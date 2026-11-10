@@ -26,14 +26,14 @@ export const harnesses: Record<HarnessId, HarnessDefinition> = {
     id: 'claude-cli', name: 'Claude Code', surface: 'CLI', binary: 'claude',
     configEnv: 'CLAUDE_CONFIG_DIR', defaultConfig: '.claude', reservedSkills: ['synced'], loadsDotFolders: true,
     otherReaders: ['Claude desktop (Code tab)', 'OpenCode', 'VS Code'],
-    nextStep: 'Written. In Claude Code, run /reload-skills or start a new session to use it.',
+    nextStep: 'Written. Start a new Claude Code session (CLI or Claude desktop’s Code tab), or run /reload-skills, to use it.',
     skillRoots: config => [{ path: join(config, 'skills'), label: 'Claude Code skills' }],
   },
   'copilot-cli': {
     id: 'copilot-cli', name: 'GitHub Copilot', surface: 'CLI', binary: 'copilot',
     configEnv: 'COPILOT_HOME', defaultConfig: '.copilot', reservedSkills: [], loadsDotFolders: false,
     otherReaders: ['GitHub Copilot app', 'VS Code'],
-    nextStep: 'Written. In Copilot CLI, run /skills reload or start a new session to use it.',
+    nextStep: 'Written. Start a new Copilot session (CLI or the GitHub Copilot app), or run /skills reload in the CLI, to use it.',
     skillRoots: (config, home) => [
       { path: join(config, 'skills'), label: 'Copilot skills' },
       { path: join(home, '.agents/skills'), label: 'Shared .agents skills' },

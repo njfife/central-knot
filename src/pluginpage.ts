@@ -306,9 +306,6 @@ const fileKinds: Record<FileKind, { title: string; file: string }> = {
   skills: { title: 'Skills', file: 'SKILL.md' }, commands: { title: 'Commands', file: 'Command file' }, agents: { title: 'Agents', file: 'Agent file' },
 };
 
-/** The narrowest a tool's column in "Your tools" gets, and the gap between columns (style.css data-layout="columns"). */
-const TOOL_COLUMN_MIN = 170, TOOL_COLUMN_GAP = 24;
-
 /**
  * Lays out "Your tools" by the box's width, decided here once (data-layout, which style.css keys off). With room for a
  * column per tool and the button, each tool gets one from the left, and "Choose all" sits at the right end. Otherwise
@@ -319,8 +316,8 @@ function settlePluginTools(): void {
   const rows = document.querySelector<HTMLElement>('.plugin-tool-rows'), all = rows?.querySelector<HTMLElement>(':scope > .btn');
   const first = rows?.firstElementChild as HTMLElement | null;
   if (!rows || !first) return;
-  const tools = Number(rows.dataset.tools ?? 1);
-  const columns = rows.clientWidth >= tools * (TOOL_COLUMN_MIN + TOOL_COLUMN_GAP) + (all?.offsetWidth ?? 0);
+  const tools = Number(rows.dataset.tools ?? 1), style = getComputedStyle(rows), px = (name: string) => parseFloat(style.getPropertyValue(name));
+  const columns = rows.clientWidth >= tools * (px('--tool-min') + px('--tool-gap')) + (all?.offsetWidth ?? 0);
   rows.dataset.layout = columns ? 'columns' : 'wrap';
   all?.classList.toggle('choice-wrapped', !columns && all.offsetTop > first.offsetTop + first.offsetHeight / 2);
 }

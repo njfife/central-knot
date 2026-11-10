@@ -1,4 +1,5 @@
 // Words shared by pages: each tool's display name, and "a, b and c" lists.
+import type { HomeKind } from './presence.ts';
 import type { HarnessId, SwitchProblem } from './types.ts';
 
 export const toolNames: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
@@ -51,3 +52,18 @@ export const noToolsSentence = 'No tools were found in this home.';
 
 /** A switch problem in words: the file (shown through `show`, say as ~/…) and what is wrong with it. */
 export const problemText = (problem: SwitchProblem, show = (path: string) => path) => `${show(problem.file)} ${problem.reason}`;
+
+/**
+ * Each kind's words, the one place they are spelled: one of it and many as a sentence names them, the page's title, the
+ * short noun a count uses ("2 servers"), and one of it with its article ("an MCP server").
+ */
+export const kindNouns: Record<HomeKind, { one: string; many: string; title: string; short: [string, string]; a: string }> = {
+  skills: { one: 'skill', many: 'skills', title: 'Skills', short: ['skill', 'skills'], a: 'a skill' },
+  mcp: { one: 'MCP server', many: 'MCP servers', title: 'MCP servers', short: ['server', 'servers'], a: 'an MCP server' },
+  agents: { one: 'agent', many: 'agents', title: 'Agents', short: ['agent', 'agents'], a: 'an agent' },
+  instructions: { one: 'instruction file', many: 'instruction files', title: 'Instructions', short: ['file', 'files'], a: 'an instruction file' },
+  plugins: { one: 'plugin', many: 'plugins', title: 'Plugins', short: ['plugin', 'plugins'], a: 'a plugin' },
+};
+
+/** Each kind as a sentence names it, many of it: "MCP servers". */
+export const kindNames = Object.fromEntries(Object.entries(kindNouns).map(([kind, nouns]) => [kind, nouns.many])) as Record<HomeKind, string>;

@@ -138,8 +138,8 @@ export function historyPage() {
     const fresh = index === 0 && Date.now() - Date.parse(event.at) < 8000;
     return [heading, h(`li.history-row${event.undoneBy ? '.history-undone' : ''}${fresh ? '.row-flash' : ''}`, { 'data-kind': event.kind },
       h('span.history-when', { title: new Date(event.at).toLocaleString() }, time(event.at)),
-      // What changed, then what happened, wrapping in the flexible column; the actions keep a column of their own at the
-      // right, the same on every row. Narrow, what happened takes a line of its own beneath (style.css).
+      // What changed, then what happened in the flexible column (its text capped at the reading measure); the actions keep a
+      // steady column at the right, the same on every row. Narrow, what happened takes a line of its own beneath (style.css).
       h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event)), h('strong', { title: event.item }, event.item)),
       h('span.history-about', {}, about.text),
       event.undoneBy ? h('span.history-actions', {}, h('span.history-done', {}, event.kind === 'removed' ? 'Restored' : 'Undone'))

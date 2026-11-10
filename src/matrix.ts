@@ -4,8 +4,7 @@
 import { itemId } from './profileplan.ts';
 import { brandMark } from './brand.ts';
 import { caughtUpNames, DAY_MS } from './model.ts';
-import { kindNouns } from './presence.ts';
-import { andList, byToolOrder, capitalToolsPhrase, orList, problemText, toolNames, toolsPhrase } from './words.ts';
+import { andList, byToolOrder, capitalToolsPhrase, kindNouns, orList, problemText, toolName, toolNames, toolsPhrase } from './words.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
 import { whyReadOnly, saidInStatusBar, tell, type Outcome, type Kind, harnessKindShown, convertAgent, flashRequests, showSkillsTable, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, findInput, fitInView, h, icon, middle, pathText, pendingCount, toggle, withToolCount } from './dom.ts';
@@ -77,7 +76,7 @@ const fromFacts = (facts: SkillFacts): SampleSkill => ({
   paths: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.directory])),
   // An MCP entry has no lines or edit date of its own: its details name the file it lives in.
   versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.lines ? { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), text: copy!.summary || facts.description } : { lines: copy!.directory.split('/').pop() ?? '', changed: 'MCP entry', text: copy!.summary }])),
-  disabled: facts.disabled, switchProblem: facts.switchProblem, disableUnverified: facts.disableUnverified, writable: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.writable])),
+  disabled: facts.disabled, switchProblem: facts.switchProblem, disableNote: facts.disableNote, writable: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.writable])),
 });
 
 /** One item as a table row. `waiting`: MCP servers whose Claude Code entry waits for Write to Claude Code, which their cell says. */
@@ -85,7 +84,7 @@ const rowOf = (fact: SkillFacts, waiting: Set<string>): SampleSkill => ({ ...fro
 
 /** The MCP or agents view behind this table; skills have their own. */
 const listView = () => (kind === 'mcp' ? state.home?.mcp : kind === 'agents' ? state.home?.agents : undefined);
-/** The kind's column header ("Server") and its title ("MCP servers"), from presence.ts kindNouns. */
+/** The kind's column header ("Server") and its title ("MCP servers"), from words.ts kindNouns. */
 const nouns = Object.fromEntries((['skills', 'mcp', 'agents'] as const).map(each => [each, [kindNouns[each].short[0].replace(/^./, first => first.toUpperCase()), kindNouns[each].title]])) as Record<Kind, [string, string]>;
 /** The kind's noun for `n` of them: "skill", "MCP servers". */
 const word = (n: number) => (n === 1 ? kindNouns[kind].one : kindNouns[kind].many);
@@ -299,7 +298,6 @@ const removeEverywhere = (key: string) => {
 /** Whether a tool's cell shows this skill as disabled there: the switch is off (or queued off) and the tool has, or gets, a copy. */
 const shownDisabled = (skill: SampleSkill, tool: Tool) => !!skill.disabled?.includes(tool) && !['cannot', 'absent'].includes(cellOf(skill, tool)) && !skill.removing?.includes(tool);
 
-/** Tools where this skill's copy can be removed: there, and not a link or shared folder Central Knot doesn't change. */
 /** Tools whose copy isn't queued for removal: a removal stops syncing there on Apply all, so status lines don't count it. */
 const keptTools = (skill: SampleSkill) => toolList().filter(tool => !skill.removing?.includes(tool));
 
@@ -627,7 +625,7 @@ function switchLine(skill: SampleSkill, tool: Tool): string {
 function rowLine(skill: SampleSkill, tool: Tool, quiet: boolean): string {
   // Disable is best effort: on a build older than the one verified it is only said (an unread version: the switch's tooltip).
   const note = !skill.removing?.includes(tool) && !skill.switchProblem?.[tool] && !skill.cannot?.[tool]
-    && (skill.copies[tool] !== undefined || cellOf(skill, tool) === 'will-sync') && skill.disableUnverified?.[tool]?.startsWith('Not checked') ? skill.disableUnverified[tool] : undefined;
+    && (skill.copies[tool] !== undefined || cellOf(skill, tool) === 'will-sync') && skill.disableNote?.[tool]?.startsWith('Not checked') ? skill.disableNote[tool] : undefined;
   return [rowSentence(skill, tool, quiet), note].filter(Boolean).join(' ');
 }
 
@@ -664,7 +662,7 @@ function toolControls(skill: SampleSkill, tool: Tool) {
   if (canRemove) remove.title = `Remove ${names[tool]}’s copy on Apply all. History keeps it for Restore${skill.managed ? ', and Central Knot stops syncing it here' : ''}.`;
   return h('span.details-tool-actions', {},
     unavailable ? h('span.tool-switch-na', {}, icon('circle-alert', 12, 'tone-muted'), 'Disable unavailable')
-      : h(`span.tool-switch${pending ? '.tool-switch-pending' : ''}`, { title: skill.disableUnverified?.[tool] }, h('span.tool-switch-word', { 'aria-hidden': 'true' }, disabled ? 'Disabled' : 'Enabled'),
+      : h(`span.tool-switch${pending ? '.tool-switch-pending' : ''}`, { title: skill.disableNote?.[tool] }, h('span.tool-switch-word', { 'aria-hidden': 'true' }, disabled ? 'Disabled' : 'Enabled'),
         toggle({ on: !disabled, label: `${skill.name ?? key} in ${names[tool]}: ${disabled ? 'disabled' : 'enabled'}${pending ? ' on Apply all' : ''}. Click to ${disabled ? 'enable' : 'disable'} it there.`, onchange: on => setDisabledIn(key, tool, !on), id: `enable-${key}-${tool}` })),
     remove);
 }
@@ -1510,7 +1508,6 @@ export function caughtUpBand(manage: ManageView): HTMLElement | null {
     closeButton(() => { state.dismissed.add(key); rerender(); }, { id: 'caught-up-dismiss' }));
 }
 
-/** Preview-only, stopped and resume states, and what the last Apply all or catch-up did. */
 /**
  * MCP servers waiting for Claude Code's own Write step, not already told by a notice: the same inset amber notice as a
  * waiting edit, so Write has one look wherever the step waits. `all` is every waiting server, which Write writes.
@@ -1747,14 +1744,13 @@ const age = (key: string) => {
 };
 
 function syncNotice(notice: Told, writeClaude?: () => void) {
-  const who = (tool: string) => names[tool] ?? tool;
-  const list = (tools: string[]) => andList(tools.map(who));
+  const who = toolName, list = (tools: string[]) => andList(tools.map(toolName));
   const order = notice.orderProved ? '' : ' The order could not be proved, so the fixed tool order decided.';
   // The button names the tools it changes: all of them, or only those the event touched.
   const involved = [...new Set([notice.winner, ...notice.losers].filter(Boolean))] as string[];
   const scope = `in ${toolsPhrase(involved, toolList())}`;
   // Undo is the one action here that writes files: a small outlined button, apart from the quieter links.
-  const undo = (title: string) => { const action = button({ variant: 'outline', size: 'small', label: writeClaude ? `Undo edit in ${list(notice.losers.length ? [notice.winner, ...notice.losers] : [notice.winner])}` : `Undo ${notice.kind === 'edit' ? 'edit ' : ''}${scope}`, id: `notice-undo-${notice.history}`, onclick: () => void restoreEvent(notice.history) }); action.title = title; action.setAttribute('aria-label', `Undo: ${title}`); return action; };
+  const undo = (title: string) => { const action = button({ variant: 'outline', size: 'small', label: `Undo ${writeClaude || notice.kind === 'edit' ? 'edit ' : ''}${scope}`, id: `notice-undo-${notice.history}`, onclick: () => void restoreEvent(notice.history) }); action.title = title; action.setAttribute('aria-label', `Undo: ${title}`); return action; };
   const offNow = notice.once ?? (!!state.home && !state.home.syncOn);
   const [glyph, tone, text, action] = ({
     edit: ['check', 'tone-success', offNow ? `${notice.item} copied from ${who(notice.winner)} to ${list(notice.losers)}.` : `${notice.item} was edited in ${who(notice.winner)} and copied to ${list(notice.losers)}.`, undo(`Put ${notice.item} back as it was before ${who(notice.winner)}’s edit, in every tool it syncs to (${who(notice.winner)} too)`)],

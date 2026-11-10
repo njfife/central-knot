@@ -7,7 +7,8 @@ import { withoutBom } from './values.ts';
 import { randomUUID } from 'node:crypto';
 import { lstat, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
-import { configRoot, harnessIds, harnesses } from './harnesses.ts';
+import { configRoot, harnesses } from './harnesses.ts';
+import { mcpTools } from './presence.ts';
 import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
@@ -38,8 +39,6 @@ export interface McpRecordItem { state: 'shared' | 'dont-share'; off: HarnessId[
   /** Entries about to be overwritten or removed, on record before the file changes, so an interrupted pass still names them in History. */
   displaced?: { tool: HarnessId; hash: string }[] }
 export interface McpRecord { formatVersion: number; items: Record<string, McpRecordItem> }
-
-export const mcpTools: HarnessId[] = harnessIds;
 
 // ---------- Files ----------
 

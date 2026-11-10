@@ -15,10 +15,9 @@ import { appendHistory, readConverted, readHistory, recordConverted, replaceHist
 import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, tomlValue } from './textedit.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy } from './types.ts';
+import { agentTools, type AgentTool } from './presence.ts';
 import { toolNames as shown } from './words.ts';
 
-type AgentTool = Exclude<HarnessId, 'pi-cli'>;
-export const agentTools: AgentTool[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
 export const isAgentTool = (tool: HarnessId): tool is AgentTool => agentTools.some(agentTool => agentTool === tool);
 
 /** One agent in a shape every tool can be written from. `fields` are its own tool's extras. */
@@ -307,9 +306,9 @@ type StaysRecorded = Exclude<Situation, 'rootMoved' | 'folderRemade'>; interface
 interface Target { tool: AgentTool; entry?: AgentEntry; recorded?: CopyNow } type AgentOutcome = 'done' | 'settling';
 /**
  * Records Managed choices and brings each managed agent into line. `only`: with Sync off, Apply all writes exactly the agents it
- * shows and nothing else spreads (SYN-03).
+ * shows and nothing else spreads (SYN-03). `decideNow`: agents (by key) whose missing copies count as deleted at once (a
+ * deletion the person asked for, as Pull's); the rest keep the settle window.
  */
-/** `decideNow`: agents (by key) whose missing copies count as deleted at once (a deletion the person asked for, as Pull's); the rest keep the settle window. */
 export async function applyAgents(context: ShareContext, tools: HarnessId[], changes: Change[], options: { settleMs?: number; now?: number; only?: Set<string>; resume?: boolean; decideNow?: Set<string> } = {}): Promise<McpResult> {
   const refused = await prepareSyncRecord(context, changes.length > 0, options.resume);
   if (refused) return refused;

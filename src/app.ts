@@ -4,12 +4,12 @@ import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseAp
 import { caughtUpNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
-import { andList, fileName, noToolsSentence, orList, sentence, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
+import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, sentence, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
-import { absentKindsIn, heldKinds, kindNames, kindNouns, type HomeKind } from './presence.ts';
+import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { activeProfile, flipSummary, NO_PROFILE, redoneSwitch } from './profileplan.ts';
 
@@ -1051,7 +1051,7 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
 
 export const applyAgentsChanges = (changes: Change[], onDone: () => void) => busy('Applying…', async () => {
   // Read before applying: a copy that had stopped and is now replaced is said as resumed, not as newly managed.
-  const before = state.home?.agents?.servers ?? [];
+  const before = state.home?.agents.servers ?? [];
   const result = await api().applyAgents(changes, state.home!.manage.gate.state === 'needs-resume', state.home!.home);
   const view = await api().refresh();
   setHome(view);
@@ -1059,7 +1059,7 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
   if (!result.stopped) { onDone(); retireTip('agents'); }
   if (!result.stopped) {
     // One-way agents are said apart: an edit spreads from their source only.
-    const managed = changes.filter(change => change.managed).map(change => state.home?.agents?.servers.find(server => server.key === change.key)).filter(server => !!server);
+    const managed = changes.filter(change => change.managed).map(change => state.home?.agents.servers.find(server => server.key === change.key)).filter(server => !!server);
     const oneWay = managed.filter(server => Object.keys(server.limits ?? {}).length);
     const nameOf = (server: { name?: string; key: string }) => server.name ?? server.key;
     // New agent files are in History as 'added': one Undo removes them again (while unchanged) and unmanages those agents.

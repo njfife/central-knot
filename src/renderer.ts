@@ -4,7 +4,8 @@ import packageInfo from '../package.json' with { type: 'json' };
 import { absentKinds, noTools, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
 import { button, fitBars, h, icon, runAfterLayout } from './dom.ts';
 import type { IconName } from './icons.ts';
-import { kindNouns, type HomeKind } from './presence.ts';
+import type { HomeKind } from './presence.ts';
+import { kindNouns } from './words.ts';
 import { agentsPage, mcpPage, overviewPage, skillsPage } from './pages.ts';
 import { harnessesPage, harnessTitle } from './harnesspage.ts';
 import { pluginsPage } from './pluginspage.ts';
@@ -15,7 +16,7 @@ import { profilesPage, profileStatus } from './profilespage.ts';
 import type { HomeMode, HomeView, ManageView } from './types.ts';
 
 const region = (id: string) => document.getElementById(id)!;
-/** Each page's title, in the header and the sidebar: a kind's page by its kind's title (presence.ts kindNouns). */
+/** Each page's title, in the header and the sidebar: a kind's page by its kind's title (words.ts kindNouns). */
 const titles: Record<Page, string> = { overview: 'Overview', ...Object.fromEntries(Object.entries(kindNouns).map(([kind, nouns]) => [kind, nouns.title])) as Record<HomeKind, string>, profiles: 'Profiles', history: 'History', repo: 'Git repo', harnesses: 'Harnesses', settings: 'Settings' };
 /** Below this window width the sidebar folds to its icon rail, unless the person chose a shape with the toggle. */
 const RAIL_BELOW = 968;
@@ -35,8 +36,8 @@ function applyLayout(): { rail: boolean; wide: boolean } {
   return { rail, wide };
 }
 
-/** A page's row: its name, how many it holds, and a dot while a change sync made on its own is unseen. */
-/** `countTitle` says the count in words (the tooltip and screen readers); `quiet` greys it (the Git repo's counts while unreachable). */
+/** A page's row: its name, how many it holds, and a dot while a change sync made on its own is unseen. `countTitle` says the
+ * count in words (the tooltip and screen readers); `quiet` greys it (the Git repo's counts while unreachable). */
 function navRow(page: Page, label: string, glyph: IconName, count?: number | string, countTitle?: string, quiet = false) {
   const current = state.page === page;
   return h('button.nav-row', {

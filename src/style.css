@@ -557,7 +557,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .shown-strip strong { margin-right: 6px; }
 .bulk-divider { width: 1px; height: 18px; background: var(--control-line); margin: 0 4px; }
 
-/* Wide content (renderer.ts .wide): the open row's details dock beside the table, which keeps the rest of the width. */
+/* Wide content (renderer.ts state.wide): the open row's details dock beside the table, which keeps the rest of the width. */
 .ov-page.docked { display: grid; grid-template-columns: minmax(0, 1fr) clamp(400px, 30cqw, 560px); grid-template-rows: minmax(0, 1fr); }
 .dock-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .docked .ov-row.open { background: var(--picked); box-shadow: inset 2px 0 0 var(--accent), inset 0 -1px 0 var(--line); }
@@ -1030,17 +1030,17 @@ span.ins-confirm { margin-top: 0; }
 .plugin-panel { margin: 18px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; }
 .plugin-panel-head { display: flex; align-items: center; gap: 12px; height: 28px; margin-bottom: 10px; }
 .plugin-panel h3, .plugin-section h3 { margin: 0; font-size: 14px; font-weight: 650; }
-.plugin-tool-rows { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 40px; }
+.plugin-tool-rows { --tool-min: 170px; --tool-gap: 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 40px; }
 .plugin-tool-rows > .btn.choice-wrapped { margin-left: auto; }
-/* With room for them (pluginpage.ts settlePluginTools): a column per tool from the left, capped, and Choose all as the next column, at the same rhythm. */
+/* With room for them (pluginpage.ts settlePluginTools, which reads --tool-min and --tool-gap): a column per tool from the left, capped, and Choose all as the next column, at the same rhythm. */
 /* The box then takes the width of its columns, so no border runs around empty space on a wide window. */
-.plugin-tool-rows[data-layout="columns"] { display: grid; grid-template-columns: repeat(var(--tool-count, 3), minmax(170px, 260px)) auto; justify-items: start; column-gap: 24px; }
+.plugin-tool-rows[data-layout="columns"] { display: grid; grid-template-columns: repeat(var(--tool-count, 3), minmax(var(--tool-min), 260px)) auto; justify-items: start; column-gap: var(--tool-gap); }
 .plugin-tool-rows[data-layout="columns"] > .btn { grid-column: -2 / -1; }
 .plugin-panel:has(> .plugin-tool-rows[data-layout="columns"]) { width: fit-content; max-width: 100%; }
 /* What it holds and how each tool takes it sit beside the README from about 1100px of page; below that, one above the other. */
 .plugin-columns { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 48px; }
 @container plugin (width >= 1100px) { .plugin-columns:has(> .plugin-readme) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
-.plugin-tool { display: flex; align-items: center; gap: 10px; min-width: 170px; }
+.plugin-tool { display: flex; align-items: center; gap: 10px; min-width: var(--tool-min); }
 .plugin-tool-text { display: flex; flex-direction: column; gap: 1px; }
 .plugin-tool-name { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .plugin-tool-state { display: flex; flex-direction: column; font-size: 11.5px; color: var(--ink-soft); }
