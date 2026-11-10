@@ -741,12 +741,15 @@ async function contentUpdate(context: PluginContext, catalog: Catalog, plugin: s
   };
   if (!(await differs())) return done('update');
   const id = `${plugin}@${catalog.name}`;
+  // A plugin its person turned off in Claude Code (settings.json enabledPlugins) is turned off again after the reinstall.
+  const wasOff = tool === 'claude-cli' && record((await recordJson(context, join(configRootOf(context, tool), 'settings.json')))?.enabledPlugins)?.[id] === false;
   const removed = await native(context, tool, uninstallArgs(tool, id));
   runs.push(removed);
   if ((await installState(context, tool, catalog.name, plugin)).state === 'installed') return { tool, outcome: 'failed', message: `Still differs from the marketplace’s copy in ${name}, and it couldn’t be reinstalled: ${lastLines(removed.output) || said}`.trim(), runs };
   const added = await native(context, tool, installArgs(tool, id));
   runs.push(added);
   if ((await installState(context, tool, catalog.name, plugin)).state !== 'installed') return { tool, outcome: 'failed', message: `Uninstalled from ${name} to reinstall it, but it isn’t installed again. Install it again from this page. ${lastLines(added.output)}`.trim(), runs };
+  if (wasOff) runs.push(await native(context, tool, ['plugin', 'disable', id, '--scope', 'user']));
   if (!(await differs())) return done('reinstall');
   return { tool, outcome: 'failed', message: `Reinstalled, but ${name}’s copy still differs from the marketplace’s. ${lastLines(added.output)}`.trim(), runs };
 }

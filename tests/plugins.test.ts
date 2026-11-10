@@ -515,6 +515,8 @@ test('A copy that differs at the same version is updated, and where the tool kee
     await put(join(copy, 'skills/one/SKILL.md'), '---\nname: one\ndescription: One.\n---\nA\n');
     const recorded = JSON.stringify({ plugins: { 'full@ck-test-market': [{ scope: 'user', installPath: copy, version: '1.0.0' }] } });
     await put(record, recorded);
+    // Turned off by its person in Claude Code: it is turned off again after the reinstall.
+    await put(join(box.home, '.claude/settings.json'), '{"enabledPlugins":{"full@ck-test-market":false}}');
     // Claude Code's stand-in: its update says it is at the latest; an install copies the marketplace's files again.
     const bin = join(box.base, 'bin');
     await mkdir(bin, { recursive: true });
@@ -532,7 +534,7 @@ esac
     const report = await update(context, catalog, 'full', 'claude-cli', differs);
     assert.deepEqual([report.outcome, report.changed, report.byContent, report.version], ['updated', true, 'reinstall', '1.0.0'], report.message);
     assert.match(report.message, /^Reinstalled from the marketplace’s copy of 1\.0\.0: Claude Code’s own update kept the copy it had\./);
-    assert.deepEqual(report.runs.map(run => run.command), ['claude plugin update full@ck-test-market --scope user', 'claude plugin uninstall full@ck-test-market --scope user', 'claude plugin install full@ck-test-market --scope user']);
+    assert.deepEqual(report.runs.map(run => run.command), ['claude plugin update full@ck-test-market --scope user', 'claude plugin uninstall full@ck-test-market --scope user', 'claude plugin install full@ck-test-market --scope user', 'claude plugin disable full@ck-test-market --scope user']);
     const again = await update(context, catalog, 'full', 'claude-cli', differs);
     assert.deepEqual([again.outcome, again.changed, again.runs.length], ['updated', undefined, 0], 'the same copy runs nothing');
   } finally { await box.cleanup(); }
