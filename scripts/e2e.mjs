@@ -106,6 +106,12 @@ if (process.platform === 'linux') {
   chmodSync(join(scratch, 'bin/xdg-open'), 0o755);
 }
 let app;
+// Every app this run started is closed when the run ends, however it ends: a failed or interrupted run must not leave
+// an app holding a debug port that a later run could attach to.
+const launched = new Set();
+process.on('exit', () => { for (const child of launched) { try { child.kill('SIGKILL'); } catch { /* already gone */ } } });
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
+
 async function launch(userData = join(scratch, 'data'), extra = [], home = HOME) {
   const port = 9400 + randomInt(500);
   const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp') };
@@ -114,6 +120,8 @@ async function launch(userData = join(scratch, 'data'), extra = [], home = HOME)
   // A dev run also opens its main process to the checks (an installed app doesn't take --inspect).
   const inspect = flag('--electron') ? port + 1000 : undefined;
   const child = spawn(command, [...(flag('--electron') ? [root, `--inspect=${inspect}`] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : []), ...extra], { env, stdio: 'ignore' });
+  launched.add(child);
+  child.once('exit', () => launched.delete(child));
   let targets;
   for (let attempt = 0; attempt < 150 && !targets; attempt++) {
     await wait(200);

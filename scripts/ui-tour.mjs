@@ -27,6 +27,12 @@ mkdirSync(join(scratch, 'bin'));
 writeFileSync(join(scratch, 'bin/xdg-open'), '#!/bin/sh\nexit 0\n');
 chmodSync(join(scratch, 'bin/xdg-open'), 0o755);
 
+// Every app this run started is closed when the run ends, however it ends: a failed or interrupted run must not leave
+// an app holding a debug port that a later run could attach to.
+const launched = new Set();
+process.on('exit', () => { for (const child of launched) { try { child.kill('SIGKILL'); } catch { /* already gone */ } } });
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
+
 async function launch() {
   const port = 9300 + Math.floor(Math.random() * 400);
   const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp') };
@@ -35,6 +41,8 @@ async function launch() {
   // A dev run also opens its main process, so the tour can show states only an installed app reaches (see Settings).
   const inspect = flag('--electron') ? port + 1000 : undefined;
   const child = spawn(command, [...(flag('--electron') ? [root, `--inspect=${inspect}`] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, 'data')}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
+  launched.add(child);
+  child.once('exit', () => launched.delete(child));
   let target;
   for (let attempt = 0; attempt < 150 && !target; attempt++) { await wait(200); try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find(item => item.type === 'page'); } catch { /* starting */ } }
   const page = await connect(target.webSocketDebuggerUrl);
