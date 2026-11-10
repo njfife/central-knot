@@ -36,7 +36,6 @@ const fromFacts = (facts: SkillFacts): SampleSkill => ({
 const rowOf = (fact: SkillFacts, waiting: Set<string>): SampleSkill => ({ ...fromFacts(fact), waits: waiting.has(fact.key) ? ['claude-cli'] : undefined });
 
 /** What this table shows: skills, MCP servers or agents. Each keeps its own pending changes; the same marks mean the same things. */
-export type { Kind } from './app.ts';
 import type { Kind } from './app.ts';
 /** The MCP or agents view behind this table; skills have their own. */
 const listView = () => (kind === 'mcp' ? state.home?.mcp : kind === 'agents' ? state.home?.agents : undefined);
@@ -92,6 +91,8 @@ const newView = () => ({
   toolMenu: undefined as Tool | undefined,
   /** The menu was opened from a harness page's "Add from…" button, so it opens under that button. */
   toolMenuFromToolbar: false,
+  /** The harness whose page this view was last drawn on (undefined: the kind's own page). */
+  shownFor: undefined as Tool | undefined,
   /** Menu rows ("from>to") where Add also takes differing copies. Each menu opens with none. */
   addConflicts: new Set<string>(),
   /** Menu rows whose list of skills that can't be added is open. */
@@ -102,8 +103,11 @@ const newView = () => ({
   confirmDelete: undefined as string | undefined,
 });
 const views: Record<Kind, ReturnType<typeof newView>> = { skills: newView(), mcp: newView(), agents: newView() };
-/** Opens a page already narrowed, for links that point at a problem (the Overview's "has different copies"). */
-export const showFiltered = (which: Kind, filter: Filter) => { views[which].filter = filter; };
+/**
+ * Opens a page already narrowed, for links that point at a problem (the Overview's or a harness card's "different copies").
+ * `harness`: the harness page it opens on (none: the kind's own page), so the first draw there keeps this filter.
+ */
+export const showFiltered = (which: Kind, filter: Filter, harness?: Tool) => { views[which].filter = filter; views[which].find = ''; views[which].shownFor = harness; };
 let view = views.skills;
 let draftHomes: Partial<Record<Kind, string>> = {};
 
@@ -244,8 +248,8 @@ function changeBar(bulk = true) {
   // Unmanaged items whose copies differ need a choice first, so Manage leaves them out and says so.
   const needChoice = committedList().filter(skill => !skill.held && inFocus(skill) && !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) === 'attention').length;
   const word = (n: number) => kindNoun[kind][n === 1 ? 0 : 1];
-  // On a harness's page the count names what it covers: only what that harness has.
-  // On a harness's page the noun drops on a narrow toolbar ("Manage 2"), so the bar keeps one line; its name says it in full.
+  // On a harness's page the label counts only what that harness has, quotes a single name, and drops its noun on a narrow
+  // toolbar ("Manage 2") so the bar keeps one line.
   const manageLabel: string | Node = focus ? (ready.length === 1 ? `Manage “${ready[0].name ?? ready[0].key}”` : h('span', {}, `Manage ${ready.length}`, h('span.manage-noun', {}, ` ${word(ready.length)}`))) : ready.length === 1 ? 'Manage 1' : ready.length === 2 ? 'Manage both' : needChoice ? `Manage ${ready.length} of ${ready.length + needChoice}` : `Manage all ${ready.length}`;
   // On a harness's page Manage steps aside (1) under the Copies differ filter, where every row shown needs a copy choice that
   // Manage leaves out, so it would act only on rows not shown; and (2) while changes are queued, so the toolbar keeps one line
@@ -990,12 +994,14 @@ function helpBand(): HTMLElement | null {
  * What the catch-up after a read copied, and where: shown on the Skills tables and the Harnesses list, until dismissed (it
  * comes back only for a different catch-up). Null once dismissed.
  */
-export function caughtUpBand(manage: ManageView, items: string[]): HTMLElement | null {
+export function caughtUpBand(manage: ManageView): HTMLElement | null {
+  // Notices already tell a spread edit or a restore; both places that show this band count the same ones, so a dismiss holds in both.
+  const items = caughtUpNames(manage, new Set(manage.notices.map(notice => notice.item)));
   const key = `caught-up:${items.join(',')}`;
   if (!items.length || state.dismissed.has(key)) return null;
-  const tools = [...new Set(manage.caughtUp.filter(result => result.outcome === 'written' && items.includes(result.item) && result.harness).map(result => names[result.harness!]))];
+  const tools = [...new Set(manage.caughtUp.filter(result => items.includes(result.item) && result.outcome === 'written' && result.harness).map(result => names[result.harness!]))];
   return h('div.band', { role: 'status' }, icon('check', 14, 'tone-success'),
-    h('span.band-text', {}, `Caught up: copied ${items.length > 4 ? `${items.slice(0, 4).join(', ')} and ${items.length - 4} more` : andList(items)} to ${tools.length ? andList(tools) : 'the tools that were missing them'}, because ${items.length === 1 ? 'it is' : 'they are'} Managed. To leave a tool out, click its box on that row.`),
+    h('span.band-text', {}, `Caught up: copied ${items.length > 4 ? `${items.slice(0, 4).join(', ')} and ${items.length - 4} more` : andList(items)} to ${tools.length ? andList(tools) : 'the tools that were missing them'}, because ${items.length === 1 ? 'it is' : 'they are'} Managed. To leave a tool out, untick its box for that skill.`),
     closeButton(() => { state.dismissed.add(key); rerender(); }, { id: 'caught-up-dismiss' }));
 }
 
@@ -1091,9 +1097,7 @@ function notices() {
   const caughtProblems = applied ? [] : manage.caughtUp.filter(result => result.outcome !== 'written' && result.outcome !== 'removed');
   if (caughtProblems.length) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
     h('span.band-text', {}, caughtProblems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · ') + (caughtProblems.length > 4 ? ` · and ${caughtProblems.length - 4} more` : ''))));
-  // A spread edit or a restore is already told by its notice; catch-up is only copies that were missing.
-  const caught = caughtUpNames(manage, new Set(syncNotices.map(notice => notice.item)));
-  const caughtBand = applied ? null : caughtUpBand(manage, caught);
+  const caughtBand = applied ? null : caughtUpBand(manage);
   if (caughtBand) bands.push(caughtBand);
   const tip = helpBand();
   if (tip) bands.push(tip);
@@ -1274,13 +1278,12 @@ function syncNotice(notice: Told, writeClaude?: () => void) {
  * (this harness has nothing that differs) goes back to All, so the table is never empty with no chip pressed.
  */
 function useTable(which: Kind, harness?: Tool) {
-  // Coming from a harness's page to the Skills, MCP servers or Agents page: that page starts with no filter or Find text of its own.
-  const leftHarness = focus !== undefined && harness === undefined;
   kind = which;
   view = views[which];
   focus = harness;
   forgetOtherHomes();
-  if (leftHarness) { view.filter = 'all'; view.find = ''; }
+  // This view was last drawn for another harness's page (or for the kind page): it starts with no filter or Find text from there.
+  if (view.shownFor !== harness) { view.filter = 'all'; view.find = ''; view.shownFor = harness; }
   if (view.filter === 'attention' && !copiesDifferChipShown()) view.filter = 'all';
 }
 
@@ -1316,8 +1319,9 @@ export function designOverview(which: Kind = 'skills', harness?: Tool) {
   return h('div.page.ov-page', { 'data-variant': variant },
     h('div.toolbar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(), h('div.toolbar-end', {}, focus && others(focus).length ? addFromButton(focus, shown) : null, changeBar())),
     notices(),
-    // An id, so a redraw (a box ticked further down) keeps the scroll position (renderer.ts restores .scroll[id]).
-    h('div.scroll.matrix', { id: `matrix-${which}` },
+    // An id per table (and per harness), so a redraw keeps the scroll position (renderer.ts restores .scroll[id]) and another
+    // harness's table opens at its own top.
+    h('div.scroll.matrix', { id: `matrix-${which}${focus ? `-${focus}` : ''}` },
       variant === 'c' ? shownStrip(shown) : null,
       withToolCount(h('div.ov', { role: 'table', 'aria-label': `${nouns[kind][1]} and where they sync`, 'data-tools': String(toolList().length) },
         h('div.ov-row.ov-head', { role: 'row' },

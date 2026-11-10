@@ -193,6 +193,12 @@ async function harnessFlow() {
   await a.click('#harness-copilot-cli');
   await a.click('#harness-tab-instructions');
   check('its instruction file is there to edit', await a.exists('#ins-edit-copilot-cli'), await a.text('.harness-page'));
+  await a.click('#harness-switch-claude-cli');
+  await a.click('#ins-edit-claude-cli');
+  await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); area.value += '- Saved from its harness page.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#ins-review-claude-cli');
+  await a.click('#ins-save-claude-cli');
+  same('a save on a harness’s Instructions tab offers one Undo, on its card', await a.run(`document.querySelectorAll('#outcome-undo-instruction').length`), 1);
   await a.click('#harness-switch-codex-cli');
   check('the switcher moves to another harness', (await a.text('.title-harness')) === 'Codex', await a.text('#header'));
   await a.click('#harness-back');

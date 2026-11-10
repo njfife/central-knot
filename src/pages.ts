@@ -4,7 +4,8 @@ import { plural, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill } from './types.ts';
 import { designMode } from './design.ts';
 import { realHomeName } from './renderer.ts';
-import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser, type Kind } from './matrix.ts';
+import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser } from './matrix.ts';
+import type { Kind } from './app.ts';
 
 // ---------- Overview ----------
 

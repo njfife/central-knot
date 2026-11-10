@@ -897,7 +897,6 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 
 /* Round 9: Instructions */
 #instructions-scroll { max-width: none; }
-#instructions-scroll > * { max-width: 932px; }
 .ins-text-new { min-height: 160px; }
 .ins-text::placeholder { color: var(--ink-faint); }
 .ins-line { display: grid; grid-template-columns: 18px minmax(0, 1fr); }
@@ -965,7 +964,6 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 
 /* Round 10: Tools and Overview scroll the full width; their content stays capped; thin scrollbars */
 #overview-scroll { max-width: none; }
-#instructions-scroll > * { max-width: 948px; }
 .scroll { scrollbar-width: thin; scrollbar-color: color-mix(in oklab, var(--ink-faint) 55%, transparent) transparent; }
 
 /* Round 10: a deleted item's trace in the table */
@@ -1344,7 +1342,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* ---------- Harnesses ---------- */
 .harness-scroll { container-type: inline-size; padding: 12px calc(16px + var(--overlay-gutter)) 16px 16px; display: flex; flex-direction: column; gap: 12px; }
 .harness-scroll > * { flex: none; }
-.harness-scroll > .tools-note { margin: 0; }
+.harness-scroll > .tools-note { margin: 0; max-width: 80ch; }
 .harness-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; }
 .harness-card { container-type: inline-size; display: flex; flex-direction: column; color: var(--ink); }
 .harness-card-main { all: unset; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 14px 16px; border-radius: 12px; color: inherit; font: inherit; text-align: left; }
@@ -1489,13 +1487,10 @@ button.harness-card-main:focus-visible { outline: 0; }
 .ov-section-after { gap: 0; }
 .ov-section-label > .ov-section-after { margin-left: 0; }
 .ov-section-dot { margin: 0 8px 0 0; color: var(--ink-faint); }
-/* A tool not found on this computer: its card is its name, how to fix it and its folder; no rows of dashes. */
-.harness-card-missing .harness-counts { display: none; }
 /* In view and while editing, the file sits at one reading measure, so the card is the same width either way and Edit swaps in place. */
 .harness-page .ins-card .ins-text, .harness-page .ins-card .ins-preview { width: calc(110ch + 26px); max-width: 100%; box-sizing: border-box; }
 /* The list's note keeps a reading measure. */
-.harness-scroll > .tools-note { max-width: 80ch; }
-.legend-left-out { border: 1px solid var(--ink-faint); border-radius: 5px; }
+.legend-left-out { display: inline-grid; place-items: center; border: 1px solid var(--ink-faint); border-radius: 5px; }
 /* The Harnesses list's bands reach the window edge, like its cards and every band on a harness page. */
 .page-harnesses .page > .bands > .band { padding-right: 16px; }
 /* One or two harnesses don't stretch across a wide window: each card is at most about 560px wide. */
@@ -1504,4 +1499,3 @@ button.harness-card-main:focus-visible { outline: 0; }
 @media (max-height: 700px) { .ov-name-sub { -webkit-line-clamp: 2; overflow: hidden; } }
 @container (max-width: 860px) { .manage-noun { display: none; } .harness-page .ov-page .toolbar > .find { flex-basis: 130px; min-width: 110px; } }
 .ov-section-after > .text-action { padding-left: 0; margin-left: 0; }
-.legend-left-out { display: inline-grid; place-items: center; }

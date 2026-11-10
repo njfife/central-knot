@@ -1,14 +1,13 @@
 // Harnesses: one place per tool. The list sums up what each one has; a harness's own page manages its items with the same
 // tables, switches and Apply all as the Skills, MCP servers and Agents pages, narrowed to that tool, plus its instruction
 // file and its plugins. Nothing here has its own engine: every change goes through the pages it mirrors.
-import { KINDS, dropActionResults, instructionReadState, isKind, loadHome, readInstructionsQuietly, rerender, shownPath, showPage, state, type HarnessTab } from './app.ts';
+import { KINDS, dropActionResults, instructionReadState, isKind, loadHome, readInstructionsQuietly, rerender, shownPath, showPage, state, type HarnessTab, type Kind } from './app.ts';
 import { installsIn, type MarketPlugin } from './pluginstatus.ts';
 import { pluginTitle } from './pluginparts.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
-import { caughtUpNames, fileName, fullToolName, plural } from './model.ts';
+import { fileName, fullToolName, plural } from './model.ts';
 import { toolNames as names } from './words.ts';
 import type { HarnessId, HomeView, InstructionFile, SkillFacts, Snapshot } from './types.ts';
-import type { Kind } from './app.ts';
 import { brandMark, caughtUpBand, closeOpenRows, designOverview, differingIn, emptyKind, kindNoun, outcomeBand, showFiltered } from './matrix.ts';
 import { instructionBands, instructionCard, instructionsNotRead } from './instructionspage.ts';
 import { browse, market, peekPlugins, peekState } from './pluginstate.ts';
@@ -118,32 +117,31 @@ function attentionLinks(snapshot: Snapshot, kinds: ReturnType<typeof tally>[]) {
     h('button.harness-card-attention', { type: 'button', id, disabled: !!state.busy, onclick: open }, icon(glyph, 13), text, icon('arrow-right', 12));
   const links = [
     ...kinds.filter(({ differing }) => differing).map(({ kind, differing }) => link(`harness-${tool}-differ-${kind}`, 'diff', `${differing} ${kindNoun[kind][differing === 1 ? 0 : 1]} with different copies`,
-      () => { goHarness(tool, kind); showFiltered(kind, 'attention'); rerender(); })),
+      () => goHarness(tool, kind, { showOnly: kind }))),
     ...(issues.length ? [link(`harness-${tool}-problems`, 'triangle-alert', plural(issues.length, 'read problem'), () => goHarness(tool, 'about'))] : []),
   ];
   return links.length ? h('div.harness-card-links', {}, links) : null;
 }
 
-const missing: Count = { value: '—', faint: true };
-
-/** One harness on the list: the whole card opens its page; a tool that was not found says so and does not open. */
+/**
+ * One harness on the list. A found tool's whole card opens its page and shows its counts; a tool not found has nothing to
+ * count, so its card is its name, how to fix that, and its folder, and does not open.
+ */
 function summaryCard(snapshot: Snapshot, home: HomeView) {
   const tool = snapshot.harness;
-  const kinds = KINDS.map(kind => tally(home, kind, tool));
-  const body = [
-    h('span.harness-card-head', {}, brandMark(tool, 18), h('strong.harness-card-name', {}, names[tool]), found(home, tool) ? icon('arrow-right', 14, 'tone-faint') : null),
-    // On this computer each card says how its tool was found; a sample or chosen folder is said once, in the note above.
-    home.mode === 'actual' ? h(`span.harness-card-status${snapshot.detection === 'Not found' ? '.tone-faint' : ''}`, {}, detectionLine(snapshot, home)) : null,
-    // Two groups (the three kinds, then its file and plugins), which sit side by side on a wide card. A tool not found on this
-    // computer has nothing to count: its rows are plain dashes, and its card says so.
-    h('span.harness-counts', {},
-      h('span.harness-count-group', {}, kinds.map(entry => countRow(tabLabel(entry.kind), found(home, tool) ? kindCount(entry, tool) : missing))),
-      h('span.harness-count-group', {}, countRow(tabLabel('instructions'), found(home, tool) ? instructionCount(tool) : missing), countRow(tabLabel('plugins'), found(home, tool) ? pluginCount(tool) : missing))),
-  ];
+  const here = found(home, tool);
+  const head = h('span.harness-card-head', {}, brandMark(tool, 18), h('strong.harness-card-name', {}, names[tool]), here ? icon('arrow-right', 14, 'tone-faint') : null);
+  // On this computer each card says how its tool was found; a sample or chosen folder is said once, in the note above.
+  const status = home.mode === 'actual' ? h(`span.harness-card-status${snapshot.detection === 'Not found' ? '.tone-faint' : ''}`, {}, detectionLine(snapshot, home)) : null;
   const path = h('span.harness-card-path', { title: snapshot.root }, h('span.mono', {}, shownPath(snapshot.root)));
-  if (!found(home, tool)) return h('div.card.harness-card.harness-card-missing', { id: `harness-${tool}`, 'aria-label': `${names[tool]}: not found` },
+  if (!here) return h('div.card.harness-card.harness-card-missing', { id: `harness-${tool}`, 'aria-label': `${names[tool]}: not found` },
     // When no tool at all was found, the note above already says to install one; each card need not repeat it.
-    h('div.harness-card-main', {}, body, home.manage.tools.length ? h('span.harness-card-next', {}, `Install ${names[tool]}, then Refresh.`) : null), path);
+    h('div.harness-card-main', {}, head, status, home.manage.tools.length ? h('span.harness-card-next', {}, `Install ${names[tool]}, then Refresh.`) : null), path);
+  const kinds = KINDS.map(kind => tally(home, kind, tool));
+  // Two groups (the three kinds, then its file and plugins), which sit side by side on a wide card.
+  const body = [head, status, h('span.harness-counts', {},
+    h('span.harness-count-group', {}, kinds.map(entry => countRow(tabLabel(entry.kind), kindCount(entry, tool)))),
+    h('span.harness-count-group', {}, countRow(tabLabel('instructions'), instructionCount(tool)), countRow(tabLabel('plugins'), pluginCount(tool))))];
   // While an action runs, its result belongs to the harness it started on: the cards wait.
   return h('div.card.harness-card', {},
     h('button.harness-card-main', { type: 'button', id: `harness-${tool}`, disabled: !!state.busy, 'aria-label': `${names[tool]}: ${detectionLine(snapshot, home)}. Open its page.`, onclick: () => goHarness(tool) }, body),
@@ -153,14 +151,15 @@ function summaryCard(snapshot: Snapshot, home: HomeView) {
 /**
  * The one way to move within Harnesses: to a harness's page (on `tab` if given, else the tab last used) or, with no harness,
  * back to the list. The last action's result and what the last page showed stay behind; another harness starts with its
- * tables closed and Copies differ filters off.
+ * tables closed and Copies differ filters off. `showOnly`: open that kind's tab showing only items whose copies differ.
+ * `fromKeyboard`: going back to the list shows the focus ring on the card only when the way back was taken from the keyboard.
  */
-/** `fromKeyboard`: going back to the list shows the focus ring on the card only when the way back was taken from the keyboard. */
-export function goHarness(tool: HarnessId | undefined, tab?: HarnessTab, fromKeyboard = true) {
+export function goHarness(tool: HarnessId | undefined, tab?: HarnessTab, { fromKeyboard = true, showOnly }: { fromKeyboard?: boolean; showOnly?: Kind } = {}) {
   const from = state.harness;
   if (tool !== from) closeOpenRows();
   state.harness = tool;
   if (tab) state.harnessTab = tab;
+  if (showOnly) showFiltered(showOnly, 'attention', tool);
   // A home switch's result (and its Go back) survives one move, as it does across pages.
   const carried = state.outcome?.carry ? { ...state.outcome, carry: false } : undefined;
   dropActionResults();
@@ -173,7 +172,7 @@ export function goHarness(tool: HarnessId | undefined, tab?: HarnessTab, fromKey
 function everyHarness(home: HomeView) {
   const done = outcomeBand();
   // What the read's catch-up copied is news here too, not only on the Skills tables.
-  const caught = caughtUpBand(home.manage, caughtUpNames(home.manage, new Set(home.manage.notices.map(notice => notice.item))));
+  const caught = caughtUpBand(home.manage);
   return h('div.page', {}, done || caught ? h('div.bands', {}, done, caught) : null,
     h('div.scroll.harness-scroll', { id: 'harnesses-scroll' },
       h('p.tools-note', {}, icon('info', 14, 'tone-muted'),
@@ -307,7 +306,10 @@ function oneHarness(snapshot: Snapshot, home: HomeView) {
   const body = isKind(tab) ? kindTab(home, tab, tool) : tab === 'instructions' ? instructionsTab(tool) : tab === 'plugins' ? pluginsTab(tool) : aboutTab(snapshot, home);
   body.classList.add('harness-tab-body');
   // Tabs without bands of their own (Plugins, About, a kind the tool doesn't use) still show the last result, such as a home switch.
-  if (!body.querySelector(':scope > .bands')) { const done = outcomeBand(); if (done) body.prepend(h('div.bands', {}, done)); }
+  // (Kind tabs draw the table's bands; Instructions draws instructionBands, which keeps a save's result on its card.)
+  const bandless = tab === 'plugins' || tab === 'about' || (isKind(tab) && !supports(home, tab, tool));
+  const done = bandless ? outcomeBand() : null;
+  if (done) body.prepend(h('div.bands', {}, done));
   // The window's header names the harness (harnessTitle); its tabs and the switcher to the others share one row below it.
   return h('div.page.harness-page', {}, h('div.harness-bar', {}, tabs(home, tool), switcher(home, tool)), body);
 }
@@ -322,7 +324,7 @@ export function harnessTitle(): (Node | null)[] | undefined {
   if (!snapshot || !state.home) return undefined;
   const tool = snapshot.harness;
   return [
-    h('button.crumb-link.title-crumb', { type: 'button', id: 'harness-back', title: 'Back to every harness', disabled: !!state.busy, onclick: (event: MouseEvent) => goHarness(undefined, undefined, event.detail === 0) }, icon('arrow-left', 14), 'Harnesses'),
+    h('button.crumb-link.title-crumb', { type: 'button', id: 'harness-back', title: 'Back to every harness', disabled: !!state.busy, onclick: (event: MouseEvent) => goHarness(undefined, undefined, { fromKeyboard: event.detail === 0 }) }, icon('arrow-left', 14), 'Harnesses'),
     h('span.crumb-sep', { 'aria-hidden': 'true' }, '/'),
     brandMark(tool, 16), h('span.title-harness', {}, names[tool]),
     // A sample or chosen folder is said once, on the list's note; the header names installed state on this computer only.
@@ -336,7 +338,7 @@ export function harnessesPage() {
   // The summary's instruction files and installs, read quietly once per home (each read checks what it already has).
   readInstructionsQuietly();
   peekPlugins();
-  // A harness not found in this home (another home without it, or no longer found) falls back to the list; one both homes have stays open.
+  // A harness no longer found (after a Refresh) falls back to the list; a home switch already closed any open harness (accept()).
   const snapshot = openSnapshot(home);
   return snapshot ? oneHarness(snapshot, home) : everyHarness(home);
 }

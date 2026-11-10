@@ -9,11 +9,11 @@ declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
 export type Page = 'overview' | 'harnesses' | 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'history' | 'settings';
-/** What a harness's page shows: one kind of item, its instruction file, its plugins, or where its files are. */
 /** The kinds of item the tables manage. */
 export type Kind = 'skills' | 'mcp' | 'agents';
 export const KINDS: Kind[] = ['skills', 'mcp', 'agents'];
 export const isKind = (tab: string | undefined): tab is Kind => (KINDS as (string | undefined)[]).includes(tab);
+/** What a harness's page shows: one kind of item, its instruction file, its plugins, or where its files are. */
 export type HarnessTab = Kind | 'instructions' | 'plugins' | 'about';
 /** The tab of the harness page on screen, if one is (Harnesses with a harness open). */
 export const harnessTabShown = (): HarnessTab | undefined => (state.page === 'harnesses' && state.harness ? state.harnessTab : undefined);
@@ -198,6 +198,7 @@ export const presentCount = () => state.home ? state.home.snapshots.filter(snaps
 /** Lets go of what the last action showed (its result band, Apply results, the spoken line): for moving to another place. */
 export function dropActionResults() {
   state.outcome = undefined;
+  state.undoMoved = undefined;
   state.applied = undefined;
   state.mcpResult = undefined;
   state.agentsResult = undefined;
