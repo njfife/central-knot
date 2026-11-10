@@ -652,6 +652,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .list-head > span:first-child { flex: 1; }
 .list-head-tool { width: 16px; display: grid; place-items: center; }
 .list-head-tool .mono-mark { background: transparent; color: var(--ink-soft); box-shadow: inset 0 0 0 1px var(--ink-faint); border-radius: 3px; }
+/* The Skills list's group headings, in the table's order: Managed, Unmanaged, Disabled everywhere. */
+.list-group { display: flex; align-items: center; height: 26px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--chrome); font-size: 12px; font-weight: 600; }
 .list-row { all: unset; box-sizing: border-box; width: 100%; height: var(--list-row); display: flex; align-items: center; gap: 8px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--line); }
 .list-row:hover { background: var(--hover); }
 .list-row.selected, .list-row.selected:hover { background: var(--picked); box-shadow: inset 2px 0 0 var(--accent); }

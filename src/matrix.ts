@@ -9,7 +9,7 @@ import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
 import { whyReadOnly, saidInStatusBar, tell, type Outcome, type Kind, harnessKindShown, convertAgent, flashRequests, showSkillsTable, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, findInput, fitInView, h, icon, middle, pathText, pendingCount, toggle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
-import { byKey, inDisplayOrder, inUse } from './roworder.ts';
+import { byKey, standing } from './roworder.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
 import type { Change, DestinationResult, HomeView, ManageView, SkillFacts, SyncNotice, HarnessId, PartsInstall } from './types.ts';
 import { market } from './pluginstate.ts';
@@ -120,6 +120,14 @@ const toolList = (): Tool[] => {
 };
 /** Whether the focused harness has its own copy; with no focus, every item counts. */
 const inFocus = (skill: SampleSkill) => !focus || skill.copies[focus] !== undefined;
+/**
+ * A row's place as things stand before pending changes, so it stays put until Apply all: 0 managed, 1 unmanaged, 2 no tool
+ * uses it (roworder.ts). The bulk actions (Manage all, Add all) leave the last kind alone; each row's own controls still work.
+ */
+const placeOf = (skill: SampleSkill) => standing(committedOf(skill.key), toolList());
+const placeNames = ['Managed', 'Unmanaged', 'Disabled everywhere'] as const;
+/** Whether some tool uses the item once pending changes apply: it has or gets a copy there that isn't disabled. */
+const usedAfter = (skill: SampleSkill) => toolList().some(tool => hasCopyAfterApply(skill, tool) && !skill.disabled?.includes(tool));
 /** Copies differ and need a choice, among the items this page is about: on a harness's page, the ones it has. */
 const needsChoice = (skill: SampleSkill) => inFocus(skill) && syncOf(skill, toolList()) === 'attention';
 
@@ -369,7 +377,7 @@ function filterBar() {
 // Edits waiting for Sync are not Apply all's to write: the Sync-off banner offers Sync now for them.
 // MCP entries for Claude Code wait for Write now, not Apply all (MCP-02), so they are not counted here either.
 const pendingSyncs = (list: SampleSkill[]) => list.filter(skill => !skill.edited?.length && toolList().some(tool => cellOf(skill, tool) === 'will-sync' && !(kind === 'mcp' && tool === 'claude-cli'))).length;
-const manageable = () => committedList().filter(skill => !skill.held && inFocus(skill)).filter(skill => !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) !== 'attention');
+const manageable = () => committedList().filter(skill => !skill.held && inFocus(skill) && placeOf(skill) !== 2).filter(skill => !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) !== 'attention');
 
 const canWrite = () => designMode || (!!state.home && !whyReadOnly(state.home) && !state.busy);
 const resumeNeeded = () => !designMode && state.home?.manage.gate.state === 'needs-resume';
@@ -406,7 +414,7 @@ function changeBar(bulk = true) {
   const waiting = pendingSyncs(committedList());
   const ready = manageable();
   // Unmanaged items whose copies differ need a choice first, so Manage leaves them out and says so.
-  const needChoice = committedList().filter(skill => !skill.held && inFocus(skill) && !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) === 'attention').length;
+  const needChoice = committedList().filter(skill => !skill.held && inFocus(skill) && placeOf(skill) !== 2 && !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) === 'attention').length;
   // On a harness's page Manage steps aside under the Copies differ filter: every row shown needs a copy choice that Manage
   // leaves out, so it would act only on rows not shown.
   const manageAll = bulk && variant !== 'c' && ready.length && !(focus && view.filter === 'attention') ? manageAllButton(ready, needChoice) : null;
@@ -1308,10 +1316,11 @@ function menuRows(tool: Tool, list: SampleSkill[], live: (readonly [Tool, Tool])
 }
 
 /** Option B: a tool's header opens a menu offering to use all its skills in each other tool. It grows by one line per tool. */
-function toolMenu(tool: Tool, list: SampleSkill[]) {
-  const mine = list.filter(skill => effective(skill).copies[tool] !== undefined).length;
+function toolMenu(tool: Tool, shown: SampleSkill[]) {
+  const mine = shown.filter(skill => effective(skill).copies[tool] !== undefined).length;
+  const list = shown.filter(skill => placeOf(skill) !== 2);
   // Stop all: every managed skill stops syncing to this tool. Copies already there stay as they are.
-  const syncingHere = list.filter(skill => { const now = effective(skill); return now.managed && !now.off.includes(tool) && !now.cannot?.[tool]; });
+  const syncingHere = shown.filter(skill => { const now = effective(skill); return now.managed && !now.off.includes(tool) && !now.cannot?.[tool]; });
   // On a harness's page every Add points into that harness (menuPairs).
   const live = focus ? menuPairs(tool, list) : undefined;
   const elsewhere = live ? [] : [...new Set(others(tool).flatMap(target => planAdd(tool, target, list).differ.flatMap(entry => entry.replaced.filter(other => other !== target))))];
@@ -1356,7 +1365,7 @@ export function resetTablesForHarness() {
 
 /** Option A: the actions sit in the headers. A tool's header adds everything the other tool has; a group header manages the group. */
 function toolHead(tool: Tool, list: SampleSkill[]) {
-  const count = sendable(other(tool), tool, list).length;
+  const count = sendable(other(tool), tool, list.filter(skill => placeOf(skill) !== 2)).length;
   if (variant === 'b') {
     const open = view.toolMenu === tool && !view.toolMenuFromToolbar;
     return h(`div.ov-cell.ov-tool-head.tool-head-b${tool === focus ? '.tool-head-focus' : ''}`, { role: 'columnheader' },
@@ -1391,18 +1400,17 @@ let managedDrawn = false;
 /** A note after a section heading, after one separating dot that is spaced the same on both sides for every note. */
 const sectionNote = (...children: (Node | string)[]) => h('span.ov-section-after', {}, h('span.ov-section-dot', { 'aria-hidden': 'true' }, '·'), ...children);
 
-/** Whether no tool uses the item as it stands before pending changes: none has it, or each that has it has it disabled. Such rows go last. */
-const unused = (skill: SampleSkill) => !inUse(committedOf(skill.key), toolList());
-
 /**
  * Rows grouped under one heading. `role`: managed or unmanaged (in use; on a harness's page, the ones it has), away (in use,
- * only other tools have them), or unused (no tool uses them, managed or not), which comes last.
+ * only other tools have them), or unused (every tool that has them has them disabled, managed or not), which comes last.
  */
 function section(role: 'managed' | 'unmanaged' | 'away' | 'unused', list: SampleSkill[], after: number) {
   if (!list.length) return null;
-  const label = role === 'managed' ? 'Managed' : role === 'unmanaged' ? 'Unmanaged' : role === 'unused' ? 'Unused' : `Not in ${names[focus!]}`;
+  const label = role === 'managed' ? 'Managed' : role === 'unmanaged' ? 'Unmanaged' : role === 'unused' ? placeNames[2] : `Not in ${names[focus!]}`;
   const sorted = [...list].sort(byKey);
   const managing = role === 'unmanaged';
+  const toManaged = managing ? list.filter(skill => skill.managed).length : 0;
+  const leaving = role === 'unused' ? list.filter(usedAfter).length : 0;
   const becoming = role === 'away' ? list.filter(skill => skill.managed && !committedOf(skill.key).managed).length : 0;
   const target = managing ? sorted.filter(skill => !skill.managed && !skill.separate && syncOf(skill, toolList()) !== 'attention') : sorted.filter(skill => skill.managed);
   return h('div', { role: 'rowgroup' },
@@ -1410,11 +1418,12 @@ function section(role: 'managed' | 'unmanaged' | 'away' | 'unused', list: Sample
       h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(list.length)),
         // A move is told once: on the section it joins, or on Unmanaged when everything there joins Managed.
         after > list.length ? sectionNote(`${after - list.length} ${after - list.length === 1 ? 'joins' : 'join'} on Apply all`)
-          : managing && after < list.length && !managedDrawn ? sectionNote(after === 0 ? `${list.length === 1 ? 'becomes' : list.length === 2 ? 'both become' : 'all become'} Managed on Apply all` : `${list.length - after} become Managed on Apply all`) : null,
+          : toManaged && !managedDrawn ? sectionNote(toManaged === list.length ? `${list.length === 1 ? 'becomes' : list.length === 2 ? 'both become' : 'all become'} Managed on Apply all` : `${toManaged} become Managed on Apply all`) : null,
+        // Rows some tool uses again once the changes apply (enabled there, or managed and copied to another tool).
+        leaving ? sectionNote(`${leaving} ${leaving === 1 ? 'leaves' : 'leave'} on Apply all`) : null,
         // Items only other tools have, turned on here: told on their own section, so the counts add up.
         becoming ? sectionNote(h('span', {}, `${becoming} ${becoming === 1 ? 'becomes' : 'become'} Managed on Apply all`))
-          : role === 'away' ? sectionNote(h('span', {}, `tick a ${names[focus!]} box to add and manage it here`))
-          : role === 'unused' ? sectionNote(h('span', {}, list.every(skill => toolList().some(tool => skill.copies[tool] !== undefined)) ? `disabled in every tool that has ${list.length === 1 ? 'it' : 'them'}` : 'in no tool, or disabled in every tool that has them')) : null,
+          : role === 'away' ? sectionNote(h('span', {}, `tick a ${names[focus!]} box to add and manage it here`)) : null,
         // A bulk Manage leaves items with differing copies out: name them, with the way to choose.
         managing ? (() => {
           const waiting = sorted.filter(skill => !effective(skill).managed && syncOf(skill, toolList()) === 'attention' && !view.draft.get(skill.key)?.resolve);
@@ -1859,9 +1868,11 @@ export function designOverview(which: Kind = 'skills', harness?: Tool) {
   const open = docked() ? all.find(skill => skill.key === view.comparing) : undefined;
   // What no tool uses goes last, under its own heading. Of the rest, the rows a harness's page is about (it has a copy)
   // split into Managed and Unmanaged; the others, only other tools have.
-  const idle = shown.filter(unused), used = shown.filter(skill => !unused(skill));
+  const idle = shown.filter(skill => placeOf(skill) === 2), used = shown.filter(skill => placeOf(skill) !== 2);
   const here = used.filter(inFocus), away = used.filter(skill => !inFocus(skill));
-  managedDrawn = here.some(skill => committedOf(skill.key).managed);
+  // Rows in use that stay in use once the changes apply; the others join the last section, which says so.
+  const staying = here.filter(usedAfter);
+  managedDrawn = here.some(skill => placeOf(skill) === 0);
   const table = [
     h('div.toolbar.fit-bar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(), h('div.toolbar-end', {}, focus && others(focus).length ? addFromButton(focus, shown) : null, changeBar())),
     notices(),
@@ -1874,11 +1885,11 @@ export function designOverview(which: Kind = 'skills', harness?: Tool) {
           h('div.ov-name', { role: 'columnheader' }, nouns[kind][0]),
           h('div.ov-managed', { role: 'columnheader' }, 'Managed'),
           toolList().map(tool => toolHead(tool, shown))),
-        section('managed', here.filter(skill => committedOf(skill.key).managed), here.filter(skill => skill.managed).length),
-        section('unmanaged', here.filter(skill => !committedOf(skill.key).managed), here.filter(skill => !skill.managed).length),
+        section('managed', here.filter(skill => placeOf(skill) === 0), staying.filter(skill => skill.managed).length),
+        section('unmanaged', here.filter(skill => placeOf(skill) === 1), staying.filter(skill => !skill.managed).length),
         // Items only other tools have: their box in this tool's column adds them here (see setTool).
         focus ? section('away', away, away.length) : null,
-        section('unused', idle, idle.length),
+        section('unused', idle, idle.length + used.filter(skill => !usedAfter(skill)).length),
         ghostRows()), toolList().length),
       legend(all))];
   return open ? h('div.page.ov-page.docked', { 'data-variant': variant }, h('div.dock-main', {}, table), itemDock(open))
@@ -1969,23 +1980,24 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
   useTable('skills');
   const all = rows();
   const needle = view.listFind.trim().toLowerCase();
-  // The table's order: managed, then in use somewhere, then unused, as things stand before pending changes (so a row keeps its place until Apply all).
-  const order = new Map(inDisplayOrder(committedList(), toolList()).map((skill, index) => [skill.key, index]));
+  // The table's order and headings: managed, then unmanaged, then what every tool has disabled.
+  const place = new Map(all.map(skill => [skill.key, placeOf(skill)]));
   const shown = all.filter(skill => !needle || skill.key.includes(needle) || (skill.name ?? '').toLowerCase().includes(needle) || skill.description.toLowerCase().includes(needle))
-    .sort((first, second) => order.get(first.key)! - order.get(second.key)!);
+    .sort((first, second) => place.get(first.key)! - place.get(second.key)! || byKey(first, second));
   const chosen = all.find(skill => skill.key === state.item);
   // The detail always shows a skill: the chosen one, else the first listed. In narrow content it sits below the list.
   const shownDetail = chosen ?? shown[0] ?? all[0];
   const listRow = (skill: SampleSkill) => h(`button.list-row${skill === shownDetail ? '.selected' : ''}${view.draft.has(skill.key) ? '.list-changed' : ''}`, {
     type: 'button', id: `list-${skill.key}`, 'aria-pressed': String(skill === shownDetail),
-    'aria-label': `${skill.name ?? skill.key}, ${skill.managed ? 'managed' : 'unmanaged'}${view.draft.has(skill.key) ? ', changed, not applied yet' : ''}`,
+    'aria-label': `${skill.name ?? skill.key}, ${skill.managed ? 'managed' : 'unmanaged'}${place.get(skill.key) === 2 ? ', disabled everywhere' : ''}${view.draft.has(skill.key) ? ', changed, not applied yet' : ''}`,
     onclick: () => select(skill.key),
   },
     middle(skill.name ?? skill.key, 12, 'list-name'),
     h('span.list-cells', { 'aria-hidden': 'true' }, toolList().map(tool => miniCell(skill, tool))));
   const find = findInput({ id: 'skills-find', label: 'Find a skill', value: view.listFind, onInput: text => { view.listFind = text; rerender(); } });
   const list = shown.length
-    ? h('div', { role: 'group', 'aria-label': 'Skills' }, shown.map(listRow))
+    ? h('div', { role: 'group', 'aria-label': 'Skills' }, shown.flatMap((skill, index) => [
+      index && place.get(shown[index - 1].key) === place.get(skill.key) ? null : h('div.list-group', {}, placeNames[place.get(skill.key)!]), listRow(skill)]))
     : emptyState('search-x', 'Nothing matches', `“${view.listFind}”`);
   const skill = shownDetail;
   const draft = view.draft.get(skill.key);

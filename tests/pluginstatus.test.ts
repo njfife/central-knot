@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { blocked, partsOffer, comparableText, copyStale, installsIn, limitNote, offeredVersion, partStillIn, otherVersions, otherVersionsLine, toolsWithoutPlugin, unavailable, updateTools } from '../src/pluginstatus.ts';
+import { blocked, partsOffer, comparableText, copyStale, installsIn, limitNote, offeredVersion, partStillIn, pluginPlace, otherVersions, otherVersionsLine, toolsWithoutPlugin, unavailable, updateTools } from '../src/pluginstatus.ts';
 import { readInto, type Read } from '../src/reads.ts';
 import type { HomeView, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
 
@@ -108,4 +108,19 @@ test('Claude Code is offered a plugin’s parts only when it has no CLI', () => 
   assert.equal(partsOffer({ ...view, clis: { ...view.clis, 'claude-cli': false }, desktopOnly: { 'claude-cli': 'Claude desktop' } }, fresh, 'p', 'claude-cli'), true);
   // A plugin with only MCP servers has nothing Claude Code takes as parts.
   assert.equal(partsOffer({ ...view, clis: {} }, fresh, 'p', 'claude-cli', { skills: 0, commands: 0, agents: 0, hooks: false, mcp: 1, mcpRootVariable: false, bin: false }), false);
+});
+
+test('A plugin every tool that can take it has comes first, one some tool has next, one no tool has last', () => {
+  const at = (states: MarketplaceView['states']['p'], more: Partial<MarketplaceView> = {}): MarketplaceView => ({ ...entry, ...more, states: { p: states } });
+  const here = { state: 'installed', path: '/x' } as const;
+  assert.equal(pluginPlace(view, at({}), 'p'), 2);
+  assert.equal(pluginPlace(view, at({ 'claude-cli': here }), 'p'), 1);
+  assert.equal(pluginPlace(view, at({ 'claude-cli': here, 'copilot-cli': here, 'codex-cli': here }), 'p'), 0);
+  // A tool that can't take it (Copilot refuses the marketplace, or holds another of this name) doesn't keep it from the top.
+  assert.equal(pluginPlace(view, at({ 'claude-cli': here, 'codex-cli': here }, { copilotRefuses: 'Copilot refuses npm.' }), 'p'), 0);
+  assert.equal(pluginPlace(view, at({ 'claude-cli': here, 'copilot-cli': here, 'codex-cli': { state: 'held', reason: 'other' } }), 'p'), 0);
+  // Parts in a tool that takes no plugins count as having it; without them that tool is no reason to wait.
+  const withPi: PluginsView = { ...view, tools: [...view.tools, 'pi-cli'] };
+  assert.equal(pluginPlace(withPi, at({ 'claude-cli': here, 'copilot-cli': here, 'codex-cli': here }), 'p'), 0);
+  assert.equal(pluginPlace(withPi, at({}, { parts: { p: { 'pi-cli': { at: '2026-11-10T00:00:00Z', items: [] } } } }), 'p'), 1);
 });
