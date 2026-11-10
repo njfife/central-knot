@@ -1,6 +1,6 @@
 // What the plugin pages say about a plugin and a tool, worked out from the view alone (no DOM): whether a tool can take
 // it, whether it is installed there, and a short summary of what it holds.
-import type { Components, HarnessId, HomeView, InstallState, MarketplaceView, Outcome, PartItem, PartKind, PartsState, PluginDetail, PluginView, PluginsView } from './types.ts';
+import type { Components, HarnessId, HomeView, InstallState, InstalledCopy, MarketplaceView, Outcome, PartItem, PartKind, PartsState, PluginContents, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { groupBy, plural } from './model.ts';
 import { SAFE_NAME, compareVersions, isCommitHash } from './values.ts';
 import { andList, toolNames as names } from './words.ts';
@@ -302,21 +302,42 @@ export const otherVersionsLine = (others: { tool: HarnessId; version: string }[]
 export const comparableText = (text: string) => text.replace(/\r\n/g, '\n');
 
 /**
- * Whether a tool's installed copy is older than the version `offered`, so Update is offered there: another version than
- * the marketplace's (versionDiffers) and not a newer one. A copy loaded live from a folder marketplace is always its own.
+ * Whether a tool's installed copy has another text than the marketplace's copy in a skill, command or agent both hold (by
+ * its place in the plugin): what the plugin page's "differs from the marketplace's copy" says per part. A part only one
+ * side has is left out, since each tool reads its copy by its own rules (Codex's manifest, Copilot CLI's skills list).
+ * The page and the update both ask this.
  */
-export function outdated(entry: MarketplaceView, plugin: string, tool: HarnessId, offered: string | undefined): boolean {
+export const copyDiffers = (offered: Pick<PluginContents, 'skills' | 'commands' | 'agents'>, copy: InstalledCopy | undefined) => !!copy && (['skills', 'commands', 'agents'] as const)
+  .some(kind => offered[kind].some(part => copy[kind].some(other => other.path === part.path && comparableText(other.text) !== comparableText(part.text))));
+
+/**
+ * Whether a tool's installed copy is the marketplace's version (or either has none) but differs from the marketplace's
+ * copy in content (copyDiffers), so Update is offered there too. Known only once the plugin's files were read (`detail`),
+ * with the marketplace's own copy; a copy loaded live from a folder marketplace is the marketplace's own.
+ */
+export function copyStale(entry: MarketplaceView, plugin: string, tool: HarnessId, offered: string | undefined, detail: PluginDetail | null | undefined): boolean {
   const state = stateOf(entry, plugin, tool);
-  return state.state === 'installed' && !state.live && versionDiffers(state.version, offered) && compareVersions(releaseOf(state.version!), releaseOf(offered!)) < 0;
+  return state.state === 'installed' && !state.live && !versionDiffers(state.version, offered) && !!detail?.offered && !detail.problem && copyDiffers(detail, detail.installed?.[tool]);
 }
 
 /**
- * The tools Update brings up to date for one plugin: those whose installed copy is older (`outdated`) and can be changed
+ * Whether Update is offered for a tool's installed copy: it is older than the version `offered` (another version than
+ * the marketplace's, see versionDiffers, and not a newer one), or the same version with other content (copyStale, once
+ * `detail` is read). A copy loaded live from a folder marketplace is always its own.
+ */
+export function outdated(entry: MarketplaceView, plugin: string, tool: HarnessId, offered: string | undefined, detail?: PluginDetail | null): boolean {
+  const state = stateOf(entry, plugin, tool);
+  if (state.state !== 'installed' || state.live) return false;
+  return (versionDiffers(state.version, offered) && compareVersions(releaseOf(state.version!), releaseOf(offered!)) < 0) || copyStale(entry, plugin, tool, offered, detail);
+}
+
+/**
+ * The tools Update brings up to date for one plugin: those whose installed copy is out of date (`outdated`) and can be changed
  * here (as for an uninstall: not held, a CLI, a home that can be written), and those holding its parts out of date.
  */
-export function updateTools(view: PluginsView, entry: MarketplaceView, plugin: string, offered: string | undefined, components?: Components): { plugin: HarnessId[]; parts: HarnessId[] } {
+export function updateTools(view: PluginsView, entry: MarketplaceView, plugin: string, offered: string | undefined, components?: Components, detail?: PluginDetail | null): { plugin: HarnessId[]; parts: HarnessId[] } {
   return {
-    plugin: view.tools.filter(tool => outdated(entry, plugin, tool, offered) && !cantUninstall(view, entry, plugin, tool)),
+    plugin: view.tools.filter(tool => outdated(entry, plugin, tool, offered, detail) && !cantUninstall(view, entry, plugin, tool)),
     parts: view.canWrite ? view.tools.filter(tool => partsMark(view, entry, plugin, tool, components) === 'changed') : [],
   };
 }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { blocked, partsOffer, comparableText, installsIn, limitNote, offeredVersion, partStillIn, otherVersions, otherVersionsLine, toolsWithoutPlugin, unavailable, updateTools } from '../src/pluginstatus.ts';
+import { blocked, partsOffer, comparableText, copyStale, installsIn, limitNote, offeredVersion, partStillIn, otherVersions, otherVersionsLine, toolsWithoutPlugin, unavailable, updateTools } from '../src/pluginstatus.ts';
 import { readInto, type Read } from '../src/reads.ts';
 import type { HomeView, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
 
@@ -43,6 +43,20 @@ test('Update is offered only where a tool’s copy is older and can be changed h
   assert.deepEqual(updateTools(view, copies, 'p', '2.0.0').plugin, ['claude-cli']);
   assert.deepEqual(updateTools({ ...view, clis: { 'copilot-cli': true } }, copies, 'p', '2.0.0').plugin, [], 'no CLI to run it');
   assert.deepEqual(updateTools(view, copies, 'p', undefined).plugin, [], 'nothing to compare with');
+});
+
+test('A copy at the marketplace’s version whose text differs is offered Update once its files are read; line endings and parts only one side has are no difference', () => {
+  const part = (text: string, path = 'skills/one') => ({ name: 'one', description: '', text, path });
+  const copies = { ...entry, states: { p: { 'claude-cli': { state: 'installed' as const, path: '/x', version: '1.2.0' }, 'copilot-cli': { state: 'installed' as const, path: '/y', version: '1.2.0' }, 'codex-cli': { state: 'installed' as const, path: '/z', version: '1.2.0', live: true } } } };
+  const detail = { skills: [part('---\nname: one\n---\nB\n')], commands: [], agents: [], hooks: [], mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false, offered: true,
+    installed: { 'claude-cli': { skills: [part('---\nname: one\n---\nA\n')], commands: [], agents: [], version: '1.2.0' }, 'copilot-cli': { skills: [part('---\r\nname: one\r\n---\r\nB\r\n'), part('extra', 'skills/two')], commands: [], agents: [], version: '1.2.0' },
+      'codex-cli': { skills: [part('A')], commands: [], agents: [], version: '1.2.0' } } } as PluginDetail;
+  // Claude Code's text differs; Copilot CLI's differs only in line endings and holds an extra part; Codex loads it live.
+  assert.deepEqual(updateTools(view, copies, 'p', '1.2.0', undefined, detail).plugin, ['claude-cli']);
+  assert.equal(copyStale(copies, 'p', 'claude-cli', '1.2.0', detail), true);
+  assert.deepEqual(updateTools(view, copies, 'p', '1.2.0').plugin, [], 'not known before its files are read');
+  assert.deepEqual(updateTools(view, copies, 'p', '1.2.0', undefined, { ...detail, offered: false }).plugin, [], 'nor without the marketplace’s own copy');
+  assert.equal(copyStale(copies, 'p', 'claude-cli', '1.3.0', detail), false, 'another version is told by its version, not its content');
 });
 
 test('A tool’s limits are named in a few words', () => {

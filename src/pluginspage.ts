@@ -9,7 +9,7 @@ import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
 import { componentsOf, dotted, pluginTitle, readme, toolBox, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { allQueued, resultLines, pluginKey, queued, resultParts, resultSentence, summary, toggleMany, type ResultLine } from './pluginplan.ts';
-import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, offeredVersion, otherVersions, otherVersionsLine, partsMark, partsOf, partsOffer, stateOf, summaryOf, unavailable, updateTools, versionToCompare } from './pluginstatus.ts';
+import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, offeredVersion, otherVersions, otherVersionsLine, partsMark, partsOf, partsOffer, stateOf, summaryOf, unavailable, updateTools, versionToCompare } from './pluginstatus.ts';
 import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
@@ -67,6 +67,9 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
   const others = otherVersions(view, entry, plugin.name, compareTo);
   const updates = view.canWrite ? updateOps(view, entry, plugin) : [];
   const partsBehind = [...new Set(updates.filter(op => op.action === 'install-parts').map(op => names[op.tool]))];
+  const differing = view.tools.filter(tool => copyStale(entry, plugin.name, tool, compareTo, detail)).map(tool => names[tool]);
+  const behind = [others.length ? otherVersionsLine(others) : '', differing.length ? `${andList(differing)} ${differing.length > 1 ? 'differ' : 'differs'} from the marketplace’s copy` : '',
+    partsBehind.length ? `parts out of date in ${andList(partsBehind)}` : ''].filter(Boolean).join(', ');
   const open = () => browse({ plugin: plugin.name });
   return h('div.ov-row.plugin-row', { role: 'row', 'data-plugin': plugin.name, onclick: open },
     h('div.ov-name.plugin-row-name', { role: 'cell' },
@@ -79,9 +82,9 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
         plugin.description ? h('span.plugin-row-about', { title: plugin.description }, plugin.description) : null,
         plugin.description && holds ? h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·') : null,
         holds ? h('span.plugin-row-holds', { title: holds }, holds) : null) : null,
-      // A tool on another version, on its own line under that, with Update for every tool that is behind.
-      others.length || updates.length ? h('span.plugin-row-update', {},
-        others.length || partsBehind.length ? versionNote(h('span', {}, others.length ? [otherVersionsLine(others), partsBehind.length ? `parts out of date in ${andList(partsBehind)}` : ''].filter(Boolean).join(', ') : `Parts out of date in ${andList(partsBehind)}`), '.plugin-row-warning') : null,
+      // A tool on another version or with another copy, on its own line under that, with Update for every tool that is behind.
+      behind || updates.length ? h('span.plugin-row-update', {},
+        behind ? versionNote(h('span', {}, behind.charAt(0).toUpperCase() + behind.slice(1)), '.plugin-row-warning') : null,
         updates.length ? updateButton(updates, `pupdate-${marketIndex}-${plugin.name}`, { row: true }) : null) : null),
     view.tools.map(tool => toolBox(view, entry, plugin, tool, marketIndex, compareTo)),
     h('div.ov-cell.plugin-row-go', { role: 'cell', 'aria-hidden': 'true' }, icon('chevron-right', 14, 'tone-faint')));
@@ -191,7 +194,8 @@ function legend(view: PluginsView, entry: MarketplaceView) {
   const markOf = (plugin: PluginView, tool: Parameters<typeof unavailable>[3]) => {
     const mark = partsMark(view, entry, plugin.name, tool, componentsOf(entry, plugin));
     if (mark) return ({ changed: 'parts-changed', installed: 'parts', offer: 'parts-offer' } as const)[mark];
-    if (updateTools(view, entry, plugin.name, versionToCompare(plugin, shownDetail(pluginKey(entry.source, plugin.name)))).plugin.includes(tool)) return 'outdated';
+    const detail = shownDetail(pluginKey(entry.source, plugin.name));
+    if (updateTools(view, entry, plugin.name, versionToCompare(plugin, detail), undefined, detail).plugin.includes(tool)) return 'outdated';
     return unavailable(view, entry, plugin.name, tool) ? 'cannot' : stateOf(entry, plugin.name, tool).state;
   };
   const marks = new Set(entry.plugins.flatMap(plugin => view.tools.map(tool => markOf(plugin, tool))));

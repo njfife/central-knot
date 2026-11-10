@@ -14,7 +14,7 @@ import { installParts, partsDigest, planParts, readParts, removeParts, undoParts
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
 import type { ActionReport, Catalog, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartsInstall, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
 import { writeDurably, type ShareContext } from './share.ts';
-import { SKILL_SWITCH_TESTED_FROM, heldReason, partsTools } from './pluginstatus.ts';
+import { SKILL_SWITCH_TESTED_FROM, copyDiffers, heldReason, partsTools } from './pluginstatus.ts';
 import { isFolder, isHttps, onlyAllowed, shortBuild } from './values.ts';
 
 /** What runs a tool's plugin commands when it is a desktop app's own copy: "Claude desktop’s Code tab 2.1.321". */
@@ -220,8 +220,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
    * "In each tool" says what each tool does with them. The detail request names just a source and a plugin, so the tools
    * and their install states are read here again.
    */
-  async function installedCopies(ctx: engine.PluginContext, catalog: Catalog, source: string, item: CatalogPlugin): Promise<Partial<Record<HarnessId, InstalledCopy>>> {
-    const tools = toolIds((await host.read()).tools);
+  async function installedCopies(ctx: engine.PluginContext, catalog: Catalog, source: string, item: CatalogPlugin, only?: PluginTool): Promise<Partial<Record<HarnessId, InstalledCopy>>> {
+    const tools = only ? [only] : toolIds((await host.read()).tools);
     const states = (await statesFor(ctx, tools, catalog, source, [item]))[item.name] ?? {};
     const copies = await Promise.all(Object.entries(states).map(async ([tool, state]) => {
       if (state?.state !== 'installed') return undefined;
@@ -374,8 +374,19 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { reports: withoutFileBytes(reports) };
   }
 
-  /** Each tool's own update of an installed plugin, checked as install is. */
-  const update = (source: string, marketName: string, plugin: string, tools: PluginTool[], home: unknown) => install(source, marketName, plugin, tools, home, use.update);
+  /**
+   * Each tool's own update of an installed plugin, checked as install is. Whether the tool's copy differs from the
+   * marketplace's is asked as the plugin page asks it (copyDiffers), from both copies read again each time.
+   */
+  const update = (source: string, marketName: string, plugin: string, tools: PluginTool[], home: unknown) => install(source, marketName, plugin, tools, home, (ctx, catalog, name, tool) => {
+    const item = catalog.plugins.find(entry => entry.name === name);
+    const differs = async () => {
+      if (!catalog.root || !item) return false;
+      const [offered, copies] = await Promise.all([offeredDetail(ctx, catalog.root, item), installedCopies(ctx, catalog, source, item, tool)]);
+      return !!offered && !offered.problem && copyDiffers(offered, copies[tool]);
+    };
+    return use.update(ctx, catalog, name, tool, differs);
+  });
 
   /** One tool's own uninstall of one plugin. `marketName` is the catalog's name for it; `source` is checked against what the tool has. */
   async function uninstall(source: string, marketName: string, plugin: string, tool: PluginTool, home: unknown): Promise<PluginActionResult> {

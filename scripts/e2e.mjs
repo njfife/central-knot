@@ -1037,6 +1037,21 @@ async function practiceFlow() {
   for (let tries = 0; tries < 30 && !/Installed · 2\.0\.0/.test(await a.text('.plugin-panel') ?? ''); tries++) await wait(100);
   check('Apply all updates it, read back from Claude Code’s record, and says it can’t be undone', /Installed · 2\.0\.0/.test(await a.text('.plugin-panel') ?? '') && !/Marketplace has/.test(await a.text('.plugin-panel') ?? '')
     && /updated to 2\.0\.0 in Claude Code, which can’t be undone/i.test(await a.run(`document.querySelector('#announcement')?.dataset.text ?? ''`)) && !(await a.exists('#plugins-undo')), [await a.text('.plugin-panel'), await a.run(`document.querySelector('#announcement')?.dataset.text`), await a.text('.bands')]);
+  // The copy changes at the same version (2.0.0): once read again, the page says so and offers Update. Claude Code's own
+  // update keeps its copy ("already at the latest"), so Apply all uninstalls and installs it again, and compares after.
+  const triage = join(newCopy, 'skills/triage/SKILL.md'), record = readFileSync(join(practice, '.claude/plugins/installed_plugins.json'), 'utf8');
+  writeFileSync(triage, readFileSync(triage, 'utf8') + '\nA line added by hand.\n');
+  writeFileSync(claudeStub, `#!/bin/sh\ncase "$*" in\n  "plugin update issue-tracker@ck-test-market --scope user") echo 'issue-tracker is already at the latest version (2.0.0).' ;;\n  "plugin uninstall issue-tracker@ck-test-market --scope user") printf '{"version":2,"plugins":{}}' > "$HOME/.claude/plugins/installed_plugins.json" ;;\n  "plugin install issue-tracker@ck-test-market --scope user") cp '${join(market, 'plugins/issue-tracker/skills/triage/SKILL.md')}' '${triage}' && printf '%s' '${record}' > "$HOME/.claude/plugins/installed_plugins.json" ;;\n  *) exit 9 ;;\nesac\n`);
+  await a.click('#nav-skills');
+  await a.click('#nav-plugins');
+  if (!(await a.exists('#pfile-0-skills-triage'))) await a.click('#popen-0-issue-tracker');
+  for (let tries = 0; tries < 30 && !/differs from the marketplace’s copy/.test(await a.text('.plugin-panel') ?? ''); tries++) await wait(100);
+  same('a copy that differs at the same version says so and offers Update', [/Installed · 2\.0\.0 · differs from the marketplace’s copy/.test(await a.text('.plugin-panel') ?? ''), await a.run(`document.querySelector('#pcell-0-issue-tracker-claude-cli')?.dataset.state`), await a.text('#pupdate-0-issue-tracker')], [true, 'outdated', 'Update in Claude Code']);
+  await a.click('#pupdate-0-issue-tracker');
+  await a.click('#plugins-apply');
+  for (let tries = 0; tries < 30 && /differs from the marketplace’s copy/.test(await a.text('.plugin-panel') ?? 'differs from the marketplace’s copy'); tries++) await wait(100);
+  check('Apply all reinstalls it where Claude Code keeps its copy, and the result says so', !/differs from the marketplace’s copy/.test(await a.text('.plugin-panel') ?? '') && readFileSync(triage, 'utf8') === readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8')
+    && /reinstalled from the marketplace’s copy of 2\.0\.0 in Claude Code/i.test(await a.run(`document.querySelector('#announcement')?.dataset.text ?? ''`)), [await a.text('.plugin-panel'), await a.run(`document.querySelector('#announcement')?.dataset.text`)]);
   writeFileSync(claudeStub, stubBefore);
   // Claude Code lets it go outside the app; coming back to Plugins reads the install states, and the copies, again.
   writeFileSync(join(practice, '.claude/plugins/installed_plugins.json'), '{"version":2,"plugins":{}}');
@@ -1131,8 +1146,7 @@ async function practiceFlow() {
   // document-tools:pdf-reader in config.toml. Codex has it installed as its record says.
   const codexConfig = join(practice, '.codex/config.toml');
   const codexCopy = join(practice, '.codex/plugins/cache/ck-test-market/document-tools/1.2.0');
-  mkdirSync(join(codexCopy, 'skills'), { recursive: true });
-  for (const name of ['pdf-reader', 'spreadsheet']) skill(join(codexCopy, 'skills'), name);
+  cpSync(join(market, 'plugins/document-tools/skills'), join(codexCopy, 'skills'), { recursive: true });
   const configBefore = `${existsSync(codexConfig) ? readFileSync(codexConfig, 'utf8') : ''}\n[marketplaces.ck-test-market]\nsource = ${JSON.stringify(market)}\n\n[plugins."document-tools@ck-test-market"]\nenabled = true\n`;
   writeFileSync(codexConfig, configBefore);
   await a.click('#plugin-back');
