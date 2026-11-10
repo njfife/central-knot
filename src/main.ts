@@ -273,6 +273,40 @@ function showWindow() {
   if (window.isMinimized()) window.restore();
   window.show();
   window.focus();
+  joinDock();
+}
+/**
+ * On a Mac, Central Knot is in the Dock (and the ⌘Tab list) only while it has a window: closed, it runs from its menu bar icon
+ * alone. A minimised or hidden (⌘H) window still counts as one. Electron drops a request to leave made within a second of the
+ * icon's return, so leaving is asked again until it holds or a window is back.
+ */
+let leavingDock: NodeJS.Timeout | undefined;
+let menuBarOnly = false;
+let joiningDock = false;
+const dock = () => (process.platform === 'darwin' ? app.dock : undefined);
+function leaveDock() {
+  if (!tray || quitting) return;
+  menuBarOnly = true;
+  askToLeaveDock();
+}
+function askToLeaveDock(tries = 10) {
+  clearTimeout(leavingDock);
+  if (!menuBarOnly || quitting) return;
+  dock()?.hide();
+  if (tries > 0 && dock()?.isVisible()) leavingDock = setTimeout(() => askToLeaveDock(tries - 1), 400);
+}
+function joinDock() {
+  clearTimeout(leavingDock);
+  menuBarOnly = false;
+  if (joiningDock || !dock() || dock()?.isVisible()) return;
+  joiningDock = true;
+  // macOS hands the front to the Dock while the icon is added, so the window is brought forward again once it is there. A
+  // window closed meanwhile leaves the Dock again.
+  void dock()?.show().then(() => {
+    joiningDock = false;
+    if (menuBarOnly) askToLeaveDock();
+    else if (window && !window.isDestroyed() && window.isVisible()) { app.focus({ steal: true }); window.focus(); }
+  });
 }
 /** One status line for both menus: where, and any news. */
 function statusLine() {
@@ -759,11 +793,11 @@ function handleNow(channel: string, work: (...args: unknown[]) => Promise<unknow
   });
 }
 
-/** The main window. Closing it hides it (PLT-04); if it is ever gone, Open from the menu bar makes a new one. */
+/** The main window. Closing it hides it and, on a Mac, takes Central Knot out of the Dock (PLT-04); if it is ever gone, Open from the menu bar makes a new one. */
 let loading: Promise<void> = Promise.resolve();
 function createWindow(show: boolean) {
   // One window at a time: a second would get no answers (requests are only taken from the current window).
-  if (window && !window.isDestroyed()) { if (show) { window.show(); window.focus(); } return; }
+  if (window && !window.isDestroyed()) { if (show) { window.show(); window.focus(); joinDock(); } return; }
   window = new BrowserWindow({
     width: 1280, height: 800, minWidth: 860, minHeight: 560, show,
     title: 'Central Knot', backgroundColor: nativeTheme.shouldUseDarkColors ? '#000000' : '#fbfbfc',
@@ -774,6 +808,9 @@ function createWindow(show: boolean) {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   log('window created');
+  if (show) joinDock();
+  // However the window comes back, the Dock icon comes with it. (Never the other way: macOS also calls a covered window hidden.)
+  window.on('show', joinDock);
   window.on('close', event => {
     log(`window close (${quitting ? 'quitting' : tray ? 'hidden' : 'no menu bar icon'})`);
     if (quitting || !tray) return;
@@ -796,10 +833,11 @@ function createWindow(show: boolean) {
       }).then(({ response, checkboxChecked }) => {
         if (signedIn.available && checkboxChecked !== signedIn.on) saveSignInQuietly(checkboxChecked);
         if (response === 1) { quitting = true; app.quit(); }
+        leaveDock();
       });
-    }
+    } else leaveDock();
   });
-  window.on('closed', () => log('window closed'));
+  window.on('closed', () => { log('window closed'); leaveDock(); });
   window.webContents.on('render-process-gone', (_event, details) => log(`page process gone: ${details.reason}`));
   window.webContents.on('did-finish-load', () => log('page loaded'));
   // Coming back to the window is when a change made in the system's own settings (Login Items, Startup apps) shows: the menus
@@ -814,7 +852,8 @@ function createWindow(show: boolean) {
 const primary = smoke || app.requestSingleInstanceLock();
 if (!primary) app.exit(0);
 app.on('second-instance', showWindow);
-app.on('activate', showWindow);
+// Opening Central Knot again (the Dock, Finder, Spotlight) while it runs: its window comes back.
+app.on('activate', () => { log('opened again'); showWindow(); });
 // A tool writing a draft is stopped with the app: it would otherwise keep working with nobody to read its answer.
 app.on('before-quit', () => { quitting = true; drafting?.abort(); });
 // A signal to stop is a Quit, not a window close: nothing waits in the menu bar.
@@ -830,6 +869,8 @@ app.whenReady().then(async () => {
   await firstSignIn();
   makeTray();
   createWindow(!smoke && !startedHidden());
+  // Started at sign-in with no window: the menu bar icon only.
+  if (!smoke && startedHidden()) leaveDock();
   // A read waits for settings writes already under way, so the page never sees a value older than one it just saved.
   handleNow('settings:get', async () => settingsWrites.then(preferences));
   handleNow('settings:appearance', async appearance => {

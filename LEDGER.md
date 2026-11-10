@@ -823,3 +823,23 @@ Nathan put the plugin `varo-dev` (5 skills, 2 agents) into Pi as parts on his wo
 **Validation on the merged branch.** 386 unit tests. Mac dev-build e2e 541/541 before the last fixes; Linux e2e 421/421 after them (a debugging aid, no longer a required check). Three review rounds, Opus 5.5 and Fable 5.2 on interface and on code (Sol and Astra could not run: ChatGPT usage limit): interface 7.5/7.5, 7/7, then 8.5/8; code 7/7.5, 8/7.5, then 8.5/8.5. Their findings are fixed above or listed below. On the Mac, this build on a copy of the real home's tool settings listed 41 skills and 4 MCP servers from the plugins installed there, with no error in its log.
 
 **Not done.** No click-through in a real window (Computer Use runs on the same ChatGPT account). The owner's own case was not reproduced on his work Mac. An installed copy whose skills folder can't be read lists nothing and says nothing. The plugin rows' drawing code sits in `src/matrix.ts`. A result can name a part as put in that was already there. "Install parts in all N tools" doesn't say which parts can't go in.
+
+## Mac: a closed window leaves the Dock, November 10, 2026
+
+Nathan asked that closing the app on a Mac leave it running in the top right (the menu bar), not in the Dock as well.
+
+- Closing the window now takes Central Knot out of the Dock and the ⌘Tab list; its menu bar icon stays. Opening it again (the icon's Open Central Knot, Settings…, or opening the app from Finder, Spotlight or Launchpad) brings the Dock icon back with the window, in front.
+- A minimised window and a hidden one (⌘H) keep the Dock icon. A start at sign-in with no window shows the menu bar icon only.
+- The first close's "still running" dialog shows while the Dock icon is still there; the icon goes once it is answered.
+- Electron drops a request to leave the Dock made within a second of the icon's return, so it is asked again until it holds (`leaveDock` in `src/main.ts`).
+- The log now has a line, "opened again", each time the system asks a running Central Knot to open.
+- Windows and Linux are unchanged.
+
+**Validation (macOS 26.6.2).**
+- Mac packaged e2e passes in CI (run 42895096593), with a new check of the system's view of the app (`lsappinfo`) before and after its window goes.
+- An ad hoc packaged build with its own home, real clicks through Computer Use: the red close button showed the first-close dialog with the Dock icon still there; after OK the system reported a menu-bar-only app, and still did three seconds later. A second close went straight there with no dialog.
+- A development run, with a real window close asked from the main process: the same, plus reopening (a Dock app again, frontmost and focused), a close 0.3 s after reopening (the icon left within a second), minimise and ⌘H (the icon stayed, also when done 0.3 s after reopening).
+
+**Not proven.** A real click on the menu bar icon's Open Central Knot: Computer Use could not reach the menu bar icon. The same code runs when the app is opened again, which was checked.
+
+**Lesson.** Computer Use asks macOS to open the app each time it looks at it, which rightly brings a closed window back. The log's "opened again" line shows it. A test of "stays closed" must read the state with the shell before Computer Use looks again.

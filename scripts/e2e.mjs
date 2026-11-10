@@ -1645,9 +1645,17 @@ async function practiceFlow() {
   same('no page errors, practice', a.pageErrors, []);
   // With no window at all, Central Knot keeps running from the menu bar and sync keeps going (PLT-04). A page-made close
   // destroys the window outright (a real close only hides it), which is the stronger case: background work needs no window.
+  // On a Mac the app is in the Dock while it has a window ("Foreground" to the system) and out of it once the window is gone
+  // ("UIElement"): it runs from its menu bar icon alone.
+  const inDock = () => { const found = spawnSync('lsappinfo', ['find', `pid=${a.child.pid}`], { encoding: 'utf8' }).stdout.trim(); return spawnSync('lsappinfo', ['info', '-only', 'ApplicationType', found], { encoding: 'utf8' }).stdout.trim(); };
+  const dockBefore = process.platform === 'darwin' ? inDock() : undefined;
   await a.run(`setTimeout(() => window.close(), 50), true`);
   await wait(800);
   same('with the window gone the app keeps running', a.child.exitCode, null);
+  if (process.platform === 'darwin') {
+    for (let tries = 0; tries < 20 && !inDock().includes('UIElement'); tries++) await wait(250);
+    same('on a Mac the app is in the Dock with its window, and leaves it for the menu bar when the window is gone', [dockBefore, inDock()], ['"ApplicationType"="Foreground"', '"ApplicationType"="UIElement"']);
+  }
   const notesToml = join(practice, '.codex/agents/release-notes.toml');
   writeFileSync(notesToml, readFileSync(notesToml, 'utf8').replace('one line each.', 'one line each. Edited with no window.'));
   let spreadClosed = false;
