@@ -77,6 +77,8 @@ export interface DesktopApi {
   refresh(): Promise<HomeView | null>;
   apply(changes: Change[], resume: boolean, home: string): Promise<ApplyResult>;
   history(): Promise<HistoryList>;
+  /** What the home's tools keep in memory, read only. */
+  memory(readId?: number): Promise<MemoryView | null>;
   applyMcp(changes: Change[], resume: boolean, home: string): Promise<McpResult>;
   writeClaude(names: string[], home: string): Promise<McpResult>;
   /** Undo of Write to Claude Code: entries back to what Claude Code held before. Claude Code must be closed. */

@@ -14,6 +14,7 @@ import { agentTools, mcpTools, noteTools, presentTools } from './presence.ts';
 import { applyMcp, mcpFile, mcpView, restoreMcp, undoClaudeWrite } from './mcp.ts';
 import { agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
 import { applyBase, baseView, instructionsView, instructionVersion, repoBase, saveInstruction, undoBase } from './instructions.ts';
+import { memoryView } from './memory.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoPulledBase, undoSettingsChange } from './gitrepo.ts';
 import { readParts } from './parts.ts';
@@ -851,6 +852,8 @@ app.whenReady().then(async () => {
     ? convertAgentToSkill(context(), await presentNow(), key)
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.' }));
   handle('instructions:view', async readId => (current ? instructionsView(context(), await readFor(readId as number | undefined)) : null));
+  // Memory: read only; nothing on its page writes.
+  handle('memory:view', async readId => (current ? memoryView(current.home, await readFor(readId as number | undefined)) : null));
   handle('instructions:save', async (tool, text, expected, home, restoring) => (home === current?.home && isTool(tool) && typeof text === 'string' && typeof expected === 'string'
     ? saveInstruction(context(), await read(), tool, text, expected, restoring === true)
     : { stopped: notOpenHome }));

@@ -11,6 +11,7 @@ import { harnessesPage, harnessTitle } from './harnesspage.ts';
 import { pluginsPage } from './pluginspage.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
+import { memoryPage } from './memorypage.ts';
 import { repo, repoPage, waitingCounts, waitingWords } from './repopage.ts';
 import { profilesPage, profileStatus } from './profilespage.ts';
 import type { HomeMode, HomeView, ManageView } from './types.ts';
@@ -18,7 +19,7 @@ import { followUpdates, statusEnd } from './updateview.ts';
 
 const region = (id: string) => document.getElementById(id)!;
 /** Each page's title, in the header and the sidebar: a kind's page by its kind's title (words.ts kindNouns). */
-const titles: Record<Page, string> = { overview: 'Overview', ...Object.fromEntries(Object.entries(kindNouns).map(([kind, nouns]) => [kind, nouns.title])) as Record<HomeKind, string>, profiles: 'Profiles', history: 'History', repo: 'Git repo', harnesses: 'Harnesses', settings: 'Settings' };
+const titles: Record<Page, string> = { overview: 'Overview', ...Object.fromEntries(Object.entries(kindNouns).map(([kind, nouns]) => [kind, nouns.title])) as Record<HomeKind, string>, memory: 'Memory', profiles: 'Profiles', history: 'History', repo: 'Git repo', harnesses: 'Harnesses', settings: 'Settings' };
 /** Below this window width the sidebar folds to its icon rail, unless the person chose a shape with the toggle. */
 const RAIL_BELOW = 968;
 /** From this content width (laptop full screen and up), an open row's details dock beside its table instead of under the row. */
@@ -99,6 +100,7 @@ function renderSidebar() {
     row('mcp', 'plug', designMode ? undefined : home?.mcp.servers.length),
     row('agents', 'bot', designMode ? undefined : home?.agents.servers.length),
     row('instructions', 'pencil-line'),
+    !noTools() ? navRow('memory', titles.memory, 'brain') : null,
     row('plugins', 'puzzle'),
     // Profiles switch skills and MCP servers, so like the kinds' rows it needs a tool to switch them in.
     !noTools() ? navRow('profiles', titles.profiles, 'sliders-horizontal') : null,
@@ -132,7 +134,7 @@ function renderHeader(rail: boolean) {
 
 function renderPage() {
   document.body.classList.toggle('page-harnesses', state.page === 'harnesses');
-  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'profiles' ? profilesPage() : state.page === 'history' ? historyPage() : state.page === 'repo' ? repoPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : harnessesPage());
+  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'profiles' ? profilesPage() : state.page === 'history' ? historyPage() : state.page === 'repo' ? repoPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'memory' ? memoryPage() : state.page === 'settings' ? settingsPage() : harnessesPage());
 }
 
 /** What the home lets Central Knot write, said in the status bar; `short` stands in when the bar is narrow (style.css). */

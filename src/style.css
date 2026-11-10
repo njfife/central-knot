@@ -849,6 +849,27 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ins-preview, .ins-diff { margin: 0; padding: 10px 12px; max-height: 360px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--chrome); font-family: var(--mono); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ins-preview { max-height: none; font-size: 12.5px; }
 .ins-empty { font-size: 12.5px; color: var(--ink-soft); }
+
+/* Memory: a card per tool; projects open to their memories, and a memory to its text. One line per row while it fits. */
+.memory-projects, .memory-notes { list-style: none; margin: 0; padding: 0; }
+.memory-projects { border-top: 1px solid var(--line); }
+.memory-project { border-bottom: 1px solid var(--line); }
+.memory-toggle { all: unset; box-sizing: border-box; display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.memory-toggle:hover { background: var(--hover); }
+.memory-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.memory-toggle > svg { flex: none; margin-top: 3px; }
+.memory-unreadable { cursor: default; }
+.memory-unreadable:hover { background: none; }
+.memory-row { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.memory-label { min-width: 0; font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
+.memory-count { margin-left: auto; font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+.memory-open { display: flex; flex-direction: column; gap: 6px; padding: 0 0 10px 21px; }
+.memory-title { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.memory-kind { flex: none; padding: 0 6px; border-radius: 999px; background: var(--chrome); font-size: 11px; line-height: 18px; color: var(--ink-soft); }
+.memory-what { flex: 1 1 24ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-soft); }
+.memory-text { display: flex; flex-direction: column; gap: 6px; padding: 2px 8px 10px 29px; }
+.memory-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; font-size: 12px; color: var(--ink-soft); }
+.memory-meta > .path-text { flex: 0 1 auto; min-width: 0; }
 /* A card's actions, and a discard confirmation, wrap by the card's width rather than spill out of it. */
 .ins-actions, .ins-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 4px; min-width: 0; }
 span.ins-confirm { margin-top: 0; }

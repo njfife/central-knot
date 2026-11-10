@@ -1,6 +1,6 @@
 import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
-import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, McpResult, ClaudeWrite, SyncNotice } from './types.ts';
+import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, McpResult, MemoryView, ClaudeWrite, SyncNotice } from './types.ts';
 import { caughtUpNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
@@ -17,7 +17,7 @@ declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
 /** Every page, in the sidebar's order. */
-export const pages = ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'repo', 'settings'] as const;
+export const pages = ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'memory', 'plugins', 'profiles', 'history', 'repo', 'settings'] as const;
 export type Page = typeof pages[number];
 
 /** This computer's names, and what its platform offers (machine.ts). */
@@ -84,6 +84,8 @@ export const state = {
   outcome: undefined as Outcome | undefined,
   /** Each tool's instruction file: read when the Instructions page opens or the home changes (pagedata.ts). */
   instructions: pageData<InstructionFile[]>(),
+  /** What Claude Code and Codex keep in memory: read when the Memory page opens or the home changes (pagedata.ts). */
+  memory: pageData<MemoryView>(),
   /** The one instruction file being edited (InstructionDraft). */
   instructionEdit: undefined as InstructionDraft | undefined,
   /** The base instructions and which tools get them, read with the instruction files. */
@@ -231,6 +233,7 @@ function accept(view: HomeView) {
   state.baseEdit = undefined;
   resetPageData(state.instructions);
   resetPageData(state.history);
+  resetPageData(state.memory);
   resetMarket();
   setHome(view, { reload: false });
   void loadPageData(state.page, { readId: view.readId });
@@ -394,6 +397,7 @@ function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; 
   if (page === 'history') return loadHistory();
   if (page === 'settings') return loadSettings().then(() => undefined);
   if (page === 'instructions') return loadInstructions(readId);
+  if (page === 'memory') return loadMemory(readId);
   // Harnesses sums up each tool's instruction file and installs, as Instructions and Plugins read them. It only counts installs,
   // so its Refresh reads the tools again without fetching every marketplace anew (Plugins' Refresh does that).
   if (page === 'harnesses') return Promise.all([loadInstructions(readId), absentKinds().includes('plugins') ? undefined : loadPlugins(false, readId)]).then(() => undefined);
@@ -651,6 +655,13 @@ export const loadInstructions = async (readId?: number): Promise<void> => {
   if (result === 'dropped') return;
   if (result === 'ready') settleDraft();
   rerender();
+};
+
+/** Reads what the tools keep in memory into its slot; the page redraws once the answer is the newest. */
+export const loadMemory = async (readId?: number): Promise<void> => {
+  const reading = readPageData(state.memory, () => api().memory(readId));
+  rerender();
+  if (await reading !== 'dropped') rerender();
 };
 
 /** The files again after a save, as an action read them. */

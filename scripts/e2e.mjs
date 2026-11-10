@@ -1573,10 +1573,30 @@ async function practiceFlow() {
       ['Not available on Linux yet.', { label: 'Start at sign-in (not on Linux yet)', visible: false, enabled: false, checked: false }, [false], [], true]);
     main.close();
   }
+  // Memory (read only): the practice copy's two Claude Code projects, Codex's summary and Copilot's note. A project opens to
+  // its memories (about you and how you work first, its index last), a memory to its text, and both close again; nothing is written.
+  const memoryFiles = () => [tree(join(practice, '.claude/projects')), tree(join(practice, '.codex/memories'))];
+  const memoryBefore = memoryFiles();
+  await a.click('#nav-memory');
+  for (let tries = 0; tries < 40 && !(await a.exists('#memory-scroll')); tries++) await wait(100);
+  const memoryPage = await a.text('#memory-scroll') ?? '';
+  check('Memory lists both projects, Codex’s summary and Copilot’s note', ['Users-sam-code-weather-app', '3 memories', 'Users-sam-notes', 'Its index only', 'CLAUDE.md, on the Instructions page', 'forecasts are cached for ten minutes', 'Copilot keeps its memory on GitHub, where Central Knot can’t read it.'].every(words => memoryPage.includes(words)), memoryPage);
+  const weather = await a.run(`[...document.querySelectorAll('.memory-project > .memory-toggle')].find(row => row.textContent.includes('weather-app'))?.id`);
+  await a.click(`#${weather}`);
+  const titles = await a.all(`#${weather} + .memory-open .memory-title`);
+  same('a project opens to its memories: about you and how you work first, then the rest, its index last', [titles.slice(0, 2).sort(), titles.slice(2)], [['Small pull requests', 'Who Sam is'], ['Forecast cache', 'Memory index, Users-sam-code-weather-app']]);
+  await a.click(`#${weather}-note-2`);
+  same('a memory opens to its text, without its settings lines', await a.text(`#${weather}-note-2-text`), 'The forecast cache keeps each city\'s forecast for ten minutes (src/cache.ts). Don\'t lower it: the provider limits requests.');
+  await fitsAtMinimum(a, 'Memory with a project and a memory open');
+  await a.click(`#${weather}-note-2`);
+  check('the memory closes again', !(await a.exists(`#${weather}-note-2-text`)));
+  await a.click(`#${weather}`);
+  check('and the project', !(await a.exists(`#${weather} + .memory-open`)));
+  same('the Memory page wrote nothing', memoryFiles(), memoryBefore);
   await a.click('#nav-skills');
-  // Full screen: nothing on the Overview, History or Plugins is cut off at 2560×1440.
+  // Full screen: nothing on the Overview, History, Memory or Plugins is cut off at 2560×1440.
   await sizeTo(a, 2560, 1440);
-  for (const page of ['overview', 'history', 'plugins']) {
+  for (const page of ['overview', 'history', 'memory', 'plugins']) {
     await a.click(`#nav-${page}`);
     await wait(300);
     same(`nothing cut off at 2560×1440 on ${page}`, await a.run(CUT_OFF), []);
@@ -1855,7 +1875,7 @@ async function fewToolsFlow() {
   cli('.pi/agent/bin/pi', 'pi 1.5.0');
   await a.click('#header-refresh');
   // Codex, whose folder is still here, holds agents and plugins: were it counted, both pages would be back.
-  same('with Pi alone, Agents and Plugins are left out', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'instructions', 'profiles', 'history', 'repo', 'settings']);
+  same('with Pi alone, Agents and Plugins are left out', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'instructions', 'memory', 'profiles', 'history', 'repo', 'settings']);
   check('and the Overview names them once', (await a.text('#overview-absent') ?? '').includes('No tool here holds agents or plugins') && !(await a.exists('#overview-agents')), await a.text('#overview-absent'));
   await a.click('#nav-skills');
   check('the tool with only a folder is no column', await a.exists('#tool-pi-cli') && !(await a.exists('[data-tool="codex-cli"], #tool-codex-cli')));
@@ -1869,13 +1889,13 @@ async function fewToolsFlow() {
   mkdirSync(join(home, '.claude'), { recursive: true });
   cli('.local/bin/claude', '2.1.309 (Claude Code)');
   await a.click('#header-refresh');
-  same('a tool that holds agents and plugins brings them back', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'repo', 'settings']);
+  same('a tool that holds agents and plugins brings them back', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'memory', 'plugins', 'profiles', 'history', 'repo', 'settings']);
   // On Agents, its only tool goes away: the page it was on no longer exists here, so the Overview opens.
   await a.click('#nav-agents');
   rmSync(join(home, '.claude'), { recursive: true, force: true });
   rmSync(join(home, '.local/bin/claude'));
   await a.click('#header-refresh');
-  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'harnesses', 'skills', 'mcp', 'instructions', 'profiles', 'history', 'repo', 'settings']]);
+  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'harnesses', 'skills', 'mcp', 'instructions', 'memory', 'profiles', 'history', 'repo', 'settings']]);
   const moved = await a.run(`document.querySelector('#announcement').dataset.text`);
   check('and the status bar says what was read and why the page moved', /^Read .*No tool here holds agents now\.$/.test(moved ?? ''), moved);
   // Claude desktop alone, with no CLI and no .claude folder yet: Claude Code is here, said so with both versions.
