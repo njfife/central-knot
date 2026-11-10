@@ -944,8 +944,8 @@ span.ins-confirm { margin-top: 0; }
 .meta-dot { margin: 0 6px; color: var(--ink-faint); }
 .market-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 14px 0 10px; border-bottom: 1px solid var(--line); }
 .market-tablist { display: flex; gap: 2px; align-self: flex-end; }
-.market-tab { all: unset; padding: 7px 12px; margin-bottom: -1px; border-bottom: 2px solid transparent; font-size: 13px; color: var(--ink-soft); cursor: pointer; }
-.market-tab.selected { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
+.market-tab, .harness-tab { all: unset; padding: 7px 12px; margin-bottom: -1px; border-bottom: 2px solid transparent; font-size: 13px; color: var(--ink-soft); cursor: pointer; }
+.market-tab.selected, .harness-tab.selected { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
 .market-item:focus-visible, .market-tab:focus-visible, .market-chip:focus-visible, .market-example:focus-visible, .crumb-link:focus-visible, .plugin-row-open:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 4px; }
 /* The toolbar over the marketplace pane: where you are at the left; at the right, what is chosen or just happened. */
 .plugins-toolbar { gap: 12px; padding-left: var(--market-gutter); padding-right: var(--market-gutter); }
@@ -1441,3 +1441,123 @@ span.ins-confirm { margin-top: 0; }
 
 /* Skills and MCP pages: a copy a profile turned off reads as off, not only by its corner mark */
 .cell-button.cell-profile-off > .icon:first-child, .cell-button.cell-profile-off > .glyph-fill { opacity: 0.4; }
+
+/* ---------- Harnesses ---------- */
+.harness-scroll { container-type: inline-size; padding: 12px var(--pad-end) 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+.harness-scroll > * { flex: none; }
+.harness-scroll > .tools-note { margin: 0; max-width: 80ch; }
+.harness-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; }
+.harness-card { container-type: inline-size; display: flex; flex-direction: column; color: var(--ink); }
+.harness-card-main { all: unset; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 14px 16px; border-radius: 12px; color: inherit; font: inherit; text-align: left; }
+button.harness-card-main { cursor: pointer; }
+button.harness-card-main:disabled { cursor: default; }
+.harness-card-links { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 0 10px 10px; margin-top: -4px; }
+.harness-card-missing { color: var(--ink-soft); }
+.harness-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.harness-card-head > svg:last-child { margin-left: auto; flex: none; }
+.harness-card-name { font-size: 14px; line-height: 20px; font-weight: 600; }
+.harness-card-status { font-size: 12px; line-height: 16px; color: var(--ink-soft); margin-top: -6px; }
+.harness-counts { display: grid; grid-template-columns: max-content minmax(2ch, max-content) minmax(0, 1fr); column-gap: 12px; row-gap: 4px; align-items: baseline; padding-top: 10px; border-top: 1px solid var(--line); }
+.harness-count, .harness-count-group { display: contents; }
+.harness-count-label { color: var(--ink-soft); font-size: 12.5px; }
+.harness-count-value { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 13px; white-space: nowrap; }
+/* An empty count (none, or a file rather than a number) still holds a line, so every row shares one baseline. */
+.harness-count-value:empty::before { content: "\00a0"; }
+.harness-count-note { color: var(--ink-soft); font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+.harness-card-attention { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 0 6px; border-radius: 6px; font-size: 12px; color: var(--warning); cursor: pointer; }
+.harness-card-attention:hover { background: var(--hover); text-decoration: underline; }
+.harness-card-attention:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.harness-card-path { font-size: 12px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: auto; padding: 0 16px 14px; }
+.harness-card-next { font-size: 12px; color: var(--ink-soft); }
+
+/* A harness's page: the window header carries "Harnesses / <harness>"; below it one bar holds the tabs and the switcher. */
+.page-title:has(.title-crumb) { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.title-crumb { flex: none; font-size: 16px; font-weight: 600; }
+.title-crumb:disabled { opacity: 0.5; cursor: default; }
+.title-harness { flex: none; }
+.title-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 400; color: var(--ink-soft); margin-left: 4px; }
+.harness-bar { flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px 0 0; border-bottom: 1px solid var(--line); min-height: 44px; }
+.harness-switch { flex: none; display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--hover); }
+.harness-switch-item { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: 6px; font-size: 13px; font-weight: 500; color: var(--ink-soft); cursor: pointer; white-space: nowrap; }
+.harness-switch-item:hover:not(:disabled) { color: var(--ink); }
+.harness-switch-item:disabled { opacity: 0.5; cursor: default; }
+.harness-switch-item.selected { background: var(--surface); color: var(--ink); box-shadow: var(--lift); }
+.harness-switch-item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.harness-tabs { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 2px; padding: 0 16px; }
+/* The tabs look like the marketplace tabs (shared rules above); each is inline-flex for its count and keeps its label on one line. */
+.harness-tab { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.harness-tab:hover:not(:disabled) { color: var(--ink); }
+.harness-tab:disabled { opacity: 0.5; cursor: default; }
+.harness-tab:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 4px; }
+.harness-tab-count { font-size: 12px; font-weight: 500; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.harness-page .harness-tab-body { flex: 1; min-height: 0; }
+.harness-plugins { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.harness-plugin { display: flex; align-items: center; gap: 12px; padding: 8px 12px 8px 16px; border-bottom: 1px solid var(--line); min-height: 52px; }
+.harness-plugin:last-child { border-bottom: 0; }
+.harness-plugin-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.harness-plugin-version { font-weight: 400; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.harness-plugin-note { font-size: 12px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Its two groups sit side by side from about 860px of pane, each growing to 640px and then staying beside the other; the card
+   is as wide as its groups, so no empty frame runs on past them. */
+.harness-about { padding: 16px; display: flex; flex-wrap: wrap; gap: 16px 48px; width: fit-content; max-width: 100%; }
+.harness-about-column { flex: 0 1 auto; display: flex; flex-direction: column; gap: 16px; min-width: 0; max-width: 640px; }
+.harness-path { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.harness-path .middle { min-width: 0; }
+/* Narrow: the switcher keeps only the marks (names stay in their tooltips). */
+@media (max-width: 1180px) { .harness-switch-item:not(.selected) .harness-switch-name { display: none; } }
+/* The harness's own column header: a quiet fill across the whole column's width. */
+.ov-tool-head.tool-head-focus { background: var(--hover); border-radius: 8px 8px 0 0; align-self: stretch; display: flex; align-items: center; justify-content: center; }
+/* Its instruction card: sized to its file at a reading measure, never wider than the pane; with notes or earlier versions
+   beside it (wide windows), it spans the pane. Sized to its file at a reading measure, never wider than the pane (the file box's 100% then resolves against the pane). */
+.harness-page .ins-card { max-width: 100%; width: fit-content; min-width: min(100%, 520px); box-sizing: border-box; }
+.harness-page .ins-card:has(> .ins-versions, > .ins-note) { width: auto; }
+/* Opened from the toolbar's Add from…: under that button, its right edge on the button's. */
+.add-from { position: relative; }
+.add-from > .tool-menu { left: auto; right: 0; transform: none; top: calc(100% + 6px); }
+/* The whole card shows hover and focus, not just its upper part. */
+.harness-card:has(> .harness-card-main:hover) { background: var(--hover); }
+.harness-card:has(> .harness-card-main:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px; }
+button.harness-card-main:focus-visible { outline: 0; }
+.harness-card:has(> .harness-card-main:disabled) { opacity: 0.6; }
+/* A wide card lays its counts in two groups side by side: the three kinds, then its instruction file and plugins. Below 600px
+   (a 2×2 grid at 1280) one column keeps notes such as "2 managed · 3 unmanaged" on one line. */
+@container (min-width: 600px) {
+  .harness-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; align-items: start; }
+  .harness-count-group { display: grid; grid-template-columns: max-content minmax(2ch, max-content) minmax(0, 1fr); column-gap: 12px; row-gap: 4px; align-items: baseline; }
+}
+.tool-menu-empty { margin: 4px 0 8px; color: var(--ink-soft); }
+/* Three harnesses fit across from the minimum window; four sit 2 × 2, or four across once each card can be 310px wide; never
+   three and one. */
+.harness-cards[data-count="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@container (min-width: 1300px) { .harness-cards[data-count="4"] { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@container (max-width: 600px) { .harness-cards[data-count="4"] { grid-template-columns: minmax(0, 1fr); } }
+/* "Not in <harness>" is an offer, not this harness's count: its heading is quieter than Managed and Unmanaged. */
+.ov-section-away .ov-section-label > strong { font-weight: 500; color: var(--ink-soft); }
+/* Wide: the file sits at a reading measure on the left, with who reads it, notes and earlier versions beside it. */
+@container (min-width: 1300px) {
+  .harness-page .ins-card { display: grid; grid-template-columns: minmax(0, max-content) minmax(260px, 1fr); grid-auto-flow: row dense; column-gap: 32px; row-gap: 0; align-content: start; }
+  .harness-page .ins-card > * { grid-column: 2; margin-bottom: 8px; }
+  .harness-page .ins-card > .ins-head { grid-column: 1 / -1; }
+  .harness-page .ins-card > .ins-body, .harness-page .ins-card > .ins-editor { grid-column: 1; grid-row: 2 / span 6; }
+  /* With nothing but the reader line beside it, the card keeps its stacked layout rather than strand one sentence. */
+  .harness-page .ins-card:not(:has(> .ins-versions, > .ins-note)) { display: flex; }
+  .harness-page .ins-card:has(> .ins-versions, > .ins-note) > .ins-readers::before { content: 'Read by'; display: block; margin-bottom: 4px; font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
+}
+/* About: every fact row is as tall as one with a copy button, so the two groups' rows line up. */
+.harness-about .facts > dt, .harness-about .facts > dd { min-height: 24px; display: flex; align-items: center; }
+.harness-tab-none:not(.selected) { color: var(--ink-faint); }
+.harness-tab-none:not(.selected):hover { color: var(--ink); }
+.harness-page .empty-body { text-wrap: balance; }
+/* A tab's empty state starts under the tab bar, where every other tab's content starts, so switching tabs doesn't move the eye. */
+.harness-page .empty { justify-content: flex-start; padding-top: 48px; }
+.harness-page .tool-head-name { white-space: nowrap; }
+/* The separating dot before a section note: even space on both sides. */
+.ov-section-after { gap: 0; }
+.ov-section-label > .ov-section-after { margin-left: 0; }
+.ov-section-dot { margin: 0 8px 0 0; color: var(--ink-faint); }
+/* In view and while editing, the file sits at one reading measure, so the card is the same width either way and Edit swaps in place. */
+.harness-page .ins-card .ins-text, .harness-page .ins-card .ins-preview { width: calc(110ch + 26px); max-width: 100%; box-sizing: border-box; }
+.harness-page .ins-card .ins-diff { max-width: 110ch; }
+/* One or two harnesses don't stretch across a wide window: each card is at most about 560px wide. */
+.harness-cards[data-count="1"], .harness-cards[data-count="2"] { grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 560px)); }
+.ov-section-after > .text-action { padding-left: 0; margin-left: 0; }

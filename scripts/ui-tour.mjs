@@ -38,7 +38,8 @@ async function launch() {
   for (let attempt = 0; attempt < 150 && !target; attempt++) { await wait(200); try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find(item => item.type === 'page'); } catch { /* starting */ } }
   const page = await connect(target.webSocketDebuggerUrl);
   const { send, run } = page;
-  const settle = async () => { await wait(150); await run(`new Promise(done => { const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : setTimeout(c, 25); c(); })`); await wait(200); };
+  // A page that never settles fails the tour instead of holding it open.
+  const settle = async () => { await wait(150); await run(`new Promise((done, fail) => { const end = Date.now() + 30000; const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : Date.now() > end ? fail(new Error('The page did not settle within 30 s.')) : setTimeout(c, 25); c(); })`); await wait(200); };
   const viewport = { width: 1280, height: 800 };
   /** Sizes the page as the window would be: the app's layout follows window.innerWidth and its resize event. */
   const size = async (width, height) => {
@@ -110,7 +111,7 @@ if (wanted('shell')) {
   await shot(a, 'first-launch-dark', 'The app as it first opens (dark appearance): the Overview, on the Practice copy, a throwaway set of sample skills, MCP servers and agents.');
   await a.theme('light'); await shot(a, 'first-launch-light', 'The same, in the light appearance.'); await a.theme('dark');
   await a.click('#nav-skills'); await shot(a, 'skills-page', 'Clicked "Skills" in the sidebar: the skills table.');
-  await a.click('#nav-tools'); await shot(a, 'tools-page', 'Clicked "Tools": which tools were found and where their files are.');
+  await a.click('#nav-harnesses'); await shot(a, 'harnesses-page', 'Clicked "Harnesses": each tool found, with what it has.');
   await a.click('#nav-history'); await shot(a, 'history-empty', 'Clicked "History" before anything happened.');
   await a.click('#nav-overview');
   if (await a.has('#intro-dismiss')) { await a.click('#intro-dismiss'); await shot(a, 'intro-dismissed', 'Dismissed the practice-copy note on the Overview.'); }
@@ -1054,6 +1055,73 @@ if (wanted('scroll')) {
   }
   await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
   await a.theme('dark');
+}
+
+// ---------- Harnesses ----------
+if (wanted('harnesses')) {
+  begin('harnesses');
+  const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.run(`window.dispatchEvent(new Event('resize'))`); await a.settle(); };
+  const sizes = async (name, caption) => {
+    for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) for (const theme of ['dark', 'light']) { await size(width, height); await a.theme(theme); await shot(a, `${name}-${width}-${theme}`, `${caption} Window ${width}×${height}, ${theme} appearance.`); }
+    await a.theme('dark'); await size(1280, 800);
+  };
+  await a.click('#nav-harnesses'); await waitFor(a, `!/…/.test(document.querySelector('.harness-cards')?.textContent ?? '…')`);
+  await shot(a, 'list-dark', 'Clicked "Harnesses" in the sidebar: one card per tool with what it has. Window 1280×800.');
+  await a.theme('light'); await shot(a, 'list-light', 'The same, light appearance.'); await a.theme('dark');
+  await sizes('list', 'The Harnesses list.');
+  if (await a.has('[id^="harness-claude-cli-differ-"]')) { await a.click('[id^="harness-claude-cli-differ-"]'); await shot(a, 'claude-differ-link', 'Clicked "1 skill with different copies" on the Claude Code card: its page, showing only those.'); await a.run(`[...document.querySelectorAll('.chip')].find(chip => chip.textContent.trim() === 'All')?.click()`); await a.settle(); await a.click('#harness-back'); }
+  await a.click('#harness-claude-cli'); await shot(a, 'claude-skills', 'Clicked the Claude Code card: its page, on the Skills tab. Its column comes first; skills only other tools have are under "Not in Claude Code".');
+  await sizes('claude-skills', 'Claude Code’s Skills tab.');
+  await a.click('#harness-add-from'); await shot(a, 'claude-add-menu', 'Clicked "Add from…" in the toolbar (the Claude Code column header opens the same menu): it adds other tools’ skills here.');
+  if (await a.has('#menu-add-copilot-cli-claude-cli:not([disabled])')) { await a.click('#menu-add-copilot-cli-claude-cli'); await shot(a, 'claude-pending', 'Clicked "Add" on the Copilot CLI row: the changes wait for Apply all.'); }
+  if (await a.has('#apply:not([disabled])')) { await a.click('#apply'); await a.settle(); await shot(a, 'claude-applied', 'Clicked "Apply all".'); }
+  await a.click('#open-release-notes'); await shot(a, 'claude-details', 'Opened release-notes’ details from its row.');
+  await a.click('#harness-tab-mcp'); await shot(a, 'claude-mcp', 'Clicked the "MCP servers" tab.');
+  await a.click('#harness-tab-agents'); await shot(a, 'claude-agents', 'Clicked the "Agents" tab.');
+  await a.click('#harness-tab-instructions'); await waitFor(a, `!!document.querySelector('#ins-edit-claude-cli')`); await shot(a, 'claude-instructions', 'Clicked the "Instructions" tab: Claude Code’s own file, editable here.');
+  await sizes('claude-instructions', 'The Instructions tab.');
+  await a.click('#ins-edit-claude-cli'); await shot(a, 'claude-instructions-editing', 'Clicked Edit.');
+  await size(860, 560); await shot(a, 'claude-instructions-editing-860', 'Editing at 860×560.');
+  await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); area.value += '- A line added in the tour, long enough to show how the review wraps a changed line at the smallest window size.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  if (await a.has('#ins-review-claude-cli')) { await a.click('#ins-review-claude-cli'); await shot(a, 'claude-instructions-review-860', 'Added a line and clicked "Review changes" at 860×560: the diff before saving.'); }
+  await size(1280, 800);
+  // Throw the tour's line away and edit afresh for the next shot.
+  for (const id of ['#ins-back-claude-cli', '#ins-cancel-claude-cli', '#ins-discard-claude-cli']) if (await a.has(id)) await a.click(id);
+  await a.click('#ins-edit-claude-cli');
+  await size(2560, 1440); await shot(a, 'claude-instructions-editing-2560', 'Editing at 2560×1440: the editor keeps a reading measure.'); await size(1280, 800); if (await a.has('#ins-cancel-claude-cli')) await a.click('#ins-cancel-claude-cli');
+  // With the Plugins tour run first, install document-tools again so this tab has something to show.
+  if (wanted('plugins')) {
+    await a.click('#nav-plugins'); if (await a.has('#plugin-back')) await a.click('#plugin-back'); await waitFor(a, `!!document.querySelector('#popen-0-document-tools')`); await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-group')`);
+    if (await a.has('#pinstall-0-document-tools:not([disabled])')) { await a.click('#pinstall-0-document-tools'); await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); }
+    await a.click('#nav-harnesses'); await a.click('#harness-claude-cli');
+  }
+  await a.click('#harness-tab-plugins'); await waitFor(a, `!/Reading/.test(document.querySelector('#harness-body')?.textContent ?? '')`); await shot(a, 'claude-plugins', 'Clicked the "Plugins" tab: plugins installed in Claude Code, each opening its page on Plugins.');
+  await a.click('#harness-tab-about'); await shot(a, 'claude-about', 'Clicked the "About" tab: how it was found and where its files are.');
+  await sizes('claude-about', 'The About tab.');
+  await a.click('#harness-switch-copilot-cli'); await a.click('#harness-tab-skills'); await shot(a, 'copilot-skills', 'Clicked Copilot CLI in the switcher at the top right, then the Skills tab.');
+  await a.theme('light'); await shot(a, 'copilot-skills-light', 'The same, light appearance.'); await a.theme('dark');
+  // A mouse click (detail 1), as a person makes it; a scripted click() reads as the keyboard.
+  await a.run(`document.querySelector('#harness-back').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }))`); await a.settle(); await shot(a, 'back', 'Clicked "Harnesses" in the header’s breadcrumb with the mouse.');
+  // A fourth harness: Pi, with one skill of its own, so the table has four tool columns.
+  const piSkill = join(practice, '.pi/agent/skills/pi-notes');
+  mkdirSync(piSkill, { recursive: true });
+  writeFileSync(join(piSkill, 'SKILL.md'), '---\nname: pi-notes\ndescription: Notes kept in Pi only.\n---\n\nWrite short notes.\n');
+  // And a skill with a long name and a long description, to see how rows fit.
+  const longSkill = join(practice, '.claude/skills/summarise-incident-timeline-from-pager-and-chat-logs');
+  mkdirSync(longSkill, { recursive: true });
+  writeFileSync(join(longSkill, 'SKILL.md'), '---\nname: summarise-incident-timeline-from-pager-and-chat-logs\ndescription: Builds a minute-by-minute incident timeline from pager alerts, chat threads and deploy logs, then drafts the summary section of the postmortem with owners and open questions.\n---\n\nRead the logs.\n');
+  await a.click('#header-refresh'); await a.settle();
+  await shot(a, 'four-list', 'Added a Pi skills folder with one skill to the practice copy, then clicked Refresh: four harnesses.');
+  await a.click('#harness-pi-cli'); await a.click('#harness-tab-skills');
+  for (const [width, height] of [[860, 560], [1150, 800], [1280, 800], [1728, 1117]]) { await size(width, height); await shot(a, `pi-skills-${width}`, `Pi's page, Skills tab, with four tool columns. Window ${width}×${height}.`); }
+  await size(860, 560);
+  const last = await a.run(`[...document.querySelectorAll('.ov-head .tool-head-button')].at(-1)?.id`);
+  if (last) { await a.click(`#${last}`); await shot(a, 'last-menu-860', 'Clicked the right-most column header at 860×560: its menu stays inside the window.'); await a.click(`#${last}`); }
+  await a.click('#harness-tab-agents'); await shot(a, 'pi-agents-860', 'Pi’s Agents tab: Pi doesn’t use agents.');
+  await a.click('#harness-tab-skills'); await a.click('#cell-release-notes-pi-cli'); await shot(a, 'pi-pending-860', 'Ticked release-notes’ Pi box at 860×560: the change waits, and the toolbar wraps for it.'); await a.click('#discard');
+  await size(1280, 800);
+  // This computer's home (in the tour, an empty throwaway folder on Linux): detection, a Not found card, and its header.
+  await a.click('#home-actual'); await a.click('#nav-harnesses'); await shot(a, 'this-computer-list', 'Clicked "This computer’s home" at the bottom left, then Harnesses: each tool with how it was found; tools not found have a card that does not open.');
 }
 
 a.quit();

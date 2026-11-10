@@ -26,9 +26,22 @@ export interface AddPlan {
 export const syncingTools = (skill: SampleSkill, tools: Tool[]) => tools.filter(tool => !skill.off.includes(tool) && !skill.cannot?.[tool]);
 /** Managed, with both tools on: the source's copy then counts. */
 export const withBoth = (skill: SampleSkill, from: Tool, to: Tool): SampleSkill => ({ ...skill, managed: true, separate: false, off: skill.off.filter(tool => tool !== from && tool !== to) });
+/**
+ * As withBoth, but a skill not managed yet syncs between these two tools only (every other one in `tools` is turned off), so
+ * adding to one harness from its own page never writes to a third. A managed skill keeps the tools it already syncs to.
+ */
+export const withOnlyBoth = (skill: SampleSkill, from: Tool, to: Tool, tools: Tool[]): SampleSkill =>
+  skill.managed ? withBoth(skill, from, to) : { ...withBoth(skill, from, to), off: tools.filter(tool => tool !== from && tool !== to) };
 
-/** Sorts one tool's skills by what adding them to another would do. `list` is the page as it will be after Apply all. */
-export function planAdd(list: SampleSkill[], from: Tool, to: Tool, tools: Tool[]): AddPlan {
+/**
+ * Turned on for `here` from that harness's own box: a skill not managed yet syncs between the tools that already have it and
+ * `here`, so no tool that lacks it gets a copy. (Add from… names one source, so it uses withOnlyBoth: that source and `here`.)
+ */
+export const withHolders = (skill: SampleSkill, here: Tool, tools: Tool[]): SampleSkill =>
+  ({ ...skill, managed: true, separate: false, off: tools.filter(tool => tool !== here && skill.copies[tool] === undefined) });
+
+/** Sorts one tool's skills by what adding them to another would do. `list` is the page as it will be after Apply all. `onlyBoth`: see withOnlyBoth. */
+export function planAdd(list: SampleSkill[], from: Tool, to: Tool, tools: Tool[], { onlyBoth = false } = {}): AddPlan {
   const plan: AddPlan = { fresh: [], same: [], resume: [], differ: [], blocked: [], synced: [], skip: [] };
   for (const skill of list) {
     if (skill.copies[from] === undefined) continue;
@@ -37,7 +50,7 @@ export function planAdd(list: SampleSkill[], from: Tool, to: Tool, tools: Tool[]
     const bothOn = skill.managed && !skill.off.includes(from) && !skill.off.includes(to);
     // Already syncing between these two with one copy: nothing to add here, whatever a third tool holds.
     if (bothOn && (skill.copies[to] === skill.copies[from] || !copiesDiffer(skill))) { plan.synced.push(skill); continue; }
-    const next = withBoth(skill, from, to);
+    const next = onlyBoth ? withOnlyBoth(skill, from, to, tools) : withBoth(skill, from, to);
     if (!copiesDiffer(next)) { (skill.managed ? plan.resume : skill.copies[to] === undefined ? plan.fresh : plan.same).push(skill); continue; }
     // The same rule Apply all uses: a block counts for a tool the skill would sync to.
     const block = skill.blocks?.[from]?.find(entry => syncingTools(next, tools).includes(entry.tool));

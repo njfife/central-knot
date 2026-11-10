@@ -5,7 +5,8 @@ import { absentKinds, noTools, loadHome, paintStatusMessage, practiceNoteOpen, s
 import { button, fitBars, h, icon, runAfterLayout } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { kindNouns, type HomeKind } from './presence.ts';
-import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './pages.ts';
+import { agentsPage, mcpPage, overviewPage, skillsPage } from './pages.ts';
+import { harnessesPage, harnessTitle } from './harnesspage.ts';
 import { pluginsPage } from './pluginspage.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
@@ -14,7 +15,7 @@ import type { HomeMode, HomeView, ManageView } from './types.ts';
 
 const region = (id: string) => document.getElementById(id)!;
 /** Each page's title, in the header and the sidebar: a kind's page by its kind's title (presence.ts kindNouns). */
-const titles: Record<Page, string> = { overview: 'Overview', ...Object.fromEntries(Object.entries(kindNouns).map(([kind, nouns]) => [kind, nouns.title])) as Record<HomeKind, string>, profiles: 'Profiles', history: 'History', tools: 'Tools', settings: 'Settings' };
+const titles: Record<Page, string> = { overview: 'Overview', ...Object.fromEntries(Object.entries(kindNouns).map(([kind, nouns]) => [kind, nouns.title])) as Record<HomeKind, string>, profiles: 'Profiles', history: 'History', harnesses: 'Harnesses', settings: 'Settings' };
 /** Below this window width the sidebar folds to its icon rail, unless the person chose a shape with the toggle. */
 const RAIL_BELOW = 968;
 /** From this content width (laptop full screen and up), an open row's details dock beside its table instead of under the row. */
@@ -72,6 +73,7 @@ function renderSidebar() {
   const row = (page: HomeKind, ...rest: [IconName, number?]) => (absent.includes(page) ? null : navRow(page, titles[page], ...rest));
   region('nav').replaceChildren(...[
     navRow('overview', titles.overview, 'layout-grid'),
+    navRow('harnesses', titles.harnesses, 'boxes'),
     row('skills', 'wand-sparkles', designMode ? sample.length : home?.manage.skills.length),
     row('mcp', 'plug', designMode ? undefined : home?.mcp.servers.length),
     row('agents', 'bot', designMode ? undefined : home?.agents?.servers.length),
@@ -81,7 +83,6 @@ function renderSidebar() {
     !noTools() ? navRow('profiles', titles.profiles, 'sliders-horizontal') : null,
     !noTools() ? h('div.nav-divider', { role: 'separator' }) : null,
     navRow('history', titles.history, 'history'),
-    navRow('tools', titles.tools, 'boxes'),
     navRow('settings', titles.settings, 'settings'),
   ].filter((entry): entry is HTMLElement => !!entry));
   // The homes: the Practice copy where this build offers it (dev builds and tests; a released build doesn't), then this
@@ -102,7 +103,7 @@ function renderHeader(rail: boolean) {
     }),
     // While the practice copy is open, the title says so on every page; clicking brings the practice note back.
     // The tag reopens the practice note, so it is hidden while that note is open on the Overview.
-    h('h1.page-title', {}, titles[state.page], state.home?.mode === 'fixture' && state.page === 'overview' && !practiceNoteOpen() ? h('button.title-tag', { type: 'button', id: 'practice-tag', title: 'What is the practice copy? Click to show the note again.',
+    h('h1.page-title', {}, (state.page === 'harnesses' && harnessTitle()) || titles[state.page], state.home?.mode === 'fixture' && state.page === 'overview' && !practiceNoteOpen() ? h('button.title-tag', { type: 'button', id: 'practice-tag', title: 'What is the practice copy? Click to show the note again.',
       onclick: () => { setPracticeNote(true); showPage('overview'); } }, icon('flask-conical', 12), 'Practice copy') : ''),
     // The same Refresh on every page: it reads the home again, then the page's own data (on Plugins, every marketplace).
     h('div.header-end', {}, button({ icon: 'refresh-cw', label: 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
@@ -111,7 +112,8 @@ function renderHeader(rail: boolean) {
 }
 
 function renderPage() {
-  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'profiles' ? profilesPage() : state.page === 'history' ? historyPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : toolsPage());
+  document.body.classList.toggle('page-harnesses', state.page === 'harnesses');
+  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'profiles' ? profilesPage() : state.page === 'history' ? historyPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : harnessesPage());
 }
 
 /** What the home lets Central Knot write, said in the status bar; `short` stands in when the bar is narrow (style.css). */

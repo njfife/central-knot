@@ -1,6 +1,6 @@
 import { loadSettings, openSettings } from './settingspage.ts';
 import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, McpResult, ClaudeWrite, SyncNotice } from './types.ts';
-import { plural } from './model.ts';
+import { caughtUpNames, plural } from './model.ts';
 import { h } from './dom.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
 import { andList, fileName, noToolsSentence, orList, sentence, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
@@ -16,13 +16,27 @@ declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
 /** Every page, in the sidebar's order. */
-export const pages = ['overview', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'tools', 'settings'] as const;
+export const pages = ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'settings'] as const;
 export type Page = typeof pages[number];
 
 /** This computer's names, and what its platform offers (machine.ts). */
 export const machine = machineNames(pagePlatform(navigator.userAgent));
 export const { home: realHomeName, machine: thisMachine, tray: trayPlace } = machine;
 
+/** The kinds of item the tables manage. */
+export type Kind = 'skills' | 'mcp' | 'agents';
+export const KINDS: Kind[] = ['skills', 'mcp', 'agents'];
+export const isKind = (tab: string | undefined): tab is Kind => (KINDS as (string | undefined)[]).includes(tab);
+/** What a harness's page shows: one kind of item, its instruction file, its plugins, or where its files are. */
+export type HarnessTab = Kind | 'instructions' | 'plugins' | 'about';
+/** Found: Central Knot reads and writes this harness in this home, so it has a page. */
+export const harnessFound = (home: HomeView, tool: HarnessId) => home.manage.tools.includes(tool);
+/** A harness's page whose tool a new read no longer finds closes, so it doesn't reopen by itself if a later read finds it again. */
+function forgetLostHarness() { if (state.harness && state.home && !harnessFound(state.home, state.harness)) state.harness = undefined; }
+/** The tab of the harness page on screen, if one is: Harnesses with a harness open that this home still finds. */
+export const harnessTabShown = (): HarnessTab | undefined => (state.page === 'harnesses' && state.harness && state.home && harnessFound(state.home, state.harness) ? state.harnessTab : undefined);
+/** The kind whose table is on screen on a harness's page, if one is. */
+export const harnessKindShown = (): Kind | undefined => { const tab = harnessTabShown(); return isKind(tab) ? tab : undefined; };
 export interface BaseEdit {
   text: string; hash: string; tools: HarnessId[]; stage: 'edit' | 'review';
   /** Where the draft came from: a tool's own instructions (they move into the base), a tool's edited copy (to use as the base),
@@ -81,6 +95,9 @@ export const state = {
   seenNotices: new Set<string>(),
   /** Whether the content is wide enough to dock an open row's details beside its table; set by the renderer's layout. */
   wide: false,
+  /** The harness whose page is open on Harnesses; none shows every harness. */
+  harness: undefined as HarnessId | undefined,
+  harnessTab: 'skills' as HarnessTab,
   /** The window chooses the sidebar shape until the person uses the toggle, which holds until the window crosses the rail breakpoint. */
   sidebar: undefined as 'open' | 'rail' | undefined,
 };
@@ -148,6 +165,7 @@ export function setHome(view: HomeView | null | undefined, { reload = true } = {
   if (!view) return;
   const before = state.home ? homeTools().join() : undefined;
   state.home = view;
+  forgetLostHarness();
   if (before !== undefined && homeTools().join() === before) return;
   leaveAbsentPage();
   if (reload) void loadPageData(state.page);
@@ -195,6 +213,8 @@ function accept(view: HomeView) {
   state.home = undefined;
   state.applied = undefined;
   state.item = undefined;
+  // A harness page belongs to the home it was opened in.
+  state.harness = undefined;
   if (!draftUnsaved()) state.instructionEdit = undefined;
   // The base and its editor belong to the home they were read in.
   state.base = undefined;
@@ -214,7 +234,7 @@ export const flashRequests = new Set<string>();
 const flashRow = (item: string) => { if (item) flashRequests.add(item.toLowerCase()); };
 
 /** After the first Apply all on a page, its tip has done its job. */
-const retireTip = (kind: 'skills' | 'mcp' | 'agents') => writeFlag(`ck-help-dismissed-${kind}`);
+const retireTip = (kind: Kind) => writeFlag(`ck-help-dismissed-${kind}`);
 
 export const applyManage = (changes: Change[], onDone: () => void) => busy('Applying…', async () => {
   const home = state.home!;
@@ -281,7 +301,9 @@ function readFound(view: HomeView, from?: string): string {
   const found = { skills: view.manage.skills.length, mcp: view.mcp.servers.length, agents: view.agents.servers.length };
   const counts = heldKinds(view).map(kind => plural(found[kind], kindNouns[kind].one, kindNouns[kind].many));
   const stopped = view.agents.servers.some(server => server.managed && server.stopped?.length);
-  return `Read ${andList(counts)}${from ? ` from ${from}` : ''}.${stopped ? '' : ' Nothing changed.'}`;
+  // A catch-up that copied something has its own Caught up band (tables and the Harnesses list), so it is not "Nothing changed".
+  const caught = caughtUpNames(view.manage, new Set(view.manage.notices.map(notice => notice.item))).length > 0;
+  return `Read ${andList(counts)}${from ? ` from ${from}` : ''}.${stopped || caught ? '' : ' Nothing changed.'}`;
 }
 
 /** A read said in the status bar: what it found, and in which home. */
@@ -350,6 +372,8 @@ function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; 
   if (page === 'history') return loadHistory();
   if (page === 'settings') return loadSettings().then(() => undefined);
   if (page === 'instructions') return loadInstructions();
+  // Harnesses sums up each tool's instruction file and installs, as Instructions and Plugins read them.
+  if (page === 'harnesses') return Promise.all([loadInstructions(), absentKinds().includes('plugins') ? undefined : loadPlugins(fresh, readId)]).then(() => undefined);
   if (page === 'plugins') return loadPlugins(fresh, readId);
   return Promise.resolve();
 }
@@ -379,16 +403,26 @@ export const homeToolNames = (): string[] => homeTools().map(toolName);
 /** The tools an action touched (ids), as a sentence names them in the open home: "all 3 tools" or their names. */
 export const touchedToolsPhrase = (touched: string[]): string => toolsPhrase(touched, homeTools());
 
+/**
+ * Lets go of what the last action showed (its result, Apply results, the spoken line): for moving to another place.
+ * A home switch's result survives one move, since switching is often followed by a click elsewhere; `page` is where it lands.
+ */
+export function leaveResults(page = state.page) {
+  const carried = state.outcome?.carry ? { ...state.outcome, page, carry: false } : undefined;
+  state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined;
+  tell(carried);
+}
+
 export function showPage(page: Page) {
   // Plugins keep what they read while the person stays on them; every other page reads its data each time it opens.
   const stays = page === 'plugins' && state.page === 'plugins';
+  // The sidebar's Harnesses opens the list of every harness, except while an action runs: its result belongs to the harness it
+  // started on. Leaving a harness's page this way drops that page's result, as its own back arrow does.
+  const leavingHarness = page === 'harnesses' && !state.busy && !!state.harness;
   // A new page starts clean: the last action's message and results belong to the page they happened on.
-  // A home-switch result survives one page change, since switching is often followed by a click elsewhere.
-  const carried = state.outcome?.carry ? { ...state.outcome, page, carry: false } : undefined;
-  if (page !== state.page) {
-    state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table';
-    tell(carried);
-  }
+  if (page !== state.page || leavingHarness) leaveResults(page);
+  if (page !== state.page) state.skillsView = 'table';
+  if (leavingHarness) state.harness = undefined;
   // Settings opens fresh (what its rows said last visit belongs to that visit); every other page reads its own data.
   if (page === 'settings') openSettings();
   else if (!stays) void loadPageData(page);
@@ -587,6 +621,8 @@ async function readInstructionsAndBase() {
 
 /** A checked save of one file: it must still hold what was opened; the replaced text is kept as an earlier version. */
 export const saveInstructionText = (file: InstructionFile, own: string) => busy('Saving…', async () => {
+  // The result belongs to the page the save was started on (Instructions, or a harness's Instructions tab).
+  const page: Page = state.page === 'harnesses' ? 'harnesses' : 'instructions';
   // A tool that gets the base is edited for its own text; its base block stays as it is in the file. Restoring an earlier version
   // puts the whole file back as it was, base block included; a version put back has its base copy judged again (main process).
   const edit = state.instructionEdit;
@@ -610,18 +646,19 @@ export const saveInstructionText = (file: InstructionFile, own: string) => busy(
   // Undo is one click: the replaced text goes back through the same checked save, which keeps this version in turn.
   const saved = state.instructions.data?.find(entry => entry.tool === file.tool);
   const before = file.exists && result.saved ? file.text : undefined;
-  tell({ page: 'instructions', item: name, kind: file.exists && result.saved ? 'saved' : undefined, tool: file.tool, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot doesn’t delete instruction files you keep; edit it here to change it. '}Start a new ${toolName(file.tool)} session to use the change.${result.problem ? ` ${result.problem}` : ''}` : `${name} already said that; nothing was written.`,
+  tell({ page, item: name, kind: file.exists && result.saved ? 'saved' : undefined, tool: file.tool, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot doesn’t delete instruction files you keep; edit it here to change it. '}Start a new ${toolName(file.tool)} session to use the change.${result.problem ? ` ${result.problem}` : ''}` : `${name} already said that; nothing was written.`,
     act: before !== undefined && saved ? { label: 'Undo', id: 'outcome-undo-instruction', run: () => void undoInstruction(saved, before) } : undefined });
 });
 
 /** Puts back the text a save replaced: a checked save against what was just written. */
 const undoInstruction = (file: InstructionFile, before: string) => busy('Undoing the save…', async () => {
+  const page: Page = state.page === 'harnesses' ? 'harnesses' : 'instructions';
   focusAfterBusy = `ins-edit-${file.tool}`;
   // Like putting back a version: the base copy it held is judged again against the base texts Central Knot kept.
   const result = await api().saveInstruction(file.tool, before, file.hash, state.home!.home, true);
   await rereadInstructions();
   const name = file.path.split(/[\\/]/).pop() ?? file.path;
-  tell(result.stopped ? undefined : { page: 'instructions', item: name, text: `${name} is back as it was before your save. The text you saved is under Earlier versions.` }, result.stopped);
+  tell(result.stopped ? undefined : { page, item: name, text: `${name} is back as it was before your save. The text you saved is under Earlier versions.` }, result.stopped);
 });
 
 /** Opens one file in the editor; any earlier result band belongs to the last task, not this one. */

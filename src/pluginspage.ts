@@ -125,7 +125,7 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
   const partsHint = partsColumns.length ? `A hatched box with a plus (${andList(partsColumns.map(tool => names[tool]))}) installs the plugin’s parts instead, as separate items.` : '';
   return [
     reasons.length && someCan ? h('p.market-hint', {}, icon('circle-alert', 13, 'tone-warning'), h('span', {}, `${[...reasons, partsHint].filter(Boolean).join(' ')} `,
-      button({ variant: 'link', size: 'micro', label: 'See Tools', id: `market-tools-${marketIndex}`, onclick: () => showPage('tools') })))
+      button({ variant: 'link', size: 'micro', label: 'See Harnesses', id: `market-tools-${marketIndex}`, onclick: () => showPage('harnesses') })))
       : partsHint && view.canWrite ? h('p.market-hint', {}, icon('info', 13, 'tone-muted'), h('span', {}, partsHint)) : null,
     shown.length
       ? withToolCount(h('div.ov.plugin-table', { role: 'table', 'aria-label': `Plugins in ${entry.name}` }, head, shown.map(plugin => pluginRow(view, entry, marketIndex, plugin))), view.tools.length)
@@ -314,7 +314,7 @@ export function pluginsPage() {
   // A home with only Pi, or with no tools: nothing here installs plugins, so there are no boxes to draw.
   if (noTools()) return h('div.page', {}, noToolsState('plugins-choose-home'));
   if (!view.tools.length) return h('div.page', {}, emptyState('puzzle', 'No tool in this home can install plugins', 'None of the tools found here takes plugins. Once one is installed, Central Knot finds it on its own, or at once with Refresh at the top.',
-    button({ variant: 'outline', label: 'See Tools', id: 'plugins-no-tools', onclick: () => showPage('tools') })));
+    button({ variant: 'outline', label: 'See Harnesses', id: 'plugins-no-tools', onclick: () => showPage('harnesses') })));
   const shown = current();
   const lines = market.lastRun ? resultLines(market.lastRun.done, market.lastRun.undo) : [];
   // With no marketplaces, adding one is the only thing to do: its box sits in the middle of the page, with examples.

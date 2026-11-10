@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { blocked, comparableText, limitNote, offeredVersion, otherVersions, otherVersionsLine, toolsWithoutPlugin, unavailable } from '../src/pluginstatus.ts';
+import { blocked, comparableText, installsIn, limitNote, offeredVersion, otherVersions, otherVersionsLine, toolsWithoutPlugin, unavailable } from '../src/pluginstatus.ts';
 import { readInto, type Read } from '../src/reads.ts';
 import type { MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
 
@@ -58,4 +58,14 @@ test('A background read is kept only while its own placeholder is still there', 
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.deepEqual(map.get('k'), { reading: false, value: 'fresh' });
   assert.equal(done, 1);
+});
+
+test('A tool\'s installs say what is installed, what could not be checked and which marketplace could not be read', () => {
+  const unsure: MarketplaceView = { ...entry, plugins: [{ name: 'p', description: '' }, { name: 'q', description: '' }], states: { p: { 'claude-cli': { state: 'installed', path: '/x' } }, q: { 'claude-cli': { state: 'not-known', reason: 'Its files are missing.' } } } };
+  const broken: MarketplaceView = { ...entry, name: 'gone', plugins: [], states: {}, problem: 'Could not be reached.' };
+  const installs = installsIn({ ...view, marketplaces: [unsure, broken] }, 'claude-cli')!;
+  assert.deepEqual(installs.installed.map(({ plugin }) => plugin.name), ['p']);
+  assert.deepEqual(installs.unknown.map(({ plugin, reason }) => [plugin.name, reason]), [['q', 'Its files are missing.']]);
+  assert.deepEqual(installs.unreadable, ['gone']);
+  assert.equal(installsIn(view, 'pi-cli'), null, 'a tool that takes no marketplace plugins');
 });

@@ -1,14 +1,14 @@
 // Instructions: each tool's own instruction file, with who reads it, a plain editor, a diff before saving and earlier versions
 // (INS-01, INS-02). There is no turn-off switch: instruction files are edited, never disabled or emptied by Central Knot (the one
 // deletion is an Undo of a base save removing a file that save created, while unchanged).
-import { announce, baseDraftTyped, draftFile, draftUnsaved, savingOff, loadInstructionVersion, ownText, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
+import { announce, baseDraftTyped, draftFile, draftUnsaved, harnessTabShown, savingOff, loadInstructionVersion, ownText, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { baseCard, baseStrip } from './basecard.ts';
 import { changeCounts, diffView, discardConfirm, escapeTo, keepCaret, keys, legend, previewBlock, versionsList } from './editparts.ts';
 import { fileName, lineCount, toolNames } from './words.ts';
 import { button, cardGrid, h, icon, lockAttrs, pathText, rereadBand } from './dom.ts';
 import { noToolsState } from './pages.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
-import type { InstructionFile } from './types.ts';
+import type { HarnessId, InstructionFile } from './types.ts';
 import { lineDiff } from './diff.ts';
 export { lineDiff } from './diff.ts';
 
@@ -25,7 +25,9 @@ function leaveReview(tool: string) {
 // In the review, Esc goes back to editing.
 document.addEventListener('keydown', event => {
   const edit = state.instructionEdit;
-  if (event.key !== 'Escape' || state.page !== 'instructions' || edit?.stage !== 'review') return;
+  // Only where the editor is on screen: Instructions, or a harness's Instructions tab.
+  const shown = state.page === 'instructions' || (harnessTabShown() === 'instructions' && edit?.tool === state.harness);
+  if (event.key !== 'Escape' || !shown || edit?.stage !== 'review') return;
   event.preventDefault();
   leaveReview(edit.tool);
 });
@@ -101,9 +103,14 @@ function editor(file: InstructionFile) {
 }
 
 /** This card's last save, shown on the card itself so nothing on the page moves; its Undo stays while other cards are edited. */
-const savedHere = (file: InstructionFile) => draftFile() !== file && state.outcome?.page === 'instructions' && state.outcome.tool === file.tool && state.outcome.kind === 'saved';
+const savedHere = (file: InstructionFile) => draftFile() !== file && state.outcome?.page === state.page && state.outcome.tool === file.tool && state.outcome.kind === 'saved';
 
-function card(file: InstructionFile) {
+/**
+ * One tool's file: shown on Instructions for every tool, and on that tool's Harnesses page. `titled`: false on a harness's
+ * page, where the header already names the tool, so the card leads with the file's path. `goToOther`: where the open
+ * draft's own card is on another page (another harness's), a link goes there.
+ */
+export function instructionCard(file: InstructionFile, { titled = true, goToOther }: { titled?: boolean; goToOther?: (tool: HarnessId) => void } = {}) {
   const editing = draftFile() === file;
   // An open editor with no changes locks nothing: Edit elsewhere just moves to that file. A changed one asks first.
   const toolDirty = !editing && draftUnsaved();
@@ -113,7 +120,7 @@ function card(file: InstructionFile) {
     : !toolDirty ? undefined : draftFile() ? `Finish or cancel the ${fileName(state.instructionEdit!.from.path)} edit first.` : 'Copy or discard the unsaved draft above first.';
   const own = ownText(file);
   return h('article.card.ins-card', { 'aria-label': `${toolNames[file.tool]} instructions` },
-    h('header.ins-head', {}, brandMark(file.tool, 18), h('h2.tool-title', {}, toolNames[file.tool]), pathText(shownPath(file.path), file.path),
+    h('header.ins-head', {}, titled ? [brandMark(file.tool, 18), h('h2.tool-title', {}, toolNames[file.tool])] : null, pathText(shownPath(file.path), file.path),
       file.exists || editing ? null : h('span.ins-missing', {}, 'No file yet'),
       savedHere(file) ? h('span.ins-saved-group', {}, h('span.ins-missing.ins-saved', {}, 'Saved'),
         state.outcome!.act ? button({ variant: 'link', size: 'micro', label: 'Undo save', id: state.outcome!.act.id, attrs: { title: 'Put back the text this save replaced' }, onclick: () => state.outcome!.act!.run() }) : null) : null,
@@ -128,7 +135,8 @@ function card(file: InstructionFile) {
         baseStrip(file, lockedWhy),
         h('div.ins-actions', {},
           button({ variant: 'outline', size: 'small', label: !file.exists ? 'Write instructions' : own.trim() || !file.base ? 'Edit' : 'Write its own instructions', id: `ins-edit-${file.tool}`, disabled: !!state.busy || readOnly || otherDirty || editing, attrs: lockAttrs(lockedWhy), onclick: () => startInstructionEdit(file) }),
-          lockedWhy ? h('span.ins-locked', {}, lockedWhy) : null)),
+          lockedWhy ? h('span.ins-locked', {}, lockedWhy,
+            otherDirty && goToOther && draftFile() ? [' ', button({ variant: 'link', size: 'micro', label: `Go to ${toolNames[draftFile()!.tool]}’s file`, id: `ins-go-${draftFile()!.tool}`, disabled: !!state.busy, onclick: () => goToOther(draftFile()!.tool) })] : null) : null)),
     versionsList(file.versions, { id: version => `ins-load-${file.tool}-${version}`, disabled: !!state.busy || readOnly || otherDirty || (editing && draftUnsaved()),
       why: editing ? 'Finish or cancel this edit first.' : lockedWhy, run: version => void loadInstructionVersion(file, version) }));
 }
@@ -152,16 +160,24 @@ function orphanDraft() {
 export function instructionsPage() {
   // From the files' own read (pagedata.ts): what it found, else that it is reading or could not read.
   const files = state.instructions.data;
-  if (!files) return h('div.page', {}, h('div.scroll', {}, h('p.empty', {}, state.instructions.state === 'failed' ? 'Instruction files could not be read.' : 'Reading instruction files…')));
+  if (!files) return h('div.page', {}, h('div.scroll', {}, instructionsNotRead()));
   if (!files.length) return h('div.page', {}, noToolsState('instructions-choose-home'));
+  return h('div.page', {}, instructionBands(),
+    h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
+      h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own file when a session starts. Changes are reviewed before saving, and earlier versions are kept on each card. Automatic sync leaves these files alone; base instructions change them only when you save.'),
+      baseCard(files),
+      cardGrid(files.map(file => instructionCard(file)))));
+}
+
+/** Shown while the files are not here yet: their read is under way, or it failed (Refresh reads again). */
+export const instructionsNotRead = (): HTMLElement => h('p.empty', {}, state.instructions.state === 'failed' ? 'Instruction files could not be read.' : 'Reading instruction files…');
+
+/** The bands above instruction cards: a re-read under way, an orphaned draft, the last result (a save's own result sits on its card instead) and, where saving is off, why. */
+export function instructionBands(): HTMLElement | null {
   const done = state.outcome?.kind === 'saved' ? null : outcomeBand();
   const access = state.home?.manage.access;
   const preview = access && !access.allowed ? h('div.band', { role: 'status' }, icon('lock', 14, 'tone-warning'), h('span.band-text', {}, 'Preview only: you can read these files here, but saving is off in this home.')) : null;
   const orphan = orphanDraft();
   const reread = rereadBand(state.instructions);
-  return h('div.page', {}, done || preview || orphan || reread ? h('div.bands', {}, reread, orphan, done, preview) : null,
-    h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
-      h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own file when a session starts. Changes are reviewed before saving, and earlier versions are kept on each card. Automatic sync leaves these files alone; base instructions change them only when you save.'),
-      baseCard(files),
-      cardGrid(files.map(card))));
+  return done || preview || orphan || reread ? h('div.bands', {}, reread, orphan, done, preview) : null;
 }

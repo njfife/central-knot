@@ -126,7 +126,8 @@ async function launch(userData = join(scratch, 'data'), extra = [], home = HOME)
   const { send, run } = page;
   await send('Runtime.enable');
   await send('Log.enable');
-  const settle = async () => { await wait(120); await run(`new Promise(done => { const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.mx,.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : setTimeout(c, 25); c(); })`); await wait(60); };
+  // A page that never settles (a renderer error at start, a read that never ends) fails the run instead of holding it open.
+  const settle = async () => { await wait(120); await run(`new Promise((done, fail) => { const end = Date.now() + 30000; const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.mx,.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : Date.now() > end ? fail(new Error('The page did not settle within 30 s.')) : setTimeout(c, 25); c(); })`); await wait(60); };
   app = {
     child, run, send, settle, pageErrors,
     inspect, main: inspect && (() => mainProcess(inspect)),
@@ -190,6 +191,74 @@ const rowKeys = a => a.all('.ov-row[data-key]', 'e.dataset.key');
 const cellState = (a, key, tool) => a.run(`document.querySelector('.ov-row[data-key=${JSON.stringify(key)}] [data-tool=${JSON.stringify(tool)}] .cell-button')?.dataset.state ?? null`);
 const switchOn = (a, key) => a.run(`document.querySelector('.ov-row[data-key=${JSON.stringify(key)}] .switch')?.getAttribute('aria-checked') === 'true'`);
 const applyAll = async a => { await a.click('#apply'); await a.settle(); };
+
+/** Harnesses: one tool's page manages its items with the same engine as the Skills page. */
+async function harnessFlow() {
+  const a = await launch(join(scratch, 'harness-data'));
+  const practice = await a.run(`document.querySelector('.status-home').title`);
+  await a.click('#nav-harnesses');
+  const list = await a.text('#harnesses-scroll') ?? '';
+  check('Harnesses sums up each tool found', ['Claude Code', 'Copilot CLI', 'Codex'].every(name => list.includes(name)) && list.includes('none managed'), list.slice(0, 400));
+  // The card's count and the tab it opens agree; another harness starts with the filter off.
+  const cardDiffer = parseInt(await a.text('#harness-claude-cli-differ-skills') ?? '', 10);
+  await a.click('#harness-claude-cli-differ-skills');
+  same('a card’s different-copies count is the Copies differ count on the tab it opens', [cardDiffer, parseInt(await a.text('.chip-warn .chip-count') ?? '', 10), (await rowKeys(a)).length], [1, 1, 1]);
+  await a.click('#harness-switch-codex-cli');
+  check('the switcher opens another harness with every row, not an empty filter', (await a.text('.title-harness')) === 'Codex' && (await a.text('.chip-on')) === 'All' && (await rowKeys(a)).length > 0, `${await a.text('#header')} ${await a.text('.chips')}`);
+  await a.click('#harness-back');
+  await a.click('#harness-copilot-cli');
+  await a.click('#harness-tab-skills');
+  check('a harness’s skills put its own column first', (await a.text('.ov-head .ov-tool-head') ?? '').includes('Copilot CLI'), await a.text('.ov-head'));
+  const away = await a.run(`[...document.querySelectorAll('[role="rowgroup"]')].find(group => group.querySelector('.ov-section-label strong')?.textContent === 'Not in Copilot CLI')?.querySelector('[data-key="release-notes"]') ? true : false`);
+  check('a skill only other tools have is under "Not in Copilot CLI"', away);
+  await a.click('#cell-release-notes-copilot-cli');
+  same('its box here adds it here only', [await cellState(a, 'release-notes', 'copilot-cli'), await cellState(a, 'release-notes', 'codex-cli')], ['will-sync', 'absent']);
+  await a.click('#discard');
+  await a.click('#manage-all');
+  same('Manage on a harness page takes what it has and leaves items only other tools have', [await switchOn(a, 'notes'), await switchOn(a, 'release-notes')], [true, false]);
+  await a.click('#discard');
+  await a.click('#harness-add-from');
+  await a.click('#menu-add-claude-cli-copilot-cli');
+  const queued = await cellState(a, 'release-notes', 'copilot-cli');
+  await a.shot('harness-pending');
+  await applyAll(a);
+  check('Add from… queues a copy here, and Apply all writes it only where the menu said', queued === 'will-sync' && existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')) && !existsSync(join(practice, '.codex/skills/release-notes')), queued);
+  check('and says so there', await a.exists('.harness-page .band-done'), await a.text('.harness-page'));
+  await a.click('#nav-harnesses');
+  check('the sidebar’s Harnesses leaves that result behind', !(await a.exists('.band-done')), await a.text('#page'));
+  await a.click('#nav-skills');
+  check('the Skills page shows the same change and is its usual self: Claude Code first, no "Not in" section', (await switchOn(a, 'release-notes')) && (await a.text('.ov-head .ov-tool-head') ?? '').includes('Claude Code') && !(await a.all('.ov-section-label strong')).some(label => label.startsWith('Not in')), await a.text('.ov-head'));
+  await a.click('#nav-harnesses');
+  await a.click('#harness-copilot-cli');
+  await a.click('#harness-tab-skills');
+  await a.click('#nav-overview');
+  await a.click('#overview-skills-differ');
+  check('after a harness’s Skills tab, the Overview’s “different copies” link still opens Skills narrowed to them', (await a.text('.chip-on') ?? '').startsWith('Copies differ'), await a.text('.chips'));
+  await a.click('#nav-harnesses');
+  await a.click('#harness-copilot-cli');
+  await a.click('#harness-tab-instructions');
+  await a.click('#harness-switch-claude-cli');
+  // At the smallest window nothing on a harness's page is cut off: every tab, and the instruction file while it is edited
+  // (before any save, while the card sizes to its file rather than to the versions list).
+  for (const tab of ['skills', 'mcp', 'agents', 'instructions', 'plugins', 'about']) { await a.click(`#harness-tab-${tab}`); await fitsAtMinimum(a, `Claude Code’s ${tab} tab`); }
+  await a.click('#harness-tab-instructions');
+  await a.click('#ins-edit-claude-cli');
+  await fitsAtMinimum(a, 'Claude Code’s instruction file while edited');
+  await a.click('#ins-cancel-claude-cli');
+  await a.click('#ins-edit-claude-cli');
+  await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); area.value += '- Saved from its harness page.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#ins-review-claude-cli');
+  await a.click('#ins-save-claude-cli');
+  check('a save on a harness’s Instructions tab writes the file and offers one Undo, on its card', readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8').includes('- Saved from its harness page.') && (await a.run(`document.querySelectorAll('#outcome-undo-instruction').length`)) === 1, await a.text('.harness-page'));
+  // Another home: the instruction file shown is that home's, not the practice copy's.
+  await a.click('#home-actual');
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-instructions');
+  check('after a home switch, instructions are that home’s', (await a.text('#harness-body') ?? '').includes('~/.claude/CLAUDE.md'), await a.text('#harness-body'));
+  same('no page errors, harnesses', a.pageErrors, []);
+  await a.quit();
+}
 
 // ---------- Fit: nothing is cut off ----------
 // In the page, on both axes: each control (button, switch, input, filter chip, tool label) that the window or a clipping
@@ -419,8 +488,8 @@ async function practiceFlow() {
   await a.click('#nav-skills');
   await a.click('#header-refresh');
   check('a tool not in this home has no column or box', !(await a.exists('[data-tool="pi-cli"], #tool-pi-cli')));
-  await a.click('#nav-tools');
-  check('nor a card on Tools', !(await a.exists('.tool-card[aria-label^="Pi"]')) && await a.exists('.tool-card[aria-label^="Codex"]'));
+  await a.click('#nav-harnesses');
+  check('nor a card on Harnesses', !(await a.exists('#harness-pi-cli')) && await a.exists('#harness-codex-cli'));
   // Copilot CLI and Codex do read the shared folder, so its skill is theirs; it goes again before the checks that count skills.
   rmSync(join(practice, '.agents'), { recursive: true, force: true });
   await a.click('#header-refresh');
@@ -1299,10 +1368,10 @@ async function practiceFlow() {
     same(`nothing cut off at 2560×1440 on ${page}`, await a.run(CUT_OFF), []);
   }
   // Every card grid at full screen: as many columns as its cards, up to four, so four tools sit in one row. (Settings is rows.)
-  for (const page of ['tools', 'instructions']) {
+  for (const [page, grid] of [['harnesses', '.harness-cards'], ['instructions', '.card-grid']]) {
     await a.click(`#nav-${page}`);
-    for (let tries = 0; tries < 30 && !(await a.exists('.card-grid')); tries++) await wait(100);
-    const rows = await a.run(`(() => { const cards = [...document.querySelectorAll('.card-grid > *')]; return [cards.length, new Set(cards.map(card => Math.round(card.getBoundingClientRect().top))).size]; })()`);
+    for (let tries = 0; tries < 30 && !(await a.exists(grid)); tries++) await wait(100);
+    const rows = await a.run(`(() => { const cards = [...document.querySelectorAll('${grid} > *')]; return [cards.length, new Set(cards.map(card => Math.round(card.getBoundingClientRect().top))).size]; })()`);
     same(`at 2560×1440 the ${page} cards (${rows[0]}) sit in one row`, rows[1], 1);
   }
   await fullSize(a);
@@ -1350,14 +1419,14 @@ async function fewToolsFlow() {
     await a.quit();
     return;
   }
-  same('a home with no tools shows only the pages that hold no kind', await pages(), ['overview', 'history', 'tools', 'settings']);
+  same('a home with no tools shows only the pages that hold no kind', await pages(), ['overview', 'harnesses', 'history', 'settings']);
   same('its Overview says no tools were found, once, with another home to choose, and no "Also here"', [await a.text('.overview-lead'), await a.exists('#overview-choose-home'), await a.exists('#overview-instructions')], ['No tools were found in this home.', true, false]);
   check('its status bar says only that the home opened', /^Opened [^.]+\.$/.test(await a.run(`document.querySelector('#announcement').dataset.text`) ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`));
   same('with nothing to sync, the switch is shown, not offered', await a.run(`[document.querySelector('#sync-switch').getAttribute('aria-disabled'), document.querySelector('#sync-switch .sync-state').textContent]`), ['true', 'Nothing to sync']);
   await fitsAtMinimum(a, 'a home with no tools');
-  await a.click('#nav-tools');
+  await a.click('#nav-harnesses');
   const toolsSays = await a.text('.page');
-  check('Tools says the same sentence, with Choose another home…, and points nowhere on screen', toolsSays.includes('No tools were found in this home.') && await a.exists('#tools-choose-home') && !/bottom left/.test(toolsSays) && !(await a.exists('.tools-note')), toolsSays);
+  check('Harnesses says the same sentence, with Choose another home…, and points nowhere on screen', toolsSays.includes('No tools were found in this home.') && await a.exists('#harnesses-choose-home') && !/bottom left/.test(toolsSays) && !(await a.exists('.tools-note')), toolsSays);
   await a.click('#nav-history');
   for (let tries = 0; tries < 30 && !(await a.exists('#history-choose-home')); tries++) await wait(100);
   check('History says the same, in the same place, rather than offering Skills', await a.exists('#history-choose-home') && !(await a.exists('#history-go-skills')), await a.text('.page'));
@@ -1365,16 +1434,16 @@ async function fewToolsFlow() {
   mkdirSync(join(home, '.pi/agent/skills/notes'), { recursive: true });
   writeFileSync(join(home, '.pi/agent/skills/notes/SKILL.md'), text('notes'));
   await a.click('#header-refresh');
-  same('with Pi alone, Agents and Plugins are left out', await pages(), ['overview', 'skills', 'mcp', 'instructions', 'profiles', 'history', 'tools', 'settings']);
+  same('with Pi alone, Agents and Plugins are left out', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'instructions', 'profiles', 'history', 'settings']);
   check('and the Overview names them once', (await a.text('#overview-absent') ?? '').includes('No tool here holds agents or plugins') && !(await a.exists('#overview-agents')), await a.text('#overview-absent'));
   mkdirSync(join(home, '.claude'), { recursive: true });
   await a.click('#header-refresh');
-  same('a tool that holds agents and plugins brings them back', await pages(), ['overview', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'tools', 'settings']);
+  same('a tool that holds agents and plugins brings them back', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'settings']);
   // On Agents, its only tool goes away: the page it was on no longer exists here, so the Overview opens.
   await a.click('#nav-agents');
   rmSync(join(home, '.claude'), { recursive: true, force: true });
   await a.click('#header-refresh');
-  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'skills', 'mcp', 'instructions', 'profiles', 'history', 'tools', 'settings']]);
+  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'harnesses', 'skills', 'mcp', 'instructions', 'profiles', 'history', 'settings']]);
   const moved = await a.run(`document.querySelector('#announcement').dataset.text`);
   check('and the status bar says what was read and why the page moved', /^Read .*No tool here holds agents now\.$/.test(moved ?? ''), moved);
   same('no page errors, few tools', a.pageErrors, []);
@@ -1388,13 +1457,14 @@ async function realHomeFlow() {
   await a.click('#nav-skills');
   same('the disposable HOME is what "this Mac" reads', await a.run(`document.querySelector('.status-home').title`), HOME);
   same('real home is never the machine’s own', HOME.startsWith(scratch), true);
-  await a.click('#nav-tools');
-  const tools = await a.text('#tools-scroll');
+  await a.click('#nav-harnesses');
+  const tools = await a.text('#harnesses-scroll');
   check('versions probed', tools.includes('2.1.309') && tools.includes('1.0.107') && tools.includes('0.142.3'), tools.slice(0, 300));
-  check('Codex says where new copies go', tools.includes('/.codex/skills'), tools.slice(0, 600));
-  // A tool card's skill count opens Skills.
-  await a.click('#tool-skills-claude-cli');
-  same('a tool’s skill count opens the Skills page', await a.text('.page-title'), 'Skills');
+  await a.click('#harness-codex-cli');
+  await a.click('#harness-tab-about');
+  const codexAbout = await a.text('#harness-body');
+  check('Codex says where new copies go', codexAbout.includes('/.codex/skills'), codexAbout.slice(0, 600));
+  await a.click('#nav-skills');
   const rows = await rowKeys(a);
   for (const name of ['rich', '名前-skill', '.dot-skill', 'linked', 'from-copilot', 'has-link']) check(`row for ${name}`, rows.includes(name), rows);
   check('names keep their case', (await a.text('.ov-row[data-key="mixedcase"]')).includes('MixedCase'), await a.text('.ov-row[data-key="mixedcase"]'));
@@ -1550,6 +1620,7 @@ const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 const started = Date.now();
 try {
   seedHome();
+  await harnessFlow();
   await practiceFlow();
   await releasedStartupFlow();
   await fewToolsFlow();
