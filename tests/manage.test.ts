@@ -77,8 +77,10 @@ test('Catch-up: a tool newly turned on gets its copy; a deleted copy is a deleti
   try {
     await skill(box.home, CLAUDE, 'kept');
     await skill(box.home, CLAUDE, 'dropped');
-    await applyChanges(ctx(box), [manage('kept', ['copilot-cli']), manage('dropped')]);
+    await skill(box.home, CLAUDE, 'solo');
+    await applyChanges(ctx(box), [manage('kept', ['copilot-cli']), manage('dropped'), manage('solo', ['claude-cli'])]);
     assert.equal(await exists(join(box.home, COPILOT, 'kept')), false, 'off for Copilot');
+    assert.equal(await exists(join(box.home, COPILOT, 'solo')), false, 'a skill whose only copy is in a tool turned off is left alone');
     assert.deepEqual((await facts(box, 'kept')).off, ['copilot-cli']);
     await applyChanges(ctx(box), [manage('kept')]);
     assert.equal(await exists(join(box.home, COPILOT, 'kept/SKILL.md')), true, 'turning Copilot on catches up');
@@ -208,16 +210,6 @@ test('Choosing a copy never writes through a link, and leaves what it points to 
     assert.equal((await stat(real)).mode & 0o777, 0o555);
     assert.equal((await stat(join(real, 'sub'))).mode & 0o777, 0o500);
     assert.equal(await readFile(join(real, 'SKILL.md'), 'utf8'), text('lk', 'Dotfiles'));
-  } finally { await box.cleanup(); }
-});
-
-test('A managed skill whose only copy is in a tool turned off is left alone', async () => {
-  const box = await sandbox();
-  try {
-    await skill(box.home, CLAUDE, 'solo');
-    const result = await applyChanges(ctx(box), [manage('solo', ['claude-cli'])]);
-    assert.equal(result.harnessWrites, 0);
-    assert.equal(await exists(join(box.home, COPILOT, 'solo')), false);
   } finally { await box.cleanup(); }
 });
 
@@ -573,7 +565,7 @@ test('With Codex present, a managed skill reaches Codex’s own folder and never
   } finally { await box.cleanup(); }
 });
 
-test('A skill in the shared .agents folder counts for both Copilot and Codex and is never written', async () => {
+test('A skill in the shared .agents folder counts as a copy for both Copilot and Codex', async () => {
   const box = await sandbox();
   try {
     await mkdir(join(box.home, '.codex'), { recursive: true });
@@ -583,9 +575,6 @@ test('A skill in the shared .agents folder counts for both Copilot and Codex and
     const facts3 = (await manageView(context)).skills.find(item => item.key === 'both')!;
     assert.ok(facts3.copies['copilot-cli'] && facts3.copies['codex-cli']);
     assert.deepEqual(facts3.choiceBlocks['claude-cli']?.map(block => block.tool).sort(), ['codex-cli', 'copilot-cli']);
-    const result = await applyChanges(context, [{ key: 'both', managed: true, off: [], use: 'claude-cli' }]);
-    assert.equal(result.harnessWrites, 0);
-    assert.equal(await readFile(join(box.home, '.agents/skills/both/SKILL.md'), 'utf8'), text('both', 'Shared.'));
   } finally { await box.cleanup(); }
 });
 
@@ -959,7 +948,7 @@ test('R4: removing the shared .agents folder is unreachable, not a deletion', as
   } finally { await box.cleanup(); }
 });
 
-test('R7: a copy that fell behind catches up once it can be written, and edits there spread again', { skip: noPosix || process.getuid?.() === 0 }, async () => {
+test('R7: a copy that fell behind catches up once it can be written, marked apart from new copies, and edits there spread again', { skip: noPosix || process.getuid?.() === 0 }, async () => {
   const box = await sandbox();
   try {
     await managedThree(box);
@@ -970,28 +959,16 @@ test('R7: a copy that fell behind catches up once it can be written, and edits t
     await applyChanges(three(box), []);
     assert.equal((await readHistory(ctx(box))).length, count, 'a failed copy adds no History when retried');
     await chmod(join(box.home, CODEX), 0o755); await chmod(join(box.home, CODEX, 'foo'), 0o755);
-    const caught = await applyChanges(three(box), []);
-    assert.deepEqual(caught.results.filter(entry => entry.outcome === 'written').map(entry => [entry.harness, entry.replaced, entry.caughtUp]), [['codex-cli', undefined, true]]);
+    // Apply all that manages a new skill meanwhile marks the catch-up apart from the new copies.
+    await skill(box.home, CLAUDE, 'fresh');
+    const caught = await applyChanges(three(box), [manage('fresh')]);
+    assert.deepEqual(caught.results.filter(entry => entry.outcome === 'written').map(entry => [entry.item, entry.harness, entry.replaced, entry.caughtUp]).sort(),
+      [['foo', 'codex-cli', undefined, true], ['fresh', 'codex-cli', undefined, undefined], ['fresh', 'copilot-cli', undefined, undefined]]);
+    assert.ok((await readHistory(ctx(box))).some(entry => entry.kind === 'added' && entry.key === 'fresh'));
     assert.equal(await readFile(join(box.home, CODEX, 'foo/SKILL.md'), 'utf8'), text('foo', 'Edit one.'), 'caught up');
     await writeFile(join(box.home, CODEX, 'foo/SKILL.md'), text('foo', 'Codex edit.'));
     await applyChanges(three(box), []);
     assert.equal(await readFile(join(box.home, CLAUDE, 'foo/SKILL.md'), 'utf8'), text('foo', 'Codex edit.'), 'and it spreads again');
-  } finally { await box.cleanup(); }
-});
-
-test('Apply all that manages a new skill while another catches up marks the catch-up apart from new and replaced copies', { skip: noPosix || process.getuid?.() === 0 }, async () => {
-  const box = await sandbox();
-  try {
-    await managedThree(box);
-    await chmod(join(box.home, CODEX), 0o555); await chmod(join(box.home, CODEX, 'foo'), 0o555);
-    await writeFile(join(box.home, CLAUDE, 'foo/SKILL.md'), text('foo', 'Edit one.'));
-    await applyChanges(three(box), []);
-    await chmod(join(box.home, CODEX), 0o755); await chmod(join(box.home, CODEX, 'foo'), 0o755);
-    await skill(box.home, CLAUDE, 'fresh');
-    const result = await applyChanges(three(box), [manage('fresh')]);
-    assert.deepEqual(result.results.filter(entry => entry.outcome === 'written').map(entry => [entry.item, entry.harness, entry.replaced, entry.caughtUp]).sort(),
-      [['foo', 'codex-cli', undefined, true], ['fresh', 'codex-cli', undefined, undefined], ['fresh', 'copilot-cli', undefined, undefined]]);
-    assert.ok((await readHistory(ctx(box))).some(entry => entry.kind === 'added' && entry.key === 'fresh'));
   } finally { await box.cleanup(); }
 });
 

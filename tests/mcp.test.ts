@@ -5,7 +5,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { applyMcp, mcpView, restoreMcp, undoClaudeWrite } from '../src/mcp.ts';
+import { applyMcp, mcpView, readTool, restoreMcp, undoClaudeWrite } from '../src/mcp.ts';
 import { readHistory } from '../src/manage.ts';
 import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
@@ -53,7 +53,7 @@ test('A managed Claude server reaches Copilot and Codex with values as-is; other
   } finally { await box.cleanup(); }
 });
 
-test('Claude Code is written only by Write now, editing only its entry', async () => {
+test('Claude Code is written only by Write now, editing only its entry; Undo removes a new entry and it waits for Write again', async () => {
   const box = await sandbox();
   try {
     const original = claudeJson({});
@@ -63,11 +63,19 @@ test('Claude Code is written only by Write now, editing only its entry', async (
     assert.ok(waiting.results.some(entry => entry.harness === 'claude-cli' && /Write now/.test(entry.message)));
     assert.equal(await readFile(join(box.home, '.claude.json'), 'utf8'), original, 'not touched without Write now');
     assert.deepEqual((await mcpView(box.context, tools)).claudePending, ['docs']);
-    await applyMcp(box.context, tools, [], { claudeNow: ['docs'] });
+    const wrote = await applyMcp(box.context, tools, [], { claudeNow: ['docs'] });
+    assert.equal(wrote.claudeWritten?.length, 1);
+    assert.equal(wrote.claudeWritten?.[0].before, null, 'it was new in Claude Code');
     const written = await readFile(join(box.home, '.claude.json'), 'utf8');
     assert.deepEqual(JSON.parse(written).mcpServers.docs, { type: 'http', url: 'https://docs.example/mcp', headers: { Authorization: 'Bearer abc' } });
     assert.deepEqual(JSON.parse(written).oauthAccount, { emailAddress: 'kept@example.com' });
     assert.ok(written.includes('"projects": {\n    "/x": {}\n  }'), 'the rest keeps its layout');
+    const undone = await undoClaudeWrite(box.context, wrote.claudeWritten!);
+    assert.equal(undone.stopped, undefined, undone.stopped ?? '');
+    const after = JSON.parse(await readFile(join(box.home, '.claude.json'), 'utf8'));
+    assert.equal(after.mcpServers?.docs, undefined, 'the entry is gone again');
+    assert.deepEqual(after.oauthAccount, { emailAddress: 'kept@example.com' }, 'the rest stays');
+    assert.deepEqual((await mcpView(box.context, tools)).claudePending, ['docs'], 'and it waits for Write again');
   } finally { await box.cleanup(); }
 });
 
@@ -122,12 +130,13 @@ test('SSE cannot go to Codex, and an unreadable file is never written', async ()
   } finally { await box.cleanup(); }
 });
 
-test("With Sync off, Apply all for a server holds that server's own pending edit", async () => {
+test("With Sync off, Apply all never spreads a pending edit, neither for another server nor for that server's own", async () => {
   const box = await sandbox();
   try {
     await writeFile(join(box.home, '.copilot/mcp-config.json'), copilotOne('a'));
     await applyMcp(box.context, tools, [{ key: 'tool', managed: true, off: ['claude-cli'] }]);
     await writeFile(join(box.home, '.copilot/mcp-config.json'), copilotOne('edited'));
+    assert.equal((await applyMcp(box.context, tools, [], { only: new Set(['other']) })).writes, 0);
     await applyMcp(box.context, tools, [{ key: 'tool', managed: true, off: ['claude-cli'] }], { only: new Set(['tool']) });
     assert.ok(!(await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('edited'));
   } finally { await box.cleanup(); }
@@ -202,22 +211,23 @@ test('Pi: a managed server reaches ~/.pi/agent/mcp.json in the mcpServers shape;
   } finally { await box.cleanup(); }
 });
 
-test('Undo of Write to Claude Code removes a new entry, keeps the rest of the file, and the server waits for Write again', async () => {
+test('Write now catching up a Claude Code copy that fell behind records the overwritten entry, and no made-up edit', async () => {
   const box = await sandbox();
   try {
-    const original = claudeJson({});
-    await writeFile(join(box.home, '.claude.json'), original);
-    await writeFile(join(box.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { docs: { type: 'http', url: 'https://docs.example/mcp' } } }, null, 2));
-    await applyMcp(box.context, tools, [{ key: 'docs', managed: true, off: [] }]);
-    const wrote = await applyMcp(box.context, tools, [], { claudeNow: ['docs'] });
-    assert.equal(wrote.claudeWritten?.length, 1);
-    assert.equal(wrote.claudeWritten?.[0].before, null, 'it was new in Claude Code');
-    const undone = await undoClaudeWrite(box.context, wrote.claudeWritten!);
-    assert.equal(undone.stopped, undefined, undone.stopped ?? '');
-    const after = JSON.parse(await readFile(join(box.home, '.claude.json'), 'utf8'));
-    assert.equal(after.mcpServers?.docs, undefined, 'the entry is gone again');
-    assert.deepEqual(after.oauthAccount, { emailAddress: 'kept@example.com' }, 'the rest stays');
-    assert.deepEqual((await mcpView(box.context, tools)).claudePending, ['docs'], 'and it waits for Write again');
+    const two: HarnessId[] = ['copilot-cli', 'claude-cli'];
+    const copilot = join(box.home, '.copilot/mcp-config.json');
+    await writeFile(copilot, copilotOne('A'));
+    await writeFile(join(box.home, '.claude.json'), claudeJson({ tool: { type: 'stdio', command: 'A' } }));
+    await applyMcp(box.context, two, [{ key: 'tool', managed: true, off: [] }]);
+    const previous = (await readTool(box.context, 'claude-cli')).entries[0].hash;
+    await writeFile(copilot, copilotOne('B'));
+    await applyMcp(box.context, two, []);
+    await applyMcp(box.context, two, [], { claudeNow: ['tool'] });
+    await applyMcp(box.context, two, []);
+    assert.equal((await readTool(box.context, 'claude-cli')).entries[0].server.command, 'B');
+    const history = await readHistory(box.context);
+    assert.ok(history.some(event => event.kind === 'edit' && event.previous === previous), JSON.stringify(history));
+    assert.ok(!history.some(event => event.winner?.tool === 'claude-cli' && event.losers.some(loser => loser.tool === 'claude-cli')), 'no made-up edit blames Claude Code');
   } finally { await box.cleanup(); }
 });
 

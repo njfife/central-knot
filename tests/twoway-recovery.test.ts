@@ -96,7 +96,7 @@ test('A Delete everywhere that fails part-way keeps the unspread edit restorable
   assert.deepEqual(await b.copies(), [null, null, null], 'the leftover goes once it can');
 }));
 
-test('An unlistable skills folder is never a deletion', () => box(async b => {
+test('An unlistable skills folder, or every one at once, is never a deletion', () => box(async b => {
   await chmod(join(b.home, roots[0]), 0o111);
   await b.pass();
   b.tick(2500);
@@ -104,9 +104,6 @@ test('An unlistable skills folder is never a deletion', () => box(async b => {
   await chmod(join(b.home, roots[0]), 0o755);
   assert.deepEqual(await b.copies(), ['BASE', 'BASE', 'BASE']);
   assert.equal((await b.state()).state, 'shared');
-}));
-
-test('Every skills folder unlistable at once is not deleted everywhere', () => box(async b => {
   for (const root of roots) await chmod(join(b.home, root), 0o111);
   await b.pass();
   b.tick(2500);

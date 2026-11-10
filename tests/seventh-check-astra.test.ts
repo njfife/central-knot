@@ -32,12 +32,15 @@ for (const [name, initial] of [
   ['docs', 'model="gpt-5"\nmcp_servers = { docs = { command = "BASE" } }\n'],
   ['docs.v2', '[mcp_servers]\n"docs.v2" = { command = "BASE" }\n'],
 ]) {
-  test(`R1 preserve valid inline Codex server ${name}`, () => box(async (context, copilot, codex) => {
+  test(`R1 inline Codex server ${name} is held on an edit, never given a second definition`, () => box(async (context, copilot, codex) => {
     validToml(initial);
     await fs.writeFile(codex, initial);
     await fs.writeFile(copilot, JSON.stringify({ mcpServers: { [name]: { command: 'BASE' } } }));
     await applyMcp(context, tools, managed(name));
-    validToml(await fs.readFile(codex, 'utf8'));
+    await fs.writeFile(copilot, JSON.stringify({ mcpServers: { [name]: { command: 'EDIT' } } }));
+    const result = await applyMcp(context, tools, []);
+    assert.deepEqual(result.results.map(entry => [entry.harness, entry.outcome]), [['codex-cli', 'held']], JSON.stringify(result.results));
+    assert.equal(await fs.readFile(codex, 'utf8'), initial);
   }));
 }
 

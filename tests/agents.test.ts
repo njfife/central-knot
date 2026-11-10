@@ -173,6 +173,32 @@ test('A tool turned off and back on for an agent never spreads what was done the
   } finally { await box.cleanup(); }
 });
 
+test('With Sync off, Apply all never spreads a pending agent edit, neither for another agent nor with a tool toggle for this one', async () => {
+  const box = await sandbox();
+  try {
+    const claude = join(box.home, '.claude/agents/reviewer.md');
+    await writeFile(claude, claudeAgent()); await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    await writeFile(join(box.home, '.copilot/agents/reviewer.agent.md'), claudeAgent('Edited in Copilot while Sync is off.\n'));
+    assert.equal((await applyAgents(box.context, tools, [], { only: new Set(['other']) })).writes, 0);
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: ['codex-cli'] }], { only: new Set(['reviewer']) });
+    assert.equal(await readFile(claude, 'utf8'), claudeAgent());
+  } finally { await box.cleanup(); }
+});
+
+test('A Copilot copy with quoted "name" and "description" keys stays readable after an update', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
+    await writeFile(join(box.home, '.copilot/agents/reviewer.agent.md'), '---\n"name": reviewer\n"description": Reviews code\n---\n\nYou review code.\nBe brief.\n');
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent('Edited.\n'));
+    await applyAgents(box.context, tools, []);
+    const copilot = await readAgents(box.context, 'copilot-cli');
+    assert.equal(copilot.unreadable.size, 0, copilot.problems.join('; '));
+    assert.equal(copilot.entries[0]?.agent.prompt.trim(), 'Edited.');
+  } finally { await box.cleanup(); }
+});
+
 test('An agent edit whose spread failed at first is still History, so the version it replaced can be restored', async () => {
   const box = await sandbox();
   try {
