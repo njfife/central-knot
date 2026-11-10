@@ -173,7 +173,7 @@ const readSummary = (view: HomeView) => {
   return `Read ${plural(skills, 'skill')}, ${plural(servers, 'MCP server')} and ${plural(agents, 'agent')} from ${view.label}. ${stopped.length ? '' : 'Nothing changed.'}`;
 };
 
-export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mode === 'fixture' ? 'the practice copy' : mode === 'actual' ? 'your real tools' : 'that folder'}…`, async () => {
+export const loadHome = (mode: HomeMode) => (state.page === 'instructions' && askAboutOpenDraft() ? undefined : (state.lastMode = mode, busy(`Reading ${mode === 'fixture' ? 'the practice copy' : mode === 'actual' ? 'your real tools' : 'that folder'}…`, async () => {
   const previous = state.home;
   const view = await api().selectHome(mode);
   const nothing = view && !view.manage.skills.length && !view.mcp.servers.length && !view.agents.servers.length;
@@ -184,7 +184,7 @@ export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Readin
   if (view) { accept(view); if (state.page === 'instructions') await readInstructions(); }
   if (view) { state.outcome = { page: state.page, carry: true, text: (nothing ? `Opened ${view.label}.` : `Opened ${view.label}. ${readSummary(view).replace(` from ${view.label}`, '')}`) + leftText,
     act: left && left.mode !== 'custom' ? { label: `Go back to ${left.label}`, id: 'outcome-go-back', run: () => void loadHome(left.mode) } : undefined }; announce(readSummary(view) + leftText, true); } else announce('');
-}));
+})));
 
 /** At launch: the home last opened (so sync resumes where it was), else this computer's home (dev builds: the practice copy). */
 export const startHome = () => busy('Reading skills, MCP servers and agents…', async () => {
@@ -503,7 +503,7 @@ export const applyBaseChange = (request: Omit<BaseApply, 'expected'>, done: (wri
   // Back to the card's rows, which now show each file's state; focus goes to the result's Undo.
   document.getElementById('instructions-scroll')?.scrollTo({ top: 0 });
   const written = result.written.map(entry => entry.tool);
-  const sessions = written.length ? ` Start a new ${written.length === 1 ? `${toolNamesOf(written)} session` : 'session in each'} to use ${written.length === 1 ? 'it' : 'them'}.` : '';
+  const sessions = written.length ? ` Start a new ${written.length === 1 ? `${toolNamesOf(written)} session` : 'session in each'} for this to take effect.` : '';
   const created = result.written.filter(entry => entry.before === null).map(entry => entry.tool);
   const undoTitle = `Put the base instructions back as they were${written.length ? `, and ${fileNames(written)} as ${written.length === 1 ? 'it was' : 'they were'}` : ''}${created.length ? ` (${fileNames(created)}, which this save created, goes again)` : ''}`;
   state.outcome = { page: 'instructions', text: `${done(written.length ? fileNames(written) : '')}${leftText(result)}${sessions}`,
@@ -512,11 +512,12 @@ export const applyBaseChange = (request: Omit<BaseApply, 'expected'>, done: (wri
 });
 
 const undoBaseChange = (undo: BaseUndo) => busy('Undoing…', async () => {
-  focusAfterBusy = 'base-edit';
   // Said for what this undo puts back: the base only if the save changed it (Put back and Update change files alone).
   const baseMoves = undo.text !== state.base?.text || undo.list.tools.join() !== state.base?.tools.join();
   const result = await api().undoBase(undo, state.home!.home);
   await readInstructions();
+  // Focus rests on the base card's own button: Edit, or Write when the undo emptied the base.
+  focusAfterBusy = state.base?.text.trim() ? 'base-edit' : 'base-write';
   if (result.stopped) { state.outcome = undefined; announce(result.stopped); return; }
   const back = result.written.map(entry => entry.tool);
   if (!baseMoves && !back.length) { state.outcome = { page: 'instructions', text: `Nothing was undone.${leftText(result, true)}` }; announce(state.outcome.text, true); return; }

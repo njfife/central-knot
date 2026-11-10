@@ -26,12 +26,13 @@ const ago = (at: string) => {
 /** The editors' keyboard hint, once there is something to review. */
 export const keys = `Esc to cancel · ${navigator.userAgent.includes('Mac') ? '⌘' : 'Ctrl'}+Enter to review`;
 
-/** Esc inside an editor clicks its Cancel button (`cancelId`), wherever focus is in it. */
-export const escapeTo = (cancelId: string) => (event: KeyboardEvent) => {
+/** Esc inside an editor clicks its Cancel button (`cancelId`) wherever focus is in it; while the discard question is open (no
+ *  Cancel shown), it answers Keep editing (`keepId`). */
+export const escapeTo = (cancelId: string, keepId: string) => (event: KeyboardEvent) => {
   if (event.key !== 'Escape') return;
-  const cancel = document.getElementById(cancelId);
-  if (!cancel) return;
-  event.preventDefault(); cancel.click();
+  const target = document.getElementById(cancelId) ?? document.getElementById(keepId);
+  if (!target) return;
+  event.preventDefault(); target.click();
 };
 
 /** Redraws, then puts focus and the caret back in the text box `id` at `at`. */

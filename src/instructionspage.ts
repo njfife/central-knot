@@ -93,7 +93,7 @@ function editor(file: InstructionFile) {
       button({ variant: 'primary', size: 'small', label: file.exists ? 'Review changes' : 'Review new file', id: `ins-review-${file.tool}`, disabled: !dirty(), onclick: () => { edit.stage = 'review'; rerender(); document.getElementById(`ins-save-${file.tool}`)?.focus(); } }),
       button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `ins-cancel-${file.tool}`, onclick: () => { const ask = dirty(); if (ask) edit.confirmDiscard = true; else state.instructionEdit = undefined; rerender(); document.getElementById(ask ? `ins-keep-${file.tool}` : `ins-edit-${file.tool}`)?.focus(); } }),
       h('span.ins-locked', { id: `ins-hint-${file.tool}` }, dirty() ? keys : file.exists ? 'Make a change to review it.' : 'Write something to review it.'));
-  return h('div.ins-editor', { onkeydown: escapeTo(`ins-cancel-${file.tool}`) },
+  return h('div.ins-editor', { onkeydown: escapeTo(`ins-cancel-${file.tool}`, `ins-keep-${file.tool}`) },
     file.exists ? null : h('p.ins-empty', {}, `New file: saving creates ${name} here.`),
     file.base ? h('p.base-explain', {}, `${toolNames[file.tool]}’s own instructions. The base instructions stay after them, as they are.`) : null,
     area, actions);

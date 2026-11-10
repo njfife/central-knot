@@ -104,7 +104,7 @@ function editView(files: InstructionFile[], edit: BaseEdit) {
   area.rows = Math.min(30, Math.max(6, lineCount(edit.text) + 3));
   const from = edit.source?.tool ? files.find(file => file.tool === edit.source!.tool) : undefined;
   // Esc anywhere in the editor (the text, a tool box, a button) is Cancel.
-  return h('div.ins-editor', { onkeydown: escapeTo('base-cancel') },
+  return h('div.ins-editor', { onkeydown: escapeTo('base-cancel', 'base-keep') },
     from && edit.source?.kind === 'own' ? h('p.ins-note', {}, icon('info', 13, 'tone-muted'), h('span', {}, `${fileName(from.path)}’s instructions move into the base: ${toolNames[from.tool]} still reads them, now from the base block, and the tools you choose get them too. A line meant only for ${toolNames[from.tool]} can go back into its own instructions after saving.`)) : null,
     area,
     h('fieldset.base-tools', {}, h('legend', {}, 'Tools that get them, after each tool’s own instructions. Review changes shows what unticking one does to its file.'),
@@ -288,12 +288,13 @@ export function baseStrip(file: InstructionFile, lockedWhy?: string) {
   const row = (state.instructions ?? []).find(entry => entry.tool === file.tool || file.sameFile.includes(entry.tool))?.tool ?? file.tool;
   const goTo = base.chosen && base.state !== 'same' ? (base.state === 'edited' ? `base-diff-${row}` : 'base-update') : undefined;
   // The choice lives on the resting Base instructions card, which an open base editor replaces.
-  const goWhy = state.baseEdit ? 'Finish or cancel the base instructions edit first.' : undefined;
+  const goWhy = state.baseEdit ? 'Finish or cancel the base instructions edit first.' : lockedWhy;
   return h('div.base-strip', {},
     h('div.base-strip-line', {}, icon('layers', 13, 'tone-muted'), h('span', {}, h('strong', {}, 'Then the base instructions'), ` · ${plural(lines, 'line')}, ${said}`),
       goTo ? button({ variant: 'link', size: 'micro', label: base.state === 'edited' ? 'Choose what to do…' : 'Update…', id: `ins-base-go-${file.tool}`, disabled: !!goWhy, attrs: lockAttrsFor(goWhy), onclick: () => { const target = document.getElementById(goTo); target?.scrollIntoView({ block: 'center' }); target?.focus(); } }) : null,
       // Not on the list any more: its block (an edited copy the list change left) can be taken out here, after a review.
-      !base.chosen ? button({ variant: 'link', size: 'micro', label: 'Take the block out…', id: `ins-base-out-${file.tool}`, disabled: !!state.busy || !!lockedWhy, attrs: lockAttrsFor(lockedWhy), onclick: () => startTakeOut(file) }) : null,
+      // Hidden under its own open review, so that review is the one decision on screen.
+      !base.chosen && !state.instructionEdit?.takeOut ? button({ variant: 'link', size: 'micro', label: 'Take the block out…', id: `ins-base-out-${file.tool}`, disabled: !!state.busy || !!lockedWhy, attrs: lockAttrsFor(lockedWhy), onclick: () => startTakeOut(file) }) : null,
       button({ variant: 'link', size: 'micro', label: shown.has(key) ? 'Hide' : 'Show', id: `ins-base-${file.tool}`, attrs: { 'aria-expanded': String(shown.has(key)) }, onclick: () => toggle(key) })),
     shown.has(key) ? h('pre.ins-preview.base-copy', { tabindex: '0', 'aria-label': `Base instructions in ${fileName(file.path)}` }, base.copy.replace(/\n$/, '')) : null);
 }
