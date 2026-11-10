@@ -1392,6 +1392,7 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 /* A long name wraps, and its kind and change follow it rather than stay at the far edge. */
 .repo-row-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; }
 .repo-row-name { min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+.repo-row-meta { display: inline-flex; align-items: baseline; gap: 8px; flex: none; white-space: nowrap; }
 .repo-row-kind { flex: none; font-size: 12px; line-height: 16px; color: var(--ink-faint); }
 .repo-row-note { display: flex; align-items: baseline; gap: 4px; max-width: 76ch; font-size: 12px; line-height: 16px; }
 .repo-row-note > svg { flex: none; align-self: flex-start; margin-top: 2px; }

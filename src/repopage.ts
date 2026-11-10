@@ -180,8 +180,9 @@ function changeRow(change: RepoChange, side: 'in' | 'out') {
   return h(`li.repo-row${change.held ? '.repo-row-held' : ''}`, { 'data-key': change.key },
     h('span.repo-row-icon', { title: kind.label }, icon(kind.glyph, 14, 'tone-muted')),
     h('span.repo-row-main', {},
-      h('span.repo-row-line', {}, h('strong.repo-row-name', { title: change.name }, change.name), h('span.repo-row-kind', {}, kind.label),
-        h(`span.repo-row-change.repo-change-${change.held ? 'held' : change.change}`, {}, label)),
+      // Kind and change stay together, so a long name that wraps carries them as one.
+      h('span.repo-row-line', {}, h('strong.repo-row-name', { title: change.name }, change.name), h('span.repo-row-meta', {}, h('span.repo-row-kind', {}, kind.label),
+        h(`span.repo-row-change.repo-change-${change.held ? 'held' : change.change}`, {}, label))),
       note ? h('span.repo-row-note.tone-muted', {}, icon(warns ? 'triangle-alert' : 'info', 12, warns ? 'tone-warning' : ''), note) : null));
 }
 
