@@ -5,9 +5,10 @@ import { access, readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { installedContents, marketplacePage, pluginDetail, pluginFiles, readmeIn, sourceLabel, type PluginFiles } from './catalogdetail.ts';
-import { searchPath } from './platform.ts';
+import { appCandidates, searchPath } from './platform.ts';
 import { failedFor } from './pluginplan.ts';
-import { findBinary, probeVersion } from './discovery.ts';
+import { findApp, findBinary, probeVersion } from './discovery.ts';
+import { coworkFolder } from './cowork.ts';
 import * as engine from './plugins.ts';
 import { installParts, partsCurrent, planParts, readParts, removeParts, undoParts } from './parts.ts';
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
@@ -15,6 +16,7 @@ import type { ActionReport, Catalog, DesktopApp, CatalogPlugin, HarnessId, Insta
 import { writeDurably, type ShareContext } from './share.ts';
 import { SKILL_SWITCH_TESTED_FROM, copyDiffers, heldReason, partsTools } from './pluginstatus.ts';
 import { isFolder, isHttps, onlyAllowed, shortBuild } from './values.ts';
+import { byToolOrder } from './words.ts';
 
 /** What runs a tool's plugin commands when it is a desktop app's own copy: "Claude desktop’s Code tab 2.1.321". */
 export const viaLabel = (app: DesktopApp, answered = app.carriedVersion) => `${app.name}’s ${app.carries}${answered ? ` ${shortBuild(answered)}` : ''}`;
@@ -57,17 +59,21 @@ export interface Routes { binaries: Partial<Record<HarnessId, string>>; apps: Pa
  * its desktop app carries (Claude desktop's Code tab, the GitHub Copilot app's runtime, ChatGPT desktop's Codex), which runs
  * the same commands (PLG-04, proved in V-01). That copy never counts as a CLI install (CD §3). Searched in this computer's
  * own home, not the home on screen: a Practice copy or backup has no tools of its own, and the ones found here are pointed
- * at the home on screen when they run.
+ * at the home on screen when they run. Cowork's plugin commands are Claude Code's own (`--cowork`): Claude desktop's copy
+ * first, the build that app came with, else the CLI. That is Cowork's route, not a stand-in for one, so no app is named for it.
  */
 async function findClis(): Promise<Routes> {
   const routes: Routes = { binaries: {}, apps: {} };
   const path = await searchPath();
   for (const tool of pluginTools) {
+    if (tool === 'claude-cowork') continue;
     const found = await findBinary(tool, homedir(), path);
     if (!found) continue;
     routes.binaries[tool] = found.binary;
     if (found.app) routes.apps[tool] = found.app;
   }
+  const cowork = (await findApp(appCandidates(homedir(), 'claude')))?.binary ?? routes.binaries['claude-cli'];
+  if (cowork) routes.binaries['claude-cowork'] = cowork;
   return routes;
 }
 const realEngine: MarketplaceEngine = { findClis, checkAccess: engine.checkAccess, readCatalog: engine.readCatalog, readRemotePlugin: engine.readRemotePlugin, install: engine.install, uninstall: engine.uninstall, update: engine.update, setSkill: engine.setSkill };
@@ -104,7 +110,18 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const open = host.home();
     if (!open) throw new Error('No home is open.');
     const routes = clis ? await use.findClis() : { binaries: {}, apps: {} };
-    return { home: open.home, dataDir: join(host.dataDir, 'plugins'), binaries: routes.binaries, apps: routes.apps, overrides: open.overrides };
+    // Cowork's folder is found, not fixed: it is named for the signed-in account (cowork.ts).
+    const cowork = await coworkFolder(open.home);
+    return { home: open.home, dataDir: join(host.dataDir, 'plugins'), binaries: routes.binaries, apps: routes.apps, overrides: { ...open.overrides, ...(cowork ? { 'claude-cowork': cowork } : {}) } };
+  };
+  /**
+   * This home's tools as the Plugins pages have them: Cowork joins after Claude Code where Claude desktop is here and
+   * Cowork has run (its folder is there). Where this computer wasn't searched (a chosen folder), the folder is all there is to go by.
+   */
+  const toolsHere = (ctx: engine.PluginContext, read: { tools: HarnessId[]; snapshots: Snapshot[] }): HarnessId[] => {
+    const claude = read.snapshots.find(snapshot => snapshot.harness === 'claude-cli');
+    const cowork = !!ctx.overrides?.['claude-cowork'] && !!claude && (claude.probe.state === 'not-run' || !!claude.app);
+    return cowork ? [...read.tools, 'claude-cowork' as const].sort(byToolOrder) : read.tools;
   };
 
   /**
@@ -221,7 +238,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
    * and their install states are read here again.
    */
   async function installedCopies(ctx: engine.PluginContext, catalog: Catalog, source: string, item: CatalogPlugin, only?: PluginTool): Promise<Partial<Record<HarnessId, InstalledCopy>>> {
-    const tools = only ? [only] : toolIds((await host.read()).tools);
+    const tools = only ? [only] : toolIds(toolsHere(ctx, await host.read()));
     const states = (await statesFor(ctx, tools, catalog, source, [item]))[item.name] ?? {};
     const copies = await Promise.all(Object.entries(states).map(async ([tool, state]) => {
       if (state?.state !== 'installed') return undefined;
@@ -256,7 +273,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const ctx: engine.PluginContext = { ...(await context({ clis: true })), reads: new Map() };
     const read = await host.read(readId);
     // Pi takes no plugins, only their parts, so it is a column only where parts can go in.
-    const tools = read.tools.filter(tool => takesPlugins(tool) || (!!host.share && partsTools.includes(tool)));
+    const tools = toolsHere(ctx, read).filter(tool => takesPlugins(tool) || (!!host.share && partsTools.includes(tool)));
     const writing = await host.writeAccess();
     const known: { source: string; origins: MarketplaceView['origins'] }[] = [];
     const note = (source: string, origin: MarketplaceView['origins'][number]) => {

@@ -1,5 +1,8 @@
 export type HomeMode = 'fixture' | 'custom' | 'actual';
-export type HarnessId = 'claude-cli' | 'copilot-cli' | 'codex-cli' | 'pi-cli';
+/** `claude-cowork` is Claude desktop's Cowork: it takes whole plugins only (cowork.ts), and no page but Plugins knows it. */
+export type HarnessId = 'claude-cli' | 'claude-cowork' | 'copilot-cli' | 'codex-cli' | 'pi-cli';
+/** The tools with folders of their own: every tool but Cowork. */
+export type FileTool = Exclude<HarnessId, 'claude-cowork'>;
 export type ProbeState = 'ok' | 'missing' | 'timeout' | 'failed' | 'malformed' | 'restricted' | 'not-run';
 
 export interface ProbeResult {

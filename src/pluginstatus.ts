@@ -13,9 +13,9 @@ import { takesPlugins } from './presence.ts';
 export const partsTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'];
 
 /** The one way of saying a tool's CLI is missing. */
-export const cliMissing = (tool: HarnessId) => `${names[tool]}’s command-line tool wasn’t found`;
+export const cliMissing = (tool: HarnessId) => (tool === 'claude-cowork' ? 'Claude Code wasn’t found here (Claude desktop’s own copy, or its command-line tool), and Cowork’s plugins install through it' : `${names[tool]}’s command-line tool wasn’t found`);
 /** The same, as the reason nothing can run there. */
-export const noCli = (tool: HarnessId) => `${cliMissing(tool)}, so its plugin commands can’t run.`;
+export const noCli = (tool: HarnessId) => `${cliMissing(tool)}, so ${tool === 'claude-cowork' ? 'nothing can be installed there' : 'its plugin commands can’t run'}.`;
 /** Why nothing can change in a home that is only previewed. */
 export const PREVIEW_ONLY = 'Preview only: nothing can be changed in this home.';
 /** Why Central Knot leaves a tool's same-named marketplace alone: it comes from `other`, not from the one on screen. */
@@ -184,11 +184,12 @@ export const versionWord = (version?: string) => (version ? `version ${version}`
 
 /**
  * Tools with no switch for one skill of a plugin, and why (ENB-06). Claude Code's skillOverrides leave plugin skills alone,
- * so only the whole plugin turns off there; a deny rule only fails the call and is not Disable. Codex keeps the switch in
+ * so only the whole plugin turns off there; a deny rule only fails the call and is not Disable. Cowork takes whole plugins only. Codex keeps the switch in
  * config.toml (`[[skills.config]]` by name, which outlives an update) and Copilot CLI behind its own `skill disable`.
  */
 export const NO_SKILL_SWITCH: Partial<Record<HarnessId, string>> = {
   'claude-cli': 'Claude Code has no switch for a single skill of a plugin. To have only some of its skills there, uninstall the plugin there, then turn on the ones you want: they go in as separate items.',
+  'claude-cowork': 'Central Knot can’t switch a single skill of a plugin in Cowork: it installs and uninstalls the whole plugin there.',
 };
 
 /** Why a skill is off that Copilot CLI turned off by its bare name, for every skill so named: not this plugin's own switch. */

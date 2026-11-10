@@ -327,6 +327,17 @@ export async function parseCatalog(root: string, source: string, kind: Catalog['
 
 const configRootOf = (context: PluginContext, tool: HarnessId) => configRoot(harnesses[tool], context.home, context.overrides?.[tool]);
 
+/** The tools that are Claude Code: the CLI and Cowork, whose plugins Claude Code keeps the same way under other names (cowork.ts). */
+type ClaudeTool = 'claude-cli' | 'claude-cowork';
+const isClaude = (tool: PluginTool): tool is ClaudeTool => tool === 'claude-cli' || tool === 'claude-cowork';
+
+/** Where Claude Code keeps a tool's plugin records: settings.json and plugins/, or for Cowork cowork_settings.json and cowork_plugins/. */
+function claudeRecords(context: PluginContext, tool: ClaudeTool): { settings: string; installed: string; known: string } {
+  const root = configRootOf(context, tool);
+  const plugins = join(root, tool === 'claude-cowork' ? 'cowork_plugins' : 'plugins');
+  return { settings: join(root, tool === 'claude-cowork' ? 'cowork_settings.json' : 'settings.json'), installed: join(plugins, 'installed_plugins.json'), known: join(plugins, 'known_marketplaces.json') };
+}
+
 /** A tool's JSON record as an object; Copilot's config.json starts with `//` comment lines, which are dropped first. */
 async function readJson(path: string): Promise<Record<string, unknown> | undefined> {
   try { return parseObject(withoutBom(await readFile(path, 'utf8')).replace(/^\s*\/\/.*$/gm, '')); } catch { return undefined; }
@@ -350,15 +361,17 @@ const codexTables = (context: PluginContext, root: string) => once(context, `cod
 /**
  * The marketplaces a tool already has, as added there: no setup needed to browse them. Claude Code records the ones its
  * own command added in plugins/known_marketplaces.json; Claude Code and Copilot CLI also read extraKnownMarketplaces in
- * settings.json; Codex keeps `[marketplaces.NAME]` tables in config.toml.
+ * settings.json; Codex keeps `[marketplaces.NAME]` tables in config.toml. Cowork's are Claude Code's, in its own files
+ * (claudeRecords): the ones added there locally, not the ones kept in the Claude account.
  */
 export async function registeredMarketplaces(context: PluginContext, tool: PluginTool): Promise<{ name: string; source: string }[]> {
   const root = configRootOf(context, tool);
   switch (tool) {
     case 'codex-cli': return Object.entries((await codexTables(context, root)).marketplaces).map(([name, entry]) => ({ name, source: text(entry.source) })).filter(entry => entry.source);
-    case 'claude-cli': case 'copilot-cli': {
-      const lists = [record((await recordJson(context, join(root, 'settings.json')))?.extraKnownMarketplaces)];
-      if (tool === 'claude-cli') lists.unshift(await recordJson(context, join(root, 'plugins/known_marketplaces.json')));
+    case 'claude-cli': case 'claude-cowork': case 'copilot-cli': {
+      const claude = isClaude(tool) ? claudeRecords(context, tool) : undefined;
+      const lists = [record((await recordJson(context, claude?.settings ?? join(root, 'settings.json')))?.extraKnownMarketplaces)];
+      if (claude) lists.unshift(await recordJson(context, claude.known));
       const found = new Map<string, string>();
       for (const [name, entry] of lists.flatMap(list => Object.entries(list ?? {}))) {
         const source = record(record(entry)?.source);
@@ -413,20 +426,22 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
   const root = configRootOf(context, tool);
   const id = `${plugin}@${marketplace}`;
   switch (tool) {
-    case 'claude-cli': {
+    case 'claude-cli': case 'claude-cowork': {
+      const records = claudeRecords(context, tool);
       // Only the user scope counts: it is the one Central Knot installs to (--scope user) and the one `uninstall` removes.
       // A plugin installed for one project only is not installed for this person everywhere.
-      const listed = record((await recordJson(context, join(root, 'plugins/installed_plugins.json')))?.plugins)?.[id];
+      const listed = record((await recordJson(context, records.installed))?.plugins)?.[id];
       const user = (Array.isArray(listed) ? listed : []).map(record).find(entry => entry?.scope === 'user');
       const path = text(user?.installPath);
       if (!path) return { state: 'not-installed' };
       // A plugin kept in a local folder marketplace is loaded from that folder at each start, whatever its record says
       // (Claude Code 2.1.321 records a cache copy and its version then, but reads the folder): the catalog's version counts.
-      const lists = [await recordJson(context, join(root, 'plugins/known_marketplaces.json')), record((await recordJson(context, join(root, 'settings.json')))?.extraKnownMarketplaces)];
+      // Not in Cowork: Claude desktop hands a session the copy the record names, so that copy is the one installed.
+      const lists = tool === 'claude-cli' ? [await recordJson(context, records.known), record((await recordJson(context, records.settings))?.extraKnownMarketplaces)] : [];
       const source = lists.map(list => record(record(list?.[marketplace])?.source)).find(Boolean);
       const live = source?.source === 'directory' && text(source.path) ? await folderItem(context, text(source.path), plugin) : undefined;
       if (live?.folder && (await hasFiles(live.folder))) return { state: 'installed', path: live.folder, live: true, ...(live.version ? { version: live.version } : {}) };
-      return (await hasFiles(path)) ? { state: 'installed', path, version: await copyVersion(user?.version, path) } : { state: 'not-known', reason: 'Claude Code lists it, but its files are not where it records them.' };
+      return (await hasFiles(path)) ? { state: 'installed', path, version: await copyVersion(user?.version, path) } : { state: 'not-known', reason: `${toolNames[tool]} lists it, but its files are not where it records them.` };
     }
     case 'copilot-cli': {
       const settingsOf = () => recordJson(context, join(root, 'settings.json'));
@@ -489,10 +504,11 @@ export async function installedPlugins(context: PluginContext, tool: PluginTool)
   const each = async (ids: string[], read: (names: { plugin: string; marketplace: string }, id: string) => Promise<ToolPlugin | undefined>) =>
     (await Promise.all([...new Set(ids)].map(id => { const names = idParts(id); return names ? read(names, id) : undefined; }))).filter((found): found is ToolPlugin => !!found);
   switch (tool) {
-    case 'claude-cli': {
-      const listed = record((await recordJson(context, join(root, 'plugins/installed_plugins.json')))?.plugins) ?? {};
-      const known = await recordJson(context, join(root, 'plugins/known_marketplaces.json'));
-      const enabled = record((await settings())?.enabledPlugins);
+    case 'claude-cli': case 'claude-cowork': {
+      const records = claudeRecords(context, tool);
+      const listed = record((await recordJson(context, records.installed))?.plugins) ?? {};
+      const known = await recordJson(context, records.known);
+      const enabled = record((await recordJson(context, records.settings))?.enabledPlugins);
       const users = Object.keys(listed).filter(id => (Array.isArray(listed[id]) ? listed[id] as unknown[] : []).some(entry => record(entry)?.scope === 'user'));
       return each(users, async ({ plugin, marketplace }, id) => {
         const where = text(record(known?.[marketplace])?.installLocation) || text(record(record(known?.[marketplace])?.source)?.path);
@@ -729,7 +745,7 @@ export async function setSkill(context: PluginContext, marketplace: string, plug
 const touched = (context: PluginContext, tool: PluginTool): string[] => {
   const root = configRootOf(context, tool);
   switch (tool) {
-    case 'claude-cli': return [join(root, 'settings.json'), join(root, 'plugins/installed_plugins.json'), join(root, 'plugins/known_marketplaces.json')];
+    case 'claude-cli': case 'claude-cowork': { const records = claudeRecords(context, tool); return [records.settings, records.installed, records.known]; }
     case 'copilot-cli': return [join(root, 'settings.json'), join(root, 'config.json')];
     case 'codex-cli': return [join(root, 'config.toml')];
   }
@@ -749,10 +765,13 @@ async function keepRecord(context: PluginContext, tool: HarnessId, command: stri
 }
 
 /** Runs one native command for a tool against the chosen home, keeping the prior bytes of every file it may change. */
-async function native(context: PluginContext, tool: PluginTool, args: string[]): Promise<NativeRun> {
+async function native(context: PluginContext, tool: PluginTool, asked: string[]): Promise<NativeRun> {
   const binary = context.binaries[tool];
+  // Cowork's plugins are Claude Code's with `--cowork`, in the Cowork folder (context.overrides, from cowork.ts).
+  const args = tool === 'claude-cowork' ? [...asked, '--cowork'] : asked;
   const command = `${harnesses[tool].binary} ${args.join(' ')}`;
   if (!binary) return { tool, command, ok: false, output: noCli(tool), changed: [] };
+  if (tool === 'claude-cowork' && !context.overrides?.[tool]) return { tool, command, ok: false, output: 'Cowork’s folder in Claude desktop wasn’t found, so nothing was run.', changed: [] };
   const files = touched(context, tool);
   const before = await Promise.all(files.map(readOrNull));
   const env: NodeJS.ProcessEnv = { ...gitEnv(), HOME: context.home, USERPROFILE: context.home, PATH: pathBeside(binary) };
@@ -774,8 +793,8 @@ async function native(context: PluginContext, tool: PluginTool, args: string[]):
 }
 
 /** Each tool's own install and uninstall of plugin@marketplace (`id`). */
-const installArgs = (tool: PluginTool, id: string) => ({ 'claude-cli': ['plugin', 'install', id, '--scope', 'user'], 'copilot-cli': ['plugin', 'install', id], 'codex-cli': ['plugin', 'add', id, '--json'] })[tool];
-const uninstallArgs = (tool: PluginTool, id: string) => ({ 'claude-cli': ['plugin', 'uninstall', id, '--scope', 'user'], 'copilot-cli': ['plugin', 'uninstall', id], 'codex-cli': ['plugin', 'remove', id, '--json'] })[tool];
+const installArgs = (tool: PluginTool, id: string) => (isClaude(tool) ? ['plugin', 'install', id, '--scope', 'user'] : tool === 'copilot-cli' ? ['plugin', 'install', id] : ['plugin', 'add', id, '--json']);
+const uninstallArgs = (tool: PluginTool, id: string) => (isClaude(tool) ? ['plugin', 'uninstall', id, '--scope', 'user'] : tool === 'copilot-cli' ? ['plugin', 'uninstall', id] : ['plugin', 'remove', id, '--json']);
 
 /** Installs one plugin into one tool: adds the marketplace there if needed (never replacing a different one of the same name), installs, then reads the tool's record. */
 export async function install(context: PluginContext, catalog: Catalog, plugin: string, tool: PluginTool): Promise<ActionReport> {
@@ -842,7 +861,7 @@ export async function update(context: PluginContext, catalog: Catalog, plugin: s
     if (!refresh.ok) return { tool, outcome: 'failed', message: `Could not refresh ${name}’s copy of the marketplace, so nothing was updated. ${lastLines(refresh.output)}`.trim(), runs };
   }
   const id = `${plugin}@${catalog.name}`;
-  const args = { 'claude-cli': ['plugin', 'update', id, '--scope', 'user'], 'copilot-cli': ['plugin', 'update', id], 'codex-cli': ['plugin', 'add', id, '--json'] }[tool];
+  const args = isClaude(tool) ? ['plugin', 'update', id, '--scope', 'user'] : tool === 'copilot-cli' ? ['plugin', 'update', id] : ['plugin', 'add', id, '--json'];
   const updated = await native(context, tool, args);
   runs.push(updated);
   const after = await installState(context, tool, catalog.name, plugin);
@@ -870,7 +889,7 @@ async function contentUpdate(context: PluginContext, catalog: Catalog, plugin: s
   if (!(await differs())) return done('update');
   const id = `${plugin}@${catalog.name}`;
   // A plugin its person turned off in Claude Code (settings.json enabledPlugins) is turned off again after the reinstall.
-  const wasOff = tool === 'claude-cli' && record((await recordJson(context, join(configRootOf(context, tool), 'settings.json')))?.enabledPlugins)?.[id] === false;
+  const wasOff = isClaude(tool) && record((await recordJson(context, claudeRecords(context, tool).settings))?.enabledPlugins)?.[id] === false;
   const removed = await native(context, tool, uninstallArgs(tool, id));
   runs.push(removed);
   if ((await installState(context, tool, catalog.name, plugin)).state === 'installed') return { tool, outcome: 'failed', message: `Still differs from the marketplace’s copy in ${name}, and it couldn’t be reinstalled: ${lastLines(removed.output) || said}`.trim(), runs };
@@ -904,6 +923,7 @@ const lastLines = (output: string) => output.split('\n').filter(Boolean).slice(-
 const nextStepFor = (tool: PluginTool, purpose = 'to use it'): string => ({
   // Said for either route: the change may have gone in through the CLI or through the desktop app's own copy.
   'claude-cli': `Start a new Claude Code session (CLI or Claude desktop’s Code tab), or run /reload-plugins, ${purpose}.`,
+  'claude-cowork': `Start a new Cowork task in Claude desktop ${purpose}.`,
   'copilot-cli': `Start a new Copilot session (CLI or the GitHub Copilot app) ${purpose}.`,
   'codex-cli': `Start a new Codex session ${purpose}; restart the ChatGPT desktop app if it is open.`,
 })[tool];

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { access, chmod, constants, copyFile, link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
-import { configRoot, harnessIds, harnesses, writeRoot } from './harnesses.ts';
+import { configRoot, harnessIds, harnesses, pluginsOnly, writeRoot } from './harnesses.ts';
 import { instructionFiles } from './instructions.ts';
 import { mcpFile } from './mcp.ts';
 import type { HarnessId, HistoryDays, HomeMode, PartsInstall, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
@@ -161,6 +161,7 @@ export function targetFor(harness: HarnessId, directory: string, source: Skill):
       return { harness, directory, limits: [] };
     case 'claude-cli':
       return { harness, directory, limits: [], note: source.metadataKeys.length ? `${source.metadataKeys.join(', ')}: effect not tested in Claude Code.` : undefined };
+    case 'claude-cowork': return pluginsOnly(harness);
   }
 }
 
@@ -367,7 +368,7 @@ export async function syncsHere(context: ShareContext): Promise<boolean> {
 export async function writeAccess(context: ShareContext): Promise<WriteAccess> {
   if (context.mode === 'actual') {
     if (!context.allowActualWrites) return { allowed: false, reason: 'Preview only: writing to real folders works only on macOS in this version. You can look around; nothing is written.' };
-    for (const id of Object.keys(harnesses) as HarnessId[]) {
+    for (const id of harnessIds) {
       const override = context.overrides?.[id];
       if (override !== undefined && !isAbsolute(override)) return { allowed: false, reason: `Preview only: ${harnesses[id].configEnv} is not an absolute path, so its folder is unknown.` };
     }

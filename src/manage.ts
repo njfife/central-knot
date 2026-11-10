@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, realpath, rename, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { DAY_MS, defaultHistoryDays } from './model.ts';
-import { harnesses, writeRoot } from './harnesses.ts';
+import { harnessIds, harnesses, writeRoot } from './harnesses.ts';
 import { presentTools } from './presence.ts';
 import {
   FORMAT_VERSION, changedWhileSyncing, clearStaleStages, storedRevision, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, placeCopy, plainError, readRecord, readTree,
@@ -201,7 +201,7 @@ const mark = (directory: string) => { let seen = evidence.get(directory); if (!s
 export const clock = (context: ShareContext) => context.now?.() ?? Date.now();
 
 /** The fixed tie-break when order is unknown (D-04): each location ranks by its highest-ordered reader in SPEC §5.1, then by path. */
-const surfaceRank: Record<HarnessId, number> = { 'copilot-cli': 0, 'claude-cli': 1, 'codex-cli': 2, 'pi-cli': 3 };
+const surfaceRank: Record<HarnessId, number> = { 'copilot-cli': 0, 'claude-cli': 1, 'codex-cli': 2, 'pi-cli': 3, 'claude-cowork': 4 };
 const byRank = (first: Location, second: Location) => surfaceRank[first.tool] - surfaceRank[second.tool] || first.copy.directory.localeCompare(second.copy.directory);
 
 /** Revision A is proved older than B when B's location was still read at the baseline after A's change was already seen. */
@@ -357,7 +357,7 @@ export async function rootProblem(context: ShareContext, tool: HarnessId): Promi
   // A folder not made yet still lands somewhere: through a linked parent, or where another tool's folder is.
   const real = await landingOf(root);
   if (!real) return `${name}'s skills folder could not be checked.`;
-  const others = [...(Object.keys(harnesses) as HarnessId[]).filter(other => other !== tool).map(other => rootOf(context, other)), join(context.home, '.agents/skills')];
+  const others = [...harnessIds.filter(other => other !== tool).map(other => rootOf(context, other)), join(context.home, '.agents/skills')];
   for (const other of others) {
     if (await landingOf(other) === real) return `${name}'s skills folder is the same folder as ${other}, so Central Knot does not write there.`;
   }

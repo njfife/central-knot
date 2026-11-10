@@ -11,22 +11,22 @@ import { choseProfileInUse, holdsOnWhatIsHere, itemKeyOf, offAfterFailures, plan
 import { deleteProfile, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from '../src/profiles.ts';
 import type { ShareContext } from '../src/share.ts';
 import { switchState } from '../src/skillswitch.ts';
-import type { HarnessId, HistoryEvent, SkillFacts } from '../src/types.ts';
+import type { FileTool, HarnessId, HistoryEvent, SkillFacts } from '../src/types.ts';
 
 test('Each tool’s MCP switch: off writes its own form, on takes it out, and every other byte stays', () => {
-  const before: Record<HarnessId, string> = {
+  const before: Record<FileTool, string> = {
     'claude-cli': '{\n  "model": "opus",\n  "deniedMcpServers": [{ "serverUrl": "https://x.example/*" }]\n}\n',
     'copilot-cli': '{\n  "theme": "dark"\n}\n',
     'codex-cli': '# mine\n[mcp_servers.docs]\ncommand = "docs"\nargs = ["a"] # keep\n\n[mcp_servers.docs.env]\nKEY = "v"\n\n[mcp_servers.other]\ncommand = "o"\nenabled = true\n',
     'pi-cli': '{\n  "mcpServers": {\n    "docs": { "command": "docs" }\n  }\n}\n',
   };
-  const off: Record<HarnessId, RegExp> = {
+  const off: Record<FileTool, RegExp> = {
     'claude-cli': /"serverName": "docs"/,
     'copilot-cli': /"disabledMcpServers": \[\s*"docs"\s*\]/,
     'codex-cli': /args = \["a"\] # keep\nenabled = false\n\n\[mcp_servers\.docs\.env\]/,
     'pi-cli': /"enabled": false/,
   };
-  for (const tool of Object.keys(before) as HarnessId[]) {
+  for (const tool of Object.keys(before) as FileTool[]) {
     const disabled = withMcpSwitch(tool, before[tool], 'docs', true);
     assert.match(disabled, off[tool], tool);
     assert.equal(mcpDisabled(tool, disabled, 'docs'), true, tool);

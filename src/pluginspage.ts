@@ -121,7 +121,7 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
   // A tool that takes no plugins at all (Pi) explains itself in its own boxes and the key: it is no hint here.
   const pluginColumns = view.tools.filter(tool => takesPlugins(tool));
   // Tools whose CLI is missing share one sentence; any other reason is said as it is.
-  const noCli = pluginColumns.filter(tool => !view.clis[tool] && !view.desktopOnly?.[tool]);
+  const noCli = pluginColumns.filter(tool => !view.clis[tool] && !view.desktopOnly?.[tool] && tool !== 'claude-cowork');
   const reasons = [noCli.length > 1 ? `${andList(noCli.map(tool => names[tool]))}: command-line tools not found, so plugins can’t be installed there.` : '',
     ...pluginColumns.filter(tool => noCli.length < 2 || !noCli.includes(tool)).map(tool => blocked(view, entry, tool) ?? '')].filter(Boolean);
   const someCan = view.canWrite && (pluginColumns.some(tool => !blocked(view, entry, tool)) || view.tools.length > pluginColumns.length);

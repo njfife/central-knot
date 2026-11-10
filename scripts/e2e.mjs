@@ -2025,6 +2025,9 @@ async function fewToolsFlow() {
     '"--version") echo "2.1.317 (Claude Code)";;',
     `"plugin marketplace add ${appMarket}") mkdir -p "$HOME/.claude/plugins" && echo '{"team-tools":{"source":{"source":"directory","path":"${appMarket}"}}}' > "$HOME/.claude/plugins/known_marketplaces.json";;`,
     `"plugin install document-tools@team-tools --scope user") echo '{"version":2,"plugins":{"document-tools@team-tools":[{"scope":"user","installPath":"${appMarket}/plugins/document-tools","version":"1.2.0"}]}}' > "$HOME/.claude/plugins/installed_plugins.json";;`,
+    // With --cowork, Claude Code keeps the same records under other names in the folder it is pointed at (cowork.ts).
+    `"plugin marketplace add ${appMarket} --cowork") mkdir -p "$CLAUDE_CONFIG_DIR/cowork_plugins" && echo '{"team-tools":{"source":{"source":"directory","path":"${appMarket}"}}}' > "$CLAUDE_CONFIG_DIR/cowork_plugins/known_marketplaces.json";;`,
+    `"plugin install document-tools@team-tools --scope user --cowork") echo '{"version":2,"plugins":{"document-tools@team-tools":[{"scope":"user","installPath":"${appMarket}/plugins/document-tools","version":"1.2.0"}]}}' > "$CLAUDE_CONFIG_DIR/cowork_plugins/installed_plugins.json";;`,
     '*) exit 9;;', 'esac', ''].join('\n'));
   chmodSync(codeTab, 0o755);
   writeMarket(appMarket);
@@ -2043,6 +2046,37 @@ async function fewToolsFlow() {
   }
   await a.send('Emulation.clearDeviceMetricsOverride');
   check('with only Claude desktop, the plugin box names its route, its Code tab, and offers no parts instead', box.includes('Claude CodePlugin not installedThrough Claude desktop’s Code tab 2.1.317') && !box.includes('Only Claude desktop'), box);
+  // Cowork (cowork.ts): with Claude desktop here, once Cowork has run (its account's folder is there) it is a tool of its
+  // own on Plugins, and a plugin goes in through Claude desktop's own Claude Code with --cowork, in that folder.
+  const coworkBox = '#pcell-0-document-tools-claude-cowork';
+  check('Cowork is no tool before it has run here', !(await a.exists(coworkBox)) && !box.includes('Cowork'), box);
+  const cowork = join(home, 'Library/Application Support/Claude/local-agent-mode-sessions/4c22591e-4a8e-4f25-a463-2553c911ad10/a5a63f38-ccf7-4f64-a64b-fdf037fea7e5');
+  mkdirSync(cowork, { recursive: true });
+  const openPlugin = async () => {
+    await a.click('#nav-plugins');
+    await a.click('#header-refresh');
+    // Plugins opens where it was left: the plugin's own page, or the list to open it from.
+    for (let tries = 0; tries < 30 && !(await a.exists('#popen-0-document-tools, .plugin-panel')); tries++) await wait(100);
+    if (await a.exists('#popen-0-document-tools')) await a.click('#popen-0-document-tools');
+    for (let tries = 0; tries < 30 && !(await a.exists(coworkBox)); tries++) await wait(100);
+  };
+  await openPlugin();
+  const withCowork = await a.text('.plugin-panel');
+  check('once Cowork has run, the plugin box lists it after Claude Code, not installed, with no stand-in route named', /Claude CodePlugin not installedThrough Claude desktop’s Code tab 2\.1\.317\s*CoworkPlugin not installed(?!Through)/.test(withCowork), withCowork);
+  await fitsAtMinimum(a, 'a plugin page with Cowork');
+  await a.shot('cowork-plugin');
+  await a.click('#nav-skills');
+  check('Cowork is a tool on the Plugins pages only: Skills has no column for it', !(await a.exists('#tool-claude-cowork')) && !(await a.text('.page')).includes('Cowork'));
+  if (canWriteRealHome) {
+    const realHome = await a.run(`document.querySelector('.status-home').title`);
+    const coworkInstall = await a.run(`window.centralKnot.installPlugin(${JSON.stringify(appMarket)}, 'team-tools', 'document-tools', ['claude-cowork'], ${JSON.stringify(realHome)})`);
+    same('the install into Cowork runs Claude desktop’s Claude Code with --cowork, and Cowork’s own record says installed',
+      [coworkInstall.reports?.map(report => [report.tool, report.outcome]), readFileSync(ranLog, 'utf8').split('\n').filter(line => line.endsWith('--cowork')), existsSync(join(cowork, 'cowork_plugins/installed_plugins.json')), existsSync(join(home, '.claude/plugins/installed_plugins.json'))],
+      [[['claude-cowork', 'installed']], [`plugin marketplace add ${appMarket} --cowork`, 'plugin install document-tools@team-tools --scope user --cowork'], true, false]);
+    await openPlugin();
+    same('its box then says installed in Cowork, and still not in Claude Code', [await a.run(`document.querySelector('${coworkBox}').dataset.state`), await a.run(`document.querySelector('#pcell-0-document-tools-claude-cli').dataset.state`)], ['installed', 'absent']);
+    await a.shot('cowork-plugin-installed');
+  }
   same('no page errors, few tools', a.pageErrors, []);
   await a.quit();
   // In the Practice copy (a real home is preview only off macOS) the install runs through that copy and its record counts.
@@ -2050,7 +2084,7 @@ async function fewToolsFlow() {
   const practiceHome = await p.run(`document.querySelector('.status-home').title`);
   await p.run(`window.centralKnot.addMarketplace(${JSON.stringify(appMarket)})`);
   const appInstall = await p.run(`window.centralKnot.installPlugin(${JSON.stringify(appMarket)}, 'team-tools', 'document-tools', ['claude-cli'], ${JSON.stringify(practiceHome)})`);
-  same('the install runs the Code tab’s Claude Code with the CLI’s own commands, and its record says installed', [appInstall.reports?.map(report => [report.tool, report.outcome]), readFileSync(ranLog, 'utf8').split('\n').filter(line => line.startsWith('plugin'))],
+  same('the install runs the Code tab’s Claude Code with the CLI’s own commands, and its record says installed', [appInstall.reports?.map(report => [report.tool, report.outcome]), readFileSync(ranLog, 'utf8').split('\n').filter(line => line.startsWith('plugin') && !line.endsWith('--cowork'))],
     [[['claude-cli', 'installed']], [`plugin marketplace add ${appMarket}`, 'plugin install document-tools@team-tools --scope user']]);
   same('no page errors, few tools, practice', p.pageErrors, []);
   await p.quit();

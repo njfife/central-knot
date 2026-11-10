@@ -10,7 +10,7 @@ export const componentsFrom = (contents: PluginContents): Components => ({
 
 /** What each component does on each tool (capability data, Appendix D, tested versions). Tools without plugins get []. */
 export function outcomes(tool: HarnessId, components: Components): Outcome[] {
-  if (tool !== 'claude-cli' && tool !== 'copilot-cli' && tool !== 'codex-cli') return [];
+  if (tool === 'pi-cli') return [];
   const list: Outcome[] = [];
   const add = (present: boolean | number, component: string, result: Outcome['result'], text: string, names?: Outcome['names']) => { if (present) list.push({ component, result, text, ...(names ? { names } : {}) }); };
   if (tool === 'claude-cli') {
@@ -19,6 +19,13 @@ export function outcomes(tool: HarnessId, components: Components): Outcome[] {
     add(components.agents, 'Agents', 'works', 'work as they are');
     add(components.hooks, 'Hooks', 'works', 'run; a hook that fails does not stop the install');
     add(components.mcp, 'MCP servers', 'works', 'run unchanged');
+  } else if (tool === 'claude-cowork') {
+    // Seen in a Cowork session: a plugin's skills. Its other parts go in with it, but what Cowork does with each isn't confirmed.
+    add(components.skills, 'Skills', 'works', 'keep their names');
+    add(components.commands, 'Commands', 'unknown', 'may not be offered: not confirmed in Cowork');
+    add(components.agents, 'Agents', 'unknown', 'may not be offered: not confirmed in Cowork');
+    add(components.hooks, 'Hooks', 'unknown', 'may not run: not confirmed in Cowork');
+    add(components.mcp, 'MCP servers', 'unknown', 'may not start: not confirmed in Cowork');
   } else if (tool === 'copilot-cli') {
     add(components.skills, 'Skills', 'works', 'keep their names');
     add(components.commands, 'Commands', 'limited', 'become skills');
