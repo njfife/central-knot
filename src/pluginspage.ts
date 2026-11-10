@@ -7,10 +7,10 @@ import { button, closeButton, emptyState, h, icon, pendingCount, rereadBand, wit
 import { brandMark } from './brand.ts';
 import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
-import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
+import { dotted, pluginTitle, readme, toolBox, versionNote } from './pluginparts.ts';
 import { resultLines, pluginKey, queued, resultParts, resultSentence, summary, type ResultLine } from './pluginplan.ts';
-import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, stateOf, summaryOf, unavailable } from './pluginstatus.ts';
-import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, shownPlugins, undoOps } from './pluginstate.ts';
+import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, offeredVersion, otherVersions, otherVersionsLine, stateOf, summaryOf, unavailable, versionToCompare } from './pluginstatus.ts';
+import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoOps } from './pluginstate.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
 import { andList, orList, toolName, toolNames as names } from './words.ts';
@@ -55,21 +55,29 @@ function marketList(view: PluginsView, shown: MarketplaceView) {
 /** One row per plugin: what it is and holds, and a box per tool. The row opens the plugin's page. */
 function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: number, plugin: PluginView) {
   // A plugin kept elsewhere says what it holds once its files have been read; while reading, that; else where it lives.
-  const read = market.details.get(pluginKey(entry.source, plugin.name));
-  const readContents = read?.reading ? 'Reading what it holds…' : read?.value && !read.value.problem ? summaryOf(componentsFrom(read.value)) : '';
+  const key = pluginKey(entry.source, plugin.name);
+  const detail = shownDetail(key);
+  const readContents = detail === undefined && market.details.get(key)?.reading ? 'Reading what it holds…' : detail?.offered ? summaryOf(componentsFrom(detail)) : '';
+  const offered = offeredVersion(plugin, detail);
   const holds = plugin.components ? summaryOf(plugin.components) : readContents || (plugin.from ? `From ${plugin.from.label}` : '');
+  // A tool on another version than the marketplace offers is named on the row, so it shows without opening the plugin.
+  const compareTo = versionToCompare(plugin, detail);
+  const others = otherVersions(view, entry, plugin.name, compareTo);
   const open = () => browse({ plugin: plugin.name });
   return h('div.ov-row.plugin-row', { role: 'row', 'data-plugin': plugin.name, onclick: open },
     h('div.ov-name.plugin-row-name', { role: 'cell' },
       h('button.plugin-row-open', { type: 'button', id: `popen-${marketIndex}-${plugin.name}`, 'aria-label': `Open ${pluginTitle(plugin)}`, onclick: (event: Event) => { event.stopPropagation(); open(); } },
         // The category pill is left out while that category is the filter: every row would say the same.
-        h('span.plugin-row-title', {}, pluginTitle(plugin)), plugin.category && !market.nav.category ? h('span.plugin-chip', {}, plugin.category) : null),
+        h('span.plugin-row-title', {}, pluginTitle(plugin)), offered ? h('span.plugin-row-version', { title: 'The version the marketplace offers' }, offered) : null,
+        plugin.category && !market.nav.category ? h('span.plugin-chip', {}, plugin.category) : null),
       // The description first, then what it holds: when room runs out the description shortens or steps aside (style.css).
       plugin.description || holds ? h('span.plugin-row-line', {},
         plugin.description ? h('span.plugin-row-about', { title: plugin.description }, plugin.description) : null,
         plugin.description && holds ? h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·') : null,
-        holds ? h('span.plugin-row-holds', { title: holds }, holds) : null) : null),
-    view.tools.map(tool => toolBox(view, entry, plugin, tool, marketIndex)),
+        holds ? h('span.plugin-row-holds', { title: holds }, holds) : null) : null,
+      // A tool on another version, on its own line under that.
+      others.length ? versionNote(h('span', {}, otherVersionsLine(others)), '.plugin-row-warning') : null),
+    view.tools.map(tool => toolBox(view, entry, plugin, tool, marketIndex, compareTo)),
     h('div.ov-cell.plugin-row-go', { role: 'cell', 'aria-hidden': 'true' }, icon('chevron-right', 14, 'tone-faint')));
 }
 

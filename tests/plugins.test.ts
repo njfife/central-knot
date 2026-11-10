@@ -39,6 +39,7 @@ async function marketplace(root: string, extra: unknown[] = []) {
   await put(join(full, 'agents/helper.md'), 'Helper.\n');
   await put(join(full, 'hooks/hooks.json'), JSON.stringify({ hooks: { SessionStart: [] } }));
   await put(join(full, '.mcp.json'), JSON.stringify({ mcpServers: { local: { command: '${CLAUDE_PLUGIN_ROOT}/server' } } }));
+  await put(join(root, 'plugins/marker/.claude-plugin/plugin.json'), JSON.stringify({ name: 'marker', version: '0.3.0' }));
   await put(join(root, 'plugins/marker/skills/ck-marker-skill/SKILL.md'), '---\nname: ck-marker-skill\ndescription: Marker.\n---\nReply ck-mk-1.\n');
 }
 
@@ -68,6 +69,8 @@ test('A catalog lists its plugins and what each holds, and reads nothing outside
     assert.deepEqual(catalog.plugins.map(plugin => plugin.name), ['escape', 'full', 'marker']);
     assert.deepEqual(catalog.plugins.find(plugin => plugin.name === 'full')!.components, { skills: 2, commands: 1, agents: 1, hooks: true, mcp: 1, mcpRootVariable: true, bin: false, skillNames: ['one', 'two'] });
     assert.equal(catalog.plugins.find(plugin => plugin.name === 'escape')!.components, undefined, 'a path outside is not read');
+    // A version the entry doesn't give comes from the plugin's own plugin.json, whether or not its files are counted.
+    for (const counts of [true, false]) assert.equal((await parseCatalog(root, root, 'folder', { counts })).plugins.find(plugin => plugin.name === 'marker')!.version, '0.3.0');
     assert.equal(catalog.copilotRefuses, undefined);
   } finally { await box.cleanup(); }
 });
@@ -256,12 +259,21 @@ test('Installed means files where the tool records them; a record with no files 
     // A settings file saved with a byte-order mark is read like any other.
     await put(join(box.home, '.claude/plugins/installed_plugins.json'), `\uFEFF${JSON.stringify({ version: 2, plugins: { 'p@m': [{ scope: 'user', installPath: cache }] } })}`);
     assert.equal((await installState(box.context, 'claude-cli', 'm', 'p')).state, 'installed');
+    // Its version is the one the tool records; Claude Code's "unknown" falls back to the copy's plugin.json.
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'p@m': [{ scope: 'user', installPath: cache, version: '1.0.0' }] } }));
+    assert.partialDeepStrictEqual(await installState(box.context, 'claude-cli', 'm', 'p'), { state: 'installed', path: cache, version: '1.0.0' });
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'p@m': [{ scope: 'user', installPath: cache, version: 'unknown' }] } }));
+    await put(join(cache, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'p', version: '0.9.1' }));
+    assert.equal((await installState(box.context, 'claude-cli', 'm', 'p') as { version?: string }).version, '0.9.1');
+    // So does a commit hash, which Claude Code records for a plugin without a version.
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'p@m': [{ scope: 'user', installPath: cache, version: 'a1b2c3d4e5f6' }] } }));
+    assert.equal((await installState(box.context, 'claude-cli', 'm', 'p') as { version?: string }).version, '0.9.1');
 
     const copied = join(box.home, '.copilot/installed-plugins/m/p');
-    await put(join(box.home, '.copilot/config.json'), `// User settings belong in settings.json.\n// This file is managed automatically.\n${JSON.stringify({ installedPlugins: [{ name: 'p', marketplace: 'm', cache_path: copied, enabled: true }] })}`);
+    await put(join(box.home, '.copilot/config.json'), `// User settings belong in settings.json.\n// This file is managed automatically.\n${JSON.stringify({ installedPlugins: [{ name: 'p', marketplace: 'm', version: '2.1.0', cache_path: copied, enabled: true }] })}`);
     assert.equal((await installState(box.context, 'copilot-cli', 'm', 'p')).state, 'not-known');
     await put(join(copied, 'skills/s/SKILL.md'), 'x');
-    assert.equal((await installState(box.context, 'copilot-cli', 'm', 'p')).state, 'installed');
+    assert.partialDeepStrictEqual(await installState(box.context, 'copilot-cli', 'm', 'p'), { state: 'installed', path: copied, version: '2.1.0' });
 
     const live = join(box.base, 'live-market');
     await marketplace(live);
@@ -272,7 +284,31 @@ test('Installed means files where the tool records them; a record with no files 
     await put(join(box.home, '.codex/config.toml'), '[plugins."p@m"]\nenabled = true\n');
     assert.equal((await installState(box.context, 'codex-cli', 'm', 'p')).state, 'not-known');
     await put(join(box.home, '.codex/plugins/cache/m/p/1.0.0/skills/s/SKILL.md'), 'x');
-    assert.equal((await installState(box.context, 'codex-cli', 'm', 'p')).state, 'installed');
+    assert.partialDeepStrictEqual(await installState(box.context, 'codex-cli', 'm', 'p'), { state: 'installed', path: join(box.home, '.codex/plugins/cache/m/p/1.0.0'), version: '1.0.0' });
+  } finally { await box.cleanup(); }
+});
+
+test('Codex loads the copy it chooses from its cache: the highest version, or "local", and a commit-named copy has its manifest\'s version', async () => {
+  const box = await sandbox();
+  try {
+    const version = async (plugin = 'p') => (await installState(box.context, 'codex-cli', 'm', plugin) as { version?: string }).version;
+    await put(join(box.home, '.codex/config.toml'), '[plugins."p@m"]\nenabled = true\n\n[plugins."h@m"]\nenabled = true\n');
+    await put(join(box.home, '.codex/plugins/cache/m/p/1.0.0/skills/s/SKILL.md'), 'x');
+    // With several copies kept, Codex loads the highest version (numbers compared as numbers), or "local" when there is one.
+    await put(join(box.home, '.codex/plugins/cache/m/p/1.10.0/skills/s/SKILL.md'), 'x');
+    await put(join(box.home, '.codex/plugins/cache/m/p/1.9.0/skills/s/SKILL.md'), 'x');
+    assert.equal(await version(), '1.10.0');
+    // A release ranks above its own pre-release, as semantic versions do.
+    await put(join(box.home, '.codex/plugins/cache/m/p/1.10.0-rc.1/skills/s/SKILL.md'), 'x');
+    assert.equal(await version(), '1.10.0');
+    // Codex reads "v1.9.0" as no semantic version, so plain text orders it, and it sorts above "1.10.0".
+    await put(join(box.home, '.codex/plugins/cache/m/p/v1.9.0/skills/s/SKILL.md'), 'x');
+    assert.equal(await version(), 'v1.9.0');
+    await put(join(box.home, '.codex/plugins/cache/m/p/local/.codex-plugin/plugin.json'), JSON.stringify({ version: '2.0.0-dev' }));
+    assert.partialDeepStrictEqual(await installState(box.context, 'codex-cli', 'm', 'p'), { state: 'installed', path: join(box.home, '.codex/plugins/cache/m/p/local'), version: '2.0.0-dev' });
+    // A curated plugin's folder is named for a commit, not a version: its manifest gives the version.
+    await put(join(box.home, '.codex/plugins/cache/m/h/77c10e110b37/.codex-plugin/plugin.json'), JSON.stringify({ version: '0.2.0' }));
+    assert.equal(await version('h'), '0.2.0');
   } finally { await box.cleanup(); }
 });
 
@@ -414,7 +450,7 @@ test('Codex turns one skill of a plugin off by name in config.toml and back on t
     const off = await switchTo('one', false);
     assert.deepEqual([off.outcome, off.changed], ['skill-off', true], off.message);
     assert.equal(await readFile(config, 'utf8'), `${original}\n[[skills.config]]\nname = "full:one"\nenabled = false\n`);
-    assert.deepEqual(await installState(box.context, 'codex-cli', 'ck-test-market', 'full'), { state: 'installed', path: copy, skills: ['one', 'second'], skillsOff: [{ skill: 'one' }] });
+    assert.deepEqual(await installState(box.context, 'codex-cli', 'ck-test-market', 'full'), { state: 'installed', path: copy, version: '1.0.0', skills: ['one', 'second'], skillsOff: [{ skill: 'one' }] });
     assert.equal((await switchTo('one', false)).changed, undefined, 'already off is not a change');
     const on = await switchTo('one', true);
     assert.deepEqual([on.outcome, on.changed], ['skill-on', true], on.message);

@@ -45,7 +45,9 @@ export const market = {
   readmes: new Map<string, Read<string | undefined>>(),
   /** Each plugin's contents and README, by plugin key; null when its files couldn't be found. */
   details: new Map<string, Read<PluginDetail | null>>(),
-  /** Part descriptions opened with "Show more", by plugin key and part, so a redraw keeps them open. */
+  /** The last contents read of each plugin, shown while it is read again after a new view (see markDetailsStale, shownDetail, forgetDetails). */
+  previous: new Map<string, PluginDetail>(),
+  /** Part descriptions opened with "Show more" and part files opened, by plugin key and part, so a redraw keeps them open (see toggleOpened). */
   opened: new Set<string>(),
   /** What is typed in the add box, kept through loading and errors. */
   draftSource: '',
@@ -53,10 +55,16 @@ export const market = {
   addOpen: false,
 };
 
+/** Opens or closes one remembered part ("Show more", or a part's file) and redraws. */
+export function toggleOpened(key: string): void {
+  if (market.opened.has(key)) market.opened.delete(key); else market.opened.add(key);
+  rerender();
+}
+
 /** A different home has other tools and other installs: nothing chosen, done or read in the last one carries over. */
 export function resetMarket(): void {
   resetPageData(market.read); market.problem = undefined; market.draft.clear(); market.lastRun = undefined; market.working = undefined; market.addOpen = false;
-  market.readmes.clear(); market.details.clear(); market.opened.clear(); market.nav = startNav();
+  market.readmes.clear(); forgetDetails(); market.opened.clear(); market.nav = startNav();
 }
 
 /** The marketplace on screen: the one chosen, or the first listed. The page and the reads both use this. */
@@ -105,9 +113,37 @@ function showView(view?: PluginsView | null): void {
 
 /** After a new view: stale choices go, the place on screen is checked against it, and what it shows is read. */
 function settleView(): void {
+  markDetailsStale();
   prune(market.draft, market.view);
   settleNav();
   readShown();
+}
+
+/**
+ * A new view carries new install states, and a plugin's contents include each tool's installed copy, so each plugin's
+ * contents are read again when shown. Until then the last read stays on screen (`previous`). A read still on its way is
+ * dropped when it lands (its placeholder is gone). A read that failed and holds no tool's copy is kept: it is tried again
+ * only when its plugin is opened or on Refresh, so an offline Git source isn't cloned again on every view.
+ */
+function markDetailsStale(): void {
+  for (const [key, read] of [...market.details]) {
+    const value = read.reading ? undefined : read.value;
+    if (value?.problem && !Object.keys(value.installed ?? {}).length) continue;
+    if (value) market.previous.set(key, value);
+    market.details.delete(key);
+  }
+}
+
+/** Forgets every plugin's contents, the ones shown while re-reading too: after a Refresh they may all have changed. */
+function forgetDetails(): void {
+  market.details.clear();
+  market.previous.clear();
+}
+
+/** A plugin's contents to show: the latest read, or while it is read again, the one before (undefined when never read). */
+export function shownDetail(key: string): PluginDetail | null | undefined {
+  const read = market.details.get(key);
+  return read && !read.reading ? read.value : market.previous.get(key);
 }
 
 /**
@@ -147,9 +183,10 @@ export async function loadPlugins(fresh = false, readId?: number): Promise<void>
   const result = await reading;
   if (result === 'dropped') return;
   if (result === 'ready') {
-    // Refresh all reads everything again; a folder marketplace is read from disk every time, so what was read from it may have changed.
-    if (fresh) { market.readmes.clear(); market.details.clear(); }
-    else for (const entry of market.view?.marketplaces ?? []) if (entry.kind === 'folder') dropReads(entry.source);
+    // Refresh all reads every README and every plugin's files again, and tries again those that couldn't be read (see
+    // markDetailsStale); a folder marketplace is read from disk every time, so its README may have changed.
+    if (fresh) { market.readmes.clear(); forgetDetails(); }
+    else for (const entry of market.view?.marketplaces ?? []) if (entry.kind === 'folder') market.readmes.delete(entry.source);
     settleView();
     markReread();
   }
@@ -190,7 +227,7 @@ export const forgetMarketplace = (source: string) => act('removing', async () =>
   const gone = market.view?.marketplaces.find(entry => entry.source === source);
   const name = gone ? marketTitle(gone) : undefined;
   const view = await api().forgetMarketplace(source);
-  dropReads(source);
+  market.readmes.delete(source);
   if (market.nav.source === source) market.nav = startNav();
   showView(view);
   const text = `${name || 'It'} was removed from this list. Tools that added it keep it, and nothing was uninstalled.`;
