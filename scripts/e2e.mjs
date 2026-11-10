@@ -1154,6 +1154,13 @@ async function practiceFlow() {
   check('going back from "Stop sharing" keeps the ticks', await a.run(`document.querySelector('#base-tool-claude-cli').checked && document.querySelector('#base-tool-codex-cli').checked`));
   await a.run(`document.querySelector('#base-tool-claude-cli').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`); await a.settle();
   check('Esc on a tool box cancels the untouched base editor', !(await a.exists('#base-text')));
+  // A typed base draft belongs to this home: switching home from another page asks first on Instructions, and stays.
+  await a.click('#base-edit');
+  await a.run(`(() => { const area = document.querySelector('#base-text'); area.value += '- Not saved.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#nav-skills');
+  await a.click('#home-actual');
+  check('a home switch with a typed base draft asks first and stays', await a.exists('#base-discard') && (await a.run(`document.querySelector('#base-text')?.value`) ?? '').includes('- Not saved.') && await a.run(`document.querySelector('#home-fixture')?.getAttribute('aria-current') === 'true'`), await a.text('.bands'));
+  await a.click('#base-discard');
   await a.click('#base-edit');
   await a.click('#base-tool-claude-cli'); await a.click('#base-tool-codex-cli');
   await a.click('#base-review'); await a.click('#base-save');
