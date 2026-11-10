@@ -25,18 +25,18 @@ import { compareVersions, record, withoutBom } from './values.ts';
 /** One tool's switch file, read and parsed once: its text ('' when there is none yet), or why it can't be used. */
 export interface SwitchFile { tool: HarnessId; path: string; text: string; exists: boolean; problem?: SwitchProblem; parsed?: ParsedSwitches }
 
-/**
- * The lowest build of each tool where its switch was seen working (Appendix B, V-20). Below it, no new Disable is offered
- * (ENB-01, DET-03), while a copy already disabled shows as disabled and can be enabled again. An unknown build (no CLI found,
- * say only a desktop app) is not held back: the settings file is the tool's documented one either way.
- */
-const VERIFIED_FROM: Record<HarnessId, string> = { 'claude-cli': '2.1.311', 'pi-cli': '1.5.0', ...SKILL_SWITCH_TESTED_FROM } as Record<HarnessId, string>;
+/** The lowest build of each tool where its switch was seen working (Appendix B, V-20). */
+const VERIFIED_FROM: Partial<Record<HarnessId, string>> = { 'claude-cli': '2.1.311', 'pi-cli': '1.5.0', ...SKILL_SWITCH_TESTED_FROM };
 
-/** Why a new Disable isn't offered for this build of a tool, if it isn't. */
+/**
+ * A quiet note beside a tool's switch when its build is older than VERIFIED_FROM or can't be read (no CLI found, say only a
+ * desktop app). Information only: Disable is best effort, offered on any build; the file written is the tool's documented one.
+ */
 export function unverifiedBuild(tool: HarnessId, version: string | undefined): string | undefined {
-  if (!version) return undefined;
-  // Said like a plugin skill's switch (pluginstatus.ts untestedBuild).
-  return compareVersions(version, VERIFIED_FROM[tool]) < 0 ? `Not verified on this build of ${toolName(tool)} (${version}): Disable is verified from ${VERIFIED_FROM[tool]}.` : undefined;
+  const from = VERIFIED_FROM[tool];
+  if (!from) return undefined;
+  if (!version) return `${toolName(tool)}’s version couldn’t be read; Disable may not take effect.`;
+  return compareVersions(version, from) < 0 ? `Not checked on this version of ${toolName(tool)} (${version}); Disable may not take effect.` : undefined;
 }
 
 /** The file that holds a tool's skill switches. */
@@ -62,8 +62,7 @@ export function isDisabled(context: ShareContext, file: SwitchFile, target: Swit
 }
 
 /**
- * Turns one tool's copy of a skill off or on, then reads the file back to confirm. A caller offering a new Disable checks
- * unverifiedBuild first (this only edits the file; it doesn't know the tool's build). Writes only over the text it read (a save
+ * Turns one tool's copy of a skill off or on, then reads the file back to confirm. Writes only over the text it read (a save
  * made meanwhile is never overwritten) and only when something changes. `restore`: what Claude Code's override held before a
  * Disable (say "name-only"), put back by Enable instead of no override; without it, Enable puts back the value kept for that
  * folder. Returns whether it changed, and that earlier value. Throws an error whose message says why (see switchFailure).

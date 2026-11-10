@@ -263,10 +263,7 @@ function skillSwitches(view: PluginsView, entry: MarketplaceView, plugin: Plugin
   const rowNote = (skill: string) => {
     const chosen = (action: PluginOp['action']) => switchable.filter(tool => queued(market.draft, entry.source, plugin.name, tool, skill) === action).map(tool => names[tool]);
     const stuck = new Set(switchable.map(tool => why(tool, skill)).filter((reason): reason is string => !!reason && !columnWide.has(reason)));
-    // Turning one back on is offered on any build (ENB-01's reversal), but on an untested one its effect isn't verified: said so.
-    const unverified = switchable.filter(tool => skillOff(entry, plugin.name, tool, skill) && !why(tool, skill)).map(tool => untestedBuild(tool, view.versions?.[tool], !!view.clis[tool])).filter((reason): reason is string => !!reason)
-      .map(reason => `${reason} Turning it back on is still offered; its effect there isn’t verified.`);
-    const notes = [chosen('skill-off').length ? `Turns off in ${andList(chosen('skill-off'))} on Apply all.` : '', chosen('skill-on').length ? `Turns back on in ${andList(chosen('skill-on'))} on Apply all.` : '', ...stuck, ...unverified];
+    const notes = [chosen('skill-off').length ? `Turns off in ${andList(chosen('skill-off'))} on Apply all.` : '', chosen('skill-on').length ? `Turns back on in ${andList(chosen('skill-on'))} on Apply all.` : '', ...stuck];
     return notes.filter(Boolean).join(' ') || undefined;
   };
   const line = (text: string, mark?: HarnessId) => h('p.plugin-skills-note', {}, mark ? brandMark(mark, 13) : null, ...inlineMarkdown(text, openLink));
@@ -276,6 +273,8 @@ function skillSwitches(view: PluginsView, entry: MarketplaceView, plugin: Plugin
       switchable.length ? line('Turn a skill off, or back on, without uninstalling the plugin; nothing changes until Apply all.') : null,
       ...tools.filter(tool => NO_SKILL_SWITCH[tool]).map(tool => line(NO_SKILL_SWITCH[tool]!, tool)),
       ...[...columnWide].map(reason => line(reason)),
+      // Disable is best effort: on a build older than the one exercised, or one whose version can't be read, only said.
+      ...switchable.filter(tool => skills.some(part => !why(tool, part.name))).flatMap(tool => untestedBuild(tool, view.versions?.[tool]) ?? []).map(note => line(note)),
       switchable.length ? h('div.skill-switch-cols', { 'aria-hidden': 'true' }, h('span.skill-switches', {}, switchable.map(tool => h('span.skill-switch-head', { title: names[tool] }, brandMark(tool, 14), names[tool])))) : null,
     ],
     end: switchable.length ? skill => h('span.skill-switches', {}, switchable.map(tool => skillSwitch(view, entry, plugin, tool, skill, marketIndex))) : undefined,

@@ -154,7 +154,7 @@ test('A skill’s switch is its own choice: it runs between installs and removal
   assert.equal(resultSentence(resultLines([done('codex-cli', 'skill-on', true)], true), true), 'Undone: docs: pdf-reader back on in Codex.');
 });
 
-test('A skill’s switch is dropped once it means nothing: not installed there, already as chosen, held off, a tool with no such switch, or a build it isn’t tested on', () => {
+test('A skill’s switch is dropped once it means nothing: not installed there, already as chosen, held off, or a tool with no such switch; an older build keeps it', () => {
   const draft: PluginDraft = new Map();
   const choose = (tool: HarnessId, skill: string, action: PluginOp['action']) => toggle(draft, { ...op('docs', tool, action), skill });
   choose('codex-cli', 'keep', 'skill-off');
@@ -166,5 +166,5 @@ test('A skill’s switch is dropped once it means nothing: not installed there, 
   prune(draft, { home: '/h', tools: ['claude-cli', 'codex-cli', 'copilot-cli'], clis: { 'claude-cli': true, 'codex-cli': true, 'copilot-cli': true }, canWrite: true, versions: { 'codex-cli': '0.167.0', 'copilot-cli': '1.0.99' },
     marketplaces: [{ source: 'anthropics/skills', origins: ['central-knot'], name: 'anthropic-agent-skills', kind: 'git', sourceLabel: 'GitHub: anthropics/skills', plugins: [{ name: 'docs', description: '' }],
       states: { docs: { 'claude-cli': { state: 'installed', path: '/c' }, 'codex-cli': { state: 'installed', path: '/x', skillsOff: [{ skill: 'already' }, { skill: 'held', held: 'every skill named held' }] }, 'copilot-cli': { state: 'installed', path: '/p' } } } }] });
-  assert.deepEqual([...draft.values()].map(entry => `${entry.tool} ${entry.skill}`), ['codex-cli keep']);
+  assert.deepEqual([...draft.values()].map(entry => `${entry.tool} ${entry.skill}`), ['codex-cli keep', 'copilot-cli keep', 'copilot-cli old']);
 });

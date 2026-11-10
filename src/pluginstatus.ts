@@ -176,28 +176,24 @@ export const UNSAFE_SKILL_NAME = 'Its name has characters Central Knot doesn’t
 export function cantSwitchSkill(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, skill: string): string | undefined {
   const state = stateOf(entry, plugin, tool);
   if (state.state !== 'installed') return NO_SKILL_SWITCH[tool] ?? `It isn’t installed in ${names[tool]}.`;
-  const off = skillOff(entry, plugin, tool, skill);
-  // Only turning one off waits for a tested build; turning one back on is always offered.
-  const blocked = noSwitchReason(tool, state.skills, skill) ?? state.switchesHeld ?? off?.held ?? (off ? undefined : untestedBuild(tool, view.versions?.[tool], !!view.clis[tool]));
+  const blocked = noSwitchReason(tool, state.skills, skill) ?? state.switchesHeld ?? skillOff(entry, plugin, tool, skill)?.held;
   if (blocked) return blocked;
   if (!view.canWrite) return PREVIEW_ONLY;
-  return tool === 'copilot-cli' && !view.clis[tool] ? `${cliMissing(tool)}.` : undefined;
+  return tool === 'copilot-cli' && !view.clis[tool] ? `${cliMissing(tool)}, and its plugin skill switch is its \`copilot skill\` command, so it can’t run.` : undefined;
 }
 
 /** The oldest build of each tool its switch for one plugin skill was exercised on (capability data, Appendix B). */
 export const SKILL_SWITCH_TESTED_FROM: Partial<Record<HarnessId, string>> = { 'codex-cli': '0.142.3', 'copilot-cli': '1.0.107' };
 
 /**
- * Why turning off one plugin skill isn't offered on this build of a tool (ENB-01: native Disable only where it was
- * verified): its `version` is older than the switch was tested on, or isn't known: not read from its CLI, or no CLI
- * found to ask (`hasCli` false; Codex's switch needs no command, only a known build). Undefined when it may be offered.
+ * A quiet note beside a tool's plugin skill switches when its `version` is older than the switch was exercised on, or
+ * can't be read. Information only: Disable is best effort, offered on any build, and the switch is read back after.
  */
-export function untestedBuild(tool: HarnessId, version: string | undefined, hasCli: boolean): string | undefined {
+export function untestedBuild(tool: HarnessId, version: string | undefined): string | undefined {
   const from = SKILL_SWITCH_TESTED_FROM[tool];
   if (!from) return undefined;
-  if (!version && !hasCli) return `${cliMissing(tool)}, so its build can’t be checked and turning off one of its plugin skills isn’t offered.`;
-  if (!version) return `${names[tool]}’s version couldn’t be read, so turning off one of its plugin skills isn’t offered (verified from ${from}).`;
-  return compareVersions(version, from) < 0 ? `Not verified on this build of ${names[tool]} (${version}): turning off one plugin skill is verified from ${from}.` : undefined;
+  if (!version) return `${names[tool]}’s version couldn’t be read; turning a skill off may not take effect.`;
+  return compareVersions(version, from) < 0 ? `Not checked on this version of ${names[tool]} (${version}); turning a skill off may not take effect.` : undefined;
 }
 
 /**

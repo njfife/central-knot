@@ -237,21 +237,18 @@ test('Refresh lets go of the copies a marketplace’s plugins keep from other re
   } finally { await box.cleanup(); }
 });
 
-test('Turning a plugin skill off waits for a tested build, read from the tool’s CLI; turning it back on never does', { skip: process.platform === 'win32' }, async () => {
+test('Turning a plugin skill off is offered on a build older than the one tested; Refresh reads the build again for the note', { skip: process.platform === 'win32' }, async () => {
   const box = await setup({ codex: true });
   try {
     await mkdir(join(box.base, 'bin'), { recursive: true });
     await writeFile(join(box.base, 'bin/codex'), '#!/bin/sh\necho "codex-cli 0.100.0"\n', { mode: 0o755 });
     const root = join(box.base, 'market');
     await marketplace(root, 'team', ['pdf']);
-    const off = await box.markets.setSkill(root, 'team', 'pdf', 'one', 'codex-cli', false, box.home);
-    assert.match(off.reports[0]!.message, /Not verified on this build of Codex \(0\.100\.0\)/);
-    const on = await box.markets.setSkill(root, 'team', 'pdf', 'one', 'codex-cli', true, box.home);
-    assert.equal(on.reports[0]!.outcome, 'skill-on');
-    assert.deepEqual(box.calls.filter(call => call.startsWith('skill')), ['skill pdf:one@team codex-cli true entry=pdf'], 'only the turn-on reached the tool, with the plugin’s catalog entry');
-    // Codex updated while the app is open: Refresh all reads its build again, and turning off is offered.
+    assert.equal((await box.markets.setSkill(root, 'team', 'pdf', 'one', 'codex-cli', false, box.home)).reports[0]!.outcome, 'skill-off');
+    assert.deepEqual(box.calls.filter(call => call.startsWith('skill')), ['skill pdf:one@team codex-cli false entry=pdf'], 'the turn-off reached the tool, with the plugin’s catalog entry');
+    assert.equal((await box.markets.view()).versions?.['codex-cli'], '0.100.0');
+    // Codex updated while the app is open: Refresh all reads its build again.
     await writeFile(join(box.base, 'bin/codex'), '#!/bin/sh\necho "codex-cli 0.167.0"\n', { mode: 0o755 });
     assert.equal((await box.markets.view(true)).versions?.['codex-cli'], '0.167.0');
-    assert.equal((await box.markets.setSkill(root, 'team', 'pdf', 'one', 'codex-cli', false, box.home)).reports[0]!.outcome, 'skill-off');
   } finally { await box.cleanup(); }
 });

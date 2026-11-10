@@ -611,9 +611,6 @@ function switchLine(skill: SampleSkill, tool: Tool): string {
   if (problem) return `${problemText(problem, shownPath)} Fix it, then Refresh.`;
   const disabled = !!skill.disabled?.includes(tool);
   const was = !!committedOf(skill.key).disabled?.includes(tool);
-  // An older build: no new Disable, but a copy disabled there can still be enabled (its effect there isn't verified).
-  if (!disabled && !was && skill.disableUnverified?.[tool]) return skill.disableUnverified[tool]!;
-  if (skill.disableUnverified?.[tool] && was) return disabled ? 'Disabled. Turning it back on is still offered; its effect there isn’t verified.' : 'Enabled again on Apply all; its effect there isn’t verified.';
   if (disabled && skill.copies[tool] === undefined) return was ? `Gets a copy on Apply all, still disabled there from before: ${names[tool]} won’t load it.` : `Gets a copy on Apply all, disabled: ${names[tool]} won’t load it.`;
   if (disabled && !was) return 'Disabled on Apply all.';
   // "Still synced" only where the skill really syncs to this tool: its box can be off while the copy stays disabled.
@@ -628,6 +625,14 @@ function switchLine(skill: SampleSkill, tool: Tool): string {
  * arrives disabled: only what Disable or Remove does there. Otherwise how the copies stand, then that.
  */
 function rowLine(skill: SampleSkill, tool: Tool, quiet: boolean): string {
+  // Disable is best effort: on a build older than the one verified, or one whose version can't be read, it is only said.
+  const note = !skill.removing?.includes(tool) && !skill.switchProblem?.[tool] && !skill.cannot?.[tool]
+    && (skill.copies[tool] !== undefined || cellOf(skill, tool) === 'will-sync') ? skill.disableUnverified?.[tool] : undefined;
+  return [rowSentence(skill, tool, quiet), note].filter(Boolean).join(' ');
+}
+
+/** rowLine without the note on an unverified build. */
+function rowSentence(skill: SampleSkill, tool: Tool, quiet: boolean): string {
   const switching = switchLine(skill, tool);
   // While a draft is pending, a row with no change of its own stays as quiet as it is once applied.
   const base = committedOf(skill.key);
@@ -651,8 +656,8 @@ function toolControls(skill: SampleSkill, tool: Tool) {
   if (!has || skill.cannot?.[tool]) return null;
   const disabled = !!skill.disabled?.includes(tool);
   const pending = switchQueued(key, tool);
-  // No switch at all when its file can't be used, or (an older build) when it is enabled: only Enable is offered there.
-  const unavailable = !!skill.switchProblem?.[tool] || (!disabled && !pending && !!skill.disableUnverified?.[tool]);
+  // No switch at all when its file can't be used.
+  const unavailable = !!skill.switchProblem?.[tool];
   // Queued and restorable, so it is a quiet action, not a red one; a row without it keeps its place so the switches line up.
   const canRemove = removable(skill).includes(tool);
   const remove = canRemove ? smallAction('Remove', `remove-${key}-${tool}`, () => setRemoved(key, [tool], true), '.tool-remove') : h('span.tool-remove-slot', { 'aria-hidden': 'true' });
@@ -701,7 +706,7 @@ function replacedOnApply(skill: SampleSkill, tool: Tool) {
 function switchNote(skill: SampleSkill, inFiles: boolean) {
   if (kind !== 'skills' || designMode) return null;
   const switchShown = toolList().some(tool => !skill.removing?.includes(tool) && !skill.cannot?.[tool] && !skill.switchProblem?.[tool]
-    && !(skill.disableUnverified?.[tool] && !skill.disabled?.includes(tool)) && (skill.copies[tool] !== undefined || cellOf(skill, tool) === 'will-sync'));
+    && (skill.copies[tool] !== undefined || cellOf(skill, tool) === 'will-sync'));
   const removeShown = removable(skill).some(tool => !skill.removing?.includes(tool));
   if (!switchShown && !removeShown) return null;
   const parts = [
