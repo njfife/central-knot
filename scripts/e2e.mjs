@@ -196,6 +196,18 @@ async function harnessFlow() {
   await a.click('#harness-copilot-cli');
   await a.click('#harness-tab-instructions');
   await a.click('#harness-switch-claude-cli');
+  // At the smallest window nothing on a harness's page scrolls sideways: every tab, and the instruction file while it is edited
+  // (before any save, while the card sizes to its file rather than to the versions list).
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 1, mobile: false });
+  const sideways = () => a.run(`[...document.querySelectorAll('#page, #page *')].filter(el => /auto|scroll/.test(getComputedStyle(el).overflowX) && el.scrollWidth > el.clientWidth + 1).map(el => el.id || el.className).join(', ')`);
+  const overflowing = [];
+  for (const tab of ['skills', 'mcp', 'agents', 'instructions', 'plugins', 'about']) { await a.click(`#harness-tab-${tab}`); const wide = await sideways(); if (wide) overflowing.push(`${tab}: ${wide}`); }
+  await a.click('#harness-tab-instructions');
+  await a.click('#ins-edit-claude-cli');
+  const editing = await sideways(); if (editing) overflowing.push(`editing: ${editing}`);
+  await a.click('#ins-cancel-claude-cli');
+  await a.send('Emulation.clearDeviceMetricsOverride');
+  same('at 860×560 no harness tab scrolls sideways, editing included', overflowing, []);
   await a.click('#ins-edit-claude-cli');
   await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); area.value += '- Saved from its harness page.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#ins-review-claude-cli');

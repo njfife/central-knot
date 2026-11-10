@@ -385,7 +385,7 @@ const toolLine = (skill: SampleSkill, tool: Tool): string => {
     const tells = version && others.some(other => other && (other.lines !== version.lines || other.changed !== version.changed));
     return `Has a different copy${tells ? ` (${version!.lines}, ${version!.changed})` : ''}.`;
   }
-  if (cellState === 'present') return skill.managed ? 'Has its own copy. Syncing to this tool is turned off.' : 'Has its own copy. Central Knot is not managing this skill.';
+  if (cellState === 'present') return skill.managed ? 'Has its own copy. Syncing to this tool is turned off.' : 'Has its own copy.';
   return skill.managed ? 'No copy, and syncing here is turned off.' : 'No copy.';
 };
 

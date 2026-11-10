@@ -1425,7 +1425,8 @@ button.harness-card-main:disabled { cursor: default; }
 .ov-tool-head.tool-head-focus { background: var(--hover); border-radius: 8px 8px 0 0; align-self: stretch; display: flex; align-items: center; justify-content: center; }
 /* Its instruction card: with nothing beside the file, it is as wide as the file at its reading measure (no empty frame);
    with notes or earlier versions beside it (wide windows), it spans the pane. */
-.harness-page .ins-card { max-width: none; width: fit-content; min-width: min(100%, 520px); }
+/* Sized to its file at a reading measure, never wider than the pane (the file box's 100% then resolves against the pane). */
+.harness-page .ins-card { max-width: 100%; width: fit-content; min-width: min(100%, 520px); box-sizing: border-box; }
 .harness-page .ins-card:has(> .ins-versions, > .ins-note) { width: auto; }
 /* Its toolbar holds one more action (Add from…), so the right-hand group wraps onto a second line rather than run off the edge. */
 .harness-page .ov-page > .toolbar { flex-wrap: wrap; row-gap: 4px; padding-top: 4px; padding-bottom: 4px; }
@@ -1440,8 +1441,9 @@ button.harness-card-main:disabled { cursor: default; }
 .harness-card:has(> .harness-card-main:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px; }
 button.harness-card-main:focus-visible { outline: 0; }
 .harness-card:has(> .harness-card-main:disabled) { opacity: 0.6; }
-/* A wide card lays its counts in two groups side by side: the three kinds, then its instruction file and plugins. */
-@container (min-width: 460px) {
+/* A wide card lays its counts in two groups side by side: the three kinds, then its instruction file and plugins. Below 600px
+   (a 2×2 grid at 1280) one column keeps notes such as "2 managed · 3 unmanaged" on one line. */
+@container (min-width: 600px) {
   .harness-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; align-items: start; }
   .harness-count-group { display: grid; grid-template-columns: max-content minmax(2ch, max-content) minmax(0, 1fr); column-gap: 12px; row-gap: 4px; align-items: baseline; }
 }
