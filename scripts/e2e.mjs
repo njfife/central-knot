@@ -2081,7 +2081,9 @@ async function openCodeFlow() {
   writeFileSync(join(oc, 'AGENTS.md'), 'Be brief.\n');
   mkdirSync(join(oc, 'agents'));
   writeFileSync(join(oc, 'agents/helper.md'), '---\ndescription: Helps.\nmode: subagent\n---\n\nYou help.\n');
-  const a = await launch(join(scratch, 'opencode-data'), flag('--electron') ? ['--as-released'] : [], home);
+  // Every tool is looked for only inside this home, so the flow reads the same on a machine that has some installed.
+  const onlyHere = { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' };
+  const a = await launch(join(scratch, 'opencode-data'), flag('--electron') ? ['--as-released'] : [], home, onlyHere);
   // With --shots, a page's picture at each window size the app must fit.
   const pictures = async (page, name) => { if (!shots) return; for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(page, width, height); await page.shot(`${name}-${width}`); } await fullSize(page); };
   await a.click('#nav-harnesses');
@@ -2096,7 +2098,8 @@ async function openCodeFlow() {
     [await cellState(a, 'notes', 'opencode-cli'), await cellState(a, 'oc-only', 'opencode-cli'), await cellState(a, 'shared', 'opencode-cli'), await cellState(a, 'notes', 'claude-cli'), await cellState(a, 'oc-only', 'claude-cli')],
     ['present', 'present', 'present', 'present', 'absent']);
   await a.click('#open-notes');
-  check('a skill OpenCode reads in Claude Code’s folder has its Disable there, and no Remove: the copy is Claude Code’s', await a.exists('#enable-notes-opencode-cli') && !(await a.exists('#remove-notes-opencode-cli')) && await a.exists('#remove-notes-claude-cli'));
+  check('a skill OpenCode reads in Claude Code’s folder says so, with its Disable there and no Remove: the copy is Claude Code’s', await a.exists('#enable-notes-opencode-cli') && !(await a.exists('#remove-notes-opencode-cli')) && await a.exists('#remove-notes-claude-cli')
+    && (await a.text('.ov-row[data-key="notes"] + *') ?? '').includes('Reads Claude Code’s copy.'), await a.text('.ov-row[data-key="notes"] + *'));
   await fitsAtMinimum(a, 'Skills with OpenCode, a skill open');
   await pictures(a, 'opencode-skill-open');
   const view = await a.run('window.centralKnot.refresh()');
@@ -2122,7 +2125,7 @@ async function openCodeFlow() {
   await a.quit();
 
   // Writes, in the Practice copy (a real home is preview only off macOS): OpenCode joins it by its folder.
-  const p = await launch(join(scratch, 'opencode-practice-data'), ['--practice-copy'], home);
+  const p = await launch(join(scratch, 'opencode-practice-data'), ['--practice-copy'], home, onlyHere);
   const practice = await p.run(`document.querySelector('.status-home').title`);
   const mine = join(practice, '.config/opencode');
   skill(join(mine, 'skills'), 'oc-only');

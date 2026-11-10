@@ -190,6 +190,11 @@ export interface ToolCopy {
   summary: string;
   /** False for a copy reached through a link or in a folder other tools share: Central Knot never writes there. */
   writable: boolean;
+  /**
+   * The tool here whose own skills folder this copy is in, when it is another tool's: OpenCode reads Claude Code's folder, so a
+   * skill there is Claude Code's copy, which OpenCode reads. It is no second copy: sync neither follows it nor writes beside it.
+   */
+  readsFrom?: HarnessId;
   /** Folder name as found, with its case. */
   folder: string;
   /** Skills: the name this tool reads for this copy (its frontmatter name), which Copilot's switch goes by. */

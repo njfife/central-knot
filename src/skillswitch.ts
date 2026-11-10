@@ -201,14 +201,15 @@ function piExcludes(entry: unknown, forms: Set<string>, home: string): boolean {
   return forms.has(path.startsWith('~/') ? forwardSlashes(join(home, path.slice(2))) : isAbsolute(path) ? forwardSlashes(path) : path);
 }
 
-/** OpenCode's rules for skills: `permission.skill` as a map of name patterns, or one word for every skill (then under "*"). */
-const openCodeRules = (json: Record<string, unknown>): [string, unknown][] => {
-  const rules = record(json.permission)?.skill;
-  return typeof rules === 'string' ? [['*', rules]] : Object.entries(record(rules) ?? {});
-};
 /** Whether an OpenCode pattern (`*` any run of characters, `?` one) is this name. */
 const openCodeMatches = (pattern: string, name: string) => new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 's').test(name);
-/** What OpenCode's rules say about a skill: the last one matching its name decides. */
+/**
+ * OpenCode's rules about skills, in the order it reads them: `permission.skill`, a map of name patterns or one word for
+ * every skill, and any other `permission` key that covers skills (`"*"`), whose word is for every skill too.
+ */
+const openCodeRules = (json: Record<string, unknown>): [string, unknown][] => Object.entries(record(json.permission) ?? {}).flatMap(([key, value]): [string, unknown][] =>
+  (key === 'skill' ? (typeof value === 'string' ? [['*', value]] : Object.entries(record(value) ?? {})) : typeof value === 'string' && openCodeMatches(key, 'skill') ? [['*', value]] : []));
+/** What OpenCode's rules say about a skill: the last one matching its name decides (measured, also for a `"*"` written after `skill`). */
 const openCodeAction = (rules: [string, unknown][], name: string) => rules.filter(([pattern]) => openCodeMatches(pattern, name)).at(-1)?.[1];
 
 /** Whether the parsed settings turn this copy off, and (Claude Code) what its override held otherwise. */
@@ -241,23 +242,26 @@ function withSwitch(context: ShareContext, file: SwitchFile, target: SwitchTarge
     return bom + putList('disabledSkills', disabled ? [...others, target.name] : others);
   }
   if (file.tool === 'opencode-cli') {
-    const path = ['permission', 'skill'];
-    const rules = openCodeRules(json);
     // Already as asked: not a byte changes.
-    if ((openCodeAction(rules, target.name) === 'deny') === disabled) return file.text;
-    const own = rules.find(([pattern]) => pattern === target.name);
-    // One word for every skill becomes a map that says the same, so one skill's rule has a place.
-    let out = typeof record(json.permission)?.skill === 'string' ? setJsonMember(text, path, Object.fromEntries(rules)) : text;
-    // The skill's own rule goes: a Disable writes it again last, where it decides; an Enable leaves the rest to decide.
-    if (own) out = setJsonMember(out, [...path, target.name], undefined);
-    const rest = rules.filter(rule => rule !== own);
-    const decides = openCodeAction(rest, target.name);
-    if (disabled) return bom + setJsonMember(out, [...path, target.name], 'deny');
-    // Still off by a wider rule ("*": "deny"): the skill gets its own rule after it.
-    if (decides === 'deny') return bom + setJsonMember(out, [...path, target.name], 'allow');
-    // A map the Enable left empty goes with its last entry, and so does a `permission` that held nothing else.
-    if (!rest.length) out = setJsonMember(out, Object.keys(record(json.permission) ?? {}).some(key => key !== 'skill') ? path : ['permission'], undefined);
-    return bom + out;
+    if ((openCodeAction(openCodeRules(json), target.name) === 'deny') === disabled) return file.text;
+    const path = ['permission', 'skill'];
+    const permission = record(json.permission) ?? {};
+    const keys = Object.keys(permission);
+    const map: Record<string, unknown> = typeof permission.skill === 'string' ? { '*': permission.skill } : record(permission.skill) ?? {};
+    const { [target.name]: own, ...others } = map;
+    const { skill: _skill, ...rest } = permission;
+    // A wider rule written after `skill` decides instead of it: `skill` then has to go last, after that rule.
+    const overruled = 'skill' in permission && keys.slice(keys.indexOf('skill') + 1).some(key => typeof permission[key] === 'string' && openCodeMatches(key, 'skill'));
+    // What the other rules say once this skill's own is out: an Enable they would still deny gets an `allow` of its own.
+    const decides = openCodeAction(openCodeRules({ permission: overruled ? { ...rest, skill: others } : { ...permission, skill: others } }), target.name);
+    const next = disabled ? { ...others, [target.name]: 'deny' } : decides === 'deny' ? { ...others, [target.name]: 'allow' } : others;
+    if (overruled || typeof permission.skill === 'string') return bom + setJsonMember(overruled ? setJsonMember(text, path, undefined) : text, path, next);
+    // A map the Enable leaves empty goes with its last entry, and so does a `permission` that held nothing else.
+    if (!Object.keys(next).length) return bom + setJsonMember(text, Object.keys(rest).length ? path : ['permission'], undefined);
+    // Its own rule, when it is the last that matches, changes its word where it is; otherwise it goes to the end, where it decides.
+    const inPlace = own !== undefined && target.name in next && Object.keys(map).findLast(pattern => openCodeMatches(pattern, target.name)) === target.name;
+    const out = own === undefined || inPlace ? text : setJsonMember(text, [...path, target.name], undefined);
+    return bom + (target.name in next ? setJsonMember(out, [...path, target.name], (next as Record<string, unknown>)[target.name]) : out);
   }
   const { written, all } = piForms(target, toolConfigRoot(context, file.tool));
   // Only this copy's exclusions go; a `+` include the person wrote stays (an exclusion wins over it while disabled).

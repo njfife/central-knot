@@ -31,7 +31,7 @@ const copyHash = (copy: string) => sha256(comparableBase(copy));
 const hashOf = (text: string | undefined) => (text === undefined ? '' : sha256(text));
 
 /** The file a tool actually reads, with what the editor must say about it (capability data §6). */
-async function bind(tool: HarnessId, root: string): Promise<{ path: string; readers: string; notes: string[] }> {
+async function bind(tool: HarnessId, root: string, home: string): Promise<{ path: string; readers: string; notes: string[] }> {
   switch (tool) {
     case 'claude-cli':
       return { path: join(root, 'CLAUDE.md'), readers: 'Claude Code reads this in every session, in the CLI and the Code tab.', notes: [] };
@@ -54,9 +54,14 @@ async function bind(tool: HarnessId, root: string): Promise<{ path: string; read
       notes.push('SYSTEM.md and APPEND_SYSTEM.md, if present, replace or extend Pi’s built-in prompt; they are not shown or changed here.');
       return { path, readers: 'Pi reads this in every session.', notes };
     }
-    case 'opencode-cli':
-      // Sent in a new session by 1.19.5 and 2.2.5 alike (measured with a stand-in model, 2026-11-10).
-      return { path: join(root, 'AGENTS.md'), readers: 'OpenCode reads this in every session, in the CLI and the desktop app.', notes: [] };
+    case 'opencode-cli': {
+      // Sent in a new session by 1.19.5 and 2.2.5 alike. With no AGENTS.md here, 1.19.5 sends Claude Code's CLAUDE.md
+      // instead and 2.2.5 sends neither (both measured with a stand-in model, 2026-11-10).
+      const path = join(root, 'AGENTS.md');
+      const fallsBack = await readText(path) === undefined && await readText(join(home, '.claude/CLAUDE.md')) !== undefined;
+      return { path, readers: 'OpenCode reads this in every session, in the CLI and the desktop app.',
+        notes: fallsBack ? ['There is no AGENTS.md here yet, so OpenCode 1.x reads Claude Code’s CLAUDE.md instead (OpenCode 2.x reads neither). Once this file exists, OpenCode 1.x reads it and no longer that one.'] : [] };
+    }
     case 'copilot-cli': {
       const notes: string[] = [];
       try { if ((await readdir(join(root, 'instructions'))).some(name => name.endsWith('.md'))) notes.push('Copilot CLI also reads the files in instructions/. Text repeated in both is read twice.'); } catch { /* none */ }
@@ -126,8 +131,8 @@ function baseIfInvolved(state: BaseHeld) {
 const present = (snapshots: Snapshot[]) => snapshots.filter(isPresent);
 
 /** Each present tool's bound file and, for tools whose files are one physical file (linked dotfiles), the others reading it. */
-async function destinations(snapshots: Snapshot[]) {
-  const bound = await Promise.all(present(snapshots).map(async snapshot => ({ snapshot, ...await bind(snapshot.harness, snapshot.root) })));
+async function destinations(snapshots: Snapshot[], home: string) {
+  const bound = await Promise.all(present(snapshots).map(async snapshot => ({ snapshot, ...await bind(snapshot.harness, snapshot.root, home) })));
   const landings = await Promise.all(bound.map(entry => landingOf(entry.path)));
   return bound.map((entry, index) => ({ ...entry, sameFile: bound.filter((other, at) => at !== index && landings[at] && landings[at] === landings[index]).map(other => other.snapshot.harness) }));
 }
@@ -136,7 +141,7 @@ async function destinations(snapshots: Snapshot[]) {
 export async function instructionsView(context: ShareContext, snapshots: Snapshot[]): Promise<InstructionFile[]> {
   const files: InstructionFile[] = [];
   const base = await readBase(context.home, (await writeAccess(context)).allowed);
-  for (const { snapshot, path, readers, notes, sameFile } of await destinations(snapshots)) {
+  for (const { snapshot, path, readers, notes, sameFile } of await destinations(snapshots, context.home)) {
     if (sameFile.length) notes.push(`This is the same file as ${toolList(sameFile)} reads (a link), so they get the same base instructions.`);
     const text = await readText(path);
     // Lines starting with @ pull other files into Claude's context; those files are not shown or changed here.
@@ -156,7 +161,7 @@ export async function saveInstruction(context: ShareContext, snapshots: Snapshot
   // Only a tool in this home (presence.ts): a save never recreates the folder of a tool that has gone.
   const snapshot = snapshots.find(entry => entry.harness === tool);
   if (!snapshot || !isPresent(snapshot)) return { stopped: 'That tool is not in this home.' };
-  const { path } = await bind(tool, snapshot.root);
+  const { path } = await bind(tool, snapshot.root, context.home);
   const current = await readText(path);
   if (hashOf(current) !== expected) return { stopped: 'The file changed since you opened it, so nothing was saved. Read it again and redo the edit.' };
   if (current === text) return { saved: false };
@@ -176,7 +181,7 @@ export async function saveInstruction(context: ShareContext, snapshots: Snapshot
  */
 async function recordRestoredCopy(context: ShareContext, snapshots: Snapshot[], tool: HarnessId, copy: string): Promise<string | undefined> {
   const base = await readBase(context.home);
-  const destination = (await destinations(snapshots)).find(entry => entry.snapshot.harness === tool);
+  const destination = (await destinations(snapshots, context.home)).find(entry => entry.snapshot.harness === tool);
   const readers = readersOfFile(tool, destination?.sameFile ?? []);
   if (!readers.some(reader => base.list.tools.includes(reader))) return undefined;
   const wrote = sameBase(copy, base.text) || (await shelf(context.home, 'base')).some(old => sameBase(copy, old.text));
@@ -233,7 +238,7 @@ export async function applyBase(context: ShareContext, snapshots: Snapshot[], re
   const baseChanged = { stopped: 'The base instructions changed outside Central Knot since the review, so nothing was saved.', changed: true, written: [], left: [] };
   const stored = await readBase(context.home, true);
   if (hashOf(stored.raw) !== request.expected) return baseChanged;
-  const bound = await destinations(snapshots);
+  const bound = await destinations(snapshots, context.home);
   // One physical file is chosen when any tool reading it is.
   const chosen = new Set(request.text.trim() ? bound.filter(entry => request.tools.includes(entry.snapshot.harness)).flatMap(entry => readersOfFile(entry.snapshot.harness, entry.sameFile)) : []);
   const files = await reviewedFiles(bound, request.seen);
@@ -319,7 +324,7 @@ export async function undoBase(context: ShareContext, snapshots: Snapshot[], und
   const { raw, list: now } = await readBase(context.home, true);
   if (hashOf(raw) !== undo.baseHash) return baseChanged;
   try { await storeBaseText(context.home, undo.text, raw); } catch (error) { return storeFailure(error, baseChanged); }
-  const bound = await destinations(snapshots);
+  const bound = await destinations(snapshots, context.home);
   const result: BaseResult = { written: [], left: [] };
   for (const file of undo.files) {
     // The very file the save wrote, even if the tool now reads another (an override appeared since): that one is never touched.

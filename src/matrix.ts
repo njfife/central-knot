@@ -186,6 +186,7 @@ const fromFacts = (facts: SkillFacts): SampleSkill => ({
   // An MCP entry has no lines or edit date of its own: its details name the file it lives in.
   versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.lines ? { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), text: copy!.summary || facts.description } : { lines: copy!.directory.split('/').pop() ?? '', changed: 'MCP entry', text: copy!.summary }])),
   disabled: facts.disabled, switchProblem: facts.switchProblem, disableNote: facts.disableNote, writable: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.writable])),
+  reads: Object.fromEntries(Object.entries(facts.copies).flatMap(([tool, copy]) => (copy!.readsFrom ? [[tool, copy!.readsFrom]] : []))),
 });
 
 /** One item as a table row. `waiting`: MCP servers whose Claude Code entry waits for Write to Claude Code, which their cell says. */
@@ -764,7 +765,9 @@ function rowLine(skill: SampleSkill, tool: Tool, quiet: boolean): string {
   // Disable is best effort: on a build older than the one verified it is only said (an unread version: the switch's tooltip).
   const note = !skill.removing?.includes(tool) && !skill.switchProblem?.[tool] && !skill.cannot?.[tool]
     && (skill.copies[tool] !== undefined || cellOf(skill, tool) === 'will-sync') && skill.disableNote?.[tool]?.startsWith('Not checked') ? skill.disableNote[tool] : undefined;
-  return [rowSentence(skill, tool, quiet), note].filter(Boolean).join(' ');
+  // A copy that is another tool's, read in that tool's folder: said first, since Disable is the only thing that changes it here.
+  const reads = skill.reads?.[tool];
+  return [reads && !skill.removing?.includes(tool) ? `Reads ${names[reads]}’s copy.` : undefined, rowSentence(skill, tool, quiet), note].filter(Boolean).join(' ');
 }
 
 /** rowLine without the note on an unverified build. */

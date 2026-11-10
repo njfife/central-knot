@@ -37,7 +37,7 @@ Skills also have, per tool and for any skill, managed or not:
 - **Remove** takes that tool's copy out. History keeps it for Restore.
 - **Delete everywhere** (unmanaged skills) removes every copy Central Knot may change, kept in History.
 
-OpenCode loads Claude Code's skills folder and `~/.agents/skills` as well as its own. A skill it reads there counts as OpenCode having it: no second copy is written, Disable works on it, and Remove is offered only for a copy in OpenCode's own folder. OpenCode 1.x leaves out a skill with no `name` in its frontmatter, so such a skill is marked as one OpenCode can't load.
+OpenCode loads Claude Code's skills folder and `~/.agents/skills` as well as its own. A skill in Claude Code's folder is Claude Code's copy, which OpenCode reads: OpenCode's row says so, no second copy is written for it, and it never stands in the way of choosing between differing copies. Disable works on it; Remove is offered only for a copy in OpenCode's own folder, and says when OpenCode still reads Claude Code's. If Claude Code is left out of a managed skill, OpenCode gets a copy of its own. OpenCode 1.x leaves out a skill with no `name` in its frontmatter, so such a skill is marked as one OpenCode can't load.
 
 MCP servers: each tool's user-wide file (Claude Code `~/.claude.json`, Copilot `mcp-config.json`, Codex `config.toml`, Pi `mcp.json`, OpenCode `opencode.json`, or `opencode.jsonc` when there is one). Writes edit only that server's entry. Claude Code's file is written only by **Write to Claude Code**, which waits while Claude Code, Claude desktop or its Code tab is open. Codex servers written inline or with dotted keys are left alone. OpenCode's servers are read from both places its settings keep them (`mcp` and `mcp.servers`); an entry is changed where it is, a new one goes under `mcp`, and comments in the file stay. Open a server to **disable or enable** it in one tool, with that tool's own switch (the table under Profiles); its entry stays, and History has the Undo.
 
@@ -54,7 +54,7 @@ Copies are written only into each tool's own folder, byte-exact with file modes,
 
 ### Instructions
 
-Opens each tool's own instruction file to read and edit in place, with **Undo save**.
+Opens each tool's own instruction file to read and edit in place, with **Undo save**. OpenCode's card says when OpenCode 1.x is reading Claude Code's `CLAUDE.md` because it has no `AGENTS.md` yet.
 
 **Base instructions**: you write a base once and choose which tools get it. It is added after each tool's own instructions as one marked block; the tool's own text is never rewritten. Every write is reviewed first (**Review changes**), a copy edited outside the app is found, and each save can be undone. A typed draft is not lost when you switch homes: the app asks first.
 

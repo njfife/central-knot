@@ -100,6 +100,41 @@ function indentOf(text: string, objectStart: number, list: Member[]): { inner: s
   return { inner: outer + unit.replace(outer, '') || outer + '  ', outer };
 }
 
+/**
+ * The text without one member and one neighbouring comma, keeping the surrounding layout. A member on a line of its own goes
+ * with that line, the comment lines directly above it and a comment after it on its line, so every other member keeps its
+ * own comments (OpenCode's settings may have them). One written beside others on a line goes up to the next member, or
+ * back to the one before.
+ */
+function withoutMember(text: string, list: Member[], index: number, objectStart: number, close: number): string {
+  const found = list[index];
+  if (list.length === 1) return text.slice(0, objectStart + 1) + text.slice(close);
+  const blank = (at: number) => { while (text[at] === ' ' || text[at] === '\t') at++; return at; };
+  const lineStart = text.lastIndexOf('\n', found.whole.start - 1) + 1;
+  // Its own comma, then what is left of its line: a comment, and the line break.
+  const comma = text[blank(found.whole.end)] === ',';
+  let rest = blank(comma ? blank(found.whole.end) + 1 : found.whole.end);
+  if (text.startsWith('//', rest)) rest = text.indexOf('\n', rest) < 0 ? text.length : text.indexOf('\n', rest);
+  else if (text.startsWith('/*', rest) && text.indexOf('*/', rest) >= 0) rest = blank(text.indexOf('*/', rest) + 2);
+  if (text[rest] === '\r') rest++;
+  // Not alone on its line (the object's brace or another member shares it): up to the next member, or back to the one before.
+  if (lineStart <= objectStart || text.slice(lineStart, found.whole.start).trim() || text[rest] !== '\n') {
+    return index < list.length - 1 ? text.slice(0, found.whole.start) + text.slice(list[index + 1].whole.start) : text.slice(0, list[index - 1].whole.end) + text.slice(found.whole.end);
+  }
+  const end = rest + 1;
+  // The comment lines directly above it are about it.
+  let start = lineStart;
+  for (;;) {
+    const above = text.lastIndexOf('\n', start - 2) + 1;
+    if (above <= objectStart || above >= start || !/^[ \t]*(\/\/.*|\/\*.*\*\/[ \t]*)\r?\n$/.test(text.slice(above, start))) break;
+    start = above;
+  }
+  // The last member has no comma of its own: the one before it goes instead.
+  const before = skipSpace(text, list[index - 1]?.whole.end ?? 0);
+  const head = !comma && index === list.length - 1 && text[before] === ',' ? text.slice(0, before) + text.slice(before + 1, start) : text.slice(0, start);
+  return head + text.slice(end);
+}
+
 const reindent = (json: string, indent: string) => json.split('\n').map((line, index) => (index === 0 ? line : indent + line)).join('\n');
 
 /**
@@ -124,16 +159,7 @@ export function setJsonMember(text: string, path: string[], value: unknown): str
     const rest = path.slice(depth + 1);
     const newValue = last ? value : rest.reduceRight<unknown>((innerValue, part) => ({ [part]: innerValue }), value);
     if (found) {
-      if (value === undefined && last) {
-        // Remove the member and one neighbouring comma, keeping the surrounding layout.
-        const index = list.indexOf(found);
-        let start = found.whole.start;
-        let end = found.whole.end;
-        if (index < list.length - 1) end = list[index + 1].whole.start;
-        else if (index > 0) start = list[index - 1].whole.end;
-        else { start = objectStart + 1; end = close; }
-        return text.slice(0, start) + text.slice(end);
-      }
+      if (value === undefined && last) return withoutMember(text, list, list.indexOf(found), objectStart, close);
       return text.slice(0, found.value.start) + reindent(JSON.stringify(newValue, null, 2), inner) + text.slice(found.value.end);
     }
     if (value === undefined) return text;

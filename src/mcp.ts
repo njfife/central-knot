@@ -88,33 +88,41 @@ export function fromJson(name: string, tool: HarnessId, file: string, raw: Recor
 
 // OpenCode keeps its servers under `mcp` in its settings file, in two places both of its lines read (measured on 1.19.5 and
 // 2.2.5): `mcp.<name>`, and `mcp.servers.<name>`, which the newer line's own command writes. An entry is
-// `{ type: "local", command: [program, ...arguments], environment }` or `{ type: "remote", url, headers }`.
+// `{ type: "local", command: [program, ...arguments], environment, cwd }` or `{ type: "remote", url, headers }`.
 
-/** `mcp.servers` when it is the newer line's holder of servers, not a server someone named "servers" (which has a `type`). */
-const openCodeHolder = (mcp: Record<string, unknown>) => { const holder = record(mcp.servers); return holder && typeof holder.type !== 'string' ? holder : undefined; };
-
-/** Where a server's entry is in OpenCode's settings, as a path of keys; nothing when it has none. Throws when the text isn't JSON. */
-export function openCodePlace(text: string, name: string): string[] | undefined {
-  const mcp = record(record(text.trim() ? readJsonc(text) : {})?.mcp) ?? {};
-  const holder = openCodeHolder(mcp);
-  if (holder && Object.hasOwn(holder, name)) return ['mcp', 'servers', name];
-  return Object.hasOwn(mcp, name) && !(holder && name === 'servers') ? ['mcp', name] : undefined;
+/**
+ * OpenCode's servers as its settings hold them: each name with its place there (a path of keys) and its entry as written,
+ * and whether the settings have an `mcp` member at all. `mcp.servers` is the newer line's holder of servers unless it is
+ * itself a server someone named "servers" (which has a `type`). Throws when the text isn't a JSON object.
+ */
+function openCodeServers(text: string): { section: boolean; servers: { name: string; place: string[]; raw: unknown }[] } {
+  const settings = record(text.trim() ? readJsonc(text) : {});
+  if (!settings || ('mcp' in settings && !record(settings.mcp))) throw new Error('mcp is not an object');
+  const mcp = record(settings.mcp) ?? {};
+  const held = record(mcp.servers);
+  const holder = held && typeof held.type !== 'string' ? held : undefined;
+  return { section: 'mcp' in settings, servers: [
+    ...Object.entries(mcp).filter(([name]) => !(holder && name === 'servers')).map(([name, raw]) => ({ name, place: ['mcp', name], raw })),
+    ...Object.entries(holder ?? {}).map(([name, raw]) => ({ name, place: ['mcp', 'servers', name], raw }))] };
 }
+
+/** One server's place in OpenCode's settings and its entry as written; nothing when it has none. Throws when the text isn't a JSON object. */
+export const openCodeServer = (text: string, name: string) => openCodeServers(text).servers.findLast(server => server.name === name);
 
 function fromOpenCode(name: string, file: string, raw: Record<string, unknown>): McpEntry {
   const remote = raw.type === 'remote' || (raw.type === undefined && typeof raw.url === 'string');
   const command = Array.isArray(raw.command) ? raw.command.map(String) : typeof raw.command === 'string' ? [raw.command] : [];
   const server: NeutralServer = remote
     ? { transport: 'http', url: typeof raw.url === 'string' ? raw.url : undefined, headers: nonEmpty(strings(raw.headers)) }
-    : { transport: 'stdio', command: command[0], args: command.length > 1 ? command.slice(1) : undefined, env: nonEmpty(strings(raw.environment)) };
-  const extras = Object.fromEntries(Object.entries(raw).filter(([key]) => !['type', 'command', 'environment', 'url', 'headers'].includes(key)));
+    : { transport: 'stdio', command: command[0], args: command.length > 1 ? command.slice(1) : undefined, env: nonEmpty(strings(raw.environment)), cwd: typeof raw.cwd === 'string' ? raw.cwd : undefined };
+  const extras = Object.fromEntries(Object.entries(raw).filter(([key]) => !['type', 'command', 'environment', 'cwd', 'url', 'headers'].includes(key)));
   return { name, tool: 'opencode-cli', file, server, extras, hash: serverHash(server), hostBound: hostBound(name, server) };
 }
 
 /** A server as OpenCode's settings hold it, with its own fields there kept. */
 function openCodeEntry(server: NeutralServer, extras: Record<string, unknown>): Record<string, unknown> {
   const entry: Record<string, unknown> = server.transport === 'stdio'
-    ? { type: 'local', command: [server.command, ...(server.args ?? [])], environment: server.env, ...extras }
+    ? { type: 'local', command: [server.command, ...(server.args ?? [])], environment: server.env, cwd: server.cwd, ...extras }
     : { type: 'remote', url: server.url, headers: server.headers, ...extras };
   return Object.fromEntries(Object.entries(entry).filter(([, value]) => value !== undefined));
 }
@@ -171,16 +179,11 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
     }
     const valid = (raw: unknown): raw is Record<string, unknown> => !!raw && typeof raw === 'object' && !Array.isArray(raw);
     if (tool === 'opencode-cli') {
-      // An empty settings file holds no servers yet, as an empty object would.
-      const settings = record(text.trim() ? readJsonc(text) : {});
-      if (!settings || ('mcp' in settings && !record(settings.mcp))) throw new Error('mcp is not an object');
-      const mcp = record(settings.mcp) ?? {};
-      const holder = openCodeHolder(mcp);
-      const all = [...Object.entries(mcp).filter(([name]) => !(holder && name === 'servers')), ...Object.entries(holder ?? {})];
+      const { section, servers } = openCodeServers(text);
       // A name in both places is held: which one OpenCode uses was not measured.
-      const twice = new Set(all.map(([name]) => name).filter((name, index, names) => names.indexOf(name) !== index));
-      return { entries: all.filter(([name, raw]) => valid(raw) && !twice.has(name)).map(([name, raw]) => fromOpenCode(name, file, raw as Record<string, unknown>)),
-        invalid: [...new Set(all.filter(([name, raw]) => !valid(raw) || twice.has(name)).map(([name]) => name))], exists: true, text, section: 'mcp' in settings };
+      const held = (server: { name: string; raw: unknown }) => !valid(server.raw) || servers.filter(other => other.name === server.name).length > 1;
+      return { entries: servers.filter(server => !held(server)).map(server => fromOpenCode(server.name, file, server.raw as Record<string, unknown>)),
+        invalid: [...new Set(servers.filter(held).map(server => server.name))], exists: true, text, section };
     }
     const parsed = JSON.parse(withoutBom(text)) as { mcpServers?: unknown };
     const section = !!parsed && typeof parsed === 'object' && 'mcpServers' in parsed;
@@ -197,7 +200,6 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
 /** Why a tool cannot hold this server, if it cannot (CD §5, Unsupported). */
 export function cannotHold(tool: HarnessId, server: NeutralServer): string | undefined {
   if ((tool === 'codex-cli' || tool === 'pi-cli' || tool === 'opencode-cli') && server.transport === 'sse') return `${harnesses[tool].name} has no SSE transport.`;
-  if (tool === 'opencode-cli' && server.cwd) return 'OpenCode has no working folder setting for a server.';
   if (server.transport === 'stdio' && !server.command) return 'It has no command to run.';
   if (server.transport !== 'stdio' && !server.url) return 'It has no URL.';
   return undefined;
@@ -218,7 +220,7 @@ export function writeEntry(text: string, tool: HarnessId, name: string, server: 
   }
   if (tool === 'opencode-cli') {
     // An entry stays where it is; a new one goes under `mcp` itself, the place both lines read and switch the same way.
-    const place = openCodePlace(text, name) ?? ['mcp', name];
+    const place = openCodeServer(text, name)?.place ?? ['mcp', name];
     return setJsonMember(text, place, server && openCodeEntry(server, extras));
   }
   if (!server) return setJsonMember(text, ['mcpServers', name], undefined);

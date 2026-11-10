@@ -9,11 +9,11 @@
 //                               `enabled: false` under "servers" is not honoured by 2.2.5, so it is not written there)
 // Claude Code's ~/.claude.json is never touched: its switch lives in settings.json, which Claude Code does not rewrite while it runs.
 import { readFile } from 'node:fs/promises';
-import { mcpFile, openCodePlace } from './mcp.ts';
+import { mcpFile, openCodeServer } from './mcp.ts';
 import { errorCode, writeFileChecked, type ShareContext } from './share.ts';
 import { switchPath, type SwitchFile } from './skillswitch.ts';
 import { problemText, toolName } from './words.ts';
-import { readJsonc, readTomlTables, setJsonMember } from './textedit.ts';
+import { readTomlTables, setJsonMember } from './textedit.ts';
 import { record, withoutBom } from './values.ts';
 import type { HarnessId, SkillFacts } from './types.ts';
 
@@ -68,12 +68,6 @@ const deniesByName = (entry: unknown, name: string) => record(entry)?.serverName
 /** Pi: the server's own entry in mcp.json's `mcpServers`, if it is there as an object. */
 const piEntry = (text: string, name: string) => record(record(jsonOf(text).mcpServers)?.[name]);
 
-/** OpenCode: where the server's own entry is in its settings (`mcp.<name>` or `mcp.servers.<name>`) and the entry, if it is there as an object. */
-function openCodeServer(text: string, name: string): { place: string[]; entry: Record<string, unknown> } | undefined {
-  const place = openCodePlace(text, name);
-  const entry = place && record(place.reduce<unknown>((value, key) => record(value)?.[key], readJsonc(text)));
-  return place && entry ? { place, entry } : undefined;
-}
 /** The key that turns an OpenCode entry off, with its value: `enabled: false` under `mcp`, `disabled: true` under `mcp.servers`. */
 const openCodeOff = (place: string[]): [string, boolean] => (place.length === 3 ? ['disabled', true] : ['enabled', false]);
 
@@ -88,12 +82,9 @@ export function mcpDisabled(tool: HarnessId, text: string, name: string): boolea
     case 'codex-cli': return codexTable(text, name)?.entries.find(entry => entry.key === 'enabled')?.value === false;
     case 'pi-cli': return piEntry(text, name)?.enabled === false;
     case 'opencode-cli': {
-      if (!text.trim()) return false;
-      if (!record(readJsonc(text))) throw new Error('Not a JSON object.');
       const found = openCodeServer(text, name);
-      if (!found) return false;
-      const [key, off] = openCodeOff(found.place);
-      return found.entry[key] === off;
+      const [key, off] = openCodeOff(found?.place ?? []);
+      return record(found?.raw)?.[key] === off;
     }
   }
 }
@@ -130,7 +121,7 @@ export function withMcpSwitch(tool: HarnessId, text: string, name: string, disab
     }
     case 'opencode-cli': {
       const found = openCodeServer(text, name);
-      if (!found) throw new Error(`OpenCode has no "${name}" server to switch.`);
+      if (!found || !record(found.raw)) throw new Error(`OpenCode has no "${name}" server to switch.`);
       const [key, off] = openCodeOff(found.place);
       return setJsonMember(text, [...found.place, key], disabled ? off : undefined);
     }
