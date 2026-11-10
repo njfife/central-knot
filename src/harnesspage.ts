@@ -198,7 +198,7 @@ function tabs(home: HomeView, tool: HarnessId) {
         type: 'button', role: 'tab', id: `harness-tab-${tab}`, 'aria-selected': String(state.harnessTab === tab), disabled: !!state.busy && state.harnessTab !== tab,
         title: !counted ? undefined : counted.shown === '—' ? (isKind(tab) ? kindNotUsed(tool, tab) : pluginsNotHandled(tool)) : `${counted.shown} in ${names[tool]}${counted.elsewhere ? ` · ${counted.elsewhere} only in other tools` : ''}`,
         onclick: () => goHarness(tool, tab),
-      }, tabLabel(tab), counted && counted.shown !== '—' ? h('span.harness-tab-count', {}, String(counted.shown)) : null);
+      }, tabLabel(tab), counted && counted.shown !== '—' && counted.shown > 0 ? h('span.harness-tab-count', {}, String(counted.shown)) : null);
     }));
 }
 

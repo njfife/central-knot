@@ -1488,6 +1488,8 @@ button.harness-card-main:focus-visible { outline: 0; }
 .harness-tab-none:not(.selected) { color: var(--ink-faint); }
 .harness-tab-none:not(.selected):hover { color: var(--ink); }
 .harness-page .empty-body { text-wrap: balance; }
+/* A tab's empty state starts under the tab bar, where every other tab's content starts, so switching tabs doesn't move the eye. */
+.harness-page .empty { justify-content: flex-start; padding-top: 48px; }
 .harness-page .tool-head-name { white-space: nowrap; }
 /* The separating dot before a section note: even space on both sides. */
 .ov-section-after { gap: 0; }
