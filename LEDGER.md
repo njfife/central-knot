@@ -714,6 +714,39 @@ SHA-256 `6f45b38130bee0ca66901f67d7f23aa4cacd7a420669271adc1bb9a0c823aa40`, tag 
 
 **Validation on 7409a6a.** 349 unit tests. Linux e2e 374/374; Mac packaged e2e 478/478.
 
+- **a618a4e:** on this computer a tool is here only when its CLI or desktop app is found; a settings folder left behind (after an uninstall) is no longer the tool, so it has no column, box, menu or note anywhere and sync writes nothing to it. Harnesses lists it as "Not found · only its folder is here". A chosen folder still goes by the folder. CLIs are looked for on the PATH the person's terminal has (asked once of the login shell), so one installed through nvm, bun or npm's own prefix is found when the app is opened from Finder.
+- **11b6ce4:** Skills: a tool with no copy of its own that has the skill through an installed plugin shows a "Through a plugin" box (it opens the plugin's page) instead of "No copy", and sync, Add and Restore place no separate copy beside the plugin's. A plugin's parts in Pi and the plugin itself in Claude Code or Copilot CLI now read as one skill.
+- **b148013:** the same for MCP servers and agents a tool has through a plugin (Claude Code and Copilot CLI).
+- **3420601:** only an item that is the plugin's counts as held through it: one Central Knot installed elsewhere as that plugin's part, or a skill whose SKILL.md is the same. An item that merely shares a name stays an ordinary item.
+
+**Validation on f910dfc** (with next at 87de0bc merged in). 354 unit tests. Linux e2e 408/408; Mac packaged e2e 503/503 (CI run 42881619568). The Mac count moves with how many crash rounds land mid-copy.
+
+## Mac disk image: drag to Applications, November 10, 2026
+
+- `npm run package:mac` now also builds `release/Central-Knot-<version>-mac-arm64.dmg` (`scripts/mac-dmg.mjs`): a window with the app on the left, a shortcut to the Applications folder on the right, an arrow between them and "Drag Central Knot to Applications" underneath. The disk carries the app's icon. The zip is still built beside it.
+- With the Developer ID present, the disk image is signed, notarized and stapled in its own right, after the app. A release build took 3 min 37 s in all.
+- The window's layout is a file Finder reads, `assets/dmg/DS_Store`, made by `scripts/mac-dmg-layout.sh` (dmgbuild, no Finder needed). The picture is `assets/dmg/background.svg`, kept as PNGs at both sizes.
+- Every build mounts its own disk image and checks the app's signature inside it and where the shortcut leads.
+
+**Validation (macOS 26.6.2, signed build of 9a807b0).** `codesign`, `stapler validate` and `spctl` (`accepted`, `source=Notarized Developer ID`) pass for the disk image and for the app inside it. In real Finder windows, through Computer Use: the image marked as a download opened on a double-click with no warning; its window came up by itself at 660 by 432 with no sidebar or toolbar, the picture filling it, both icons and the arrow in place, the caption 58 points above the bottom, labels readable; the disk shows the app's icon; the shortcut opens the real Applications folder. The app copied out of that image opened in a throwaway home. The drag: Nathan dragged the app onto the shortcut by hand from the first test image (unsigned, same layout but for the window's height), and Finder copied it into `/Applications`; the tester's synthetic drag does not register in Finder.
+
+**Not proven.** The drag from a signed image. Light appearance (the Mac was in Dark; labels were black on the slate blue). Macs older than macOS 26, where the title bar is 4 points shorter and the window shows 4 more points of the picture.
+
+## Display order: managed, then in use, then disabled everywhere, November 10, 2026
+
+Nathan asked that what is managed come first, then what some tool has, and that what no tool has or every tool has disabled go to the very bottom, so moving an item between tools means no scrolling past what nothing loads.
+
+- **Tables (Skills, MCP servers, Agents, and each harness's page):** Managed, Unmanaged, then on a harness's page "Not in <tool>", then **Disabled everywhere** last: items every tool that has them has disabled, managed or not. A tool that has the item through an installed plugin that is on counts as using it. Rows are placed as things stand before pending changes; a row that will join or leave the last section is told on its heading.
+- **Bulk actions** (Manage all, Add all, a section's Manage all) leave the Disabled everywhere rows alone, so a skill someone disabled is not spread to other tools by a bulk click. Each row's own controls still work.
+- **Skills list (files view):** the same order, with the same three headings where the group changes.
+- **Plugins:** in a marketplace, plugins every tool that can take them has come first, then plugins some tool has, then plugins no tool has; by name within each. Whole or as parts both count. A tool that can't take the plugin (Pi, a blocked marketplace) doesn't keep it from the top group.
+- The rule is `src/roworder.ts` (`standing`) for items and `pluginPlace` in `src/pluginstatus.ts` for plugins.
+- Housekeeping: `.gitignore` now covers a `node_modules` link as well as a folder.
+
+**Validation.** 358 unit tests. Linux e2e 409/409 on the branch with next at 31278c4 merged in; unit tests again with next at 5f06ab1. Reviews: Opus 5.5 (8 for what was asked, 8 for code) and Fable 5.2 (7 and 8) on the first commit; their findings are in the list above. Astra could not run (ChatGPT usage limit). On macOS 26.6.2, a packaged ad hoc build on the real home through Computer Use: Skills Managed 1 then Unmanaged 44; MCP servers Unmanaged 2 then Disabled everywhere 1; claude-plugins-official (317 plugins) lists its 4 installed first; nothing cut off at about 900 by 600.
+
+**Not done.** A whole plugin turned off in every tool still counts as installed on the Plugins page: its switch is read (`installedPlugins`) but not yet carried to that page. The marketplaces list keeps its order. Mac packaged e2e was not run on this branch.
+
 ## Self-update on macOS (PLT-02a), November 10, 2026
 
 The Mac app updates itself from the GitHub releases. `scripts/package-mac.mjs` records the build's release tag in `dist/build-info.json` inside the app (the commit's version tag, or `CK_RELEASE_TAG`; `--release` refuses to package without one). The app asks `api.github.com/repos/njfife/central-knot/releases` 10 s after launch and every 4 hours (30 min after a failed check), picks the newest newer tag with the Mac zip (previews and finals for a preview build, finals only for a final one), and shows it as the status bar's Update button. One click: the app downloads the zip itself (progress, a byte-count check, 60 s stall limit), then hands it to Electron's `autoUpdater` (Squirrel.Mac) through a loopback-only feed under a random path. Squirrel checks the new app against the running app's designated requirement (same bundle id and Developer ID team), unpacks it aside, and ShipIt swaps it in at the restart and opens the new app. Unsaved instruction drafts and changes waiting for Apply all hold the restart; the restart waits in the main queue, so never during a write. New app state: `update` in `app-settings.json` (the tag being installed), cleared at the next launch, which says once "Central Knot is now on …" with Release notes, or that the update didn't finish.

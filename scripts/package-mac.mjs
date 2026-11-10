@@ -2,6 +2,7 @@ import { packager } from '@electron/packager';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { buildDmg } from './mac-dmg.mjs';
 
 if (process.platform !== 'darwin') throw new Error('Mac packaging runs on the selected Mac, not a cross-platform stand-in.');
 
@@ -65,4 +66,8 @@ if (notarize) {
 }
 const archive = `release/Central-Knot-${version}-mac-arm64.zip`;
 execFileSync('/usr/bin/ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', bundle, archive]);
-console.log(`Package: ${archive}, ${tag ? `release ${tag}` : 'no release tag'} (${identity ? `${identity}${notarize ? ', notarized and stapled' : ', not notarized'}` : 'signed ad hoc'})`);
+// The download for people: a disk image to drag the app out of into Applications. The zip stays: it is what the app's
+// own updater downloads (src/updates.ts looks for it by this name).
+const dmg = `release/Central-Knot-${version}-mac-arm64.dmg`;
+buildDmg({ bundle, dmg, identity, notaryProfile: notarize ? notaryProfile : undefined });
+console.log(`Package: ${archive} and ${dmg}, ${tag ? `release ${tag}` : 'no release tag'} (${identity ? `${identity}${notarize ? ', notarized and stapled' : ', not notarized'}` : 'signed ad hoc'})`);

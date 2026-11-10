@@ -189,6 +189,9 @@ export interface ToolCopy {
 }
 
 /** What is true now for one skill, across every tool. The page derives its marks from this. */
+/** The plugin a tool has an item through: its name, the marketplace as that tool added it, and the installed copy's version. `off`: turned off there. */
+export interface ThroughPlugin { plugin: string; marketplace: string; source?: string; version?: string; off?: true }
+
 export interface SkillFacts {
   /** Made by Convert to skill from an agent (AGT-02): which agent, from which tool, and what an agent had that a skill does not. */
   converted?: { agent: string; origin: HarnessId; losses: string[] };
@@ -202,6 +205,11 @@ export interface SkillFacts {
   off: HarnessId[];
   /** Why a tool that lacks the skill could not load a copy. */
   cannot: Partial<Record<HarnessId, string>>;
+  /**
+   * Tools with no copy of their own that have the skill through a plugin installed there. Each is in `cannot` too, in
+   * words: no separate copy is placed beside a plugin's.
+   */
+  plugin?: Partial<Record<HarnessId, ThroughPlugin>>;
   /** Why the skill cannot be managed at all, such as a link inside it. */
   held?: string;
   /** The person chose to keep differing copies as they are. */
@@ -234,8 +242,11 @@ export interface SwitchProblem { file: string; reason: string }
 /** One tool's copy of a skill, as its switch names it: Claude Code by folder, Copilot by name, Codex and Pi by SKILL.md path. */
 export interface SwitchTarget { folder: string; name: string; /** Absolute path to the copy's SKILL.md (where it is, or where it will be written). */ skillFile: string }
 
-/** One switch a 'switched' History event changed: which way, the entry it named, and a Claude Code override it replaced ("name-only"). */
-export interface SwitchRecord { tool: HarnessId; disabled: boolean; target: SwitchTarget; before?: string }
+/**
+ * One switch a 'switched' History event changed: which way, and for a skill the entry it named and a Claude Code override it
+ * replaced ("name-only"). An MCP server's switch goes by the server's name (the event's item), so it has no `target`.
+ */
+export interface SwitchRecord { tool: HarnessId; disabled: boolean; target?: SwitchTarget; before?: string }
 
 export interface ManageView {
   tools: HarnessId[];
@@ -264,9 +275,9 @@ export interface Change {
   useHash?: string;
   /** Whether the page showed it managed: a change made from an older read is refused if that no longer holds. */
   seenManaged?: boolean;
-  /** Skills: tools to disable it in with each tool's own switch. Tools named in neither list keep their switch as it is. */
+  /** Skills and MCP servers: tools to disable it in with each tool's own switch. Tools named in neither list keep their switch as it is. */
   disable?: HarnessId[];
-  /** Skills: tools to enable it in again. */
+  /** Skills and MCP servers: tools to enable it in again. */
   enable?: HarnessId[];
   /** Skills: tools whose copy is removed, kept in History for Restore. A managed skill also stops syncing there. */
   remove?: HarnessId[];

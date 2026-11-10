@@ -1031,6 +1031,9 @@ function drainOwedRefresh() {
 // ---------- MCP servers ----------
 
 export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('Applying…', async () => {
+  // Read before applying: only a server this Apply all made Managed is said as now managed, and only its own History entries get an Undo here.
+  const wasManaged = new Set((state.home?.mcp.servers ?? []).filter(server => server.managed).map(server => server.key));
+  const started = Date.now();
   const result = await api().applyMcp(changes, state.home!.manage.gate.state === 'needs-resume', state.home!.home);
   const view = await api().refresh();
   setHome(view);
@@ -1038,19 +1041,31 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
   if (!result.stopped) { onDone(); retireTip('mcp'); }
   if (!result.stopped) {
     const to = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean);
-    const managed = changes.filter(change => change.managed).length;
+    const managed = changes.filter(change => change.managed && !wasManaged.has(change.key)).length;
     // The write band right below says what waits for Claude Code; the result names what was written, and where.
     const copied = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
     const matched = changes.filter(change => change.managed && !copied.includes(change.key)).map(change => change.key);
     // New entries are in History as 'added': one Undo removes them again (while unchanged) and unmanages those servers.
-    const addedNow = (await api().history()).events.filter(event => event.kind === 'added' && !event.undoneBy && changes.some(change => `mcp:${change.key}` === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
+    const recent = (await api().history()).events.filter(event => !event.undoneBy && changes.some(change => `mcp:${change.key}` === event.key) && Date.parse(event.at) >= started - 1000);
+    const addedNow = recent.filter(event => event.kind === 'added');
     const replacedAny = result.results.some(entry => entry.replaced);
     const undoable = addedNow.length > 0 && !replacedAny;
     const done = managed ? `${plural(managed, 'server')} now managed` : 'Applied';
     const wrote = copied.length ? `${andList(copied)} copied to ${andList(to)}` : 'Nothing needed writing';
     const already = matched.length && copied.length ? `; ${andList(matched)} ${matched.length === 1 ? 'was' : 'were'} already in ${andList(to)}` : '';
     const takeBack = undoable ? '' : ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.';
-    tell({ page: state.page, act: undoable ? addedUndo(addedNow) : undefined, items: [...copied, ...matched], text: `${done}. ${wrote}${already}.${takeBack}` });
+    // Disable and Enable, per tool, said after the copies; alone, they are the whole result ("hindsight enabled in Copilot CLI.").
+    const flipped = result.results.filter(entry => entry.outcome === 'switched');
+    const flippedIn = (disabled: boolean) => [...new Set(flipped.filter(entry => entry.disabled === disabled).map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean);
+    const switches = [flippedIn(true).length ? `disabled in ${andList(flippedIn(true))}` : '', flippedIn(false).length ? `enabled in ${andList(flippedIn(false))}` : ''].filter(Boolean).join(' · ');
+    const touched = [...new Set(flipped.map(entry => entry.item))];
+    const onlySwitches = !!switches && !managed && !copied.length;
+    const switched = !switches ? '' : `${touched.length === 1 ? `${touched[0]} ${switches}` : switches.replace(/^./, first => first.toUpperCase())}, from ${flippedIn(true).concat(flippedIn(false)).length === 1 ? 'its' : 'their'} next session.`;
+    // A lone Disable or Enable gets its own Undo here; more than one is undone from History.
+    const switchedNow = recent.filter(event => event.kind === 'switched');
+    const switchUndo = switchedNow.length === 1 && !undoable ? { label: 'Undo', id: 'outcome-undo-switch', title: 'Flip it back', run: () => void restoreEvent(switchedNow[0].id) } : undefined;
+    tell({ page: state.page, act: undoable ? addedUndo(addedNow) : switchUndo, items: [...copied, ...matched, ...touched],
+      text: onlySwitches ? switched : `${done}. ${wrote}${already}.${switched ? ` ${switched}` : ''}${takeBack}` });
   } else tell(undefined, result.stopped);
 });
 

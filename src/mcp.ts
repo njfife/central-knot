@@ -12,8 +12,12 @@ import { mcpTools } from './presence.ts';
 import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
-import { mcpSwitchFacts, readMcpSwitches } from './mcpswitch.ts';
-import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy, ClaudeWrite } from './types.ts';
+import { mcpSwitchFacts, readMcpSwitches, setMcpDisabled } from './mcpswitch.ts';
+import { throughPlugins } from './plugins.ts';
+import { switchFailure } from './skillswitch.ts';
+import { throughPlugin, toolName } from './words.ts';
+import { ALREADY_AS_IT_WAS } from './types.ts';
+import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SwitchRecord, SyncNotice, ThroughPlugin, ToolCopy, ClaudeWrite } from './types.ts';
 export type { McpResult, McpView } from './types.ts';
 
 // ---------- Shapes ----------
@@ -299,6 +303,15 @@ function claudeWaits(item: McpRecordItem | undefined, slot: Partial<Record<Harne
   return here.hash !== item.hash && copy?.hash === here.hash;
 }
 
+/**
+ * The servers each tool has through its installed plugins, by name: such a tool gets no entry of its own beside the
+ * plugin's. Only a server Central Knot installed elsewhere as that plugin's part counts: a name alone could be another server.
+ */
+async function serversThroughPlugins(context: ShareContext, tools: HarnessId[]): Promise<Map<HarnessId, Map<string, ThroughPlugin>>> {
+  const all = await throughPlugins(context, tools, 'mcp', name => name);
+  return new Map([...all].map(([tool, given]) => [tool, new Map([...given].flatMap(([name, { asParts, text: _text, ...plugin }]) => (asParts ? [[name, plugin] as const] : [])))]));
+}
+
 export async function mcpView(context: ShareContext, tools: HarnessId[], notices: SyncNotice[] = []): Promise<McpView> {
   const present = tools.filter(tool => mcpTools.includes(tool));
   const { byName, problems } = await gatherAll(context, present);
@@ -308,6 +321,7 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
   const claudePending: string[] = [];
   // Each tool's own switch (profiles turn servers off with it): read once, then asked about every server there.
   const switches = await readMcpSwitches(context, present);
+  const through = await serversThroughPlugins(context, present);
   for (const [name, slot] of [...byName].sort(([first], [second]) => first.localeCompare(second))) {
     const item = record.items[name];
     const entries = Object.values(slot) as McpEntry[];
@@ -318,10 +332,13 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
     // The definition shown is the synced one: a copy still waiting (Claude Code's older entry) is not what the server now is.
     const sample = (entries.find(entry => item?.state === 'shared' && entry.hash === item.hash) ?? entries[0]).server;
     for (const tool of present) { if (!slot[tool]) { const reason = cannotHold(tool, sample); if (reason) cannot[tool] = reason; } }
+    // A tool that has the server through one of its plugins is shown as that, and gets no entry of its own.
+    const plugin: Partial<Record<HarnessId, ThroughPlugin>> = {};
+    for (const tool of present) { const given = slot[tool] ? undefined : through.get(tool)?.get(name); if (given) { plugin[tool] = given; cannot[tool] = throughPlugin(tool, given, 'MCP server'); } }
     if (claudeWaits(item, slot, present)) claudePending.push(name);
     // Edits waiting to spread, as skills and agents mark them: a recorded copy now holding other content.
     const edited = item?.state === 'shared' ? item.copies.filter(copy => !copy.status && slot[copy.tool] && slot[copy.tool]!.hash !== copy.hash).map(copy => copy.tool) : [];
-    servers.push({ key: name, name, description: summary(sample), copies, extra: [], managed: item?.state === 'shared', off: item?.off ?? [], cannot, held, separate: item?.separate, choiceBlocks: {},
+    servers.push({ key: name, name, description: summary(sample), copies, extra: [], managed: item?.state === 'shared', off: item?.off ?? [], cannot, ...(Object.keys(plugin).length ? { plugin } : {}), held, separate: item?.separate, choiceBlocks: {},
       edited: edited.length ? edited : undefined, ...mcpSwitchFacts(name, entries.map(entry => entry.tool), switches) });
   }
   return { tools: present, servers, claudePending, access: await writeAccess(context), gate: problem ? { state: 'stopped', reason: problem } : await syncGate(context), problems, notices };
@@ -349,6 +366,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
   if (gate.state !== 'ready') await remember(context, owner.generation);
 
   const present = tools.filter(tool => mcpTools.includes(tool));
+  const through = await serversThroughPlugins(context, present);
   // A write a crash interrupted is finished first, so a settings file moved aside is never read as missing (where a linked file points, too).
   for (const tool of present) await recoverSettings(context, tool);
   const { byName, unreadable, missingFiles, invalid, noSection } = await gatherAll(context, present);
@@ -380,6 +398,8 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
   // Servers this Apply all makes Managed: the entries it adds for them are told in History as 'added', so Undo can take them back.
   const newlyManaged = new Set<string>();
   const claudeWritten: ClaudeWrite[] = [];
+  // Changes taken (not refused): the only ones whose Disable and Enable are carried out, after the sync below.
+  const taken: Change[] = [];
   for (const change of changes) {
     const slot = byName.get(change.key);
     if (!slot) continue;
@@ -394,6 +414,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     else delete item.deleted;
     if (change.use && change.use !== 'separate' && slot[change.use]) { item.hash = slot[change.use]!.hash; item.copies = item.copies.filter(copy => copy.status === 'removing'); chosenNow.add(change.key); }
     record.items[change.key] = item;
+    taken.push(change);
   }
   const now = options.now ?? Date.now();
   for (const [name, item] of Object.entries(record.items)) {
@@ -488,7 +509,8 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     for (const tool of live) {
       const here = slot[tool];
       if (here?.hash === source.hash) { holds.set(tool, source.hash); continue; }
-      const reason = cannotHold(tool, source.server);
+      const given = here ? undefined : through.get(tool)?.get(name);
+      const reason = given ? throughPlugin(tool, given, 'MCP server') : cannotHold(tool, source.server);
       if (reason) { results.push({ item: name, harness: tool, outcome: 'held', message: reason }); continue; }
       if (tool === 'claude-cli' && !claudeNow(name)) { results.push({ item: name, harness: tool, outcome: 'held', message: 'Close Claude, then use Write now: Claude Code rewrites this file while it runs (MCP-02).' }); continue; }
       const ref = here ? await keep(context, name, here.server, here) : undefined;
@@ -555,6 +577,12 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       results.push({ item: name, harness: copy.tool, outcome: 'removed', message: 'Removed now, finishing an earlier deletion.' });
     }
   }
+  // Disable and Enable, explicit only, after the sync above: an entry written just now can be turned off too. Each tool's own
+  // switch, and only the tools the change names; one 'switched' event per server, for Undo.
+  for (const change of taken) {
+    const switched = await flipMcpSwitches(context, change.key, present, [...(change.disable ?? []).map(tool => [tool, true] as const), ...(change.enable ?? []).map(tool => [tool, false] as const)], results);
+    if (switched.length) event({ key: `mcp:${change.key}`, item: change.key, kind: 'switched', switched, losers: [], orderProved: true });
+  }
   // Displaced entries no event of this pass names (left by a pass that stopped part-way) get their own History entry.
   const named = (name: string, hash: string) => events.some(made => made.key === `mcp:${name}` && (made.previous === hash || made.winner?.hash === hash || made.losers.some(loser => loser.hash === hash)));
   for (const left of carried) {
@@ -575,6 +603,47 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
   }
   if (cleared) await saveMcpRecord(context.home, record);
   return { results, writes, notices, settling, claudeWritten: claudeWritten.length ? claudeWritten : undefined };
+}
+
+/**
+ * Turns one server off or on in the tools named, each with its own switch (mcpswitch.ts). Says what happened in `results` and
+ * returns the switches that changed: a tool that already had it that way is left out, so Undo flips back only what this did.
+ */
+async function flipMcpSwitches(context: ShareContext, name: string, present: HarnessId[], flips: (readonly [HarnessId, boolean])[], results: DestinationResult[]): Promise<SwitchRecord[]> {
+  const switched: SwitchRecord[] = [];
+  for (const [tool, disabled] of flips) {
+    if (!present.includes(tool)) continue;
+    try { if (!(await setMcpDisabled(context, tool, name, disabled))) continue; }
+    catch (error) {
+      results.push({ item: name, harness: tool, outcome: 'failed', message: `Could not ${disabled ? 'disable' : 'enable'} it in ${toolName(tool)}: ${switchFailure(error)}` });
+      continue;
+    }
+    switched.push({ tool, disabled });
+    results.push({ item: name, harness: tool, outcome: 'switched', disabled, message: disabled ? `Disabled in ${toolName(tool)}: its entry stays, and ${toolName(tool)} doesn’t start it from its next session.` : `Enabled again in ${toolName(tool)} from its next session.` });
+  }
+  return switched;
+}
+
+/**
+ * Undo of a server's Disable or Enable: each switch the event changed goes back. A tool already back as it was needs nothing. A
+ * new 'switched' event records what was flipped, and its own Undo flips it again (as for a skill's, manage.ts undoSwitched).
+ */
+async function undoSwitchedMcp(context: ShareContext, history: HistoryEvent[], past: HistoryEvent): Promise<McpResult> {
+  if (past.undoneBy) return { stopped: 'That change was already undone.', results: [], writes: 0 };
+  const name = past.key.replace(/^mcp:/, '');
+  const results: DestinationResult[] = [];
+  const asked = past.switched ?? [];
+  const back = await flipMcpSwitches(context, name, asked.map(entry => entry.tool), asked.map(entry => [entry.tool, !entry.disabled] as const), results);
+  const failed = results.filter(result => result.outcome === 'failed');
+  if (failed.length && !back.length) return { stopped: failed[0].message, results, writes: 0 };
+  for (const entry of asked) {
+    if (!results.some(result => result.harness === entry.tool)) results.push({ item: name, harness: entry.tool, outcome: 'stayed', message: `${toolName(entry.tool)} has it ${entry.disabled ? 'enabled' : 'disabled'} already.` });
+  }
+  // Done once nothing is left to retry. The new event exists only when something flipped, so "Undo again" always has one to use.
+  const id = back.length ? randomUUID() : undefined;
+  if (!failed.length) past.undoneBy = id ?? ALREADY_AS_IT_WAS;
+  await replaceHistory(context, [...history, ...(id ? [{ id, at: new Date().toISOString(), key: past.key, item: name, kind: 'switched' as const, switched: back, losers: [], orderProved: true }] : [])]);
+  return { results, writes: 0 };
 }
 
 /** The version an MCP event's Undo or Restore puts back. */
@@ -667,6 +736,7 @@ export async function restoreMcp(context: ShareContext, tools: HarnessId[], even
   const history = await readHistory(context);
   const past = history.find(entry => entry.id === eventId);
   if (past?.kind === 'added') return undoAddedMcp(context, history, past);
+  if (past?.kind === 'switched') return undoSwitchedMcp(context, history, past);
   const name = past?.key.replace(/^mcp:/, '');
   const hash = past && restorable(past);
   if (!past || !name || !hash) return { stopped: 'That change can’t be restored.', results: [], writes: 0 };
@@ -676,6 +746,7 @@ export async function restoreMcp(context: ShareContext, tools: HarnessId[], even
   const record = await readMcpRecord(context.home);
   const item: McpRecordItem = record.items[name] ?? { state: 'shared', off: [], hash: '', copies: [] };
   const present = tools.filter(tool => mcpTools.includes(tool));
+  const through = await serversThroughPlugins(context, present);
   for (const tool of present) await recoverSettings(context, tool);
   const { byName, unreadable, invalid } = await gatherAll(context, present);
   const slot = byName.get(name) ?? {};
@@ -698,7 +769,8 @@ export async function restoreMcp(context: ShareContext, tools: HarnessId[], even
     const extras = ref ? await keptExtras(context, name, hash, ref) : here ? undefined : version.extras[tool];
     if (here?.hash === hash && (!extras || JSON.stringify(here.extras) === JSON.stringify(extras))) { holds.set(tool, hash); continue; }
     if (here) holds.set(tool, here.hash);
-    const reason = cannotHold(tool, version.server);
+    const given = here ? undefined : through.get(tool)?.get(name);
+    const reason = given ? throughPlugin(tool, given, 'MCP server') : cannotHold(tool, version.server);
     if (reason) { results.push({ item: name, harness: tool, outcome: 'held', message: reason }); continue; }
     if (tool === 'claude-cli') { results.push({ item: name, harness: tool, outcome: 'held', message: 'Close Claude, then use Write now to restore it there.' }); continue; }
     if (here) await keep(context, name, here.server, here);

@@ -4,7 +4,7 @@ import { announce, busy, rerender, setHome, state as app, tell } from './app.ts'
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { plural } from './model.ts';
 import { isParts, resultLines, forSource, pluginKey, prune, recordRun, resultSentence, reverse, runPlan, type LastRun, type PluginDraft, type PluginOp } from './pluginplan.ts';
-import { FIND_FROM, categoriesOf, marketTitle, matches, partsTools } from './pluginstatus.ts';
+import { FIND_FROM, categoriesOf, marketTitle, matches, partsTools, pluginPlace } from './pluginstatus.ts';
 import { readInto, type Read } from './reads.ts';
 import type { HarnessId, MarketplaceView, PartPlan, PluginDetail, PluginsView } from './types.ts';
 
@@ -82,8 +82,18 @@ export function clearNotice(): void { if (app.outcome?.page === 'plugins') app.o
 /** How many of a marketplace's plugins kept elsewhere are read ahead (each is a small Git copy), so a large catalog stays cheap. */
 const REMOTE_READ_AHEAD = 8;
 
-/** The plugins the marketplace on screen lists under the current find text and category. */
-export const shownPlugins = (entry: MarketplaceView) => entry.plugins.filter(plugin => matches(plugin, market.nav.find) && (!market.nav.category || plugin.category === market.nav.category));
+/**
+ * The plugins the marketplace on screen lists under the current find text and category: those every tool that can take
+ * them has first, then those some tool has, then those no tool has, by name within each (pluginstatus.ts pluginPlace).
+ * Pending choices move nothing until Apply all.
+ */
+export function shownPlugins(entry: MarketplaceView) {
+  const view = market.view;
+  const listed = entry.plugins.filter(plugin => matches(plugin, market.nav.find) && (!market.nav.category || plugin.category === market.nav.category));
+  if (!view) return listed;
+  const place = new Map(listed.map(plugin => [plugin.name, pluginPlace(view, entry, plugin.name)]));
+  return listed.sort((first, second) => place.get(first.name)! - place.get(second.name)!);
+}
 
 /** Reads, in the background, what the place on screen shows and hasn't been read yet: a README or a plugin's contents. */
 function readShown(): void {

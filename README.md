@@ -4,7 +4,7 @@ Central Knot is a desktop app that shows the skills, MCP servers, agents, instru
 
 ## Getting it
 
-Download the signed Mac build (Apple silicon) from the [GitHub releases](https://github.com/njfife/central-knot/releases). It is signed with a Developer ID and notarized. Unzip it, move **Central Knot.app** to Applications and open it.
+Download the Mac disk image (Apple silicon), `Central-Knot-<version>-mac-arm64.dmg`, from the [GitHub releases](https://github.com/njfife/central-knot/releases). Open it, drag **Central Knot** onto the **Applications** folder beside it, then open Central Knot from Applications. It is signed with a Developer ID and notarized. Each release also has the same app as a zip.
 
 A released build opens on **This Mac's home**: your real tools. Nothing is changed until you choose it. The sidebar's **Home** list also has **Another folder…**, for a backup or another account's home; Central Knot writes only inside that folder, and one that is or links into your real tool folders is read-only. The **Practice copy** (sample data in a throwaway folder, removed at Quit) is only in development builds: run `npm start` from the source to try things on sample files first.
 
@@ -18,7 +18,7 @@ One card each for skills, MCP servers and agents, with counts and anything that 
 
 ### Harnesses
 
-One card per tool found on this computer, with its skills, MCP servers, agents, instruction file, plugins and config folder. A tool counts as found when its CLI or its desktop app is there; when both are, their versions are shown separately. Each harness has its own page with tabs for Skills, MCP servers, Agents, Instructions, Plugins and About, and you can manage that tool's items there directly. Only the tools you have are shown anywhere in the app.
+One card per tool found on this computer, with its skills, MCP servers, agents, instruction file, plugins and config folder. A tool counts as found when its CLI or its desktop app is there; when both are, their versions are shown separately. A settings folder with no CLI or app beside it (left behind by an uninstall, say) doesn't count, and a CLI is looked for wherever your terminal finds it, including folders that nvm, bun and the like add to your PATH. Each harness has its own page with tabs for Skills, MCP servers, Agents, Instructions, Plugins and About, and you can manage that tool's items there directly. Only the tools you have are shown anywhere in the app.
 
 ### Skills, MCP servers and Agents
 
@@ -37,7 +37,7 @@ Skills also have, per tool and for any skill, managed or not:
 - **Remove** takes that tool's copy out. History keeps it for Restore.
 - **Delete everywhere** (unmanaged skills) removes every copy Central Knot may change, kept in History.
 
-MCP servers: each tool's user-wide file (Claude Code `~/.claude.json`, Copilot `mcp-config.json`, Codex `config.toml`, Pi `mcp.json`). Writes edit only that server's entry. Claude Code's file is written only by **Write to Claude Code**, which waits while Claude Code, Claude desktop or its Code tab is open. Codex servers written inline or with dotted keys are left alone.
+MCP servers: each tool's user-wide file (Claude Code `~/.claude.json`, Copilot `mcp-config.json`, Codex `config.toml`, Pi `mcp.json`). Writes edit only that server's entry. Claude Code's file is written only by **Write to Claude Code**, which waits while Claude Code, Claude desktop or its Code tab is open. Codex servers written inline or with dotted keys are left alone. Open a server to **disable or enable** it in one tool, with that tool's own switch (the table under Profiles); its entry stays, and History has the Undo.
 
 Agents: Claude Code `~/.claude/agents`, Copilot `~/.copilot/agents`, Codex `~/.codex/agents`. Name, description and prompt sync. A tool that lacks the origin's other fields gets the agent **With limits**, one way: changes there stay there. Pi has no agents; **Convert to skill** writes one as a Pi skill, once.
 
@@ -62,6 +62,7 @@ Opens each tool's own instruction file to read and edit in place, with **Undo sa
 - Each plugin shows its parts (skills, MCP servers, agents and more), what each tool gets from them, its skill text, and each tool's installed version next to the marketplace's.
 - **Install and uninstall** run through each tool's own plugin commands, and count only when that tool's own record shows the result. Nothing runs until **Apply all**.
 - **Parts** for a tool that can't take the whole plugin (Pi always): the plugin's skills, MCP servers and agents go in as ordinary items. They are removed together, can be undone, and show **Update parts** when the plugin changes.
+- **One item, however a tool has it**: on Skills, MCP servers and Agents, a tool that has an item through the plugin itself shows **Through a plugin** (the box opens the plugin's page) rather than "No copy", and sync never places a separate copy beside the plugin's. This applies to items Central Knot installed elsewhere as that plugin's parts and to skills whose SKILL.md is the same; another item that only shares the name stays an ordinary item.
 - **Per-skill switch**: turn off one skill of an installed plugin in Codex or Copilot CLI.
 - **Update**: where a tool has an older version than the marketplace, the plugin box, list row and plugin page offer Update (**Update all** for a marketplace with two or more behind). Each tool refreshes its copy of the marketplace and updates through its own command. An update can't be undone, and the result says so.
 - **Desktop apps without a CLI**: Claude desktop (its Code tab), the GitHub Copilot app and ChatGPT desktop each carry their own copy of the tool. With no CLI installed, Central Knot runs the plugin commands through that copy, and the plugin box says which route it uses. A CLI is used when one is installed. If the app's copy isn't on disk yet (for example, the Code tab has never been opened), the plugin's parts are offered instead. macOS app locations only.
@@ -78,7 +79,7 @@ A profile is a named set of skills and MCP servers to have on, such as *Incident
 | Pi | a `-skills/…` filter in `settings.json` | `"enabled": false` in `mcp.json` |
 
 - A switch is one History row, and **Undo switch** puts back what it changed.
-- A skill you disabled by hand stays off; profiles only turn back on what a profile turned off.
+- A skill or server you disabled by hand stays off; profiles only turn back on what a profile turned off.
 - A managed item a profile turned off still receives edits. Profiles never change Managed.
 - Agents have no off switch in any tool, so they are not in profiles. Profiles are kept in `.central-knot/profiles.json`. A switch takes effect from each tool's next session.
 
@@ -126,7 +127,9 @@ npm test             # TypeScript check and unit tests (tests/*.test.ts)
 
 ### Packaging and release
 
-`npm run package:mac` (`scripts/package-mac.mjs`) builds `release/Central-Knot-<version>-mac-arm64.zip` on an Apple silicon Mac. It signs with the Mac's Developer ID Application certificate and notarizes through the `central-knot-notary` keychain profile when both are there; otherwise, or with `CK_SIGN=0`, it signs ad hoc. `npm run package:mac:release` never falls back to ad hoc. The version comes from `package.json`. The release tag is recorded in the app (`build-info.json`) from the version tag on the commit being built (`v0.5.0-preview.5`), or `CK_RELEASE_TAG`; a release build refuses to package without one, and an untagged build never offers updates. Each release must carry the Mac zip named `Central-Knot-<version>-mac-arm64.zip`, as now: that is what the app looks for. `node scripts/update-proof.mjs` proves an update between two signed test builds in throwaway folders (instructions at its top). Releases are published on GitHub with their checks in the release notes.
+`npm run package:mac` (`scripts/package-mac.mjs`) builds the app on an Apple silicon Mac and puts it in two downloads under `release/`: `Central-Knot-<version>-mac-arm64.dmg`, a disk image whose window shows the app beside a shortcut to Applications, and `Central-Knot-<version>-mac-arm64.zip`. It signs with the Mac's Developer ID Application certificate and notarizes through the `central-knot-notary` keychain profile when both are there; otherwise, or with `CK_SIGN=0`, it signs ad hoc. The disk image is signed, notarized and stapled the same way, in its own right. `npm run package:mac:release` never falls back to ad hoc. The version comes from `package.json`. The release tag is recorded in the app (`build-info.json`) from the highest version tag on the commit being built (`v0.5.0-preview.5`), or `CK_RELEASE_TAG`; a release build refuses to package without one, and an untagged build never offers updates. Each release must carry both downloads: the disk image is for people, and the zip, named `Central-Knot-<version>-mac-arm64.zip`, is what the app's own updater downloads. `node scripts/update-proof.mjs` proves an update between two signed test builds in throwaway folders (instructions at its top).
+
+The disk image is made by `scripts/mac-dmg.mjs`. Its window's picture is `assets/dmg/background.svg`, kept as PNGs at both sizes beside it; the window's size and icon places are in `assets/dmg/DS_Store`, which `scripts/mac-dmg-layout.sh` makes again on a Mac after a layout change. Releases are published on GitHub with their checks in the release notes.
 
 ### Logo
 
