@@ -253,6 +253,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       // A plugin the catalog dropped stays listed while its parts are in a tool, so they can still be removed together.
       for (const name of Object.keys(parts ?? {})) if (!shown.some(plugin => plugin.name === name)) shown.push({ name, description: catalog ? 'No longer in this marketplace. Its parts can still be removed together.' : 'Its marketplace can’t be read now. Its parts can still be removed together.', gone: true });
       if (!catalog) return { ...base, name: recordedName ?? '', problem: problem ?? read?.problem, plugins: shown, parts };
+      if (base.bundled) base.bundled = { ...base.bundled, addedTo: (await readAdded(catalog.name))[ctx.home] ?? [] };
       return { ...base, name: catalog.name, fetchedAt: catalog.fetchedAt, problem, stale, owner: catalog.owner, description: catalog.description, copilotRefuses: catalog.copilotRefuses, codexOnly: catalog.codexOnly, plugins: shown, states: await statesFor(ctx, tools.filter(takesPlugins), catalog, source), parts };
     } catch { return { ...base, problem: 'It could not be read.' }; }
   }
@@ -385,6 +386,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     for (const tool of tools) {
       try { reports.push(await run(ctx, catalog, plugin, tool)); }
       catch (error) { reports.push(...failedFor([tool], `It stopped unexpectedly: ${error instanceof Error ? error.message : String(error)}`)); }
+      // An install from the build's own marketplace put it in that tool's list too: noted, so it is never added again by itself.
+      if (carried && reports.at(-1)?.outcome === 'installed') await noteAdded(catalog.name, ctx.home, tool);
     }
     return { reports: withoutFileBytes(reports) };
   }
@@ -479,9 +482,9 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   const tried = new Set<string>();
 
   /** Adds the carried marketplace to one tool's own list and notes it when it is there afterwards. */
-  async function addCarriedToTool(tool: PluginTool): Promise<ListedReport | undefined> {
+  async function addCarriedToTool(tool: PluginTool): Promise<ListedReport> {
     const carried = host.bundled?.();
-    if (!carried) return undefined;
+    if (!carried) return { tool, outcome: 'failed', message: 'This build carries no marketplace.' };
     const ctx = await context({ clis: true });
     const { catalog } = await catalogFor(ctx, carried.source, { counts: false });
     if (!catalog?.name) return { tool, outcome: 'failed', message: 'The marketplace this build carries can’t be read now.' };
@@ -508,10 +511,12 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const { binaries } = await use.findClis();
     const reports: ListedReport[] = [];
     for (const tool of todo.filter(candidate => binaries[candidate])) {
-      tried.add(`${open.home}\u0000${tool}`);
-      // The home may have been switched while this waited its turn: then nothing more is added.
-      const report = await turn(async () => (host.home()?.home === open.home ? addCarriedToTool(tool) : undefined));
-      if (report) reports.push(report);
+      const key = `${open.home}\u0000${tool}`;
+      tried.add(key);
+      // The home may have been switched while this waited its turn: then nothing is added, and the tool is tried again
+      // the next time this computer's home is read.
+      const report = await turn(async () => { const now = host.home(); return now?.actual && now.home === open.home ? addCarriedToTool(tool) : undefined; });
+      if (report) reports.push(report); else tried.delete(key);
     }
     return reports;
   }

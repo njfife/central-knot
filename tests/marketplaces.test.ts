@@ -39,7 +39,7 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?:
     update: async (_context, _catalog, plugin, tool) => { calls.push(`update ${plugin} ${tool}`); return { tool, outcome: 'updated', message: 'Updated.', runs: [], changed: true }; },
     setSkill: async (_context, marketplace, plugin, skill, tool, on, _source, entry) => { calls.push(`skill ${plugin}:${skill}@${marketplace} ${tool} ${on} entry=${entry?.name}`); return { tool, outcome: on ? 'skill-on' : 'skill-off', message: '', runs: [], changed: true }; },
   };
-  return { base, home, calls, ran, markets: createMarketplaces(host, use), cleanup: () => rm(base, { recursive: true, force: true }) };
+  return { base, home, calls, ran, host, markets: createMarketplaces(host, use), cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 
 test('Adding a marketplace reads it once, stores how it was given, and the view lists it with its plugins', async () => {
@@ -337,6 +337,8 @@ test('A bundled build adds its marketplace to each tool’s own list once, and n
     assert.equal(byHand.report?.outcome, 'added');
     assert.equal(byHand.view?.marketplaces[0]?.name, 'team');
     assert.equal((await box.markets.addCarriedTo('claude-cli', '/another/home')).stopped, 'The home on screen is not the one open. Nothing was changed. Read it again.');
+    // The page is told which tools the build added it to, so About can say it was the app's doing.
+    assert.deepEqual(byHand.view?.marketplaces[0]?.bundled?.addedTo, ['claude-cli']);
   } finally { await box.cleanup(); }
 });
 
@@ -349,4 +351,33 @@ test('The carried marketplace is added to no tool in a folder opened as a home, 
       assert.deepEqual(box.calls.filter(call => call.startsWith('list')), []);
     } finally { await box.cleanup(); }
   }
+});
+
+test('Installing a carried plugin into a tool counts as adding the marketplace there: it is never added again by itself', async () => {
+  const box = await setup({ bundled: { folder: 'carried' }, codex: true });
+  try {
+    const carried = join(box.base, 'carried');
+    await marketplace(carried, 'team', ['pdf']);
+    // The person installs into Codex before the build's own add reaches it (its command-line tool turned up between reads).
+    assert.deepEqual((await box.markets.install(carried, 'team', 'pdf', ['codex-cli'], box.home)).reports.map(report => report.outcome), ['installed']);
+    const reports = await box.markets.addCarried(['claude-cli', 'codex-cli'], work => work());
+    assert.deepEqual(reports.map(report => report.tool), ['claude-cli']);
+    assert.deepEqual(box.calls.filter(call => call.startsWith('list')), ['list team claude-cli']);
+  } finally { await box.cleanup(); }
+});
+
+test('A home switched while a tool waits its turn adds nothing, and that tool is tried again when this computer’s home is read next', async () => {
+  let actual = true;
+  const box = await setup({ bundled: { folder: 'carried' } });
+  try {
+    await marketplace(join(box.base, 'carried'), 'team', ['pdf']);
+    const host = box.host;
+    const home = host.home;
+    host.home = () => ({ ...home()!, actual });
+    // The switch happens while Claude Code's add waits in the queue.
+    assert.deepEqual(await box.markets.addCarried(['claude-cli'], work => { actual = false; return work(); }), []);
+    assert.deepEqual(box.calls.filter(call => call.startsWith('list')), []);
+    actual = true;
+    assert.deepEqual((await box.markets.addCarried(['claude-cli'], work => work())).map(report => report.outcome), ['added']);
+  } finally { await box.cleanup(); }
 });
