@@ -1411,6 +1411,14 @@ async function fewToolsFlow() {
   mkdirSync(home, { recursive: true });
   const a = await launch(join(scratch, 'few-data'), flag('--electron') ? ['--as-released'] : [], home);
   const pages = () => a.all('#nav [id^="nav-"]', 'e.id.slice(4)');
+  // The app also looks for each tool's CLI in system folders that no test home can hide (executableCandidates). On a
+  // machine that has one there, no home is without tools, so this flow has nothing to check.
+  const installed = await a.run(`window.centralKnot.refresh().then(view => (view?.snapshots ?? []).filter(snapshot => snapshot.detection !== 'Not found').map(snapshot => snapshot.harnessName))`);
+  if (installed.length) {
+    console.log(`few tools: skipped, this machine has ${installed.join(', ')} installed outside any home`);
+    await a.quit();
+    return;
+  }
   same('a home with no tools shows only the pages that hold no kind', await pages(), ['overview', 'harnesses', 'history', 'settings']);
   same('its Overview says no tools were found, once, with another home to choose, and no "Also here"', [await a.text('.overview-lead'), await a.exists('#overview-choose-home'), await a.exists('#overview-instructions')], ['No tools were found in this home.', true, false]);
   check('its status bar says only that the home opened', /^Opened [^.]+\.$/.test(await a.run(`document.querySelector('#announcement').dataset.text`) ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`));
