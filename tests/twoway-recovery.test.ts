@@ -63,7 +63,7 @@ test('A crash between destinations of a chosen copy never loses a replaced copy'
   await restarted.applyChanges(b.context, []);
   const stored = await b.stored();
   assert.ok(stored.includes('COPILOT UNIQUE') && stored.includes('CODEX UNIQUE'), JSON.stringify(stored));
-  const history = await readHistory(b.home);
+  const history = await readHistory(b.context);
   assert.ok(history.some(entry => entry.losers.some(loser => loser.tool === 'copilot-cli')) && history.some(entry => entry.losers.some(loser => loser.tool === 'codex-cli')), 'History names both, so neither is pruned');
 }));
 
@@ -88,7 +88,7 @@ test('A Delete everywhere that fails part-way keeps the unspread edit restorable
   b.tick(2500);
   await b.pass();
   assert.ok((await b.stored()).includes('UNSPREAD UNIQUE WORK'));
-  const deleted = (await readHistory(b.home)).filter(entry => entry.kind === 'deleted');
+  const deleted = (await readHistory(b.context)).filter(entry => entry.kind === 'deleted');
   assert.ok(deleted.length >= 1);
   assert.equal((await b.state()).copies.find(copy => copy.harness === 'copilot-cli')?.status, 'removing');
   await chmod(join(b.home, roots[1]), 0o755);
@@ -113,7 +113,7 @@ test('Every skills folder unlistable at once is not deleted everywhere', () => b
   await b.pass();
   for (const root of roots) await chmod(join(b.home, root), 0o755);
   assert.equal((await b.state()).state, 'shared');
-  assert.ok(!(await readHistory(b.home)).some(entry => entry.kind === 'deleted'));
+  assert.ok(!(await readHistory(b.context)).some(entry => entry.kind === 'deleted'));
 }));
 
 test('A SKILL.md broken for a moment holds the skill instead of deleting it elsewhere', () => box(async b => {
@@ -182,7 +182,7 @@ test('Use this copy with one destination read-only still records the replaced co
   const result = await applyChanges(b.context, [{ key: name, managed: true, off: [], use: 'copilot-cli' }]);
   assert.ok(result.results.some(entry => entry.harness === 'codex-cli' && entry.outcome === 'failed'), JSON.stringify(result.results));
   assert.equal(await b.read(0), 'COPILOT VERSION');
-  const chosen = (await readHistory(b.home)).find(entry => entry.kind === 'chosen');
+  const chosen = (await readHistory(b.context)).find(entry => entry.kind === 'chosen');
   assert.ok(chosen?.losers.some(loser => loser.tool === 'claude-cli'), 'History names the replaced Claude copy');
   assert.equal((await b.state()).use, undefined, 'the choice is finished, not retried every pass');
   await b.write(0, 'ANOTHER SKILL', 'ck-other');
@@ -225,7 +225,7 @@ test('Each competing edit that lost can be put back from History', () => box(asy
   await b.write(2, 'CODEX EDIT');
   await b.write(0, 'CLAUDE EDIT');
   await b.pass();
-  const conflict = (await readHistory(b.home)).find(entry => entry.kind === 'conflict')!;
+  const conflict = (await readHistory(b.context)).find(entry => entry.kind === 'conflict')!;
   assert.ok(conflict);
   const { restorableChoices, restoreFromHistory } = await import('../src/manage.ts');
   const options = restorableChoices(conflict);
@@ -263,7 +263,7 @@ test('An edit whose spread failed at first is still History, so the version it r
   for (const i of [1, 2]) { await chmod(join(b.home, roots[i]), 0o755); await chmod(b.path(i), 0o755); }
   await b.pass();
   assert.deepEqual(await b.copies(), ['EDITED', 'EDITED', 'EDITED']);
-  const edit = (await readHistory(b.home)).find(entry => entry.kind === 'edit');
+  const edit = (await readHistory(b.context)).find(entry => entry.kind === 'edit');
   assert.ok(edit, 'the edit is in History');
   assert.ok((await b.stored()).includes('BASE'), 'and the version it replaced is kept');
 }));

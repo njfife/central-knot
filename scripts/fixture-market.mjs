@@ -6,9 +6,9 @@ import { dirname, join } from 'node:path';
 const file = (root, path, text) => { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), text); };
 const skill = (root, path, name, description) => file(root, `${path}/${name}/SKILL.md`, `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n---\n\nFollow the steps.\n`);
 
-export function writeMarket(root, name = 'team-tools') {
+export function writeMarket(root, name = 'team-tools', owner = 'Platform team') {
   file(root, '.claude-plugin/marketplace.json', JSON.stringify({
-    name, owner: { name: 'Platform team' }, description: 'Plugins the platform team keeps for everyday work.',
+    name, owner: { name: owner }, description: 'Plugins the platform team keeps for everyday work.',
     plugins: [
       { name: 'document-tools', source: './plugins/document-tools', version: '1.2.0', category: 'productivity', author: { name: 'Docs crew' }, description: 'Read PDFs and tidy spreadsheets.', keywords: ['pdf', 'xlsx'] },
       { name: 'release-helper', source: './plugins/release-helper', version: '0.4.1', category: 'development', description: 'Release notes, a review agent and a check before each commit.' },
@@ -44,7 +44,7 @@ export function writeMarket(root, name = 'team-tools') {
   ].join('\n'));
   // A skill as long as real ones run: headings, long paragraphs, a list and a command.
   file(root, 'plugins/document-tools/skills/pdf-reader/SKILL.md', [
-    '---', 'name: pdf-reader', 'description: "Reads PDF files and pulls out text and tables."', '---', '',
+    '---', 'name: pdf-reader', 'description: "Reads PDF files and pulls out their text and tables, keeping headings and lists, so a long report can be searched or quoted."', '---', '',
     '# Reading PDFs', '',
     'Use this skill whenever someone hands you a PDF and wants what is in it: the running text, the tables, or both. Read the whole file before answering, because the first page of a report often only holds a cover and a contents list, and the numbers people ask about are usually several pages in.', '',
     '## Steps', '',

@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { cachedCatalog, whyGitFailed, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, uninstall, type PluginContext } from '../src/plugins.ts';
+import { cachedCatalog, checkAccess, gitFailure, whyGitFailed, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, uninstall, type PluginContext } from '../src/plugins.ts';
 
 const noPosix = process.platform === 'win32';
 
@@ -38,6 +38,22 @@ async function marketplace(root: string, extra: unknown[] = []) {
   await put(join(full, '.mcp.json'), JSON.stringify({ mcpServers: { local: { command: '${CLAUDE_PLUGIN_ROOT}/server' } } }));
   await put(join(root, 'plugins/marker/.claude-plugin/plugin.json'), JSON.stringify({ name: 'marker', version: '0.3.0' }));
   await put(join(root, 'plugins/marker/skills/ck-marker-skill/SKILL.md'), '---\nname: ck-marker-skill\ndescription: Marker.\n---\nReply ck-mk-1.\n');
+}
+
+
+/** The fixture server's base URL: its whole first line, however the output arrives in chunks. */
+function servedAt(server: ChildProcess): Promise<string> {
+  return new Promise(done => {
+    let out = '';
+    const read = (chunk: Buffer) => { out += String(chunk); if (out.includes('\n')) { server.stdout!.off('data', read); done(out.split('\n')[0]!.trim()); } };
+    server.stdout!.on('data', read);
+  });
+}
+
+/** Stops the fixture server and waits until it has exited, so a request made next can't still reach it. */
+function stopped(server: ChildProcess): Promise<void> {
+  if (server.exitCode !== null || server.signalCode !== null) return Promise.resolve();
+  return new Promise(done => { server.once('exit', () => done()); server.kill(); });
 }
 
 test('A catalog lists its plugins and what each holds, and reads nothing outside the marketplace', async () => {
@@ -121,15 +137,76 @@ test('One repository is recognised however it was typed', () => {
   assert.ok(sameSource('/tmp/x/../market', '/tmp/market'));
 });
 
-test('Git access failures are told apart, and an unknown one is shown as it is', () => {
-  assert.match(whyGitFailed('missing', ''), /Git is not installed/);
-  assert.match(whyGitFailed('timeout', ''), /Can’t reach/);
-  assert.match(whyGitFailed(128, 'fatal: unable to access: Could not resolve host: x'), /Can’t reach/);
-  assert.match(whyGitFailed(128, 'Host key verification failed.'), /SSH host is not known/);
-  assert.match(whyGitFailed(128, 'Enter passphrase for key'), /passphrase/);
-  assert.match(whyGitFailed(128, 'fatal: could not read Username for https://x: terminal prompts disabled'), /Sign-in needed/);
-  assert.match(whyGitFailed(128, 'remote: Repository not found.'), /No access/);
-  assert.match(whyGitFailed(1, 'something new happened'), /something new happened/);
+test('Git access failures are told apart, an ambiguous one says so, and an unknown one is shown as it is', () => {
+  const samples: [number | 'timeout' | 'missing', string, string, RegExp][] = [
+    ['missing', '', 'git-missing', /Git is not installed.*Install Git/],
+    ['timeout', '', 'network', /Can’t reach/],
+    [128, 'fatal: unable to access: Could not resolve host: x', 'network', /Can’t reach/],
+    [128, 'fatal: unable to access \'http://127.0.0.1:1/x.git/\': Failed to connect to 127.0.0.1 port 1 after 0 ms: Could not connect to server', 'network', /VPN/],
+    [128, 'ssh: connect to host git.example.com port 22: Connection timed out', 'network', /Can’t reach/],
+    [128, 'Host key verification failed.\nfatal: Could not read from remote repository.', 'unknown-host', /SSH host is not known.*known_hosts/],
+    [128, 'Enter passphrase for key \'/Users/x/.ssh/id_ed25519\':', 'passphrase', /passphrase.*SSH agent/],
+    [128, 'fatal: could not read Username for \'https://x\': terminal prompts disabled', 'sign-in', /Sign-in needed, or no repository there: the server doesn’t say which/],
+    [128, 'remote: HTTP Basic: Access denied\nfatal: Authentication failed for \'https://gitlab.example.com/a/b.git/\'', 'sign-in', /Sign-in needed/],
+    [128, 'git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.', 'sign-in', /credentials that already work/],
+    [128, 'remote: Repository not found.\nfatal: repository \'https://github.com/a/b.git/\' not found', 'no-access', /No access, or no repository there: the server doesn’t say which/],
+    [128, 'fatal: \'/srv/x\' does not appear to be a git repository', 'no-access', /Check the address/],
+    [1, 'something new happened', 'unclassified', /^something new happened$/],
+  ];
+  for (const [code, output, state, words] of samples) {
+    const failure = gitFailure(code, output);
+    assert.deepEqual([failure.state, words.test(failure.message)], [state, true], `${output}: ${failure.message}`);
+    assert.equal(whyGitFailed(code, output), failure.message, 'a clone and an access check word one failure the same way');
+  }
+});
+
+test('The access check finds Git missing, and asks only once per source within one request', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  const savedPath = process.env.PATH;
+  try {
+    process.env.PATH = join(box.base, 'empty');
+    assert.equal((await checkAccess(box.context, 'http://127.0.0.1:1/x.git')).state, 'git-missing');
+    process.env.PATH = savedPath;
+    const checked = new Map();
+    const context = { ...box.context, checked };
+    const [first, second] = await Promise.all([checkAccess(context, 'http://127.0.0.1:1/x.git'), checkAccess(context, 'http://127.0.0.1:1/x.git')]);
+    assert.equal(first, second);
+    assert.equal(first.state, 'network');
+    assert.equal(checked.size, 1);
+  } finally { process.env.PATH = savedPath; await box.cleanup(); }
+});
+
+test('Before a tool is told to fetch a Git marketplace, access is checked; a failed check runs nothing, a passed one leaves the result to the tool', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  const server = spawn(process.execPath, [join(import.meta.dirname, '../scripts/git-http-fixture.mjs'), join(box.base, 'served'), '0']);
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root);
+    const git = (args: string[], cwd: string) => execFileSync('git', args, { cwd, stdio: 'ignore' });
+    git(['init', '-q'], root); git(['add', '-A'], root); git(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'v1'], root);
+    await mkdir(join(box.base, 'served'), { recursive: true });
+    git(['clone', '-q', '--bare', root, join(box.base, 'served/market.git')], box.base);
+    const base = await servedAt(server);
+    const bin = join(box.base, 'bin');
+    await mkdir(bin, { recursive: true });
+    await writeFile(join(bin, 'claude'), '#!/bin/sh\necho "$*" >> "$HOME/calls.txt"\necho "add failed" >&2\nexit 1\n', { mode: 0o755 });
+    const context = { ...box.context, binaries: { 'claude-cli': join(bin, 'claude') } as PluginContext['binaries'] };
+    const calls = () => readFile(join(box.home, 'calls.txt'), 'utf8').catch(() => '');
+
+    const missing = await install(context, await parseCatalog(root, `${base}/missing.git`, 'git'), 'marker', 'claude-cli');
+    assert.deepEqual([missing.outcome, missing.runs.length], ['failed', 0]);
+    assert.match(missing.message, /No access, or no repository there.*Nothing was added to Claude Code\./);
+    assert.equal(await calls(), '', 'the tool was never run');
+
+    const reachable = await install(context, await parseCatalog(root, `${base}/market.git`, 'git'), 'marker', 'claude-cli');
+    assert.deepEqual(reachable.runs.map(run => run.command), [`claude plugin marketplace add ${base}/market.git`]);
+    assert.deepEqual([reachable.outcome, reachable.message], ['failed', 'Could not add the marketplace. add failed'], 'the tool’s own result decides');
+
+    await stopped(server);
+    const unreachable = await install(context, await parseCatalog(root, `${base}/market.git`, 'git'), 'marker', 'claude-cli');
+    assert.match(unreachable.message, /Can’t reach the marketplace/);
+    assert.equal((await calls()).trim().split('\n').length, 1, 'only the passed check let the tool run');
+  } finally { server.kill(); await box.cleanup(); }
 });
 
 test('Each tool’s marketplaces are read from where it records them', async () => {
@@ -242,8 +319,9 @@ test('A Git marketplace is checked, then read from a fresh shallow copy; the las
     git(['init', '-q'], root); git(['add', '-A'], root); git(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'v1'], root);
     await mkdir(join(box.base, 'served'), { recursive: true });
     git(['clone', '-q', '--bare', root, join(box.base, 'served/market.git')], box.base);
-    const base = await new Promise<string>(done => server.stdout.once('data', chunk => done(String(chunk).trim())));
+    const base = await servedAt(server);
     const url = `${base}/market.git`;
+    assert.deepEqual(await checkAccess(box.context, url), { state: 'ok' });
     const catalog = await readCatalog(box.context, url);
     assert.equal(catalog.problem, undefined);
     assert.equal(catalog.kind, 'git');
@@ -256,8 +334,8 @@ test('A Git marketplace is checked, then read from a fresh shallow copy; the las
     assert.match((await readCatalog(box.context, url)).problem ?? '', /could not be read as JSON/);
     assert.equal((await cachedCatalog(box.context, url))?.plugins.length, 3, 'the good copy was kept');
     assert.equal((await readdir(join(box.context.dataDir, 'catalogs'))).length, 1, 'and no stage was left');
-    server.kill();
-    // One clone, no separate access check: its failure is classified in words a person can act on.
+    await stopped(server);
+    // A refresh is one clone, with no access check first: its failure is classified in words a person can act on.
     assert.match((await readCatalog(box.context, url)).problem ?? '', /Can’t reach the marketplace/);
     assert.equal((await cachedCatalog(box.context, url))?.plugins.length, 3, 'the last fetched catalog stays browsable');
   } finally { server.kill(); await box.cleanup(); }
