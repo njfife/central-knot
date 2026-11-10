@@ -711,6 +711,8 @@ function createWindow(show: boolean) {
   window = new BrowserWindow({
     width: 1280, height: 800, minWidth: 860, minHeight: 560, show,
     title: 'Central Knot', backgroundColor: nativeTheme.shouldUseDarkColors ? '#000000' : '#fbfbfc',
+    // macOS takes the app's icon from its bundle; Windows and Linux take the window's.
+    ...(process.platform === 'darwin' ? {} : { icon: join(__dirname, '../assets/icon.png') }),
     webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));

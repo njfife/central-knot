@@ -163,7 +163,8 @@ ul { list-style: none; }
 .page { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
 .brand { height: 48px; flex: none; display: flex; align-items: center; gap: 8px; padding-left: 16px; box-shadow: inset 0 -1px 0 var(--line); }
-.logo { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 6px; background: var(--accent); color: #fff; font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: 0.02em; }
+/* The default mark (assets/logo.svg); a branded build replaces the files in assets/. */
+.logo { width: 24px; height: 24px; flex: none; display: block; border-radius: 6px; }
 .wordmark { font-size: 14px; font-weight: 600; white-space: nowrap; }
 
 #nav { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding: 8px; display: flex; flex-direction: column; gap: 2px; }

@@ -30,6 +30,8 @@ const packages = await packager({
   dir: '.', out: 'release', name: 'Central Knot', executableName: 'Central Knot',
   appBundleId: 'com.centralknot.firstlook', appVersion: version, platform: 'darwin', arch: 'arm64',
   asar: true, overwrite: true, prune: true,
+  // The default app icon; a branded build replaces the files in assets/.
+  icon: 'assets/icon.icns',
   // Optional: a folder already holding the Electron zip, for when GitHub's downloads are failing (CK_ELECTRON_ZIP_DIR).
   ...(process.env.CK_ELECTRON_ZIP_DIR ? { electronZipDir: process.env.CK_ELECTRON_ZIP_DIR } : {}),
   // @electron/osx-sign's defaults: hardened runtime and the entitlements Electron needs (JIT and its helpers).

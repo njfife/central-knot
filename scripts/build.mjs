@@ -10,6 +10,7 @@ await build({ entryPoints: ['src/preload.ts'], outfile: 'dist/preload.cjs', bund
 await build({ entryPoints: ['src/renderer.ts'], outfile: 'dist/renderer.js', bundle: true, platform: 'browser', format: 'esm', target: 'chrome140' });
 await cp('src/index.html', 'dist/index.html');
 await cp('src/style.css', 'dist/style.css');
+await cp('assets/logo.svg', 'dist/logo.svg');
 await mkdir('dist/fonts', { recursive: true });
 for (const family of families) {
   const folder = `node_modules/@fontsource-variable/${family}`;
