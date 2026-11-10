@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { applyMcp, mcpView, restoreMcp, undoClaudeWrite } from '../src/mcp.ts';
 import { readHistory } from '../src/manage.ts';
-import type { ShareContext } from '../src/share.ts';
+import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
 
 const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
@@ -89,7 +89,7 @@ test('An edit spreads and Undo reverts it; a deletion spreads once it holds and 
     assert.deepEqual(spread.notices?.map(notice => [notice.kind, notice.winner, notice.losers]), [['edit', 'codex-cli', ['copilot-cli']]]);
     assert.equal((await copilotOf(box.home)).tool.command, 'b', 'Codex edit reached Copilot');
     assert.deepEqual((await copilotOf(box.home)).tool.tools, ['*'], "Copilot's own field stays");
-    const edit = (await readHistory(box.home)).find(event => event.kind === 'edit' && event.key === 'mcp:tool')!;
+    const edit = (await readHistory(box.context)).find(event => event.kind === 'edit' && event.key === 'mcp:tool')!;
     assert.equal((await restoreMcp(box.context, tools, edit.id)).stopped, undefined);
     assert.equal((await copilotOf(box.home)).tool.command, 'a', 'Undo put the old command back in Copilot');
     assert.ok((await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('command = "a"'), 'and in Codex');
@@ -110,7 +110,7 @@ test('An edit spreads and Undo reverts it; a deletion spreads once it holds and 
     const held = await applyMcp(box.context, tools, [{ key: 'twin', managed: true, off: ['claude-cli'] }]);
     assert.ok(held.results.some(entry => /Copies differ/.test(entry.message)));
     await applyMcp(box.context, tools, [{ key: 'twin', managed: true, off: ['claude-cli'], use: 'copilot-cli' }]);
-    assert.ok((await readHistory(box.home)).some(e => e.kind === 'chosen' && e.key === 'mcp:twin' && e.losers.some(l => l.tool === 'codex-cli')), 'the replaced copy is in History');
+    assert.ok((await readHistory(box.context)).some(e => e.kind === 'chosen' && e.key === 'mcp:twin' && e.losers.some(l => l.tool === 'codex-cli')), 'the replaced copy is in History');
     assert.ok((await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('command = "x"'));
   } finally { await box.cleanup(); }
 });
@@ -182,7 +182,7 @@ test('Apply all records the entries it adds; Undo removes them while unchanged, 
     await writeFile(join(box.home, '.claude.json'), claudeJson({ massive }));
     await writeFile(join(box.home, '.codex/config.toml'), codexToml);
     await applyMcp(box.context, tools, [{ key: 'massive', managed: true, off: [] }]);
-    const added = (await readHistory(box.home)).find(event => event.kind === 'added' && event.key === 'mcp:massive')!;
+    const added = (await readHistory(box.context)).find(event => event.kind === 'added' && event.key === 'mcp:massive')!;
     assert.deepEqual(added.losers.map(loser => loser.tool).sort(), ['codex-cli', 'copilot-cli']);
     const undone = await restoreMcp(box.context, tools, added.id);
     assert.equal(undone.stopped, undefined, JSON.stringify(undone));
@@ -252,5 +252,77 @@ test('Undo of Write to Claude Code puts back an older entry, and refuses when th
     const refused = await undoClaudeWrite(box.context, again.claudeWritten!);
     assert.ok(refused.stopped);
     assert.equal(JSON.parse(await readFile(join(box.home, '.claude.json'), 'utf8')).mcpServers.docs.url, 'https://edited-in-claude.example/mcp');
+  } finally { await box.cleanup(); }
+});
+
+test('A damaged, unreadable or newer MCP record stops every write and is never rewritten; a missing one is a first run', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude.json'), claudeJson({ massive }));
+    const first = await applyMcp(box.context, tools, [{ key: 'massive', managed: true, off: [] }]);
+    assert.equal(first.writes, 2, 'a missing record is a first run');
+    const recordFile = join(box.home, '.central-knot/mcp.json');
+    const good = await readFile(recordFile, 'utf8');
+    assert.equal(JSON.parse(good).formatVersion, 1);
+    // An edit in Copilot that a pass would spread to Codex.
+    const copilot = JSON.parse(await readFile(join(box.home, '.copilot/mcp-config.json'), 'utf8'));
+    copilot.mcpServers.massive.args = ['-y', 'massive@2'];
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), JSON.stringify(copilot, null, 2));
+    const files = ['.claude.json', '.copilot/mcp-config.json', '.codex/config.toml'];
+    const before = await Promise.all(files.map(file => readFile(join(box.home, file), 'utf8')));
+    const edit = (await readHistory(box.context)).at(-1)!;
+    const bad: [string, RegExp][] = [
+      ['{"formatVersion": 1, "items": {', /The MCP record is damaged\. Nothing was written or deleted/],
+      [JSON.stringify({ formatVersion: 1, items: [] }), /The MCP record is damaged\./],
+      [JSON.stringify({ formatVersion: 1, items: { massive: { state: 'shared', hash: 'x' } } }), /The MCP record is damaged\./],
+      [JSON.stringify({ formatVersion: 'one', items: {} }), /The MCP record is damaged\./],
+      [JSON.stringify({ items: JSON.parse(good).items }), /The MCP record is damaged\./],
+      [JSON.stringify({ ...JSON.parse(good), formatVersion: 2 }), /The MCP record was written by a newer Central Knot\. Nothing was written or deleted/],
+    ];
+    for (const [text, reason] of bad) {
+      await writeFile(recordFile, text);
+      assert.match((await applyMcp(box.context, tools, [])).stopped ?? '', reason);
+      assert.match((await applyMcp(box.context, tools, [{ key: 'massive', managed: false, off: [] }])).stopped ?? '', reason);
+      assert.match((await applyMcp(box.context, tools, [], { claudeNow: ['massive'] })).stopped ?? '', reason);
+      assert.match((await restoreMcp(box.context, tools, edit.id)).stopped ?? '', reason);
+      assert.match((await undoClaudeWrite(box.context, [{ name: 'massive', before: null, after: 'x' }])).stopped ?? '', reason);
+      const view = await mcpView(box.context, tools);
+      assert.deepEqual(view.servers.map(server => server.key), ['massive'], 'the page still reads');
+      assert.ok(view.gate.state === 'stopped' && reason.test(view.gate.reason));
+      assert.ok(view.problems.some(problem => reason.test(problem)));
+      assert.equal(await readFile(recordFile, 'utf8'), text, 'the record is left as it is');
+      assert.deepEqual(await Promise.all(files.map(file => readFile(join(box.home, file), 'utf8'))), before, 'no tool file changed');
+    }
+    await rm(recordFile);
+    await mkdir(recordFile);
+    assert.match((await applyMcp(box.context, tools, [])).stopped ?? '', /The MCP record could not be read\. Nothing was written or deleted/);
+    assert.deepEqual(await Promise.all(files.map(file => readFile(join(box.home, file), 'utf8'))), before);
+    await rm(recordFile, { recursive: true });
+    await writeFile(recordFile, good);
+    const resumed = await applyMcp(box.context, tools, []);
+    assert.equal(resumed.stopped, undefined);
+    assert.match(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), /massive@2/, 'with the record back, the edit spreads');
+  } finally { await box.cleanup(); }
+});
+
+test('With an intact record this app has no memory of, Apply stops until an explicit Resume, which keeps the record and remembers it', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), copilotOne('a'));
+    await applyMcp(box.context, tools, [{ key: 'tool', managed: true, off: ['claude-cli'] }]);
+    const generation = (await readRecord(box.home)).record!.generation;
+    await rm(join(box.base, 'settings.json'));
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { tool: { type: 'local', command: 'a', tools: ['*'] }, more: { type: 'local', command: 'm', tools: ['*'] } } }));
+    assert.equal((await syncGate(box.context)).state, 'needs-resume');
+    const blocked = await applyMcp(box.context, tools, [{ key: 'more', managed: true, off: ['claude-cli'] }]);
+    assert.match(blocked.stopped ?? '', /no memory/);
+    assert.equal(blocked.writes, 0);
+    assert.equal((await syncGate(box.context)).state, 'needs-resume');
+    const resumed = await applyMcp(box.context, tools, [{ key: 'more', managed: true, off: ['claude-cli'] }], { resume: true });
+    assert.equal(resumed.stopped, undefined);
+    assert.equal(resumed.writes, 1, JSON.stringify(resumed.results));
+    assert.match(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), /\[mcp_servers\.more\]/);
+    assert.equal((await readRecord(box.home)).record!.generation, generation);
+    assert.equal((await syncGate(box.context)).state, 'ready');
   } finally { await box.cleanup(); }
 });

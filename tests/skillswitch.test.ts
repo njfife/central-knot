@@ -139,7 +139,7 @@ test('Managed and disabled in two tools: each copy arrives switched off (Codex b
     await applyChanges(box.context, []);
     await applyChanges(box.context, []);
     assert.equal(await readFile(copy, 'utf8'), text('Notes Helper', 'Edited.'));
-    const switched = (await readHistory(box.home)).find(event => event.kind === 'switched')!;
+    const switched = (await readHistory(box.context)).find(event => event.kind === 'switched')!;
     assert.equal((await restoreFromHistory(box.context, switched.id)).stopped, undefined);
     notes = (await manageView(box.context)).skills.find(item => item.key === 'notes')!;
     assert.equal(notes.disabled, undefined);
@@ -168,7 +168,7 @@ test('Remove from one tool: unmanaged or managed, only that copy goes, nothing b
       assert.ok(facts.copies['claude-cli'] && !facts.copies['copilot-cli'], key);
     }
     assert.deepEqual(view.skills.find(item => item.key === 'kept')!.off, ['copilot-cli']);
-    for (const removed of (await readHistory(box.home)).filter(event => event.kind === 'removed')) {
+    for (const removed of (await readHistory(box.context)).filter(event => event.kind === 'removed')) {
       assert.equal((await restoreFromHistory(box.context, removed.id)).stopped, undefined);
     }
     assert.equal(await readFile(join(box.home, '.copilot/skills/loose/SKILL.md'), 'utf8'), text('loose'));
@@ -181,7 +181,7 @@ test('Remove from one tool: unmanaged or managed, only that copy goes, nothing b
     const gone = await applyChanges(box.context, [{ key: 'whole', managed: true, off: [], remove: ['claude-cli', 'copilot-cli'], seenManaged: true }]);
     assert.deepEqual(gone.results.map(entry => entry.outcome), ['removed', 'removed'], JSON.stringify(gone));
     assert.equal((await manageView(box.context)).skills.some(item => item.key === 'whole'), false);
-    await restoreFromHistory(box.context, (await readHistory(box.home)).find(event => event.kind === 'removed' && event.key === 'whole')!.id);
+    await restoreFromHistory(box.context, (await readHistory(box.context)).find(event => event.kind === 'removed' && event.key === 'whole')!.id);
     const whole = (await manageView(box.context)).skills.find(item => item.key === 'whole')!;
     assert.deepEqual([whole.managed, whole.off, Object.keys(whole.copies).length], [true, [], 2]);
     // A copy in a tool whose box is off doesn't count: removing the synced ones still unmanages the skill, with no stray result.
@@ -192,7 +192,7 @@ test('Remove from one tool: unmanaged or managed, only that copy goes, nothing b
     // Unticking a tool and removing its copy in one change: Restore later doesn't turn syncing there back on.
     await skill(box.home, 'claude-cli', 'both'); await applyChanges(box.context, [{ key: 'both', managed: true, off: [] }]);
     await applyChanges(box.context, [{ key: 'both', managed: true, off: ['copilot-cli'], remove: ['copilot-cli'], seenManaged: true }]);
-    assert.deepEqual((await readHistory(box.home)).find(event => event.kind === 'removed' && event.key === 'both')!.stoppedSync, []);
+    assert.deepEqual((await readHistory(box.context)).find(event => event.kind === 'removed' && event.key === 'both')!.stoppedSync, []);
     // Removing the very copy chosen for every tool is refused, changing nothing.
     await skill(box.home, 'claude-cli', 'pick'); await skill(box.home, 'copilot-cli', 'pick', text('pick', 'Other.'));
     const refused = await applyChanges(box.context, [{ key: 'pick', managed: true, off: [], use: 'claude-cli', remove: ['claude-cli'] }]);
@@ -200,14 +200,14 @@ test('Remove from one tool: unmanaged or managed, only that copy goes, nothing b
     // A Restore that can't finish everywhere (a different copy took one tool's place) puts back the rest, and a retry finishes.
     await skill(box.home, 'claude-cli', 'pair'); await skill(box.home, 'copilot-cli', 'pair');
     await applyChanges(box.context, [{ key: 'pair', managed: false, off: [], remove: ['claude-cli', 'copilot-cli'] }]);
-    const pair = (await readHistory(box.home)).find(event => event.kind === 'removed' && event.key === 'pair')!;
+    const pair = (await readHistory(box.context)).find(event => event.kind === 'removed' && event.key === 'pair')!;
     await skill(box.home, 'claude-cli', 'pair', text('pair', 'Someone else’s.'));
     await restoreFromHistory(box.context, pair.id);
     assert.equal(await readFile(join(box.home, '.copilot/skills/pair/SKILL.md'), 'utf8'), text('pair'));
     await rm(join(box.home, '.claude/skills/pair'), { recursive: true });
     assert.equal((await restoreFromHistory(box.context, pair.id)).stopped, undefined);
     assert.equal(await readFile(join(box.home, '.claude/skills/pair/SKILL.md'), 'utf8'), text('pair'));
-    assert.ok((await readHistory(box.home)).find(event => event.id === pair.id)!.undoneBy, 'done once every copy is back');
+    assert.ok((await readHistory(box.context)).find(event => event.id === pair.id)!.undoneBy, 'done once every copy is back');
     // A removal that doesn't happen (the copy was edited just then) keeps the copy, and it keeps syncing.
     const copilotKept = join(box.home, '.copilot/skills/kept/SKILL.md');
     const editing = { ...box.context, fault: (step: string) => { if (step === 'before-remove') writeFileSync(copilotKept, text('kept', 'Edited just now.')); } };
