@@ -374,8 +374,9 @@ function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; 
   if (page === 'history') return loadHistory();
   if (page === 'settings') return loadSettings().then(() => undefined);
   if (page === 'instructions') return loadInstructions();
-  // Harnesses sums up each tool's instruction file and installs, as Instructions and Plugins read them.
-  if (page === 'harnesses') return Promise.all([loadInstructions(), absentKinds().includes('plugins') ? undefined : loadPlugins(fresh, readId)]).then(() => undefined);
+  // Harnesses sums up each tool's instruction file and installs, as Instructions and Plugins read them. It only counts installs,
+  // so its Refresh reads the tools again without fetching every marketplace anew (Plugins' Refresh does that).
+  if (page === 'harnesses') return Promise.all([loadInstructions(), absentKinds().includes('plugins') ? undefined : loadPlugins(false, readId)]).then(() => undefined);
   if (page === 'plugins') return loadPlugins(fresh, readId);
   return Promise.resolve();
 }
