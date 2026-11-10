@@ -1397,7 +1397,7 @@ button.harness-card-main:disabled { cursor: default; }
 /* Its two groups sit side by side from about 860px of pane, each growing to 640px and then staying beside the other; the card
    is as wide as its groups, so no empty frame runs on past them. */
 .harness-about { padding: 16px; display: flex; flex-wrap: wrap; gap: 16px 48px; width: fit-content; max-width: 100%; }
-.harness-about-column { flex: 1 1 400px; display: flex; flex-direction: column; gap: 16px; min-width: 0; max-width: 640px; }
+.harness-about-column { flex: 0 1 auto; display: flex; flex-direction: column; gap: 16px; min-width: 0; max-width: 640px; }
 .harness-path { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .harness-path .middle { min-width: 0; }
 /* Narrow: the switcher keeps only the marks (names stay in their tooltips). */
@@ -1444,7 +1444,6 @@ button.harness-card-main:focus-visible { outline: 0; }
 @container (min-width: 520px) {
   .harness-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; align-items: start; }
   .harness-count-group { display: grid; grid-template-columns: max-content minmax(2ch, max-content) minmax(0, 1fr); column-gap: 12px; row-gap: 4px; align-items: baseline; }
-}
 }
 /* A file's text keeps a reading measure. */
 .harness-page .ins-card pre, .harness-page .ins-card textarea { max-width: 110ch; }
@@ -1497,3 +1496,7 @@ button.harness-card-main:focus-visible { outline: 0; }
 /* The list's note keeps a reading measure. */
 .harness-scroll > .tools-note { max-width: 80ch; }
 .legend-left-out { border: 1px solid var(--control-line); border-radius: 5px; }
+/* The Harnesses list's bands reach the window edge, like its cards and every band on a harness page. */
+.page-harnesses .page > .bands > .band { padding-right: 16px; }
+/* One or two harnesses don't stretch across a wide window: each card is at most about 560px wide. */
+.harness-cards[data-count="1"], .harness-cards[data-count="2"] { grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 560px)); }
