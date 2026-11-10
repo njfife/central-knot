@@ -501,6 +501,17 @@ async function practiceFlow() {
   check('a change on disk spreads on its own', watched);
   await wait(800);
   check('and the page hears about it without a click', (await a.text('.sync-notices') ?? '').includes("standup was edited in Copilot CLI"), await a.text('.bands'));
+  // A background read whose reply arrives while an action runs is set aside, but the notice it carried still reaches the page.
+  check('the refresh reply is slowed', await main.slowReply('discovery:refresh', 1500));
+  writeFileSync(standupPath('codex'), standupBefore.replace(/\n*$/, '\nEdited in Codex during an action.\n'));
+  await main.tellPage('sync:changed');
+  await wait(300);
+  await a.run(`(document.querySelector('#header-refresh').click(), true)`);
+  await wait(3500);
+  await main.restore('discovery:refresh');
+  let keptNotice = false;
+  for (let tries = 0; tries < 40 && !keptNotice; tries++) { await wait(250); keptNotice = (await a.text('.sync-notices') ?? '').includes('standup was edited in Codex'); }
+  check('a notice from a background read set aside for an action is still shown', keptNotice, await a.text('.bands'));
   // Sync off: edits are noted, not spread; the page shows them pending; Sync now spreads once; Apply all still works.
   await a.click('#sync-switch');
   same('Sync turns off', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'false');

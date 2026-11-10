@@ -1,6 +1,6 @@
 import { loadSettings, openSettings } from './settingspage.ts';
 import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, McpResult, ClaudeWrite, SyncNotice } from './types.ts';
-import { caughtUpNames, plural } from './model.ts';
+import { caughtUpNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
 import { andList, fileName, noToolsSentence, orList, sentence, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
@@ -918,6 +918,8 @@ export const syncNow = () => busy('Syncing…', async () => {
 /** A background read is running, or one arrived while the page was busy and runs when it is done (busy). */
 let refreshing = false;
 let refreshOwed = false;
+/** A background view that arrived while an action ran: its notices and caught-up results go into the next one (withSetAside). */
+let setAside: HomeView | undefined;
 // The Settings… menu item (and any later page the main process asks for) opens that page.
 const isPage = (page: string): page is Page => (pages as readonly string[]).includes(page);
 api().onNavigate(page => { if (isPage(page)) showPage(page); });
@@ -941,9 +943,11 @@ async function backgroundRefresh() {
   if (state.busy || refreshing) { refreshOwed = true; return; }
   refreshing = true;
   try {
-    const view = await api().refresh();
-    if (state.busy) { refreshOwed = true; return; }
+    const read = await api().refresh();
+    const view = read ? withSetAside(setAside, read) : undefined;
+    if (state.busy) { refreshOwed = true; if (view) setAside = view; return; }
     if (!view) return;
+    setAside = undefined;
     const known = new Set(state.home ? noticesByPage(state.home).flatMap(([, notices]) => notices.map(notice => notice.history)) : []);
     const fresh = noticesByPage(view).map(([page, notices]) => [page, notices.filter(notice => !known.has(notice.history))] as const).filter(([, notices]) => notices.length);
     if (fresh.length) {
