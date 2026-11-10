@@ -28,6 +28,8 @@ function check(name, ok, detail) {
   console.error(`FAIL ${name}${detail === undefined ? '' : `: ${JSON.stringify(detail)?.slice(0, 500)}`}`);
 }
 const same = (name, actual, expected) => check(name, JSON.stringify(actual) === JSON.stringify(expected), { actual, expected });
+// A file a poll reads; empty for the moment the app's checked write has it moved aside.
+const readNow = path => { try { return readFileSync(path, 'utf8'); } catch { return ''; } };
 
 // ---------- Disposable home ----------
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'ck-e2e-')));
@@ -194,7 +196,8 @@ const applyAll = async a => { await a.click('#apply'); await a.settle(); };
 
 /** Harnesses: one tool's page manages its items with the same engine as the Skills page. */
 async function harnessFlow() {
-  const a = await launch(join(scratch, 'harness-data'));
+  // A packaged build starts on this computer's home: the switch puts it on the Practice copy, as a dev build starts.
+  const a = await launch(join(scratch, 'harness-data'), ['--practice-copy']);
   const practice = await a.run(`document.querySelector('.status-home').title`);
   await a.click('#nav-harnesses');
   const list = await a.text('#harnesses-scroll') ?? '';
@@ -497,7 +500,7 @@ async function practiceFlow() {
   await a.click('#nav-skills');
   writeFileSync(standupPath('copilot'), standupBefore.replace(/\n*$/, '\nEdited in Copilot, watched.\n'));
   let watched = false;
-  for (let tries = 0; tries < 40 && !watched; tries++) { await wait(250); watched = readFileSync(standupPath('claude'), 'utf8').includes('watched'); }
+  for (let tries = 0; tries < 40 && !watched; tries++) { await wait(250); watched = readNow(standupPath('claude')).includes('watched'); }
   check('a change on disk spreads on its own', watched);
   await wait(800);
   check('and the page hears about it without a click', (await a.text('.sync-notices') ?? '').includes("standup was edited in Copilot CLI"), await a.text('.bands'));
@@ -760,7 +763,7 @@ async function practiceFlow() {
   const copilotFile = join(practice, '.copilot/mcp-config.json');
   writeFileSync(copilotFile, readFileSync(copilotFile, 'utf8').replace('"command": "npx"', '"command": "npx-edited"'));
   let mcpSpread = false;
-  for (let tries = 0; tries < 24 && !mcpSpread; tries++) { await wait(250); mcpSpread = readFileSync(join(practice, '.codex/config.toml'), 'utf8').includes('command = "npx-edited"'); }
+  for (let tries = 0; tries < 24 && !mcpSpread; tries++) { await wait(250); mcpSpread = readNow(join(practice, '.codex/config.toml')).includes('command = "npx-edited"'); }
   check('an MCP edit in Copilot reaches Codex within 6 s', mcpSpread);
   for (let tries = 0; tries < 20 && !(await a.exists('.sync-notice[data-kind="edit"]')); tries++) await wait(250);
   await fitsAtMinimum(a, 'MCP servers with the edit’s notice and its actions');
@@ -1385,7 +1388,7 @@ async function practiceFlow() {
   const notesToml = join(practice, '.codex/agents/release-notes.toml');
   writeFileSync(notesToml, readFileSync(notesToml, 'utf8').replace('one line each.', 'one line each. Edited with no window.'));
   let spreadClosed = false;
-  for (let tries = 0; tries < 80 && !spreadClosed; tries++) { await wait(250); spreadClosed = readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Edited with no window.'); }
+  for (let tries = 0; tries < 80 && !spreadClosed; tries++) { await wait(250); spreadClosed = readNow(join(practice, '.claude/agents/release-notes.md')).includes('Edited with no window.'); }
   check('an agent edit spreads in the background with no window', spreadClosed);
   main?.close();
   await a.quit();
