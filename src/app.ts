@@ -1,6 +1,6 @@
 import { loadSettings } from './settingspage.ts';
 import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
-import { fileName, plural } from './model.ts';
+import { caughtUpNames, fileName, plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools } from './words.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
 import { readInto, readState, type Read } from './reads.ts';
@@ -154,9 +154,9 @@ const readSummary = (view: HomeView) => {
   const skills = view.manage.skills.length, servers = view.mcp.servers.length, agents = view.agents?.servers.length ?? 0;
   // "Nothing changed" means nothing was written; a copy that stopped updating is still news, so it is said.
   const stopped = (view.agents?.servers ?? []).filter(server => server.managed && server.stopped?.length).map(server => `${server.name}’s ${server.stopped!.length === 1 ? 'copy in one tool' : 'copies in some tools'}`);
-  // A catch-up that copied managed skills where they were missing is said, not covered by "Nothing changed".
-  const caught = [...new Set(view.manage.caughtUp.filter(result => result.outcome === 'written').map(result => result.item))];
-  return `Read ${plural(skills, 'skill')}, ${plural(servers, 'MCP server')} and ${plural(agents, 'agent')} from ${view.label}. ${caught.length ? `Copied ${andList(caught)} where ${caught.length === 1 ? 'it was' : 'they were'} missing.` : stopped.length ? '' : 'Nothing changed.'}`;
+  // A catch-up that copied something has its own Caught up band (tables and the Harnesses list), so it is not "Nothing changed".
+  const caught = caughtUpNames(view.manage, new Set(view.manage.notices.map(notice => notice.item)));
+  return `Read ${plural(skills, 'skill')}, ${plural(servers, 'MCP server')} and ${plural(agents, 'agent')} from ${view.label}. ${stopped.length || caught.length ? '' : 'Nothing changed.'}`;
 };
 
 export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mode === 'fixture' ? 'the practice copy' : mode === 'actual' ? 'your real tools' : 'that folder'}…`, async () => {
@@ -189,6 +189,15 @@ export const readAgain = () => busy('Reading skills, MCP servers and agents…',
 /** How many tools this home really has: a tool that was not found (Pi, often) never makes "all tools" false. */
 export const presentCount = () => state.home ? state.home.snapshots.filter(snapshot => snapshot.detection !== 'Not found' || snapshot.skills.length > 0).length || 3 : 3;
 
+/** Lets go of what the last action showed (its result band, Apply results, the spoken line): for moving to another place. */
+export function dropActionResults() {
+  state.outcome = undefined;
+  state.applied = undefined;
+  state.mcpResult = undefined;
+  state.agentsResult = undefined;
+  announce('');
+}
+
 export function showPage(page: Page) {
   if (page === 'plugins' && state.page !== 'plugins') void loadPlugins();
   // A new page starts clean: the last action's message and results belong to the page they happened on.
@@ -201,7 +210,7 @@ export function showPage(page: Page) {
   if (page === 'instructions') readInstructionsQuietly(true);
   // The sidebar's Harnesses opens the list of every harness, except while an action runs: its result belongs to the harness it
   // started on. Leaving a harness's page this way drops that page's result, as its own back arrow does.
-  if (page === 'harnesses' && !state.busy && state.harness) { state.harness = undefined; state.outcome = undefined; state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; announce(''); }
+  if (page === 'harnesses' && !state.busy && state.harness) { state.harness = undefined; dropActionResults(); }
   state.page = page;
   state.find = '';
   state.item = undefined;

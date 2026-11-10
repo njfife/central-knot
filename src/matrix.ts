@@ -2,6 +2,7 @@
 // Managed says whether Central Knot keeps a skill in sync; each tool's cell says what that tool has.
 // Changes collect until "Apply all".
 import { brandMark } from './brand.ts';
+import { caughtUpNames } from './model.ts';
 import { andList, toolNames } from './words.ts';
 import { convertAgent, flashRequests, harnessKindShown, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { button, closeButton, emptyState, h, icon, middle, withToolCount } from './dom.ts';
@@ -244,11 +245,11 @@ function changeBar(bulk = true) {
   const word = (n: number) => kindNoun[kind][n === 1 ? 0 : 1];
   // On a harness's page the count names what it covers: only what that harness has.
   const manageLabel = focus ? `Manage ${ready.length} ${word(ready.length)}` : ready.length === 1 ? 'Manage 1' : ready.length === 2 ? 'Manage both' : needChoice ? `Manage ${ready.length} of ${ready.length + needChoice}` : `Manage all ${ready.length}`;
-  // Under the Copies differ filter a harness's page shows only items that need a copy choice, which Manage leaves out:
-  // the button would act on rows not shown, so it waits until the filter changes.
-  // On a harness's page, once changes are queued the toolbar holds them (count, Discard, Apply all) and Manage steps aside,
-  // so the bar keeps one line and the table does not move.
-  const manageAll = bulk && variant !== 'c' && ready.length && !(focus && view.filter === 'attention') && !(focus && count) ? button({ variant: 'outline', size: 'small', label: manageLabel, attrs: needChoice ? { title: `${needChoice === 1 ? `One ${word(1)} needs` : `${needChoice} need`} a copy choice first` } : undefined, name: `Manage ${ready.length} unmanaged ${word(ready.length)}${needChoice ? `; ${needChoice} more ${needChoice === 1 ? 'needs' : 'need'} a copy choice first` : ''}`, id: 'manage-all', onclick: () => setManaged(ready.map(skill => skill.key), true) }) : null;
+  // On a harness's page Manage steps aside (1) under the Copies differ filter, where every row shown needs a copy choice that
+  // Manage leaves out, so it would act only on rows not shown; and (2) while changes are queued, so the toolbar keeps one line
+  // for the count, Discard and Apply all and the table does not move. It comes back after Apply all or Discard.
+  const offerManage = bulk && variant !== 'c' && ready.length > 0 && !(focus && (view.filter === 'attention' || count > 0));
+  const manageAll = offerManage ? button({ variant: 'outline', size: 'small', label: manageLabel, attrs: needChoice ? { title: `${needChoice === 1 ? `One ${word(1)} needs` : `${needChoice} need`} a copy choice first` } : undefined, name: `Manage ${ready.length} unmanaged ${word(ready.length)}${needChoice ? `; ${needChoice} more ${needChoice === 1 ? 'needs' : 'need'} a copy choice first` : ''}`, id: 'manage-all', onclick: () => setManaged(ready.map(skill => skill.key), true) }) : null;
   const firstChoice = committedList().find(skill => !skill.held && !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) === 'attention');
   // The Unmanaged section's note names the item that needs a copy choice; the toolbar no longer repeats it.
   const choiceNote: HTMLElement | null = null;
@@ -751,7 +752,7 @@ function addRow(from: Tool, to: Tool, list: SampleSkill[], shown: Tool = to) {
   const showWhy = view.addReasons.has(key);
   const idle = !count && !plan.differ.length;
   // Mixed new and already-there items say both, so the button matches the pending bar's "new copies" afterwards.
-  const fresh = plan.fresh.length + (conflicts && plan.differ.some(entry => !entry.here) ? plan.differ.filter(entry => !entry.here).length : 0);
+  const fresh = plan.fresh.length + (conflicts ? plan.differ.filter(entry => !entry.here).length : 0);
   const label = !count ? 'Add' : !copies ? `Manage ${count}` : fresh && fresh < count ? `Add ${count} (${fresh} new)` : `Add ${count}`;
   return h(`div.add-target${conflicts ? '.add-target-conflicts' : ''}`, { 'data-target': to },
     h('div.tool-menu-row', {},
@@ -789,11 +790,8 @@ function menuPairs(tool: Tool, list: SampleSkill[]) {
   // A pair counts if adding would do something, or would say why it can't; one where everything already syncs does not.
   return pairs.filter(([from, to]) => { const { synced: _, ...rest } = planAdd(from, to, list); return Object.values(rest).some(group => group.length); });
 }
-const menuHasRows = (tool: Tool, list: SampleSkill[]) => menuPairs(tool, list).length > 0;
-
-/** The menu's Add rows under one label, or one plain line when there is nothing to add. */
-function menuRows(tool: Tool, list: SampleSkill[]) {
-  const live = menuPairs(tool, list);
+/** The menu's Add rows (`live`: from menuPairs) under one label, or one plain line when there is nothing to add. */
+function menuRows(tool: Tool, list: SampleSkill[], live: (readonly [Tool, Tool])[]) {
   const what = kindNoun[kind][1];
   if (!live.length) return [h('p.tool-menu-empty', {}, tool === focus ? `The other tools have no ${what} that ${names[tool]} doesn’t already have.` : `${names[tool]} has no ${what} to add${focus ? ` to ${names[focus]}` : ''}.`)];
   const label = tool === focus ? `Add to ${names[tool]} from` : focus ? `Add ${names[tool]}’s ${what} to ${names[focus]}` : `Add ${names[tool]}’s ${what} to…`;
@@ -806,12 +804,13 @@ function toolMenu(tool: Tool, list: SampleSkill[]) {
   // Stop all: every managed skill stops syncing to this tool. Copies already there stay as they are.
   const syncingHere = list.filter(skill => { const now = effective(skill); return now.managed && !now.off.includes(tool) && !now.cannot?.[tool]; });
   const noun = (n: number) => kindNoun[kind][n === 1 ? 0 : 1];
+  const live = menuPairs(tool, list);
   return h('div.tool-menu', { role: 'dialog', 'aria-label': `${names[tool]} actions`, onclick: (event: Event) => event.stopPropagation() },
     // On a harness's own page the page already names it and counts what it has: the menu starts at its first action.
-    tool === focus ? null : h('div.tool-menu-head', {}, brandMark(tool, 16), h('strong', {}, names[tool]), menuHasRows(tool, list) ? h('span.tool-menu-count', {}, `has ${mine} ${noun(mine)}`) : null),
-    ...menuRows(tool, list),
+    tool === focus ? null : h('div.tool-menu-head', {}, brandMark(tool, 16), h('strong', {}, names[tool]), live.length ? h('span.tool-menu-count', {}, `has ${mine} ${noun(mine)}`) : null),
+    ...menuRows(tool, list, live),
     // Only when there is something to queue: a menu that says there is nothing to add needs no note about Apply all.
-    menuHasRows(tool, list) ? h('p.tool-menu-foot', {}, 'Adding only queues the change; nothing is written until Apply all.') : null,
+    live.length ? h('p.tool-menu-foot', {}, 'Adding only queues the change; nothing is written until Apply all.') : null,
     // Stopping only exists once something syncs to this tool; before that, the foot would be a dead control.
     !syncingHere.length ? null : h('div.tool-menu-stop', {},
       h('span.tool-menu-note', {}, syncingHere.length ? `${syncingHere.length} managed ${syncingHere.length === 1 ? `${noun(1)} syncs` : `${noun(2)} sync`} here. Stopping keeps their copies here but stops updating them.` : `Nothing syncs to ${names[tool]} yet.`),
@@ -821,10 +820,10 @@ function toolMenu(tool: Tool, list: SampleSkill[]) {
 /** A harness's page: the same menu as its column header, from the toolbar and opening under it, so bringing items in is never hidden. */
 function addFromButton(tool: Tool, list: SampleSkill[]) {
   const open = view.toolMenu === tool && view.toolMenuFromToolbar;
-  // Its word drops at narrow widths (the plus stays, with the full name as its tooltip), so the toolbar keeps one line.
+  // "Add from…" becomes "Add…" at narrow widths (the full name stays in its tooltip), so the toolbar keeps one line.
   return h('span.add-from', {},
-    h('button.btn.outline.small', { type: 'button', id: 'harness-add-from', title: `Add to ${names[tool]} from another tool`, 'aria-label': `Add to ${names[tool]} from another tool`, 'aria-expanded': String(open), 'aria-haspopup': 'dialog',
-      onclick: (event: Event) => toggleToolMenu(event, tool, true) }, icon('plus', 14), h('span.add-from-word', {}, 'Add', h('span.add-from-more', {}, ' from'), '…')),
+    button({ variant: 'outline', size: 'small', icon: 'plus', label: h('span.add-from-word', {}, 'Add', h('span.add-from-more', {}, ' from'), '…'), name: `Add to ${names[tool]} from another tool`, id: 'harness-add-from',
+      attrs: { title: `Add to ${names[tool]} from another tool`, 'aria-expanded': String(open), 'aria-haspopup': 'dialog' }, onclick: event => toggleToolMenu(event, tool, true) }),
     open ? toolMenu(tool, list) : null);
 }
 
@@ -978,6 +977,12 @@ function helpBand(): HTMLElement | null {
     closeButton(() => { writeFlag(key); rerender(); }, { id: 'help-dismiss', label: 'Hide this tip' }));
 }
 
+/** What the catch-up after a read copied: shown on the Skills tables, and on the Harnesses list, so it is never news only in one place. */
+export function caughtUpBand(names: string[]): HTMLElement {
+  return h('div.band', { role: 'status' }, icon('check', 14, 'tone-success'),
+    h('span.band-text', {}, `Caught up: copied ${names.slice(0, 4).join(', ')}${names.length > 4 ? ` and ${names.length - 4} more` : ''} to tools that were missing them. To stop a tool getting a skill back, turn that tool off for it.`));
+}
+
 /** Preview-only, stopped and resume states, and what the last Apply all or catch-up did. */
 function mcpNotices() {
   const mcp = listView()!;
@@ -1071,10 +1076,8 @@ function notices() {
   if (caughtProblems.length) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
     h('span.band-text', {}, caughtProblems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · ') + (caughtProblems.length > 4 ? ` · and ${caughtProblems.length - 4} more` : ''))));
   // A spread edit or a restore is already told by its notice; catch-up is only copies that were missing.
-  const told = new Set(syncNotices.map(notice => notice.item));
-  const caughtNames = [...new Set(manage.caughtUp.filter(result => result.outcome === 'written' && !told.has(result.item)).map(result => result.item))];
-  if (caughtNames.length && !applied) bands.push(h('div.band', { role: 'status' }, icon('check', 14, 'tone-success'),
-    h('span.band-text', {}, `Caught up: copied ${caughtNames.slice(0, 4).join(', ')}${caughtNames.length > 4 ? ` and ${caughtNames.length - 4} more` : ''} to tools that were missing them. To stop a tool getting a skill back, turn that tool off for it.`)));
+  const caught = caughtUpNames(manage, new Set(syncNotices.map(notice => notice.item)));
+  if (caught.length && !applied) bands.push(caughtUpBand(caught));
   const tip = helpBand();
   if (tip) bands.push(tip);
   return bands.length ? h('div.bands', {}, bands) : null;

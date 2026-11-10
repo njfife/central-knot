@@ -1357,7 +1357,7 @@ button.harness-card-main:disabled { cursor: default; }
 .harness-card-name { font-size: 14px; line-height: 20px; font-weight: 600; }
 .harness-card-status { font-size: 12px; line-height: 16px; color: var(--ink-soft); margin-top: -6px; }
 .harness-counts { display: grid; grid-template-columns: max-content minmax(2ch, max-content) minmax(0, 1fr); column-gap: 12px; row-gap: 4px; align-items: baseline; padding-top: 10px; border-top: 1px solid var(--line); }
-.harness-count { display: contents; }
+.harness-count, .harness-count-group { display: contents; }
 .harness-count-label { color: var(--ink-soft); font-size: 12.5px; }
 .harness-count-value { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 13px; white-space: nowrap; }
 .harness-count-note { color: var(--ink-soft); font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
@@ -1417,11 +1417,12 @@ button.harness-card-main:disabled { cursor: default; }
    width instead, with the tool columns at their narrow size so the name and description get the room. Measured on the table's
    own width, per number of tool columns n: name 300 + Managed 76 + 132 per tool + 260 for the description = 636 + 132n (keep
    in step with --ov-columns above). */
-@container (max-width: 768px) { .ov[data-tools="1"] .ov-desc { display: none; } .harness-page .ov[data-tools="1"] { --ov-columns: minmax(170px, 1fr) 76px repeat(1, minmax(92px, 124px)) 16px; } .harness-page .ov[data-tools="1"] .ov-name-sub { display: block; } }
-@container (max-width: 900px) { .ov[data-tools="2"] .ov-desc { display: none; } .harness-page .ov[data-tools="2"] { --ov-columns: minmax(170px, 1fr) 76px repeat(2, minmax(92px, 124px)) 16px; } .harness-page .ov[data-tools="2"] .ov-name-sub { display: block; } }
-@container (max-width: 1032px) { .ov[data-tools="3"] .ov-desc { display: none; } .harness-page .ov[data-tools="3"] { --ov-columns: minmax(170px, 1fr) 76px repeat(3, minmax(92px, 124px)) 16px; } .harness-page .ov[data-tools="3"] .ov-name-sub { display: block; } }
-@container (max-width: 1164px) { .ov[data-tools="4"] .ov-desc { display: none; } .harness-page .ov[data-tools="4"] { --ov-columns: minmax(170px, 1fr) 76px repeat(4, minmax(92px, 124px)) 16px; } .harness-page .ov[data-tools="4"] .ov-name-sub { display: block; } }
-@container (max-width: 1296px) { .ov[data-tools="5"] .ov-desc { display: none; } .harness-page .ov[data-tools="5"] { --ov-columns: minmax(170px, 1fr) 76px repeat(5, minmax(92px, 124px)) 16px; } .harness-page .ov[data-tools="5"] .ov-name-sub { display: block; } }
+.harness-page .ov { --narrow-columns: minmax(170px, 1fr) 76px repeat(var(--tool-count, 3), minmax(92px, 124px)) 16px; }
+@container (max-width: 768px) { .harness-page .ov[data-tools="1"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="1"] .ov-desc { display: none; } .harness-page .ov[data-tools="1"] .ov-name-sub { display: block; } }
+@container (max-width: 900px) { .harness-page .ov[data-tools="2"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="2"] .ov-desc { display: none; } .harness-page .ov[data-tools="2"] .ov-name-sub { display: block; } }
+@container (max-width: 1032px) { .harness-page .ov[data-tools="3"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="3"] .ov-desc { display: none; } .harness-page .ov[data-tools="3"] .ov-name-sub { display: block; } }
+@container (max-width: 1164px) { .harness-page .ov[data-tools="4"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="4"] .ov-desc { display: none; } .harness-page .ov[data-tools="4"] .ov-name-sub { display: block; } }
+@container (max-width: 1296px) { .harness-page .ov[data-tools="5"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="5"] .ov-desc { display: none; } .harness-page .ov[data-tools="5"] .ov-name-sub { display: block; } }
 .ov-desc-head { padding-top: 0; padding-bottom: 0; font-size: 12px; font-weight: 500; color: var(--ink-soft); }
 /* The harness's own column header: a quiet fill across the whole column's width. */
 .ov-tool-head.tool-head-focus { background: var(--hover); border-radius: 8px 8px 0 0; align-self: stretch; display: flex; align-items: center; justify-content: center; }
@@ -1444,16 +1445,9 @@ button.harness-card-main:focus-visible { outline: 0; }
 .harness-card:has(> .harness-card-main:disabled) { opacity: 0.6; }
 /* A wide card lays its counts in two groups side by side: the three kinds, then its instruction file and plugins. */
 @container (min-width: 520px) {
-  .harness-counts { grid-template-columns: repeat(2, max-content minmax(2ch, max-content) minmax(0, 1fr)); }
-  .harness-count:nth-child(1) > *, .harness-count:nth-child(4) > * { grid-row: 1; }
-  .harness-count:nth-child(2) > *, .harness-count:nth-child(5) > * { grid-row: 2; }
-  .harness-count:nth-child(3) > * { grid-row: 3; }
-  .harness-count:nth-child(-n+3) > :nth-child(1) { grid-column: 1; }
-  .harness-count:nth-child(-n+3) > :nth-child(2) { grid-column: 2; }
-  .harness-count:nth-child(-n+3) > :nth-child(3) { grid-column: 3; }
-  .harness-count:nth-child(n+4) > :nth-child(1) { grid-column: 4; }
-  .harness-count:nth-child(n+4) > :nth-child(2) { grid-column: 5; }
-  .harness-count:nth-child(n+4) > :nth-child(3) { grid-column: 6; }
+  .harness-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; align-items: start; }
+  .harness-count-group { display: grid; grid-template-columns: max-content minmax(2ch, max-content) minmax(0, 1fr); column-gap: 12px; row-gap: 4px; align-items: baseline; }
+}
 }
 /* A file's text keeps a reading measure; the card around it spans the pane. */
 .harness-page .ins-card pre, .harness-page .ins-card textarea { max-width: 110ch; }
@@ -1464,10 +1458,9 @@ button.harness-card-main:focus-visible { outline: 0; }
 .harness-cards[data-count="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @container (min-width: 1300px) { .harness-cards[data-count="4"] { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @container (max-width: 600px) { .harness-cards[data-count="4"] { grid-template-columns: minmax(0, 1fr); } }
-/* A long name wraps onto more lines rather than being cut, and never pushes the copy-choice pill out. */
 /* The name never leaves the chevron's line (its width is capped at the line's) and wraps inside it at hyphens; a pill or tag
    that no longer fits beside it moves to the next line instead of squeezing the name mid-word. */
-.harness-page .ov-row:not(.ov-head) .ov-name { flex-wrap: wrap; row-gap: 2px; }
+.harness-page .ov-row:not(.ov-head) .ov-name { flex-wrap: wrap; row-gap: 2px; padding-top: 6px; padding-bottom: 6px; }
 .harness-page .ov-name-text { flex: 0 1 auto; min-width: 0; max-width: calc(100% - 26px); white-space: normal; overflow-wrap: break-word; }
 .harness-page .ov-name > .decide, .harness-page .ov-name > .held-pill { flex: none; }
 /* "Not in <harness>" is an offer, not this harness's count: its heading is quieter than Managed and Unmanaged. */
@@ -1485,12 +1478,10 @@ button.harness-card-main:focus-visible { outline: 0; }
   .harness-page .ins-card:has(> .ins-versions, > .ins-note) > .ins-readers::before { content: 'Read by'; display: block; margin-bottom: 4px; font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
 }
 /* An agent's "one-way from …" tag always sits on its own line under the name. */
-.harness-page .ov-row:not(.ov-head) .ov-name { padding-top: 6px; padding-bottom: 6px; }
-.harness-page .ov-name > .row-tag { flex-basis: 100%; margin-left: 20px; }
+.harness-page .ov-name > .row-tag { flex-basis: 100%; margin-left: 20px; order: 1; }
 /* The description shows in its column or, when that is hidden, under the name: an open row's details never say it again. */
 .harness-page .ov .details-description { display: none; }
 /* Under the name come, in order: any pill beside it, then the one-way tag, then the description. */
-.harness-page .ov-name > .row-tag { order: 1; }
 .ov-name-sub { order: 2; display: none; flex-basis: 100%; margin-left: 20px; font-size: 12px; line-height: 16px; color: var(--ink-faint); white-space: normal; }
 /* About: every fact row is as tall as one with a copy button, so the two groups' rows line up. */
 .harness-about .facts > dt, .harness-about .facts > dd { min-height: 24px; display: flex; align-items: center; }

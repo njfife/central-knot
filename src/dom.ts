@@ -29,7 +29,8 @@ interface ButtonOptions {
   variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'link';
   size?: 'micro' | 'small' | 'default';
   icon?: IconName;
-  label?: string;
+  /** Visible text: usually a string; a node when part of it changes with the width (Add from… / Add…). */
+  label?: string | Node;
   /** Accessible name where the visible label is not enough, and the name of an icon-only button. */
   name?: string;
   id?: string;
