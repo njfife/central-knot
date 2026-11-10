@@ -469,6 +469,18 @@ if (wanted('plugin-versions')) {
   await shot(a, 'list-860', 'Back to the marketplace list at 860×560, scrolled to issue-tracker, which two tools have at another version.');
   await a.theme('light'); await shot(a, 'list-860-light', 'The same, light.'); await a.theme('dark');
   await size(2560, 1440); await a.theme('light'); await shot(a, 'list-2560-light', 'The marketplace list at 2560×1440, light.');
+  // Update: each row behind offers it for every tool behind, and the marketplace for all of them; a click only chooses.
+  await a.theme('dark');
+  for (const [width, height] of [[860, 560], [1728, 1117]]) {
+    await size(width, height); await a.run(`document.querySelector('#plugins-scroll')?.scrollTo(0, 0)`); await a.settle();
+    await shot(a, `update-offered-${width}`, `At ${width}×${height}: document-tools and issue-tracker are behind in some tools, so their rows offer Update, and the marketplace "Update all".`);
+    await a.click('#pupdate-0-issue-tracker');
+    await a.run(`document.querySelector('[data-plugin="issue-tracker"]').scrollIntoView({ block: 'center' })`); await a.settle();
+    await shot(a, `update-chosen-${width}`, `Clicked "Update in Claude Code and Codex" on issue-tracker: both boxes wait for Apply all, and the toolbar counts 2 updates.`);
+    await a.click('#popen-0-issue-tracker'); await waitFor(a, `!!document.querySelector('.plugin-panel')`);
+    await shot(a, `update-page-${width}`, `Opened issue-tracker with its update chosen: each tool says "Will update to 2.0.0", and the button takes it back.`);
+    await a.click('#plugin-back'); await a.click('#plugins-discard');
+  }
   await size(1280, 800); await a.theme('dark');
 }
 

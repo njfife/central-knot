@@ -674,6 +674,41 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
   return { tool, outcome: 'failed', message: `Not installed. ${lastLines(installed.output)}${older}`.trim(), runs };
 }
 
+/**
+ * Updates an installed plugin through the tool's own commands, then reads its record: only the version it then records
+ * counts. A Git marketplace's copy in the tool is refreshed first, since each tool installs from its own copy. Routes,
+ * as run on Claude Code 2.1.311, Copilot CLI 1.0.105 and Codex 0.142.3: Claude Code `plugin marketplace update M`, then
+ * `plugin update P@M --scope user` (without the refresh it says it is already at the latest); Copilot CLI `plugin
+ * marketplace update M`, then `plugin update P@M`; Codex `plugin marketplace upgrade M` (which moves the installed copy
+ * on its own), then `plugin add P@M` again, which for a folder marketplace is what takes the new files. An update is
+ * never undone: the tools keep no way back to the earlier copy.
+ */
+export async function update(context: PluginContext, catalog: Catalog, plugin: string, tool: PluginTool): Promise<ActionReport> {
+  const name = toolNames[tool];
+  const held = await heldBy(context, tool, catalog.name, catalog.source);
+  if (held) return { tool, outcome: 'held', message: heldReason(tool, catalog.name, held), runs: [] };
+  const before = await installState(context, tool, catalog.name, plugin);
+  if (before.state !== 'installed') return { tool, outcome: 'failed', message: `It isn’t installed in ${name} now.`, runs: [] };
+  const offered = catalog.plugins.find(item => item.name === plugin)?.version;
+  const current = (version?: string) => !!version && !!offered && compareVersions(version, offered) >= 0;
+  if (before.live || current(before.version)) return { tool, outcome: 'updated', version: before.version, message: `Already up to date in ${name}.`, runs: [] };
+  const runs: NativeRun[] = [];
+  if (catalog.kind === 'git' && (await registeredSource(context, tool, catalog.name))) {
+    const refresh = await native(context, tool, ['plugin', 'marketplace', tool === 'codex-cli' ? 'upgrade' : 'update', catalog.name]);
+    runs.push(refresh);
+    if (!refresh.ok) return { tool, outcome: 'failed', message: `Could not refresh ${name}’s copy of the marketplace, so nothing was updated. ${lastLines(refresh.output)}`.trim(), runs };
+  }
+  const id = `${plugin}@${catalog.name}`;
+  const args = { 'claude-cli': ['plugin', 'update', id, '--scope', 'user'], 'copilot-cli': ['plugin', 'update', id], 'codex-cli': ['plugin', 'add', id, '--json'] }[tool];
+  const updated = await native(context, tool, args);
+  runs.push(updated);
+  const after = await installState(context, tool, catalog.name, plugin);
+  if (after.state !== 'installed') return { tool, outcome: 'failed', message: `It is no longer installed in ${name}. ${lastLines(updated.output)}`.trim(), runs };
+  const moved = after.version !== before.version || after.path !== before.path;
+  if (moved && (current(after.version) || !offered)) return { tool, outcome: 'updated', changed: true, version: after.version, message: `Updated${after.version ? ` to ${after.version}` : ''}. ${nextStepFor(tool)}`.trim(), runs };
+  return { tool, outcome: 'failed', message: `Still ${after.version ?? 'the earlier copy'} in ${name}${offered ? `; the marketplace has ${offered}` : ''}. ${lastLines(updated.output)}`.trim(), runs };
+}
+
 /** Uninstalls through the tool's own command and reads its record again. The marketplace stays added there. */
 export async function uninstall(context: PluginContext, marketplace: string, plugin: string, tool: PluginTool, source: string): Promise<ActionReport> {
   const name = toolNames[tool];

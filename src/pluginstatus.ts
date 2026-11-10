@@ -301,3 +301,23 @@ export const otherVersionsLine = (others: { tool: HarnessId; version: string }[]
 
 /** A file's text to compare copies by: line endings as LF, since a Windows Git checkout writes CRLF and that is no difference. */
 export const comparableText = (text: string) => text.replace(/\r\n/g, '\n');
+
+/**
+ * Whether a tool's installed copy is older than the version `offered`, so Update is offered there: another version than
+ * the marketplace's (versionDiffers) and not a newer one. A copy loaded live from a folder marketplace is always its own.
+ */
+export function outdated(entry: MarketplaceView, plugin: string, tool: HarnessId, offered: string | undefined): boolean {
+  const state = stateOf(entry, plugin, tool);
+  return state.state === 'installed' && !state.live && versionDiffers(state.version, offered) && compareVersions(releaseOf(state.version!), releaseOf(offered!)) < 0;
+}
+
+/**
+ * The tools Update brings up to date for one plugin: those whose installed copy is older (`outdated`) and can be changed
+ * here (as for an uninstall: not held, a CLI, a home that can be written), and those holding its parts out of date.
+ */
+export function updateTools(view: PluginsView, entry: MarketplaceView, plugin: string, offered: string | undefined, components?: Components): { plugin: HarnessId[]; parts: HarnessId[] } {
+  return {
+    plugin: view.tools.filter(tool => outdated(entry, plugin, tool, offered) && !cantUninstall(view, entry, plugin, tool)),
+    parts: view.canWrite ? view.tools.filter(tool => partsMark(view, entry, plugin, tool, components) === 'changed') : [],
+  };
+}

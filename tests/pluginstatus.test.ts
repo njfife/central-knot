@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { blocked, comparableText, installsIn, limitNote, offeredVersion, partStillIn, otherVersions, otherVersionsLine, toolsWithoutPlugin, unavailable } from '../src/pluginstatus.ts';
+import { blocked, comparableText, installsIn, limitNote, offeredVersion, partStillIn, otherVersions, otherVersionsLine, toolsWithoutPlugin, unavailable, updateTools } from '../src/pluginstatus.ts';
 import { readInto, type Read } from '../src/reads.ts';
 import type { HomeView, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
 
@@ -34,6 +34,15 @@ test('Only a known version that names another release is a difference', () => {
   assert.equal(offeredVersion({ name: 'p', description: '', version: '1.0.0' }, { version: '1.1.0' } as PluginDetail), '1.1.0');
   // A copy checked out with Windows line endings is the same text.
   assert.equal(comparableText('---\r\nname: s\r\n'), comparableText('---\nname: s\n'));
+});
+
+test('Update is offered only where a tool’s copy is older and can be changed here', () => {
+  const at = (states: MarketplaceView['states']['p']): MarketplaceView => ({ ...entry, states: { p: states } });
+  const copies = at({ 'claude-cli': { state: 'installed', path: '/x', version: '1.9.0' }, 'copilot-cli': { state: 'installed', path: '/y', version: '2.1.0' }, 'codex-cli': { state: 'installed', path: '/z', version: '1.0.0', live: true } });
+  // Claude Code is behind; Copilot CLI is ahead of the marketplace; Codex loads it live from the folder.
+  assert.deepEqual(updateTools(view, copies, 'p', '2.0.0').plugin, ['claude-cli']);
+  assert.deepEqual(updateTools({ ...view, clis: { 'copilot-cli': true } }, copies, 'p', '2.0.0').plugin, [], 'no CLI to run it');
+  assert.deepEqual(updateTools(view, copies, 'p', undefined).plugin, [], 'nothing to compare with');
 });
 
 test('A tool’s limits are named in a few words', () => {

@@ -42,6 +42,7 @@ const api: DesktopApi = {
   pickMarketplaceFolder: () => ipcRenderer.invoke('plugins:pick-folder'),
   installPlugin: (source, marketName, plugin, tools, home) => ipcRenderer.invoke('plugins:install', source, marketName, plugin, tools, home),
   uninstallPlugin: (source, marketName, plugin, tool, home) => ipcRenderer.invoke('plugins:uninstall', source, marketName, plugin, tool, home),
+  updatePlugin: (source, marketName, plugin, tools, home) => ipcRenderer.invoke('plugins:update', source, marketName, plugin, tools, home),
   repo: check => ipcRenderer.invoke('repo:view', check),
   connectRepo: (url, branch, home) => ipcRenderer.invoke('repo:connect', url, branch, home),
   pullRepo: home => ipcRenderer.invoke('repo:pull', home),

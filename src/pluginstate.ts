@@ -248,7 +248,7 @@ export const openLink = (url: string) => void api().openExternal(url);
 export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'undoing' : 'applying', async () => {
   const home = app.home!.home;
   market.problem = undefined;
-  const planApi = { install: api().installPlugin, uninstall: api().uninstallPlugin, setSkill: api().setPluginSkill, parts: api().pluginParts };
+  const planApi = { install: api().installPlugin, update: api().updatePlugin, uninstall: api().uninstallPlugin, setSkill: api().setPluginSkill, parts: api().pluginParts };
   let result: Awaited<ReturnType<typeof runPlan>> = { done: [] };
   try {
     result = await runPlan(ops, planApi, home, step => { market.working = { source: step.source, plugin: step.plugin, tools: step.tools }; rerender(); });

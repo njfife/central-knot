@@ -1,14 +1,14 @@
 // Pieces the marketplace and plugin pages draw alike: a tool's install box, a README, and "a · b · c" lines. A box only
 // chooses a change; Apply all runs it (pluginplan.ts, pluginstate.ts). What the boxes say comes from pluginstatus.ts.
 import { rerender, state as app } from './app.ts';
-import { h, icon } from './dom.ts';
+import { button, h, icon } from './dom.ts';
 import { markdown } from './markdown.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
-import { pluginKey, queued, toggle, type PluginAction } from './pluginplan.ts';
+import { allQueued, pluginKey, queued, toggle, toggleMany, type PluginAction, type PluginOp } from './pluginplan.ts';
 import { clearNotice, market, openLink, shownDetail } from './pluginstate.ts';
-import { PREVIEW_ONLY, cantUninstall, partsMark, partsOf, partsSummary, stateOf, unavailable, versionDiffers, versionWord } from './pluginstatus.ts';
+import { PREVIEW_ONLY, cantUninstall, outdated, partsMark, partsOf, partsSummary, stateOf, unavailable, updateTools, versionDiffers, versionToCompare, versionWord } from './pluginstatus.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, PluginView, PluginsView } from './types.ts';
-import { toolNames as names } from './words.ts';
+import { andList, toolNames as names } from './words.ts';
 
 /** The name a plugin is shown by: its display name when the catalog gives one. */
 export const pluginTitle = (plugin: PluginView) => plugin.displayName ?? plugin.name;
@@ -25,8 +25,9 @@ export function componentsOf(entry: MarketplaceView, plugin: PluginView): Compon
 export const changedWords = (parts: { version?: string; now?: string }) => (parts.now && parts.version ? `Parts are from version ${parts.version}; the plugin is now ${parts.now}` : 'The plugin’s parts have changed since they were installed');
 
 /**
- * One tool's box for one plugin: installed (with its version), not installed, chosen for Apply all, or not available,
- * each saying why. `marketIndex` is the marketplace's place in the list, so box ids stay unique across marketplaces.
+ * One tool's box for one plugin: installed (with its version), out of date, not installed, chosen for Apply all, or not
+ * available, each saying why. An out-of-date box looks like parts out of date and, like it, a click chooses the update;
+ * a second click turns that into an uninstall, a third leaves it as it is. `marketIndex` is the marketplace's place in the list, so box ids stay unique across marketplaces.
  * `offered` is the version to compare with, when there is one (see versionToCompare).
  */
 export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, marketIndex: number, offered: string | undefined) {
@@ -73,6 +74,8 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
     const text = `${name}: installed${version}${status.live ? ', loaded live from the marketplace folder' : ''}`;
     if (pending === 'remove') return box({ look: 'cell-pending.cell-pending-remove', state: 'remove', title: `${name}: uninstalled on Apply all. Click to keep it.`, glyph: icon('x', 15), action: 'remove' });
     const stuck = cantUninstall(view, entry, plugin.name, tool);
+    if (pending === 'update') return box({ look: 'cell-pending.cell-chosen.cell-on', state: 'update', title: `${name}: updated to ${offered} on Apply all. Click to uninstall it instead.`, glyph: icon('refresh-cw', 14), action: 'remove' });
+    if (outdated(entry, plugin.name, tool, offered)) return box({ look: 'cell-differs.cell-on', state: 'outdated', title: stuck ? `${text}. Can’t update here: ${stuck}` : `${text}. Click to update it on Apply all.`, glyph: icon('refresh-cw', 14), action: 'update', disabled: !!app.busy || !!stuck });
     return box({ look: 'cell-synced.cell-on', state: 'installed', title: stuck ? `${text}. Can’t uninstall here: ${stuck}` : `${text}. Click to uninstall on Apply all.`,
       glyph: icon('check', 16), action: 'remove', disabled: !!app.busy || !!stuck });
   }
@@ -82,6 +85,27 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
     return box({ look: 'cell-differs', state: 'not-known', title: `${status.reason} ${preview || 'Click to install again on Apply all.'}`, glyph: icon('circle-question-mark', 16), action: 'install' });
   }
   return box({ look: 'cell-absent.plugin-add', state: 'absent', title: `Plugin not installed in ${name}. ${preview || 'Click to install on Apply all.'}`, glyph: icon('plus', 14, 'plugin-add-glyph'), action: 'install' });
+}
+
+/**
+ * What Update chooses for one plugin: an update in each tool whose installed copy is older than the marketplace's, and
+ * its parts brought up to date in each tool holding them out of date. Empty when nothing is out of date.
+ */
+export function updateOps(view: PluginsView, entry: MarketplaceView, plugin: PluginView): PluginOp[] {
+  const { plugin: tools, parts } = updateTools(view, entry, plugin.name, versionToCompare(plugin, shownDetail(pluginKey(entry.source, plugin.name))), componentsOf(entry, plugin));
+  const op = (tool: PluginOp['tool'], action: PluginOp['action']): PluginOp => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action });
+  return [...tools.map(tool => op(tool, 'update')), ...parts.map(tool => op(tool, 'install-parts'))];
+}
+
+/** "Update in Claude Code and Codex" (or in 3 tools) for these ops, or once they are all chosen, the way to take them back. `row`: on a list row. */
+export function updateButton(ops: PluginOp[], id: string, { row = false } = {}) {
+  const tools = [...new Set(ops.map(op => op.tool))];
+  const chosen = allQueued(market.draft, ops);
+  // On a list row it is a link, so the row keeps its height, and a click on it doesn't open the plugin.
+  return button({ variant: row ? 'link' : chosen ? 'ghost' : 'outline', size: row ? 'micro' : 'small', icon: chosen || row ? undefined : 'refresh-cw', id, disabled: !!app.busy,
+    label: chosen ? 'Don’t update' : `Update in ${tools.length > 2 ? `${tools.length} tools` : andList(tools.map(tool => names[tool]))}`,
+    attrs: { title: chosen ? 'Leaves it as it is.' : `Chooses the update for ${andList(tools.map(tool => names[tool]))}; it runs on Apply all, and an update can’t be undone.` },
+    onclick: (event: Event) => { if (row) event.stopPropagation(); toggleMany(market.draft, ops); clearNotice(); rerender(); } });
 }
 
 /** Rendered READMEs by text and context: a redraw (every box click) reuses the built nodes instead of parsing again. */
