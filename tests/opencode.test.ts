@@ -14,7 +14,7 @@ import { applyMcp, mcpView, readTool } from '../src/mcp.ts';
 import { mcpDisabled, withMcpSwitch } from '../src/mcpswitch.ts';
 import { executableCandidates } from '../src/platform.ts';
 import type { ShareContext } from '../src/share.ts';
-import { readSwitchFile, switchState, switchedText } from '../src/skillswitch.ts';
+import { isDisabled, readSwitchFile, switchState, switchedText } from '../src/skillswitch.ts';
 import { readJsonc } from '../src/textedit.ts';
 import type { HarnessId } from '../src/types.ts';
 
@@ -108,6 +108,13 @@ test('The copy OpenCode reads in Claude Code’s folder is Claude Code’s: it b
     assert.equal(await readFile(join(box.home, '.claude/skills/notes/SKILL.md'), 'utf8'), text('notes'), 'Claude Code’s copy is left alone');
     assert.doesNotMatch(said(edited), /older copy|does not change/);
 
+    // Remove from Claude Code of a skill managed in all three: OpenCode gets a copy of its own in the same pass, and is not said to have lost it.
+    await skill(box.home, '.claude/skills', 'kept');
+    await applyChanges(box.context, [{ key: 'kept', managed: true, off: [] }]);
+    const kept = await applyChanges(box.context, [{ key: 'kept', managed: true, off: [], remove: ['claude-cli'] }]);
+    assert.deepEqual([await exists(join(box.home, '.claude/skills/kept')), await exists(join(box.home, OPENCODE, 'skills/kept/SKILL.md'))], [false, true], said(kept));
+    assert.doesNotMatch(said(kept), /no longer has the skill/);
+
     // Remove takes OpenCode's own copy out and says the skill still loads there from Claude Code's folder.
     await skill(box.home, `${OPENCODE}/skills`, 'own');
     await applyChanges(box.context, [{ key: 'own', managed: true, off: [] }]);
@@ -153,6 +160,12 @@ test('Restore, Remove and leaving Claude Code out keep OpenCode’s own copy apa
     await skill(box.home, '.claude/skills', 'epsilon');
     await applyChanges(box.context, [{ key: 'epsilon', managed: true, off: ['claude-cli'] }]);
     assert.equal(await exists(join(box.home, OPENCODE, 'skills/epsilon/SKILL.md')), true);
+    // That copy is one Apply all added: it is in History, so Undo takes it out again.
+    assert.deepEqual((await readHistory(box.context)).filter(event => event.kind === 'added' && event.key === 'epsilon').map(event => event.losers.map(copy => copy.tool)), [['opencode-cli']]);
+    // OpenCode's own copy deleted by hand is a deletion: it is not made again from Claude Code's.
+    await rm(join(box.home, OPENCODE, 'skills/epsilon'), { recursive: true });
+    await applyChanges(box.context, []); await applyChanges(box.context, []);
+    assert.equal(await exists(join(box.home, OPENCODE, 'skills/epsilon')), false);
 
     // Remove from Claude Code of a managed skill OpenCode only reads: OpenCode keeps the skill, as a copy of its own.
     await skill(box.home, '.claude/skills', 'alpha');
@@ -216,6 +229,10 @@ test('OpenCode’s skill switch is a deny rule by name, written last so it decid
     // `skill` moved after it, which would make the rules it overrules count again: reported, never edited.
     await writeFile(settings(box.home), '{ "permission": { "skill": { "beta": "deny" }, "*": "allow" } }\n');
     assert.match((await readSwitchFile(box.context, 'opencode-cli')).problem?.reason ?? '', /a rule after skill in permission that decides for every skill/);
+    assert.equal(isDisabled(box.context, await readSwitchFile(box.context, 'opencode-cli'), target), false);
+    // What such a file turns off is still read, so the page shows it: here every skill is off.
+    await writeFile(settings(box.home), '{ "permission": { "skill": { "alpha": "allow" }, "*": "deny" } }\n');
+    assert.equal(isDisabled(box.context, await readSwitchFile(box.context, 'opencode-cli'), target), true);
     assert.equal(state('{ "permission": { "*": "deny" } }'), true, 'every permission denied, skills too');
     // A rule's comment stays with it when another rule goes, and a rule already last changes its word in place.
     const noted = '{\n  "permission": {\n    "skill": {\n      // mine\n      "beta": "deny",\n      // about alpha\n      "alpha": "deny"\n    }\n  }\n}\n';

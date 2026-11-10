@@ -614,7 +614,8 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     if (!options.observeOnly && !entry.locations.some(location => syncing.includes(location.tool))) {
       for (const tool of syncing) {
         const read = entry.facts.copies[tool];
-        if (!read?.readsFrom || entry.facts.cannot[tool] || await rootProblem(context, tool)) continue;
+        // A reader that had a copy of its own on record deleted it: that is a deletion, never made good from here.
+        if (!read?.readsFrom || entry.facts.cannot[tool] || item.copies.some(copy => copy.harness === tool) || await rootProblem(context, tool)) continue;
         const directory = ownCopyDir(context, tool, read.folder);
         try {
           await mkdir(dirname(directory), { recursive: true });
@@ -628,6 +629,8 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
         entry.facts.copies[tool] = copy;
         entry.locations.push({ tool, copy });
         writes++;
+        // Newly managed: this copy is one Apply all added, so its Undo takes it out again.
+        if (newlyManaged.has(key)) added.set(key, { name, hash: copy.hash, copies: [...(added.get(key)?.copies ?? []), { tool, hash: copy.hash }] });
         results.push({ item: name, harness: tool, outcome: 'written', message: `${harnesses[tool].name} read ${harnesses[readsFrom!].name}’s copy, which is left out here, so it has a copy of its own now. ${harnesses[tool].nextStep}` });
         break;
       }
@@ -985,8 +988,8 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       removed.push({ tool, hash: copy.hash, folder: copy.folder, ...(synced ? { synced } : {}) });
       // Its own copy is gone; a copy it reads in another tool's folder still loads there, and only Disable stops that.
       const still = entry.reads[tool];
-      // And the other way: a tool that read this copy, with none of its own, no longer has the skill.
-      const lost = tools.filter(other => entry.facts.copies[other]?.readsFrom === tool);
+      // And the other way: a tool that read this copy, and got none of its own in this pass, no longer has the skill.
+      const lost = tools.filter(other => entry.facts.copies[other]?.readsFrom === tool && !item.copies.some(copy => copy.harness === other && copy.status === 'written'));
       results.push({ item: name, harness: tool, outcome: 'removed', message: `Removed from ${toolName(tool)}. Restore it from History.${still ? ` ${toolName(tool)} still reads ${toolName(still)}’s copy; Disable it in ${toolName(tool)} to stop it loading there.` : ''}${lost.length ? ` ${lost.map(toolName).join(' and ')} read this copy, so ${lost.length > 1 ? 'they no longer have' : 'it no longer has'} the skill.` : ''}` });
     }
     if (removed.length) event({ key: change.key, item: name, kind: 'removed', losers: removed, orderProved: true, stoppedSync: stoppedSync.filter(tool => removed.some(gone => gone.tool === tool)), ...(lastCopies && item.state !== 'shared' ? { unmanaged: true } : {}) });

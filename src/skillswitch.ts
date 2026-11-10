@@ -55,12 +55,13 @@ export async function readSwitchFile(context: ShareContext, tool: HarnessId): Pr
   }
   try { return { tool, path, text, exists: true, parsed: parse(tool, text) }; }
   catch (error) {
-    const reason = errorCode(error) === 'CK_FORM' ? (error as { reason: string }).reason : `isn’t valid ${tool === 'codex-cli' ? 'TOML' : 'JSON'}.`;
-    return { tool, path, text, exists: true, problem: { file: path, reason } };
+    const form = errorCode(error) === 'CK_FORM' ? error as { reason: string; read?: ParsedSwitches } : undefined;
+    // A form that is read but not edited still says what it turns off: the page shows that, and offers no switch.
+    return { tool, path, text, exists: true, problem: { file: path, reason: form?.reason ?? `isn’t valid ${tool === 'codex-cli' ? 'TOML' : 'JSON'}.` }, ...(form?.read ? { parsed: form.read } : {}) };
   }
 }
 
-/** Whether a tool's switch file turns this copy off. False for a file with a problem (which is never written). */
+/** Whether a tool's switch file turns this copy off. False for a file that can't be read (one with a problem is never written). */
 export function isDisabled(context: ShareContext, file: SwitchFile, target: SwitchTarget): boolean {
   return !!file.parsed && stateIn(context, file.tool, file.parsed, target).disabled;
 }
@@ -73,7 +74,7 @@ export function isDisabled(context: ShareContext, file: SwitchFile, target: Swit
  */
 export async function setDisabled(context: ShareContext, tool: HarnessId, target: SwitchTarget, disabled: boolean, restore?: string): Promise<{ changed: boolean; previous?: string }> {
   const file = await readSwitchFile(context, tool);
-  if (!file.parsed) throw failure(problemText(file.problem!));
+  if (file.problem || !file.parsed) throw failure(problemText(file.problem!));
   const now = stateIn(context, tool, file.parsed, target);
   if (now.disabled === disabled) return { changed: false };
   if (tool === 'claude-cli' && !disabled) restore ??= (await readKeptOverrides(context))[target.folder];
@@ -127,7 +128,8 @@ const isPathOf = (rule: CodexRule, skillFile: string) => {
 /** A switch file parsed: JSON settings, or Codex's skill rules. */
 export type ParsedSwitches = { json: Record<string, unknown> } | { rules: CodexRule[] };
 
-const formError = (reason = 'writes skills.config as a value, a form Central Knot doesn’t edit.') => Object.assign(new Error('Skill rules in a form not edited here.'), { code: 'CK_FORM', reason });
+/** `read`: the settings as parsed, where the form can still be read for what it turns off, only not edited. */
+const formError = (reason = 'writes skills.config as a value, a form Central Knot doesn’t edit.', read?: ParsedSwitches) => Object.assign(new Error('Skill rules in a form not edited here.'), { code: 'CK_FORM', reason, read });
 const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
 /** A tool's settings, parsed. Throws when the text isn't the tool's format. */
@@ -142,7 +144,7 @@ function parse(tool: HarnessId, text: string): ParsedSwitches {
   const permission = tool === 'opencode-cli' && 'permission' in json ? record(json.permission) : {};
   if (!permission) throw formError('sets permission as one word, a form Central Knot doesn’t edit.');
   const keys = Object.keys(permission);
-  if ('skill' in permission && keys.slice(keys.indexOf('skill') + 1).some(key => typeof permission[key] === 'string' && openCodeMatches(key, 'skill'))) throw formError('has a rule after skill in permission that decides for every skill, a form Central Knot doesn’t edit. Move it above skill to switch one skill.');
+  if ('skill' in permission && keys.slice(keys.indexOf('skill') + 1).some(key => typeof permission[key] === 'string' && openCodeMatches(key, 'skill'))) throw formError('has a rule after skill in permission that decides for every skill, a form Central Knot doesn’t edit. Move it above skill to switch one skill.', { json });
   return { json };
 }
 
