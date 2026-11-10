@@ -148,7 +148,7 @@ async function saveSyncSetting(on: boolean) {
 }
 
 /** Sends the page a message, when there is a window to send it to. */
-function send(channel: 'sync:changed' | 'settings:changed' | 'navigate' | 'updates:changed', ...args: unknown[]) {
+function send(channel: 'sync:changed' | 'settings:changed' | 'navigate' | 'updates:changed' | 'said', ...args: unknown[]) {
   if (window && !window.isDestroyed()) window.webContents.send(channel, ...args);
 }
 
@@ -540,7 +540,11 @@ function addCarriedSoon(present: HarnessId[]) {
   if (!bundle || !carriedMarket) return;
   void carriedMarket.addCarried(present, queued).then(reports => {
     for (const report of reports) log(`bundle: ${bundle?.release.marketplace} in ${report.tool}: ${report.outcome}: ${report.message}`);
-    if (reports.some(report => report.outcome === 'added')) send('sync:changed');
+    const added = reports.filter(report => report.outcome === 'added').map(report => harnesses[report.tool].name);
+    if (!added.length) return;
+    // The page reads the tools again, and the status bar says once what was done on the person's behalf.
+    send('sync:changed');
+    send('said', `${custom?.marketplace?.displayName ?? bundle?.release.marketplace} was added to ${added.length > 1 ? `${added.slice(0, -1).join(', ')} and ${added.at(-1)}` : added[0]}, so its plugins also show in ${added.length > 1 ? 'those tools’ own plugin lists' : 'that tool’s own plugin list'}. Nothing was installed.`);
   }, error => logFailure('adding the carried marketplace to the tools', error));
 }
 

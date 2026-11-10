@@ -87,6 +87,8 @@ export interface DesktopApi {
   setSync(on: boolean): Promise<HomeView | null>;
   syncNow(home: string): Promise<HomeView | null>;
   onSyncChanged(callback: () => void): void;
+  /** Main did something on the person's behalf outside any request (a bundled build added its marketplace to their tools): words for the status bar. */
+  onSaid(callback: (text: string) => void): void;
   /** Central Knot's own settings (how the app looks), as stored by the main process. */
   getSettings(): Promise<AppPreferences>;
   /** Sets the appearance; the window follows at once. Returns the settings as saved. */

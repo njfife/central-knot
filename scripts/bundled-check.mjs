@@ -146,6 +146,7 @@ if (writes) {
   check('each was given the folder in the build’s own data folder', addedBy('claude')[0] === marketFolder && addedBy('codex')[0] === marketFolder, addedBy('claude'));
   check('Copilot CLI, which refuses this marketplace, was not asked', addedBy('copilot').length === 0);
   check('nothing was installed by it', !existsSync(join(HOME, '.claude/plugins/installed_plugins.json')));
+  check('the status bar says once what was added, and that nothing was installed', await a.until(`document.querySelector('#announcement').textContent.includes('Acme plugins was added to Claude Code and Codex') && document.querySelector('#announcement').textContent.includes('Nothing was installed.')`), await a.run(`document.querySelector('#announcement').textContent`));
 } else {
   await wait(1500);
   check('in a home that is preview only, it is added to no tool', ['claude', 'copilot', 'codex'].every(name => addedBy(name).length === 0));

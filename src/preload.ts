@@ -28,6 +28,7 @@ const api: DesktopApi = {
   setSync: on => ipcRenderer.invoke('sync:set', on),
   syncNow: home => ipcRenderer.invoke('sync:now', home),
   onSyncChanged: callback => { ipcRenderer.on('sync:changed', () => callback()); },
+  onSaid: callback => { ipcRenderer.on('said', (_event, text) => callback(String(text))); },
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setAppearance: appearance => ipcRenderer.invoke('settings:appearance', appearance),
   setStartAtSignIn: on => ipcRenderer.invoke('settings:sign-in', on),
