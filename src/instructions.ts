@@ -6,7 +6,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
 import { lineDiff } from './diff.ts';
 import { errorCode, landingOf, plainError, recoverParked, removeFileChecked, sha256, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
-import { baseAction, comparableBase, fileWithBase, readersOfFile, sameBase, splitBase } from './basetext.ts';
+import { baseAction, comparableBase, draftedOwn, fileWithBase, readersOfFile, sameBase, splitBase } from './basetext.ts';
 import { lineCount, linesOf, toolList } from './words.ts';
 import { harnessIds } from './harnesses.ts';
 import { isPresent } from './presence.ts';
@@ -95,10 +95,10 @@ async function readBase(home: string, recover = false) {
 }
 type StoredBase = Awaited<ReturnType<typeof readBase>>;
 
-/** The base instructions, which tools get them, and earlier versions of the base. */
-export async function baseView(context: ShareContext): Promise<BaseView> {
+/** The base instructions, which tools get them, and earlier versions of the base. `drafters`: the tools that can write a draft of them here. */
+export async function baseView(context: ShareContext, drafters: HarnessId[] = []): Promise<BaseView> {
   const base = await readBase(context.home);
-  return { path: basePath(context.home), text: base.text, hash: hashOf(base.raw), tools: base.list.tools, versions: describe(await shelf(context.home, 'base'), base.text) };
+  return { path: basePath(context.home), text: base.text, hash: hashOf(base.raw), tools: base.list.tools, versions: describe(await shelf(context.home, 'base'), base.text), drafters };
 }
 
 /** How a tool's file holds the base: the same, the copy Central Knot last wrote there (an older base), edited there, or not at
@@ -217,7 +217,8 @@ const storeFailure = (error: unknown, ifChanged: BaseResult): BaseResult => (cha
 /**
  * Sets the base instructions and which tools get them, then updates exactly the files the review showed (`request.seen`), each
  * only if it still holds what the review saw: its block is added or replaced, or taken out for a tool taken off the list. Each
- * tool's own text stays as it is. A copy edited in a tool's file is left alone unless `overwrite` names that tool; `adopt` names
+ * tool's own text stays as it is, except where `own` gives a chosen tool's own text as a draft sorted it (draftbase.ts): that
+ * replaces it. A copy edited in a tool's file is left alone unless `overwrite` names that tool; `adopt` names
  * the tool whose own text became the base, so it moves into the block. Tools reading one physical file (linked dotfiles) are one
  * destination: chosen together and written once. `changed` on a stop: the base or a file changed since the review, so the review
  * should be shown again.
@@ -243,7 +244,7 @@ export async function applyBase(context: ShareContext, snapshots: Snapshot[], re
     const text = current ?? '';
     const isChosen = chosen.has(tool);
     const held = baseState(text, readers, stored);
-    const planned = fileWithBase(text, request.text, { chosen: isChosen, held, action: baseAction(readers, request) });
+    const planned = fileWithBase(text, request.text, { chosen: isChosen, held, action: baseAction(readers, request), own: draftedOwn(readers, request.own) });
     if ('left' in planned) { result.left.push({ tool, why: 'edited' }); continue; }
     const { next } = planned;
     // Nothing to change, and a missing file is never created empty.
