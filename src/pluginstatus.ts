@@ -1,6 +1,6 @@
 // What the plugin pages say about a plugin and a tool, worked out from the view alone (no DOM): whether a tool can take
 // it, whether it is installed there, and a short summary of what it holds.
-import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PartItem, PartKind, PartsState, PluginDetail, PluginView, PluginsView } from './types.ts';
+import type { Components, HarnessId, HomeView, InstallState, MarketplaceView, Outcome, PartItem, PartKind, PartsState, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { groupBy, plural } from './model.ts';
 import { SAFE_NAME, compareVersions, isCommitHash } from './values.ts';
 import { andList, toolNames as names } from './words.ts';
@@ -120,6 +120,13 @@ export function samePart(first: Pick<PartItem, 'kind' | 'name'>, second: Pick<Pa
 /** Which page lists each kind of part, and the kind each page lists. */
 export const pageOfPart = { skill: 'skills', mcp: 'mcp', agent: 'agents' } as const;
 export const partOfPage = { skills: 'skill', mcp: 'mcp', agents: 'agent' } as const;
+
+/** Whether the home, as last read, still has this part in the tool: a copy removed by hand since is no longer installed there. */
+export function partStillIn(home: Pick<HomeView, 'manage' | 'mcp' | 'agents'>, tool: HarnessId, part: Pick<PartItem, 'kind' | 'name'>): boolean {
+  const { tools, facts } = part.kind === 'skill' ? { tools: home.manage.tools, facts: home.manage.skills } : part.kind === 'mcp' ? { tools: home.mcp.tools, facts: home.mcp.servers } : { tools: home.agents.tools, facts: home.agents.servers };
+  // A kind the home doesn't read in that tool can't be checked: the part counts as there.
+  return !tools.includes(tool) || facts.some(fact => fact.copies[tool] !== undefined && [fact.key, fact.name].some(name => !!name && samePart(part, { kind: part.kind, name })));
+}
 
 /** Each kind of part in words: [one, several]. */
 export const partWords: Record<PartKind, [string, string]> = { skill: ['skill', 'skills'], mcp: ['MCP server', 'MCP servers'], agent: ['agent', 'agents'] };

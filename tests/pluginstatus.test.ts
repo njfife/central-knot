@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { blocked, comparableText, installsIn, limitNote, offeredVersion, otherVersions, otherVersionsLine, toolsWithoutPlugin, unavailable } from '../src/pluginstatus.ts';
+import { blocked, comparableText, installsIn, limitNote, offeredVersion, partStillIn, otherVersions, otherVersionsLine, toolsWithoutPlugin, unavailable } from '../src/pluginstatus.ts';
 import { readInto, type Read } from '../src/reads.ts';
-import type { MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
+import type { HomeView, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
 
 const entry: MarketplaceView = { source: 'a/b', origins: ['central-knot'], name: 'm', kind: 'git', sourceLabel: 'GitHub: a/b', plugins: [{ name: 'p', description: '' }],
   states: { p: { 'claude-cli': { state: 'installed', path: '/x' }, 'codex-cli': { state: 'held', reason: 'other' } } } };
@@ -68,4 +68,13 @@ test('A tool\'s installs say what is installed, what could not be checked and wh
   assert.deepEqual(installs.unknown.map(({ plugin, reason }) => [plugin.name, reason]), [['q', 'Its files are missing.']]);
   assert.deepEqual(installs.unreadable, ['gone']);
   assert.equal(installsIn(view, 'pi-cli'), null, 'a tool that takes no marketplace plugins');
+});
+
+test('A part removed from a tool by hand is no longer installed there; a kind the home does not read there still counts', () => {
+  const facts = (key: string, tools: string[]) => ({ key, copies: Object.fromEntries(tools.map(tool => [tool, {}])) });
+  const home = { manage: { tools: ['codex-cli', 'pi-cli'], skills: [facts('triage', ['codex-cli'])] }, mcp: { tools: ['codex-cli'], servers: [facts('issues', ['codex-cli'])] }, agents: { tools: [], servers: [] } } as unknown as HomeView;
+  assert.equal(partStillIn(home, 'codex-cli', { kind: 'skill', name: 'Triage' }), true);
+  assert.equal(partStillIn(home, 'pi-cli', { kind: 'skill', name: 'triage' }), false);
+  assert.equal(partStillIn(home, 'pi-cli', { kind: 'mcp', name: 'issues' }), true);
+  assert.equal(partStillIn(home, 'codex-cli', { kind: 'agent', name: 'helper' }), true);
 });

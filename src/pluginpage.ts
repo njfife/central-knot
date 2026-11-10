@@ -8,7 +8,7 @@ import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { changedWords, componentsOf, dotted, pluginTitle, readme, toolBox, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { allQueued, pluginKey, queued, skillChoices, toggle, toggleMany, type PluginAction, type PluginOp } from './pluginplan.ts';
-import { NO_SKILL_SWITCH, cantSwitchSkill, comparableText, installed, limitNote, marketplaceVersionNote, offeredVersion, pageOfPart, partWords, partsEligible, partsFit, partsMark, partsOf, partsOffer, partsWhy, removableTools, samePart, skillOff, stateOf, toolsWithoutPlugin, unavailable, untestedBuild, versionToCompare, versionWord } from './pluginstatus.ts';
+import { cantSwitchSkill, comparableText, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partsEligible, partsFit, partsMark, partsOf, partsOffer, partStillIn, partsWhy, partWords, removableTools, samePart, skillOff, stateOf, toolsWithoutPlugin, unavailable, untestedBuild, versionToCompare, versionWord } from './pluginstatus.ts';
 import { takesPlugins } from './presence.ts';
 import { clearNotice, market, openLink, shownDetail, toggleOpened } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, Outcome, PartPlan, PartsState, PluginDetail, PluginView, PluginsView } from './types.ts';
@@ -166,7 +166,12 @@ function partsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const read = market.partsPlans.get(pluginKey(entry.source, plugin.name));
   const plans = read && !read.reading ? read.value : undefined;
   const op = (tool: HarnessId, action: PluginAction): PluginOp => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action });
-  const partsIn = (tool: HarnessId) => partsOf(entry, plugin.name, tool);
+  // Only the parts the tool still has: one removed there by hand is no longer listed as installed.
+  const partsIn = (tool: HarnessId) => {
+    const parts = partsOf(entry, plugin.name, tool);
+    const items = parts && app.home ? parts.items.filter(item => partStillIn(app.home!, tool, item)) : parts?.items;
+    return parts && items?.length ? { ...parts, items } : undefined;
+  };
   const chosen = (tool: HarnessId) => queued(market.draft, entry.source, plugin.name, tool);
   // The buttons choose for the tools not chosen yet; the boxes take a choice back.
   const open = tools.filter(tool => !chosen(tool));

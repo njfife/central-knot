@@ -1,7 +1,7 @@
 // Base instructions (INS-03, INS-04): one text, written once, that Central Knot keeps in each chosen tool's own instruction file,
 // in a marked block after that tool's own instructions. A tool's own text is never rewritten. A copy edited in a tool's file is
 // shown, never overwritten by itself: the person uses it as the base or puts the base back. Every save shows each file's change first.
-import { applyBaseChange, savingOff, startTakeOut, baseDraftTyped, baseSaveDoesSomething, loadBaseVersion, ownText, rerender, toolDraftTyped, shownPath, startBaseEdit, state, type BaseEdit } from './app.ts';
+import { applyBaseChange, savingOff, startTakeOut, baseDraftTyped, baseSaveDoesSomething, loadBaseVersion, ownText, rerender, showPage, toolDraftTyped, shownPath, startBaseEdit, state, type BaseEdit } from './app.ts';
 import { baseAction, fileWithBase, readersOfFile, sameBase, splitBase } from './basetext.ts';
 import { lineDiff } from './diff.ts';
 import { button, checkbox, h, icon, lockAttrs as lockAttrsFor, pathText } from './dom.ts';
@@ -291,7 +291,11 @@ export function baseStrip(file: InstructionFile, lockedWhy?: string) {
   const goWhy = state.baseEdit ? 'Finish or cancel the base instructions edit first.' : lockedWhy;
   return h('div.base-strip', {},
     h('div.base-strip-line', {}, icon('layers', 13, 'tone-muted'), h('span', {}, h('strong', {}, 'Then the base instructions'), ` · ${plural(lines, 'line')}, ${said}`),
-      goTo ? button({ variant: 'link', size: 'micro', label: base.state === 'edited' ? 'Choose what to do…' : 'Update…', id: `ins-base-go-${file.tool}`, disabled: !!goWhy, attrs: lockAttrsFor(goWhy), onclick: () => { const target = document.getElementById(goTo); target?.scrollIntoView({ block: 'center' }); target?.focus(); } }) : null,
+      goTo ? button({ variant: 'link', size: 'micro', label: base.state === 'edited' ? 'Choose what to do…' : 'Update…', id: `ins-base-go-${file.tool}`, disabled: !!goWhy, attrs: lockAttrsFor(goWhy), onclick: () => {
+        // On a harness's Instructions tab the Base instructions card isn't on the page: the choice is made on Instructions.
+        if (!document.getElementById(goTo)) showPage('instructions');
+        const target = document.getElementById(goTo); target?.scrollIntoView({ block: 'center' }); target?.focus();
+      } }) : null,
       // Not on the list any more: its block (an edited copy the list change left) can be taken out here, after a review.
       // Hidden under its own open review, so that review is the one decision on screen.
       !base.chosen && !state.instructionEdit?.takeOut ? button({ variant: 'link', size: 'micro', label: 'Take the block out…', id: `ins-base-out-${file.tool}`, disabled: !!state.busy || !!lockedWhy, attrs: lockAttrsFor(lockedWhy), onclick: () => startTakeOut(file) }) : null,

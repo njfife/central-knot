@@ -30,7 +30,8 @@ function fromPlugins(skill: SampleSkill, page: Kind): { install: PartsInstall; t
   const named = [skill.key, skill.name].filter((name): name is string => !!name).map(name => ({ kind: partKind, name }) as const);
   const found = new Map<string, { install: PartsInstall; tools: HarnessId[] }>();
   for (const install of state.home?.parts ?? []) {
-    if (!install.items.some(item => !item.removed && named.some(name => samePart(item, name)))) continue;
+    // A copy removed from that tool by hand is no longer a part installed there.
+    if ((toolList().includes(install.tool) && skill.copies[install.tool] === undefined) || !install.items.some(item => !item.removed && named.some(name => samePart(item, name)))) continue;
     const key = pluginKey(install.source, install.plugin);
     const entry = found.get(key) ?? { install, tools: [] };
     entry.tools.push(install.tool);
@@ -142,6 +143,8 @@ interface Draft { managed: boolean; off: Tool[]; resolve?: Resolution; prior?: b
 const newView = () => ({
   committed: sample.map(skill => ({ ...skill })),
   draft: new Map<string, Draft>(),
+  /** When the draft last changed (state.said.seq): a result said before that steps aside for the pending changes. */
+  draftSaid: 0,
   filter: 'all' as Filter,
   find: '',
   /** The skill whose details are open under its row. */
@@ -171,7 +174,7 @@ const views: Record<Kind, ReturnType<typeof newView>> = { skills: newView(), mcp
 export const showFiltered = (which: Kind, filter: Filter, harness?: Tool) => { startFresh(views[which], harness); views[which].filter = filter; };
 /** A table drawn for another page (a harness's, or the kind's own) starts with no filter, Find text, open row or menu from the last one. */
 function startFresh(table: ReturnType<typeof newView>, harness: Tool | undefined) {
-  Object.assign(table, { filter: 'all', find: '', comparing: undefined, toolMenu: undefined, toolMenuFromToolbar: false, shownFor: harness });
+  Object.assign(table, { filter: 'all', find: '', comparing: undefined, toolMenu: undefined, toolMenuFromToolbar: false, confirmDelete: undefined, shownFor: harness });
 }
 /** Opens an item's details on its own page (Skills, MCP servers or Agents), found by name, and scrolls it into view. */
 export function openItem(which: Kind, name: string) {
@@ -185,6 +188,8 @@ export function openItem(which: Kind, name: string) {
   if (key) requestAnimationFrame(() => document.querySelector(`.ov-row[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'center' }));
 }
 let view = views.skills;
+/** The page the tables were last drawn on. */
+let tablesPage: string | undefined;
 let draftHomes: Partial<Record<Kind, string>> = {};
 
 // A click elsewhere or Escape closes a tool menu.
@@ -224,6 +229,7 @@ function edit(key: string, change: (skill: SampleSkill, draft?: Draft) => Draft)
   const same = !next.resolve && next.managed === base.managed && sameSet(next.off, base.off) && !next.remove?.length && !Object.keys(next.switches ?? {}).length;
   if (same) view.draft.delete(key); else view.draft.set(key, next);
   announce(view.draft.size ? `${view.draft.size} ${view.draft.size === 1 ? 'change' : 'changes'} not applied yet.` : 'No changes.', true);
+  view.draftSaid = state.said.seq;
 }
 
 // Turning a skill on undoes "keep both"; turning it off drops a chosen copy. The page then shows what Apply all will do.
@@ -1418,7 +1424,7 @@ export { brandMark };
 function outcomeShown(outcome: Outcome, matrixPage: boolean): boolean {
   if (outcome.page !== state.page) return false;
   const named = [outcome.item, ...(outcome.items ?? [])].filter((name): name is string => !!name);
-  if (matrixPage && view.draft.size) return false;
+  if (matrixPage && view.draft.size && (outcome.said ?? 0) < view.draftSaid) return false;
   const choosing = matrixPage && view.comparing && committedList().some(skill => skill.key === view.comparing && syncOf(skill, toolList()) === 'attention' && named.some(name => name === skill.name || name.toLowerCase() === skill.key));
   if (choosing) return false;
   return !(state.skillsView === 'files' && state.item && !named.some(name => name.toLowerCase() === state.item));
@@ -1445,7 +1451,7 @@ export function outcomeBand(table = state.page === 'skills' || state.page === 'm
     text.push(rest.slice(0, hits[0].at), h('strong.item-name', {}, hits[0].name));
     rest = rest.slice(hits[0].at + hits[0].name.length);
   }
-  return h('div.band.band-done', { role: 'status' }, outcome.warn ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'), h('span.band-text', {}, ...text,
+  return h('div.band.band-done', { role: 'status', 'data-outcome': '' }, outcome.warn ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'), h('span.band-text', {}, ...text,
     // The space before the note sits outside it, so a note kept whole on its line never carries the last word with it.
     outcome.note ? [' ', h('span.tone-faint', {}, outcome.note.replace(/ History\.$/, ' '), h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History'), '.')] : null),
     outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
@@ -1632,7 +1638,16 @@ function forgetOtherHomes() {
       view.draft.delete(key);
       if (stale) announce(`${skill!.name ?? key}: the copy you chose changed, so that choice was dropped. Choose again.`);
       else if (moved) announce(`${skill!.name ?? key} changed since you edited it, so your change to it was dropped.`);
+      continue;
     }
+    // A switch clicked here that the tool now has anyway (a profile switch flipped it meanwhile) has nothing left to do.
+    const done = (Object.entries(draft.switches ?? {}) as [Tool, boolean][]).filter(([tool, off]) => off === !!skill.disabled?.includes(tool));
+    if (!done.length) continue;
+    const switches = Object.fromEntries(Object.entries(draft.switches!).filter(([tool]) => !done.some(([gone]) => gone === tool)));
+    const next = { ...draft, switches };
+    if (!next.resolve && next.managed === skill.managed && [...next.off].sort().join() === [...skill.off].sort().join() && !next.remove?.length && !Object.keys(switches).length) view.draft.delete(key); else view.draft.set(key, next);
+    const [, off] = done[0];
+    announce(`${skill.name ?? key} is already ${off ? 'disabled' : 'enabled'} in ${andList(done.map(([tool]) => names[tool]))} now, so that change was dropped.`);
   }
 }
 
@@ -1791,6 +1806,8 @@ function syncNotice(notice: Told, writeClaude?: () => void) {
  * (this harness has nothing that differs) goes back to All, so the table is never empty with no chip pressed.
  */
 function useTable(which: Kind, harness?: Tool) {
+  // An armed Delete everywhere belongs to the visit it was clicked on: another page disarms it.
+  if (state.page !== tablesPage) { for (const each of Object.values(views)) each.confirmDelete = undefined; tablesPage = state.page; }
   kind = which;
   view = views[which];
   focus = harness;

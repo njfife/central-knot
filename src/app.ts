@@ -134,7 +134,7 @@ export function announce(text: string, quiet = false) {
 export function tell(outcome: Outcome | undefined, otherwise = ''): void {
   state.outcome = outcome;
   if (!outcome) announce(otherwise);
-  else announce(outcome.text, !saidInStatusBar(outcome));
+  else { announce(outcome.text, !saidInStatusBar(outcome)); outcome.said = state.said.seq; }
 }
 
 /** Paints the status bar's message from state.said, keeping its whole text as its tooltip. */
@@ -148,11 +148,13 @@ export function paintStatusMessage() {
     region.replaceChildren(...(told.text ? [h('span.said-first', {}, first), rest ? h('span.said-rest', {}, ` ${rest.trim()}`) : null].filter((part): part is HTMLElement => !!part) : []));
   }
   region.title = told.text;
-  // Only a message that repeats what the page shows (announced quiet) is for screen readers alone.
-  region.classList.toggle('visually-hidden', told.quiet);
+  // Only a message that repeats what the page shows (announced quiet) is for screen readers alone. A result the page didn't
+  // draw (no band on this page, or held back) is shown here after all: the drawn result is marked data-outcome.
+  const quiet = told.quiet && !(state.outcome && told.text === state.outcome.text && !document.querySelector('[data-outcome]'));
+  region.classList.toggle('visually-hidden', quiet);
   // A narrow status bar shows a small mark instead of a message cut to a stub; its tooltip has the message (style.css).
   const mark = document.getElementById('message-mark');
-  if (mark) { mark.title = told.text; mark.hidden = !told.text || told.quiet; }
+  if (mark) { mark.title = told.text; mark.hidden = !told.text || quiet; }
 }
 
 const focusById = (id?: string | null) => (id ? document.getElementById(id) : null)?.focus();
@@ -387,8 +389,9 @@ function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; 
   if (page === 'history') return loadHistory();
   if (page === 'settings') return loadSettings().then(() => undefined);
   if (page === 'instructions') return loadInstructions(readId);
-  // Harnesses sums up each tool's instruction file and installs, as Instructions and Plugins read them.
-  if (page === 'harnesses') return Promise.all([loadInstructions(readId), absentKinds().includes('plugins') ? undefined : loadPlugins(fresh, readId)]).then(() => undefined);
+  // Harnesses sums up each tool's instruction file and installs, as Instructions and Plugins read them. It only counts installs,
+  // so its Refresh reads the tools again without fetching every marketplace anew (Plugins' Refresh does that).
+  if (page === 'harnesses') return Promise.all([loadInstructions(readId), absentKinds().includes('plugins') ? undefined : loadPlugins(false, readId)]).then(() => undefined);
   if (page === 'plugins') return loadPlugins(fresh, readId);
   if (page === 'repo') return loadRepo(true);
   return Promise.resolve();
@@ -533,7 +536,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   if (past?.kind === 'switched' || past?.kind === 'removed') {
     // Every tool's result is said, including one that was already as wanted ("has it back already") or still waits.
     const text = past.kind === 'removed'
-      ? [where.length ? `${past.item} is back in ${andList(where)}.` : '', ...result.results.filter(entry => entry.outcome !== 'written').map(entry => entry.message), stillDisabled(past.key, restored)].filter(Boolean).join(' ')
+      ? [where.length ? `${past.item} is back in ${andList(where.map(tool => toolName(tool)))}.` : '', ...result.results.filter(entry => entry.outcome !== 'written').map(entry => entry.message), stillDisabled(past.key, restored)].filter(Boolean).join(' ')
       : result.results.map(entry => `${past.item}: ${entry.message}`).join(' ');
     // "Undo again" only for a switch Undo that recorded what it flipped.
     const again = past.kind === 'switched' && undoneBy && state.history.data?.some(event => event.id === undoneBy) ? { id: undoneBy, label: 'Undo again' } : undefined;
@@ -585,6 +588,8 @@ export interface Outcome {
   history?: boolean;
   undo?: { id: string; label: string };
   act?: { label: string; id: string; run: () => void; title?: string };
+  /** When it was said (state.said.seq): a result newer than a table's pending changes still shows there. */
+  said?: number;
 }
 
 /**
@@ -1154,6 +1159,7 @@ export const switchToProfile = (id: string | null) => busy('Switching profile…
   if (result.view) setHome(result.view);
   if (result.stopped) { announce(result.stopped); return; }
   switchOutcome(result);
+  if (state.page === 'history') await putHistory();
 });
 // A switch from the menu bar: its result and Undo are on the page the next time the window shows.
 api().onProfileSwitched(async result => {

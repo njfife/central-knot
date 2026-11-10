@@ -431,6 +431,7 @@ async function practiceFlow() {
   await a.run(`document.querySelector('.history-row[data-kind="removed"] button').click()`);
   await a.settle();
   same('Restore in History puts it back', readFileSync(join(practice, '.codex/skills/notes/SKILL.md'), 'utf8'), readFileSync(join(practice, '.claude/skills/notes/SKILL.md'), 'utf8'));
+  check('and names the tool as people know it', (await a.run(`document.querySelector('#announcement').dataset.text`) ?? '').startsWith('notes is back in Codex.'), await a.run(`document.querySelector('#announcement').dataset.text`));
   await a.click('#nav-skills');
 
   // Profiles: a profile with only notes in it turns every other skill and MCP server off with each tool's own switch, in one
@@ -457,6 +458,31 @@ async function practiceFlow() {
   same('Undo switch puts every switch back', readSwitches().map(settled), switchesBefore.map(settled));
   same('…and No profile is in use again', (await a.text('#status-profile'))?.trim(), 'No profile');
   await a.click('#nav-skills');
+  // A switch from the status bar with changes queued: a queued Disable the switch already made is dropped, saying so; the other
+  // stays; and the switch's result shows over the pending changes, with its Undo.
+  const switchFromBar = async name => { await a.click('#status-profile'); await a.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes(${JSON.stringify(name)})).click()`); await a.settle(); };
+  const statusShown = () => a.run(`(() => { const region = document.querySelector('#announcement'); return region.classList.contains('visually-hidden') ? '' : region.dataset.text; })()`);
+  await a.click('#open-notes'); await a.click('#enable-notes-claude-cli');
+  await a.click('#open-standup'); await a.click('#enable-standup-claude-cli');
+  await switchFromBar('Incident');
+  check('a queued Disable that the profile switch already made is dropped; the other stays', (await a.text('.apply-count .count-full')) === '1 change · 1 copy to disable', await a.text('.apply-count .count-full'));
+  check('the switch’s result shows over pending changes, with Undo switch', (await a.text('.band-done') ?? '').includes('Incident is the profile now') && await a.exists('#outcome-undo'), await a.text('.bands'));
+  await a.click('#outcome-undo');
+  await a.click('#discard');
+  // On History (no result band) the switch is listed at once and its result is said in the status bar, as is its Undo from there.
+  await a.click('#nav-history');
+  const profileRows = async () => (await a.all('.history-row[data-kind="profile"]')).length;
+  const rowsBeforeSwitch = await profileRows();
+  await switchFromBar('Incident');
+  check('a switch from the status bar on History is listed at once and said', (await profileRows()) === rowsBeforeSwitch + 1 && /^Incident is the profile now/.test(await statusShown() ?? ''), [rowsBeforeSwitch, await profileRows(), await statusShown()]);
+  await a.run(`document.querySelector('.history-row[data-kind="profile"] .history-actions button').click()`); await a.settle();
+  check('its Undo from History says what it did in the status bar', /^Undone:/.test(await statusShown() ?? '') && (await a.text('#status-profile'))?.trim() === 'No profile', await statusShown());
+  await a.click('#nav-skills');
+  // An armed Delete everywhere stays on the visit it was clicked on.
+  const standupOpen = async () => { if (!(await a.exists('#delete-standup, #delete-confirm-standup'))) await a.click('#open-standup'); };
+  await standupOpen(); await a.click('#delete-standup');
+  await a.click('#nav-overview'); await a.click('#nav-skills'); await standupOpen();
+  check('an armed Delete everywhere is disarmed by leaving the page', await a.exists('#delete-standup') && !(await a.exists('#delete-confirm-standup')), await a.all('.delete-armed button'));
 
   // Two-way: an edit in one tool spreads on the next read, Undo puts it back; a deletion spreads after the settle window; Restore returns it.
   const standupPath = tool => join(practice, `.${tool}/skills/standup/SKILL.md`);
@@ -1176,6 +1202,10 @@ async function practiceFlow() {
   await a.click('#header-refresh');
   for (let tries = 0; tries < 40 && !(await a.exists('#base-restore-codex-cli')); tries++) await wait(100);
   check('an edit inside Codex’s copy shows, with both choices', await a.exists('#base-usecopy-codex-cli') && await a.exists('#base-restore-codex-cli'), await a.text('#base-card'));
+  // On Codex's harness page the strip's "Choose what to do…" goes to that choice on Instructions (its target isn't on a harness tab).
+  await a.click('#nav-harnesses'); await a.click('#harness-codex-cli'); await a.click('#harness-tab-instructions');
+  await a.click('#ins-base-go-codex-cli');
+  check('“Choose what to do…” on a harness’s Instructions tab opens the choice on Instructions', await a.exists('#base-card') && await a.run(`document.activeElement?.id?.startsWith('base-diff-')`), await a.run(`[document.activeElement?.id, !!document.querySelector('#base-card')]`));
   await a.click('#base-usecopy-codex-cli');
   await a.click('#base-save');
   check('Use it as the base spreads Codex’s edit to Claude Code', readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8').includes('- Shared, edited in Codex.'));
