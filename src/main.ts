@@ -10,7 +10,7 @@ import { configRoot, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { executableCandidates } from './platform.ts';
 import { syncsHere, writeAccess, type ShareContext } from './share.ts';
 import { applyChanges, deleteEverywhere, eventChange, manageView, pruneHistory, readHistory, restoreFromHistory } from './manage.ts';
-import { presentTools } from './presence.ts';
+import { noteTools, presentTools } from './presence.ts';
 import { applyMcp, mcpFile, mcpTools, mcpView, restoreMcp, undoClaudeWrite } from './mcp.ts';
 import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
 import { applyBase, baseView, instructionsView, instructionVersion, saveInstruction, undoBase } from './instructions.ts';
@@ -520,18 +520,12 @@ async function readFor(readId?: number): Promise<Snapshot[]> {
 /** The tools in the open home as last noted (presence.ts), with the home they were noted in, so a change is acted on once. */
 let lastPresent = { home: '', tools: '' };
 
-/**
- * Notes which tools are in the open home and says whether they changed while that home stayed open. Then the folders
- * are watched again, so a tool that appeared is watched like the rest. A home just opened is only noted (false): opening
- * it starts watching (selectHome), and the page reads it anyway.
- */
+/** Notes the open home's tools (noteTools); when they changed, the folders are watched again, so a new tool is watched like the rest. */
 function toolsChangedHere(snapshots: Snapshot[]): boolean {
-  const tools = presentTools(snapshots).join(), home = current?.home ?? '';
-  if (home === lastPresent.home && tools === lastPresent.tools) return false;
-  const sameHome = home === lastPresent.home;
-  lastPresent = { home, tools };
-  if (sameHome) void startWatching();
-  return sameHome;
+  const { noted, changed } = noteTools(lastPresent, current?.home ?? '', snapshots);
+  lastPresent = noted;
+  if (changed) void startWatching();
+  return changed;
 }
 
 function queueBackgroundPass() { if (current && !smoke) void queued(backgroundPass).catch(() => undefined); }

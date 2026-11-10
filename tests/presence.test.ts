@@ -7,9 +7,9 @@ import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
 import { applyChanges, manageView } from '../src/manage.ts';
-import { absentKindsIn, absentTools, heldKinds, presentTools } from '../src/presence.ts';
+import { absentKindsIn, absentTools, heldKinds, noteTools, presentTools } from '../src/presence.ts';
 import type { ShareContext } from '../src/share.ts';
-import type { HarnessId } from '../src/types.ts';
+import type { HarnessId, Snapshot } from '../src/types.ts';
 
 const text = (name: string) => `---\nname: ${name}\ndescription: The ${name} skill.\n---\n\nBody.\n`;
 const exists = (path: string) => lstat(path).then(() => true, () => false);
@@ -88,4 +88,14 @@ test('a kind no tool in the home can hold is absent; a home with no tools holds 
   assert.deepEqual(absentKindsIn(view([], [], [])), ['skills', 'mcp', 'agents', 'instructions', 'plugins']);
   assert.deepEqual(heldKinds(view(['pi-cli'], ['pi-cli'], [])), ['skills', 'mcp']);
   assert.deepEqual(heldKinds(view([], [], [])), []);
+});
+
+test('the tools count as changed only while the same home stays open', () => {
+  const tools = (...present: HarnessId[]) => harnessIds.map(harness => ({ harness, detection: present.includes(harness) ? 'Detected' : 'Not found' }) as Snapshot);
+  const opened = noteTools({ home: '', tools: '' }, '/a', tools('claude-cli'));
+  assert.equal(opened.changed, false, 'a home just opened is only noted');
+  assert.equal(noteTools(opened.noted, '/a', tools('claude-cli')).changed, false);
+  const added = noteTools(opened.noted, '/a', tools('claude-cli', 'codex-cli'));
+  assert.deepEqual([added.changed, added.noted.tools], [true, 'claude-cli,codex-cli']);
+  assert.equal(noteTools(added.noted, '/b', tools('claude-cli')).changed, false, 'another home is a switch, not a change');
 });

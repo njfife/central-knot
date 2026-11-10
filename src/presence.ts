@@ -12,6 +12,18 @@ export const isPresent = (snapshot: Snapshot): boolean => snapshot.detection !==
 /** The tools in this home, in discovery order: the columns, boxes, menus and sentences every page draws from. */
 export const presentTools = (snapshots: Snapshot[]): HarnessId[] => snapshots.filter(isPresent).map(snapshot => snapshot.harness);
 
+/** The tools last noted in the open home, and that home, so a change is acted on once. */
+export interface NotedTools { home: string; tools: string }
+
+/**
+ * Notes which tools are in `home`. `changed` only when they differ from those noted while that same home stayed open: a home
+ * just opened is only noted, since opening it starts watching and the page reads it anyway.
+ */
+export function noteTools(last: NotedTools, home: string, snapshots: Snapshot[]): { noted: NotedTools; changed: boolean } {
+  const noted = { home, tools: presentTools(snapshots).join() };
+  return { noted, changed: home === last.home && noted.tools !== last.tools };
+}
+
 /** The tools that install plugins: every tool but Pi, which has none. */
 export type PluginTool = Exclude<HarnessId, 'pi-cli'>;
 export const pluginTools: PluginTool[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
