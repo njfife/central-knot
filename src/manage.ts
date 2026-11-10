@@ -935,7 +935,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       const target = await liveSwitchTarget(context, entry, tool);
       if (!target) { if (disabled) results.push({ item: name, harness: tool, outcome: 'held', message: `${toolName(tool)} has no copy to disable.` }); continue; }
       let flipped: { changed: boolean; previous?: string };
-      try { flipped = await setDisabled(context, tool, target, disabled, disabled ? undefined : await overrideBeforeDisable(context, change.key, tool, target)); }
+      try { flipped = await setDisabled(context, tool, target, disabled); }
       catch (error) {
         results.push({ item: name, harness: tool, outcome: 'failed', message: `Could not ${disabled ? 'disable' : 'enable'} it in ${toolName(tool)}: ${switchFailure(error)}` });
         continue;
@@ -1302,17 +1302,6 @@ async function restoreRemoved(context: ShareContext, record: SyncRecord, history
     await saveHistory(context, history);
   }
   return { results, harnessWrites: writes };
-}
-
-/**
- * What Claude Code's override for this copy held before its latest Disable (say "name-only"), from History, so Enable puts
- * that back instead of no override. Undefined when the Disable replaced nothing, or no Disable is on record.
- */
-async function overrideBeforeDisable(context: ShareContext, key: string, tool: HarnessId, target: SwitchTarget): Promise<string | undefined> {
-  if (tool !== 'claude-cli') return undefined;
-  const disables = (await readHistory(context)).filter(event => event.kind === 'switched' && event.key === key)
-    .flatMap(event => (event.switched ?? []).filter(entry => entry.tool === tool && entry.disabled && entry.target.folder === target.folder));
-  return disables.at(-1)?.before;
 }
 
 /** Puts a stored revision of a skill into a tool's own skills folder under `folder`; nothing may be there yet. */

@@ -264,3 +264,21 @@ test('A settings file that can’t be written fails only its own flips, and an U
     assert.equal((await readHistory(box.context)).find(event => event.id === result.event)?.undoneBy, undefined);
   } finally { for (const folder of folders) await chmod(folder, 0o755); await box.cleanup(); }
 });
+
+test('A profile switch and back keeps a Claude Code override other than off, as a Skills page Enable does', async () => {
+  const box = await sandbox();
+  try {
+    const settings = join(box.home, '.claude/settings.json');
+    const original = '{\n  "skillOverrides": { "pager": "name-only" }\n}\n';
+    await writeFile(settings, original);
+    const dev = (await saveProfile(box.context, { name: 'Dev', items: ['skill:dev', 'mcp:sentry'] })).id!;
+    assert.equal((await switchProfile(box.context, dev)).stopped, undefined);
+    assert.match(await readFile(settings, 'utf8'), /"pager": "off"/);
+    await switchProfile(box.context, null);
+    assert.equal(await readFile(settings, 'utf8'), original);
+    // Turned off by a profile, on again from the Skills page: the same kept value comes back.
+    await switchProfile(box.context, dev);
+    await applyChanges(box.context, [{ key: 'pager', managed: false, off: [], enable: ['claude-cli'] }]);
+    assert.equal(await readFile(settings, 'utf8'), original);
+  } finally { await box.cleanup(); }
+});

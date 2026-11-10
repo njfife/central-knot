@@ -11,7 +11,7 @@ import { mcpView } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from './mcpswitch.ts';
 import { changedSince, choseProfileInUse, driftOf, itemId, itemKeyOf, itemKind, NO_PROFILE, planSwitch, releaseHolds, offAfterFlips, offAfterFailures, holdsOnWhatIsHere, switchItems, type SwitchItem } from './profileplan.ts';
 import { errorCode, itemKey, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
-import { switchedText, switchPath, switchState, type SwitchTarget } from './skillswitch.ts';
+import { keepOverrides, readKeptOverrides, switchedText, switchPath, switchState, type SwitchTarget } from './skillswitch.ts';
 import { onlyAllowed, record, strings } from './values.ts';
 import { toolName } from './words.ts';
 import type { DestinationResult, HarnessId, HistoryEvent, Profile, ProfileEdit, ProfileFlip, ProfileSwitchResult, ProfilesView } from './types.ts';
@@ -153,16 +153,23 @@ export async function driftNow(context: ShareContext): Promise<{ drift: number; 
 /**
  * One flip's switch: the file it lives in, how to read whether the item is off there, and how to set it in that file's text.
  * Skills use the tool's skill switch (named by the copy: folder, name, path), MCP servers the tool's MCP switch (by name).
+ * A Claude Code skill turned off notes the override it replaced in `overrides` (kept by flipAll, as a Skills page Disable keeps
+ * it), and one turned on puts back the value `kept` for it.
  */
 interface Switch { file: string; isOff(text: string): boolean; set(text: string): string }
-function switchOf(context: ShareContext, home: HomeRead, flip: ProfileFlip): Switch {
+function switchOf(context: ShareContext, home: HomeRead, flip: ProfileFlip, kept: Record<string, string>, overrides: Map<ProfileFlip, [string, string | undefined]>): Switch {
   const key = itemKeyOf(flip.item);
   if (itemKind(flip.item) === 'mcp') return { file: mcpSwitchPath(context, flip.tool), isOff: text => mcpDisabled(flip.tool, text, key), set: text => withMcpSwitch(flip.tool, text, key, flip.disabled) };
   const target = skillTarget(home.manage, key, flip.tool);
   // A tool with no copy now fails this one flip when it is made (editText reports it), not here: throwing here would stop flipAll
   // before the other flips.
   const missing = () => { throw new Error(`${toolName(flip.tool)} has no copy of it now.`); };
-  return { file: switchPath(context, flip.tool), isOff: text => (target ? switchState(context, flip.tool, text, target) : missing()), set: text => (target ? switchedText(context, flip.tool, text, target, flip.disabled) : missing()) };
+  const set = (text: string, at: SwitchTarget) => {
+    const switched = switchedText(context, flip.tool, text, at, flip.disabled, flip.disabled ? undefined : kept[at.folder]);
+    if (flip.tool === 'claude-cli' && switched.text !== text) overrides.set(flip, [at.folder, flip.disabled ? switched.previous : undefined]);
+    return switched.text;
+  };
+  return { file: switchPath(context, flip.tool), isOff: text => (target ? switchState(context, flip.tool, text, target) : missing()), set: text => (target ? set(text, target) : missing()) };
 }
 
 /** One file's text with every flip of `group` made in it; a flip that can't be made there is in `failed` with why. */
@@ -209,7 +216,9 @@ async function flipAll(context: ShareContext, home: HomeRead, flips: ProfileFlip
   const results: DestinationResult[] = [];
   const done: ProfileFlip[] = [];
   const groups = new Map<string, [ProfileFlip, Switch][]>();
-  for (const flip of flips) { const at = switchOf(context, home, flip); groups.set(at.file, [...(groups.get(at.file) ?? []), [flip, at]]); }
+  const kept = await readKeptOverrides(context);
+  const overrides = new Map<ProfileFlip, [string, string | undefined]>();
+  for (const flip of flips) { const at = switchOf(context, home, flip, kept, overrides); groups.set(at.file, [...(groups.get(at.file) ?? []), [flip, at]]); }
   for (const [file, group] of groups) {
     const failed = await writeFlips(file, group);
     let after: string | undefined;
@@ -221,6 +230,8 @@ async function flipAll(context: ShareContext, home: HomeRead, flips: ProfileFlip
       results.push({ item: flip.name, harness: flip.tool, outcome: 'switched', message: `${flip.disabled ? 'Off' : 'On'} in ${toolName(flip.tool)} from its next session.` });
     }
   }
+  const changes = done.filter(flip => overrides.has(flip)).map(flip => overrides.get(flip)!);
+  if (changes.length) await keepOverrides(context, Object.fromEntries(changes));
   return { done, results };
 }
 
