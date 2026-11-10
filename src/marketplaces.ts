@@ -85,6 +85,8 @@ const empty: PluginDetail = { skills: [], commands: [], agents: [], hooks: [], m
 
 export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine = realEngine) {
   const listPath = join(host.dataDir, 'marketplaces.json');
+  /** How the page shows this marketplace when it is the one this build carries; undefined for any other. */
+  const carriedAs = (source: string) => { const carried = host.bundled?.(); return carried && engine.sameSource(carried.source, source) ? carried.view : undefined; };
   const added = async (): Promise<string[]> => {
     try { const list = JSON.parse(await readFile(listPath, 'utf8')); return Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : []; } catch { return []; }
   };
@@ -238,8 +240,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
    * `records`: the parts record as read once for the whole view.
    */
   async function entryView(ctx: engine.PluginContext, tools: HarnessId[], source: string, origins: MarketplaceView['origins'], fresh: boolean, records: PartsInstall[]): Promise<MarketplaceView> {
-    const carried = host.bundled?.();
-    const bundled = carried && engine.sameSource(carried.source, source) ? carried.view : undefined;
+    const bundled = carriedAs(source);
     const base: MarketplaceView = { source, origins, name: '', kind: isFolder(source) ? 'folder' : 'git', plugins: [], states: {}, page: marketplacePage(source), sourceLabel: bundled ? `Comes with ${bundled.app}` : sourceLabel(source), ...(bundled ? { bundled } : {}) };
     try {
       const { catalog: read, stale, problem } = await catalogFor(ctx, source, { fresh });
@@ -348,8 +349,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   /** Takes a marketplace off Central Knot's own list. Tools that added it keep it, and nothing is uninstalled. */
   async function forget(source: string): Promise<PluginsView> {
     // The marketplace a build carries is part of the build: it stays listed.
-    const carried = host.bundled?.();
-    if (carried && engine.sameSource(carried.source, source)) return view();
+    if (carriedAs(source)) return view();
     await saveAdded((await added()).filter(item => !engine.sameSource(item, source)));
     for (const known of fetched.keys()) if (engine.sameSource(known, source)) fetched.delete(known);
     const shown = await view();
@@ -377,8 +377,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     if (!catalog?.plugins.some(item => item.name === plugin)) return { reports: failedFor(tools, 'It is no longer in the marketplace as last read. Refresh the marketplace.') };
     if (catalog.name !== marketName) return { reports: failedFor(tools, `Its marketplace is now named “${catalog.name}”, not “${marketName}”. Refresh, then choose it again.`) };
     // A plugin the build's marketplace lists but carries no files for is not installed from it.
-    const carried = host.bundled?.();
-    const left = carried && engine.sameSource(carried.source, source) ? carried.view.unpackaged.find(item => item.name === plugin) : undefined;
+    const left = carriedAs(source)?.unpackaged.find(item => item.name === plugin);
     if (left) return { reports: failedFor(tools, notCarried(left.reason)) };
     // One tool's error fails that tool only: what earlier tools did stays reported (and undoable), and later tools still run.
     const reports: ActionReport[] = [];

@@ -10,7 +10,7 @@ import { copyFile, mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseCatalog } from './plugins.ts';
 import { writeDurably } from './share.ts';
-import { SAFE_NAME, record, text } from './values.ts';
+import { PRODUCT, SAFE_NAME, record, text } from './values.ts';
 
 /** The standard app's identity: the system's name for it, and the name a sync record gives its owner. */
 export const STANDARD_BUILD = 'com.centralknot.firstlook';
@@ -55,9 +55,6 @@ export const readCustomBuild = async (folder: string) => customBuild(await readJ
 export function readCustomBuildSync(folder: string): CustomBuild | undefined {
   try { return customBuild(JSON.parse(readFileSync(join(folder, CUSTOM_FILE), 'utf8'))); } catch { return undefined; }
 }
-
-/** The product's own name, written so that a custom build's renaming of the app (scripts/build.mjs) leaves it as it is. */
-const PRODUCT = ['Central', 'Knot'].join(' ');
 
 /**
  * What a custom build says about itself in Settings: what it is, that it doesn't update itself, and where its marketplace's
@@ -157,22 +154,28 @@ export const packArchive = (folder: string, path: string) => tar(['-czf', path, 
 export async function activateRelease(dataDir: string, release: BundleRelease, archive: string): Promise<{ problem?: string }> {
   const root = bundleRoot(dataDir);
   const stage = join(root, `incoming-${randomUUID()}`);
-  const failed = async (problem: string) => { await rm(stage, { recursive: true, force: true }); return { problem }; };
+  const live = bundledMarketplace(dataDir), previous = previousFolder(dataDir);
+  // Whatever stopped it, the folder that was in use is back in its place before the problem is reported.
+  const failed = async (problem: string) => {
+    if (!(await exists(live)) && (await exists(previous))) await rename(previous, live).catch(() => undefined);
+    await rm(stage, { recursive: true, force: true });
+    return { problem };
+  };
   try {
     await mkdir(join(stage, 'marketplace'), { recursive: true });
     const copy = join(stage, 'content.tgz');
     await copyFile(archive, copy);
     const { size, sha256 } = await fileDigest(copy);
     if (size !== release.size || sha256 !== release.sha256) return failed('Its archive is not the one its manifest describes (another size or checksum), so it was not used.');
-    const unpacked = await tar(['-xzf', copy, '-C', join(stage, 'marketplace')]);
+    // -p: every file keeps the mode it was packed with, whatever this account's default for new files is.
+    const unpacked = await tar(['-xpzf', copy, '-C', join(stage, 'marketplace')]);
     if (unpacked) return failed(`Its archive could not be unpacked: ${unpacked}`);
     const catalog = await parseCatalog(join(stage, 'marketplace'), join(stage, 'marketplace'), 'folder', { counts: false });
     if (catalog.problem) return failed(`Its archive doesn’t hold a marketplace that can be read: ${catalog.problem}`);
     if (catalog.name !== release.marketplace) return failed(`Its archive holds the marketplace “${catalog.name}”, not “${release.marketplace}”, so it was not used.`);
-    // The swap: the folder in use steps aside, the new one takes its path, then the manifest says what is there. A stop
-    // between the first two steps is mended at the next open (activeBundle); one before the manifest is written leaves the
-    // new content under the old manifest, which the next open replaces again from the same release.
-    const live = bundledMarketplace(dataDir), previous = previousFolder(dataDir);
+    // The swap: the folder in use steps aside, the new one takes its path, then the manifest says what is there. If the
+    // app is stopped between the first two steps, the next open puts the folder back (activeBundle); stopped before the
+    // manifest is written, the new content sits under the old manifest, and the next open replaces it from the same release.
     await rm(previous, { recursive: true, force: true });
     if (await exists(live)) await rename(live, previous);
     await rename(join(stage, 'marketplace'), live);

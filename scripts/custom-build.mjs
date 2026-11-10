@@ -7,8 +7,8 @@
 //
 // Inputs, all optional (none of them: the standard app, and nothing is staged):
 //   --marketplace <owner/repo | Git URL | folder>   the marketplace to carry, fetched with this computer's own Git sign-in
-//   --app-name "<name>"                             the app's name; with its own name it installs beside the standard app
-//   --app-id <id>                                   its identity (settings folder, bundle id); made from the name when left out
+//   --app-name "<name>"                             the app's name (required for a custom build): under its own name it sits beside the standard app
+//   --app-id <id>                                   its identity (settings folder, bundle id); made from the app's name when left out
 //   --app-icon <file.png | file.icns>               the app's icon (a 1024 by 1024 .png, or a Mac .icns)
 //   --marketplace-name "<name>"                     how the carried marketplace is named in the app
 //   --marketplace-logo <file.png | .svg | .jpg>     its picture in the app

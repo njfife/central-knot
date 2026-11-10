@@ -24,6 +24,9 @@ export const heldReason = (tool: HarnessId, marketName: string, other: string) =
 /** Why a plugin a bundled build's marketplace lists can't be installed from it: the build carries no files for it (`reason`: why it couldn't be packed). */
 export const notCarried = (reason: string) => `This build doesn’t carry its files, so it can’t be installed from here. ${reason}`;
 
+/** Why this plugin can't be installed from its marketplace at all, if the marketplace is a bundled build's and the build has no files for it. */
+export const whyNotCarried = (entry: MarketplaceView, plugin: string) => { const left = entry.bundled?.unpackaged.find(item => item.name === plugin); return left && notCarried(left.reason); };
+
 /** Why a tool can't take this marketplace's plugins, if it can't: no CLI and no copy in its desktop app, a Codex-only marketplace, or Copilot refusing it. */
 export function blocked(view: PluginsView, entry: MarketplaceView, tool: HarnessId): string | undefined {
   if (!takesPlugins(tool)) return `${names[tool]} doesn’t take Claude plugins.`;
@@ -64,8 +67,7 @@ export function unavailable(view: PluginsView, entry: MarketplaceView, plugin: s
   const state = stateOf(entry, plugin, tool);
   if (state.state === 'held') return state.reason;
   if (state.state === 'installed') return undefined;
-  const left = entry.bundled?.unpackaged.find(item => item.name === plugin);
-  return left ? notCarried(left.reason) : blocked(view, entry, tool);
+  return whyNotCarried(entry, plugin) ?? blocked(view, entry, tool);
 }
 
 /**
@@ -123,7 +125,8 @@ export const partsFit = (tool: HarnessId, components?: Components) => !component
  * updated or removed, even once the plugin could go there itself).
  */
 export function partsOffer(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, components?: Components): boolean {
-  return (partsTools.includes(tool) && !!partsOf(entry, plugin, tool)) || (partsEligible(view, entry, plugin, tool) && partsFit(tool, components));
+  // A plugin the build carries no files for has no parts to give either.
+  return (partsTools.includes(tool) && !!partsOf(entry, plugin, tool)) || (!whyNotCarried(entry, plugin) && partsEligible(view, entry, plugin, tool) && partsFit(tool, components));
 }
 
 /**

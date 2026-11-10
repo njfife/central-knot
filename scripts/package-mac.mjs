@@ -1,6 +1,6 @@
 import { packager } from '@electron/packager';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { buildInputs, downloadName, isCustom } from '../src/bundlepack.ts';
@@ -58,6 +58,8 @@ if (custom) {
   }
   execFileSync(process.execPath, ['scripts/build.mjs'], { stdio: 'inherit', env: { ...process.env, CK_CUSTOM_BUILD: custom.out, ...(given?.endsWith('.icns') ? { CK_CUSTOM_LOGO: join(custom.out, 'app-logo.png') } : {}) } });
 }
+// A standard package is never a custom build by accident: one left in dist/ (CK_CUSTOM_BUILD set for the build step) is built again without it.
+if (!custom && existsSync('dist/custom-build.json')) execFileSync(process.execPath, ['scripts/build.mjs'], { stdio: 'inherit', env: { ...process.env, CK_CUSTOM_BUILD: '' } });
 
 // The release tag this build is made from, recorded inside the app so it can tell a newer release (updates.ts): CK_RELEASE_TAG,
 // or the highest version tag on the commit being built. A checkout with changes of its own doesn't take the commit's tag, and

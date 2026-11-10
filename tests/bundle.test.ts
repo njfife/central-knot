@@ -4,7 +4,7 @@ import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, s
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { activeBundle, bundledMarketplace, customBuild, openBundle, readRelease, releaseLabel } from '../src/bundle.ts';
-import { buildInputs, describeBuild, isCustom, packRelease, stageCustomBuild } from '../src/bundlepack.ts';
+import { STANDARD_NAME, buildInputs, describeBuild, isCustom, packRelease, stageCustomBuild } from '../src/bundlepack.ts';
 import { parseCatalog } from '../src/plugins.ts';
 
 const put = async (path: string, text: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, text); };
@@ -21,6 +21,8 @@ async function market(root: string, version = '1.0.0') {
   await put(join(root, 'plugins/docs/skills/pdf/SKILL.md'), `---\nname: pdf\ndescription: Reads PDFs (${version}).\n---\n\ntoken=abc123 stays as written\n`);
   await put(join(root, 'plugins/docs/bin/run.sh'), '#!/bin/sh\necho hi\n');
   await chmod(join(root, 'plugins/docs/bin/run.sh'), 0o755);
+  await put(join(root, 'plugins/docs/bin/shared.sh'), '#!/bin/sh\n');
+  await chmod(join(root, 'plugins/docs/bin/shared.sh'), 0o775);
   await symlink('SKILL.md', join(root, 'plugins/docs/skills/pdf/alias.md'));
   await put(join(root, 'plugins/release/commands/notes.md'), '---\ndescription: Notes.\n---\n');
   await put(join(root, '.git/config'), '[remote "origin"]\n\turl = https://token@example.com/team/tools.git\n');
@@ -46,12 +48,13 @@ test('build inputs: none is the standard build, any one is a custom build with i
   const { inputs, rest } = buildInputs(['--marketplace', 'acme/plugins', '--app-name=Acme Knot', '--release', '--sequence', '7']);
   assert.deepEqual(rest, ['--release']);
   assert.deepEqual(inputs, { marketplace: 'acme/plugins', appName: 'Acme Knot', sequence: 7 });
-  assert.deepEqual(describeBuild(inputs, 'team-tools'), { id: 'acme-knot', name: 'Acme Knot', bundleId: 'com.centralknot.custom.acme-knot', marketplace: {} });
-  // A marketplace alone keeps the standard name and takes its identity from the marketplace.
-  assert.deepEqual(describeBuild({ marketplace: '/m' }, 'team-tools'), { id: 'central-knot-team-tools', name: 'Central Knot', bundleId: 'com.centralknot.custom.central-knot-team-tools', marketplace: {} });
+  assert.deepEqual(describeBuild(inputs), { id: 'acme-knot', name: 'Acme Knot', bundleId: 'com.centralknot.custom.acme-knot', marketplace: {} });
   // Branding with no marketplace is an unbundled custom build.
   assert.deepEqual(describeBuild({ appName: 'Staging Knot' }), { id: 'staging-knot', name: 'Staging Knot', bundleId: 'com.centralknot.custom.staging-knot' });
-  assert.deepEqual(describeBuild({ marketplace: '/m', appId: 'acme', marketplaceName: ' Acme plugins ', marketplaceLogo: '/x/Logo.PNG' }, 'team-tools').marketplace, { displayName: 'Acme plugins', logo: 'marketplace-logo.png' });
+  assert.deepEqual(describeBuild({ marketplace: '/m', appName: 'Acme', appId: 'acme.tools', marketplaceName: ' Acme plugins ', marketplaceLogo: '/x/Logo.PNG' }),
+    { id: 'acme.tools', name: 'Acme', bundleId: 'com.centralknot.custom.acme.tools', marketplace: { displayName: 'Acme plugins', logo: 'marketplace-logo.png' } });
+  // The standard app's name can be asked for outright, with an identity of the build's own.
+  assert.equal(describeBuild({ appName: 'Central Knot', appId: 'ck-test' }).name, 'Central Knot');
 });
 
 test('build inputs that describe no build are refused in plain words', () => {
@@ -59,10 +62,14 @@ test('build inputs that describe no build are refused in plain words', () => {
   assert.throws(() => buildInputs(['--app-name', '--release']), /--app-name needs a value/);
   assert.throws(() => buildInputs(['--app-id', 'a', '--app-id', 'b']), /given twice/);
   assert.throws(() => buildInputs(['--sequence', 'soon']), /whole number/);
+  // Left with the standard app's name, the build's file would take the standard app's place.
+  assert.throws(() => describeBuild({ marketplace: '/m' }), /needs its own name: add --app-name/);
+  assert.throws(() => describeBuild({ appId: 'acme' }), /needs its own name: add --app-name/);
+  assert.throws(() => describeBuild({ appName: 'Central Knot' }), /--app-id/);
   assert.throws(() => describeBuild({ marketplaceName: 'Acme plugins' }), /add --marketplace/);
   assert.throws(() => describeBuild({ marketplaceLogo: '/x/logo.png' }), /add --marketplace/);
-  assert.throws(() => describeBuild({ appId: 'central-knot' }), /--app-id/);
-  assert.throws(() => describeBuild({ appId: 'Has Space' }), /--app-id/);
+  assert.throws(() => describeBuild({ appName: 'Acme', appId: 'central-knot' }), /--app-id/);
+  assert.throws(() => describeBuild({ appName: 'Acme', appId: 'Has Space' }), /--app-id/);
   assert.throws(() => describeBuild({ appName: 'a/b' }), /--app-name/);
   assert.throws(() => describeBuild({ appName: '東京' }), /--app-id/);
   assert.throws(() => describeBuild({ appName: 'Acme', appIcon: '/x/icon.svg' }), /--app-icon takes a \.png or \.icns/);
@@ -99,6 +106,7 @@ test('packing: every plugin’s files go in as they are, a plugin kept elsewhere
     assert.equal(opened.active?.folder, folder);
     assert.equal(await readFile(join(folder, 'plugins/docs/skills/pdf/SKILL.md'), 'utf8'), await readFile(join(source, 'plugins/docs/skills/pdf/SKILL.md'), 'utf8'));
     assert.equal((await stat(join(folder, 'plugins/docs/bin/run.sh'))).mode & 0o777, 0o755);
+    assert.equal((await stat(join(folder, 'plugins/docs/bin/shared.sh'))).mode & 0o777, 0o775, 'a mode this account wouldn’t give a new file is kept too');
     assert.equal(await readFile(join(folder, 'plugins/docs/skills/pdf/alias.md'), 'utf8'), await readFile(join(folder, 'plugins/docs/skills/pdf/SKILL.md'), 'utf8'));
     assert.equal(await exists(join(folder, '.git')), false);
     assert.equal(await exists(join(folder, '_bundled/elsewhere/.git')), false);
@@ -238,7 +246,18 @@ test('staging a custom build: its identity file, the carried release, its pictur
     assert.deepEqual((await readdir(out)).sort(), ['build-report.txt', 'custom-build.json']);
     assert.match(plain.report, /Marketplace: none/);
     // Inputs that can't be built stop before anything is fetched or written.
-    await assert.rejects(stageCustomBuild({ marketplace: source, appIcon: join(base, 'nothing.png') }, { out, work: join(base, 'work') }), /--app-icon: there is no file/);
-    await assert.rejects(stageCustomBuild({ marketplace: join(base, 'nowhere') }, { out, work: join(base, 'work') }), /could not be read/);
+    await assert.rejects(stageCustomBuild({ marketplace: source, appName: 'Acme Knot', appIcon: join(base, 'nothing.png') }, { out, work: join(base, 'work') }), /--app-icon: there is no file/);
+    await assert.rejects(stageCustomBuild({ marketplace: join(base, 'nowhere'), appName: 'Acme Knot' }, { out, work: join(base, 'work') }), /could not be read/);
   } finally { await cleanup(); }
+});
+
+test('what is written outside the app names the product, never a custom build: the renaming can’t reach it', async () => {
+  // A custom build is renamed by replacing the standard name's plain spelling in the built code (scripts/build.mjs). The
+  // markers in a tool's instruction file must read the same from every build, so their code never spells the name out.
+  const code = (await readFile(join(import.meta.dirname, '../src/basetext.ts'), 'utf8')).split('\n').filter(line => !/^\s*(\/\/|\/?\*)/.test(line)).join('\n');
+  assert.equal(code.includes(STANDARD_NAME), false, 'basetext.ts builds its markers from PRODUCT');
+  const { splitBase } = await import('../src/basetext.ts');
+  assert.deepEqual(splitBase('Mine.\n<!-- Central Knot base instructions: start (shared by your tools; edit them in Central Knot) -->\nBase.\n<!-- Central Knot base instructions: end -->\n'), { own: 'Mine.\n', copy: 'Base.\n' });
+  const { PRODUCT } = await import('../src/values.ts');
+  assert.equal(PRODUCT, STANDARD_NAME);
 });

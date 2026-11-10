@@ -70,6 +70,10 @@ if (dev) {
   check('the package is the build’s own app, with its own bundle id', execFileSync('/usr/bin/plutil', ['-extract', 'CFBundleIdentifier', 'raw', join(root, `release/${NAME}-darwin-arm64/${NAME}.app/Contents/Info.plist`)], { encoding: 'utf8' }).trim() === `com.centralknot.custom.${ID}`);
   check('the package’s download is a zip under the build’s name', readdirSync(join(root, 'release')).some(name => /^Acme-Knot-.*-mac-arm64\.zip$/.test(name)));
 }
+// What the app writes outside itself keeps the product's name, so this build and the standard app read each other's files.
+const mainCode = dev ? readFileSync(join(root, 'dist/main.cjs'), 'utf8') : (await import('@electron/asar')).extractFile(join(root, `release/${NAME}-darwin-arm64/${NAME}.app/Contents/Resources/app.asar`), 'dist/main.cjs').toString();
+check('the app’s own words carry the build’s name', mainCode.includes(`Quit ${NAME}`) && !mainCode.includes('Quit Central Knot'));
+check('the markers written into instruction files keep the product’s name', mainCode.includes('base instructions: start') && !mainCode.includes(`${NAME} base instructions`) && !mainCode.includes(`${NAME}: update`));
 check('report: identity', report.includes(`Identity: ${ID} (com.centralknot.custom.${ID})`), report);
 check('report: the plugins kept in the marketplace are packed', ['document-tools 1.2.0', 'issue-tracker 2.0.0', 'release-helper 0.4.1', 'starter-skills'].every(name => /Plugins packed \(\d\): (.*)/.exec(report)?.[1].includes(name)), report);
 check('report: the npm plugin is named as not packed', /NOT PACKED \(\d\)[\s\S]*- npm-thing: Its files are kept elsewhere \(npm: @example\/npm-thing\)/.test(report), report);
@@ -132,6 +136,7 @@ const rows = await a.run(`[...document.querySelectorAll('.plugin-row')].map(row 
 check('every listed plugin has a row', JSON.stringify(rows) === JSON.stringify(['document-tools', 'issue-tracker', 'npm-thing', 'release-helper', 'spark', 'starter-skills']), rows);
 check('a packed plugin says what it holds, read with the source gone', await a.run(`document.querySelector('[data-plugin="document-tools"] .plugin-row-holds')?.textContent`) === '2 skills');
 check('the plugin that couldn’t be packed can’t be chosen, and says why', await a.run(`(() => { const box = document.querySelector('[data-plugin="npm-thing"] .ov-cell button, [data-plugin="npm-thing"] .ov-cell [title]'); return (box?.getAttribute('title') ?? '') + '|' + (box?.getAttribute('aria-label') ?? ''); })()`).then(text => text.includes('This build doesn’t carry its files')), await a.run(`document.querySelector('[data-plugin="npm-thing"]').outerHTML.slice(0, 900)`));
+check('nor are its parts offered in any tool', await a.run(`document.querySelectorAll('[data-plugin="npm-thing"] .cell-parts-offer').length`) === 0);
 check('the Plugins page fits at 1280', await a.fits());
 await a.shot('plugins-1280');
 

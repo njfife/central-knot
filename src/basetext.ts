@@ -3,10 +3,12 @@
 // (Adding a block after own text that has no final line break gives it one, so the block starts on its own line; and when a tool's
 // own text is saved from its editor, own text someone put after the block moves before it.)
 import type { BaseHeld, HarnessId } from './types.ts';
+import { PRODUCT } from './values.ts';
 
-const START = '<!-- Central Knot base instructions: start (shared by your tools; edit them in Central Knot) -->';
-const END = '<!-- Central Knot base instructions: end -->';
-const isMarker = (line: string, which: 'start' | 'end') => line.trimStart().startsWith(`<!-- Central Knot base instructions: ${which}`);
+// The markers name the product, never a custom build's own name: every build writes and finds the same block.
+const START = `<!-- ${PRODUCT} base instructions: start (shared by your tools; edit them in ${PRODUCT}) -->`;
+const END = `<!-- ${PRODUCT} base instructions: end -->`;
+const isMarker = (line: string, which: 'start' | 'end') => line.trimStart().startsWith(`<!-- ${PRODUCT} base instructions: ${which}`);
 
 /** Base text as a block holds it: ending in a line break. */
 export const blockText = (text: string) => (text && !text.endsWith('\n') ? `${text}\n` : text);

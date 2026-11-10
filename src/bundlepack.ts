@@ -64,16 +64,17 @@ export const isCustom = (inputs: BuildInputs) => Object.values(inputs).some(valu
 const slug = (name: string) => name.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
 
 /**
- * The custom build these inputs describe, or why they describe none. Marketplace branding with no marketplace is refused
- * rather than built without one. The identity is `--app-id`, else made from the app's name; with neither (a marketplace
- * alone), from the marketplace's own name (`marketName`), since a custom build never shares the standard app's identity.
+ * The custom build these inputs describe, or why they describe none. Every custom build is given its name: left with the
+ * standard app's, its file would take the standard app's place in Applications. Marketplace branding with no marketplace
+ * is refused rather than built without one. The identity is `--app-id`, else made from the name.
  */
-export function describeBuild(inputs: BuildInputs, marketName?: string): CustomBuild {
+export function describeBuild(inputs: BuildInputs): CustomBuild {
   if (!inputs.marketplace && (inputs.marketplaceName || inputs.marketplaceLogo)) throw new Error('--marketplace-name and --marketplace-logo are for a build that carries a marketplace: add --marketplace.');
   if (!inputs.marketplace && inputs.sequence !== undefined) throw new Error('--sequence orders a carried marketplace’s releases: add --marketplace.');
-  const name = (inputs.appName ?? STANDARD_NAME).trim();
+  if (inputs.appName === undefined) throw new Error(`A custom build needs its own name: add --app-name "<name>". Under the standard app’s name it would take that app’s place in Applications.`);
+  const name = inputs.appName.trim();
   if (!name || name.length > 60 || /[\\/:\n\r\t]/.test(name) || name.startsWith('.')) throw new Error('--app-name is the app’s name as people see it: up to 60 characters, without / \\ : or line breaks.');
-  const id = inputs.appId ?? (inputs.appName ? slug(name) : marketName ? `central-knot-${slug(marketName)}` : '');
+  const id = inputs.appId ?? slug(name);
   if (!BUILD_ID.test(id) || id === 'central-knot') throw new Error(inputs.appId ? '--app-id is lower-case letters, digits, dots and dashes (not “central-knot”, the standard app’s).' : 'Give the build an identity with --app-id: lower-case letters, digits, dots and dashes.');
   for (const [option, file, kinds] of [['--app-icon', inputs.appIcon, ['.png', '.icns']], ['--marketplace-logo', inputs.marketplaceLogo, ['.png', '.svg', '.jpg', '.jpeg', '.webp']]] as const) {
     if (file && !(kinds as readonly string[]).includes(extname(file).toLowerCase())) throw new Error(`${option} takes a ${kinds.join(' or ')} file.`);
@@ -85,7 +86,15 @@ export function describeBuild(inputs: BuildInputs, marketName?: string): CustomB
 // ---------- Packing a marketplace ----------
 
 const exists = (path: string) => stat(path).then(() => true, () => false);
-const gitHead = (folder: string) => new Promise<string>(done => execFile('git', ['-C', folder, 'rev-parse', 'HEAD'], { encoding: 'utf8' }, (error, out) => done(error ? '' : out.trim())));
+/**
+ * The commit a folder is at, when it is a Git repository's own top folder (a folder inside some other repository names no
+ * commit of its own), with a note when it holds changes that commit doesn't.
+ */
+const gitCommit = (folder: string) => new Promise<string>(done => execFile('git', ['-C', folder, 'rev-parse', '--show-prefix', 'HEAD'], { encoding: 'utf8' }, (error, out) => {
+  const [prefix, head] = error ? [] : out.split('\n');
+  if (error || prefix !== '' || !head) { done(''); return; }
+  execFile('git', ['-C', folder, 'status', '--porcelain'], { encoding: 'utf8' }, (failed, changes) => done(`${head.slice(0, 10)}${!failed && changes.trim() ? ' with changes not committed' : ''}`));
+}));
 
 /** Copies a folder as it is (modes and links kept), without the .git folder at its top: the fetch's own, never content. */
 const copyTree = (from: string, to: string) => cp(from, to, { recursive: true, verbatimSymlinks: true, filter: source => resolve(source) !== resolve(from, '.git') });
@@ -100,7 +109,8 @@ function whyNotFetched(plugin: CatalogPlugin): string {
 /**
  * Packs one release of a marketplace into `out`: release.json and the archive it names. `source` is owner/repo, a Git URL
  * (fetched with this computer's own Git sign-in into `work`) or a folder. Every plugin's files go in: one kept in another
- * repository is fetched and its entry pointed at the copy, which sits in a folder of its own in the archive. A plugin that
+ * repository is fetched and its entry pointed at the copy, which sits in a folder of its own in the archive (the manifest
+ * is then written again as JSON: every value as it was, its layout not). A plugin that
  * can't be fetched is named in `unpackaged` with the reason; its entry stays as written, and the release is still made.
  */
 export async function packRelease({ source, out, work, sequence, now = new Date(), fetchPlugin = readRemotePlugin }: { source: string; out: string; work: string; sequence?: number; now?: Date; /** Fetches a plugin kept in another repository; replaceable in tests. */ fetchPlugin?: typeof readRemotePlugin }): Promise<{ release: BundleRelease } | { problem: string }> {
@@ -108,7 +118,7 @@ export async function packRelease({ source, out, work, sequence, now = new Date(
   const where = isFolder(source) ? resolve(source) : source.trim();
   const catalog = await readCatalog(context, where);
   if (catalog.problem || !catalog.root) return { problem: `The marketplace (${source}) could not be read: ${catalog.problem ?? 'it has no files.'}` };
-  const commit = await gitHead(catalog.root);
+  const commit = await gitCommit(catalog.root);
   const stage = join(work, 'snapshot');
   await rm(stage, { recursive: true, force: true });
   await copyTree(catalog.root, stage);
@@ -148,7 +158,7 @@ export async function packRelease({ source, out, work, sequence, now = new Date(
   const failed = await packArchive(stage, join(out, archive));
   if (failed) return { problem: `The marketplace could not be packed: ${failed}` };
   const release: BundleRelease = { format: 1, marketplace: packed.name, sequence: order, madeAt: now.toISOString(),
-    from: `${sourceLabel(where)}${commit ? ` at ${commit.slice(0, 10)}` : ''}`, archive, ...(await fileDigest(join(out, archive))),
+    from: `${sourceLabel(where)}${commit ? ` at ${commit}` : ''}`, archive, ...(await fileDigest(join(out, archive))),
     plugins: packed.plugins.filter(plugin => !left.has(plugin.name)).map(plugin => ({ name: plugin.name, ...(plugin.version ? { version: plugin.version } : {}) })), unpackaged };
   await writeFile(join(out, RELEASE_FILE), `${JSON.stringify(release, null, 2)}\n`);
   await rm(stage, { recursive: true, force: true });
@@ -167,7 +177,7 @@ export interface StagedBuild { build: CustomBuild; release?: BundleRelease; /** 
  */
 export async function stageCustomBuild(inputs: BuildInputs, { out, work, now }: { out: string; work: string; now?: Date }): Promise<StagedBuild> {
   // The inputs are checked before anything is fetched.
-  describeBuild(inputs, inputs.marketplace ? 'marketplace' : undefined);
+  const build = describeBuild(inputs);
   for (const [option, file] of [['--app-icon', inputs.appIcon], ['--marketplace-logo', inputs.marketplaceLogo]] as const) {
     if (file && !(await stat(file).then(found => found.isFile(), () => false))) throw new Error(`${option}: there is no file at ${file}.`);
   }
@@ -179,7 +189,6 @@ export async function stageCustomBuild(inputs: BuildInputs, { out, work, now }: 
     if ('problem' in packed) throw new Error(packed.problem);
     release = packed.release;
   }
-  const build = describeBuild(inputs, release?.marketplace);
   if (inputs.marketplaceLogo && build.marketplace?.logo) await copyFile(inputs.marketplaceLogo, join(out, CARRIED_FOLDER, build.marketplace.logo));
   const icon = inputs.appIcon ? `app-icon${extname(inputs.appIcon).toLowerCase()}` : undefined;
   if (icon) await copyFile(inputs.appIcon!, join(out, icon));
@@ -195,7 +204,7 @@ export function buildReport(build: CustomBuild, release: BundleRelease | undefin
     `${build.name}: a custom build of Central Knot`,
     '',
     `Identity: ${build.id} (${build.bundleId}). Its settings are its own: it installs beside the standard app and never shares its settings.`,
-    `App name: ${build.name}${inputs.appName ? '' : ' (the standard name: give --app-name to install it beside the standard app in one folder)'}`,
+    `App name: ${build.name}${build.name === STANDARD_NAME ? ' (the standard app’s name: the two can’t be in one folder)' : ''}`,
     `App icon: ${inputs.appIcon ? basename(inputs.appIcon) : 'the standard icon'}`,
   ];
   if (release) {
