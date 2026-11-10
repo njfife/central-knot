@@ -2046,8 +2046,11 @@ async function draftFlow() {
   check('with tools that can write one, the base card offers a draft', await untilThere('#base-draft'), await says('#base-card'));
   await a.shot('draft-entry');
   await a.click('#base-draft');
-  // Claude Code and Codex have a CLI here; Copilot CLI has only its folder in the home, so it is not offered.
-  same('each tool with a CLI on this computer is offered, and no other', await a.all('#base-card [id^="base-draft-by-"]', 'e.textContent'), ['Draft with Claude Code', 'Draft with Codex']);
+  // Claude Code and Codex have a CLI in the HOME the app is given. Copilot CLI has only its folder in the home on screen, so
+  // it is offered only on a machine that has its CLI in a system folder (which no test home can hide).
+  const offered = await a.all('#base-card [id^="base-draft-by-"]', 'e.textContent');
+  check('each tool with a CLI on this computer is offered by name', offered.includes('Draft with Claude Code') && offered.includes('Draft with Codex') && offered.every(label => label.startsWith('Draft with ')), offered);
+  if (!existsSync('/opt/homebrew/bin/copilot') && !existsSync('/usr/local/bin/copilot')) check('and a tool with no CLI is not', !offered.includes('Draft with Copilot CLI'), offered);
   check('before a tool is chosen, the card says what it will do and that the draft is seen first', /splits them/.test(await says('#base-card')) && /before anything is saved/.test(await says('#base-card')), await says('#base-card'));
   await a.click('#base-draft-by-claude-cli');
   check('a tool that can’t answer says why in its own words, and the other tool can still be tried', (await says('#base-draft-problem')).includes('Claude Code could not write a draft: “Not logged in · Please run /login”. Nothing was changed.') && await a.exists('#base-draft-by-codex-cli'), await says('#base-card'));
