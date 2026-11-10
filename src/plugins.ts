@@ -464,6 +464,67 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
 }
 
 
+/** One plugin a tool has installed for its person, as the tool records it; `off`: turned off there, so nothing of it loads. */
+export interface InstalledPlugin { plugin: string; marketplace: string; off?: true }
+
+/**
+ * Every plugin a tool has installed for its person, from the same records `installState` reads: Claude Code's
+ * installed_plugins.json (user scope), Copilot CLI's config.json and the plugins it has turned on from a folder
+ * marketplace, and Codex's `[plugins."ID"]` tables. A record alone: `installState` says whether its files are there.
+ */
+export async function installedPlugins(context: PluginContext, tool: PluginTool): Promise<InstalledPlugin[]> {
+  const root = configRootOf(context, tool);
+  const found = new Map<string, boolean>();
+  switch (tool) {
+    case 'claude-cli': {
+      const switches = record((await recordJson(context, join(root, 'settings.json')))?.enabledPlugins);
+      for (const [id, listed] of Object.entries(record((await recordJson(context, join(root, 'plugins/installed_plugins.json')))?.plugins) ?? {})) {
+        if ((Array.isArray(listed) ? listed : []).some(entry => record(entry)?.scope === 'user')) found.set(id, switches?.[id] === false);
+      }
+      break;
+    }
+    case 'copilot-cli': {
+      const switches = record((await recordJson(context, join(root, 'settings.json')))?.enabledPlugins);
+      const listed = (await recordJson(context, join(root, 'config.json')))?.installedPlugins;
+      for (const item of (Array.isArray(listed) ? listed : []).map(record)) if (text(item?.name) && text(item?.marketplace)) found.set(`${text(item?.name)}@${text(item?.marketplace)}`, item?.enabled === false);
+      for (const [id, on] of Object.entries(switches ?? {})) if (on === true && !found.has(id)) found.set(id, false);
+      break;
+    }
+    case 'codex-cli':
+      for (const [id, table] of Object.entries((await codexTables(context, root)).plugins)) found.set(id, table.enabled === false);
+  }
+  return [...found].flatMap(([id, off]) => {
+    const at = id.lastIndexOf('@');
+    return at > 0 && at < id.length - 1 ? [{ plugin: id.slice(0, at), marketplace: id.slice(at + 1), ...(off ? { off: true as const } : {}) }] : [];
+  });
+}
+
+/**
+ * The skills each of a tool's installed plugins gives it, by name, with the plugin, the marketplace as the tool added it
+ * and the copy's version. For Claude Code, which adds a marketplace entry's skills to the plugin's own, the entry is read
+ * from the marketplace's manifest where Claude Code keeps it. `off`: the plugin, or that one skill, is turned off there.
+ */
+export async function pluginSkills(context: PluginContext, tool: PluginTool): Promise<{ skill: string; plugin: string; marketplace: string; source?: string; version?: string; off?: true }[]> {
+  const root = configRootOf(context, tool);
+  const given: Awaited<ReturnType<typeof pluginSkills>> = [];
+  for (const { plugin, marketplace, off } of await installedPlugins(context, tool)) {
+    let entry: Record<string, unknown> | undefined, atMarketplaceRoot = false;
+    if (tool === 'claude-cli') {
+      const known = record((await recordJson(context, join(root, 'plugins/known_marketplaces.json')))?.[marketplace]);
+      const kept = text(known?.installLocation) || text(record(known?.source)?.path);
+      const listed = kept ? (await recordJson(context, join(kept, MANIFEST)))?.plugins : undefined;
+      entry = (Array.isArray(listed) ? listed : []).map(record).find(item => item?.name === plugin);
+      atMarketplaceRoot = !!kept && typeof entry?.source === 'string' && resolve(kept, entry.source) === resolve(kept);
+    }
+    const state = await installState(context, tool, marketplace, plugin, entry);
+    if (state.state !== 'installed') continue;
+    const skills = state.skills ?? await skillNamesIn(state.path, entry, { atMarketplaceRoot });
+    const source = await registeredSource(context, tool, marketplace);
+    for (const skill of skills) given.push({ skill, plugin, marketplace, ...(source ? { source } : {}), ...(state.version ? { version: state.version } : {}), ...(off || state.skillsOff?.some(entry => entry.skill === skill) ? { off: true as const } : {}) });
+  }
+  return given;
+}
+
 /**
  * The version folder Codex loads of a cached plugin (core-plugin-common `active_plugin_version`): `local` when there is
  * one, otherwise the highest version. Only that one counts: if it is empty, the plugin is Not known yet, never an older one.

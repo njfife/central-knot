@@ -10,7 +10,7 @@ import { whyReadOnly, saidInStatusBar, tell, type Outcome, type Kind, harnessKin
 import { afterLayout, button, closeButton, emptyState, findInput, fitInView, h, icon, middle, pathText, pendingCount, toggle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
-import type { Change, DestinationResult, HomeView, ManageView, SkillFacts, SyncNotice, HarnessId, PartsInstall } from './types.ts';
+import type { Change, DestinationResult, HomeView, ManageView, SkillFacts, SyncNotice, HarnessId, PartsInstall, ThroughPlugin } from './types.ts';
 import { market } from './pluginstate.ts';
 import { pluginKey } from './pluginplan.ts';
 import { partOfPage, samePart, versionWord } from './pluginstatus.ts';
@@ -40,11 +40,19 @@ function fromPlugins(skill: SampleSkill, page: Kind): { install: PartsInstall; t
   return [...found.values()].map(entry => ({ ...entry, tools: entry.tools.sort(byToolOrder) }));
 }
 
-/** Opens a plugin's page on Plugins, where its parts are updated or removed together. */
-function openPlugin(install: PartsInstall) {
-  market.nav = { source: install.source, plugin: install.plugin, tab: 'plugins', find: '', category: undefined };
+/**
+ * Opens a plugin's page on Plugins, where the plugin and its parts are updated or removed together. `marketplace`: its
+ * marketplace's name, to find it by when the page lists that marketplace under another spelling of its address.
+ */
+function openPlugin({ source, plugin, marketplace }: { source?: string; plugin: string; marketplace?: string }) {
+  const lists = (entry: { plugins: { name: string }[] }) => entry.plugins.some(item => item.name === plugin);
+  const listed = market.view?.marketplaces.find(entry => entry.source === source && lists(entry)) ?? market.view?.marketplaces.find(entry => !!marketplace && entry.name === marketplace && lists(entry));
+  market.nav = { source: listed?.source ?? source, plugin, tab: 'plugins', find: '', category: undefined };
   showPage('plugins');
 }
+
+/** The tools that have this item through `plugin` itself (not as a separate item), in column order. */
+const throughPluginIn = (skill: SampleSkill, plugin: string) => toolList().filter(tool => skill.plugin?.[tool]?.plugin === plugin && skill.copies[tool] === undefined);
 
 /** The note in an item's details: which plugin it is a part of, where, and where its parts are managed together. */
 function partNote(skill: SampleSkill) {
@@ -52,6 +60,7 @@ function partNote(skill: SampleSkill) {
   const unlisted = (install: PartsInstall) => !!market.view && !market.view.marketplaces.some(entry => entry.source === install.source && entry.plugins.some(plugin => plugin.name === install.plugin));
   return fromPlugins(skill, kind).map(({ install, tools }) => h('p.details-limits.details-note.details-part', {}, icon('blocks', 12, 'tone-muted'),
     h('span', {}, `From the plugin ${install.plugin}${install.version ? ` (${versionWord(install.version)})` : ''}, installed in ${andList(tools.map(tool => names[tool]))} as a separate item. `,
+      throughPluginIn(skill, install.plugin).length ? `${andList(throughPluginIn(skill, install.plugin).map(tool => names[tool]))} ${throughPluginIn(skill, install.plugin).length > 1 ? 'have' : 'has'} it through the plugin itself. ` : '',
       ...(unlisted(install) ? ['Its marketplace no longer lists the plugin, so this is now an ordinary item.']
         : ['Update or remove its parts together on ', h('button.inline-link', { type: 'button', id: `open-plugin-${skill.key}-${install.plugin}`, onclick: (event: Event) => { event.stopPropagation(); openPlugin(install); } }, 'the plugin’s page'), '.']))));
 }
@@ -66,7 +75,7 @@ const ago = (iso: string) => {
 
 /** The real home's facts in the shape the page works with. */
 const fromFacts = (facts: SkillFacts): SampleSkill => ({
-  key: facts.key, name: facts.name, description: facts.description, converted: facts.converted, limits: facts.limits, oneWay: facts.oneWay, kept: facts.kept, stopped: facts.stopped, managed: facts.managed, off: facts.off, cannot: facts.cannot, held: facts.held, separate: facts.separate, edited: facts.edited,
+  key: facts.key, name: facts.name, description: facts.description, converted: facts.converted, limits: facts.limits, oneWay: facts.oneWay, kept: facts.kept, stopped: facts.stopped, managed: facts.managed, off: facts.off, cannot: facts.cannot, plugin: facts.plugin, held: facts.held, separate: facts.separate, edited: facts.edited,
   blocks: facts.choiceBlocks, hashes: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   // A tool reading two different copies has copies that differ, even if one of them matches the other tool.
   copies: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, facts.extra.some(extra => extra.tool === tool && extra.hash !== copy!.hash) ? `mixed:${tool}` : copy!.hash])
@@ -345,6 +354,9 @@ const cellLook: Record<Cell, { glyph?: IconName; tone: string; label: string }> 
   absent: { tone: 'cell-absent', label: 'No copy' },
   cannot: { tone: 'cell-cannot', label: 'Cannot load it' },
 };
+/** A tool with no copy of its own that has the item through a plugin: drawn apart from Can’t load it, since the tool does have it. */
+const PLUGIN_LOOK = { glyph: 'blocks', tone: 'cell-plugin', label: 'Through a plugin' } as const;
+const throughPluginHere = (skill: SampleSkill, tool: Tool): ThroughPlugin | undefined => (skill.copies[tool] === undefined ? skill.plugin?.[tool] : undefined);
 
 
 const smallAction = (label: string, id: string, onclick: () => void, extra = '') =>
@@ -492,6 +504,14 @@ function cell(skill: SampleSkill, tool: Tool, inDetails = false) {
     return h('div.ov-cell', { role: 'cell', 'data-tool': tool },
       h('button.cell-button.cell-removing.cell-pending-edit', { type: 'button', id: `cell-${skill.key}-${tool}${inDetails ? '-details' : ''}`, title: text, 'aria-label': text, 'data-state': 'removing',
         onclick: (event: Event) => { event.stopPropagation(); setRemoved(skill.key, [tool], false); } }, icon('minus', 16)));
+  }
+  // Through a plugin installed in this tool: no copy of its own, and none is placed there. The box opens the plugin's page.
+  const given = throughPluginHere(skill, tool);
+  if (given) {
+    const text = `${skill.cannot?.[tool] ?? `${names[tool]} has this through the plugin ${given.plugin}.`} Click to open the plugin’s page.`;
+    return h('div.ov-cell', { role: 'cell', 'data-tool': tool },
+      h(`button.cell-button.${PLUGIN_LOOK.tone}`, { type: 'button', id: `cell-${skill.key}-${tool}${inDetails ? '-details' : ''}`, 'data-state': 'plugin', title: text, 'aria-label': text,
+        onclick: (event: Event) => { event.stopPropagation(); openPlugin(given); } }, icon(PLUGIN_LOOK.glyph, 15)));
   }
   const { cell: drawn, on, pending, look, disabled, switching } = cellNow(skill, tool);
   const differs = drawn === 'differs' || drawn === 'present-differs';
@@ -1112,8 +1132,11 @@ function legend(list: SampleSkill[]) {
   // What is drawn: a pending synced cell is drawn as Starts syncing, a replaced one with its own mark.
   const seen = new Set(list.flatMap(skill => toolList().map(tool => {
     const cell = cellOf(skill, tool);
+    // A box drawn as Through a plugin is keyed as that, not as Can’t load it.
+    if (throughPluginHere(skill, tool)) return undefined;
     return cell === 'synced' && view.draft.has(skill.key) && cellOf(committedOf(skill.key), tool) !== 'synced' ? 'will-sync' as Cell : cell;
   })));
+  const throughPlugin = list.some(skill => toolList().some(tool => throughPluginHere(skill, tool)));
   const replaced = list.some(skill => toolList().some(tool => replacedOnApply(skill, tool)));
   // A tool switched off for a managed item, waiting for Apply all: drawn with the same blue dashed edge as any change.
   const stops = list.some(skill => toolList().some(tool => stopsOnApply(skill, tool)));
@@ -1170,6 +1193,7 @@ function legend(list: SampleSkill[]) {
     seen.has('differs') || seen.has('present-differs') ? entry('Copies differ', swatch('differs', true)) : null,
     seen.has('present') || seen.has('off') ? entry('Has its own copy', swatch('present', false)) : null,
     seen.has('absent') ? entry('No copy', swatch('absent', false)) : null,
+    throughPlugin ? entry('Through a plugin', h('span.legend-cell.cell-plugin', { 'aria-hidden': 'true' }, icon('blocks', 11))) : null,
     seen.has('cannot') ? entry('Can’t load it', swatch('cannot', false)) : null,
     // The dashed blue Managed switch is a pending mark too.
     list.some(skill => view.draft.has(skill.key) && skill.managed && !committedOf(skill.key).managed) ? entry('Becomes Managed on Apply all', h('span.legend-switch', { 'aria-hidden': 'true' }, h('span.switch-knob'))) : null);

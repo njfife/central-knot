@@ -1126,6 +1126,24 @@ async function practiceFlow() {
   await a.shot('practice-plugin-parts');
   await a.click('#nav-skills');
   check('the skill says which plugin it came from', /from issue-tracker/.test(await a.text('[data-key="triage"]') ?? ''), await a.text('[data-key="triage"]'));
+  // Claude Code has the plugin itself: on Skills its box says the skill comes through it (never "No copy" or "Can't load
+  // it"), and opens the plugin's page, where the plugin and its parts are updated together.
+  const installRecord = join(practice, '.claude/plugins/installed_plugins.json');
+  const installsBefore = existsSync(installRecord) ? readFileSync(installRecord, 'utf8') : undefined;
+  writeClaudeInstall(practice, 'ck-test-market', 'issue-tracker', '9.9.9', { 'skills/triage/SKILL.md': readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8') });
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 30 && (await a.run(`document.querySelector('#cell-triage-claude-cli')?.dataset.state`)) !== 'plugin'; tries++) await wait(100);
+  same('a tool with the plugin itself has the skill through it', await a.run(`[document.querySelector('#cell-triage-claude-cli')?.dataset.state, document.querySelector('#cell-triage-pi-cli')?.dataset.state]`), ['plugin', 'present']);
+  const throughTitle = await a.run(`document.querySelector('#cell-triage-claude-cli')?.title`);
+  check('its box says which plugin, and the key names the mark', /^Claude Code has this skill through the plugin issue-tracker \(version 9\.9\.9\), so no separate copy is placed there\. Click to open the plugin’s page\.$/.test(throughTitle ?? '') && /Through a plugin/.test(await a.text('.legend') ?? ''), [throughTitle, await a.text('.legend')]);
+  await fitsAtMinimum(a, 'a skill a tool has through a plugin');
+  await a.shot('skill-through-plugin');
+  await a.click('#cell-triage-claude-cli');
+  for (let tries = 0; tries < 30 && !(await a.exists('#plugin-back')); tries++) await wait(100);
+  check('and opens the plugin’s page', await a.exists('#plugin-back') && /issue[- ]tracker/i.test(await a.text('.plugin-page h2') ?? ''), await a.text('.plugin-page h2'));
+  if (installsBefore === undefined) rmSync(installRecord); else writeFileSync(installRecord, installsBefore);
+  rmSync(join(practice, '.claude/plugins/cache/ck-test-market/issue-tracker/9.9.9'), { recursive: true, force: true });
+  await a.click('#header-refresh');
   await a.click('#nav-plugins');
   await a.click('#plugins-undo');
   check('Undo takes the parts out of Pi', !existsSync(join(practice, '.pi/agent/skills/triage')) && !readFileSync(piMcp, 'utf8').includes('issues'), readFileSync(piMcp, 'utf8'));
