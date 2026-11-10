@@ -72,8 +72,11 @@ const detectionLine = (snapshot: Snapshot, home: HomeView) => {
   if (snapshot.detection === 'App only') return `${app} · no CLI found`;
   return snapshot.detection;
 };
-/** A desktop app with its version and the version of what it carries: "Claude desktop 4.16336.0 (Code tab 2.1.317)". */
-const appLine = (app: DesktopApp) => `${app.name}${app.version ? ` ${app.version}` : ''}${app.carriedVersion ? ` (${app.carries} ${app.carriedVersion})` : ''}`;
+/**
+ * A desktop app with its version and the version of what it carries: "Claude desktop 4.16336.0 (Code tab 2.1.317)". A
+ * pre-release keeps only its first word: "1.0.102-0.unstable.r41779900948.gf482387" reads "1.0.102-unstable".
+ */
+const appLine = (app: DesktopApp) => `${app.name}${app.version ? ` ${app.version}` : ''}${app.carriedVersion ? ` (${app.carries} ${app.carriedVersion.replace(/^(\d+\.\d+\.\d+)-(?:\d+\.)?([A-Za-z]+)[.\w-]*$/, '$1-$2')})` : ''}`;
 
 // ---------- Every harness ----------
 
