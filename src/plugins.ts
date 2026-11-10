@@ -19,7 +19,7 @@ import { SAFE_NAME, compareVersions, githubRepo, isCommitHash, isFolder, isHttps
 /** Names the tools accept (values.ts holds it, so the page can check a skill's name too). */
 export { SAFE_NAME };
 import { toolNames } from './words.ts';
-import type { ActionReport, Catalog, CatalogPlugin, Components, HarnessId, InstallState, NativeRun, SkillOff } from './types.ts';
+import type { ActionReport, Catalog, CatalogPlugin, DesktopApp, Components, HarnessId, InstallState, NativeRun, SkillOff } from './types.ts';
 
 // ---------- Shapes ----------
 
@@ -27,8 +27,10 @@ export interface PluginContext {
   home: string;
   /** Where this build keeps fetched catalogs and the prior bytes of native operations. */
   dataDir: string;
-  /** The CLI to run for each tool, if one was found. An app's bundled CLI is never used here. */
+  /** The binary to run for each tool's plugin commands: its CLI, or with none, the copy its desktop app carries (`apps`). */
   binaries: Partial<Record<HarnessId, string>>;
+  /** Tools whose binary is a desktop app's own copy, with that app. */
+  apps?: Partial<Record<HarnessId, DesktopApp>>;
   overrides?: Partial<Record<HarnessId, string>>;
   timeoutMs?: number;
   /** Reads shared within one read-only view (each tool's records and a live folder's catalog read once). Never set for an install or uninstall, which read again after their command. */

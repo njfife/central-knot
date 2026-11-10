@@ -1,17 +1,22 @@
 // Real CLIs, disposable homes: install and uninstall the marker plugin through each tool's own commands.
 // Opt-in (`npm run test:harness`), for the Mac. Needs claude, copilot and codex on PATH; a missing one is skipped by name.
+// With CK_HARNESS_APPS=1 the same tests run the copy of each tool its desktop app carries instead (PLG-04, V-01).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
+import { findApp } from '../../src/discovery.ts';
+import { appCandidates } from '../../src/platform.ts';
 import { install, installState, parseCatalog, readCatalog, uninstall, update, type PluginContext } from '../../src/plugins.ts';
 import type { PluginTool } from '../../src/presence.ts';
 import type { HarnessId } from '../../src/types.ts';
 
 const which = (name: string) => { try { return execFileSync('/bin/sh', ['-c', `command -v ${name}`], { encoding: 'utf8' }).trim() || undefined; } catch { return undefined; } };
-const binaries: Partial<Record<HarnessId, string>> = { 'claude-cli': which('claude'), 'copilot-cli': which('copilot'), 'codex-cli': which('codex') };
+const fromApp = async (name: string) => (await findApp(appCandidates(homedir(), name)))?.binary;
+const find = process.env.CK_HARNESS_APPS ? fromApp : async (name: string) => which(name);
+const binaries: Partial<Record<HarnessId, string>> = { 'claude-cli': await find('claude'), 'copilot-cli': await find('copilot'), 'codex-cli': await find('codex') };
 const put = async (path: string, text: string) => { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, text); };
 
 async function marker(root: string, version = '1.0.0') {

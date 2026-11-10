@@ -11,7 +11,7 @@ const view: PluginsView = { home: '/h', tools: ['claude-cli', 'copilot-cli', 'co
 test('A tool can take a plugin only when its CLI is there, it is not held or refused, and it is not installed yet', () => {
   assert.deepEqual(toolsWithoutPlugin(view, entry, 'p'), ['copilot-cli']);
   assert.match(blocked({ ...view, clis: {} }, entry, 'claude-cli') ?? '', /command-line tool wasn’t found/);
-  assert.match(blocked({ ...view, clis: {}, desktopOnly: { 'claude-cli': 'Claude desktop' } }, entry, 'claude-cli') ?? '', /^Only Claude desktop was found here. Claude Code’s command-line tool wasn’t found, and plugins install only through it.$/);
+  assert.match(blocked({ ...view, clis: {}, desktopOnly: { 'claude-cli': 'Claude desktop' } }, entry, 'claude-cli') ?? '', /^Only Claude desktop was found here, and the copy of Claude Code it carries isn’t there yet \(the app adds it once it has run\). Claude Code’s command-line tool wasn’t found either.$/);
   assert.equal(blocked(view, { ...entry, copilotRefuses: 'Copilot refuses npm.' }, 'copilot-cli'), 'Copilot refuses npm.');
   assert.deepEqual(toolsWithoutPlugin(view, { ...entry, copilotRefuses: 'x' }, 'p'), []);
   // One answer for every box, panel and key: held says why, installed is never unavailable, a missing CLI is.

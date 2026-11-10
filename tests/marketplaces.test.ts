@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
 import * as engine from '../src/plugins.ts';
-import type { ActionReport, HarnessId } from '../src/types.ts';
+import type { ActionReport, DesktopApp, HarnessId } from '../src/types.ts';
 
 const put = async (path: string, text: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, text); };
 const marketplace = (root: string, name: string, plugins: string[]) => Promise.all([
@@ -13,11 +13,12 @@ const marketplace = (root: string, name: string, plugins: string[]) => Promise.a
   ...plugins.map(plugin => put(join(root, `plugins/${plugin}/skills/${plugin}/SKILL.md`), `---\nname: ${plugin}\ndescription: ${plugin}\n---\n`)),
 ]);
 
-async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?: boolean } = {}) {
+async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?: boolean; app?: DesktopApp } = {}) {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-markets-')));
   const home = join(base, 'home');
   await mkdir(home, { recursive: true });
   const calls: string[] = [];
+  const ran: (string | undefined)[] = [];
   const host: MarketplaceHost = {
     home: () => ({ home }),
     read: async () => ({ tools: ['claude-cli', 'copilot-cli', 'codex-cli'], snapshots: [] }),
@@ -27,16 +28,16 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?:
     openExternal: async () => {},
   };
   const use: MarketplaceEngine = {
-    findClis: async () => ({ 'claude-cli': '/bin/true', ...(options.codex ? { 'codex-cli': join(base, 'bin/codex') } : {}) }),
+    findClis: async () => ({ binaries: { 'claude-cli': '/bin/true', ...(options.codex ? { 'codex-cli': join(base, 'bin/codex') } : {}), ...(options.app ? { 'copilot-cli': options.app.binary } : {}) }, apps: options.app ? { 'copilot-cli': options.app } : {} }),
     checkAccess: async (context, source) => { calls.push(`check ${source}`); return engine.checkAccess(context, source); },
     readCatalog: async (context, source) => { calls.push(`read ${source}`); return engine.readCatalog(context, source); },
     readRemotePlugin: async () => ({ problem: 'not in tests' }),
-    install: async (_context, _catalog, plugin, tool) => { calls.push(`install ${plugin} ${tool}`); if (tool === options.throwFor) throw new Error('disk full'); return { tool, outcome: 'installed', message: 'Installed.', runs: [{ tool, command: 'x', ok: true, output: '', changed: [{ path: '/p', before: 'old', after: 'new' }] }], changed: true } satisfies ActionReport; },
+    install: async (context, _catalog, plugin, tool) => { calls.push(`install ${plugin} ${tool}`); ran.push(context.binaries[tool]); if (tool === options.throwFor) throw new Error('disk full'); return { tool, outcome: 'installed', message: 'Installed.', runs: [{ tool, command: 'x', ok: true, output: '', changed: [{ path: '/p', before: 'old', after: 'new' }] }], changed: true } satisfies ActionReport; },
     uninstall: async (_context, marketplace, plugin, tool, source) => { calls.push(`uninstall ${plugin}@${marketplace} ${tool} ${source}`); return { tool, outcome: 'uninstalled', message: 'Uninstalled.', runs: [], changed: true }; },
     update: async (_context, _catalog, plugin, tool) => { calls.push(`update ${plugin} ${tool}`); return { tool, outcome: 'updated', message: 'Updated.', runs: [], changed: true }; },
     setSkill: async (_context, marketplace, plugin, skill, tool, on, _source, entry) => { calls.push(`skill ${plugin}:${skill}@${marketplace} ${tool} ${on} entry=${entry?.name}`); return { tool, outcome: on ? 'skill-on' : 'skill-off', message: '', runs: [], changed: true }; },
   };
-  return { base, home, calls, markets: createMarketplaces(host, use), cleanup: () => rm(base, { recursive: true, force: true }) };
+  return { base, home, calls, ran, markets: createMarketplaces(host, use), cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 
 test('Adding a marketplace reads it once, stores how it was given, and the view lists it with its plugins', async () => {
@@ -105,6 +106,22 @@ test('One tool’s error fails that tool only: the others’ reports stay, and l
     assert.deepEqual(result.reports.map(report => [report.tool, report.outcome, !!report.changed]), [['claude-cli', 'installed', true], ['copilot-cli', 'failed', false], ['codex-cli', 'installed', true]]);
     assert.match(result.reports[1]!.message, /disk full/);
   } finally { await box.cleanup(); }
+});
+
+test('With no CLI, a tool’s plugins go through the copy its desktop app carries, named on the page with the version it answers', { skip: process.platform === 'win32' }, async () => {
+  const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-app-route-')));
+  const runtime = join(base, 'copilot-sdk-runtime-1.0.102-0.unstable.r41779900948.gf482387/copilot');
+  await put(runtime, '#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.102-0.unstable.r41779900948.gf482387."\n');
+  await chmod(runtime, 0o755);
+  const box = await setup({ app: { name: 'GitHub Copilot app', version: '1.1.35', carries: 'Copilot runtime', carriedVersion: '1.0.102-0.unstable.r41779900948.gf482387', binary: runtime } });
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root, 'team', ['pdf']);
+    const view = (await box.markets.add(root)).view!;
+    assert.deepEqual([view.clis['copilot-cli'], view.via, view.desktopOnly], [true, { 'copilot-cli': 'GitHub Copilot app’s Copilot runtime 1.0.102-unstable' }, {}]);
+    await box.markets.install(root, 'team', 'pdf', ['claude-cli', 'copilot-cli'], box.home);
+    assert.deepEqual(box.ran, ['/bin/true', runtime], 'the same install, run with the app’s copy where there is no CLI');
+  } finally { await box.cleanup(); await rm(base, { recursive: true, force: true }); }
 });
 
 test('A Git marketplace that can’t be reached is not fetched again on every view', async () => {

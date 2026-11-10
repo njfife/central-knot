@@ -57,3 +57,6 @@ export function compareVersions(first: string, second: string): number {
 
 /** Whether a name is a Git commit hash or a prefix of one (7 to 40 hex digits, at least one a letter, so 20250101 is not). */
 export const isCommitHash = (name: string) => /^(?=\d*[a-f])[0-9a-f]{7,40}$/i.test(name);
+
+/** A build for display: a pre-release cut to its first word ("1.0.102-0.unstable.r4177…" is "1.0.102-unstable"). */
+export const shortBuild = (version: string) => version.replace(/^(\d+\.\d+\.\d+)-(?:\d+\.)?([A-Za-z]+)[.\w-]*$/, '$1-$2');

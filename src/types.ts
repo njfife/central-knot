@@ -15,6 +15,8 @@ export interface DesktopApp {
   /** What the app carries: "Code tab", "Codex", "Copilot runtime". */
   carries: string;
   carriedVersion?: string;
+  /** The tool's own binary the app carries, where it is on disk: the plugin route when the tool has no CLI here (PLG-04). */
+  binary?: string;
 }
 
 export interface Skill {
@@ -473,12 +475,14 @@ export type InstalledCopy = Pick<PluginContents, 'skills' | 'commands' | 'agents
 export interface PluginsView {
   home: string;
   tools: HarnessId[];
-  /** Tools whose own CLI was found, so their plugin commands can run. */
+  /** Tools whose plugin commands can run: through their own CLI, or with none, through the copy their desktop app carries (`via`). */
   clis: Partial<Record<HarnessId, boolean>>;
+  /** Tools with no CLI whose plugin commands run through their desktop app's own copy, each with what that copy is: "Claude desktop’s Code tab 2.1.321". */
+  via?: Partial<Record<HarnessId, string>>;
   canWrite: boolean;
   reason?: string;
   marketplaces: MarketplaceView[];
-  /** Tools present here only as their desktop app, with no CLI to run plugin commands: each with the app's name. */
+  /** Tools present here only as their desktop app, with no CLI and no copy of the tool in the app to run plugin commands: each with the app's name. */
   desktopOnly?: Partial<Record<HarnessId, string>>;
   /** Each found CLI's version, where it could be read (a plugin skill's switch is offered only from a tested build). */
   versions?: Partial<Record<HarnessId, string>>;

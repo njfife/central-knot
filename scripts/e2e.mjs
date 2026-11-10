@@ -1556,8 +1556,45 @@ async function fewToolsFlow() {
   await a.click('#nav-harnesses');
   const desktopCard = await a.text('#harness-claude-cli');
   check('its card names the app, its version, its Code tab’s version and no CLI', desktopCard.includes('Claude desktop 4.16336.0 (Code tab 2.1.317) · no CLI found'), desktopCard);
+  // Once the Code tab's own Claude Code is there, plugins install through it (PLG-04): the box says so, and never calls it the CLI.
+  const codeTab = join(home, 'Library/Application Support/Claude/claude-code/2.1.317/e6736b2d954d/claude.app/Contents/MacOS/claude');
+  const ranLog = join(scratch, 'code-tab-runs.txt');
+  const appMarket = join(scratch, 'app-market');
+  mkdirSync(join(codeTab, '..'), { recursive: true });
+  writeFileSync(codeTab, [
+    '#!/bin/sh', `echo "$*" >> '${ranLog}'`, 'case "$*" in',
+    '"--version") echo "2.1.317 (Claude Code)";;',
+    `"plugin marketplace add ${appMarket}") mkdir -p "$HOME/.claude/plugins" && echo '{"team-tools":{"source":{"source":"directory","path":"${appMarket}"}}}' > "$HOME/.claude/plugins/known_marketplaces.json";;`,
+    `"plugin install document-tools@team-tools --scope user") echo '{"version":2,"plugins":{"document-tools@team-tools":[{"scope":"user","installPath":"${appMarket}/plugins/document-tools","version":"1.2.0"}]}}' > "$HOME/.claude/plugins/installed_plugins.json";;`,
+    '*) exit 9;;', 'esac', ''].join('\n'));
+  chmodSync(codeTab, 0o755);
+  writeMarket(appMarket);
+  await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(appMarket)})`);
+  await a.click('#nav-plugins');
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 30 && !(await a.exists('#popen-0-document-tools')); tries++) await wait(100);
+  await a.click('#popen-0-document-tools');
+  for (let tries = 0; tries < 30 && !(await a.exists('.plugin-tool-via')); tries++) await wait(100);
+  const box = await a.text('.plugin-panel');
+  for (const [width, height] of [[860, 560], [1728, 1117]]) {
+    await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+    await wait(300);
+    await a.shot(`app-only-plugin-${width}`);
+    check(`at ${width}×${height} the app-only plugin box’s route line is not cut off`, await a.run(`(() => { const line = document.querySelector('.plugin-tool-via'); const box = line.getBoundingClientRect(); return box.width > 0 && line.scrollWidth <= line.clientWidth + 1 && box.right <= innerWidth; })()`));
+  }
+  await a.send('Emulation.clearDeviceMetricsOverride');
+  check('with only Claude desktop, the plugin box names its route, its Code tab, and offers no parts instead', box.includes('Claude CodePlugin not installedThrough Claude desktop’s Code tab 2.1.317') && !box.includes('Only Claude desktop'), box);
   same('no page errors, few tools', a.pageErrors, []);
   await a.quit();
+  // In the Practice copy (a real home is preview only off macOS) the install runs through that copy and its record counts.
+  const p = await launch(join(scratch, 'few-practice-data'), ['--practice-copy'], home);
+  const practiceHome = await p.run(`document.querySelector('.status-home').title`);
+  await p.run(`window.centralKnot.addMarketplace(${JSON.stringify(appMarket)})`);
+  const appInstall = await p.run(`window.centralKnot.installPlugin(${JSON.stringify(appMarket)}, 'team-tools', 'document-tools', ['claude-cli'], ${JSON.stringify(practiceHome)})`);
+  same('the install runs the Code tab’s Claude Code with the CLI’s own commands, and its record says installed', [appInstall.reports?.map(report => [report.tool, report.outcome]), readFileSync(ranLog, 'utf8').split('\n').filter(line => line.startsWith('plugin'))],
+    [[['claude-cli', 'installed']], [`plugin marketplace add ${appMarket}`, 'plugin install document-tools@team-tools --scope user']]);
+  same('no page errors, few tools, practice', p.pageErrors, []);
+  await p.quit();
 }
 
 async function realHomeFlow() {

@@ -4,7 +4,7 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, wri
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { discover, probeVersion } from '../src/discovery.ts';
+import { discover, findApp, probeVersion } from '../src/discovery.ts';
 import { CLAUDE_PROCESS, appCandidates, executableCandidates } from '../src/platform.ts';
 import { isPresent } from '../src/presence.ts';
 
@@ -195,6 +195,29 @@ test('A desktop app with no CLI makes its tool present, with the app’s version
     assert.deepEqual([app2.detection, app2.app?.version, app2.app?.carriedVersion], ['App only', '1.1.35', '1.0.102-0.unstable.r41779900948.gf482387']);
     // No app and no CLI: not found. (Only this home's folders: the computer running the test may have the real app.)
     assert.equal((await discover({ home: setup.home, mode: 'actual', harness: 'codex-cli', runProbes: true, binaries: [], apps: appCandidates(setup.home, 'codex').filter(candidate => candidate.app.startsWith(setup.home)) })).detection, 'Not found');
+  } finally { await setup.cleanup(); }
+});
+
+test('The copy of the tool a desktop app carries is found where the app keeps it: the plugin route when there is no CLI', { skip: process.platform === 'win32' }, async () => {
+  const setup = await fixture();
+  try {
+    const mine = (binary: string) => appCandidates(setup.home, binary).filter(candidate => candidate.app.startsWith(setup.home));
+    const runnable = async (path: string) => { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, '#!/bin/sh\n', { mode: 0o755 }); };
+    await app(join(setup.home, 'Applications/Claude.app'), '4.23118.1');
+    const code = join(setup.home, 'Library/Application Support/Claude/claude-code');
+    // The newest version folder holds no build yet (still downloading): the newest one that does is the copy.
+    await mkdir(join(code, '2.1.322'), { recursive: true });
+    await runnable(join(code, '2.1.321/e6736b2d954d/claude.app/Contents/MacOS/claude'));
+    assert.deepEqual(await findApp(mine('claude')), { name: 'Claude desktop', version: '4.23118.1', carries: 'Code tab', carriedVersion: '2.1.321', binary: join(code, '2.1.321/e6736b2d954d/claude.app/Contents/MacOS/claude') });
+    // The Copilot app's runtime is unpacked into the caches by the version the app names; until then it has no copy.
+    const copilot = join(setup.home, 'Applications/GitHub Copilot.app');
+    await app(copilot, '1.1.35');
+    await mkdir(join(copilot, 'Contents/Resources/copilot-sdk'), { recursive: true });
+    await writeFile(join(copilot, 'Contents/Resources/copilot-sdk/cliVersion.d.ts'), 'export declare const COPILOT_CLI_VERSION = "1.0.102-0.unstable.r41779900948.gf482387";\n');
+    assert.equal((await findApp(mine('copilot')))?.binary, undefined);
+    const runtime = join(setup.home, 'Library/Caches/github-copilot-sdk/cli/copilot-sdk-runtime-1.0.102-0.unstable.r41779900948.gf482387/copilot');
+    await runnable(runtime);
+    assert.equal((await findApp(mine('copilot')))?.binary, runtime);
   } finally { await setup.cleanup(); }
 });
 
