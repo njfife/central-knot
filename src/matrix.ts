@@ -529,13 +529,20 @@ function cell(skill: SampleSkill, tool: Tool, inDetails = false) {
   return h('div.ov-cell', { role: 'cell', 'data-tool': tool },
     h(`button.cell-button.${look.tone}${on ? '.cell-on' : ''}${pending ? '.cell-pending-edit' : ''}${oneWay ? '.cell-oneway' : ''}${disabled ? '.cell-disabled' : ''}${byProfile ? '.cell-profile-off' : ''}${switching ? '.cell-switch-queued' : ''}`, {
       type: 'button', id: `cell-${skill.key}-${tool}${inDetails ? '-details' : ''}`, 'data-state': drawn,
-      title: action ? `${text}. Click to ${action.charAt(0).toLowerCase()}${action.slice(1)}.${kind === 'skills' && skill.copies[tool] !== undefined && !switching ? ' To disable or remove it here, open the skill.' : ''}` : text, 'aria-label': `${text}${action ? `. ${action}` : ''}`,
+      title: action ? `${text}. Click to ${action.charAt(0).toLowerCase()}${action.slice(1)}.${openHint(skill, tool, disabled, switching)}` : text, 'aria-label': `${text}${action ? `. ${action}` : ''}`,
       disabled: drawn === 'cannot' || (!!skill.held && !differs),
       onclick: (event: Event) => { event.stopPropagation(); if (differs) { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); } else setTool([skill.key], tool, !on); } },
       glyph,
       oneWay ? h('span.cell-oneway-mark', { 'aria-hidden': 'true' }, icon('arrow-up-right', 9)) : null,
       disabled ? h(`span.cell-disabled-mark${byProfile ? '.cell-disabled-profile' : ''}`, { 'aria-hidden': 'true' }, icon(byProfile ? 'sliders-horizontal' : 'circle-off', 9)) : null,
       on && kind === 'agents' && skill.managed && skill.oneWay?.from === tool ? h('span.cell-source-mark', { 'aria-hidden': 'true' }) : null));
+}
+
+/** After a box's own click: where this tool's switch is, since the box only starts and stops syncing. '' when it has none. */
+function openHint(skill: SampleSkill, tool: Tool, disabled: boolean, switching: boolean): string {
+  if (kind === 'agents' || skill.copies[tool] === undefined || switching) return '';
+  if (kind === 'skills') return ' To disable or remove it here, open the skill.';
+  return ` To ${disabled ? 'enable' : 'disable'} it here, open the server.`;
 }
 
 /**
@@ -664,9 +671,12 @@ function rowSentence(skill: SampleSkill, tool: Tool, quiet: boolean): string {
   return switching && routine ? switching : [toolLine(skill, tool), switching].filter(Boolean).join(' ');
 }
 
-/** Skills: one tool's switch (Enabled or Disabled, applied on Apply all) and Remove, for a copy it has or gets. */
+/**
+ * Skills and MCP servers: one tool's switch (Enabled or Disabled, applied on Apply all), for a copy it has or gets. Skills have
+ * Remove beside it; a server leaves a tool by its box and its settings file.
+ */
 function toolControls(skill: SampleSkill, tool: Tool) {
-  if (designMode || kind !== 'skills') return null;
+  if (designMode || kind === 'agents') return null;
   const key = skill.key;
   // Keep it takes Remove's id, so keyboard focus stays on the same spot when they swap.
   if (skill.removing?.includes(tool)) return h('span.details-tool-actions', {}, smallAction('Keep it', `remove-${key}-${tool}`, () => setRemoved(key, [tool], false)));
@@ -677,9 +687,9 @@ function toolControls(skill: SampleSkill, tool: Tool) {
   // No switch at all when its file can't be used.
   const unavailable = !!skill.switchProblem?.[tool];
   // Queued and restorable, so it is a quiet action, not a red one; a row without it keeps its place so the switches line up.
-  const canRemove = removable(skill).includes(tool);
-  const remove = canRemove ? smallAction('Remove', `remove-${key}-${tool}`, () => setRemoved(key, [tool], true), '.tool-remove') : h('span.tool-remove-slot', { 'aria-hidden': 'true' });
-  if (canRemove) remove.title = `Remove ${names[tool]}’s copy on Apply all. History keeps it for Restore${skill.managed ? ', and Central Knot stops syncing it here' : ''}.`;
+  const canRemove = kind === 'skills' && removable(skill).includes(tool);
+  const remove = kind !== 'skills' ? null : canRemove ? smallAction('Remove', `remove-${key}-${tool}`, () => setRemoved(key, [tool], true), '.tool-remove') : h('span.tool-remove-slot', { 'aria-hidden': 'true' });
+  if (canRemove && remove) remove.title = `Remove ${names[tool]}’s copy on Apply all. History keeps it for Restore${skill.managed ? ', and Central Knot stops syncing it here' : ''}.`;
   return h('span.details-tool-actions', {},
     unavailable ? h('span.tool-switch-na', {}, icon('circle-alert', 12, 'tone-muted'), 'Disable unavailable')
       : h(`span.tool-switch${pending ? '.tool-switch-pending' : ''}`, { title: skill.disableNote?.[tool] }, h('span.tool-switch-word', { 'aria-hidden': 'true' }, disabled ? 'Disabled' : 'Enabled'),
@@ -722,13 +732,14 @@ function replacedOnApply(skill: SampleSkill, tool: Tool) {
  * will be after Apply all) syncs, so a tool's box in the table is told apart too, except in the Files view, which has no table.
  */
 function switchNote(skill: SampleSkill, inFiles: boolean) {
-  if (kind !== 'skills' || designMode) return null;
+  if (kind === 'agents' || designMode) return null;
   const switchShown = toolList().some(tool => !skill.removing?.includes(tool) && !skill.cannot?.[tool] && !skill.switchProblem?.[tool]
     && (skill.copies[tool] !== undefined || cellOf(skill, tool) === 'will-sync'));
-  const removeShown = removable(skill).some(tool => !skill.removing?.includes(tool));
+  const removeShown = kind === 'skills' && removable(skill).some(tool => !skill.removing?.includes(tool));
   if (!switchShown && !removeShown) return null;
   const parts = [
-    switchShown ? [h('strong', {}, 'Disabled'), `: the copy stays${skill.managed ? ' and keeps syncing' : ''}, but that tool stops loading it, starting with its next session. `] : null,
+    switchShown ? [h('strong', {}, 'Disabled'), kind === 'mcp' ? `: the server stays in that tool’s settings${skill.managed ? ' and keeps syncing' : ''}, but that tool stops starting it, from its next session. `
+      : `: the copy stays${skill.managed ? ' and keeps syncing' : ''}, but that tool stops loading it, starting with its next session. `] : null,
     removeShown ? [h('strong', {}, 'Remove'), skill.managed ? ': the copy is taken out and syncing there stops; History keeps it. ' : ': the copy is taken out; History keeps it. '] : null,
     skill.managed && !inFiles ? [h('strong', {}, 'Unticking a tool’s box'), ' in the table: syncing there stops; the copy stays.'] : null,
   ].filter(Boolean).flat() as (string | HTMLElement)[];
@@ -1513,7 +1524,7 @@ function helpBand(): HTMLElement | null {
       h('span.tone-muted', {}, ...(kind === 'agents' && list.some(skill => Object.keys(skill.limits ?? {}).length)
         ? [focus ? 'Tick a tool’s box to add an agent there; once it’s Managed, untick a box to leave that tool out. “One-way” means edits flow only from the tool named.' : 'Once it’s Managed, click a tool’s box to leave that tool out.']
         : kind === 'skills' ? ['Click a tool’s box to include it or leave it out. Open a skill to disable or remove it in one tool.']
-          : ['Click a tool’s box to include it or leave it out. Turning Managed off keeps existing copies.']))),
+          : [`Click a tool’s box to include it or leave it out. Turning Managed off keeps existing copies.${kind === 'mcp' ? ' Open a server to disable or enable it in one tool.' : ''}`]))),
     closeButton(() => { writeFlag(key); rerender(); }, { id: 'help-dismiss', label: 'Hide this tip' }));
 }
 
@@ -1555,7 +1566,9 @@ function writeStepBand(rest: string[], all: string[]) {
  * so it is no surprise after. Names the servers Claude Code will lack after Apply all.
  */
 function secondStepNote() {
-  const reachesClaude = [...view.draft].filter(([, draft]) => draft.managed && !draft.off.includes('claude-cli'));
+  // A draft that only flips a tool's switch copies nothing, so Claude Code has no step to wait for.
+  const copies = (key: string, draft: Draft) => { const base = committedOf(key); return !!draft.resolve || draft.managed !== base.managed || [...draft.off].sort().join() !== [...base.off].sort().join(); };
+  const reachesClaude = [...view.draft].filter(([key, draft]) => draft.managed && !draft.off.includes('claude-cli') && copies(key, draft));
   if (kind !== 'mcp' || !toolList().includes('claude-cli') || !reachesClaude.length) return null;
   const needs = reachesClaude.filter(([key]) => committedList().find(skill => skill.key === key)?.copies['claude-cli'] === undefined).map(([key]) => key);
   const writtenNow = others('claude-cli').map(tool => names[tool]);

@@ -345,3 +345,57 @@ test('A deletion asked for now (decideNow) is a deletion even when it empties a 
     assert.equal(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), plain, 'nothing written back');
   } finally { await box.cleanup(); }
 });
+
+test('A server disabled in one tool is enabled again by hand, and Undo turns it back off: only the named tool’s own switch changes', async () => {
+  const box = await sandbox();
+  try {
+    const hindsight = { type: 'http', url: 'http://127.0.0.1:8888/mcp/nathan-personal/' };
+    await writeFile(join(box.home, '.claude.json'), claudeJson({ hindsight }));
+    await applyMcp(box.context, tools, [{ key: 'hindsight', managed: true, off: [] }]);
+    // Turned off in Copilot CLI (as `copilot mcp disable` writes it) and in Codex, outside Central Knot.
+    const copilotSettings = join(box.home, '.copilot/settings.json');
+    await writeFile(copilotSettings, '{\n  "theme": "dark",\n  "disabledMcpServers": ["hindsight", "other"]\n}\n');
+    const codexFile = join(box.home, '.codex/config.toml');
+    await writeFile(codexFile, (await readFile(codexFile, 'utf8')).replace('[mcp_servers.hindsight]\n', '[mcp_servers.hindsight]\nenabled = false\n'));
+    const disabledIn = async () => (await mcpView(box.context, tools)).servers.find(server => server.key === 'hindsight')!.disabled ?? [];
+    assert.deepEqual((await disabledIn()).sort(), ['codex-cli', 'copilot-cli']);
+    const entries = await readFile(join(box.home, '.copilot/mcp-config.json'), 'utf8');
+
+    const enabled = await applyMcp(box.context, tools, [{ key: 'hindsight', managed: true, off: [], enable: ['copilot-cli'] }]);
+    assert.deepEqual(enabled.results.map(result => [result.harness, result.outcome, result.disabled]), [['copilot-cli', 'switched', false]]);
+    assert.deepEqual(JSON.parse(await readFile(copilotSettings, 'utf8')), { theme: 'dark', disabledMcpServers: ['other'] }, 'only this server’s switch; the rest of the file stays');
+    assert.deepEqual(await disabledIn(), ['codex-cli'], 'Codex was not named, so it stays off');
+    assert.equal(await readFile(join(box.home, '.copilot/mcp-config.json'), 'utf8'), entries, 'the server’s entry is untouched');
+    const made = (await readHistory(box.context)).filter(event => event.kind === 'switched');
+    assert.deepEqual(made.map(event => [event.key, event.switched]), [['mcp:hindsight', [{ tool: 'copilot-cli', disabled: false }]]]);
+    // Asking again changes nothing and records nothing.
+    const again = await applyMcp(box.context, tools, [{ key: 'hindsight', managed: true, off: [], enable: ['copilot-cli'] }]);
+    assert.deepEqual([again.results, (await readHistory(box.context)).filter(event => event.kind === 'switched').length], [[], 1]);
+
+    const undone = await restoreMcp(box.context, tools, made[0].id);
+    assert.deepEqual(undone.results.map(result => [result.harness, result.outcome, result.disabled]), [['copilot-cli', 'switched', true]]);
+    assert.deepEqual((await disabledIn()).sort(), ['codex-cli', 'copilot-cli']);
+    assert.match((await restoreMcp(box.context, tools, made[0].id)).stopped ?? '', /already undone/);
+
+    // Disable by hand: Codex's switch is a line in the server's own table, and the copies still count as the same.
+    await applyMcp(box.context, tools, [{ key: 'hindsight', managed: true, off: [], enable: ['codex-cli', 'copilot-cli'] }]);
+    assert.deepEqual(await disabledIn(), []);
+    const off = await applyMcp(box.context, tools, [{ key: 'hindsight', managed: true, off: [], disable: ['codex-cli'] }]);
+    assert.deepEqual(off.results.map(result => [result.harness, result.outcome, result.disabled]), [['codex-cli', 'switched', true]]);
+    assert.match(await readFile(codexFile, 'utf8'), /\[mcp_servers\.hindsight\]\n(.+\n)*enabled = false\n/);
+    assert.equal((await applyMcp(box.context, tools, [])).writes, 0, 'a switch is not an edit to spread');
+  } finally { await box.cleanup(); }
+});
+
+test('A switch that can’t be made is said, and nothing else is changed: Codex has no entry to turn off', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude.json'), claudeJson({ massive }));
+    await writeFile(join(box.home, '.codex/config.toml'), codexToml);
+    const result = await applyMcp(box.context, tools, [{ key: 'massive', managed: false, off: [], disable: ['codex-cli', 'claude-cli'] }]);
+    assert.deepEqual(result.results.map(result => [result.harness, result.outcome]), [['codex-cli', 'failed'], ['claude-cli', 'switched']]);
+    assert.match(result.results[0].message, /Could not disable it in Codex: Codex has no \[mcp_servers\.massive\] table to switch\./);
+    assert.equal(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), codexToml);
+    assert.deepEqual(JSON.parse(await readFile(join(box.home, '.claude/settings.json'), 'utf8')), { deniedMcpServers: [{ serverName: 'massive' }] });
+  } finally { await box.cleanup(); }
+});

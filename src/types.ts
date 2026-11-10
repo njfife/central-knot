@@ -232,8 +232,11 @@ export interface SwitchProblem { file: string; reason: string }
 /** One tool's copy of a skill, as its switch names it: Claude Code by folder, Copilot by name, Codex and Pi by SKILL.md path. */
 export interface SwitchTarget { folder: string; name: string; /** Absolute path to the copy's SKILL.md (where it is, or where it will be written). */ skillFile: string }
 
-/** One switch a 'switched' History event changed: which way, the entry it named, and a Claude Code override it replaced ("name-only"). */
-export interface SwitchRecord { tool: HarnessId; disabled: boolean; target: SwitchTarget; before?: string }
+/**
+ * One switch a 'switched' History event changed: which way, and for a skill the entry it named and a Claude Code override it
+ * replaced ("name-only"). An MCP server's switch goes by the server's name (the event's item), so it has no `target`.
+ */
+export interface SwitchRecord { tool: HarnessId; disabled: boolean; target?: SwitchTarget; before?: string }
 
 export interface ManageView {
   tools: HarnessId[];
@@ -262,9 +265,9 @@ export interface Change {
   useHash?: string;
   /** Whether the page showed it managed: a change made from an older read is refused if that no longer holds. */
   seenManaged?: boolean;
-  /** Skills: tools to disable it in with each tool's own switch. Tools named in neither list keep their switch as it is. */
+  /** Skills and MCP servers: tools to disable it in with each tool's own switch. Tools named in neither list keep their switch as it is. */
   disable?: HarnessId[];
-  /** Skills: tools to enable it in again. */
+  /** Skills and MCP servers: tools to enable it in again. */
   enable?: HarnessId[];
   /** Skills: tools whose copy is removed, kept in History for Restore. A managed skill also stops syncing there. */
   remove?: HarnessId[];
