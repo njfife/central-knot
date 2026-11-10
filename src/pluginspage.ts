@@ -260,7 +260,7 @@ function toolbarRight(lines: ResultLine[]): HTMLElement | null {
   const outcome = app.outcome?.page === 'plugins' && app.outcome.act ? app.outcome : undefined;
   if (!outcome?.act) return null;
   const action = button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, disabled: !!app.busy, onclick: () => outcome.act!.run() });
-  return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, icon('check', 14, 'tone-success'), h('span.toolbar-result-text', { title: outcome.text }, outcome.text), action, dismiss(clearNotice, 'report-dismiss'));
+  return h('div.toolbar-result', { role: 'status', id: 'plugins-result', 'data-outcome': '' }, icon('check', 14, 'tone-success'), h('span.toolbar-result-text', { title: outcome.text }, outcome.text), action, dismiss(clearNotice, 'report-dismiss'));
 }
 
 /** What went wrong in the last run, or why a marketplace couldn't be added: a band, because it needs reading. */

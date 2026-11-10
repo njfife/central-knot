@@ -122,7 +122,7 @@ export function instructionCard(file: InstructionFile, { titled = true, goToOthe
   return h('article.card.ins-card', { 'aria-label': `${toolNames[file.tool]} instructions` },
     h('header.ins-head', {}, titled ? [brandMark(file.tool, 18), h('h2.tool-title', {}, toolNames[file.tool])] : null, pathText(shownPath(file.path), file.path),
       file.exists || editing ? null : h('span.ins-missing', {}, 'No file yet'),
-      savedHere(file) ? h('span.ins-saved-group', {}, h('span.ins-missing.ins-saved', {}, 'Saved'),
+      savedHere(file) ? h('span.ins-saved-group', { 'data-outcome': '' }, h('span.ins-missing.ins-saved', {}, 'Saved'),
         state.outcome!.act ? button({ variant: 'link', size: 'micro', label: 'Undo save', id: state.outcome!.act.id, attrs: { title: 'Put back the text this save replaced' }, onclick: () => state.outcome!.act!.run() }) : null) : null,
       editing ? h('span.ins-missing.ins-draft', { id: `ins-draft-${file.tool}`, hidden: state.instructionEdit!.text === own }, 'Unsaved changes') : null),
     h('p.ins-readers', {}, file.readers),

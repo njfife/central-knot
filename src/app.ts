@@ -147,11 +147,13 @@ export function paintStatusMessage() {
     region.replaceChildren(...(told.text ? [h('span.said-first', {}, first), rest ? h('span.said-rest', {}, ` ${rest.trim()}`) : null].filter((part): part is HTMLElement => !!part) : []));
   }
   region.title = told.text;
-  // Only a message that repeats what the page shows (announced quiet) is for screen readers alone.
-  region.classList.toggle('visually-hidden', told.quiet);
+  // Only a message that repeats what the page shows (announced quiet) is for screen readers alone. A result the page didn't
+  // draw (no band on this page, or held back) is shown here after all: the drawn result is marked data-outcome.
+  const quiet = told.quiet && !(state.outcome && told.text === state.outcome.text && !document.querySelector('[data-outcome]'));
+  region.classList.toggle('visually-hidden', quiet);
   // A narrow status bar shows a small mark instead of a message cut to a stub; its tooltip has the message (style.css).
   const mark = document.getElementById('message-mark');
-  if (mark) { mark.title = told.text; mark.hidden = !told.text || told.quiet; }
+  if (mark) { mark.title = told.text; mark.hidden = !told.text || quiet; }
 }
 
 const focusById = (id?: string | null) => (id ? document.getElementById(id) : null)?.focus();
@@ -1118,6 +1120,7 @@ export const switchToProfile = (id: string | null) => busy('Switching profile…
   if (result.view) setHome(result.view);
   if (result.stopped) { announce(result.stopped); return; }
   switchOutcome(result);
+  if (state.page === 'history') await putHistory();
 });
 // A switch from the menu bar: its result and Undo are on the page the next time the window shows.
 api().onProfileSwitched(async result => {
