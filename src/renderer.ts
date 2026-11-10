@@ -31,12 +31,12 @@ function applyLayout() {
   return { rail, shape: [...classes].filter(name => ['rail', 'one-pane'].includes(name)).join() };
 }
 
-function navRow(page: Page, label: string, glyph: IconName, count?: number | string, countTitle?: string) {
+function navRow(page: Page, label: string, glyph: IconName, count?: number | string, countTitle?: string, quiet = false) {
   const current = state.page === page;
   return h('button.nav-row', {
     type: 'button', id: `nav-${page}`, 'aria-current': current ? 'page' : undefined, 'aria-label': countTitle ? `${label}: ${countTitle}` : label, title: label,
     onclick: () => showPage(page),
-  }, icon(glyph), h('span.nav-label', {}, label), count !== undefined && h(`span.nav-count${count === 0 ? '.nav-count-zero' : ''}`, { 'aria-hidden': 'true', title: countTitle }, String(count)),
+  }, icon(glyph), h('span.nav-label', {}, label), count !== undefined && h(`span.nav-count${count === 0 || quiet ? '.nav-count-zero' : ''}`, { 'aria-hidden': 'true', title: countTitle }, String(count)),
     // A change sync made on its own shows as a dot on its page until that notice is seen or dismissed there.
     !current && unseen(page) ? h('span.nav-unseen', { title: unseenText(page) }) : null);
 }
@@ -71,8 +71,10 @@ function repoRow() {
   const newer = view?.connected && !pull && !retry && !!view.pushBlocked;
   // Directions, not an item count: ↓ to pull (or try again), ↑ to push.
   const shown = [pull + retry ? `↓${pull + retry}` : newer ? '↓' : '', push ? `↑${push}` : ''].filter(Boolean).join(' ');
-  const said = [pull ? `${pull} to pull` : '', retry ? `${retry} to try again` : '', newer ? 'A newer commit to pull' : '', push ? `${push} to push` : ''].filter(Boolean).join(' · ');
-  return navRow('repo', 'Git repo', 'git-branch', shown || undefined, said || undefined);
+  const unreachable = view?.connected && !!view.problem;
+  const said = [unreachable ? 'Couldn’t reach the repo' : '', pull ? `${pull} to pull` : '', retry ? `${retry} to pull again` : '', newer ? 'A newer commit to pull' : '', push ? `${push} to push` : ''].filter(Boolean).join(' · ');
+  // While the repo can't be reached, the counts are last seen: quiet, as on the page.
+  return navRow('repo', 'Git repo', 'git-branch', shown || undefined, said || undefined, unreachable);
 }
 
 function renderSidebar() {

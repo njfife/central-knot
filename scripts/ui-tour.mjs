@@ -324,12 +324,14 @@ if (wanted('repo')) {
   run(author, 'add', '-A'); run(author, 'commit', '--quiet', '-m', 'Retire the reviewer'); run(author, 'push', '--quiet', 'origin', 'HEAD:main');
   await a.click('#sync-switch'); await a.settle();
   await a.click('#header-refresh'); await waitFor(a, idle, 30000); await a.settle();
+  await shot(a, 'repo-sync-off-removal', 'Turned Automatic sync off; the repo deleted the reviewer agent, then "Refresh": the row says Pull leaves it until sync is on.');
   await a.click('#repo-pull'); await waitFor(a, idle, 30000); await a.settle();
-  await shot(a, 'repo-try-again', 'With Sync off, the repo deleted the reviewer agent and "Pull 1" was clicked: the deletion waits for Sync, and the page says it is left to try again.');
+  await shot(a, 'repo-try-again', 'Clicked "Pull 1": the deletion waits for Automatic sync, and the page says it is left to pull again.');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();
   await shot(a, 'repo-try-again-860', 'The same at 860×560.');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
-  await a.click('#sync-switch'); await a.settle();
+  await a.click('#sync-switch'); await wait(2500); await a.settle();
+  await shot(a, 'repo-pull-again-sync-on', 'Turned Automatic sync back on: the row now says to Pull again.');
   await a.click('#repo-disconnect'); await shot(a, 'repo-disconnect-confirm', 'Clicked "Disconnect…": it asks once, saying what stays.');
   await tab(1); await shot(a, 'repo-keyboard-cancel', 'Pressed Tab: focus moves from Disconnect to Cancel.');
   await a.run(`document.querySelector('#repo-disconnect-confirm').focus()`);

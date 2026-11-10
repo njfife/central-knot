@@ -230,7 +230,7 @@ const preference: HarnessId[] = ['claude-cli', 'codex-cli', 'copilot-cli', 'pi-c
 const byPreference = (first: HarnessId, second: HarnessId) => preference.indexOf(first) - preference.indexOf(second);
 
 /** Said when copies here differ and sync hasn't settled which is the item yet (Sync off, say): it waits rather than guess. */
-const UNSETTLED = 'Its copies here differ and haven’t synced yet. Turn on Sync or use Sync once, then look again.';
+const UNSETTLED = 'Its copies here differ and haven’t synced yet. Turn on Automatic sync, or use Sync once on its page, then click Refresh.';
 
 /**
  * Which tool's copy stands for a Managed item here, by tool preference among the tools it syncs to: an edit waiting to spread when
@@ -434,7 +434,7 @@ export function classify(sides: Pick<Sides, 'base' | 'latest' | 'here' | 'unsent
     else if (unfinished[key]) {
       const editedHere = editedSince(unfinished[key], atHere);
       if (editedHere && atHere && !inRepo) outgoing.push({ ...row, change: 'added', keptHere: true });
-      else incoming.push({ ...row, change: changeFrom(atHere, inRepo), held: unfinished[key].reason, retry: true, alsoHere: editedHere ? (atHere ? 'changed' : 'removed') : undefined });
+      else incoming.push({ ...row, change: changeFrom(atHere, inRepo), held: unfinished[key].reason, retry: true, waitsForSync: unfinished[key].reason === DELETION_WAITS || undefined, alsoHere: editedHere ? (atHere ? 'changed' : 'removed') : undefined });
     }
     else if (same(atHere, atBase)) incoming.push({ ...row, change: changeFrom(atBase, inRepo), alsoHere: !atHere && sides.unmanaged?.has(key) ? 'unmanaged' : undefined });
     else if (same(inRepo, atBase)) outgoing.push({ ...row, change: changeFrom(atBase, atHere) });
@@ -573,7 +573,7 @@ const writeProblem = (change: RepoChange, tool: HarnessId, noun: string, error: 
  * With Sync off, an MCP server's or agent's deletion can't spread past the one tool Pull would remove it from (sync spreads
  * deletions; skills have Delete everywhere), so Pull leaves every copy as it is and tries again once Sync can carry it.
  */
-const DELETION_WAITS = 'Its deletion from the repo waits for Sync: turn on Sync or use Sync once, then try again.';
+const DELETION_WAITS = 'Its deletion from the repo waits for Automatic sync: turn it on, then Pull again.';
 /** Said when sync would not take the repo's version on (the reason is in the results beside it): Pull tries again next time. */
 const notManaged = (change: RepoChange, tool: HarnessId) => notIn(change.name, `It is in ${harnesses[tool].name} now, but sync couldn’t make it Managed yet.`);
 /** What a sync pass started by Pull may touch: with Sync off, this item alone (as Apply all does); with Sync on, undefined, an ordinary pass. */

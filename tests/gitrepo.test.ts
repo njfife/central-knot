@@ -155,7 +155,7 @@ test('An MCP server edited and an agent deleted on one computer arrive on the ot
     await pushRepo(first);
 
     // With Sync off, the agent's deletion can't spread, so Pull leaves every copy and says why; with Sync on, it comes in.
-    assert.match((await pullRepo(second, { syncOn: false })).results.map(result => result.message).join(' '), /waits for Sync/);
+    assert.match((await pullRepo(second, { syncOn: false })).results.map(result => result.message).join(' '), /waits for Automatic sync/);
     assert.equal(Object.keys((await agentsView(second, tools)).servers[0].copies).length, 2, 'no copy removed while the deletion waits');
     const view = live((await pullRepo(second)).view);
     assert.deepEqual([view.incoming, view.outgoing], [[], []]);
@@ -261,7 +261,7 @@ test('Edits cross both ways; when both sides changed, the repo’s edit wins on 
     // With Sync off, two tools edited differently: which is the skill isn't settled, so it neither goes out nor counts as removed.
     await writeFile(join(first.home, '.claude/skills/review/SKILL.md'), skillText('review', 'One way.'));
     await writeFile(join(first.home, '.copilot/skills/review/SKILL.md'), skillText('review', 'Another way.'));
-    assert.deepEqual(live(await repoView(first)).outgoing.map(row => [row.name, row.held]), [['review', 'Its copies here differ and haven’t synced yet. Turn on Sync or use Sync once, then look again.']]);
+    assert.deepEqual(live(await repoView(first)).outgoing.map(row => [row.name, row.held]), [['review', 'Its copies here differ and haven’t synced yet. Turn on Automatic sync, or use Sync once on its page, then click Refresh.']]);
   } finally { await box.cleanup(); }
 });
 
