@@ -471,6 +471,11 @@ async function practiceFlow() {
   await a.run(`document.querySelector('.history-row[data-kind="profile"] .history-actions button').click()`); await a.settle();
   check('its Undo from History says what it did in the status bar', /^Undone:/.test(await statusShown() ?? '') && (await a.text('#status-profile'))?.trim() === 'No profile', await statusShown());
   await a.click('#nav-skills');
+  // An armed Delete everywhere stays on the visit it was clicked on.
+  const standupOpen = async () => { if (!(await a.exists('#delete-standup, #delete-confirm-standup'))) await a.click('#open-standup'); };
+  await standupOpen(); await a.click('#delete-standup');
+  await a.click('#nav-overview'); await a.click('#nav-skills'); await standupOpen();
+  check('an armed Delete everywhere is disarmed by leaving the page', await a.exists('#delete-standup') && !(await a.exists('#delete-confirm-standup')), await a.all('.delete-armed button'));
 
   // Two-way: an edit in one tool spreads on the next read, Undo puts it back; a deletion spreads after the settle window; Restore returns it.
   const standupPath = tool => join(practice, `.${tool}/skills/standup/SKILL.md`);

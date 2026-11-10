@@ -174,7 +174,7 @@ const views: Record<Kind, ReturnType<typeof newView>> = { skills: newView(), mcp
 export const showFiltered = (which: Kind, filter: Filter, harness?: Tool) => { startFresh(views[which], harness); views[which].filter = filter; };
 /** A table drawn for another page (a harness's, or the kind's own) starts with no filter, Find text, open row or menu from the last one. */
 function startFresh(table: ReturnType<typeof newView>, harness: Tool | undefined) {
-  Object.assign(table, { filter: 'all', find: '', comparing: undefined, toolMenu: undefined, toolMenuFromToolbar: false, shownFor: harness });
+  Object.assign(table, { filter: 'all', find: '', comparing: undefined, toolMenu: undefined, toolMenuFromToolbar: false, confirmDelete: undefined, shownFor: harness });
 }
 /** Opens an item's details on its own page (Skills, MCP servers or Agents), found by name, and scrolls it into view. */
 export function openItem(which: Kind, name: string) {
@@ -188,6 +188,8 @@ export function openItem(which: Kind, name: string) {
   if (key) requestAnimationFrame(() => document.querySelector(`.ov-row[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'center' }));
 }
 let view = views.skills;
+/** The page the tables were last drawn on. */
+let tablesPage: string | undefined;
 let draftHomes: Partial<Record<Kind, string>> = {};
 
 // A click elsewhere or Escape closes a tool menu.
@@ -1800,6 +1802,8 @@ function syncNotice(notice: Told, writeClaude?: () => void) {
  * (this harness has nothing that differs) goes back to All, so the table is never empty with no chip pressed.
  */
 function useTable(which: Kind, harness?: Tool) {
+  // An armed Delete everywhere belongs to the visit it was clicked on: another page disarms it.
+  if (state.page !== tablesPage) { for (const each of Object.values(views)) each.confirmDelete = undefined; tablesPage = state.page; }
   kind = which;
   view = views[which];
   focus = harness;
