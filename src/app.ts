@@ -4,6 +4,7 @@ import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseAp
 import { caughtUpNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
+import { pluginItemCount } from './pluginrows.ts';
 import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, sentence, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
@@ -304,7 +305,8 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
  */
 function readFound(view: HomeView, from?: string): string {
   if (!view.manage.tools.length) return noToolsSentence;
-  const found = { skills: view.manage.skills.length, mcp: view.mcp.servers.length, agents: view.agents.servers.length };
+  // A plugin's items count as the pages list them.
+  const found = { skills: view.manage.skills.length + pluginItemCount(view, 'skills'), mcp: view.mcp.servers.length + pluginItemCount(view, 'mcp'), agents: view.agents.servers.length + pluginItemCount(view, 'agents') };
   const counts = heldKinds(view).map(kind => plural(found[kind], kindNouns[kind].one, kindNouns[kind].many));
   const stopped = view.agents.servers.some(server => server.managed && server.stopped?.length);
   // A catch-up that copied something has its own Caught up band (tables and the Harnesses list), so it is not "Nothing changed".

@@ -1,7 +1,7 @@
 // A screenshot tour of the real app on the Practice copy, feature by feature, for user-interface judging.
 // Clicks are sent as pointer clicks (detail 1), as a mouse makes them; keyboard steps use real Tab presses.
 // Usage: node scripts/ui-tour.mjs <outDir> [--electron] [--no-sandbox] [--only shell,skills,…]
-// Features: shell, skills, sync, mcp, agents, plugins, instructions, sizes (four tools; every page at 860×560 with the
+// Features: shell, skills, sync, mcp, agents, plugins, plugin-items, instructions, sizes (four tools; every page at 860×560 with the
 // sidebar as a rail and open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light) and missing
 // (a folder home with only Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
@@ -581,6 +581,66 @@ if (wanted('parts')) {
     await a.click('#plugin-back');
   }
   await size(1280, 800);
+}
+
+// ---------- What plugins installed whole bring, on Skills, MCP servers and Agents ----------
+if (wanted('plugin-items')) {
+  await fresh();
+  begin('plugin-items');
+  const market = join(scratch, 'items-market');
+  writeMarket(market);
+  const copyOf = (plugin, folder) => { cpSync(join(market, 'plugins', plugin), folder, { recursive: true }); return folder; };
+  // As each tool records them: document-tools and release-helper in Claude Code (its marketplace added there), document-tools
+  // in Copilot CLI with pdf-reader switched off, issue-tracker in Codex turned off (its marketplace added nowhere), and
+  // issue-tracker's triage also in Pi as a separate part.
+  const installs = Object.fromEntries(['document-tools', 'release-helper'].map(plugin => [`${plugin}@team-tools`, [{ scope: 'user', installPath: copyOf(plugin, join(practice, `.claude/plugins/cache/team-tools/${plugin}/1.0.0`)), version: plugin === 'document-tools' ? '1.2.0' : '0.4.1' }]]));
+  writeFileSync(join(practice, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: installs }));
+  writeFileSync(join(practice, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'team-tools': { source: { source: 'github', repo: 'example/team-tools' }, installLocation: market } }));
+  const copilotCopy = copyOf('document-tools', join(practice, '.copilot/installed-plugins/team-tools/document-tools'));
+  writeFileSync(join(practice, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'document-tools', marketplace: 'team-tools', version: '1.2.0', cache_path: copilotCopy, enabled: true }] }));
+  writeFileSync(join(practice, '.copilot/settings.json'), JSON.stringify({ disabledSkills: ['document-tools:pdf-reader'] }));
+  copyOf('issue-tracker', join(practice, '.codex/plugins/cache/team-tools/issue-tracker/2.0.0'));
+  edit(join(practice, '.codex/config.toml'), text => `${text}\n[plugins."issue-tracker@team-tools"]\nenabled = false\n`);
+  mkdirSync(join(practice, '.pi/agent/skills/triage'), { recursive: true });
+  cpSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), join(practice, '.pi/agent/skills/triage/SKILL.md'));
+  mkdirSync(join(practice, '.central-knot'), { recursive: true });
+  writeFileSync(join(practice, '.central-knot/plugin-parts.json'), JSON.stringify({ installs: [{ source: market, marketName: 'team-tools', plugin: 'issue-tracker', version: '2.0.0', tool: 'pi-cli', at: new Date().toISOString(), digest: 'tour', items: [{ kind: 'skill', name: 'triage', hash: 'tour' }] }] }));
+  const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
+  const toPlugins = async () => { await a.run(`document.querySelector('.ov-section-plugins')?.scrollIntoView({ block: 'center' })`); await wait(150); };
+  await a.click('#nav-skills'); await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('.ov-section-plugins')`, 15000);
+  await shot(a, 'skills', 'Skills: the plugins’ skills are rows under “From plugins”, each marked “from <plugin>”, with a filled plugin box in each tool that has it (pdf-reader off in Copilot CLI, issue-tracker’s whole plugin off in Codex); triage is one row with its Pi part.');
+  await a.theme('light'); await shot(a, 'skills-light', 'The same, light.'); await a.theme('dark');
+  for (const [width, height] of [[860, 560], [1728, 1117]]) {
+    await size(width, height); await toPlugins();
+    await shot(a, `skills-${width}`, `Skills at ${width}×${height}, scrolled to the plugin rows.`);
+    await a.theme('light'); await shot(a, `skills-${width}-light`, `The same at ${width}×${height}, light.`); await a.theme('dark');
+  }
+  await size(1280, 800);
+  await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
+  await shot(a, 'skill-open', 'Opened pdf-reader: what it is, where it is handled (a link to document-tools’ page), and each tool’s copy.');
+  await a.click('[id="pfile-document-tools@team-tools/pdf-reader"]');
+  await shot(a, 'skill-open-file', 'Clicked “Show its SKILL.md”.');
+  await a.theme('light'); await shot(a, 'skill-open-light', 'The same, light.'); await a.theme('dark');
+  await size(860, 560); await shot(a, 'skill-open-860', 'The open row at 860×560.');
+  await a.theme('light'); await shot(a, 'skill-open-860-light', 'The same at 860×560, light.'); await a.theme('dark');
+  await size(1728, 1117); await shot(a, 'skill-open-1728', 'The open row at 1728×1117.'); await size(1280, 800);
+  await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
+  if (await a.has('#open-triage')) { await a.click('#open-triage'); await shot(a, 'part-and-plugin', 'Opened triage: its Pi part and the plugin installed in Codex share the row; both say where they come from.'); }
+  await a.click('#nav-mcp'); await waitFor(a, `!!document.querySelector('.ov-section-plugins, [data-key^="issue-tracker@"]')`);
+  await shot(a, 'mcp', 'MCP servers: issue-tracker’s issues server, installed in Codex with the plugin turned off.');
+  await a.theme('light'); await shot(a, 'mcp-light', 'The same, light.'); await a.theme('dark');
+  for (const [width, height] of [[860, 560], [1728, 1117]]) {
+    await size(width, height); await toPlugins();
+    await shot(a, `mcp-${width}`, `MCP servers at ${width}×${height}.`);
+    await a.theme('light'); await shot(a, `mcp-${width}-light`, `The same at ${width}×${height}, light.`); await a.theme('dark');
+  }
+  await size(1280, 800);
+  if (await a.has('[id="open-issue-tracker@team-tools/issues"]')) { await a.click('[id="open-issue-tracker@team-tools/issues"]'); await shot(a, 'mcp-open', 'Opened issues: its marketplace is added nowhere, so it says how Codex itself handles it.'); }
+  await a.click('#nav-agents'); await toPlugins(); await shot(a, 'agents', 'Agents: release-helper’s release-reviewer in Claude Code.');
+  await a.click('#nav-overview'); await shot(a, 'overview', 'Overview: each card counts the plugins’ items apart (“from plugins”).');
+  await a.click('#nav-harnesses'); await shot(a, 'harnesses', 'Harnesses: each card’s counts say how many come from plugins.');
+  await a.click('#harness-copilot-cli'); await a.click('#harness-tab-skills'); await toPlugins();
+  await shot(a, 'harness-skills', 'Copilot CLI’s page, Skills tab: its plugin rows, those it has.');
 }
 
 // ---------- Instructions ----------

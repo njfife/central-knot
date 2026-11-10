@@ -888,6 +888,28 @@ async function practiceFlow() {
   check('Restore Codex’s edit puts the edit back, and the copy stops again', readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]'), JSON.stringify(await a.all('[id^=cell-code-reviewer]', 'e.id + "=" + e.dataset.state')) + ' ' + (await a.text('main'))?.slice(0, 400));
   await a.click('#nav-skills');
 
+  // What a plugin installed whole brings shows on Skills and MCP servers with the plugin's mark, before Plugins was ever
+  // opened, from a marketplace nothing here has added: Claude Code's own record and copy are enough.
+  writeClaudeInstall(practice, 'ck-outside', 'outside-tools', '0.3.0', {
+    'skills/outside-skill/SKILL.md': '---\nname: outside-skill\ndescription: Comes with a plugin.\n---\n\nSteps.\n',
+    '.mcp.json': JSON.stringify({ mcpServers: { 'outside-server': { command: 'npx', args: ['-y', 'outside'] } } }),
+  });
+  await a.click('#header-refresh');
+  const outside = 'outside-tools@ck-outside/outside-skill', outsideRow = `.ov-row[data-key="${outside}"]`;
+  for (let tries = 0; tries < 40 && !(await a.exists(outsideRow)); tries++) await wait(100);
+  same('a plugin’s skill is a row with its mark, filled under Claude Code, empty elsewhere, with no Managed switch',
+    [/from outside-tools/.test(await a.text(outsideRow) ?? ''), await cellState(a, outside, 'claude-cli'), await cellState(a, outside, 'copilot-cli'), await a.exists(`${outsideRow} .switch`), await a.exists('.ov-section-plugins')],
+    [true, 'plugin', 'plugin-none', false, true]);
+  await a.click(`[id="open-${outside}"]`);
+  check('its details say it isn’t managed and where it is handled', /not managed by Central Knot[\s\S]*marketplace “ck-outside”, which isn’t added in Central Knot/.test(await a.text('main') ?? ''), await a.text('main'));
+  await a.click('#nav-mcp');
+  same('its MCP server too, on the MCP servers page', await cellState(a, 'outside-tools@ck-outside/outside-server', 'claude-cli'), 'plugin');
+  rmSync(join(practice, '.claude/plugins'), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 40 && await a.exists('[data-key="outside-tools@ck-outside/outside-server"]'); tries++) await wait(100);
+  check('and gone once the plugin is', !(await a.exists('[data-key="outside-tools@ck-outside/outside-server"]')));
+  await a.click('#nav-skills');
+
   // Plugins: a folder marketplace is browsed (its README, each plugin's contents) and installs are chosen, then applied.
   const market = join(scratch, 'market');
   writeMarket(market, 'ck-test-market');
@@ -1211,6 +1233,12 @@ async function practiceFlow() {
   await a.click('#plugins-apply');
   check('Apply all turns it off with Codex’s own switch, by name', readFileSync(codexConfig, 'utf8') === `${configBefore}\n[[skills.config]]\nname = "document-tools:pdf-reader"\nenabled = false\n`, readFileSync(codexConfig, 'utf8'));
   check('and the page shows it off', await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`) === 'false' && /Installed (· [^·]+ )?· 1 skill off/.test(await a.text('.plugin-panel')) && /pdf-reader turned off in Codex/.test(await a.text('.toolbar') ?? ''), await a.text('.plugin-page'));
+  // The Skills page shows the same switch in Codex's box for the plugin's skill.
+  const pdfRow = 'document-tools@ck-test-market/pdf-reader';
+  await a.click('#nav-skills');
+  for (let tries = 0; tries < 40 && await cellState(a, pdfRow, 'codex-cli') !== 'plugin-off'; tries++) await wait(100);
+  same('on the Skills page its Codex box shows it off, the plugin’s other skill on', [await cellState(a, pdfRow, 'codex-cli'), await cellState(a, 'document-tools@ck-test-market/spreadsheet', 'codex-cli')], ['plugin-off', 'plugin']);
+  await a.click('#nav-plugins');
   await a.click('#plugins-undo');
   same('Undo turns it back on: config.toml is as it was', [readFileSync(codexConfig, 'utf8') === configBefore, await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`)], [true, 'true']);
   writeFileSync(codexConfig, configBefore.slice(0, configBefore.indexOf('\n[marketplaces.ck-test-market]')));

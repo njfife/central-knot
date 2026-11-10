@@ -6,6 +6,7 @@ import { designMode } from './design.ts';
 import { absentTools, heldKinds, isPresent } from './presence.ts';
 import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser, wrappingPath } from './matrix.ts';
 import { andList, kindNames, kindNouns, noToolsSentence, orList } from './words.ts';
+import { pluginItemCount } from './pluginrows.ts';
 
 // ---------- Overview ----------
 
@@ -106,7 +107,9 @@ interface KindFact { managed: boolean; edited?: unknown[]; differs: boolean; cop
  */
 function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof icon>[0], facts: KindFact[], holders: HarnessId[], waitsForClaude = 0) {
   const { title, short: noun } = kindNouns[page];
-  const total = facts.length;
+  // A plugin's items count with the rest, said apart: nothing here manages them.
+  const fromPlugins = !designMode && state.home ? pluginItemCount(state.home, page) : 0;
+  const total = facts.length + fromPlugins;
   const managed = facts.filter(fact => fact.managed).length;
   const differs = facts.filter(fact => fact.differs).length;
   const edits = facts.filter(fact => fact.managed && fact.edited?.length).length;
@@ -118,7 +121,7 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof ic
   const status = !attention ? null : differs
     ? h(`button.kind-card-state.kind-card-link.${attention.tone}`, { type: 'button', id: `overview-${page}-differ`, title: attention.title, onclick: () => { showFiltered(page, 'attention'); showPage(page); } }, icon(attention.glyph, 13), attention.text)
     : h(`span.kind-card-state.${attention.tone}`, { title: attention.title }, icon(attention.glyph, 13), attention.text);
-  const countFor = (tool: HarnessId) => facts.filter(fact => fact.copies[tool] !== undefined).length;
+  const countFor = (tool: HarnessId) => facts.filter(fact => fact.copies[tool] !== undefined).length + (fromPlugins || state.home?.pluginItems?.length ? pluginItemCount(state.home!, page, tool) : 0);
   const tools = holders.map(tool => {
     const count = countFor(tool);
     return h('span.kind-tool', {}, brandMark(tool, 12), h('span', {}, toolName(tool)), h('strong.kind-tool-count', {}, String(count)));
@@ -127,7 +130,7 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof ic
   return h('div.kind-card', {},
     h('button.kind-card-main', { type: 'button', id: `overview-${page}`, onclick: () => showPage(page) },
       h('span.kind-card-head', {}, icon(glyph, 16), h('strong', {}, title), icon('arrow-right', 14, 'tone-faint'))),
-    h('div.kind-card-summary', {}, h('span', {}, total ? `${plural(total, noun[0], noun[1])} · ${managed ? `${managed} managed` : 'none managed'}` : `No ${noun[1]}`),
+    h('div.kind-card-summary', {}, h('span', {}, total ? `${plural(total, noun[0], noun[1])} · ${managed ? `${managed} managed` : 'none managed'}${fromPlugins ? ` · ${fromPlugins} from plugins` : ''}` : `No ${noun[1]}`),
       // The "·" goes with the status; a narrow card puts the status on a line of its own, without it (markWrappedStatus).
       status ? h('span.kind-card-status', {}, h('span.kind-card-dot', { 'aria-hidden': 'true' }, '·'), status) : null),
     total ? h('div.kind-card-tools', {}, tools) : null);
@@ -215,7 +218,7 @@ export function overviewPage() {
 
 export function mcpPage() {
   if (!state.home) return notRead();
-  if (!state.home.mcp.servers.length) return emptyKindPage('mcp', 'mcp-empty');
+  if (!state.home.mcp.servers.length && !pluginItemCount(state.home, 'mcp')) return emptyKindPage('mcp', 'mcp-empty');
   return designOverview('mcp');
 }
 
@@ -223,7 +226,7 @@ export function mcpPage() {
 
 export function agentsPage() {
   if (!state.home) return notRead();
-  if (!state.home.agents.servers.length) return emptyKindPage('agents', 'agents-empty');
+  if (!state.home.agents.servers.length && !pluginItemCount(state.home, 'agents')) return emptyKindPage('agents', 'agents-empty');
   return designOverview('agents');
 }
 
@@ -272,7 +275,7 @@ const contents = (key: string, copies: Found[]) =>
 export function skillsPage() {
   const home = state.home;
   if (!designMode && !home) return notRead();
-  if (!designMode && !home!.manage.skills.length) return noSkills('empty-read');
+  if (!designMode && !home!.manage.skills.length && !pluginItemCount(home!, 'skills')) return noSkills('empty-read');
   // The table is the Skills page; "Files" opens one skill's files and contents beside the list.
   if (state.skillsView !== 'files') return designOverview('skills');
   return skillsBrowser(key => {

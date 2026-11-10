@@ -1686,3 +1686,13 @@ button.harness-card-main:focus-visible { outline: 0; }
 .repo-layout dd { margin: 0; color: var(--ink-soft); }
 .repo-start .empty-aside { max-width: 72ch; margin: 0; padding: 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 @container (max-width: 300px) { .repo-layout { grid-template-columns: minmax(0, 1fr); } .repo-layout dd { margin-bottom: 4px; } }
+
+/* ---------- A plugin's items on the Skills, MCP servers and Agents pages (matrix.ts pluginCell) ---------- */
+/* There through the plugin: filled with its glyph in the accent's tint, apart from a synced copy's green check. Its box is
+   no button (sync never copies a plugin's own files), so hovering it changes nothing. */
+.cell-static { cursor: default; }
+.cell-button.cell-static:hover { border-color: var(--cell-line); background: transparent; }
+.cell-plugin { color: var(--accent-ink); }
+.cell-plugin.cell-on, .cell-button.cell-static.cell-plugin.cell-on:hover { background: color-mix(in oklab, var(--accent) 16%, transparent); border-color: transparent; }
+.cell-plugin.cell-disabled.cell-on, .cell-button.cell-static.cell-plugin.cell-disabled:hover { background: transparent; border-color: var(--control-line); color: var(--ink-soft); }
+.ov-row.unmanaged .cell-static.cell-absent { border-style: dotted; border-color: var(--cell-line); }
