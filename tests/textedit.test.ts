@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue } from '../src/textedit.ts';
+import { editTomlArray, readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue } from '../src/textedit.ts';
 
 const claudeJson = `{
   "numStartups": 42,
@@ -95,4 +95,18 @@ test('TOML: replacing, adding and removing a server table leaves every other byt
   assert.ok(added.startsWith(codexToml));
   assert.ok(added.endsWith('[mcp_servers."my server"]\ncommand = "x"\n'));
   assert.equal(readTomlTables(added).find(table => table.path[1] === 'my server')!.entries[0].value, 'x');
+});
+
+test('TOML: each [[array]] block is read as its own table, and blocks are dropped or added with every other byte kept', () => {
+  const text = `${codexToml}\n[[skills.config]]\nname = "a:one"\nenabled = false\n# about the next one\n[[ skills.config ]]\npath = "/p/SKILL.md"\nenabled = false\n`;
+  const blocks = readTomlTables(text).filter(table => table.array);
+  assert.deepEqual(blocks.map(table => [table.path.join('.'), table.entries[0]!.value]), [['skills.config', 'a:one'], ['skills.config', '/p/SKILL.md']]);
+  assert.equal(setTomlTable(text, ['mcp_servers'], 'massive', undefined).includes('[[skills.config]]\nname = "a:one"'), true, 'a server edit leaves the blocks alone');
+  assert.ok(setTomlTable(`${codexToml}[[mcp_servers.massive.extra]]\nx = 1\n`, ['mcp_servers'], 'massive', undefined).includes('[[mcp_servers.massive.extra]]'), 'even one under the server: the MCP reader never carried it');
+  const dropped = editTomlArray(text, ['skills', 'config'], block => block.entries[0]!.value === 'a:one');
+  assert.equal(dropped, `${codexToml}\n# about the next one\n[[ skills.config ]]\npath = "/p/SKILL.md"\nenabled = false\n`);
+  assert.equal(editTomlArray(editTomlArray(codexToml, ['skills', 'config'], () => false, { name: 'b:two', enabled: false }), ['skills', 'config'], () => true), codexToml, 'an added block taken out again leaves the file as it was');
+  const windows = codexToml.replace(/\n/g, '\r\n');
+  const added = editTomlArray(windows, ['skills', 'config'], () => false, { name: 'b:two', enabled: false });
+  assert.ok(!/[^\r]\n/.test(added) && editTomlArray(added, ['skills', 'config'], () => true) === windows, 'a file with Windows line endings keeps them');
 });

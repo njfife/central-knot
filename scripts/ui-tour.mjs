@@ -9,7 +9,7 @@ import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, 
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
-import { writeMarket } from './fixture-market.mjs';
+import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
 import { connect, DAY, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
 
 const args = process.argv.slice(2);
@@ -93,6 +93,12 @@ async function shot(a, name, caption, pointer = { x: 2, y: a.viewport.height - 2
 }
 const waitFor = async (a, expression, ms = 8000) => { for (let spent = 0; spent < ms; spent += 250) { if (await a.run(expression)) return true; await wait(250); } return false; };
 const edit = (path, change) => writeFileSync(path, change(readFileSync(path, 'utf8')));
+// Types a marketplace source into "Add a marketplace" (opening the box first if needed) and clicks Add.
+async function addMarketplace(a, source) {
+  if (!(await a.has('#marketplace-source'))) await a.click('#open-add-marketplace');
+  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(source)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#add-marketplace');
+}
 
 let a = await launch();
 const practice = await a.run(`document.querySelector('.status-home').title`);
@@ -125,6 +131,55 @@ if (wanted('skills')) {
   if (await a.has('#use-review-claude-cli')) { await a.click('#use-review-claude-cli'); await shot(a, 'review-chosen-pending', 'Chose "Use Claude Code\'s copy": queued.'); await a.click('#apply'); await shot(a, 'review-applied', 'Clicked "Apply all".'); }
   await a.click('#open-standup'); await shot(a, 'details-synced', 'Opened standup, a managed skill whose copies are all the same.');
   if (await a.has('#files-standup')) { await a.click('#files-standup'); await shot(a, 'files-view', 'Clicked "Files and contents" in its details.'); await a.click('#skills-table'); }
+}
+
+// ---------- Disable and Remove, per tool ----------
+if (wanted('disable')) {
+  begin('disable');
+  await a.click('#nav-skills');
+  await a.click('#open-notes'); await shot(a, 'unmanaged-details', 'Opened notes, an unmanaged skill in Claude Code and Copilot CLI: each tool\'s row has an Enabled switch and Remove.');
+  await a.click('#switch-notes'); await a.click('#enable-notes-codex-cli');
+  await shot(a, 'managed-codex-disabled-pending', 'Turned Managed on for notes, then switched Codex\'s row to Disabled: queued, nothing written yet.');
+  await a.click('#apply');
+  const toml = readFileSync(join(practice, '.codex/config.toml'), 'utf8');
+  await shot(a, 'applied-disabled', `Clicked "Apply all". Codex got a copy and has it disabled. Codex's config.toml now ends with:\n\n\`\`\`toml\n${toml.slice(toml.lastIndexOf('[[skills.config]]'))}\`\`\`\n`);
+  await a.click('#open-notes');
+  await a.click('#open-standup'); await a.click('#remove-standup-copilot-cli');
+  await shot(a, 'remove-pending', 'Opened standup (unmanaged, only in Copilot CLI) and clicked Remove in its Copilot CLI row: queued.');
+  await a.click('#apply'); await shot(a, 'removed', 'Clicked "Apply all": the copy is gone from Copilot CLI and kept in History.');
+  await a.click('#open-release-notes'); await a.click('#enable-release-notes-claude-cli'); await a.click('#apply');
+  await shot(a, 'unmanaged-disabled', 'Opened release-notes (unmanaged, only in Claude Code), switched Claude Code to Disabled and clicked "Apply all".');
+  await a.click('#delete-release-notes');
+  await shot(a, 'delete-everywhere-confirm', 'Opened release-notes (unmanaged, only in Claude Code) and clicked "Delete everywhere…": it asks once more.');
+  await a.click('#delete-confirm-release-notes'); await shot(a, 'delete-everywhere-done', 'Clicked "Delete release-notes from every tool".');
+  await a.click('#nav-history'); await shot(a, 'history', 'Clicked "History": the Disable and the removal, each with its own Undo or Restore.');
+  const restore = await a.run(`document.querySelector('.history-row[data-kind="removed"] button')?.id ?? ''`);
+  if (restore) { await a.click(`#${restore}`); await shot(a, 'history-restored', 'Clicked Restore on the newest removal (release-notes, in Claude Code).'); }
+  await a.click('#nav-skills');
+  await a.click('#open-review'); await shot(a, 'differing-details', 'Opened review, whose copies differ: the choice first, then each tool\'s switch and Remove.');
+  await a.click('#open-review');
+  writeFileSync(join(practice, '.copilot/settings.json'), '{ not json');
+  await a.click('#header-refresh'); await a.click('#open-notes');
+  await shot(a, 'switch-unavailable', 'Outside the app, Copilot\'s settings.json was broken, then Refresh: its row says Disable unavailable, with the reason as the row\'s text.');
+  rmSync(join(practice, '.copilot/settings.json'));
+  await a.click('#header-refresh');
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: width > 1300 ? 1 : 2, mobile: false });
+    for (const theme of ['dark', 'light']) {
+      await a.theme(theme);
+      if (!(await a.has('.details'))) await a.click('#open-notes');
+      await shot(a, `size-${width}-${theme}`, `notes' details (managed, disabled in Codex) at ${width}×${height}, ${theme}.`);
+    }
+  }
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false });
+  await a.theme('dark'); await a.click('#enable-notes-claude-cli'); await a.click('#remove-notes-copilot-cli');
+  await shot(a, 'pending-860-dark', 'At 860×560: queued Disable in Claude Code and Remove in Copilot CLI for notes, not applied.');
+  await a.click('#discard');
+  if (!(await a.has('.details'))) await a.click('#open-notes');
+  await a.click('#files-notes'); await shot(a, 'files-view-860-dark', 'At 860×560: clicked "Files and contents" for notes. The details pane is narrow here, so each tool\'s switch and Remove share the tool\'s line.');
+  await a.click('#skills-table');
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
+  await a.theme('dark');
 }
 
 // ---------- Sync, notices and History ----------
@@ -199,8 +254,7 @@ if (wanted('plugins')) {
   const market = join(scratch, 'market');
   writeMarket(market);
   await a.click('#nav-plugins'); await shot(a, 'plugins-empty', 'Clicked "Plugins" before adding a marketplace.');
-  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-  await a.click('#add-marketplace'); await shot(a, 'plugins-added', 'Typed a marketplace folder (a local copy of a team marketplace) into "Add a marketplace" and clicked Add.');
+  await addMarketplace(a, market); await shot(a, 'plugins-added', 'Typed a marketplace folder (a local copy of a team marketplace) into "Add a marketplace" and clicked Add.');
   await a.click('#market-tab-about'); await waitFor(a, `!!document.querySelector('.plugin-readme, .plugin-muted')`); await shot(a, 'plugins-about', 'Clicked the "About" tab.');
   await a.click('#market-tab-plugins');
   await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-group')`); await shot(a, 'plugin-page', 'Clicked the "document-tools" row.');
@@ -211,6 +265,177 @@ if (wanted('plugins')) {
   await a.click('#plugin-back');
   await a.click('#popen-0-spark'); await waitFor(a, `!!document.querySelector('.plugin-group, .plugin-muted:not(:empty)') && !/Reading/.test(document.querySelector('.plugin-page')?.textContent ?? '')`, 60000); await shot(a, 'plugin-page-remote', 'Opened "spark", whose files live in GitHub’s copilot-plugins repository (read from there).');
   if (await a.has('#plugins-undo')) { await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); await shot(a, 'plugins-undone', 'Clicked "Undo" on the result of Apply all.'); }
+}
+
+// ---------- One skill of an installed plugin, off and back on (ENB-06) ----------
+if (wanted('plugin-skills')) {
+  begin('plugin-skills');
+  const market = join(scratch, 'market');
+  if (!existsSync(market)) writeMarket(market);
+  // document-tools as each tool records it installed: Claude Code's installed_plugins.json, Codex's config.toml and plugin
+  // cache, Copilot CLI's config.json. A stand-in `copilot` keeps its skill switch in settings.json as the real one does.
+  const copyTo = folder => { for (const name of ['pdf-reader', 'spreadsheet']) { mkdirSync(join(folder, 'skills', name), { recursive: true }); writeFileSync(join(folder, 'skills', name, 'SKILL.md'), readFileSync(join(market, 'plugins/document-tools/skills', name, 'SKILL.md'))); } return folder; };
+  const claudeCopy = copyTo(join(practice, '.claude/plugins/cache/ck-tools/document-tools/1.2.0'));
+  writeFileSync(join(practice, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'document-tools@team-tools': [{ scope: 'user', installPath: claudeCopy, version: '1.2.0' }] } }));
+  copyTo(join(practice, '.codex/plugins/cache/team-tools/document-tools/1.2.0'));
+  edit(join(practice, '.codex/config.toml'), text => `${text}\n[marketplaces.team-tools]\nsource = ${JSON.stringify(market)}\n\n[plugins."document-tools@team-tools"]\nenabled = true\n`);
+  const copilotCopy = copyTo(join(practice, '.copilot/installed-plugins/team-tools/document-tools'));
+  mkdirSync(join(practice, '.copilot'), { recursive: true });
+  writeFileSync(join(practice, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'document-tools', marketplace: 'team-tools', version: '1.2.0', cache_path: copilotCopy }] }));
+  mkdirSync(join(HOME, '.local/bin'), { recursive: true });
+  // Codex's switch is its config.toml, so its CLI is only asked its version (the switch is offered from a tested build).
+  writeFileSync(join(HOME, '.local/bin/codex'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli 0.167.0" && exit 0\nexit 9\n`, { mode: 0o755 });
+  writeFileSync(join(HOME, '.local/bin/copilot'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.108." && exit 0\nS="$HOME/.copilot/settings.json"\ncase "$1 $2" in\n  "skill disable") printf '{"disabledSkills":["%s"]}' "$3" > "$S" ;;\n  "skill enable") printf '{"disabledSkills":[]}' > "$S" ;;\n  *) exit 9 ;;\nesac\n`, { mode: 0o755 });
+  const at860 = async (name, caption) => {
+    await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();
+    await a.run(`document.querySelector('.plugin-skills')?.scrollIntoView({ block: 'start' })`); await wait(150);
+    await shot(a, name, caption);
+    await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
+  };
+  await a.click('#nav-plugins');
+  if (await a.has('#plugin-back')) await a.click('#plugin-back');
+  if (await a.has('#marketplace-source')) {
+    await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.click('#add-marketplace');
+  }
+  await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#pcell-0-document-tools-codex-cli[data-state="installed"]')`, 15000);
+  await shot(a, 'plugins-installed', 'document-tools is installed in Claude Code, Copilot CLI and Codex (by each tool’s own record). Clicked Refresh on team-tools.');
+  await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-skills')`);
+  await shot(a, 'skills-switches', 'Opened document-tools. Its skills each have a switch in Copilot CLI and Codex; Claude Code has no switch for one skill of a plugin.');
+  await a.click('#pskill-0-document-tools-pdf-reader-codex-cli');
+  await a.click('#pskill-0-document-tools-pdf-reader-copilot-cli');
+  await shot(a, 'skill-chosen', 'Clicked pdf-reader’s switches under Codex and Copilot CLI. Nothing has changed yet: both wait for Apply all.');
+  await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').focus({ focusVisible: true })`);
+  await shot(a, 'skill-focus', 'Moved keyboard focus to pdf-reader’s chosen Codex switch (as Tab would): focus ring and waiting ring together.');
+  await a.theme('light'); await shot(a, 'skill-focus-light', 'The same, in the light appearance.'); await a.theme('dark');
+  await a.run(`document.activeElement?.blur()`);
+  await at860('skill-chosen-860', 'The chosen state at 860×560, scrolled to the skills.');
+  await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle();
+  await shot(a, 'skill-off', 'Clicked Apply all. Codex’s config.toml now names document-tools:pdf-reader with enabled = false, and Copilot CLI ran `copilot skill disable document-tools:pdf-reader`.');
+  await a.theme('light'); await shot(a, 'skill-off-light', 'The same, in the light appearance.'); await a.theme('dark');
+  for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
+    await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: width > 2000 ? 1 : 2, mobile: false }); await a.settle();
+    await shot(a, `skill-off-${width}`, `The same page at ${width}×${height}.`);
+    await a.theme('light'); await shot(a, `skill-off-${width}-light`, `The same at ${width}×${height}, light.`); await a.theme('dark');
+  }
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
+  await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle();
+  await shot(a, 'skill-undone', 'Clicked Undo: pdf-reader is on again in both tools.');
+  writeFileSync(join(practice, '.copilot/settings.json'), JSON.stringify({ disabledSkills: ['spreadsheet'] }));
+  await a.click('#plugin-back'); await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#pcell-0-document-tools-copilot-cli')`, 15000); await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-skills')`);
+  await shot(a, 'skill-held', 'Turned every skill named “spreadsheet” off in Copilot CLI outside Central Knot (`copilot skill disable spreadsheet`), then reopened the page: it shows off there, locked, and can’t be turned on for this plugin alone (its row says why).');
+  await at860('skill-held-860', 'The held state at 860×560, scrolled to the skills.');
+  await a.theme('light'); await at860('skill-held-860-light', 'The held state at 860×560, light.'); await a.theme('dark');
+}
+
+// ---------- Plugin versions and skill text ----------
+if (wanted('plugin-versions')) {
+  begin('plugin-versions');
+  const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
+  const market = join(scratch, 'market');
+  if (!existsSync(market)) writeMarket(market);
+  // Claude Code has document-tools 1.1.0, whose pdf-reader skill was worded differently; Codex has the marketplace's 1.2.0.
+  writeClaudeInstall(practice, 'team-tools', 'document-tools', '1.1.0', {
+    'skills/pdf-reader/SKILL.md': '---\nname: pdf-reader\ndescription: "Reads PDF files and pulls out text."\n---\n\nOpen the PDF and copy out its text.\n',
+    'skills/spreadsheet/SKILL.md': readFileSync(join(market, 'plugins/document-tools/skills/spreadsheet/SKILL.md'), 'utf8'),
+  });
+  cpSync(join(market, 'plugins/document-tools'), join(practice, '.codex/plugins/cache/team-tools/document-tools/1.2.0'), { recursive: true });
+  // Both Claude Code and Codex have issue-tracker 1.9.0 (the marketplace offers 2.0.0): two tools named on one list row.
+  writeClaudeInstall(practice, 'team-tools', 'issue-tracker', '1.9.0', { 'skills/triage/SKILL.md': readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8') });
+  cpSync(join(market, 'plugins/issue-tracker'), join(practice, '.codex/plugins/cache/team-tools/issue-tracker/1.9.0'), { recursive: true });
+  edit(join(practice, '.codex/config.toml'), text => `${text.replace(/\n*$/, '\n')}\n[plugins."document-tools@team-tools"]\nenabled = true\n\n[plugins."issue-tracker@team-tools"]\nenabled = true\n`);
+  await a.click('#nav-plugins');
+  if (await a.has('#plugin-back')) await a.click('#plugin-back');
+  // Added already by the plugins feature: read again, so the installs written above show.
+  if (await a.has('[data-plugin="document-tools"]')) { await a.click('#header-refresh'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); }
+  else {
+    await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.click('#add-marketplace');
+  }
+  await shot(a, 'list-versions', 'The team-tools marketplace (a local folder). Claude Code has document-tools 1.1.0; Codex has 1.2.0, the version the marketplace offers. Both have issue-tracker 1.9.0 where the marketplace offers 2.0.0. Copilot CLI isn\'t installed on this machine.');
+  await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('#pfile-0-skills-pdf-reader')`);
+  await shot(a, 'plugin-versions', 'Clicked the "document-tools" row.');
+  await a.click('#pfile-0-skills-pdf-reader');
+  await shot(a, 'skill-open', 'Clicked "pdf-reader" under Skills: its SKILL.md. Claude Code\'s copy (1.1.0) differs from the marketplace\'s and Codex\'s (1.2.0), so each text shows, named.');
+  await a.run(`document.querySelector('.plugin-file').scrollIntoView({ block: 'center' })`); await a.settle();
+  await shot(a, 'skill-open-scrolled', 'Scrolled down to the opened SKILL.md.');
+  await a.click('#pfile-0-skills-spreadsheet');
+  await a.run(`document.querySelector('#pfile-0-skills-spreadsheet').scrollIntoView({ block: 'center' })`); await a.settle();
+  await shot(a, 'skill-same-everywhere', 'Also opened "spreadsheet", whose text is the same in every copy: one block, named as such.');
+  await a.click('#pfile-0-skills-spreadsheet');
+  await a.run(`document.querySelector('#pfile-0-skills-spreadsheet').focus()`);
+  await shot(a, 'keyboard-focus', 'Closed "spreadsheet" again; the keyboard focus is on its name.');
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await size(width, height);
+    await a.run(`document.querySelector('.plugin-page')?.closest('.scroll')?.scrollTo(0, 0)`);
+    await a.theme('dark'); await shot(a, `plugin-${width}-dark`, `document-tools with pdf-reader open, at ${width}×${height}, dark.`);
+    await a.theme('light'); await shot(a, `plugin-${width}-light`, `The same, light.`);
+    if (width === 860 || width === 2560) { await a.run(`document.querySelector('.plugin-file').scrollIntoView({ block: 'center' })`); await a.settle(); await shot(a, `plugin-${width}-file-light`, `At ${width}×${height}, scrolled to the opened SKILL.md.`); await a.theme('dark'); }
+  }
+  await a.theme('dark');
+  await a.click('#plugin-back');
+  await size(860, 560); await a.run(`document.querySelector('[data-plugin="issue-tracker"]').scrollIntoView({ block: 'center' })`); await a.settle();
+  await shot(a, 'list-860', 'Back to the marketplace list at 860×560, scrolled to issue-tracker, which two tools have at another version.');
+  await a.theme('light'); await shot(a, 'list-860-light', 'The same, light.'); await a.theme('dark');
+  await size(2560, 1440); await a.theme('light'); await shot(a, 'list-2560-light', 'The marketplace list at 2560×1440, light.');
+  await size(1280, 800); await a.theme('dark');
+}
+
+// ---------- A plugin's parts in tools without plugins ----------
+if (wanted('parts')) {
+  begin('parts');
+  // Pi is in the home (it takes no plugins), and no tool's CLI is on this tour's PATH, so Codex and Copilot CLI can't
+  // take plugins here either: each can take a plugin's parts instead.
+  mkdirSync(join(practice, '.pi/agent'), { recursive: true });
+  await a.run('window.centralKnot.refresh()');
+  const market = join(scratch, 'parts-market');
+  writeMarket(market);
+  await a.click('#nav-skills'); await a.click('#nav-plugins');
+  if (await a.has('#marketplace-source')) {
+    await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.click('#add-marketplace');
+  }
+  if (await a.has('#plugin-back')) await a.click('#plugin-back');
+  const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
+  await shot(a, 'list-offers', 'Plugins, team-tools: Pi takes no plugins, and Codex and Copilot CLI have no CLI on this computer, so their boxes are hatched with a plus: a click chooses the plugin’s parts instead.');
+  await a.click('#popen-0-issue-tracker'); await waitFor(a, `/(Can go in|Installed|Out of date)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
+  await shot(a, 'page-offer', 'Opened issue-tracker: "Its parts, as separate items" says which tools can take them and what goes in.');
+  await a.click('#pcell-0-issue-tracker-pi-cli'); await a.click('#pcell-0-issue-tracker-codex-cli');
+  await shot(a, 'page-chosen', 'Clicked the Pi and Codex boxes: both wait for Apply all.');
+  await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await shot(a, 'page-installed', 'Clicked Apply all: the skill and MCP server went into Pi and Codex as ordinary items.');
+  await a.click('#plugin-back');
+  await a.click('#popen-0-release-helper'); await waitFor(a, `/(Can go in|Nothing in it)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
+  await shot(a, 'page-left-behind', 'Opened release-helper (a command, an agent and hooks): what goes in where, and what stays with the plugin.');
+  await a.click('#plugin-back'); await shot(a, 'list-installed', 'Back to the list: Pi and Codex show the parts mark.');
+  await a.click('#nav-skills'); if (await a.has('#open-triage')) await a.click('#open-triage');
+  await shot(a, 'skills-provenance', 'Skills page, triage opened: it says which plugin it came from, with a way to its page.');
+  await a.click('#nav-mcp'); if (await a.has('#open-issues')) await a.click('#open-issues');
+  await shot(a, 'mcp-provenance', 'MCP page, issues opened: the server in Pi’s and Codex’s own formats, from issue-tracker.');
+  // The marketplace publishes a new version: the triage skill changed.
+  edit(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), text => text.replace('Follow the steps.', 'Follow the steps, then label it.'));
+  edit(join(market, '.claude-plugin/marketplace.json'), text => text.replace('"version": "2.0.0"', '"version": "2.1.0"'));
+  await a.click('#nav-plugins'); if (await a.has('#plugin-back')) await a.click('#plugin-back');
+  await a.click('#header-refresh'); await waitFor(a, `document.querySelector('#pcell-0-issue-tracker-pi-cli')?.dataset.state === 'parts-changed'`, 60000);
+  await shot(a, 'list-out-of-date', 'The marketplace published 2.1.0 and Refresh read it again: the parts show as out of date.');
+  await a.click('#popen-0-issue-tracker'); await waitFor(a, `/(Can go in|Installed|Out of date)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
+  await shot(a, 'page-out-of-date', 'issue-tracker’s page: "Parts out of date" with Update parts.');
+  await a.click('#pparts-issue-tracker'); await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await shot(a, 'page-updated', 'Clicked Update parts, then Apply all.');
+  await a.click('#pcell-0-issue-tracker-pi-cli'); await shot(a, 'page-remove-chosen', 'Clicked Pi’s box: its parts are chosen for removal.');
+  await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await shot(a, 'page-removed', 'Clicked Apply all: Pi’s parts were removed together.');
+  if (await a.has('#plugins-undo')) { await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); await shot(a, 'page-undone', 'Clicked Undo: Pi’s parts are back.'); }
+  await a.theme('light'); await shot(a, 'page-light', 'The same page in the light appearance.');
+  await a.click('#plugin-back'); await shot(a, 'list-light', 'The list in the light appearance.'); await a.theme('dark');
+  for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
+    await size(width, height);
+    await shot(a, `list-${width}`, `The list at ${width}×${height}.`);
+    await a.click('#popen-0-issue-tracker'); await waitFor(a, `/(Can go in|Installed|Out of date)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
+    await shot(a, `page-${width}`, `issue-tracker’s page at ${width}×${height}.`);
+    await a.click('#plugin-back');
+  }
+  await size(1280, 800);
 }
 
 // ---------- Instructions ----------
@@ -693,6 +918,71 @@ if (wanted('base')) {
   await shot(a, 'base-860-review-discard', 'At 860×560: Edit text or tools, added a line, Review changes, then Discard changes (the question is open).');
   await a.click('#base-review-discard-yes');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
+}
+
+// ---------- Scrolled pages: sticky headers and toolbars (last: it adds a lot to the practice copy) ----------
+if (wanted('scroll')) {
+  begin('scroll');
+  // Stand-in CLIs (they answer --version and refuse anything else), so the plugin boxes are live and the column header
+  // shows its "Click a box…" hint, as on a computer with the tools installed. Nothing is clicked, so nothing runs.
+  mkdirSync(join(HOME, '.local/bin'), { recursive: true });
+  for (const [name, version] of [['claude', '2.1.309 (Claude Code)'], ['copilot', 'GitHub Copilot CLI 1.0.107.'], ['codex', 'codex-cli 0.142.3']]) {
+    writeFileSync(join(HOME, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`);
+    chmodSync(join(HOME, '.local/bin', name), 0o755);
+  }
+  // A marketplace long enough to scroll (35 plugins), and a second one so the header shows "Refresh all".
+  const long = join(scratch, 'long-market');
+  writeMarket(long, 'long-list');
+  edit(join(long, '.claude-plugin/marketplace.json'), text => JSON.stringify({ ...JSON.parse(text), plugins: Array.from({ length: 35 }, (_, index) => ({
+    name: `team-plugin-${String(index + 1).padStart(2, '0')}`, source: './plugins/issue-tracker', category: index % 3 ? 'development' : 'productivity',
+    description: index % 2 ? 'MCP server for the team tracker, with skills for triage' : 'A longer description that goes on for a while to show how a row with plenty of text wraps or ends with an ellipsis at narrow sizes',
+  })) }, null, 2));
+  const second = join(scratch, 'second-market');
+  writeMarket(second, 'second-list');
+  await a.click('#nav-plugins');
+  for (const source of [long, second]) await addMarketplace(a, source);
+  await a.run(`[...document.querySelectorAll('.market-item')].find(item => /long-list/.test(item.textContent))?.click()`); await a.settle();
+  // Enough skills, MCP servers and agents in the practice copy that every table scrolls at every size.
+  for (let index = 1; index <= 40; index++) {
+    const name = `extra-${String(index).padStart(2, '0')}`;
+    for (const tool of index % 2 ? ['.claude'] : ['.claude', '.copilot']) {
+      mkdirSync(join(practice, tool, 'skills', name), { recursive: true });
+      writeFileSync(join(practice, tool, 'skills', name, 'SKILL.md'), `---\nname: ${name}\ndescription: An extra skill so the table scrolls.\n---\n\nFollow the steps.\n`);
+    }
+    writeFileSync(join(practice, '.claude/agents', `${name}.md`), `---\nname: ${name}\ndescription: An extra agent so the table scrolls.\n---\n\nDo the task.\n`);
+  }
+  edit(join(practice, '.copilot/mcp-config.json'), text => {
+    const config = JSON.parse(text);
+    for (let index = 1; index <= 40; index++) config.mcpServers[`extra-${String(index).padStart(2, '0')}`] = { type: 'local', command: 'npx', args: ['-y', `@example/extra-${index}`], tools: ['*'] };
+    return JSON.stringify(config, null, 2);
+  });
+  await a.click('#header-refresh');
+  const sizes = [[860, 560, 2], [1280, 800, 2], [1728, 1117, 1], [2560, 1440, 1]];
+  // Scrolls the page's main scroller (the tallest one that can scroll) by `by` pixels, so sticky parts are tested over rows.
+  // Returns what scrolled and how far its pinned column header sits below the scroller's top (0 when the stack is right).
+  const scroll = by => a.run(`(() => {
+    const box = [...document.querySelectorAll('#page .scroll')].filter(e => e.scrollHeight > e.clientHeight).sort((x, y) => y.clientHeight - x.clientHeight)[0];
+    if (!box) return 'nothing scrolls';
+    box.scrollTop = ${by};
+    const head = box.querySelector('.ov-head');
+    if (!head) return box.id || box.className;
+    return (box.id || box.className) + '; column header ' + Math.round(head.getBoundingClientRect().top - box.getBoundingClientRect().top) + 'px below the scroller top';
+  })()`);
+  for (const page of ['plugins', 'overview', 'skills', 'mcp', 'agents', 'settings']) {
+    if (!(await a.has(`#nav-${page}`))) continue;
+    await a.click(`#nav-${page}`);
+    for (const [width, height, scale] of sizes) {
+      await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scale, mobile: false });
+      for (const theme of ['dark', 'light']) {
+        await a.theme(theme);
+        const what = await scroll(Math.round(height * 0.4)); await wait(100);
+        await shot(a, `${page}-${width}-${theme}`, `${page} at ${width}×${height}, ${theme}, main list scrolled down ${Math.round(height * 0.4)}px (${what}).`);
+      }
+      await scroll(0);
+    }
+  }
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
+  await a.theme('dark');
 }
 
 a.quit();

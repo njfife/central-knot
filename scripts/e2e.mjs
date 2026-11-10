@@ -6,7 +6,7 @@ import { chmodSync, cpSync, existsSync, renameSync, lstatSync, mkdirSync, mkdtem
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
-import { writeMarket } from './fixture-market.mjs';
+import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
 import { connect, DAY, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
 
 const args = process.argv.slice(2);
@@ -335,6 +335,28 @@ async function practiceFlow() {
   same('Codex is a column and gets its copies too', [await a.exists('#tool-codex-cli'), existsSync(join(practice, '.codex/skills/notes/SKILL.md')), existsSync(join(practice, '.codex/skills/standup/SKILL.md'))], [true, true, true]);
   check('Codex’s own .system skills stay untouched and unlisted', existsSync(join(practice, '.codex/skills/.system/openai-docs/SKILL.md')) && !(await rowKeys(a)).includes('openai-docs'));
 
+  // Disable and Remove, per tool: Codex's own switch turns standup off there while its copy stays; Undo flips it back, byte for byte.
+  // Remove takes only Codex's copy of notes out, and Restore puts it back.
+  const switchConfig = join(practice, '.codex/config.toml');
+  const switchBefore = readFileSync(switchConfig, 'utf8');
+  await a.click('#open-standup');
+  await a.click('#enable-standup-codex-cli');
+  check('Disable waits for Apply all', readFileSync(switchConfig, 'utf8') === switchBefore && (await a.text('.apply-count') ?? '').includes('1 copy to disable'), await a.text('.apply-count'));
+  await applyAll(a);
+  check('Disable writes Codex’s own switch and keeps the copy', readFileSync(switchConfig, 'utf8').endsWith(`[[skills.config]]\npath = ${JSON.stringify(join(practice, '.codex/skills/standup/SKILL.md'))}\nenabled = false\n`) && existsSync(join(practice, '.codex/skills/standup/SKILL.md')), readFileSync(switchConfig, 'utf8'));
+  same('the Codex cell is marked disabled, the others are not', [await a.exists('.ov-row[data-key="standup"] [data-tool="codex-cli"] .cell-disabled'), await a.exists('.ov-row[data-key="standup"] [data-tool="claude-cli"] .cell-disabled')], [true, false]);
+  await a.click('#outcome-undo-switch');
+  same('Undo enables it again and leaves config.toml as it was', readFileSync(switchConfig, 'utf8'), switchBefore);
+  await a.click('#open-notes');
+  await a.click('#remove-notes-codex-cli');
+  await applyAll(a);
+  same('Remove takes out only Codex’s copy', [existsSync(join(practice, '.codex/skills/notes')), existsSync(join(practice, '.claude/skills/notes/SKILL.md')), existsSync(join(practice, '.copilot/skills/notes/SKILL.md'))], [false, true, true]);
+  await a.click('#nav-history');
+  await a.run(`document.querySelector('.history-row[data-kind="removed"] button').click()`);
+  await a.settle();
+  same('Restore in History puts it back', readFileSync(join(practice, '.codex/skills/notes/SKILL.md'), 'utf8'), readFileSync(join(practice, '.claude/skills/notes/SKILL.md'), 'utf8'));
+  await a.click('#nav-skills');
+
   // Two-way: an edit in one tool spreads on the next read, Undo puts it back; a deletion spreads after the settle window; Restore returns it.
   const standupPath = tool => join(practice, `.${tool}/skills/standup/SKILL.md`);
   const standupBefore = readFileSync(standupPath('claude'), 'utf8');
@@ -531,8 +553,9 @@ async function practiceFlow() {
   await a.click('#list-standup');
   check('the details show the skill', (await a.text('.pane-title')).includes('standup') && (await a.exists('#detail-scroll .details-paths')), await a.text('.pane-title'));
   check('its folders and contents are shown', (await a.text('#detail-scroll .details-paths')).includes('/.copilot/skills/standup') && (await a.text('#detail-scroll pre.content')).includes('name:'), await a.text('#detail-scroll'));
-  // Stacked (this window), the file comes before where each copy is, and nothing to delete sits above the file.
-  same('stacked, the file comes first, then where each copy is', await a.run(`(() => { const order = [...document.querySelectorAll('#detail-scroll pre.content, #detail-scroll .details-paths, #detail-scroll [id^="delete-"]')].map(e => e.matches('pre') ? 'file' : e.matches('.details-paths') ? 'where' : 'delete'); return order.filter((entry, index) => order.indexOf(entry) === index); })()`), ['file', 'where']);
+  // Stacked (this window), the file comes before where each copy is, and nothing to delete sits above the file (an unmanaged
+  // skill's Delete everywhere comes last).
+  same('stacked, the file comes first, then where each copy is', await a.run(`(() => { const order = [...document.querySelectorAll('#detail-scroll pre.content, #detail-scroll .details-paths, #detail-scroll [id^="delete-"]')].map(e => e.matches('pre') ? 'file' : e.matches('.details-paths') ? 'where' : 'delete'); return order.filter((entry, index) => order.indexOf(entry) === index); })()`), ['file', 'where', 'delete']);
   // A wide pane (here at 1728) puts the details in a column at the right: where each copy is open from the start, the
   // file's box spanning to meet it.
   await sizeTo(a, 1728, 1117);
@@ -688,11 +711,30 @@ async function practiceFlow() {
   // Plugins: a folder marketplace is browsed (its README, each plugin's contents) and installs are chosen, then applied.
   const market = join(scratch, 'market');
   writeMarket(market, 'ck-test-market');
+  // Claude Code has an older issue-tracker (1.9.0, its triage skill worded differently); the marketplace offers 2.0.0.
+  writeClaudeInstall(practice, 'ck-test-market', 'issue-tracker', '1.9.0', {
+    'skills/triage/SKILL.md': '---\nname: triage\ndescription: Sorts new issues.\n---\n\nThe old steps.\n',
+    'skills/old-triage/SKILL.md': '---\nname: old-triage\ndescription: Dropped in 2.0.0.\n---\n',
+  });
   await a.click('#nav-plugins');
   check('no marketplaces yet', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
   await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#add-marketplace');
   check('the marketplace is listed and opened, with its plugins', (await a.text('.market-list')).includes('ck-test-market') && await a.exists('[data-plugin="document-tools"]') && (await a.text('.market-title-line')).includes('By Platform team'), await a.text('#plugins-scroll'));
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 1, mobile: false });
+  // Scrolled just past the header's own place, it stays flush with the scroller's top while the first row passes under it.
+  // The scroller is held short for the measurement, so the five-plugin fixture scrolls far enough at any layout.
+  const pinned = await a.run(`(() => {
+    const box = document.querySelector('#plugins-scroll'), head = document.querySelector('.plugin-table .ov-head'), top = () => box.getBoundingClientRect().top;
+    const style = box.style.cssText;
+    box.style.flex = 'none'; box.style.height = '160px';
+    box.scrollTop = head.getBoundingClientRect().top - top() + 20;
+    const gap = Math.round(head.getBoundingClientRect().top - top()), rowUnder = document.querySelector('.plugin-row').getBoundingClientRect().top < head.getBoundingClientRect().bottom;
+    box.scrollTop = 0; box.style.cssText = style;
+    return { gap, rowUnder };
+  })()`);
+  same('scrolled at 860×560, the plugin column header pins flush to the top, with no rows showing above it', pinned, { gap: 0, rowUnder: true });
+  await a.send('Emulation.clearDeviceMetricsOverride');
   check('a root-level entry counts only the skills it lists', (await a.text('[data-plugin="starter-skills"]')).includes('1 skill'), await a.text('[data-plugin="starter-skills"]'));
   // Read ahead from its own repository when the network allows: what it holds; otherwise where it comes from.
   check('a plugin elsewhere says what it holds, that it is reading it, or where it comes from', /From GitHub: github\/copilot-plugins\/plugins\/spark|Reading what it holds…|\d+ skills?/.test(await a.text('[data-plugin="spark"]')), await a.text('[data-plugin="spark"]'));
@@ -821,6 +863,30 @@ async function practiceFlow() {
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme-body')); tries++) await wait(100);
   check('About shows the README, with its HTML dropped and its link kept', (await a.text('.plugin-readme-body')).includes('What is inside') && !(await a.text('.plugin-readme-body')).includes('<p') && await a.exists('.plugin-readme-body .md-link'), await a.text('.plugin-readme-body'));
   await a.click('#market-tab-plugins');
+  check('a row shows the version offered, and a tool that has another', /2\.0\.0/.test(await a.text('[data-plugin="issue-tracker"] .plugin-row-version')) && /Claude Code has\s1\.9\.0/.test(await a.text('[data-plugin="issue-tracker"] .plugin-version-differs')), await a.text('[data-plugin="issue-tracker"]'));
+  await a.click('#popen-0-issue-tracker');
+  for (let tries = 0; tries < 30 && !(await a.exists('#pfile-0-skills-triage')); tries++) await wait(100);
+  check('the plugin page says which version Claude Code has', /Installed · 1\.9\.0\s*Marketplace has 2\.0\.0/.test(await a.text('.plugin-panel')), await a.text('.plugin-panel'));
+  check('a skill only an installed copy has says where it is', (await a.text('#pfile-0-skills-old-triage')).includes('Only in Claude Code (1.9.0)'), await a.text('.plugin-page'));
+  check('a closed skill row names the tool whose copy differs', (await a.text('#pfile-0-skills-triage')).includes('Claude Code (1.9.0) differs from the marketplace’s copy'), await a.text('#pfile-0-skills-triage'));
+  await a.click('#pfile-0-skills-triage');
+  same('a skill opens its SKILL.md as written, one block per version that differs', await a.all('.plugin-file .content-block', '[e.querySelector(".content-owner")?.textContent, e.querySelector("pre").textContent]'),
+    [['SKILL.md · Marketplace (2.0.0)', readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8')], ['SKILL.md · Claude Code (1.9.0)', '---\nname: triage\ndescription: Sorts new issues.\n---\n\nThe old steps.\n']]);
+  // Claude Code lets it go outside the app; coming back to Plugins reads the install states, and the copies, again.
+  writeFileSync(join(practice, '.claude/plugins/installed_plugins.json'), '{"version":2,"plugins":{}}');
+  await a.click('#nav-skills');
+  await a.click('#nav-plugins');
+  if (!(await a.exists('#pfile-0-skills-triage'))) await a.click('#popen-0-issue-tracker');
+  for (let tries = 0; tries < 30 && /1\.9\.0/.test(await a.text('.plugin-page') ?? '1.9.0'); tries++) await wait(100);
+  check('a copy a tool no longer has is gone from the page', !/1\.9\.0/.test(await a.text('.plugin-page')) && /not installed/i.test(await a.text('.plugin-panel')), await a.text('.plugin-page'));
+  // The marketplace moves issue-tracker on; after Refresh its row offers the new version, not one read before.
+  writeFileSync(join(market, '.claude-plugin/marketplace.json'), readFileSync(join(market, '.claude-plugin/marketplace.json'), 'utf8').replace('"version": "2.0.0"', '"version": "2.1.0"'));
+  await a.click('#plugin-back');
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 30 && !/2\.1\.0/.test(await a.text('[data-plugin="issue-tracker"] .plugin-row-version') ?? ''); tries++) await wait(100);
+  check('after Refresh a row offers the marketplace’s new version', (await a.text('[data-plugin="issue-tracker"] .plugin-row-version')) === '2.1.0', await a.text('[data-plugin="issue-tracker"]'));
+  await a.click('#popen-0-issue-tracker');
+  await a.click('#plugin-back');
   await a.click('#popen-0-release-helper');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-group')); tries++) await wait(100);
   check('a plugin page names what it holds', /release-notes[\s\S]*Drafts release notes/.test(await a.text('.plugin-page')) && (await a.text('.plugin-page')).includes('release-reviewer') && (await a.text('.plugin-page')).includes('Runs on PreToolUse'), await a.text('.plugin-page'));
@@ -855,6 +921,51 @@ async function practiceFlow() {
   check('a refused install is reported as such', /Could not add the marketplace\. It stopped with exit code 9/.test(await a.text('.plugin-problems')), await a.text('.bands'));
   await a.shot('practice-plugins');
   same('and nothing is claimed installed', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].filter(cell => cell.dataset.state === 'installed').length`), 0);
+  // A plugin's parts in a tool without plugins (Pi): its skill and MCP server go in as ordinary items, marked as from it, and Undo takes them out.
+  mkdirSync(join(practice, '.pi/agent'), { recursive: true });
+  await a.run('window.centralKnot.refresh()');
+  await a.click('#nav-skills');
+  await a.click('#nav-plugins');
+  await a.click('#plugin-back');
+  same('Pi is a column whose box offers the plugin’s parts', await a.run(`document.querySelector('#pcell-0-issue-tracker-pi-cli')?.dataset.state`), 'parts-offer');
+  await a.click('#popen-0-issue-tracker');
+  for (let tries = 0; tries < 40 && !/Can go in/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
+  check('its page says what goes into Pi', /takes no plugins[\s\S]*Can go in: skill triage · MCP server issues/.test(await a.text('.plugin-parts-section') ?? ''), await a.text('.plugin-parts-section'));
+  await a.click('#pcell-0-issue-tracker-pi-cli');
+  await a.click('#plugins-apply');
+  const piMcp = join(practice, '.pi/agent/mcp.json');
+  check('the skill and MCP server are in Pi, values as they are', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && existsSync(piMcp) && JSON.parse(readFileSync(piMcp, 'utf8')).mcpServers?.issues?.args?.[1] === '@example/issues-mcp', existsSync(piMcp) ? readFileSync(piMcp, 'utf8') : await a.text('.bands'));
+  same('Pi’s box shows its parts', await a.run(`document.querySelector('#pcell-0-issue-tracker-pi-cli')?.dataset.state`), 'parts');
+  await a.shot('practice-plugin-parts');
+  await a.click('#nav-skills');
+  check('the skill says which plugin it came from', /from issue-tracker/.test(await a.text('[data-key="triage"]') ?? ''), await a.text('[data-key="triage"]'));
+  await a.click('#nav-plugins');
+  await a.click('#plugins-undo');
+  check('Undo takes the parts out of Pi', !existsSync(join(practice, '.pi/agent/skills/triage')) && !readFileSync(piMcp, 'utf8').includes('issues'), readFileSync(piMcp, 'utf8'));
+  rmSync(join(practice, '.pi'), { recursive: true, force: true });
+  await a.run('window.centralKnot.refresh()');
+  // One skill of an installed plugin, off and back on (ENB-06): Codex's switch is a [[skills.config]] block naming
+  // document-tools:pdf-reader in config.toml. Codex has it installed as its record says.
+  const codexConfig = join(practice, '.codex/config.toml');
+  const codexCopy = join(practice, '.codex/plugins/cache/ck-test-market/document-tools/1.2.0');
+  mkdirSync(join(codexCopy, 'skills'), { recursive: true });
+  for (const name of ['pdf-reader', 'spreadsheet']) skill(join(codexCopy, 'skills'), name);
+  const configBefore = `${existsSync(codexConfig) ? readFileSync(codexConfig, 'utf8') : ''}\n[marketplaces.ck-test-market]\nsource = ${JSON.stringify(market)}\n\n[plugins."document-tools@ck-test-market"]\nenabled = true\n`;
+  writeFileSync(codexConfig, configBefore);
+  await a.click('#plugin-back');
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 60 && !(await a.run(`(document.querySelector('[data-plugin="document-tools"]')?.textContent ?? '').includes('Installed') || !!document.querySelector('#pcell-0-document-tools-codex-cli[data-state="installed"]')`)); tries++) await wait(100);
+  await a.click('#popen-0-document-tools');
+  for (let tries = 0; tries < 60 && !(await a.exists('#pskill-0-document-tools-pdf-reader-codex-cli')); tries++) await wait(100);
+  same('an installed plugin’s skills each get a switch in the tool that has it, on', await a.all('.plugin-skills .switch', 'e.id + "=" + e.getAttribute("aria-checked")'), ['pskill-0-document-tools-pdf-reader-codex-cli=true', 'pskill-0-document-tools-spreadsheet-codex-cli=true']);
+  await a.click('#pskill-0-document-tools-pdf-reader-codex-cli');
+  check('turning one off only chooses it', /1 skill to turn off/.test(await a.text('.toolbar') ?? '') && readFileSync(codexConfig, 'utf8') === configBefore, await a.text('.toolbar'));
+  await a.click('#plugins-apply');
+  check('Apply all turns it off with Codex’s own switch, by name', readFileSync(codexConfig, 'utf8') === `${configBefore}\n[[skills.config]]\nname = "document-tools:pdf-reader"\nenabled = false\n`, readFileSync(codexConfig, 'utf8'));
+  check('and the page shows it off', await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`) === 'false' && /Installed (· [^·]+ )?· 1 skill off/.test(await a.text('.plugin-panel')) && /pdf-reader turned off in Codex/.test(await a.text('.toolbar') ?? ''), await a.text('.plugin-page'));
+  await a.click('#plugins-undo');
+  same('Undo turns it back on: config.toml is as it was', [readFileSync(codexConfig, 'utf8') === configBefore, await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`)], [true, 'true']);
+  writeFileSync(codexConfig, configBefore.slice(0, configBefore.indexOf('\n[marketplaces.ck-test-market]')));
   await a.click('#plugin-back');
   // About has every fact about the marketplace, and Remove.
   await a.click('#market-tab-about');
@@ -1011,6 +1122,7 @@ async function practiceFlow() {
   }
   // Keep history for: 30 days at first, and History shows only what the window covers. A longer window saves at once; a shorter
   // one asks first (Cancel writes nothing), then removes what is older from this home's History file and from the History page.
+  // This home's History also holds the removals made above, so its intro names Restore too.
   const historyFile = join(practice, '.central-knot/history.json');
   writeFileSync(historyFile, JSON.stringify({ events: [...JSON.parse(readFileSync(historyFile, 'utf8')).events, ...[60, 20, 5].map(days =>
     ({ id: `aged-${days}`, at: new Date(Date.now() - days * DAY).toISOString(), key: `aged-${days}`, item: `aged-${days}-days`, kind: 'edit', winner: { tool: 'claude-cli', hash: '0'.repeat(64) }, losers: [], orderProved: true }))] }));
@@ -1057,7 +1169,7 @@ async function practiceFlow() {
     const listedMeanwhile = await a.text('#history-scroll') ?? '';
     same('while main is busy the row says it is updating and takes no other change; the newest request wins, the overtaken shorter ones remove nothing, and History opened meanwhile agrees with the window that won',
       [during, savedSettings().historyDays, agedOnFile(), [overtaken.pruned ?? 'none', newest.pruned], listedMeanwhile.includes('aged-20-days'), listedMeanwhile.includes('aged-60-days'), await a.text('.history-intro')],
-      [[true, 'Updating History…', false, false, 90, true], 30, ['aged-20', 'aged-5'], ['none', 'done'], true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back. Kept for 30 days. Change in Settings.']);
+      [[true, 'Updating History…', false, false, 90, true], 30, ['aged-20', 'aged-5'], ['none', 'done'], true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back; Restore puts a removed copy back. Kept for 30 days. Change in Settings.']);
     await a.click('#nav-settings');
     same('the row then shows the window that won and takes changes again', [await a.run(`document.querySelector('#history-days').value`), await a.run(`document.querySelector('#history-days').disabled`)], ['30', false]);
     await a.click('#appearance-system');
@@ -1090,7 +1202,7 @@ async function practiceFlow() {
   await a.click('#history-intro-settings');
   same('Shorten saves, removes the older History from this home’s file, says from when (even after a re-read while it waited), and History shows only what is left, how long it keeps it, and the way to Settings',
     [savedSettings().historyDays, agedOnFile(), /^Saved\. History before .+ was removed\.$/.test(removedNote), noteAfterOtherRow, listed.includes('aged-5-days'), listed.includes('aged-20-days'), intro, await a.exists('#history-days')],
-    [7, ['aged-5'], true, false, true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back. Kept for 7 days. Change in Settings.', true]);
+    [7, ['aged-5'], true, false, true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back; Restore puts a removed copy back. Kept for 7 days. Change in Settings.', true]);
   // Start at sign-in: only an installed app can register a login item, so here the row is off, can't be changed, and says why
   // in its hint's place. Main refuses a change too, and nothing about it is saved.
   const signInReason = flag('--electron') ? 'Only the installed app can start at sign-in.' : 'Move Central Knot to the Applications folder first.';

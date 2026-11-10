@@ -12,19 +12,37 @@ async function box() {
   return { base, root: join(base, 'market'), cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 
-test('Paths an entry or plugin.json lists are read instead of the default folders', async () => {
+test('Parts are found as Claude Code and Codex find them: what plugin.json and the entry list, and which default folders stay', async () => {
   const { root, cleanup } = await box();
   try {
     for (const name of ['hello', 'unlisted']) await put(join(root, `skills/${name}/SKILL.md`), `---\nname: ${name}\ndescription: Says ${name}\n---\n`);
+    await put(join(root, 'extra-skills/more/SKILL.md'), '---\nname: more\ndescription: More\n---\n');
     await put(join(root, 'tools/notes.md'), '---\ndescription: Takes notes\n---\n');
-    await put(join(root, '.claude-plugin/plugin.json'), JSON.stringify({ hooks: './config/hooks.json', mcpServers: './config/servers.json' }));
+    await put(join(root, 'commands/ignored.md'), '---\ndescription: Not read\n---\n');
+    await put(join(root, 'tools/status.md'), '---\ndescription: Shows status\n---\n');
+    // commands may also be a map of name to { source } or inline { content }.
+    await put(join(root, '.claude-plugin/plugin.json'), JSON.stringify({ version: '0.9.0', skills: './extra-skills', commands: { status: { source: './tools/status.md' }, about: { content: 'About.' } }, hooks: './config/hooks.json', mcpServers: './config/servers.json' }));
     await put(join(root, 'config/hooks.json'), JSON.stringify({ hooks: { SessionStart: [], PreToolUse: [] } }));
     await put(join(root, 'config/servers.json'), JSON.stringify({ mcpServers: { files: { command: 'npx', args: ['-y', 'files-mcp'] } } }));
-    const contents = await pluginContents(root, { source: './', strict: false, skills: ['./skills/hello'], commands: ['./tools/notes.md'] }, root);
-    assert.deepEqual(contents.skills, [{ name: 'hello', description: 'Says hello' }]);
-    assert.deepEqual(contents.commands, [{ name: 'notes', description: 'Takes notes' }]);
+    const contents = await pluginContents(root, { source: './', version: '1.0.0', skills: ['./skills/hello'], commands: ['./tools/notes.md'] }, root);
+    // Skills: the default folder, plugin.json's list and the entry's, each skill once. Commands: the lists replace commands/.
+    assert.deepEqual(contents.skills.map(skill => skill.name), ['hello', 'more', 'unlisted']);
+    // Each part carries its whole file as written and its place in the plugin, the same in every copy of it.
+    assert.deepEqual(contents.skills[0], { name: 'hello', description: 'Says hello', text: '---\nname: hello\ndescription: Says hello\n---\n', path: join('skills', 'hello') });
+    assert.deepEqual(contents.commands[0], { name: 'notes', description: 'Takes notes', text: '---\ndescription: Takes notes\n---\n', path: join('tools', 'notes.md') });
+    assert.deepEqual(contents.commands.map(command => command.name), ['notes', 'status']);
+    // plugin.json's version wins over the entry's.
+    assert.equal(contents.version, '0.9.0');
     assert.deepEqual(contents.hooks, ['PreToolUse', 'SessionStart']);
     assert.deepEqual(contents.mcpServers, [{ name: 'files', runs: 'npx -y files-mcp' }]);
+    // A marketplace's root plugin whose entry lists skills loads only those.
+    assert.deepEqual((await pluginContents(root, { skills: ['./skills/hello'] }, root, { atMarketplaceRoot: true })).skills.map(skill => skill.name), ['hello']);
+    // Codex: its manifest's list replaces skills/, and an empty list falls back to it.
+    assert.deepEqual((await pluginContents(root, {}, root, { codex: { skills: './extra-skills' } })).skills.map(skill => skill.name), ['more']);
+    assert.deepEqual((await pluginContents(root, {}, root, { codex: { skills: [] } })).skills.map(skill => skill.name), ['hello', 'unlisted']);
+    // A plugin that is one skill: SKILL.md at its root.
+    await put(join(root, 'single/SKILL.md'), '---\nname: single\ndescription: One skill\n---\n');
+    assert.deepEqual((await pluginContents(join(root, 'single'), {}, root)).skills.map(skill => [skill.name, skill.path]), [['single', '.']]);
   } finally { await cleanup(); }
 });
 
@@ -38,12 +56,14 @@ test('Server and hook files are read in every shape plugins use: flat or wrapped
     await put(join(root, '.lsp.json'), JSON.stringify({ gopls: { command: 'gopls' } }));
     await put(join(root, 'hooks/hooks.json'), JSON.stringify({ PreToolUse: [] }));
     await put(join(root, 'commands/git/commit.md'), '---\ndescription: Commits\n---\n');
+    await put(join(root, 'commands/docs/commit.md'), '---\ndescription: Commits the docs\n---\n');
     const contents = await pluginContents(root, { mcpServers: ['./extra/one.json', './extra/two.json'], lspServers: { rust: { command: 'ra' } } }, root);
     assert.deepEqual(contents.mcpServers.map(server => server.name), ['github', 'one', 'two']);
     assert.equal(contents.mcpUsesPluginRoot, true);
     assert.deepEqual(contents.lspServers, ['gopls', 'rust']);
     assert.deepEqual(contents.hooks, ['PreToolUse']);
-    assert.deepEqual(contents.commands.map(command => command.name), ['commit']);
+    // Two commands may share a name in different folders; their places in the plugin tell them apart.
+    assert.deepEqual(contents.commands.map(command => [command.name, command.path]), [['commit', join('commands', 'docs', 'commit.md')], ['commit', join('commands', 'git', 'commit.md')]]);
   } finally { await cleanup(); }
 });
 

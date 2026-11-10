@@ -5,7 +5,7 @@
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
 import { lineDiff } from './diff.ts';
-import { errorCode, landingOf, plainError, recoverParked, sha, removeFileChecked, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { errorCode, landingOf, plainError, recoverParked, removeFileChecked, sha256, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { baseAction, comparableBase, fileWithBase, readersOfFile, sameBase, splitBase } from './basetext.ts';
 import { lineCount, linesOf, toolList } from './words.ts';
 import { harnessIds } from './harnesses.ts';
@@ -25,9 +25,9 @@ const versionsFolder = (home: string, shelf: Shelf) => join(storeDirectory(home)
 const basePath = (home: string) => join(storeDirectory(home), 'instructions', 'base.md');
 const baseListPath = (home: string) => join(storeDirectory(home), 'instructions', 'base-tools.json');
 /** The hash of a base copy as a block holds it, so a copy and the base text it came from compare equal. */
-const copyHash = (copy: string) => sha(comparableBase(copy));
+const copyHash = (copy: string) => sha256(comparableBase(copy));
 /** A file's hash for checks: '' when there is no file. */
-const hashOf = (text: string | undefined) => (text === undefined ? '' : sha(text));
+const hashOf = (text: string | undefined) => (text === undefined ? '' : sha256(text));
 
 /** The file a tool actually reads, with what the editor must say about it (capability data §6). */
 async function bind(tool: HarnessId, root: string): Promise<{ path: string; readers: string; notes: string[] }> {
@@ -109,7 +109,7 @@ function baseState(text: string, readers: HarnessId[], base: StoredBase): BaseHe
   const { own, copy } = splitBase(text);
   const state = copy === undefined ? 'missing' : sameBase(copy, base.text) ? 'same' : base.list.written[tool] === copyHash(copy) ? 'older' : 'edited';
   const chosen = readers.some(reader => base.list.tools.includes(reader)) && !!base.text.trim();
-  return { chosen, state, own, copy, leftPlain: copy === undefined && !!text && base.list.leftPlain[tool] === sha(text) };
+  return { chosen, state, own, copy, leftPlain: copy === undefined && !!text && base.list.leftPlain[tool] === sha256(text) };
 }
 
 /** A file's base part when the file is involved with the base: it gets it, holds a block (left by an Undo, or pasted in), or holds
@@ -187,7 +187,7 @@ async function keep(home: string, shelf: Shelf, current: string) {
   await mkdir(folder, { recursive: true });
   // Two writes in one millisecond (a base apply) still get their own names.
   for (let at = Date.now(); ; at++) {
-    try { await writeFile(join(folder, `${at}-${sha(current).slice(0, 12)}.md`), current, { flag: 'wx' }); return; }
+    try { await writeFile(join(folder, `${at}-${sha256(current).slice(0, 12)}.md`), current, { flag: 'wx' }); return; }
     catch (error) { if (errorCode(error) !== 'EEXIST') throw error; }
   }
 }
@@ -252,7 +252,7 @@ export async function applyBase(context: ShareContext, snapshots: Snapshot[], re
       // A failed write keeps the tool's records, so a retry still knows what Central Knot wrote and left there.
       try { await keepAndWrite(context.home, tool, path, next, current); }
       catch (error) { result.left.push({ tool, why: changedMeanwhile(error) ? 'edited' : 'failed' }); continue; }
-      result.written.push({ tool, path, before: current ?? null, afterHash: sha(next) });
+      result.written.push({ tool, path, before: current ?? null, afterHash: sha256(next) });
     }
     // Taken off with nothing of its own: the base stays in the file as plain text (never emptied), and that text is remembered.
     const leftAsPlain = !isChosen && !unchanged && !splitBase(text).own.trim();
@@ -297,7 +297,7 @@ function recordHeld(list: BaseList, readers: HarnessId[], held: { copy: string }
   for (const reader of readers) {
     delete list.written[reader]; delete list.leftPlain[reader];
     if ('copy' in held) list.written[reader] = copyHash(held.copy);
-    else if (held.plain !== undefined) list.leftPlain[reader] = sha(held.plain);
+    else if (held.plain !== undefined) list.leftPlain[reader] = sha256(held.plain);
   }
 }
 
@@ -322,13 +322,13 @@ export async function undoBase(context: ShareContext, snapshots: Snapshot[], und
     const path = file.path;
     if (!snapshot || relative(snapshot.root, path).startsWith('..')) { result.left.push({ tool: file.tool, why: 'failed' }); continue; }
     const current = await readText(path);
-    if (current === undefined || sha(current) !== file.afterHash) { result.left.push({ tool: file.tool, why: 'edited' }); continue; }
+    if (current === undefined || sha256(current) !== file.afterHash) { result.left.push({ tool: file.tool, why: 'edited' }); continue; }
     try {
       // A file this apply created goes again, exactly as it came: only while it still holds what was written.
       if (file.before === null) { await keep(context.home, file.tool, current); await removeFileChecked(path, current); }
       else await keepAndWrite(context.home, file.tool, path, file.before, current);
     } catch { result.left.push({ tool: file.tool, why: 'failed' }); continue; }
-    result.written.push({ tool: file.tool, path, before: current, afterHash: file.before === null ? '' : sha(file.before) });
+    result.written.push({ tool: file.tool, path, before: current, afterHash: file.before === null ? '' : sha256(file.before) });
   }
   // A file the undo left as it is keeps the records that describe it now, so its copy isn't taken for an edit made there.
   const list: BaseList = { tools: undo.list.tools, written: { ...undo.list.written }, leftPlain: { ...undo.list.leftPlain } };

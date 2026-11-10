@@ -718,8 +718,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .facts { display: grid; grid-template-columns: minmax(96px, 144px) minmax(0, 1fr); column-gap: 12px; row-gap: 4px; align-items: baseline; }
 .facts dt { color: var(--ink-soft); min-width: 0; }
 .facts dd { min-width: 0; }
-.content { padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: text; }
-.content-owner { margin-bottom: 4px; color: var(--ink-soft); font-size: 12px; line-height: 16px; }
+/* A file as written; its lines keep a reading measure, as prose does */
+.content { max-width: 120ch; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: text; }
+.content-owner { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; color: var(--ink-soft); font-size: 12px; line-height: 16px; }
+.content-owner.tone-warning { color: var(--warning); }
 .content-block + .content-block { margin-top: 8px; }
 
 /* ---------- Empty states ---------- */
@@ -917,7 +919,12 @@ span.ins-confirm { margin-top: 0; }
 .market-hint { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 8px; font-size: 12px; color: var(--ink-soft); }
 .market-hint > svg { flex: none; margin-top: 2px; }
 .market-hint .btn { height: auto; padding-top: 0; padding-bottom: 0; line-height: inherit; }
-.market-main { padding: 18px max(0px, calc(var(--market-gutter) - var(--scrollbar))) 32px var(--market-gutter); }
+/*
+ * Never a top padding here: sticky offsets count from a scroller's padding edge, so the plugin table's pinned column
+ * header would stop below the toolbar with rows showing through the gap. The pages in this scroller carry that space.
+ */
+.market-main { padding-right: max(0px, calc(var(--market-gutter) - var(--scrollbar))); padding-bottom: 32px; padding-left: var(--market-gutter); }
+.market-page, .plugin-page { padding-top: 18px; }
 /*
  * The toolbar's left on a marketplace's page: its name, then its facts, on one line. What doesn't fit wraps onto a line
  * below, out of sight, so facts drop whole, the last first; the name, first, only shortens (with its tooltip) once alone.
@@ -969,7 +976,10 @@ span.ins-confirm { margin-top: 0; }
   .plugin-table > .plugin-row:nth-child(even of .plugin-row):not(:hover):not(:has(:focus-visible)) { background: var(--row-stripe); }
 }
 .plugin-table .ov-row { grid-template-columns: minmax(0, 1fr) repeat(var(--tool-count, 3), 120px) 28px; height: auto; min-height: 40px; }
+/* Room above the tool icons, so the pinned header doesn't touch the toolbar's rule */
+.plugin-table .ov-head { min-height: 48px; }
 .plugin-table .ov-head .ov-name { padding: 6px 0; font-size: 12px; font-weight: 400; color: var(--ink-soft); }
+.market-hint > span { max-width: 110ch; }
 .plugin-row { cursor: pointer; }
 .plugin-row-name { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; padding: 8px 12px 8px 0; text-align: left; }
 .plugin-row-name > span { max-width: 100%; }
@@ -1023,7 +1033,7 @@ span.ins-confirm { margin-top: 0; }
 .plugin-tool { display: flex; align-items: center; gap: 10px; min-width: 170px; }
 .plugin-tool-text { display: flex; flex-direction: column; gap: 1px; }
 .plugin-tool-name { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
-.plugin-tool-state { font-size: 11.5px; color: var(--ink-soft); }
+.plugin-tool-state { display: flex; flex-direction: column; font-size: 11.5px; color: var(--ink-soft); }
 .plugin-section { margin: 22px 0 0; }
 .plugin-section .plugin-outcome-list { margin-top: 8px; }
 .plugin-outcome-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
@@ -1046,6 +1056,56 @@ span.ins-confirm { margin-top: 0; }
 .part-more:hover { text-decoration: underline; }
 .part-more:focus-visible { outline: 2px solid var(--focus); border-radius: 3px; }
 .plugin-parts li.clamped .part-more { display: inline; }
+/* A plugin's skills with a switch per tool where it is installed: the switches line up under each tool's name. */
+.plugin-skills-note { margin: 0 0 6px; font-size: 12px; color: var(--ink-soft); max-width: 76ch; }
+.skill-switch-cols { display: flex; justify-content: flex-end; margin: 0 0 2px; padding-right: 4px; }
+/* With switches, each skill is a table row: a hairline and a hover tint carry the eye from the name to its switches on a wide window. */
+.plugin-skills .plugin-parts { gap: 0; border-top: 1px solid var(--control-line); }
+.plugin-skills .plugin-parts li.with-end { padding: 5px 4px; border-bottom: 1px solid var(--control-line); }
+.plugin-parts li > .plugin-part-note { grid-column: 2 / -1; max-width: 76ch; margin-top: 2px; }
+.plugin-part-note code { white-space: nowrap; }
+.plugin-skills .plugin-parts li.with-end:hover { background: var(--hover); }
+.plugin-parts li.with-end { grid-template-columns: minmax(120px, max-content) minmax(0, 1fr) auto; min-height: 28px; align-items: start; }
+.skill-switches { display: inline-flex; align-self: start; }
+.skill-switch, .skill-switch-head { width: 96px; display: inline-flex; justify-content: center; align-items: center; }
+.skill-switch-head { gap: 5px; font-size: 11.5px; color: var(--ink); white-space: nowrap; }
+.skill-switch { position: relative; height: 22px; }
+/* An off switch keeps a visible edge on the dark page; a held one stays readable (its row says why it can't change). */
+.skill-switch:not(.skill-switch-chosen) .switch[aria-checked="false"] { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 22%, transparent); }
+/* Chosen for Apply all: the accent fill a waiting switch has elsewhere, and a dashed ring like a chosen install box. */
+.skill-switch-chosen .switch[aria-checked="true"] { background: var(--accent); }
+.skill-switch-chosen .switch[aria-checked="true"] .switch-knob { background: #fff; }
+/* The dashed ring, like a chosen install box. Focus is the app's solid ring just outside it, so a
+   switch can show both and the two never look alike. */
+.skill-switch-chosen .switch::after { content: ''; position: absolute; inset: -4px; border: 2px dashed var(--accent); border-radius: 999px; }
+.skill-switch .switch:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
+/* One that can't change here: full strength, a lock beside it, and its reason on the row or above the list. */
+.skill-switch-stuck .switch { cursor: not-allowed; }
+.skill-switch-lock { position: absolute; right: 13px; color: var(--ink-soft); }
+.plugin-skills-note .brand-mark { display: inline-block; vertical-align: -2px; margin-right: 6px; }
+.plugin-skills-note code, .plugin-part-note code { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; }
+.plugin-part-note { font-size: 12px; color: var(--ink-soft); }
+/* A skill, command or agent: the whole row opens its file, shown as the Skills page shows a skill's SKILL.md */
+.plugin-parts li.open { margin-bottom: 6px; }
+.plugin-file-toggle { all: unset; grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start; padding: 3px 0; border-radius: 6px; cursor: pointer; }
+.plugin-file-toggle:hover { background: var(--hover); }
+.plugin-file-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.plugin-file-name { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--ink); }
+.plugin-file-name .icon { flex: none; color: var(--ink-soft); }
+.plugin-file { grid-column: 1 / -1; margin: 6px 0 4px 17px; min-width: 0; }
+/* With a skill's switches at the row's end, the toggle covers name and description only */
+.plugin-parts li.with-end > .plugin-file-toggle { grid-column: 1 / 3; }
+/* A row that opens nothing starts its name where an opening row's name starts, after the chevron */
+.plugin-parts > li > .plugin-name:first-child { margin-left: 17px; }
+/* Versions: the marketplace's beside a plugin's name; a tool with another version, in the warning tone */
+.plugin-row-version, .plugin-meta-version { font-size: 12px; font-weight: 400; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+/* The icon keeps its own column, so a wrapped second line stays under the first line's text */
+.plugin-version-differs { display: inline-flex; align-items: baseline; gap: 4px; color: var(--warning); }
+.plugin-version-differs > .icon { flex: none; align-self: center; }
+.plugin-version-differs > span { min-width: 0; }
+/* The list row's version warning: its own line under the plugin's description, wrapping between words */
+.plugin-row-warning { font-size: 11.5px; }
+.plugin-row-warning > .icon { align-self: flex-start; margin-top: 2px; }
 .plugin-muted { margin: 6px 0 0; font-size: 12.5px; color: var(--ink-soft); }
 .plugin-readme h3 { margin-bottom: 8px; }
 /* Narrow content: the marketplaces become a strip above the page they open. */
@@ -1060,7 +1120,7 @@ span.ins-confirm { margin-top: 0; }
   .market-add-input { width: 240px; }
   .plugins-page { --market-gutter: 16px; }
   /* Less height around the table, and two-line rows (the name, then what it holds and what it does), so several show. */
-  .market-main { padding-top: 12px; }
+  .market-page, .plugin-page { padding-top: 12px; }
   .market-tabs { margin: 8px 0 6px; }
   .market-tab { padding: 5px 10px; }
   .plugin-table .ov-head .ov-tool-head { flex-direction: row; gap: 6px; }
@@ -1156,6 +1216,32 @@ span.ins-confirm { margin-top: 0; }
 .appearance-choice:hover { border-color: var(--control-line); color: var(--ink); }
 .appearance-choice.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); color: var(--ink); font-weight: 600; }
 .appearance-choice:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 2px; }
+
+/* A plugin's parts in a tool that can't take the plugin (parts.ts): the hatched box still says "no plugins here", with a
+   plus on a solid chip that reads as a control; installed parts show as boxes, not the check a plugin gets */
+.cell-button.cell-parts-offer, .legend-cell.cell-parts-offer { border: 1px dashed color-mix(in oklab, var(--ink) 55%, transparent); color: var(--ink);
+  background: repeating-linear-gradient(135deg, transparent 0 3px, color-mix(in oklab, var(--ink) 18%, transparent) 3px 4.5px); }
+.cell-button.cell-parts-offer .plugin-add-glyph { background: var(--surface); border-radius: 50%; padding: 2px; box-sizing: content-box; }
+.cell-button.cell-parts-offer:hover { border-style: solid; border-color: var(--ink-soft); }
+.details-part .inline-link { white-space: nowrap; }
+.details .details-limits.details-part { margin-left: 0; }
+.row-tag.row-part { display: inline-flex; align-items: center; gap: 4px; }
+.plugin-panel-hint { margin: -4px 0 10px; font-size: 12px; color: var(--ink-soft); }
+.plugin-section-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 28px; }
+.plugin-section-actions { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.plugin-parts-about { margin: 6px 0 10px; max-width: var(--measure); font-size: 13px; line-height: 20px; color: var(--ink-soft); }
+.plugin-parts-section .plugin-muted { margin-top: 8px; }
+.plugin-parts-list .plugin-outcome-row { grid-template-columns: 220px minmax(0, 1fr); column-gap: 24px; }
+.plugin-outcome-what code.plugin-name { font-size: 12px; }
+.plugin-parts-tool { display: flex; flex-direction: column; gap: 1px; }
+.plugin-parts-why { font-size: 11.5px; color: var(--ink-soft); }
+.plugin-part-link .plugin-name { color: var(--accent); }
+.plugin-part-link:hover .plugin-name { text-decoration: underline; }
+/* A narrow plugin page: the tool column of the parts rows narrows, and the section's actions go under its title. */
+@container plugin (width < 760px) {
+  .plugin-parts-list .plugin-outcome-row { grid-template-columns: 150px minmax(0, 1fr); }
+  .plugin-section-actions { margin-left: 0; width: 100%; justify-content: flex-start; }
+}
 /* A short phrase and its link stay on one line, so a link never wraps away from the words that lead to it. */
 .keep-together { white-space: nowrap; }
 
@@ -1191,3 +1277,59 @@ span.ins-confirm { margin-top: 0; }
 @container ins-card (width >= 1100px) { .base-columns { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
 /* Marker comments and code read as typed: no ligatures turning <!-- into an arrow. */
 .ins-preview, .ins-diff, .ins-text { font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
+
+/* Disable and Remove, per tool (skills). A disabled copy keeps its cell's state, outlined instead of filled, with a corner mark. */
+.cell-disabled { position: relative; }
+/* Only once applied: a queued disable keeps the pending look, and the corner mark alone says Disabled. */
+.cell-disabled.cell-on:not(.cell-pending-edit) { background: transparent; border-color: var(--control-line); }
+.cell-disabled.cell-synced:not(.cell-pending-edit) { color: var(--ink-soft); }
+.cell-disabled-mark { position: absolute; top: -4px; right: -4px; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--ink-faint); }
+.cell-disabled-mark svg { width: 12px; height: 12px; stroke-width: 2.5; }
+.mini-cell.cell-disabled { position: relative; }
+.legend-cell.mini-cell .cell-disabled-mark { top: -5px; right: -5px; width: 11px; height: 11px; }
+.legend-cell.mini-cell .cell-disabled-mark svg { width: 8px; height: 8px; }
+.legend-cell .cell-disabled-mark { top: -5px; right: -5px; width: 12px; height: 12px; }
+.legend-cell .cell-disabled-mark svg { width: 9px; height: 9px; }
+.legend-item > .legend-cell.cell-disabled { margin-right: 5px; }
+.cell-removing, .legend-cell.cell-removing { color: var(--danger); border: 1px dashed color-mix(in oklab, var(--danger) 60%, transparent); background: var(--danger-tint); }
+/* Skills: every tool's row has the same three columns (tool, what happens there, its switch and Remove), so the switches line up. */
+.details.details-skills .details-tool-head { grid-template-columns: 196px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; }
+.details-tool-head > .details-tool-actions { display: inline-flex; align-items: center; gap: 12px; justify-self: end; }
+.details-tools { container-type: inline-size; }
+/* In a narrow pane (the dock, the Files view's details) the tool and its controls share the first line; the sentence, if any, goes under. */
+@container (max-width: 560px) {
+  .details.details-skills .details-tool-head { grid-template-columns: minmax(0, 1fr) auto; }
+  .details.details-skills .details-tool-head > .details-tool-label { grid-row: 1; grid-column: 1; }
+  .details.details-skills .details-tool-head > .details-tool-actions { grid-row: 1; grid-column: 2; justify-self: end; }
+  .details.details-skills .details-tool-head > .details-tool-line { grid-row: 2; grid-column: 1 / -1; }
+  .details.details-skills .details-tool-head > .details-tool-line:empty { display: none; }
+}
+.tool-switch { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-soft); }
+/* The app's switch, at its own size (the row's action-button height doesn't apply to it). */
+.details-tool-actions .tool-switch .switch { height: 18px; }
+.delete-armed { display: inline-flex; align-items: center; gap: 8px; }
+.tool-switch-word { min-width: 56px; text-align: right; }
+/* Queued, like the Managed switch: a dashed outline, never a ring that reads as focus. */
+.tool-switch-pending .switch { box-shadow: none; outline: 1.5px dashed var(--accent); outline-offset: 2px; }
+.tool-switch-pending .tool-switch-word { color: var(--accent-ink); }
+/* A switch queued in a skill's details shows in its cell too: the queued dash around the cell, and the mark in accent. */
+.cell-switch-queued { outline: 1.5px dashed var(--accent); outline-offset: 1px; }
+.cell-switch-queued .cell-disabled-mark { color: var(--accent-ink); box-shadow: 0 0 0 1px var(--accent); }
+.tool-switch-na { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-soft); }
+/* What Disabled and Remove mean, right under the rows they belong to. */
+.details-switch-note { margin: 0; }
+/* Remove is queued and restorable: quiet until pointed at. A row without it keeps the same space. */
+.text-action.tool-remove { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+.text-action.tool-remove:hover, .text-action.tool-remove:focus-visible { color: var(--danger); }
+.tool-remove, .tool-remove-slot { min-width: 60px; text-align: center; }
+.tool-remove-slot { display: inline-block; }
+/* Differing copies hide an empty foot, but not one holding Delete everywhere. */
+.details-differs .compare-foot:has(.compare-foot-start:empty):has(> .text-action, > .delete-armed) { display: flex; }
+/* Queued changes never shrink out of sight: when the change bar doesn't fit beside the filters, it takes its own line. */
+.ov-page > .toolbar:has(.apply-count) { flex-wrap: wrap; }
+/* On its own line the breakdown may still be long: it wraps within the bar rather than run past the edge. */
+.toolbar-end > .apply { min-width: 0; }
+.toolbar-end .apply-count { white-space: normal; min-width: 0; }
+.ov-page > .toolbar:has(.apply-count) > .toolbar-end { flex-shrink: 1; min-width: 0; }
+/* Focus always shows as focus: outside the small switch, and over a queued cell's dash. */
+.tool-switch .switch:focus-visible, .managed-pending .switch:focus-visible, .cell-switch-queued:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

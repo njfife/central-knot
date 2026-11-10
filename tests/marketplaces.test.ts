@@ -13,7 +13,7 @@ const marketplace = (root: string, name: string, plugins: string[]) => Promise.a
   ...plugins.map(plugin => put(join(root, `plugins/${plugin}/skills/${plugin}/SKILL.md`), `---\nname: ${plugin}\ndescription: ${plugin}\n---\n`)),
 ]);
 
-async function setup(options: { allowed?: boolean; throwFor?: HarnessId } = {}) {
+async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?: boolean } = {}) {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-markets-')));
   const home = join(base, 'home');
   await mkdir(home, { recursive: true });
@@ -27,12 +27,13 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId } = {}) 
     openExternal: async () => {},
   };
   const use: MarketplaceEngine = {
-    findClis: async () => ({ 'claude-cli': '/bin/true' }),
+    findClis: async () => ({ 'claude-cli': '/bin/true', ...(options.codex ? { 'codex-cli': join(base, 'bin/codex') } : {}) }),
     checkAccess: async (context, source) => { calls.push(`check ${source}`); return engine.checkAccess(context, source); },
     readCatalog: async (context, source) => { calls.push(`read ${source}`); return engine.readCatalog(context, source); },
     readRemotePlugin: async () => ({ problem: 'not in tests' }),
     install: async (_context, _catalog, plugin, tool) => { calls.push(`install ${plugin} ${tool}`); if (tool === options.throwFor) throw new Error('disk full'); return { tool, outcome: 'installed', message: 'Installed.', runs: [{ tool, command: 'x', ok: true, output: '', changed: [{ path: '/p', before: 'old', after: 'new' }] }], changed: true } satisfies ActionReport; },
     uninstall: async (_context, marketplace, plugin, tool, source) => { calls.push(`uninstall ${plugin}@${marketplace} ${tool} ${source}`); return { tool, outcome: 'uninstalled', message: 'Uninstalled.', runs: [], changed: true }; },
+    setSkill: async (_context, marketplace, plugin, skill, tool, on, _source, entry) => { calls.push(`skill ${plugin}:${skill}@${marketplace} ${tool} ${on} entry=${entry?.name}`); return { tool, outcome: on ? 'skill-on' : 'skill-off', message: '', runs: [], changed: true }; },
   };
   return { base, home, calls, markets: createMarketplaces(host, use), cleanup: () => rm(base, { recursive: true, force: true }) };
 }
@@ -152,6 +153,48 @@ test('A plugin’s page and the marketplace’s About read their files; Remove t
   } finally { await box.cleanup(); }
 });
 
+test('Each tool’s installed copy is read as that tool reads it, which may be another release than the marketplace’s', async () => {
+  const box = await setup();
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root, 'team', ['pdf']);
+    await box.markets.add(root);
+    // Claude Code has an older release whose plugin.json kept its skill elsewhere: its copy is read as it lists its own
+    // parts, not as the marketplace's current entry does (which now names another folder).
+    await put(join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'team', plugins: [{ name: 'pdf', source: './plugins/pdf', skills: ['./skills/pdf'] }] }));
+    const copy = join(box.home, '.claude/plugins/cache/team/pdf/0.9.0');
+    await put(join(copy, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'pdf', skills: ['./old'] }));
+    await put(join(copy, 'old/SKILL.md'), '---\nname: pdf\ndescription: older\n---\n');
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'pdf@team': [{ scope: 'user', installPath: copy, version: '0.9.0' }] } }));
+    // Codex has it too. It reads only its own .codex-plugin/plugin.json, which lists no skills, so the default folder:
+    // not the folder Claude Code's plugin.json in the same copy lists.
+    const codexCopy = join(box.home, '.codex/plugins/cache/team/pdf/1.0.0');
+    await put(join(codexCopy, '.codex-plugin/plugin.json'), JSON.stringify({ name: 'pdf' }));
+    await put(join(codexCopy, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'pdf', skills: ['./claude-skills'] }));
+    await put(join(codexCopy, 'skills/pdf/SKILL.md'), '---\nname: pdf\ndescription: for codex\n---\n');
+    await put(join(codexCopy, 'claude-skills/pdf/SKILL.md'), '---\nname: pdf\ndescription: for claude\n---\n');
+    await put(join(box.home, '.codex/config.toml'), '[plugins."pdf@team"]\nenabled = true\n');
+    const installed = (await box.markets.detail(root, 'pdf'))?.installed;
+    assert.deepEqual([installed?.['claude-cli']?.version, installed?.['claude-cli']?.skills.map(skill => skill.description), installed?.['codex-cli']?.skills.map(skill => skill.description)],
+      ['0.9.0', ['older'], ['for codex']]);
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin the marketplace can’t give files for (an npm package) is read from the tool that installed it', async () => {
+  const box = await setup();
+  try {
+    const external = join(box.base, 'external');
+    await put(join(external, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'ext', plugins: [{ name: 'tool', source: { source: 'npm', package: 'some-tool' } }] }));
+    const npmCopy = join(box.home, '.claude/plugins/cache/ext/tool/1.0.0');
+    await put(join(npmCopy, 'skills/s/SKILL.md'), '---\nname: s\ndescription: from npm\n---\n');
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'tool@ext': [{ scope: 'user', installPath: npmCopy, version: '1.0.0' }] } }));
+    await box.markets.add(external);
+    const fromTool = await box.markets.detail(external, 'tool');
+    assert.deepEqual([fromTool?.skills, fromTool?.installed?.['claude-cli']?.skills.map(skill => skill.description)], [[], ['from npm']]);
+    assert.deepEqual([fromTool?.offered, fromTool?.problem], [false, undefined]);
+  } finally { await box.cleanup(); }
+});
+
 test('A plugin gone from the marketplace fails for its tools; uninstall names the marketplace source it is for', async () => {
   const box = await setup();
   try {
@@ -191,5 +234,24 @@ test('Refresh lets go of the copies a marketplace’s plugins keep from other re
     assert.equal(await import('node:fs/promises').then(fs => fs.stat(copy).then(() => true, () => false)), true, 'a plain view keeps the copy');
     await box.markets.view(true);
     assert.equal(await import('node:fs/promises').then(fs => fs.stat(copy).then(() => true, () => false)), false);
+  } finally { await box.cleanup(); }
+});
+
+test('Turning a plugin skill off waits for a tested build, read from the tool’s CLI; turning it back on never does', { skip: process.platform === 'win32' }, async () => {
+  const box = await setup({ codex: true });
+  try {
+    await mkdir(join(box.base, 'bin'), { recursive: true });
+    await writeFile(join(box.base, 'bin/codex'), '#!/bin/sh\necho "codex-cli 0.100.0"\n', { mode: 0o755 });
+    const root = join(box.base, 'market');
+    await marketplace(root, 'team', ['pdf']);
+    const off = await box.markets.setSkill(root, 'team', 'pdf', 'one', 'codex-cli', false, box.home);
+    assert.match(off.reports[0]!.message, /Not verified on this build of Codex \(0\.100\.0\)/);
+    const on = await box.markets.setSkill(root, 'team', 'pdf', 'one', 'codex-cli', true, box.home);
+    assert.equal(on.reports[0]!.outcome, 'skill-on');
+    assert.deepEqual(box.calls.filter(call => call.startsWith('skill')), ['skill pdf:one@team codex-cli true entry=pdf'], 'only the turn-on reached the tool, with the plugin’s catalog entry');
+    // Codex updated while the app is open: Refresh all reads its build again, and turning off is offered.
+    await writeFile(join(box.base, 'bin/codex'), '#!/bin/sh\necho "codex-cli 0.167.0"\n', { mode: 0o755 });
+    assert.equal((await box.markets.view(true)).versions?.['codex-cli'], '0.167.0');
+    assert.equal((await box.markets.setSkill(root, 'team', 'pdf', 'one', 'codex-cli', false, box.home)).reports[0]!.outcome, 'skill-off');
   } finally { await box.cleanup(); }
 });
