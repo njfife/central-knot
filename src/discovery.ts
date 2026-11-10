@@ -5,13 +5,16 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parseDocument } from 'yaml';
 import { configRoot, harnesses, type HarnessDefinition } from './harnesses.ts';
-import { isBundledCli, pathBeside } from './platform.ts';
-import type { HarnessId, HomeMode, ProbeResult, Skill, Snapshot } from './types.ts';
+import { pathBeside, type AppCandidate } from './platform.ts';
+import type { DesktopApp, HarnessId, HomeMode, ProbeResult, Skill, Snapshot } from './types.ts';
 import { machineNames } from './machine.ts';
+import { compareVersions } from './values.ts';
 
 function errorCode(error: unknown): string {
   return typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : 'UNKNOWN';
 }
+
+const VERSION = /\b\d+\.\d+\.\d+(?:[-+][\w.-]+)?\b/;
 
 export async function probeVersion(binary: string, timeoutMs = 1500): Promise<ProbeResult> {
   try {
@@ -28,10 +31,26 @@ export async function probeVersion(binary: string, timeoutMs = 1500): Promise<Pr
         resolveResult({ state: error.killed ? 'timeout' : 'failed', detail: error.killed ? 'Version probe timed out.' : 'Version probe failed.' });
         return;
       }
-      const version = stdout.trim().match(/\b\d+\.\d+\.\d+(?:[-+][\w.-]+)?\b/)?.[0];
+      const version = stdout.trim().match(VERSION)?.[0];
       resolveResult(version ? { state: 'ok', version, detail: 'Version only; no session started.' } : { state: 'malformed', detail: 'Version probe returned no recognizable version.' });
     });
   });
+}
+
+/** The first desktop app found among the candidates, with its version and the version of what it carries, where readable. Never runs the app. */
+export async function findApp(candidates: AppCandidate[], timeoutMs?: number): Promise<DesktopApp | undefined> {
+  for (const candidate of candidates) {
+    try { if (!(await stat(candidate.app)).isDirectory()) continue; } catch { continue; }
+    const plist = await readFile(join(candidate.app, 'Contents/Info.plist'), 'utf8').catch(() => '');
+    const version = plist.match(/<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/)?.[1]?.trim();
+    const { carried } = candidate;
+    let carriedVersion: string | undefined;
+    if ('folders' in carried) carriedVersion = (await readdir(carried.folders).catch(() => [] as string[])).filter(name => VERSION.exec(name)?.[0] === name).sort((first, second) => compareVersions(second, first))[0];
+    else if ('file' in carried) carriedVersion = (await readFile(carried.file, 'utf8').catch(() => '')).match(VERSION)?.[0];
+    else carriedVersion = (await probeVersion(carried.binary, timeoutMs)).version;
+    return { name: candidate.name, ...(version ? { version } : {}), carries: candidate.carries, ...(carriedVersion ? { carriedVersion } : {}) };
+  }
+  return undefined;
 }
 
 const OPENING = /^﻿?---[ \t]*\r?\n/;
@@ -120,6 +139,8 @@ export async function discover(options: {
   harness?: HarnessId;
   configOverride?: string;
   binaries?: string[];
+  /** Where the tool's desktop app may be; looked for with the probes. */
+  apps?: AppCandidate[];
   runProbes?: boolean;
   timeoutMs?: number;
 }): Promise<Snapshot> {
@@ -153,11 +174,15 @@ export async function discover(options: {
     for (const binary of options.binaries ?? []) {
       const probe = await probeVersion(binary, options.timeoutMs);
       if (probe.state === 'missing') continue;
-      // An app's bundled CLI never counts as a CLI install (CD §3): it shows the desktop app is there, and says so.
-      if (isBundledCli(binary)) { probe.detail = 'ChatGPT desktop’s own Codex; no Codex CLI found. Version only; no session started.'; probe.bundled = true; }
       snapshot.probe = probe;
       snapshot.detection = probe.state === 'restricted' ? snapshot.detection : probe.state === 'ok' ? 'Installed' : 'Version unknown';
       break;
+    }
+    // The desktop app alone makes the tool present (its files are the same ones the CLI reads), but never counts as the CLI.
+    const app = await findApp(options.apps ?? [], options.timeoutMs);
+    if (app) {
+      snapshot.app = app;
+      if (snapshot.detection === 'Not found' || snapshot.detection === 'Config found but app not detected') snapshot.detection = 'App only';
     }
   }
   const seen = new Set<string>();

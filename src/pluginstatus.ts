@@ -8,9 +8,9 @@ import { takesPlugins } from './presence.ts';
 
 /**
  * Tools that can take a plugin's parts as separate items (parts.ts) where the plugin itself can't go: Pi always, Codex and
- * Copilot CLI when their plugin route is blocked here. Claude Code always takes the plugin itself.
+ * Copilot CLI when their plugin route is blocked here, Claude Code only with no CLI (its desktop app alone, say).
  */
-export const partsTools: HarnessId[] = ['copilot-cli', 'codex-cli', 'pi-cli'];
+export const partsTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'];
 
 /** The one way of saying a tool's CLI is missing. */
 export const cliMissing = (tool: HarnessId) => `${names[tool]}’s command-line tool wasn’t found`;
@@ -21,10 +21,12 @@ export const PREVIEW_ONLY = 'Preview only: nothing can be changed in this home.'
 /** Why Central Knot leaves a tool's same-named marketplace alone: it comes from `other`, not from the one on screen. */
 export const heldReason = (tool: HarnessId, marketName: string, other: string) => `${names[tool]} has a different marketplace named “${marketName}” (${other}). Central Knot leaves it alone.`;
 
-/** Why a tool can't take this marketplace's plugins, if it can't: no CLI, only a desktop app's copy, a Codex-only marketplace, or Copilot refusing it. */
+/** Why a tool can't take this marketplace's plugins, if it can't: no CLI (perhaps only its desktop app), a Codex-only marketplace, or Copilot refusing it. */
 export function blocked(view: PluginsView, entry: MarketplaceView, tool: HarnessId): string | undefined {
   if (!takesPlugins(tool)) return `${names[tool]} doesn’t take Claude plugins.`;
-  if (!view.clis[tool]) return view.desktopOnly?.includes(tool) ? 'Only ChatGPT desktop was found. Installing there without the Codex CLI is not known yet.' : noCli(tool);
+  const app = view.desktopOnly?.[tool];
+  // Plugins install only through the tool's own CLI: the copy a desktop app carries is no install route (CD §3, PLG-04).
+  if (!view.clis[tool]) return app ? `Only ${app} was found here. ${cliMissing(tool)}, and plugins install only through it.` : noCli(tool);
   if (entry.codexOnly && tool !== 'codex-cli') return entry.codexOnly;
   return tool === 'copilot-cli' ? entry.copilotRefuses : undefined;
 }
@@ -81,12 +83,12 @@ export const partsOf = (entry: MarketplaceView, plugin: string, tool: HarnessId)
  * plugin route blocked), the plugin is still listed, and the tool holds no other marketplace of this name.
  */
 export function partsEligible(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): boolean {
-  if (!partsTools.includes(tool) || partsOf(entry, plugin, tool) || installed(entry, plugin, tool) || entry.plugins.find(candidate => candidate.name === plugin)?.gone) return false;
+  if (!partsTools.includes(tool) || (tool === 'claude-cli' && view.clis[tool]) || partsOf(entry, plugin, tool) || installed(entry, plugin, tool) || entry.plugins.find(candidate => candidate.name === plugin)?.gone) return false;
   return !!unavailable(view, entry, plugin, tool) && stateOf(entry, plugin, tool).state === 'not-installed';
 }
 
-/** Whether a plugin holding these components has a part this tool can take (Pi takes no agents). Unknown counts as yes. */
-export const partsFit = (tool: HarnessId, components?: Components) => !components || !!(components.skills || components.mcp || (components.agents && tool !== 'pi-cli'));
+/** Whether a plugin holding these components has a part this tool can take (Pi takes no agents, Claude Code no MCP servers as parts). Unknown counts as yes. */
+export const partsFit = (tool: HarnessId, components?: Components) => !components || !!(components.skills || (components.mcp && tool !== 'claude-cli') || (components.agents && tool !== 'pi-cli'));
 
 /**
  * Whether this plugin's parts can go into this tool as separate items, or are there already (then they can always be
@@ -102,7 +104,7 @@ export function partsOffer(view: PluginsView, entry: MarketplaceView, plugin: st
  */
 export function partsWhy(view: PluginsView, entry: MarketplaceView, tool: HarnessId): [string, string] {
   if (!takesPlugins(tool)) return ['takes no plugins', 'take no plugins'];
-  if (!view.clis[tool]) return view.desktopOnly?.includes(tool) ? ['is only the desktop app here', 'are only desktop apps here'] : ['command-line tool not found', 'command-line tools not found'];
+  if (!view.clis[tool]) return view.desktopOnly?.[tool] ? ['is only the desktop app here', 'are only desktop apps here'] : ['command-line tool not found', 'command-line tools not found'];
   // Parts kept in a tool that can take the plugin again (its CLI is back): nothing to explain.
   return (tool === 'copilot-cli' && entry.copilotRefuses) || (tool !== 'codex-cli' && entry.codexOnly) ? ['refuses this marketplace', 'refuse this marketplace'] : ['', ''];
 }

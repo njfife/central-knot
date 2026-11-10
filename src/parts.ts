@@ -1,5 +1,5 @@
-// A plugin's parts in a tool that can't take the plugin itself (Pi, or Codex and Copilot CLI where their plugin route is
-// blocked here): its skills, MCP servers and agents written as ordinary items, through the same writers the Skills, MCP
+// A plugin's parts in a tool that can't take the plugin itself (Pi, or Claude Code, Codex and Copilot CLI where their
+// plugin route is blocked here, such as a desktop app with no CLI): its skills, MCP servers and agents written as ordinary items, through the same writers the Skills, MCP
 // and Agents pages use (byte-exact skill copies, each tool's MCP format, each tool's agent format). Values go in as-is.
 // What went in is recorded per plugin and tool (plugin-parts.json), so the items say where they came from, can be removed
 // together, show when the plugin has changed, and every run can be undone from the content kept in Central Knot's store
@@ -110,6 +110,8 @@ async function partsFor(context: ShareContext, files: PluginFiles, tool: Harness
     ready.push({ kind: 'skill', name: skill.name, hash: tree.hash, store: () => importRevision(context, itemKey(skill.name), skill.dir, stored) });
   }
   for (const [server, raw] of Object.entries(files.servers).sort(([first], [second]) => first.localeCompare(second))) {
+    // Claude Code rewrites its MCP file while running, so its servers are written only with Write to Claude Code (MCP-02).
+    if (tool === 'claude-cli') { plan.push({ kind: 'mcp', name: server, why: 'Claude Code’s MCP servers are written only with Write to Claude Code on the MCP servers page, so parts leave them out.' }); continue; }
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { unread.add(unreadKey('mcp', server)); plan.push({ kind: 'mcp', name: server, why: 'It isn’t a server entry.' }); continue; }
     const why = await needsPlugin(raw as Record<string, unknown>, files.folder);
     if (why) { plan.push({ kind: 'mcp', name: server, why }); continue; }
@@ -129,8 +131,9 @@ async function partsFor(context: ShareContext, files: PluginFiles, tool: Harness
     if (!parsed) { unread.add(unreadKey('agent', agent.name)); plan.push({ kind: 'agent', name: agent.name, why: 'Its front matter couldn’t be read.' }); continue; }
     if (tool === 'copilot-cli' && !parsed.description.trim()) { plan.push({ kind: 'agent', name: agent.name, why: `${name} doesn’t offer an agent with no description.` }); continue; }
     let text: string;
-    try { text = agentText(tool, parsed); } catch { plan.push({ kind: 'agent', name: agent.name, why: `It can’t be written as a ${name} agent.` }); continue; }
-    const fields = Object.keys(parsed.fields);
+    // A plugin's agents are Claude Code agents: Claude Code takes the file as it is, with every field.
+    try { text = tool === 'claude-cli' ? agent.text : agentText(tool, parsed); } catch { plan.push({ kind: 'agent', name: agent.name, why: `It can’t be written as a ${name} agent.` }); continue; }
+    const fields = tool === 'claude-cli' ? [] : Object.keys(parsed.fields);
     plan.push({ kind: 'agent', name: agent.name, limit: staysBehind(fields) });
     const hash = sha256(text);
     ready.push({ kind: 'agent', name: agent.name, hash, store: async () => { if (!(await exists(agentTextPath(context.home, hash)))) await writeDurably(agentTextPath(context.home, hash), text); } });

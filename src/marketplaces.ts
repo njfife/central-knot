@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { codexManifest, marketplacePage, pluginContents, pluginDetail, pluginFiles, readmeIn, sourceLabel, type PluginFiles } from './catalogdetail.ts';
 import { harnesses } from './harnesses.ts';
-import { executableCandidates, isBundledCli } from './platform.ts';
+import { executableCandidates } from './platform.ts';
 import { failedFor } from './pluginplan.ts';
 import { probeVersion } from './discovery.ts';
 import * as engine from './plugins.ts';
@@ -47,7 +47,7 @@ export interface MarketplaceEngine {
 }
 
 /**
- * A tool's own CLI, never an app's bundled copy (CD §3), from the same candidate list version probes use. Searched in
+ * A tool's own CLI, never the copy a desktop app carries (CD §3), from the same candidate list version probes use. Searched in
  * this computer's own home, not the home on screen: a Practice copy or backup has no CLIs of its own, and the CLIs found
  * here are pointed at the home on screen when they run.
  */
@@ -55,7 +55,6 @@ async function findClis(): Promise<Partial<Record<HarnessId, string>>> {
   const found: Partial<Record<HarnessId, string>> = {};
   for (const tool of pluginTools) {
     for (const candidate of executableCandidates(homedir(), process.env.PATH ?? '', harnesses[tool].binary)) {
-      if (isBundledCli(candidate)) continue;
       try { await access(candidate, constants.X_OK); found[tool] = candidate; break; } catch { /* next */ }
     }
   }
@@ -263,7 +262,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const marketplaces: MarketplaceView[] = [];
     // All at once: one unreachable source doesn't hold up the others.
     marketplaces.push(...await Promise.all(known.map(({ source, origins }) => entryView(ctx, tools, source, origins, fresh, records))));
-    const desktopOnly = tools.filter(tool => !ctx.binaries[tool] && read.snapshots.find(snapshot => snapshot.harness === tool)?.probe.bundled);
+    const desktopOnly = Object.fromEntries(tools.flatMap(tool => { const app = read.snapshots.find(snapshot => snapshot.harness === tool)?.app; return !ctx.binaries[tool] && app ? [[tool, app.name]] : []; }));
     if (fresh) versionReads.clear();
     const versions = Object.fromEntries((await Promise.all(tools.filter(tool => SKILL_SWITCH_TESTED_FROM[tool]).map(async tool => [tool, await buildOf(ctx, tool, read.snapshots)] as const))).filter(([, version]) => version));
     return { home: ctx.home, tools, clis: Object.fromEntries(tools.map(tool => [tool, !!ctx.binaries[tool]])), canWrite: writing.allowed, reason: writing.allowed ? undefined : writing.reason, marketplaces, desktopOnly, versions };

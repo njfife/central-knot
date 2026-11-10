@@ -5,7 +5,8 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover, probeVersion } from '../src/discovery.ts';
-import { executableCandidates } from '../src/platform.ts';
+import { CLAUDE_PROCESS, appCandidates, executableCandidates } from '../src/platform.ts';
+import { isPresent } from '../src/presence.ts';
 
 async function fixture() {
   const home = await mkdtemp(join(tmpdir(), 'ck-first-look-'));
@@ -161,3 +162,47 @@ test('A version probe finds a script CLI’s interpreter beside it, even when th
   } finally { process.env.PATH = path; await rm(dir, { recursive: true, force: true }); }
 });
 
+
+/** A desktop app bundle with this version in its Info.plist, as macOS apps carry it. */
+async function app(path: string, version: string) {
+  await mkdir(join(path, 'Contents'), { recursive: true });
+  await writeFile(join(path, 'Contents/Info.plist'), `<?xml version="1.0"?>\n<plist><dict>\n\t<key>CFBundleShortVersionString</key>\n\t<string>${version}</string>\n</dict></plist>\n`);
+}
+
+test('A desktop app with no CLI makes its tool present, with the app’s version and the version it carries, never as the CLI', { skip: process.platform === 'win32' }, async () => {
+  const setup = await fixture();
+  try {
+    const apps = appCandidates(setup.home, 'claude');
+    await app(join(setup.home, 'Applications/Claude.app'), '4.16336.0');
+    // Claude desktop keeps each Code tab build in a folder named by its version; the newest is the one it runs.
+    for (const build of ['2.1.317', '2.1.99', '2.1.321', 'not-a-version']) await mkdir(join(setup.home, 'Library/Application Support/Claude/claude-code', build), { recursive: true });
+    const alone = await discover({ home: setup.home, mode: 'actual', runProbes: true, binaries: [join(setup.home, 'no-cli/claude')], apps });
+    assert.equal(alone.detection, 'App only');
+    assert.ok(isPresent(alone));
+    assert.deepEqual(alone.app, { name: 'Claude desktop', version: '4.16336.0', carries: 'Code tab', carriedVersion: '2.1.321' });
+    assert.equal(alone.probe.state, 'missing');
+    // With the CLI too, each keeps its own version.
+    const both = await discover({ home: setup.home, mode: 'actual', runProbes: true, binaries: [await executable(setup.home, "printf '2.1.318 (Claude Code)\\n'")], apps });
+    assert.equal(both.detection, 'Installed');
+    assert.equal(both.probe.version, '2.1.318');
+    assert.equal(both.app?.carriedVersion, '2.1.321');
+    // The GitHub Copilot app names its runtime's version in a file of its own.
+    const copilot = join(setup.home, 'Applications/GitHub Copilot.app');
+    await app(copilot, '1.1.35');
+    await mkdir(join(copilot, 'Contents/Resources/copilot-sdk'), { recursive: true });
+    await writeFile(join(copilot, 'Contents/Resources/copilot-sdk/cliVersion.d.ts'), 'export declare const COPILOT_CLI_VERSION = "1.0.102-0.unstable.r41779900948.gf482387";\n');
+    const app2 = await discover({ home: setup.home, mode: 'actual', harness: 'copilot-cli', runProbes: true, binaries: [], apps: appCandidates(setup.home, 'copilot') });
+    assert.deepEqual([app2.detection, app2.app?.version, app2.app?.carriedVersion], ['App only', '1.1.35', '1.0.102-0.unstable.r41779900948.gf482387']);
+    // No app and no CLI: not found.
+    assert.equal((await discover({ home: setup.home, mode: 'actual', harness: 'codex-cli', runProbes: true, binaries: [], apps: appCandidates(setup.home, 'codex') })).detection, 'Not found');
+  } finally { await setup.cleanup(); }
+});
+
+test('Write to Claude Code waits for Claude desktop and its Code tab as well as the CLI', () => {
+  const running = (command: string) => new RegExp(CLAUDE_PROCESS).test(command);
+  assert.ok(running('/Users/n/Library/Application Support/Claude/claude-code/2.1.321/e6736b2d954d/claude.app/Contents/MacOS/claude --output-format stream-json'));
+  assert.ok(running('/Applications/Claude.app/Contents/MacOS/Claude'));
+  assert.ok(running('/usr/local/bin/node /usr/local/bin/claude'));
+  assert.ok(!running('/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper --type=renderer'));
+  assert.ok(!running('grep -r @anthropic-ai/claude-code/ .'));
+});
