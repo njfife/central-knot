@@ -886,9 +886,9 @@ app.whenReady().then(async () => {
     const began = Date.now();
     const opened = await openBundle(app.getPath('userData'), join(__dirname, CARRIED_FOLDER));
     bundle = opened.active;
+    if (opened.kept) log(`bundle: ${opened.kept}`);
     if (opened.problem) log(`bundle: ${opened.problem}`);
-    else if (opened.kept) log(`bundle: ${opened.kept}`);
-    if (!opened.problem) log(`bundle: ${bundle?.release.marketplace} as of ${bundle ? releaseLabel(bundle.release) : 'nothing'} (sequence ${bundle?.release.sequence}), ready in ${Date.now() - began} ms`);
+    else log(`bundle: ${bundle?.release.marketplace} as of ${bundle ? releaseLabel(bundle.release) : 'nothing'} (sequence ${bundle?.release.sequence}), ready in ${Date.now() - began} ms`);
   }
   applyAppearance();
   await firstSignIn();

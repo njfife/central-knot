@@ -14,7 +14,7 @@ import type { CatalogPlugin } from './types.ts';
 
 // ---------- The build's optional inputs ----------
 
-/** The standard app's name, which a custom build keeps unless it is given its own. */
+/** The standard app's name, which no custom build may take. */
 export const STANDARD_NAME = 'Central Knot';
 
 /** The optional inputs a build takes. None given: the standard app. */
@@ -76,7 +76,7 @@ export function describeBuild(inputs: BuildInputs): CustomBuild {
   const name = inputs.appName.trim();
   // The name is also the app's file name, so nothing a file name can't hold as written.
   if (!name || name.length > 60 || /[\\/:?*"<>|\n\r\t]/.test(name) || name.startsWith('.') || name.endsWith('.')) throw new Error('--app-name is the app’s name as people see it, and its file’s name: up to 60 characters, without / \\ : ? * " < > | or line breaks, and not starting or ending with a period.');
-  if (name.toLowerCase() === STANDARD_NAME.toLowerCase()) throw new Error(`--app-name can’t be “${STANDARD_NAME}”: under that name the build’s file would take the standard app’s place in Applications.`);
+  if (downloadName(name).toLowerCase() === downloadName(STANDARD_NAME).toLowerCase()) throw new Error(`--app-name can’t be “${STANDARD_NAME}”: under that name the build’s file would take the standard app’s place in Applications.`);
   const id = inputs.appId ?? slug(name);
   if (!BUILD_ID.test(id) || id === 'central-knot') throw new Error(inputs.appId ? '--app-id is lower-case letters, digits, dots and dashes (not “central-knot”, the standard app’s).' : 'Give the build an identity with --app-id: lower-case letters, digits, dots and dashes.');
   for (const [option, file, kinds] of [['--app-icon', inputs.appIcon, ['.png', '.icns']], ['--marketplace-logo', inputs.marketplaceLogo, ['.png', '.svg', '.jpg', '.jpeg', '.webp']]] as const) {
@@ -193,7 +193,7 @@ export async function packRelease({ source, out, work, sequence, now = new Date(
 // ---------- Staging a custom build ----------
 
 /** A staged custom build: what the app's build takes in (scripts/build.mjs), and the report of what was made. */
-export interface StagedBuild { build: CustomBuild; release?: BundleRelease; /** Notes from packing (packRelease). */ notes?: string[]; /** The app icon as given, copied beside the rest. */ icon?: string; report: string }
+export interface StagedBuild { build: CustomBuild; release?: BundleRelease; /** The app icon as given, copied beside the rest. */ icon?: string; report: string }
 
 /**
  * Stages a custom build in `out` from the inputs: custom-build.json, the carried release under bundle/ with the marketplace's
@@ -211,6 +211,8 @@ export async function stageCustomBuild(inputs: BuildInputs, { out, work, now }: 
   if (there.length && !there.includes(CUSTOM_FILE)) throw new Error(`${out} holds other files. Stage into an empty folder, or one staged before.`);
   await rm(out, { recursive: true, force: true });
   await mkdir(out, { recursive: true });
+  // Written first: a staging that stops halfway leaves a folder the next one may clear.
+  await writeFile(join(out, CUSTOM_FILE), `${JSON.stringify(build, null, 2)}\n`);
   let release: BundleRelease | undefined, notes: string[] = [];
   if (inputs.marketplace) {
     const packed = await packRelease({ source: inputs.marketplace, out: join(out, CARRIED_FOLDER), work, sequence: inputs.sequence, now });
@@ -220,10 +222,9 @@ export async function stageCustomBuild(inputs: BuildInputs, { out, work, now }: 
   if (inputs.marketplaceLogo && build.marketplace?.logo) await copyFile(inputs.marketplaceLogo, join(out, CARRIED_FOLDER, build.marketplace.logo));
   const icon = inputs.appIcon ? `app-icon${extname(inputs.appIcon).toLowerCase()}` : undefined;
   if (icon) await copyFile(inputs.appIcon!, join(out, icon));
-  await writeFile(join(out, CUSTOM_FILE), `${JSON.stringify(build, null, 2)}\n`);
   const report = buildReport(build, release, inputs, notes);
   await writeFile(join(out, 'build-report.txt'), report);
-  return { build, release, notes, icon, report };
+  return { build, release, icon, report };
 }
 
 /** The build report: what was built, in plain lines. */

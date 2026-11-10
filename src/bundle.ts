@@ -65,8 +65,7 @@ export function readCustomBuildSync(folder: string): CustomBuild | undefined {
  */
 export function aboutBuild(build: CustomBuild, version: string, market?: { name: string; date: string }): string[] {
   return [
-    `${build.name} is a custom build of ${PRODUCT} ${version}.`,
-    `It keeps its own settings, separate from ${PRODUCT}’s.`,
+    `${build.name} is a custom build of ${PRODUCT} ${version}, with its own settings.`,
     `It doesn’t update itself: for a newer one, ask whoever gave you ${build.name}.`,
     ...(market ? [`Its ${market.name} marketplace ${market.date ? `is as of ${market.date} and ` : ''}changes only with a new ${build.name}.`] : []),
   ];

@@ -106,10 +106,11 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
       : `Uninstall ${batch.length > 1 ? `all ${batch.length}` : `from ${names[batch[0]!.tool]}`}…`,
     onclick: () => { toggleMany(market.draft, batch); clearNotice(); rerender(); },
   }) : null;
+  const notIncluded = whyNotCarried(entry, plugin.name);
   return h('section.plugin-panel', { 'aria-label': 'Your tools' },
     h('div.plugin-panel-head', {}, h('h3', {}, 'Your tools')),
     // A plugin a bundled build doesn't include says why here, on the page, once for every tool.
-    whyNotCarried(entry, plugin.name) ? h('p.plugin-panel-hint', { id: 'plugin-not-included' }, whyNotCarried(entry, plugin.name)!)
+    notIncluded ? h('p.plugin-panel-hint', { id: 'plugin-not-included' }, notIncluded)
       : view.canWrite ? h('p.plugin-panel-hint', {}, 'A box or button only chooses; nothing changes until Apply all.') : null,
     // The tools from the left under the heading, each in a column of capped width, and the button for all of them at the
     // right end; a box too narrow for that puts them in a row that wraps (settlePluginTools).

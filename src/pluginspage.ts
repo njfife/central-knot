@@ -88,7 +88,8 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
         plugin.description ? h('span.plugin-row-about', { title: plugin.description }, plugin.description) : null,
         plugin.description && (holds || left) ? h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·') : null,
         holds ? h('span.plugin-row-holds', { title: holds }, holds) : null,
-        left ? h('span.plugin-row-holds.plugin-row-left', {}, `Can’t be installed from ${entry.bundled!.app}`, h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·'),
+        // The link sits beside the words: a long app name shortens the words, never the link.
+        left ? h('span.plugin-row-left', {}, h('span.plugin-row-holds', { title: `Can’t be installed from ${entry.bundled!.app}` }, `Can’t be installed from ${entry.bundled!.app}`), h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·'),
           h('button.text-action', { type: 'button', id: `pleft-${marketIndex}-${plugin.name}`, onclick: (event: Event) => { event.stopPropagation(); browse({ tab: 'about' }); } }, 'see why')) : null) : null,
       // A tool on another version or with another copy, on its own line under that, with Update for every tool that is behind.
       behind || updates.length ? h('span.plugin-row-update', {},
@@ -167,7 +168,7 @@ function aboutTab(entry: MarketplaceView, marketIndex: number) {
     // In narrow content the description is said here only (style.css), so the plugins get the height on their tab.
     entry.description ? h('p.market-page-about.about-only-narrow', {}, entry.description) : null,
     // A build's own marketplace says which release of it this is; where it "comes from" is the build, already among its facts.
-    h('div.market-about-head', {}, h('p.market-page-meta', {}, dotted(entry.bundled ? [...marketFacts(entry), ...(entry.bundled.release ? [h('span', { title: entry.bundled.from ? `Made from ${entry.bundled.from}` : undefined }, `Plugins as of ${entry.bundled.release}`)] : [])] : [...marketFacts(entry), source])), remove),
+    h('div.market-about-head', {}, h('p.market-page-meta', {}, entry.bundled ? bundledFacts(entry) : dotted([...marketFacts(entry), source])), remove),
     notCarriedNote(entry),
     !read || read.reading ? h('p.plugin-muted', {}, 'Reading…')
       : read.value ? h('div.plugin-readme-body', {}, readme(read.value, entry.name, [entry.description ?? ''])) : h('p.plugin-muted', {}, 'This marketplace has no README.'),
@@ -179,6 +180,16 @@ function marketFacts(entry: MarketplaceView): string[] {
   if (entry.bundled) return [entry.owner ? `By ${entry.owner}` : '', entry.sourceLabel].filter(Boolean);
   const addedBy = entry.origins.includes('central-knot') ? [] : entry.origins.filter(origin => origin !== 'bundle').map(toolName);
   return [entry.owner ? `By ${entry.owner}` : '', addedBy.length ? `Added in ${andList(addedBy)}` : '', entry.fetchedAt ? `Updated ${when(entry.fetchedAt)}` : ''].filter(Boolean);
+}
+
+/**
+ * About's line for a build's own marketplace: which release of it this is (what it was made from is its tooltip, for
+ * whoever needs to tell releases apart). Who made it and that it comes with the app are on the title line just above, so
+ * here they show only where that line is hidden (narrow).
+ */
+function bundledFacts(entry: MarketplaceView) {
+  const release = entry.bundled?.release ? h('span', { title: entry.bundled.from ? `Made from ${entry.bundled.from}` : undefined }, `Plugins as of ${entry.bundled.release}`) : null;
+  return [h('span.market-fact-narrow', {}, dotted(marketFacts(entry)), release ? h('span.meta-dot', { 'aria-hidden': 'true' }, '·') : null), release];
 }
 
 /** The plugins a build's marketplace lists but the build carries no files for, each with why, so "not available" has its reason in one place. */
