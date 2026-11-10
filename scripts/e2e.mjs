@@ -2252,16 +2252,12 @@ const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 const started = Date.now();
 try {
   seedHome();
-  await harnessFlow();
-  await practiceFlow();
-  await releasedStartupFlow();
-  await updateFlow();
-  await fewToolsFlow();
-  await listDiffersFlow();
-  await repoBaseFlow();
-  await draftFlow();
-  await realHomeFlow();
-  if (canWriteRealHome && crashRounds > 0) await crashFlow();
+  // Each flow's time is printed, so a run that grows slow says where.
+  for (const flow of [harnessFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, listDiffersFlow, repoBaseFlow, draftFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])]) {
+    const from = Date.now();
+    await flow();
+    console.log(`${flow.name}: ${Math.round((Date.now() - from) / 1000)}s`);
+  }
   execChmod();
 } catch (error) {
   failures.push(`aborted: ${error.message}`);
