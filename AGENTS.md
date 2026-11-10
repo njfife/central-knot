@@ -18,6 +18,18 @@ Central Knot is a configuration mover, not a secret manager or security product.
 
 macOS is the only supported platform right now. Linux and Windows are not being supported yet: do not make a Linux or Windows run a required check, and do not spend time on Linux-only or Windows-only failures or features, unless Nathan asks.
 
+## Checking a change
+
+Keep the loop short. These are the checks; nothing else is required.
+
+1. `npm test`: the type check and the unit tests, about 20 seconds.
+2. The Mac run, on your pushed branch: `gh workflow run mac.yml -R njfife/central-knot --ref <branch>`, then `gh run watch <id> -R njfife/central-knot`. It packages the app, runs the light tour and the end-to-end checks against the packaged app, and prints how long each part took. It also runs by itself on every push to `next`.
+3. If you changed what a page looks like, look at the pictures: `gh run download <id> -R njfife/central-knot -n light-tour` gives one picture of each page. For a state the light tour doesn't show, run only your own feature's section: `node scripts/ui-tour.mjs <outDir> --electron --only <section>`.
+
+- The full tour (`--full`, hundreds of pictures, about ten minutes) runs for a new release only. Do not run it, repair it or extend it for an ordinary change; a section outside your feature is not yours to fix.
+- The end-to-end checks already open every page, fail on a page error and check that nothing is cut off at each window size. Add a check there, not a tour section, when behaviour needs covering.
+- No Linux or Windows run is required (see Platform focus).
+
 ## Mandatory subagent briefing
 
 Every delegated task must include the following paragraph directly in its task brief, whether it concerns research, specification writing, implementation, builds, testing or review. Do not rely on inherited conversation context or the child discovering this file.

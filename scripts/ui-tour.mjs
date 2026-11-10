@@ -1,6 +1,10 @@
-// A screenshot tour of the real app on the Practice copy, feature by feature, for user-interface judging.
+// A screenshot tour of the real app on the Practice copy.
 // Clicks are sent as pointer clicks (detail 1), as a mouse makes them; keyboard steps use real Tab presses.
-// Usage: node scripts/ui-tour.mjs <outDir> [--electron] [--no-sandbox] [--only shell,skills,…]
+// Usage: node scripts/ui-tour.mjs <outDir> [--electron] [--no-sandbox] [--only shell,skills,…] [--full]
+// - With no switch it is the light tour (folder `light`): the app opens and each page is opened once, one picture each,
+//   in well under a minute. It fails if a page doesn't open or throws. This is the run for every change.
+// - `--only a,b` runs the named feature sections: the ones a change touched.
+// - `--full` runs every feature section, hundreds of pictures over about ten minutes. For a new release only.
 // Features: shell, skills, sync, mcp, agents, plugins, instructions, updates, sizes (four tools; every page at 860×560 with the
 // sidebar as a rail and open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light) and missing
 // (a folder home with only Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options).
@@ -18,6 +22,7 @@ const args = process.argv.slice(2);
 const out = resolve(args.find(arg => !arg.startsWith('--')) ?? 'ui-tour');
 const flag = name => args.includes(name);
 const only = args.includes('--only') ? args[args.indexOf('--only') + 1].split(',') : undefined;
+const full = flag('--full');
 const root = resolve(import.meta.dirname, '..');
 const command = flag('--electron') ? join(root, 'node_modules/electron/dist', readFileSync(join(root, 'node_modules/electron/path.txt'), 'utf8').trim()) : join(root, 'release/Central Knot-darwin-arm64/Central Knot.app/Contents/MacOS/Central Knot');
 const scratch = mkdtempSync(join(tmpdir(), 'ck-tour-'));
@@ -34,6 +39,8 @@ const launched = new Set();
 process.on('exit', () => { for (const child of launched) { try { child.kill('SIGKILL'); } catch { /* already gone */ } } });
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
+/** What a page threw, in any app this run started. */
+const pageErrors = [];
 async function launch(more = {}) {
   const port = 9300 + Math.floor(Math.random() * 400);
   const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), ...more };
@@ -41,13 +48,14 @@ async function launch(more = {}) {
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   // A dev run also opens its main process, so the tour can show states only an installed app reaches (see Settings).
   const inspect = flag('--electron') ? port + 1000 : undefined;
-  const child = spawn(command, [...(flag('--electron') ? [root, `--inspect=${inspect}`] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, 'data')}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
+  const child = spawn(command, [...(flag('--electron') ? [root, `--inspect=${inspect}`] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, 'data')}`, '--practice-copy', ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
   launched.add(child);
   child.once('exit', () => launched.delete(child));
   let target;
   for (let attempt = 0; attempt < 150 && !target; attempt++) { await wait(200); try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find(item => item.type === 'page'); } catch { /* starting */ } }
-  const page = await connect(target.webSocketDebuggerUrl);
+  const page = await connect(target.webSocketDebuggerUrl, data => { if (data.method === 'Runtime.exceptionThrown') pageErrors.push(data.params.exceptionDetails.exception?.description ?? data.params.exceptionDetails.text); });
   const { send, run } = page;
+  await send('Runtime.enable');
   // A page that never settles fails the tour instead of holding it open.
   const settle = async () => { await wait(150); await run(`new Promise((done, fail) => { const end = Date.now() + 30000; const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : Date.now() > end ? fail(new Error('The page did not settle within 30 s.')) : setTimeout(c, 25); c(); })`); await wait(200); };
   const viewport = { width: 1280, height: 800 };
@@ -92,7 +100,7 @@ async function requestHandles(a) {
 let feature = '';
 let step = 0;
 const begin = name => { feature = name; step = 0; mkdirSync(join(out, name), { recursive: true }); writeFileSync(join(out, name, 'tour.md'), `# ${name}\n\nEach step: what was just done, then the screenshot and visible text with the same number.\n\n`); };
-const wanted = name => !only || only.includes(name);
+const wanted = name => only ? only.includes(name) : full;
 /** Takes a screenshot. `pointer`: where the mouse rests for it (to show a hover); by default out of the way, in the corner. */
 async function shot(a, name, caption, pointer = { x: 2, y: a.viewport.height - 2 }) {
   step++;
@@ -129,6 +137,19 @@ async function fresh(more = {}, keepData = false) {
   mkdirSync(HOME, { recursive: true });
   a = await launch(more);
   practice = await a.run(`document.querySelector('.status-home').title`);
+}
+
+// ---------- The light tour: the app opens, and so does each page ----------
+if (only ? only.includes('light') : !full) {
+  begin('light');
+  if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
+  for (const name of ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'repo', 'settings']) {
+    if (!(await a.has(`#nav-${name}`))) throw new Error(`The sidebar has no ${name} page.`);
+    await a.click(`#nav-${name}`);
+    if (!(await waitFor(a, `document.querySelector('#nav-${name}')?.getAttribute('aria-current') === 'page'`))) throw new Error(`The ${name} page did not open.`);
+    await shot(a, name, `Clicked "${name}" in the sidebar, on the Practice copy at 1280×800.`);
+  }
+  if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 
 // ---------- First run, homes and navigation ----------
