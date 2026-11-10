@@ -118,6 +118,8 @@ export function updateButton(view: UpdateView, { held, restarting = false }: { h
 export function updateStatus(view: UpdateView): { text: string; tone: 'done' | 'info' | 'failure' | 'progress' } | undefined {
   if (view.failed) return { text: view.failed, tone: 'failure' };
   if (view.checking) return { text: 'Checking for updates…', tone: 'progress' };
+  // The newest check failing is said even when an earlier one found a release: its Update button stays.
+  if (view.checked?.failed && !view.step) return { text: view.checked.failed, tone: 'failure' };
   if (view.available) {
     const words = tagWords(view.available.tag);
     if (view.step === 'downloading') return { text: `Downloading ${words}… ${Math.floor((view.progress ?? 0) * 100)}%`, tone: 'progress' };
@@ -125,7 +127,6 @@ export function updateStatus(view: UpdateView): { text: string; tone: 'done' | '
     if (view.step === 'ready') return { text: `${words} is ready. It’s installed when Central Knot restarts.`, tone: 'info' };
     return { text: `${words} is available.`, tone: 'info' };
   }
-  if (view.checked?.failed) return { text: view.checked.failed, tone: 'failure' };
   if (view.checked) return { text: 'Up to date.', tone: 'done' };
   return undefined;
 }
