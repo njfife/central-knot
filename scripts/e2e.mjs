@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeMarket } from './fixture-market.mjs';
+import { connect, DAY, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
 
 const args = process.argv.slice(2);
 const flag = name => args.includes(name);
@@ -95,41 +96,40 @@ function seedHome() {
 }
 
 // ---------- App ----------
+// On Linux the file manager the app opens is this stand-in: it notes what it was asked to open.
+const opened = join(scratch, 'opened.txt');
+if (process.platform === 'linux') {
+  mkdirSync(join(scratch, 'bin'));
+  writeFileSync(join(scratch, 'bin/xdg-open'), `#!/bin/sh\necho "$*" >> '${opened}'\n`);
+  chmodSync(join(scratch, 'bin/xdg-open'), 0o755);
+}
 let app;
 async function launch(userData = join(scratch, 'data'), extra = []) {
   const port = 9400 + randomInt(500);
-  const env = { HOME, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp') };
+  const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp') };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
-  const child = spawn(command, [...(flag('--electron') ? [root] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : []), ...extra], { env, stdio: 'ignore' });
+  // A dev run also opens its main process to the checks (an installed app doesn't take --inspect).
+  const inspect = flag('--electron') ? port + 1000 : undefined;
+  const child = spawn(command, [...(flag('--electron') ? [root, `--inspect=${inspect}`] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : []), ...extra], { env, stdio: 'ignore' });
   let targets;
   for (let attempt = 0; attempt < 150 && !targets; attempt++) {
     await wait(200);
     try { targets = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).filter(target => target.type === 'page'); if (!targets.length) targets = undefined; } catch { /* still starting */ }
   }
   if (!targets) { child.kill('SIGKILL'); throw new Error('The app did not open a debug port.'); }
-  const socket = new WebSocket(targets[0].webSocketDebuggerUrl);
-  await new Promise((done, fail) => { socket.onopen = done; socket.onerror = fail; });
-  const pending = new Map();
   const pageErrors = [];
-  let id = 0;
-  socket.onmessage = message => {
-    const data = JSON.parse(message.data);
-    if (pending.has(data.id)) { pending.get(data.id)(data); pending.delete(data.id); }
+  const page = await connect(targets[0].webSocketDebuggerUrl, data => {
     if (data.method === 'Runtime.exceptionThrown') pageErrors.push(data.params.exceptionDetails.exception?.description ?? data.params.exceptionDetails.text);
     if (data.method === 'Log.entryAdded' && data.params.entry.level === 'error') pageErrors.push(data.params.entry.text);
-  };
-  const send = (method, params = {}) => new Promise(done => { const key = ++id; pending.set(key, done); socket.send(JSON.stringify({ id: key, method, params })); });
+  });
+  const { send, run } = page;
   await send('Runtime.enable');
   await send('Log.enable');
-  const run = async expression => {
-    const reply = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-    if (reply.result.exceptionDetails) throw new Error(reply.result.exceptionDetails.exception?.description ?? reply.result.exceptionDetails.text);
-    return reply.result.result.value;
-  };
   const settle = async () => { await wait(120); await run(`new Promise(done => { const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.mx,.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : setTimeout(c, 25); c(); })`); await wait(60); };
   app = {
     child, run, send, settle, pageErrors,
+    main: inspect && (() => mainProcess(inspect)),
     click: async selector => { await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); e.click(); })()`); await settle(); },
     exists: selector => run(`!!document.querySelector(${JSON.stringify(selector)})`),
     text: selector => run(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? null`),
@@ -139,8 +139,8 @@ async function launch(userData = join(scratch, 'data'), extra = []) {
     expand: async () => { await run(`[...document.querySelectorAll('button')].filter(b => /^Show \\d+ skill/.test(b.textContent.trim()) && b.getAttribute('aria-expanded') !== 'true').forEach(b => b.click())`); await settle(); },
     plan: () => run(`Object.fromEntries([...document.querySelectorAll('.plan-card')].map(e => [e.dataset.key, e.dataset.state]))`),
     pages: async () => (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).filter(target => target.type === 'page').length,
-    quit: async () => { socket.close(); child.kill('SIGTERM'); await new Promise(done => { child.once('exit', done); setTimeout(done, 5000); }); },
-    crash: () => new Promise(done => { socket.close(); child.once('exit', done); child.kill('SIGKILL'); }),
+    quit: async () => { page.close(); child.kill('SIGTERM'); await new Promise(done => { child.once('exit', done); setTimeout(done, 5000); }); },
+    crash: () => new Promise(done => { page.close(); child.once('exit', done); child.kill('SIGKILL'); }),
   };
   await settle();
   return app;
@@ -544,9 +544,12 @@ async function practiceFlow() {
   await a.click('#nav-settings');
   const dark = () => a.run(`matchMedia('(prefers-color-scheme: dark)').matches`);
   check('Settings shows the three appearances, System chosen', await a.exists('#appearance-system[aria-checked="true"]') && await a.exists('#appearance-light') && await a.exists('#appearance-dark'));
-  await a.click('#appearance-dark');
-  await wait(200);
-  check('Dark makes the page dark', await dark() === true && await a.exists('#appearance-dark[aria-checked="true"]'));
+  // The cards are one radio group: the chosen card is the only Tab stop, and arrow keys move on and choose (focus stays put
+  // through the save's redraw, so the second press works).
+  await a.run(`document.querySelector('#appearance-system').focus()`);
+  for (let press = 0; press < 2; press++) { await a.press('ArrowRight', 'ArrowRight'); await wait(200); }
+  check('arrow keys choose Dark, which makes the page dark', await dark() === true && await a.exists('#appearance-dark[aria-checked="true"]')
+    && await a.run(`document.activeElement.id === 'appearance-dark' && [...document.querySelectorAll('[role="radio"]')].filter(card => card.tabIndex === 0).map(card => card.id).join() === 'appearance-dark'`));
   await a.shot('settings-dark');
   await a.click('#appearance-light');
   await wait(200);
@@ -554,6 +557,179 @@ async function practiceFlow() {
   await a.shot('settings-light');
   await a.click('#appearance-system');
   check('System can be chosen again', await a.exists('#appearance-system[aria-checked="true"]'));
+  same('Settings rows use the page width, each control at the row end, text 16px in as on other pages', await a.run(`(() => {
+    const page = document.querySelector('.settings-scroll'), style = getComputedStyle(page), row = document.querySelector('#setting-log'), box = row.getBoundingClientRect();
+    return [Math.round(page.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - box.width),
+      Math.round(box.right - parseFloat(getComputedStyle(row).paddingRight) - document.querySelector('#show-log').getBoundingClientRect().right),
+      Math.round(document.querySelector('#setting-log-title').getBoundingClientRect().left - page.getBoundingClientRect().left)];
+  })()`), [0, 0, 16]);
+  const appSettings = join(scratch, 'data/app-settings.json');
+  // The app rewrites this file in place, so a read can land mid-write: read again until it parses.
+  const savedSettings = () => { for (let tries = 0; ; tries++) { try { return JSON.parse(readFileSync(appSettings, 'utf8')); } catch (error) { if (tries > 50) throw error; } } };
+  // Every writer saves through one chain: saves sent together land in order, the file stays whole, and other fields stay.
+  // They bypass the page, so the open page (showing System) can only come to show Light by hearing that main saved it.
+  await a.run(`Promise.all(['light', 'system', 'dark', 'system', 'light'].map(choice => window.centralKnot.setAppearance(choice)))`);
+  let followed = false;
+  for (let tries = 0; tries < 20 && !followed; tries++) { await wait(100); followed = await a.exists('#appearance-light[aria-checked="true"]'); }
+  check('settings saved at once keep the other settings, and the open page follows the last', followed && savedSettings().appearance === 'light' && savedSettings().home?.mode === 'fixture', savedSettings());
+  chmodSync(appSettings, 0o444);
+  await a.click('#appearance-dark');
+  check('a save that fails says why in plain words in its row, and the saved choice stays', await dark() === false && await a.exists('#appearance-light[aria-checked="true"]')
+    && await a.text('#setting-appearance .setting-failure') === 'Couldn’t save: Central Knot can’t write its settings file. Light is still in use. Check the file’s permissions, then try again.', await a.text('#setting-appearance'));
+  chmodSync(appSettings, 0o644);
+  await a.click('#appearance-system');
+  check('the next save clears the failure', !(await a.exists('.setting-failure')) && savedSettings().appearance === 'system');
+  // Show log file opens the folder the log is in, and says so (macOS and Windows select the file: the Mac check covers that).
+  if (process.platform === 'linux') {
+    await a.click('#show-log');
+    for (let tries = 0; tries < 30 && !existsSync(opened); tries++) await wait(100);
+    same('Show log file opens the log’s folder and names the file', [existsSync(opened) && readFileSync(opened, 'utf8').trim(), await a.text('#setting-log .setting-note')],
+      [join(scratch, 'data'), 'Opened the log’s folder. The file is central-knot.log.']);
+  }
+  // Keep history for: 30 days at first, and History shows only what the window covers. A longer window saves at once; a shorter
+  // one asks first (Cancel writes nothing), then removes what is older from this home's History file and from the History page.
+  const historyFile = join(practice, '.central-knot/history.json');
+  writeFileSync(historyFile, JSON.stringify({ events: [...JSON.parse(readFileSync(historyFile, 'utf8')).events, ...[60, 20, 5].map(days =>
+    ({ id: `aged-${days}`, at: new Date(Date.now() - days * DAY).toISOString(), key: `aged-${days}`, item: `aged-${days}-days`, kind: 'edit', winner: { tool: 'claude-cli', hash: '0'.repeat(64) }, losers: [], orderProved: true }))] }));
+  const agedIn = events => events.map(event => event.key).filter(key => key.startsWith('aged-'));
+  const agedOnFile = () => agedIn(JSON.parse(readFileSync(historyFile, 'utf8')).events);
+  const agedShown = async () => agedIn((await a.run('window.centralKnot.history()')).events);
+  same('History is kept for 30 days at first: it shows what that covers, and reading alone removes nothing',
+    [await a.run(`document.querySelector('#history-days').value`), await agedShown(), agedOnFile()], ['30', ['aged-20', 'aged-5'], ['aged-60', 'aged-20', 'aged-5']]);
+  await keepFor(a, 90);
+  same('a longer window saves at once, with no question, and History shows what it now covers',
+    [savedSettings().historyDays, await a.exists('#history-shorten'), await agedShown()], [90, false, ['aged-60', 'aged-20', 'aged-5']]);
+  await keepFor(a, 7);
+  const question = await a.text('#history-shorten-text') ?? '';
+  same('a shorter window asks first, naming from when, and keeps the saved choice until confirmed (which its other button names)',
+    [/^History before .+ will be removed and can’t be restored\. Your other homes remove it too the next time they record a change\.$/.test(question), await a.text('#history-shorten'), await a.text('#history-shorten-cancel'), await a.run(`document.querySelector('#history-days').value`), savedSettings().historyDays],
+    [true, 'Shorten to 7 days', 'Keep 90 days', '90', 90]);
+  await a.shot('settings-history-confirm');
+  await a.run(`document.querySelector('#history-days').focus()`);
+  for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await a.settle();
+  const escaped = await a.exists('#history-shorten');
+  await keepFor(a, 7);
+  await a.click('#history-shorten-cancel');
+  same('Escape or Cancel closes the question and writes nothing', [escaped, await a.exists('#history-shorten'), savedSettings().historyDays, agedOnFile(), await a.run(`document.activeElement.id`)], [false, false, 90, ['aged-60', 'aged-20', 'aged-5'], 'history-days']);
+  // A window change waits its turn behind whatever main is doing (here a held queue standing in for a long sync pass). Meanwhile
+  // the row says so and takes no other change, and other rows still work. Newer requests that arrive meanwhile win: the
+  // confirmed shorter window they overtook neither saves nor removes anything, and main reports nothing pruned for it. History
+  // opened while they wait shows the window that won with the events it covers, never the window from before.
+  if (a.main) {
+    const main = await a.main();
+    const held = await holdQueue(main, a);
+    await keepFor(a, 7);
+    await a.click('#history-shorten');
+    await a.run(`void (window.ckOvertaken = window.centralKnot.setHistoryDays(7))`);
+    await a.run(`void (window.ckNewest = window.centralKnot.setHistoryDays(30).then(saved => (window.ckNewestDone = true, saved)))`);
+    await a.click('#appearance-light');
+    const during = [await a.run(`document.querySelector('#history-days').disabled`), (await a.text('#setting-history-notice'))?.trim(), await a.exists('#history-shorten'),
+      await a.run(`window.ckNewestDone === true`), savedSettings().historyDays, await a.exists('#appearance-light[aria-checked="true"]')];
+    // Not a.click: it waits for the page to be idle, and History's read waits behind the held queue.
+    await a.run(`document.querySelector('#nav-history').click()`);
+    await held.release();
+    const [overtaken, newest] = [await a.run('window.ckOvertaken'), await a.run('window.ckNewest')];
+    await a.settle();
+    const listedMeanwhile = await a.text('#history-scroll') ?? '';
+    same('while main is busy the row says it is updating and takes no other change; the newest request wins, the overtaken shorter ones remove nothing, and History opened meanwhile agrees with the window that won',
+      [during, savedSettings().historyDays, agedOnFile(), [overtaken.pruned ?? 'none', newest.pruned], listedMeanwhile.includes('aged-20-days'), listedMeanwhile.includes('aged-60-days'), await a.text('.history-intro')],
+      [[true, 'Updating History…', false, false, 90, true], 30, ['aged-20', 'aged-5'], ['none', 'done'], true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back. Kept for 30 days. Change in Settings.']);
+    await a.click('#nav-settings');
+    same('the row then shows the window that won and takes changes again', [await a.run(`document.querySelector('#history-days').value`), await a.run(`document.querySelector('#history-days').disabled`)], ['30', false]);
+    await a.click('#appearance-system');
+    main.close();
+  }
+  // Shorten. Where main can be reached the change is held in its queue, and the window refocused meanwhile, so the page re-reads
+  // the settings (still 30 days) before main saves. The re-read main asks for once it has saved can land either side of the
+  // save's answer; it is muted here, so the save's answer must stand on its own: it is still the newer one, and the row reports it.
+  await keepFor(a, 7);
+  const shortenMain = a.main && await a.main();
+  const shortenHeld = shortenMain && await holdQueue(shortenMain, a);
+  await a.click('#history-shorten');
+  if (shortenHeld) {
+    await refocus(shortenMain); await a.settle();
+    await shortenMain.run(`(contents => { const send = contents.send; globalThis.ckUnmute = () => { contents.send = send; }; contents.send = (channel, ...rest) => channel === 'settings:changed' ? undefined : send.call(contents, channel, ...rest); })(electron.BrowserWindow.getAllWindows()[0].webContents)`);
+    await shortenHeld.release();
+  }
+  for (let tries = 0; tries < 30 && savedSettings().historyDays !== 7; tries++) await wait(100);
+  for (let tries = 0; tries < 30 && agedOnFile().length > 1; tries++) await wait(100);
+  for (let tries = 0; tries < 30 && !(await a.exists('#setting-history-message')); tries++) await wait(100);
+  const removedNote = await a.text('#setting-history-message') ?? '';
+  if (shortenHeld) { await shortenMain.run('ckUnmute()'); shortenMain.close(); }
+  // Another row acting clears the note: the page says one finished thing at a time.
+  await a.click('#appearance-light');
+  const noteAfterOtherRow = await a.exists('#setting-history-message');
+  await a.click('#appearance-system');
+  await a.click('#nav-history');
+  const listed = await a.text('#history-scroll') ?? '';
+  const intro = await a.text('.history-intro');
+  await a.click('#history-intro-settings');
+  same('Shorten saves, removes the older History from this home’s file, says from when (even after a re-read while it waited), and History shows only what is left, how long it keeps it, and the way to Settings',
+    [savedSettings().historyDays, agedOnFile(), /^Saved\. History before .+ was removed\.$/.test(removedNote), noteAfterOtherRow, listed.includes('aged-5-days'), listed.includes('aged-20-days'), intro, await a.exists('#history-days')],
+    [7, ['aged-5'], true, false, true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back. Kept for 7 days. Change in Settings.', true]);
+  // Start at sign-in: only an installed app can register a login item, so here the row is off, can't be changed, and says why
+  // in its hint's place. Main refuses a change too, and nothing about it is saved.
+  const signInReason = flag('--electron') ? 'Only the installed app can start at sign-in.' : 'Move Central Knot to the Applications folder first.';
+  const refused = await a.run(`window.centralKnot.setStartAtSignIn(true).then(() => 'saved', error => String(error))`);
+  same('Start at sign-in that can’t be changed is off and disabled, says why, and main refuses a change', [
+    await a.run(`(({ disabled, ariaChecked }) => [ariaChecked, disabled])(document.querySelector('#start-at-sign-in'))`),
+    await a.run(`document.getElementById(document.querySelector('#start-at-sign-in').getAttribute('aria-describedby'))?.textContent`),
+    refused.includes(signInReason), 'startAtSignIn' in savedSettings()], [['false', true], signInReason, true, false]);
+  // The installed-app checks below stand in main's platform and login items, which only works where they are Linux's own: elsewhere a
+  // stood-in packaged app could reach the real system's login items.
+  if (a.main && process.platform === 'linux') {
+    // Main stands in as an installed app on Windows (see standIn): its login items keep what they are asked for unless told to
+    // ignore it, it keeps every menu it builds from here on, and the system's settings pages and the first-close dialog are stand-ins.
+    const main = await a.main();
+    await standIn(main, 'win32');
+    const until = async (expected, read) => { let seen; for (let tries = 0; tries < 30; tries++) { seen = await read(); if (JSON.stringify(seen) === JSON.stringify(expected)) break; await wait(100); } return seen; };
+    // The switch, the row's message and its action.
+    const row = () => a.run(`(message => [document.querySelector('#start-at-sign-in').getAttribute('aria-checked'), message?.querySelector('.setting-message-text').textContent ?? null, message?.querySelector('.text-action')?.textContent ?? null])(document.querySelector('#setting-sign-in .setting-message'))`);
+    // Coming back to the window: the row can be changed now.
+    await refocus(main);
+    await until(false, () => a.run(`document.querySelector('#start-at-sign-in').disabled`));
+    await a.click('#start-at-sign-in');
+    const fromSettings = await until(['true', null, null], row);
+    // The menu's item turns it off while Settings is open: the row follows.
+    await main.run(`ck.menus.at(-1).find(item => item.label === 'Start at sign-in').click({ checked: false })`);
+    const fromMenu = await until(['false', null, null], row);
+    // A system that ignores the change: the row says so, with the way to its settings; once it is put right there, coming back clears it.
+    const unchanged = ['false', 'Your system didn’t change this.', 'Open Startup apps'];
+    await main.run(`ck.login.ignore = true`);
+    await a.click('#start-at-sign-in');
+    const ignored = await until(unchanged, row);
+    // The action keeps the keyboard focus while the page redraws for something else (the appearance changed from elsewhere).
+    const action = '#setting-sign-in .setting-message .text-action';
+    await a.run(`document.querySelector('${action}').focus()`);
+    await a.run(`window.centralKnot.setAppearance('dark')`);
+    const redrawn = await until(true, () => a.exists('#appearance-dark[aria-checked="true"]'));
+    const focused = await a.run(`document.activeElement.matches('${action}')`);
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    await a.click(action);
+    await main.run(`Object.assign(ck.login, { ignore: false, on: true })`);
+    await refocus(main);
+    const putRight = await until(['true', null, null], row);
+    same('Start at sign-in on an installed Windows app (stand-in system): Settings and the menu change it and the row shows the system’s answer; a change the system ignored is said, its action keeps focus through a redraw, opens Startup apps, and the line clears once put right',
+      [fromSettings, fromMenu, ignored, redrawn && focused, putRight, await main.run(`[ck.asked, ck.opened]`)],
+      [['true', null, null], ['false', null, null], unchanged, true, ['true', null, null], [[true, false, true], ['ms-settings:startupapps']]]);
+    // As an installed app on Linux: coming back to the window reads it again.
+    await main.run(`(ck.as('linux'), ck.asked = [])`);
+    const saved = savedSettings().startAtSignIn;
+    await refocus(main);
+    const reread = await until('Not available on Linux yet.', () => a.text('#setting-sign-in-hint'));
+    const menuItem = await main.run(`(({ label, visible, enabled, checked }) => ({ label, visible, enabled, checked }))(ck.menus.at(-1).find(item => item.label?.startsWith('Start at sign-in')))`);
+    // The first close explains where the app went; on Linux it offers no start at sign-in.
+    await main.run(`electron.BrowserWindow.getAllWindows()[0].close()`);
+    for (let tries = 0; tries < 20 && !savedSettings().closeExplained; tries++) await wait(100);
+    const dialogs = await main.run(`ck.dialogs.map(options => 'checkboxLabel' in options)`);
+    // The rest of the run has the real system back: platform, packaging, login items, menus, dialogs and links.
+    await main.run(`(ck.restore(), electron.BrowserWindow.getAllWindows()[0].show())`);
+    same('an installed app on Linux: the row (read again on focus), the menu (hidden) and the first-close dialog agree it isn’t available; no login-item call, nothing saved',
+      [reread, menuItem, dialogs, await main.run(`ck.asked`), savedSettings().startAtSignIn === saved],
+      ['Not available on Linux yet.', { label: 'Start at sign-in (not on Linux yet)', visible: false, enabled: false, checked: false }, [false], [], true]);
+    main.close();
+  }
   await a.click('#nav-skills');
   same('no page errors, practice', a.pageErrors, []);
   // With no window at all, Central Knot keeps running from the menu bar and sync keeps going (PLT-04). A page-made close
@@ -602,6 +778,23 @@ async function realHomeFlow() {
     same('main process refuses too', refused.harnessWrites, 0);
     check('with a reason', /Preview only/.test(refused.stopped ?? ''), refused);
     check('no copy and no store', !existsSync(join(COPILOT, 'rich')) && !existsSync(join(HOME, '.central-knot')));
+    // The History window chosen in the practice run survives the restart. Shortening it here, a preview-only home, writes nothing.
+    mkdirSync(join(HOME, '.central-knot'));
+    const previewHistory = join(HOME, '.central-knot/history.json');
+    writeFileSync(previewHistory, JSON.stringify({ events: [{ id: 'aged', at: new Date(Date.now() - 20 * DAY).toISOString(), key: 'aged', item: 'aged', kind: 'edit', losers: [], orderProved: true }] }));
+    const before = readFileSync(previewHistory, 'utf8');
+    const restarted = (await a.run('window.centralKnot.getSettings()')).historyDays;
+    await a.run('window.centralKnot.setHistoryDays(30)');
+    await a.click('#nav-settings');
+    await keepFor(a, 7);
+    await a.click('#history-shorten');
+    for (let tries = 0; tries < 30 && !(await a.exists('#setting-history-message')); tries++) await wait(100);
+    const previewNote = (await a.text('#setting-history-message') ?? '').trim();
+    same('the History window survives a restart; shortening it never writes a preview-only home, whose History still shows only the window, and the row says another copy removes the older History later rather than that it was removed',
+      [restarted, readFileSync(previewHistory, 'utf8') === before, (await a.run('window.centralKnot.history()')).events.length, (await a.run('window.centralKnot.getSettings()')).historyDays, previewNote],
+      [7, true, 0, 7, 'Saved. Older History in this home is removed the next time Central Knot records a change in it.']);
+    await a.run('window.centralKnot.setHistoryDays(30)');
+    rmSync(join(HOME, '.central-knot'), { recursive: true });
     await a.quit();
     return;
   }

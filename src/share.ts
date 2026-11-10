@@ -5,7 +5,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, 
 import { configRoot, harnessIds, harnesses, writeRoot } from './harnesses.ts';
 import { instructionFiles } from './instructions.ts';
 import { mcpFile } from './mcp.ts';
-import type { HarnessId, HomeMode, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
+import type { HarnessId, HistoryDays, HomeMode, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
 
 export const FORMAT_VERSION = 1;
 const STAGE_PREFIX = '.ck-stage-';
@@ -32,6 +32,8 @@ export interface ShareContext {
   fault?: (step: 'before-rename' | 'after-rename' | 'before-replace' | 'mid-replace' | 'before-remove') => void;
   /** The clock for observation intervals (CON-04); tests pass their own. */
   now?: () => number;
+  /** How many days History keeps events, and deleted items' content (STO-04); the default unless Settings says otherwise. */
+  historyDays?: HistoryDays;
   /** How long a copy must stay missing before it counts as deleted, so an atomic save is not a deletion (SYN-04). Default 2 s. */
   settleMs?: number;
 }
@@ -335,6 +337,11 @@ export async function syncGate(context: ShareContext): Promise<SyncGate> {
   if (!remembered) return { state: 'needs-resume', reason: 'This app has an intact sync record but no memory of it. Resuming keeps every recorded choice.' };
   if (remembered !== record.generation) return { state: 'stopped', reason: `The sync record is not the one this app last used. ${NOTHING_CHANGED}` };
   return { state: 'ready' };
+}
+
+/** Whether this build syncs this home and may write it: History is kept tidy, and passes run, only where both hold. */
+export async function syncsHere(context: ShareContext): Promise<boolean> {
+  return (await writeAccess(context)).allowed && (await syncGate(context)).state === 'ready';
 }
 
 /** The real home is written only by explicitly choosing it. A simulated home that reaches it stays read-only. */

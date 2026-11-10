@@ -80,7 +80,7 @@ test('An edit spreads and Undo reverts it; a deletion spreads once it holds and 
     assert.deepEqual(spread.notices?.map(notice => [notice.kind, notice.winner, notice.losers]), [['edit', 'codex-cli', ['copilot-cli']]]);
     assert.equal((await copilotOf(box.home)).tool.command, 'b', 'Codex edit reached Copilot');
     assert.deepEqual((await copilotOf(box.home)).tool.tools, ['*'], "Copilot's own field stays");
-    const edit = (await readHistory(box.home)).find(event => event.kind === 'edit' && event.key === 'mcp:tool')!;
+    const edit = (await readHistory(box.context)).find(event => event.kind === 'edit' && event.key === 'mcp:tool')!;
     assert.equal((await restoreMcp(box.context, tools, edit.id)).stopped, undefined);
     assert.equal((await copilotOf(box.home)).tool.command, 'a', 'Undo put the old command back in Copilot');
     assert.ok((await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('command = "a"'), 'and in Codex');
@@ -101,7 +101,7 @@ test('An edit spreads and Undo reverts it; a deletion spreads once it holds and 
     const held = await applyMcp(box.context, tools, [{ key: 'twin', managed: true, off: ['claude-cli'] }]);
     assert.ok(held.results.some(entry => /Copies differ/.test(entry.message)));
     await applyMcp(box.context, tools, [{ key: 'twin', managed: true, off: ['claude-cli'], use: 'copilot-cli' }]);
-    assert.ok((await readHistory(box.home)).some(e => e.kind === 'chosen' && e.key === 'mcp:twin' && e.losers.some(l => l.tool === 'codex-cli')), 'the replaced copy is in History');
+    assert.ok((await readHistory(box.context)).some(e => e.kind === 'chosen' && e.key === 'mcp:twin' && e.losers.some(l => l.tool === 'codex-cli')), 'the replaced copy is in History');
     assert.ok((await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('command = "x"'));
   } finally { await box.cleanup(); }
 });
@@ -173,7 +173,7 @@ test('Apply all records the entries it adds; Undo removes them while unchanged, 
     await writeFile(join(box.home, '.claude.json'), claudeJson({ massive }));
     await writeFile(join(box.home, '.codex/config.toml'), codexToml);
     await applyMcp(box.context, tools, [{ key: 'massive', managed: true, off: [] }]);
-    const added = (await readHistory(box.home)).find(event => event.kind === 'added' && event.key === 'mcp:massive')!;
+    const added = (await readHistory(box.context)).find(event => event.kind === 'added' && event.key === 'mcp:massive')!;
     assert.deepEqual(added.losers.map(loser => loser.tool).sort(), ['codex-cli', 'copilot-cli']);
     const undone = await restoreMcp(box.context, tools, added.id);
     assert.equal(undone.stopped, undefined, JSON.stringify(undone));
@@ -261,7 +261,7 @@ test('A damaged, unreadable or newer MCP record stops every write and is never r
     await writeFile(join(box.home, '.copilot/mcp-config.json'), JSON.stringify(copilot, null, 2));
     const files = ['.claude.json', '.copilot/mcp-config.json', '.codex/config.toml'];
     const before = await Promise.all(files.map(file => readFile(join(box.home, file), 'utf8')));
-    const edit = (await readHistory(box.home)).at(-1)!;
+    const edit = (await readHistory(box.context)).at(-1)!;
     const bad: [string, RegExp][] = [
       ['{"formatVersion": 1, "items": {', /The MCP record is damaged\. Nothing was written or deleted/],
       [JSON.stringify({ formatVersion: 1, items: [] }), /The MCP record is damaged\./],
