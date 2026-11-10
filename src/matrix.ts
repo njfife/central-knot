@@ -625,9 +625,9 @@ function switchLine(skill: SampleSkill, tool: Tool): string {
  * arrives disabled: only what Disable or Remove does there. Otherwise how the copies stand, then that.
  */
 function rowLine(skill: SampleSkill, tool: Tool, quiet: boolean): string {
-  // Disable is best effort: on a build older than the one verified, or one whose version can't be read, it is only said.
+  // Disable is best effort: on a build older than the one verified it is only said (an unread version: the switch's tooltip).
   const note = !skill.removing?.includes(tool) && !skill.switchProblem?.[tool] && !skill.cannot?.[tool]
-    && (skill.copies[tool] !== undefined || cellOf(skill, tool) === 'will-sync') ? skill.disableUnverified?.[tool] : undefined;
+    && (skill.copies[tool] !== undefined || cellOf(skill, tool) === 'will-sync') && skill.disableUnverified?.[tool]?.startsWith('Not checked') ? skill.disableUnverified[tool] : undefined;
   return [rowSentence(skill, tool, quiet), note].filter(Boolean).join(' ');
 }
 
@@ -664,7 +664,7 @@ function toolControls(skill: SampleSkill, tool: Tool) {
   if (canRemove) remove.title = `Remove ${names[tool]}’s copy on Apply all. History keeps it for Restore${skill.managed ? ', and Central Knot stops syncing it here' : ''}.`;
   return h('span.details-tool-actions', {},
     unavailable ? h('span.tool-switch-na', {}, icon('circle-alert', 12, 'tone-muted'), 'Disable unavailable')
-      : h(`span.tool-switch${pending ? '.tool-switch-pending' : ''}`, {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, disabled ? 'Disabled' : 'Enabled'),
+      : h(`span.tool-switch${pending ? '.tool-switch-pending' : ''}`, { title: skill.disableUnverified?.[tool] }, h('span.tool-switch-word', { 'aria-hidden': 'true' }, disabled ? 'Disabled' : 'Enabled'),
         toggle({ on: !disabled, label: `${skill.name ?? key} in ${names[tool]}: ${disabled ? 'disabled' : 'enabled'}${pending ? ' on Apply all' : ''}. Click to ${disabled ? 'enable' : 'disable'} it there.`, onchange: on => setDisabledIn(key, tool, !on), id: `enable-${key}-${tool}` })),
     remove);
 }
