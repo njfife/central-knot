@@ -9,7 +9,9 @@ import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { findApp } from '../../src/discovery.ts';
 import { appCandidates } from '../../src/platform.ts';
-import { install, installState, parseCatalog, readCatalog, uninstall, update, type PluginContext } from '../../src/plugins.ts';
+import { addMarketplace, install, installState, parseCatalog, readCatalog, registeredMarketplaces, uninstall, update, type PluginContext } from '../../src/plugins.ts';
+import { bundledMarketplace, openBundle } from '../../src/bundle.ts';
+import { packRelease } from '../../src/bundlepack.ts';
 import type { PluginTool } from '../../src/presence.ts';
 import type { HarnessId } from '../../src/types.ts';
 
@@ -123,5 +125,38 @@ for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli'] as PluginTool[]) {
       assert.deepEqual([report.outcome, report.changed], ['updated', true], JSON.stringify(report, null, 1));
       assert.equal(await differs(), false, 'and now it has the new text');
     } finally { server.kill(); await rm(base, { recursive: true, force: true }); }
+  });
+}
+
+for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli'] as PluginTool[]) {
+  test(`${tool}: a bundled build's marketplace, unpacked in a data folder with a space in its path, is added to the tool's own list, then installs and uninstalls`, { skip: binaries[tool] ? false : `${tool} not on PATH` }, async () => {
+    const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-harness-')));
+    try {
+      // Packed as a build packs it, then opened as the app opens it, into a folder named as a Mac names one.
+      const source = join(base, 'market');
+      await marker(source);
+      const packed = await packRelease({ source, out: join(base, 'carried'), work: join(base, 'work') });
+      assert.ok('release' in packed, JSON.stringify(packed));
+      await rm(source, { recursive: true, force: true });
+      const dataDir = join(base, 'Application Support/acme-knot');
+      const opened = await openBundle(dataDir, join(base, 'carried'));
+      assert.equal(opened.problem, undefined);
+      const folder = bundledMarketplace(dataDir);
+      const context: PluginContext = { home: join(base, 'home'), dataDir: join(dataDir, 'plugins'), binaries, timeoutMs: 120_000 };
+      await mkdir(context.home, { recursive: true });
+      const catalog = await parseCatalog(folder, folder, 'folder');
+      // Added to the tool's own list: nothing is installed, and the tool records the folder.
+      const listed = await addMarketplace(context, catalog, tool);
+      assert.equal(listed.outcome, 'added', JSON.stringify(listed, null, 1));
+      assert.deepEqual((await registeredMarketplaces(context, tool)).map(entry => entry.name), ['ck-test-market']);
+      assert.equal((await installState(context, tool, 'ck-test-market', 'ck-marker')).state, 'not-installed');
+      assert.equal((await addMarketplace(context, catalog, tool)).outcome, 'there', 'a second add runs nothing');
+      // Then its plugin installs by the tool's own command, with the source long gone, and uninstalls.
+      const report = await install(context, catalog, 'ck-marker', tool);
+      assert.equal(report.outcome, 'installed', JSON.stringify(report, null, 1));
+      const state = await installState(context, tool, 'ck-test-market', 'ck-marker');
+      assert.equal(state.state, 'installed', JSON.stringify(state));
+      assert.equal((await uninstall(context, 'ck-test-market', 'ck-marker', tool, folder)).outcome, 'uninstalled');
+    } finally { await rm(base, { recursive: true, force: true }); }
   });
 }
