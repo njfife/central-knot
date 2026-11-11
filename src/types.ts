@@ -211,6 +211,8 @@ export interface Outside {
   linkTo?: string;
   /** 'shared': why Manage can't give each tool its own copy instead: a tool's own skills folder is this folder. Delete still removes it. */
   pinned?: string;
+  /** With `pinned`: the tool whose skills folder is a link to the shared folder. */
+  pinnedBy?: HarnessId;
 }
 
 export interface ToolCopy {
@@ -287,6 +289,8 @@ export interface SkillFacts {
   disableNote?: Partial<Record<HarnessId, string>>;
   /** Skills: tools whose own skills folder has a broken link by this name, with where it led: a copy written there replaces it. */
   brokenLink?: Partial<Record<HarnessId, string>>;
+  /** Skills, managed: its links or shared copy are back since a take-over (Manage, Replace with managed copies) removed them. */
+  outsideBack?: true;
 }
 
 /** Why a tool's skill switch can't be used: its settings file, and what is wrong with it ("isn’t valid JSON."). */

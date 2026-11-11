@@ -62,6 +62,8 @@ export interface SampleSkill {
   outside?: Partial<Record<Tool, Outside>>;
   /** Skills: a broken link by this name in a tool's own folder, and where it led: a copy written there replaces it. */
   brokenLink?: Partial<Record<Tool, string>>;
+  /** Skills, managed: its links or shared copy are back since a take-over removed them. */
+  outsideBack?: boolean;
   /** Skills, before Apply all: tools whose copy is removed then. */
   removing?: Tool[];
 }

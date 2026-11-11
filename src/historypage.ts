@@ -1,6 +1,6 @@
 // History: what sync did on its own, newest first, with Undo or Restore where the kept content allows it (CON-02, DEL-03).
 import { clockTime, DAY_MS } from './model.ts';
-import { noTools, restoreEvent, showPage, state, touchedToolsPhrase } from './app.ts';
+import { noTools, restoreEvent, showPage, shownPath, state, touchedToolsPhrase } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
 import { changedProfile, flipSummary, NO_PROFILE, redoneSwitch } from './profileplan.ts';
@@ -61,10 +61,11 @@ function tookOverText(event: HistoryEvent, undone: boolean): string {
   const told = event.tookOver;
   if (!told) return 'Took over its copies outside Central Knot.';
   const replaced = told.links.filter(link => link.placed).map(link => link.tool);
+  // The same words as the Skills page: "link", "shared copy", and the folder through the same path-shortening ("~/.agents/skills").
   const parts = [
-    replaced.length ? `replaced the link in ${andList(replaced.map(tool => `${who(tool)}’s`))} skills folder with a real copy` : '',
-    told.placed.length ? `gave ${andList(told.placed.map(copy => who(copy.tool)))} ${told.placed.length > 1 ? 'copies' : 'a copy'} of ${told.placed.length > 1 ? 'their' : 'its'} own` : '',
-    told.shared.length ? `removed the copy in ${told.shared[0].path.replace(/\/[^/]+$/, '')}` : '',
+    replaced.length ? `replaced ${andList(replaced.map(tool => `${who(tool)}’s`))} ${replaced.length > 1 ? 'links with real copies' : 'link with a real copy'}` : '',
+    told.placed.length ? `gave ${andList(told.placed.map(copy => who(copy.tool)))} ${told.placed.length > 1 ? 'their own copies' : 'its own copy'}` : '',
+    told.shared.length ? `removed the shared copy in ${shownPath(told.shared[0].path.replace(/\/[^/]+$/, ''))}` : '',
   ].filter(Boolean);
   const text = parts.length ? parts.join('; ') : 'took over its copies outside Central Knot';
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}${undone ? '; this was undone, and they are back as they were.' : '. Central Knot kept what it replaced.'}`;

@@ -422,11 +422,11 @@ export const sharedFolder = (context: ShareContext) => join(context.home, '.agen
  * Why the shared folder's copies stay where they are when a skill is managed: a present tool's own skills folder is that very
  * folder (a link to it), so a copy there is the only one that tool can have. Undefined when no tool's folder is.
  */
-async function pinnedShared(context: ShareContext, tools: HarnessId[], problems: Map<HarnessId, string | undefined>): Promise<string | undefined> {
+async function pinnedShared(context: ShareContext, tools: HarnessId[], problems: Map<HarnessId, string | undefined>): Promise<{ text: string; tool: HarnessId } | undefined> {
   const shared = await landingOf(sharedFolder(context));
   if (!shared) return undefined;
   for (const tool of tools) {
-    if (problems.get(tool) && await landingOf(rootOf(context, tool)) === shared) return `${toolName(tool)}’s skills folder is that same folder, so the copy there is the only one ${toolName(tool)} can have.`;
+    if (problems.get(tool) && await landingOf(rootOf(context, tool)) === shared) return { text: `${toolName(tool)}’s skills folder is that same folder, so the copy there is the only one ${toolName(tool)} can have.`, tool };
   }
   return undefined;
 }
@@ -436,10 +436,10 @@ async function pinnedShared(context: ShareContext, tools: HarnessId[], problems:
  * skills folder (when that folder itself is sound), or a copy in the shared ~/.agents/skills folder. Anything else (a copy
  * reached through a skills folder that is itself a link) is never taken over.
  */
-async function outsideOf(context: ShareContext, tool: HarnessId, directory: string, problems: Map<HarnessId, string | undefined>, pinned?: string): Promise<Outside | undefined> {
+async function outsideOf(context: ShareContext, tool: HarnessId, directory: string, problems: Map<HarnessId, string | undefined>, pinned?: { text: string; tool: HarnessId }): Promise<Outside | undefined> {
   let linkTo: string | undefined;
   try { if ((await lstat(directory)).isSymbolicLink()) linkTo = await readlink(directory); } catch { return undefined; }
-  if (sameDir(dirname(directory), sharedFolder(context))) return { kind: 'shared', ...(linkTo !== undefined ? { linkTo } : {}), ...(pinned ? { pinned } : {}) };
+  if (sameDir(dirname(directory), sharedFolder(context))) return { kind: 'shared', ...(linkTo !== undefined ? { linkTo } : {}), ...(pinned ? { pinned: pinned.text, pinnedBy: pinned.tool } : {}) };
   if (linkTo !== undefined && !problems.get(tool) && sameDir(dirname(directory), rootOf(context, tool))) return { kind: 'link', linkTo };
   return undefined;
 }
@@ -480,6 +480,11 @@ export async function manageView(context: ShareContext, { caughtUp = [], notices
     const recorded = new Set(item.copies.filter(copy => copy.status === 'written').map(copy => copy.directory));
     const edited = entry.locations.filter(location => recorded.has(location.copy.directory) && location.copy.hash !== item.hash).map(location => location.tool);
     if (edited.length) entry.facts.edited = [...new Set(edited)];
+  }
+  // A managed skill with links or a shared copy again after a take-over removed them (an installer put them back): the page says they are back.
+  const tookOver = new Set((await readHistory(context)).filter(event => event.kind === 'took-over' && !event.undoneBy).map(event => event.key));
+  for (const [key, entry] of gathered) {
+    if (record?.items[key]?.state === 'shared' && tookOver.has(key) && entry.locations.some(location => location.copy.outside && !location.copy.outside.pinned)) entry.facts.outsideBack = true;
   }
   const skills = [...gathered.values()].map(entry => entry.facts).sort(byKey);
   const tools = presentTools(snapshots);
@@ -1210,7 +1215,8 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
         if (removedPaths.has(copy.directory)) { removedFrom.add(tool); continue; }
         const outside = copy.outside;
         // The shared folder's copy is read by other tools too: removing it for one tool alone would take it from them as well.
-        const alsoReading = outside?.kind === 'shared' ? tools.filter(other => other !== tool && !asked.has(other) && [entry.facts.copies[other], ...entry.facts.extra.filter(extra => extra.tool === other)].some(found => found && sameDir(found.directory, copy.directory))) : [];
+        // Delete everywhere takes it from all of them, as its confirming click says.
+        const alsoReading = outside?.kind === 'shared' && !change.everywhere ? tools.filter(other => other !== tool && !asked.has(other) && [entry.facts.copies[other], ...entry.facts.extra.filter(extra => extra.tool === other)].some(found => found && sameDir(found.directory, copy.directory))) : [];
         const refusal = copy.writable ? await rootProblem(context, tool)
           : copy.readsFrom ? `${toolName(tool)} reads ${toolName(copy.readsFrom)}’s copy. Disable it in ${toolName(tool)} to stop it loading there, or remove it from ${toolName(copy.readsFrom)}.`
           : alsoReading.length ? `${toolName(tool)} reads it in ${dirname(copy.directory)}, which ${andList(alsoReading.map(toolName))} ${alsoReading.length > 1 ? 'read' : 'reads'} too. Disable it in ${toolName(tool)}, or use Delete everywhere.`
@@ -1249,6 +1255,18 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       // A copy it still reads in the shared folder (only Remove for one tool leaves that): it still has the skill from there.
       const left = change.everywhere ? undefined : entry.facts.extra.find(extra => extra.tool === tool && !removedPaths.has(extra.directory));
       results.push({ item: name, harness: tool, outcome: 'removed', message: `Removed from ${toolName(tool)}.${how.get(tool) ?? ''} Restore it from History.${still ? ` ${toolName(tool)} still reads ${toolName(still)}’s copy; Disable it in ${toolName(tool)} to stop it loading there.` : ''}${left ? ` ${toolName(tool)} still reads the copy in ${dirname(left.directory)}.` : ''}${lost.length ? ` ${lost.map(toolName).join(' and ')} read this copy, so ${lost.length > 1 ? 'they no longer have' : 'it no longer has'} the skill.` : ''}` });
+    }
+    // Delete everywhere: a tool not asked about that read only the removed copies (its skills folder is a link to the shared
+    // folder) no longer has the skill either, and the result names it with the others.
+    if (change.everywhere && removedPaths.size) {
+      for (const tool of tools.filter(other => !asked.has(other))) {
+        const its = [entry.facts.copies[tool], ...entry.facts.extra.filter(extra => extra.tool === tool)].filter((copy): copy is ToolCopy => !!copy && !copy.readsFrom);
+        if (!its.some(copy => removedPaths.has(copy.directory))) continue;
+        const left = [];
+        for (const copy of its) if (!removedPaths.has(copy.directory) && await exists(copy.directory)) left.push(copy);
+        if (left.length) continue;
+        results.push({ item: name, harness: tool, outcome: 'removed', message: `Removed from ${toolName(tool)} too: it read the copy in ${dirname([...removedPaths].find(path => its.some(copy => copy.directory === path))!)}. Restore it from History.` });
+      }
     }
     if (removed.length) event({ key: change.key, item: name, kind: 'removed', losers: removed, orderProved: true, stoppedSync: stoppedSync.filter(tool => removed.some(gone => gone.tool === tool)), ...(lastCopies && item.state !== 'shared' ? { unmanaged: true } : {}) });
   };

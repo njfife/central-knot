@@ -1418,6 +1418,8 @@ span.ins-confirm { margin-top: 0; }
 /* The app's switch, at its own size (the row's action-button height doesn't apply to it). */
 .details-tool-actions .tool-switch .switch { height: 18px; }
 .delete-armed { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+/* Cancel starts where the actions above it start ("Files and contents"), as a lone action in .details-actions does. */
+.delete-armed > .text-action:first-child { padding-left: 0; }
 /* What a confirming click also does (the links and the shared copy it removes), on its own line under the two buttons. */
 .delete-armed-note { flex: 1 1 100%; min-width: 0; max-width: var(--measure); font-size: 12px; color: var(--ink-soft); overflow-wrap: anywhere; }
 .details-outside { display: flex; flex-direction: column; gap: 2px; }

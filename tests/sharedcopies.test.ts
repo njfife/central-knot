@@ -336,3 +336,57 @@ test('Remove from one tool: its link goes, and a shared copy other tools read is
     assert.equal(await there(shared), true);
   } finally { await box.cleanup(); }
 });
+
+test('Layout 4, unmanaged: Delete everywhere removes the shared copy, and the result names every tool that had it', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const shared = await skill(box.home, SHARED, 'gamma', text('gamma', 'Shared.'));
+    await symlink(join(box.home, SHARED), join(box.home, COPILOT));
+    const facts = (await factsOf(box, 'gamma'))!;
+    assert.equal(facts.copies['pi-cli']!.outside?.pinnedBy, 'copilot-cli', 'the page is told whose skills folder it is');
+    // As the page sends it: the tools whose copy Delete everywhere can remove (Pi's is the shared copy; Copilot CLI's is through its linked folder).
+    const result = await applyChanges(box.context(), [{ key: 'gamma', managed: false, off: [], remove: ['pi-cli'], everywhere: true, seenManaged: false }]);
+    assert.ok(!result.stopped, messages(result));
+    assert.doesNotMatch(messages(result), /use Delete everywhere/);
+    assert.equal(await there(shared), false);
+    assert.deepEqual(result.results.filter(entry => entry.outcome === 'removed' && entry.harness).map(entry => entry.harness).sort(), ['copilot-cli', 'pi-cli']);
+    assert.equal(await isLink(join(box.home, COPILOT)), true, 'the linked skills folder itself stays');
+    const removed = (await readHistory(box.context())).find(event => event.kind === 'removed')!;
+    assert.ok(!(await restoreFromHistory(box.context(), removed.id)).stopped);
+    assert.equal(await readFile(join(shared, 'SKILL.md'), 'utf8'), text('gamma', 'Shared.'));
+  } finally { await box.cleanup(); }
+});
+
+test('Layout 4, managed: Claude Code gets its own copy; an edit made there never reaches the shared copy Copilot CLI and Pi read', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const shared = await skill(box.home, SHARED, 'gamma', text('gamma', 'Shared.'));
+    await symlink(join(box.home, SHARED), join(box.home, COPILOT));
+    await applyChanges(box.context(), [manage('gamma')]);
+    assert.equal(await readFile(join(box.home, CLAUDE, 'gamma/SKILL.md'), 'utf8'), text('gamma', 'Shared.'));
+    await writeFile(join(box.home, CLAUDE, 'gamma/SKILL.md'), text('gamma', 'Edited in Claude Code.'));
+    const pass = await applyChanges(box.context(), []);
+    assert.equal(await readFile(join(shared, 'SKILL.md'), 'utf8'), text('gamma', 'Shared.'), 'the shared copy is never written');
+    assert.ok(pass.results.some(entry => entry.harness === 'pi-cli' && entry.outcome === 'held'), messages(pass));
+  } finally { await box.cleanup(); }
+});
+
+test('Came back: Automatic sync never changes the link or the shared copy, so an edit reaches neither, nor Copilot CLI; the page is told they are back', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    await installerLayout(box, 'back');
+    await applyChanges(box.context(), [manage('back')]);
+    assert.equal((await factsOf(box, 'back'))!.outsideBack, undefined, 'nothing is back yet');
+    // The installer puts them back.
+    await rm(join(box.home, COPILOT, 'back'), { recursive: true });
+    await rm(join(box.home, PI, 'back'), { recursive: true });
+    await skill(box.home, SHARED, 'back', text('back', 'Shared.'));
+    await link(box.home, COPILOT, 'back', `../../${SHARED}/back`);
+    await applyChanges(box.context(), []);
+    assert.equal((await factsOf(box, 'back'))!.outsideBack, true);
+    await writeFile(join(box.home, CLAUDE, 'back/SKILL.md'), text('back', 'Edited in Claude Code.'));
+    await applyChanges(box.context(), []);
+    assert.equal(await readFile(join(box.home, SHARED, 'back/SKILL.md'), 'utf8'), text('back', 'Shared.'), 'the shared copy, which Copilot CLI’s link leads to, is unchanged');
+    assert.equal(await isLink(join(box.home, COPILOT, 'back')), true);
+  } finally { await box.cleanup(); }
+});

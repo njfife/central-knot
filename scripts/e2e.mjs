@@ -2427,27 +2427,34 @@ async function sharedCopiesFlow() {
   const a = await launch(data);
   await a.click('#nav-skills');
   const row = `.ov-row[data-key="${name}"]`;
+  const rowLineOf = tool => a.run(`[...document.querySelectorAll('.details-tool')].find(row => row.querySelector('strong')?.textContent === ${JSON.stringify(tool)})?.querySelector('.details-tool-line')?.textContent?.trim() ?? ''`);
   check('the installer’s skill is a row', (await rowKeys(a)).includes(name), await rowKeys(a));
   await a.click(`#open-${name}`);
   const where = await a.text(`#outside-${name}`) ?? '';
-  check('its details say where the copies are and what each action does', /Copilot CLI’s copy is a link to \.\.\/\.\.\/\.agents\/skills\/opus-sol-loop\./.test(where) && /Copilot CLI and Pi read it in [~…]\/\.agents\/skills, a folder other apps read too/.test(where) && /Manage gives each tool a real copy/.test(where), where);
+  check('its details say where the copies are and what each action does', /^This skill is in [~…]\/\.agents\/skills, a shared folder other apps read too\. Pi reads it there, and Copilot CLI has a link to it\. Manage gives each tool its own copy and removes the link and the shared copy\. Delete everywhere removes them too\. History keeps both\.$/.test(where.trim()) && !where.includes('../'), where);
+  check('no second line repeats the shared copy', !(await a.exists('.details-extra-line')), await a.all('.details-extra-line'));
+  same('each tool’s row says how it gets the skill', [await rowLineOf('Pi'), await rowLineOf('Copilot CLI')].map(line => line.replace(/[~…]\/\.agents/, '~/.agents')), ['Reads the shared copy in ~/.agents/skills.', 'A link to the shared copy in ~/.agents/skills.']);
   await a.shot('shared-unmanaged');
   await a.click(`${row} .switch`);
   const told = await a.text(`#outside-${name}`) ?? '';
-  check('before Apply all, the page says the link becomes a real copy, Pi gets its own and the shared copy goes', /On Apply all, Central Knot also replaces the link in Copilot CLI’s skills folder with a real copy, gives Pi a copy of its own and removes the copy in [~…]\/\.agents\/skills \(History keeps it\), so other apps that read that folder won’t find it there\./.test(told), told);
+  check('before Apply all, the page says the link becomes a real copy, Pi gets its own and the shared copy goes', /On Apply all, Central Knot replaces Copilot CLI’s link with a real copy, gives Pi its own copy and removes the shared copy \(History keeps it\)\. Other apps that read [~…]\/\.agents\/skills won’t find it there\./.test(told), told);
+  same('and the rows say it too', [await rowLineOf('Copilot CLI'), await rowLineOf('Pi')], ['Its link becomes a real copy on Apply all, then it syncs.', 'Gets its own copy on Apply all, then it syncs.']);
+  same('Pi’s box is marked as a new copy', await a.run(`document.querySelector('#cell-${name}-pi-cli svg')?.outerHTML.includes('M5 12h14') ?? false`), true);
   const summary = await a.run(`document.querySelector('#apply').title`);
-  check('Apply all’s summary counts them too', /1 link to replace with a real copy · 1 copy to remove from [~…]\/\.agents\/skills/.test(summary), summary);
+  check('Apply all’s summary counts every new copy, the link and the shared copy', /^1 change · 2 new copies · 1 link to replace with a real copy · 1 copy to remove from [~…]\/\.agents\/skills\./.test(summary), summary);
   await fitsAtMinimum(a, 'a skill with copies outside Central Knot’s, about to be managed');
   await applyAll(a);
   same('Manage took it over: real copies in every tool, the shared copy gone',
     [lstatSync(join(copilot, name)).isDirectory(), existsSync(join(pi, name, 'SKILL.md')), existsSync(join(claude, name, 'SKILL.md')), existsSync(join(agents, name))], [true, true, true, false]);
   const outcome = await a.text('.band-done') ?? await a.text('.bands') ?? '';
-  check('the page says what it did, with Undo', /replaced the link in Copilot CLI’s skills folder with a real copy/.test(outcome) && /removed the copy in [~…]\/\.agents\/skills/.test(outcome) && await a.exists('#outcome-undo-takeover'), outcome);
+  check('the page says what it did, matching the count before, with Undo', /opus-sol-loop managed · 2 new copies written to Claude Code and Pi · replaced Copilot CLI’s link with a real copy · removed the shared copy in [~…]\/\.agents\/skills \(kept in History\)\./.test(outcome) && await a.exists('#outcome-undo-takeover'), outcome);
   check('the skill is an ordinary managed one now', !(await a.exists(`#outside-${name}`)) && await switchOn(a, name), await a.text(`${row}`));
   await a.shot('shared-managed');
   await a.click('#outcome-undo-takeover');
   same('Undo puts the link and the shared copy back, and the skill is unmanaged again',
     [lstatSync(join(copilot, name)).isSymbolicLink() && readlinkSync(join(copilot, name)), existsSync(join(agents, name, 'SKILL.md')), existsSync(join(pi, name)), existsSync(join(claude, name)), await switchOn(a, name)], [link, true, false, false, false]);
+  const undone = await a.run(`document.getElementById('announcement')?.title ?? ''`);
+  check('the Undo line names the tools in the page’s order', /^Undone: Copilot CLI’s link and the shared copy in [~…]\/\.agents\/skills are back; removed the new copies in Claude Code and Pi\. opus-sol-loop is unmanaged again\.$/.test(undone), undone);
   await a.shot('shared-undone');
   // Managed again, then deleted from the page.
   await a.click(`${row} .switch`);
@@ -2458,7 +2465,7 @@ async function sharedCopiesFlow() {
   await a.click(`#delete-confirm-${name}`);
   same('Delete everywhere removes every copy', [existsSync(join(copilot, name)), existsSync(join(pi, name)), existsSync(join(claude, name)), existsSync(join(agents, name))], [false, false, false, false]);
   const deleted = await a.text('.band-done') ?? '';
-  check('the page says it was deleted, with Restore', /Deleted opus-sol-loop from/.test(deleted) && await a.exists('#outcome-restore-delete'), deleted);
+  check('the page says it was deleted, with Restore', /Deleted opus-sol-loop from Claude Code, Copilot CLI and Pi\. History keeps it\./.test(deleted) && await a.exists('#outcome-restore-delete'), deleted);
   await a.shot('shared-deleted');
   // The installer puts it back; never managed, Delete everywhere removes the link (as a link) and the shared copy.
   install();
@@ -2466,10 +2473,14 @@ async function sharedCopiesFlow() {
   if (!(await a.exists(`#delete-${name}`))) await a.click(`#open-${name}`);
   await a.click(`#delete-${name}`);
   const armed = await a.text(`#delete-note-${name}`) ?? '';
-  check('the armed Delete says it also removes the link and the shared copy', /This also removes the link in Copilot CLI’s skills folder \(not what it leads to\) and the copy in [~…]\/\.agents\/skills, which other apps may read too\./.test(armed), armed);
+  check('the armed Delete says it also removes the link and the shared copy', /^This also removes the link in Copilot CLI’s skills folder and the shared copy in [~…]\/\.agents\/skills, which other apps may read too\.$/.test(armed.trim()), armed);
+  same('its red action is short, so Cancel keeps its line', (await a.text(`#delete-confirm-${name}`))?.trim(), 'Delete from every tool now');
   await fitsAtMinimum(a, 'an armed Delete everywhere that removes a link and the shared copy');
   await a.click(`#delete-confirm-${name}`);
   same('and does', [existsSync(join(copilot, name)), existsSync(join(agents, name))], [false, false]);
+  const unmanagedDeleted = await a.text('.band-done') ?? '';
+  check('the band names the skill, the tools and the shared folder, with Restore', /Deleted opus-sol-loop from Copilot CLI and Pi, and from [~…]\/\.agents\/skills\. History keeps it\./.test(unmanagedDeleted) && !/kept in History/.test(unmanagedDeleted) && await a.exists('#outcome-undo-switch'), unmanagedDeleted);
+  same('the status line says the same', await a.run(`document.getElementById('announcement')?.title ?? ''`), unmanagedDeleted.replace(/\s*Restore\s*$/, '').trim());
   check('nothing staged left in the shared folder', !readdirSync(join(home, '.agents')).some(entry => entry.startsWith('.ck-')), readdirSync(join(home, '.agents')));
   same('no page errors, shared copies', a.pageErrors, []);
   await a.quit();
