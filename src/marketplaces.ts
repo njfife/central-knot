@@ -14,7 +14,7 @@ import { suggestedMarketplaces, type SuggestedMarketplace } from './suggested.ts
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
 import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartRef, PartsInstall, PartsPick, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
 import { writeDurably, type ShareContext } from './share.ts';
-import { SKILL_SWITCH_TESTED_FROM, copyDiffers, heldReason, keptReason, marketTitle, notCarried, partsTools, stateOf, updateTools, versionToCompare } from './pluginstatus.ts';
+import { SKILL_SWITCH_TESTED_FROM, copyDiffers, heldReason, keptReason, marketTitle, notCarried, partsOf, partsOffer, partsTools, stateOf, unavailable, updateTools, versionToCompare } from './pluginstatus.ts';
 import { isFolder, isHttps, onlyAllowed, record, shortBuild } from './values.ts';
 
 /** What runs a tool's plugin commands when it is a desktop app's own copy: "Claude desktop’s Code tab 2.1.321". */
@@ -484,16 +484,39 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
    * it offers today (`unreadSources`: the same, as added; `offline`: every Git marketplace did, so the next try can come sooner). A plugin its catalog dropped
    * is left as it is. One turned off in a tool is still updated there, and update() keeps it off.
    */
-  async function pendingUpdates(home: unknown): Promise<{ stopped?: string; ops: (PluginOp & { offered?: string })[]; unread: string[]; unreadSources: string[]; offline?: true }> {
+  /**
+   * What is due now: the updates Update all would choose and, for selections that wait (pluginupdates.ts), the tools here
+   * that plugins go into (`tools`) with what each would get to have every plugin that all the other tools taking plugins
+   * whole have (`joins`): an install where the tool takes the plugin, its parts where it takes parts.
+   */
+  async function pendingUpdates(home: unknown): Promise<{ stopped?: string; ops: (PluginOp & { offered?: string })[]; unread: string[]; unreadSources: string[]; offline?: true; tools?: HarnessId[]; joins?: Partial<Record<HarnessId, PluginOp[]>> }> {
     const stopped = await guard(home);
     if (stopped) return { stopped, ops: [], unread: [], unreadSources: [] };
     const shown = await view(true);
     const ops: (PluginOp & { offered?: string })[] = [];
     const unread: string[] = [], unreadSources: string[] = [];
+    const joins: Partial<Record<HarnessId, PluginOp[]>> = {};
+    const whole = shown.tools.filter(takesPlugins);
+    // The plugins each of them has turned off, by marketplace and name.
+    const ctx = await context();
+    const offIn = new Map(await Promise.all(whole.map(async tool => [tool, new Set((await engine.installedPlugins(ctx, tool).catch(() => [])).filter(found => found.off).map(found => `${found.marketplace}\u0000${found.plugin}`))] as const)));
     for (const entry of shown.marketplaces) {
       if (entry.problem || !entry.name) { unread.push(marketTitle(entry)); unreadSources.push(entry.source); continue; }
       for (const plugin of entry.plugins) {
         if (plugin.gone) continue;
+        // A plugin every other tool that takes plugins whole has, and has on, is one a tool without it would get: one
+        // turned off somewhere is not wanted everywhere.
+        const installedIn = whole.filter(tool => stateOf(entry, plugin.name, tool).state === 'installed');
+        const has = installedIn.filter(tool => !offIn.get(tool)?.has(`${entry.name}\u0000${plugin.name}`));
+        for (const tool of shown.tools) {
+          // The others that count are those that can hold it: a tool with no way to install here neither has it nor lacks it.
+          const others = whole.filter(other => other !== tool && (installedIn.includes(other) || !unavailable(shown, entry, plugin.name, other)));
+          if (!others.length || !others.every(other => has.includes(other))) continue;
+          // A tool that has it already (on or off), or its parts, gets nothing.
+          const action = takesPlugins(tool) ? (installedIn.includes(tool) || unavailable(shown, entry, plugin.name, tool) ? undefined : 'install' as const)
+            : !partsOf(entry, plugin.name, tool) && partsOffer(shown, entry, plugin.name, tool, plugin.components) ? 'install-parts' as const : undefined;
+          if (action) (joins[tool] ??= []).push({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action });
+        }
         const copied = shown.tools.some(tool => { const state = stateOf(entry, plugin.name, tool); return state.state === 'installed' && !state.live && !state.directory; });
         if (!copied && !entry.parts?.[plugin.name]) continue;
         const files = copied ? await detail(entry.source, plugin.name).catch(() => null) : undefined;
@@ -505,7 +528,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     }
     // Every Git marketplace failed to read: most likely this computer is offline just now.
     const git = shown.marketplaces.filter(entry => entry.kind === 'git');
-    return { ops, unread, unreadSources, ...(git.length && git.every(entry => entry.problem) ? { offline: true as const } : {}) };
+    return { ops, unread, unreadSources, tools: shown.tools, joins, ...(git.length && git.every(entry => entry.problem) ? { offline: true as const } : {}) };
   }
 
   /** One tool's own uninstall of one plugin. `marketName` is the catalog's name for it; `source` is checked against what the tool has. */
