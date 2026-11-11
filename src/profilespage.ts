@@ -342,7 +342,7 @@ function noProfileDetail() {
       h('ul.pf-how', {},
         h('li', {}, icon('sliders-horizontal', 14, 'tone-muted'), h('span', {}, 'A profile is the skills and MCP servers you want on for one kind of work. Switching to it turns everything else off with each tool’s own switch; nothing is moved or deleted.')),
         h('li', {}, icon('circle-off', 14, 'tone-muted'), h('span', {}, 'Something you disable by hand in one tool stays disabled. Profiles only turn back on what a profile turned off.')),
-        h('li', {}, icon('refresh-cw', 14, 'tone-muted'), h('span', {}, 'Managed items keep syncing while they are off, so they are up to date when they come back.')),
+        h('li', {}, icon('refresh-cw', 14, 'tone-muted'), h('span', {}, 'Synced items keep syncing while they are off, so they are up to date when they come back.')),
         h('li', {}, icon('history', 14, 'tone-muted'), h('span', {}, 'Each switch is one step in History, with Undo. Switch here, from the status bar, or from Central Knot’s menu bar menu.'))),
       offItems.length ? [withClass(eyebrow('Turned off by profiles', offItems.length), 'pf-eyebrow'), ...table(offItems, { plan, action: active ? 'apply' : 'stop using profiles' })] : null));
 }

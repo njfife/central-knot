@@ -580,7 +580,7 @@ export function displace(item: RecordItem, tool: HarnessId, hash: string, remova
 
 /**
  * `observeOnly` (Sync off, SYN-03): read and keep the ordering evidence, write nothing. `only`: write only these skills, so an
- * explicit Apply all with Sync off does exactly what it shows and no background spreading rides along.
+ * explicit click with Sync off does exactly what it is about and no background spreading rides along.
  */
 export interface PassOptions { observeOnly?: boolean; only?: Set<string> }
 
@@ -1009,7 +1009,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       // Sync off: the evidence above is kept, so order can be proved later; nothing is written now.
       if (options.observeOnly) continue;
       const changed = active.filter(location => recorded.has(location.copy.directory) && location.copy.hash !== recordedHash.get(location.copy.directory));
-      // With Sync off, Apply all writes only what it shows: a pending edit or deletion of this skill waits for Sync.
+      // With Sync off, a click writes only what it is about: a pending edit or deletion of this skill waits for Sync.
       if (options.only && (changed.length || deletions.length)) { results.push({ item: name, outcome: 'held', message: `An edit or deletion of ${name} is waiting for sync. Turn automatic sync on, or use Sync once.` }); continue; }
       if (deletions.length) {
         const deletedSeen = Math.min(...deletions.map(gone => evidence.get(gone.directory)!.missingSince!));
@@ -1395,7 +1395,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     const now = clock(context);
     for (const [key, item] of Object.entries(record.items)) {
       await owned();
-      // Apply all with Sync off writes only what it shows: no earlier deletion finishes alongside it.
+      // A click with Sync off writes only what it is about: no earlier deletion finishes alongside it.
       if (options.only && !options.only.has(key)) continue;
       // A copy a deletion could not remove is retried while it still holds what it held; changed or gone, it is let go.
       // A folder made again since (a reset or reinstall) holds a new install: the old deletion has no say over it.
@@ -1537,7 +1537,7 @@ export async function restoreFromHistory(context: ShareContext, eventId: string,
     const record = start.record;
     const history = await readHistory(context);
     const past = history.find(entry => entry.id === eventId);
-    // A take-over Apply all made along with these new copies is undone with them: its Undo undoes both.
+    // A take-over made in the same click as these new copies is undone with them: its Undo undoes both.
     const alongside = past?.kind === 'added' ? tookOverWith(history, past) : undefined;
     if (alongside) return await undoTookOver(context, record, history, alongside);
     if (past?.kind === 'added') return await undoAdded(context, record, history, past);
@@ -1686,13 +1686,13 @@ async function undoAdded(context: ShareContext, record: SyncRecord, history: His
   return { results, harnessWrites: writes };
 }
 
-/** The take-over that came with an Apply all's new copies, while neither is undone. */
+/** The take-over that came with a click's new copies, while neither is undone. */
 const tookOverWith = (history: HistoryEvent[], added: HistoryEvent) => (added.undoneBy ? undefined : history.find(entry => entry.kind === 'took-over' && !entry.undoneBy && entry.tookOver?.addedId === added.id));
 
 /**
  * Undo of a take-over: the shared copy goes back where it was (as a link, if it was one), each real copy that replaced a link is
  * a link again, and the copies made for tools that read the shared one are removed. All or nothing: if any of those copies was
- * edited since, or something else is where one goes back, nothing is written. When the same Apply all started managing the
+ * edited since, or something else is where one goes back, nothing is written. When the same click started syncing the
  * skill, its new copies go too and the skill is unmanaged again, as it was.
  */
 async function undoTookOver(context: ShareContext, record: SyncRecord, history: HistoryEvent[], past: HistoryEvent): Promise<ApplyResult> {

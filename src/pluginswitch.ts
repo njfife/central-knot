@@ -1,11 +1,10 @@
 // The Skills, MCP servers and Agents pages' switch for an item a tool has through an installed plugin: the item's own
 // switch where the tool has one (a skill in Copilot CLI or Codex, ENB-06; an MCP server in Claude Code, Copilot CLI or
-// Codex and an agent in Claude Code, partswitch.ts), else the whole plugin's. A click is a choice for Apply all, kept in the page's own plugin
-// draft (pluginplan), so it runs, reports and undoes like the Plugins page's.
+// Codex and an agent in Claude Code, partswitch.ts), else the whole plugin's. A click applies at once: it is worked out as
+// the plugin choices it needs (pluginplan), which run, report and undo like the Plugins page's.
 // Pure functions over plain data; the page draws and applies.
 import { choose, clear, queued, queuedPart, queuedWhole, wholeChoice, type PluginDraft, type PluginOp } from './pluginplan.ts';
 import { NO_SKILL_SWITCH, hasPartSwitch, noSwitchReason, partWords, samePart } from './pluginstatus.ts';
-import { plural } from './model.ts';
 import { andList, toolNames as names } from './words.ts';
 import type { HarnessId, InstalledPlugin, PartKind, PluginItem } from './types.ts';
 
@@ -33,26 +32,25 @@ const switchable = (install: InstalledPlugin): Part[] => install.items.filter(en
 /** Whether the tool has this one item's own switch off now. */
 const itemOffNow = (install: InstalledPlugin, part: Part) => !!{ skill: install.skillsOff, mcp: install.serversOff, agent: install.agentsOff }[part.kind]?.some(name => samePart(part, { kind: part.kind, name }));
 
-/** Whether the whole plugin is off in the item's tool after Apply all. */
+/** Whether the whole plugin is off in the item's tool once the draft runs. */
 const wholeOffAfter = (draft: PluginDraft, item: PluginItemAt) => {
   const chosen = queuedWhole(draft, where(item).source, item.install.plugin, item.tool);
   return chosen ? chosen === 'plugin-off' : !!item.install.off;
 };
-/** Whether one item of the plugin has its own switch off in the item's tool after Apply all. */
+/** Whether one item of the plugin has its own switch off in the item's tool once the draft runs. */
 const itemOffAfter = (draft: PluginDraft, item: PluginItemAt, part: Part) => {
   const { source, plugin, tool } = where(item);
   const chosen = part.kind === 'skill' ? queued(draft, source, plugin, tool, part.name) : queuedPart(draft, source, plugin, tool, part);
   return chosen ? chosen === 'skill-off' || chosen === 'part-off' : itemOffNow(item.install, part);
 };
 
-/** Where the item stands in its tool: on now, and on after Apply all. */
+/** Where the item stands in its tool: on now, and on once the draft runs. */
 export function standing(draft: PluginDraft, item: PluginItemAt): { now: boolean; on: boolean } {
-  const own = ownSwitch(item);
-  return {
-    now: !item.install.off && !(own && itemOffNow(item.install, item)),
-    on: !wholeOffAfter(draft, item) && !(own && itemOffAfter(draft, item, item)),
-  };
+  return { now: onNow(item), on: !wholeOffAfter(draft, item) && !(ownSwitch(item) && itemOffAfter(draft, item, item)) };
 }
+
+/** Whether the item is on in its tool now: the plugin is on there, and its own switch (where it has one) hasn't turned it off. */
+export const onNow = (item: PluginItemAt) => !item.install.off && !(ownSwitch(item) && itemOffNow(item.install, item));
 
 /** Why Copilot CLI's whole-plugin switch isn't offered for a plugin it loads live from a folder. */
 export const LIVE_PLUGIN = 'Copilot CLI loads this plugin live from a folder, where turning it off is the same as uninstalling it. Uninstall it on the plugin’s page instead.';
@@ -68,12 +66,13 @@ export function cantSwitch(item: PluginItemAt): string | undefined {
 }
 
 /**
- * Turns the item on or off in its tool on Apply all, or takes that choice back. Each click changes the clicked box:
+ * The plugin choices that turn the item on or off in its tool, added to `draft` (or, clicked again before they run, taken back).
+ * Each click changes the clicked item:
  * - an item with its own switch flips that switch. Where the whole plugin is off, the plugin goes on for it, with the
  *   switch of every other item that has one turned off, so only this one comes on (and whatever of the plugin has no
  *   switch there). Once the items it came on for are all off again, the plugin stays off and it is all back as it was;
  * - anything else flips the whole plugin there, with everything it brings.
- * Worked out as where things stand after Apply all (the whole plugin, and each item with a switch of its own), which the
+ * Worked out as where things stand once it runs (the whole plugin, and each item with a switch of its own), which the
  * draft is then made to say: a choice is kept only where that differs from how the tool has it now.
  */
 export function click(draft: PluginDraft, item: PluginItemAt): void {
@@ -97,7 +96,7 @@ export function click(draft: PluginDraft, item: PluginItemAt): void {
     wholeOff = false;
     if (mine) partOff.set(mine, false);
   }
-  // While the plugin is off after Apply all, no item's own switch shows or matters: none is left chosen unseen.
+  // While the plugin is off once it runs, no item's own switch shows or matters: none is left chosen unseen.
   if (wholeOff) for (const part of parts) partOff.set(part, itemOffNow(install, part));
   const put = (op: PluginOp, differs: boolean) => { if (differs) choose(draft, op); else clear(draft, op); };
   put({ ...at, action: wholeOff ? 'plugin-off' : 'plugin-on', ...(forItems && !wholeOff ? { forItems: true as const } : {}) }, wholeOff !== !!install.off);
@@ -123,16 +122,16 @@ export function turnEvery(items: PluginItemAt[], on: boolean): { draft: PluginDr
     if (held) left.push(`Still ${on ? 'off' : 'on'} in ${names[item.tool]}: ${held}`); else whole.push(item);
   }
   const limit = whole.map(item => `Still ${on ? 'off' : 'on'} in ${names[item.tool]}: it has no switch for one ${partWords[item.kind][0]} of a plugin, only one for the whole plugin, ${item.install.plugin}.`).join(' ');
-  const leftIn = items.filter(item => !turned.includes(item) && standing(new Map(), item).now !== on).map(item => item.tool);
+  const leftIn = items.filter(item => !turned.includes(item) && onNow(item) !== on).map(item => item.tool);
   return { draft, ops: [...draft.values()], turned, whole, limit: limit || undefined, left: left.join(' ') || undefined, leftIn };
 }
 
 /** One of a plugin's items by name, as a result says it: a skill's own name, or "MCP server issues". */
-const named = (op: PluginOp) => (op.part ? `${partWords[op.part.kind][0]} ${op.part.name}` : op.skill!);
+const named = (op: PluginOp) => (op.part ? `${partWords[op.part.kind][0]} ${op.part.name}` : `skill ${op.skill!}`);
 
 /**
  * What a click's choices (`ops`, all run) brought with one item in its tool, after the item's own sentence: "Its plugin
- * issue-tracker was turned on there, with triage left off.", "Its whole plugin document-tools was turned off there, with its 2
+ * issue-tracker was turned on there, with its skill triage left off.", "Its whole plugin document-tools was turned off there, with its 2
  * other skills."; '' where only the item's own switch turned. `there`: said in place of the tool's name.
  */
 export function alongWords(item: PluginItemAt, ops: PluginOp[], there = false): string {
@@ -141,7 +140,7 @@ export function alongWords(item: PluginItemAt, ops: PluginOp[], there = false): 
   const where = there ? 'there' : `in ${names[item.tool]}`;
   if (whole.forItems) {
     const leftOff = ops.filter(op => op.tool === whole.tool && op.plugin === whole.plugin && (op.action === 'skill-off' || op.action === 'part-off')).map(named);
-    return `Its plugin ${item.install.plugin} was turned on ${where}${leftOff.length ? `, with ${andList(leftOff)} left off` : ''}.`;
+    return `Its plugin ${item.install.plugin} was turned on ${where}${leftOff.length ? `, with its ${andList(leftOff)} left off` : ''}.`;
   }
   const rest = item.install.items.filter(entry => !samePart(entry, item) && !(hasOwnSwitch(item.tool, entry.kind) && itemOffNow(item.install, entry)));
   return `Its whole plugin ${item.install.plugin} was turned ${whole.action === 'plugin-on' ? 'on' : 'off'} ${where}${rest.length ? `, with its ${counted(rest, item.kind)}` : ''}.`;
@@ -150,89 +149,37 @@ export function alongWords(item: PluginItemAt, ops: PluginOp[], there = false): 
 /** A click on one item's switch in its tool, said once its choices (`ops`) all ran: the item first ("issues is on in Codex."), then what came with it. */
 export const itemSaid = (item: PluginItemAt, on: boolean, ops: PluginOp[]) => [`${item.name} is ${on ? 'on' : 'off'} in ${names[item.tool]}.`, alongWords(item, ops, true)].filter(Boolean).join(' ');
 
-/**
- * Drops choices that mean nothing now, so none is counted or run unseen: the plugin is no longer installed in that tool,
- * or the plugin, the skill, the MCP server or the agent already is as chosen there (and with a plugin that already is on,
- * the items that were to be left off when it came on).
- */
-export function prune(draft: PluginDraft, installs: InstalledPlugin[]): void {
-  const sameWhere = (first: PluginOp, second: PluginOp) => first.source === second.source && first.plugin === second.plugin && first.tool === second.tool;
-  for (const [key, op] of draft) {
-    const install = installs.find(entry => entry.tool === op.tool && entry.plugin === op.plugin && entry.marketName === op.marketName);
-    const part: Part | undefined = op.part ?? (op.skill ? { kind: 'skill', name: op.skill } : undefined);
-    const off = op.action === 'plugin-off' || op.action === 'skill-off' || op.action === 'part-off';
-    if (install && (part ? itemOffNow(install, part) : !!install.off) !== off) continue;
-    draft.delete(key);
-    // A plugin that was to come on, and already is: the items chosen to be left off with it go too, since they may be
-    // ones nobody clicked (held off so that one item came on alone).
-    if (op.action === 'plugin-on') for (const [other, held] of draft) if (sameWhere(held, op) && (held.action === 'skill-off' || held.action === 'part-off')) draft.delete(other);
-  }
-}
-
 /** A list of the plugin's items by kind, in words: "2 skills and 1 MCP server", or ''. `beside`: the kind of the item they are counted beside, said as "1 other MCP server". */
 const counted = (items: Part[], beside?: PartKind) => andList((['skill', 'mcp', 'agent'] as PartKind[]).flatMap(kind => {
   const n = items.filter(entry => entry.kind === kind).length;
   return n ? [`${n} ${kind === beside ? 'other ' : ''}${partWords[kind][n === 1 ? 0 : 1]}`] : [];
 }));
 
-/**
- * What a click on the item's box does, as the sentence after its state ("Click to turn it off in Codex on Apply all.").
- * `when`: when it happens, after the tool's name; '' where a click applies at once.
- */
-export function clickWords(draft: PluginDraft, item: PluginItemAt, when = ' on Apply all'): string {
+/** What a click on the item's switch does, as the sentence after its state ("Click to turn it off in Codex."). */
+export function clickWords(item: PluginItemAt): string {
   const tool = names[item.tool];
   const plugin = item.install.plugin;
-  const { now, on } = standing(draft, item);
-  if (on !== now) return `${on ? 'Turned on' : 'Turned off'} in ${tool}${when}. Click to leave it ${now ? 'on' : 'off'}.`;
+  const on = onNow(item);
   // What else of the plugin is on there now: what its own switch already keeps off neither goes with it nor comes back with it.
   const rest = item.install.items.filter(entry => !samePart(entry, item) && !(hasOwnSwitch(item.tool, entry.kind) && itemOffNow(item.install, entry)));
   // Copilot CLI's switch for a server goes by its bare name, whoever's server it is.
   const byName = (way: string) => (item.kind === 'mcp' && item.tool === 'copilot-cli' ? ` Copilot CLI goes by the name, so any other server named “${item.name}” there goes ${way} too.` : '');
-  if (on && ownSwitch(item)) return `Click to turn it off in ${tool}${when}.${byName('off')}`;
-  if (on) return `${tool} has no switch for one ${partWords[item.kind][0]} of a plugin. Click to turn the whole plugin ${plugin} off in ${tool}${when}${rest.length ? `, with its ${counted(rest)}` : ''}.`;
-  if (!wholeOffAfter(draft, item)) return `Click to turn it on in ${tool}${when}.${byName('on')}`;
-  // Off by its own switch in a plugin that is on now and chosen to go off: a click takes that back, and turns this on.
-  if (!item.install.off) return `The whole plugin ${plugin} turns off in ${tool}${when}. Click to leave the plugin on and turn this ${partWords[item.kind][0]} on there.${byName('on')}`;
+  if (on && ownSwitch(item)) return `Click to turn it off in ${tool}.${byName('off')}`;
+  if (on) return `${tool} has no switch for one ${partWords[item.kind][0]} of a plugin. Click to turn the whole plugin ${plugin} off in ${tool}${rest.length ? `, with its ${counted(rest)}` : ''}.`;
+  if (!item.install.off) return `Click to turn it on in ${tool}.${byName('on')}`;
   if (ownSwitch(item)) {
     // What comes on beside this item: whatever the plugin brings that can't be held off there (no switch of its own, or
     // one that can't be written), and isn't off by its own switch already.
     const held = switchable(item.install);
     const brought = rest.filter(entry => !held.some(part => samePart(part, entry)));
-    return `Click to turn the plugin ${plugin} on in ${tool}${when} with only this ${partWords[item.kind][0]} on${brought.length ? `; its ${counted(brought, item.kind)} ${brought.length === 1 ? 'comes' : 'come'} on too` : ''}.`;
+    return `Click to turn the plugin ${plugin} on in ${tool} with only this ${partWords[item.kind][0]} on${brought.length ? `; its ${counted(brought, item.kind)} ${brought.length === 1 ? 'comes' : 'come'} on too` : ''}.`;
   }
-  return `Click to turn the whole plugin ${plugin} on in ${tool}${when}${rest.length ? `, with its ${counted(rest)}` : ''}.`;
+  return `Click to turn the whole plugin ${plugin} on in ${tool}${rest.length ? `, with its ${counted(rest)}` : ''}.`;
 }
 
-/**
- * The item's switch in words, for the line beside it: what Apply all will do; or, with nothing waiting, that its switch is
- * the whole plugin's where the tool has none for one item; or ''.
- */
-export function pendingWords(draft: PluginDraft, item: PluginItemAt): string {
-  const { now, on } = standing(draft, item);
-  if (on === now) return ownSwitch(item) || cantSwitch(item) ? '' : `${names[item.tool]} has no switch for one ${partWords[item.kind][0]} of a plugin, so this switch turns the whole plugin ${on ? 'off' : 'on'} there.`;
-  const whole = queuedWhole(draft, where(item).source, item.install.plugin, item.tool);
-  const rest = item.install.items.filter(entry => !samePart(entry, item) && !(hasOwnSwitch(item.tool, entry.kind) && itemOffNow(item.install, entry)));
-  // With the whole plugin: what else of it changes with this item (going off, all that is on now; coming on, all but what is chosen to stay off).
-  const along = on ? rest.filter(entry => { const part = switchable(item.install).find(candidate => samePart(candidate, entry)); return !part || !itemOffAfter(draft, item, part); }) : rest;
-  if (whole && !ownSwitch(item)) return `Apply all turns it ${on ? 'on' : 'off'}${along.length ? `, with the ${along.length === rest.length ? 'whole ' : ''}plugin (${plural(along.length, 'other item')})` : ', with the plugin'}.`;
-  if (!(on && whole === 'plugin-on')) return `Apply all turns it ${on ? 'on' : 'off'}.`;
-  // An item with its own switch coming on with a plugin that is off: the plugin comes on, what is chosen to stay off is
-  // left off (the other items held off for it, when it was clicked alone), and everything else of it comes on too.
-  const leftOff = rest.filter(entry => { const part = switchable(item.install).find(candidate => samePart(candidate, entry)); return !!part && itemOffAfter(draft, item, part); });
-  const brought = rest.filter(entry => !leftOff.includes(entry));
-  return `Apply all turns it on: the plugin ${item.install.plugin} comes on${leftOff.length ? ` with its ${counted(leftOff, item.kind)} left off` : ''}${brought.length ? `; its ${counted(brought, item.kind)} ${brought.length === 1 ? 'comes' : 'come'} on too` : ''}.`;
+/** The line beside the item's switch where the tool has none for one item: that its switch is the whole plugin's there; else ''. */
+export function switchWords(item: PluginItemAt): string {
+  if (ownSwitch(item) || cantSwitch(item)) return '';
+  return `${names[item.tool]} has no switch for one ${partWords[item.kind][0]} of a plugin, so this switch turns the whole plugin ${onNow(item) ? 'off' : 'on'} there.`;
 }
 
-/**
- * The plugins a draft turns off or on as a whole, in words for the change bar ("the whole plugin full off in Claude
- * Code"), so a click on one item's box that takes the plugin with it is said before Apply all. A plugin that comes on
- * with items of its own left off says how many ("the plugin full on in Codex with 2 items left off").
- */
-export function wholeWords(draft: PluginDraft): string[] {
-  const ops = [...draft.values()];
-  const leftOff = (whole: PluginOp) => ops.filter(op => op.source === whole.source && op.plugin === whole.plugin && op.tool === whole.tool && (op.action === 'skill-off' || op.action === 'part-off')).length;
-  return ops.filter(op => op.action === 'plugin-off' || op.action === 'plugin-on').map(op => {
-    const held = op.action === 'plugin-on' ? leftOff(op) : 0;
-    return held ? `the plugin ${op.plugin} on in ${names[op.tool]} with ${plural(held, 'item')} left off` : `the whole plugin ${op.plugin} ${op.action === 'plugin-off' ? 'off' : 'on'} in ${names[op.tool]}`;
-  });
-}

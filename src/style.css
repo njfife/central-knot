@@ -20,7 +20,7 @@
  *   - content narrower than 880px: two-pane pages stack, the list above its detail, and the marketplaces become a strip;
  *     narrow History rows put what happened on its own line;
  *   - content from 1000px: History stripes its rows;
- *   - a table narrower than 900px with four tools, or 780px: its Managed and tool columns tighten (--narrow);
+ *   - a table narrower than 900px with four tools, or 780px: its switch and tool columns tighten (--narrow);
  *   - a table from 1000px: the skills tables stripe their rows (the plugin table from 700px);
  *   - a plugin table from 1100px puts each description beside its name, and below 700px leaves descriptions out;
  *   - a plugin's page from 1100px puts the README beside what it holds;
@@ -407,29 +407,22 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 
 /* ---------- The table: skills, MCP servers and agents ---------- */
 /*
- * The name column takes the free width (and shows the description); Managed and each tool keep a steady width. On a wide
+ * The name column takes the free width (and shows the description); the switch and each tool keep a steady width. On a wide
  * display an open row's details dock beside the table (.docked), so the item's actions sit with it.
  */
 .matrix { container: table / inline-size; position: relative; }
 .ov { --ov-columns: minmax(200px, 1fr) 84px repeat(var(--tool-count, 3), 120px); }
-/* A narrow table: tighter columns, so names keep their room, and a chosen copy shows as its tool's mark and Change, the
-   full choice in its tooltip. Four tools need it sooner, five sooner still (dom.ts data-tools). Five tools in the smallest
-   window with the sidebar open are tighter again: the column menus' arrows go, the names stay. */
+/* A narrow table: tighter columns, so names keep their room. Four tools need it sooner, five sooner still (dom.ts
+   data-tools). Five tools in the smallest window with the sidebar open are tighter again. */
 @container table (width < 780px) { .ov { --narrow: 1; } }
 @container table (width < 900px) { .ov[data-tools="4"] { --narrow: 1; } }
 @container table (width < 1020px) { .ov[data-tools="5"] { --narrow: 1; } }
 @container table (width < 700px) { .ov[data-tools="5"] { --tight: 1; } }
-.decided-short, .decided-undo-icon { display: none; }
 @container style(--narrow: 1) {
-  .decided-undo-text { display: none; }
-  .decided-undo-icon { display: block; }
   .ov-row { --ov-columns: minmax(160px, 1fr) 72px repeat(var(--tool-count, 3), 92px); }
-  .decided-uses, .decided-what { display: none; }
-  .decided-short { display: inline; }
 }
 @container style(--tight: 1) {
   .ov-row { --ov-columns: minmax(160px, 1fr) 60px repeat(var(--tool-count, 3), 80px); }
-  .tool-head-name > svg { display: none; }
 }
 
 .ov-row { position: relative; display: grid; grid-template-columns: var(--ov-columns); align-items: center; height: 40px; box-shadow: inset 0 -1px 0 var(--line); scroll-margin-top: 128px; }
@@ -474,19 +467,11 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ov-name-fit > .row-tag, .ov-name-fit > .ov-name-about { line-height: 40px; }
 .row-open { display: grid; place-items: center; width: 18px; height: 18px; margin-left: -6px; flex: none; border: 0; background: none; border-radius: 4px; cursor: pointer; color: inherit; }
 .row-open:hover { background: var(--press); }
-.row-open-spacer { display: inline-block; width: 18px; margin-left: -6px; flex: none; }
 .row-tag { flex: none; font-size: 11.5px; color: var(--ink-soft); white-space: nowrap; }
 .held-pill { flex: none; white-space: nowrap; font-size: 11.5px; color: var(--ink-soft); border: 1px solid var(--control-line); border-radius: 999px; padding: 1px 7px; }
-.decided { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 1px 4px 1px 7px; white-space: nowrap; border: 1px solid var(--line); border-radius: 999px; font-size: 11.5px; color: var(--ink-soft); }
-.decided-uses { color: var(--ink-faint); }
-.decided-undo { display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 6px 0 7px; border: 0; border-left: 1px solid color-mix(in oklab, var(--accent) 35%, transparent); border-radius: 0 999px 999px 0; background: none; color: var(--accent); font: inherit; font-size: 11.5px; cursor: pointer; }
-.decided-undo:hover { background: var(--hover); }
 .ov-managed { display: flex; justify-content: center; }
 .ov-cell { position: relative; display: flex; justify-content: center; align-items: center; gap: 6px; }
 .ov-tool-head { flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--ink); }
-.ov-ghost, .ov-ghost .ov-name-text { color: var(--ink-faint); }
-.ov-ghost-why { margin-left: 10px; font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
-.ov-ghost-text { grid-column: 2 / -1; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-right: 16px; font-size: 12px; color: var(--ink-soft); }
 
 .switch { position: relative; flex: none; width: 32px; height: 18px; border-radius: 999px; border: 0; padding: 0; background: var(--switch-off); cursor: pointer; transition: background 140ms var(--ease); }
 .switch-knob { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 30%); transition: transform 140ms var(--ease); }
@@ -496,9 +481,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .switch[aria-checked="mixed"] { background: var(--switch-mixed); }
 .switch[aria-checked="mixed"] .switch-knob { transform: translateX(7px); }
 .switch[aria-checked="mixed"] .switch-knob::after { content: ""; position: absolute; left: 3px; right: 3px; top: calc(50% - 1px); height: 2px; border-radius: 1px; background: #8b8b95; }
-/* Managed, waiting for Apply all: blue, with a dashed ring. */
-.managed-pending .switch { outline: 1.5px dashed var(--accent); outline-offset: 2px; }
-.managed-pending .switch[aria-checked="true"] { background: var(--accent); }
 
 /* A cell says what that tool has: green synced, blue pending (dashed), amber differing or waiting, striped can't. */
 .cell-button, .legend-cell { position: relative; display: grid; place-items: center; width: 30px; height: 26px; border-radius: 7px; border: 1px solid var(--cell-line); background: transparent; color: var(--ink-faint); }
@@ -518,31 +500,16 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .cell-waiting { color: var(--warning); border-style: dashed; border-color: var(--warning); }
 .cell-waiting.cell-on { background: var(--cell-warn); }
 .cell-present { color: var(--ink); }
-.ov-row.unmanaged .cell-absent:not(.cell-pending-edit) { border-style: dotted; border-color: var(--ink-faint); }
-/* Every change waiting for Apply all wears the same blue dashed edge, a removal as much as an addition. */
-.cell-button.cell-pending-edit, .legend-cell.cell-pending-edit { border-style: dashed; border-color: var(--accent); }
 .legend-cell.cell-absent { border-style: dotted; }
 .cell-cannot { background: repeating-linear-gradient(135deg, var(--control-line) 0 2px, transparent 2px 6px); }
 .cell-working { border-style: dashed; color: var(--accent); }
-.cell-oneway-mark { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; background: var(--surface); color: var(--ink-soft); box-shadow: 0 0 0 1px var(--line); }
-.cell-oneway-mark svg { width: 11px; height: 11px; }
-.legend-cell .cell-oneway-mark { top: -4px; right: -4px; width: 10px; height: 10px; }
-.legend-cell .cell-source-mark { top: -3px; left: -3px; width: 7px; height: 7px; }
 /* A copy that is another tool's, read in that tool's folder: a link at the lower left, clear of the other corner marks. */
-.cell-reads-mark { position: absolute; bottom: -5px; left: -5px; display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; background: var(--surface); color: var(--ink-soft); box-shadow: 0 0 0 1px var(--line); }
-.cell-reads-mark svg { width: 10px; height: 10px; }
-.legend-cell .cell-reads-mark { bottom: -4px; left: -4px; width: 11px; height: 11px; }
-.legend-cell .cell-reads-mark svg { width: 8px; height: 8px; }
-.cell-source-mark { position: absolute; top: -4px; left: -4px; width: 9px; height: 9px; border-radius: 50%; background: var(--switch-on); box-shadow: 0 0 0 2px var(--surface); }
 
 .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; padding: 14px 16px 18px; font-size: 11.5px; color: var(--ink-soft); }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .legend-lead { font-size: 12px; color: var(--ink-soft); }
 /* "On Apply all:" and what follows it: kept together on one line, wrapping inside only when wider than the whole key. */
 .legend-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; max-width: 100%; }
-.legend-first { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }
-.legend-switch { position: relative; display: inline-block; width: 22px; height: 12px; border-radius: 999px; border: 1px dashed color-mix(in oklab, var(--accent) 60%, white); background: var(--accent); }
-.legend-switch > .switch-knob { top: 1px; left: auto; right: 1px; width: 8px; height: 8px; box-shadow: none; }
 
 .brand-mark { flex: none; display: block; }
 .mono-mark { display: inline-grid; place-items: center; flex: none; border-radius: 4px; background: var(--ink); color: var(--surface); font-weight: 700; letter-spacing: -0.3px; }
@@ -551,7 +518,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .mono-16 { width: 16px; height: 16px; font-size: 9px; }
 .mono-18 { width: 18px; height: 18px; font-size: 10px; }
 
-.tool-head-name { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
 
 /* Wide content (renderer.ts state.wide): the open row's details dock beside the table, which keeps the rest of the width. */
 .ov-page.docked { display: grid; grid-template-columns: minmax(0, 1fr) clamp(400px, 30cqw, 560px); grid-template-rows: minmax(0, 1fr); }
@@ -576,7 +542,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .details-head { display: flex; flex-direction: column; gap: 2px; padding-right: 28px; }
 .details-head:empty { display: none; }
 .details-status { font-size: 12px; font-weight: 500; color: var(--ink); }
-.details-pending { color: var(--ink-soft); }
 .details-description { max-width: var(--measure); font-size: 12px; color: var(--ink-soft); }
 .details-definition { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 2px 10px; font-size: 12.5px; }
 .details-definition dt { color: var(--ink-faint); }
@@ -636,12 +601,12 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .version-head { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
 .version-meta, .version-effect { font-size: 11.5px; color: var(--ink-soft); }
 .version-text { font-size: 12px; color: var(--ink); font-style: italic; }
+.version-latest { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); }
+.compare-copies { margin: 8px 0 0; max-height: 40vh; overflow: auto; overscroll-behavior: contain; }
 .version-cta { display: inline-flex; align-self: flex-start; margin-top: auto; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--control-line); background: var(--surface); font-size: 12px; font-weight: 600; color: var(--ink); }
 .version:hover .version-cta, .version:focus-visible .version-cta { border-color: var(--accent); color: var(--accent); }
 .version-blocked { opacity: 0.75; cursor: not-allowed; }
 .version-why { display: flex; gap: 6px; align-items: flex-start; color: var(--ink-soft); }
-.compare-separate { margin: 2px 0 0; font-size: 12.5px; color: var(--ink-soft); }
-.compare-separate .text-action { padding: 0 2px; margin: 0 -2px; font-size: 12.5px; }
 
 /* ---------- Skills: Files and contents (a list beside one skill's detail) ---------- */
 /* The page holds the result strip, then the list beside one skill's pane (.split), which takes the rest of the height. */
@@ -651,13 +616,11 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .list-toolbar .find { flex: 1 1 auto; }
 .list-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--line); background: var(--surface); font-size: 12px; color: var(--ink-soft); }
 .list-head > span:first-child { flex: 1; }
-/* The Skills list's group headings, in the table's order: Managed, Unmanaged, Disabled everywhere. */
+/* The Skills list's group headings, in the table's order: On, Not synced, Off. */
 .list-group { display: flex; align-items: center; height: 26px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--chrome); font-size: 12px; font-weight: 600; }
 .list-row { all: unset; box-sizing: border-box; width: 100%; height: var(--list-row); display: flex; align-items: center; gap: 8px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--line); }
 .list-row:hover { background: var(--hover); }
 .list-row.selected, .list-row.selected:hover { background: var(--picked); box-shadow: inset 2px 0 0 var(--accent); }
-.list-row.list-changed { box-shadow: inset 2px 0 0 color-mix(in oklab, var(--accent) 70%, transparent); }
-.list-row.selected.list-changed { box-shadow: inset 2px 0 0 var(--accent); }
 .list-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .list-name { flex: 1; font-weight: 500; }
 .list-cells { flex: none; display: inline-flex; gap: 4px; }
@@ -797,7 +760,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 @container cards (width >= 960px) { .card-grid:not(:where([data-count="1"], [data-count="3"])) { --cols: 2; } }
 @container cards (width >= 992px) { .card-grid[data-count="3"] { --cols: 3; } }
 @container cards (width >= 2000px) { .card-grid[data-count="4"] { --cols: 4; } }
-.tool-card { container-type: inline-size; }
 .tool-head { display: flex; align-items: center; gap: 8px; min-height: 53px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 /* A narrow card leaves its header's folder out rather than cut it to a stub; "Config folder" below says it whole. */
 @container (width < 440px) { .tool-head > .path-text { display: none; } }
@@ -805,11 +767,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* Copy folder path keeps the right end, also when a narrow card leaves the path out. */
 .tool-head > .btn:last-child { margin-left: auto; }
 .tool-title { flex: none; font-size: 14px; line-height: 20px; font-weight: 600; }
-.tool-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px 24px; padding: 16px; }
-@container (width >= 704px) { .tool-body { grid-template-columns: minmax(0, 1.6fr) minmax(220px, 1fr); } }
-.tool-column { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.link-row { margin-left: -8px; }
-.link-quiet { padding: 0 8px; font-size: 12px; color: var(--ink-soft); }
 .plain-list { display: flex; flex-direction: column; gap: 4px; }
 
 .ins-card { container: ins-card / inline-size; display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; }
@@ -1365,28 +1322,17 @@ span.ins-confirm { margin-top: 0; }
 /* Marker comments and code read as typed: no ligatures turning <!-- into an arrow. */
 .ins-preview, .ins-diff, .ins-text { font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
 
-/* Disable and Remove, per tool (skills). A disabled copy keeps its cell's state, outlined instead of filled, with a corner mark. */
-.cell-disabled { position: relative; }
-/* Only once applied: a queued disable keeps the pending look, and the corner mark alone says Disabled. */
-.cell-disabled.cell-on:not(.cell-pending-edit) { background: transparent; border-color: var(--control-line); }
-.cell-disabled.cell-synced:not(.cell-pending-edit) { color: var(--ink-soft); }
-.cell-disabled-mark { position: absolute; top: -4px; right: -4px; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--ink-faint); }
-.cell-disabled-mark svg { width: 12px; height: 12px; stroke-width: 2.5; }
-.legend-cell .cell-disabled-mark { top: -5px; right: -5px; width: 12px; height: 12px; }
-.legend-cell .cell-disabled-mark svg { width: 9px; height: 9px; }
-.legend-item > .legend-cell.cell-disabled { margin-right: 5px; }
-.cell-removing, .legend-cell.cell-removing { color: var(--danger); border: 1px dashed color-mix(in oklab, var(--danger) 60%, transparent); background: var(--danger-tint); }
-/* Skills, agents and a plugin's items: every tool's row has the same three columns (tool, what happens there, its switch and Remove or the plugin's page), so the switches line up. */
-.details:is(.details-skills, .details-plugin, .details-agents) .details-tool-head { grid-template-columns: 196px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; }
+/* Skills, agents and a plugin's items: every tool's row has the same three columns (tool, what it has, its own controls), so the controls line up. */
+.details.details-grid .details-tool-head { grid-template-columns: 196px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; }
 .details-tool-head > .details-tool-actions { display: inline-flex; align-items: center; gap: 12px; justify-self: end; }
 .details-tools { container-type: inline-size; }
 /* In a narrow pane (the dock, the Files view's details) the tool and its controls share the first line; the sentence, if any, goes under. */
 @container (max-width: 560px) {
-  .details:is(.details-skills, .details-plugin, .details-agents) .details-tool-head { grid-template-columns: minmax(0, 1fr) auto; }
-  .details:is(.details-skills, .details-plugin, .details-agents) .details-tool-head > .details-tool-label { grid-row: 1; grid-column: 1; }
-  .details:is(.details-skills, .details-plugin, .details-agents) .details-tool-head > .details-tool-actions { grid-row: 1; grid-column: 2; justify-self: end; }
-  .details:is(.details-skills, .details-plugin, .details-agents) .details-tool-head > .details-tool-line { grid-row: 2; grid-column: 1 / -1; }
-  .details:is(.details-skills, .details-plugin, .details-agents) .details-tool-head > .details-tool-line:empty { display: none; }
+  .details.details-grid .details-tool-head { grid-template-columns: minmax(0, 1fr) auto; }
+  .details.details-grid .details-tool-head > .details-tool-label { grid-row: 1; grid-column: 1; }
+  .details.details-grid .details-tool-head > .details-tool-actions { grid-row: 1; grid-column: 2; justify-self: end; }
+  .details.details-grid .details-tool-head > .details-tool-line { grid-row: 2; grid-column: 1 / -1; }
+  .details.details-grid .details-tool-head > .details-tool-line:empty { display: none; }
 }
 .tool-switch { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-soft); }
 /* The app's switch, at its own size (the row's action-button height doesn't apply to it). */
@@ -1402,24 +1348,15 @@ span.ins-confirm { margin-top: 0; }
 .details-outside .details-note { overflow-wrap: anywhere; }
 .details-outside > .details-actions { margin-top: 0; }
 .tool-switch-word { min-width: 56px; text-align: right; }
-/* Queued, like the Managed switch: a dashed outline, never a ring that reads as focus. */
-.tool-switch-pending .switch { box-shadow: none; outline: 1.5px dashed var(--accent); outline-offset: 2px; }
-.tool-switch-pending .tool-switch-word { color: var(--accent-ink); }
-/* A switch queued in a skill's details shows in its cell too: the queued dash around the cell, and the mark in accent. */
-.cell-switch-queued { outline: 1.5px dashed var(--accent); outline-offset: 1px; }
-.cell-switch-queued .cell-disabled-mark { color: var(--accent-ink); box-shadow: 0 0 0 1px var(--accent); }
+/* A tool whose switch file can't be used says so where its switch would be. */
 .tool-switch-na { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-soft); }
-/* What Disabled and Remove mean, right under the rows they belong to. */
-.details-switch-note { margin: 0; }
-/* Remove is queued and restorable: quiet until pointed at. A row without it keeps the same space. */
+/* Remove runs at once and History keeps the copy: quiet until pointed at. A row without it keeps the same space. */
 .text-action.tool-remove { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
 .text-action.tool-remove:hover, .text-action.tool-remove:focus-visible { color: var(--danger); }
 .tool-remove, .tool-remove-slot { min-width: 60px; text-align: center; }
 /* Beside a plugin item's switch, where an own copy has Remove: the way to the plugin's page. */
 .text-action.tool-link { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; white-space: nowrap; }
 .tool-remove-slot { display: inline-block; }
-/* Differing copies hide an empty foot, but not one holding Delete everywhere. */
-.details-differs .compare-foot:has(.compare-foot-start:empty):has(> .text-action, > .delete-armed) { display: flex; }
 /* Queued changes never shrink out of sight: when the change bar doesn't fit beside the filters, it takes its own line. */
 .ov-page > .toolbar:has(.apply-count) { flex-wrap: wrap; }
 /* On its own line the breakdown may still be long: it wraps within the bar rather than run past the edge. */
@@ -1427,7 +1364,7 @@ span.ins-confirm { margin-top: 0; }
 .toolbar-end .apply-count { white-space: normal; min-width: 0; }
 .ov-page > .toolbar:has(.apply-count) > .toolbar-end { flex-shrink: 1; min-width: 0; }
 /* Focus always shows as focus: outside the small switch, and over a queued cell's dash. */
-.tool-switch .switch:focus-visible, .managed-pending .switch:focus-visible, .cell-switch-queued:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.tool-switch .switch:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* Profiles page: the list of profiles beside the open one, and the open one's header (rename, Delete, its setup step) */
 .profiles-split { min-height: 0; }
@@ -1535,7 +1472,6 @@ span.ins-confirm { margin-top: 0; }
 @container status (width < 1000px) { .status-profile-drift-text { display: none; } }
 
 /* Skills and MCP pages: a copy a profile turned off reads as off, not only by its corner mark */
-.cell-button.cell-profile-off > .icon:first-child, .cell-button.cell-profile-off > .glyph-fill { opacity: 0.4; }
 
 /* ---------- Harnesses ---------- */
 .harness-scroll { container-type: inline-size; padding: 12px var(--pad-end) 16px 16px; display: flex; flex-direction: column; gap: 12px; }
@@ -1611,7 +1547,6 @@ button.harness-card-main:disabled { cursor: default; }
 /* Narrow: the switcher keeps only the marks (names stay in their tooltips). */
 @media (max-width: 1180px) { .harness-switch-item:not(.selected) .harness-switch-name { display: none; } }
 /* The harness's own column header: a quiet fill across the whole column's width. */
-.ov-tool-head.tool-head-focus { background: var(--hover); border-radius: 8px 8px 0 0; align-self: stretch; display: flex; align-items: center; justify-content: center; }
 /* Its instruction card: sized to its file at a reading measure, never wider than the pane; with notes or earlier versions
    beside it (wide windows), it spans the pane (the file box's 100% then resolves against the pane).
    It is no size container here: containment would size it as if empty, leaving it at its minimum on any window. */
@@ -1633,7 +1568,7 @@ button.harness-card-main:focus-visible { outline: 0; }
 .harness-cards[data-count="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @container (min-width: 1300px) { .harness-cards[data-count="4"] { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @container (max-width: 600px) { .harness-cards[data-count="4"] { grid-template-columns: minmax(0, 1fr); } }
-/* "Not in <harness>" is an offer, not this harness's count: its heading is quieter than Managed and Unmanaged. */
+/* "Not in <harness>" and Off: quieter headings than On and Not synced. */
 .ov-section-away .ov-section-label > strong { font-weight: 500; color: var(--ink-soft); }
 /* Wide: the file sits at a reading measure on the left, with who reads it, notes and earlier versions beside it. */
 @container (min-width: 1300px) {
@@ -1652,7 +1587,6 @@ button.harness-card-main:focus-visible { outline: 0; }
 .harness-page .empty-body { text-wrap: balance; }
 /* A tab's empty state starts under the tab bar, where every other tab's content starts, so switching tabs doesn't move the eye. */
 .harness-page .empty { justify-content: flex-start; padding-top: 48px; }
-.harness-page .tool-head-name { white-space: nowrap; }
 /* The separating dot before a section note: even space on both sides. */
 .ov-section-after { gap: 0; }
 .ov-section-label > .ov-section-after { margin-left: 0; }
@@ -1772,14 +1706,7 @@ button.harness-card-main:focus-visible { outline: 0; }
 /* ---------- A plugin's items on the Skills, MCP servers and Agents pages (matrix.ts pluginCell) ---------- */
 /* There through the plugin: filled with its glyph in the accent's tint, apart from a synced copy's green check. Its box is
    no button (sync never copies a plugin's own files), so hovering it changes nothing. */
-.cell-static { cursor: default; }
-.cell-button.cell-static:hover { border-color: var(--cell-line); background: transparent; }
 .cell-plugin { color: var(--accent-ink); }
-.cell-plugin.cell-on, .cell-button.cell-static.cell-plugin.cell-on:hover { background: color-mix(in oklab, var(--accent) 16%, transparent); border-color: transparent; }
-.cell-plugin.cell-disabled.cell-on, .cell-button.cell-static.cell-plugin.cell-disabled:hover { background: transparent; border-color: var(--control-line); color: var(--ink-soft); }
-/* A plugin item's switch waiting for Apply all keeps the dashed blue edge of any waiting change, over the two rules above. */
-.cell-button.cell-plugin.cell-pending-edit, .cell-button.cell-plugin.cell-disabled.cell-pending-edit { border-style: dashed; border-color: var(--accent); }
-.ov-row.unmanaged .cell-static.cell-absent { border-style: dotted; border-color: var(--cell-line); }
 
 /* The note of what plugin updates did by themselves (pluginupdateview.ts): what it is about, then a line per plugin. The
    icon and the close button stay at the first line however many lines follow. */
@@ -1823,5 +1750,6 @@ button.harness-card-main:focus-visible { outline: 0; }
 }
 .tool-mark.mark-off::after { content: ""; position: absolute; left: 3px; right: 3px; top: calc(50% - 0.75px); height: 1.5px; border-radius: 1px; background: var(--ink-soft); transform: rotate(-40deg); }
 .tool-mark.mark-differs, .tool-mark.mark-waits { color: var(--warning); }
+.tool-mark.mark-kept { color: var(--ink-soft); }
 .row-tag.row-tag-differs { color: var(--warning); }
 .details-actions.details-danger { margin-top: 0; }

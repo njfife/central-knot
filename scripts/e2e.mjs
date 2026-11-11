@@ -215,7 +215,6 @@ const cellState = (a, key, tool) => a.run(`document.getElementById(${JSON.string
 /** The tools whose mark on an item's row is drawn off (the copy kept). */
 const offMarks = (a, key) => a.all(`.ov-row[data-key=${JSON.stringify(key)}] .tool-mark[data-look="off"]`, 'e.dataset.tool');
 const switchOn = (a, key) => a.run(`document.querySelector('.ov-row[data-key=${JSON.stringify(key)}] .switch')?.getAttribute('aria-checked') === 'true'`);
-const applyAll = async a => { await a.click('#apply'); await a.settle(); };
 /** Each section on an item page, in order, with the keys of its rows. */
 const sectionsNow = a => a.run(`[...document.querySelectorAll('.ov-section[data-section]')].map(head => [head.dataset.section, [...head.parentElement.querySelectorAll('.ov-row[data-key]')].map(row => row.dataset.key)])`);
 
@@ -226,7 +225,7 @@ async function harnessFlow() {
   const practice = await a.run(`document.querySelector('.status-home').title`);
   await a.click('#nav-harnesses');
   const list = await a.text('#harnesses-scroll') ?? '';
-  check('Harnesses sums up each tool found', ['Claude Code', 'Copilot CLI', 'Codex'].every(name => list.includes(name)) && list.includes('none managed'), list.slice(0, 400));
+  check('Harnesses sums up each tool found', ['Claude Code', 'Copilot CLI', 'Codex'].every(name => list.includes(name)) && list.includes('none synced'), list.slice(0, 400));
   // The card's count and the tab it opens agree; another harness starts with the filter off.
   const cardDiffer = parseInt(await a.text('#harness-claude-cli-differ-skills') ?? '', 10);
   await a.click('#harness-claude-cli-differ-skills');
@@ -289,7 +288,7 @@ async function harnessFlow() {
 // In the page, on both axes: each control (button, switch, input, filter chip, tool label) that the window or a clipping
 // ancestor cuts. A control a scroll area can bring into view is reachable there, but that scroll area's own viewport must
 // still be visible within every clipping boundary outside it, up to the window. Also each region that scrolls sideways,
-// each bar the app's own fitting (dom.ts fitBars) marks as still too wide, and an open menu outside its scroll area.
+// and each bar the app's own fitting (dom.ts fitBars) marks as still too wide.
 // Empty when everything fits.
 const CUT_OFF = `(() => {
   const out = [];
@@ -317,10 +316,6 @@ const CUT_OFF = `(() => {
   }
   for (const node of document.querySelectorAll('.scroll, .toolbar, .band, #header, .market-chips')) if (node.scrollWidth > node.clientWidth + 1) out.push('scrolls sideways: ' + (node.id || node.className));
   for (const bar of document.querySelectorAll('.fit-bar[data-overflows]')) out.push('too wide even when fitted: ' + bar.className);
-  for (const menu of document.querySelectorAll('.tool-menu')) {
-    const box = menu.getBoundingClientRect(), area = menu.closest('.scroll').getBoundingClientRect();
-    if (!inside(box, area, 'x') || !inside(box, area, 'y')) out.push('menu outside its area: ' + menu.getAttribute('aria-label'));
-  }
   return out;
 })()`;
 
@@ -756,13 +751,17 @@ async function practiceFlow() {
   same('find filters', await rowKeys(a), ['standup']);
   await a.press('Escape');
   same('Escape clears find', (await rowKeys(a)).length, 4);
-  // MCP: each tool's servers on one page; Apply all writes Copilot and Codex by editing only that entry; Claude Code waits for Write now.
+  // MCP: each tool's servers on one page; turning one on writes Copilot and Codex at once by editing only that entry; Claude
+  // Code waits for Write to Claude Code.
   await a.click('#nav-mcp');
   same('MCP servers from every tool', (await rowKeys(a)).sort(), ['docs', 'files']);
   same('files is the same in Copilot and Codex, absent in Claude', [await cellState(a, 'files', 'copilot-cli'), await cellState(a, 'files', 'codex-cli'), await cellState(a, 'files', 'claude-cli')], ['present', 'present', 'absent']);
+  check('the MCP page has one switch per server and no Apply all', await a.exists('#switch-docs') && !(await a.exists('#apply, #manage-all')));
   const tomlBefore = readFileSync(join(practice, '.codex/config.toml'), 'utf8');
-  await a.click('#manage-all');
-  await applyAll(a);
+  await a.click('#switch-docs');
+  await a.click('#switch-files');
+  check('turning files on says where it is on and that Claude Code gets it with Write, as a plain note, not a warning', /^files is on in Copilot CLI and Codex\. Claude Code gets it when you click Write to Claude Code\./.test(await a.text('.band-done .band-text') ?? '')
+    && !(await a.exists('.band-done .tone-warning')) && !/waits for Claude Code/.test(await a.text('.toolbar') ?? ''), [await a.text('.bands'), await a.text('.toolbar')]);
   const copilotMcp = JSON.parse(readFileSync(join(practice, '.copilot/mcp-config.json'), 'utf8')).mcpServers;
   same('docs reached Copilot with its header as-is', copilotMcp.docs, { type: 'http', url: 'https://docs.example.test/mcp', headers: { Authorization: 'Bearer practice-token' }, tools: ['*'] });
   const tomlAfter = readFileSync(join(practice, '.codex/config.toml'), 'utf8');
@@ -781,29 +780,39 @@ async function practiceFlow() {
   check('and files waits for Write again', await a.exists('#mcp-write-claude'));
   await a.click('#mcp-write-claude');
   check('Write works again after Undo', JSON.parse(readFileSync(join(practice, '.claude.json'), 'utf8')).mcpServers.files?.command === 'npx');
+  // Off: each tool's own switch turns files off at once, its entries stay; Undo turns each back on.
+  const mcpSwitchFiles = ['.claude/settings.json', '.copilot/settings.json', '.codex/config.toml'].map(file => join(practice, file));
+  const mcpSwitchesBefore = mcpSwitchFiles.map(readNow);
+  const groupOf = async key => (await sectionsNow(a)).find(([, keys]) => keys.includes(key))?.[0];
+  const filesGroup = await groupOf('files');
+  await a.click('#switch-files');
+  const [claudeMcpOff, copilotMcpOff, codexMcpOff] = mcpSwitchFiles.map(readNow);
+  same('Off turns files off with each tool’s own switch, and every entry stays', [JSON.parse(claudeMcpOff).deniedMcpServers, JSON.parse(copilotMcpOff).disabledMcpServers, codexMcpOff.split(/\n(?=\[)/).find(table => table.startsWith('[mcp_servers.files]'))?.includes('\nenabled = false\n'), !!JSON.parse(readFileSync(join(practice, '.claude.json'), 'utf8')).mcpServers.files],
+    [[{ serverName: 'files' }], ['files'], true, true]);
+  same('its marks say off in every tool, and with the pointer away from the list it is under Off at once', [await offMarks(a, 'files'), filesGroup, await groupOf('files')], [['claude-cli', 'copilot-cli', 'codex-cli'], 'on', 'off']);
+  await a.click('#outcome-undo');
+  const settledMcp = (text, index) => (index === 2 ? text : JSON.stringify(Object.fromEntries(Object.entries(text.trim() ? JSON.parse(text) : {}).filter(([, value]) => !(value && typeof value === 'object' && !Object.keys(value).length)))));
+  same('Undo turns it back on in each tool', [mcpSwitchFiles.map(readNow).map(settledMcp), await switchOn(a, 'files')], [mcpSwitchesBefore.map(settledMcp), true]);
   // A server turned off in one tool, outside Central Knot (as `copilot mcp disable` writes it), is marked so, and its row has
-  // that tool's switch to turn it on again: Apply all changes only Copilot's own switch, and Undo flips it back.
+  // that tool's switch to turn it on again: it changes only Copilot's own switch, at once, and Undo flips it back.
   const copilotMcpSwitch = join(practice, '.copilot/settings.json');
   const offBefore = `${JSON.stringify({ ...JSON.parse(readNow(copilotMcpSwitch) || '{}'), disabledMcpServers: ['docs'] }, null, 2)}\n`;
   writeFileSync(copilotMcpSwitch, offBefore);
   await a.click('#header-refresh');
-  check('a server disabled in Copilot CLI is marked there', await a.exists('.ov-row[data-key="docs"] [data-tool="copilot-cli"] .cell-disabled'), await a.text('.ov-row[data-key="docs"]'));
+  same('a server off in Copilot CLI is marked there', await offMarks(a, 'docs'), ['copilot-cli']);
   await a.click('#open-docs');
   await a.shot('practice-mcp-disabled');
   const docsSwitches = Object.fromEntries(await a.all('.details-mcp .tool-switch .switch', '[e.id, e.getAttribute("aria-checked")]'));
   same('its row offers each tool’s switch, off only for Copilot CLI', [docsSwitches['enable-docs-copilot-cli'], docsSwitches['enable-docs-claude-cli'], docsSwitches['enable-docs-codex-cli']], ['false', 'true', 'true']);
   await a.click('#enable-docs-copilot-cli');
-  check('Enable waits for Apply all', readFileSync(copilotMcpSwitch, 'utf8') === offBefore && (await a.text('.apply-count') ?? '').includes('1 copy to enable'), await a.text('.apply-count'));
-  await applyAll(a);
-  same('Apply all turns it on in Copilot CLI and keeps the rest of its settings', [JSON.parse(readFileSync(copilotMcpSwitch, 'utf8')).disabledMcpServers, await a.exists('.ov-row[data-key="docs"] .cell-disabled')], [undefined, false]);
-  check('the result says so, with Undo', /docs enabled in Copilot CLI/.test(await a.text('.band-outcome, .bands') ?? ''), await a.text('.bands'));
+  same('its switch turns it on in Copilot CLI at once, and keeps the rest of its settings', [JSON.parse(readFileSync(copilotMcpSwitch, 'utf8')).disabledMcpServers, await offMarks(a, 'docs')], [undefined, []]);
+  check('the result says so, with Undo', /docs is on in Copilot CLI/.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-undo'), await a.text('.bands'));
   await a.shot('practice-mcp-enabled');
-  await a.click('#outcome-undo-switch');
+  await a.click('#outcome-undo');
   same('Undo turns it off again, byte for byte', readFileSync(copilotMcpSwitch, 'utf8'), offBefore);
   if (!(await a.exists('#enable-docs-copilot-cli'))) await a.click('#open-docs');
   await a.click('#enable-docs-copilot-cli');
-  await applyAll(a);
-  check('and it can be enabled once more', !readFileSync(copilotMcpSwitch, 'utf8').includes('disabledMcpServers'), readFileSync(copilotMcpSwitch, 'utf8'));
+  check('and it can be turned on once more', !readFileSync(copilotMcpSwitch, 'utf8').includes('disabledMcpServers'), readFileSync(copilotMcpSwitch, 'utf8'));
   if (await a.exists('#enable-docs-copilot-cli')) await a.click('#open-docs');
   // An MCP edit spreads within seconds: settings files are watched, not left to the 20 s poll.
   const copilotFile = join(practice, '.copilot/mcp-config.json');
@@ -817,38 +826,42 @@ async function practiceFlow() {
   // Agents: each tool's agents on one page. A plain agent is two-way; one with Claude-only fields reaches the others With limits.
   await a.click('#nav-agents');
   same('agents from every tool', (await rowKeys(a)).sort(), ['code-reviewer', 'release-notes']);
-  await a.click('#manage-all');
-  await applyAll(a);
+  await a.click('#switch-code-reviewer');
+  await a.click('#switch-release-notes');
   const copilotAgent = readFileSync(join(practice, '.copilot/agents/code-reviewer.agent.md'), 'utf8');
   check('code-reviewer reached Copilot with name, description and prompt, without Claude-only fields', copilotAgent.includes('description: Reviews a change') && copilotAgent.includes('You are a careful code reviewer.') && !copilotAgent.includes('tools:') && !copilotAgent.includes('model:'), copilotAgent);
   check('release-notes reached Claude Code from Codex', readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Group them as Added, Changed and Fixed.'));
   check('code-reviewer reached Codex as TOML', readFileSync(join(practice, '.codex/agents/code-reviewer.toml'), 'utf8').includes('developer_instructions = """'));
+  // An agent has no switch of its own in each tool: turning it off stops syncing it and leaves its copies; Undo syncs it again.
+  await a.click('#switch-release-notes');
+  same('turning an agent off stops syncing it; its copies stay, and its switch is halfway (not synced)', [await a.run(`document.querySelector('#switch-release-notes').getAttribute('aria-checked')`), existsSync(join(practice, '.claude/agents/release-notes.md'))], ['mixed', true]);
+  await a.click('#outcome-undo');
+  same('and Undo syncs it again', await switchOn(a, 'release-notes'), true);
   await a.click('#open-code-reviewer');
   check('the details name the limits', /can’t hold its tools \(.*model \(.*edits only flow out/.test(await a.text('.details') ?? ''), await a.text('.details'));
   await a.shot('practice-agents');
-  // One-way edge: an edit in a receiving tool stays there and stops updating; its amber box queues the source's copy again.
+  // One-way edge: an edit in a receiving tool stays there and stops updating (amber), and its row can take the source's copy again.
   const codexAgent = join(practice, '.codex/agents/code-reviewer.toml');
   const codexAgentBefore = readFileSync(codexAgent, 'utf8');
   writeFileSync(codexAgent, codexAgentBefore.replace('description = "', 'description = "Edited in Codex. '));
   await a.click('#header-refresh');
   check('the edited one-way copy stays and shows amber', readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]'));
   check('Claude Code’s copy was not touched', !readFileSync(join(practice, '.claude/agents/code-reviewer.md'), 'utf8').includes('Edited in Codex.'));
-  // Keep my edit settles it: the box turns quiet and the warning count goes away; the box can still bring the source back.
+  // Keep my edit settles it: the mark turns quiet and the warning count goes away; its row can still bring the source back.
   check('the stopped copy has its own notice with both choices', await a.exists('#stopped-keep-code-reviewer-codex-cli') && await a.exists('#stopped-use-code-reviewer-codex-cli'));
-  check('while its notice shows, the toolbar says it without a link', (await a.text('.toolbar') ?? '').includes('1 copy stopped updating') && !(await a.exists('#go-stopped')), await a.text('.toolbar'));
-  check('the status line no longer lists the stopped copy as receiving', /one-way to Copilot CLI · Codex’s copy stopped updating/.test(await a.text('.details-status') ?? ''), await a.text('.details-status'));
+  check('while its notice shows, the toolbar doesn’t say it again', !(await a.text('.toolbar') ?? '').includes('stopped updating') && !(await a.exists('#go-stopped')), await a.text('.toolbar'));
+  check('the status line leads with the copy that stopped, then where it is on, and no more', /^Codex’s copy stopped updating · on in all 3 tools$/.test((await a.text('.details-status') ?? '').trim()), await a.text('.details-status'));
   await a.click('#stopped-dismiss-code-reviewer-codex-cli');
   check('deciding later keeps both choices in the Codex row', await a.exists('#stopped-keep-code-reviewer-codex-cli-details') && await a.exists('#stopped-use-code-reviewer-codex-cli-details') && await a.exists('#go-stopped'));
   await a.click('#stopped-keep-code-reviewer-codex-cli-details');
   check('keeping the edit is said with an Undo, and the toolbar counts it', /Codex keeps its own edit of code-reviewer/.test(await a.text('main') ?? '') && await a.exists('#outcome-undo-keep') && /Synced · 1 kept edit/.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
   check('Keep my edit clears the warning and leaves the edit', await a.exists('#cell-code-reviewer-codex-cli[data-state="kept"]') && !(await a.text('.toolbar') ?? '').includes('stopped updating') && readFileSync(codexAgent, 'utf8').includes('Edited in Codex.'));
-  await a.click('#cell-code-reviewer-codex-cli');
-  await applyAll(a);
-  check('the result says Codex resumed, not that an agent was newly managed', /Codex has Claude Code’s copy of code-reviewer again/.test(await a.text('main') ?? ''), (await a.text('main') ?? '').slice(0, 300));
-  check('its amber box puts Claude Code’s copy back in Codex', !readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && !(await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]')), readFileSync(codexAgent, 'utf8'));
-  check('the resume result offers to restore Codex’s edit', await a.exists('#outcome-restore-edit'));
-  await a.click('#outcome-restore-edit');
-  check('Restore Codex’s edit puts the edit back, and the copy stops again', readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]'), JSON.stringify(await a.all('[id^=cell-code-reviewer]', 'e.id + "=" + e.dataset.state')) + ' ' + (await a.text('main'))?.slice(0, 400));
+  await a.click('#stopped-use-code-reviewer-codex-cli-details');
+  check('the result says Codex resumed, not that an agent was newly synced', /Codex has Claude Code’s copy of code-reviewer again/.test(await a.text('main') ?? ''), (await a.text('main') ?? '').slice(0, 300));
+  check('it puts Claude Code’s copy back in Codex, at once', !readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && !(await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]')), readFileSync(codexAgent, 'utf8'));
+  check('the result offers Undo, which restores Codex’s edit', await a.exists('#outcome-undo'));
+  await a.click('#outcome-undo');
+  check('Undo puts the edit back, and the copy stops again', readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]'), JSON.stringify(await a.all('[id^=cell-code-reviewer]', 'e.id + "=" + e.dataset.state')) + ' ' + (await a.text('main'))?.slice(0, 400));
   await a.click('#nav-skills');
 
   // What a plugin installed whole brings shows on Skills and MCP servers with the plugin's mark, before Plugins was ever
@@ -972,12 +985,13 @@ async function practiceFlow() {
     same('and a later result stays said', [await a.text('#announcement'), (await heads()).length], [result, all]);
     check('that result says what was read', /^Read \d/.test(result ?? ''), result);
     // A sync:changed right after an action keeps that action's message: the read it starts brings no new notice.
-    await a.click('#nav-mcp');
-    await a.run(`(document.querySelector('.ov-row[data-key] .cell-button:not([disabled])').click(), true)`);
-    await a.click('#discard');
+    await a.click('#nav-skills');
+    await a.click('#switch-notes');
+    const switched = await a.run(`document.querySelector('#announcement').dataset.text`);
     await main.tellPage('sync:changed');
     await wait(1500);
-    same('a sync:changed right after an action keeps its message', await a.run(`document.querySelector('#announcement').dataset.text`), 'Changes discarded. Nothing was written.');
+    same('a sync:changed right after an action keeps its message', [await a.run(`document.querySelector('#announcement').dataset.text`), /^notes is off in/.test(switched ?? '')], [switched, true]);
+    await a.click('#outcome-undo');
     // A tool that appears is noticed by whichever read sees it first. Opening Plugins before the poll reads the home for
     // its columns, and the page as a whole hears of the new tool: Skills gets its column too, with no Refresh.
     await a.click('#nav-skills');
@@ -1226,46 +1240,29 @@ async function practiceFlow() {
   rmSync(join(practice, '.codex/plugins'), { recursive: true, force: true });
   if (codexTomlBefore === undefined) rmSync(codexToml, { force: true }); else writeFileSync(codexToml, codexTomlBefore);
   await a.click('#header-refresh');
-  // Its MCP server has a switch of its own in Claude Code: the box turns that one server off, by the name Claude Code gives a plugin's server.
+  // Its MCP server has a switch of its own in Claude Code: the opened row's switch turns that one server off at once, by the
+  // name Claude Code gives a plugin's server; the row's mark only shows it.
   await a.click('#nav-mcp');
-  same('so does its MCP server, on MCP servers', await a.run(`[document.querySelector('#cell-issues-claude-cli')?.dataset.state, /through the plugin issue-tracker[^]*Click to turn it off in Claude Code on Apply all\.$/.test(document.querySelector('#cell-issues-claude-cli')?.title ?? '')]`), ['plugin', true]);
-  await a.click('#cell-issues-claude-cli');
-  check('a click on the server’s box only chooses it', await a.run(`document.querySelector('#cell-issues-claude-cli')?.dataset.state`) === 'plugin-turns-off' && pluginSettingsNow() === pluginSettingsBefore, await a.text('.toolbar'));
-  await applyAll(a);
-  for (let tries = 0; tries < 40 && (await a.run(`document.querySelector('#cell-issues-claude-cli')?.dataset.state`)) !== 'plugin-off'; tries++) await wait(100);
-  check('Apply all turns that one server off with Claude Code’s own switch, and the page says so', JSON.stringify(JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers) === '[{"serverName":"plugin:issue-tracker:issues"}]'
-    && await a.run(`document.querySelector('#cell-issues-claude-cli')?.dataset.state`) === 'plugin-off' && /MCP server issues turned off in Claude Code/.test(await a.run('document.body.innerText') ?? ''), [pluginSettingsNow(), await a.run(`document.querySelector('#cell-issues-claude-cli')?.title`)]);
-  await a.click('#nav-skills');
-  same('the plugin’s skill is still on there', await a.run(`document.querySelector('#cell-triage-claude-cli')?.dataset.state`), 'plugin');
-  await a.click('#nav-mcp');
-  // The opened row has the same switch where a person's own server has its Enabled switch, and the way to the plugin's page.
+  same('so does its MCP server, on MCP servers, and its mark is no button', await a.run(`[document.querySelector('#cell-issues-claude-cli')?.dataset.state, /through the plugin issue-tracker/.test(document.querySelector('#cell-issues-claude-cli')?.title ?? ''), document.querySelector('#cell-issues-claude-cli')?.tagName]`), ['plugin', true, 'SPAN']);
   if (!(await a.exists('#enable-issues-claude-cli'))) await a.click('#open-issues');
-  same('the opened row shows it Disabled in Claude Code', await a.run(`[document.querySelector('#enable-issues-claude-cli')?.getAttribute('aria-checked'), document.querySelector('#enable-issues-claude-cli')?.closest('.tool-switch')?.textContent]`), ['false', 'Disabled']);
+  same('the opened row has its switch in Claude Code, on', [await a.run(`document.querySelector('#enable-issues-claude-cli')?.getAttribute('aria-checked')`), /Click to turn it off in Claude Code\.$/.test(await a.run(`document.querySelector('#enable-issues-claude-cli')?.getAttribute('aria-label')`) ?? '')], ['true', true]);
+  await a.click('#enable-issues-claude-cli');
+  for (let tries = 0; tries < 40 && (await cellState(a, 'issues', 'claude-cli')) !== 'plugin-off'; tries++) await wait(100);
+  check('a click turns that one server off at once with Claude Code’s own switch, and the page says so, with Undo', JSON.stringify(JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers) === '[{"serverName":"plugin:issue-tracker:issues"}]'
+    && await cellState(a, 'issues', 'claude-cli') === 'plugin-off' && /issues is off in Claude Code\./.test(await a.text('.bands') ?? '') && await a.exists('#outcome-undo-plugin'), [pluginSettingsNow(), await a.text('.bands')]);
+  await a.click('#nav-skills');
+  same('the plugin’s skill is still on there', await cellState(a, 'triage', 'claude-cli'), 'plugin');
+  await a.click('#nav-mcp');
+  if (!(await a.exists('#enable-issues-claude-cli'))) await a.click('#open-issues');
+  same('the opened row shows it off in Claude Code', await a.run(`[document.querySelector('#enable-issues-claude-cli')?.getAttribute('aria-checked'), document.querySelector('#enable-issues-claude-cli')?.closest('.tool-switch')?.textContent]`), ['false', 'Off']);
   await fitsAtMinimum(a, 'a server a tool has through a plugin, opened');
   await a.shot('server-through-plugin-off');
   await a.click('#enable-issues-claude-cli');
-  await applyAll(a);
-  for (let tries = 0; tries < 40 && (await a.run(`document.querySelector('#cell-issues-claude-cli')?.dataset.state`)) !== 'plugin'; tries++) await wait(100);
-  check('its switch turns it back on: the settings are as they were', (pluginSettingsNow() === pluginSettingsBefore || JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers === undefined) && await a.run(`document.querySelector('#cell-issues-claude-cli')?.dataset.state`) === 'plugin', pluginSettingsNow());
+  for (let tries = 0; tries < 40 && (await cellState(a, 'issues', 'claude-cli')) !== 'plugin'; tries++) await wait(100);
+  check('its switch turns it back on: the settings are as they were', (pluginSettingsNow() === pluginSettingsBefore || JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers === undefined) && await cellState(a, 'issues', 'claude-cli') === 'plugin', pluginSettingsNow());
   await a.click('#outcome-undo-plugin');
-  for (let tries = 0; tries < 40 && (await a.run(`document.querySelector('#cell-issues-claude-cli')?.dataset.state`)) !== 'plugin-off'; tries++) await wait(100);
-  same('Undo turns it off again', [await a.run(`document.querySelector('#cell-issues-claude-cli')?.dataset.state`), JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers?.length], ['plugin-off', 1]);
-  // A plugin item's switch and a change to a person's own server in one Apply all: both are written, one result says both,
-  // and its Undo takes both back.
-  const copilotSettings = join(practice, '.copilot/settings.json');
-  const docsOff = () => (existsSync(copilotSettings) ? JSON.parse(readFileSync(copilotSettings, 'utf8')).disabledMcpServers ?? [] : []).includes('docs');
-  const docsWasOff = docsOff();
-  await a.click('#cell-issues-claude-cli');
-  if (!(await a.exists('#enable-docs-copilot-cli'))) await a.click('#open-docs');
-  await a.click('#enable-docs-copilot-cli');
-  check('the bar counts both kinds of change', /2 changes/.test(await a.run(`document.querySelector('#apply')?.title`) ?? '') && /1 plugin item to turn on/.test(await a.run(`document.querySelector('#apply')?.title`) ?? ''), await a.run(`document.querySelector('#apply')?.title`));
-  await applyAll(a);
-  for (let tries = 0; tries < 60 && !(await a.exists('#outcome-undo-plugin')); tries++) await wait(100);
-  check('one Apply all writes both, and its result says both', docsOff() === !docsWasOff && JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers === undefined
-    && /MCP server issues turned on in Claude Code/.test(await a.run('document.body.innerText') ?? '') && !(await a.exists('#discard')), [docsOff(), pluginSettingsNow(), (await a.run('document.body.innerText') ?? '').match(/[^\n]*turned on in Claude Code[^\n]*/)?.[0]]);
-  await a.click('#outcome-undo-plugin');
-  for (let tries = 0; tries < 80 && (docsOff() !== docsWasOff || JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers?.length !== 1); tries++) await wait(100);
-  same('and its Undo takes both back', [docsOff(), JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers?.length], [docsWasOff, 1]);
+  for (let tries = 0; tries < 40 && (await cellState(a, 'issues', 'claude-cli')) !== 'plugin-off'; tries++) await wait(100);
+  same('Undo turns it off again', [await cellState(a, 'issues', 'claude-cli'), JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers?.length], ['plugin-off', 1]);
   await a.settle();
   if (pluginSettingsBefore === undefined) rmSync(pluginSettings, { force: true }); else writeFileSync(pluginSettings, pluginSettingsBefore);
   await a.click('#header-refresh');
@@ -2204,7 +2201,6 @@ async function openCodeFlow() {
   // Its server goes to the other tools in their own forms, values as they are; Claude Code's waits for Write to Claude Code.
   await p.click('#nav-mcp');
   await p.click('.ov-row[data-key="oc-docs"] .switch');
-  await applyAll(p);
   const inCopilot = JSON.parse(readNow(join(practice, '.copilot/mcp-config.json')) || '{}').mcpServers?.['oc-docs'];
   same('OpenCode’s server reaches Copilot CLI in Copilot’s form', [inCopilot?.command, inCopilot?.args, inCopilot?.env], ['npx', ['-y', 'docs'], { DOCS_TOKEN: 'value-123' }]);
   // OpenCode takes no plugin whole: a plugin's skills, MCP servers and agents go in as ordinary items, in OpenCode's forms.

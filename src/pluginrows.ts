@@ -87,7 +87,7 @@ export const pluginItemCount = (home: HomeView, page: Page, tool?: HarnessId): n
  * just went), and a plugin's. None: the page shows its empty state instead.
  */
 export const rowCount = (home: HomeView, page: Page): number =>
-  (page === 'skills' ? home.manage.skills.length + (home.manage.gone?.length ?? 0) : page === 'mcp' ? home.mcp.servers.length : home.agents.servers.length) + pluginItemCount(home, page);
+  (page === 'skills' ? home.manage.skills.length + (home.manage.gone?.length ?? 0) : page === 'mcp' ? home.mcp.servers.length + (home.mcp.gone?.length ?? 0) : home.agents.servers.length + (home.agents.gone?.length ?? 0)) + pluginItemCount(home, page);
 
 /** The tools that have this item through the plugin, in column order. */
 export const pluginTools = (row: PluginRow) => (Object.keys(row.copies) as HarnessId[]).sort(byToolOrder);
@@ -128,7 +128,8 @@ export function toolWords(row: PluginRow, tool: HarnessId): string {
   if (!row.copies[tool]) return missingWhy(row, tool);
   const version = row.installs[tool]?.version;
   const off = offIn(row, tool);
-  return `Inside ${row.plugin}${version ? ` ${version}` : ''}. ${off === 'plugin' ? 'The whole plugin is turned off here.' : off === 'item' ? 'Turned off here with its own switch.' : 'On.'}`;
+  const inside = `Inside ${row.plugin}${version ? ` ${version}` : ''}`;
+  return off === 'plugin' ? `${inside}. The whole plugin is turned off here.` : off === 'item' ? `${inside}. Turned off here with its own switch.` : `${inside}, on here.`;
 }
 
 /** Where a plugin's item is handled, in one sentence: on its page, or, with its marketplace nowhere here, in the tool itself. */
