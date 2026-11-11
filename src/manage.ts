@@ -640,6 +640,8 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
         const { readsFrom, ...copy } = { ...read, directory, writable: true };
         entry.facts.copies[tool] = copy;
         entry.locations.push({ tool, copy });
+        // On record as one Central Knot made, so an Undo that takes added copies out again can remove it.
+        item.copies.push({ harness: tool, directory, hash: copy.hash, created: true, status: 'written' });
         writes++;
         // Newly managed: this copy is one Apply all added, so its Undo takes it out again.
         if (newlyManaged.has(key)) added.set(key, { name, hash: copy.hash, copies: [...(added.get(key)?.copies ?? []), { tool, hash: copy.hash }] });

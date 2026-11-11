@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
-import { applyChanges, manageView } from '../src/manage.ts';
+import { applyChanges, manageView, readHistory, restoreFromHistory } from '../src/manage.ts';
 import { absentKindsIn, absentTools, heldKinds, managedTools, noteTools, presentTools } from '../src/presence.ts';
 import { readRecord, saveRecord, type ShareContext } from '../src/share.ts';
 import { chooseTools } from '../src/toolchoice.ts';
@@ -157,6 +157,11 @@ test('with Claude Code left out, the copy OpenCode reads in its folder can still
     assert.equal(await readFile(join(box.path, '.codex/skills/brief/SKILL.md'), 'utf8'), text('brief'), 'Codex now uses the chosen copy');
     assert.equal(await readFile(join(box.path, '.config/opencode/skills/brief/SKILL.md'), 'utf8'), text('brief'), 'OpenCode has a copy of its own');
     assert.equal(await readFile(join(box.path, '.claude/skills/brief/SKILL.md'), 'utf8'), text('brief'));
+    // Undo of the choice puts Codex's copy back and takes OpenCode's new copy out again: it reads Claude Code's folder as before.
+    const choice = (await readHistory(box.context)).find(event => event.kind === 'chosen')!;
+    assert.equal((await restoreFromHistory(box.context, choice.id, false, 'narrow')).stopped, undefined);
+    assert.equal(await readFile(join(box.path, '.codex/skills/brief/SKILL.md'), 'utf8'), text('brief as Codex has it'));
+    assert.equal(await exists(join(box.path, '.config/opencode/skills/brief')), false);
   } finally { await box.cleanup(); }
 });
 
