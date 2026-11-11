@@ -329,6 +329,8 @@ test('A tool’s own marketplace is suggested where that tool is here, until it 
     // Declined: not offered again, also by a later read.
     assert.deepEqual((await box.markets.decline(join(box.base, 'offered'))).suggested, []);
     assert.deepEqual((await box.markets.view(true)).suggested, []);
+    // Its Undo: offered again.
+    assert.equal((await box.markets.decline(join(box.base, 'offered'), true)).suggested?.length, 1);
   } finally { await box.cleanup(); }
   const carried = await setup({ bundled: { folder: 'carried', unpackaged: [] } });
   try {

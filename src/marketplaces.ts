@@ -358,10 +358,10 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { view: shown, source: shown.marketplaces.find(entry => engine.sameSource(entry.source, stored))?.source ?? stored };
   }
 
-  /** A suggested marketplace the person doesn't want offered: remembered, and it is not offered again. */
-  async function decline(source: string): Promise<PluginsView> {
-    const list = await declined();
-    if (!list.some(item => engine.sameSource(item, source))) await writeDurably(declinedPath, `${JSON.stringify([...list, source], null, 2)}\n`);
+  /** A suggested marketplace the person doesn't want offered: remembered, and not offered again. `again`: offer it again after all (its Undo). */
+  async function decline(source: string, again = false): Promise<PluginsView> {
+    const others = (await declined()).filter(item => !engine.sameSource(item, source));
+    await writeDurably(declinedPath, `${JSON.stringify(again ? others : [...others, source], null, 2)}\n`);
     return view();
   }
 
@@ -500,7 +500,7 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
   handleNow('open:external', async url => { if (isHttps(url)) await host.openExternal(url); });
   handle('plugins:add', async source => { if (!open() || !isText(source)) throw new Error('Invalid marketplace.'); return markets.add(source); });
   handle('plugins:forget', async source => (open() && isText(source) ? markets.forget(source) : null));
-  handle('plugins:decline', async source => (open() && isText(source) ? markets.decline(source) : null));
+  handle('plugins:decline', async (source, again) => (open() && isText(source) ? markets.decline(source, again === true) : null));
   handle('plugins:pick-folder', async () => (await host.pickFolder()) ?? null);
   // A malformed step fails for its tools, so it never stops (and then blocks) every later Apply all.
   const refused = (tools: unknown) => ({ reports: failedFor(toolIds(Array.isArray(tools) ? tools : [tools]), 'That request was malformed, so nothing ran.') });
