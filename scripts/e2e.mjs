@@ -115,9 +115,10 @@ process.on('exit', () => { for (const child of launched) { try { child.kill('SIG
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
 async function launch(userData = join(scratch, 'data'), extra = [], home = HOME, more = {}) {
-  // OpenCode is looked for only inside the throwaway home: a machine that has it installed (the Mac these run on does) would
-  // otherwise bring a tool into every flow that opens "This Mac's home".
-  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), CK_TEST_HOME_ONLY: 'opencode', CK_PLUGIN_UPDATES_EVERY_MS: 'never', ...more };
+  // OpenCode, and the apps named under the Harnesses cards (T3 Code, VS Code), are looked for only inside the throwaway home:
+  // a machine that has them installed (the Mac these run on does) would otherwise bring them into every flow that opens
+  // "This Mac's home".
+  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), CK_TEST_HOME_ONLY: 'opencode,other-apps', CK_PLUGIN_UPDATES_EVERY_MS: 'never', ...more };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   // The app picks its own free debug ports (port 0) and says them, so no other run on this machine can be on them (cdp.mjs
@@ -2089,7 +2090,7 @@ async function openCodeFlow() {
   mkdirSync(join(oc, 'agents'));
   writeFileSync(join(oc, 'agents/helper.md'), '---\ndescription: Helps.\nmode: subagent\n---\n\nYou help.\n');
   // Every tool is looked for only inside this home, so the flow reads the same on a machine that has some installed.
-  const onlyHere = { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' };
+  const onlyHere = { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,other-apps' };
   const a = await launch(join(scratch, 'opencode-data'), flag('--electron') ? ['--as-released'] : [], home, onlyHere);
   // With --shots, a page's picture at each window size the app must fit.
   const pictures = async (page, name) => { if (!shots) return; for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(page, width, height); await page.shot(`${name}-${width}`); } await fullSize(page); };
@@ -2196,6 +2197,94 @@ async function openCodeFlow() {
   await pictures(p, 'opencode-five-plugin-page');
   same('no page errors, OpenCode in the Practice copy', p.pageErrors, []);
   await p.quit();
+}
+
+/**
+ * Marketplaces offered without being looked for: each plugin tool's own default, where that tool is here. Nothing is
+ * fetched to offer one, so this flow never reaches the network (it never clicks Add).
+ */
+async function suggestedFlow() {
+  const home = join(scratch, 'home-suggested');
+  const cli = (path, version) => { mkdirSync(join(home, path, '..'), { recursive: true }); writeFileSync(join(home, path), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(join(home, path), 0o755); };
+  cli('.local/bin/claude', '2.1.309 (Claude Code)');
+  mkdirSync(join(home, '.claude'), { recursive: true });
+  const onlyHere = { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,other-apps' };
+  const data = join(scratch, 'suggested-data');
+  const a = await launch(data, flag('--electron') ? ['--as-released'] : [], home, onlyHere);
+  const pictures = async name => { if (!shots) return; for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); await a.shot(`${name}-${width}`); } await fullSize(a); };
+  const offered = page => page.all('.market-suggestion', `e.querySelector('.market-suggestion-name').textContent + ' · ' + e.querySelector('.market-suggestion-meta').textContent`);
+  await a.click('#nav-plugins');
+  same('with Claude Code alone, its own marketplace is suggested, and no other tool’s', await offered(a), ['claude-plugins-official · For Claude Code']);
+  check('a suggestion has Add and a way to say no', await a.exists('#suggested-add-anthropics-claude-plugins-official') && await a.exists('#suggested-no-anthropics-claude-plugins-official'));
+  await fitsAtMinimum(a, 'the empty Plugins page with a suggestion');
+  // Said no to on the empty page: it goes at once, with a note and Undo, and Undo offers it again.
+  await a.click('#suggested-no-anthropics-claude-plugins-official');
+  same('declined on the empty page, it leaves at once', await offered(a), []);
+  check('with a note and Undo', /claude-plugins-official won’t be suggested again\./.test(await a.text('.plugins-page') ?? '') && await a.exists('#outcome-suggest-again'), await a.text('.plugins-page'));
+  await a.click('#outcome-suggest-again');
+  const again = `${await a.text('.plugins-page') ?? ''} ${await a.run(`document.querySelector('#announcement').dataset.text`) ?? ''}`;
+  same('Undo offers it again, and says so', [await offered(a), /claude-plugins-official is suggested again\./.test(again), await a.exists('#outcome-suggest-again')], [['claude-plugins-official · For Claude Code'], true, false]);
+  await pictures('suggested-empty');
+  // Copilot CLI joins the home: its marketplace is offered too.
+  cli('.local/bin/copilot', 'GitHub Copilot CLI 1.0.109.');
+  mkdirSync(join(home, '.copilot'), { recursive: true });
+  await a.click('#header-refresh');
+  same('each tool here brings its own', await offered(a), ['claude-plugins-official · For Claude Code', 'copilot-plugins · For Copilot CLI']);
+  // With a marketplace on the list, the suggestions sit under it.
+  const market = join(scratch, 'suggested-market');
+  writeMarket(market);
+  await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)})`);
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && !(await a.exists('.market-list .market-suggested')); tries++) await wait(100);
+  same('beside a marketplace on the list, the suggestions are under the list', await offered(a), ['claude-plugins-official · For Claude Code', 'copilot-plugins · For Copilot CLI']);
+  await fitsAtMinimum(a, 'Plugins with a marketplace and two suggestions');
+  await pictures('suggested-under-list');
+  // Said no to: gone at once, and not offered again after a restart.
+  await a.click('#suggested-no-github-copilot-plugins');
+  for (let tries = 0; tries < 50 && (await offered(a)).length !== 1; tries++) await wait(100);
+  same('a declined suggestion leaves the page', await offered(a), ['claude-plugins-official · For Claude Code']);
+  check('with a note that it won’t be suggested again, and Undo', /copilot-plugins won’t be suggested again\./.test(await a.text('.plugins-page') ?? '') && await a.exists('#outcome-suggest-again'), await a.text('.plugins-page'));
+  await a.click('#outcome-suggest-again');
+  for (let tries = 0; tries < 50 && (await offered(a)).length !== 2; tries++) await wait(100);
+  same('Undo offers it again', (await offered(a)).length, 2);
+  await a.click('#suggested-no-github-copilot-plugins');
+  for (let tries = 0; tries < 50 && (await offered(a)).length !== 1; tries++) await wait(100);
+  same('no page errors, suggested marketplaces', a.pageErrors, []);
+  await a.quit();
+  const b = await launch(data, flag('--electron') ? ['--as-released'] : [], home, onlyHere);
+  await b.click('#nav-plugins');
+  for (let tries = 0; tries < 50 && !(await b.exists('.market-suggestion')); tries++) await wait(100);
+  same('and stays declined after a restart', await offered(b), ['claude-plugins-official · For Claude Code']);
+  same('no page errors, suggested marketplaces after a restart', b.pageErrors, []);
+  await b.quit();
+}
+
+/**
+ * The other desktop apps: pi-gui counts as Pi's app, and T3 Code and VS Code, which are no tool of their own, are named
+ * under the Harnesses cards when they are installed, and nowhere when they are not.
+ */
+async function otherAppsFlow() {
+  const home = join(scratch, 'home-other-apps');
+  const cli = (path, version) => { mkdirSync(join(home, path, '..'), { recursive: true }); writeFileSync(join(home, path), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(join(home, path), 0o755); };
+  const app = (name, version) => { mkdirSync(join(home, 'Applications', name, 'Contents'), { recursive: true }); writeFileSync(join(home, 'Applications', name, 'Contents/Info.plist'), `<?xml version="1.0"?>\n<plist><dict><key>CFBundleShortVersionString</key><string>${version}</string></dict></plist>\n`); };
+  cli('.local/bin/claude', '2.1.309 (Claude Code)');
+  mkdirSync(join(home, '.claude'), { recursive: true });
+  const a = await launch(join(scratch, 'other-apps-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,other-apps' });
+  await a.click('#nav-harnesses');
+  check('with none of them installed, nothing is said about other apps', !(await a.exists('#other-apps')));
+  app('T3 Code (Nightly).app', '0.1.9-nightly.20261110.4478');
+  app('Visual Studio Code.app', '1.99.0');
+  app('pi-gui.app', '0.4.0');
+  await a.click('#header-refresh');
+  const also = await a.text('#other-apps') ?? '';
+  check('T3 Code and VS Code are named under the cards, each with its version (a nightly build’s shortened) and what it means here', /T3 Code 0\.1\.9-nightlyRuns your tools for you\./.test(also) && /VS Code 1\.99\.0Its built-in Copilot lists skills/.test(also), also);
+  const pi = await a.text('#harness-pi-cli') ?? '';
+  check('pi-gui alone makes Pi a tool here, named as the third-party app it is, with no CLI', pi.includes('pi-gui (third-party) 0.4.0 · no CLI found') && await a.exists('button#harness-pi-cli'), pi);
+  await fitsAtMinimum(a, 'Harnesses with other apps named');
+  if (shots) for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); await a.shot(`other-apps-${width}`); }
+  await fullSize(a);
+  same('no page errors, other apps', a.pageErrors, []);
+  await a.quit();
 }
 
 async function realHomeFlow() {
@@ -2630,7 +2719,7 @@ const started = Date.now();
 try {
   seedHome();
   // Each flow's time is printed, so a run that grows slow says where.
-  const flows = [harnessFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, listDiffersFlow, pluginUpdatesFlow, repoBaseFlow, draftFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
+  const flows = [harnessFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, suggestedFlow, otherAppsFlow, listDiffersFlow, pluginUpdatesFlow, repoBaseFlow, draftFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
   const named = option('--flows')?.split(',');
   for (const flow of flows.filter(each => !named || named.includes(each.name))) {
     const from = Date.now();

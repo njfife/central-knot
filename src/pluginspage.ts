@@ -10,7 +10,7 @@ import { pluginPage } from './pluginpage.ts';
 import { componentsOf, dotted, pluginTitle, readme, toolBox, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { allQueued, resultLines, pickOf, pluginKey, queued, resultParts, resultSentence, summary, toggleMany, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, noLongerOffered, offeredVersion, otherVersions, otherVersionsLine, partsMark, partsOf, partsOffer, stateOf, summaryOf, unavailable, updateTools, versionToCompare, whyNotCarried } from './pluginstatus.ts';
-import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoOps } from './pluginstate.ts';
+import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, checkCarriedFeed, browse, clearNotice, current, declineMarketplace, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginUpdateNotes } from './pluginupdateview.ts';
@@ -40,6 +40,29 @@ function addBox(first: boolean) {
       button({ variant: 'outline', size: 'small', icon: 'folder-plus', label: 'Folder…', name: 'Choose a marketplace folder', id: 'pick-marketplace-folder', disabled: !!app.busy, onclick: () => void pickMarketplaceFolder().then(folder => { if (folder) void addMarketplace(folder); }) })));
 }
 
+/**
+ * Marketplaces offered without being looked for (suggested.ts): each named with the tools here it is the default of, an
+ * Add button and a way to say no for good. Nothing is fetched or listed until Add. `first`: on the empty page, where they
+ * sit under the add box.
+ */
+function suggestions(view: PluginsView, first = false) {
+  const offers = view.suggested ?? [];
+  if (!offers.length) return null;
+  const id = (source: string) => source.replace(/[^A-Za-z0-9]+/g, '-');
+  // Off, like Add, while something else is being read or added: one piece of work on the page at a time.
+  const no = (offer: { source: string; name: string }) => {
+    const made = closeButton(() => void declineMarketplace(offer.source, offer.name), { id: `suggested-no-${id(offer.source)}`, label: `Don’t suggest ${offer.name}` });
+    if (app.busy) made.setAttribute('disabled', '');
+    return made;
+  };
+  return h(`div.market-suggested${first ? '.market-suggested-first' : ''}`, { role: 'group', 'aria-label': 'Suggested marketplaces' },
+    h('h3.market-suggested-title', {}, 'Suggested'),
+    h('ul', {}, offers.map(offer => h('li.market-suggestion', { title: `${offer.source}. Adding it lists its plugins here and installs nothing.` },
+      h('span.market-suggestion-text', {}, h('span.market-suggestion-name', {}, offer.name), h('span.market-suggestion-meta', {}, `For ${andList(offer.tools.map(tool => names[tool]))}`)),
+      button({ variant: 'outline', size: 'small', label: 'Add', name: `Add ${offer.name}`, id: `suggested-add-${id(offer.source)}`, disabled: !!app.busy, onclick: () => void addMarketplace(offer.source) }),
+      no(offer)))));
+}
+
 /** The picture a bundled build gave its marketplace, drawn small before its name; nothing for any other marketplace. */
 const marketLogo = (entry: MarketplaceView) => (entry.bundled?.logo ? h('img.market-logo', { src: entry.bundled.logo, alt: '', 'aria-hidden': 'true' }) : null);
 
@@ -55,7 +78,7 @@ function marketList(view: PluginsView, shown: MarketplaceView) {
       h('span.market-item-name', {}, marketLogo(entry), marketTitle(entry)), h('span.market-item-meta', {}, meta)));
   };
   return h('nav.market-list', { 'aria-label': 'Marketplaces' },
-    h('h2.market-list-title', {}, 'Marketplaces'), h('ul', {}, view.marketplaces.map(item)), addBox(false));
+    h('h2.market-list-title', {}, 'Marketplaces'), h('ul', {}, view.marketplaces.map(item)), suggestions(view), addBox(false));
 }
 
 /** One row per plugin: what it is and holds, and a box per tool. The row opens the plugin's page. */
@@ -403,10 +426,6 @@ function titleLine(entry: MarketplaceView) {
   return h('div.market-title-line', {}, h('h2', { title: name }, marketLogo(entry), name), marketFacts(entry).map(fact => h('span.market-fact', {}, fact)));
 }
 
-/** Public marketplaces to try from the empty page; a click adds one (adding installs nothing). */
-const EXAMPLES = ['anthropics/skills', 'github/copilot-plugins'];
-
-
 export function pluginsPage() {
   const view = market.view;
   // From the marketplaces' own read (pagedata.ts): what it found, else that it is reading or could not read.
@@ -422,7 +441,7 @@ export function pluginsPage() {
   const empty = emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a Git repository or folder that lists plugins. Adding one installs nothing.',
     h('div.market-empty-add', {},
       addBox(true),
-      h('div.market-examples', {}, h('span', {}, 'Or try one:'), EXAMPLES.map(example => h('button.market-example', { type: 'button', disabled: !!app.busy, onclick: () => void addMarketplace(example) }, example))),
+      suggestions(view, true),
       h('p.empty-aside', {}, `Marketplaces you added in ${orList(view.tools.filter(takesPlugins).map(tool => names[tool]))} show up here by themselves.`)));
   return h('div.page.plugins-page', {},
     shown ? null : toolbar(undefined, lines),

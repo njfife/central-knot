@@ -5,7 +5,7 @@ import { homedir, hostname, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
-import { discover } from './discovery.ts';
+import { discover, findOtherApps } from './discovery.ts';
 import { configRoot, envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { CLAUDE_PROCESS, appCandidates, executableCandidates, searchPath } from './platform.ts';
 import { syncsHere, takeOverSync, writeAccess, type ShareContext } from './share.ts';
@@ -531,6 +531,8 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   const readId = handoff.id + 1;
   const made: HomeView = {
     mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), readId, profiles, parts: await readParts(current!.home),
+    // Apps that run the tools or read their files are looked for only on this computer, like the tools' own apps.
+    ...(current!.mode === 'actual' ? { otherApps: await findOtherApps(current!.home) } : {}),
     manage: await manageView(shared, { caughtUp: caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain), notices, snapshots }),
     mcp: await mcpView(shared, presentTools(snapshots), pendingMcpNotices.splice(0)),
     agents: await agentsView(shared, presentTools(snapshots), pendingAgentNotices.splice(0)),

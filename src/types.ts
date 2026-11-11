@@ -19,6 +19,9 @@ export interface DesktopApp {
   binary?: string;
 }
 
+/** An app found on this computer that runs the tools or reads their files without being a tool Central Knot manages (T3 Code, VS Code). */
+export interface OtherApp { name: string; version?: string; says: string }
+
 export interface Skill {
   /** Folder name: what the harness root holds and what a copy is called. */
   folder: string;
@@ -72,7 +75,7 @@ export type SyncGate =
 
 export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** `switched`: which way. */ disabled?: boolean }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
@@ -163,6 +166,8 @@ export interface DesktopApi {
   /** Adds a marketplace; `source` is how it was stored, so the page can open exactly that one. */
   addMarketplace(source: string): Promise<{ problem?: string; view?: PluginsView; source?: string }>;
   forgetMarketplace(source: string): Promise<PluginsView | null>;
+  /** Stops offering a suggested marketplace; `again`: offers it again (the Undo of that). */
+  declineMarketplace(source: string, again?: boolean): Promise<PluginsView | null>;
   /** Adds the marketplace this build carries to one tool's own plugin list, with that tool's own command. Installs nothing. */
   addCarriedTo(tool: HarnessId, home: string): Promise<{ stopped?: string; report?: ListedReport; view?: PluginsView }>;
   /** Looks now at a bundled build's feed for newer plugins, and takes them if there are any. The Plugins view is read again afterwards. */
@@ -576,6 +581,8 @@ export interface PluginsView {
   desktopOnly?: Partial<Record<HarnessId, string>>;
   /** Each found CLI's version, where it could be read (a plugin skill's switch is offered only from a tested build). */
   versions?: Partial<Record<HarnessId, string>>;
+  /** Marketplaces offered without being looked for (suggested.ts): each with the tools here it is the default of. One click adds one; nothing is fetched before. */
+  suggested?: { source: string; name: string; tools: HarnessId[] }[];
 }
 
 // ---------- MCP servers ----------

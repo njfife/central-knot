@@ -10,6 +10,7 @@ import { failedFor, succeeded, type PluginOp } from './pluginplan.ts';
 import { findBinary, probeVersion } from './discovery.ts';
 import * as engine from './plugins.ts';
 import { installParts, partsCurrent, planParts, readParts, removeParts, undoParts } from './parts.ts';
+import { suggestedMarketplaces, type SuggestedMarketplace } from './suggested.ts';
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
 import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartsInstall, PartsPick, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
 import { writeDurably, type ShareContext } from './share.ts';
@@ -88,7 +89,7 @@ export const NO_LONGER_OFFERED = 'Stays installed as it is until you uninstall i
 /** A plugin's contents with nothing in them, for a plugin whose files couldn't be read (its `problem` says why). */
 const empty: PluginDetail = { skills: [], commands: [], agents: [], hooks: [], mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false, offered: false };
 
-export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine = realEngine) {
+export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine = realEngine, offers: SuggestedMarketplace[] = suggestedMarketplaces) {
   const listPath = join(host.dataDir, 'marketplaces.json');
   /** How the page shows this marketplace when it is the one this build carries; undefined for any other. */
   const carriedAs = (source: string) => { const carried = host.bundled?.(); return carried && engine.sameSource(carried.source, source) ? carried.view : undefined; };
@@ -96,6 +97,11 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     try { const list = JSON.parse(await readFile(listPath, 'utf8')); return Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : []; } catch { return []; }
   };
   const saveAdded = (list: string[]) => writeDurably(listPath, `${JSON.stringify(list, null, 2)}\n`);
+  // Suggested marketplaces the person said no to (suggested.ts): never offered again on this computer.
+  const declinedPath = join(host.dataDir, 'marketplaces-declined.json');
+  const declined = async (): Promise<string[]> => {
+    try { const list = JSON.parse(await readFile(declinedPath, 'utf8')); return Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : []; } catch { return []; }
+  };
   /**
    * Each CLI's version by its path (`--version`), for a plugin skill switch's tested range. A version read is kept until
    * Refresh all (a CLI may be updated meanwhile); a read that failed (a slow first start) is tried again next time.
@@ -316,7 +322,13 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const via = Object.fromEntries(await Promise.all(Object.entries(ctx.apps ?? {}).filter(([tool]) => tools.includes(tool as HarnessId)).map(async ([tool, app]) => [tool, viaLabel(app, await cliVersion(ctx.binaries[tool as HarnessId]))] as const)));
     if (fresh) versionReads.clear();
     const versions = Object.fromEntries((await Promise.all(tools.filter(tool => SKILL_SWITCH_TESTED_FROM[tool]).map(async tool => [tool, await buildOf(ctx, tool, read.snapshots)] as const))).filter(([, version]) => version));
-    return { home: ctx.home, tools, clis: Object.fromEntries(tools.map(tool => [tool, !!ctx.binaries[tool]])), canWrite: writing.allowed, reason: writing.allowed ? undefined : writing.reason, marketplaces, desktopOnly, via, versions };
+    // What is offered without being looked for: the default of a plugin tool that is here, unless it is listed already (a
+    // tool added it, or the person did), was declined, or this build carries its own marketplace.
+    const no = await declined();
+    const suggested = host.bundled?.() ? [] : offers
+      .map(offer => ({ source: offer.source, name: offer.name, tools: offer.tools.filter(tool => read.tools.includes(tool)) }))
+      .filter(offer => offer.tools.length && ![...known.map(item => item.source), ...no].some(source => engine.sameSource(source, offer.source)));
+    return { home: ctx.home, tools, clis: Object.fromEntries(tools.map(tool => [tool, !!ctx.binaries[tool]])), canWrite: writing.allowed, reason: writing.allowed ? undefined : writing.reason, marketplaces, desktopOnly, via, versions, suggested };
   }
 
   /**
@@ -378,6 +390,13 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     if (!isFolder(stored)) fetched.set(stored, { catalog });
     const shown = await view();
     return { view: shown, source: shown.marketplaces.find(entry => engine.sameSource(entry.source, stored))?.source ?? stored };
+  }
+
+  /** A suggested marketplace the person doesn't want offered: remembered, and not offered again. `again`: offer it again after all (its Undo). */
+  async function decline(source: string, again = false): Promise<PluginsView> {
+    const others = (await declined()).filter(item => !engine.sameSource(item, source));
+    await writeDurably(declinedPath, `${JSON.stringify(again ? others : [...others, source], null, 2)}\n`);
+    return view();
   }
 
   /** Takes a marketplace off Central Knot's own list. Tools that added it keep it, and nothing is uninstalled. */
@@ -607,7 +626,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { report, view: await view() };
   }
 
-  return { view, detail, readme, add, forget, install, update, uninstall, setSkill, partsPlan, parts, pendingUpdates, addCarried, addCarriedTo };
+  return { view, detail, readme, add, forget, decline, install, update, uninstall, setSkill, partsPlan, parts, pendingUpdates, addCarried, addCarriedTo };
 }
 
 type Handle = (channel: string, work: (...args: unknown[]) => Promise<unknown>) => void;
@@ -634,6 +653,7 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
   handleNow('open:external', async url => { if (isHttps(url)) await host.openExternal(url); });
   handle('plugins:add', async source => { if (!open() || !isText(source)) throw new Error('Invalid marketplace.'); return markets.add(source); });
   handle('plugins:forget', async source => (open() && isText(source) ? markets.forget(source) : null));
+  handle('plugins:decline', async (source, again) => (open() && isText(source) ? markets.decline(source, again === true) : null));
   handle('plugins:pick-folder', async () => (await host.pickFolder()) ?? null);
   handle('plugins:add-carried', async (tool, home) => { const ids = toolIds([tool]); return open() && ids.length ? markets.addCarriedTo(ids[0]!, home) : { stopped: 'That request was malformed, so nothing ran.' }; });
   // A malformed step fails for its tools, so it never stops (and then blocks) every later Apply all.
