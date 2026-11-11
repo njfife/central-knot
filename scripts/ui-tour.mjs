@@ -490,19 +490,20 @@ if (wanted('agents')) {
   await flip(true); await flip(false);
   writeFileSync(own, 'name = "changelog"\ndescription = "Writes the changelog for a release."\ndeveloper_instructions = """\nList what changed, in Codex’s own words.\n"""\n');
   await a.click('#header-refresh'); await a.settle();
-  await a.click('#switch-changelog'); await waitFor(a, `!!document.querySelector('#use-changelog-claude-cli')`, 15000);
+  await a.click('#switch-changelog'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000); await a.settle();
+  await shot(a, 'agents-on-kept-own', 'Turned changelog off, made a changelog by hand in Codex, and turned it on: the result says Codex keeps its own copy, which turned up since, that the one kept when it was turned off is in History, and that its copies differ.');
   await a.click('#nav-history'); await a.settle();
   await shot(a, 'agents-history-kept-copy', 'changelog was turned off, a changelog was made by hand in Codex, and it was turned on: in History its On says “Turned on again: put back in Claude Code and Copilot CLI; Codex kept the copy that turned up”, with a standing “Turn off again in Claude Code and Copilot CLI” and, beside it, “Use the kept copy in Codex”.');
   await a.size(1728, 1117); await shot(a, 'agents-history-kept-copy-1728', 'The same at 1728×1117: what happened runs wider before it wraps, and the actions keep their column at the right.'); await a.size(1280, 800);
   await a.click('#nav-agents'); await a.settle();
-  if (!(await a.has('#use-changelog-claude-cli'))) await a.click('#switch-changelog');
-  await a.click('#use-changelog-claude-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  if (!(await a.has('#use-changelog-codex-cli'))) { await a.click('#open-changelog'); await a.settle(); }
+  await a.click('#use-changelog-codex-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
   await a.click('#nav-history'); await a.settle();
-  await shot(a, 'agents-history-chosen-since', 'Chose Claude Code’s copy for every tool, then History: the choice has “Undo choice in Codex”; the On before it reads “Chosen since” in place of its Turn off again, and still offers “Use the kept copy in Codex”.');
+  await shot(a, 'agents-history-chosen-since', 'Chose Codex’s copy for every tool, then History: the choice has “Undo choice in Claude Code and Copilot CLI”; the On before it reads “Chosen since” in place of its Turn off again, and still offers “Use the kept copy in Codex”.');
   const useKept = await a.run(`[...document.querySelectorAll('.history-row button')].find(button => button.textContent.trim() === 'Use the kept copy in Codex')?.id ?? ''`);
   if (useKept) {
     await a.click(`#${useKept}`); await a.settle();
-    await shot(a, 'agents-history-kept-copy-used', 'Clicked “Use the kept copy in Codex”: Codex has the copy kept when changelog was turned off; the one it replaced is in History, on the new row, with “Undo in Codex”. The On no longer offers the kept copy while it is in use.');
+    await shot(a, 'agents-history-kept-copy-used', 'Clicked “Use the kept copy in Codex”: Codex has the copy kept when changelog was turned off; the one it replaced is in History, on the new row, with “Undo in Codex”. The On no longer offers the kept copy while it is in use. (Codex’s copy now differs from the one the other tools took, so the Agents page asks which copy every tool uses.)');
   }
   await a.click('#nav-agents'); await a.settle();
   await flip(false); await flip(true); await flip(false); await flip(true);

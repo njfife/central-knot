@@ -58,8 +58,9 @@ export function entryIs(event: HistoryEvent, events: HistoryEvent[]): EntryIs {
 
 const toolsOf = (copies: HistoryEvent['losers'] = []) => copies.map(copy => copy.tool);
 /**
- * The copies an Off holds, one per tool: those it took out (`losers`), and for a tool it holds without having removed anything
- * (`turnedUp`: Turn off again found the tool's own copy there and left it), the copy History still keeps for that tool.
+ * The copies an Off holds: those it took out (`losers`), then those it holds besides (`turnedUp`, on an Off made by Turn off
+ * again): the kept copy of a tool whose own copy it left where it was, and an older kept copy of a tool it also took one out
+ * of. A put-back gives each tool the first of its copies here, and leaves the rest in History, on offer.
  */
 export const heldCopies = (off: HistoryEvent) => [...off.losers, ...(off.turnedUp ?? [])];
 /** An entry's tools that its Undo or put-back hasn't reached yet (`restoredTools`: those it has, part-way). */
