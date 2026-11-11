@@ -5,7 +5,7 @@ import { lstat, mkdir, readFile, readdir, readlink, realpath, rename, stat, syml
 import { dirname, join } from 'node:path';
 import { DAY_MS, defaultHistoryDays } from './model.ts';
 import { configRoot, harnessIds, harnesses, writeRoot } from './harnesses.ts';
-import { presentTools } from './presence.ts';
+import { managedTools, presentTools } from './presence.ts';
 import {
   FORMAT_VERSION, changedWhileSyncing, clearStaleStages, storedRevision, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, newRecord, placeCopy, plainError, readRecord, readTree, stillOwned,
   remember, removeTree, saveRecord, stagingFolder, storeDirectory, storeFolder, syncGate, syncsHere, targetFor, writeAccess, writeDurably, type RecordItem, type ShareContext, type SyncRecord,
@@ -27,14 +27,14 @@ interface Location { tool: HarnessId; copy: ToolCopy }
 type Loser = HistoryEvent['losers'][number];
 interface Gathered { facts: SkillFacts; skills: Partial<Record<HarnessId, Skill[]>>; locations: Location[]; /** Tools that read this skill in another present tool's own folder, and whose folder: so with or without a copy of their own. */ reads: Partial<Record<HarnessId, HarnessId>> }
 
-/** Reads every skill in every present tool once. A copy that cannot be read makes the skill held, never the whole page. */
+/** Reads every skill in every managed tool once. A copy that cannot be read makes the skill held, never the whole page. */
 async function gather(context: ShareContext, snapshots: Snapshot[], record?: SyncRecord): Promise<Map<string, Gathered>> {
-  const tools = presentTools(snapshots);
+  const tools = managedTools(snapshots, record?.tools);
   const problems = new Map(await Promise.all(tools.map(async tool => [tool, await rootProblem(context, tool)] as const)));
   const map = new Map<string, Gathered>();
-  // Each present tool's own skills folder. A skill another tool reads there (OpenCode reads Claude Code's folder) is the
-  // owner's copy: shown for the reader, but never a location of its own, so it blocks no choice and is never called older.
-  const owners = new Map(tools.map(tool => [rootOf(context, tool), tool] as const));
+  // Each present tool's own skills folder, managed or not. A skill another tool reads there (OpenCode reads Claude Code's folder)
+  // is the owner's copy: shown for the reader, but never a location of its own, so it blocks no choice and is never called older.
+  const owners = new Map(presentTools(snapshots).map(tool => [rootOf(context, tool), tool] as const));
   const pinned = await pinnedShared(context, tools, problems);
   for (const snapshot of snapshots) {
     if (!tools.includes(snapshot.harness)) continue;
@@ -487,7 +487,7 @@ export async function manageView(context: ShareContext, { caughtUp = [], notices
     if (record?.items[key]?.state === 'shared' && tookOver.has(key) && entry.locations.some(location => location.copy.outside && !location.copy.outside.pinned)) entry.facts.outsideBack = true;
   }
   const skills = [...gathered.values()].map(entry => entry.facts).sort(byKey);
-  const tools = presentTools(snapshots);
+  const tools = managedTools(snapshots, record?.tools);
   const writes = Object.fromEntries(await Promise.all(tools.map(async tool => [tool, { to: rootOf(context, tool), alsoReadBy: harnesses[tool].otherReaders, blocked: await rootProblem(context, tool) }] as const)));
   return { tools, writes, skills, access: await writeAccess(context), gate: await syncGate(context), caughtUp, notices };
 }
@@ -577,7 +577,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
   if (!record && !changes.length) return { results: [], harnessWrites: 0 };
 
   const snapshots = await context.read();
-  const tools = presentTools(snapshots);
+  const tools = managedTools(snapshots, record?.tools);
   const gathered = await gather(context, snapshots, record);
   // A crash between these steps leaves an intact record this build can resume.
   if (!record) { record = newRecord(context); await saveRecord(context.home, record); }
@@ -619,8 +619,10 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       results.push({ item: entry.facts.name, outcome: 'held', message: `${entry.facts.name} changed since the page was read${before?.deleted ? ' (it was deleted)' : ''}. Nothing was changed; read again.` });
       continue;
     }
-    // The copy a tool reads in another tool's folder is that tool's: choosing it chooses the owner's.
-    if (change.use && change.use !== 'separate') change.use = entry.facts.copies[change.use]?.readsFrom ?? change.use;
+    // The copy a tool reads in another managed tool's folder is that tool's: choosing it chooses the owner's. With the owner
+    // left out, it stays the reader's choice, and the reader gets a copy of its own from it.
+    const owner = change.use && change.use !== 'separate' ? entry.facts.copies[change.use]?.readsFrom : undefined;
+    if (owner && tools.includes(owner)) change.use = owner;
     // A choice that cannot be carried out changes nothing at all: not even Managed.
     if (change.use && change.use !== 'separate') {
       const syncing = tools.filter(tool => !change.off.includes(tool) && !entry.facts.cannot[tool]);
@@ -848,8 +850,10 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     if (takeOvers.has(key) && !options.observeOnly && await takeOver(key, entry, item, syncing) === 'held') { skip(); continue; }
     // No tool it syncs to holds it, but one reads the copy of a tool that is left out (OpenCode reads Claude Code's): that
     // copy becomes the reader's own, to start from. The owner's is no longer kept in sync, and this pass may remove it.
-    if (!options.observeOnly && !entry.locations.some(location => syncing.includes(location.tool))) {
-      for (const tool of syncing) {
+    // The same for a reader whose copy was chosen over the others: it needs a copy of its own to be chosen from.
+    const chosenReader = item.use && syncing.includes(item.use.tool) && !entry.locations.some(location => location.tool === item.use!.tool) ? item.use.tool : undefined;
+    if (!options.observeOnly && (chosenReader || !entry.locations.some(location => syncing.includes(location.tool)))) {
+      for (const tool of chosenReader ? [chosenReader] : syncing) {
         const read = entry.facts.copies[tool];
         // A reader that had a copy of its own on record deleted it: that is a deletion, never made good from here.
         if (!read?.readsFrom || entry.facts.cannot[tool] || item.copies.some(copy => copy.harness === tool) || await rootProblem(context, tool)) continue;
@@ -865,6 +869,8 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
         const { readsFrom, ...copy } = { ...read, directory, writable: true };
         entry.facts.copies[tool] = copy;
         entry.locations.push({ tool, copy });
+        // On record as one Central Knot made, so an Undo that takes added copies out again can remove it.
+        item.copies.push({ harness: tool, directory, hash: copy.hash, created: true, status: 'written' });
         writes++;
         // Newly managed: this copy is one Apply all added, so its Undo takes it out again.
         if (newlyManaged.has(key)) added.set(key, { name, hash: copy.hash, copies: [...(added.get(key)?.copies ?? []), { tool, hash: copy.hash }] });
@@ -1496,10 +1502,10 @@ export async function restoreFromHistory(context: ShareContext, eventId: string,
     let tree;
     try { tree = await readTree(kept); } catch { return { stopped: 'The kept content is no longer in Central Knot’s store, so it can’t be restored.', results: [], harnessWrites: 0 }; }
     const snapshots = await context.read();
-    const tools = presentTools(snapshots);
+    const tools = managedTools(snapshots, record.tools);
     const results: DestinationResult[] = [];
     let writes = 0;
-    let entry = (await gather(context, await context.read(), record)).get(past.key);
+    let entry = (await gather(context, snapshots, record)).get(past.key);
     // A skill deleted earlier whose name is managed again with other content: restoring the old one would replace the new one.
     if (past.kind === 'deleted' && item.state === 'shared' && item.hash !== hash) return { stopped: `“${item.name}” is managed again with other content. Restoring the old one would replace it; delete or rename the new one first.`, results: [], harnessWrites: 0 };
     // A skill deleted earlier whose name is now taken by a different skill: never overwrite the new one.

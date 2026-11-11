@@ -179,6 +179,23 @@ export async function readAgentRecord(home: string): Promise<AgentRecord> {
 const saveAgentRecord = (home: string, record: AgentRecord) => writeDurably(recordPath(home), `${JSON.stringify(record, null, 2)}\n`);
 
 /**
+ * Forgets the recorded copies in tools no longer managed (toolchoice.ts). An agent whose origin is left out has only one-way
+ * copies left, which never sync with each other: they become ordinary copies, and the next pass picks an origin among them.
+ * A damaged record is left as it is: it stops agent sync anyway.
+ */
+export async function forgetAgentCopies(home: string, managed: readonly HarnessId[]) {
+  const { record } = await inspectAgentRecord(home);
+  if (!record) return;
+  for (const item of Object.values(record.items)) {
+    item.copies = item.copies.filter(copy => managed.includes(copy.tool));
+    if (!item.origin || managed.includes(item.origin)) continue;
+    delete item.origin;
+    for (const copy of item.copies) delete copy.oneWay;
+  }
+  await saveAgentRecord(home, record);
+}
+
+/**
  * Every file Central Knot replaces or removes is kept whole first, per tool, under the agent's content ID, so Restore puts back
  * each tool's own file with its own fields (CON-02). Kept versions are never pruned.
  */

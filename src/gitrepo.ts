@@ -25,8 +25,8 @@ import { appendHistory, applyChanges, deleteEverywhere, displace, manageView, re
 import { applyMcp, cannotHold, editEntry, fromJson, jsonEntry, keep, mcpView, readMcpRecord, readTool, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { gitEnv, gitFailure, runGit, whyGitFailed, whyPushFailed } from './plugins.ts';
 import { PRODUCT } from './values.ts';
-import { agentTools, mcpTools, presentTools } from './presence.ts';
-import { copyTree, errorCode, exists, gateRefusal, itemKey, notCopied, sha256 as sha, syncGate, placeCopy, plainError, readRecord, readTree, removeFileChecked, removeTree, saveRecord, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { agentTools, mcpTools } from './presence.ts';
+import { copyTree, errorCode, exists, gateRefusal, itemKey, managedNow, notCopied, sha256 as sha, syncGate, placeCopy, plainError, readRecord, readTree, removeFileChecked, removeTree, saveRecord, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { undoBase } from './instructions.ts';
 import type { BaseUndo, Change, DestinationResult, HarnessId, HistoryEvent, McpResult, RepoChange, RepoCommit, RepoKind, RepoResult, RepoView, SkillFacts, Snapshot } from './types.ts';
 
@@ -697,11 +697,11 @@ const notManaged = (change: RepoChange, tool: HarnessId) => notIn(change.name, `
  * results are kept (`own`), and a version that went in but that sync didn't take on is said.
  */
 async function passOutcome(done: { stopped?: string; results: DestinationResult[] }, change: RepoChange, own: (result: DestinationResult) => boolean,
-  writer: HarnessId, managedNow?: () => Promise<boolean>): Promise<DestinationResult[]> {
+  writer: HarnessId, isManaged?: () => Promise<boolean>): Promise<DestinationResult[]> {
   if (done.stopped) return [notIn(change.name, done.stopped)];
   const results = done.results.filter(own);
   // Asked only when the repo's version was written (a deletion has nothing to be Managed).
-  return !managedNow || await managedNow() ? results : [...results, notManaged(change, writer)];
+  return !isManaged || await isManaged() ? results : [...results, notManaged(change, writer)];
 }
 /**
  * What Pull wrote into the first tool before sync carried it on, so History can undo that copy too: what was there (`before`; none for
@@ -753,7 +753,7 @@ async function pullSkill(context: ShareContext, dir: string, change: RepoChange,
 
 /** MCP servers: written to one tool other than Claude Code (which waits for Write now, MCP-02), then spread by sync. */
 async function pullServer(context: ShareContext, dir: string, change: RepoChange, item: SideItem | undefined, wrote: Wrote): Promise<DestinationResult[]> {
-  const tools = presentTools(await context.read());
+  const tools = await managedNow(context, await context.read());
   const view = await mcpView(context, tools);
   const facts = view.servers.find(server => server.key === change.name);
   if (!item && !facts?.managed) return [];
@@ -778,7 +778,7 @@ async function pullServer(context: ShareContext, dir: string, change: RepoChange
 
 /** Agents: the repo holds Claude Code's format, so Claude Code takes it as written (with its own settings); others get it one-way. */
 async function pullAgent(context: ShareContext, dir: string, change: RepoChange, item: SideItem | undefined, wrote: Wrote): Promise<DestinationResult[]> {
-  const tools = presentTools(await context.read());
+  const tools = await managedNow(context, await context.read());
   const view = await agentsView(context, tools);
   const key = keyOf(change.name);
   const facts = view.servers.find(agent => agent.key === key);

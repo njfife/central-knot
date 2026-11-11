@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { applyMcp, mcpView, readTool, restoreMcp, undoClaudeWrite } from '../src/mcp.ts';
 import { readHistory } from '../src/manage.ts';
 import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
+import { chooseTools } from '../src/toolchoice.ts';
 import type { HarnessId } from '../src/types.ts';
 
 const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
@@ -51,6 +52,28 @@ test('A managed Claude server reaches Copilot and Codex with values as-is; other
     assert.ok(toml.includes('[mcp_servers.massive]\ncommand = "npx"\nargs = ["-y", "massive"]') && toml.includes('[mcp_servers.massive.env]\nMASSIVE_TOKEN = "secret-value-123"'));
     assert.equal((await applyMcp(box.context, tools, [])).writes, 0, 'a repeat writes nothing');
   } finally { await box.cleanup(); }
+});
+
+test('A tool managed again starts from its own entries: an edit or deletion made there while it was left out does not spread', async () => {
+  for (const change of ['edit', 'delete'] as const) {
+    const box = await sandbox();
+    try {
+      // Codex keeps a server of its own, so taking this one out is a deletion, not a reset of the whole file.
+      await writeFile(join(box.home, '.codex/config.toml'), codexToml);
+      await writeFile(join(box.home, '.copilot/mcp-config.json'), copilotOne('a'));
+      await applyMcp(box.context, tools, [{ key: 'tool', managed: true, off: ['claude-cli'] }]);
+      // Left out, and changed there with no pass in between (Sync off).
+      await chooseTools(box.context, ['claude-cli', 'copilot-cli']);
+      const toml = await readFile(join(box.home, '.codex/config.toml'), 'utf8');
+      const section = toml.slice(toml.indexOf('[mcp_servers.tool]'));
+      await writeFile(join(box.home, '.codex/config.toml'), change === 'edit' ? toml.replace('command = "a"', 'command = "b"') : toml.replace(section, ''));
+      await chooseTools(box.context, tools);
+      await applyMcp(box.context, tools, [], { settleMs: 0 });
+      await applyMcp(box.context, tools, [], { settleMs: 0 });
+      assert.equal((await copilotOf(box.home)).tool?.command, 'a', `the ${change} in Codex did not spread`);
+      assert.match(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), change === 'edit' ? /command = "b"/ : /\[mcp_servers\.tool\]\ncommand = "a"/, 'Codex keeps its edit, or gets the server back');
+    } finally { await box.cleanup(); }
+  }
 });
 
 test('Claude Code is written only by Write now, editing only its entry; Undo removes a new entry and it waits for Write again', async () => {

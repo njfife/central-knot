@@ -323,6 +323,14 @@ export async function readMcpRecord(home: string): Promise<McpRecord> {
 }
 const saveMcpRecord = (home: string, record: McpRecord) => writeDurably(recordPath(home), `${JSON.stringify(record, null, 2)}\n`);
 
+/** Forgets the recorded copies in tools no longer managed (toolchoice.ts). A damaged record is left as it is: it stops MCP sync anyway. */
+export async function forgetMcpCopies(home: string, managed: readonly HarnessId[]) {
+  const { record } = await inspectMcpRecord(home);
+  if (!record) return;
+  for (const item of Object.values(record.items)) item.copies = item.copies.filter(copy => managed.includes(copy.tool));
+  await saveMcpRecord(home, record);
+}
+
 // ---------- View ----------
 
 const summary = (server: NeutralServer) => (server.transport === 'stdio' ? `Command · ${[server.command, ...(server.args ?? [])].filter(Boolean).join(' ')}` : `${server.transport.toUpperCase()} · ${server.url ?? ''}`);
