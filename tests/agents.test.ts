@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { agentText, agentsView, applyAgents, readAgents, restoreAgent } from '../src/agents.ts';
 import { readHistory } from '../src/manage.ts';
 import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
+import { chooseTools } from '../src/toolchoice.ts';
 import type { HarnessId } from '../src/types.ts';
 import { readTomlTables } from '../src/textedit.ts';
 
@@ -72,6 +73,42 @@ test('Claude-only fields make the others one-way With limits; an edit there stay
     await rm(join(box.home, '.codex/agents/reviewer.toml'));
     await applyAgents(box.context, tools, [], { settleMs: 0 });
     assert.match(await read(box.home, '.claude/agents/reviewer.md'), /New prompt\./);
+  } finally { await box.cleanup(); }
+});
+
+test('A tool managed again starts from its own agents: an edit or deletion made there while it was left out does not spread', async () => {
+  for (const change of ['edit', 'delete'] as const) {
+    const box = await sandbox();
+    try {
+      await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
+      await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+      // Left out, and changed there with no pass in between (Sync off).
+      await chooseTools(box.context, ['claude-cli', 'codex-cli']);
+      const copilot = join(box.home, '.copilot/agents/reviewer.agent.md');
+      if (change === 'edit') await writeFile(copilot, (await readFile(copilot, 'utf8')).replace('Be brief.', 'Be long.')); else await rm(copilot);
+      await chooseTools(box.context, tools);
+      await applyAgents(box.context, tools, [], { settleMs: 0 });
+      await applyAgents(box.context, tools, [], { settleMs: 0 });
+      assert.match(await read(box.home, '.claude/agents/reviewer.md'), /Be brief\./, `the ${change} in Copilot did not spread`);
+      assert.match(await readFile(copilot, 'utf8'), change === 'edit' ? /Be long\./ : /Be brief\./, 'Copilot keeps its edit, or gets the agent back');
+    } finally { await box.cleanup(); }
+  }
+});
+
+test('With an agent’s origin left out, the tools that remain sync it with each other', async () => {
+  const box = await sandbox();
+  try {
+    // Claude-only fields make the other two copies one-way from Claude Code.
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent(undefined, 'tools: Read, Grep\nmodel: opus\n'));
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    const rest: HarnessId[] = ['copilot-cli', 'codex-cli'];
+    await chooseTools(box.context, rest);
+    await applyAgents(box.context, rest, [], { settleMs: 0 });
+    const copilot = join(box.home, '.copilot/agents/reviewer.agent.md');
+    await writeFile(copilot, (await readFile(copilot, 'utf8')).replace('Be brief.', 'Be long.'));
+    const spread = await applyAgents(box.context, rest, [], { settleMs: 0 });
+    assert.match(await read(box.home, '.codex/agents/reviewer.toml'), /Be long\./, JSON.stringify(spread.results));
+    assert.match(await read(box.home, '.claude/agents/reviewer.md'), /Be brief\./, 'Claude Code, left out, is not written');
   } finally { await box.cleanup(); }
 });
 

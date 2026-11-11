@@ -8,7 +8,7 @@ import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover, findOtherApps } from './discovery.ts';
 import { configRoot, envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { CLAUDE_PROCESS, appCandidates, executableCandidates, searchPath } from './platform.ts';
-import { syncsHere, takeOverSync, writeAccess, type ShareContext } from './share.ts';
+import { managedNow, syncsHere, takeOverSync, writeAccess, type ShareContext } from './share.ts';
 import { applyChanges, deleteEverywhere, eventChange, manageView, pruneHistory, readHistory, restoreFromHistory } from './manage.ts';
 import { agentTools, mcpTools, noteTools, pluginTools, presentTools } from './presence.ts';
 import { installedPlugins } from './plugins.ts';
@@ -493,12 +493,12 @@ async function pass(snapshots: Snapshot[], explicit = false): Promise<PassResult
   const skills = await applyChanges(shared, [], false, { observeOnly: !syncOn && !explicit });
   // MCP servers catch up with the same switch: edits and deletions spread with Sync on (Claude Code still waits for Write now).
   if (!syncOn && !explicit) return { skills };
-  const present = presentTools(snapshots);
+  const managed = await managedNow(shared, snapshots);
   const crashes: DestinationResult[] = [];
   const crashed = (item: string) => (error: unknown) => { crashes.push({ item, outcome: 'failed', message: `${item} could not finish: ${error instanceof Error ? error.message : String(error)}` }); return undefined; };
-  const mcp = await applyMcp(shared, present, []).catch(crashed('MCP sync'));
+  const mcp = await applyMcp(shared, managed, []).catch(crashed('MCP sync'));
   // Agents follow the same switch and rules (D-32).
-  const agents = await applyAgents(shared, present, []).catch(crashed('Agents sync'));
+  const agents = await applyAgents(shared, managed, []).catch(crashed('Agents sync'));
   return { skills, mcpAndAgents: {
     failures: [...crashes, ...[...(mcp?.results ?? []), ...(agents?.results ?? [])].filter(entry => entry.outcome === 'failed')],
     stopped: ([['MCP sync', mcp?.stopped], ['Agents sync', agents?.stopped]] as const).filter(([, why]) => why).map(([item, why]) => ({ item, outcome: 'failed' as const, message: why! })),
@@ -530,18 +530,19 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   // no writes, yet may have made some. An observe-only pass, or one that couldn't run, wrote nothing.
   const snapshots = skills && (syncOn || explicit) ? await read() : before;
   const writable = (await writeAccess(shared)).allowed;
+  const managed = await managedNow(shared, snapshots);
   const readId = handoff.id + 1;
   const made: HomeView = {
     mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), readId, profiles, parts: await readParts(current!.home),
     // Apps that run the tools or read their files are looked for only on this computer, like the tools' own apps.
     ...(current!.mode === 'actual' ? { otherApps: await findOtherApps(current!.home) } : {}),
     manage: await manageView(shared, { caughtUp: caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain), notices, snapshots }),
-    mcp: await mcpView(shared, presentTools(snapshots), pendingMcpNotices.splice(0)),
-    agents: await agentsView(shared, presentTools(snapshots), pendingAgentNotices.splice(0)),
+    mcp: await mcpView(shared, managed, pendingMcpNotices.splice(0)),
+    agents: await agentsView(shared, managed, pendingAgentNotices.splice(0)),
   };
   // What plugins installed whole bring, read with the home so the Skills, MCP servers and Agents pages show it without Plugins.
   // With the view's own reads, so each tool's installed plugins are read once for these rows and the pages' Through a plugin boxes.
-  made.pluginItems = await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), presentTools(snapshots));
+  made.pluginItems = await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), managed);
   // Another build syncs this home: whether it is open now decides what the page says about it.
   if (made.manage.gate.state === 'stopped' && made.manage.gate.owner) made.manage.gate.owner.running = await buildRunning(made.manage.gate.owner.build);
   lastItems = switchItems(made.manage, made.mcp);
@@ -680,8 +681,8 @@ async function lookAtSwitchFiles(somethingChanged: boolean): Promise<boolean> {
 /** A watcher event since the last pass: with Sync off nothing is written, but the page still shows the edit as pending. */
 let touched = false;
 
-/** The tools in the open home, read now: the one way the requests below learn them. */
-const presentNow = async (): Promise<HarnessId[]> => presentTools(await read());
+/** The tools Central Knot manages in the open home, read now: the one way the requests below learn them. */
+const toolsNow = async (): Promise<HarnessId[]> => managedNow(context(), await read());
 
 /**
  * The home for a request that names the read it follows (`readId`, from the page's view): that read when it is the one
@@ -1149,7 +1150,7 @@ app.whenReady().then(async () => {
   handle('file:show', async path => { if (typeof path === 'string' && isAbsolute(path)) shell.showItemInFolder(path); });
   handle('history:change', async eventId => (current && typeof eventId === 'string' ? eventChange(context(), eventId) : undefined));
   handle('agents:convert', async (key, home) => (home === current?.home && typeof key === 'string'
-    ? convertAgentToSkill(context(), await presentNow(), key)
+    ? convertAgentToSkill(context(), await toolsNow(), key)
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.' }));
   handle('instructions:view', async readId => (current ? instructionsView(context(), await readFor(readId as number | undefined)) : null));
   handle('instructions:save', async (tool, text, expected, home, restoring) => (home === current?.home && isTool(tool) && typeof text === 'string' && typeof expected === 'string'
@@ -1191,7 +1192,7 @@ app.whenReady().then(async () => {
       if (past?.settingsFile) return undoSettingsChange(context(), eventId);
       // A Pull that edited or deleted the base instructions: the base's own Undo puts the earlier base and its tools back.
       if (past?.base) return undoPulledBase(context(), await read(), eventId);
-      const tools = await presentNow();
+      const tools = await toolsNow();
       if (key.startsWith('mcp:')) {
         const result = await restoreMcp(context(), tools, eventId);
         // Undo of a server's Disable or Enable is a choice made by hand too.
@@ -1239,13 +1240,13 @@ app.whenReady().then(async () => {
   handle('mcp:apply', async (list, resume, home) => {
     if (home !== current?.home) return { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 };
     const asked = changes(list);
-    const result = await applyMcp(context(), await presentNow(), asked, { resume: resume === true, ...(syncOn ? {} : { only: new Set(asked.map(change => change.key)) }) });
+    const result = await applyMcp(context(), await toolsNow(), asked, { resume: resume === true, ...(syncOn ? {} : { only: new Set(asked.map(change => change.key)) }) });
     // A Disable or Enable chosen here takes that switch over from profiles, as a skill's does.
     await releaseProfileHolds(context(), switchedByHand(asked.filter(change => change.disable?.length || change.enable?.length), result.results, 'mcp'));
     return result;
   });
   handle('agents:apply', async (list, resume, home) => (home === current?.home
-    ? applyAgents(context(), await presentNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
+    ? applyAgents(context(), await toolsNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
   // Write now is for when Claude Code is closed (MCP-02): a running Claude Code would write its older copy back over it.
   // Its Undo goes through the same check: Claude Code closed, or it would write its copy back over the undone one.
@@ -1255,7 +1256,7 @@ app.whenReady().then(async () => {
     : { stopped: elsewhere, results: [], writes: 0 }));
   handle('mcp:write-claude', async (names, home) => (home === current?.home && Array.isArray(names)
     // The practice copy is sample files: the real Claude Code never reads them, so it need not be closed there.
-    ? current?.mode !== 'fixture' && await claudeRunning() ? { stopped: 'Claude Code or Claude desktop is still running. Quit it first (every window and terminal session), then click Write to Claude Code again.', results: [], writes: 0 } : applyMcp(context(), await presentNow(), [], { claudeNow: names.filter((name): name is string => typeof name === 'string'), ...(syncOn ? {} : { only: new Set(names.filter((name): name is string => typeof name === 'string')) }) })
+    ? current?.mode !== 'fixture' && await claudeRunning() ? { stopped: 'Claude Code or Claude desktop is still running. Quit it first (every window and terminal session), then click Write to Claude Code again.', results: [], writes: 0 } : applyMcp(context(), await toolsNow(), [], { claudeNow: names.filter((name): name is string => typeof name === 'string'), ...(syncOn ? {} : { only: new Set(names.filter((name): name is string => typeof name === 'string')) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
   handle('manage:apply', async (list, resume, home) => {
     if (home !== current?.home) return { stopped: elsewhere, results: [], harnessWrites: 0 } satisfies ApplyResult;
