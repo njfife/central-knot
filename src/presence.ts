@@ -20,13 +20,17 @@ export const isPresent = (snapshot: Snapshot): boolean =>
  */
 export const hasCowork = (snapshots: Snapshot[]): boolean => snapshots.some(snapshot => snapshot.harness === 'claude-cli' && !!snapshot.app);
 
-/** The tools installed in this home, in discovery order. Only the Tools page and what installs plugins go by these: items go by managedTools. */
+/**
+ * The tools installed in this home, in discovery order. Plugins, plugin updates, instructions and noteTools go by these;
+ * skills, MCP servers and agents go by managedTools (as does the Tools page, through the skills view, until it can show both).
+ */
 export const presentTools = (snapshots: Snapshot[]): HarnessId[] => snapshots.filter(isPresent).map(snapshot => snapshot.harness);
 
 /**
- * The tools Central Knot manages in this home, in discovery order: the present ones the sync record names. A record that names
- * none (every record made before the choice existed, and a home with no record yet) manages every present tool. Every item
- * page and every sync pass draws from these, so a present tool left out is neither shown with items nor written.
+ * The tools Central Knot manages in this home, in discovery order: the present ones the sync record lists (share.ts
+ * chooseTools sets the list). With no list (every record made before the choice existed, and a home with no record yet) it
+ * manages every present tool; an empty list manages none. Every item page and every sync pass draws from these, so a present
+ * tool left out is neither shown with items nor written.
  */
 export const managedTools = (snapshots: Snapshot[], chosen?: readonly HarnessId[]): HarnessId[] => {
   const present = presentTools(snapshots);

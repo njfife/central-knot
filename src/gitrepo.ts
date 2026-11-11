@@ -697,11 +697,11 @@ const notManaged = (change: RepoChange, tool: HarnessId) => notIn(change.name, `
  * results are kept (`own`), and a version that went in but that sync didn't take on is said.
  */
 async function passOutcome(done: { stopped?: string; results: DestinationResult[] }, change: RepoChange, own: (result: DestinationResult) => boolean,
-  writer: HarnessId, managedNow?: () => Promise<boolean>): Promise<DestinationResult[]> {
+  writer: HarnessId, isManaged?: () => Promise<boolean>): Promise<DestinationResult[]> {
   if (done.stopped) return [notIn(change.name, done.stopped)];
   const results = done.results.filter(own);
   // Asked only when the repo's version was written (a deletion has nothing to be Managed).
-  return !managedNow || await managedNow() ? results : [...results, notManaged(change, writer)];
+  return !isManaged || await isManaged() ? results : [...results, notManaged(change, writer)];
 }
 /**
  * What Pull wrote into the first tool before sync carried it on, so History can undo that copy too: what was there (`before`; none for

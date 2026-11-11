@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { applyMcp, mcpView, readTool, restoreMcp, undoClaudeWrite } from '../src/mcp.ts';
 import { readHistory } from '../src/manage.ts';
-import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
+import { chooseTools, readRecord, syncGate, type ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
 
 const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
@@ -50,6 +50,22 @@ test('A managed Claude server reaches Copilot and Codex with values as-is; other
     assert.ok(toml.startsWith(before), 'everything already in config.toml stays byte for byte');
     assert.ok(toml.includes('[mcp_servers.massive]\ncommand = "npx"\nargs = ["-y", "massive"]') && toml.includes('[mcp_servers.massive.env]\nMASSIVE_TOKEN = "secret-value-123"'));
     assert.equal((await applyMcp(box.context, tools, [])).writes, 0, 'a repeat writes nothing');
+  } finally { await box.cleanup(); }
+});
+
+test('A server deleted in a tool while it was left out is not deleted elsewhere when that tool is managed again', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), copilotOne('a'));
+    await applyMcp(box.context, tools, [{ key: 'tool', managed: true, off: ['claude-cli'] }]);
+    await chooseTools(box.context, ['claude-cli', 'copilot-cli']);
+    const toml = await readFile(join(box.home, '.codex/config.toml'), 'utf8');
+    await writeFile(join(box.home, '.codex/config.toml'), toml.slice(0, toml.indexOf('[mcp_servers.tool]')));
+    await applyMcp(box.context, ['claude-cli', 'copilot-cli'], [], { settleMs: 0 });
+    await applyMcp(box.context, tools, [], { settleMs: 0 });
+    await applyMcp(box.context, tools, [], { settleMs: 0 });
+    assert.equal((await copilotOf(box.home)).tool?.command, 'a', 'the deletion in Codex while left out did not spread');
+    assert.ok((await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('[mcp_servers.tool]'), 'Codex gets it back');
   } finally { await box.cleanup(); }
 });
 

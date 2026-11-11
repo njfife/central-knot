@@ -493,12 +493,12 @@ async function pass(snapshots: Snapshot[], explicit = false): Promise<PassResult
   const skills = await applyChanges(shared, [], false, { observeOnly: !syncOn && !explicit });
   // MCP servers catch up with the same switch: edits and deletions spread with Sync on (Claude Code still waits for Write now).
   if (!syncOn && !explicit) return { skills };
-  const present = await managedNow(shared, snapshots);
+  const managed = await managedNow(shared, snapshots);
   const crashes: DestinationResult[] = [];
   const crashed = (item: string) => (error: unknown) => { crashes.push({ item, outcome: 'failed', message: `${item} could not finish: ${error instanceof Error ? error.message : String(error)}` }); return undefined; };
-  const mcp = await applyMcp(shared, present, []).catch(crashed('MCP sync'));
+  const mcp = await applyMcp(shared, managed, []).catch(crashed('MCP sync'));
   // Agents follow the same switch and rules (D-32).
-  const agents = await applyAgents(shared, present, []).catch(crashed('Agents sync'));
+  const agents = await applyAgents(shared, managed, []).catch(crashed('Agents sync'));
   return { skills, mcpAndAgents: {
     failures: [...crashes, ...[...(mcp?.results ?? []), ...(agents?.results ?? [])].filter(entry => entry.outcome === 'failed')],
     stopped: ([['MCP sync', mcp?.stopped], ['Agents sync', agents?.stopped]] as const).filter(([, why]) => why).map(([item, why]) => ({ item, outcome: 'failed' as const, message: why! })),

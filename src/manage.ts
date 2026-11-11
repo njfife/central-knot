@@ -5,7 +5,7 @@ import { lstat, mkdir, readFile, readdir, realpath, rename, stat } from 'node:fs
 import { dirname, join } from 'node:path';
 import { DAY_MS, defaultHistoryDays } from './model.ts';
 import { configRoot, harnesses, writeRoot } from './harnesses.ts';
-import { managedTools } from './presence.ts';
+import { managedTools, presentTools } from './presence.ts';
 import {
   FORMAT_VERSION, changedWhileSyncing, clearStaleStages, storedRevision, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, newRecord, placeCopy, plainError, readRecord, readTree, stillOwned,
   remember, removeTree, saveRecord, stagingFolder, storeDirectory, storeFolder, syncGate, syncsHere, targetFor, writeAccess, writeDurably, type RecordItem, type ShareContext, type SyncRecord,
@@ -25,14 +25,14 @@ const bodyLine = (content: string) => content.replace(/^﻿?---[ \t]*\r?\n[\s\S]
 interface Location { tool: HarnessId; copy: ToolCopy }
 interface Gathered { facts: SkillFacts; skills: Partial<Record<HarnessId, Skill[]>>; locations: Location[]; /** Tools that read this skill in another present tool's own folder, and whose folder: so with or without a copy of their own. */ reads: Partial<Record<HarnessId, HarnessId>> }
 
-/** Reads every skill in every present tool once. A copy that cannot be read makes the skill held, never the whole page. */
+/** Reads every skill in every managed tool once. A copy that cannot be read makes the skill held, never the whole page. */
 async function gather(context: ShareContext, snapshots: Snapshot[], record?: SyncRecord): Promise<Map<string, Gathered>> {
   const tools = managedTools(snapshots, record?.tools);
   const problems = new Map(await Promise.all(tools.map(async tool => [tool, await rootProblem(context, tool)] as const)));
   const map = new Map<string, Gathered>();
-  // Each present tool's own skills folder. A skill another tool reads there (OpenCode reads Claude Code's folder) is the
-  // owner's copy: shown for the reader, but never a location of its own, so it blocks no choice and is never called older.
-  const owners = new Map(tools.map(tool => [rootOf(context, tool), tool] as const));
+  // Each present tool's own skills folder, managed or not. A skill another tool reads there (OpenCode reads Claude Code's folder)
+  // is the owner's copy: shown for the reader, but never a location of its own, so it blocks no choice and is never called older.
+  const owners = new Map(presentTools(snapshots).map(tool => [rootOf(context, tool), tool] as const));
   for (const snapshot of snapshots) {
     if (!tools.includes(snapshot.harness)) continue;
     for (const skill of snapshot.skills) {
