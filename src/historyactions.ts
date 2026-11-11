@@ -11,7 +11,7 @@
 // 2. here: its row in `table`;
 // 3. historypage.ts describe: the sentence its row says;
 // 4. the engine's route to its Undo: for an agent's entry, agents.ts restoreAgent (its `switch` on entryIs).
-import { endedBy, entryIs, keptCopyTools, offTools, sinceWords, type EntryIs } from './historyrules.ts';
+import { endedBy, entryIs, keptCopiesOffered, offTools, sinceWords, type EntryIs } from './historyrules.ts';
 import { NO_PROFILE, redoneSwitch } from './profileplan.ts';
 import { andList, toolName, toolsPhrase } from './words.ts';
 import type { DestinationResult, HarnessId, HistoryEvent, RestoreHow } from './types.ts';
@@ -51,7 +51,7 @@ const pulledEdit: Row = { word: () => 'Undo pull', scope: 'all', help: event => 
 // there either: that copy is left alone again, held by an Off as before. An On that only did that has no "Turn off again".
 const ownCopies = (tools: HarnessId[]) => `${andList(tools.map(tool => `${toolName(tool)}’s`))} own ${tools.length === 1 ? 'copy' : 'copies'}`;
 const leftAlone = (tools: HarnessId[]) => `${ownCopies(tools)} ${tools.length === 1 ? 'is' : 'are'} left alone again`;
-const turnedUpIn = (event: HistoryEvent) => (event.turnedUp ?? []).map(copy => copy.tool);
+const turnedUpIn = (event: HistoryEvent) => [...new Set((event.turnedUp ?? []).map(copy => copy.tool))];
 function offAgainHelp(event: HistoryEvent, tools: HarnessId[]): string {
   const own = turnedUpIn(event);
   if (!event.losers.length) return `${leftAlone(own)}, as before ${event.item} was turned on there: nothing is removed, and Central Knot doesn’t sync ${own.length === 1 ? 'it' : 'them'}`;
@@ -59,11 +59,12 @@ function offAgainHelp(event: HistoryEvent, tools: HarnessId[]): string {
 }
 function offAgainSaid(event: HistoryEvent, results: DestinationResult[]): string {
   const off = where(results, 'removed'), own = where(results, 'stayed');
-  return sentence(off.length ? `${event.item} is off in ${andList(off.map(toolName))} again. History keeps ${off.length === 1 ? 'its copy' : 'the copies'}.` : '',
+  const said = sentence(off.length ? `${event.item} is off in ${andList(off.map(toolName))} again. History keeps ${off.length === 1 ? 'its copy' : 'the copies'}.` : '',
     own.length ? `${leftAlone(own)}.` : '', ...leftAsIs(results.filter(entry => entry.outcome !== 'stayed')));
+  return said || `${event.item} is off again.`;
 }
-/** An On's second action, one per tool where it left the tool's own copy in place of the kept one (the rule: historyrules.ts keptCopyTools). */
-const keptCopyActions = (event: HistoryEvent, events: HistoryEvent[]): EntryAction[] => keptCopyTools(event, events).map(tool => ({
+/** An On's second action, one per tool for which it left a kept copy in History (the rule: historyrules.ts keptCopiesOffered). */
+const keptCopyActions = (event: HistoryEvent, events: HistoryEvent[]): EntryAction[] => keptCopiesOffered(event, events).map(({ tool }) => ({
   word: 'Use the kept copy', label: `Use the kept copy in ${toolName(tool)}`, how: { keptIn: tool },
   help: `Put the copy kept when ${event.item} was turned off back in ${toolName(tool)}, in place of the one there now, which goes to History with its own Undo` }));
 const keptCopySaid = (event: HistoryEvent, results: DestinationResult[]) => sentence(...where(results, 'written').map(tool => `${toolName(tool)} has the copy of ${event.item} kept when it was turned off.`),

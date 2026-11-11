@@ -1,17 +1,18 @@
 // History: what sync did on its own, newest first, with Undo or Restore where the kept content allows it (CON-02, DEL-03).
 import { clockTime, DAY_MS } from './model.ts';
 import { offered, unfinished, type EntryAction } from './historyactions.ts';
-import { entryIs, heldCopies } from './historyrules.ts';
+import { entryIs } from './historyrules.ts';
 import { homeTools, noTools, restoreEvent, showPage, shownPath, state, touchedToolsPhrase, unwriteClaudeNow } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
+import { itemAt, onNow } from './pluginswitch.ts';
 import { tookOverHistory } from './outsidewords.ts';
 import { changedProfile, flipSummary, NO_PROFILE, redoneSwitch } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
 import { button, emptyState, h, icon, rereadBand } from './dom.ts';
 import { OFF_KEPT } from './settingspage.ts';
 import type { IconName } from './icons.ts';
-import type { HistoryEvent } from './types.ts';
+import type { HarnessId, HistoryEvent } from './types.ts';
 
 const who = (tool?: string) => (tool ? toolName(tool) : 'Central Knot');
 
@@ -64,21 +65,37 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string } {
 }
 
 /**
- * An Off: where it removed copies, where it only holds a tool again (Turn off again found the tool's own copy there, which
- * stays), and (a mixed item) that a tool has it through a plugin, whose own switch turns it on there.
+ * A standing Off of an item a tool has through a plugin (a mixed item): where that tool has it now, since this Off's Turn on
+ * puts back only the copies it removed. The row's switch turns the plugin's item off and on with them.
+ */
+function pluginPart(event: HistoryEvent): string {
+  const row = [...(state.home?.agents.servers ?? []), ...(state.home?.agents.gone ?? [])].find(fact => `agent:${fact.key}` === event.key);
+  const through = (Object.keys(row?.plugin ?? {}) as HarnessId[]).map(tool => {
+    const item = itemAt(state.home?.pluginItems, 'agent', row!.name, tool, row!.plugin![tool]);
+    return { tool, on: item ? onNow(item) : !row!.plugin![tool]!.off };
+  });
+  if (!through.length || event.undoneBy) return '';
+  const said = (on: boolean) => {
+    const tools = through.filter(entry => entry.on === on).map(entry => toolName(entry.tool));
+    return tools.length ? `${andList(tools)} ${tools.length === 1 ? 'has' : 'have'} it through a plugin, ${on ? 'on there' : 'turned off there too with its plugin switch'}.` : '';
+  };
+  const all = andList(through.map(entry => toolName(entry.tool)));
+  return ` ${[said(false), said(true)].filter(Boolean).join(' ')} Turn on here leaves ${all} as ${through.length === 1 ? 'it is' : 'they are'}.`;
+}
+
+/**
+ * An Off: where it removed copies, and where it only holds a tool again (Turn off again found the tool's own copy there, which
+ * stays).
  */
 function offText(event: HistoryEvent): string {
   const removed = event.losers.map(loser => loser.tool), own = (event.turnedUp ?? []).map(copy => copy.tool);
-  const held = heldCopies(event).length;
-  const kept = `History keeps ${held === 1 ? 'the copy removed from it' : 'the copies removed'} until it is turned on again or deleted.`;
+  const what = removed.length ? (removed.length === 1 ? 'it' : 'them') : own.length === 1 ? 'the copy removed earlier' : 'the copies removed earlier';
+  const kept = `History keeps ${what} until it is turned on again or deleted.`;
   const back = event.restoredTools?.length ? ` Back on in ${touchedToolsPhrase(event.restoredTools)}.` : '';
-  const row = [...(state.home?.agents.servers ?? []), ...(state.home?.agents.gone ?? [])].find(fact => `agent:${fact.key}` === event.key);
-  const plugins = Object.keys(row?.plugin ?? {});
-  const plugin = event.key.startsWith('agent:') && plugins.length ? ` ${andList(plugins.map(toolName))} ${plugins.length === 1 ? 'has' : 'have'} it through a plugin: its plugin switch there turns it on or off.` : '';
   const leftAlone = own.length ? `${andList(own.map(tool => `${who(tool)}’s`))} own ${own.length === 1 ? 'copy stays there' : 'copies stay there'}, left alone` : '';
-  const what = !removed.length ? `Turned off again: ${leftAlone}.`
+  const did = !removed.length ? `Turned off again: ${leftAlone}.`
     : `Turned off: removed from ${touchedToolsPhrase(removed)}, which ${removed.length === 1 ? 'has' : 'have'} no switch for it${leftAlone ? `; ${leftAlone}` : ''}.`;
-  return `${what} ${kept}${back}${plugin}`;
+  return `${did} ${kept}${back}${pluginPart(event)}`;
 }
 
 /** A 'restored' entry, by what it undid: turned on again after an Off, restored after a deletion, a redo, or an earlier version back. */

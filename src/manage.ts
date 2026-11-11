@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, readlink, realpath, rename, stat, symlink, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { DAY_MS, defaultHistoryDays } from './model.ts';
-import { deletedSince, keptOff, offTools } from './historyrules.ts';
+import { deletedSince, keptOff, offsWaitingFor, offTools } from './historyrules.ts';
 import { configRoot, harnessIds, harnesses, writeRoot } from './harnesses.ts';
 import { managedTools, presentTools } from './presence.ts';
 import {
@@ -539,20 +539,27 @@ export function goneFacts(events: HistoryEvent[], here: Set<string>, keyOf: (eve
     const covered = new Set(list[0].tools);
     const also = list.slice(1).filter(older => { const more = older.tools.filter(tool => !covered.has(tool)); for (const tool of more) covered.add(tool); return more.length > 0; }).map(older => older.event.id);
     return { key, name: latest.item, description: '', copies: {}, extra: [], managed: false, off: [], cannot: {}, choiceBlocks: {},
-      gone: { history: latest.id, at: latest.at, ...(also.length ? { also } : {}), ...(latest.turnedOff ? { turnedOff: true as const } : {}) }, ...heldOffOf(list) };
+      gone: { history: latest.id, at: latest.at, ...(also.length ? { also } : {}), ...(latest.turnedOff ? { turnedOff: true as const } : {}) }, ...heldOffOf(list, events) };
   });
 }
 
-/** Each tool an item's open Off removals hold (Rule A), with the latest that holds it: what turning it on puts back (SkillFacts.heldOff). */
-function heldOffOf(list: { event: HistoryEvent; tools: HarnessId[] }[]): Pick<SkillFacts, 'heldOff'> {
+/**
+ * Each tool an item's open Off removals hold (Rule A), with the latest that holds it: what turning it on puts back
+ * (SkillFacts.heldOff); `older`: the Offs before it that still keep a copy for that tool (historyrules.ts offsWaitingFor).
+ */
+function heldOffOf(list: { event: HistoryEvent; tools: HarnessId[] }[], events: HistoryEvent[]): Pick<SkillFacts, 'heldOff'> {
   const heldOff: NonNullable<SkillFacts['heldOff']> = [];
-  for (const { event, tools } of list) if (event.turnedOff) for (const tool of tools) if (!heldOff.some(entry => entry.tool === tool)) heldOff.push({ tool, history: event.id });
+  for (const { event, tools } of list) if (event.turnedOff) for (const tool of tools) {
+    if (heldOff.some(entry => entry.tool === tool)) continue;
+    const older = offsWaitingFor(events, event.key, tool).map(off => off.id);
+    heldOff.push({ tool, history: event.id, ...(older.length ? { older } : {}) });
+  }
   return heldOff.length ? { heldOff } : {};
 }
 
 /** The open Off removals of each item some tool still has a copy of (SkillFacts.heldOff), by key. */
 export function heldOffFacts(events: HistoryEvent[], here: Set<string>, keyOf: (event: HistoryEvent) => string | undefined): Map<string, Pick<SkillFacts, 'heldOff'>> {
-  return new Map([...openRemovals(events, keyOf)].filter(([key]) => here.has(key)).map(([key, list]) => [key, heldOffOf(list)] as const).filter(([, facts]) => facts.heldOff));
+  return new Map([...openRemovals(events, keyOf)].filter(([key]) => here.has(key)).map(([key, list]) => [key, heldOffOf(list, events)] as const).filter(([, facts]) => facts.heldOff));
 }
 
 /**

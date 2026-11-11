@@ -6,11 +6,19 @@
 import { choose, clear, queued, queuedPart, queuedWhole, wholeChoice, type PluginDraft, type PluginOp } from './pluginplan.ts';
 import { NO_SKILL_SWITCH, hasPartSwitch, noSwitchReason, partWords, samePart } from './pluginstatus.ts';
 import { andList, toolNames as names } from './words.ts';
-import type { HarnessId, InstalledPlugin, PartKind, PluginItem } from './types.ts';
+import type { HarnessId, InstalledPlugin, PartKind, PluginItem, ThroughPlugin } from './types.ts';
 
 /** One item in one tool, through the plugin as that tool has it installed. `name`: the item's own name in the plugin. */
 export interface PluginItemAt { kind: PartKind; name: string; tool: HarnessId; install: InstalledPlugin }
 type Part = Pick<PluginItem, 'kind' | 'name'>;
+/**
+ * The item a tool has through a plugin on a row of the person's own (`given`, as the row's facts name the plugin), with that
+ * plugin as the tool has it installed (`installs`: the home's); none when that install isn't known. `name`: the row's name.
+ */
+export function itemAt(installs: readonly InstalledPlugin[] | undefined, kind: PartKind, name: string, tool: HarnessId, given: ThroughPlugin | undefined): PluginItemAt | undefined {
+  const install = given && installs?.find(entry => entry.tool === tool && entry.plugin === given.plugin && entry.marketName === given.marketplace);
+  return install ? { kind, name: given.name ?? name, tool, install } : undefined;
+}
 
 /**
  * Whether the tool turns one item of this kind on and off by itself: a skill where the tool has a switch for one skill of a

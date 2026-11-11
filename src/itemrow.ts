@@ -63,7 +63,7 @@ export interface ItemRow {
   /** No tool has a copy any more; History can put it back. */
   gone?: GoneItem;
   /** Each tool whose copy was removed to turn it off (no switch there), with the History removal that puts it back. */
-  heldOff?: { tool: Tool; history: string; source?: Tool }[];
+  heldOff?: { tool: Tool; history: string; source?: Tool; older?: string[] }[];
 }
 
 const heldTools = (skill: ItemRow) => (skill.heldOff ?? []).map(entry => entry.tool);
@@ -72,14 +72,17 @@ export const offHeldIn = (skill: ItemRow) => heldTools(skill).filter(tool => ski
 /** The tools an Off holds where a copy turned up since (made there by hand): that tool's own, left alone until it is turned on. */
 export const turnedUpIn = (skill: ItemRow) => heldTools(skill).filter(tool => skill.copies[tool] !== undefined);
 /**
- * The History entries turning it on puts back, each once: those of the Offs holding its tools, the one holding a one-way copy's
- * source first (its receiving copies wait for it); with none held, the removals that left it no copy (`gone`).
+ * The History entries turning it on puts back, in order: those of the Offs holding its tools, each once, the one holding a
+ * one-way copy's source first (its receiving copies wait for it); then the Offs that still keep an older copy for one of those
+ * tools (`older`), which find the tool's copy by then and leave their own in History, on offer. With none held, the removals
+ * that left it no copy (`gone`).
  */
 export function putBackOrder(skill: ItemRow): string[] {
   const held = skill.heldOff ?? [];
   if (!held.length) return skill.gone ? [skill.gone.history, ...(skill.gone.also ?? [])] : [];
   const sources = new Set(held.flatMap(entry => (entry.source ? [entry.source] : [])));
-  return [...new Set([...held].sort((first, second) => Number(sources.has(second.tool)) - Number(sources.has(first.tool))).map(entry => entry.history))];
+  const holders = [...held].sort((first, second) => Number(sources.has(second.tool)) - Number(sources.has(first.tool))).map(entry => entry.history);
+  return [...new Set(holders), ...new Set(held.flatMap(entry => entry.older ?? []))];
 }
 
 /** What one tool has of an item, as its mark on the row shows it. */

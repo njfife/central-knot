@@ -75,7 +75,7 @@ export type SyncGate =
   | { state: 'needs-resume'; reason: string }
   | { state: 'stopped'; reason: string; /** Set when another build syncs this home: its identity, its name, and whether it is open now (where that can be told). */ owner?: { build: string; name: string; running?: boolean } };
 
-export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** A refusal made before anything was changed, the record included: the click did nothing. */ unchanged?: true; /** A take-over step: a link replaced by a real copy, a tool given its own copy, or the shared copy removed (or, in its Undo, each put back). */ tookOver?: 'link' | 'placed' | 'shared'; /** With `tookOver` 'shared': the folder the copy was removed from. */ folder?: string; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true; /** `held`: waits for Write to Claude Code (MCP-02), as it should (not a failure). */ waits?: true; }
+export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** A refusal made before anything was changed, the record included: the click did nothing. */ unchanged?: true; /** A take-over step: a link replaced by a real copy, a tool given its own copy, or the shared copy removed (or, in its Undo, each put back). */ tookOver?: 'link' | 'placed' | 'shared'; /** With `tookOver` 'shared': the folder the copy was removed from. */ folder?: string; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true; /** `held`: waits for Write to Claude Code (MCP-02), as it should (not a failure). */ waits?: true; /** `stayed`, an agent turned on again: the tool's own copy, which turned up while it was off there, stays, and the copy kept when it was turned off is in History (Use the kept copy). */ turnedUp?: true; }
 
 export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
 
@@ -307,7 +307,8 @@ export interface SkillFacts {
    * Rule A as the page reads it (historyrules.ts offTools): each tool a standing Off holds, with that Off's History entry, which
    * puts its copy back. A tool listed here with a copy again had one turn up since (itemrow.ts offHeldIn, turnedUpIn).
    */
-  heldOff?: { tool: HarnessId; history: string; /** Agents: a one-way copy, and the tool it receives from: turned on after that one. */ source?: HarnessId }[];
+  heldOff?: { tool: HarnessId; history: string; /** Agents: a one-way copy, and the tool it receives from: turned on after that one. */ source?: HarnessId;
+    /** Offs before `history` that still keep a copy for this tool (a later Off took the tool over from them), newest first: turned on after it, so each leaves its kept copy in History, on offer. */ older?: string[] }[];
 }
 
 /** An item with no copy left, from the History event that took the last one: when, and the event that puts it back. */
@@ -484,16 +485,18 @@ export interface HistoryEvent {
   /** 'restored' with putBackFrom: the Off or the deletion it put copies back from (whole, or part-way), by id. */
   reverses?: string;
   /**
-   * An agent's tools whose own copy turned up while an Off held them (made there by hand) and was left where it is, each with the
-   * copy History keeps for that tool (the one the Off removed): never a copy this entry removed or wrote. On a put-back
-   * ('restored' with putBackFrom): the tools it turned on with the copy it found; its row offers Use the kept copy for each
-   * (historyrules.ts keptCopyTools), and its Undo has an Off hold them again. On that Off ('removed', made by Turn off again):
-   * the tools it holds without having removed anything.
+   * An agent's kept copies that the entry names without having removed or written them itself. On a put-back ('restored' with
+   * putBackFrom): the copies it left in History, each because its tool had a copy by then: the tool's own, which turned up
+   * while an Off held the tool (made there by hand), or the newer kept copy just put back where an older Off had kept one too.
+   * Its row offers Use the kept copy for them (historyrules.ts keptCopiesOffered), and its Undo has an Off hold them again. On
+   * that Off or deletion ('removed' or 'deleted', made by Turn off again or Delete again): the copies it holds besides those it
+   * removed.
    */
   turnedUp?: HistoryEvent['losers'];
   /**
-   * 'chosen', an agent's Use the kept copy: the put-back entry (by id) whose row offered it. The tool in `winner` took back the
-   * copy an Off had kept for it, in place of the copy in `losers` (none: the tool had no copy), which its Undo puts back.
+   * 'chosen', an agent's Use the kept copy: the put-back entry (by id) whose row offered it. The tool in `winner` took back a
+   * copy an Off had kept for it (`winner.kept`: which), in place of the copy in `losers` (none: the tool had no copy), which
+   * its Undo puts back.
    */
   keptFrom?: string;
   /** 'added': copies for tools a managed skill syncs to again; Undo removes them and stops syncing there, and the skill stays managed. */
@@ -507,7 +510,7 @@ export interface HistoryEvent {
   addedId?: string;
   /** The item's record as it was before this entry, which its Undo puts back (RecordBefore): a choice's, or an agent's Off, deletion or put-back. */
   before?: RecordBefore;
-  winner?: { tool: HarnessId; hash: string };
+  winner?: { tool: HarnessId; hash: string; /** Use the kept copy: which kept copy of that content it wrote, as the store names it. */ kept?: string };
   /** Content that gave way, kept in Central Knot's store. */
   losers: { tool: HarnessId; hash: string; /** MCP, or an agent's: which of the kept copies of that content from that tool this is (the store keeps each under its own name), for an exact put-back. */ kept?: string; /** 'removed', or an agent's deletion: the copy's own name in its tool as it was (a skill's folder, an agent's file name without its suffix), to put it back under the same name. */ folder?: string;
     /** 'removed', managed: the content last synced to that copy, so Restore puts its sync record back and an unsynced edit in it spreads. */ synced?: string;
@@ -515,7 +518,7 @@ export interface HistoryEvent {
     /** 'removed', or an agent's deletion: the copy was a link with this text; putting it back makes the link again. */ linkTo?: string;
     /** 'chosen', a skill's or an agent's: when the replaced copy was last edited (its file's time), which its Undo gives it again. */ editedAt?: string;
     /** 'removed' or 'deleted', an agent's: its copy as the record had it (none: not synced there), recorded again when it is put back. */ record?: AgentCopyRecord;
-    /** In `turnedUp` on a put-back: the copy found in the tool was this kept one, byte for byte, so there is no kept copy to offer. */ same?: true }[];
+    /** In `turnedUp` on a put-back: the tool holds this kept copy already, byte for byte (found so by the put-back, or by Use the kept copy since), so there is no kept copy to offer. */ same?: true }[];
   /** The synced content before this event, to put back on Undo. */
   previous?: string;
   orderProved: boolean;

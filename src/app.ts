@@ -343,7 +343,7 @@ export const applyClick = (click: Click) => busy(click.putBack ? 'Putting it bac
   setHome(await api().refresh());
   // History as the click left it: the page reads it (an empty page after a deletion, the History page's actions).
   if (back || result?.made?.length) await putHistory();
-  const { ours, did, refusal, failed, differs, notIn } = clickResults([...(back?.results ?? []), ...(result?.results ?? [])], names);
+  const { ours, did, refusal, failed, differs, notIn, keptOwn } = clickResults([...(back?.results ?? []), ...(result?.results ?? [])], names);
   // A refusal is the click's result, said in its own band, not again among the failures.
   kindPages[click.kind].keep(ours.filter(entry => entry !== refusal), result?.notices);
   if (result?.stopped) { tell({ page: state.page, items: click.items, warn: true, band: true, text: result.stopped }); return; }
@@ -363,11 +363,12 @@ export const applyClick = (click: Click) => busy(click.putBack ? 'Putting it bac
   const wrote = [...new Set(ours.filter(entry => entry.outcome === 'written' && entry.harness).map(entry => entry.harness!))];
   const said = changes === 'choose' ? `${click.items[0]} is back.` : typeof click.said === 'string' ? click.said : click.said([...notIn, ...(plugged?.failedIn ?? [])], wrote);
   const choose = differs || changes === 'choose' ? ' Its copies differ: choose which copy every tool uses.' : '';
+  const own = keptOwnSaid(keptOwn);
   // A skill taken over (its links and shared copy, when it was turned on): what that did to them.
   const outside = sent.some(change => change.takeOver) ? tookOverSentence(ours) : '';
   const plugText = !plugged ? '' : plugged.failed.length || plugged.stopped ? switchProblems(plugged) : click.plugins?.said ?? '';
   // A hold that came after the change is said beside what was done, not dropped.
-  const text = done || !refusal ? [said, plugText, outside, click.also, click.note, refusal?.message].filter(Boolean).join(' ') + choose : refusal.message;
+  const text = done || !refusal ? [said, own, plugText, outside, click.also, click.note, refusal?.message].filter(Boolean).join(' ') + choose : refusal.message;
   const switchedBack = plugged?.back ?? [];
   // A skill put back is taken out again with Remove, its copies kept in History.
   const undo = click.undoing || !done ? undefined : back && click.kind === 'skills' ? () => takeOutAgain(click)
@@ -377,6 +378,13 @@ export const applyClick = (click: Click) => busy(click.putBack ? 'Putting it bac
     text, act: undo ? { label: 'Undo', id: 'outcome-undo', title: back ? 'Take it out of every tool again; History keeps it' : 'Put back everything this did', run: undo } : undefined });
   for (const item of click.items) flashRow(item);
 });
+
+/** After turning an agent on where tools had a copy of their own by then: those copies stay, and what History kept is still there to use. */
+function keptOwnSaid(tools: HarnessId[]): string {
+  if (!tools.length) return '';
+  const one = tools.length === 1;
+  return `${andList(tools.map(toolName))} ${one ? 'keeps its own copy' : 'keep their own copies'}, which turned up since; ${one ? 'the one' : 'those'} kept when you turned it off ${one ? 'is' : 'are'} in History.`;
+}
 
 /** Puts back an item's removals from History, the latest first (`tool`: that tool's copy alone). One that can't go back stops it only if it is the first. */
 async function restoreAll(ids: string[], tool?: HarnessId): Promise<{ results: DestinationResult[]; made: string[]; stopped?: string }> {

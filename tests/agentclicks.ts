@@ -139,7 +139,7 @@ export async function choose(box: Box, use: HarnessId, context = box.context) {
 export async function toolOn(box: Box, tool: HarnessId, context = box.context) {
   const entry = (await factOf(box, context))?.heldOff?.find(held => held.tool === tool);
   if (!entry) return undefined;
-  return putBackThen(box, [entry.history], tool, () => [], context);
+  return putBackThen(box, [entry.history, ...(entry.older ?? [])], tool, () => [], context);
 }
 /** The click's Undo (app.ts undoClick): each entry it made, in undoOrder; then the record, when the entries didn't put it back. */
 export async function undo(box: Box, click: Clicked, context = box.context): Promise<McpResult[]> {
@@ -170,9 +170,12 @@ export async function historyActions(box: Box, context = box.context) {
   });
 }
 
-/** Runs `body` on the home as it is, then puts the home back exactly (the record holds absolute paths, so it is moved, not copied elsewhere). */
-export async function trial<T>(box: Box, body: () => Promise<T>): Promise<T> {
-  const saved = `${box.base}-trial`;
+/**
+ * Runs `body` on the home as it is, then puts the home back exactly (the record holds absolute paths, so it is moved, not copied
+ * elsewhere). A trial inside a trial gives its saved copy a `name` of its own.
+ */
+export async function trial<T>(box: Box, body: () => Promise<T>, name = 'trial'): Promise<T> {
+  const saved = `${box.base}-${name}`;
   await rm(saved, { recursive: true, force: true });
   await cp(box.base, saved, { recursive: true, verbatimSymlinks: true, preserveTimestamps: true });
   try { return await body(); }

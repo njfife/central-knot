@@ -1,21 +1,24 @@
-// The sequences the step-4 judges found one click past the earlier tests (FIX-STEP4-R2: Fable's S1–S4, N1, N2, N4, N5 and
-// probe 7; Opus's N1, N2, N5, N8, N11, N12), replayed as the page clicks them (agentclicks.ts) on real files in temp homes, each
-// with the next plain pass and the next click. Rule A: a tool a standing Off holds gets no copy but that Off's own, put back.
-// Rule B: an entry's action stands only while no later Off, deletion, put-back or copy choice changed what it acts on.
+// Sequences of clicks on one agent, replayed as the page and History send them (agentclicks.ts) on real files in temp homes: Off,
+// On, a tool's own switch, copy choices, Delete everywhere and History's actions, with copies made by hand in between. Each
+// test is one sequence that once went wrong one click or one pass later than the tests before it looked, so each asserts the
+// next plain pass and the next click too. Three rules run through them (historyrules.ts):
+// - Rule A: a tool a standing Off holds gets no copy but that Off's own, put back;
+// - Rule B: an entry's action stands only while no later Off, deletion, put-back or copy choice changed what it acts on;
+// - a copy an Off kept is never left with no way back (Use the kept copy).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, lstat, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { applyAgents, restoreAgent } from '../src/agents.ts';
 import { readHistory } from '../src/manage.ts';
-import { choose, claudeAgent, codexOwn, deleteEverywhere, factOf, fields, files, filesOf, historyActions, historyOf, pass, readOf, recordOf, sandbox, synced, toolOff, toolOn, tools, turnOff, turnOn, undo, write, type Box } from './agentclicks.ts';
+import { age, choose, claudeAgent, codexOwn, deleteEverywhere, factOf, fields, files, filesOf, historyActions, historyOf, pass, prune, readOf, recordOf, sandbox, synced, toolOff, toolOn, tools, turnOff, turnOn, undo, write, type Box } from './agentclicks.ts';
 
 const offered = async (box: Box) => (await historyActions(box)).filter(action => action.event.kind !== 'added').map(action => `${action.label} (${action.event.kind}${action.event.putBackFrom ? `/${action.event.putBackFrom}` : ''})`);
 const entryOf = async (box: Box, id: string) => (await readHistory(box.context)).find(event => event.id === id)!;
 const heldIn = async (box: Box) => ((await factOf(box))?.heldOff ?? []).map(entry => entry.tool).sort();
 const asRoot = process.getuid?.() === 0;
 
-test('S1: an earlier On’s Turn off again is not offered after a later Off, and the row’s On puts back the newer copy that Off kept', async () => {
+test('An earlier On’s Turn off again is not offered after a later Off, and the row’s On puts back the newer copy that Off kept', async () => {
   const box = await sandbox();
   try {
     await synced(box);
@@ -33,7 +36,7 @@ test('S1: an earlier On’s Turn off again is not offered after a later Off, and
   } finally { await box.cleanup(); }
 });
 
-test('S2: Restore of an older Delete everywhere waits while a newer agent of that name is off, and never writes over it', async () => {
+test('Restore of an older Delete everywhere waits while a newer agent of that name is off, and never writes over it', async () => {
   const box = await sandbox();
   try {
     await synced(box);
@@ -53,7 +56,7 @@ test('S2: Restore of an older Delete everywhere waits while a newer agent of tha
   } finally { await box.cleanup(); }
 });
 
-test('S3: a copy choice on a row with a tool off puts that copy back first, so the choice replaces it and its Undo gives it back', async () => {
+test('A copy choice on a row with a tool off puts that copy back first, so the choice replaces it and its Undo gives it back', async () => {
   const box = await sandbox();
   try {
     await write(box, 'claude-cli', claudeAgent('Claude’s.\n'));
@@ -72,7 +75,7 @@ test('S3: a copy choice on a row with a tool off puts that copy back first, so t
   } finally { await box.cleanup(); }
 });
 
-test('S4: Off, On, Off: the first On’s Turn off again is not offered, and asked for anyway it says why and does nothing', async () => {
+test('Off, On, Off: the first On’s Turn off again is not offered, and asked for anyway it says why and does nothing', async () => {
   const box = await sandbox();
   try {
     await synced(box);
@@ -86,7 +89,7 @@ test('S4: Off, On, Off: the first On’s Turn off again is not offered, and aske
   } finally { await box.cleanup(); }
 });
 
-test('N1 (Fable): Undo of Delete everywhere on an Off row leaves every tool off as before; one tool’s switch then gives the others nothing', async () => {
+test('Undo of Delete everywhere on an Off row leaves every tool off as before; one tool’s switch then gives the others nothing', async () => {
   const box = await sandbox();
   try {
     await synced(box);
@@ -101,7 +104,7 @@ test('N1 (Fable): Undo of Delete everywhere on an Off row leaves every tool off 
   } finally { await box.cleanup(); }
 });
 
-test('N2 (Fable): Undo of an On whose copies were all edited by hand since takes nothing out, writes no entry and keeps its Undo', async () => {
+test('Undo of an On whose copies were all edited by hand since takes nothing out, writes no entry and keeps its Undo', async () => {
   const box = await sandbox();
   try {
     await synced(box);
@@ -119,7 +122,7 @@ test('N2 (Fable): Undo of an On whose copies were all edited by hand since takes
   } finally { await box.cleanup(); }
 });
 
-test('N4 (Fable): an Off that stopped part-way (a folder read-only), then Off again: each tool’s kept copy goes back, the oldest Off’s first', { skip: asRoot }, async () => {
+test('An Off that stopped part-way (a folder read-only), then Off again: each tool’s kept copy goes back, the oldest Off’s first', { skip: asRoot }, async () => {
   const box = await sandbox();
   try {
     await synced(box);
@@ -135,7 +138,7 @@ test('N4 (Fable): an Off that stopped part-way (a folder read-only), then Off ag
   } finally { await chmod(join(box.home, '.claude/agents'), 0o755).catch(() => undefined); await box.cleanup(); }
 });
 
-test('N5 (Fable): a copy that turned up turns the agent on there with its own switch: not synced, nothing asked, and its Undo has it turned up again', async () => {
+test('A copy that turned up turns the agent on there with its own switch: not synced, nothing asked, and its Undo has it turned up again', async () => {
   const box = await sandbox();
   try {
     await synced(box);
@@ -152,7 +155,7 @@ test('N5 (Fable): a copy that turned up turns the agent on there with its own sw
   } finally { await box.cleanup(); }
 });
 
-test('Probe 7: Off in one tool, then everywhere, then that tool’s switch: synced, the others off; their On catches them up to its edit without a choice', async () => {
+test('Off in one tool, then everywhere, then that tool’s switch: synced, the others off; their On catches them up to its edit without a choice', async () => {
   const box = await sandbox();
   try {
     await synced(box);
@@ -172,7 +175,7 @@ test('Probe 7: Off in one tool, then everywhere, then that tool’s switch: sync
   } finally { await box.cleanup(); }
 });
 
-test('Seed 1001: an On that stopped part-way leaves that tool off, sync gives it nothing, and the next On puts back its own kept file', { skip: asRoot }, async () => {
+test('An On that stopped part-way leaves that tool off, sync gives it nothing, and the next On puts back its own kept file', { skip: asRoot }, async () => {
   const box = await sandbox();
   try {
     await synced(box);
@@ -187,7 +190,7 @@ test('Seed 1001: an On that stopped part-way leaves that tool off, sync gives it
   } finally { await chmod(join(box.home, '.copilot/agents'), 0o755).catch(() => undefined); await box.cleanup(); }
 });
 
-test('N1 (Opus): an On’s Turn off again waits while a later Off stands, and stands again once that Off is turned on', async () => {
+test('An On’s Turn off again waits while a later Off stands, and stands again once that Off is turned on', async () => {
   const box = await sandbox();
   try {
     await synced(box);
@@ -202,7 +205,7 @@ test('N1 (Opus): an On’s Turn off again waits while a later Off stands, and st
   } finally { await box.cleanup(); }
 });
 
-test('N2 (Opus): a Restore’s Delete again is not offered after a later Delete everywhere, and asked for anyway it changes nothing', async () => {
+test('A Restore’s Delete again is not offered after a later Delete everywhere, and asked for anyway it changes nothing', async () => {
   const box = await sandbox();
   try {
     await synced(box);
@@ -216,7 +219,7 @@ test('N2 (Opus): a Restore’s Delete again is not offered after a later Delete 
   } finally { await box.cleanup(); }
 });
 
-test('N5 (Opus): a one-way receiver’s Off is turned on from History only after its source: History’s Turn on says so', async () => {
+test('A one-way receiver’s Off is turned on from History only after its source: History’s Turn on says so', async () => {
   const box = await sandbox();
   try {
     await synced(box, claudeAgent(undefined, fields));
@@ -231,7 +234,7 @@ test('N5 (Opus): a one-way receiver’s Off is turned on from History only after
   } finally { await box.cleanup(); }
 });
 
-test('N8 (Opus): after a copy choice, an earlier On’s Turn off again is not offered; the choice’s Undo gives Codex its own copy back', async () => {
+test('After a copy choice, an earlier On’s Turn off again is not offered; the choice’s Undo gives Codex its own copy back', async () => {
   const box = await sandbox();
   try {
     await synced(box);
@@ -249,7 +252,7 @@ test('N8 (Opus): after a copy choice, an earlier On’s Turn off again is not of
   } finally { await box.cleanup(); }
 });
 
-test('N11 (Opus): Off, Delete everywhere, its Undo, then On: the deletion’s Delete again is not offered, and nothing is marked deleted', async () => {
+test('Off, Delete everywhere, its Undo, then On: the deletion’s Delete again is not offered, and nothing is marked deleted', async () => {
   const box = await sandbox();
   try {
     await synced(box);
@@ -263,7 +266,7 @@ test('N11 (Opus): Off, Delete everywhere, its Undo, then On: the deletion’s De
   } finally { await box.cleanup(); }
 });
 
-test('N12 (Opus): the long sequence one click further: after On and a choice, Delete again is refused and Codex keeps the chosen copy', async () => {
+test('The long sequence one click further: after On and a choice, Delete again is refused and Codex keeps the chosen copy', async () => {
   const box = await sandbox();
   try {
     await synced(box);
@@ -281,7 +284,7 @@ test('N12 (Opus): the long sequence one click further: after On and a choice, De
   } finally { await box.cleanup(); }
 });
 
-test('P1 (Opus): an agent file that is a link stays a link through Off and On, and an edit where it points still spreads', async () => {
+test('An agent file that is a link stays a link through Off and On, and an edit where it points still spreads', async () => {
   const box = await sandbox();
   try {
     const dotfiles = join(box.base, 'dotfiles', 'reviewer.md');
@@ -298,7 +301,7 @@ test('P1 (Opus): an agent file that is a link stays a link through Off and On, a
   } finally { await box.cleanup(); }
 });
 
-test('P3 (Opus): a copy that turned up differing only in that tool’s own fields is said to be its own, not “It has it already”, and its Undo holds it again', async () => {
+test('A copy that turned up differing only in that tool’s own fields is said to be its own, not “It has it already”, and its Undo holds it again', async () => {
   const box = await sandbox();
   try {
     // Codex's own field: its copy keeps `model = "gpt"` while the agent syncs two-way.
@@ -513,7 +516,8 @@ test('A copy Off kept stays reachable after On keeps a hand-made copy in its pla
     await write(box, 'claude-cli', claudeAgent('Made by hand while it was off.\n', 'model: haiku\n'));
     const hand = await readOf(box, 'claude-cli');
     const on = (await turnOn(box))!;
-    assert.match(on.results.find(entry => entry.harness === 'claude-cli')!.message, /That copy stays; the one kept when you turned it off is in History\.$/);
+    const found = on.results.find(entry => entry.harness === 'claude-cli')!;
+    assert.deepEqual([found.outcome, found.turnedUp, /That copy stays; the one kept when you turned it off is in History\.$/.test(found.message)], ['stayed', true, true]);
     const useKept = async () => (await historyActions(box)).find(action => action.label === 'Use the kept copy in Claude Code');
     const undoUse = async () => (await historyActions(box)).find(action => action.label === 'Undo in Claude Code');
     // Before the choice: the kept file goes back whole, the hand-made one goes to History, and its Undo brings that back.
@@ -550,5 +554,325 @@ test('Two files of one tool with the same name, description and prompt but other
     const useKept = (await historyActions(box)).find(action => action.label === 'Use the kept copy in Codex')!;
     assert.equal((await useKept.run()).stopped, undefined);
     assert.equal(await readOf(box, 'codex-cli'), withSettings);
+  } finally { await box.cleanup(); }
+});
+
+test('Off in the source’s tool changes nothing for the copies still on: they sync two-way as before, and On finds the source as it was', async () => {
+  const box = await sandbox();
+  try {
+    // Two-way from Copilot CLI, whose copy has no settings of its own; Claude Code's has, which are only its own.
+    await write(box, 'copilot-cli', claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }], { settleMs: 0 });
+    await write(box, 'claude-cli', claudeAgent(undefined, fields));
+    await pass(box);
+    const before = await recordOf(box);
+    assert.deepEqual([before?.origin, (await factOf(box))?.oneWay], ['copilot-cli', undefined]);
+    const off = (await toolOff(box, 'copilot-cli'))!;
+    assert.deepEqual([(await recordOf(box))?.origin, (await factOf(box))?.oneWay], ['copilot-cli', undefined], 'Claude Code doesn’t become the source of a one-way agent');
+    // An edit in Codex while Copilot CLI is off still reaches Claude Code.
+    await write(box, 'codex-cli', (await readOf(box, 'codex-cli'))!.replace('Be brief.', 'Edited in Codex.'));
+    await pass(box);
+    assert.match((await readOf(box, 'claude-cli'))!, /Edited in Codex/);
+    await undo(box, off);
+    await pass(box);
+    const after = await recordOf(box);
+    assert.deepEqual([after?.origin, after?.copies.filter(copy => copy.oneWay || copy.stopped), /Edited in Codex/.test((await readOf(box, 'copilot-cli'))!)], ['copilot-cli', [], true]);
+  } finally { await box.cleanup(); }
+});
+
+test('Undo of On leaves out again a tool that was left out before it, though On’s own pass had taken it back in and asked for a choice', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    // Codex is left out of sync and has no copy; then Off, and a copy made by hand in Codex.
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: ['codex-cli'], seenManaged: true }], { settleMs: 0 });
+    await rm(join(box.home, files['codex-cli']));
+    await turnOff(box);
+    await write(box, 'codex-cli', codexOwn('Made by hand while it was off.'));
+    const before = { record: await recordOf(box), files: await filesOf(box) };
+    assert.deepEqual(before.record?.off, ['codex-cli']);
+    const on = (await turnOn(box))!;
+    assert.deepEqual([(await recordOf(box))?.off, on.results.some(entry => entry.differs)], [[], true], 'On syncs to every tool again, and Codex’s own copy waits for a choice');
+    await undo(box, on);
+    const after = await recordOf(box);
+    assert.deepEqual([after?.off, after?.state, await filesOf(box), (await pass(box)).writes], [['codex-cli'], before.record?.state, before.files, 0]);
+    // The next click, On again, asks as before.
+    assert.equal((await turnOn(box))!.results.some(entry => entry.differs), true);
+  } finally { await box.cleanup(); }
+});
+
+test('Choices are undone newest first: the older one’s Undo is refused while the newer stands, and goes through once that is undone', async () => {
+  const box = await sandbox();
+  try {
+    // Not synced, each tool with its own copy; two choices in a row.
+    await write(box, 'claude-cli', claudeAgent());
+    await write(box, 'copilot-cli', claudeAgent('Copilot’s own.\n'));
+    await write(box, 'codex-cli', codexOwn('You review code.\nBe brief.'));
+    const start = await filesOf(box);
+    await choose(box, 'claude-cli');
+    await write(box, 'codex-cli', codexOwn('Edited in Codex since.'));
+    await choose(box, 'copilot-cli');
+    const [older, newer] = (await historyOf(box)).filter(event => event.kind === 'chosen');
+    // The first replaced Copilot CLI's copy, the second Codex's: other tools, and still only the newer has its Undo.
+    assert.deepEqual(await offered(box), ['Undo choice in Codex (chosen)']);
+    assert.match((await restoreAgent(box.context, tools, older.id)).stopped ?? '', /chosen since, so that no longer applies/);
+    assert.equal((await restoreAgent(box.context, tools, newer.id)).stopped, undefined);
+    assert.deepEqual(await offered(box), ['Undo choice in Copilot CLI (chosen)']);
+    assert.equal((await restoreAgent(box.context, tools, older.id)).stopped, undefined);
+    assert.deepEqual([(await filesOf(box))['copilot-cli'], (await recordOf(box))?.state, (await pass(box)).writes], [start['copilot-cli'], 'dont-share', 0]);
+  } finally { await box.cleanup(); }
+});
+
+test('A choice’s Undo records no copy for a tool an Off holds, though a copy made by hand is there: that copy stays the tool’s own', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    await write(box, 'codex-cli', (await readOf(box, 'codex-cli'))!.replace('Be brief.', 'Codex’s edit.'));
+    await choose(box, 'claude-cli');
+    await toolOff(box, 'copilot-cli');
+    await write(box, 'copilot-cli', claudeAgent('Made by hand in Copilot while it was off.\n'));
+    const hand = await readOf(box, 'copilot-cli');
+    const undoChoice = (await historyActions(box)).find(action => action.label.startsWith('Undo choice'))!;
+    assert.equal((await undoChoice.run()).stopped, undefined);
+    assert.deepEqual([(await recordOf(box))?.copies.map(copy => copy.tool).sort(), await heldIn(box)], [['claude-cli', 'codex-cli'], ['copilot-cli']]);
+    // The next pass spreads Codex's edit, back as before the choice, to Claude Code only.
+    await pass(box);
+    assert.deepEqual([await readOf(box, 'copilot-cli'), await heldIn(box), /Codex’s edit/.test((await readOf(box, 'claude-cli'))!), (await pass(box)).writes], [hand, ['copilot-cli'], true, 0]);
+  } finally { await box.cleanup(); }
+});
+
+test('An On that only found a tool’s own copy is undone without removing anything: an Off holds that tool again with the kept copy, which On puts back once the own copy is gone', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    const keptFile = await readOf(box, 'codex-cli');
+    await toolOff(box, 'codex-cli');
+    await write(box, 'codex-cli', codexOwn('Made by hand while it was off.'));
+    const hand = await readOf(box, 'codex-cli');
+    const on = (await toolOn(box, 'codex-cli'))!;
+    assert.deepEqual(await offered(box), ['Undo turn on in Codex (restored/off)', 'Use the kept copy in Codex (restored/off)']);
+    const undone = await restoreAgent(box.context, tools, on.made[0]);
+    assert.deepEqual(undone.results.map(entry => [entry.harness, entry.outcome, entry.message]), [['codex-cli', 'stayed', 'Its own copy is left alone again.']]);
+    const again = (await historyOf(box)).at(-1)!;
+    assert.deepEqual([again.kind, again.losers, again.turnedUp?.map(copy => copy.tool), await readOf(box, 'codex-cli'), await heldIn(box), (await pass(box)).writes], ['removed', [], ['codex-cli'], hand, ['codex-cli'], 0]);
+    // The own copy removed by hand: the row's On now puts the kept one back.
+    await rm(join(box.home, files['codex-cli']));
+    await turnOn(box);
+    assert.deepEqual([await readOf(box, 'codex-cli'), (await pass(box)).writes], [keptFile, 0]);
+  } finally { await box.cleanup(); }
+});
+
+test('History’s Turn on of an older Off puts back only the tools it still holds: one a later Off took over stays off, with that Off’s own copy', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    await turnOff(box);
+    await write(box, 'codex-cli', codexOwn('Made by hand while it was off.'));
+    const hand = await readOf(box, 'codex-cli');
+    await toolOff(box, 'codex-cli');
+    const older = (await historyActions(box)).find(action => action.label === 'Turn on in Claude Code and Copilot CLI')!;
+    assert.equal((await older.run()).stopped, undefined);
+    assert.deepEqual([await readOf(box, 'codex-cli'), await heldIn(box)], [undefined, ['codex-cli']]);
+    await toolOn(box, 'codex-cli');
+    assert.equal(await readOf(box, 'codex-cli'), hand);
+  } finally { await box.cleanup(); }
+});
+
+test('History’s Turn on puts a one-way agent’s source back first, whatever its place among the tools, so no receiving copy is left waiting for it', async () => {
+  const box = await sandbox();
+  try {
+    // The source is Codex, last among the tools: its file holds a setting of its own.
+    await write(box, 'codex-cli', codexOwn('You review code.').replace('name = "reviewer"', 'name = "reviewer"\nmodel = "gpt-5"'));
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }], { settleMs: 0 });
+    assert.equal((await factOf(box))?.oneWay?.from, 'codex-cli');
+    const before = await filesOf(box);
+    await turnOff(box);
+    const turnOnAll = (await historyActions(box)).find(action => action.label === 'Turn on in all 3 tools')!;
+    assert.deepEqual((await turnOnAll.run()).results.map(entry => entry.outcome), ['written', 'written', 'written']);
+    assert.deepEqual([await filesOf(box), await heldIn(box), (await pass(box)).writes], [before, [], 0]);
+  } finally { await box.cleanup(); }
+});
+
+test('History keeps every later entry of an agent beside an Off it keeps past its days: a newer Off that took a tool over still puts its own copy back', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    await turnOff(box);
+    await write(box, 'codex-cli', codexOwn('Made by hand while it was off.'));
+    const hand = await readOf(box, 'codex-cli');
+    await toolOff(box, 'codex-cli');
+    await age(box, 91);
+    await prune(box.context);
+    assert.deepEqual((await historyOf(box)).filter(event => event.turnedOff).map(event => event.losers.map(loser => loser.tool)), [tools, ['codex-cli']]);
+    await turnOn(box);
+    assert.equal(await readOf(box, 'codex-cli'), hand);
+  } finally { await box.cleanup(); }
+});
+
+test('Use the kept copy that can’t write its folder changes nothing and stays offered; it waits while an Off holds that tool', { skip: asRoot }, async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    const keptFile = await readOf(box, 'codex-cli');
+    await turnOff(box);
+    await write(box, 'codex-cli', codexOwn('Made by hand while it was off.'));
+    const on = (await turnOn(box))!;
+    const useKept = async () => (await historyActions(box)).find(action => action.label === 'Use the kept copy in Codex');
+    const before = { files: await filesOf(box), history: JSON.stringify(await historyOf(box)) };
+    await chmod(dirname(join(box.home, files['codex-cli'])), 0o555);
+    const blocked = await (await useKept())!.run();
+    await chmod(dirname(join(box.home, files['codex-cli'])), 0o755);
+    assert.match(blocked.stopped ?? '', /^Could not put it back in Codex: its agents folder can’t be written\.$/);
+    assert.deepEqual([await filesOf(box), JSON.stringify(await historyOf(box)), !!(await useKept())], [before.files, before.history, true]);
+    // While an Off holds Codex it is not offered, and asked for anyway (a page read before) it says to turn it on first.
+    await toolOff(box, 'codex-cli');
+    assert.equal(await useKept(), undefined);
+    assert.equal((await restoreAgent(box.context, tools, on.made[0], { keptIn: 'codex-cli' })).stopped, 'reviewer is off in Codex now. Turn it on there first.');
+    await toolOn(box, 'codex-cli');
+    assert.equal((await (await useKept())!.run()).stopped, undefined);
+    assert.deepEqual([await readOf(box, 'codex-cli'), (await pass(box)).writes], [keptFile, 0]);
+  } finally { await chmod(dirname(join(box.home, files['codex-cli'])), 0o755).catch(() => undefined); await box.cleanup(); }
+});
+
+test('Two copies made by hand in a tool while it was off, each turned off in turn: every kept copy still has a way back, the oldest too', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    await write(box, 'codex-cli', (await readOf(box, 'codex-cli'))!.replace('name = "reviewer"', 'name = "reviewer"\nmodel = "gpt-5"'));
+    await pass(box);
+    const first = await readOf(box, 'codex-cli');
+    await toolOff(box, 'codex-cli');
+    await write(box, 'codex-cli', codexOwn('Second, made by hand.'));
+    const second = await readOf(box, 'codex-cli');
+    await toolOff(box, 'codex-cli');
+    await write(box, 'codex-cli', codexOwn('Third, made by hand.'));
+    const third = await readOf(box, 'codex-cli');
+    // Codex's own switch turns it on with the third copy; History keeps the second and the first.
+    await toolOn(box, 'codex-cli');
+    assert.deepEqual([await readOf(box, 'codex-cli'), await heldIn(box)], [third, []]);
+    const useKept = async () => (await historyActions(box)).find(action => action.label === 'Use the kept copy in Codex')!;
+    // Each click gives the next kept copy not in place; what it replaces has its own Undo.
+    await (await useKept()).run();
+    assert.equal(await readOf(box, 'codex-cli'), second);
+    await (await useKept()).run();
+    assert.equal(await readOf(box, 'codex-cli'), first);
+    await (await useKept()).run();
+    assert.equal(await readOf(box, 'codex-cli'), second);
+    const undoUse = (await historyActions(box)).filter(action => action.label === 'Undo in Codex');
+    assert.equal(undoUse.length, 1, 'only the latest use has its Undo: the earlier ones ended with it');
+    await undoUse[0].run();
+    assert.deepEqual([await readOf(box, 'codex-cli'), (await pass(box)).writes, (await pass(box)).writes], [first, 0, 0]);
+  } finally { await box.cleanup(); }
+});
+
+test('An Off that holds two kept copies for one tool puts the newer back and leaves the older in History, still offered', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    const first = await readOf(box, 'codex-cli');
+    await toolOff(box, 'codex-cli');
+    await write(box, 'codex-cli', codexOwn('Second, made by hand.'));
+    const second = await readOf(box, 'codex-cli');
+    await toolOff(box, 'codex-cli');
+    await write(box, 'codex-cli', codexOwn('Third, made by hand.'));
+    // Turned on with the third copy, and that undone: one Off holds Codex again, with both kept copies and nothing removed.
+    await toolOn(box, 'codex-cli');
+    await (await historyActions(box)).find(action => action.label === 'Undo turn on in Codex')!.run();
+    const off = (await historyOf(box)).at(-1)!;
+    assert.deepEqual([off.losers, off.turnedUp?.map(copy => copy.tool)], [[], ['codex-cli', 'codex-cli']]);
+    // The third copy removed by hand: On puts the second back, and the first is offered.
+    await rm(join(box.home, files['codex-cli']));
+    await turnOn(box);
+    assert.equal(await readOf(box, 'codex-cli'), second);
+    await (await historyActions(box)).find(action => action.label === 'Use the kept copy in Codex')!.run();
+    assert.deepEqual([await readOf(box, 'codex-cli'), (await pass(box)).writes], [first, 0]);
+  } finally { await box.cleanup(); }
+});
+
+test('History’s Turn on of an older Off whose tool a later Off took over leaves it open for that tool: once the later Off is turned on, its own kept copy is still offered', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    const first = await readOf(box, 'codex-cli');
+    await turnOff(box);
+    await write(box, 'codex-cli', codexOwn('Second, made by hand.'));
+    await toolOff(box, 'codex-cli');
+    await write(box, 'codex-cli', codexOwn('Third, made by hand.'));
+    // The older Off puts back what it still holds, and is not spent: Codex's first copy is still its to give.
+    await (await historyActions(box)).find(action => action.label === 'Turn on in Claude Code and Copilot CLI')!.run();
+    const older = (await historyOf(box)).find(event => event.turnedOff)!;
+    assert.deepEqual([older.undoneBy, older.restoredTools], [undefined, ['claude-cli', 'copilot-cli']]);
+    await toolOn(box, 'codex-cli');
+    const useKept = async () => (await historyActions(box)).find(action => action.label === 'Use the kept copy in Codex')!;
+    await (await useKept()).run();
+    await (await useKept()).run();
+    assert.deepEqual([await readOf(box, 'codex-cli'), (await historyOf(box)).find(event => event.id === older.id)?.undoneBy !== undefined], [first, true]);
+  } finally { await box.cleanup(); }
+});
+
+test('Delete everywhere that leaves one tool’s copy (its folder read-only) leaves that copy its tool’s own, off the record', { skip: asRoot }, async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    await chmod(dirname(join(box.home, files['copilot-cli'])), 0o555);
+    await deleteEverywhere(box);
+    await chmod(dirname(join(box.home, files['copilot-cli'])), 0o755);
+    const record = await recordOf(box);
+    assert.deepEqual([record?.state, record?.copies, Object.keys((await factOf(box))!.copies)], ['dont-share', [], ['copilot-cli']]);
+  } finally { await chmod(dirname(join(box.home, files['copilot-cli'])), 0o755).catch(() => undefined); await box.cleanup(); }
+});
+
+test('Undo of Use the kept copy needs only its own entry: it still goes through after History’s days dropped the On that offered it', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    await turnOff(box);
+    await write(box, 'codex-cli', codexOwn('Made by hand while it was off.'));
+    const hand = await readOf(box, 'codex-cli');
+    await toolOn(box, 'codex-cli');
+    await age(box, 91);
+    await (await historyActions(box)).find(action => action.label === 'Use the kept copy in Codex')!.run();
+    // The rest is turned on: nothing keeps the old entries any longer, and they go.
+    await (await historyActions(box)).find(action => action.label === 'Turn on in Claude Code and Copilot CLI')!.run();
+    assert.deepEqual((await historyOf(box)).map(event => event.kind), ['chosen', 'restored']);
+    assert.equal((await (await historyActions(box)).find(action => action.label === 'Undo in Codex')!.run()).stopped, undefined);
+    assert.equal(await readOf(box, 'codex-cli'), hand);
+  } finally { await box.cleanup(); }
+});
+
+
+test('The kept copy never becomes the synced copy by itself: where it differs from what is synced it waits for a choice, and a hand edit since keeps it from its Undo', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    await turnOff(box);
+    await write(box, 'codex-cli', codexOwn('Made by hand while it was off.'));
+    await turnOn(box);
+    // Every tool takes Codex's hand-made copy; then the kept one goes back in Codex, and differs from what is synced.
+    await choose(box, 'codex-cli');
+    await (await historyActions(box)).find(action => action.label === 'Use the kept copy in Codex')!.run();
+    const waits = await pass(box);
+    assert.deepEqual([waits.writes, waits.results.some(entry => entry.differs), /Made by hand/.test((await readOf(box, 'claude-cli'))!)], [0, true, true]);
+    // Changed by hand since, the copy there is the person's to keep: the Undo of the use writes nothing over it.
+    await write(box, 'codex-cli', codexOwn('Edited again by hand.'));
+    const undoUse = (await historyActions(box)).find(action => action.label === 'Undo in Codex')!;
+    assert.equal((await undoUse.run()).stopped, 'Codex’s copy of reviewer changed since, so nothing was undone here.');
+  } finally { await box.cleanup(); }
+});
+
+test('Where the tool already holds the kept copy, byte for byte, Use the kept copy says so once and is offered no more', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    const keptFile = await readOf(box, 'codex-cli');
+    await turnOff(box);
+    await write(box, 'codex-cli', codexOwn('Made by hand while it was off.'));
+    await turnOn(box);
+    // Every tool takes Claude Code's copy: Codex's file is then what the kept copy was.
+    await choose(box, 'claude-cli');
+    assert.equal(await readOf(box, 'codex-cli'), keptFile);
+    const useKept = async () => (await historyActions(box)).find(action => action.label === 'Use the kept copy in Codex');
+    const already = await (await useKept())!.run();
+    assert.deepEqual([already.stopped, already.results.map(entry => entry.message), await useKept()], [undefined, ['Codex has that copy already.'], undefined]);
   } finally { await box.cleanup(); }
 });

@@ -13,7 +13,7 @@
 //   tool's own switch, nothing is removed, and its entries keep their actions for History's days. Read by History's action
 //   table (historyactions.ts offered, drawn by historypage.ts), which shows sinceWords in place of the action, and by
 //   agents.ts restoreAgent, which refuses an ended action in the same words. One action outlives Rule B: an On's "Use the kept
-//   copy" (keptCopyTools).
+//   copy" (keptCopiesOffered).
 // Entries are in History's order (oldest first); "later" means after in that list. A deletion ends what came before it by time.
 // Worked examples on plain entries: tests/historyactions.test.ts.
 import type { HarnessId, HistoryEvent } from './types.ts';
@@ -151,6 +151,14 @@ const unchangedOff = (event: HistoryEvent, events: HistoryEvent[]) => {
  * sync or any click, but this Off's own, put back. Its Off row, sync, every click and History's prune read it.
  */
 export const offTools = (event: HistoryEvent, events: HistoryEvent[]) => (deletedSince(event, events) ? [] : unchangedOff(event, events));
+/**
+ * The Offs of item `key` that still keep a copy for `tool` though a later Off holds it now (that one took the tool over),
+ * newest first. Once the holder's copy is back, the newest of these holds the tool again, its copy there one that turned up.
+ * So turning the tool on puts the holder back and then each of these: it finds the tool's copy, and leaves its own kept copy
+ * in History, on offer (itemrow.ts putBackOrder).
+ */
+export const offsWaitingFor = (events: HistoryEvent[], key: string, tool: HarnessId) =>
+  events.filter(event => event.key === key && isOff(event) && !deletedSince(event, events) && reach.off.changes(event).includes(tool) && !unchangedOff(event, events).includes(tool)).reverse();
 /** Every tool a standing Off of item `key` holds (offTools). */
 export const heldTools = (events: HistoryEvent[], key: string) => [...new Set(events.filter(event => event.key === key).flatMap(event => offTools(event, events)))];
 
@@ -177,21 +185,34 @@ export const sinceWords = (ending: HistoryEvent) => (ending.kind === 'deleted' ?
   : ending.kind === 'chosen' ? 'Chosen since' : ending.putBackFrom === 'off' ? 'Turned on since' : 'Restored since');
 
 /**
- * The tools for which `on`, an On, still offers "Use the kept copy". Turning the agent on found the tool's own copy there and
- * left it (`turnedUp`), so the copy the Off had kept for that tool can come back only from this entry. That is offered for as
- * long as History keeps the entry, whatever is clicked later (a copy choice doesn't end it), but not:
- * - while the kept copy is in use there: a use of it (a 'kept-copy' entry naming this On) that Rule B hasn't ended or its Undo undone;
- * - where the copy found was the kept one already, byte for byte (`same`);
+ * The kept copies that `on`, an On, still offers with "Use the kept copy", at most one per tool. Turning the agent on left
+ * them out (`turnedUp`): the tool had a copy of its own there, or an older Off had kept a copy for a tool a later Off took
+ * over. So each can come back only from this entry, which offers it for as long as History keeps the entry, whatever is
+ * clicked later (a copy choice doesn't end it), but not:
+ * - while that kept copy is in use there: a use of it (a 'kept-copy' entry naming this On and that copy) that Rule B hasn't
+ *   ended or its Undo undone. With several kept for one tool, the next one not in use is offered, so each has its turn;
+ * - where the tool held the kept copy already, byte for byte (`same`);
  * - while an Off holds that tool (Rule A): it is offered again once that Off is turned on;
- * - once the On is undone (the Off that undid it holds that tool, kept copy and all) or the agent was deleted since (the
+ * - once the On is undone (the Off that undid it holds that tool, kept copies and all) or the agent was deleted since (the
  *   deletion's Restore brings this back).
  */
-export function keptCopyTools(on: HistoryEvent, events: HistoryEvent[]): HarnessId[] {
+export function keptCopiesOffered(on: HistoryEvent, events: HistoryEvent[]): HistoryEvent['losers'] {
   if (on.undoneBy || deletedSince(on, events)) return [];
   const held = heldTools(events, on.key);
-  const inUse = (tool: HarnessId) => events.some(use => use.keptFrom === on.id && use.winner?.tool === tool && !use.undoneBy && !endedBy(use, events));
-  return (on.turnedUp ?? []).filter(copy => !copy.same && !held.includes(copy.tool) && !inUse(copy.tool)).map(copy => copy.tool);
+  const inUse = (copy: HistoryEvent['losers'][number]) => events.some(use => use.keptFrom === on.id && use.winner?.tool === copy.tool && use.winner.kept === copy.kept
+    && use.winner.hash === copy.hash && !use.undoneBy && !endedBy(use, events));
+  const waiting = (on.turnedUp ?? []).filter(copy => !copy.same && !held.includes(copy.tool) && !inUse(copy));
+  return waiting.filter((copy, at) => waiting.findIndex(other => other.tool === copy.tool) === at);
 }
+
+/**
+ * The copies that Offs other than `by` still keep for `tool` and can no longer put back themselves, because `by`, a later Off,
+ * took that tool over from them (Rule A), each with its Off. The put-back of `by` takes them on (agents.ts putBackAgent), so
+ * no kept copy is left without a way back.
+ */
+export const keptByEarlierOffs = (by: HistoryEvent, events: HistoryEvent[], tool: HarnessId) =>
+  events.filter(off => off.id !== by.id && off.key === by.key && isOff(off) && !deletedSince(off, events))
+    .flatMap(off => heldCopies(off).filter(copy => copy.tool === tool && !off.restoredTools?.includes(tool)).map(copy => ({ off, copy })));
 
 /**
  * Whether History keeps `event` whatever its age (`cutoff`: the oldest moment it keeps otherwise): an Off, and the content it

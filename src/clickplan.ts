@@ -82,8 +82,9 @@ export const keptBack = (entry: DestinationResult) => entry.outcome === 'failed'
 /**
  * A click's own results, out of a pass that may have done more (with Sync on, every click is a full pass), and what they say:
  * whether it did anything, a hold on the whole item (`refusal`; its `unchanged` says the click did nothing at all), whether
- * something failed, the tools where it failed or was held (`notIn`), and whether its copies differ (waiting for a choice).
- * Neither copies that differ nor Claude Code waiting for its Write step is a failure.
+ * something failed, the tools where it failed or was held (`notIn`), whether its copies differ (waiting for a choice), and the
+ * tools that kept a copy of their own where turning it on found one (`keptOwn`). Neither copies that differ nor Claude Code
+ * waiting for its Write step is a failure.
  */
 export function clickResults(results: DestinationResult[], names: readonly string[]) {
   const own = new Set(names.map(name => name.toLowerCase()));
@@ -95,6 +96,7 @@ export function clickResults(results: DestinationResult[], names: readonly strin
     failed: ours.some(keptBack),
     notIn: [...new Set(ours.filter(entry => keptBack(entry) && entry.harness).map(entry => entry.harness!))],
     differs: ours.some(entry => entry.outcome === 'held' && entry.differs),
+    keptOwn: [...new Set(ours.filter(entry => entry.turnedUp && entry.harness).map(entry => entry.harness!))],
   };
 }
 

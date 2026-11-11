@@ -1,9 +1,11 @@
-// History's action table (historyactions.ts) and Rule B (historyrules.ts endedBy), on History entries as the agents engine writes
-// them: what each row offers, what it shows once something ended it, and what is said after its click.
+// History's rules (historyrules.ts: Rule A, where an agent is off; Rule B, endedBy; the kept copy's rule) and its action table
+// (historyactions.ts), on History entries as the agents engine writes them: what each row offers, what it shows once something
+// ended it, and what is said after its click. Entries are made oldest first: each `entry` is later than the ones before it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { afterWords, offered } from '../src/historyactions.ts';
-import { entryIs, heldTools, offTools } from '../src/historyrules.ts';
+import { entryIs, heldTools, keptCopiesOffered, offTools } from '../src/historyrules.ts';
+import { putBackOrder } from '../src/itemrow.ts';
 import type { DestinationResult, HarnessId, HistoryEvent } from '../src/types.ts';
 
 const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
@@ -14,7 +16,11 @@ const off = (losers: HarnessId[] = tools, more: Partial<HistoryEvent> = {}) => e
 const on = (losers: HarnessId[] = tools, more: Partial<HistoryEvent> = {}) => entry('restored', losers, { putBackFrom: 'off', ...more });
 /** `undone` undone by `by`, as the engine marks it. */
 const undid = (undone: HistoryEvent, by: HistoryEvent) => { undone.undoneBy = by.id; return by; };
+const choice = (losers: HarnessId[], more: Partial<HistoryEvent> = {}) => entry('chosen', losers, { winner: { tool: 'claude-cli', hash: 'h-chosen' }, ...more });
 const shown = (event: HistoryEvent, events: HistoryEvent[]) => { const { action, state } = offered(event, events, tools); return action ? action.label : state; };
+const also = (event: HistoryEvent, events: HistoryEvent[]) => offered(event, events, tools).also.map(action => action.label);
+const kept = (tool: HarnessId) => ({ tool, hash: `h-${tool}` });
+const keptOfferedIn = (on: HistoryEvent, events: HistoryEvent[]) => keptCopiesOffered(on, events).map(copy => copy.tool);
 const results = (outcome: DestinationResult['outcome'], ...harnesses: HarnessId[]) => harnesses.map(harness => ({ item: 'reviewer', harness, outcome, message: '' }));
 
 test('An Off offers Turn on where it still holds a tool; once turned on it says so, and a deletion since ends it', () => {
@@ -67,3 +73,95 @@ test('What is said after an Off’s, an On’s or a deletion’s action, from wh
   const again = entry('restored', tools, { putBackFrom: 'delete-everywhere' });
   assert.equal(afterWords(again, [again], { results: results('removed', ...tools), homeTools }), 'Deleted reviewer again from Claude Code, Copilot CLI and Codex. History keeps it.');
 });
+
+test('Rule A: an Off partly turned on holds only the tools not put back yet', () => {
+  const first = off(tools, { restoredTools: ['codex-cli'] });
+  assert.deepEqual([offTools(first, [first]), shown(first, [first])], [['claude-cli', 'copilot-cli'], 'Turn on in Claude Code and Copilot CLI']);
+});
+
+test('Rule B: a choice’s Undo ends with a later Off of one of its tools, not of another; Undo add ends with any later Off, and both stand again once that Off is turned on', () => {
+  const added = entry('added', ['copilot-cli', 'codex-cli']);
+  const chose = choice(['codex-cli']);
+  const elsewhere = off(['claude-cli']);
+  // Undo add shows the latest thing that ended it.
+  assert.deepEqual([shown(chose, [added, chose, elsewhere]), shown(added, [added, chose]), shown(added, [added, chose, elsewhere])], ['Undo choice in Codex', 'Chosen since', 'Turned off since']);
+  const there = off(['codex-cli']);
+  assert.deepEqual([shown(chose, [chose, there]), shown(added, [added, there])], ['Turned off since', 'Turned off since']);
+  const back = undid(there, on(['codex-cli'], { reverses: there.id }));
+  assert.deepEqual([shown(chose, [chose, there, back]), shown(added, [added, there, back])], ['Undo choice in Codex', 'Undo add']);
+});
+
+test('Rule B: choices are undone newest first: a later choice ends an earlier one’s Undo, whatever its tools, until its own Undo undid it', () => {
+  const older = choice(['codex-cli']), newer = choice(['copilot-cli']);
+  assert.deepEqual([shown(older, [older, newer]), shown(newer, [older, newer])], ['Chosen since', 'Undo choice in Copilot CLI']);
+  newer.undoneBy = 'its own Undo, which writes no entry';
+  assert.equal(shown(older, [older, newer]), 'Undo choice in Codex');
+});
+
+test('Rule B: an On counts as a change where it found a copy turned up, so an earlier choice of that tool loses its Undo', () => {
+  const first = off();
+  const chose = choice(['codex-cli']);
+  const back = undid(first, on(['claude-cli', 'copilot-cli'], { reverses: first.id, turnedUp: [kept('codex-cli')] }));
+  assert.equal(shown(chose, [first, chose, back]), 'Turned on since');
+  const elsewhere = choice(['copilot-cli']);
+  const plain = undid(first, on(['claude-cli'], { reverses: first.id }));
+  assert.equal(shown(elsewhere, [first, elsewhere, plain]), 'Undo choice in Copilot CLI');
+});
+
+test('Rule B: a deletion keeps its Restore whatever came later, a later deletion too', () => {
+  const first = entry('deleted', tools, { everywhere: true });
+  const second = entry('deleted', [], { everywhere: true });
+  assert.deepEqual([shown(first, [first, second]), shown(second, [first, second])], ['Restore in all 3 tools', 'Restore']);
+});
+
+test('An On that found a tool’s own copy offers Use the kept copy there for as long as it is in History: a later choice doesn’t end it; a use of it, an Off of that tool, its own Undo or a deletion do', () => {
+  const first = off();
+  const back = undid(first, on(['claude-cli', 'copilot-cli'], { reverses: first.id, turnedUp: [kept('codex-cli')] }));
+  const events = [first, back];
+  assert.deepEqual([shown(back, events), also(back, events)], ['Turn off again in Claude Code and Copilot CLI', ['Use the kept copy in Codex']]);
+  // A copy choice ends its Turn off again, never the kept copy.
+  const chose = choice(['codex-cli']);
+  assert.deepEqual([shown(back, [...events, chose]), also(back, [...events, chose])], ['Chosen since', ['Use the kept copy in Codex']]);
+  // In use: not offered. Its Undo (which writes no entry), or a later choice that replaced it there, and it is offered again.
+  const used = choice(['codex-cli'], { keptFrom: back.id, winner: { tool: 'codex-cli', hash: 'h-codex-cli' } });
+  assert.deepEqual([entryIs(used, [...events, used]), shown(used, [...events, used]), keptOfferedIn(back, [...events, used])], ['kept-copy', 'Undo in Codex', []]);
+  assert.deepEqual(keptOfferedIn(back, [...events, used, choice(['codex-cli'])]), ['codex-cli']);
+  assert.deepEqual(keptOfferedIn(back, [...events, { ...used, undoneBy: 'its own Undo' }]), ['codex-cli']);
+  // An Off of that tool holds it: offered again once that is turned on. Undone, the Off that undid it has the kept copy.
+  const later = off(['codex-cli']);
+  assert.deepEqual(keptOfferedIn(back, [...events, later]), []);
+  assert.deepEqual(keptOfferedIn(back, [...events, later, undid(later, on(['codex-cli'], { reverses: later.id }))]), ['codex-cli']);
+  assert.deepEqual(keptOfferedIn({ ...back, undoneBy: 'an Off again' }, events), []);
+  assert.deepEqual(keptOfferedIn(back, [...events, entry('deleted', tools, { everywhere: true })]), []);
+  // Found byte for byte the same as the kept one: nothing to offer.
+  assert.deepEqual(keptOfferedIn({ ...back, turnedUp: [{ ...kept('codex-cli'), same: true }] }, events), []);
+});
+
+test('An On that only found a tool’s own copy removed nothing, so it has no Turn off again: its Undo leaves that copy alone again, and the Off it writes says so', () => {
+  const first = off(['codex-cli']);
+  const back = undid(first, on([], { reverses: first.id, turnedUp: [kept('codex-cli')] }));
+  const { action } = offered(back, [first, back], tools);
+  assert.deepEqual([action?.label, action?.help], ['Undo turn on in Codex', 'Codex’s own copy is left alone again, as before reviewer was turned on there: nothing is removed, and Central Knot doesn’t sync it']);
+  assert.equal(afterWords(back, [first, back], { results: results('stayed', 'codex-cli'), homeTools: tools }), 'Codex’s own copy is left alone again.');
+  // The Off that Undo writes holds Codex without having removed anything: Rule A reads it, and its Turn on names it.
+  const again = undid(back, off([], { turnedUp: [kept('codex-cli')] }));
+  assert.deepEqual([offTools(again, [first, back, again]), shown(again, [first, back, again])], [['codex-cli'], 'Turn on in Codex']);
+  // One that also put copies back says both.
+  const mixed = on(['claude-cli'], { turnedUp: [kept('codex-cli')] });
+  assert.equal(offered(mixed, [mixed], tools).action?.help, 'Turn off reviewer again: each copy it put back removed from Claude Code, and History keeps it; Codex’s own copy is left alone again');
+  assert.equal(afterWords(mixed, [mixed], { results: [...results('removed', 'claude-cli'), ...results('stayed', 'codex-cli')], homeTools: tools }), 'reviewer is off in Claude Code again. History keeps its copy. Codex’s own copy is left alone again.');
+});
+
+test('What is said after Use the kept copy, and after its Undo', () => {
+  const back = on(['claude-cli'], { turnedUp: [kept('codex-cli')] });
+  const wrote = [{ item: 'reviewer', harness: 'codex-cli' as const, outcome: 'written' as const, replaced: true as const, message: '' }];
+  assert.equal(afterWords(back, [back], { results: wrote, homeTools: tools, how: { keptIn: 'codex-cli' } }), 'Codex has the copy of reviewer kept when it was turned off. The one it replaced is in History, with its own Undo.');
+  const used = choice(['codex-cli'], { keptFrom: back.id, winner: { tool: 'codex-cli', hash: 'h-codex-cli' } });
+  assert.equal(afterWords(used, [back, used], { results: results('written', 'codex-cli'), homeTools: tools }), 'Codex has the copy it had before again.');
+});
+
+test('The row’s On puts back the Off that holds a one-way copy’s source before the Offs of the copies waiting for it', () => {
+  const row = { key: 'reviewer', description: '', copies: {}, managed: false, off: [], heldOff: [{ tool: 'copilot-cli', history: 'receiver’s Off', source: 'claude-cli' }, { tool: 'claude-cli', history: 'source’s Off' }] };
+  assert.deepEqual(putBackOrder(row), ['source’s Off', 'receiver’s Off']);
+});
+

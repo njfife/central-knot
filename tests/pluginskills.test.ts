@@ -55,7 +55,7 @@ test('a tool that has a skill through an installed plugin is shown as that, and 
     await put(join(home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'issue-tracker@team': false } }));
     const off = (await manageView(context)).skills.find(skill => skill.key === 'triage')!;
     assert.equal(off.plugin?.['claude-cli']?.off, true);
-    assert.match(off.cannot['claude-cli'] ?? '', /turned off there/);
+    assert.match(off.cannot['claude-cli'] ?? '', /, where it is turned off, so no separate copy is placed there\.$/);
   } finally { await rm(base, { recursive: true, force: true }); }
 });
 
