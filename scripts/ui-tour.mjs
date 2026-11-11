@@ -1266,8 +1266,8 @@ if (wanted('updates')) {
   await shot(a, 'downloading', 'Managed every skill (not applied yet), then clicked "Update available": the control shows the download, its progress a ring round the arrow.');
   await size(860, 560); await shot(a, 'downloading-860-rail', 'The same at 860×560, in the rail: the ring alone.');
   await a.click('#sidebar-toggle'); await shot(a, 'downloading-860-open', 'The same with the sidebar open.'); await a.click('#sidebar-toggle'); await size(1280, 800);
-  await waitFor(a, `document.querySelector('#update-control')?.textContent.trim() === 'Restart to update'`, 30000);
-  await shot(a, 'held', 'Downloaded and prepared. Changes wait for Apply all, so it doesn’t restart by itself: the control says "Restart to update" with the warning mark, and the status bar says why.');
+  await waitFor(a, `document.querySelector('#update-control')?.dataset.look === 'held'`, 30000);
+  await shot(a, 'held', 'Downloaded and prepared. Changes wait for Apply all, so it doesn’t restart by itself: the control is an outlined "Restart to update…" with the warning mark (a click opens Settings, which says what would be lost), and the status bar says why.');
   await everySize('held', 'Restart to update, held for the changes waiting for Apply all.');
   await a.click('#nav-settings'); await shot(a, 'settings-held', 'Settings while the update waits for the restart.');
   // The next launch, as the new version: it says so once.
@@ -1322,8 +1322,8 @@ if (wanted('updates')) {
   await a.click('#update-control');
   await waitFor(a, `/Downloading… [1-9]/.test(document.querySelector('#update-control')?.textContent ?? '')`, 10000);
   await shot(a, 'narrow-downloading', 'Managed every skill (not applied yet), then clicked it: the ring shows the download.');
-  await waitFor(a, `document.querySelector('#update-control')?.textContent.trim() === 'Restart to update'`, 30000);
-  await shot(a, 'narrow-held', 'Downloaded and prepared; changes wait for Apply all, so the control is "Restart to update", with the warning mark. The message is only its mark at this width (its words are the mark’s tooltip, and the control’s).');
+  await waitFor(a, `document.querySelector('#update-control')?.dataset.look === 'held'`, 30000);
+  await shot(a, 'narrow-held', 'Downloaded and prepared; changes wait for Apply all, so the control is the outlined "Restart to update…", with the warning mark. The message is only its mark at this width (its words are the mark’s tooltip, and the control’s).');
   await reopen('v0.5.0-preview.5', { update: { tag: 'v0.5.0-preview.5', page: 'https://github.com/njfife/central-knot/releases/tag/v0.5.0-preview.5', from: 'v0.5.0-preview.4' } });
   await waitFor(a, `/now on/.test(document.getElementById('announcement').textContent)`, 10000);
   await shot(a, 'narrow-updated', 'Opened again as 0.5.0 preview 5 at 860×560, the profile still in use: the version alone at the end, and the note that it is on the new version as its mark.');

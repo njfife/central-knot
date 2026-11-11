@@ -4,7 +4,8 @@
 //   failures on it;
 // - the status bar's end (statusEnd): the build's name and version, nothing more;
 // - what Settings' Updates row needs: its Update button (settingUpdateButton) and Check now (checkNow).
-// Restarting is held, with the reason on the control, while something typed isn't saved.
+// Restarting is held while something typed isn't saved or changes wait for Apply all: the control then opens Settings, whose
+// Updates row says what restarting would lose beside its own Restart button.
 import { announce, baseDraftTyped, rerender, showPage, state, toolDraftTyped } from './app.ts';
 import { h, icon } from './dom.ts';
 import { changesWaiting } from './matrix.ts';
@@ -30,10 +31,12 @@ function keepFocus() {
 }
 function returnFocus() {
   if (!focusBack || buttonNow()?.busy) return;
-  const id = focusBack;
-  focusBack = undefined;
   // In Settings, Check now stands in for an Update button that is gone (the release was withdrawn).
-  if (document.activeElement === document.body) (document.getElementById(id) ?? (id === 'setting-update' ? document.getElementById('check-updates') : null))?.focus();
+  const target = document.getElementById(focusBack) ?? (focusBack === 'setting-update' ? document.getElementById('check-updates') : null);
+  // Still disabled (a check that hasn't ended): asked again once it has.
+  if (target instanceof HTMLButtonElement && target.disabled) return;
+  focusBack = undefined;
+  if (document.activeElement === document.body) target?.focus();
 }
 
 /** Why restarting now would lose something typed or chosen, or nothing. Read when it matters: typing doesn't redraw the page. */
@@ -82,9 +85,16 @@ export function takeUpdates(view: UpdateView) {
     else restart();
   }
   if (before?.step === 'downloading' && view.step === 'downloading') { paintProgress(); return; }
-  rerender();
+  // A check that started, or ended finding nothing new, changes only the sidebar's control: it alone is drawn again, so a check
+  // every quarter of an hour never redraws the page under someone typing. Settings' row says the check, so there the page is.
+  if (before && sameOffer(before, view) && state.page !== 'settings') paintSidebarEnd();
+  else rerender();
   returnFocus();
 }
+/** Nothing but the check's own state differs between two views. */
+const sameOffer = (a: UpdateView, b: UpdateView) =>
+  a.available?.tag === b.available?.tag && a.available?.zip === b.available?.zip && a.step === b.step && a.failed === b.failed
+  && a.reason?.key === b.reason?.key && a.updated?.tag === b.updated?.tag && a.checked?.failed === b.checked?.failed;
 
 export const loadUpdates = async () => takeUpdates(await window.centralKnot.updates());
 
@@ -144,12 +154,19 @@ export function settingUpdateButton() {
 export function sidebarEnd(): Node[] {
   const shown = indicatorNow();
   if (!shown) return [];
-  const click = { check: () => void checkNow(), update: startUpdate, restart, settings: openUpdatesRow }[shown.does];
+  // Typing doesn't redraw the page, so a draft typed since the control was drawn is looked for again at the click.
+  const restartUnlessHeld = () => (unsavedWork() ? openUpdatesRow() : restart());
+  const click = { check: () => void checkNow(), update: startUpdate, restart: restartUnlessHeld, settings: openUpdatesRow }[shown.does];
   const glyph = h(`span.update-glyph${shown.progress !== undefined ? '.with-progress' : ''}`, {}, icon(shown.glyph, 16, shown.look === 'checking' ? 'spin' : shown.glyph === 'triangle-alert' ? 'tone-warning' : ''));
   // The download's progress rings the icon (style.css), set as a property: the page's CSP allows that where a style attribute isn't.
   if (shown.progress !== undefined) glyph.style.setProperty('--progress', String(shown.progress));
   return [h('button.nav-row.update-control', { type: 'button', id: 'update-control', 'data-look': shown.look, 'aria-label': shown.name, title: shown.title, disabled: shown.busy, 'aria-busy': String(shown.busy), onclick: click },
     glyph, h('span.nav-label', {}, shown.label))];
+}
+
+/** The sidebar's control drawn again on its own (renderer.ts draws it with the rest of the sidebar on a redraw). */
+function paintSidebarEnd() {
+  document.getElementById('sidebar-end')?.replaceChildren(...sidebarEnd());
 }
 
 /** Download progress, painted in place so a redraw never interrupts typing elsewhere on the page. */

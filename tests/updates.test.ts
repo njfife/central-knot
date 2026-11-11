@@ -112,11 +112,17 @@ test('what the sidebar’s update control shows, from the quiet arrows to the bu
   const downloading = updateIndicator({ ...base, available: preview5, step: 'downloading', progress: 0.427 })!;
   assert.deepEqual([downloading.look, downloading.label, downloading.busy, downloading.progress], ['working', 'Downloading… 42%', true, 0.427]);
   assert.deepEqual(shown({ available: preview5, step: 'installing' }), { look: 'working', label: 'Preparing update…', does: 'update', busy: true });
-  // Ready: a click restarts into it. Something unsaved holds it, and the control says what restarting loses.
+  // Ready: a click restarts into it.
   assert.deepEqual(shown({ available: preview5, step: 'ready' }), { look: 'ready', label: 'Restart to update', does: 'restart', busy: false });
-  const held = updateIndicator({ ...base, available: preview5, step: 'ready' }, { held: 'Restarting now loses your unsaved instructions draft.' })!;
-  assert.deepEqual([held.glyph, held.title], ['triangle-alert', '0.5.0 preview 5 is ready. Restarting now loses your unsaved instructions draft. Click to restart anyway.']);
-  assert.deepEqual(shown({ available: preview5, step: 'ready' }, { restarting: true }), { look: 'ready', label: 'Restarting…', does: 'restart', busy: true });
+  // Something unsaved holds it: the control never restarts on a click, it opens Settings, whose row says what would be lost
+  // beside its own Restart button. Its name says the loss too.
+  const loses = 'Restarting now loses 3 changes waiting for Apply all.';
+  assert.deepEqual(shown({ available: preview5, step: 'ready' }, { held: loses }), { look: 'held', label: 'Restart to update…', does: 'settings', busy: false });
+  const held = updateIndicator({ ...base, available: preview5, step: 'ready' }, { held: loses })!;
+  assert.deepEqual([held.glyph, held.name, held.title], ['triangle-alert', 'Restart to update: Restarting now loses 3 changes waiting for Apply all. Opens Settings',
+    '0.5.0 preview 5 is ready. Restarting now loses 3 changes waiting for Apply all. Click to open Settings, where you can restart anyway.']);
+  // Restarting anyway from Settings: the control shows it, busy.
+  assert.deepEqual(shown({ available: preview5, step: 'ready' }, { held: loses, restarting: true }), { look: 'ready', label: 'Restarting…', does: 'restart', busy: true });
   // A download that failed: the release is still offered, and the click tries again.
   const failed = updateIndicator({ ...base, available: preview5, failed: 'The download didn’t finish. Central Knot wasn’t changed. Try again.' })!;
   assert.deepEqual([failed.look, failed.label, failed.does, failed.title], ['available', 'Try the update again', 'update', 'The download didn’t finish. Central Knot wasn’t changed. Try again.']);

@@ -1895,20 +1895,23 @@ async function updateFlow() {
     await watchLooks();
     await press('update-control');
     same('the click says it won’t restart by itself, with changes waiting', await a.run(`document.getElementById('announcement').dataset.text`), 'Downloading 0.5.0 preview 5. Something here isn’t saved yet, so Central Knot will wait for you to restart.');
-    same('downloaded and prepared, it waits to restart', await reaches('ready'), 'ready');
+    same('downloaded and prepared, it waits to restart', await reaches('held'), 'held');
     const looks = await a.run('window.ckLooks');
     check('one click downloads, with progress on the control, then prepares', looks.filter(look => /^working Downloading… \d+%$/.test(look)).length >= 2 && looks.includes('working Preparing update…'), looks);
-    same('changes waiting for Apply all hold the restart', (await control()).label, 'Restart to update');
+    same('changes waiting for Apply all hold the restart', (await control()).label, 'Restart to update…');
     same('the control, disabled while it worked, takes the focus back', await focused(), 'update-control');
     await wait(1500);
     check('and the app is still running', a.child.exitCode === null);
     check('the status bar says what restarting loses, first', /^Restarting now loses \d+ changes? waiting for Apply all\./.test(await a.text('#announcement') ?? ''), await a.text('#announcement'));
-    check('so does the control', /waiting for Apply all\. Click to restart anyway\.$/.test((await control()).title), (await control()).title);
+    check('so does the control, whose name says it too', /waiting for Apply all\. Click to open Settings, where you can restart anyway\.$/.test((await control()).title) && /^Restart to update: Restarting now loses \d+ changes? waiting for Apply all\. Opens Settings$/.test((await control()).name), await control());
+    // A click on the held control never restarts: it opens Settings, which says what restarting loses beside its Restart button.
+    await a.click('#update-control');
+    check('the held control opens Settings’ Updates row, which says what would be lost, and the app keeps running', await a.run(`document.querySelector('#nav-settings').getAttribute('aria-current') === 'page'`) && /is ready\. Restarting now loses \d+ changes? waiting for Apply all\./.test(await a.text('#setting-updates') ?? '') && a.child.exitCode === null, await a.text('#setting-updates'));
     same('no page errors while updating', a.pageErrors, []);
-    // Clicking it is the person's choice: the app restarts (here: quits, the stub's install).
+    // Restarting there is the person's choice: the app restarts (here: quits, the stub's install).
     const exited = new Promise(done => a.child.once('exit', done));
     // Clicked a moment later, from the page: the app quits at once, so a reply to the click itself might never come.
-    await a.run(`(setTimeout(() => document.getElementById('update-control').click(), 100), true)`);
+    await a.run(`(setTimeout(() => document.getElementById('setting-update').click(), 100), true)`);
     check('Restart to update quits for the update', await Promise.race([exited.then(() => true), wait(15000).then(() => false)]));
     const pending = JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).update;
     same('the update is recorded for the next launch', pending && [pending.tag, pending.from], ['v0.5.0-preview.5', 'v0.5.0-preview.4']);
@@ -2010,7 +2013,7 @@ async function updateFlow() {
     for (let i = 0; i < 40 && !/^Downloading… \d+%$/.test((await control()).label); i++) await wait(100);
     same('while downloading, the icon is ringed by the progress', await a.run(`Number(document.querySelector('#update-control .update-glyph.with-progress')?.style.getPropertyValue('--progress')) > 0`), true);
     same('nor while downloading', [await sidebarFit(), await crowding()], [[], []]);
-    await reaches('ready');
+    await reaches('held');
     same('nor with the restart held and its reason as a mark', [await a.run(`getComputedStyle(document.getElementById('message-mark')).display !== 'none'`), await crowding()], [true, []]);
     await fitsBothWays('Restart to update, held');
     await a.quit();

@@ -125,12 +125,14 @@ export function updateButton(view: UpdateView, { held, restarting = false }: { h
  * - `checking`: the arrows spin while a check runs, whoever asked for it.
  * - `available`: a newer release this copy can install. It stands out; a click downloads it, prepares it and restarts.
  * - `working`: downloading (with its progress) or preparing it.
- * - `ready`: prepared; a click restarts into it. `held` when something unsaved keeps it from restarting by itself.
+ * - `ready`: prepared; a click restarts into it.
+ * - `held`: prepared, but something unsaved keeps it from restarting by itself. It never restarts on a click: it opens Settings'
+ *   Updates row, which says what restarting would lose, beside its own Restart button.
  * - `elsewhere`: a newer release this copy can't install itself (Settings says why and links the release). It opens Settings.
  * `does` is what a click does; `name` is the control's full name for a screen reader and the folded sidebar, whose control
  * shows only its icon; `title` is the tooltip.
  */
-export type IndicatorLook = 'off' | 'check' | 'checking' | 'available' | 'working' | 'ready' | 'elsewhere';
+export type IndicatorLook = 'off' | 'check' | 'checking' | 'available' | 'working' | 'ready' | 'held' | 'elsewhere';
 export interface Indicator {
   look: IndicatorLook; glyph: 'refresh-cw' | 'circle-arrow-down' | 'arrow-down' | 'circle-alert' | 'circle-check' | 'triangle-alert' | 'clock';
   label: string; name: string; title: string; busy: boolean;
@@ -144,7 +146,8 @@ export function updateIndicator(view: UpdateView, { held, restarting = false, ch
   if (button) {
     const words = tagWords(view.available!.tag);
     if (view.step === 'downloading' || view.step === 'installing') return { look: 'working', glyph: view.step === 'installing' ? 'clock' : 'arrow-down', label: button.label, name: button.label, title: button.title, busy: true, does: 'update', progress: view.step === 'downloading' ? view.progress ?? 0 : undefined };
-    if (view.step === 'ready') return { look: 'ready', glyph: button.held ? 'triangle-alert' : 'circle-check', label: button.label, name: button.busy ? button.label : `Restart to update to ${words}`, title: button.title, busy: button.busy, does: 'restart' };
+    if (view.step === 'ready' && held && !restarting) return { look: 'held', glyph: 'triangle-alert', label: 'Restart to update…', name: `Restart to update: ${held} Opens Settings`, title: `${words} is ready. ${held} Click to open Settings, where you can restart anyway.`, busy: false, does: 'settings' };
+    if (view.step === 'ready') return { look: 'ready', glyph: 'circle-check', label: button.label, name: button.busy ? button.label : `Restart to update to ${words}`, title: button.title, busy: button.busy, does: 'restart' };
     // After a failed download or prepare the release is still offered: the control says so (the failure's own words already
     // say what to do) and the click tries again.
     if (view.failed) return { look: 'available', glyph: 'circle-alert', label: 'Try the update again', name: `Try the update to ${words} again`, title: view.failed, busy: false, does: 'update' };

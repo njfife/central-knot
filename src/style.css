@@ -192,7 +192,8 @@ ul { list-style: none; }
 /*
  * The sidebar's end, at the bottom left: the update control (updateview.ts sidebarEnd), a row like the pages' rows. Quiet while
  * there is nothing to do (a faint one in a build that doesn't update itself); a newer release this copy can install, or one
- * ready to restart into, makes it the sidebar's one filled button; one it can't install has an outline and opens Settings.
+ * ready to restart into, makes it the sidebar's one filled button; one it can't install, or a restart held for something
+ * unsaved, has an outline and opens Settings.
  */
 #sidebar-end { flex: none; padding: 0 8px 8px; display: flex; flex-direction: column; }
 #sidebar-end:empty { display: none; }
@@ -207,7 +208,8 @@ ul { list-style: none; }
 /* A focus ring inside the blue fill would be lost in it: it goes outside, as on the page's primary buttons. */
 .update-control[data-look="available"]:focus-visible, .update-control[data-look="ready"]:focus-visible { outline-offset: 2px; }
 .update-control[data-look="elsewhere"] { color: var(--accent-ink); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent-ink) 45%, transparent); }
-.update-control .tone-warning { color: #fff; }
+/* A restart held for something unsaved: never the filled button (a click opens Settings, which says what restarting loses). */
+.update-control[data-look="held"] { color: var(--warning); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning) 45%, transparent); }
 /* The download's progress: a ring round the icon, filled as it arrives (--progress, 0 to 1). */
 .update-glyph.with-progress::before { content: ""; position: absolute; inset: -4px; border-radius: 50%; background: conic-gradient(var(--accent-ink) calc(var(--progress, 0) * 1turn), var(--line) 0); mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px)); }
 
