@@ -1040,9 +1040,16 @@ if (wanted('shared-copies')) {
   await everySize('manage-pending', `Switched Managed on (not applied yet): the details and the tool rows say what Apply all will do to the link and the shared copy; the count beside Apply all counts both new copies.`, `#outside-${name}`, true);
   await a.click('#apply');
   await everySize('managed', 'Clicked "Apply all": the band says what was done to which folder, with Undo; the skill is an ordinary managed one.', '.band-done', true);
-  await a.click('#outcome-undo-takeover');
+  await a.click('#outcome-undo-added');
   await open();
-  await everySize('undone', 'Clicked "Undo" in that band: the link and the shared copy are back, the new copies are gone, and the skill is unmanaged again.', '.band-done');
+  await everySize('undone', 'Clicked "Undo Apply all" in that band: the status line leads with the conclusion: unmanaged again, the link and the shared copy back, the new copies gone.', `#outside-${name}`);
+  // Manage both: two skills in one Apply all, one of them taken over; the band's one Undo undoes the whole Apply all.
+  await a.click('#manage-all');
+  await a.click('#apply');
+  await everySize('manage-both', 'Clicked "Manage both", then "Apply all": two skills managed, one taken over (counted), with one "Undo Apply all".', '.band-done');
+  await a.click('#outcome-undo-added');
+  await open();
+  await everySize('manage-both-undone', 'Clicked "Undo Apply all" there: both skills are unmanaged again, and the link and the shared copy are back.', `#outside-${name}`);
   await a.click(`#delete-${name}`);
   await everySize('delete-armed', `Clicked "Delete everywhere…" on the unmanaged skill: the second click is offered, and it says it also removes the link and the shared copy.`, `#delete-note-${name}`, true);
   await a.click(`#delete-confirm-${name}`);
@@ -1055,7 +1062,10 @@ if (wanted('shared-copies')) {
   install();
   await a.click('#header-refresh');
   await open();
-  await everySize('came-back', 'Managed, then the installer put the shared copy and the link back ("Refresh"): the details say they are back and what leaving them means, and offer "Replace with managed copies…".', `#outside-${name}`, true);
+  await everySize('came-back', 'Managed, then the installer put the shared copy and the link back ("Refresh"): the heading says Synced only where Central Knot writes, Copilot CLI’s box is drawn as a link, the details say they came back and offer "Replace with managed copies…".', `#outside-${name}`, true);
+  await a.click(`#remove-${name}-copilot-cli`);
+  await everySize('came-back-remove', 'Clicked "Remove" on Copilot CLI’s row (the link): only the Remove is queued; nothing says the link becomes a real copy.', `#outside-${name}`, true);
+  await a.click(`#remove-${name}-copilot-cli`);
   await a.click(`#takeover-${name}`);
   await everySize('came-back-armed', 'Clicked "Replace with managed copies…": the second click is offered, saying what goes.', `#takeover-note-${name}`);
   await a.click(`#takeover-confirm-${name}`);
@@ -1065,6 +1075,15 @@ if (wanted('shared-copies')) {
   await everySize('managed-delete-armed', 'Clicked "Delete everywhere…" on the managed skill: it asks once more.', `#delete-confirm-${name}`);
   await a.click(`#delete-confirm-${name}`);
   await everySize('managed-deleted', 'Clicked "Delete from every tool now": deleted everywhere, with Restore.', '.band-done');
+  // Undo refused: managed again (taken over), then Claude Code's new copy edited before any sync: nothing is undone, and the band says why.
+  install();
+  await a.click('#header-refresh');
+  await open();
+  await a.click(`.ov-row[data-key="${name}"] .switch`);
+  await a.click('#apply');
+  writeFileSync(join(claude, name, 'SKILL.md'), `${readFileSync(join(claude, name, 'SKILL.md'), 'utf8')}\nEdited in Claude Code.\n`);
+  await a.click('#outcome-undo-added');
+  await everySize('undo-refused', 'Managed it again, edited Claude Code’s new copy, then clicked "Undo Apply all": nothing is undone, and the band says why, with History.', '.band-done', true);
   // Layout 4: Copilot CLI's whole skills folder is a link to the shared folder, so the copy there is the only one it can have.
   const linked = join(scratch, 'shared-root');
   for (const [path, version] of [['.local/bin/claude', '2.1.309 (Claude Code)'], ['.local/bin/copilot', 'GitHub Copilot CLI 1.0.107.'], ['.pi/agent/bin/pi', 'pi 1.5.0']]) { mkdirSync(join(linked, path, '..'), { recursive: true }); writeFileSync(join(linked, path), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(join(linked, path), 0o755); }

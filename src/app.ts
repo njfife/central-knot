@@ -7,7 +7,7 @@ import { caughtUpNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
-import { deletedText } from './outsidewords.ts';
+import { backText, deletedText, replacedText, tookOverDone, undoneText } from './outsidewords.ts';
 import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, sentence, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
@@ -273,7 +273,8 @@ export const applyManage = (changes: Change[], onDone: () => void, options: { re
   setHome(view);
   state.applied = result;
   if (!result.stopped) { onDone(); retireTip('skills'); }
-  const managed = changes.filter(change => change.managed).length;
+  // Skills this Apply all starts managing: a change on a skill managed already (a Disable, say) manages nothing new.
+  const managed = changes.filter(change => change.managed && before.get(change.key)?.managed !== true).length;
   // History holds what Apply all replaced; new copies are undone by turning Managed off, which leaves them in place.
   const names = new Set(changes.map(change => state.home?.manage.skills.find(skill => skill.key === change.key)?.name ?? change.key));
   const ours = result.results.filter(entry => names.has(entry.item));
@@ -285,17 +286,14 @@ export const applyManage = (changes: Change[], onDone: () => void, options: { re
   // A tool a take-over gave its own copy (it read the shared one) counts as a new copy, as the count before Apply all did.
   const writtenTo = (replaced: boolean) => toolsWhere(entry => entry.outcome === 'written' && !entry.caughtUp && entry.tookOver !== 'link' && !!entry.replaced === replaced);
   const added = writtenTo(false), replacedIn = writtenTo(true);
-  const single = managed === 1 ? changes.find(change => change.managed)?.key : undefined;
+  const single = managed === 1 ? changes.find(change => change.managed && before.get(change.key)?.managed !== true)?.key : undefined;
   const singleName = single ? state.home?.manage.skills.find(skill => skill.key === single)?.name ?? single : undefined;
   // The result matches the bar before it: how many new copies, and of which skills.
   const newCopies = ours.filter(entry => entry.outcome === 'written' && !entry.replaced && !entry.caughtUp && entry.tookOver !== 'link');
   // A take-over, said as what it did to the links and the shared copy (the tools given their own are among the new copies).
-  const linksIn = toolsWhere(entry => entry.tookOver === 'link' && entry.outcome === 'written');
-  const sharedGone = ours.find(entry => entry.tookOver === 'shared' && entry.outcome === 'removed');
-  const tookOverText = [
-    linksIn.length ? `replaced ${andList(linksIn.map(name => `${name}’s`))} ${linksIn.length > 1 ? 'links with real copies' : 'link with a real copy'}` : '',
-    sharedGone ? `removed the shared copy in ${shownPath(sharedGone.folder ?? '')} (kept in History)` : '',
-  ].filter(Boolean);
+  const linksIn = ours.filter(entry => entry.tookOver === 'link' && entry.outcome === 'written').map(entry => ({ tool: toolName(entry.harness ?? ''), item: entry.item }));
+  const sharedGone = ours.filter(entry => entry.tookOver === 'shared' && entry.outcome === 'removed').map(entry => ({ folder: shownPath(entry.folder ?? ''), item: entry.item }));
+  const tookOverClauses = tookOverDone(linksIn, sharedGone);
   const newItems = [...new Set(newCopies.map(entry => entry.item))];
   // Disable, Enable and Remove, per tool, said after the copies.
   const disabledIn = toolsWhere(entry => entry.outcome === 'switched' && entry.disabled === true), enabledIn = toolsWhere(entry => entry.outcome === 'switched' && entry.disabled === false), removedFrom = toolsWhere(entry => entry.outcome === 'removed');
@@ -304,7 +302,7 @@ export const applyManage = (changes: Change[], onDone: () => void, options: { re
     managed ? (singleName ? `${singleName} managed` : `${plural(managed, 'skill')} managed`) : '',
     newCopies.length ? `${plural(newCopies.length, 'new copy', 'new copies')} written${!singleName && newItems.length <= 3 ? ` (${newItems.join(', ')})` : ` to ${andList(added)}`}` : '',
     replacedIn.length ? `replaced ${andList(replacedIn.map(name => `${name}’s copy`))} (kept in History)` : '',
-    ...tookOverText,
+    ...tookOverClauses.map((clause, index) => (index === tookOverClauses.length - 1 ? `${clause} (kept in History)` : clause)),
   ].filter(Boolean);
   const switches = [disabledIn.length ? `disabled in ${andList(disabledIn)}` : '', enabledIn.length ? `enabled in ${andList(enabledIn)}` : '', removedFrom.length ? `removed from ${andList(removedFrom)} (kept in History)` : ''].filter(Boolean);
   // One skill's switches with nothing else to say name the skill once, at the front: "notes disabled in Codex · removed from …".
@@ -316,7 +314,7 @@ export const applyManage = (changes: Change[], onDone: () => void, options: { re
   const replaceName = options.replace ? singleName ?? ours[0]?.item : undefined;
   const lostBy = everywhere ? toolsThatLost(everywhere.key, before.get(everywhere.key)) : [];
   const what = everywhereName && lostBy.length ? deletedText(everywhereName, lostBy, deletedFolders).replace(/\.$/, '')
-    : replaceName && tookOverText.length ? `${replaceName}: ${tookOverText.join(' and ').replace(' (kept in History)', '')}. History keeps ${linksIn.length + (sharedGone ? 1 : 0) > 1 ? 'both' : 'it'}`
+    : replaceName && tookOverClauses.length ? replacedText(replaceName, tookOverClauses, linksIn.length + sharedGone.length).replace(/\.$/, '')
     : [...parts, ...switches].join(' · ') || 'nothing needed copying';
   // New copies are in History as 'added': one Undo here removes them again (while unchanged) and unmanages those skills.
   // Only when nothing was replaced: undoing a replacement is its own History entry, and a half-undone choice would mislead.
@@ -328,17 +326,19 @@ export const applyManage = (changes: Change[], onDone: () => void, options: { re
   const chosenNow = replacedSome ? recent.filter(event => event.kind === 'chosen') : [];
   // A lone Disable, Enable or Remove gets its own Undo here; more than one is undone from History.
   const switchedNow = recent.filter(event => event.kind === 'switched' || event.kind === 'removed');
-  // A take-over gets its own Undo here: the links and the shared copy back, and the same run's new copies and Managed undone with it.
-  const tookOverNow = recent.filter(event => event.kind === 'took-over');
-  const takeOverUndo = tookOverNow.length === 1 ? { label: 'Undo', id: 'outcome-undo-takeover', title: 'Put the links and the shared copy back as they were', run: () => void restoreEvent(tookOverNow[0].id) } : undefined;
+  // A take-over: the links and the shared copy back. One that came with new copies (Manage) is undone with them, so the band's
+  // one Undo undoes the whole Apply all; one on its own (Replace with managed copies) gets its own Undo.
+  const tookOverNow = recent.filter(event => event.kind === 'took-over' && ours.some(entry => entry.tookOver && entry.item === event.item));
+  const tookOverAlone = tookOverNow.filter(event => !addedNow.some(added => added.id === event.tookOver?.addedId));
+  const takeOverUndo = tookOverNow.length === 1 && !addedNow.length ? { label: 'Undo', id: 'outcome-undo-takeover', title: 'Put the links and the shared copy back as they were', run: () => void restoreEvent(tookOverNow[0].id) } : undefined;
   const switchUndo = switchedNow.length === 1 && !addedNow.length && !chosenNow.length
     ? { label: switchedNow[0].kind === 'removed' ? 'Restore' : 'Undo', id: 'outcome-undo-switch', title: switchedNow[0].kind === 'removed' ? 'Put the removed copy back' : 'Flip it back', run: () => void restoreEvent(switchedNow[0].id) } : undefined;
   const firstApply = !readFlag('ck-applied-once');
   writeFlag('ck-applied-once');
   const failed = result.results.filter(entry => entry.outcome === 'failed').length;
   const kept = everywhereName ? ours.filter(entry => entry.outcome === 'held' || entry.outcome === 'failed').map(entry => entry.message) : [];
-  tell(result.stopped ? undefined : { page: state.page, history: replacedSome && !chosenNow.length, text: `${what}.` + (kept.length ? ` ${kept.join(' ')}` : '') + (managed && firstApply && !replaceName ? ' Edits now spread between tools.' : '') + (failed ? ` ${failed} failed.` : ''), item: singleName, items: newItems,
-    act: takeOverUndo ?? (addedNow.length ? addedUndo(addedNow, switchedNow) : chosenNow.length ? choiceUndo(chosenNow) : switchUndo) }, result.stopped);
+  tell(result.stopped ? undefined : { page: state.page, history: replacedSome && !chosenNow.length, text: `${what}.` + (kept.length ? ` ${kept.join(' ')}` : '') + (managed && firstApply && !replaceName ? ' Edits now spread between tools.' : '') + (failed ? ` ${failed} failed.` : ''), item: singleName ?? everywhereName ?? replaceName, items: newItems,
+    act: addedNow.length ? addedUndo(addedNow, [...switchedNow, ...tookOverAlone]) : takeOverUndo ?? (chosenNow.length ? choiceUndo(chosenNow) : switchUndo) }, result.stopped);
 });
 
 /**
@@ -580,14 +580,17 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const item = restored[0]?.item ?? past?.item ?? '';
   const removedFrom = [...new Set(result.results.filter(entry => entry.outcome === 'removed').map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean);
   if (past?.kind === 'took-over') {
-    const linked = result.results.filter(entry => entry.outcome === 'written' && entry.harness).map(entry => toolName(entry.harness ?? '') ?? '').filter(Boolean);
-    const shared = result.results.some(entry => !entry.harness && entry.outcome === 'written');
-    const back = [linked.length ? `${andList(linked.map(name => `${name}’s`))} ${linked.length > 1 ? 'links' : 'link'}` : '', shared ? `the shared copy in ${shownPath(past.tookOver?.shared[0]?.path.replace(/\/[^/]+$/, '') ?? '~/.agents/skills')}` : ''].filter(Boolean);
-    const unmanaged = past.tookOver?.managedNow;
+    // Refused (a copy was edited since): said on the page, with the way to an earlier version.
+    if (result.stopped) { tell({ page: state.page, item: past.item, text: result.stopped, warn: true, history: true }); return; }
+    const back = backText(result.results.filter(entry => entry.tookOver === 'link' && entry.outcome === 'written').map(entry => ({ tool: toolName(entry.harness ?? ''), item: past.item })),
+      result.results.filter(entry => entry.tookOver === 'shared' && entry.outcome === 'written').map(() => ({ item: past.item })));
+    // "Unmanaged again" only when it is: read back from the page's view, not assumed.
+    const unmanaged = !!past.tookOver?.managedNow && state.home?.manage.skills.find(skill => skill.key === past.key)?.managed === false;
     // In the page's tool order, as everywhere else.
     const order = Object.values(namedTools);
     const gone = [...removedFrom].sort((first, second) => order.indexOf(first) - order.indexOf(second));
-    tell(result.stopped ? undefined : { page: state.page, item: past.item, text: `Undone: ${back.length ? `${sentence(andList(back))} ${back.length > 1 || linked.length > 1 ? 'are' : 'is'} back` : 'its copies are back as they were'}${gone.length ? `; removed the new copies in ${andList(gone)}` : ''}.${unmanaged ? ` ${past.item} is unmanaged again.` : ''}` }, result.stopped);
+    const held = result.results.filter(entry => entry.outcome === 'held').map(entry => entry.message);
+    tell({ page: state.page, item: past.item, text: [undoneText(past.item, back, gone, unmanaged), ...held].join(' ') });
     flashRow(past.item);
     return;
   }
@@ -1054,15 +1057,27 @@ export const undoAdded = (ids: string[]) => busy('Undoing Apply all…', async (
   const view = await api().refresh();
   setHome(view);
   await putHistory();
+  // A take-over undone with them (Manage of a skill kept in ~/.agents/skills): its links and shared copy are back.
+  const all = [...results, ...alongside];
+  const back = backText(all.filter(entry => entry.tookOver === 'link' && entry.outcome === 'written').map(entry => ({ tool: toolName(entry.harness ?? ''), item: entry.item })),
+    all.filter(entry => entry.tookOver === 'shared' && entry.outcome === 'written').map(entry => ({ item: entry.item })));
   const removed = results.filter(entry => entry.outcome === 'removed').length;
   const stayed = results.filter(entry => entry.outcome === 'held');
-  const items = [...new Set(results.map(entry => entry.item))];
-  const also = alongside.filter(entry => entry.outcome === 'switched' || entry.outcome === 'written').map(entry => `${entry.item}: ${entry.outcome === 'written' ? `back in ${toolName(entry.harness ?? '')}` : entry.message.replace(/\.$/, '')}.`);
-  tell(stopped ? undefined : { page: state.page, items, text: `Undone: removed ${plural(removed, 'new copy', 'new copies')}; ${andList(items)} ${items.length === 1 ? 'is' : 'are'} unmanaged again.${also.length ? ` ${also.join(' ')}` : ''}${stayed.length ? ` ${stayed.map(entry => entry.message).join(' ')}` : ''}` }, stopped);
+  // "Unmanaged again" only for the skills the refreshed view shows unmanaged.
+  const items = [...new Set(results.map(entry => entry.item))].sort((first, second) => first.toLowerCase().localeCompare(second.toLowerCase()));
+  const unmanaged = items.filter(item => view?.manage.skills.find(skill => skill.name === item)?.managed !== true);
+  const also = alongside.filter(entry => !entry.tookOver && (entry.outcome === 'switched' || entry.outcome === 'written')).map(entry => `${entry.item}: ${entry.outcome === 'written' ? `back in ${toolName(entry.harness ?? '')}` : entry.message.replace(/\.$/, '')}.`);
+  const lead = unmanaged.length ? `Undone: ${andList(unmanaged)} ${unmanaged.length === 1 ? 'is' : 'are'} unmanaged again.` : 'Undone.';
+  // Refused (a copy edited since): said on the page, with the way to an earlier version.
+  if (stopped) { tell({ page: state.page, items, text: stopped, warn: true, history: true }); return; }
+  // One skill names the tools, in the page's order; several are counted.
+  const order = Object.values(namedTools);
+  const removedIn = [...new Set(results.filter(entry => entry.outcome === 'removed').map(entry => toolName(entry.harness ?? '')).filter(Boolean))].sort((first, second) => order.indexOf(first) - order.indexOf(second));
+  const removedSaid = !removed ? '' : items.length === 1 && removedIn.length ? `Removed the new copies in ${andList(removedIn)}.` : `Removed ${plural(removed, 'new copy', 'new copies')}.`;
+  tell({ page: state.page, items, text: [lead, back, removedSaid, ...also, ...stayed.map(entry => entry.message)].filter(Boolean).join(' ') });
   for (const item of items) flashRow(item);
 });
 
-/** Delete everywhere: offered when an edit was kept over a deletion with order unknown. */
 /** The tools, in the page's order, that had a copy of a skill before an action and have none after it (whatever way they read it). */
 function toolsThatLost(key: string, before: SkillFacts | undefined): string[] {
   const after = state.home?.manage.skills.find(skill => skill.key === key);
@@ -1070,6 +1085,7 @@ function toolsThatLost(key: string, before: SkillFacts | undefined): string[] {
   return Object.keys(before?.copies ?? {}).filter(tool => !after?.copies[tool as HarnessId]).map(toolName).sort((first, second) => order.indexOf(first) - order.indexOf(second));
 }
 
+/** Delete everywhere: offered when an edit was kept over a deletion with order unknown. */
 export const deleteEverywhereKey = (key: string) => busy('Deleting everywhere…', async () => {
   const home = state.home!;
   const before = home.manage.skills.find(skill => skill.key === key);

@@ -3,6 +3,7 @@ import { clockTime, DAY_MS } from './model.ts';
 import { noTools, restoreEvent, showPage, shownPath, state, touchedToolsPhrase } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
+import { tookOverHistory } from './outsidewords.ts';
 import { changedProfile, flipSummary, NO_PROFILE, redoneSwitch } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
 import { button, emptyState, h, icon, rereadBand } from './dom.ts';
@@ -60,15 +61,9 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
 function tookOverText(event: HistoryEvent, undone: boolean): string {
   const told = event.tookOver;
   if (!told) return 'Took over its copies outside Central Knot.';
-  const replaced = told.links.filter(link => link.placed).map(link => link.tool);
-  // The same words as the Skills page: "link", "shared copy", and the folder through the same path-shortening ("~/.agents/skills").
-  const parts = [
-    replaced.length ? `replaced ${andList(replaced.map(tool => `${who(tool)}’s`))} ${replaced.length > 1 ? 'links with real copies' : 'link with a real copy'}` : '',
-    told.placed.length ? `gave ${andList(told.placed.map(copy => who(copy.tool)))} ${told.placed.length > 1 ? 'their own copies' : 'its own copy'}` : '',
-    told.shared.length ? `removed the shared copy in ${shownPath(told.shared[0].path.replace(/\/[^/]+$/, ''))}` : '',
-  ].filter(Boolean);
-  const text = parts.length ? parts.join('; ') : 'took over its copies outside Central Knot';
-  return `${text.charAt(0).toUpperCase()}${text.slice(1)}${undone ? '; this was undone, and they are back as they were.' : '. Central Knot kept what it replaced.'}`;
+  // The same words as the Skills page (outsidewords.ts), and the folder through the same path-shortening ("~/.agents/skills").
+  const text = tookOverHistory(told.links.filter(link => link.placed).map(link => who(link.tool)), told.placed.map(copy => who(copy.tool)), told.shared.length ? shownPath(told.shared[0].path.replace(/\/[^/]+$/, '')) : undefined);
+  return `${text}${undone ? '; this was undone, and they are back as they were.' : '. Central Knot kept what it replaced.'}`;
 }
 
 /** The base instructions as a Pull changed them: set for the first time, edited, or deleted; `tools` names the tools that get them. */

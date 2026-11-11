@@ -2,7 +2,7 @@
 // no raw link text, and only what is true as built.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { deleteNote, deletedText, linkTarget, managedSentence, manageSentence, pendingSentence, pinnedSentence, replaceSentence, whereSentence, type Shape } from '../src/outsidewords.ts';
+import { backText, deleteNote, deletedText, linkTarget, managedSentence, manageSentence, notPutBack, pendingSentence, pinnedSentence, replacedText, replaceSentence, syncedSome, tookOverDone, undoneText, whereSentence, type Shape } from '../src/outsidewords.ts';
 
 const folder = '~/.agents/skills';
 /** The reported layout: the real folder in the shared folder, a link from Copilot CLI's folder, Pi reading the shared folder. */
@@ -47,7 +47,7 @@ test('The armed Delete says "not what it leads to" only when the link’s target
 test('Back since it was managed: says so, and what leaving them means, as built', () => {
   const back: Shape = { shared: { folder, readers: [], linkers: ['Copilot CLI'], besides: ['Pi'] }, elsewhere: [], ownCopies: true };
   assert.equal(whereSentence(back), 'A copy of this skill is in ~/.agents/skills, a shared folder other apps read too. Copilot CLI has a link to it, and Pi also reads it there besides its own copy.');
-  assert.equal(managedSentence(back, true, ['Copilot CLI']), 'The link and the shared copy are back since you managed this skill; an installer may have put them there. Automatic sync never changes them, so edits won’t reach them, or Copilot CLI, which has no other copy.');
+  assert.equal(managedSentence(back, true, ['Copilot CLI']), 'The link and the shared copy came back after you managed this skill; an installer may have put them there. Automatic sync never changes them, so edits won’t reach them, or Copilot CLI, which has no other copy.');
   // Never taken over (managed by an older build): not called "back".
   assert.equal(managedSentence(back, false, []), 'Central Knot doesn’t manage the link and the shared copy. Automatic sync never changes them, so edits won’t reach them.');
   assert.equal(replaceSentence(back, { links: ['Copilot CLI'], gets: [], loses: [], everyTool: true }), 'This replaces Copilot CLI’s link with a real copy and removes the shared copy. History keeps both. Other apps that read ~/.agents/skills won’t find it there.');
@@ -57,8 +57,8 @@ test('A skills folder that is a link to the shared folder: what Manage does, and
   const shared = { folder, readers: ['Pi'], linkers: [], besides: [], pinnedBy: 'Copilot CLI' };
   assert.equal(whereSentence({ shared, elsewhere: [], ownCopies: false }), 'Copilot CLI’s skills folder is a link to ~/.agents/skills, a shared folder other apps read too, so the shared copy is the only one Copilot CLI can have. Pi reads it there too.');
   assert.equal(pinnedSentence(shared, false, ['Claude Code'], ['Copilot CLI', 'Pi'], ['Claude Code']),
-    'Manage gives Claude Code its own copy and leaves the shared copy for Copilot CLI and Pi. Central Knot does not write into it, so edits made in Claude Code won’t reach Copilot CLI and Pi. Delete everywhere removes the shared copy too. History keeps it.');
-  assert.equal(pinnedSentence(shared, true, ['Claude Code'], ['Copilot CLI', 'Pi']), 'Central Knot does not write into the shared copy, so edits made in Claude Code don’t reach Copilot CLI and Pi.');
+    'Manage gives Claude Code its own copy and leaves the shared copy for Copilot CLI and Pi. Central Knot does not write into it, so edits made in Claude Code won’t reach Copilot CLI and Pi. Edits made in the shared copy will still reach Claude Code. Delete everywhere removes the shared copy too. History keeps it.');
+  assert.equal(pinnedSentence(shared, true, ['Claude Code'], ['Copilot CLI', 'Pi']), 'Central Knot does not write into the shared copy, so edits made in Claude Code don’t reach Copilot CLI and Pi. Edits made in the shared copy still reach Claude Code.');
 });
 
 test('The Delete everywhere result names the skill, the tools and the shared folder, with one History', () => {
@@ -69,4 +69,29 @@ test('The Delete everywhere result names the skill, the tools and the shared fol
 test('A link’s target is resolved against its own folder, never shown as its raw text', () => {
   assert.equal(linkTarget('/Users/n/.copilot/skills/opus', '../../.agents/skills/opus'), '/Users/n/.agents/skills/opus');
   assert.equal(linkTarget('/Users/n/.pi/agent/skills/opus', '/Users/n/.agents/skills/opus'), '/Users/n/.agents/skills/opus');
+});
+
+test('Synced is said only for the tools Central Knot writes; the others are named with what they read', () => {
+  assert.equal(syncedSome('Claude Code', ['Copilot CLI', 'Pi'], 'shared'), 'Synced in Claude Code · Copilot CLI and Pi read the shared copy, which Central Knot doesn’t write');
+  assert.equal(syncedSome('Claude Code and Pi', ['Copilot CLI'], 'link'), 'Synced in Claude Code and Pi · Copilot CLI reads it through a link, which Central Knot doesn’t write');
+});
+
+test('A take-over’s result names the tools for one skill and counts them across several', () => {
+  const one = tookOverDone([{ tool: 'Copilot CLI', item: 'opus' }], [{ folder, item: 'opus' }]);
+  assert.deepEqual(one, ['replaced Copilot CLI’s link with a real copy', 'removed the shared copy in ~/.agents/skills']);
+  assert.equal(replacedText('opus', one, 2), 'opus: replaced Copilot CLI’s link with a real copy and removed the shared copy in ~/.agents/skills. History keeps both.');
+  assert.deepEqual(tookOverDone([{ tool: 'Copilot CLI', item: 'a' }, { tool: 'Copilot CLI', item: 'b' }], [{ folder, item: 'a' }, { folder, item: 'b' }]),
+    ['replaced 2 links with real copies', 'removed 2 shared copies from ~/.agents/skills']);
+});
+
+test('Undo of a take-over leads with whether the skill is unmanaged again, then what is back', () => {
+  const back = backText([{ tool: 'Copilot CLI', item: 'opus-sol-loop' }], [{ item: 'opus-sol-loop' }]);
+  assert.equal(undoneText('opus-sol-loop', back, ['Claude Code', 'Pi'], true), 'Undone: opus-sol-loop is unmanaged again. Copilot CLI’s link and the shared copy are back. Removed the new copies in Claude Code and Pi.');
+  assert.equal(undoneText('opus-sol-loop', back, [], false), 'Undone. Copilot CLI’s link and the shared copy are back.');
+  assert.equal(backText([{ tool: 'Copilot CLI', item: 'a' }, { tool: 'Copilot CLI', item: 'b' }], [{ item: 'a' }, { item: 'b' }]), '2 links and 2 shared copies are back.');
+});
+
+test('Restore after deleting a managed skill says what it doesn’t put back', () => {
+  assert.equal(notPutBack(2, 1), 'Each tool has its own copy now; the links and the shared copy aren’t put back.');
+  assert.equal(notPutBack(0, 1), 'Each tool has its own copy now; the shared copy isn’t put back.');
 });

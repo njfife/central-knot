@@ -2447,25 +2447,70 @@ async function sharedCopiesFlow() {
   same('Manage took it over: real copies in every tool, the shared copy gone',
     [lstatSync(join(copilot, name)).isDirectory(), existsSync(join(pi, name, 'SKILL.md')), existsSync(join(claude, name, 'SKILL.md')), existsSync(join(agents, name))], [true, true, true, false]);
   const outcome = await a.text('.band-done') ?? await a.text('.bands') ?? '';
-  check('the page says what it did, matching the count before, with Undo', /opus-sol-loop managed · 2 new copies written to Claude Code and Pi · replaced Copilot CLI’s link with a real copy · removed the shared copy in [~…]\/\.agents\/skills \(kept in History\)\./.test(outcome) && await a.exists('#outcome-undo-takeover'), outcome);
+  check('the page says what it did, matching the count before, with Undo', /opus-sol-loop managed · 2 new copies written to Claude Code and Pi · replaced Copilot CLI’s link with a real copy · removed the shared copy in [~…]\/\.agents\/skills \(kept in History\)\./.test(outcome) && await a.exists('#outcome-undo-added'), outcome);
   check('the skill is an ordinary managed one now', !(await a.exists(`#outside-${name}`)) && await switchOn(a, name), await a.text(`${row}`));
   await a.shot('shared-managed');
-  await a.click('#outcome-undo-takeover');
+  await a.click('#outcome-undo-added');
   same('Undo puts the link and the shared copy back, and the skill is unmanaged again',
     [lstatSync(join(copilot, name)).isSymbolicLink() && readlinkSync(join(copilot, name)), existsSync(join(agents, name, 'SKILL.md')), existsSync(join(pi, name)), existsSync(join(claude, name)), await switchOn(a, name)], [link, true, false, false, false]);
   const undone = await a.run(`document.getElementById('announcement')?.title ?? ''`);
-  check('the Undo line names the tools in the page’s order', /^Undone: Copilot CLI’s link and the shared copy in [~…]\/\.agents\/skills are back; removed the new copies in Claude Code and Pi\. opus-sol-loop is unmanaged again\.$/.test(undone), undone);
+  check('the Undo line leads with the conclusion and names the tools in the page’s order', /^Undone: opus-sol-loop is unmanaged again\. Copilot CLI’s link and the shared copy are back\. Removed the new copies in Claude Code and Pi\.$/.test(undone), undone);
   await a.shot('shared-undone');
-  // Managed again, then deleted from the page.
+  // Manage both: two skills in one Apply all, one of them taken over. The band's one Undo undoes the whole Apply all.
+  skill(claude, 'release-notes', text('release-notes', 'Notes.'));
+  await a.click('#header-refresh');
+  same('Manage both is offered', (await a.text('#manage-all'))?.trim(), 'Manage both');
+  await a.click('#manage-all');
+  await applyAll(a);
+  same('both are managed, and the installer’s skill was taken over', [lstatSync(join(copilot, name)).isDirectory(), existsSync(join(agents, name)), existsSync(join(copilot, 'release-notes')), await switchOn(a, name), await switchOn(a, 'release-notes')], [true, false, true, true, true]);
+  check('the band offers one Undo for the whole Apply all', await a.exists('#outcome-undo-added') && !(await a.exists('#outcome-undo-takeover')), await a.text('.band-done'));
+  await a.click('#outcome-undo-added');
+  same('Undo after Manage both undoes both: the link and the shared copy back, release-notes’ new copies gone, neither managed',
+    [lstatSync(join(copilot, name)).isSymbolicLink(), existsSync(join(agents, name, 'SKILL.md')), existsSync(join(copilot, 'release-notes')), existsSync(join(pi, 'release-notes')), existsSync(join(claude, 'release-notes', 'SKILL.md')), await switchOn(a, name), await switchOn(a, 'release-notes')],
+    [true, true, false, false, true, false, false]);
+  const bothUndone = await a.run(`document.getElementById('announcement')?.title ?? ''`);
+  check('its line says both are unmanaged again and what is back', /^Undone: opus-sol-loop and release-notes are unmanaged again\. Copilot CLI’s link and the shared copy are back\./.test(bothUndone), bothUndone);
+  rmSync(join(claude, 'release-notes'), { recursive: true, force: true });
+  // Managed again; then the installer puts the shared copy and Copilot CLI's link back ("came back").
   await a.click(`${row} .switch`);
   await applyAll(a);
+  rmSync(join(copilot, name), { recursive: true, force: true });
+  rmSync(join(pi, name), { recursive: true, force: true });
+  install();
+  await a.click('#header-refresh');
+  if (!(await a.exists(`#outside-${name}`))) await a.click(`#open-${name}`);
+  const status = await a.text('.details-status') ?? '';
+  check('came back: Synced is said only where Central Knot writes', /^Synced in Claude Code · Copilot CLI and Pi read the shared copy, which Central Knot doesn’t write/.test(status.trim()), status);
+  check('the boxes of the tools that read the shared copy are not drawn as synced', await a.run(`['copilot-cli', 'pi-cli'].every(tool => document.querySelector('#cell-${name}-' + tool)?.dataset.state === 'outside')`), await a.run(`['copilot-cli', 'pi-cli'].map(tool => document.querySelector('#cell-${name}-' + tool)?.dataset.state)`));
+  check('nor is the skill counted in All synced', !/All synced/.test(await a.text('.apply-state') ?? ''), await a.text('.apply-state'));
+  await a.shot('shared-came-back');
+  // Disable alone on a came-back skill: only the Disable, no take-over.
+  await a.click(`#enable-${name}-pi-cli`);
+  const disableSaid = await a.text(`#outside-${name}`) ?? '';
+  check('a queued Disable says nothing about replacing the link', !/On Apply all, Central Knot/.test(disableSaid) && !/link to replace/.test(await a.run(`document.querySelector('#apply').title`)), disableSaid);
+  await applyAll(a);
+  same('Disable alone does not take the skill over: only Pi is disabled', [lstatSync(join(copilot, name)).isSymbolicLink(), existsSync(join(agents, name, 'SKILL.md')), existsSync(join(pi, name)), /^opus-sol-loop disabled in Pi\./.test(await a.text('.band-done') ?? '')], [true, true, false, true]);
+  await a.click('#outcome-undo-switch');
+  // Remove on the tool whose copy is the link: only that link goes, and later passes leave the other tools' copies alone.
+  if (!(await a.exists(`#remove-${name}-copilot-cli`))) await a.click(`#open-${name}`);
+  await a.click(`#remove-${name}-copilot-cli`);
+  const removeSaid = await a.text(`#outside-${name}`) ?? '';
+  check('a queued Remove on the linked tool is not described as getting a real copy', !/replaces Copilot CLI’s link/.test(removeSaid) && !/link to replace/.test(await a.run(`document.querySelector('#apply').title`)), removeSaid);
+  await a.shot('shared-came-back-remove');
+  await applyAll(a);
+  await wait(2500);
+  await a.click('#header-refresh');
+  await wait(2500);
+  await a.click('#header-refresh');
+  same('the link is gone, and the skill stays in Claude Code and the shared copy Pi reads', [existsSync(join(copilot, name)), existsSync(join(claude, name, 'SKILL.md')), existsSync(join(agents, name, 'SKILL.md')), await switchOn(a, name)], [false, true, true, true]);
+  // Then deleted from the page.
   if (!(await a.exists(`#delete-${name}`))) await a.click(`#open-${name}`);
   await a.click(`#delete-${name}`);
   await a.shot('shared-delete-armed');
   await a.click(`#delete-confirm-${name}`);
   same('Delete everywhere removes every copy', [existsSync(join(copilot, name)), existsSync(join(pi, name)), existsSync(join(claude, name)), existsSync(join(agents, name))], [false, false, false, false]);
   const deleted = await a.text('.band-done') ?? '';
-  check('the page says it was deleted, with Restore', /Deleted opus-sol-loop from Claude Code, Copilot CLI and Pi\. History keeps it\./.test(deleted) && await a.exists('#outcome-restore-delete'), deleted);
+  check('the page says it was deleted, with Restore', /Deleted opus-sol-loop from Claude Code, Copilot CLI and Pi, and from [~…]\/\.agents\/skills\. History keeps it\./.test(deleted) && await a.exists('#outcome-restore-delete'), deleted);
   await a.shot('shared-deleted');
   // The installer puts it back; never managed, Delete everywhere removes the link (as a link) and the shared copy.
   install();

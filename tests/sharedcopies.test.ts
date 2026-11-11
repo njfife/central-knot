@@ -130,8 +130,11 @@ test('The reported case: managed the old way, Delete everywhere now removes the 
     for (const path of [join(box.home, COPILOT, 'opus'), join(box.home, PI, 'opus'), join(box.home, CLAUDE, 'opus'), shared]) assert.equal(await there(path), false, path);
     // Restore of a deletion: back in every tool it synced to, as Central Knot's own copies.
     const deleted = (await readHistory(box.context())).find(event => event.kind === 'deleted')!;
-    assert.ok(!(await restoreFromHistory(box.context(), deleted.id)).stopped);
+    const restored = await restoreFromHistory(box.context(), deleted.id);
+    assert.ok(!restored.stopped, messages(restored));
     for (const root of [COPILOT, PI, CLAUDE]) assert.equal(await readFile(join(box.home, root, 'opus/SKILL.md'), 'utf8'), text('opus', 'Shared.'));
+    assert.equal(await there(shared), false, 'the shared copy is not put back: each tool has its own');
+    assert.match(messages(restored), /Each tool has its own copy now; the links and the shared copy aren’t put back\./);
   } finally { await box.cleanup(); }
 });
 
@@ -388,5 +391,110 @@ test('Came back: Automatic sync never changes the link or the shared copy, so an
     await applyChanges(box.context(), []);
     assert.equal(await readFile(join(box.home, SHARED, 'back/SKILL.md'), 'utf8'), text('back', 'Shared.'), 'the shared copy, which Copilot CLI’s link leads to, is unchanged');
     assert.equal(await isLink(join(box.home, COPILOT, 'back')), true);
+  } finally { await box.cleanup(); }
+});
+
+/** Came back: managed and taken over, then the installer put the shared copy and Copilot CLI's link back (Pi reads the shared copy). */
+async function cameBack(box: Box, name = 'back') {
+  await installerLayout(box, name);
+  await applyChanges(box.context(), [manage(name)]);
+  await rm(join(box.home, COPILOT, name), { recursive: true });
+  await rm(join(box.home, PI, name), { recursive: true });
+  await skill(box.home, SHARED, name, text(name, 'Shared.'));
+  await link(box.home, COPILOT, name, `../../${SHARED}/${name}`);
+  await applyChanges(box.context(), []);
+  assert.equal((await factsOf(box, name))!.outsideBack, true);
+}
+
+test('Came back: Remove on the tool whose copy is a link, riding a take-over, removes only that tool; the next passes spread nothing, and Restore puts the link back', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    await cameBack(box);
+    const result = await applyChanges(box.context(), [manage('back', { seenManaged: true, remove: ['copilot-cli'] })]);
+    assert.ok(!result.stopped, messages(result));
+    await applyChanges(box.context(), []);
+    await applyChanges(box.context(), []);
+    assert.equal(await there(join(box.home, COPILOT, 'back')), false, 'Copilot CLI has no copy, and got none back');
+    for (const root of [CLAUDE, PI]) assert.equal(await isFolder(join(box.home, root, 'back')), true, `${root} keeps its copy`);
+    const { record } = await readRecord(box.home);
+    assert.equal(record!.items.back.state, 'shared');
+    assert.ok(record!.items.back.off?.includes('copilot-cli'), 'Copilot CLI is off');
+    assert.equal((await readHistory(box.context())).some(event => event.kind === 'deleted'), false, 'no deletion spread');
+    const removed = (await readHistory(box.context())).find(event => event.kind === 'removed')!;
+    assert.ok(removed, 'the Remove is in History');
+    assert.deepEqual(removed.losers.map(loser => [loser.tool, loser.linkTo]), [['copilot-cli', `../../${SHARED}/back`]]);
+    const back = await restoreFromHistory(box.context(), removed.id);
+    assert.ok(!back.stopped, messages(back));
+    assert.equal(await readlink(join(box.home, COPILOT, 'back')), `../../${SHARED}/back`, 'Restore puts the link back');
+    await applyChanges(box.context(), []);
+    for (const root of [CLAUDE, PI]) assert.equal(await isFolder(join(box.home, root, 'back')), true, `${root} still has it after Restore`);
+  } finally { await box.cleanup(); }
+});
+
+test('Fresh Manage with Remove queued on the tool whose copy is a link: that tool gets no copy on the next passes', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    await installerLayout(box);
+    const result = await applyChanges(box.context(), [manage('opus', { remove: ['copilot-cli'] })]);
+    assert.ok(!result.stopped, messages(result));
+    await applyChanges(box.context(), []);
+    await applyChanges(box.context(), []);
+    assert.equal(await there(join(box.home, COPILOT, 'opus')), false, 'Copilot CLI got no copy');
+    for (const root of [CLAUDE, PI]) assert.equal(await isFolder(join(box.home, root, 'opus')), true, root);
+    const { record } = await readRecord(box.home);
+    assert.ok(record!.items.opus.off?.includes('copilot-cli'));
+    const history = await readHistory(box.context());
+    assert.ok(history.some(event => event.kind === 'removed' && event.losers.some(loser => loser.tool === 'copilot-cli' && loser.linkTo !== undefined)));
+    assert.equal(history.find(event => event.kind === 'took-over')!.tookOver!.links.some(link => link.tool === 'copilot-cli'), false, 'the take-over’s Undo does not bring back a link that was asked to go');
+  } finally { await box.cleanup(); }
+});
+
+test('Undo of a Manage that took the skill over, after one of the copies Manage added was edited: nothing is written, and it says why', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const shared = await installerLayout(box);
+    await applyChanges(box.context(), [manage('opus')]);
+    await writeFile(join(box.home, CLAUDE, 'opus/SKILL.md'), text('opus', 'Edited in Claude Code.'));
+    const tookOver = (await readHistory(box.context())).find(event => event.kind === 'took-over')!;
+    const undo = await restoreFromHistory(box.context(), tookOver.id);
+    assert.match(undo.stopped ?? '', /Claude Code’s new copy of opus was edited since, so nothing was undone/, messages(undo));
+    assert.equal(await isFolder(join(box.home, COPILOT, 'opus')), true, 'the real copy stays');
+    assert.equal(await there(shared), false, 'the shared copy is not put back');
+    assert.equal((await factsOf(box, 'opus'))!.managed, true);
+    assert.equal((await readHistory(box.context())).find(event => event.id === tookOver.id)!.undoneBy, undefined);
+  } finally { await box.cleanup(); }
+});
+
+test('Layout 4, managed: Restore after Delete everywhere puts the shared copy back for the tool whose skills folder is that folder', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const shared = await skill(box.home, SHARED, 'gamma', text('gamma', 'Shared.'));
+    await symlink(join(box.home, SHARED), join(box.home, COPILOT));
+    await applyChanges(box.context(), [manage('gamma')]);
+    assert.ok(!(await deleteEverywhere(box.context(), 'gamma')).stopped);
+    assert.equal(await there(shared), false);
+    const deleted = (await readHistory(box.context())).find(event => event.kind === 'deleted')!;
+    const back = await restoreFromHistory(box.context(), deleted.id);
+    assert.ok(!back.stopped, messages(back));
+    assert.equal(await readFile(join(shared, 'SKILL.md'), 'utf8'), text('gamma', 'Shared.'), 'the only copy Copilot CLI can have is back');
+    assert.equal(await readFile(join(box.home, CLAUDE, 'gamma/SKILL.md'), 'utf8'), text('gamma', 'Shared.'));
+    assert.equal(await there(join(box.home, PI, 'gamma')), false, 'Pi reads the shared copy again: no second copy beside it');
+    assert.doesNotMatch(messages(back), /does not write through it/);
+    assert.equal((await factsOf(box, 'gamma'))!.managed, true);
+  } finally { await box.cleanup(); }
+});
+
+test('Restore of a removal is finished only when every copy is back: a link back, with something else where the shared copy goes, is not', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const shared = await installerLayout(box);
+    await applyChanges(box.context(), [{ key: 'opus', managed: false, off: [], remove: ['copilot-cli', 'pi-cli'], everywhere: true, seenManaged: false }]);
+    await skill(box.home, SHARED, 'opus', text('opus', 'Something else.'));
+    const removed = (await readHistory(box.context())).find(event => event.kind === 'removed')!;
+    const back = await restoreFromHistory(box.context(), removed.id);
+    assert.equal(await readlink(join(box.home, COPILOT, 'opus')), `../../${SHARED}/opus`);
+    assert.match(messages(back), /Something else is at .*\.agents\/skills\/opus now/);
+    assert.equal(await readFile(join(shared, 'SKILL.md'), 'utf8'), text('opus', 'Something else.'));
+    assert.equal((await readHistory(box.context())).find(event => event.id === removed.id)!.undoneBy, undefined, 'still offered for Restore');
   } finally { await box.cleanup(); }
 });
