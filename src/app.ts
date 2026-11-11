@@ -343,8 +343,9 @@ export const applyClick = (click: Click) => busy(click.putBack ? 'Putting it bac
   if (result?.stopped) { tell({ page: state.page, items: click.items, warn: true, band: true, text: result.stopped }); return; }
   if (!click.undoing) retireTip(click.kind);
   const made = result && 'made' in result ? result.made ?? [] : [];
-  // A refused click changed nothing: a record unlike the page's was changed elsewhere (the page was read before it), never by this click.
-  const changed = refusal ? [] : recordChanged(before, standings(click.kind, keys));
+  // A click refused before anything was done changed nothing: a record unlike the page's was changed elsewhere (the page was
+  // read before it), never by this click. A hold that came after the record was changed (an edit waiting for sync) is no such refusal.
+  const changed = refusal?.unchanged ? [] : recordChanged(before, standings(click.kind, keys));
   const copied = !!back || did || made.length > 0 || changed.length > 0;
   // The plugins' part, once the copies' part went through (a whole-click refusal leaves it unrun).
   const plugged = click.plugins?.ops.length && (copied || !refusal) ? await runSwitches(click.plugins.ops, click.plugins.draft) : undefined;
@@ -356,12 +357,13 @@ export const applyClick = (click: Click) => busy(click.putBack ? 'Putting it bac
   // A skill taken over (its links and shared copy, when it was turned on): what that did to them.
   const outside = sent.some(change => change.takeOver) ? tookOverSentence(ours) : '';
   const plugText = !plugged ? '' : plugged.failed.length || plugged.stopped ? switchProblems(plugged) : click.plugins?.said ?? '';
-  const text = done || !refusal ? [said, plugText, outside, click.also, click.note].filter(Boolean).join(' ') + choose : refusal.message;
+  // A hold that came after the change is said beside what was done, not dropped.
+  const text = done || !refusal ? [said, plugText, outside, click.also, click.note, refusal?.message].filter(Boolean).join(' ') + choose : refusal.message;
   const switchedBack = plugged?.back ?? [];
   const undo = click.undoing || !done ? undefined : back ? () => takeOutAgain(click)
     : made.length || changed.length || switchedBack.length ? () => void undoClick(click, made, before, changed, switchedBack) : undefined;
   const warned = failed || !!plugged?.failed.length || !!plugged?.stopped;
-  tell({ page: state.page, items: click.items, warn: warned || !!click.also || (!done && !!refusal), band: true, fade: click.undoing && !warned, next: click.next,
+  tell({ page: state.page, items: click.items, warn: warned || !!click.also || !!refusal, band: true, fade: click.undoing && !warned, next: done || !refusal ? click.next : undefined,
     text, act: undo ? { label: 'Undo', id: 'outcome-undo', title: back ? 'Take it out of every tool again; History keeps it' : 'Put back everything this did', run: undo } : undefined });
   for (const item of click.items) flashRow(item);
 });

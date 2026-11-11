@@ -649,7 +649,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     // A change made from an older read of the page is refused when the skill changed since: a deletion spread meanwhile must not be undone.
     const before = record.items[change.key];
     if (change.seenManaged !== undefined && (before?.state === 'shared') !== change.seenManaged) {
-      results.push({ item: entry.facts.name, outcome: 'held', message: `${entry.facts.name} changed since the page was read${before?.deleted ? ' (it was deleted)' : ''}. Nothing was changed; read again.` });
+      results.push({ item: entry.facts.name, outcome: 'held', unchanged: true, message: `${entry.facts.name} changed since the page was read${before?.deleted ? ' (it was deleted)' : ''}. Nothing was changed; read again.` });
       continue;
     }
     // The copy a tool reads in another managed tool's folder is that tool's: choosing it chooses the owner's. With the owner
@@ -660,7 +660,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     if (change.use && change.use !== 'separate') {
       const syncing = tools.filter(tool => !change.off.includes(tool) && !entry.facts.cannot[tool]);
       const problem = choiceProblem(entry, change.use, change.useHash, syncing, !!change.takeOver);
-      if (problem) { results.push({ item: entry.facts.name, outcome: 'held', ...problem }); continue; }
+      if (problem) { results.push({ item: entry.facts.name, outcome: 'held', unchanged: true, ...problem }); continue; }
     }
     // Removing the very copy chosen for every tool would leave the choice nothing to copy from: refused, changing nothing.
     if (change.use && change.use !== 'separate' && change.remove?.includes(change.use)) {
@@ -946,8 +946,9 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       }
       if (found) copy.directory = found.copy.directory;
     }
-    // A copy an Undo of a choice left as its tool's own stays so while it holds that content.
-    for (const [tool, hash] of Object.entries(item.keptOwn ?? {}) as [HarnessId, string][]) if (entry.facts.copies[tool]?.hash !== hash) delete item.keptOwn![tool];
+    // A copy an Undo of a choice left as its tool's own stays so until that tool's copy is on record again (chosen, or the
+    // same as the rest) or gone. An edit there doesn't end it: taken back, the copy is still the tool's own, never just behind.
+    for (const tool of Object.keys(item.keptOwn ?? {}) as HarnessId[]) if (!entry.facts.copies[tool] || item.copies.some(copy => copy.harness === tool)) delete item.keptOwn![tool];
     if (item.keptOwn && !Object.keys(item.keptOwn).length) delete item.keptOwn;
     // An unrecorded copy holding the synced content, or an earlier revision of this skill from the store (a folder switched back,
     // a copy that once failed to update), is this skill's copy, just behind: adopt it rather than call it a collision.
@@ -2038,6 +2039,7 @@ export async function deleteEverywhere(context: ShareContext, key: string, resum
     const hash = item.hash || lost[0]?.hash || '';
     item.copies = [...leftover, ...item.copies.filter(copy => copy.status === 'written' && !entry.locations.some(location => location.copy.directory === copy.directory)).map(copy => ({ ...copy, status: 'removing' as const }))];
     item.state = 'dont-share';
+    delete item.keptOwn;
     item.deleted = { at: new Date(clock(context)).toISOString(), tool: lost[0]?.tool ?? 'claude-cli', hash };
     await saveRecord(context.home, record);
     // History first, then the hold is dropped: a crash between leaves the hold, never content no one can restore.

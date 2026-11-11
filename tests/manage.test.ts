@@ -950,12 +950,26 @@ test('Undo of choosing a left-out tool’s own copy puts the synced copies back 
     const chosen = (await readHistory(ctx(box))).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
     assert.equal((await restoreFromHistory(three(box), chosen.id, false, 'narrow')).stopped, undefined);
     assert.equal(await readFile(join(box.home, CLAUDE, 'foo/SKILL.md'), 'utf8'), text('foo', 'Original.'));
+    // Codex's own copy, the one that was chosen, waits for a choice again: no pass catches it up, even after it is edited and the edit taken back.
+    const waits = async (when: string) => {
+      const pass = await applyChanges(three(box), []);
+      assert.deepEqual([pass.harnessWrites, pass.results.some(entry => entry.outcome === 'held' && entry.differs), await readFile(join(box.home, CODEX, 'foo/SKILL.md'), 'utf8')], [0, true, text('foo', 'Codex’s own.')], when);
+    };
+    await waits('after the Undo');
+    await writeFile(join(box.home, CODEX, 'foo/SKILL.md'), text('foo', 'Codex’s own, edited.'));
+    await applyChanges(three(box), []);
+    await writeFile(join(box.home, CODEX, 'foo/SKILL.md'), text('foo', 'Codex’s own.'));
+    await waits('after an edit there was taken back');
     // An edit in Claude Code, then Codex out again, as before Sync here: the edit reaches Copilot CLI as an edit.
     await writeFile(join(box.home, CLAUDE, 'foo/SKILL.md'), text('foo', 'Edited in Claude.'));
     const edit = await applyChanges(three(box), [{ ...manage('foo', ['codex-cli']), seenManaged: true }]);
     assert.deepEqual(edit.notices?.map(notice => notice.kind), ['edit'], JSON.stringify(edit.notices));
     assert.equal(await readFile(join(box.home, COPILOT, 'foo/SKILL.md'), 'utf8'), text('foo', 'Edited in Claude.'));
     assert.equal(await readFile(join(box.home, CODEX, 'foo/SKILL.md'), 'utf8'), text('foo', 'Codex’s own.'));
+    // Deleted everywhere, the skill keeps no note: turned on again later, it starts clean.
+    assert.notEqual((await readRecord(box.home)).record?.items.foo.keptOwn, undefined);
+    await deleteEverywhere(three(box), 'foo');
+    assert.equal((await readRecord(box.home)).record?.items.foo.keptOwn, undefined);
   } finally { await box.cleanup(); }
 });
 
@@ -1096,6 +1110,7 @@ test('9: a change made from a page read before a deletion spread is refused', as
     await applyChanges(fast(box), []);
     const stale = await applyChanges(fast(box), [{ key: 'foo', managed: true, off: [], seenManaged: true }]);
     assert.match(stale.results[0]?.message ?? '', /changed since the page was read/);
+    assert.equal(stale.results[0]?.unchanged, true, 'said as a refusal that changed nothing');
     assert.equal(await exists(join(box.home, CLAUDE, 'foo')), false, 'not revived');
   } finally { await box.cleanup(); }
 });
@@ -1241,6 +1256,8 @@ test('R10: with Sync off, Apply all does not carry a pending deletion along', as
     const result = await applyChanges(three(box), [manage('foo', ['codex-cli'])], false, { only: new Set(['foo']) });
     assert.match(result.results.map(entry => entry.message).join(' '), /waiting for sync/);
     assert.equal(await exists(join(box.home, COPILOT, 'foo/SKILL.md')), true);
+    // The record did change (Codex is left out now), so this hold is no refusal that changed nothing: the click keeps its Undo.
+    assert.deepEqual([result.results.some(entry => entry.unchanged), (await readRecord(box.home)).record?.items.foo.off], [false, ['codex-cli']]);
   } finally { await box.cleanup(); }
 });
 
