@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { tomlValue } from '../src/textedit.ts';
@@ -708,6 +708,40 @@ cp "${join(box.base, 'on.toml')}" "$HOME/.codex/config.toml"
     assert.equal(report.message, 'Updated to 2.0.0. It is still off in Codex.');
     assert.equal(await readFile(config, 'utf8'), 'model = "x"\n\n[plugins."full@ck-test-market"]\nenabled = false\n\n[plugins."other@ck-test-market"]\nenabled = true\n', 'only its own switch changed');
     assert.deepEqual(report.runs.map(run => run.command), ['codex plugin add full@ck-test-market --json', 'config.toml [plugins."full@ck-test-market"] enabled = false']);
+  } finally { await box.cleanup(); }
+});
+
+test('A Codex update that drops a plugin’s server switch (its own uninstall takes the table out) turns that server off again', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root);
+    // Codex has full 1.0.0 with the server `issues` turned off. Its stand-in's `plugin add` puts 2.0.0 in and writes
+    // config.toml without the server's table, as a reinstall does.
+    for (const version of ['1.0.0', 'next']) {
+      const copy = join(box.home, '.codex/plugins/cache/ck-test-market/full', version);
+      await put(join(copy, '.codex-plugin/plugin.json'), JSON.stringify({ name: 'full', mcpServers: './.mcp.json' }));
+      await put(join(copy, '.mcp.json'), JSON.stringify({ mcpServers: { issues: { command: 'npx' }, wiki: { command: 'npx' } } }));
+    }
+    await rename(join(box.home, '.codex/plugins/cache/ck-test-market/full/next'), join(box.base, 'next'));
+    const config = join(box.home, '.codex/config.toml');
+    const plain = 'model = "x"\n\n[plugins."full@ck-test-market"]\nenabled = true\n';
+    const off = '\n[plugins."full@ck-test-market".mcp_servers.issues]\nenabled = false\n';
+    await put(config, plain + off);
+    await put(join(box.base, 'plain.toml'), plain);
+    const bin = join(box.base, 'bin');
+    await mkdir(bin, { recursive: true });
+    await writeFile(join(bin, 'codex'), `#!/bin/sh
+cp -R "${join(box.base, 'next')}" "$HOME/.codex/plugins/cache/ck-test-market/full/2.0.0"
+cp "${join(box.base, 'plain.toml')}" "$HOME/.codex/config.toml"
+`, { mode: 0o755 });
+    const read = await parseCatalog(root, root, 'folder');
+    const catalog = { ...read, plugins: read.plugins.map(plugin => (plugin.name === 'full' ? { ...plugin, version: '2.0.0' } : plugin)) };
+    const context = { ...box.context, binaries: { 'codex-cli': join(bin, 'codex') } as PluginContext['binaries'] };
+    const report = await update(context, catalog, 'full', 'codex-cli');
+    assert.deepEqual([report.outcome, report.version], ['updated', '2.0.0'], report.message);
+    assert.equal(await readFile(config, 'utf8'), plain + off, 'the server is off again, and nothing else changed');
+    assert.equal(report.runs.length, 2, 'the update, then the switch put back');
   } finally { await box.cleanup(); }
 });
 

@@ -391,14 +391,18 @@ function cutTables(text: string, tables: TomlTable[], replacement?: string, { en
 /**
  * Replaces the table `[prefix.name]` and its subtables `[prefix.name.*]` with `body` (or removes them when `body` is
  * undefined). Everything else, including comments and other tables, stays byte for byte. A new table goes at the end.
+ * `endGap`: a table taken from the document's end takes with it the blank line that was put before it, so adding a table
+ * and removing it again leaves the file as it was (apart from a final newline the file lacked).
  */
-export function setTomlTable(text: string, prefix: string[], name: string, body: string | undefined): string {
+export function setTomlTable(text: string, prefix: string[], name: string, body: string | undefined, { endGap = false } = {}): string {
   // `[[…]]` blocks are never a table's own (the MCP reader leaves them out too), so rewriting a server keeps them.
   const owns = (table: TomlTable) => !table.array && table.path.length > prefix.length && prefix.every((part, index) => table.path[index] === part) && table.path[prefix.length] === name;
   const mine = readTomlTables(text).filter(owns);
-  if (!mine.length) return body === undefined ? text : appendToml(text, body);
+  // A file written with Windows line endings keeps them in what `endGap` adds or takes back.
+  const eol = endGap && text.includes('\r\n') ? '\r\n' : '\n';
+  if (!mine.length) return body === undefined ? text : appendToml(text, body, eol);
   // Rebuilt in place of the first of its tables; its other tables are dropped wherever they are.
-  return cutTables(text, mine, body);
+  return cutTables(text, mine, body, { endGap, eol });
 }
 
 /**

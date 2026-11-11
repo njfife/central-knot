@@ -11,6 +11,7 @@ import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, sente
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
+import { clear as clearPluginOp, resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, type PluginOp } from './pluginplan.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
@@ -315,6 +316,44 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   const failed = result.results.filter(entry => entry.outcome === 'failed').length;
   tell(result.stopped ? undefined : { page: state.page, history: replacedSome && !chosenNow.length, text: `${what}.` + (managed && firstApply ? ' Edits now spread between tools.' : '') + (failed ? ` ${failed} failed.` : ''), item: singleName, items: newItems,
     act: addedNow.length ? addedUndo(addedNow, switchedNow) : chosenNow.length ? choiceUndo(chosenNow) : switchUndo }, result.stopped);
+});
+
+/**
+ * Turns plugins' items on or off from the Skills, MCP servers and Agents pages (pluginswitch.ts), with each tool's own
+ * switch, then reads the home again. What ran leaves `draft`; what wasn't reached stays chosen. The result offers Undo,
+ * which runs what this run changed, reversed. `before`: the result of the copies' Apply all that ran just before in the
+ * same click, which this one's result carries with it: its words first, and its Undo run after this one's.
+ */
+export const applyPluginSwitches = (ops: PluginOp[], draft: Map<string, PluginOp>, undo = false, before?: Outcome) => busy(undo ? 'Undoing…' : 'Applying…', async () => {
+  const home = state.home!.home;
+  const plan = { install: api().installPlugin, uninstall: api().uninstallPlugin, setSkill: api().setPluginSkill, setPart: api().setPluginPart, setWhole: api().setPluginOn };
+  const result = await runPlan(ops, plan, home);
+  for (const entry of result.done) clearPluginOp(draft, entry);
+  // A plugin that failed to come on leaves no item switched off for it: those written before it are put back, and said
+  // only where that failed too.
+  const strays = strayHolds(result.done);
+  const putBack = strays.length ? (await runPlan(reverse(strays), plan, home)).done : [];
+  const restored = strays.filter(stray => putBack.some(back => back.tool === stray.tool && back.plugin === stray.plugin && back.skill === stray.skill && back.part?.kind === stray.part?.kind && back.part?.name === stray.part?.name && succeeded(back.report)));
+  result.done = result.done.filter(entry => !restored.includes(entry));
+  setHome(await api().refresh());
+  const lines = resultLines(result.done, undo);
+  const failed = lines.filter(line => !line.ok);
+  const back = undo ? [] : reverse(result.done);
+  const text = [before?.text, result.stopped ?? resultSentence(lines, undo), ...failed.map(line => `${line.plugin}: ${line.text.replace(/\.$/, '')}.`)].filter(Boolean).join(' ') || 'Nothing changed.';
+  // The switches go back first; the copies' own Undo follows only when that worked, and is still offered when it didn't.
+  const undoPlugins = () => applyPluginSwitches(back, new Map(), true, before?.act ? { page: state.page, text: '', act: { ...before.act, label: 'Undo the rest', title: 'Undo the changes to copies made in the same Apply all' } } : undefined);
+  // With the copies' changes said above it and no Undo of theirs to run after, the button says what it does undo.
+  // After them the copies' own Undo runs, when they worked; its result then says both.
+  const undoBoth = async () => {
+    await undoPlugins();
+    const first = state.outcome;
+    if (first?.warn || !before?.act) return;
+    before.act.run();
+    while (state.busy) await new Promise(done => setTimeout(done, 50));
+    tell(state.outcome ? { ...state.outcome, text: [first?.text, state.outcome.text].filter(Boolean).join(' ') } : first && { ...first, act: undefined });
+  };
+  const act = back.length ? { label: before && !before.act ? 'Undo plugin switches' : 'Undo', id: 'outcome-undo-plugin', title: before?.act ? 'Turn the plugin items back as they were, then undo the rest' : 'Turn them back as they were', run: () => void undoBoth() } : before?.act;
+  tell({ ...before, page: state.page, text, warn: !!failed.length || !!result.stopped || !!before?.warn, act });
 });
 
 /**
