@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { STANDARD_BUILD, PRODUCT } from './values.ts';
 import { createReadStream } from 'node:fs';
-import { access, chmod, constants, copyFile, link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { access, chmod, constants, copyFile, link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
 import { configRoot, harnessIds, harnesses, writeRoot } from './harnesses.ts';
 import { instructionFiles } from './instructions.ts';
@@ -136,6 +136,11 @@ export async function copyTree(source: string, target: string, tree: Tree) {
 }
 
 export const finishCopy = async (source: string, target: string) => chmod(target, (await stat(source)).mode & 0o777);
+
+/** A file's last-modified time, as the pages show it (ToolCopy.modified); none when it can't be read. */
+export const fileTime = (path: string) => stat(path).then(info => info.mtime.toISOString(), () => undefined);
+/** Gives a file put back by an Undo the edit time it had: it back-dates the real file's modification time, so "Edited most recently" points where it did. A failure is let go. */
+export const giveFileTime = async (path: string, at: string | undefined) => { if (at) await utimes(path, new Date(), new Date(at)).catch(() => undefined); };
 
 /** Removes a folder CK owns, even one with read-only folders inside. */
 export async function removeTree(path: string) {

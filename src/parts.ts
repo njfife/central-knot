@@ -621,7 +621,7 @@ function installOutcome(tool: HarnessId, moved: Moved, items: PartItem[], update
   if (!items.length) return { outcome: 'uninstalled', message: `Parts removed: the plugin no longer has any that can go into ${name}.` };
   const there = partsSummary(items.filter(item => !item.removed), ', ');
   const done = picked ? `Parts changed: ${name} now has ${there}` : `${update ? 'Parts brought up to date' : 'Parts installed'}: ${there}`;
-  return { outcome: 'installed', message: `${done}. ${harnesses[tool].nextStep.replace(/^Written\. /, '')}` };
+  return { outcome: 'installed', message: `${done}. ${harnesses[tool].nextStep}` };
 }
 
 /** Removes a plugin's parts from a tool: each one still as it was installed. Edited or managed parts stay. Undoable. */

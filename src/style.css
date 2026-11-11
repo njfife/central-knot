@@ -362,6 +362,14 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .band-lines { display: flex; flex-direction: column; gap: 2px; }
 .band-danger { background: var(--danger-tint); color: var(--danger); }
 .band-done, .band-done .band-text { color: var(--ink); }
+.band-actions { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.band-actions:empty { display: none; }
+/* A result with two buttons in a narrow window: the buttons take their own line under the words, which keep the width. */
+@container content (width < 1000px) {
+  .band-two { flex-wrap: wrap; row-gap: 6px; }
+  .band-two > .band-text { flex: 1 1 calc(100% - 60px); }
+  .band-two > .band-actions { order: 1; flex-basis: 100%; flex-wrap: wrap; padding-left: 20px; }
+}
 .band-help { color: var(--ink-soft); }
 .band-why { color: var(--ink-soft); }
 .band-sync-off .text-action + .text-action { margin-left: 4px; }
@@ -1115,8 +1123,9 @@ span.ins-confirm { margin-top: 0; }
 .plugin-file-name { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--ink); }
 .plugin-file-name .icon { flex: none; color: var(--ink-soft); }
 .plugin-file { grid-column: 1 / -1; margin: 6px 0 4px 17px; min-width: 0; }
-/* In an item's details, the file scrolls in its own box, so each tool's switch below it stays in reach at every size. */
+/* In an item's details the file sits under each tool's switch, in its own scrolling box, so a long file never fills the page. */
 .details-plugin .plugin-file { max-height: 40vh; overflow: auto; overscroll-behavior: contain; }
+.details-file > .details-actions { margin-top: 0; }
 /* With a skill's switches at the row's end, the toggle covers name and description only */
 .plugin-parts li.with-end > .plugin-file-toggle { grid-column: 1 / 3; }
 /* A row that opens nothing starts its name where an opening row's name starts, after the chevron */

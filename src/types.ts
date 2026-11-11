@@ -351,6 +351,8 @@ export interface Change {
   enable?: HarnessId[];
   /** Skills: tools whose copy is removed, kept in History for Restore. A managed skill also stops syncing there. */
   remove?: HarnessId[];
+  /** Agents, with `use`: the Stopped switch of this tool. Only its stopped copy takes the chosen copy; every other copy is left as it is. */
+  resumeIn?: HarnessId;
   /** Skills: Delete everywhere for an unmanaged skill: the removed tools' other copies (in ~/.agents/skills) go too. */
   everywhere?: boolean;
   /**
@@ -390,6 +392,22 @@ export interface TookOver {
   addedId?: string;
 }
 
+/** What a copy choice changed in the item's record besides the copies it wrote (HistoryEvent.before). */
+export interface ChoiceBefore {
+  /**
+   * An MCP server's: the tools the choice put on record without writing them (Claude Code waiting for Write), each with what was
+   * on record for it before (no hash: nothing).
+   */
+  record?: { tool: HarnessId; hash?: string }[];
+  /** A synced agent's: the tool it was shared from. */
+  origin?: HarnessId;
+  /**
+   * An agent's: the tools whose copy had stopped updating. A choice on a synced agent that replaced only such copies gave them
+   * the source's copy again (a Stopped switch).
+   */
+  stopped?: HarnessId[];
+}
+
 export interface HistoryEvent {
   id: string;
   at: string;
@@ -399,8 +417,9 @@ export interface HistoryEvent {
    * 'switched': a change turned it off or on in some tools, with each tool's own switch (`switched`); Undo flips them back.
    * 'removed': a change removed it from the tools in `losers`, keeping each copy; Restore puts them back there.
    * 'profile': a profile switch (key 'profiles:switch', item the profile's name); Undo switches back.
-   * 'took-over': copies outside Central Knot were taken over (`tookOver`); Undo puts the links and the shared copy back. */
-  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed' | 'profile' | 'took-over';
+   * 'took-over': copies outside Central Knot were taken over (`tookOver`); Undo puts the links and the shared copy back.
+   * 'written': Write to Claude Code replaced an MCP entry there that History didn't hold (`previous`); Undo is Undo write. */
+  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed' | 'profile' | 'took-over' | 'written';
   /** 'took-over': what was replaced, removed and placed, so Undo can put it back exactly. */
   tookOver?: TookOver;
   /** 'profile': which profile was in use before and after, and every switch it flipped. */
@@ -422,14 +441,15 @@ export interface HistoryEvent {
   wasSynced?: boolean;
   /** 'chosen': the 'added' entry its own pass wrote (the copies that came with the choice), which its Undo takes out; never another. */
   addedId?: string;
-  /** 'chosen', an agent's: the source's copy given again to copies that had stopped updating; its Undo puts their edits back, stopped again. */
-  resumed?: boolean;
+  /** 'chosen': what the choice changed in the record besides the copies it wrote, which its Undo puts back. */
+  before?: ChoiceBefore;
   winner?: { tool: HarnessId; hash: string };
   /** Content that gave way, kept in Central Knot's store. */
   losers: { tool: HarnessId; hash: string; /** MCP: which kept copy of that tool's own settings this replaced, for an exact Restore. */ kept?: string; /** 'removed': the copy's folder name as it was, to put it back under the same name. */ folder?: string;
     /** 'removed', managed: the content last synced to that copy, so Restore puts its sync record back and an unsynced edit in it spreads. */ synced?: string;
     /** 'removed': a copy outside the tool's own folder (in ~/.agents/skills), put back at this path. */ path?: string;
-    /** 'removed': the copy was a link with this text; Restore makes the link again. */ linkTo?: string }[];
+    /** 'removed': the copy was a link with this text; Restore makes the link again. */ linkTo?: string;
+    /** 'chosen', a skill's or an agent's: when the replaced copy was last edited (its file's time), which its Undo gives it again. */ editedAt?: string }[];
   /** The synced content before this event, to put back on Undo. */
   previous?: string;
   orderProved: boolean;
@@ -683,7 +703,7 @@ export interface McpView {
 export interface McpResult { stopped?: string; results: DestinationResult[]; writes: number; /** The History events the asked changes made, for their one Undo (ApplyResult.made). */ made?: string[]; notices?: SyncNotice[]; /** A deletion is inside its settle window: look again shortly. */ settling?: boolean;
   /** What Write to Claude Code wrote, for its Undo: each entry's hash before (null when it was new) and after. */
   claudeWritten?: ClaudeWrite[] }
-export interface ClaudeWrite { name: string; before: string | null; after: string }
+export interface ClaudeWrite { name: string; before: string | null; after: string; /** Its History entry ('written'), undone with it. */ event?: string }
 
 // ---------- Instructions ----------
 

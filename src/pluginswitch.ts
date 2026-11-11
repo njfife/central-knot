@@ -143,7 +143,9 @@ export function alongWords(item: PluginItemAt, ops: PluginOp[], there = false): 
     return `Its plugin ${item.install.plugin} was turned on ${where}${leftOff.length ? `, with its ${andList(leftOff)} left off` : ''}.`;
   }
   const rest = item.install.items.filter(entry => !samePart(entry, item) && !(hasOwnSwitch(item.tool, entry.kind) && itemOffNow(item.install, entry)));
-  return `Its whole plugin ${item.install.plugin} was turned ${whole.action === 'plugin-on' ? 'on' : 'off'} ${where}${rest.length ? `, with its ${counted(rest, item.kind)}` : ''}.`;
+  // One item beside it is named ("with its other skill, spreadsheet"); more are counted.
+  const one = rest.length === 1 ? `${rest[0].kind === item.kind ? `other ${partWords[rest[0].kind][0]},` : partWords[rest[0].kind][0]} ${rest[0].name}` : undefined;
+  return `Its whole plugin ${item.install.plugin} was turned ${whole.action === 'plugin-on' ? 'on' : 'off'} ${where}${rest.length ? `, with its ${one ?? counted(rest, item.kind)}` : ''}.`;
 }
 
 /** A click on one item's switch in its tool, said once its choices (`ops`) all ran: the item first ("issues is on in Codex."), then what came with it. */

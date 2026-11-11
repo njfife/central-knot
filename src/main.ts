@@ -849,7 +849,7 @@ const pluginItemsContext = (overrides: Partial<Record<HarnessId, string>> | unde
 
 /**
  * Keeps what a change came to, for a problem report: a refusal for the whole home, each plugin step as its tool reported
- * it (with the tool's own output when its command failed), and each item an Apply all couldn't change. The words the page
+ * it (with the tool's own output when its command failed), and each item a change couldn't reach. The words the page
  * showed, and where they name one, the path and the system's error code; never an item's content.
  */
 function logOutcome(channel: string, args: unknown[], result: unknown) {
@@ -1074,7 +1074,7 @@ app.whenReady().then(async () => {
     && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenManaged === undefined || typeof change.seenManaged === 'boolean')
   ).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged,
     ...(change.disable ? { disable: ids(change.disable) } : {}), ...(change.enable ? { enable: ids(change.enable) } : {}), ...(change.remove ? { remove: ids(change.remove) } : {}),
-    ...(change.everywhere === true ? { everywhere: true } : {}), ...(change.takeOver === true ? { takeOver: true } : {}) }));
+    ...(change.everywhere === true ? { everywhere: true } : {}), ...(change.takeOver === true ? { takeOver: true } : {}), ...(change.resumeIn && harnessIds.includes(change.resumeIn) ? { resumeIn: change.resumeIn } : {}) }));
   // Marketplaces and plugins: their own module, given only what it needs from here.
   const markets = carriedMarket = registerMarketplaces({ handle, handleNow }, {
     home: () => (current ? { home: current.home, overrides: context().overrides, actual: current.mode === 'actual' } : undefined),
@@ -1252,7 +1252,7 @@ app.whenReady().then(async () => {
   // Its Undo goes through the same check: Claude Code closed, or it would write its copy back over the undone one.
   handle('mcp:unwrite-claude', async (written, home) => (home === current?.home && Array.isArray(written)
     ? current?.mode !== 'fixture' && await claudeRunning() ? { stopped: 'Claude Code or Claude desktop is still running. Quit it first, then click Undo again.', results: [], writes: 0 }
-      : undoClaudeWrite(context(), written.filter((write): write is ClaudeWrite => !!write && typeof write.name === 'string' && typeof write.after === 'string' && (write.before === null || typeof write.before === 'string')))
+      : undoClaudeWrite(context(), written.filter((write): write is ClaudeWrite => !!write && typeof write.name === 'string' && typeof write.after === 'string' && (write.before === null || typeof write.before === 'string') && (write.event === undefined || typeof write.event === 'string')))
     : { stopped: elsewhere, results: [], writes: 0 }));
   handle('mcp:write-claude', async (names, home) => (home === current?.home && Array.isArray(names)
     // The practice copy is sample files: the real Claude Code never reads them, so it need not be closed there.

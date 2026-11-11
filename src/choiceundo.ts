@@ -79,7 +79,10 @@ export async function undoChoice(history: HistoryEvent[], chosen: HistoryEvent, 
     done.add(loser.tool);
     results.push({ item: sides.name, harness: loser.tool, outcome: 'written', message: [`Its own ${sides.noun} is back.`, sides.nextStep?.(loser.tool)].filter(Boolean).join(' ') });
   }
-  // Synced before only with content on record then: one held before its first write had nothing to stay synced to.
+  // Synced before only with content on record then: one held before its first write had nothing to stay synced to, so it ends
+  // not synced, each tool keeping its copy (a copy that pass gave a tool too, as no 'added' entry names it), where it was On
+  // and waiting. Left so: the page turns nothing on before its copy is chosen, so only a page read before then, or a record
+  // from before one-switch pages, gets there, and not synced writes nothing more.
   await sides.settle(chosen.wasSynced ? chosen.previous : undefined, new Map(chosen.losers.filter(loser => done.has(loser.tool)).map(loser => [loser.tool, loser.hash])));
   if (addedGone && chosen.losers.every(loser => done.has(loser.tool))) { chosen.undoneBy = randomUUID(); delete chosen.restoredTools; }
   else chosen.restoredTools = [...done];

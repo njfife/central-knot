@@ -435,9 +435,24 @@ async function practiceFlow() {
   // Seconds later, after any background pass, the result and its Undo are still there.
   await wait(3500);
   check('the choice offers an inline Undo', await a.exists('#outcome-undo'), await a.text('.bands'));
+  // Claude Code's skills folder can't be written for a moment: the Undo stops part-way, and History's row finishes it.
+  const claudeSkills = join(practice, '.claude/skills');
+  chmodSync(claudeSkills, 0o555);
   await a.click('#outcome-undo');
+  for (let tries = 0; tries < 50 && !/Not all of review/.test(await a.text('.bands') ?? ''); tries++) await wait(100);
+  chmodSync(claudeSkills, 0o755);
+  check('an Undo that couldn’t put a copy back says so, and that History finishes it', /^Not all of review could be put back\..*History’s Undo of the choice finishes it\.$/.test((await a.text('.band-done .band-text') ?? '').trim()), await a.text('.bands'));
+  await a.click('#nav-history');
+  const unfinishedRow = `[...document.querySelectorAll('.history-row[data-kind="chosen"]')].find(row => row.querySelector('.history-about')?.textContent.includes('still to go'))`;
+  same('its History row says what is still to go, with Finish undo', await a.run(`[${unfinishedRow}?.querySelector('.history-about')?.textContent, ${unfinishedRow}?.querySelector('.history-actions button')?.textContent]`),
+    ['You chose Copilot CLI’s copy; it replaced Claude Code’s. Claude Code still to go.', 'Finish undo']);
+  await a.run(`${unfinishedRow}.querySelector('.history-actions button').click()`);
   for (let tries = 0; tries < 30 && readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8') !== reviewClaude; tries++) await wait(100);
-  check('Undo puts the replaced copy back in its own tool and takes the added one out', readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8') === reviewClaude && readFileSync(join(practice, '.copilot/skills/review/SKILL.md'), 'utf8') === reviewCopilot && !existsSync(join(practice, '.codex/skills/review')));
+  check('Finish undo puts the replaced copy back in its own tool; the added one went with the first Undo', readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8') === reviewClaude && readFileSync(join(practice, '.copilot/skills/review/SKILL.md'), 'utf8') === reviewCopilot && !existsSync(join(practice, '.codex/skills/review')));
+  const rowUndone = () => a.run(`[...document.querySelectorAll('.history-row[data-kind="chosen"]')].some(row => row.textContent.includes('replaced Claude Code’s') && row.querySelector('.history-done')?.textContent === 'Undone')`);
+  for (let tries = 0; tries < 50 && !(await rowUndone()); tries++) await wait(100);
+  check('and the row reads Undone', await rowUndone(), await a.run(`document.querySelector('.history-list')?.textContent.slice(0, 600)`));
+  await a.click('#nav-skills');
   check('and review is not synced, flagged again', !(await switchOn(a, 'review')) && await a.exists('#decide-review'));
 
   // Off: every tool's own switch turns release-notes off at once; the copies stay. Undo turns each back on, byte for byte.
@@ -852,16 +867,32 @@ async function practiceFlow() {
   check('while its notice shows, the toolbar doesn’t say it again', !(await a.text('.toolbar') ?? '').includes('stopped updating') && !(await a.exists('#go-stopped')), await a.text('.toolbar'));
   check('the status line leads with the copy that stopped, then where it is on, and no more', /^Codex’s copy stopped updating · on in all 3 tools$/.test((await a.text('.details-status') ?? '').trim()), await a.text('.details-status'));
   await a.click('#stopped-dismiss-code-reviewer-codex-cli');
-  check('deciding later keeps both choices in the Codex row', await a.exists('#stopped-keep-code-reviewer-codex-cli-details') && await a.exists('#stopped-use-code-reviewer-codex-cli-details') && await a.exists('#go-stopped'));
+  check('deciding later keeps both choices in the Codex row: Keep its edit, and its Stopped switch for Claude Code’s copy', await a.exists('#stopped-keep-code-reviewer-codex-cli-details') && await a.exists('#sync-code-reviewer-codex-cli') && !(await a.exists('#stopped-use-code-reviewer-codex-cli-details')) && await a.exists('#go-stopped'));
   await a.click('#stopped-keep-code-reviewer-codex-cli-details');
   check('keeping the edit is said with an Undo, and the toolbar counts it', /Codex keeps its own edit of code-reviewer/.test(await a.text('main') ?? '') && await a.exists('#outcome-undo-keep') && /Synced · 1 kept edit/.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
   check('Keep my edit clears the warning and leaves the edit', await a.exists('#cell-code-reviewer-codex-cli[data-state="kept"]') && !(await a.text('.toolbar') ?? '').includes('stopped updating') && readFileSync(codexAgent, 'utf8').includes('Edited in Codex.'));
-  await a.click('#stopped-use-code-reviewer-codex-cli-details');
+  // A second copy stops too (Copilot CLI's): Codex's switch is for Codex alone (main.ts passes resumeIn through).
+  const copilotAgentFile = join(practice, '.copilot/agents/code-reviewer.agent.md');
+  writeFileSync(copilotAgentFile, readFileSync(copilotAgentFile, 'utf8').replace('description: ', 'description: Edited in Copilot. '));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 30 && !(await a.exists('#cell-code-reviewer-copilot-cli[data-state="stopped"]')); tries++) await wait(100);
+  check('the second edited copy stops too', await a.exists('#cell-code-reviewer-copilot-cli[data-state="stopped"]'), JSON.stringify(await a.all('[id^=cell-code-reviewer]', 'e.id + "=" + e.dataset.state')));
+  await a.click('#sync-code-reviewer-codex-cli');
   check('the result says Codex resumed, not that an agent was newly synced', /Codex has Claude Code’s copy of code-reviewer again/.test(await a.text('main') ?? ''), (await a.text('main') ?? '').slice(0, 300));
   check('it puts Claude Code’s copy back in Codex, at once', !readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && !(await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]')), readFileSync(codexAgent, 'utf8'));
+  check('Codex’s switch leaves Copilot CLI’s stopped copy with its edit', readFileSync(copilotAgentFile, 'utf8').includes('Edited in Copilot.') && await a.exists('#cell-code-reviewer-copilot-cli[data-state="stopped"]'), readFileSync(copilotAgentFile, 'utf8'));
   check('the result offers Undo, which restores Codex’s edit', await a.exists('#outcome-undo'));
   await a.click('#outcome-undo');
-  check('Undo puts the edit back, and the copy stops again', readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]'), JSON.stringify(await a.all('[id^=cell-code-reviewer]', 'e.id + "=" + e.dataset.state')) + ' ' + (await a.text('main'))?.slice(0, 400));
+  check('Undo puts the edit back with the mark the click cleared: it keeps its edit again', readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && await a.exists('#cell-code-reviewer-codex-cli[data-state="kept"]'), JSON.stringify(await a.all('[id^=cell-code-reviewer]', 'e.id + "=" + e.dataset.state')) + ' ' + (await a.text('main'))?.slice(0, 400));
+  // History's Undo of the same switch puts the mark back too: it is for Codex's copy as it was kept.
+  await a.click('#sync-code-reviewer-codex-cli');
+  for (let tries = 0; tries < 30 && readFileSync(codexAgent, 'utf8').includes('Edited in Codex.'); tries++) await wait(100);
+  await a.click('#nav-history');
+  const resumeRow = `[...document.querySelectorAll('.history-row[data-kind="chosen"]')].find(row => row.textContent.includes('code-reviewer') && row.querySelector('.history-actions button'))`;
+  await a.run(`${resumeRow}.querySelector('.history-actions button').click()`);
+  for (let tries = 0; tries < 30 && !readFileSync(codexAgent, 'utf8').includes('Edited in Codex.'); tries++) await wait(100);
+  await a.click('#nav-agents');
+  check('History’s Undo of the switch puts the edit back, and it keeps its edit again', readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && await a.exists('#cell-code-reviewer-codex-cli[data-state="kept"]'), JSON.stringify(await a.all('[id^=cell-code-reviewer]', 'e.id + "=" + e.dataset.state')));
   await a.click('#nav-skills');
 
   // What a plugin installed whole brings shows on Skills and MCP servers with the plugin's mark, before Plugins was ever
@@ -1200,10 +1231,10 @@ async function practiceFlow() {
   await a.click('#enable-triage-claude-cli');
   for (let tries = 0; tries < 60 && !(await a.exists('#outcome-undo-plugin')); tries++) await wait(100);
   check('the opened row’s switch applies at once, and its result leads with the skill', wholeOff() && await cellState(a, 'triage', 'claude-cli') === 'plugin-off'
-    && /triage is off in Claude Code\. Its whole plugin issue-tracker was turned off there, with its 1 MCP server\./.test(await a.text('.bands') ?? ''), [pluginSettingsNow(), await a.text('.bands')]);
+    && /triage is off in Claude Code\. Its whole plugin issue-tracker was turned off there, with its MCP server issues\./.test(await a.text('.bands') ?? ''), [pluginSettingsNow(), await a.text('.bands')]);
   await a.click('#outcome-undo-plugin');
   for (let tries = 0; tries < 60 && (wholeOff() || !/Undone: triage/.test(await a.text('.bands') ?? '')); tries++) await wait(100);
-  check('its Undo turns the plugin back on there', !wholeOff() && /Undone: triage is on in Claude Code again\./.test(await a.text('.bands') ?? ''), [pluginSettingsNow(), await a.text('.bands')]);
+  check('its Undo turns the plugin back on there', !wholeOff() && /Undone: triage is back on in Claude Code\./.test(await a.text('.bands') ?? ''), [pluginSettingsNow(), await a.text('.bands')]);
   writeFileSync(claudeStub, stubBefore);
   // Codex has the plugin too, and a switch for one skill of it: the row's switch turns Pi's copy and Codex's skill off in one
   // click (Claude Code left on, and said), and its one Undo puts both back.

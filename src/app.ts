@@ -280,9 +280,9 @@ export interface Click {
   items: string[];
   /**
    * What was done, as the result's sentence ("notes is on in all 3 tools"); as a function, given the tools where the click's
-   * write failed or was held, so it never claims those.
+   * write failed or was held, so it never claims those, and the tools it wrote.
    */
-  said: string | ((notIn: HarnessId[]) => string);
+  said: string | ((notIn: HarnessId[], wrote: HarnessId[]) => string);
   /** Said after it, as a warning: what the click left as it is, and why ("Still on in Codex: its settings file can’t be read."). */
   also?: string;
   /** Said after it, as a plain note: what is still to come, or left as it should be ("Claude Code gets it when you click Write to Claude Code."). */
@@ -354,7 +354,8 @@ export const applyClick = (click: Click) => busy(click.putBack ? 'Putting it bac
   if (plugged) setHome(await api().refresh());
   const done = copied || !!plugged?.done.length;
   // Said from what happened: a tool whose write failed, copy or plugin switch, is not called on (or off).
-  const said = changes === 'choose' ? `${click.items[0]} is back.` : typeof click.said === 'string' ? click.said : click.said([...notIn, ...(plugged?.failedIn ?? [])]);
+  const wrote = [...new Set(ours.filter(entry => entry.outcome === 'written' && entry.harness).map(entry => entry.harness!))];
+  const said = changes === 'choose' ? `${click.items[0]} is back.` : typeof click.said === 'string' ? click.said : click.said([...notIn, ...(plugged?.failedIn ?? [])], wrote);
   const choose = differs || changes === 'choose' ? ' Its copies differ: choose which copy every tool uses.' : '';
   // A skill taken over (its links and shared copy, when it was turned on): what that did to them.
   const outside = sent.some(change => change.takeOver) ? tookOverSentence(ours) : '';
@@ -475,22 +476,27 @@ async function runSwitches(ops: PluginOp[], draft: Map<string, PluginOp>, undo =
   return { done, lines, failed: lines.filter(line => !line.ok), failedIn, back: undo ? [] : reverse(done), stopped: result.stopped };
 }
 
+/** A plugin switch click's words: `said` when everything ran (else what ran and what didn't), and `undone` its Undo's. Said
+ * after it, what the click left as it is: `also` as a warning (a switch that can't be written), `note` plainly (a tool with no
+ * switch for one item). `next`: a second button beside the Undo. */
+interface SwitchWords { said?: string; undone?: string; also?: string; note?: string; next?: Outcome['next'] }
+
 /**
  * Turns plugins' items on or off from the Skills, MCP servers and Agents pages (pluginswitch.ts), with each tool's own
  * switch, then reads the home again: a click with nothing of the person's own to change (a tool's switch for a plugin's item,
  * a plugin row's switch). What ran leaves `draft`. The result offers Undo, which runs what this run changed, reversed.
- * `said`: the result's words when everything ran (else what ran and what didn't), and `undoSaid` its Undo's. Said after it,
- * what the click left as it is: `also` as a warning (a switch that can't be written), `note` plainly (a tool with no switch
- * for one item). `kind`: the page's, whose tip a click retires.
  */
-export const applyPluginSwitches = (ops: PluginOp[], draft: Map<string, PluginOp>, options: { undo?: boolean; also?: string; note?: string; said?: string; undoSaid?: string; kind?: Kind; next?: Outcome['next'] } = {}) => busy(options.undo ? 'Undoing…' : 'Applying…', async () => {
-  const { undo = false, also, note, said, undoSaid, kind, next } = options;
+export const applyPluginSwitches = (ops: PluginOp[], draft: Map<string, PluginOp>, words: SwitchWords = {}) => switchPlugins(ops, draft, words, false);
+
+const switchPlugins = (ops: PluginOp[], draft: Map<string, PluginOp>, { said, undone, also, note, next }: SwitchWords, undo: boolean) => busy(undo ? 'Undoing…' : 'Applying…', async () => {
   const ran = await runSwitches(ops, draft, undo);
   setHome(await api().refresh());
-  if (kind && !undo) retireTip(kind);
+  // The page's tip goes after its first click, as for a copy's.
+  const page = harnessKindShown() ?? (isKind(state.page) ? state.page : undefined);
+  if (page && !undo) retireTip(page);
   const worked = !ran.failed.length && !ran.stopped;
   const text = [worked && said ? said : ran.stopped ?? resultSentence(ran.lines, undo), worked ? '' : switchProblems({ ...ran, stopped: undefined }), also, note].filter(Boolean).join(' ') || 'Nothing changed.';
-  const act = ran.back.length ? { label: 'Undo', id: 'outcome-undo-plugin', title: 'Turn them back as they were', run: () => void applyPluginSwitches(ran.back, new Map(), { undo: true, said: undoSaid }) } : undefined;
+  const act = ran.back.length ? { label: 'Undo', id: 'outcome-undo-plugin', title: 'Turn them back as they were', run: () => void switchPlugins(ran.back, new Map(), { said: undone }, true) } : undefined;
   tell({ page: state.page, text, warn: !worked || !!also, band: true, fade: undo && worked, act, next: worked ? next : undefined });
 });
 
@@ -1319,10 +1325,12 @@ export const writeClaudeNow = (names: string[]) => busy('Writing to Claude Code�
     act: written.length ? { label: 'Undo write', id: 'outcome-undo-write', title: `Puts back what Claude Code had before (${written.map(write => `${write.name}: ${write.before ? 'its earlier entry' : 'removed'}`).join(', ')}). Quit Claude Code first.`, run: () => void unwriteClaudeNow(written) } : undefined }, result.stopped);
 });
 
-const unwriteClaudeNow = (written: ClaudeWrite[]) => busy('Undoing the write…', async () => {
+/** Undo write, from Write's band or from its History entry ('written'): one Undo, either place. */
+export const unwriteClaudeNow = (written: ClaudeWrite[]) => busy('Undoing the write…', async () => {
   const result = await api().unwriteClaude(written, state.home!.home);
   const view = await api().refresh();
   setHome(view);
+  await putHistory();
   const names = written.map(write => write.name);
   tell(result.stopped ? undefined : { page: state.page, items: names, text: `Undone: Claude Code has what it had before. ${names.join(', ')} ${names.length === 1 ? 'waits' : 'wait'} for Write to Claude Code again.` }, result.stopped);
 });

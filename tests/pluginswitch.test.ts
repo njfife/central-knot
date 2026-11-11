@@ -198,6 +198,11 @@ test('a main switch turns one item in every tool with a switch for it, and never
   const whole: PluginDraft = new Map();
   click(whole, item(claude, 'skill', 'one'));
   assert.equal(itemSaid(item(claude, 'skill', 'one'), false, [...whole.values()]), 'one is off in Claude Code. Its whole plugin full was turned off there, with its 1 other skill, 2 MCP servers and 1 agent.');
+  // One item beside it is named.
+  const pair = installed('claude-cli', { items: [{ kind: 'skill', name: 'pdf', description: '' }, { kind: 'skill', name: 'spreadsheet', description: '' }] });
+  const both: PluginDraft = new Map();
+  click(both, item(pair, 'skill', 'pdf'));
+  assert.equal(itemSaid(item(pair, 'skill', 'pdf'), false, [...both.values()]), 'pdf is off in Claude Code. Its whole plugin full was turned off there, with its other skill, spreadsheet.');
 });
 
 test('a main switch never falls back to the whole plugin where the item’s own switch can’t be written', () => {
