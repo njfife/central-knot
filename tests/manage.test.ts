@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
@@ -1668,5 +1668,52 @@ test('One build syncs a home at a time: the other names the owner, and Take over
     await writeFile(path, '{ damaged');
     assert.match((await takeOverSync(acme)).stopped ?? '', /^The sync record is damaged\./);
     assert.equal(await readFile(path, 'utf8'), '{ damaged');
+  } finally { await box.cleanup(); }
+});
+
+test('Undo of a skill’s copy choice gives the copy it puts back its earlier edit time, so the copy edited most recently is the same one as before', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'pair', text('pair', 'Older.'));
+    await skill(box.home, COPILOT, 'pair', text('pair', 'Newer.'));
+    const earlier = new Date(Date.now() - 3_600_000);
+    await utimes(join(box.home, CLAUDE, 'pair/SKILL.md'), earlier, earlier);
+    const times = async () => { const copies = (await facts(box, 'pair')).copies; return [copies['claude-cli']!.modified, copies['copilot-cli']!.modified]; };
+    const [claudeBefore] = await times();
+    // Copilot CLI's newer copy is chosen, then undone: Claude Code's older copy is written back.
+    const chose = await applyChanges(fast(box), [{ ...manage('pair'), use: 'copilot-cli', useHash: (await facts(box, 'pair')).copies['copilot-cli']!.hash }]);
+    const chosen = (await readHistory(ctx(box))).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
+    assert.equal((await restoreFromHistory(fast(box), chosen.id, false, 'narrow')).stopped, undefined);
+    const [claude, copilot] = await times();
+    assert.equal(claude, claudeBefore);
+    assert.ok(Date.parse(copilot) > Date.parse(claude), 'Copilot CLI’s is still the one edited most recently');
+  } finally { await box.cleanup(); }
+});
+
+test('Finish undo of a skill’s choice after the synced content moved on leaves it where it is', { skip: noPosix || process.getuid?.() === 0 }, async () => {
+  const box = await sandbox();
+  try {
+    await managedThree(box);
+    await applyChanges(three(box), [{ ...manage('foo', ['codex-cli']), seenManaged: true }]);
+    await writeFile(join(box.home, CODEX, 'foo/SKILL.md'), text('foo', 'Codex’s own.'));
+    await applyChanges(three(box), [{ ...manage('foo'), seenManaged: true }]);
+    const chose = await applyChanges(three(box), [{ ...manage('foo'), seenManaged: true, use: 'claude-cli', useHash: (await facts(box, 'foo')).copies['claude-cli']!.hash }]);
+    const chosen = (await readHistory(ctx(box))).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
+    await chmod(join(box.home, CODEX), 0o555);
+    await restoreFromHistory(three(box), chosen.id, false, 'narrow');
+    await chmod(join(box.home, CODEX), 0o755);
+    // Codex left out, then an edit in Claude Code spreads.
+    await applyChanges(three(box), [{ ...manage('foo', ['codex-cli']), seenManaged: true }]);
+    await writeFile(join(box.home, CLAUDE, 'foo/SKILL.md'), text('foo', 'Moved on.'));
+    await applyChanges(three(box), []);
+    const moved = (await readRecord(box.home)).record!.items.foo.hash;
+    assert.equal((await restoreFromHistory(three(box), chosen.id, false, 'narrow')).stopped, undefined);
+    assert.equal(await readFile(join(box.home, CODEX, 'foo/SKILL.md'), 'utf8'), text('foo', 'Codex’s own.'));
+    assert.equal((await readRecord(box.home)).record!.items.foo.hash, moved);
+    assert.equal((await applyChanges(three(box), [])).harnessWrites, 0);
+    // The copies that moved on are still the skill's: an edit in one of them spreads.
+    await writeFile(join(box.home, CLAUDE, 'foo/SKILL.md'), text('foo', 'Edited again.'));
+    await applyChanges(three(box), []);
+    assert.equal(await readFile(join(box.home, COPILOT, 'foo/SKILL.md'), 'utf8'), text('foo', 'Edited again.'));
   } finally { await box.cleanup(); }
 });

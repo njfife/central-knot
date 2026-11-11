@@ -1074,7 +1074,7 @@ app.whenReady().then(async () => {
     && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenManaged === undefined || typeof change.seenManaged === 'boolean')
   ).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged,
     ...(change.disable ? { disable: ids(change.disable) } : {}), ...(change.enable ? { enable: ids(change.enable) } : {}), ...(change.remove ? { remove: ids(change.remove) } : {}),
-    ...(change.everywhere === true ? { everywhere: true } : {}), ...(change.takeOver === true ? { takeOver: true } : {}) }));
+    ...(change.everywhere === true ? { everywhere: true } : {}), ...(change.takeOver === true ? { takeOver: true } : {}), ...(change.resumeIn && harnessIds.includes(change.resumeIn) ? { resumeIn: change.resumeIn } : {}) }));
   // Marketplaces and plugins: their own module, given only what it needs from here.
   const markets = carriedMarket = registerMarketplaces({ handle, handleNow }, {
     home: () => (current ? { home: current.home, overrides: context().overrides, actual: current.mode === 'actual' } : undefined),
@@ -1194,6 +1194,10 @@ app.whenReady().then(async () => {
       if (past?.base) return undoPulledBase(context(), await read(), eventId);
       const tools = await toolsNow();
       if (key.startsWith('mcp:')) {
+        // A choice's Undo that puts Claude Code's own entry back (Write to Claude Code replaced it) writes Claude Code's settings:
+        // only once Claude is closed, as Write itself.
+        const claudeBack = choice === 'narrow' && past?.losers.some(loser => loser.tool === 'claude-cli' && !past.restoredTools?.includes(loser.tool));
+        if (claudeBack && current?.mode !== 'fixture' && await claudeRunning()) return { stopped: 'Claude Code or Claude desktop is still running. Quit it first, then click Undo again: Claude Code’s own entry goes back too.', results: [], harnessWrites: 0 };
         const result = await restoreMcp(context(), tools, eventId, typeof choice === 'string' ? choice : undefined);
         // Undo of a server's Disable or Enable is a choice made by hand too.
         await releaseProfileHolds(context(), switchedByHand([{ key: key.slice('mcp:'.length) }], result.results, 'mcp'));

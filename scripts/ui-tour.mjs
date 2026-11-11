@@ -347,6 +347,7 @@ if (wanted('agents')) {
   await a.click('#switch-release-notes'); await a.settle();
   if (await a.has('#use-release-notes-claude-cli')) {
     await shot(a, 'agents-choice', 'Turned release-notes off (each copy stays), edited it in Codex, and turned it on again: its copies differ, so it asks which copy every tool uses. Claude Code’s and Copilot CLI’s are the same and share one card; Codex’s quotes the line only it has, the words only it has tinted, and is marked as edited most recently, with when.');
+    await a.theme('light'); await shot(a, 'agents-choice-light', 'The same, in the light appearance: the words only Codex’s copy has, tinted.'); await a.theme('dark');
     if (await a.has('#diff-release-notes')) { await a.click('#diff-release-notes'); await a.settle(); await shot(a, 'agents-choice-read', 'Clicked “Read every copy”: each different prompt under the cards, the same ones shown once.'); await a.click('#diff-release-notes'); await a.settle(); }
     await a.click('#use-release-notes-claude-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
     await shot(a, 'agents-choice-made', 'Clicked Claude Code’s copy: Codex’s copy is replaced (kept in History), and release-notes is on in all 3 tools; with Undo.');
@@ -372,7 +373,13 @@ if (wanted('agents')) {
   await a.click('#header-refresh'); await a.settle();
   if (await a.has('#stopped-dismiss-code-reviewer-codex-cli')) { await a.click('#stopped-dismiss-code-reviewer-codex-cli'); await a.settle(); }
   if (!(await a.has('.details'))) { await a.click('#open-code-reviewer'); await a.settle(); }
-  await shot(a, 'agents-decide-later', 'code-reviewer was edited in Codex again; clicked × (Decide later) on its notice. Its details are open: Codex’s switch sits halfway, labelled “Stopped”.');
+  await shot(a, 'agents-decide-later', 'code-reviewer was edited in Codex again; clicked × (Decide later) on its notice. Its details are open: Codex’s switch sits halfway, labelled “Stopped”, with “Keep Codex’s edit” beside it.');
+  if (await a.has('#sync-code-reviewer-codex-cli')) {
+    await a.click('#sync-code-reviewer-codex-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+    await shot(a, 'agents-stopped-switch', 'Clicked Codex’s “Stopped” switch: Codex has Claude Code’s copy of code-reviewer again and receives its updates; its edit is in History, with Undo.');
+    await a.click('#outcome-undo'); await waitFor(a, `/Undone/.test(document.querySelector('.bands')?.textContent ?? '')`, 15000);
+    await shot(a, 'agents-stopped-switch-undone', 'Clicked Undo: Codex’s edit is back, and its switch reads “Stopped” again.');
+  }
   if (await a.has('#stopped-keep-code-reviewer-codex-cli-details')) { await a.click('#stopped-keep-code-reviewer-codex-cli-details'); await a.settle(); await shot(a, 'agents-kept', 'Clicked "Keep Codex\'s edit" in the Codex row: its switch, still halfway, reads “Keeps its edit”.'); }
 }
 

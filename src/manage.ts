@@ -7,7 +7,7 @@ import { DAY_MS, defaultHistoryDays } from './model.ts';
 import { configRoot, harnessIds, harnesses, writeRoot } from './harnesses.ts';
 import { managedTools, presentTools } from './presence.ts';
 import {
-  FORMAT_VERSION, changedWhileSyncing, clearStaleStages, storedRevision, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, newRecord, placeCopy, plainError, readRecord, readTree, stillOwned,
+  FORMAT_VERSION, changedWhileSyncing, clearStaleStages, storedRevision, landingOf, copyTree, errorCode, exists, finishCopy, giveFileTime, importRevision, itemKey, newRecord, placeCopy, plainError, readRecord, readTree, stillOwned,
   remember, removeTree, saveRecord, stagingFolder, storeDirectory, storeFolder, syncGate, syncsHere, targetFor, writeAccess, writeDurably, type RecordItem, type ShareContext, type SyncRecord,
 } from './share.ts';
 import { parseSkill } from './discovery.ts';
@@ -1095,7 +1095,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       const inSync = new Set<string>();
       // The content each replace actually wrote, which can be newer than what this pass first read at the source.
       const written = new Map<string, string>();
-      const chosenLosers: { tool: HarnessId; hash: string }[] = [];
+      const chosenLosers: { tool: HarnessId; hash: string; editedAt?: string }[] = [];
       if (winner) {
         source = winner.copy;
         sourceTool = winner.tool;
@@ -1174,7 +1174,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
           }
           writes++;
           inSync.add(location.copy.directory);
-          chosenLosers.push({ tool: location.tool, hash: location.copy.hash });
+          chosenLosers.push({ tool: location.tool, hash: location.copy.hash, editedAt: location.copy.modified });
           results.push({ item: name, harness: location.tool, outcome: 'written', replaced: true, message: `Now uses ${harnesses[chosen].name}'s copy. The replaced copy is kept in Central Knot's store. ${harnesses[location.tool].nextStep}` });
         }
       } else for (const location of active) inSync.add(location.copy.directory);
@@ -1936,8 +1936,10 @@ async function undoChoice(context: ShareContext, record: SyncRecord, history: Hi
       return { results: out.results, writes: out.harnessWrites, stopped: out.stopped };
     },
     putBack: async (tool, own) => {
-      try { await replaceCopy(context, chosen.key, storedRevision(context, chosen.key, own), copy(tool)!.directory, chosen.winner!.hash); return undefined; }
+      try { await replaceCopy(context, chosen.key, storedRevision(context, chosen.key, own), copy(tool)!.directory, chosen.winner!.hash); }
       catch (error) { if (error instanceof Error && error.message.startsWith('fault:')) throw error; return plainError(error); }
+      await giveFileTime(join(copy(tool)!.directory, 'SKILL.md'), chosen.losers.find(loser => loser.tool === tool)?.editedAt);
+      return undefined;
     },
     nextStep: tool => harnesses[tool].nextStep,
     settle: async (synced, back) => {
@@ -1946,7 +1948,8 @@ async function undoChoice(context: ShareContext, record: SyncRecord, history: Hi
       if (!synced) { item.state = 'dont-share'; item.copies = []; await saveRecord(context.home, record); return; }
       // Synced before, and still: one turned off since a part-way Undo is left as it is.
       if (item.state !== 'shared') { await saveRecord(context.home, record); return; }
-      item.hash = synced;
+      // A Finish undo after the synced content moved on leaves it where the passes since took it.
+      if (item.hash === chosen.winner?.hash) item.hash = synced;
       for (const [tool, here] of Object.entries(entry?.facts.copies ?? {}) as [HarnessId, ToolCopy][]) {
         if (here.readsFrom || item.off?.includes(tool)) continue;
         const now = back.get(tool) ?? here.hash;

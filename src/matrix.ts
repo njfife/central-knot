@@ -545,7 +545,7 @@ function filterBar() {
 
 const canWrite = () => !!state.home && !whyReadOnly(state.home) && !state.busy;
 /** Agents: a stopped one-way copy the person chose to keep. It stays theirs, quietly; its row can still take the source's copy. */
-const keptKey = (skill: ItemRow, tool: Tool) => keptEditFlag(state.home?.home ?? '', skill.key, tool);
+const keptKey = (skill: ItemRow, tool: Tool) => keptEditFlag(state.home?.home ?? '', skill.key, tool, `${skill.hashes?.[tool] ?? ''}@${skill.versions?.[tool]?.at ?? ''}`);
 const keptEdit = (skill: ItemRow, tool: Tool) => readFlag(keptKey(skill, tool));
 const stoppedLive = (skill: ItemRow) => (skill.stopped ?? []).filter(tool => !skill.off.includes(tool) && !keptEdit(skill, tool));
 
@@ -747,8 +747,13 @@ function ownWords(skill: ItemRow, tool: Tool, others: Tool[]): Child[] | undefin
     const theirs = others.map(other => new Set(lines(versions[other]?.prompt)));
     const added = lines(prompt).filter(line => theirs.some(set => !set.has(line)));
     if (added.length) {
-      const shared = (line: string) => markedWords(line, added[0], 'added').filter(part => typeof part === 'string' && part.trim()).length;
-      const nearest = others.flatMap(other => lines(versions[other]?.prompt)).reduce<string | undefined>((best, line) => (shared(line) > (best === undefined ? 0 : shared(best)) ? line : best), undefined);
+      // The other copies' line most like it (the most runs of words left unmarked) shows which of its words only it has.
+      const unmarkedRuns = (line: string) => markedWords(line, added[0], 'added').filter(part => typeof part === 'string' && part.trim()).length;
+      let nearest: string | undefined, best = 0;
+      for (const line of others.flatMap(other => lines(versions[other]?.prompt))) {
+        const runs = unmarkedRuns(line);
+        if (runs > best) { nearest = line; best = runs; }
+      }
       const more = added.length > 1 ? ` and ${added.length - 1} more ${added.length === 2 ? 'line' : 'lines'}` : '';
       return ['“', ...(nearest === undefined ? [added[0]] : markedWords(nearest, added[0], 'added')), `”${more}`];
     }
@@ -769,7 +774,9 @@ function compareChoices(skill: ItemRow, inFiles = false) {
   // Line counts and edit times are shown only where they tell the copies apart; the copy edited last is marked.
   const metaDiffers = new Set(groups.map(([tool]) => `${versions[tool]?.lines}|${versions[tool]?.changed}`)).size > 1;
   // A group's content was made when its earliest copy was: a copy sync wrote is newer than the edit it carries. Marked only when
-  // every copy's time is known and one group's is the latest.
+  // every copy's time is known and one group's is the latest. A copy an Undo of a choice puts back has its earlier time again.
+  // Left so: a copy sync wrote into a tool that was behind, alone in its group, carries the time of that write, not of the edit
+  // it holds; "edited most recently" gets its full meaning with first setup (one-switch step 7).
   const editedAt = groups.map(group => Math.min(...group.map(tool => Date.parse(versions[tool]?.at ?? ''))));
   const last = Math.max(...editedAt);
   const latest = groups.length > 1 && kind !== 'mcp' && editedAt.every(Number.isFinite) && editedAt.filter(at => at === last).length === 1 ? groups[editedAt.indexOf(last)] : undefined;
@@ -805,7 +812,7 @@ function compareChoices(skill: ItemRow, inFiles = false) {
     : null;
   return h('div.compare-block', {},
     h('p.compare-title', {}, icon('diff', 14, 'tone-warning'), h('span', {}, 'Which copy of ', h('strong.item-name', {}, skill.name ?? skill.key), ` should ${compared.length + receiving.length > 2 ? 'every tool' : 'both tools'} use?`)),
-    h('p.compare-note', {}, `Choosing applies at once, and turns it on everywhere. Replaced copies are kept in History.${kind === 'mcp' && receiving.includes('claude-cli') ? ' Claude Code gets it when you Write to Claude Code.' : ''}`),
+    h('p.compare-note', {}, `Choosing applies at once, and turns it on everywhere. Replaced copies are kept in History.${kind === 'mcp' && receiving.includes('claude-cli') ? ` ${CLAUDE_LATER}` : ''}`),
     h('div.compare-choices', {}, groups.map(choice)),
     read, prompts);
 }
@@ -1532,15 +1539,19 @@ function pluginRowSwitch(row: PluginRow) {
 }
 
 /**
- * Agents: one tool's stopped one-way copy takes the source's copy again, and receives its updates from now on; every other
- * stopped copy keeps its edit. Its edit is kept in History, and Undo puts it back with the mark it had.
+ * Agents: one tool's stopped one-way copy takes the source's copy again, and receives its updates from now on; every other copy
+ * is left as it is. Its edit is kept in History, and Undo (the band's or History's) puts it back with the mark it had: "keeps its
+ * edit" is for that copy as it was kept (keptKey).
  */
 function resumeOneWay(skill: ItemRow, source: Tool, tool: Tool) {
-  // It receives again: an earlier "keep my edit" no longer stands for a later edit.
-  const kept = keptEdit(skill, tool);
-  writeFlag(keptKey(skill, tool), false);
-  click({ kind, items: [nameOf(skill)], changes: [{ ...asItIs(skill), managed: true, use: source as HarnessId, useHash: skill.hashes?.[source], resume: tool as HarnessId }],
-    said: `${names[tool]} has ${names[source]}’s copy of ${nameOf(skill)} again and receives its updates. Its edited copy is in History.`, undone: kept ? () => writeFlag(keptKey(skill, tool)) : undefined });
+  const name = nameOf(skill);
+  click({ kind, items: [name], changes: [{ ...asItIs(skill), managed: true, use: source as HarnessId, useHash: skill.hashes?.[source], resumeIn: tool as HarnessId }],
+    // Said for every tool it wrote: from a page read before another copy came to differ, that one takes the source's copy too.
+    said: (notIn, wrote) => {
+      if (!wrote.length) return notIn.includes(tool as HarnessId) ? `${names[tool]} couldn’t be given ${names[source]}’s copy of ${name}.` : `${names[tool]} has ${names[source]}’s copy of ${name} already.`;
+      const one = wrote.length === 1;
+      return `${andList(wrote.map(entry => names[entry as Tool]))} ${one ? 'has' : 'have'} ${names[source]}’s copy of ${name} again and ${one ? 'receives' : 'receive'} its updates. ${one ? 'Its edited copy is' : 'Their own copies are'} in History.`;
+    } });
 }
 
 /**
@@ -1812,21 +1823,24 @@ function harnessControls(skill: ItemRow, tool: Tool) {
   if (kind === 'agents') {
     const source = skill.oneWay?.from;
     const stopped = !!source && skill.managed && !!skill.stopped?.includes(tool) && !skill.off.includes(tool);
-    // A stopped copy's choices: here once its notice is put aside; a kept edit can still take the source's copy again.
-    const choices = !stopped ? [] : keptEdit(skill, tool) ? [stoppedActions(skill, tool, source, '-details')[0]]
-      : state.dismissed.has(`stopped:${skill.key}:${tool}`) ? stoppedActions(skill, tool, source, '-details') : [];
     // On the source's row, leaving it out amounts to stopping the whole agent: said and done as that.
     const isSource = skill.managed && source === tool;
     const synced = skill.managed && !skill.off.includes(tool);
     // Two tools are the fewest it syncs between: the last but one can't be left out.
     const fewest = synced && toolList().filter(other => !skill.off.includes(other)).length < 2;
+    const hasSwitch = skill.managed && !isSource && !(synced && (!has || fewest));
+    // A stopped copy's choices: here once its notice is put aside, or once its edit is kept (it can still take the source's copy
+    // again). Its switch, where it has one, is the way to the source's copy: the button for it is then left out.
+    const kept = stopped && keptEdit(skill, tool);
+    const [useSource, keepEdit] = stopped && (kept || state.dismissed.has(`stopped:${skill.key}:${tool}`)) ? stoppedActions(skill, tool, source, '-details') : [];
+    const choices = [hasSwitch ? undefined : useSource, kept ? undefined : keepEdit].filter((action): action is HTMLElement => !!action);
     const stopAll = isSource && has && synced && !fewest ? smallAction('Stop syncing this agent', `stop-sync-${skill.key}-${tool}`, () => turnOff(skill), '', !canWrite()) : null;
     if (stopAll) stopAll.title = `${where} is the source: stop syncing ${name} in every tool. Each tool keeps its copy as it is.`;
     // Each other tool has a Synced switch, as the other pages have On: off leaves it out (its copy stays as it is), on syncs it there again.
     const leaveOut = () => click({ kind, items: [name], changes: [{ ...now, off: [...now.off, tool as HarnessId] }], said: `${name} no longer syncs to ${where}. Its copy there stays.` });
     // A copy that stopped updating (or keeps its edit) sits halfway: its click gives it the source's copy again, its edit kept in History.
-    const paused = stopped ? (keptEdit(skill, tool) ? 'Keeps its edit' : 'Stopped') : undefined;
-    const syncSwitch = !skill.managed || isSource || (synced && (!has || fewest)) ? null
+    const paused = stopped ? (kept ? 'Keeps its edit' : 'Stopped') : undefined;
+    const syncSwitch = !hasSwitch ? null
       : h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, paused ?? (synced ? 'Synced' : 'Not synced')),
         paused && source ? toggle({ on: false, mixed: true, disabled: !canWrite(), id: `sync-${skill.key}-${tool}`, onchange: () => resumeOneWay(skill, source, tool),
           label: `${name} in ${where}: ${paused === 'Stopped' ? 'stopped updating, since it was edited there' : 'keeps its own edit'}. Click to give it ${names[source]}’s copy again; the edit is kept in History.` })

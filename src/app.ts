@@ -280,9 +280,9 @@ export interface Click {
   items: string[];
   /**
    * What was done, as the result's sentence ("notes is on in all 3 tools"); as a function, given the tools where the click's
-   * write failed or was held, so it never claims those.
+   * write failed or was held, so it never claims those, and the tools it wrote.
    */
-  said: string | ((notIn: HarnessId[]) => string);
+  said: string | ((notIn: HarnessId[], wrote: HarnessId[]) => string);
   /** Said after it, as a warning: what the click left as it is, and why ("Still on in Codex: its settings file can’t be read."). */
   also?: string;
   /** Said after it, as a plain note: what is still to come, or left as it should be ("Claude Code gets it when you click Write to Claude Code."). */
@@ -301,8 +301,6 @@ export interface Click {
   plugins?: { ops: PluginOp[]; draft: Map<string, PluginOp>; said?: string };
   /** Offered beside the Undo: the next step the result names (the whole plugin's switch where one item has none). */
   next?: Outcome['next'];
-  /** Run once its Undo put everything back: the page's own mark the click cleared (an agent copy's "keeps its edit"). */
-  undone?: () => void;
 }
 
 /** Each item page's own: its items as the open home shows them, how its changes are sent, and where its last result is kept. */
@@ -356,7 +354,8 @@ export const applyClick = (click: Click) => busy(click.putBack ? 'Putting it bac
   if (plugged) setHome(await api().refresh());
   const done = copied || !!plugged?.done.length;
   // Said from what happened: a tool whose write failed, copy or plugin switch, is not called on (or off).
-  const said = changes === 'choose' ? `${click.items[0]} is back.` : typeof click.said === 'string' ? click.said : click.said([...notIn, ...(plugged?.failedIn ?? [])]);
+  const wrote = [...new Set(ours.filter(entry => entry.outcome === 'written' && entry.harness).map(entry => entry.harness!))];
+  const said = changes === 'choose' ? `${click.items[0]} is back.` : typeof click.said === 'string' ? click.said : click.said([...notIn, ...(plugged?.failedIn ?? [])], wrote);
   const choose = differs || changes === 'choose' ? ' Its copies differ: choose which copy every tool uses.' : '';
   // A skill taken over (its links and shared copy, when it was turned on): what that did to them.
   const outside = sent.some(change => change.takeOver) ? tookOverSentence(ours) : '';
@@ -447,7 +446,6 @@ const undoClick = (click: Click, made: string[], before: Map<string, Standing>, 
   const back = backText(results.filter(entry => entry.tookOver === 'link' && entry.outcome === 'written').map(entry => ({ tool: toolName(entry.harness ?? ''), item: entry.item })),
     results.filter(entry => entry.tookOver === 'shared' && entry.outcome === 'written').map(entry => ({ item: entry.item })));
   const lead = failed.length ? `Not all of ${what} could be put back.` : `Undone: ${what} ${click.items.length === 1 ? 'is' : 'are'} as before.`;
-  if (!stopped && !failed.length) click.undone?.();
   // A choice whose Undo stopped part-way keeps what it put back on its History entry, whose Undo finishes it.
   const finish = state.history.data?.some(event => made.includes(event.id) && event.kind === 'chosen' && !event.undoneBy) ? 'History’s Undo of the choice finishes it.' : '';
   tell({ page: state.page, items: click.items, warn: !!stopped || failed.length > 0, band: true, fade: !stopped && !failed.length,
