@@ -351,6 +351,8 @@ export interface Change {
   enable?: HarnessId[];
   /** Skills: tools whose copy is removed, kept in History for Restore. A managed skill also stops syncing there. */
   remove?: HarnessId[];
+  /** Agents, with `use`: only this tool's stopped copy takes the chosen copy; every other stopped copy keeps its edit. */
+  resume?: HarnessId;
   /** Skills: Delete everywhere for an unmanaged skill: the removed tools' other copies (in ~/.agents/skills) go too. */
   everywhere?: boolean;
   /**
@@ -422,8 +424,16 @@ export interface HistoryEvent {
   wasSynced?: boolean;
   /** 'chosen': the 'added' entry its own pass wrote (the copies that came with the choice), which its Undo takes out; never another. */
   addedId?: string;
-  /** 'chosen', an agent's: the source's copy given again to copies that had stopped updating; its Undo puts their edits back, stopped again. */
-  resumed?: boolean;
+  /**
+   * 'chosen', an MCP server's: the tools the choice put on record without writing them (Claude Code waiting for Write), each with
+   * what was on record for it before (no hash: nothing); its Undo puts that record back.
+   */
+  recordBefore?: { tool: HarnessId; hash?: string }[];
+  /**
+   * 'chosen', an agent's: the tools whose copy had stopped updating before the choice; its Undo records them stopped again. A
+   * choice on a synced agent that replaced only such copies gave them the source's copy again (`isResume`).
+   */
+  stoppedBefore?: HarnessId[];
   winner?: { tool: HarnessId; hash: string };
   /** Content that gave way, kept in Central Knot's store. */
   losers: { tool: HarnessId; hash: string; /** MCP: which kept copy of that tool's own settings this replaced, for an exact Restore. */ kept?: string; /** 'removed': the copy's folder name as it was, to put it back under the same name. */ folder?: string;

@@ -460,8 +460,8 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
   const displace = async (item: McpRecordItem, tool: HarnessId, hash: string) => { (item.displaced ??= []).push({ tool, hash }); await saveMcpRecord(context.home, record); };
   const undisplace = (item: McpRecordItem, tool: HarnessId, hash: string) => { if (!item.displaced) return; item.displaced = item.displaced.filter(entry => !(entry.tool === tool && entry.hash === hash)); if (!item.displaced.length) delete item.displaced; };
   // Servers whose copy the person chose in this pass: the chosen copy replaces the others. With each, the content it synced
-  // before (undefined: it wasn't synced then).
-  const chosenNow = new Map<string, string | undefined>();
+  // before (undefined: it wasn't synced then) and its copies on record before.
+  const chosenNow = new Map<string, { synced?: string; copies: McpCopy[] }>();
   // Servers this pass makes synced: the entries it adds for them are told in History as 'added', so Undo can take them back.
   const newlyManaged = new Set<string>();
   // Synced servers that sync to tools again (left out before): the entries written there are 'added' too, marked rejoined.
@@ -485,7 +485,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     item.separate = change.use === 'separate' ? true : undefined;
     if (item.state !== 'shared') item.copies = item.copies.filter(copy => copy.status === 'removing');
     else delete item.deleted;
-    if (change.use && change.use !== 'separate' && slot[change.use]) { item.hash = slot[change.use]!.hash; item.copies = item.copies.filter(copy => copy.status === 'removing'); chosenNow.set(change.key, syncedBefore); }
+    if (change.use && change.use !== 'separate' && slot[change.use]) { chosenNow.set(change.key, { synced: syncedBefore, copies: item.copies }); item.hash = slot[change.use]!.hash; item.copies = item.copies.filter(copy => copy.status === 'removing'); }
     record.items[change.key] = item;
     taken.push(change);
   }
@@ -576,6 +576,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     const replaced: { tool: HarnessId; hash: string; kept?: string }[] = [];
     // What each tool holds after this pass, as decided: never a later read, so an edit saved meanwhile is still an edit next time.
     const holds = new Map<HarnessId, string>();
+    const written = new Set<HarnessId>();
     const addedHere: { tool: HarnessId; hash: string }[] = [];
     await keep(context, name, source.server, source);
     const claudeBefore = slot['claude-cli']?.hash ?? null;
@@ -595,27 +596,12 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       const problem = await editEntry(context, tool, name, here?.hash, source.server);
       if (problem) { if (here) undisplace(item, tool, here.hash); results.push({ item: name, harness: tool, outcome: 'held', message: problem }); continue; }
       writes++;
+      written.add(tool);
       holds.set(tool, source.hash);
       if (here) replaced.push({ tool, hash: here.hash, kept: ref });
       else if (newlyManaged.has(name) || rejoined.get(name)?.includes(tool)) addedHere.push({ tool, hash: source.hash });
       if (tool === 'claude-cli') claudeWritten.push({ name, before: claudeBefore, after: source.hash });
       results.push({ item: name, harness: tool, outcome: 'written', replaced: here ? true : undefined, message: `${here ? `Now has ${harnesses[source.tool].name}'s version.` : 'Added.'} ${harnesses[tool].name === 'Codex' ? 'Start a new Codex session to use it.' : 'Start a new session to use it.'}` });
-    }
-    const key = `mcp:${name}`;
-    const addedId = addedHere.length ? event({ key, item: name, kind: 'added', losers: addedHere, orderProved: true, previous: source.hash, ...(newlyManaged.has(name) ? {} : { rejoined: true }) }) : undefined;
-    if (addedId) made.push(addedId);
-    // A chosen copy that replaced others, an edit kept over a deletion, and an edit that spread are History, with what each replaced kept (CON-02).
-    // A choice names the entries its own pass added (its Undo takes out those, never others) and, synced before, what it synced then.
-    const syncedBefore = chosenNow.get(name);
-    if (chosenNow.has(name) && replaced.length) made.push(event({ key, item: name, kind: 'chosen', winner: { tool: source.tool, hash: source.hash }, losers: replaced, orderProved: true, previous: syncedBefore || undefined, ...(syncedBefore !== undefined ? { wasSynced: true } : {}), ...(addedId ? { addedId } : {}) }));
-    else if (raced) {
-      const id = event({ key, item: name, kind: 'kept-edit', winner: { tool: source.tool, hash: source.hash }, losers: [...raced.map(tool => ({ tool, hash: item.hash })), ...replaced], orderProved: false, previous: item.hash });
-      notices.push({ key, item: name, kind: 'kept-edit', winner: source.tool, losers: raced, orderProved: false, history: id });
-    } else if (edited.length && (replaced.length || (item.hash && item.hash !== source.hash))) {
-      // An edit that changed the synced content is History even when no copy could be written yet (Claude Code waiting for Write
-      // now): the version it replaces stays restorable after the catch-up overwrites it.
-      const id = event({ key, item: name, kind: competing ? 'conflict' : 'edit', winner: { tool: source.tool, hash: source.hash }, losers: replaced, orderProved: !competing, previous: item.hash || undefined });
-      if (replaced.length) notices.push({ key, item: name, kind: competing ? 'conflict' : 'edit', winner: source.tool, losers: competing ? edited.filter(entry => entry.hash !== source.hash).map(entry => entry.tool) : replaced.map(entry => entry.tool), orderProved: !competing, history: id });
     }
     // A copy not written (Claude waiting, a refusal) keeps what was recorded for it, so a change there is still seen as one. A copy
     // replaced by this choice that could not be written yet is recorded as it is, so it reads as behind.
@@ -623,6 +609,27 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       if (holds.has(tool) || !slot[tool]) continue;
       const before = recorded.get(tool) ?? (chosenNow.has(name) ? slot[tool]!.hash : undefined);
       if (before) holds.set(tool, before);
+    }
+    const key = `mcp:${name}`;
+    const addedId = addedHere.length ? event({ key, item: name, kind: 'added', losers: addedHere, orderProved: true, previous: source.hash, ...(newlyManaged.has(name) ? {} : { rejoined: true }) }) : undefined;
+    if (addedId) made.push(addedId);
+    // A chosen copy that replaced others, an edit kept over a deletion, and an edit that spread are History, with what each replaced kept (CON-02).
+    // A choice names the entries its own pass added (its Undo takes out those, never others), what it synced before, if it was
+    // synced then, and the record it changed for the tools it didn't write (Claude Code waiting for Write), which its Undo puts back.
+    const choice = chosenNow.get(name);
+    if (choice && replaced.length) {
+      const was = new Map(choice.copies.filter(copy => !copy.status).map(copy => [copy.tool, copy.hash]));
+      const recordBefore = live.filter(tool => !written.has(tool) && holds.get(tool) !== was.get(tool)).map(tool => (was.has(tool) ? { tool, hash: was.get(tool) } : { tool }));
+      made.push(event({ key, item: name, kind: 'chosen', winner: { tool: source.tool, hash: source.hash }, losers: replaced, orderProved: true, previous: choice.synced || undefined,
+        ...(choice.synced !== undefined ? { wasSynced: true } : {}), ...(addedId ? { addedId } : {}), ...(recordBefore.length ? { recordBefore } : {}) }));
+    } else if (raced) {
+      const id = event({ key, item: name, kind: 'kept-edit', winner: { tool: source.tool, hash: source.hash }, losers: [...raced.map(tool => ({ tool, hash: item.hash })), ...replaced], orderProved: false, previous: item.hash });
+      notices.push({ key, item: name, kind: 'kept-edit', winner: source.tool, losers: raced, orderProved: false, history: id });
+    } else if (edited.length && (replaced.length || (item.hash && item.hash !== source.hash))) {
+      // An edit that changed the synced content is History even when no copy could be written yet (Claude Code waiting for Write
+      // now): the version it replaces stays restorable after the catch-up overwrites it.
+      const id = event({ key, item: name, kind: competing ? 'conflict' : 'edit', winner: { tool: source.tool, hash: source.hash }, losers: replaced, orderProved: !competing, previous: item.hash || undefined });
+      if (replaced.length) notices.push({ key, item: name, kind: competing ? 'conflict' : 'edit', winner: source.tool, losers: competing ? edited.filter(entry => entry.hash !== source.hash).map(entry => entry.tool) : replaced.map(entry => entry.tool), orderProved: !competing, history: id });
     }
     item.hash = source.hash;
     item.copies = [
@@ -884,8 +891,8 @@ async function entriesNow(context: ShareContext, tools: HarnessId[], name: strin
 /**
  * Undo of a copy choice, right after it (choiceundo.ts, as for skills and agents): each replaced entry goes back in its own tool,
  * with its own settings as kept, the entries the choice's pass added go again, and the server is as it was before the choice.
- * A choice never replaces Claude Code's entry (only Write to Claude Code writes it), so it is never one to put back, and its
- * record, which waits for that step, is never changed here.
+ * A choice never replaces Claude Code's entry (only Write to Claude Code writes it), so it is never one to put back; its record
+ * goes back to what it was before the choice.
  */
 async function undoChoiceMcp(context: ShareContext, tools: HarnessId[], history: HistoryEvent[], chosen: HistoryEvent): Promise<McpResult> {
   const name = chosen.key.replace(/^mcp:/, '');
@@ -925,8 +932,12 @@ async function undoChoiceMcp(context: ShareContext, tools: HarnessId[], history:
     },
     nextStep: tool => (tool === 'codex-cli' ? 'Start a new Codex session to use it.' : 'Start a new session to use it.'),
     settle: async (synced, back) => {
-      if (synced) {
-        Object.assign(item, { state: 'shared', hash: synced });
+      if (!synced) {
+        item.state = 'dont-share';
+        item.copies = item.copies.filter(copy => copy.status === 'removing');
+      // Synced before, and still: one turned off since a part-way Undo is left as it is.
+      } else if (item.state === 'shared') {
+        item.hash = synced;
         for (const tool of present.filter(candidate => candidate !== 'claude-cli' && !item.off.includes(candidate))) {
           const held = back.get(tool) ?? now.get(tool)?.hash;
           // Put back holding the synced entry: on record with it. Holding another: that tool's own, off the record, so the next
@@ -934,9 +945,11 @@ async function undoChoiceMcp(context: ShareContext, tools: HarnessId[], history:
           if (held === synced) item.copies = item.copies.map(copy => (copy.tool === tool && !copy.status && back.has(tool) ? { ...copy, hash: synced } : copy));
           else if (held !== undefined) item.copies = item.copies.filter(copy => copy.tool !== tool || copy.status);
         }
-      } else {
-        item.state = 'dont-share';
-        item.copies = item.copies.filter(copy => copy.status === 'removing');
+        // A tool the choice put on record without writing it (Claude Code waiting for Write): its record as before the choice.
+        for (const { tool, hash } of chosen.recordBefore ?? []) {
+          item.copies = item.copies.filter(copy => copy.tool !== tool || copy.status);
+          if (hash) item.copies.push({ tool, hash, file: mcpFile(context, tool) });
+        }
       }
       await saveMcpRecord(context.home, record);
     },

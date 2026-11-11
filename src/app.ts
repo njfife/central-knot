@@ -301,6 +301,8 @@ export interface Click {
   plugins?: { ops: PluginOp[]; draft: Map<string, PluginOp>; said?: string };
   /** Offered beside the Undo: the next step the result names (the whole plugin's switch where one item has none). */
   next?: Outcome['next'];
+  /** Run once its Undo put everything back: the page's own mark the click cleared (an agent copy's "keeps its edit"). */
+  undone?: () => void;
 }
 
 /** Each item page's own: its items as the open home shows them, how its changes are sent, and where its last result is kept. */
@@ -445,6 +447,7 @@ const undoClick = (click: Click, made: string[], before: Map<string, Standing>, 
   const back = backText(results.filter(entry => entry.tookOver === 'link' && entry.outcome === 'written').map(entry => ({ tool: toolName(entry.harness ?? ''), item: entry.item })),
     results.filter(entry => entry.tookOver === 'shared' && entry.outcome === 'written').map(entry => ({ item: entry.item })));
   const lead = failed.length ? `Not all of ${what} could be put back.` : `Undone: ${what} ${click.items.length === 1 ? 'is' : 'are'} as before.`;
+  if (!stopped && !failed.length) click.undone?.();
   // A choice whose Undo stopped part-way keeps what it put back on its History entry, whose Undo finishes it.
   const finish = state.history.data?.some(event => made.includes(event.id) && event.kind === 'chosen' && !event.undoneBy) ? 'History’s Undo of the choice finishes it.' : '';
   tell({ page: state.page, items: click.items, warn: !!stopped || failed.length > 0, band: true, fade: !stopped && !failed.length,
@@ -475,22 +478,27 @@ async function runSwitches(ops: PluginOp[], draft: Map<string, PluginOp>, undo =
   return { done, lines, failed: lines.filter(line => !line.ok), failedIn, back: undo ? [] : reverse(done), stopped: result.stopped };
 }
 
+/** A plugin switch click's words: `said` when everything ran (else what ran and what didn't), and `undone` its Undo's. Said
+ * after it, what the click left as it is: `also` as a warning (a switch that can't be written), `note` plainly (a tool with no
+ * switch for one item). `next`: a second button beside the Undo. */
+interface SwitchWords { said?: string; undone?: string; also?: string; note?: string; next?: Outcome['next'] }
+
 /**
  * Turns plugins' items on or off from the Skills, MCP servers and Agents pages (pluginswitch.ts), with each tool's own
  * switch, then reads the home again: a click with nothing of the person's own to change (a tool's switch for a plugin's item,
  * a plugin row's switch). What ran leaves `draft`. The result offers Undo, which runs what this run changed, reversed.
- * `said`: the result's words when everything ran (else what ran and what didn't), and `undoSaid` its Undo's. Said after it,
- * what the click left as it is: `also` as a warning (a switch that can't be written), `note` plainly (a tool with no switch
- * for one item). `kind`: the page's, whose tip a click retires.
  */
-export const applyPluginSwitches = (ops: PluginOp[], draft: Map<string, PluginOp>, options: { undo?: boolean; also?: string; note?: string; said?: string; undoSaid?: string; kind?: Kind; next?: Outcome['next'] } = {}) => busy(options.undo ? 'Undoing…' : 'Applying…', async () => {
-  const { undo = false, also, note, said, undoSaid, kind, next } = options;
+export const applyPluginSwitches = (ops: PluginOp[], draft: Map<string, PluginOp>, words: SwitchWords = {}) => switchPlugins(ops, draft, words, false);
+
+const switchPlugins = (ops: PluginOp[], draft: Map<string, PluginOp>, { said, undone, also, note, next }: SwitchWords, undo: boolean) => busy(undo ? 'Undoing…' : 'Applying…', async () => {
   const ran = await runSwitches(ops, draft, undo);
   setHome(await api().refresh());
-  if (kind && !undo) retireTip(kind);
+  // The page's tip goes after its first click, as for a copy's.
+  const page = harnessKindShown() ?? (isKind(state.page) ? state.page : undefined);
+  if (page && !undo) retireTip(page);
   const worked = !ran.failed.length && !ran.stopped;
   const text = [worked && said ? said : ran.stopped ?? resultSentence(ran.lines, undo), worked ? '' : switchProblems({ ...ran, stopped: undefined }), also, note].filter(Boolean).join(' ') || 'Nothing changed.';
-  const act = ran.back.length ? { label: 'Undo', id: 'outcome-undo-plugin', title: 'Turn them back as they were', run: () => void applyPluginSwitches(ran.back, new Map(), { undo: true, said: undoSaid }) } : undefined;
+  const act = ran.back.length ? { label: 'Undo', id: 'outcome-undo-plugin', title: 'Turn them back as they were', run: () => void switchPlugins(ran.back, new Map(), { said: undone }, true) } : undefined;
   tell({ page: state.page, text, warn: !worked || !!also, band: true, fade: undo && worked, act, next: worked ? next : undefined });
 });
 

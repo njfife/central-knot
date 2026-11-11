@@ -106,7 +106,7 @@ function switchPluginItem(item: PluginItemAt) {
   const on = !itemOn(item);
   clickPluginItem(draft, item);
   const ops = [...draft.values()];
-  void applyPluginSwitches(ops, draft, { kind, said: itemSaid(item, on, ops), undoSaid: `Undone: ${item.name} is ${on ? 'off' : 'on'} in ${names[item.tool]} again.` });
+  void applyPluginSwitches(ops, draft, { said: itemSaid(item, on, ops), undone: undoneWords(item.name, on, names[item.tool]) });
 }
 
 /** Why an item a tool has through a plugin can't be switched on this page now, if it can't: the switch itself (pluginswitch.cantSwitch), or a home that can't be written. */
@@ -228,10 +228,14 @@ function unreadBand() {
   return h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
     h('span.band-text', {}, list.slice(0, 3).map(install => `What ${install.plugin} brings in ${names[install.tool]} isn’t listed: ${install.problem}`).join(' · ') + (list.length > 3 ? ` · and ${list.length - 3} more` : '')));
 }
-const ago = (iso: string) => {
-  const days = Math.floor((Date.now() - Date.parse(iso)) / DAY_MS);
-  return days <= 0 ? 'edited today' : days === 1 ? 'edited yesterday' : days < 14 ? `edited ${days} days ago` : days < 60 ? `edited ${Math.floor(days / 7)} weeks ago` : `edited ${Math.floor(days / 30)} months ago`;
+/** How long ago a time was ("2 min ago", "3 h ago", "yesterday", "5 days ago"), or '' when it isn't known. */
+const sinceThen = (at: number) => {
+  if (!Number.isFinite(at)) return '';
+  const minutes = Math.floor((Date.now() - at) / 60_000), days = Math.floor(minutes / 1440);
+  return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : days <= 0 ? `${Math.floor(minutes / 60)} h ago` : days === 1 ? 'yesterday'
+    : days < 14 ? `${days} days ago` : days < 60 ? `${Math.floor(days / 7)} weeks ago` : `${Math.floor(days / 30)} months ago`;
 };
+const ago = (iso: string) => { const said = sinceThen(Date.parse(iso)); return said && `edited ${said}`; };
 
 /** The real home's facts in the shape the page works with. */
 const fromFacts = (facts: SkillFacts): ItemRow => ({
@@ -702,7 +706,7 @@ function movedUndoText(label: string, items: string[]): (string | HTMLElement)[]
 
 /** The two ways forward for a stopped one-way copy, offered in its notice and, once that is put aside, in its details row. */
 function stoppedActions(skill: ItemRow, tool: Tool, source: Tool, where = '') {
-  const replace = button({ variant: 'outline', size: 'small', label: `Use ${names[source]}’s copy`, id: `stopped-use-${skill.key}-${tool}${where}`, disabled: !canWrite(), onclick: () => resumeOneWay(skill, source) });
+  const replace = button({ variant: 'outline', size: 'small', label: `Use ${names[source]}’s copy`, id: `stopped-use-${skill.key}-${tool}${where}`, disabled: !canWrite(), onclick: () => resumeOneWay(skill, source, tool) });
   replace.title = `${names[tool]} gets ${names[source]}’s copy again now; your edit is kept in History`;
   const keep = button({ variant: 'outline', size: 'small', label: `Keep ${names[tool]}’s edit`, id: `stopped-keep-${skill.key}-${tool}${where}`, onclick: () => {
     writeFlag(keptKey(skill, tool)); state.dismissed.add(`stopped:${skill.key}:${tool}`);
@@ -744,8 +748,11 @@ function compareChoices(skill: ItemRow, inFiles = false) {
   const receiving = toolList().filter(tool => !skill.cannot?.[tool] && skill.copies[tool] === undefined && !skill.waits?.includes(tool));
   // Line counts and edit times are shown only where they tell the copies apart; the copy edited last is marked.
   const metaDiffers = new Set(groups.map(([tool]) => `${versions[tool]?.lines}|${versions[tool]?.changed}`)).size > 1;
-  const editedAt = (group: Tool[]) => Math.max(...group.map(tool => Date.parse(versions[tool]?.at ?? '') || 0));
-  const latest = groups.length > 1 && kind !== 'mcp' ? groups.reduce((last, group) => (editedAt(group) > editedAt(last) ? group : last)) : undefined;
+  // A group's content was made when its earliest copy was: a copy sync wrote is newer than the edit it carries. Marked only when
+  // every copy's time is known and one group's is the latest.
+  const editedAt = groups.map(group => Math.min(...group.map(tool => Date.parse(versions[tool]?.at ?? ''))));
+  const last = Math.max(...editedAt);
+  const latest = groups.length > 1 && kind !== 'mcp' && editedAt.every(Number.isFinite) && editedAt.filter(at => at === last).length === 1 ? groups[editedAt.indexOf(last)] : undefined;
   const effect = (group: Tool[]) => {
     const replaced = compared.filter(entry => !group.includes(entry)).map(entry => names[entry]);
     const parts = [replaced.length ? `replaces ${andList(replaced.map(name => `${name}’s copy`))}` : '', receiving.length ? `adds it to ${andList(receiving.map(entry => names[entry]))}` : ''].filter(Boolean);
@@ -764,7 +771,7 @@ function compareChoices(skill: ItemRow, inFiles = false) {
     return h('button.version', { type: 'button', id: `use-${skill.key}-${tool}`, 'aria-label': `Use ${whose}`, disabled: !canWrite(), onclick: () => turnOn(skill, tool) },
       h('span.version-head', {}, ...group.map(entry => brandMark(entry, 14)), h('strong', {}, whose)),
       version && metaDiffers ? h('span.version-meta', {}, `${version.lines} · ${version.changed}`) : null,
-      group === latest ? h('span.version-meta.version-latest', {}, icon('pencil-line', 12), 'Edited most recently') : null,
+      group === latest ? h('span.version-meta.version-latest', {}, icon('pencil-line', 12), `Edited most recently, ${sinceThen(last)}`) : null,
       said ? h('span.version-text', {}, said) : null,
       h('span.version-effect', {}, effect(group)),
       h('span.version-cta', { 'aria-hidden': 'true' }, 'Use this copy'));
@@ -1455,9 +1462,11 @@ function mainClick(name: string, on: boolean, changes: Change[], plugins: Return
   const next = wholePluginAct(name, plugins.whole, on);
   if (changes.length) { void applyClick({ kind, items: [name], changes, said, also, note: [note, plugins.limit].filter(Boolean).join(' ') || undefined, next, plugins: plugins.ops.length ? { ops: plugins.ops, draft: plugins.draft, said: along } : undefined }); return; }
   const where = toolsPhrase(plugins.turned.map(item => item.tool), toolList());
-  void applyPluginSwitches(plugins.ops, plugins.draft, { kind, also, note: plugins.limit, next, said: [said([]), along].filter(Boolean).join(' '),
-    undoSaid: on ? `Undone: ${name} is off in ${where} again.` : `Undone: ${name} is back on in ${where}.` });
+  void applyPluginSwitches(plugins.ops, plugins.draft, { also, note: plugins.limit, next, said: [said([]), along].filter(Boolean).join(' '), undone: undoneWords(name, on, where) });
 }
+
+/** A plugin item's Undo, in one form on every page: what the click did, turned back ("Undone: triage is back on in Codex."). */
+const undoneWords = (name: string, on: boolean, where: string) => (on ? `Undone: ${name} is off in ${where} again.` : `Undone: ${name} is back on in ${where}.`);
 
 /** The whole plugin's switch in the tools that have no switch for one of its items (`whole`), as a result's second button. */
 function wholePluginAct(name: string, whole: PluginItemAt[], on: boolean) {
@@ -1468,7 +1477,7 @@ function wholePluginAct(name: string, whole: PluginItemAt[], on: boolean) {
     const draft: PluginDraft = new Map();
     for (const item of whole) clickPluginItem(draft, item);
     const ops = [...draft.values()];
-    void applyPluginSwitches(ops, draft, { kind, said: whole.map(item => itemSaid(item, on, ops)).join(' '), undoSaid: `Undone: ${name} is ${on ? 'off' : 'on'} in ${where} again.` });
+    void applyPluginSwitches(ops, draft, { said: whole.map(item => itemSaid(item, on, ops)).join(' '), undone: undoneWords(name, on, where) });
   } };
 }
 
@@ -1498,13 +1507,16 @@ function pluginRowSwitch(row: PluginRow) {
   } });
 }
 
-/** Agents: a stopped one-way copy takes the source's copy again, and receives its updates from now on. Its edit is kept in History. */
-function resumeOneWay(skill: ItemRow, source: Tool) {
-  const stopped = skill.stopped ?? [];
+/**
+ * Agents: one tool's stopped one-way copy takes the source's copy again, and receives its updates from now on; every other
+ * stopped copy keeps its edit. Its edit is kept in History, and Undo puts it back with the mark it had.
+ */
+function resumeOneWay(skill: ItemRow, source: Tool, tool: Tool) {
   // It receives again: an earlier "keep my edit" no longer stands for a later edit.
-  for (const tool of stopped) writeFlag(keptKey(skill, tool), false);
-  click({ kind, items: [nameOf(skill)], changes: [{ ...asItIs(skill), managed: true, use: source as HarnessId, useHash: skill.hashes?.[source] }],
-    said: `${andList(stopped.map(tool => names[tool]))} ${stopped.length === 1 ? 'has' : 'have'} ${names[source]}’s copy of ${nameOf(skill)} again and ${stopped.length === 1 ? 'receives' : 'receive'} its updates. The edited copy is in History.` });
+  const kept = keptEdit(skill, tool);
+  writeFlag(keptKey(skill, tool), false);
+  click({ kind, items: [nameOf(skill)], changes: [{ ...asItIs(skill), managed: true, use: source as HarnessId, useHash: skill.hashes?.[source], resume: tool as HarnessId }],
+    said: `${names[tool]} has ${names[source]}’s copy of ${nameOf(skill)} again and receives its updates. Its edited copy is in History.`, undone: kept ? () => writeFlag(keptKey(skill, tool)) : undefined });
 }
 
 /**
@@ -1792,7 +1804,7 @@ function harnessControls(skill: ItemRow, tool: Tool) {
     const paused = stopped ? (keptEdit(skill, tool) ? 'Keeps its edit' : 'Stopped') : undefined;
     const syncSwitch = !skill.managed || isSource || (synced && (!has || fewest)) ? null
       : h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, paused ?? (synced ? 'Synced' : 'Not synced')),
-        paused && source ? toggle({ on: false, mixed: true, disabled: !canWrite(), id: `sync-${skill.key}-${tool}`, onchange: () => resumeOneWay(skill, source),
+        paused && source ? toggle({ on: false, mixed: true, disabled: !canWrite(), id: `sync-${skill.key}-${tool}`, onchange: () => resumeOneWay(skill, source, tool),
           label: `${name} in ${where}: ${paused === 'Stopped' ? 'stopped updating, since it was edited there' : 'keeps its own edit'}. Click to give it ${names[source]}’s copy again; the edit is kept in History.` })
           : toggle({ on: synced, disabled: !canWrite(), id: `sync-${skill.key}-${tool}`, onchange: next => (next ? rejoin() : leaveOut()),
             label: `${name} in ${where}: ${synced ? 'synced' : 'not synced'}. ${synced ? `Click to leave ${where} out: its copy stays as it is and no longer gets updates.` : `Click to sync it to ${where} again${has ? '; if its copy there differs, you choose which copy every tool uses' : ''}.`}` }));

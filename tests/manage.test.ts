@@ -750,7 +750,7 @@ test('Undo of a copy choice on a synced skill puts it back as before the choice:
     assert.equal(chosen.wasSynced, true);
     assert.equal(await readFile(join(box.home, COPILOT, 'pair/SKILL.md'), 'utf8'), text('pair', 'Original.'));
     const undone = await restoreFromHistory(fast(box), chosen.id, false, 'narrow');
-    assert.deepEqual(undone.results.map(entry => [entry.harness, entry.outcome, entry.message]), [['copilot-cli', 'written', `Its own copy is back. ${harnesses['copilot-cli'].nextStep.replace(/^Written\. /, '')}`]]);
+    assert.deepEqual(undone.results.map(entry => [entry.harness, entry.outcome, entry.message]), [['copilot-cli', 'written', `Its own copy is back. ${harnesses['copilot-cli'].nextStep}`]]);
     const after = await facts(box, 'pair');
     assert.deepEqual([await readFile(join(box.home, COPILOT, 'pair/SKILL.md'), 'utf8'), after.managed, after.off], [text('pair', 'Copilot’s own.'), true, []]);
     // As before the choice, on every pass: its copy (in the store now, the choice kept it) is never caught up over.
@@ -995,6 +995,27 @@ test('An Undo of a choice that can’t put a copy back or take an added one out 
     assert.equal(finished.stopped, undefined, JSON.stringify(finished));
     assert.deepEqual([await readFile(join(box.home, COPILOT, 'foo/SKILL.md'), 'utf8'), await exists(join(box.home, CODEX, 'foo'))], [text('foo', 'Copilot’s.'), false]);
     assert.ok((await readHistory(ctx(box))).filter(event => [chosen.id, chosen.addedId].includes(event.id)).every(event => event.undoneBy));
+    assert.equal((await applyChanges(three(box), [])).harnessWrites, 0);
+  } finally { await box.cleanup(); }
+});
+test('Finish undo of a choice leaves a skill no longer synced since as it is: only the copy still to go back goes back (probe F1)', { skip: noPosix || process.getuid?.() === 0 }, async () => {
+  const box = await sandbox();
+  try {
+    await managedThree(box);
+    await applyChanges(three(box), [{ ...manage('foo', ['codex-cli']), seenManaged: true }]);
+    await writeFile(join(box.home, CODEX, 'foo/SKILL.md'), text('foo', 'Codex’s own.'));
+    await applyChanges(three(box), [{ ...manage('foo'), seenManaged: true }]);
+    const chose = await applyChanges(three(box), [{ ...manage('foo'), seenManaged: true, use: 'claude-cli', useHash: (await facts(box, 'foo')).copies['claude-cli']!.hash }]);
+    const chosen = (await readHistory(ctx(box))).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
+    await chmod(join(box.home, CODEX), 0o555);
+    const once = await restoreFromHistory(three(box), chosen.id, false, 'narrow');
+    await chmod(join(box.home, CODEX), 0o755);
+    assert.deepEqual(once.results.map(entry => [entry.harness, entry.outcome]), [['codex-cli', 'failed']]);
+    await applyChanges(three(box), [{ ...manage('foo'), managed: false, seenManaged: true }]);
+    const finished = await restoreFromHistory(three(box), chosen.id, false, 'narrow');
+    assert.equal(finished.stopped, undefined, JSON.stringify(finished));
+    assert.equal(await readFile(join(box.home, CODEX, 'foo/SKILL.md'), 'utf8'), text('foo', 'Codex’s own.'));
+    assert.equal((await facts(box, 'foo')).managed, false, 'still not synced');
     assert.equal((await applyChanges(three(box), [])).harnessWrites, 0);
   } finally { await box.cleanup(); }
 });

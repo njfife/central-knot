@@ -435,9 +435,22 @@ async function practiceFlow() {
   // Seconds later, after any background pass, the result and its Undo are still there.
   await wait(3500);
   check('the choice offers an inline Undo', await a.exists('#outcome-undo'), await a.text('.bands'));
+  // Claude Code's skills folder can't be written for a moment: the Undo stops part-way, and History's row finishes it.
+  const claudeSkills = join(practice, '.claude/skills');
+  chmodSync(claudeSkills, 0o555);
   await a.click('#outcome-undo');
+  for (let tries = 0; tries < 50 && !/Not all of review/.test(await a.text('.bands') ?? ''); tries++) await wait(100);
+  chmodSync(claudeSkills, 0o755);
+  check('an Undo that couldn’t put a copy back says so, and that History finishes it', /^Not all of review could be put back\..*History’s Undo of the choice finishes it\.$/.test((await a.text('.band-done .band-text') ?? '').trim()), await a.text('.bands'));
+  await a.click('#nav-history');
+  const unfinishedRow = `[...document.querySelectorAll('.history-row[data-kind="chosen"]')].find(row => row.querySelector('.history-about')?.textContent.includes('still to go'))`;
+  same('its History row says what is still to go, with Finish undo', await a.run(`[${unfinishedRow}?.querySelector('.history-about')?.textContent, ${unfinishedRow}?.querySelector('.history-actions button')?.textContent]`),
+    ['You chose Copilot CLI’s copy; it replaced Claude Code’s. Claude Code still to go.', 'Finish undo']);
+  await a.run(`${unfinishedRow}.querySelector('.history-actions button').click()`);
   for (let tries = 0; tries < 30 && readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8') !== reviewClaude; tries++) await wait(100);
-  check('Undo puts the replaced copy back in its own tool and takes the added one out', readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8') === reviewClaude && readFileSync(join(practice, '.copilot/skills/review/SKILL.md'), 'utf8') === reviewCopilot && !existsSync(join(practice, '.codex/skills/review')));
+  check('Finish undo puts the replaced copy back in its own tool; the added one went with the first Undo', readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8') === reviewClaude && readFileSync(join(practice, '.copilot/skills/review/SKILL.md'), 'utf8') === reviewCopilot && !existsSync(join(practice, '.codex/skills/review')));
+  check('and the row reads Undone', await a.run(`[...document.querySelectorAll('.history-row[data-kind="chosen"]')].some(row => row.textContent.includes('replaced Claude Code’s') && row.querySelector('.history-done')?.textContent === 'Undone')`));
+  await a.click('#nav-skills');
   check('and review is not synced, flagged again', !(await switchOn(a, 'review')) && await a.exists('#decide-review'));
 
   // Off: every tool's own switch turns release-notes off at once; the copies stay. Undo turns each back on, byte for byte.
@@ -861,7 +874,7 @@ async function practiceFlow() {
   check('it puts Claude Code’s copy back in Codex, at once', !readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && !(await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]')), readFileSync(codexAgent, 'utf8'));
   check('the result offers Undo, which restores Codex’s edit', await a.exists('#outcome-undo'));
   await a.click('#outcome-undo');
-  check('Undo puts the edit back, and the copy stops again', readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]'), JSON.stringify(await a.all('[id^=cell-code-reviewer]', 'e.id + "=" + e.dataset.state')) + ' ' + (await a.text('main'))?.slice(0, 400));
+  check('Undo puts the edit back with the mark the click cleared: it keeps its edit again', readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && await a.exists('#cell-code-reviewer-codex-cli[data-state="kept"]'), JSON.stringify(await a.all('[id^=cell-code-reviewer]', 'e.id + "=" + e.dataset.state')) + ' ' + (await a.text('main'))?.slice(0, 400));
   await a.click('#nav-skills');
 
   // What a plugin installed whole brings shows on Skills and MCP servers with the plugin's mark, before Plugins was ever
@@ -1203,7 +1216,7 @@ async function practiceFlow() {
     && /triage is off in Claude Code\. Its whole plugin issue-tracker was turned off there, with its 1 MCP server\./.test(await a.text('.bands') ?? ''), [pluginSettingsNow(), await a.text('.bands')]);
   await a.click('#outcome-undo-plugin');
   for (let tries = 0; tries < 60 && (wholeOff() || !/Undone: triage/.test(await a.text('.bands') ?? '')); tries++) await wait(100);
-  check('its Undo turns the plugin back on there', !wholeOff() && /Undone: triage is on in Claude Code again\./.test(await a.text('.bands') ?? ''), [pluginSettingsNow(), await a.text('.bands')]);
+  check('its Undo turns the plugin back on there', !wholeOff() && /Undone: triage is back on in Claude Code\./.test(await a.text('.bands') ?? ''), [pluginSettingsNow(), await a.text('.bands')]);
   writeFileSync(claudeStub, stubBefore);
   // Codex has the plugin too, and a switch for one skill of it: the row's switch turns Pi's copy and Codex's skill off in one
   // click (Claude Code left on, and said), and its one Undo puts both back.

@@ -1233,7 +1233,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
         if (newlyManaged.has(key) || rejoined.get(key)?.includes(tool)) { const told = added.get(key) ?? { name, hash: tree.hash, copies: [] }; told.copies.push({ tool, hash: tree.hash }); added.set(key, told); }
         writes++;
         if (resetRoots.has(dirname(directory))) putBack.add(tool);
-        results.push({ item: name, harness: tool, outcome: 'written', message: led === undefined ? harnesses[tool].nextStep : `${harnesses[tool].nextStep} It replaced a broken link there${led ? ` (it led to ${led})` : ''}.` });
+        results.push({ item: name, harness: tool, outcome: 'written', message: `Written. ${harnesses[tool].nextStep}${led === undefined ? '' : ` It replaced a broken link there${led ? ` (it led to ${led})` : ''}.`}` });
       }
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('fault:')) throw error;
@@ -1435,7 +1435,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
             copy.hash = tree.hash;
             writes++;
             putBack.add(copy.harness);
-            results.push({ item: item.name, harness: copy.harness, outcome: 'written', message: harnesses[copy.harness].nextStep });
+            results.push({ item: item.name, harness: copy.harness, outcome: 'written', message: `Written. ${harnesses[copy.harness].nextStep}` });
           } catch (error) {
             if (error instanceof Error && error.message.startsWith('fault:')) throw error;
             results.push({ item: item.name, harness: copy.harness, outcome: 'failed', message: `Could not put it back in ${harnesses[copy.harness].name}. ${plainError(error)}` });
@@ -1939,12 +1939,13 @@ async function undoChoice(context: ShareContext, record: SyncRecord, history: Hi
       try { await replaceCopy(context, chosen.key, storedRevision(context, chosen.key, own), copy(tool)!.directory, chosen.winner!.hash); return undefined; }
       catch (error) { if (error instanceof Error && error.message.startsWith('fault:')) throw error; return plainError(error); }
     },
-    nextStep: tool => harnesses[tool].nextStep.replace(/^Written\. /, ''),
+    nextStep: tool => harnesses[tool].nextStep,
     settle: async (synced, back) => {
       delete item.use;
       delete item.keptOwn;
       if (!synced) { item.state = 'dont-share'; item.copies = []; await saveRecord(context.home, record); return; }
-      item.state = 'shared';
+      // Synced before, and still: one turned off since a part-way Undo is left as it is.
+      if (item.state !== 'shared') { await saveRecord(context.home, record); return; }
       item.hash = synced;
       for (const [tool, here] of Object.entries(entry?.facts.copies ?? {}) as [HarnessId, ToolCopy][]) {
         if (here.readsFrom || item.off?.includes(tool)) continue;
