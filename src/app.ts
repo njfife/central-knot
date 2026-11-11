@@ -343,7 +343,16 @@ export const applyPluginSwitches = (ops: PluginOp[], draft: Map<string, PluginOp
   // The switches go back first; the copies' own Undo follows only when that worked, and is still offered when it didn't.
   const undoPlugins = () => applyPluginSwitches(back, new Map(), true, before?.act ? { page: state.page, text: '', act: { ...before.act, label: 'Undo the rest', title: 'Undo the changes to copies made in the same Apply all' } } : undefined);
   // With the copies' changes said above it and no Undo of theirs to run after, the button says what it does undo.
-  const act = back.length ? { label: before && !before.act ? 'Undo plugin switches' : 'Undo', id: 'outcome-undo-plugin', title: before?.act ? 'Turn the plugin items back as they were, then undo the rest' : 'Turn them back as they were', run: () => void undoPlugins().then(() => { if (!state.outcome?.warn) before?.act?.run(); }) } : before?.act;
+  // After them the copies' own Undo runs, when they worked; its result then says both.
+  const undoBoth = async () => {
+    await undoPlugins();
+    const first = state.outcome;
+    if (first?.warn || !before?.act) return;
+    before.act.run();
+    while (state.busy) await new Promise(done => setTimeout(done, 50));
+    tell(state.outcome ? { ...state.outcome, text: [first?.text, state.outcome.text].filter(Boolean).join(' ') } : first && { ...first, act: undefined });
+  };
+  const act = back.length ? { label: before && !before.act ? 'Undo plugin switches' : 'Undo', id: 'outcome-undo-plugin', title: before?.act ? 'Turn the plugin items back as they were, then undo the rest' : 'Turn them back as they were', run: () => void undoBoth() } : before?.act;
   tell({ ...before, page: state.page, text, warn: !!failed.length || !!result.stopped || !!before?.warn, act });
 });
 

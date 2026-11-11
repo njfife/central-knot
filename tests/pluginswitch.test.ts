@@ -51,7 +51,7 @@ test('turning on one item of a plugin that is off as a whole turns the plugin on
   // `two` is off already; the servers are held off, then the plugin comes on.
   assert.deepEqual(chosen(draft), ['codex-cli part-off mcp issues', 'codex-cli part-off mcp wiki', 'codex-cli plugin-on']);
   assert.deepEqual([standing(draft, one).on, standing(draft, item(codex, 'skill', 'two')).on, standing(draft, item(codex, 'mcp', 'issues')).on], [true, false, false]);
-  assert.equal(pendingWords(draft, one), 'Apply all turns it on: the plugin full comes on with its other items left off.');
+  assert.equal(pendingWords(draft, one), 'Apply all turns it on: the plugin full comes on with its 2 MCP servers left off.');
   // A second item turned on beside it only drops its own hold.
   click(draft, item(codex, 'mcp', 'issues'));
   assert.deepEqual(chosen(draft), ['codex-cli part-off mcp wiki', 'codex-cli plugin-on']);
@@ -65,6 +65,16 @@ test('turning on one item of a plugin that is off as a whole turns the plugin on
   click(draft, item(claude, 'mcp', 'issues'));
   assert.deepEqual(chosen(draft), ['claude-cli part-off mcp wiki', 'claude-cli part-off agent helper', 'claude-cli plugin-on']);
   assert.deepEqual(wholeWords(draft), ['the plugin full on in Claude Code with 2 items left off'], 'a plugin that comes on for one item says what it leaves off');
+  assert.equal(pendingWords(draft, item(claude, 'mcp', 'issues')), 'Apply all turns it on: the plugin full comes on with its 1 MCP server and 1 agent left off; its 2 skills come on too.');
+  // Turned off again there, its skills still come on with the plugin, so the plugin stays chosen: each click changes its own box.
+  click(draft, item(claude, 'mcp', 'issues'));
+  assert.deepEqual(chosen(draft).sort(), ['claude-cli part-off agent helper', 'claude-cli part-off mcp issues', 'claude-cli part-off mcp wiki', 'claude-cli plugin-on']);
+  click(draft, item(claude, 'mcp', 'issues'));
+  // The plugin chosen to come on whole by a skill's box, then one server kept off: both stay chosen.
+  const whole: PluginDraft = new Map();
+  click(whole, item(claude, 'skill', 'one'));
+  click(whole, item(claude, 'mcp', 'issues'));
+  assert.deepEqual(chosen(whole), ['claude-cli part-off mcp issues', 'claude-cli plugin-on']);
   assert.equal(clickWords(new Map(), item(claude, 'skill', 'one')), 'Click to turn the whole plugin full on in Claude Code on Apply all, with its 1 skill, 2 MCP servers and 1 agent.');
   // An item its own switch keeps off doesn't come on with the plugin, so it isn't counted.
   assert.equal(clickWords(new Map(), item(installed('claude-cli', { off: true, serversOff: ['wiki'], agentsOff: ['helper'] }), 'skill', 'one')), 'Click to turn the whole plugin full on in Claude Code on Apply all, with its 1 skill and 1 MCP server.');
@@ -87,6 +97,9 @@ test('an item with no switch of its own flips the whole plugin, and its words na
   const claude = installed('claude-cli');
   const skill = item(claude, 'skill', 'one');
   assert.equal(clickWords(draft, skill), 'Claude Code has no switch for one skill of a plugin. Click to turn the whole plugin full off in Claude Code on Apply all, with its 1 skill, 2 MCP servers and 1 agent.');
+  // The line beside its switch in the opened row says the same before any click; an item with its own switch says nothing.
+  assert.equal(pendingWords(draft, skill), 'Claude Code has no switch for one skill of a plugin, so this switch turns the whole plugin off there.');
+  assert.equal(pendingWords(draft, item(claude, 'mcp', 'issues')), '');
   click(draft, skill);
   assert.deepEqual(chosen(draft), ['claude-cli plugin-off']);
   assert.equal(pendingWords(draft, skill), 'Apply all turns it off, with the whole plugin (4 other items).');
@@ -146,6 +159,9 @@ test('a plugin that came on for one item says so in one line, with what was left
   const ran = (more: Partial<PluginOp>, outcome: PluginDone['report']['outcome'], changed = true): PluginDone => ({ source: '/m', marketName: 'team', plugin: 'full', tool: 'codex-cli', action: 'plugin-on', ...more, report: { tool: more.tool ?? 'codex-cli', outcome, message: '', runs: [], changed } });
   const done = [ran({ skill: 'two', action: 'skill-off' }, 'skill-off'), ran({ part: { kind: 'mcp', name: 'wiki' }, action: 'part-off' }, 'part-off'), ran({}, 'plugin-on'), ran({ tool: 'claude-cli' }, 'plugin-on')];
   assert.deepEqual(resultLines(done).map(line => line.text), ['turned on in Claude Code; turned on in Codex with two and MCP server wiki left off']);
+  // Past three items left off, they are counted.
+  const many = [...['a', 'b', 'c', 'd'].map(skill => ran({ skill, action: 'skill-off' }, 'skill-off')), ran({}, 'plugin-on')];
+  assert.deepEqual(resultLines(many).map(line => line.text), ['turned on in Codex with 4 items left off']);
   // On its own, each switch is its own line; an Undo says each thing that came back.
   assert.deepEqual(resultLines(done.slice(0, 2)).map(line => line.text), ['two turned off in Codex', 'MCP server wiki turned off in Codex']);
   // Its Undo, as it runs: the plugin off again, then each held item's switch back. One line: the plugin is off again.

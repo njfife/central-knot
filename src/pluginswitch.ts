@@ -70,7 +70,8 @@ export function cantSwitch(item: PluginItemAt): string | undefined {
 /**
  * Turns the item on or off in its tool on Apply all, or takes that choice back:
  * - an item with its own switch flips that switch; where the whole plugin is off, the plugin goes on with the switch of
- *   every other item that has one turned off, so only this one comes on; turning that one off again puts it all back as it was;
+ *   every other item that has one turned off, so only this one comes on; turning that one off again, with nothing of the
+ *   plugin left to come on, puts it all back as it was;
  * - anything else flips the whole plugin there, with everything it brings.
  * Worked out as where things stand after Apply all (the whole plugin, and each item with a switch of its own), which the
  * draft is then made to say: a choice is kept only where that differs from how the tool has it now.
@@ -84,8 +85,10 @@ export function click(draft: PluginDraft, item: PluginItemAt): void {
   const partOff = new Map(parts.map(part => [part, itemOffAfter(draft, item, part)]));
   if (standing(draft, item).on) {
     if (mine) partOff.set(mine, true); else wholeOff = true;
-    // A plugin that would come on only for items that are all off again stays off, as it is.
-    if (install.off && parts.every(part => partOff.get(part))) wholeOff = true;
+    // A plugin that would come on with nothing of it on (every item off again by its own switch) stays off, as it is.
+    // Where something of it has no switch there (its skills in Claude Code), that still comes on, and the plugin with it.
+    const offAfter = (entry: Part) => { const part = parts.find(candidate => samePart(candidate, entry)); return part ? !!partOff.get(part) : hasOwnSwitch(install.tool, entry.kind) && itemOffNow(install, entry); };
+    if (install.off && install.items.every(offAfter)) wholeOff = true;
   } else {
     // A plugin that is off now comes on for this item alone: its other items that have a switch are held off.
     if (wholeOff && install.off && mine) for (const part of parts) partOff.set(part, true);
@@ -149,15 +152,22 @@ export function clickWords(draft: PluginDraft, item: PluginItemAt): string {
   return `Click to turn the whole plugin ${plugin} on in ${tool} on Apply all${rest.length ? `, with its ${counted(rest)}` : ''}.`;
 }
 
-/** The item's switch in words, for the line beside it: what Apply all will do, or '' when nothing waits. */
+/**
+ * The item's switch in words, for the line beside it: what Apply all will do; or, with nothing waiting, that its switch is
+ * the whole plugin's where the tool has none for one item; or ''.
+ */
 export function pendingWords(draft: PluginDraft, item: PluginItemAt): string {
   const { now, on } = standing(draft, item);
-  if (on === now) return '';
+  if (on === now) return ownSwitch(item) || cantSwitch(item) ? '' : `${names[item.tool]} has no switch for one ${partWords[item.kind][0]} of a plugin, so this switch turns the whole plugin ${on ? 'off' : 'on'} there.`;
   const whole = queuedWhole(draft, where(item).source, item.install.plugin, item.tool);
-  const others = whole && !ownSwitch(item) ? item.install.items.filter(entry => !samePart(entry, item) && !(hasOwnSwitch(item.tool, entry.kind) && itemOffNow(item.install, entry))) : [];
-  // One item turned on in a plugin that is off: the plugin comes on, and its other items' switches are written off.
-  const alone = on && whole === 'plugin-on' && ownSwitch(item) && switchable(item.install).some(part => !samePart(part, item) && itemOffAfter(draft, item, part) && !itemOffNow(item.install, part));
-  return `Apply all turns it ${on ? 'on' : 'off'}${others.length ? `, with the whole plugin (${plural(others.length, 'other item')})` : alone ? `: the plugin ${item.install.plugin} comes on with its other items left off` : ''}.`;
+  const rest = item.install.items.filter(entry => !samePart(entry, item) && !(hasOwnSwitch(item.tool, entry.kind) && itemOffNow(item.install, entry)));
+  if (whole && !ownSwitch(item)) return `Apply all turns it ${on ? 'on' : 'off'}${rest.length ? `, with the whole plugin (${plural(rest.length, 'other item')})` : ''}.`;
+  if (!(on && whole === 'plugin-on')) return `Apply all turns it ${on ? 'on' : 'off'}.`;
+  // One item turned on in a plugin that is off: the plugin comes on, its other items' switches are written off, and
+  // whatever of it can't be held off comes on too.
+  const leftOff = rest.filter(entry => { const part = switchable(item.install).find(candidate => samePart(candidate, entry)); return !!part && itemOffAfter(draft, item, part); });
+  const brought = rest.filter(entry => !switchable(item.install).some(part => samePart(part, entry)));
+  return `Apply all turns it on: the plugin ${item.install.plugin} comes on${leftOff.length ? ` with its ${counted(leftOff)} left off` : ''}${brought.length ? `; its ${counted(brought)} ${brought.length === 1 ? 'comes' : 'come'} on too` : ''}.`;
 }
 
 /**

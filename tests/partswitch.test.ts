@@ -44,6 +44,10 @@ test('Codex keeps the person’s own keys in a server’s table, and changes onl
   const off = withPartSwitch('codex-cli', mine, at, true);
   assert.equal(off, mine.replace('startup_timeout_sec = 20\n', 'startup_timeout_sec = 20\nenabled = false\n'));
   assert.equal(withPartSwitch('codex-cli', off, at, false), mine);
+  // A comment on the person's `enabled` line stays through off and on.
+  const noted = '[plugins."full@team".mcp_servers.issues]\nenabled = true # mine\n';
+  assert.equal(withPartSwitch('codex-cli', noted, at, true), noted.replace('true', 'false'));
+  assert.equal(withPartSwitch('codex-cli', noted.replace('true', 'false'), at, false), noted);
   // The person's own subtable written without the server's table stays, with the switch's table put in above it.
   const sub = '[plugins."full@team"]\nenabled = true\n\n[plugins."full@team".mcp_servers.issues.env]\nA = "1"\n';
   const subOff = withPartSwitch('codex-cli', sub, at, true);

@@ -350,7 +350,8 @@ export function resultLines(ran: PluginDone[], undo = false, { after = false } =
       : [[tools('installed', true), undo ? 'put back in' : 'installed in'], ...updatedGroups(mine, !after), [tools('updated', false), 'already up to date in'], [tools('uninstalled', true), undo ? 'removed from' : 'uninstalled from'],
         [tools('installed', false), 'already in'], [tools('uninstalled', false), 'wasn’t installed in'],
         [tools('plugin-off', true), undo ? 'off again in' : 'turned off in'], [tools('plugin-on', true).filter(tool => !onWith.some(entry => names[entry.tool] === tool)), undo ? 'back on in' : 'turned on in'],
-        ...onWith.map((entry): Group => [[names[entry.tool]], 'turned on in', ` with ${andList(heldWith(entry).map(itemSaid))} left off`]),
+        // Past three, the items left off are counted, not named.
+        ...onWith.map((entry): Group => { const held = heldWith(entry); return [[names[entry.tool]], 'turned on in', ` with ${held.length > 3 ? `${held.length} items` : andList(held.map(itemSaid))} left off`]; }),
         [tools('plugin-off', false), 'already off in'], [tools('plugin-on', false), 'already on in'], ...partsGroups];
     // An item's switch only ever reaches the few tools that have one, so its tools are always named.
     const said = (counted: boolean) => groups.filter(([list]) => list.length).map(([list, verb, after = '']) => `${verb} ${counted && !item && list.length > 2 ? `${list.length} tools` : andList(list)}${after}`).join('; ');

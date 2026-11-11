@@ -82,7 +82,7 @@ export function partOff(tool: HarnessId, text: string, at: PluginPartAt): boolea
  * The switch file's text with this server or agent of the plugin turned off or on. Only the switch changes (a JSON list
  * is written back as a list, with the same entries). Claude Code's deny list, left empty, goes, and `permissions` with it
  * when it held nothing else. Codex: a table that holds nothing but the switch goes whole when the server is turned on
- * (on is the default); one with the person's own keys keeps them. Throws SERVER_FORM for a Codex file that sets the
+ * (on is the default); one with the person's own keys keeps them, and a comment on the `enabled` line stays. Throws SERVER_FORM for a Codex file that sets the
  * server's settings as a value.
  */
 export function withPartSwitch(tool: HarnessId, text: string, at: PluginPartAt, off: boolean): string {
@@ -114,9 +114,11 @@ export function withPartSwitch(tool: HarnessId, text: string, at: PluginPartAt, 
   const line = table.entries.find(entry => entry.key === 'enabled');
   // Turned on, a table that held only the switch has nothing left to say. Above the person's own subtables, the table
   // goes with the blank lines after it, as it came (unless a comment sits there, which belongs to what follows).
-  if (!off && line && table.entries.length === 1 && !subtables.length) return setTomlTable(text, path.slice(0, -1), at.name, undefined, { endGap: true });
-  if (!off && line && table.entries.length === 1 && !text.slice(line.end, table.end).trim()) return `${text.slice(0, table.start)}${text.slice(table.end)}`;
-  if (line) return `${text.slice(0, line.start)}${off ? `enabled = false${eol}` : ''}${text.slice(line.end)}`;
+  const bare = !!line && /^\s*enabled\s*=\s*false\s*$/.test(line.raw);
+  if (!off && bare && table.entries.length === 1 && !subtables.length) return setTomlTable(text, path.slice(0, -1), at.name, undefined, { endGap: true });
+  if (!off && bare && table.entries.length === 1 && !text.slice(line!.end, table.end).trim()) return `${text.slice(0, table.start)}${text.slice(table.end)}`;
+  // The person's own line (a comment on it, `enabled = true`) keeps everything but its value; a bare `enabled = false` goes when turned on.
+  if (line) return `${text.slice(0, line.start)}${!off && bare ? '' : line.raw.replace(/(=\s*)(?:true|false)/, `$1${!off}`)}${text.slice(line.end)}`;
   const insertAt = table.entries.at(-1)?.end ?? (text.indexOf('\n', table.start) + 1 || text.length);
   const before = text.slice(0, insertAt);
   return `${before}${before.endsWith('\n') ? '' : eol}enabled = false${eol}${text.slice(insertAt)}`;
