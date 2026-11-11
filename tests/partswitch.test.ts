@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { installedCopies, pluginParts, setPart, type PluginContext } from '../src/plugins.ts';
-import { SERVER_FORM, partOff, withPartSwitch } from '../src/partswitch.ts';
+import { SERVER_FORM, partOff, serverHeld, withPartSwitch } from '../src/partswitch.ts';
 import type { PluginTool } from '../src/presence.ts';
 
 const at = { plugin: 'full', marketplace: 'team', kind: 'mcp' as const, name: 'issues' };
@@ -54,8 +54,14 @@ test('a Codex file that sets the plugin’s servers as a value is read and never
   for (const inline of ['[plugins."full@team"]\nenabled = true\nmcp_servers = { issues = { enabled = true } }\n', '[plugins."full@team".mcp_servers]\nissues.enabled = true\n', 'plugins = { "full@team" = { enabled = true } }\n']) {
     assert.throws(() => withPartSwitch('codex-cli', inline, at, true), { message: SERVER_FORM }, inline);
   }
+  // Such a file still says what it turns off (the box shows it), and why it can't be switched, before any click.
+  for (const off of ['[plugins."full@team"]\nmcp_servers = { issues = { enabled = false } }\n', '[plugins."full@team".mcp_servers]\nissues.enabled = false\n', '[plugins."full@team"]\nmcp_servers.issues.enabled = false\n']) {
+    assert.deepEqual([partOff('codex-cli', off, at), serverHeld(off, at)], [true, SERVER_FORM], off);
+    assert.throws(() => withPartSwitch('codex-cli', off, at, false), { message: SERVER_FORM }, off);
+  }
   // Another server's value under the same table is no obstacle.
   assert.doesNotThrow(() => withPartSwitch('codex-cli', '[plugins."full@team".mcp_servers]\nother.enabled = true\n', at, true));
+  assert.equal(serverHeld('[plugins."full@team".mcp_servers]\nother.enabled = true\n', at), undefined);
 });
 
 test('Claude Code turns a plugin’s agent off with a deny rule in its settings, and takes only that rule out again', () => {

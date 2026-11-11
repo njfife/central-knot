@@ -47,14 +47,20 @@ export function standing(draft: PluginDraft, item: PluginItemAt): { now: boolean
   };
 }
 
+/** Why Copilot CLI's whole-plugin switch isn't offered for a plugin it loads live from a folder. */
+export const LIVE_PLUGIN = 'Copilot CLI loads this plugin live from a folder, where turning it off is the same as uninstalling it. Uninstall it on the plugin’s page instead.';
+
 /**
- * Why this item can't be switched here, if it can't: the tool's skill switches are in a form not edited here, the skill is
- * held off by a switch that isn't this plugin's own, or Copilot CLI's command line can't take the skill's name. (A plugin
- * whose marketplace the tool no longer lists is switched all the same: the tool still loads it, and has no other
- * marketplace of that name to mistake it for.)
+ * Why this item can't be switched here, if it can't: Codex sets the plugin's MCP servers in a form not edited here; the
+ * tool's skill switches are in a form not edited here, the skill is held off by a switch that isn't this plugin's own, or
+ * Copilot CLI's command line can't take the skill's name; or the whole plugin would go, in Copilot CLI, where it is
+ * loaded live from a folder. (A plugin whose marketplace the tool no longer lists is switched all the same: the tool
+ * still loads it, and has no other marketplace of that name to mistake it for.)
  */
 export function cantSwitch(item: PluginItemAt): string | undefined {
-  if (item.kind !== 'skill' || !ownSwitch(item)) return undefined;
+  if (!ownSwitch(item)) return item.tool === 'copilot-cli' && item.install.live ? LIVE_PLUGIN : undefined;
+  if (item.kind === 'mcp') return item.install.serversHeld?.[item.name];
+  if (item.kind !== 'skill') return undefined;
   return item.install.switchesHeld ?? item.install.skillsHeld?.[item.name] ?? noSwitchReason(item.tool, undefined, item.name);
 }
 
@@ -63,35 +69,33 @@ export function cantSwitch(item: PluginItemAt): string | undefined {
  * - an item with its own switch flips that switch; where the whole plugin is off, the plugin goes on with the switch of
  *   every other item that has one turned off, so only this one comes on; turning that one off again puts it all back as it was;
  * - anything else flips the whole plugin there, with everything it brings.
+ * Worked out as where things stand after Apply all (the whole plugin, and each item with a switch of its own), which the
+ * draft is then made to say: a choice is kept only where that differs from how the tool has it now.
  */
 export function click(draft: PluginDraft, item: PluginItemAt): void {
   const at = where(item);
   const install = item.install;
-  const others = ownSwitch(item) ? switchable(install).filter(part => !samePart(part, item)) : [];
-  const setItem = (part: Part, off: boolean) => {
-    const op: PluginOp = part.kind === 'skill' ? { ...at, skill: part.name, action: off ? 'skill-off' : 'skill-on' } : { ...at, part: { kind: part.kind, name: part.name }, action: off ? 'part-off' : 'part-on' };
-    if (off === itemOffNow(install, part)) clear(draft, op); else choose(draft, op);
-  };
-  const setWhole = (off: boolean) => {
-    const op: PluginOp = { ...at, action: off ? 'plugin-off' : 'plugin-on' };
-    if (off === !!install.off) clear(draft, op); else choose(draft, op);
-  };
+  const parts = switchable(install);
+  const mine = parts.find(part => samePart(part, item));
+  let wholeOff = wholeOffAfter(draft, item);
+  const partOff = new Map(parts.map(part => [part, itemOffAfter(draft, item, part)]));
   if (standing(draft, item).on) {
-    if (!ownSwitch(item)) { setWhole(true); return; }
-    setItem(item, true);
-    // A plugin turned on only for items that are now all off again goes back as it was, with each item's switch.
-    if (install.off && !wholeOffAfter(draft, item) && others.every(part => itemOffAfter(draft, item, part))) {
-      setWhole(true);
-      for (const part of [...others, item]) setItem(part, itemOffNow(install, part));
-    }
-    return;
+    if (mine) partOff.set(mine, true); else wholeOff = true;
+    // A plugin that would come on only for items that are all off again stays off, as it is.
+    if (install.off && parts.every(part => partOff.get(part))) wholeOff = true;
+  } else {
+    // A plugin that is off now comes on for this item alone: its other items that have a switch are held off.
+    if (wholeOff && install.off && mine) for (const part of parts) partOff.set(part, true);
+    wholeOff = false;
+    if (mine) partOff.set(mine, false);
   }
-  if (wholeOffAfter(draft, item)) {
-    setWhole(false);
-    // A plugin that is off now comes on for this item alone; one only chosen to go off just stays on, as it is.
-    if (install.off) for (const part of others) if (!itemOffAfter(draft, item, part)) setItem(part, true);
+  // While the plugin stays off as it is, no item's own switch shows or matters: none is left chosen unseen.
+  if (wholeOff && install.off) for (const part of parts) partOff.set(part, itemOffNow(install, part));
+  const put = (op: PluginOp, differs: boolean) => { if (differs) choose(draft, op); else clear(draft, op); };
+  put({ ...at, action: wholeOff ? 'plugin-off' : 'plugin-on' }, wholeOff !== !!install.off);
+  for (const [part, off] of partOff) {
+    put(part.kind === 'skill' ? { ...at, skill: part.name, action: off ? 'skill-off' : 'skill-on' } : { ...at, part: { kind: part.kind, name: part.name }, action: off ? 'part-off' : 'part-on' }, off !== itemOffNow(install, part));
   }
-  if (ownSwitch(item) && itemOffAfter(draft, item, item)) setItem(item, false);
 }
 
 /**
@@ -120,15 +124,18 @@ export function clickWords(draft: PluginDraft, item: PluginItemAt): string {
   const { now, on } = standing(draft, item);
   if (on !== now) return `${on ? 'Turned on' : 'Turned off'} in ${tool} on Apply all. Click to leave it ${now ? 'on' : 'off'}.`;
   const rest = item.install.items.filter(entry => !samePart(entry, item));
-  if (on && ownSwitch(item)) return `Click to turn it off in ${tool} on Apply all.`;
-  if (on) return `${item.kind === 'skill' ? `${tool} has no switch for one skill of a plugin. ` : item.kind === 'agent' ? `${tool} has no switch for one agent of a plugin. ` : ''}Click to turn the whole plugin ${plugin} off in ${tool} on Apply all${rest.length ? `, with its ${counted(rest)}` : ''}.`;
+  // Copilot CLI's switch for a server goes by its bare name, whoever's server it is.
+  if (on && ownSwitch(item)) return `Click to turn it off in ${tool} on Apply all.${item.kind === 'mcp' && item.tool === 'copilot-cli' ? ` Copilot CLI goes by the name, so any other server named “${item.name}” there goes off too.` : ''}`;
+  if (on) return `${tool} has no switch for one ${partWords[item.kind][0]} of a plugin. Click to turn the whole plugin ${plugin} off in ${tool} on Apply all${rest.length ? `, with its ${counted(rest)}` : ''}.`;
   if (!wholeOffAfter(draft, item)) return `Click to turn it on in ${tool} on Apply all.`;
   if (ownSwitch(item)) {
     // What comes on beside this item: whatever the plugin brings that has no switch of its own there.
     const brought = rest.filter(entry => !hasOwnSwitch(item.tool, entry.kind));
-    return `The whole plugin ${plugin} is off in ${tool}. Click to turn it on there on Apply all with only this ${partWords[item.kind][0]} on${brought.length ? `; its ${counted(brought)} ${brought.length === 1 ? 'comes' : 'come'} on too` : ''}.`;
+    return `Click to turn the plugin ${plugin} on in ${tool} on Apply all with only this ${partWords[item.kind][0]} on${brought.length ? `; its ${counted(brought)} ${brought.length === 1 ? 'comes' : 'come'} on too` : ''}.`;
   }
-  return `The whole plugin ${plugin} is off in ${tool}. Click to turn it on there on Apply all${rest.length ? `, with its ${counted(rest)}` : ''}.`;
+  // What comes on with the plugin: everything but the items their own switch keeps off.
+  const comes = rest.filter(entry => !(hasOwnSwitch(item.tool, entry.kind) && itemOffNow(item.install, entry)));
+  return `Click to turn the whole plugin ${plugin} on in ${tool} on Apply all${comes.length ? `, with its ${counted(comes)}` : ''}.`;
 }
 
 /** The item's switch in words, for the line beside it: what Apply all will do, or '' when nothing waits. */
@@ -137,7 +144,7 @@ export function pendingWords(draft: PluginDraft, item: PluginItemAt): string {
   if (on === now) return '';
   const whole = queuedWhole(draft, where(item).source, item.install.plugin, item.tool);
   const others = whole && !ownSwitch(item) ? item.install.items.filter(entry => !samePart(entry, item)) : [];
-  return `${on ? 'Turned on' : 'Turned off'} on Apply all${others.length ? `, with the whole plugin (${plural(others.length, 'other item')})` : ''}.`;
+  return `Apply all turns it ${on ? 'on' : 'off'}${others.length ? `, with the whole plugin (${plural(others.length, 'other item')})` : ''}.`;
 }
 
 /**

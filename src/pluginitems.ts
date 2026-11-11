@@ -22,7 +22,7 @@ export async function readPluginItems(context: PluginContext, tools: HarnessId[]
   const parts = await readParts(context.home);
   const perTool = await Promise.all(tools.filter(takesPlugins).map(async tool => {
     const [plugins, markets] = await Promise.all([installedCopies(read, tool).catch(() => []), registeredMarketplaces(read, tool).catch(() => [])]);
-    return plugins.map(({ plugin, marketplace, state, off, contents, serversOff, agentsOff }): InstalledPlugin => {
+    return plugins.map(({ plugin, marketplace, state, off, contents, serversOff, agentsOff, serversHeld }): InstalledPlugin => {
       const source = markets.find(market => market.name === marketplace)?.source ?? parts.find(install => install.marketName === marketplace)?.source;
       const base: InstalledPlugin = { tool, plugin, marketName: marketplace, ...(off ? { off } : {}), items: [], listed: !!source, ...(source ? { source } : {}) };
       if (state.state !== 'installed') return { ...base, problem: state.state === 'not-known' ? state.reason : UNREADABLE };
@@ -36,7 +36,7 @@ export async function readPluginItems(context: PluginContext, tools: HarnessId[]
       const skillsOff = (state.skillsOff ?? []).map(entry => entry.skill);
       const skillsHeld = Object.fromEntries((state.skillsOff ?? []).flatMap(entry => (entry.held ? [[entry.skill, entry.held]] : [])));
       return { ...base, version: state.version, items, ...(skillsOff.length ? { skillsOff } : {}), ...(serversOff?.length ? { serversOff } : {}), ...(agentsOff?.length ? { agentsOff } : {}),
-        ...(state.switchesHeld ? { switchesHeld: state.switchesHeld } : {}), ...(Object.keys(skillsHeld).length ? { skillsHeld } : {}) };
+        ...(state.switchesHeld ? { switchesHeld: state.switchesHeld } : {}), ...(serversHeld ? { serversHeld } : {}), ...(state.live ? { live: true } : {}), ...(Object.keys(skillsHeld).length ? { skillsHeld } : {}) };
     });
   }));
   return perTool.flat();

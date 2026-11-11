@@ -42,6 +42,29 @@ const codexTable = (tables: TomlTable[], path: string[]) => tables.find(table =>
 const setElsewhere = (tables: TomlTable[], path: string[]) => tables.some(table => !table.array && table.path.length < path.length && startsWith(path, table.path)
   && table.entries.some(entry => { const rest = path.slice(table.path.length); return entry.keys.slice(0, rest.length).every((key, index) => key === rest[index]); }));
 
+/**
+ * What Codex's config.toml says for `enabled` of the table at `path`, however it is written: a line in that table, a
+ * dotted key in a table above it (`<server>.enabled = false` under `mcp_servers`), or inside a value there
+ * (`mcp_servers = { <server> = { enabled = false } }`). Undefined when it says nothing.
+ */
+function codexEnabled(tables: TomlTable[], path: string[]): unknown {
+  for (const table of tables) {
+    if (table.array || !startsWith(path, table.path)) continue;
+    const rest = [...path.slice(table.path.length), 'enabled'];
+    for (const entry of table.entries) {
+      if (entry.keys.length > rest.length || !entry.keys.every((key, index) => key === rest[index])) continue;
+      const found = rest.slice(entry.keys.length).reduce<unknown>((value, key) => record(value)?.[key], entry.value);
+      if (found !== undefined) return found;
+    }
+  }
+  return undefined;
+}
+
+/** Why this server of the plugin can't be switched in Codex's config.toml `text`, if it can't: its settings are written as a value (SERVER_FORM). Undefined for a file that can't be read at all. */
+export function serverHeld(text: string, at: PluginPartAt): string | undefined {
+  try { return setElsewhere(readTomlTables(text), codexPath(at)) ? SERVER_FORM : undefined; } catch { return undefined; }
+}
+
 /** Why Codex's switch for this server isn't written. */
 export const SERVER_FORM = 'Codex’s config.toml sets this plugin’s MCP servers in a form Central Knot doesn’t edit, so this server can’t be switched here.';
 const noSwitch = () => Object.assign(new Error('That tool has no switch for this.'), { code: 'CK_FORM' });
@@ -52,7 +75,7 @@ export function partOff(tool: HarnessId, text: string, at: PluginPartAt): boolea
   if (at.kind === 'agent') return denyList(text).some(rule => claudeAgentRules(at).includes(rule as string));
   if (tool === 'claude-cli') return mcpDisabled(tool, text, claudeServer(at));
   if (tool === 'copilot-cli') return mcpDisabled(tool, text, at.name);
-  return codexTable(readTomlTables(text), codexPath(at))?.entries.find(entry => entry.key === 'enabled')?.value === false;
+  return codexEnabled(readTomlTables(text), codexPath(at)) === false;
 }
 
 /**
@@ -64,6 +87,7 @@ export function partOff(tool: HarnessId, text: string, at: PluginPartAt): boolea
  */
 export function withPartSwitch(tool: HarnessId, text: string, at: PluginPartAt, off: boolean): string {
   if (!hasPartSwitch(tool, at.kind)) throw noSwitch();
+  if (tool === 'codex-cli' && setElsewhere(readTomlTables(text), codexPath(at))) throw Object.assign(new Error(SERVER_FORM), { code: 'CK_FORM' });
   if (partOff(tool, text, at) === off) return text;
   if (at.kind === 'agent') {
     const rules = claudeAgentRules(at);
@@ -77,7 +101,6 @@ export function withPartSwitch(tool: HarnessId, text: string, at: PluginPartAt, 
   if (tool === 'copilot-cli') return withMcpSwitch(tool, text, at.name, off);
   const path = codexPath(at);
   const tables = readTomlTables(text);
-  if (setElsewhere(tables, path)) throw Object.assign(new Error(SERVER_FORM), { code: 'CK_FORM' });
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
   const table = codexTable(tables, path);
   if (!table) return setTomlTable(text, path.slice(0, -1), at.name, `${tomlHeader(path)}${eol}enabled = false${eol}`, { endGap: true });

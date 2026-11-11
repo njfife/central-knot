@@ -1258,6 +1258,23 @@ async function practiceFlow() {
   await a.click('#outcome-undo-plugin');
   for (let tries = 0; tries < 40 && (await a.run(`document.querySelector('#cell-issues-claude-cli')?.dataset.state`)) !== 'plugin-off'; tries++) await wait(100);
   same('Undo turns it off again', [await a.run(`document.querySelector('#cell-issues-claude-cli')?.dataset.state`), JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers?.length], ['plugin-off', 1]);
+  // A plugin item's switch and a change to a person's own server in one Apply all: both are written, one result says both,
+  // and its Undo takes both back.
+  const copilotSettings = join(practice, '.copilot/settings.json');
+  const docsOff = () => (existsSync(copilotSettings) ? JSON.parse(readFileSync(copilotSettings, 'utf8')).disabledMcpServers ?? [] : []).includes('docs');
+  const docsWasOff = docsOff();
+  await a.click('#cell-issues-claude-cli');
+  if (!(await a.exists('#enable-docs-copilot-cli'))) await a.click('#open-docs');
+  await a.click('#enable-docs-copilot-cli');
+  check('the bar counts both kinds of change', /2 changes/.test(await a.run(`document.querySelector('#apply')?.title`) ?? '') && /1 plugin item to turn on/.test(await a.run(`document.querySelector('#apply')?.title`) ?? ''), await a.run(`document.querySelector('#apply')?.title`));
+  await applyAll(a);
+  for (let tries = 0; tries < 60 && !(await a.exists('#outcome-undo-plugin')); tries++) await wait(100);
+  check('one Apply all writes both, and its result says both', docsOff() === !docsWasOff && JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers === undefined
+    && /MCP server issues turned on in Claude Code/.test(await a.run('document.body.innerText') ?? '') && !(await a.exists('#discard')), [docsOff(), pluginSettingsNow(), (await a.run('document.body.innerText') ?? '').match(/[^\n]*turned on in Claude Code[^\n]*/)?.[0]]);
+  await a.click('#outcome-undo-plugin');
+  for (let tries = 0; tries < 80 && (docsOff() !== docsWasOff || JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers?.length !== 1); tries++) await wait(100);
+  same('and its Undo takes both back', [docsOff(), JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers?.length], [docsWasOff, 1]);
+  await a.settle();
   if (pluginSettingsBefore === undefined) rmSync(pluginSettings, { force: true }); else writeFileSync(pluginSettings, pluginSettingsBefore);
   await a.click('#header-refresh');
   for (let tries = 0; tries < 40 && (await a.run(`document.querySelector('#cell-issues-claude-cli')?.dataset.state`)) !== 'plugin'; tries++) await wait(100);

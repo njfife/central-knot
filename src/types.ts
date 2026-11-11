@@ -495,6 +495,8 @@ export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: 
   /** Its MCP servers and agents that tool has turned off one by one (partswitch.ts). */ serversOff?: string[]; agentsOff?: string[];
   /** Why none of its skills can be switched here (Codex's skill rules in a form not edited), if so. */ switchesHeld?: string;
   /** Skills held off by a switch that isn't this plugin's own, each with why it can't be turned on here. */ skillsHeld?: Record<string, string>;
+  /** MCP servers whose switch can't be written here, each with why. */ serversHeld?: Record<string, string>;
+  /** Loaded live from a folder marketplace, nothing copied (Copilot CLI): turned off, such a plugin is no longer installed. */ live?: boolean;
   items: PluginItem[];
   /** Why what it brings couldn't be read; then `items` is empty. */ problem?: string;
   /** Its marketplace is on the Plugins page (it is added in a tool), so the plugin's page can be opened there. */ listed: boolean;

@@ -75,9 +75,9 @@ export const forSource = (key: string, source: string) => key.startsWith(`${sour
 
 /** The install or uninstall chosen for a plugin in a tool, or with `skill`, that skill's switch chosen there. */
 export const queued = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId, skill?: string) => draft.get(opKey({ source, plugin, tool, skill }))?.action;
-/** The whole plugin's switch chosen in a tool, if one is. */
 /** The switch chosen for one MCP server or agent of a plugin in a tool, if one is. */
 export const queuedPart = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId, part: PartRef) => draft.get(opKey({ source, plugin, tool, part }))?.action;
+/** The whole plugin's switch chosen in a tool, if one is. */
 export const queuedWhole = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId) => draft.get(opKey({ source, plugin, tool, action: 'plugin-on' }))?.action;
 
 /** Takes one change out of the draft, once it has run. */
@@ -294,8 +294,15 @@ export const succeeded = (report: ActionReport) => report.outcome !== 'held' && 
  * in" for an uninstall reversed, "back on in" for a skill turned off. `after`: for a note read later (an update made with
  * nobody watching), without "which can't be undone", which is said before a click.
  */
-export function resultLines(done: PluginDone[], undo = false, { after = false } = {}): ResultLine[] {
+export function resultLines(ran: PluginDone[], undo = false, { after = false } = {}): ResultLine[] {
   const lines: ResultLine[] = [];
+  // A plugin that came on with other items held off (one item turned on in a plugin that was off, pluginswitch.ts) is one
+  // line, "turned on in Codex with triage left off", not a line more for each item held.
+  const itemSaid = (entry: PluginDone) => (entry.part ? `${partWords[entry.part.kind][0]} ${entry.part.name}` : entry.skill!);
+  const heldWith = (whole: PluginDone) => (undo || whole.action !== 'plugin-on' || !whole.report.changed ? []
+    : ran.filter(entry => entry.source === whole.source && entry.plugin === whole.plugin && entry.tool === whole.tool && (entry.action === 'skill-off' || entry.action === 'part-off') && entry.report.changed));
+  const folded = new Set(ran.flatMap(heldWith));
+  const done = ran.filter(entry => !folded.has(entry));
   const lineKey = (entry: PluginDone) => `${pluginKey(entry.source, entry.plugin)}\u0000${switchSlot(entry)}`;
   for (const key of new Set(done.map(lineKey))) {
     const mine = done.filter(entry => lineKey(entry) === key);
@@ -326,12 +333,14 @@ export function resultLines(done: PluginDone[], undo = false, { after = false } 
       [mine.filter(entry => isParts(entry.action) && entry.report.replacedLinks?.length).map(entry => names[entry.tool]), 'a broken link replaced in'],
     ];
     const [off, on] = part ? ['part-off', 'part-on'] as const : ['skill-off', 'skill-on'] as const;
+    const onWith = mine.filter(entry => heldWith(entry).length);
     const groups: Group[] = item
       ? [[tools(off, true), undo ? `${item} off again in` : `${item} turned off in`], [tools(on, true), undo ? `${item} back on in` : `${item} turned on in`],
         [tools(off, false), `${item} already off in`], [tools(on, false), `${item} already on in`]]
       : [[tools('installed', true), undo ? 'put back in' : 'installed in'], ...updatedGroups(mine, !after), [tools('updated', false), 'already up to date in'], [tools('uninstalled', true), undo ? 'removed from' : 'uninstalled from'],
         [tools('installed', false), 'already in'], [tools('uninstalled', false), 'wasn’t installed in'],
-        [tools('plugin-off', true), undo ? 'off again in' : 'turned off in'], [tools('plugin-on', true), undo ? 'back on in' : 'turned on in'],
+        [tools('plugin-off', true), undo ? 'off again in' : 'turned off in'], [tools('plugin-on', true).filter(tool => !onWith.some(entry => names[entry.tool] === tool)), undo ? 'back on in' : 'turned on in'],
+        ...onWith.map((entry): Group => [[names[entry.tool]], 'turned on in', ` with ${andList(heldWith(entry).map(itemSaid))} left off`]),
         [tools('plugin-off', false), 'already off in'], [tools('plugin-on', false), 'already on in'], ...partsGroups];
     // An item's switch only ever reaches the few tools that have one, so its tools are always named.
     const said = (counted: boolean) => groups.filter(([list]) => list.length).map(([list, verb, after = '']) => `${verb} ${counted && !item && list.length > 2 ? `${list.length} tools` : andList(list)}${after}`).join('; ');

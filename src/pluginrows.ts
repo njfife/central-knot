@@ -28,12 +28,12 @@ export interface PluginRow {
 /** A page's plugin rows (those no row of the person's own already shows), and copies that couldn't be read. */
 export interface PageRows { rows: PluginRow[]; unread: InstalledPlugin[] }
 
-/** Whether this tool's copy of the plugin has this item turned off, and how: the whole plugin, or the item's own switch (a skill's, an MCP server's). */
+/** Whether this tool's copy of the plugin has this item turned off, and how: the whole plugin, or the item's own switch (a skill's, an MCP server's, an agent's). */
 export function offIn(row: PluginRow, tool: HarnessId): 'plugin' | 'item' | undefined {
   const install = row.installs[tool];
   if (!install || !row.copies[tool]) return undefined;
   if (install.off) return 'plugin';
-  const off = row.kind === 'skill' ? install.skillsOff : row.kind === 'mcp' ? install.serversOff : undefined;
+  const off = { skill: install.skillsOff, mcp: install.serversOff, agent: install.agentsOff }[row.kind];
   return off?.some(name => samePart({ kind: row.kind, name }, row)) ? 'item' : undefined;
 }
 

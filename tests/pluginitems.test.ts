@@ -137,6 +137,10 @@ test('each tool’s cell says whether it is on: the skill’s own switch, the wh
   assert.equal(server!.description, 'Command · npx -y issues');
   assert.deepEqual([offIn(server!, 'copilot-cli'), offIn(server!, 'claude-cli')], ['item', 'plugin']);
   assert.equal(toolWords(server!, 'copilot-cli'), 'Inside issue-tracker 2.0.0. Turned off here with its own switch.');
+  // An agent turned off by itself (Claude Code) is said the same way.
+  const agents = homeOf([], [{ ...install('claude-cli', { agentsOff: ['reviewer'] }), items: [{ kind: 'agent', name: 'reviewer', description: '' }] }]);
+  const [agent] = pageRows(agents, 'agents').rows;
+  assert.deepEqual([offIn(agent!, 'claude-cli'), toolWords(agent!, 'claude-cli')], ['item', 'Inside issue-tracker 2.0.0. Turned off here with its own switch.']);
 });
 
 test('a plugin whose marketplace is on no tool any more says where it is handled instead of linking to a page', () => {

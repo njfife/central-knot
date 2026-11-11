@@ -1798,6 +1798,8 @@ button.harness-card-main:focus-visible { outline: 0; }
 .cell-plugin { color: var(--accent-ink); }
 .cell-plugin.cell-on, .cell-button.cell-static.cell-plugin.cell-on:hover { background: color-mix(in oklab, var(--accent) 16%, transparent); border-color: transparent; }
 .cell-plugin.cell-disabled.cell-on, .cell-button.cell-static.cell-plugin.cell-disabled:hover { background: transparent; border-color: var(--control-line); color: var(--ink-soft); }
+/* A plugin item's switch waiting for Apply all keeps the dashed blue edge of any waiting change, over the two rules above. */
+.cell-button.cell-plugin.cell-pending-edit, .cell-button.cell-plugin.cell-disabled.cell-pending-edit { border-style: dashed; border-color: var(--accent); }
 .ov-row.unmanaged .cell-static.cell-absent { border-style: dotted; border-color: var(--cell-line); }
 
 /* The note of what plugin updates did by themselves (pluginupdateview.ts): what it is about, then a line per plugin. The

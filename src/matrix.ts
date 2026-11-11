@@ -102,10 +102,10 @@ function itemThrough(skill: SampleSkill, tool: Tool): PluginItemAt | undefined {
  * it on or off there on Apply all (pluginswitch.ts), dashed blue while that waits. `said`: what the box shows, in words.
  */
 function pluginSwitchCell(item: PluginItemAt, said: string, id: string) {
-  const { now, on } = pluginStanding(view.pluginDraft, item);
+  const { now, on } = pluginStanding(pluginDraft, item);
   const why = cantSwitchHere(item);
   const pending = on !== now;
-  const text = `${said}. ${why ?? clickWords(view.pluginDraft, item)}`.replace(/\.\. /, '. ');
+  const text = `${said}. ${why ?? clickWords(pluginDraft, item)}`.replace(/\.\. /, '. ');
   return h(`button.cell-button.${PLUGIN_LOOK.tone}.cell-on${on ? '' : '.cell-disabled'}${pending ? '.cell-pending-edit' : ''}`, {
     type: 'button', id, title: text, 'aria-label': text, 'data-state': pending ? (on ? 'plugin-turns-on' : 'plugin-turns-off') : on ? 'plugin' : 'plugin-off', disabled: !!why || !!state.busy,
     onclick: (event: Event) => { event.stopPropagation(); flipPluginItem(item); } },
@@ -117,7 +117,7 @@ const cantSwitchHere = (item: PluginItemAt) => cantSwitch(item) ?? (state.home ?
 
 /** A click on a plugin item's box or its switch: turns it on or off there on Apply all, or takes that choice back. */
 function flipPluginItem(item: PluginItemAt) {
-  clickPluginItem(view.pluginDraft, item);
+  clickPluginItem(pluginDraft, item);
   view.draftSaid = state.said.seq;
   const count = pluginSwitchCount() + view.draft.size;
   announce(count ? `${count} ${count === 1 ? 'change' : 'changes'} not applied yet.` : 'No changes.', true);
@@ -129,31 +129,36 @@ function flipPluginItem(item: PluginItemAt) {
  * applied on Apply all. `page`: a link to the plugin's page beside it, on a row that has no other.
  */
 function pluginItemControls(item: PluginItemAt, id: string, page?: () => void) {
-  const { now, on } = pluginStanding(view.pluginDraft, item);
+  const { now, on } = pluginStanding(pluginDraft, item);
   const why = cantSwitchHere(item);
   const pending = on !== now;
-  const label = `${item.name} in ${names[item.tool]}: ${on ? 'enabled' : 'disabled'}${pending ? ' on Apply all' : ''}. ${why ?? clickWords(view.pluginDraft, item)}`;
+  const label = `${item.name} in ${names[item.tool]}: ${on ? 'enabled' : 'disabled'}${pending ? ' on Apply all' : ''}. ${why ?? clickWords(pluginDraft, item)}`;
   return h('span.details-tool-actions', {},
     h(`span.tool-switch${pending ? '.tool-switch-pending' : ''}`, {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, on ? 'Enabled' : 'Disabled'),
       toggle({ on, label, disabled: !!why || !!state.busy, onchange: () => flipPluginItem(item), id })),
     page ? smallAction('Plugin’s page', `${id}-page`, page, '.tool-link') : null);
 }
 
-/** Every box on this page for an item a tool has through a plugin. */
-function pluginItemsShown(): PluginItemAt[] {
-  const own = committedList().flatMap(skill => toolList().map(tool => itemThrough(skill, tool)).filter((item): item is PluginItemAt => !!item));
-  const rows = plugged().rows.flatMap(row => (toolList() as HarnessId[]).flatMap(tool => (row.copies[tool] && row.installs[tool] ? [{ kind: row.kind, name: row.name, tool, install: row.installs[tool]! }] : [])));
-  return [...own, ...rows];
+/**
+ * Items that tools have through a plugin, turned on or off on Apply all with each tool's own switch (pluginswitch.ts).
+ * One draft for the Skills, MCP servers and Agents pages: a whole plugin chosen to go off on one page shows as waiting on
+ * the others' rows of that plugin too, and Apply all on any of them runs them all.
+ */
+const pluginDraft: PluginDraft = new Map();
+/** The home the plugin draft was chosen in: opening another starts clean. */
+let pluginDraftHome: string | undefined;
+
+/** Every item a tool has through a plugin, on whichever page it is listed: what the plugin draft may change. */
+const pluginItemsAll = (): PluginItemAt[] => (state.home?.pluginItems ?? []).flatMap(install => install.items.map(entry => ({ kind: entry.kind, name: entry.name, tool: install.tool, install })));
+/** How many of them turn on, and how many off, on Apply all. */
+function pluginTurns(): { on: number; off: number } {
+  const turning = pluginDraft.size ? pluginItemsAll().map(item => pluginStanding(pluginDraft, item)).filter(({ now, on }) => now !== on) : [];
+  return { on: turning.filter(({ on }) => on).length, off: turning.filter(({ on }) => !on).length };
 }
-/** How many of those boxes turn on or off on Apply all; at least one while any plugin switch is chosen. */
+/** How many plugin items change on Apply all; at least one while any plugin switch is chosen. */
 function pluginSwitchCount(): number {
-  if (!view.pluginDraft.size) return 0;
-  return Math.max(1, pluginItemsShown().filter(item => { const { now, on } = pluginStanding(view.pluginDraft, item); return now !== on; }).length);
-}
-/** "on", "off" or "on or off": which way the chosen plugin switches go. */
-function pluginTurns(): string {
-  const ways = new Set(pluginItemsShown().map(item => pluginStanding(view.pluginDraft, item)).filter(({ now, on }) => now !== on).map(({ on }) => on));
-  return ways.size === 1 ? ([...ways][0] ? 'on' : 'off') : 'on or off';
+  const { on, off } = pluginTurns();
+  return pluginDraft.size ? Math.max(1, on + off) : 0;
 }
 
 /** Opens the plugin's page on Plugins, found by its marketplace's name where the source each tool recorded is spelled otherwise. */
@@ -200,7 +205,7 @@ function pluginDetails(row: PluginRow, placement: 'row' | 'dock' = 'row') {
       const item: PluginItemAt | undefined = install && { kind: row.kind, name: row.name, tool: tool as HarnessId, install };
       return h('div.details-tool', {}, h('div.details-tool-head', {},
         h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
-        h('span.details-tool-line', {}, [toolWords(row, tool as HarnessId), item ? pendingWords(view.pluginDraft, item) : ''].filter(Boolean).join(' ')),
+        h('span.details-tool-line', {}, [toolWords(row, tool as HarnessId), item ? pendingWords(pluginDraft, item) : ''].filter(Boolean).join(' ')),
         item ? pluginItemControls(item, `enable-${row.key}-${tool}`) : null));
     })),
     !shown ? null : !copies?.length ? h('p.details-limits', {}, copies ? 'Its file couldn’t be read.' : 'Reading…')
@@ -332,8 +337,6 @@ interface Draft { managed: boolean; off: Tool[]; resolve?: Resolution; prior?: b
 const newView = () => ({
   committed: sample.map(skill => ({ ...skill })),
   draft: new Map<string, Draft>(),
-  /** Items that tools have through a plugin, turned on or off on Apply all with each tool's own switch (pluginswitch.ts). */
-  pluginDraft: new Map() as PluginDraft,
   /** When the draft last changed (state.said.seq): a result said before that steps aside for the pending changes. */
   draftSaid: 0,
   filter: 'all' as Filter,
@@ -359,7 +362,7 @@ const newView = () => ({
 });
 const views: Record<Kind, ReturnType<typeof newView>> = { skills: newView(), mcp: newView(), agents: newView() };
 /** Changes chosen in the skills, MCP servers and agents tables and not yet applied. */
-export const changesWaiting = () => Object.values(views).reduce((sum, view) => sum + view.draft.size + view.pluginDraft.size, 0);
+export const changesWaiting = () => Object.values(views).reduce((sum, view) => sum + view.draft.size, pluginDraft.size);
 /**
  * Opens a page already narrowed, for links that point at a problem (the Overview's or a harness card's "different copies").
  * `harness`: the harness page it opens on (none: the kind's own page), so the first draw there keeps this filter.
@@ -507,27 +510,32 @@ function resolve(key: string, choice: Resolution | undefined) {
   rerender();
 }
 
+/** Applies the copies' changes chosen on this page; the draft is cleared once they are written. */
+function applyCopies(): Promise<void> {
+  const changes = [...view.draft].map(([key, draft]) => ({ key, managed: draft.managed, off: draft.off, use: draft.resolve, useHash: draft.seen, seenManaged: draft.seenManaged,
+    ...switchChanges(key, draft), ...(draft.remove?.length ? { remove: draft.remove } : {}) })) as Change[];
+  const drafts = view.draft;
+  return kind === 'mcp' ? applyMcpChanges(changes, () => drafts.clear()) : kind === 'agents' ? applyAgentsChanges(changes, () => drafts.clear()) : applyManage(changes, () => drafts.clear());
+}
+
 function applyAll() {
   const count = view.draft.size;
-  if (!designMode && view.pluginDraft.size) {
-    // Plugin switches first, on their own: the copies' Apply all (if any is chosen too) follows and says its own result.
-    const plugins = view.pluginDraft;
-    void applyPluginSwitches([...plugins.values()], plugins).then(() => { if (view.draft.size) applyAll(); });
+  if (designMode) {
+    view.committed = view.committed.map(skill => applied(effective(skill)));
+    view.draft.clear();
+    announce(`${count} ${count === 1 ? 'change' : 'changes'} applied.`);
+    rerender();
     return;
   }
-  if (!designMode) {
-    const changes = [...view.draft].map(([key, draft]) => ({ key, managed: draft.managed, off: draft.off, use: draft.resolve, useHash: draft.seen, seenManaged: draft.seenManaged,
-      ...switchChanges(key, draft), ...(draft.remove?.length ? { remove: draft.remove } : {}) })) as Change[];
-    const drafts = view.draft;
-    if (kind === 'mcp') void applyMcpChanges(changes, () => drafts.clear());
-    else if (kind === 'agents') void applyAgentsChanges(changes, () => drafts.clear());
-    else void applyManage(changes, () => drafts.clear());
-    return;
-  }
-  view.committed = view.committed.map(skill => applied(effective(skill)));
-  view.draft.clear();
-  announce(`${count} ${count === 1 ? 'change' : 'changes'} applied.`);
-  rerender();
+  if (!pluginDraft.size) { void applyCopies(); return; }
+  // Both kinds chosen: the copies first, then the plugin items' switches, whose result carries the copies' with it. Copies
+  // that could not be applied (they stay chosen) stop it there, with the plugin switches still chosen.
+  void (async () => {
+    const copies = count > 0;
+    if (copies) await applyCopies();
+    if (copies && view.draft.size) return;
+    await applyPluginSwitches([...pluginDraft.values()], pluginDraft, false, copies ? state.outcome : undefined);
+  })();
 }
 
 // ---------- Visual vocabulary ----------
@@ -587,9 +595,11 @@ function pendingSummary(count: number): string {
   const flips = next.flatMap(skill => toolList().filter(tool => hasCopyAfterApply(skill, tool) && switchQueued(skill.key, tool)).map(tool => !!skill.disabled?.includes(tool)));
   const disabling = flips.filter(Boolean).length, enabling = flips.length - disabling;
   const copies = (n: number, what: string) => (n ? ` · ${n} ${n === 1 ? 'copy' : 'copies'} ${what}` : '');
-  const plugins = pluginSwitchCount();
-  const whole = wholeWords(view.pluginDraft);
-  return `${plural(count, 'change')}${fresh ? ` · ${fresh} new ${fresh === 1 ? 'copy' : 'copies'}` : ''}${copies(replaced, 'to replace')}${copies(removed, 'to remove')}${copies(disabling, 'to disable')}${copies(enabling, 'to enable')}${plugins ? ` · ${plugins} through a plugin to turn ${pluginTurns()}${whole.length ? ` (${whole.join(', ')})` : ''}` : ''}`;
+  // Plugin items: how many turn on and off, and by name any whole plugin that goes or comes with them.
+  const turns = pluginTurns();
+  const whole = wholeWords(pluginDraft);
+  const items = (n: number, way: string) => (n ? ` · ${n} plugin ${n === 1 ? 'item' : 'items'} to turn ${way}` : '');
+  return `${plural(count, 'change')}${fresh ? ` · ${fresh} new ${fresh === 1 ? 'copy' : 'copies'}` : ''}${copies(replaced, 'to replace')}${copies(removed, 'to remove')}${copies(disabling, 'to disable')}${copies(enabling, 'to enable')}${items(turns.on, 'on')}${items(turns.off, 'off')}${whole.length ? ` (${whole.join(', ')})` : ''}`;
 }
 
 /**
@@ -621,7 +631,7 @@ function changeBar(bulk = true) {
     // In a crowded toolbar the count shortens to "2 changes"; the full summary stays its tooltip and Apply all's.
     return h('div.apply', {}, manageAll,
       pendingCount(pending, plural(count, 'change')),
-      button({ variant: 'ghost', size: 'small', label: 'Discard', name: 'Discard these changes', id: 'discard', onclick: () => { view.draft.clear(); view.pluginDraft.clear(); announce('Changes discarded. Nothing was written.'); rerender(); } }),
+      button({ variant: 'ghost', size: 'small', label: 'Discard', name: 'Discard these changes', id: 'discard', onclick: () => { view.draft.clear(); pluginDraft.clear(); announce('Changes discarded. Nothing was written.'); rerender(); } }),
       button({ variant: 'primary', size: 'small', label, id: 'apply', disabled: !canWrite(), attrs: { title: `${pending}. Nothing is written until Apply all.` }, onclick: applyAll }));
   }
   if (waiting) return h('div.apply', {}, manageAll, h('span.apply-count.apply-quiet', {}, `${waiting} to sync`), button({ variant: 'primary', size: 'small', label, id: 'apply', disabled: !canWrite(), onclick: applyAll }));
@@ -855,7 +865,7 @@ function switchLine(skill: SampleSkill, tool: Tool): string {
 function rowLine(skill: SampleSkill, tool: Tool, quiet: boolean): string {
   // Through a plugin: where it comes from, then what its switch does on Apply all.
   const through = itemThrough(skill, tool);
-  if (through) return [skill.cannot?.[tool], pendingWords(view.pluginDraft, through)].filter(Boolean).join(' ');
+  if (through) return [skill.cannot?.[tool], pendingWords(pluginDraft, through)].filter(Boolean).join(' ');
   // Disable is best effort: on a build older than the one verified it is only said (an unread version: the switch's tooltip).
   const note = !skill.removing?.includes(tool) && !skill.switchProblem?.[tool] && !skill.cannot?.[tool]
     && (skill.copies[tool] !== undefined || cellOf(skill, tool) === 'will-sync') && skill.disableNote?.[tool]?.startsWith('Not checked') ? skill.disableNote[tool] : undefined;
@@ -1702,7 +1712,7 @@ export { brandMark };
 function outcomeShown(outcome: Outcome, matrixPage: boolean): boolean {
   if (outcome.page !== state.page) return false;
   const named = [outcome.item, ...(outcome.items ?? [])].filter((name): name is string => !!name);
-  if (matrixPage && (view.draft.size || view.pluginDraft.size) && (outcome.said ?? 0) < view.draftSaid) return false;
+  if (matrixPage && (view.draft.size || pluginDraft.size) && (outcome.said ?? 0) < view.draftSaid) return false;
   const choosing = matrixPage && view.comparing && committedList().some(skill => skill.key === view.comparing && syncOf(skill, toolList()) === 'attention' && named.some(name => name === skill.name || name.toLowerCase() === skill.key));
   if (choosing) return false;
   return !(state.skillsView === 'files' && state.item && !named.some(name => name.toLowerCase() === state.item));
@@ -1924,8 +1934,9 @@ function notices() {
 
 /** Pending changes belong to one home: opening another starts clean. */
 function forgetOtherHomes() {
-  if (!designMode && state.home?.home !== draftHomes[kind]) { view.draft.clear(); view.pluginDraft.clear(); view.comparing = undefined; draftHomes[kind] = state.home?.home; keptNotices.delete(kind); }
-  if (!designMode) prunePluginSwitches(view.pluginDraft, state.home?.pluginItems ?? []);
+  if (!designMode && state.home?.home !== pluginDraftHome) { pluginDraft.clear(); pluginDraftHome = state.home?.home; }
+  if (!designMode && state.home?.home !== draftHomes[kind]) { view.draft.clear(); view.comparing = undefined; draftHomes[kind] = state.home?.home; keptNotices.delete(kind); }
+  if (!designMode) prunePluginSwitches(pluginDraft, state.home?.pluginItems ?? []);
   // A change for a skill that is no longer there has nothing to apply to.
   // So is a choice of a copy that has gone or changed since it was chosen.
   const byKey = new Map(committedList().map(skill => [skill.key, skill]));
