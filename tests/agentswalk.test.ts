@@ -8,7 +8,7 @@
 //       History's days for it have passed;
 //   (e) the row says what is true: each tool an Off holds is off there, has no copy on record, and is held by a standing Off whose
 //       kept file is in the store; an Off row has no copy anywhere;
-//   (f) a click that went through whole, from a settled home (a plain pass would write nothing and ask nothing), is undone
+//   (f) a click that went through whole, from a settled home (a plain pass would write nothing and hold nothing), is undone
 //       exactly by its Undo: the files and the row as before it. (From an unsettled one, the click's pass also does sync's
 //       waiting work, which its Undo leaves, as the band promises: it reverses the click, not what sync did alongside.)
 // The walks that once found a bug run in `npm test`; CK_WALKS=<n> runs n more seeds of each kind, CK_SEED=<n> starts there.
@@ -124,7 +124,7 @@ async function walk(seed: number, oneWay: boolean): Promise<Finding[]> {
       // (a) Two plain passes: the second writes nothing.
       await trial(box, async () => {
         const first = await pass(box, context()), second = await pass(box, context());
-        settled = !first.writes && !first.results.some(entry => entry.differs);
+        settled = !first.writes && !first.results.some(entry => entry.outcome === 'held');
         if (second.writes) fail(`(a) a second plain pass writes: ${second.results.map(entry => entry.message).join(' | ').slice(0, 100)}`);
       });
       // (b) Every action History offers does something.

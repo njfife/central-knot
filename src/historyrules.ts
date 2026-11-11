@@ -37,28 +37,32 @@ const changedBy = (event: HistoryEvent): HarnessId[] => (event.kind === 'removed
 const actsOn = (event: HistoryEvent, events: HistoryEvent[]): HarnessId[] | '*' | undefined => {
   const open = (tools: HarnessId[]) => tools.filter(tool => !event.restoredTools?.includes(tool));
   if (event.kind === 'removed') return event.turnedOff ? open(toolsOf(event.losers)) : undefined;
-  if (event.kind === 'restored') return event.putBackFrom === 'off' ? changedBy(event) : event.putBackFrom || events.some(other => other.undoneBy === event.id && other.kind === 'deleted') ? '*' : undefined;
+  // Turn off again or Delete again puts the agent's synced state back too: any later click ends it, whatever its tools.
+  if (event.kind === 'restored') return event.putBackFrom || events.some(other => other.undoneBy === event.id && other.kind === 'deleted') ? '*' : undefined;
   // Undo add makes it not synced again: it acts on the whole item.
   return event.kind === 'chosen' ? open(toolsOf(event.losers)) : event.kind === 'added' && event.via !== 'repo' ? '*' : undefined;
 };
 /**
- * The later entries of `event`'s item that still change something since it: an Off, a put-back or a copy choice (changedBy).
- * An entry undone since and the one that undid it cancel out when both came after `event` (an Off and its On, an On and its Turn
- * off again, a choice and its Undo, which leaves no entry): a chain of undos counts once, as its first entry, when it has an
- * odd number of steps, and not at all when even.
+ * What the later entries of `event`'s item still change since it, each with its tools: an Off, a put-back or a copy choice
+ * (changedBy). An entry undone since and the one that undid it cancel out when both came after `event` (an Off and its On, an
+ * On and its Turn off again, a choice and its Undo, which leaves no entry): a chain of undos counts once, as its first entry,
+ * when it has an odd number of steps, and not at all when even. Turning on an Off that came after `event`, whole or part-way,
+ * is that Off's own undoing, except in a tool where it found a copy turned up: that tool keeps its own copy, a change that stays.
  */
-function laterChanges(event: HistoryEvent, events: HistoryEvent[]): HistoryEvent[] {
+function laterChanges(event: HistoryEvent, events: HistoryEvent[]): { entry: HistoryEvent; tools: HarnessId[] }[] {
   const all = events.slice(events.findIndex(other => other.id === event.id) + 1).filter(later => later.key === event.key);
-  // Turning an Off on that came after `event`, whole or part-way, is that Off's own undoing: the Off counts for what it still holds.
-  const after = all.filter(later => !(later.reverses && all.some(other => other.id === later.reverses)));
+  const reversesLater = (later: HistoryEvent) => !!later.reverses && all.some(other => other.id === later.reverses);
+  const after = all.filter(later => !reversesLater(later));
   const byId = new Map(all.map(later => [later.id, later]));
   const undoers = new Set(after.flatMap(later => (later.undoneBy && byId.has(later.undoneBy) ? [later.undoneBy] : [])));
   const steps = (first: HistoryEvent) => { let count = 1; for (let at: HistoryEvent | undefined = first; at?.undoneBy; at = byId.get(at.undoneBy)) count++; return count; };
-  return after.filter(later => !undoers.has(later.id) && steps(later) % 2 === 1 && changedBy(later).length);
+  const counted = after.filter(later => !undoers.has(later.id) && steps(later) % 2 === 1).map(entry => ({ entry, tools: changedBy(entry) }));
+  const turnedUp = all.filter(reversesLater).map(entry => ({ entry, tools: toolsOf(entry.turnedUp) }));
+  return [...counted, ...turnedUp].filter(change => change.tools.length).sort((first, second) => all.indexOf(first.entry) - all.indexOf(second.entry));
 }
 /** An Off's tools that no later click changed: a copy that turned up there, turned off again, is held by that later Off. */
 const unchangedOff = (event: HistoryEvent, events: HistoryEvent[]) => {
-  const changed = new Set(laterChanges(event, events).flatMap(changedBy));
+  const changed = new Set(laterChanges(event, events).flatMap(change => change.tools));
   const tools = actsOn(event, events);
   return isOff(event) && Array.isArray(tools) ? tools.filter(tool => !changed.has(tool)) : [];
 };
@@ -81,8 +85,8 @@ export function endedBy(event: HistoryEvent, events: HistoryEvent[]): HistoryEve
   const deletion = events.findLast(later => deletes(later, event));
   const tools = actsOn(event, events);
   if (deletion || !tools) return deletion;
-  const touches = (later: HistoryEvent) => tools === '*' || changedBy(later).some(tool => tools.includes(tool));
-  return isOff(event) && unchangedOff(event, events).length ? undefined : laterChanges(event, events).findLast(touches);
+  const touches = (change: { tools: HarnessId[] }) => tools === '*' || change.tools.some(tool => tools.includes(tool));
+  return isOff(event) && unchangedOff(event, events).length ? undefined : laterChanges(event, events).findLast(touches)?.entry;
 }
 /** What History says of an entry `endedBy` ended, by what ended it. */
 export const sinceWords = (ending: HistoryEvent) => (ending.kind === 'deleted' ? 'Deleted since' : ending.kind === 'removed' ? 'Turned off since'

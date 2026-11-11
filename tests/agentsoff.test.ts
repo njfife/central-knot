@@ -69,7 +69,7 @@ test('Off removes every copy, History keeps them whatever its age, and On puts e
     assert.deepEqual(turned.results.filter(entry => entry.outcome === 'removed').map(entry => entry.harness), tools);
     for (const folder of ['.claude/agents', '.copilot/agents', '.codex/agents']) assert.deepEqual(await readdir(join(box.home, folder)), []);
     const removal = await latest(box, 'removed');
-    assert.deepEqual([turned.made, removal.turnedOff, removal.before], [[removal.id], true, { state: 'shared', off: [] }]);
+    assert.deepEqual([turned.made, removal.turnedOff, removal.before], [[removal.id], true, { state: 'shared' }]);
     // Its row stays, off, with each tool's copy in History; the next plain pass writes nothing and puts nothing back.
     // It still says what it is; its receiving copies wait for their source's.
     const view = await agentsView(box.context, tools);

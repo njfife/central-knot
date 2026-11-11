@@ -418,14 +418,11 @@ export type RestoreHow = { use: string } | { narrow: true } | { tool: HarnessId 
 
 /**
  * HistoryEvent.before: the item's record as it was before the entry, as far as its Undo needs it. A copy choice's: what it changed
- * besides the copies it wrote (origin, copies, an MCP record). An agent's Off, Delete everywhere or put-back: whether it was synced
- * and the tools the person left out.
+ * besides the copies it wrote (origin, copies, an MCP record). An agent's Off, Delete everywhere or put-back: whether it was synced.
  */
 export interface RecordBefore {
-  /** An agent's Off, deletion or put-back: synced ('shared') or not. A put-back makes the agent synced again only when its Off's or deletion's was 'shared' (agents.ts syncedAgain); the put-back's Undo puts its own back. */
+  /** An agent's Off, Delete everywhere or put-back: synced ('shared') or not before it. Putting copies back makes the agent synced again only when its Off's or deletion's was 'shared' (agents.ts syncedAgain); a put-back's Undo puts its own back. */
   state?: 'shared' | 'dont-share';
-  /** An agent's Off, deletion or put-back: the tools the person left out of sync (the record's `off`, never the tools an Off holds). */
-  off?: HarnessId[];
   /**
    * An MCP server's: the tools the choice put on record without writing them (Claude Code waiting for Write), each with what was
    * on record for it before (no hash: nothing).

@@ -351,3 +351,80 @@ test('Rule A: a change sent while a tool is off (its off naming that tool, as th
     assert.match((await readOf(box, 'codex-cli'))!, /Edited after Codex was back/);
   } finally { await box.cleanup(); }
 });
+
+test('Rule B: an On that went part-way (a folder read-only) and was finished later pairs with its Off, so an earlier choice keeps its Undo', { skip: asRoot }, async () => {
+  const box = await sandbox();
+  try {
+    // Not synced yet, Codex's copy its own: the choice replaces it.
+    const own = codexOwn();
+    await write(box, 'claude-cli', claudeAgent());
+    await write(box, 'copilot-cli', claudeAgent());
+    await write(box, 'codex-cli', own);
+    await pass(box);
+    await choose(box, 'claude-cli');
+    const choice = (await historyOf(box)).findLast(event => event.kind === 'chosen')!;
+    assert.deepEqual(choice.losers.map(loser => loser.tool), ['codex-cli']);
+    await turnOff(box);
+    await chmod(join(box.home, '.claude/agents'), 0o555);
+    await turnOn(box);
+    await chmod(join(box.home, '.claude/agents'), 0o755);
+    await turnOn(box);
+    assert.deepEqual([await heldIn(box), (await offered(box)).some(label => label.startsWith('Undo choice'))], [[], true]);
+    assert.equal((await restoreAgent(box.context, tools, choice.id, { narrow: true })).stopped, undefined);
+    assert.equal(await readOf(box, 'codex-cli'), own);
+  } finally { await chmod(join(box.home, '.claude/agents'), 0o755).catch(() => undefined); await box.cleanup(); }
+});
+
+test('A one-way receiver turned off after its source was already off goes back alone: the Undo of that click is exact', { skip: asRoot }, async () => {
+  const box = await sandbox();
+  try {
+    await synced(box, claudeAgent(undefined, fields));
+    await chmod(join(box.home, '.copilot/agents'), 0o555);
+    await turnOff(box);
+    await chmod(join(box.home, '.copilot/agents'), 0o755);
+    const before = await filesOf(box);
+    assert.notEqual(before['copilot-cli'], undefined, 'Copilot CLI’s copy stayed');
+    const receiver = (await toolOff(box, 'copilot-cli'))!;
+    const undone = await undo(box, receiver);
+    assert.deepEqual([undone.map(result => result.stopped), await filesOf(box)], [[undefined], before]);
+  } finally { await chmod(join(box.home, '.copilot/agents'), 0o755).catch(() => undefined); await box.cleanup(); }
+});
+
+test('A copy made by hand in a one-way source’s tool while it was off never becomes the synced copy: On puts the receivers back and asks', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box, claudeAgent(undefined, fields));
+    const before = await filesOf(box);
+    await turnOff(box);
+    await write(box, 'claude-cli', claudeAgent('Made by hand while it was off.\n', fields));
+    await turnOn(box);
+    const next = await pass(box);
+    const now = await filesOf(box);
+    assert.deepEqual([now['copilot-cli'], now['codex-cli'], next.writes, next.results.some(entry => entry.differs)], [before['copilot-cli'], before['codex-cli'], 0, true]);
+  } finally { await box.cleanup(); }
+});
+
+test('Restore of Delete everywhere never mixes in another agent of that name made since in a tool, synced or not', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    const deleted = (await deleteEverywhere(box))!;
+    await write(box, 'copilot-cli', claudeAgent('A new reviewer, not synced.\n'));
+    await pass(box);
+    const files = await filesOf(box);
+    assert.equal((await restoreAgent(box.context, tools, deleted.made[0])).stopped, 'A different “reviewer” agent is in Copilot CLI now. Remove or rename it, then restore.');
+    assert.deepEqual(await filesOf(box), files);
+  } finally { await box.cleanup(); }
+});
+
+test('An action already undone, asked for from a page read before, says so', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    await turnOff(box);
+    const on = (await turnOn(box))!;
+    const put = on.made[0];
+    assert.equal((await restoreAgent(box.context, tools, put)).stopped, undefined);
+    assert.equal((await restoreAgent(box.context, tools, put)).stopped, 'That change was already undone.');
+  } finally { await box.cleanup(); }
+});

@@ -19,6 +19,7 @@ import { undoChoice } from './choiceundo.ts';
 import { endedBy, heldTools, offTools, sinceWords } from './historyrules.ts';
 import { FORMAT_VERSION, newRecord, NOTHING_CHANGED, errorCode, fileTime, giveFileTime, readRecord, recoverParked, sha256, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, tomlValue } from './textedit.ts';
+import { ALREADY_AS_IT_WAS } from './types.ts';
 import type { AgentCopyRecord, Change, RecordBefore, RestoreHow, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ThroughPlugin, ToolCopy } from './types.ts';
 import { agentTools, type AgentTool } from './presence.ts';
 import { andList, throughPlugin, toolNames as shown } from './words.ts';
@@ -759,11 +760,11 @@ async function undoAddedAgent(context: ShareContext, tools: HarnessId[], history
 // stays synced until no copy is left outside its held tools. Whether an entry's action still applies is historyrules.ts endedBy
 // (Rule B), checked once in restoreAgent before any of these run.
 //
-// Each entry made here notes `before`, the agent's record as it was (synced or not, the tools left out): a put-back reads the
-// Off's or the deletion's to make the agent synced again (syncedAgain), and the Undo of a put-back puts its own back.
+// Each entry made here notes `before`, whether the agent was synced: a put-back reads the Off's or the deletion's to make the
+// agent synced again (syncedAgain), and the Undo of a put-back puts its own back (Rule B has made sure no later click changed it).
 
-/** The agent's record as an entry notes it in `before`: synced or not, and the tools the person left out. */
-const recordNow = (item: AgentRecordItem): RecordBefore => ({ state: item.state, off: [...item.off] });
+/** The agent's record as an entry notes it in `before`: synced or not. */
+const recordNow = (item: AgentRecordItem): RecordBefore => ({ state: item.state });
 
 /**
  * Takes the copies in `tools` out, each tool's own file (one a plugin brings is never touched), kept whole first and noted with
@@ -908,13 +909,15 @@ async function putBackAgent(context: ShareContext, tools: HarnessId[], history: 
   await saveAgentRecord(context.home, record);
   const id = randomUUID();
   if (whole) { past.undoneBy = id; delete past.restoredTools; } else past.restoredTools = [...done];
-  await replaceHistory(context, [...history, { id, at: new Date().toISOString(), key: past.key, item: item.name, kind: 'restored', losers: back.map(({ tool, hash, folder }) => ({ tool, hash, ...(folder ? { folder } : {}) })), orderProved: true,
-    putBackFrom: past.kind === 'deleted' ? 'delete-everywhere' : 'off', reverses: past.id, before, ...(turnedUp.length ? { turnedUp } : {}) }]);
+  const after = [...history, { id, at: new Date().toISOString(), key: past.key, item: item.name, kind: 'restored', losers: back.map(({ tool, hash, folder }) => ({ tool, hash, ...(folder ? { folder } : {}) })), orderProved: true,
+    putBackFrom: past.kind === 'deleted' ? 'delete-everywhere' : 'off', reverses: past.id, before, ...(turnedUp.length ? { turnedUp } : {}) } satisfies HistoryEvent];
+  await replaceHistory(context, after);
   return { results, writes: back.length, made: [id] };
 }
 
+
 /**
- * Undo of a put-back (putBackAgent): the Off or the deletion again, and the record as it was before the put-back (its `before`).
+ * Undo of a put-back (putBackAgent): the Off or the deletion again, synced or not as before the put-back (its `before`).
  * The copies it put back go again while each is as it was put back, or as sync caught it up since (its file the one on record);
  * one changed since stays. A copy it found turned up is held by an Off again while its tool still has it and no other Off holds
  * that tool. When it put copies back and none can be taken out, nothing changes and the entry keeps its Undo. Rule B (endedBy,
@@ -943,10 +946,15 @@ async function undoPutBack(context: ShareContext, tools: HarnessId[], history: H
   if (restored.losers.length && !taken.losers.length) return stop(results.find(result => result.outcome !== 'removed')?.message ?? `${item.name}’s copies aren’t as it put them back, so they stay.`, results);
   const held = heldTools(history, restored.key);
   const turnedUp = (restored.turnedUp ?? []).filter(loser => slot[loser.tool as AgentTool] && !held.includes(loser.tool));
-  if (!taken.losers.length && !turnedUp.length && !deletion) return stop(`${item.name}’s own copy that turned up is gone since, so there is nothing to turn off again.`, results);
+  if (!taken.losers.length && !turnedUp.length && !deletion) {
+    // Only copies that turned up, each gone since or held by an Off again: it is off there already, so nothing needs doing.
+    if (!(restored.turnedUp ?? []).every(loser => held.includes(loser.tool))) return stop(`${item.name}’s own copy that turned up is gone since, so there is nothing to turn off again.`, results);
+    restored.undoneBy = ALREADY_AS_IT_WAS;
+    await replaceHistory(context, history);
+    return { results: [{ item: item.name, outcome: 'stayed', message: `${item.name} is off in ${andList((restored.turnedUp ?? []).map(loser => shown[loser.tool]))} already.` }], writes: 0 };
+  }
   for (const loser of turnedUp) item.copies = item.copies.filter(copy => copy.tool !== loser.tool);
   if (restored.before?.state) item.state = restored.before.state;
-  if (restored.before?.off) item.off = [...restored.before.off];
   if (deletion) markDeleted(item, present, slot);
   const event = takenOutEntry(item, key, deletion ? 'deleted' : 'removed', [...taken.losers, ...turnedUp], before);
   await saveAgentRecord(context.home, record);
