@@ -171,7 +171,11 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     }
     const states: MarketplaceView['states'] = {};
     for (const plugin of plugins) {
-      const pairs = await Promise.all(tools.map(async tool => [tool, held.get(tool) ?? await engine.installState(ctx, tool, catalog.name, plugin.name, plugin.entry)] as const));
+      const pairs = await Promise.all(tools.map(async tool => {
+        const own = held.get(tool) ?? await engine.installState(ctx, tool, catalog.name, plugin.name, plugin.entry);
+        // Claude Code may have this same plugin from the Anthropic Directory instead.
+        return [tool, own.state === 'not-installed' && tool === 'claude-cli' ? (await engine.fromDirectory(ctx, catalog, plugin)) ?? own : own] as const;
+      }));
       states[plugin.name] = Object.fromEntries(pairs);
     }
     return states;
@@ -511,7 +515,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
             : !partsOf(entry, plugin.name, tool) && partsOffer(shown, entry, plugin.name, tool, plugin.components) ? 'install-parts' as const : undefined;
           if (action) (joins[tool] ??= []).push({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action });
         }
-        const copied = shown.tools.some(tool => { const state = stateOf(entry, plugin.name, tool); return state.state === 'installed' && !state.live; });
+        const copied = shown.tools.some(tool => { const state = stateOf(entry, plugin.name, tool); return state.state === 'installed' && !state.live && !state.directory; });
         if (!copied && !entry.parts?.[plugin.name]) continue;
         const files = copied ? await detail(entry.source, plugin.name).catch(() => null) : undefined;
         const offered = versionToCompare(plugin, files);
