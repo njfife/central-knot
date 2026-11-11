@@ -449,7 +449,9 @@ async function practiceFlow() {
   await a.run(`${unfinishedRow}.querySelector('.history-actions button').click()`);
   for (let tries = 0; tries < 30 && readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8') !== reviewClaude; tries++) await wait(100);
   check('Finish undo puts the replaced copy back in its own tool; the added one went with the first Undo', readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8') === reviewClaude && readFileSync(join(practice, '.copilot/skills/review/SKILL.md'), 'utf8') === reviewCopilot && !existsSync(join(practice, '.codex/skills/review')));
-  check('and the row reads Undone', await a.run(`[...document.querySelectorAll('.history-row[data-kind="chosen"]')].some(row => row.textContent.includes('replaced Claude Code’s') && row.querySelector('.history-done')?.textContent === 'Undone')`));
+  const rowUndone = () => a.run(`[...document.querySelectorAll('.history-row[data-kind="chosen"]')].some(row => row.textContent.includes('replaced Claude Code’s') && row.querySelector('.history-done')?.textContent === 'Undone')`);
+  for (let tries = 0; tries < 50 && !(await rowUndone()); tries++) await wait(100);
+  check('and the row reads Undone', await rowUndone(), await a.run(`document.querySelector('.history-list')?.textContent.slice(0, 600)`));
   await a.click('#nav-skills');
   check('and review is not synced, flagged again', !(await switchOn(a, 'review')) && await a.exists('#decide-review'));
 
