@@ -71,7 +71,7 @@ export interface WriteAccess { allowed: boolean; reason: string }
 export type SyncGate =
   | { state: 'first-setup' | 'ready' }
   | { state: 'needs-resume'; reason: string }
-  | { state: 'stopped'; reason: string };
+  | { state: 'stopped'; reason: string; /** Set when another build syncs this home: its identity, its name, and whether it is open now (where that can be told). */ owner?: { build: string; name: string; running?: boolean } };
 
 export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** `switched`: which way. */ disabled?: boolean }
 
@@ -91,6 +91,8 @@ export interface DesktopApi {
   startHome(): Promise<HomeView | null>;
   setSync(on: boolean): Promise<HomeView | null>;
   syncNow(home: string): Promise<HomeView | null>;
+  /** Makes this build the home's sync owner, in place of the build that syncs it now; every managed item and choice stays. */
+  takeOverSync(home: string): Promise<{ stopped?: string; from?: string; view: HomeView | null }>;
   onSyncChanged(callback: () => void): void;
   /** Main did something on the person's behalf outside any request (a bundled build added its marketplace to their tools): words for the status bar. */
   onSaid(callback: (text: string) => void): void;

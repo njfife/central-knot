@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { applyChanges, manageView } from '../src/manage.ts';
-import { readRecord, storeDirectory, writeAccess, type ShareContext } from '../src/share.ts';
+import { gateRefusal, readRecord, saveRecord, storeDirectory, syncGate, takeOverSync, writeAccess, type ShareContext } from '../src/share.ts';
 import type { HarnessId, HistoryDays, Snapshot } from '../src/types.ts';
 import { DAY_MS } from '../src/model.ts';
 
@@ -344,7 +344,7 @@ test('Every stop writes nothing: damaged, missing, another generation, a newer f
     await attempt(null, /missing/);
     await attempt(JSON.stringify({ ...record, generation: 'other' }), /not the one/);
     await attempt(JSON.stringify({ ...record, formatVersion: record.formatVersion + 1 }), /newer/);
-    await attempt(JSON.stringify({ ...record, owner: 'someone-else' }), /another Central Knot/);
+    await attempt(JSON.stringify({ ...record, owner: 'someone-else' }), /Another Central Knot build \(someone-else\) syncs this home, so nothing was written or deleted\. Take over syncing/);
     await attempt(JSON.stringify({ ...record, items: { solo: { ...record.items.solo, off: 'claude-cli' } } }), /damaged/);
     await writeFile(path, good);
     assert.equal((await applyChanges(ctx(box), [manage('new-one')])).harnessWrites, 1, 'restoring the record then retrying works');
@@ -1336,5 +1336,56 @@ test('Undo of a copy choice writes nothing when a copy changed since', async () 
     assert.ok(undone.stopped, 'stopped');
     assert.equal(await readFile(join(box.home, COPILOT, 'foo/SKILL.md'), 'utf8'), text('foo', 'CLAUDE VERSION'), 'nothing was written');
     assert.equal(await readFile(join(box.home, CODEX, 'foo/SKILL.md'), 'utf8'), text('foo', 'EDITED IN CODEX'));
+  } finally { await box.cleanup(); }
+});
+
+test('One build syncs a home at a time: the other names the owner, and Take over syncing carries on from the same record', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, '.claude/skills', 'notes');
+    // Two builds on one home, each with its own settings.
+    const standard = ctx(box, { build: 'com.centralknot.firstlook', buildName: 'Central Knot', settingsPath: join(box.base, 'standard-settings.json') });
+    const acme = ctx(box, { build: 'com.centralknot.custom.acme', buildName: 'Acme Knot', settingsPath: join(box.base, 'acme-settings.json') });
+    // The standard app manages a skill: the home is its to sync.
+    assert.equal((await applyChanges(standard, [manage('notes')])).stopped, undefined);
+    assert.equal((await syncGate(standard)).state, 'ready');
+    const owned = (await readRecord(box.home)).record!;
+    assert.deepEqual([owned.owner, owned.ownerName, Object.keys(owned.items)], ['com.centralknot.firstlook', 'Central Knot', ['notes']]);
+    // The custom build finds it owned: it names the owner and writes nothing.
+    assert.deepEqual(await syncGate(acme), { state: 'stopped', reason: 'Central Knot syncs this home, so nothing was written or deleted. Take over syncing to have Acme Knot sync it instead.', owner: { build: 'com.centralknot.firstlook', name: 'Central Knot' } });
+    const before = await snapshotTree(box.home);
+    assert.match((await applyChanges(acme, [manage('notes')])).stopped ?? '', /^Central Knot syncs this home/);
+    assert.deepEqual(await snapshotTree(box.home), before);
+    // Take over syncing: the same record, generation and items, under the new owner. Nothing is set up again.
+    assert.deepEqual(await takeOverSync(acme), { from: 'Central Knot' });
+    const taken = (await readRecord(box.home)).record!;
+    assert.deepEqual([taken.owner, taken.ownerName, taken.generation], ['com.centralknot.custom.acme', 'Acme Knot', owned.generation]);
+    assert.deepEqual(taken.items, owned.items);
+    assert.equal((await syncGate(acme)).state, 'ready');
+    assert.equal((await manageView(acme)).skills.find(item => item.key === 'notes')?.managed, true);
+    // The build that owned it now finds the other one, by name, and stops; taking over again changes nothing for the new owner.
+    const stopped = await syncGate(standard);
+    assert.ok(stopped.state === 'stopped' && stopped.owner?.name === 'Acme Knot', JSON.stringify(stopped));
+    assert.deepEqual(await takeOverSync(acme), {});
+    // A pass the standard app had under way when it was taken over stops at its next save: it can't take the home back by finishing.
+    const stale = { ...owned, items: { ...owned.items } };
+    await assert.rejects(saveRecord(box.home, stale), /^Error: Acme Knot took over syncing this home meanwhile, so this stopped there\.$/);
+    assert.equal((await readRecord(box.home)).record!.owner, 'com.centralknot.custom.acme');
+    // A home that can't be written is taken over by nobody.
+    assert.match((await takeOverSync({ ...standard, mode: 'actual', home: box.home, realHome: box.home, allowActualWrites: false })).stopped ?? '', /^Preview only/);
+    // And back again, by the same step.
+    assert.deepEqual(await takeOverSync(standard), { from: 'Acme Knot' });
+    assert.equal((await syncGate(standard)).state, 'ready');
+    // A record made before builds wrote their names: the standard app's identity is known, any other is said as it is.
+    const path = join(box.home, '.central-knot/sync.json');
+    const { ownerName: _name, ...unnamed } = JSON.parse(await readFile(path, 'utf8'));
+    await writeFile(path, JSON.stringify(unnamed));
+    assert.match(gateRefusal(await syncGate(acme)) ?? '', /^Central Knot syncs this home/);
+    await writeFile(path, JSON.stringify({ ...unnamed, owner: 'com.example.other' }));
+    assert.match(gateRefusal(await syncGate(acme)) ?? '', /^Another Central Knot build \(com\.example\.other\) syncs this home/);
+    // A record that can't be read is taken over by nobody.
+    await writeFile(path, '{ damaged');
+    assert.match((await takeOverSync(acme)).stopped ?? '', /^The sync record is damaged\./);
+    assert.equal(await readFile(path, 'utf8'), '{ damaged');
   } finally { await box.cleanup(); }
 });

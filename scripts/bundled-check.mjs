@@ -14,6 +14,10 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { connect, debugPorts } from './cdp.mjs';
 import { stage } from './custom-build.mjs';
 import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
+import { discover } from '../src/discovery.ts';
+import { harnessIds } from '../src/harnesses.ts';
+import { applyChanges } from '../src/manage.ts';
+import { syncGate } from '../src/share.ts';
 
 const args = process.argv.slice(2);
 const flag = name => args.includes(name);
@@ -275,6 +279,15 @@ const before = statSync(marketFolder).ino;
 a.quit();
 await wait(500);
 
+// Between the two opens the standard app manages a skill in this home, as its own code does it: the home is its to sync.
+const standard = { home: HOME, mode: 'custom', read: () => Promise.all(harnessIds.map(harness => discover({ home: HOME, mode: 'custom', harness }))), build: 'com.centralknot.firstlook', buildName: 'Central Knot', settingsPath: join(scratch, 'standard-settings.json'), realHome: join(scratch, 'elsewhere') };
+mkdirSync(join(HOME, '.claude/skills/notes'), { recursive: true });
+writeFileSync(join(HOME, '.claude/skills/notes/SKILL.md'), '---\nname: notes\ndescription: Takes notes.\n---\n\nTake notes.\n');
+const managed = await applyChanges(standard, [{ key: 'notes', managed: true, off: [] }], false);
+const recordPath = join(HOME, '.central-knot/sync.json');
+const record = () => JSON.parse(readFileSync(recordPath, 'utf8'));
+check('the standard app syncs this home first', !managed.stopped && record().owner === 'com.centralknot.firstlook' && record().ownerName === 'Central Knot' && !!record().items.notes, managed.stopped ?? record());
+
 // Between the two opens the person takes the marketplace out of Claude Code, in Claude Code.
 if (writes) rmSync(join(HOME, '.claude/plugins/known_marketplaces.json'));
 
@@ -298,6 +311,43 @@ if (writes) {
   check('the status bar says what happened', await b.run(`document.querySelector('#announcement').textContent`).then(text => text.startsWith('Nothing was installed: Acme plugins is now listed in Claude Code.')), await b.run(`document.querySelector('#announcement').textContent`));
 }
 check('a second open keeps the unpacked marketplace as it is', statSync(marketFolder).ino === before);
+
+// ---------- One build syncs a home at a time ----------
+await b.click('#nav-skills');
+const ownerSays = () => b.run(`document.querySelector('#other-owner .band-text')?.textContent ?? ''`);
+// Whether the standard app is open now is asked of macOS for an installed app; a development run can't tell.
+check('Skills says the standard app syncs this home', await b.until(`!!document.querySelector('#other-owner')`) && (dev ? await ownerSays() === 'Central Knot syncs this home, so skills, MCP servers and agents aren’t changed from here. Taking over keeps every managed item and choice.'
+  : /^Central Knot (is open and syncs this home, so skills, MCP servers and agents aren’t changed from here|synced this home last and isn’t open, so nothing is syncing here now)\. Taking over keeps every managed item and choice\.$/.test(await ownerSays())), await ownerSays());
+check('with Take over syncing beside it', await b.run(`document.querySelector('#take-over-sync')?.textContent`) === 'Take over syncing');
+check('Skills fits with it at 1280', await b.fits());
+await b.shot('skills-other-owner-1280');
+await b.size(860, 560);
+check('Skills fits with it at 860', await b.fits());
+await b.shot('skills-other-owner-860');
+await b.size(1280, 800);
+await b.click('#nav-overview');
+check('the Skills card on Overview doesn’t say All in sync of a home another build syncs', !(await b.run(`document.body.innerText`)).includes('All in sync'));
+// (A preview-only home says that on Overview instead.)
+if (writes) check('Overview says so too', await b.run(`document.querySelector('#overview-other-owner')?.textContent ?? ''`).then(text => text.startsWith('Central Knot ') && text.endsWith('Take over syncing')), await b.run(`document.querySelector('#overview-other-owner')?.textContent`));
+await b.shot('overview-other-owner-1280');
+if (writes) {
+  check('the status bar’s sync switch says whose it is', await b.run(`document.querySelector('#sync-switch .sync-state').textContent`) .then(text => text === 'By Central Knot' || text === 'Central Knot’s, not open'), await b.run(`document.querySelector('#sync-switch .sync-state').textContent`));
+  await b.click('#nav-skills');
+  await b.click('#take-over-sync');
+  check('Take over syncing: this build syncs the home now, and says so', await b.until(`!document.querySelector('#other-owner')`) && await b.run(`document.querySelector('#announcement').textContent`).then(text => text === `${NAME} now syncs this home. To go back, take over in Central Knot.`), await b.run(`document.querySelector('#announcement').textContent`));
+  const taken = record();
+  check('the record is the same one, under the new owner, with what was managed', taken.owner === `com.centralknot.custom.${ID}` && taken.ownerName === NAME && !!taken.items.notes, taken);
+  const other = await syncGate(standard);
+  check('the standard app then finds this build syncs it, by name', other.state === 'stopped' && other.owner?.name === NAME, other);
+  check('the sync switch is this build’s again', await b.run(`document.querySelector('#sync-switch .sync-state').textContent`).then(text => text.startsWith('On')), await b.run(`document.querySelector('#sync-switch').textContent`));
+  await b.shot('skills-taken-over-1280');
+  await b.size(860, 560);
+  await b.shot('skills-taken-over-860');
+  await b.size(1280, 800);
+} else {
+  await b.click('#nav-skills');
+  check('where the home is preview only, taking over is not offered to act', await b.run(`document.querySelector('#take-over-sync').disabled`) === true);
+}
 check('no page error at the second open', b.errors.length === 0, b.errors);
 b.quit();
 

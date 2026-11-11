@@ -13,8 +13,7 @@ import { parseCatalog } from './plugins.ts';
 import { writeDurably } from './share.ts';
 import { PRODUCT, SAFE_NAME, record, text } from './values.ts';
 
-/** The standard app's identity: the system's name for it, and the name a sync record gives its owner. */
-export const STANDARD_BUILD = 'com.centralknot.firstlook';
+export { STANDARD_BUILD } from './values.ts';
 
 export const CUSTOM_FILE = 'custom-build.json';
 export const RELEASE_FILE = 'release.json';
@@ -226,7 +225,8 @@ async function carryOver(live: string, staged: string, release: BundleRelease, k
   for (const plugin of before.plugins) {
     if (!wanted.includes(plugin.name) || !plugin.folder || !(await exists(plugin.folder))) continue;
     await mkdir(join(staged, KEPT_FOLDER), { recursive: true });
-    await cp(plugin.folder, join(staged, KEPT_FOLDER, plugin.name), { recursive: true, verbatimSymlinks: true });
+    // (A plugin that is the marketplace's own root is the whole folder, less the plugins kept in it before.)
+    await cp(plugin.folder, join(staged, KEPT_FOLDER, plugin.name), { recursive: true, verbatimSymlinks: true, filter: source => source !== join(live, KEPT_FOLDER) });
     paths.set(plugin.name, `./${KEPT_FOLDER}/${plugin.name}`);
   }
   if (paths.size) await pointEntries(staged, paths, live);

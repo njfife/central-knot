@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { parseDocument, stringify as stringifyYaml } from 'yaml';
 import { configRoot, harnesses, writeRoot } from './harnesses.ts';
 import { appendHistory, readConverted, readHistory, recordConverted, replaceHistory } from './manage.ts';
-import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { FORMAT_VERSION, newRecord, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, tomlValue } from './textedit.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ThroughPlugin, ToolCopy } from './types.ts';
 import { agentTools, type AgentTool } from './presence.ts';
@@ -350,7 +350,7 @@ async function prepareSyncRecord(context: ShareContext, hasChanges: boolean, res
   if (recordProblem) return { stopped: recordProblem, results: [], writes: 0 };
   let { record: syncRecord } = await readRecord(context.home);
   if (!syncRecord && !hasChanges) return { results: [], writes: 0 };
-  if (!syncRecord) { syncRecord = { formatVersion: FORMAT_VERSION, generation: randomUUID(), owner: context.build, items: Object.create(null) }; await saveRecord(context.home, syncRecord); }
+  if (!syncRecord) { syncRecord = newRecord(context); await saveRecord(context.home, syncRecord); }
   if (gate.state !== 'ready') await remember(context, syncRecord.generation);
   return undefined;
 }
