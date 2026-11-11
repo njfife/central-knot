@@ -6,6 +6,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, 
 import { configRoot, harnessIds, harnesses, writeRoot } from './harnesses.ts';
 import { instructionFiles } from './instructions.ts';
 import { mcpFile } from './mcp.ts';
+import { managedTools } from './presence.ts';
 import type { HarnessId, HistoryDays, HomeMode, PartsInstall, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
 
 export const FORMAT_VERSION = 1;
@@ -49,7 +50,8 @@ export interface RecordCopy { harness: HarnessId; directory: string; hash: strin
 export interface RecordItem { name: string; hash: string; state: 'shared' | 'dont-share'; startId: string; observedAt: string; copies: RecordCopy[]; /** Tools this managed skill does not sync to. */ off?: HarnessId[]; /** Differing copies kept as they are on purpose. */ separate?: boolean; /** A chosen copy not yet in every tool: the tool whose copy wins, and that copy's content ID. */ use?: { tool: HarnessId; hash: string }; /** Deleted everywhere it synced: when, from which tool, and the content it had. A copy turning up later is new input, never a revival (D-37). */ deleted?: { at: string; tool: HarnessId; hash: string };
   /** Content about to be overwritten or removed, put on record before the disk changes, so a crash or a partial failure never lets it be pruned. Cleared once History names it. */
   displaced?: { tool: HarnessId; hash: string; /** A per-tool Remove (its folder, and whether it stopped syncing there), recovered as one if History never named it. */ removal?: { folder: string; stoppedSync: boolean } }[] }
-export interface SyncRecord { formatVersion: number; generation: string; owner: string; /** The owner's own name, as people know it (a record made before there were custom builds has none). */ ownerName?: string; /** Each skills folder's identity at the last pass, so a folder made again reads as a reset, not as deletions. */ roots?: Record<string, { ino: number; birth: number }>; lastStartId?: string; /** Set while a Start is copying, so a crash and retry stay one Start. */ activeStartId?: string; items: Record<string, RecordItem> }
+export interface SyncRecord { formatVersion: number; generation: string; owner: string; /** The owner's own name, as people know it (a record made before there were custom builds has none). */ ownerName?: string; /** Each skills folder's identity at the last pass, so a folder made again reads as a reset, not as deletions. */ roots?: Record<string, { ino: number; birth: number }>; lastStartId?: string; /** Set while a Start is copying, so a crash and retry stay one Start. */ activeStartId?: string; items: Record<string, RecordItem>;
+  /** The tools Central Knot manages in this home (presence.ts managedTools). Unset: every tool present. */ tools?: HarnessId[] }
 
 export function storeDirectory(home: string): string { return join(home, '.central-knot'); }
 /** Where the plugins' parts are recorded (parts.ts writes it): which plugin's parts went into which tool as separate items. */
@@ -219,7 +221,8 @@ export async function readRecord(home: string): Promise<{ record?: SyncRecord; p
     if (!Number.isInteger(record?.formatVersion) || record.formatVersion < 1) return { problem: 'The sync record is damaged.' };
     if (record.formatVersion > FORMAT_VERSION) return { problem: 'The sync record was written by a newer Central Knot.' };
     if (typeof record.generation !== 'string' || typeof record.owner !== 'string' || !validItems(record.items)
-      || ![record.lastStartId, record.activeStartId].every(id => id === undefined || typeof id === 'string')) return { problem: 'The sync record is damaged.' };
+      || ![record.lastStartId, record.activeStartId].every(id => id === undefined || typeof id === 'string')
+      || (record.tools !== undefined && !(Array.isArray(record.tools) && record.tools.every(knownTool)))) return { problem: 'The sync record is damaged.' };
     // No prototype: a skill may be called constructor or __proto__.
     record.items = Object.assign(Object.create(null), record.items);
     return { record };
@@ -336,6 +339,11 @@ export async function removeFileChecked(path: string, expected: string) {
   try { held = await readFile(parked, 'utf8'); } catch { /* checked below */ }
   if (held !== expected) { await putBack(parked, path); throw changedWhileSyncing(); }
   await unlink(parked);
+}
+
+/** The tools Central Knot manages in this home now, as its sync record says (presence.ts managedTools). */
+export async function managedNow(context: ShareContext, snapshots: Snapshot[]): Promise<HarnessId[]> {
+  return managedTools(snapshots, (await readRecord(context.home)).record?.tools);
 }
 
 /** A home's first sync record, owned by this build. */

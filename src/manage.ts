@@ -5,7 +5,7 @@ import { lstat, mkdir, readFile, readdir, realpath, rename, stat } from 'node:fs
 import { dirname, join } from 'node:path';
 import { DAY_MS, defaultHistoryDays } from './model.ts';
 import { configRoot, harnesses, writeRoot } from './harnesses.ts';
-import { presentTools } from './presence.ts';
+import { managedTools } from './presence.ts';
 import {
   FORMAT_VERSION, changedWhileSyncing, clearStaleStages, storedRevision, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, newRecord, placeCopy, plainError, readRecord, readTree, stillOwned,
   remember, removeTree, saveRecord, stagingFolder, storeDirectory, storeFolder, syncGate, syncsHere, targetFor, writeAccess, writeDurably, type RecordItem, type ShareContext, type SyncRecord,
@@ -27,7 +27,7 @@ interface Gathered { facts: SkillFacts; skills: Partial<Record<HarnessId, Skill[
 
 /** Reads every skill in every present tool once. A copy that cannot be read makes the skill held, never the whole page. */
 async function gather(context: ShareContext, snapshots: Snapshot[], record?: SyncRecord): Promise<Map<string, Gathered>> {
-  const tools = presentTools(snapshots);
+  const tools = managedTools(snapshots, record?.tools);
   const problems = new Map(await Promise.all(tools.map(async tool => [tool, await rootProblem(context, tool)] as const)));
   const map = new Map<string, Gathered>();
   // Each present tool's own skills folder. A skill another tool reads there (OpenCode reads Claude Code's folder) is the
@@ -410,7 +410,7 @@ export async function manageView(context: ShareContext, { caughtUp = [], notices
     if (edited.length) entry.facts.edited = [...new Set(edited)];
   }
   const skills = [...gathered.values()].map(entry => entry.facts).sort(byKey);
-  const tools = presentTools(snapshots);
+  const tools = managedTools(snapshots, record?.tools);
   const writes = Object.fromEntries(await Promise.all(tools.map(async tool => [tool, { to: rootOf(context, tool), alsoReadBy: harnesses[tool].otherReaders, blocked: await rootProblem(context, tool) }] as const)));
   return { tools, writes, skills, access: await writeAccess(context), gate: await syncGate(context), caughtUp, notices };
 }
@@ -500,7 +500,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
   if (!record && !changes.length) return { results: [], harnessWrites: 0 };
 
   const snapshots = await context.read();
-  const tools = presentTools(snapshots);
+  const tools = managedTools(snapshots, record?.tools);
   const gathered = await gather(context, snapshots, record);
   // A crash between these steps leaves an intact record this build can resume.
   if (!record) { record = newRecord(context); await saveRecord(context.home, record); }
@@ -1197,7 +1197,7 @@ export async function restoreFromHistory(context: ShareContext, eventId: string,
     let tree;
     try { tree = await readTree(kept); } catch { return { stopped: 'The kept content is no longer in Central Knot’s store, so it can’t be restored.', results: [], harnessWrites: 0 }; }
     const snapshots = await context.read();
-    const tools = presentTools(snapshots);
+    const tools = managedTools(snapshots, record.tools);
     const entry = (await gather(context, snapshots, record)).get(past.key);
     // A skill deleted earlier whose name is managed again with other content: restoring the old one would replace the new one.
     if (past.kind === 'deleted' && item.state === 'shared' && item.hash !== hash) return { stopped: `“${item.name}” is managed again with other content. Restoring the old one would replace it; delete or rename the new one first.`, results: [], harnessWrites: 0 };

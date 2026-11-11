@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
 import { applyChanges, manageView } from '../src/manage.ts';
-import { absentKindsIn, absentTools, heldKinds, noteTools, presentTools } from '../src/presence.ts';
-import type { ShareContext } from '../src/share.ts';
+import { absentKindsIn, absentTools, heldKinds, managedTools, noteTools, presentTools } from '../src/presence.ts';
+import { readRecord, saveRecord, type ShareContext } from '../src/share.ts';
 import type { HarnessId, Snapshot } from '../src/types.ts';
 
 const text = (name: string) => `---\nname: ${name}\ndescription: The ${name} skill.\n---\n\nBody.\n`;
@@ -77,6 +77,28 @@ test('a tool that appears gets the managed copies; when it disappears again, not
     assert.deepEqual(pass.notices ?? [], []);
     assert.ok(await exists(join(box.path, '.claude/skills/brief/SKILL.md')), 'Claude Code keeps its copy');
     assert.equal((await manageView(box.context)).skills.find(skill => skill.key === 'brief')?.managed, true);
+  } finally { await box.cleanup(); }
+});
+
+test('a present tool the record leaves out is not managed: no item shows it, and no pass writes to it', async () => {
+  const box = await home({ '.claude/skills': ['brief'] }, ['.codex']);
+  try {
+    const snapshots = await box.read();
+    assert.deepEqual(managedTools(snapshots), ['claude-cli', 'codex-cli'], 'a record that names no tools manages every present one');
+    assert.deepEqual(managedTools(snapshots, ['codex-cli', 'pi-cli']), ['codex-cli'], 'only present tools, in discovery order');
+    await applyChanges(box.context, [{ key: 'brief', managed: true, off: [] }]);
+    // Codex is left out from now on: a new skill managed in Claude Code goes nowhere else, and Codex's own copy is left as it is.
+    const { record } = await readRecord(box.path);
+    await saveRecord(box.path, { ...record!, tools: ['claude-cli'] });
+    await mkdir(join(box.path, '.claude/skills/later'), { recursive: true });
+    await writeFile(join(box.path, '.claude/skills/later/SKILL.md'), text('later'));
+    await writeFile(join(box.path, '.codex/skills/brief/SKILL.md'), text('brief edited in Codex'));
+    const view = await manageView(box.context);
+    assert.deepEqual(view.tools, ['claude-cli']);
+    assert.equal(view.skills.find(skill => skill.key === 'brief')?.copies['codex-cli'], undefined);
+    await applyChanges({ ...box.context, settleMs: 0 }, [{ key: 'later', managed: true, off: [] }]);
+    assert.equal(await exists(join(box.path, '.codex/skills/later')), false);
+    assert.equal(await readFile(join(box.path, '.claude/skills/brief/SKILL.md'), 'utf8'), text('brief'), 'an edit in a tool left out does not spread');
   } finally { await box.cleanup(); }
 });
 
