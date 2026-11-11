@@ -279,11 +279,17 @@ export const forgetMarketplace = (source: string) => act('removing', async () =>
   tell({ page: 'plugins', item: name || undefined, text, act: { label: 'Add back', id: 'outcome-add-back', run: () => void addMarketplace(source) } });
 });
 
-/** Stops offering a suggested marketplace: it leaves the page at once and is not offered again, unless its Undo is pressed. */
-export async function declineMarketplace(source: string, name: string) {
+/**
+ * Stops offering a suggested marketplace: it leaves the page and is not offered again, unless its Undo is pressed. Both run
+ * as the page's other marketplace actions do, so the page is drawn again and a failure is said.
+ */
+export const declineMarketplace = (source: string, name: string) => act('removing', async () => {
   showView(await api().declineMarketplace(source));
-  tell({ page: 'plugins', item: name, text: `${name} won’t be suggested again.`, act: { label: 'Undo', id: 'outcome-suggest-again', run: () => void api().declineMarketplace(source, true).then(showView) } });
-}
+  tell({ page: 'plugins', item: name, text: `${name} won’t be suggested again.`, act: { label: 'Undo', id: 'outcome-suggest-again', run: () => void act('adding', async () => {
+    showView(await api().declineMarketplace(source, true));
+    tell({ page: 'plugins', item: name, text: `${name} is suggested again.` });
+  }) } });
+});
 
 export const pickMarketplaceFolder = () => api().pickMarketplaceFolder();
 
