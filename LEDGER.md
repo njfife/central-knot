@@ -900,3 +900,23 @@ Nathan asked for the features still open in the original plan, each in its own t
 - A plugin kept in another repository only in a Codex-format manifest, when the marketplace has both manifests, is not fetched.
 - At 860 wide the app's name shows nowhere on a page (the sidebar is a rail, the status bar shows only the version), as for the standard app.
 - Registering the marketplace with each tool (step 2), a content feed (step 3) and one build taking over syncing (step 4) are the next steps.
+
+## Bundled build, step 2: the marketplace in each tool's own list, and installs from the bundle, November 10, 2026
+
+Second of four steps (plan Phase 6b; SPEC ORG-03, ORG-04, REC-01).
+
+- **Decision.** Which tools get the bundled marketplace added at first open was left open by the plan. Two judges (Opus 5.5 and Fable 5.2; Astra could not run, the ChatGPT usage limit was reached) both ranked "every installed tool that takes plugins, automatically" first, ahead of asking once and of adding only at the first install. Built that way, with the conditions both attached; Nathan was told and can switch it to asking once.
+- **Adding.** `plugins.addMarketplace` is the step `install` already took before installing, now on its own: the tool's own `plugin marketplace add <folder>`, counted only when the tool's record then lists it, never over a different marketplace of the same name. After each read of this Mac's home (`addCarriedSoon` in `src/main.ts`, `addCarried` in `src/marketplaces.ts`), a bundled build adds its marketplace to each plugin tool it has not added it to yet: only in this computer's own home, only where writing is allowed, only for a tool whose commands can run, one tool per turn of the app's queue. `bundled/added-to-tools.json` in the build's data folder records each tool once added (an install from the build's marketplace into a tool counts too), so a marketplace taken out in a tool is not put back by itself; a failed add is tried again at the next open. The status bar says once that nothing was installed and which tools now list it.
+- **By hand.** The marketplace's About tab says which tools list it, that the app added it, and that taking it out in a tool is respected; it has **List in <tool>** for one that doesn't and could.
+- **Installing** needed no new code: the unpacked folder is a folder marketplace, and the Plugins page installs, updates and uninstalls from it as from any other.
+
+**Validation.**
+- 442 unit tests.
+- Real CLIs on the Mac in throwaway homes (`tests/harness/plugins.harness.ts`): Claude Code 2.1.311, Copilot CLI 1.0.109 and Codex 0.142.3, and the same through the desktop apps' own copies. The bundle is packed, unpacked into a data folder with a space in its path, added to the tool's own list, installed and uninstalled; a second add runs nothing.
+- Mac run 42926517721 on the branch with `next` merged in: end-to-end 595 passed; `scripts/bundled-check.mjs` 57 of 57 against the packaged custom app. Stand-ins for the tools' CLIs record what they were asked: added once to Claude Code and Codex at the first open, Copilot CLI (which refuses this fixture marketplace) left alone, not added again after it was taken out of Claude Code, and **List in Claude Code** putting it back.
+- Reviews, Opus 5.5 and Fable 5.2: code 8, then 9; interface 7, 8, 8.5. Fixed on the way: a tool skipped by a home switch was never tried again; an install from the bundle was not counted as adding; "Nothing was installed" on About could become untrue.
+
+**Not done or not proven.**
+- No click-through in a real window (Computer Use shares the ChatGPT account whose usage limit was reached), and no session in a signed-in tool showing the marketplace in its own plugin browser: the tools' own records are what was read.
+- Two **List in** buttons at once were not pictured (it needs two tools that lack the marketplace and can take it).
+- Cowork is not a destination.

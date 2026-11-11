@@ -87,6 +87,8 @@ export interface DesktopApi {
   setSync(on: boolean): Promise<HomeView | null>;
   syncNow(home: string): Promise<HomeView | null>;
   onSyncChanged(callback: () => void): void;
+  /** Main did something on the person's behalf outside any request (a bundled build added its marketplace to their tools): words for the status bar. */
+  onSaid(callback: (text: string) => void): void;
   /** Central Knot's own settings (how the app looks), as stored by the main process. */
   getSettings(): Promise<AppPreferences>;
   /** Sets the appearance; the window follows at once. Returns the settings as saved. */
@@ -147,6 +149,8 @@ export interface DesktopApi {
   /** Adds a marketplace; `source` is how it was stored, so the page can open exactly that one. */
   addMarketplace(source: string): Promise<{ problem?: string; view?: PluginsView; source?: string }>;
   forgetMarketplace(source: string): Promise<PluginsView | null>;
+  /** Adds the marketplace this build carries to one tool's own plugin list, with that tool's own command. Installs nothing. */
+  addCarriedTo(tool: HarnessId, home: string): Promise<{ stopped?: string; report?: ListedReport; view?: PluginsView }>;
   pickMarketplaceFolder(): Promise<string | null>;
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
@@ -460,12 +464,15 @@ export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: 
 /** A catalog plugin as the page gets it: what the catalog says about it, without its raw entry or repository address. */
 export type PluginView = Omit<CatalogPlugin, 'remote' | 'entry'>;
 
+/** What adding a marketplace to one tool's own list came to: already `there`, `added`, `held` (left alone, with why) or `failed`. */
+export interface ListedReport { tool: HarnessId; outcome: 'there' | 'added' | 'held' | 'failed'; message: string }
+
 /**
  * The marketplace a bundled build carries, as the page shows it: the app's name, the name and picture the build gave the
  * marketplace, its release ("November 10, 2026", made from "GitHub: acme/plugins at 1a2b3c4d5e"), and each plugin the
  * marketplace lists whose files the build doesn't carry, with why.
  */
-export interface BundledView { app: string; displayName?: string; logo?: string; /** Its release's date, in words. */ release: string; /** What the release was made from, for whoever needs to tell releases apart. */ from?: string; unpackaged: { name: string; reason: string }[] }
+export interface BundledView { app: string; displayName?: string; logo?: string; /** Its release's date, in words. */ release: string; /** What the release was made from, for whoever needs to tell releases apart. */ from?: string; unpackaged: { name: string; reason: string }[]; /** The tools of the open home this build added the marketplace to (by itself or when asked), as its own record has it. */ addedTo?: HarnessId[] }
 
 export interface MarketplaceView {
   source: string;

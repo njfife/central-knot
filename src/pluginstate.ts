@@ -7,6 +7,7 @@ import { isParts, resultLines, forSource, pluginKey, prune, recordRun, resultSen
 import { FIND_FROM, categoriesOf, copiesToCompare, marketTitle, matches, partsTools, pluginPlace } from './pluginstatus.ts';
 import { readInTurn, readInto, type Read } from './reads.ts';
 import type { HarnessId, MarketplaceView, PartPlan, PluginDetail, PluginsView } from './types.ts';
+import { toolNames } from './words.ts';
 
 const api = () => window.centralKnot;
 
@@ -15,13 +16,14 @@ export type MarketTab = 'plugins' | 'about';
  * The action the page is running, so it can say so; set by each action, cleared when it ends. Reading the marketplaces
  * is not an action: it is the page's data (market.read), and a read never clears an action's activity.
  */
-export type MarketActivity = 'adding' | 'removing' | 'applying' | 'undoing';
+export type MarketActivity = 'adding' | 'removing' | 'applying' | 'undoing' | 'listing';
 /** Each activity's short label (the app's busy line) and what the page's band says while it runs. */
 export const ACTIVITIES: Record<MarketActivity, { label: string; band: string }> = {
   adding: { label: 'Reading the marketplace…', band: 'Reading the marketplace… Nothing is installed by this.' },
   removing: { label: 'Removing from the list…', band: 'Removing from the list…' },
   applying: { label: 'Applying…', band: 'Applying… Each change runs that tool’s own command and can take a few seconds.' },
   undoing: { label: 'Undoing…', band: 'Undoing… Each change runs that tool’s own command and can take a few seconds.' },
+  listing: { label: 'Listing the marketplace…', band: 'Listing the marketplace in the tool’s own plugin list… Nothing is installed by this.' },
 };
 
 /** `marketName`: the marketplace to open when `source` is spelled as a tool recorded it, not as the page lists it (a plugin item's link). */
@@ -277,6 +279,15 @@ export const forgetMarketplace = (source: string) => act('removing', async () =>
   showView(view);
   const text = `${name || 'It'} was removed from this list. Tools that added it keep it, and nothing was uninstalled.`;
   tell({ page: 'plugins', item: name || undefined, text, act: { label: 'Add back', id: 'outcome-add-back', run: () => void addMarketplace(source) } });
+});
+
+/** Adds the marketplace this build carries to one tool's own plugin list (its About tab's "List in …"). */
+export const addCarriedTo = (entry: MarketplaceView, tool: HarnessId) => act('listing', async () => {
+  const result = await api().addCarriedTo(tool, market.view?.home ?? '');
+  showView(result.view);
+  const name = marketTitle(entry), added = result.report?.outcome === 'added' || result.report?.outcome === 'there';
+  tell({ page: 'plugins', item: name, warn: !added,
+    text: added ? `Nothing was installed: ${name} is now listed in ${toolNames[tool]}.` : `${name} was not listed in ${toolNames[tool]}. ${result.stopped ?? result.report?.message ?? ''}`.trim() });
 });
 
 export const pickMarketplaceFolder = () => api().pickMarketplaceFolder();
