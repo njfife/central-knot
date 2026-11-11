@@ -5,7 +5,7 @@ import { itemId } from './profileplan.ts';
 import { brandMark } from './brand.ts';
 import { caughtUpNames, DAY_MS, groupBy } from './model.ts';
 import { deletedText, deleteNote, linkTarget, managedSentence, manageSentence, pinnedSentence, readsOutside, replaceSentence, rowWords, whereSentence, type Shape } from './outsidewords.ts';
-import { cantUse, choiceEffect, shortQuote } from './copywords.ts';
+import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
 import { REPLACE_ACTION, andList, byToolOrder, capitalToolsPhrase, kindNouns, orList, problemText, toolName, toolNames, toolsPhrase } from './words.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
 import { whyReadOnly, otherOwnerSaid, saidInStatusBar, takeOverSync, takeOverTitle, tell, type Click, type Outcome, type Kind, harnessKindShown, convertAgent, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, deleteEverywhereKey, rerender, retireTip, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
@@ -735,15 +735,15 @@ function markedWords(from: string, to: string, keep: 'removed' | 'added'): Child
   return runs.flatMap(run => { if (!run.marked) return [run.text]; const [, lead, core, tail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(run.text)!; return [lead, core ? h(`span.change-${keep}`, {}, core) : '', tail].filter(Boolean); });
 }
 
-/** Of `lines`, the one most like `line` (the most runs of words left unmarked): what `line`'s own words are marked against. */
-function nearestLine(line: string, lines: string[]): string | undefined {
-  const unmarkedRuns = (other: string) => markedWords(other, line, 'added').filter(part => typeof part === 'string' && part.trim()).length;
-  let nearest: string | undefined, best = 0;
-  for (const other of lines) {
-    const runs = unmarkedRuns(other);
-    if (runs > best) { nearest = other; best = runs; }
-  }
-  return nearest;
+/** The stretch of marked words (markedWords' strings and marks) that starts at character `start` and is `length` long, its marks kept. */
+function cutMarked(parts: Child[], start: number, length: number): Child[] {
+  let at = 0;
+  return parts.flatMap((part): Child[] => {
+    const text = part instanceof Node ? part.textContent ?? '' : String(part);
+    const kept = text.slice(Math.max(0, start - at), Math.max(0, start + length - at));
+    at += text.length;
+    return !kept ? [] : part instanceof Node ? [h('span.change-added', {}, kept)] : [kept];
+  });
 }
 
 /**
@@ -755,8 +755,9 @@ function entryWords(summary: string, others: string[]): Child[] {
   const split = (entry: string) => { const [label, ...rest] = entry.split(' · '); return { label, value: rest.join(' · ') }; };
   const { label, value } = split(summary);
   const nearest = nearestLine(value, others.map(other => split(other).value));
-  // Each word is one unit, and so is each folder of a path with its "/": a line breaks only between units.
-  const units = (words: string, marked: boolean) => words.split(/(\s+)/).filter(Boolean).flatMap((word): Child[] => (word.trim() ? word.split(/(?<=\/)/).map(part => h(`span.wrap-part${marked ? '.change-added' : ''}`, {}, part)) : [' ']));
+  // Each word is one unit, and so is each folder of a path with the "/" that ends it (a path's first "/" and an address's
+  // "//" stay with what follows): a line breaks only between units.
+  const units = (words: string, marked: boolean) => words.split(/(\s+)/).filter(Boolean).flatMap((word): Child[] => (word.trim() ? word.split(/(?<=[^/:]\/)(?=[^/])/).map(part => h(`span.wrap-part${marked ? '.change-added' : ''}`, {}, part)) : [' ']));
   const parts = nearest === undefined ? [value] : markedWords(nearest, value, 'added');
   return [h('span.version-entry-kind', {}, `${label} · `), h('code.version-command', {}, ...parts.flatMap(part => (part instanceof Node ? units(part.textContent ?? '', true) : units(String(part), false))))];
 }
@@ -780,11 +781,11 @@ function copyQuote(skill: ItemRow, tool: Tool, others: Tool[]): Child[] | undefi
     const [line, ...further] = lines(prompt).filter(mine => theirs.some(other => !other.includes(mine)));
     if (line !== undefined) {
       const nearest = nearestLine(line, theirs.flat());
-      const mark = (words: string) => (nearest === undefined ? [words] : markedWords(nearest, words, 'added'));
+      const marked = nearest === undefined ? [line] : markedWords(nearest, line, 'added');
       // Where the words only this copy has start, so a line too long to quote whole keeps them.
-      const marked = mark(line), own = marked.findIndex(part => typeof part !== 'string');
-      const { lead, words, tail } = shortQuote(kind, line, own < 0 ? 0 : marked.slice(0, own).join('').length);
-      return [`“${lead}`, ...mark(words), `${tail}”${further.length ? ` and ${further.length} more ${further.length === 1 ? 'line' : 'lines'}` : ''}`];
+      const own = marked.findIndex(part => part instanceof Node);
+      const { lead, words, tail, start } = shortQuote(kind, line, own < 0 ? 0 : marked.slice(0, own).join('').length);
+      return [`“${lead}`, ...cutMarked(marked, start, words.length), `${tail}”${further.length ? ` and ${further.length} more ${further.length === 1 ? 'line' : 'lines'}` : ''}`];
     }
     const missing = theirs.flat().find(other => !lines(prompt).includes(other));
     if (missing) return [`Without ${inMarks(missing)}`];

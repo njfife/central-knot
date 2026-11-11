@@ -1,18 +1,18 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { QUOTE_LIMIT, cantUse, choiceEffect, shortQuote } from '../src/copywords.ts';
+import { QUOTE_LIMIT, cantUse, choiceEffect, nearestLine, shortQuote } from '../src/copywords.ts';
 
 const long = 'Turn the notes, the ticket and the related commits into a first draft that a reviewer can read in one sitting, with every open question listed last and each claim tied to the commit or note it came from.';
 
 test('a quote that fits is shown whole', () => {
-  assert.deepEqual(shortQuote('skills', 'Claude Code’s draft.'), { lead: '', words: 'Claude Code’s draft.', tail: '' });
+  assert.deepEqual(shortQuote('skills', 'Claude Code’s draft.'), { lead: '', words: 'Claude Code’s draft.', tail: '', start: 0 });
   const exact = 'a'.repeat(QUOTE_LIMIT);
-  assert.deepEqual(shortQuote('agents', exact), { lead: '', words: exact, tail: '' });
+  assert.deepEqual(shortQuote('agents', exact), { lead: '', words: exact, tail: '', start: 0 });
 });
 
 test('a longer quote is cut after a whole word and ends with “…”, so it does not read as the whole sentence', () => {
   const quote = shortQuote('skills', long);
-  assert.deepEqual(quote, { lead: '', words: 'Turn the notes, the ticket and the related commits into a first draft that a reviewer can read in one sitting, with every open question', tail: '…' });
+  assert.deepEqual(quote, { lead: '', words: 'Turn the notes, the ticket and the related commits into a first draft that a reviewer can read in one sitting, with every open question', tail: '…', start: 0 });
   assert.ok(quote.words.length <= QUOTE_LIMIT);
   // Punctuation the cut would leave hanging before the “…” goes too.
   assert.equal(shortQuote('skills', `${'word '.repeat(27)}last, ${'more '.repeat(10)}`).words.endsWith('last'), true);
@@ -30,13 +30,21 @@ test('an agent’s long line keeps the words only this copy has: it starts a few
   assert.deepEqual([quote.lead, quote.tail], ['…', '…']);
   assert.match(quote.words, /^(tied to|the commit|commit or).* Codex’s own wording goes here/);
   assert.ok(quote.words.length <= QUOTE_LIMIT);
+  assert.equal(line.slice(quote.start, quote.start + quote.words.length), quote.words, 'start says where the kept words begin');
   // Words of its own near the start need no such move.
   assert.equal(shortQuote('agents', line, 5).lead, '');
 });
 
 test('an MCP server’s command is never shortened: its row is the only place the question shows it', () => {
   const command = `Command · search-mcp --index codex --cache-directory /Users/someone/${'folder/'.repeat(30)} --timeout-seconds 45`;
-  assert.deepEqual(shortQuote('mcp', command), { lead: '', words: command, tail: '' });
+  assert.deepEqual(shortQuote('mcp', command), { lead: '', words: command, tail: '', start: 0 });
+});
+
+test('a copy’s own words are marked against the other copies’ line that shares the most words with it', () => {
+  const theirs = ['Read the commits since the last tag and write the release notes for the app.', 'Group them as Added, Changed and Fixed, and list the changes a person using the app would notice first.'];
+  // The first line shares “the”, “and” and “app” in several places; the second is the same line but for two words.
+  assert.equal(nearestLine('Group them as Added, Changed and Fixed, and list the changes a person using the app would notice first. Codex’s wording.', theirs), theirs[1]);
+  assert.equal(nearestLine('Nothing in common here', theirs), undefined);
 });
 
 test('choosing a copy names the one or two copies it replaces, and the tools it adds the item to', () => {

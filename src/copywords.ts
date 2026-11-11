@@ -1,5 +1,7 @@
-// The copy question's words (matrix.ts compareChoices puts them in its rows): how a copy's quote is shortened, what choosing
-// a copy does, and why a copy can't be chosen. Each rule is one function here, with worked examples in tests/copywords.test.ts.
+// The copy question's words (matrix.ts compareChoices puts them in its rows): how a copy's quote is shortened, which line its
+// own words are marked against, what choosing a copy does, and why a copy can't be chosen. Each rule is one function here,
+// with worked examples in tests/copywords.test.ts.
+import { lineDiff } from './diff.ts';
 import { andList, sentence } from './words.ts';
 
 /** The most characters of a skill's or an agent's text that a row quotes. */
@@ -7,8 +9,8 @@ export const QUOTE_LIMIT = 140;
 /** How much of a shortened quote may come before the words only this copy has, so they are never the part left out. */
 const BEFORE_OWN = 40;
 
-/** A quote as a row shows it: the words kept, and "…" at an end where words were left out. */
-export interface ShortQuote { lead: '' | '…'; words: string; tail: '' | '…' }
+/** A quote as a row shows it: the words kept (`start`: where they begin in the text), and "…" at an end where words were left out. */
+export interface ShortQuote { lead: '' | '…'; words: string; tail: '' | '…'; start: number }
 
 /**
  * The one place that decides how a row shortens a copy's quote, for every kind:
@@ -19,12 +21,27 @@ export interface ShortQuote { lead: '' | '…'; words: string; tail: '' | '…' 
  *  - an MCP server's command or address is never shortened: its row is the only place the question shows it.
  */
 export function shortQuote(kind: 'skills' | 'mcp' | 'agents', text: string, own = 0): ShortQuote {
-  if (kind === 'mcp' || text.length <= QUOTE_LIMIT) return { lead: '', words: text, tail: '' };
+  if (kind === 'mcp' || text.length <= QUOTE_LIMIT) return { lead: '', words: text, tail: '', start: 0 };
   const start = own <= QUOTE_LIMIT - BEFORE_OWN ? 0 : text.lastIndexOf(' ', own - BEFORE_OWN) + 1;
   let end = Math.min(text.length, start + QUOTE_LIMIT);
   // Cut at a word: back to the last space, unless one word alone is longer than the limit.
   if (end < text.length && text.lastIndexOf(' ', end) > start) end = text.lastIndexOf(' ', end);
-  return { lead: start ? '…' : '', words: text.slice(start, end).replace(/[\s,;:]+$/, ''), tail: end < text.length ? '…' : '' };
+  return { lead: start ? '…' : '', words: text.slice(start, end).replace(/[\s,;:]+$/, ''), tail: end < text.length ? '…' : '', start };
+}
+
+/**
+ * Of `lines`, the one most like `line`: the one that shares the most of its words, in order (none, when no line shares a
+ * word). A row marks the words only its copy has against this line, so a line that is the same but for a few words is
+ * chosen over one that only shares "the" and "and" here and there.
+ */
+export function nearestLine(line: string, lines: string[]): string | undefined {
+  const words = (text: string) => text.split(/\s+/).filter(Boolean).join('\n');
+  let nearest: string | undefined, most = 0;
+  for (const other of lines) {
+    const shared = lineDiff(words(other), words(line)).filter(part => part.kind === 'same').length;
+    if (shared > most) { nearest = other; most = shared; }
+  }
+  return nearest;
 }
 
 /**
