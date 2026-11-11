@@ -11,6 +11,7 @@ import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, sente
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
+import { clear as clearPluginOp, resultLines, resultSentence, reverse, runPlan, type PluginOp } from './pluginplan.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
@@ -315,6 +316,24 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   const failed = result.results.filter(entry => entry.outcome === 'failed').length;
   tell(result.stopped ? undefined : { page: state.page, history: replacedSome && !chosenNow.length, text: `${what}.` + (managed && firstApply ? ' Edits now spread between tools.' : '') + (failed ? ` ${failed} failed.` : ''), item: singleName, items: newItems,
     act: addedNow.length ? addedUndo(addedNow, switchedNow) : chosenNow.length ? choiceUndo(chosenNow) : switchUndo }, result.stopped);
+});
+
+/**
+ * Turns plugins' items on or off from the Skills, MCP servers and Agents pages (pluginswitch.ts), with each tool's own
+ * switch, then reads the home again. What ran leaves `draft`; what wasn't reached stays chosen. The result offers Undo,
+ * which runs what this run changed, reversed.
+ */
+export const applyPluginSwitches = (ops: PluginOp[], draft: Map<string, PluginOp>, undo = false) => busy(undo ? 'Undoing…' : 'Applying…', async () => {
+  const home = state.home!.home;
+  const result = await runPlan(ops, { install: api().installPlugin, uninstall: api().uninstallPlugin, setSkill: api().setPluginSkill, setWhole: api().setPluginOn }, home);
+  for (const entry of result.done) clearPluginOp(draft, entry);
+  setHome(await api().refresh());
+  const lines = resultLines(result.done, undo);
+  const failed = lines.filter(line => !line.ok);
+  const back = undo ? [] : reverse(result.done);
+  const text = [result.stopped ?? resultSentence(lines, undo), ...failed.map(line => `${line.plugin}: ${line.text}.`)].filter(Boolean).join(' ') || 'Nothing changed.';
+  tell({ page: state.page, text, warn: !!failed.length || !!result.stopped,
+    act: back.length ? { label: 'Undo', id: 'outcome-undo-plugin', title: 'Turn them back as they were', run: () => void applyPluginSwitches(back, new Map(), true) } : undefined });
 });
 
 /**

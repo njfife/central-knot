@@ -584,7 +584,7 @@ export async function throughPlugins(home: { home: string; overrides?: Partial<R
     for (const { kind: partKind, name, ...plugin } of parts) {
       if (partKind !== kind) continue;
       const asParts = installs.some(install => install.plugin === plugin.plugin && (!plugin.source || sameSource(install.source, plugin.source)) && install.items.some(item => !item.removed && samePart(item, { kind, name })));
-      if (!byKey.has(keyOf(name)) || (asParts && !byKey.get(keyOf(name))!.asParts)) byKey.set(keyOf(name), { ...plugin, asParts });
+      if (!byKey.has(keyOf(name)) || (asParts && !byKey.get(keyOf(name))!.asParts)) byKey.set(keyOf(name), { ...plugin, name, asParts });
     }
     if (byKey.size) found.set(tool, byKey);
   }
@@ -747,14 +747,14 @@ async function wholeOff(context: PluginContext, tool: PluginTool, id: string): P
 }
 
 /**
- * Turns a whole plugin off with the tool's own switch: Claude Code's and Copilot CLI's `plugin disable`; Codex has no
- * command for it, so its `[plugins."ID"]` table takes `enabled = false` (capability-data section 8). Undefined where
- * Codex has no such table to switch.
+ * Turns a whole plugin off (or, `on`, back on) with the tool's own switch: Claude Code's and Copilot CLI's `plugin disable`
+ * and `plugin enable`; Codex has no command for it, so its `[plugins."ID"]` table takes `enabled = false` or `true`
+ * (capability-data section 8). Undefined where Codex has no such table to switch.
  */
-async function turnOff(context: PluginContext, tool: PluginTool, id: string): Promise<NativeRun | undefined> {
-  if (tool !== 'codex-cli') return native(context, tool, ['plugin', 'disable', id, ...(tool === 'claude-cli' ? ['--scope', 'user'] : [])]);
+async function switchWhole(context: PluginContext, tool: PluginTool, id: string, on = false): Promise<NativeRun | undefined> {
+  if (tool !== 'codex-cli') return native(context, tool, ['plugin', on ? 'enable' : 'disable', id, ...(tool === 'claude-cli' ? ['--scope', 'user'] : [])]);
   const path = join(configRootOf(context, tool), 'config.toml');
-  const command = `config.toml [plugins."${id}"] enabled = false`;
+  const command = `config.toml [plugins."${id}"] enabled = ${on}`;
   const before = await readOrNull(path);
   let table: ReturnType<typeof codexPluginTable>;
   try { table = codexPluginTable(before ?? '', id); } catch { table = undefined; }
@@ -763,11 +763,30 @@ async function turnOff(context: PluginContext, tool: PluginTool, id: string): Pr
   // An `enabled = …` line is replaced; otherwise one goes right after the table's last key (as an MCP server's switch does).
   const at = line ? line.start : table.entries.at(-1)?.end ?? (before.indexOf('\n', table.start) + 1 || before.length);
   const head = before.slice(0, at);
-  const after = `${head}${head.endsWith('\n') || !head ? '' : '\n'}enabled = false\n${before.slice(line ? line.end : at)}`;
+  const after = `${head}${head.endsWith('\n') || !head ? '' : '\n'}enabled = ${on}\n${before.slice(line ? line.end : at)}`;
   try { await writeFileChecked(path, after, before); } catch (error) { return { tool, command, ok: false, output: `Codex’s config.toml couldn’t be written: ${error instanceof Error ? error.message : String(error)}`, changed: [] }; }
   const changed = [{ path, before, after }];
   await keepRecord(context, tool, command, '', changed).catch(() => undefined);
   return { tool, command, ok: true, output: '', changed };
+}
+
+/**
+ * Turns a whole installed plugin off (`on` false) or back on in one tool, with that tool's own switch (switchWhole), then
+ * reads it again: only what the tool then records counts. Everything the plugin brings there goes with it. The plugin's
+ * files are never touched.
+ */
+export async function setWhole(context: PluginContext, marketplace: string, plugin: string, tool: PluginTool, on: boolean, source: string): Promise<ActionReport> {
+  const name = toolNames[tool];
+  const outcome = on ? 'plugin-on' : 'plugin-off';
+  const held = await heldBy(context, tool, marketplace, source);
+  if (held) return { tool, outcome: 'held', message: heldReason(tool, marketplace, held), runs: [] };
+  if ((await installState(context, tool, marketplace, plugin)).state !== 'installed') return { tool, outcome: 'failed', message: `It isn’t installed in ${name} now.`, runs: [] };
+  const id = `${plugin}@${marketplace}`;
+  if (!(await wholeOff(context, tool, id)) === on) return { tool, outcome, message: `Already ${on ? 'on' : 'off'} in ${name}.`, runs: [] };
+  const run = await switchWhole(context, tool, id, on);
+  if (!run) return { tool, outcome: 'failed', message: `Codex’s config.toml has no entry for ${id} to switch.`, runs: [] };
+  if (!(await wholeOff(context, tool, id)) === on) return { tool, outcome, changed: true, message: `Turned ${on ? 'on' : 'off'} in ${name}. ${nextStepFor(tool, 'for this to take effect')}`.trim(), runs: [run] };
+  return { tool, outcome: 'failed', message: `Still ${on ? 'off' : 'on'} in ${name}. ${lastLines(run.output)}`.trim(), runs: [run] };
 }
 
 // ---------- Install and uninstall ----------
@@ -886,7 +905,7 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
  * that second route is not taken: an uninstall whose install then failed would leave the tool without the plugin.
  *
  * A plugin its person turned off in the tool is still off afterwards: where the tool's own commands turned it on, it is
- * turned off again with the tool's own switch (turnOff), and the report says so if that didn't hold.
+ * turned off again with the tool's own switch (switchWhole), and the report says so if that didn't hold.
  */
 export async function update(context: PluginContext, catalog: Catalog, plugin: string, tool: PluginTool, differs?: () => Promise<boolean>, { reinstall = true } = {}): Promise<ActionReport> {
   const name = toolNames[tool];
@@ -896,7 +915,7 @@ export async function update(context: PluginContext, catalog: Catalog, plugin: s
   const wasOff = await wholeOff(context, tool, id);
   const report = await ownUpdate(context, catalog, plugin, tool, differs, { reinstall, next: wasOff ? `It is still off in ${name}.` : nextStepFor(tool) });
   if (!wasOff || !report.runs.length || (await installState(context, tool, catalog.name, plugin)).state !== 'installed' || (await wholeOff(context, tool, id))) return report;
-  const switched = await turnOff(context, tool, id);
+  const switched = await switchWhole(context, tool, id);
   if (switched) report.runs.push(switched);
   if (await wholeOff(context, tool, id)) return report;
   return { ...report, message: report.message.replace(`It is still off in ${name}.`, '').trim(), notes: [...(report.notes ?? []), `It was off in ${name}, and the update turned it on. It couldn’t be turned off again: turn it off in ${name}. ${lastLines(switched?.output ?? '')}`.trim()] };

@@ -5,12 +5,13 @@ import type { ActionReport, HarnessId, MarketplaceView, PartPlan, PartRef, Parts
 import { andList, byToolOrder, toolNames as names } from './words.ts';
 
 /**
- * Install, update or uninstall a plugin, or turn one of its skills off or back on (ENB-06), in one tool. install-parts: its parts
+ * Install, update or uninstall a plugin, turn one of its skills off or back on (ENB-06), or turn the whole plugin off or
+ * back on (plugin-off, plugin-on), in one tool. install-parts: its parts
  * as separate items in a tool that can't take the plugin (installed, or brought up to date); remove-parts: those parts out
  * again; pick-parts: single parts of it put in or taken out there (`pick`); undo-parts: an Undo of a parts run (`run`),
  * which only Undo makes.
  */
-export type PluginAction = 'install' | 'update' | 'remove' | 'skill-off' | 'skill-on' | 'install-parts' | 'remove-parts' | 'pick-parts' | 'undo-parts';
+export type PluginAction = 'install' | 'update' | 'remove' | 'skill-off' | 'skill-on' | 'plugin-off' | 'plugin-on' | 'install-parts' | 'remove-parts' | 'pick-parts' | 'undo-parts';
 /** The parts engine's mode for a parts action (installing also brings parts up to date; a pick installs only the parts it names); undefined for any other action. */
 const PARTS_MODES: Partial<Record<PluginAction, 'install' | 'remove' | 'undo'>> = { 'install-parts': 'install', 'remove-parts': 'remove', 'pick-parts': 'install', 'undo-parts': 'undo' };
 export const partsMode = (action: PluginAction) => PARTS_MODES[action];
@@ -54,14 +55,20 @@ export const failedFor = (tools: HarnessId[], message: string): ActionReport[] =
 /** One plugin in one marketplace: two marketplaces may both offer a plugin with the same name. */
 export const pluginKey = (source: string, plugin: string) => `${source}\u0000${plugin}`;
 /** A plugin's own change in a tool, each of its skills' switches there, and the single parts picked for it there are separate choices. */
-const opKey = (op: Pick<PluginOp, 'source' | 'plugin' | 'tool' | 'skill'> & { action?: PluginAction }) => `${pluginKey(op.source, op.plugin)}\u0000${op.tool}\u0000${op.action === 'pick-parts' ? PICK_SLOT : op.skill ?? ''}`;
+const opKey = (op: Pick<PluginOp, 'source' | 'plugin' | 'tool' | 'skill'> & { action?: PluginAction }) => `${pluginKey(op.source, op.plugin)}\u0000${op.tool}\u0000${op.action === 'pick-parts' ? PICK_SLOT : isWhole(op.action) ? WHOLE_SLOT : op.skill ?? ''}`;
 /** A pick's place among a tool's choices: no skill has this name. */
 const PICK_SLOT = '\u0001parts';
+/** The whole plugin's switch's place among a tool's choices: no skill has this name either. */
+const WHOLE_SLOT = '\u0001whole';
+/** Whether an action is the whole plugin's own switch. */
+export const isWhole = (action?: PluginAction) => action === 'plugin-on' || action === 'plugin-off';
 /** Whether a plugin key (or a key made from one) belongs to this marketplace. */
 export const forSource = (key: string, source: string) => key.startsWith(`${source}\u0000`);
 
 /** The install or uninstall chosen for a plugin in a tool, or with `skill`, that skill's switch chosen there. */
 export const queued = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId, skill?: string) => draft.get(opKey({ source, plugin, tool, skill }))?.action;
+/** The whole plugin's switch chosen in a tool, if one is. */
+export const queuedWhole = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId) => draft.get(opKey({ source, plugin, tool, action: 'plugin-on' }))?.action;
 
 /** Takes one change out of the draft, once it has run. */
 export const clear = (draft: PluginDraft, op: Pick<PluginOp, 'source' | 'plugin' | 'tool' | 'skill'> & { action?: PluginAction }) => { draft.delete(opKey(op)); };
@@ -91,7 +98,7 @@ export function flipPick(pick: PartsPick | undefined, part: PartRef, on: boolean
 }
 
 /** Chooses one change. The whole plugin, or all its parts out, takes back single parts picked there; an install or update of its parts keeps them, as its exceptions. */
-function choose(draft: PluginDraft, op: PluginOp): void {
+export function choose(draft: PluginDraft, op: PluginOp): void {
   draft.set(opKey(op), op);
   if (op.action === 'install' || op.action === 'remove-parts') draft.delete(opKey({ ...op, action: 'pick-parts' }));
 }
@@ -226,7 +233,7 @@ export interface Step { source: string; marketName: string; plugin: string; acti
 
 /**
  * Runs in a fixed, readable order: per plugin, installs first, then updates (each one command per tool set), then skill switches, then
- * removals, tool by tool, then parts, tool by tool. Single parts picked in a tool whose parts are also installed or
+ * the whole plugin's switches (so a plugin turned on for one skill has its other skills off before it loads), then removals, tool by tool, then parts, tool by tool. Single parts picked in a tool whose parts are also installed or
  * updated are one step: that install or update with the pick as its exceptions (`pick.rest`).
  */
 export function batches(ops: PluginOp[]): Step[] {
@@ -239,7 +246,7 @@ export function batches(ops: PluginOp[]): Step[] {
       const tools = mine.filter(op => op.action === action).map(op => op.tool);
       if (tools.length) out.push({ source: first.source, marketName: first.marketName, plugin: first.plugin, action, tools });
     }
-    out.push(...mine.filter(op => op.action === 'skill-off' || op.action === 'skill-on').map(one), ...mine.filter(op => op.action === 'remove').map(one),
+    out.push(...mine.filter(op => op.action === 'skill-off' || op.action === 'skill-on').map(one), ...mine.filter(op => isWhole(op.action)).map(one), ...mine.filter(op => op.action === 'remove').map(one),
       ...mine.filter(op => isParts(op.action)).flatMap(op => {
         const pick = mine.find(other => other.action === 'pick-parts' && other.tool === op.tool);
         if (op.action === 'pick-parts') return [{ ...one(op), pick: { ...op.pick!, rest: mine.some(other => other.action === 'install-parts' && other.tool === op.tool) } }];
@@ -249,7 +256,7 @@ export function batches(ops: PluginOp[]): Step[] {
   return out;
 }
 
-const OPPOSITE: Partial<Record<PluginAction, PluginAction>> = { install: 'remove', remove: 'install', 'skill-off': 'skill-on', 'skill-on': 'skill-off' };
+const OPPOSITE: Partial<Record<PluginAction, PluginAction>> = { install: 'remove', remove: 'install', 'skill-off': 'skill-on', 'skill-on': 'skill-off', 'plugin-off': 'plugin-on', 'plugin-on': 'plugin-off' };
 
 /**
  * The way back: only what this run really changed, reversed, last first (so each Codex skill switch is undone onto the
@@ -263,7 +270,7 @@ export const reverse = (done: PluginDone[]): PluginOp[] => done
   .reverse();
 
 /** A tool did what was asked (installed, updated, uninstalled, turned a skill off or on), whether this run changed it or it already was. */
-export const succeeded = (report: ActionReport) => report.outcome === 'installed' || report.outcome === 'updated' || report.outcome === 'uninstalled' || report.outcome === 'skill-off' || report.outcome === 'skill-on';
+export const succeeded = (report: ActionReport) => report.outcome === 'installed' || report.outcome === 'updated' || report.outcome === 'uninstalled' || report.outcome === 'skill-off' || report.outcome === 'skill-on' || report.outcome === 'plugin-off' || report.outcome === 'plugin-on';
 
 /**
  * One line per plugin (or per skill of it) and outcome, e.g. "document-tools: installed in Claude Code and Codex" or
@@ -305,7 +312,9 @@ export function resultLines(done: PluginDone[], undo = false, { after = false } 
       ? [[tools('skill-off', true), undo ? `${skill} off again in` : `${skill} turned off in`], [tools('skill-on', true), undo ? `${skill} back on in` : `${skill} turned on in`],
         [tools('skill-off', false), `${skill} already off in`], [tools('skill-on', false), `${skill} already on in`]]
       : [[tools('installed', true), undo ? 'put back in' : 'installed in'], ...updatedGroups(mine, !after), [tools('updated', false), 'already up to date in'], [tools('uninstalled', true), undo ? 'removed from' : 'uninstalled from'],
-        [tools('installed', false), 'already in'], [tools('uninstalled', false), 'wasn’t installed in'], ...partsGroups];
+        [tools('installed', false), 'already in'], [tools('uninstalled', false), 'wasn’t installed in'],
+        [tools('plugin-off', true), undo ? 'off again in' : 'turned off in'], [tools('plugin-on', true), undo ? 'back on in' : 'turned on in'],
+        [tools('plugin-off', false), 'already off in'], [tools('plugin-on', false), 'already on in'], ...partsGroups];
     // A skill switch only ever reaches the few tools that have one, so its tools are always named.
     const said = (counted: boolean) => groups.filter(([list]) => list.length).map(([list, verb, after = '']) => `${verb} ${counted && !skill && list.length > 2 ? `${list.length} tools` : andList(list)}${after}`).join('; ');
     if (said(false)) lines.push({ source, plugin, ...(skill ? { skill } : {}), ok: true, text: said(false), short: said(true) });
@@ -401,6 +410,7 @@ export interface PlanApi {
   install(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstall(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
   setSkill(source: string, marketName: string, plugin: string, skill: string, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
+  setWhole?(source: string, marketName: string, plugin: string, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
   update?(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   parts?(source: string, marketName: string, plugin: string, tool: HarnessId, mode: 'install' | 'remove' | 'undo', run: string | undefined, home: string, pick?: PartsPick): Promise<PluginActionResult>;
 }
@@ -420,6 +430,7 @@ export async function runPlan(ops: PluginOp[], api: PlanApi, home: string, onSte
         : step.action === 'update' ? (api.update ? await api.update(step.source, step.marketName, step.plugin, step.tools, home) : { reports: failedFor(step.tools, 'Plugins can’t be updated here.') })
         : step.action === 'remove' ? await api.uninstall(step.source, step.marketName, step.plugin, step.tools[0]!, home)
         : isParts(step.action) ? (api.parts ? await api.parts(step.source, step.marketName, step.plugin, step.tools[0]!, partsMode(step.action)!, step.run, home, step.pick) : { reports: failedFor(step.tools, 'Parts can’t be installed here.') })
+        : isWhole(step.action) ? (api.setWhole ? await api.setWhole(step.source, step.marketName, step.plugin, step.tools[0]!, step.action === 'plugin-on', home) : { reports: failedFor(step.tools, 'Plugins can’t be turned on or off here.') })
         : step.skill ? await api.setSkill(step.source, step.marketName, step.plugin, step.skill, step.tools[0]!, step.action === 'skill-on', home)
         : { reports: failedFor(step.tools, 'That choice named no skill, so nothing ran.') };
     } catch { result = { reports: failedFor(step.tools, 'It stopped unexpectedly. Refresh to see where it stands.') }; }

@@ -53,6 +53,7 @@ export interface MarketplaceEngine {
   uninstall: typeof engine.uninstall;
   update: typeof engine.update;
   setSkill: typeof engine.setSkill;
+  setWhole: typeof engine.setWhole;
 }
 
 /** The binary each tool's plugin commands run with, and for those that are a desktop app's own copy, which app carries it. */
@@ -76,7 +77,7 @@ async function findClis(): Promise<Routes> {
   }
   return routes;
 }
-const realEngine: MarketplaceEngine = { findClis, checkAccess: engine.checkAccess, addMarketplace: engine.addMarketplace, readCatalog: engine.readCatalog, readRemotePlugin: engine.readRemotePlugin, install: engine.install, uninstall: engine.uninstall, update: engine.update, setSkill: engine.setSkill };
+const realEngine: MarketplaceEngine = { findClis, checkAccess: engine.checkAccess, addMarketplace: engine.addMarketplace, readCatalog: engine.readCatalog, readRemotePlugin: engine.readRemotePlugin, install: engine.install, uninstall: engine.uninstall, update: engine.update, setSkill: engine.setSkill, setWhole: engine.setWhole };
 
 /** Tools named by the page: only those that install plugins. */
 const toolIds = (value: unknown): PluginTool[] => onlyAllowed(value, pluginTools);
@@ -554,6 +555,14 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { reports: withoutFileBytes([await use.setSkill(ctx, marketName, plugin, skill, tool, on, source, catalog?.plugins.find(item => item.name === plugin)?.entry)]) };
   }
 
+  /** One tool's own switch for a whole installed plugin. `marketName` and `source` as for uninstall. */
+  async function setWhole(source: string, marketName: string, plugin: string, tool: PluginTool, on: boolean, home: unknown): Promise<PluginActionResult> {
+    const stopped = await guard(home);
+    if (stopped) return { stopped, reports: [] };
+    const ctx = await context({ clis: true });
+    return { reports: withoutFileBytes([await use.setWhole(ctx, marketName, plugin, tool, on, source)]) };
+  }
+
   // ---------- The build's own marketplace in each tool's own list (ORG-03) ----------
 
   /**
@@ -626,7 +635,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { report, view: await view() };
   }
 
-  return { view, detail, readme, add, forget, decline, install, update, uninstall, setSkill, partsPlan, parts, pendingUpdates, addCarried, addCarriedTo };
+  return { view, detail, readme, add, forget, decline, install, update, uninstall, setSkill, setWhole, partsPlan, parts, pendingUpdates, addCarried, addCarriedTo };
 }
 
 type Handle = (channel: string, work: (...args: unknown[]) => Promise<unknown>) => void;
@@ -676,6 +685,10 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
   handle('plugins:skill', async (source, marketplace, plugin, skill, tool, on, home) => {
     const ids = toolIds([tool]);
     return open() && isText(source) && isName(marketplace) && isName(plugin) && isText(skill, 200) && typeof on === 'boolean' && ids.length ? markets.setSkill(source, marketplace, plugin, skill, ids[0]!, on, home) : refused(tool);
+  });
+  handle('plugins:whole', async (source, marketplace, plugin, tool, on, home) => {
+    const ids = toolIds([tool]);
+    return open() && isText(source) && isName(marketplace) && isName(plugin) && typeof on === 'boolean' && ids.length ? markets.setWhole(source, marketplace, plugin, ids[0]!, on, home) : refused(tool);
   });
   return markets;
 }
