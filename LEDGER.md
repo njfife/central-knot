@@ -889,8 +889,8 @@ Nathan asked for the features still open in the original plan, each in its own t
 - **Check.** `scripts/bundled-check.mjs` runs the documented command on the fixture marketplace (plus an npm plugin), deletes the marketplace, opens the build in a throwaway home and checks it. The Mac CI runs it on the packaged app after the end-to-end checks.
 
 **Validation.**
-- 437 unit tests.
-- Mac run 42923496940 on the branch: end-to-end 596 passed against the packaged standard app; `scripts/bundled-check.mjs` 44 of 44 against the packaged custom app (the archive is unpacked from inside `app.asar`). The same check passes on the Mac as Nathan's own account, and as a development run.
+- 438 unit tests.
+- Mac run 42925216159 on the branch with `next` merged in (after Cowork landed): end-to-end 595 passed against the packaged standard app; `scripts/bundled-check.mjs` 44 of 44 against the packaged custom app (the archive is unpacked from inside `app.asar`). The same check passes on the Mac as Nathan's own account, and as a development run.
 - Side by side on the Mac, both opened through macOS (`open`) from one folder, each with a throwaway home: `Central Knot` (`com.centralknot.firstlook`) and `Acme Knot` (`com.centralknot.custom.ck-bundled-check`) ran at once, each window under its own name, the custom build with its own settings folder and its marketplace unpacked in 32 ms. Nothing in the real `Application Support/central-knot` changed.
 - Reviews, Opus 5.5 and Fable 5.2 (Astra could not run: the ChatGPT usage limit was reached). Code: 7 and 7, then 8.5 and 8.5; every finding fixed, among them the base-instruction markers and commit text renamed with the app, a relative marketplace folder read as a Git source, app names that broke packaging at the end, an empty plugin folder counted as packed, and a settings folder that could have been another app's. Interface: 7.5, 8, 8.5; the last round's wording is in.
 
@@ -910,7 +910,18 @@ Second of four steps (plan Phase 6b; SPEC ORG-03, ORG-04, REC-01).
 - **By hand.** The marketplace's About tab says which tools list it, that the app added it, and that taking it out in a tool is respected; it has **List in <tool>** for one that doesn't and could.
 - **Installing** needed no new code: the unpacked folder is a folder marketplace, and the Plugins page installs, updates and uninstalls from it as from any other.
 
-## Bundled build, step 3: publishing newer plugins, and the feed, November 10, 2026
+**Validation.**
+- 442 unit tests.
+- Real CLIs on the Mac in throwaway homes (`tests/harness/plugins.harness.ts`): Claude Code 2.1.311, Copilot CLI 1.0.109 and Codex 0.142.3, and the same through the desktop apps' own copies. The bundle is packed, unpacked into a data folder with a space in its path, added to the tool's own list, installed and uninstalled; a second add runs nothing.
+- Mac run 42926517721 on the branch with `next` merged in: end-to-end 595 passed; `scripts/bundled-check.mjs` 57 of 57 against the packaged custom app. Stand-ins for the tools' CLIs record what they were asked: added once to Claude Code and Codex at the first open, Copilot CLI (which refuses this fixture marketplace) left alone, not added again after it was taken out of Claude Code, and **List in Claude Code** putting it back.
+- Reviews, Opus 5.5 and Fable 5.2: code 8, then 9; interface 7, 8, 8.5. Fixed on the way: a tool skipped by a home switch was never tried again; an install from the bundle was not counted as adding; "Nothing was installed" on About could become untrue.
+
+**Not done or not proven.**
+- No click-through in a real window (Computer Use shares the ChatGPT account whose usage limit was reached), and no session in a signed-in tool showing the marketplace in its own plugin browser: the tools' own records are what was read.
+- Two **List in** buttons at once were not pictured (it needs two tools that lack the marketplace and can take it).
+- Cowork is not a destination.
+
+## Bundled build, step 3: publishing newer plugins, and the feed, November 11, 2026
 
 Third of four steps (plan 7b's publisher and feed; SPEC ORG-05, D-35, the bundle part of PLG-08).
 
