@@ -161,6 +161,8 @@ export interface DesktopApi {
   /** Adds a marketplace; `source` is how it was stored, so the page can open exactly that one. */
   addMarketplace(source: string): Promise<{ problem?: string; view?: PluginsView; source?: string }>;
   forgetMarketplace(source: string): Promise<PluginsView | null>;
+  /** Stops offering a suggested marketplace; `again`: offers it again (the Undo of that). */
+  declineMarketplace(source: string, again?: boolean): Promise<PluginsView | null>;
   /** Adds the marketplace this build carries to one tool's own plugin list, with that tool's own command. Installs nothing. */
   addCarriedTo(tool: HarnessId, home: string): Promise<{ stopped?: string; report?: ListedReport; view?: PluginsView }>;
   /** Looks now at a bundled build's feed for newer plugins, and takes them if there are any. The Plugins view is read again afterwards. */
@@ -574,6 +576,8 @@ export interface PluginsView {
   desktopOnly?: Partial<Record<HarnessId, string>>;
   /** Each found CLI's version, where it could be read (a plugin skill's switch is offered only from a tested build). */
   versions?: Partial<Record<HarnessId, string>>;
+  /** Marketplaces offered without being looked for (suggested.ts): each with the tools here it is the default of. One click adds one; nothing is fetched before. */
+  suggested?: { source: string; name: string; tools: HarnessId[] }[];
 }
 
 // ---------- MCP servers ----------

@@ -44,7 +44,9 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?:
     update: async (_context, _catalog, plugin, tool, _differs, options) => { calls.push(`update ${plugin} ${tool}${options?.reinstall === false ? ' (no reinstall)' : ''}`); return { tool, outcome: 'updated', message: 'Updated.', runs: [], changed: true }; },
     setSkill: async (_context, marketplace, plugin, skill, tool, on, _source, entry) => { calls.push(`skill ${plugin}:${skill}@${marketplace} ${tool} ${on} entry=${entry?.name}`); return { tool, outcome: on ? 'skill-on' : 'skill-off', message: '', runs: [], changed: true }; },
   };
-  return { base, home, calls, told, ran, host, markets: createMarketplaces(host, use), cleanup: () => rm(base, { recursive: true, force: true }) };
+  // The suggested marketplaces are folders here, so a test never reaches the network: one for Claude Code and Codex, one for a tool this home lacks.
+  const offers = [{ source: join(base, 'offered'), name: 'Offered', tools: ['claude-cli', 'codex-cli'] as const }, { source: join(base, 'for-pi'), name: 'Not here', tools: [] }];
+  return { base, home, calls, told, ran, host, markets: createMarketplaces(host, use, offers.map(offer => ({ ...offer, tools: [...offer.tools] }))), cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 
 test('Adding a marketplace reads it once, stores how it was given, and the view lists it with its plugins', async () => {
@@ -317,6 +319,30 @@ test('A bundled build’s own marketplace is listed first, stays listed, and off
     assert.match(refused.reports[0]!.message, /^Acme Knot doesn’t include this plugin’s files, so it can’t be installed from here\. It is an npm package\.$/);
     assert.deepEqual(box.calls.filter(call => call.startsWith('install')), ['install pdf claude-cli']);
   } finally { await box.cleanup(); }
+});
+
+test('A tool’s own marketplace is suggested where that tool is here, until it is listed or declined; a build that carries a marketplace suggests none', async () => {
+  const box = await setup();
+  try {
+    await marketplace(join(box.base, 'offered'), 'offered', ['pdf']);
+    // Offered for the tools here it belongs to; one for no tool here is not offered. Nothing was read to offer it.
+    assert.deepEqual((await box.markets.view()).suggested, [{ source: join(box.base, 'offered'), name: 'Offered', tools: ['claude-cli', 'codex-cli'] }]);
+    assert.deepEqual(box.calls, []);
+    // Added: it is a marketplace on the list now, so it is no longer a suggestion. Removed from the list: offered again.
+    await box.markets.add(join(box.base, 'offered'));
+    assert.deepEqual((await box.markets.view()).suggested, []);
+    assert.equal((await box.markets.forget(join(box.base, 'offered'))).suggested?.length, 1);
+    // Declined: not offered again, also by a later read.
+    assert.deepEqual((await box.markets.decline(join(box.base, 'offered'))).suggested, []);
+    assert.deepEqual((await box.markets.view(true)).suggested, []);
+    // Its Undo: offered again.
+    assert.equal((await box.markets.decline(join(box.base, 'offered'), true)).suggested?.length, 1);
+  } finally { await box.cleanup(); }
+  const carried = await setup({ bundled: { folder: 'carried', unpackaged: [] } });
+  try {
+    await marketplace(join(carried.base, 'carried'), 'carried', ['pdf']);
+    assert.deepEqual((await carried.markets.view()).suggested, []);
+  } finally { await carried.cleanup(); }
 });
 
 /** A marketplace whose plugins each say their version, with one skill each holding `text`. */
