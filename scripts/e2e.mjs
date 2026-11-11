@@ -1213,7 +1213,7 @@ async function practiceFlow() {
   await a.click('#enable-triage-claude-cli');
   for (let tries = 0; tries < 60 && !(await a.exists('#outcome-undo-plugin')); tries++) await wait(100);
   check('the opened row’s switch applies at once, and its result leads with the skill', wholeOff() && await cellState(a, 'triage', 'claude-cli') === 'plugin-off'
-    && /triage is off in Claude Code\. Its whole plugin issue-tracker was turned off there, with its 1 MCP server\./.test(await a.text('.bands') ?? ''), [pluginSettingsNow(), await a.text('.bands')]);
+    && /triage is off in Claude Code\. Its whole plugin issue-tracker was turned off there, with its MCP server issues\./.test(await a.text('.bands') ?? ''), [pluginSettingsNow(), await a.text('.bands')]);
   await a.click('#outcome-undo-plugin');
   for (let tries = 0; tries < 60 && (wholeOff() || !/Undone: triage/.test(await a.text('.bands') ?? '')); tries++) await wait(100);
   check('its Undo turns the plugin back on there', !wholeOff() && /Undone: triage is back on in Claude Code\./.test(await a.text('.bands') ?? ''), [pluginSettingsNow(), await a.text('.bands')]);

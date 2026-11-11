@@ -201,6 +201,10 @@ if (wanted('skills')) {
   await a.size(1280, 800);
   await a.click('#use-review-claude-cli');
   await shot(a, 'review-chosen', 'Clicked "Claude Code’s copy": every tool uses it at once, and review is on. Its details stay open, now with each tool’s own controls.');
+  await a.click('#outcome-undo'); await waitFor(a, `/as before/.test(document.querySelector('.band-done')?.textContent ?? '')`, 15000);
+  await shot(a, 'review-chosen-undone', 'Clicked "Undo" in the strip: each copy is back in its own tool and Codex’s new copy is gone; review is not synced and its copies differ again, as before the choice (“Undone: review is as before.”).');
+  if (!(await a.has('#use-review-claude-cli'))) await a.click('#switch-review');
+  await a.click('#use-review-claude-cli');
   await a.click('#open-review');
   const overStandup = await pointerOver('.ov-row[data-key="standup"]');
   await a.click('#switch-standup');
@@ -319,7 +323,7 @@ if (wanted('mcp')) {
   if (await a.has('#use-search-copilot-cli')) {
     await shot(a, 'mcp-choice', 'A server named search is in Copilot CLI and Codex with different commands; clicked its switch: it asks which entry every tool uses, each card quoting its own command.');
     await a.click('#use-search-copilot-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
-    await shot(a, 'mcp-choice-made', 'Clicked Copilot CLI’s entry: Codex’s is replaced (kept in History), and search is on everywhere; Claude Code gets it when you Write to Claude Code. With Undo.');
+    await shot(a, 'mcp-choice-made', 'Clicked Copilot CLI’s entry: Codex’s is replaced (kept in History). The result says “Copilot CLI and Codex now use Copilot CLI’s copy of search”, and that Claude Code gets it when you click Write to Claude Code; with Undo. The amber band names what Claude Code has of each: an older copy of files, and no search yet.');
     await a.click('#outcome-undo'); await waitFor(a, `/Undone/.test(document.querySelector('.bands')?.textContent ?? '')`, 15000);
     await shot(a, 'mcp-choice-undone', 'Clicked Undo: Codex has its own entry back, and search is as before the choice: not synced, its copies differing, so its switch asks again.');
   }
@@ -328,7 +332,7 @@ if (wanted('mcp')) {
 // ---------- Agents ----------
 if (wanted('agents')) {
   begin('agents');
-  await a.click('#nav-agents'); await shot(a, 'agents-start', 'Clicked "Agents".');
+  await a.click('#nav-agents'); await shot(a, 'agents-start', 'Clicked "Agents". code-reviewer, not synced yet, is tagged “one-way from Claude Code when on”; once on, the tag reads “one-way from Claude Code”.');
   for (const key of ['code-reviewer', 'release-notes']) if (await a.has(`#switch-${key}:not([aria-checked="true"])`)) await a.click(`#switch-${key}`);
   await shot(a, 'agents-on', 'Turned code-reviewer and release-notes on.');
   // Off: agents have no switch in each tool, so Off stops syncing and leaves each copy; Undo syncs it again.
@@ -342,7 +346,7 @@ if (wanted('agents')) {
   await a.click('#header-refresh'); await a.settle();
   await a.click('#switch-release-notes'); await a.settle();
   if (await a.has('#use-release-notes-claude-cli')) {
-    await shot(a, 'agents-choice', 'Turned release-notes off (each copy stays), edited it in Codex, and turned it on again: its copies differ, so it asks which copy every tool uses. Claude Code’s and Copilot CLI’s are the same and share one card; Codex’s quotes the line only it has and is marked as edited most recently.');
+    await shot(a, 'agents-choice', 'Turned release-notes off (each copy stays), edited it in Codex, and turned it on again: its copies differ, so it asks which copy every tool uses. Claude Code’s and Copilot CLI’s are the same and share one card; Codex’s quotes the line only it has, the words only it has tinted, and is marked as edited most recently, with when.');
     if (await a.has('#diff-release-notes')) { await a.click('#diff-release-notes'); await a.settle(); await shot(a, 'agents-choice-read', 'Clicked “Read every copy”: each different prompt under the cards, the same ones shown once.'); await a.click('#diff-release-notes'); await a.settle(); }
     await a.click('#use-release-notes-claude-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
     await shot(a, 'agents-choice-made', 'Clicked Claude Code’s copy: Codex’s copy is replaced (kept in History), and release-notes is on in all 3 tools; with Undo.');
@@ -827,9 +831,9 @@ if (wanted('plugin-items')) {
   await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
   await shot(a, 'skill-open', 'Opened pdf-reader: it opens with where it is on (“On in Claude Code · off in Copilot CLI and Codex · from the plugin document-tools”), then where it is handled (a link to document-tools’ page; the switches below turn it on or off in each tool), and each tool’s line with its switch.');
   await a.click('[id="pfile-document-tools@team-tools/pdf-reader"]'); await waitFor(a, `!!document.querySelector('.details-plugin .plugin-file')`, 15000);
-  await shot(a, 'skill-open-file', 'Clicked “Show its SKILL.md”: the file opens right under the link, above the tools’ lines, in its own scrolling box no taller than 40% of the window.');
+  await shot(a, 'skill-open-file', 'Clicked “Show its SKILL.md”, under the tools’ lines: the file opens right under the link, in its own scrolling box no taller than 40% of the window, and each tool’s switch stays in view above it.');
   await a.theme('light'); await shot(a, 'skill-open-light', 'The same, light.'); await a.theme('dark');
-  await size(860, 560); await shot(a, 'skill-open-860', 'The open row at 860×560, its SKILL.md showing under the link.');
+  await size(860, 560); await shot(a, 'skill-open-860', 'The open row at 860×560: the tools’ lines and their switches, then its SKILL.md under the link.');
   await a.theme('light'); await shot(a, 'skill-open-860-light', 'The same at 860×560, light.'); await a.theme('dark');
   await size(1728, 1117); await shot(a, 'skill-open-1728', 'The open row at 1728×1117.'); await size(1280, 800);
   // The row's own switch turns it off in every tool with a switch for one skill of a plugin. Copilot CLI and Codex have it off
@@ -849,6 +853,9 @@ if (wanted('plugin-items')) {
   // Code on (and says so), and its Undo turns both back on.
   await a.click('[id="switch-document-tools@team-tools/spreadsheet"]'); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
   await shot(a, 'main-switch-changed', 'Clicked spreadsheet’s own switch: off in Copilot CLI and Codex at once, each with its own switch; still on in Claude Code, which has no switch for one skill of a plugin, so “Turn document-tools off in Claude Code” is offered beside Undo.');
+  await size(860, 560); await a.click('#sidebar-toggle');
+  await shot(a, 'main-switch-changed-860-sidebar', 'The same at 860×560 with the sidebar open: the two buttons drop under the sentence, which keeps the width.');
+  await a.click('#sidebar-toggle'); await size(1280, 800);
   await a.click('#outcome-undo-plugin'); await a.settle();
   await shot(a, 'main-switch-changed-undone', 'Clicked Undo: “Undone: spreadsheet is back on in Copilot CLI and Codex.”');
   if (await a.has('#open-triage')) {

@@ -849,7 +849,7 @@ const pluginItemsContext = (overrides: Partial<Record<HarnessId, string>> | unde
 
 /**
  * Keeps what a change came to, for a problem report: a refusal for the whole home, each plugin step as its tool reported
- * it (with the tool's own output when its command failed), and each item an Apply all couldn't change. The words the page
+ * it (with the tool's own output when its command failed), and each item a change couldn't reach. The words the page
  * showed, and where they name one, the path and the system's error code; never an item's content.
  */
 function logOutcome(channel: string, args: unknown[], result: unknown) {

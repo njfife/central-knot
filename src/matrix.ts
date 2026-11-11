@@ -5,7 +5,7 @@ import { itemId } from './profileplan.ts';
 import { brandMark } from './brand.ts';
 import { caughtUpNames, DAY_MS, groupBy } from './model.ts';
 import { deletedText, deleteNote, linkTarget, managedSentence, manageSentence, pinnedSentence, readsOutside, replaceSentence, rowWords, whereSentence, type Shape } from './outsidewords.ts';
-import { REPLACE_ACTION, andList, byToolOrder, kindNouns, orList, problemText, toolName, toolNames, toolsPhrase } from './words.ts';
+import { REPLACE_ACTION, andList, byToolOrder, capitalToolsPhrase, kindNouns, orList, problemText, toolName, toolNames, toolsPhrase } from './words.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
 import { whyReadOnly, otherOwnerSaid, saidInStatusBar, takeOverSync, takeOverTitle, tell, type Click, type Outcome, type Kind, harnessKindShown, convertAgent, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, deleteEverywhereKey, rerender, retireTip, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
@@ -159,7 +159,7 @@ function pluginDetails(row: PluginRow, placement: 'row' | 'dock' = 'row') {
   const [type, ...rest] = row.description.split(' · ');
   const shown = filesShown.has(row.key), copies = filesShown.get(row.key);
   const file = row.kind === 'skill' ? 'SKILL.md' : 'agent file';
-  // The file shows right under the link that shows it, above the tools' lines.
+  // The file shows right under the link that shows it, below the tools' lines, as in the Files view: the switches stay in view.
   const fileShown = !shown ? null : !copies?.length ? h('p.details-limits', {}, copies ? 'Its file couldn’t be read.' : 'Reading…')
     : h('div.plugin-file', {}, fileBlocks(`pfile-${row.key}-text`, file, copies, holders => `${file} · ${andList(holders.map(holder => names[holder.tool]))}`, { named: copies.length > 1 }));
   return h(`div.compare.details.details-plugin.details-grid${placement === 'row' ? '' : '.details-bare'}`, { role: 'region', 'aria-label': `Details for ${row.name}` },
@@ -167,9 +167,7 @@ function pluginDetails(row: PluginRow, placement: 'row' | 'dock' = 'row') {
       h('p.details-status', {}, pluginStatus(row)),
       kind === 'mcp' && row.description ? h('dl.details-definition', {}, h('dt', {}, 'Type'), h('dd', {}, type === 'Command' ? 'Command (stdio)' : type), h('dt', {}, type === 'Command' ? 'Command' : 'URL'), h('dd.mono', {}, rest.join(' · ')))
         : row.description ? h('p.details-description', {}, row.description) : null,
-      handledNote(row, '', `open-whole-${row.key}`),
-      row.kind === 'mcp' ? null : h('div.details-actions', {}, smallAction(shown ? `Hide its ${file}` : `Show its ${file}`, `pfile-${row.key}`, () => toggleFile(row))),
-      fileShown),
+      handledNote(row, '', `open-whole-${row.key}`)),
     h('div.details-tools', {}, toolList().map(tool => {
       const install = row.copies[tool as HarnessId] ? row.installs[tool as HarnessId] : undefined;
       const item: PluginItemAt | undefined = install && { kind: row.kind, name: row.name, tool: tool as HarnessId, install };
@@ -177,7 +175,8 @@ function pluginDetails(row: PluginRow, placement: 'row' | 'dock' = 'row') {
         h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
         h('span.details-tool-line', {}, [toolWords(row, tool as HarnessId), item ? cantSwitch(item) ?? switchWords(item) : ''].filter(Boolean).join(' ')),
         item ? pluginItemControls(item, `enable-${row.key}-${tool}`) : null));
-    })));
+    })),
+    row.kind === 'mcp' ? null : h('div.details-file', {}, h('div.details-actions', {}, smallAction(shown ? `Hide its ${file}` : `Show its ${file}`, `pfile-${row.key}`, () => toggleFile(row))), fileShown));
 }
 
 /** A plugin's item's state in one line, as an ordinary item's opens: "On in Claude Code · off in Copilot CLI · from the plugin document-tools". */
@@ -721,22 +720,43 @@ function stoppedActions(skill: ItemRow, tool: Tool, source: Tool, where = '') {
 }
 
 /**
- * What one copy says that another doesn't, to tell copies apart: an agent's prompt lines found in this copy only (or, with none,
- * a line the others have that it lacks); otherwise its description or summary, where that differs.
+ * `to` with the words `from` lacks marked (`keep` 'added'), or `from` with the words `to` lacks ('removed'): what an MCP edit
+ * changed in a command, and the words only one agent copy has.
  */
-function ownWords(skill: ItemRow, tool: Tool, others: Tool[]): string | undefined {
+function markedWords(from: string, to: string, keep: 'removed' | 'added'): Child[] {
+  const parts = lineDiff(from.split(/(\s+)/).join('\n'), to.split(/(\s+)/).join('\n')).filter(part => part.kind === 'same' || part.kind === keep);
+  // Words marked together are one mark, its spaces at either end left outside it.
+  const runs = parts.reduce<{ marked: boolean; text: string }[]>((all, part) => {
+    const marked = part.kind === keep, last = all.at(-1);
+    if (last?.marked === marked) last.text += part.text; else all.push({ marked, text: part.text });
+    return all;
+  }, []);
+  return runs.flatMap(run => { if (!run.marked) return [run.text]; const [, lead, core, tail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(run.text)!; return [lead, core ? h(`span.change-${keep}`, {}, core) : '', tail].filter(Boolean); });
+}
+
+/**
+ * What one copy says that another doesn't, to tell copies apart: an agent's prompt lines found in this copy only, the words
+ * only it has marked against the others' line most like it (or, with none, a line the others have that it lacks); otherwise
+ * its description or summary, where that differs.
+ */
+function ownWords(skill: ItemRow, tool: Tool, others: Tool[]): Child[] | undefined {
   const versions = skill.versions ?? {};
   const prompt = versions[tool]?.prompt;
   if (prompt !== undefined) {
     const lines = (text?: string) => (text ?? '').split('\n').map(line => line.trim()).filter(Boolean);
     const theirs = others.map(other => new Set(lines(versions[other]?.prompt)));
     const added = lines(prompt).filter(line => theirs.some(set => !set.has(line)));
-    if (added.length) return `“${added[0]}”${added.length > 1 ? ` and ${added.length - 1} more ${added.length === 2 ? 'line' : 'lines'}` : ''}`;
+    if (added.length) {
+      const shared = (line: string) => markedWords(line, added[0], 'added').filter(part => typeof part === 'string' && part.trim()).length;
+      const nearest = others.flatMap(other => lines(versions[other]?.prompt)).reduce<string | undefined>((best, line) => (shared(line) > (best === undefined ? 0 : shared(best)) ? line : best), undefined);
+      const more = added.length > 1 ? ` and ${added.length - 1} more ${added.length === 2 ? 'line' : 'lines'}` : '';
+      return ['“', ...(nearest === undefined ? [added[0]] : markedWords(nearest, added[0], 'added')), `”${more}`];
+    }
     const missing = others.flatMap(other => lines(versions[other]?.prompt)).find(line => !lines(prompt).includes(line));
-    if (missing) return `Without “${missing}”`;
+    if (missing) return [`Without “${missing}”`];
   }
   const text = versions[tool]?.text;
-  return text && others.some(other => versions[other]?.text !== text) ? `“${text}”` : undefined;
+  return text && others.some(other => versions[other]?.text !== text) ? [`“${text}”`] : undefined;
 }
 
 /** The decision for differing copies: each choice says what it does, and does it at once. Copies that are the same are one choice. */
@@ -767,12 +787,12 @@ function compareChoices(skill: ItemRow, inFiles = false) {
     if (block) return h('button.version.version-blocked', { type: 'button', id: `use-${skill.key}-${tool}`, disabled: true, title: block.reason },
       h('span.version-head', {}, brandMark(tool, 14), h('strong', {}, `Use ${whose}`)),
       h('span.version-effect.version-why', {}, icon('circle-alert', 12, 'tone-warning'), block.reason));
-    const said = ownWords(skill, tool, compared.filter(entry => !group.includes(entry))) ?? (version ? `“${version.text}”` : undefined);
+    const said = ownWords(skill, tool, compared.filter(entry => !group.includes(entry))) ?? (version ? [`“${version.text}”`] : undefined);
     return h('button.version', { type: 'button', id: `use-${skill.key}-${tool}`, 'aria-label': `Use ${whose}`, disabled: !canWrite(), onclick: () => turnOn(skill, tool) },
       h('span.version-head', {}, ...group.map(entry => brandMark(entry, 14)), h('strong', {}, whose)),
       version && metaDiffers ? h('span.version-meta', {}, `${version.lines} · ${version.changed}`) : null,
       group === latest ? h('span.version-meta.version-latest', {}, icon('pencil-line', 12), `Edited most recently, ${sinceThen(last)}`) : null,
-      said ? h('span.version-text', {}, said) : null,
+      said ? h('span.version-text', {}, ...said) : null,
       h('span.version-effect', {}, effect(group)),
       h('span.version-cta', { 'aria-hidden': 'true' }, 'Use this copy'));
   };
@@ -840,8 +860,8 @@ function openRow(key: string) {
 /** An agent that syncs one-way: a quiet tag after its name, its tooltip saying what the other tools get. */
 function oneWayTag(skill: ItemRow, from: Tool) {
   const title = `${skill.managed ? 'Syncs' : 'Would sync'} one-way: it uses ${names[from]}’s ${limitedFields(skill).replace(' or ', ' and ')} settings, which the other tools can’t hold, so they get only its name, description and prompt`;
-  // Not synced yet, nothing flows: it only has fields the others can't hold.
-  return h('span.row-tag', { title }, skill.managed ? `one-way from ${names[from]}` : `${names[from]} only fields`);
+  // One property in both states, true in each: not synced yet, nothing flows until it is on.
+  return h('span.row-tag', { title }, `one-way from ${names[from]}${skill.managed ? '' : ' when on'}`);
 }
 
 /**
@@ -914,13 +934,15 @@ export function outcomeBand(table = state.page === 'skills' || state.page === 'm
     text.push(rest.slice(0, hits[0].at), h('strong.item-name', {}, hits[0].name));
     rest = rest.slice(hits[0].at + hits[0].name.length);
   }
-  return h('div.band.band-done', { role: 'status', 'data-outcome': '' }, outcome.warn ? icon('triangle-alert', 14, 'tone-warning') : outcome.info ? icon('info', 14, 'tone-muted') : icon('check', 14, 'tone-success'), h('span.band-text', {}, ...text,
+  // Two buttons take their own line under the words in a narrow window (style.css), so the sentence is never squeezed.
+  return h(`div.band.band-done${outcome.next ? '.band-two' : ''}`, { role: 'status', 'data-outcome': '' }, outcome.warn ? icon('triangle-alert', 14, 'tone-warning') : outcome.info ? icon('info', 14, 'tone-muted') : icon('check', 14, 'tone-success'), h('span.band-text', {}, ...text,
     // The space before the note sits outside it, so a note kept whole on its line never carries the last word with it.
     outcome.note ? [' ', h('span.tone-faint', {}, outcome.note.replace(/ History\.$/, ' '), h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History'), '.')] : null),
-    outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
-      : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), undefined)
-      : outcome.history ? smallAction('Undo in History', 'outcome-history', () => showPage('history')) : null,
-    outcome.next ? button({ variant: 'outline', size: 'small', label: outcome.next.label, id: outcome.next.id, attrs: outcome.next.title ? { title: outcome.next.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.next!.run(); } }) : null,
+    h('span.band-actions', {},
+      outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
+        : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), undefined)
+        : outcome.history ? smallAction('Undo in History', 'outcome-history', () => showPage('history')) : null,
+      outcome.next ? button({ variant: 'outline', size: 'small', label: outcome.next.label, id: outcome.next.id, attrs: outcome.next.title ? { title: outcome.next.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.next!.run(); } }) : null),
     closeButton(() => { state.outcome = undefined; rerender(); }, { id: 'outcome-dismiss' }));
 }
 
@@ -974,10 +996,11 @@ export function caughtUpBand(manage: ManageView): HTMLElement | null {
  */
 function writeStepBand(rest: string[], all: string[]) {
   const missing = rest.filter(name => committedList().find(skill => skill.key === name)?.copies['claude-cli'] === undefined);
-  const servers = rest.length === 1 ? 'server' : 'servers';
-  const what = missing.length === rest.length
-    ? ['Claude Code doesn’t have the ', ...nameList(rest), ` ${servers} yet.`]
-    : [`Claude Code has ${rest.length === 1 ? 'an older copy' : 'older copies'} of the `, ...nameList(rest), ` ${servers}.`];
+  const older = rest.filter(name => !missing.includes(name));
+  const servers = (names: string[]) => (names.length === 1 ? 'server' : 'servers');
+  // Each server said as what Claude Code has of it: an older copy, or none yet ("…an older copy of the files server and doesn't have search yet.").
+  const what = !older.length ? ['Claude Code doesn’t have the ', ...nameList(missing), ` ${servers(missing)} yet.`]
+    : [`Claude Code has ${older.length === 1 ? 'an older copy' : 'older copies'} of the `, ...nameList(older), ` ${servers(older)}`, ...(missing.length ? [' and doesn’t have ', ...nameList(missing), ' yet.'] : ['.'])];
   const quitFirst = state.home?.mode === 'fixture' ? h('span.band-why', {}, ' On your real tools, quit Claude Code first.') : ' Quit Claude Code first; it rewrites its settings file while open.';
   const write = button({ variant: 'primary', size: 'small', label: 'Write to Claude Code', id: 'mcp-write-claude', onclick: () => void writeClaudeNow(all),
     attrs: { title: 'Claude Code rewrites ~/.claude.json while it is open, so Central Knot writes it only when Claude Code is closed.' } });
@@ -1230,14 +1253,12 @@ function syncNotice(notice: Told, writeClaude?: () => void) {
       if (!before || !after || before === after) return null;
       const bare = (summary: string) => summary.replace(/^[^·]+·\s*/, '');
       const field = /^Command/.test(after) ? 'command' : 'URL';
-      // Words that differ are marked: struck in Claude Code's entry, tinted in the new one.
-      const words = (from: string, to: string, keep: 'removed' | 'added') => lineDiff(from.split(/(\s+)/).join('\n'), to.split(/(\s+)/).join('\n'))
-        .filter(part => part.kind === 'same' || part.kind === keep).map(part => part.kind === 'same' ? part.text : h(`span.change-${keep}`, {}, part.text));
       // The field is named once, above the pair; short tool labels keep the old and new values side by side.
       return h('span.notice-change', {},
         h('span.notice-change-caption', {}, field === 'URL' ? 'URL' : 'Command'),
-        h('span.tone-faint', {}, 'Claude Code (older)'), h('code', {}, ...words(bare(before), bare(after), 'removed')),
-        h('span.tone-faint', {}, `${[notice.winner, ...notice.losers].map(who).join(', ')} (new)`), h('code.notice-change-new', {}, ...words(bare(before), bare(after), 'added')));
+        // Words that differ are marked: struck in Claude Code's entry, tinted in the new one.
+        h('span.tone-faint', {}, 'Claude Code (older)'), h('code', {}, ...markedWords(bare(before), bare(after), 'removed')),
+        h('span.tone-faint', {}, `${[notice.winner, ...notice.losers].map(who).join(', ')} (new)`), h('code.notice-change-new', {}, ...markedWords(bare(before), bare(after), 'added')));
     })() : null,
     h('span.notice-actions', {},
       writeClaude ? button({ variant: 'primary', size: 'small', label: 'Write to Claude Code', id: 'mcp-write-claude', onclick: writeClaude }) : null,
@@ -1437,8 +1458,9 @@ function turnOn(skill: ItemRow, use?: Tool) {
   pinRows(skill.key);
   // Said from what happened: a tool whose copy couldn't be written is not called on, nor Claude Code while it waits for Write.
   const said = (notIn: HarnessId[]) => {
-    const where = onPhrase(skill, [...plugins.leftIn, ...notIn, ...(later ? ['claude-cli'] : [])]);
-    return use ? `Every tool now uses ${names[use]}’s copy of ${name}, and it is on in ${where}. Replaced copies are kept in History.` : `${name} is on in ${where}.`;
+    const left = [...plugins.leftIn, ...notIn, ...(later ? ['claude-cli'] : [])];
+    const using = canHave(skill).filter(tool => !left.includes(tool));
+    return use && using.length ? `${capitalToolsPhrase(using, toolList())} now ${using.length === 1 ? 'uses' : 'use'} ${names[use]}’s copy of ${name}. Replaced copies are kept in History.` : `${name} is on in ${onPhrase(skill, left)}.`;
   };
   mainClick(name, true, [onChange(skill, use)], plugins, said, plugins.left, later ? CLAUDE_LATER : undefined);
 }
@@ -1458,7 +1480,9 @@ const rowItems = (row: PluginRow): PluginItemAt[] => pluginTools(row).flatMap(to
  * offered beside the Undo.
  */
 function mainClick(name: string, on: boolean, changes: Change[], plugins: ReturnType<typeof turnEvery>, said: (notIn: HarnessId[]) => string, also?: string, note?: string) {
-  const along = plugins.turned.map(item => alongWords(item, plugins.ops)).filter(Boolean).join(' ') || undefined;
+  // Said as "there" when the result is about that one tool, as after a tool's own switch; else by the tool's name.
+  const there = !changes.length && new Set(plugins.turned.map(item => item.tool)).size === 1;
+  const along = plugins.turned.map(item => alongWords(item, plugins.ops, there)).filter(Boolean).join(' ') || undefined;
   const next = wholePluginAct(name, plugins.whole, on);
   if (changes.length) { void applyClick({ kind, items: [name], changes, said, also, note: [note, plugins.limit].filter(Boolean).join(' ') || undefined, next, plugins: plugins.ops.length ? { ops: plugins.ops, draft: plugins.draft, said: along } : undefined }); return; }
   const where = toolsPhrase(plugins.turned.map(item => item.tool), toolList());
@@ -1733,7 +1757,7 @@ function harnessLine(skill: ItemRow, tool: Tool): string {
   // A broken link by its name in that tool's skills folder: a copy written there replaces it.
   const broken = skill.brokenLink?.[tool] !== undefined ? ` Its skills folder has a broken link by this name${skill.brokenLink[tool] ? ` (to ${skill.brokenLink[tool]})` : ''}; a copy written there replaces it.` : '';
   const copy = drawn === 'write-now' ? waitsLine(skill, tool)
-    : !has ? `${skill.managed && skill.off.includes(tool) ? 'Not synced here.' : getsCopy(skill, tool) ? `${NEXT_SYNC}.` : skill.gone ? 'No copy.' : 'No copy. Its switch above adds it here.'}${broken}`
+    : !has ? `${skill.managed && skill.off.includes(tool) ? 'Not synced here.' : getsCopy(skill, tool) ? `${NEXT_SYNC}.` : skill.gone ? 'No copy.' : 'No copy. Turning it on adds it here.'}${broken}`
       // Off with its own switch: said once, the copy kept, whatever else it is.
       : skill.disabled?.includes(tool) ? `Off here${turnedOffByProfile(skill.key, tool) ? ' by a profile' : ''} · ${kind === 'mcp' ? 'entry' : 'copy'} kept`
       // Only a link or the shared copy: said where it is (outsideRow), not as a copy of its own.
