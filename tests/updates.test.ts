@@ -98,7 +98,7 @@ test('what the sidebar’s update control shows, from the quiet arrows to the bu
   // Nothing newer: the circular arrows, and a click checks. The tooltip says what the last check found.
   assert.deepEqual(shown({}), { look: 'check', label: 'Check for updates', does: 'check', busy: false });
   assert.equal(updateIndicator(base)!.title, 'Central Knot checks for a newer release by itself. Click to check now.', 'before the first check');
-  assert.equal(updateIndicator({ ...base, checked: { at: 1 } })!.title, 'Up to date: 0.5.0 preview 4 is the newest release. Click to check now.');
+  assert.equal(updateIndicator({ ...base, checked: { at: 1 } })!.title, 'Up to date. Click to check now.');
   assert.equal(updateIndicator({ ...base, checked: { at: 1, failed: 'Couldn’t check for updates: GitHub couldn’t be reached. Central Knot tries again later.' } })!.title,
     'Couldn’t check for updates: GitHub couldn’t be reached. Central Knot tries again later. Click to check now.', 'a failed check gets no mark of its own: it is tried again by itself');
   // A check under way spins the arrows, whether main's clock started it or the page did.

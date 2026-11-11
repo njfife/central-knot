@@ -374,6 +374,6 @@ test('the launch after an update says it is on the new version, once', async t =
 test('the launch after an update that didn’t take says the old version is still in use', async t => {
   const { world, flow } = installed(t, { pending: { tag: 'v0.5.0-preview.7', page: 'https://example.test/7', from: 'v0.5.0-preview.6' } });
   const view = await flow.view();
-  assert.equal(view.failed, 'The update to 0.5.0 preview 7 didn’t finish. Central Knot 0.5.0 preview 6 is still in use. Try the update again.');
+  assert.equal(view.failed, 'The update to 0.5.0 preview 7 didn’t finish. Central Knot 0.5.0 preview 6 is still in use.');
   assert.deepEqual([view.updated, world.pending], [undefined, undefined]);
 });

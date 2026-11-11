@@ -52,7 +52,9 @@ function restart() {
   keepFocus();
   updates.restarting = true;
   rerender();
-  void window.centralKnot.restartToUpdate().catch(() => { updates.restarting = false; announce('Couldn’t restart. Quit Central Knot and open it again to finish the update.'); rerender(); returnFocus(); });
+  // Still here when main answers: the restart didn't happen (main says why), so the control can be pressed again.
+  void window.centralKnot.restartToUpdate().then(() => { updates.restarting = false; rerender(); returnFocus(); },
+    () => { updates.restarting = false; announce('Couldn’t restart. Quit Central Knot and open it again to finish the update.'); rerender(); returnFocus(); });
 }
 const openPage = (url: string) => void window.centralKnot.openExternal(url).catch(() => announce('Couldn’t open the release page.'));
 /** Settings, scrolled to its Updates row: where a copy that can't update itself, or doesn't check, says why. */

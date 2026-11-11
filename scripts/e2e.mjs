@@ -1939,7 +1939,7 @@ async function updateFlow() {
     for (let i = 0; i < 40 && (await a.run(`document.getElementById('announcement').dataset.text`)) !== found; i++) await wait(100);
     same('clicked on another page, it checks and the status bar says what it found', [await a.run(`document.getElementById('announcement').dataset.text`), await a.run(`document.getElementById('announcement').classList.contains('visually-hidden')`)], [found, false]);
     check('the control showed the check, then went back to the quiet arrows', (await a.run('window.ckLooks')).includes('checking Checking…') && (await control()).look === 'check', await a.run('window.ckLooks'));
-    same('its tooltip says it is up to date', (await control()).title, 'Up to date: 0.5.0 preview 5 is the newest release. Click to check now.');
+    same('its tooltip says it is up to date', (await control()).title, 'Up to date. Click to check now.');
     same('and it takes the focus back', await focused(), 'update-control');
     await a.quit();
     // An update that didn't take (the old build opens again) says so, in Settings.

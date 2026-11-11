@@ -16,7 +16,7 @@
  *   - the Files view's pane from 1040px: the file and the skill's details in two columns (matrix.ts, data-columns);
  *   - a plugin's "Your tools": a column per tool once they and Choose all fit (pluginpage.ts, data-layout).
  * In this stylesheet, by window, content (#main, beside the sidebar) or component width:
- *   - window shorter than 680px: sidebar rows tighten so every page, home and the update control fit without scrolling;
+ *   - window 680px tall or less: sidebar rows tighten so every page, home and the update control fit without scrolling;
  *   - content narrower than 880px: two-pane pages stack, the list above its detail, and the marketplaces become a strip;
  *     narrow History rows put what happened on its own line;
  *   - content from 1000px: History stripes its rows;

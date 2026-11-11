@@ -162,7 +162,7 @@ export function updateIndicator(view: UpdateView, { held, restarting = false, ch
   }
   if (checking || view.checking) return { look: 'checking', glyph: 'refresh-cw', label: 'Checking…', name: 'Checking for updates', title: 'Checking GitHub for a newer release…', busy: true, does: 'check' };
   // What the last check found, said in the tooltip: nothing here is worth a mark of its own (Central Knot tries again by itself).
-  const found = view.failed ?? view.checked?.failed ?? (view.checked ? `Up to date: ${buildWords(view)} is the newest release.` : 'Central Knot checks for a newer release by itself.');
+  const found = view.failed ?? view.checked?.failed ?? (view.checked ? 'Up to date.' : 'Central Knot checks for a newer release by itself.');
   return { look: 'check', glyph: 'refresh-cw', label: 'Check for updates', name: 'Check for updates', title: `${found} Click to check now.`, busy: false, does: 'check' };
 }
 

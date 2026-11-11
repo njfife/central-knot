@@ -236,7 +236,7 @@ export function updateFlow(host: UpdaterHost, system: UpdateSystem) {
     const pending = host.pending();
     if (pending) {
       if (pending.tag === tag) view.updated = { tag: pending.tag, page: pending.page };
-      else view.failed = `The update to ${tagWords(pending.tag)} didn’t finish. Central Knot ${buildWords(view)} is still in use. Try the update again.`;
+      else view.failed = `The update to ${tagWords(pending.tag)} didn’t finish. Central Knot ${buildWords(view)} is still in use.`;
       // Said once: a record that can't be cleared is said again at the next launch, which is all it costs.
       await host.savePending(undefined).catch(error => host.log(`update: clearing the record: ${said(error)}`));
     }
