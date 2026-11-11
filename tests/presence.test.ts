@@ -8,7 +8,8 @@ import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
 import { applyChanges, manageView } from '../src/manage.ts';
 import { absentKindsIn, absentTools, heldKinds, managedTools, noteTools, presentTools } from '../src/presence.ts';
-import { chooseTools, readRecord, saveRecord, type ShareContext } from '../src/share.ts';
+import { readRecord, saveRecord, type ShareContext } from '../src/share.ts';
+import { chooseTools } from '../src/toolchoice.ts';
 import type { HarnessId, Snapshot } from '../src/types.ts';
 
 const text = (name: string) => `---\nname: ${name}\ndescription: The ${name} skill.\n---\n\nBody.\n`;
@@ -123,6 +124,20 @@ test('a tool managed again starts from its own copies: what was deleted or edite
     assert.ok(await exists(join(box.path, '.claude/skills/gone/SKILL.md')), 'the deletion in Codex did not spread');
     assert.equal(await readFile(join(box.path, '.codex/skills/gone/SKILL.md'), 'utf8'), text('gone'), 'Codex gets the copy back');
     assert.equal(await readFile(join(box.path, '.claude/skills/edited/SKILL.md'), 'utf8'), text('edited later in Claude Code'), 'the old edit in Codex did not win');
+    assert.equal(await readFile(join(box.path, '.codex/skills/edited/SKILL.md'), 'utf8'), text('edited in Codex while left out'), "Codex's own edit is kept, not overwritten");
+  } finally { await box.cleanup(); }
+});
+
+test('with Claude Code left out, OpenCode gets a copy of its own and Claude Code\'s folder is left alone', async () => {
+  const box = await home({ '.claude/skills': ['brief'] }, ['.config/opencode']);
+  try {
+    await applyChanges(box.context, [{ key: 'brief', managed: true, off: [] }]);
+    await chooseTools(box.context, ['opencode-cli']);
+    await applyChanges({ ...box.context, settleMs: 0 }, []);
+    assert.equal(await readFile(join(box.path, '.config/opencode/skills/brief/SKILL.md'), 'utf8'), text('brief'));
+    await writeFile(join(box.path, '.config/opencode/skills/brief/SKILL.md'), text('brief edited in OpenCode'));
+    await applyChanges({ ...box.context, settleMs: 0 }, []);
+    assert.equal(await readFile(join(box.path, '.claude/skills/brief/SKILL.md'), 'utf8'), text('brief'), 'nothing is written in a tool left out');
   } finally { await box.cleanup(); }
 });
 

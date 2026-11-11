@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { agentText, agentsView, applyAgents, readAgents, restoreAgent } from '../src/agents.ts';
 import { readHistory } from '../src/manage.ts';
 import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
+import { chooseTools } from '../src/toolchoice.ts';
 import type { HarnessId } from '../src/types.ts';
 import { readTomlTables } from '../src/textedit.ts';
 
@@ -73,6 +74,24 @@ test('Claude-only fields make the others one-way With limits; an edit there stay
     await applyAgents(box.context, tools, [], { settleMs: 0 });
     assert.match(await read(box.home, '.claude/agents/reviewer.md'), /New prompt\./);
   } finally { await box.cleanup(); }
+});
+
+test('A tool managed again starts from its own agents: an edit or deletion made there while it was left out does not spread', async () => {
+  for (const change of ['edit', 'delete'] as const) {
+    const box = await sandbox();
+    try {
+      await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
+      await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+      // Left out, and changed there with no pass in between (Sync off).
+      await chooseTools(box.context, ['claude-cli', 'codex-cli']);
+      const copilot = join(box.home, '.copilot/agents/reviewer.agent.md');
+      if (change === 'edit') await writeFile(copilot, (await readFile(copilot, 'utf8')).replace('Be brief.', 'Be long.')); else await rm(copilot);
+      await chooseTools(box.context, tools);
+      await applyAgents(box.context, tools, [], { settleMs: 0 });
+      await applyAgents(box.context, tools, [], { settleMs: 0 });
+      assert.match(await read(box.home, '.claude/agents/reviewer.md'), /Be brief\./, `the ${change} in Copilot did not spread`);
+    } finally { await box.cleanup(); }
+  }
 });
 
 test('Updating a copy keeps that tool’s own fields, comments and tables', async () => {

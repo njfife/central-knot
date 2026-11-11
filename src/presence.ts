@@ -1,5 +1,5 @@
-// Which tools are in a home. Every page offers and names only these, and sync writes only to these, so the rule lives
-// here, once, for the main process and the page alike.
+// Which tools are in a home (presentTools) and which of them Central Knot manages (managedTools). Pages offer and name only
+// these, and sync writes only to managed ones, so the rule lives here, once, for the main process and the page alike.
 import type { HarnessId, Snapshot } from './types.ts';
 
 /**
@@ -27,7 +27,7 @@ export const hasCowork = (snapshots: Snapshot[]): boolean => snapshots.some(snap
 export const presentTools = (snapshots: Snapshot[]): HarnessId[] => snapshots.filter(isPresent).map(snapshot => snapshot.harness);
 
 /**
- * The tools Central Knot manages in this home, in discovery order: the present ones the sync record lists (share.ts
+ * The tools Central Knot manages in this home, in discovery order: the present ones the sync record lists (toolchoice.ts
  * chooseTools sets the list). With no list (every record made before the choice existed, and a home with no record yet) it
  * manages every present tool; an empty list manages none. Every item page and every sync pass draws from these, so a present
  * tool left out is neither shown with items nor written.
