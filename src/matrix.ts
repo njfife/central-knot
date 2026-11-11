@@ -6,7 +6,7 @@ import { brandMark } from './brand.ts';
 import { caughtUpNames, DAY_MS } from './model.ts';
 import { andList, byToolOrder, capitalToolsPhrase, kindNouns, orList, problemText, toolName, toolNames, toolsPhrase } from './words.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
-import { whyReadOnly, otherOwnerSaid, saidInStatusBar, takeOverSync, tell, type Outcome, type Kind, harnessKindShown, convertAgent, flashRequests, showSkillsTable, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
+import { whyReadOnly, otherOwnerSaid, saidInStatusBar, takeOverSync, takeOverTitle, tell, type Outcome, type Kind, harnessKindShown, convertAgent, flashRequests, showSkillsTable, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, fitInView, h, icon, middle, pathText, pendingCount, toggle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { byKey, standing } from './roworder.ts';
@@ -1722,9 +1722,8 @@ function secondStepNote() {
 function otherOwnerBand(): HTMLElement | null {
   const gate = state.home?.manage.gate;
   if (gate?.state !== 'stopped' || !gate.owner) return null;
-  const { name } = gate.owner;
   const take = button({ variant: 'outline', size: 'small', label: 'Take over syncing', id: 'take-over-sync', disabled: !!state.busy || !state.home!.manage.access.allowed, onclick: () => void takeOverSync() });
-  take.title = `Central Knot syncs this home from then on, from where ${name} left it: every managed item and choice stays. ${name} stops syncing here.`;
+  take.title = takeOverTitle(gate.owner);
   return h('div.band', { role: 'status', id: 'other-owner' }, icon('circle-alert', 14, 'tone-warning'), h('span.band-text', {}, otherOwnerSaid(gate.owner)), take);
 }
 

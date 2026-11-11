@@ -225,7 +225,8 @@ async function carryOver(live: string, staged: string, release: BundleRelease, k
   for (const plugin of before.plugins) {
     if (!wanted.includes(plugin.name) || !plugin.folder || !(await exists(plugin.folder))) continue;
     await mkdir(join(staged, KEPT_FOLDER), { recursive: true });
-    await cp(plugin.folder, join(staged, KEPT_FOLDER, plugin.name), { recursive: true, verbatimSymlinks: true });
+    // (A plugin that is the marketplace's own root is the whole folder, less the plugins kept in it before.)
+    await cp(plugin.folder, join(staged, KEPT_FOLDER, plugin.name), { recursive: true, verbatimSymlinks: true, filter: source => source !== join(live, KEPT_FOLDER) });
     paths.set(plugin.name, `./${KEPT_FOLDER}/${plugin.name}`);
   }
   if (paths.size) await pointEntries(staged, paths, live);

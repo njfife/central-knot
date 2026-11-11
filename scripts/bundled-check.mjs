@@ -316,8 +316,8 @@ check('a second open keeps the unpacked marketplace as it is', statSync(marketFo
 await b.click('#nav-skills');
 const ownerSays = () => b.run(`document.querySelector('#other-owner .band-text')?.textContent ?? ''`);
 // Whether the standard app is open now is asked of macOS for an installed app; a development run can't tell.
-check('Skills says the standard app syncs this home', await b.until(`!!document.querySelector('#other-owner')`) && (dev ? await ownerSays() === 'Central Knot syncs this home, so nothing is changed from here.'
-  : /^Central Knot (is open and syncs this home, so nothing is changed from here|synced this home last and isn’t open, so nothing is syncing here now)\.$/.test(await ownerSays())), await ownerSays());
+check('Skills says the standard app syncs this home', await b.until(`!!document.querySelector('#other-owner')`) && (dev ? await ownerSays() === 'Central Knot syncs this home, so skills, MCP servers and agents aren’t changed from here. Taking over keeps every managed item and choice.'
+  : /^Central Knot (is open and syncs this home, so skills, MCP servers and agents aren’t changed from here|synced this home last and isn’t open, so nothing is syncing here now)\. Taking over keeps every managed item and choice\.$/.test(await ownerSays())), await ownerSays());
 check('with Take over syncing beside it', await b.run(`document.querySelector('#take-over-sync')?.textContent`) === 'Take over syncing');
 check('Skills fits with it at 1280', await b.fits());
 await b.shot('skills-other-owner-1280');
@@ -326,19 +326,23 @@ check('Skills fits with it at 860', await b.fits());
 await b.shot('skills-other-owner-860');
 await b.size(1280, 800);
 await b.click('#nav-overview');
+check('the Skills card on Overview doesn’t say All in sync of a home another build syncs', !(await b.run(`document.body.innerText`)).includes('All in sync'));
 check('Overview says so too', await b.run(`document.querySelector('#overview-other-owner')?.textContent ?? ''`).then(text => text.startsWith('Central Knot ') && text.endsWith('Take over syncing')) || !writes, await b.run(`document.querySelector('#overview-other-owner')?.textContent`));
 await b.shot('overview-other-owner-1280');
 if (writes) {
-  check('the status bar’s sync switch says whose it is', await b.run(`document.querySelector('#sync-switch .sync-state').textContent`) === 'By Central Knot');
+  check('the status bar’s sync switch says whose it is', await b.run(`document.querySelector('#sync-switch .sync-state').textContent`) .then(text => text === 'By Central Knot' || text === 'Central Knot’s, not open'), await b.run(`document.querySelector('#sync-switch .sync-state').textContent`));
   await b.click('#nav-skills');
   await b.click('#take-over-sync');
-  check('Take over syncing: this build syncs the home now, and says so', await b.until(`!document.querySelector('#other-owner')`) && await b.run(`document.querySelector('#announcement').textContent`).then(text => text === `${NAME} now syncs this home, from where Central Knot left it. Central Knot no longer syncs here.`), await b.run(`document.querySelector('#announcement').textContent`));
+  check('Take over syncing: this build syncs the home now, and says so', await b.until(`!document.querySelector('#other-owner')`) && await b.run(`document.querySelector('#announcement').textContent`).then(text => text === `${NAME} now syncs this home. To go back, take over in Central Knot.`), await b.run(`document.querySelector('#announcement').textContent`));
   const taken = record();
   check('the record is the same one, under the new owner, with what was managed', taken.owner === `com.centralknot.custom.${ID}` && taken.ownerName === NAME && !!taken.items.notes, taken);
   const other = await syncGate(standard);
   check('the standard app then finds this build syncs it, by name', other.state === 'stopped' && other.owner?.name === NAME, other);
   check('the sync switch is this build’s again', await b.run(`document.querySelector('#sync-switch .sync-state').textContent`).then(text => text.startsWith('On')), await b.run(`document.querySelector('#sync-switch').textContent`));
   await b.shot('skills-taken-over-1280');
+  await b.size(860, 560);
+  await b.shot('skills-taken-over-860');
+  await b.size(1280, 800);
 } else {
   await b.click('#nav-skills');
   check('where the home is preview only, taking over is not offered to act', await b.run(`document.querySelector('#take-over-sync').disabled`) === true);

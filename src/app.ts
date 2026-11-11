@@ -1047,16 +1047,21 @@ export const syncNow = () => busy('Syncing…', async () => {
   announce('Synced once. Automatic sync stays off.', true);
 });
 
-/** Another build syncs this home: who, and whether it is open now (where that can be told). Said the same on every page. */
-export const otherOwnerSaid = (owner: { name: string; running?: boolean }) => (owner.running === true ? `${owner.name} is open and syncs this home, so nothing is changed from here.`
-  : owner.running === false ? `${owner.name} synced this home last and isn’t open, so nothing is syncing here now.`
-    : `${owner.name} syncs this home, so nothing is changed from here.`);
+/**
+ * Another build syncs this home: who, whether it is open now (where that can be told), what that means here, and that
+ * taking over loses nothing. Said the same on every page.
+ */
+export const otherOwnerSaid = (owner: { name: string; running?: boolean }) => `${owner.running === false ? `${owner.name} synced this home last and isn’t open, so nothing is syncing here now.`
+  : `${owner.name}${owner.running ? ' is open and' : ''} syncs this home, so skills, MCP servers and agents aren’t changed from here.`} Taking over keeps every managed item and choice.`;
+/** What Take over syncing does, for its button's tooltip. */
+export const takeOverTitle = (owner: { name: string }) => `Central Knot syncs this home from now on, from where ${owner.name} left it, and anything waiting is synced straight away. ${owner.name} stops syncing here until you take over from it again.`;
 
 /** Take over syncing: Central Knot syncs the home from now on, in place of the build that did; nothing is reset. */
 export const takeOverSync = () => busy('Taking over syncing…', async () => {
   const taken = await api().takeOverSync(state.home!.home);
   if (taken.view) setHome(taken.view);
-  announce(taken.stopped ? `Syncing was not taken over. ${taken.stopped}` : taken.from ? `Central Knot now syncs this home, from where ${taken.from} left it. ${taken.from} no longer syncs here.` : 'Central Knot already syncs this home.');
+  // Short enough for the status bar to keep its first sentence whole; the second says the way back.
+  announce(taken.stopped ? `Syncing was not taken over. ${taken.stopped}` : taken.from ? `Central Knot now syncs this home. To go back, take over in ${taken.from}.` : 'Central Knot already syncs this home.');
 });
 
 /** A background read is running, or one arrived while the page was busy and runs when it is done (busy). */
