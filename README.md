@@ -120,7 +120,9 @@ A **bundled build** also carries a marketplace, with every plugin's files inside
 - A plugin a release no longer offers stays, files and entry, while a tool on this Mac has it installed: its row says **No longer offered**, its page says it stays in the tools that have it, and it can be uninstalled but not installed anywhere else. (Without that, Claude Code stops loading an installed plugin the moment its marketplace no longer lists it.) The first release after it is uninstalled leaves it out.
 - A later build that carries a newer release of the marketplace replaces the unpacked one at its first open, keeping such plugins the same way. An older one never does. A release that can't be unpacked leaves the last working one in place, and the log says why.
 
-Not there yet: a custom build's own updates (it says so in Settings), and one build taking over syncing from the other. Until then, when a custom build and the standard app are both used on one home, the one that managed something first keeps syncing there and the other says so.
+**One build syncs a home at a time.** A custom build and the standard app can both be on one Mac and open one home, but skills, MCP servers and agents are kept in sync by one of them: the one that managed something there first, until another is told to take over. The other one names it on Overview, Skills, MCP servers and Agents (and whether it is open now), changes nothing there, and offers **Take over syncing**. Taking over starts nothing again: the record of what is managed, every choice and History live in the home (`.central-knot/`), so the new owner carries on from exactly where the other left it, and the other stops at its next look and offers the same button. Syncing never changes hands by itself. Plugins are each build's own business either way: both install, update and list their marketplaces as before, and an instruction file can still be saved from either.
+
+Not there yet: a custom build's own updates (it says so in Settings).
 
 ## State
 

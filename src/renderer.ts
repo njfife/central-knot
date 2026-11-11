@@ -139,7 +139,9 @@ function renderPage() {
 
 /** What the home lets Central Knot write, said in the status bar; `short` stands in when the bar is narrow (style.css). */
 function writeFact(manage: ManageView): { glyph: IconName; text: string; short?: string; tone: string } {
-  if (manage.gate.state === 'stopped') return { glyph: 'circle-alert', text: 'Writing is stopped', tone: 'tone-danger' };
+  // Another build syncing this home stops only this build's syncing (the switch beside this says whose it is): plugins and
+  // instruction files are still written from here.
+  if (manage.gate.state === 'stopped' && !manage.gate.owner) return { glyph: 'circle-alert', text: 'Writing is stopped', tone: 'tone-danger' };
   if (!manage.access.allowed) return { glyph: 'lock', text: 'Preview only', tone: '' };
   if (state.home?.mode === 'actual') return { glyph: 'pencil-line', text: 'Writes to your real tools', short: 'Real tools', tone: '' };
   if (state.home?.mode === 'fixture') return { glyph: 'pencil-line', text: 'Changes stay here', short: 'Stays here', tone: '' };
