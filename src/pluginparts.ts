@@ -80,7 +80,7 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
     const detail = shownDetail(pluginKey(entry.source, plugin.name));
     const stale = copyStale(entry, plugin.name, tool, offered, detail);
     const version = status.version ? ` ${status.version}${versionDiffers(status.version, offered) ? ` (the marketplace has ${offered})` : ''}` : '';
-    const text = `${name}: installed${version}${status.live ? ', loaded live from the marketplace folder' : ''}${stale ? ', which differs from the marketplace’s copy' : ''}`;
+    const text = `${name}: installed${version}${status.live ? ', loaded live from the marketplace folder' : ''}${status.directory ? ', from the Anthropic Directory' : ''}${stale ? ', which differs from the marketplace’s copy' : ''}`;
     if (pending === 'remove') return box({ look: 'cell-pending.cell-pending-remove', state: 'remove', title: `${name}: uninstalled on Apply all. Click to keep it.`, glyph: icon('x', 15), action: 'remove' });
     const stuck = cantUninstall(view, entry, plugin.name, tool);
     if (pending === 'update') return box({ look: 'cell-pending.cell-chosen.cell-on', state: 'update', title: `${name}: updated to ${stale || !offered ? 'the marketplace’s copy' : offered} on Apply all. Click to uninstall it instead.`, glyph: icon('refresh-cw', 14), action: 'remove' });
