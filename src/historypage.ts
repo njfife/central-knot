@@ -11,6 +11,8 @@ import type { IconName } from './icons.ts';
 import type { HistoryEvent } from './types.ts';
 
 const who = (tool?: string) => (tool ? toolName(tool) : 'Central Knot');
+/** A deletion of the item since `event` that still stands: it ended what `event` did (an Off), and its own Restore is the way back. */
+const deletedSince = (event: HistoryEvent) => !!state.history.data?.some(later => later.key === event.key && later.kind === 'deleted' && !later.undoneBy && Date.parse(later.at) >= Date.parse(event.at) && later.id !== event.id);
 
 function describe(event: HistoryEvent): { glyph: IconName; text: string; action?: string } {
   const order = event.orderProved ? '' : ' Order not proved; the fixed tool order decided.';
@@ -45,7 +47,7 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
     case 'profile': return profileSwitch(event);
     // Turned off where a tool has no switch: History keeps it until it is turned on again or deleted.
     case 'removed': return event.turnedOff
-      ? { glyph: 'circle-off', text: `Turned off: removed from ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}, which ${event.losers.length === 1 ? 'has' : 'have'} no switch for it. History keeps ${event.losers.length === 1 ? 'it' : 'them'} until it is turned on again or deleted.${event.restoredTools?.length ? ` Back on in ${touchedToolsPhrase(event.restoredTools)}.` : ''}`, action: 'Turn on' }
+      ? { glyph: 'circle-off', text: `Turned off: removed from ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}, which ${event.losers.length === 1 ? 'has' : 'have'} no switch for it. History keeps ${event.losers.length === 1 ? 'it' : 'them'} until it is turned on again or deleted.${event.restoredTools?.length ? ` Back on in ${touchedToolsPhrase(event.restoredTools)}.` : ''}${deletedSince(event) ? ' It was deleted since: its deletion’s Restore puts it back.' : ''}`, ...(deletedSince(event) ? {} : { action: 'Turn on' }) }
       : { glyph: 'circle-minus', text: `Removed from ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}; Central Knot kept the ${event.losers.length === 1 ? 'copy' : 'copies'}.`, action: 'Restore' };
     case 'took-over': return { glyph: 'arrow-down-to-line', text: tookOverText(event, !!event.undoneBy), action: 'Undo' };
     case 'written': return { glyph: 'pencil-line', text: 'Write to Claude Code replaced Claude Code’s own entry with the synced one; Central Knot kept it.', action: 'Undo write' };
@@ -143,6 +145,7 @@ const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'pro
   : event.kind === 'removed' && event.turnedOff ? `Turn ${event.item} on again there: each copy back as it was`
   : event.kind === 'removed' ? `Put the removed copy back in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}`
   : event.kind === 'restored' && action === 'Undo' && !event.winner ? `Turn ${event.item} off again there: each copy removed, and History keeps it`
+  : event.kind === 'deleted' && event.everywhere ? (event.losers.length ? `Put each copy back in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}, as it was` : `Put ${event.item} back on its page, off, its copies in History`)
   : event.kind === 'took-over' ? `Put the links and the shared copy back as they were${event.tookOver?.managedNow ? `, remove the copies that turning it on added, and stop syncing ${event.item}` : ''} (only while unchanged)`
   : event.kind === 'added' ? `Remove the copies ${event.via === 'repo' ? 'Pull' : 'it'} added (only while unchanged) and stop syncing ${event.item}${event.rejoined ? ' there' : ''}` : action === 'Restore' ? `Put ${event.item} back in every tool it synced to`
   : action === 'Finish undo' ? `${unfinished(event, true)} (only while unchanged since)`
@@ -164,7 +167,7 @@ function actions(event: HistoryEvent, action?: string) {
   const named = (event.kind === 'added' || event.kind === 'removed' || (event.kind === 'deleted' && event.everywhere) || (event.kind === 'restored' && !event.winner)) ? event.losers.map(loser => loser.tool).filter(tool => !event.restoredTools?.includes(tool)) : [];
   const touched = event.base ? event.base.list.tools : named.length ? [...new Set(named)] : event.kind === 'switched' ? (event.switched ?? []).map(entry => entry.tool) : [];
   // A base no tool gets is undone in Central Knot alone, so its Undo names no tools.
-  const scope = touched.length ? `in ${touchedToolsPhrase(touched)}` : event.base ? '' : 'in all tools';
+  const scope = touched.length ? `in ${touchedToolsPhrase(touched)}` : event.base || (event.kind === 'deleted' && event.everywhere) ? '' : 'in all tools';
   // A switch's Undo says that it is one, and what it does: enable where it was disabled, disable where it was enabled.
   const flips = new Set((event.switched ?? []).map(entry => entry.disabled));
   const verb = action === 'Undo' && event.via === 'repo' ? 'Undo pull' : action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action === 'Undo' && event.kind === 'chosen' ? 'Undo choice'

@@ -753,6 +753,8 @@ async function putBackAgent(context: ShareContext, tools: HarnessId[], history: 
   const record = await readAgentRecord(context.home);
   const item = record.items[key];
   if (!item) return stop('That change can’t be restored.');
+  // Turned off, then deleted: the deletion's Restore is the way back.
+  if (past.kind === 'removed' && item.deleted) return stop(`${item.name} was deleted since. Restore the deletion from History instead.`);
   const { present, onDisk: { byKey, unreadable, duplicates } } = await gatherAgentsAfterRecovery(context, tools);
   const problem = blocked(key, unreadable, duplicates, present);
   if (problem) return stop(problem);

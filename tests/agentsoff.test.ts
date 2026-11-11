@@ -220,6 +220,9 @@ test('Delete everywhere is the only real delete: no row stays, History restores 
     const turned = await applyAgents(box.context, tools, [off()]);
     const dropped = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: false, off: tools, seenManaged: false, remove: [], everywhere: true }]);
     assert.deepEqual([dropped.made?.length, (await agentsView(box.context, tools)).gone], [1, []]);
+    // The Off it ended can't be turned on from History any more: the deletion's Restore is the way back.
+    assert.match((await restoreAgent(box.context, tools, turned.made![0])).stopped ?? '', /was deleted since/);
+    assert.equal((await everyFile(box))['claude-cli'], undefined);
     assert.equal((await restoreAgent(box.context, tools, dropped.made![0])).stopped, undefined);
     assert.deepEqual((await agentsView(box.context, tools)).gone?.map(item => item.gone?.history), [turned.made![0]]);
     const later = at(box, 365);
