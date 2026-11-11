@@ -6,13 +6,18 @@
 // - By default (a Mac) it packages the build with `scripts/package-mac.mjs` and opens the packaged app.
 // - `--electron` stages the same build and opens it as a development run, on any system (under xvfb-run on Linux).
 import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, truncateSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { connect, debugPorts } from './cdp.mjs';
 import { stage } from './custom-build.mjs';
-import { writeMarket } from './fixture-market.mjs';
+import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
+import { discover } from '../src/discovery.ts';
+import { harnessIds } from '../src/harnesses.ts';
+import { applyChanges } from '../src/manage.ts';
+import { syncGate } from '../src/share.ts';
 
 const args = process.argv.slice(2);
 const flag = name => args.includes(name);
@@ -45,17 +50,33 @@ process.on('exit', () => {
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
 // ---------- The build ----------
-// The fixture marketplace, with one more plugin that can't be packed: an npm package.
+// The fixture marketplace, with one more plugin that can't be packed: an npm package. `change` edits its entries, for a
+// later release of it.
 const market = join(scratch, 'market');
-writeMarket(market);
-const manifestPath = join(market, '.claude-plugin/marketplace.json');
-const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-manifest.plugins.push({ name: 'npm-thing', source: { source: 'npm', package: '@example/npm-thing' }, description: 'Kept as an npm package.' });
-writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
-const inputs = ['--marketplace', market, '--app-name', NAME, '--app-id', ID, '--app-icon', join(root, 'assets/icon.png'), '--marketplace-name', 'Acme plugins', '--marketplace-logo', join(root, 'assets/tray.svg')];
+function writeFixture(change = plugins => plugins) {
+  rmSync(market, { recursive: true, force: true });
+  writeMarket(market);
+  const manifestPath = join(market, '.claude-plugin/marketplace.json');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  manifest.plugins = change([...manifest.plugins, { name: 'npm-thing', source: { source: 'npm', package: '@example/npm-thing' }, description: 'Kept as an npm package.' }]);
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+}
+writeFixture();
+// The build's feed: a folder served on this computer only. Nothing is published in it yet.
+const feedDir = join(scratch, 'feed');
+mkdirSync(feedDir);
+const feedServer = createServer((request, response) => {
+  try { const bytes = readFileSync(join(feedDir, decodeURIComponent(new URL(request.url, 'http://x').pathname).replace(/^\/+/, '').replace(/\.\./g, ''))); response.writeHead(200, { 'Content-Length': bytes.length }); response.end(bytes); }
+  catch { response.writeHead(404); response.end('not found'); }
+});
+await new Promise(done => feedServer.listen(0, '127.0.0.1', done));
+const FEED = `http://127.0.0.1:${feedServer.address().port}/`;
+/** Publishes the fixture marketplace as it is now into the feed's folder, with the documented command. */
+const publish = sequence => execFileSync(process.execPath, ['scripts/publish-bundle.mjs', '--marketplace', market, '--out', feedDir, '--sequence', String(sequence)], { cwd: root, encoding: 'utf8' });
+const inputs = ['--feed', FEED, '--marketplace', market, '--app-name', NAME, '--app-id', ID, '--app-icon', join(root, 'assets/icon.png'), '--marketplace-name', 'Acme plugins', '--marketplace-logo', join(root, 'assets/tray.svg')];
 let command, launchArgs, report;
 if (dev) {
-  const staged = await stage({ marketplace: market, appName: NAME, appId: ID, appIcon: join(root, 'assets/icon.png'), marketplaceName: 'Acme plugins', marketplaceLogo: join(root, 'assets/tray.svg') }, join(scratch, 'staged'));
+  const staged = await stage({ feed: FEED, marketplace: market, appName: NAME, appId: ID, appIcon: join(root, 'assets/icon.png'), marketplaceName: 'Acme plugins', marketplaceLogo: join(root, 'assets/tray.svg') }, join(scratch, 'staged'));
   report = staged.report;
   execFileSync(process.execPath, ['scripts/build.mjs'], { cwd: root, stdio: 'inherit', env: { ...process.env, CK_CUSTOM_BUILD: staged.out } });
   // dist/ goes back to the standard app when the check ends.
@@ -78,7 +99,7 @@ check('report: identity', report.includes(`Identity: ${ID} (com.centralknot.cust
 check('report: the plugins kept in the marketplace are packed', ['document-tools 1.2.0', 'issue-tracker 2.0.0', 'release-helper 0.4.1', 'starter-skills'].every(name => /Plugins packed \(\d\): (.*)/.exec(report)?.[1].includes(name)), report);
 check('report: the npm plugin is named as not packed', /NOT PACKED \(\d\)[\s\S]*- npm-thing: Its files are an npm package \(@example\/npm-thing\), which can’t be packed into the app\./.test(report), report);
 check('report: the maker is told what the npm plugin does to Copilot CLI', /Note: Copilot CLI refuses a marketplace with an npm plugin source \(“npm-thing”\)/.test(report), report);
-check('report: no update location and no feed are said', report.includes('App updates: not met.') && report.includes('Content feed: not met.'), report);
+check('report: no update location is said, and where the feed is', report.includes('App updates: not met.') && report.includes(`Content feed: ${FEED} `), report);
 // Whether the plugin kept on GitHub was fetched depends on the network: either way it must be accounted for.
 const sparkPacked = /Plugins packed \(\d\): .*spark/.test(report);
 check('report: the plugin kept on GitHub is packed or named', sparkPacked || /- spark: /.test(report), report);
@@ -182,8 +203,8 @@ await a.settle();
 await a.shot('plugin-1280');
 await a.click('#plugin-back');
 await a.click('#market-tab-about');
-check('About: the release it carries, and no way to remove it', await a.run(`document.querySelector('.market-page-meta').textContent + '|' + !!document.querySelector('[id^="forget-"]')`).then(text => /Plugins as of \w+ \d+, \d{4}\|false$/.test(text)), await a.run(`document.querySelector('.market-page-meta').textContent`));
-if (writes) check('About says which tools have it in their own list', await a.until(`(document.querySelector('.market-in-tools p')?.textContent ?? '').startsWith('${NAME} added this marketplace to Claude Code and Codex, so these plugins also show in those tools’ own plugin lists. Remove it in a tool and it stays out.')`), await a.run(`document.querySelector('.market-in-tools')?.textContent`));
+check('About: the release it carries, and no way to remove it', await a.run(`document.querySelector('.market-page-meta').textContent + '|' + !!document.querySelector('[id^="forget-"]')`).then(text => /Plugins as of \w+ \d+, \d{4}(,| at) \d+:\d\d [AP]M\|false$/.test(text)), await a.run(`document.querySelector('.market-page-meta').textContent`));
+if (writes) check('About says which tools have it in their own list', await a.until(`(document.querySelector('#market-listed p')?.textContent ?? '').startsWith('${NAME} added this marketplace to Claude Code and Codex, so these plugins also show in those tools’ own plugin lists. Remove it in a tool and it stays out.')`), await a.run(`document.querySelector('#market-listed')?.textContent`));
 check('and offers no List in button where it is already listed or can’t go', await a.run(`document.querySelectorAll('[id^="add-carried-"]').length`) === 0);
 check('About names the plugin the build doesn’t carry', await a.run(`document.querySelector('.market-not-carried')?.textContent ?? ''`).then(text => text.includes(`isn’t included in ${NAME}`) && text.includes('npm-thing') && text.includes('an npm package (@example/npm-thing)') && text.includes('Ask Platform team if you need it.')));
 check('About shows the marketplace’s README', await a.until(`document.querySelector('.plugin-readme-body')?.textContent.includes('What is inside')`));
@@ -200,7 +221,7 @@ await a.size(1280, 800);
 
 await a.click('#nav-settings');
 const about = await a.run(`document.querySelector('#setting-build-hint')?.textContent ?? ''`);
-check('Settings says what this build is', about.includes(`${NAME} is a custom build of Central Knot`) && about.includes(`${NAME} is a custom build of Central Knot`) && about.includes(`for a newer one, ask whoever gave you ${NAME}`) && about.includes('Its Acme plugins marketplace is as of') && about.includes(`changes only with a new ${NAME}`), about);
+check('Settings says what this build is', about.includes(`${NAME} is a custom build of Central Knot`) && about.includes(`${NAME} is a custom build of Central Knot`) && about.includes(`for a newer one, ask whoever gave you ${NAME}`) && about.includes('Its Acme plugins marketplace is as of') && about.includes('newer plugins arrive by themselves'), about);
 check('Settings offers no updates from the standard app', await a.run(`!document.querySelector('#setting-updates') && !document.querySelector('#check-updates')`));
 await a.shot('settings-1280');
 for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
@@ -208,10 +229,64 @@ for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
   check(`Settings fits at ${width}`, await a.fits());
   await a.shot(`settings-${width}`);
 }
+
+// ---------- The feed: newer plugins without a new build ----------
+await a.size(1280, 800);
+await a.click('#nav-plugins');
+await a.click('#market-tab-about');
+const feedSays = () => a.run(`document.querySelector('#market-feed p')?.textContent ?? ''`);
+const checkNow = async () => { await a.click('[id^="check-feed-"]'); await a.until(`document.body.dataset.busy !== 'true'`); await a.settle(); };
+check('About has the feed’s line and Check now', await a.until(`!!document.querySelector('[id^="check-feed-"]')`), await feedSays());
+// Nothing is published yet.
+await checkNow();
+check('with nothing published, it says the feed couldn’t be read, and the plugins stay', /^Couldn’t check for newer plugins: nothing is published at their address \(the server answered 404\)\. The ones here stay in use, and the app tries again by itself\. Last tried .+\. If it keeps happening, tell Platform team\.$/.test(await feedSays()), await feedSays());
+// Claude Code has starter-skills installed (as its own records say); then release 2 is published: document-tools moves
+// on to 1.3.0 and starter-skills is no longer offered.
+writeClaudeInstall(HOME, 'team-tools', 'starter-skills', '1.0.0', { 'skills/hello/SKILL.md': '---\nname: hello\ndescription: Says hello.\n---\n' });
+writeFixture(plugins => plugins.filter(plugin => plugin.name !== 'starter-skills').map(plugin => (plugin.name === 'document-tools' ? { ...plugin, version: '1.3.0' } : plugin)));
+const published = publish(Math.floor(Date.now() / 1000) + 100);
+check('publish: the report says what went out', /^Published team-tools: .*\n[\s\S]*Plugins packed \(4\): document-tools 1\.3\.0[\s\S]*NOT PACKED \(1\)/.test(published), published);
+rmSync(market, { recursive: true, force: true });
+await checkNow();
+check('Check now takes the newer plugins, and says so', /^Newer plugins arrive by themselves\. Tools that have one installed pick up the new version when they next start; if a tool can’t, Update shows here\. Last checked /.test(await feedSays()) && await a.run(`document.querySelector('#announcement').textContent`).then(text => text.startsWith('Acme plugins now has the plugins published on ')), [await feedSays(), await a.run(`document.querySelector('#announcement').textContent`)]);
+await a.shot('about-feed-1280');
+await a.click('#market-tab-plugins');
+check('the Plugins tab shows the newer version', await a.until(`document.querySelector('[data-plugin="document-tools"] .plugin-row-version')?.textContent === '1.3.0'`), await a.run(`document.querySelector('[data-plugin="document-tools"]')?.textContent`));
+check('a plugin no longer offered stays, since a tool has it installed, and says so', await a.run(`document.querySelector('[data-plugin="starter-skills"] .plugin-chip-gone')?.textContent`) === 'No longer offered', await a.run(`[...document.querySelectorAll('.plugin-row')].map(row => row.dataset.plugin)`));
+check('its files are still in the marketplace folder', existsSync(join(marketFolder, '_kept/starter-skills/skills/hello/SKILL.md')));
+check('the Plugins page fits with it', await a.fits());
+await a.shot('plugins-feed-1280');
+// A broken publish: release 3's archive is cut short on the way up.
+writeFixture(plugins => plugins.map(plugin => (plugin.name === 'document-tools' ? { ...plugin, version: '1.4.0' } : plugin)));
+publish(Math.floor(Date.now() / 1000) + 200);
+rmSync(market, { recursive: true, force: true });
+truncateSync(join(feedDir, readdirSync(feedDir).filter(name => name.endsWith('.tgz')).sort().at(-1)), 300);
+await a.click('#market-tab-about');
+await checkNow();
+check('a broken publish is said, with why', /^Newer plugins \(.+\) are published, but they didn’t arrive whole, so they weren’t used\. The ones here stay in use, and the app tries again by itself\. Last tried .+\. If it keeps happening, tell Platform team\.$/.test(await feedSays()), await feedSays());
+check('the status bar says it short enough to read whole', await a.run(`document.querySelector('#announcement').textContent`) === 'Newer Acme plugins couldn’t be used. The ones here stay in use.', await a.run(`document.querySelector('#announcement').textContent`));
+await a.shot('about-feed-broken-1280');
+await a.size(860, 560);
+check('About with the feed’s trouble fits at 860', await a.fits());
+await a.shot('about-feed-broken-860');
+await a.size(1280, 800);
+await a.click('#market-tab-plugins');
+check('and the last good plugins stay in use', await a.run(`document.querySelector('[data-plugin="document-tools"] .plugin-row-version')?.textContent`) === '1.3.0');
+await a.click('#nav-settings');
+check('Settings says newer plugins arrive by themselves', await a.run(`document.querySelector('#setting-build-hint')?.textContent ?? ''`).then(text => text.includes('newer plugins arrive by themselves')), await a.run(`document.querySelector('#setting-build-hint')?.textContent`));
 check('no page error', a.errors.length === 0, a.errors);
 const before = statSync(marketFolder).ino;
 a.quit();
 await wait(500);
+
+// Between the two opens the standard app manages a skill in this home, as its own code does it: the home is its to sync.
+const standard = { home: HOME, mode: 'custom', read: () => Promise.all(harnessIds.map(harness => discover({ home: HOME, mode: 'custom', harness }))), build: 'com.centralknot.firstlook', buildName: 'Central Knot', settingsPath: join(scratch, 'standard-settings.json'), realHome: join(scratch, 'elsewhere') };
+mkdirSync(join(HOME, '.claude/skills/notes'), { recursive: true });
+writeFileSync(join(HOME, '.claude/skills/notes/SKILL.md'), '---\nname: notes\ndescription: Takes notes.\n---\n\nTake notes.\n');
+const managed = await applyChanges(standard, [{ key: 'notes', managed: true, off: [] }], false);
+const recordPath = join(HOME, '.central-knot/sync.json');
+const record = () => JSON.parse(readFileSync(recordPath, 'utf8'));
+check('the standard app syncs this home first', !managed.stopped && record().owner === 'com.centralknot.firstlook' && record().ownerName === 'Central Knot' && !!record().items.notes, managed.stopped ?? record());
 
 // Between the two opens the person takes the marketplace out of Claude Code, in Claude Code.
 if (writes) rmSync(join(HOME, '.claude/plugins/known_marketplaces.json'));
@@ -219,25 +294,63 @@ if (writes) rmSync(join(HOME, '.claude/plugins/known_marketplaces.json'));
 // A second open keeps what is there: the same folder, not unpacked again, and what was taken out of a tool stays out.
 const b = await launch();
 await b.click('#nav-plugins');
-check('a second open lists it again', await b.until(`document.querySelectorAll('.plugin-row').length === 6`));
+check('a second open lists it again, as the feed left it', await b.until(`document.querySelectorAll('.plugin-row').length === 6 && document.querySelector('[data-plugin="document-tools"] .plugin-row-version')?.textContent === '1.3.0'`));
 if (writes) {
   await b.click('#market-tab-about');
-  check('About offers to add it to Claude Code again', await b.until(`!!document.querySelector('[id^="add-carried-"][id$="claude-cli"]')`), await b.run(`document.querySelector('.market-in-tools')?.textContent`));
+  check('About offers to add it to Claude Code again', await b.until(`!!document.querySelector('[id^="add-carried-"][id$="claude-cli"]')`), await b.run(`document.querySelector('#market-listed')?.textContent`));
   check('it was not added again by itself', addedBy('claude').length === 1 && addedBy('codex').length === 1, { claude: addedBy('claude'), codex: addedBy('codex') });
-  check('and says which tool lists it and which doesn’t', await b.run(`document.querySelector('.market-in-tools p').textContent`) === `${NAME} added this marketplace to Codex, so these plugins also show in Codex’s own plugin list. Claude Code doesn’t list it. Remove it in a tool and it stays out.`, await b.run(`document.querySelector('.market-in-tools p').textContent`));
+  check('and says which tool lists it and which doesn’t', await b.run(`document.querySelector('#market-listed p').textContent`) === `${NAME} added this marketplace to Codex, so these plugins also show in Codex’s own plugin list. Claude Code doesn’t list it. Remove it in a tool and it stays out.`, await b.run(`document.querySelector('#market-listed p').textContent`));
   await b.shot('about-add-1280');
   await b.size(860, 560);
   check('About with its button fits at 860', await b.fits());
   await b.shot('about-add-860');
   await b.size(1280, 800);
   await b.click('[id^="add-carried-"][id$="claude-cli"]');
-  check('List in Claude Code adds it, and the page says so', await b.until(`(document.querySelector('.market-in-tools p')?.textContent ?? '').startsWith('${NAME} added this marketplace to Claude Code and Codex')`) && addedBy('claude').length === 2, await b.run(`document.querySelector('.market-in-tools')?.textContent`));
+  check('List in Claude Code adds it, and the page says so', await b.until(`(document.querySelector('#market-listed p')?.textContent ?? '').startsWith('${NAME} added this marketplace to Claude Code and Codex')`) && addedBy('claude').length === 2, await b.run(`document.querySelector('#market-listed')?.textContent`));
   await b.shot('about-listed-1280');
   check('the status bar says what happened', await b.run(`document.querySelector('#announcement').textContent`).then(text => text.startsWith('Nothing was installed: Acme plugins is now listed in Claude Code.')), await b.run(`document.querySelector('#announcement').textContent`));
 }
 check('a second open keeps the unpacked marketplace as it is', statSync(marketFolder).ino === before);
+
+// ---------- One build syncs a home at a time ----------
+await b.click('#nav-skills');
+const ownerSays = () => b.run(`document.querySelector('#other-owner .band-text')?.textContent ?? ''`);
+// Whether the standard app is open now is asked of macOS for an installed app; a development run can't tell.
+check('Skills says the standard app syncs this home', await b.until(`!!document.querySelector('#other-owner')`) && (dev ? await ownerSays() === 'Central Knot syncs this home, so skills, MCP servers and agents aren’t changed from here. Taking over keeps every managed item and choice.'
+  : /^Central Knot (is open and syncs this home, so skills, MCP servers and agents aren’t changed from here|synced this home last and isn’t open, so nothing is syncing here now)\. Taking over keeps every managed item and choice\.$/.test(await ownerSays())), await ownerSays());
+check('with Take over syncing beside it', await b.run(`document.querySelector('#take-over-sync')?.textContent`) === 'Take over syncing');
+check('Skills fits with it at 1280', await b.fits());
+await b.shot('skills-other-owner-1280');
+await b.size(860, 560);
+check('Skills fits with it at 860', await b.fits());
+await b.shot('skills-other-owner-860');
+await b.size(1280, 800);
+await b.click('#nav-overview');
+check('the Skills card on Overview doesn’t say All in sync of a home another build syncs', !(await b.run(`document.body.innerText`)).includes('All in sync'));
+// (A preview-only home says that on Overview instead.)
+if (writes) check('Overview says so too', await b.run(`document.querySelector('#overview-other-owner')?.textContent ?? ''`).then(text => text.startsWith('Central Knot ') && text.endsWith('Take over syncing')), await b.run(`document.querySelector('#overview-other-owner')?.textContent`));
+await b.shot('overview-other-owner-1280');
+if (writes) {
+  check('the status bar’s sync switch says whose it is', await b.run(`document.querySelector('#sync-switch .sync-state').textContent`) .then(text => text === 'By Central Knot' || text === 'Central Knot’s, not open'), await b.run(`document.querySelector('#sync-switch .sync-state').textContent`));
+  await b.click('#nav-skills');
+  await b.click('#take-over-sync');
+  check('Take over syncing: this build syncs the home now, and says so', await b.until(`!document.querySelector('#other-owner')`) && await b.run(`document.querySelector('#announcement').textContent`).then(text => text === `${NAME} now syncs this home. To go back, take over in Central Knot.`), await b.run(`document.querySelector('#announcement').textContent`));
+  const taken = record();
+  check('the record is the same one, under the new owner, with what was managed', taken.owner === `com.centralknot.custom.${ID}` && taken.ownerName === NAME && !!taken.items.notes, taken);
+  const other = await syncGate(standard);
+  check('the standard app then finds this build syncs it, by name', other.state === 'stopped' && other.owner?.name === NAME, other);
+  check('the sync switch is this build’s again', await b.run(`document.querySelector('#sync-switch .sync-state').textContent`).then(text => text.startsWith('On')), await b.run(`document.querySelector('#sync-switch').textContent`));
+  await b.shot('skills-taken-over-1280');
+  await b.size(860, 560);
+  await b.shot('skills-taken-over-860');
+  await b.size(1280, 800);
+} else {
+  await b.click('#nav-skills');
+  check('where the home is preview only, taking over is not offered to act', await b.run(`document.querySelector('#take-over-sync').disabled`) === true);
+}
 check('no page error at the second open', b.errors.length === 0, b.errors);
 b.quit();
 
 console.log(`bundled check (${dev ? 'development run' : 'packaged app'}): ${passes} passed, ${failures.length} failed${sparkPacked ? '' : ' (the plugin kept on GitHub could not be fetched here, and was named)'}`);
+feedServer.close();
 process.exit(failures.length ? 1 : 0);

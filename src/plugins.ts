@@ -4,20 +4,20 @@ import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { pathBeside } from './platform.ts';
 import { configRoot, harnesses } from './harnesses.ts';
 import { CODEX_MANIFEST, MANIFEST, codexManifest, inside, installedContents, parseObject, pluginContents, pluginManifest, readManifest, remoteOf, skillName, skillNamesIn, sourceOf, type ReadAs } from './catalogdetail.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { editTomlArray, readTomlTables, type TomlValue } from './textedit.ts';
 import { codexSkillSwitches, type CodexSkillSwitch } from './skillswitch.ts';
-import { INLINE_SKILLS_CONFIG, heldReason, noCli, offByBareName, noSwitchReason, samePart } from './pluginstatus.ts';
+import { DIRECTORY, INLINE_SKILLS_CONFIG, heldReason, noCli, offByBareName, noSwitchReason, samePart } from './pluginstatus.ts';
 import { takesPlugins, type PluginTool } from './presence.ts';
 import { errorCode, readParts, writeFileChecked } from './share.ts';
 import { SAFE_NAME, compareVersions, githubRepo, isCommitHash, isFolder, isHttps, record, strings, text, withoutBom } from './values.ts';
 
 /** Names the tools accept (values.ts holds it, so the page can check a skill's name too). */
-export { SAFE_NAME };
+export { DIRECTORY, SAFE_NAME };
 import { toolNames } from './words.ts';
 import type { ActionReport, Catalog, CatalogPlugin, DesktopApp, Components, HarnessId, InstallState, NativeRun, PartKind, PluginContents, SkillOff, ThroughPlugin } from './types.ts';
 
@@ -466,6 +466,62 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
 }
 
 
+// ---------- Claude Code's Anthropic Directory ----------
+
+/**
+ * A plugin's repository and folder as Claude Code keys the Anthropic Directory: "github.com/owner/repo#path", the
+ * repository in lowercase, the folder as written (its catalog has "…#HubSpot-Sales"): keys are compared ignoring case.
+ * Undefined for an address that names no host (a local folder).
+ */
+export function repositoryKey(url: string, path = ''): string | undefined {
+  const address = url.trim();
+  const scp = /^[\w.-]+@([\w.-]+):(?!\/\/)(.+)$/.exec(address);
+  let where: string;
+  if (scp) where = `${scp[1]}/${scp[2]}`;
+  else {
+    try { const parsed = new URL(address); if (!parsed.hostname) return undefined; where = `${parsed.hostname}${parsed.pathname}`; } catch { return undefined; }
+  }
+  const repo = where.replace(/\/+$/, '').replace(/\.git$/i, '');
+  const folder = path.replace(/\\/g, '/').replace(/^(\.?\/)+/, '').replace(/\/+$/, '');
+  return `${repo.toLowerCase()}#${folder}`;
+}
+
+/** A marketplace plugin's repository key: where its entry says it lives, or, kept in a Git marketplace, that repository and its folder there. */
+function catalogKey(catalog: Catalog, item: CatalogPlugin): string | undefined {
+  if (item.remote) return repositoryKey(item.remote.url, item.remote.path);
+  if (catalog.kind !== 'git' || !catalog.root || !item.folder) return undefined;
+  return repositoryKey(fetchUrl(catalog.source), relative(catalog.root, item.folder));
+}
+
+/**
+ * Claude Code's copy of a marketplace plugin from the Anthropic Directory, if it has one: a user-scope install there
+ * whose repository key is the plugin's. Claude Code counts the two as the same plugin and won't install it from the
+ * marketplace too ("already installed from Anthropic Directory … Nothing to install", exit 0, 2.1.322), so it is
+ * installed, from the directory. Its key is on the install record, or in plugin-directory-bindings.json.
+ */
+export async function fromDirectory(context: PluginContext, catalog: Catalog, item: CatalogPlugin): Promise<InstallState | undefined> {
+  const key = catalogKey(catalog, item)?.toLowerCase();
+  if (!key) return undefined;
+  const root = configRootOf(context, 'claude-cli');
+  const listed = record((await recordJson(context, join(root, 'plugins/installed_plugins.json')))?.plugins) ?? {};
+  const bindings = record((await recordJson(context, join(root, 'plugins/plugin-directory-bindings.json')))?.bindings);
+  for (const [id, entries] of Object.entries(listed)) {
+    const names = idParts(id);
+    if (names?.marketplace !== DIRECTORY) continue;
+    const user = (Array.isArray(entries) ? entries : []).map(record).find(entry => entry?.scope === 'user');
+    const bound = text(user?.directoryRepositoryKey) || text(record(bindings?.[id])?.repositoryKey);
+    if (!user || bound.toLowerCase() !== key) continue;
+    const state = await installState(context, 'claude-cli', DIRECTORY, names.plugin, item.entry);
+    // Claude Code refuses the marketplace's copy while it lists the directory's, files or not: no Install to offer here.
+    if (state.state !== 'installed') return { state: 'held', reason: `Claude Code lists it as ${id}, from the Anthropic Directory, but its files are not where it records them. Reinstall it in Claude Code (/plugin).` };
+    // Claude Code records a directory copy's version as the release and the commit's first 12 digits: the release is the version.
+    const sha = text(user.gitCommitSha);
+    const version = state.version?.replace(/-([0-9a-f]{7,40})$/i, (whole, digits: string) => (sha && sha.toLowerCase().startsWith(digits.toLowerCase()) ? '' : whole));
+    return { ...state, directory: id, ...(version ? { version } : {}) };
+  }
+  return undefined;
+}
+
 /** One plugin a tool has installed, as its own records say: its copy (installState), whether the whole plugin is off there, and its marketplace entry where the tool's copy of the marketplace is readable. */
 export interface ToolPlugin { plugin: string; marketplace: string; state: InstallState; off: boolean; entry?: Record<string, unknown>; atMarketplaceRoot?: boolean }
 
@@ -850,6 +906,11 @@ export async function addMarketplace(context: PluginContext, catalog: Catalog, t
 /** Installs one plugin into one tool: adds the marketplace there if needed (never replacing a different one of the same name), installs, then reads the tool's record. */
 export async function install(context: PluginContext, catalog: Catalog, plugin: string, tool: PluginTool): Promise<ActionReport> {
   const name = toolNames[tool];
+  // Claude Code won't install a plugin it has from the Anthropic Directory again from a marketplace: it already has it.
+  const item = tool === 'claude-cli' ? catalog.plugins.find(candidate => candidate.name === plugin) : undefined;
+  const directory = item ? await fromDirectory(context, catalog, item) : undefined;
+  if (directory?.state === 'installed') return { tool, outcome: 'installed', message: `Already installed in ${name}, from the Anthropic Directory.`, runs: [] };
+  if (directory?.state === 'held') return { tool, outcome: 'held', message: directory.reason, runs: [] };
   // Held first: a same-named plugin installed from the other marketplace is not this one "already installed".
   const listed = await addMarketplace(context, catalog, tool);
   const runs = listed.runs;
@@ -866,7 +927,8 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
   if (state.state === 'installed') return { tool, outcome: 'installed', changed: true, message: `${installed.ok ? 'Installed' : 'The command reported a problem, but it is installed'}${state.live ? ', loaded live from the marketplace folder' : ''}. ${nextStepFor(tool)}`.trim(), runs };
   if (state.state === 'not-known') return { tool, outcome: 'not-known', message: state.reason, runs };
   // A marketplace the tool already had is used as the tool last fetched it, which may predate what this page shows.
-  const older = registered ? ` ${name} uses its own copy of this marketplace, which may be older than the one shown here: update it in ${name}, then try again.` : '';
+  // A tool that says it has the same plugin from elsewhere has it: an older copy of this marketplace isn't why.
+  const older = registered && !/already installed from/i.test(installed.output) ? ` ${name} uses its own copy of this marketplace, which may be older than the one shown here: update it in ${name}, then try again.` : '';
   return { tool, outcome: 'failed', message: `Not installed. ${lastLines(installed.output)}${older}`.trim(), runs };
 }
 

@@ -19,6 +19,9 @@ export interface DesktopApp {
   binary?: string;
 }
 
+/** An app found on this computer that runs the tools or reads their files without being a tool Central Knot manages (T3 Code, VS Code). */
+export interface OtherApp { name: string; version?: string; says: string }
+
 export interface Skill {
   /** Folder name: what the harness root holds and what a copy is called. */
   folder: string;
@@ -68,11 +71,11 @@ export interface WriteAccess { allowed: boolean; reason: string }
 export type SyncGate =
   | { state: 'first-setup' | 'ready' }
   | { state: 'needs-resume'; reason: string }
-  | { state: 'stopped'; reason: string };
+  | { state: 'stopped'; reason: string; /** Set when another build syncs this home: its identity, its name, and whether it is open now (where that can be told). */ owner?: { build: string; name: string; running?: boolean } };
 
 export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** A take-over step: a link replaced by a real copy, a tool given its own copy, or the shared copy removed. */ tookOver?: 'link' | 'placed' | 'shared'; /** With `tookOver` 'shared': the folder the copy was removed from. */ folder?: string; /** `switched`: which way. */ disabled?: boolean }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
@@ -88,6 +91,8 @@ export interface DesktopApi {
   startHome(): Promise<HomeView | null>;
   setSync(on: boolean): Promise<HomeView | null>;
   syncNow(home: string): Promise<HomeView | null>;
+  /** Makes this build the home's sync owner, in place of the build that syncs it now; every managed item and choice stays. */
+  takeOverSync(home: string): Promise<{ stopped?: string; from?: string; view: HomeView | null }>;
   onSyncChanged(callback: () => void): void;
   /** Main did something on the person's behalf outside any request (a bundled build added its marketplace to their tools): words for the status bar. */
   onSaid(callback: (text: string) => void): void;
@@ -161,8 +166,12 @@ export interface DesktopApi {
   /** Adds a marketplace; `source` is how it was stored, so the page can open exactly that one. */
   addMarketplace(source: string): Promise<{ problem?: string; view?: PluginsView; source?: string }>;
   forgetMarketplace(source: string): Promise<PluginsView | null>;
+  /** Stops offering a suggested marketplace; `again`: offers it again (the Undo of that). */
+  declineMarketplace(source: string, again?: boolean): Promise<PluginsView | null>;
   /** Adds the marketplace this build carries to one tool's own plugin list, with that tool's own command. Installs nothing. */
   addCarriedTo(tool: HarnessId, home: string): Promise<{ stopped?: string; report?: ListedReport; view?: PluginsView }>;
+  /** Looks now at a bundled build's feed for newer plugins, and takes them if there are any. The Plugins view is read again afterwards. */
+  checkCarriedFeed(): Promise<void>;
   pickMarketplaceFolder(): Promise<string | null>;
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
@@ -465,6 +474,11 @@ export interface Catalog {
 export interface SkillOff { skill: string; held?: string }
 
 export type InstallState = { state: 'installed'; path: string; live?: boolean;
+  /**
+   * Claude Code has this plugin from the Anthropic Directory, not from this marketplace: the same plugin (the same
+   * repository and folder), under this id there. It is installed for the person, and Claude Code keeps it.
+   */
+  directory?: string;
   /** The version the tool records for its copy, or its copy's manifest gives (see plugins.ts copyVersion). */
   version?: string;
   /** Where the tool has a switch for one skill of a plugin: the skills the installed copy holds, and those of them turned off. */
@@ -529,7 +543,9 @@ export interface ListedReport { tool: HarnessId; outcome: 'there' | 'added' | 'h
  * marketplace, its release ("November 10, 2026", made from "GitHub: acme/plugins at 1a2b3c4d5e"), and each plugin the
  * marketplace lists whose files the build doesn't carry, with why.
  */
-export interface BundledView { app: string; displayName?: string; logo?: string; /** Its release's date, in words. */ release: string; /** What the release was made from, for whoever needs to tell releases apart. */ from?: string; unpackaged: { name: string; reason: string }[]; /** The tools of the open home this build added the marketplace to (by itself or when asked), as its own record has it. */ addedTo?: HarnessId[] }
+export interface BundledView { app: string; displayName?: string; logo?: string; /** Its release's date and time, in words. */ release: string; /** What the release was made from, for whoever needs to tell releases apart. */ from?: string; unpackaged: { name: string; reason: string }[]; /** The tools of the open home this build added the marketplace to (by itself or when asked), as its own record has it. */ addedTo?: HarnessId[];
+  /** Plugins the marketplace no longer offers that stay because a tool here has them installed. */ kept?: string[];
+  /** Set when the build has a feed of newer plugins: when it was last looked at, and what that came to, in words (bundlefeed.ts). */ feed?: { checked?: string; outcome?: 'current' | 'updated' | 'held' | 'failed'; message?: string } }
 
 export interface MarketplaceView {
   source: string;
@@ -609,6 +625,8 @@ export interface PluginsView {
   desktopOnly?: Partial<Record<HarnessId, string>>;
   /** Each found CLI's version, where it could be read (a plugin skill's switch is offered only from a tested build). */
   versions?: Partial<Record<HarnessId, string>>;
+  /** Marketplaces offered without being looked for (suggested.ts): each with the tools here it is the default of. One click adds one; nothing is fetched before. */
+  suggested?: { source: string; name: string; tools: HarnessId[] }[];
 }
 
 // ---------- MCP servers ----------

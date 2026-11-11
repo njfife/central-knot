@@ -162,7 +162,10 @@ const FIT_STEPS = ['bar-short', 'bar-icons', 'bar-wrap'];
  * than it shows (its own content overflows it, though the part itself fits).
  */
 function overflows(bar: HTMLElement): boolean {
-  const inner = bar.getBoundingClientRect().right - parseFloat(getComputedStyle(bar).paddingRight);
+  const box = bar.getBoundingClientRect();
+  // A bar that isn't drawn (a toolbar holding only a title, in narrow content) has nothing to overflow.
+  if (!box.width) return false;
+  const inner = box.right - parseFloat(getComputedStyle(bar).paddingRight);
   return [...bar.children].some(child => child.getBoundingClientRect().right > inner + 0.5 || child.scrollWidth > child.clientWidth + 1);
 }
 

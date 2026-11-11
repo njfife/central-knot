@@ -938,8 +938,11 @@ span.ins-confirm { margin-top: 0; }
 .market-logo { box-sizing: border-box; width: 18px; height: 18px; margin-right: 6px; padding: 2px; border-radius: 4px; background: #fff; object-fit: contain; vertical-align: -4px; }
 .market-in-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 12.5px; line-height: 18px; color: var(--ink-soft); }
 .market-in-tools p { margin: 0; min-width: 0; }
+.market-in-tools p:has(> svg) { display: flex; align-items: flex-start; gap: 6px; }
+.market-in-tools p > svg { flex: none; margin-top: 2px; }
 /* The dot between "can't be installed" and its link stays where the rows drop their other dots (narrow). */
-.plugin-row-left { display: flex; align-items: baseline; flex: 0 1 auto; min-width: 0; font-size: 11.5px; }
+/* Its words give way only once the description beside them has given all it can. */
+.plugin-row-left { display: flex; align-items: baseline; flex: 0 0 auto; max-width: 100%; min-width: 0; font-size: 11.5px; }
 .plugin-row-left .plugin-row-holds { flex: 0 1 auto; min-width: 0; }
 .plugin-row-left .plugin-row-sep { display: inline; margin: 0 6px; }
 .plugin-row-left .text-action { flex: none; padding: 0; font-size: inherit; white-space: nowrap; }
@@ -961,10 +964,15 @@ span.ins-confirm { margin-top: 0; }
 .market-add-actions { display: flex; gap: 6px; }
 .market-empty-add { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .market-empty-add .market-add { width: 360px; max-width: 100%; text-align: left; }
-.market-examples { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; margin: 4px 0 10px; font-size: 12.5px; color: var(--ink-soft); }
-.market-example { all: unset; cursor: pointer; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; font-family: var(--mono); font-size: 12px; color: var(--ink); }
-.market-example:hover { border-color: var(--accent); }
-.market-example:disabled { opacity: .5; cursor: default; }
+/* Suggested marketplaces: under the list (and under the add box on the empty page), each a name, whose default it is, Add and a way to say no. */
+.market-suggested { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; padding: 10px 0 0; border-top: 1px solid var(--line); }
+.market-suggested-title { margin: 0 6px 2px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-faint); }
+.market-suggestion { display: flex; align-items: center; gap: 6px; padding: 4px 4px 4px 10px; }
+.market-suggestion-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+/* A name wraps in the list's narrow column rather than being cut short; in the strip and on the empty page it has the room. */
+.market-suggestion-name { font-size: 13px; font-weight: 500; color: var(--ink); overflow-wrap: anywhere; }
+.market-suggestion-meta { font-size: 11.5px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.market-suggested-first { width: 360px; max-width: 100%; margin: 4px 0 10px; text-align: left; }
 .market-empty { color: var(--ink-soft); font-size: 13px; }
 .empty-aside { margin: 10px 0 0; font-size: 12px; color: var(--ink-soft); }
 .market-hint { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 8px; font-size: 12px; color: var(--ink-soft); }
@@ -995,7 +1003,7 @@ span.ins-confirm { margin-top: 0; }
 .market-tablist { display: flex; gap: 2px; align-self: flex-end; }
 .market-tab, .harness-tab { all: unset; padding: 7px 12px; margin-bottom: -1px; border-bottom: 2px solid transparent; font-size: 13px; color: var(--ink-soft); cursor: pointer; }
 .market-tab.selected, .harness-tab.selected { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
-.market-item:focus-visible, .market-tab:focus-visible, .market-chip:focus-visible, .market-example:focus-visible, .crumb-link:focus-visible, .plugin-row-open:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 4px; }
+.market-item:focus-visible, .market-tab:focus-visible, .market-chip:focus-visible, .crumb-link:focus-visible, .plugin-row-open:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 4px; }
 /* The toolbar over the marketplace pane: where you are at the left; at the right, what is chosen or just happened. */
 .plugins-toolbar { gap: 12px; padding-left: var(--market-gutter); padding-right: var(--market-gutter); }
 .market-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
@@ -1198,6 +1206,12 @@ span.ins-confirm { margin-top: 0; }
   .market-list ul { flex-direction: row; }
   .market-item { flex-direction: row; align-items: baseline; gap: 8px; width: auto; max-width: 320px; padding: 4px 10px; }
   .market-add { flex-direction: row; align-items: center; margin: 0; padding: 0 0 0 8px; border-top: 0; border-left: 1px solid var(--line); }
+  /* Suggestions take a line of their own under the strip, each its name and Add side by side; whose default it is stays in its tooltip. */
+  .market-list:has(> .market-suggested) { flex-wrap: wrap; row-gap: 6px; }
+  .market-list > .market-suggested { order: 1; flex: 1 0 100%; flex-direction: row; align-items: center; margin: 0; padding: 0; border-top: 0; }
+  .market-list > .market-suggested > .market-suggested-title { margin: 0 2px 0 0; }
+  .market-list > .market-suggested .market-suggestion { padding: 0 0 0 4px; }
+  .market-list > .market-suggested .market-suggestion-meta { display: none; }
   .market-add-head { display: none; }
   .market-add-input { width: 240px; }
   .plugins-page { --market-gutter: 16px; }
@@ -1545,6 +1559,14 @@ span.ins-confirm { margin-top: 0; }
 
 /* ---------- Harnesses ---------- */
 .harness-scroll { container-type: inline-size; padding: 12px var(--pad-end) 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+/* Apps that run the tools or read their files (T3 Code, VS Code): a quiet list under the cards. */
+.other-apps { margin-top: 4px; }
+.other-apps-title { margin: 0 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-faint); }
+.other-apps ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.other-app { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font-size: 12.5px; }
+.other-app-name { color: var(--ink); font-weight: 600; }
+.other-app-version { font-weight: 400; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.other-app-says { color: var(--ink-soft); max-width: 90ch; }
 .harness-scroll > * { flex: none; }
 .harness-scroll > .tools-note { margin: 0; max-width: 80ch; }
 .harness-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; }

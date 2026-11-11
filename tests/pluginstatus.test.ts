@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { blocked, partsOffer, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, partStillIn, pluginPlace, otherVersions, otherVersionsLine, toolsWithoutPlugin, unavailable, updateTools } from '../src/pluginstatus.ts';
+import { FROM_DIRECTORY, blocked, cantUninstall, partsOffer, removableTools, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, partStillIn, pluginPlace, otherVersions, otherVersionsLine, toolsWithoutPlugin, unavailable, updateTools } from '../src/pluginstatus.ts';
 import { readInTurn, readInto, type Read } from '../src/reads.ts';
 import type { HomeView, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
 
@@ -43,6 +43,11 @@ test('Update is offered only where a tool’s copy is older and can be changed h
   assert.deepEqual(updateTools(view, copies, 'p', '2.0.0').plugin, ['claude-cli']);
   assert.deepEqual(updateTools({ ...view, clis: { 'copilot-cli': true } }, copies, 'p', '2.0.0').plugin, [], 'no CLI to run it');
   assert.deepEqual(updateTools(view, copies, 'p', undefined).plugin, [], 'nothing to compare with');
+  // Claude Code's copy from the Anthropic Directory is installed, and left to Claude Code: behind or not, no Update, no Uninstall.
+  const directory = at({ 'claude-cli': { state: 'installed', path: '/x', version: '1.9.0', directory: 'p@anthropic-plugin-directory' } });
+  assert.deepEqual([updateTools(view, directory, 'p', '2.0.0').plugin, removableTools(view, directory, 'p'), toolsWithoutPlugin(view, directory, 'p')], [[], [], ['copilot-cli', 'codex-cli']]);
+  assert.equal(cantUninstall(view, directory, 'p', 'claude-cli'), FROM_DIRECTORY);
+  assert.deepEqual(copiesToCompare(view, directory), [], 'its files aren’t compared with the marketplace’s');
 });
 
 test('A copy at the marketplace’s version whose text differs is offered Update once its files are read; line endings and parts only one side has are no difference', () => {

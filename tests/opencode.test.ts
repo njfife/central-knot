@@ -6,13 +6,13 @@ import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:f
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { agentsView, applyAgents } from '../src/agents.ts';
-import { discover } from '../src/discovery.ts';
+import { discover, findOtherApps } from '../src/discovery.ts';
 import { envOverride, harnesses } from '../src/harnesses.ts';
 import { instructionsView } from '../src/instructions.ts';
 import { applyChanges, manageView, readHistory, restoreFromHistory } from '../src/manage.ts';
 import { applyMcp, mcpView, readTool } from '../src/mcp.ts';
 import { mcpDisabled, withMcpSwitch } from '../src/mcpswitch.ts';
-import { executableCandidates } from '../src/platform.ts';
+import { appCandidates, executableCandidates } from '../src/platform.ts';
 import type { ShareContext } from '../src/share.ts';
 import { isDisabled, readSwitchFile, switchState, switchedText } from '../src/skillswitch.ts';
 import { readJsonc } from '../src/textedit.ts';
@@ -336,5 +336,19 @@ test('OpenCode’s instruction file is AGENTS.md in its own folder', async () =>
     await rm(join(box.home, OPENCODE, 'AGENTS.md'));
     await writeFile(join(box.home, '.claude/CLAUDE.md'), 'Claude Code’s own.\n');
     assert.match((await instructionsView(box.context, await box.context.read())).find(file => file.tool === 'opencode-cli')!.notes.join(' '), /OpenCode 1\.x reads Claude Code’s CLAUDE\.md instead/);
+  } finally { await box.cleanup(); }
+});
+
+test('pi-gui is found as Pi’s desktop app, and T3 Code as an app that runs the tools, each by its own version', async () => {
+  const box = await sandbox();
+  const plist = (version: string) => `<plist><dict><key>CFBundleShortVersionString</key><string>${version}</string></dict></plist>`;
+  try {
+    for (const [name, version] of [['pi-gui.app', '0.4.0'], ['T3 Code (Nightly).app', '0.1.9']]) {
+      await mkdir(join(box.home, 'Applications', name, 'Contents'), { recursive: true });
+      await writeFile(join(box.home, 'Applications', name, 'Contents/Info.plist'), plist(version));
+    }
+    const pi = await discover({ home: box.home, mode: 'actual', harness: 'pi-cli', runProbes: true, binaries: [], apps: appCandidates(box.home, 'pi') });
+    assert.deepEqual([pi.detection, pi.app], ['App only', { name: 'pi-gui (third-party)', version: '0.4.0', carries: 'Pi' }]);
+    assert.deepEqual((await findOtherApps(box.home)).find(app => app.name === 'T3 Code')?.version, '0.1.9');
   } finally { await box.cleanup(); }
 });

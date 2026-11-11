@@ -70,7 +70,8 @@ export const searchPath = (): Promise<string> =>
  */
 export interface AppCandidate {
   name: string; app: string; alias?: true; versionFile?: string; carries: string;
-  carried: { folders: string; binary?: string } | { file: string; runtimes?: string; binary?: string } | { binary: string };
+  /** Where the tool the app carries is. Left out for an app that only reads the tool's files (pi-gui): it has a version of its own and no copy of the tool to name. */
+  carried?: { folders: string; binary?: string } | { file: string; runtimes?: string; binary?: string } | { binary: string };
 }
 
 export function appCandidates(home: string, binary: string, platform: string = process.platform): AppCandidate[] {
@@ -83,6 +84,8 @@ export function appCandidates(home: string, binary: string, platform: string = p
     codex: where.map(apps => ({ name: 'ChatGPT desktop', app: join(apps, 'ChatGPT.app'), carries: 'Codex', carried: { binary: 'Contents/Resources/codex-cli/bin/codex' } })),
     // OpenCode desktop 2.2.5 names the OpenCode it carries in a file beside it. That copy is never run from here: an OpenCode
     // of the newer line started on a fresh data folder stops an older CLI from working (measured, capability-data §8).
+    // pi-gui is a third-party desktop app for Pi (no official one is established): it uses Pi's own files through Pi's SDK.
+    pi: where.map(apps => ({ name: 'pi-gui (third-party)', app: join(apps, 'pi-gui.app'), carries: 'Pi' })),
     opencode: where.map(apps => ({ name: 'OpenCode desktop', app: join(apps, 'OpenCode.app'), carries: 'OpenCode', carried: { file: 'Contents/Resources/opencode-cli.version' } })),
   };
   const own: Record<string, Record<string, AppCandidate[]>> = {
@@ -109,3 +112,15 @@ export function appCandidates(home: string, binary: string, platform: string = p
  * Claude desktop itself, which starts Code tab sessions while it is open.
  */
 export const CLAUDE_PROCESS = '^[^ ]*node .*(@anthropic-ai/claude-code/|/bin/claude( |$))|/claude-code/[^/]+/[^/]+/claude\\.app/Contents/MacOS/claude( |$)|/Claude\\.app/Contents/MacOS/Claude( |$)';
+
+/**
+ * Apps that are no tool of their own here, but run the tools or read their files (SPEC 5.1, D-24): looked for on this
+ * computer, never run, and named on Harnesses only when found. `says`: what that means for what Central Knot sets up.
+ */
+export const otherAppCandidates = (home: string): { name: string; says: string; apps: string[] }[] => {
+  const places = (names: string[]) => [join(home, 'Applications'), '/Applications'].flatMap(apps => names.map(name => join(apps, name)));
+  return [
+    { name: 'T3 Code', says: 'Runs your tools for you. One it starts with this computer’s home uses what is set up here.', apps: places(['T3 Code.app', 'T3 Code (Nightly).app', 'T3 Code (Alpha).app']) },
+    { name: 'VS Code', says: 'Its built-in Copilot lists skills from some of your tools’ folders. Central Knot doesn’t change VS Code’s own settings.', apps: places(['Visual Studio Code.app', 'Visual Studio Code - Insiders.app']) },
+  ].map(app => ({ ...app, apps: app.apps.filter(path => !homeOnly('other-apps') || path.startsWith(`${home}${sep}`)) }));
+};

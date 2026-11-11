@@ -24,8 +24,18 @@ export const heldReason = (tool: HarnessId, marketName: string, other: string) =
 /** Why a plugin a bundled build's marketplace lists can't be installed from it: the build carries no files for it (`reason`: why it couldn't be packed). */
 export const notCarried = (app: string, reason: string) => `${app} doesn’t include this plugin’s files, so it can’t be installed from here. ${reason}`;
 
-/** Why this plugin can't be installed from its marketplace at all, if the marketplace is a bundled build's and the build has no files for it. */
-export const whyNotCarried = (entry: MarketplaceView, plugin: string) => { const left = entry.bundled?.unpackaged.find(item => item.name === plugin); return left && `${notCarried(entry.bundled!.app, left.reason)}${entry.owner ? ` Ask ${entry.owner} if you need it.` : ''}`; };
+/** Why a plugin a bundled build's marketplace no longer offers is still listed: a tool here has it installed, and it stays until uninstalled there. */
+export const keptReason = (market: string) => `${market} no longer offers this plugin. It stays in the tools that have it until you uninstall it.`;
+
+/**
+ * Why this plugin can't be installed from its marketplace at all, if the marketplace is a bundled build's: the build has
+ * no files for it, or the marketplace no longer offers it and it is kept only for the tools that have it.
+ */
+export const whyNotCarried = (entry: MarketplaceView, plugin: string): string | undefined => {
+  if (entry.bundled?.kept?.includes(plugin)) return keptReason(entry.bundled.displayName || entry.name);
+  const left = entry.bundled?.unpackaged.find(item => item.name === plugin);
+  return left && `${notCarried(entry.bundled!.app, left.reason)}${entry.owner ? ` Ask ${entry.owner} if you need it.` : ''}`;
+};
 
 /** Why a tool can't take this marketplace's plugins, if it can't: no CLI and no copy in its desktop app, a Codex-only marketplace, or Copilot refusing it. */
 export function blocked(view: PluginsView, entry: MarketplaceView, tool: HarnessId): string | undefined {
@@ -41,7 +51,7 @@ export function blocked(view: PluginsView, entry: MarketplaceView, tool: Harness
  * Whether a plugin is marked "No longer offered": its marketplace's catalog was read and no longer lists it, while a tool
  * still has it or its parts. (A plugin listed only because its marketplace can't be read now is `gone` too, without the mark.)
  */
-export const noLongerOffered = (entry: MarketplaceView, plugin: PluginView) => !!plugin.gone && !!entry.fetchedAt;
+export const noLongerOffered = (entry: MarketplaceView, plugin: PluginView) => (!!plugin.gone && !!entry.fetchedAt) || !!entry.bundled?.kept?.includes(plugin.name);
 
 /** A plugin's state in one tool, as last read ("not installed" when the tool has no record of it). */
 export const stateOf = (entry: MarketplaceView, plugin: string, tool: HarnessId): InstallState => entry.states[plugin]?.[tool] ?? { state: 'not-installed' };
@@ -94,9 +104,15 @@ export function pluginPlace(view: PluginsView, entry: MarketplaceView, plugin: s
 export function cantUninstall(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): string | undefined {
   const state = stateOf(entry, plugin, tool);
   if (state.state === 'held') return state.reason;
+  if (state.state === 'installed' && state.directory) return FROM_DIRECTORY;
   if (!view.canWrite) return PREVIEW_ONLY;
   return view.clis[tool] ? undefined : `${cliMissing(tool)}.`;
 }
+
+/** The marketplace name Claude Code records a plugin from the Anthropic Directory under. It is in no marketplace list. */
+export const DIRECTORY = 'anthropic-plugin-directory';
+/** Why Central Knot leaves Claude Code's copy from the Anthropic Directory to Claude Code. */
+export const FROM_DIRECTORY = 'Claude Code has its copy from the Anthropic Directory: update or uninstall it in Claude Code (/plugin).';
 
 /** This plugin's parts in a tool, when they were installed there as separate items (parts.ts). */
 export const partsOf = (entry: MarketplaceView, plugin: string, tool: HarnessId): PartsState | undefined => entry.parts?.[plugin]?.[tool];
@@ -362,25 +378,27 @@ export const copyDiffers = (offered: Pick<PluginContents, 'skills' | 'commands' 
  */
 export function copyStale(entry: MarketplaceView, plugin: string, tool: HarnessId, offered: string | undefined, detail: PluginDetail | null | undefined): boolean {
   const state = stateOf(entry, plugin, tool);
-  return state.state === 'installed' && !state.live && !versionDiffers(state.version, offered) && !!detail?.offered && !detail.problem && copyDiffers(detail, detail.installed?.[tool]);
+  return state.state === 'installed' && !state.live && !state.directory && !versionDiffers(state.version, offered) && !!detail?.offered && !detail.problem && copyDiffers(detail, detail.installed?.[tool]);
 }
 
 /**
  * The plugins whose files the list reads in the background, so copyStale is known without their pages being opened: those
- * some tool has installed, other than as a copy loaded live from a folder marketplace (never stale).
+ * some tool has installed, other than as a copy loaded live from a folder marketplace or Claude Code's copy from the
+ * Anthropic Directory (never stale).
  */
 export const copiesToCompare = (view: PluginsView, entry: MarketplaceView): string[] => entry.plugins
-  .filter(plugin => view.tools.some(tool => { const state = stateOf(entry, plugin.name, tool); return state.state === 'installed' && !state.live; }))
+  .filter(plugin => view.tools.some(tool => { const state = stateOf(entry, plugin.name, tool); return state.state === 'installed' && !state.live && !state.directory; }))
   .map(plugin => plugin.name);
 
 /**
  * Whether Update is offered for a tool's installed copy: it is older than the version `offered` (another version than
  * the marketplace's, see versionDiffers, and not a newer one), or the same version with other content (copyStale, once
- * `detail` is read). A copy loaded live from a folder marketplace is always its own.
+ * `detail` is read). A copy loaded live from a folder marketplace is always its own, and so is Claude Code's copy from
+ * the Anthropic Directory, which Claude Code keeps up to date.
  */
 export function outdated(entry: MarketplaceView, plugin: string, tool: HarnessId, offered: string | undefined, detail?: PluginDetail | null): boolean {
   const state = stateOf(entry, plugin, tool);
-  if (state.state !== 'installed' || state.live) return false;
+  if (state.state !== 'installed' || state.live || state.directory) return false;
   return (versionDiffers(state.version, offered) && compareVersions(releaseOf(state.version!), releaseOf(offered!)) < 0) || copyStale(entry, plugin, tool, offered, detail);
 }
 

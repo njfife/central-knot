@@ -76,7 +76,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     if (state.state === 'installed') {
       const switching = (action: PluginOp['action']) => skillChoices(market.draft, entry.source, plugin.name, { tool }).filter(op => op.action === action).length;
       const willOff = switching('skill-off'), willOn = switching('skill-on');
-      return installedLine(state.version, compareTo, [stale ? 'differs from the marketplace’s copy' : '', state.skillsOff?.length ? `${plural(state.skillsOff.length, 'skill')} off` : '',
+      return installedLine(state.version, compareTo, [state.directory ? 'from the Anthropic Directory' : '', stale ? 'differs from the marketplace’s copy' : '', state.skillsOff?.length ? `${plural(state.skillsOff.length, 'skill')} off` : '',
         willOff ? `${plural(willOff, 'skill')} will turn off` : '', willOn ? `${plural(willOn, 'skill')} will turn on` : '']);
     }
     const mark = partsMark(view, entry, plugin.name, tool, components);

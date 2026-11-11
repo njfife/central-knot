@@ -9,6 +9,9 @@
  */
 export const PRODUCT = ['Central', 'Knot'].join(' ');
 
+/** The standard app's identity: the system's name for it, and the name a sync record gives it as its owner. */
+export const STANDARD_BUILD = 'com.centralknot.firstlook';
+
 /** A string, or '' for anything else. */
 export const text = (value: unknown): string => (typeof value === 'string' ? value : '');
 

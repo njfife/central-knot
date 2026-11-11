@@ -13,7 +13,7 @@ const marketplace = (root: string, name: string, plugins: string[]) => Promise.a
   ...plugins.map(plugin => put(join(root, `plugins/${plugin}/skills/${plugin}/SKILL.md`), `---\nname: ${plugin}\ndescription: ${plugin}\n---\n`)),
 ]);
 
-async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?: boolean; app?: DesktopApp; pi?: boolean; /** Not this computer's own home. */ folderHome?: boolean; /** What adding the marketplace to a tool's own list comes to, where not `added`. */ listing?: Partial<Record<HarnessId, Awaited<ReturnType<typeof engine.addMarketplace>>>>; /** A bundled build: the marketplace it carries is in this folder under the base, and these plugins are not packed. */ bundled?: { folder: string; unpackaged?: string[] } } = {}) {
+async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?: boolean; app?: DesktopApp; pi?: boolean; /** Not this computer's own home. */ folderHome?: boolean; /** What adding the marketplace to a tool's own list comes to, where not `added`. */ listing?: Partial<Record<HarnessId, Awaited<ReturnType<typeof engine.addMarketplace>>>>; /** A bundled build: the marketplace it carries is in this folder under the base, and these plugins are not packed. */ bundled?: { folder: string; unpackaged?: string[]; kept?: string[] } } = {}) {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-markets-')));
   const home = join(base, 'home');
   await mkdir(home, { recursive: true });
@@ -31,7 +31,7 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?:
     changed: (_source, plugin, tools) => { told.push(`${plugin} ${tools.join(',')}`); },
     // With Pi in the home, the parts engine's context too, so a plugin's parts can go into it.
     ...(options.pi ? { share: () => ({ home, mode: 'custom' as const, read: async () => [], build: 'test', settingsPath: join(base, 'settings.json'), realHome: join(base, 'real') }) } : {}),
-    ...(options.bundled ? { bundled: () => ({ source: join(base, options.bundled!.folder), view: { app: 'Acme Knot', displayName: 'Acme plugins', release: 'November 10, 2026 (GitHub: acme/plugins)', unpackaged: (options.bundled!.unpackaged ?? []).map(name => ({ name, reason: 'It is an npm package.' })) } }) } : {}),
+    ...(options.bundled ? { bundled: () => ({ source: join(base, options.bundled!.folder), view: { app: 'Acme Knot', displayName: 'Acme plugins', release: 'November 10, 2026 (GitHub: acme/plugins)', unpackaged: (options.bundled!.unpackaged ?? []).map(name => ({ name, reason: 'It is an npm package.' })), kept: options.bundled!.kept } }) } : {}),
   };
   const use: MarketplaceEngine = {
     findClis: async () => ({ binaries: { 'claude-cli': '/bin/true', ...(options.codex ? { 'codex-cli': join(base, 'bin/codex') } : {}), ...(options.app ? { 'copilot-cli': options.app.binary } : {}) }, apps: options.app ? { 'copilot-cli': options.app } : {} }),
@@ -44,7 +44,9 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?:
     update: async (_context, _catalog, plugin, tool, _differs, options) => { calls.push(`update ${plugin} ${tool}${options?.reinstall === false ? ' (no reinstall)' : ''}`); return { tool, outcome: 'updated', message: 'Updated.', runs: [], changed: true }; },
     setSkill: async (_context, marketplace, plugin, skill, tool, on, _source, entry) => { calls.push(`skill ${plugin}:${skill}@${marketplace} ${tool} ${on} entry=${entry?.name}`); return { tool, outcome: on ? 'skill-on' : 'skill-off', message: '', runs: [], changed: true }; },
   };
-  return { base, home, calls, told, ran, host, markets: createMarketplaces(host, use), cleanup: () => rm(base, { recursive: true, force: true }) };
+  // The suggested marketplaces are folders here, so a test never reaches the network: one for Claude Code and Codex, one for a tool this home lacks.
+  const offers = [{ source: join(base, 'offered'), name: 'Offered', tools: ['claude-cli', 'codex-cli'] as const }, { source: join(base, 'for-pi'), name: 'Not here', tools: [] }];
+  return { base, home, calls, told, ran, host, markets: createMarketplaces(host, use, offers.map(offer => ({ ...offer, tools: [...offer.tools] }))), cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 
 test('Adding a marketplace reads it once, stores how it was given, and the view lists it with its plugins', async () => {
@@ -205,6 +207,26 @@ test('Each tool’s installed copy is read as that tool reads it, which may be a
   } finally { await box.cleanup(); }
 });
 
+test('Claude Code’s copy of a plugin from the Anthropic Directory shows as installed there, and is left to Claude Code: no update, no uninstall', async () => {
+  const box = await setup();
+  try {
+    const root = join(box.base, 'market');
+    await put(join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'official', plugins: [{ name: 'incident-io', version: '2.0.0', source: { source: 'git-subdir', url: 'https://github.com/incident-io/skills.git', path: 'plugins/incident-io' } }] }));
+    await box.markets.add(root);
+    const copy = join(box.home, '.claude/plugins/cache/anthropic-plugin-directory/incident-io/1.0.0-6af50e2e23e9');
+    await put(join(copy, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'incident-io', version: '1.0.0' }));
+    await put(join(copy, 'skills/incidents/SKILL.md'), '---\nname: incidents\ndescription: Incidents.\n---\n');
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'incident.io@anthropic-plugin-directory': [{ scope: 'user', installPath: copy, version: '1.0.0-6af50e2e23e9', gitCommitSha: '6af50e2e23e9c782b95a456aab5a053550fba3c9', directoryRepositoryKey: 'github.com/incident-io/skills#plugins/incident-io' }] } }));
+    const view = await box.markets.view();
+    const entry = view.marketplaces.find(candidate => candidate.name === 'official')!;
+    assert.deepEqual(entry.states['incident-io']?.['claude-cli'], { state: 'installed', path: copy, version: '1.0.0', directory: 'incident.io@anthropic-plugin-directory' });
+    assert.deepEqual(entry.states['incident-io']?.['copilot-cli'], { state: 'not-installed' }, 'only Claude Code reads the directory');
+    // An older version than the marketplace's, yet nothing is due: Claude Code keeps its directory copy.
+    assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops, []);
+    assert.deepEqual(Object.keys((await box.markets.detail(root, 'incident-io'))?.installed ?? {}), ['claude-cli'], 'its copy’s contents are read');
+  } finally { await box.cleanup(); }
+});
+
 test('A plugin the marketplace can’t give files for (an npm package) is read from the tool that installed it', async () => {
   const box = await setup();
   try {
@@ -317,6 +339,30 @@ test('A bundled build’s own marketplace is listed first, stays listed, and off
     assert.match(refused.reports[0]!.message, /^Acme Knot doesn’t include this plugin’s files, so it can’t be installed from here\. It is an npm package\.$/);
     assert.deepEqual(box.calls.filter(call => call.startsWith('install')), ['install pdf claude-cli']);
   } finally { await box.cleanup(); }
+});
+
+test('A tool’s own marketplace is suggested where that tool is here, until it is listed or declined; a build that carries a marketplace suggests none', async () => {
+  const box = await setup();
+  try {
+    await marketplace(join(box.base, 'offered'), 'offered', ['pdf']);
+    // Offered for the tools here it belongs to; one for no tool here is not offered. Nothing was read to offer it.
+    assert.deepEqual((await box.markets.view()).suggested, [{ source: join(box.base, 'offered'), name: 'Offered', tools: ['claude-cli', 'codex-cli'] }]);
+    assert.deepEqual(box.calls, []);
+    // Added: it is a marketplace on the list now, so it is no longer a suggestion. Removed from the list: offered again.
+    await box.markets.add(join(box.base, 'offered'));
+    assert.deepEqual((await box.markets.view()).suggested, []);
+    assert.equal((await box.markets.forget(join(box.base, 'offered'))).suggested?.length, 1);
+    // Declined: not offered again, also by a later read.
+    assert.deepEqual((await box.markets.decline(join(box.base, 'offered'))).suggested, []);
+    assert.deepEqual((await box.markets.view(true)).suggested, []);
+    // Its Undo: offered again.
+    assert.equal((await box.markets.decline(join(box.base, 'offered'), true)).suggested?.length, 1);
+  } finally { await box.cleanup(); }
+  const carried = await setup({ bundled: { folder: 'carried', unpackaged: [] } });
+  try {
+    await marketplace(join(carried.base, 'carried'), 'carried', ['pdf']);
+    assert.deepEqual((await carried.markets.view()).suggested, []);
+  } finally { await carried.cleanup(); }
 });
 
 /** A marketplace whose plugins each say their version, with one skill each holding `text`. */
@@ -470,5 +516,18 @@ test('A home switched while a tool waits its turn adds nothing, and that tool is
     assert.deepEqual(box.calls.filter(call => call.startsWith('list')), []);
     actual = true;
     assert.deepEqual((await box.markets.addCarried(['claude-cli'], work => work())).map(report => report.outcome), ['added']);
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin the build’s marketplace no longer offers goes into no other tool, and still updates where it is', async () => {
+  // It is kept for the tools that have it; the release that dropped it also lists it as one it has no files for.
+  const box = await setup({ bundled: { folder: 'carried', kept: ['pdf'], unpackaged: ['pdf'] } });
+  try {
+    const carried = join(box.base, 'carried');
+    await marketplace(carried, 'team', ['pdf']);
+    const refused = await box.markets.install(carried, 'team', 'pdf', ['codex-cli'], box.home);
+    assert.deepEqual(refused.reports.map(report => [report.outcome, report.message]), [['failed', 'Acme plugins no longer offers this plugin. It stays in the tools that have it until you uninstall it.']]);
+    assert.deepEqual((await box.markets.update(carried, 'team', 'pdf', ['claude-cli'], box.home)).reports.map(report => report.outcome), ['updated']);
+    assert.deepEqual(box.calls.filter(call => /^(install|update)/.test(call)), ['update pdf claude-cli']);
   } finally { await box.cleanup(); }
 });
