@@ -1218,6 +1218,27 @@ test('History’s Undo of a Stopped switch puts back only that tool’s edit, st
   } finally { await box.cleanup(); }
 });
 
+test('A Stopped switch recorded before choices noted every copy (its entry names only the stopped tools) is still undone with that copy stopped again', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent(undefined, fields));
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    const codex = (await read(box.home, '.codex/agents/reviewer.toml')).replace('Be brief.', 'Codex only.');
+    await writeFile(join(box.home, '.codex/agents/reviewer.toml'), codex);
+    await applyAgents(box.context, tools, []);
+    const resumed = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, use: 'claude-cli', resumeIn: 'codex-cli' }]);
+    // The entry as an older Central Knot wrote it: `before.stopped`, no `before.copies`.
+    const path = join(box.home, '.central-knot', 'history.json');
+    const saved = JSON.parse(await readFile(path, 'utf8')) as { events: HistoryEvent[] };
+    const chosen = saved.events.find(event => resumed.made?.includes(event.id) && event.kind === 'chosen')!;
+    chosen.before = { origin: chosen.before?.origin, stopped: ['codex-cli'] };
+    await writeFile(path, JSON.stringify(saved));
+    assert.equal((await restoreAgent(box.context, tools, chosen.id)).stopped, undefined);
+    assert.deepEqual([await read(box.home, '.codex/agents/reviewer.toml'), (await agentsView(box.context, tools)).servers[0].stopped], [codex, ['codex-cli']]);
+    assert.equal((await applyAgents(box.context, tools, [], { settleMs: 0 })).writes, 0);
+  } finally { await box.cleanup(); }
+});
+
 test('Finish undo leaves a copy put back holding the synced content on record with its one-way mark, as a full Undo does: its later edit stops there (probe O2F)', { skip: process.getuid?.() === 0 }, async () => {
   const box = await sandbox();
   try {

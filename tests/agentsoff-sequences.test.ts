@@ -335,3 +335,19 @@ test('Delete everywhere marks the agent deleted only once no tool holds a copy: 
     assert.match(late.results[0]?.message ?? '', /changed since the page was read \(it was deleted\)/);
   } finally { await chmod(join(box.home, '.codex/agents'), 0o755).catch(() => undefined); await box.cleanup(); }
 });
+
+test('Rule A: a change sent while a tool is off (its off naming that tool, as the row reads it) never leaves that tool out once it is turned on', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    await toolOff(box, 'codex-cli');
+    const fact = (await factOf(box))!;
+    assert.deepEqual(fact.off, ['codex-cli']);
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: fact.off, seenManaged: true }], { settleMs: 0 });
+    assert.deepEqual((await recordOf(box))?.off, []);
+    await toolOn(box, 'codex-cli');
+    await write(box, 'claude-cli', claudeAgent('Edited after Codex was back.\n'));
+    await pass(box);
+    assert.match((await readOf(box, 'codex-cli'))!, /Edited after Codex was back/);
+  } finally { await box.cleanup(); }
+});

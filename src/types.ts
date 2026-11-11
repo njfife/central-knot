@@ -470,7 +470,7 @@ export interface HistoryEvent {
   /**
    * 'removed': an Off. It turned the item off in tools with no switch for it, removing their copies, and holds those tools (model.ts
    * offTools, Rule A) until it is turned on there, a later Off takes the tool over, or a deletion ends it. While it holds a tool,
-   * and while a deletion that ended it can be restored, History keeps it whatever its age (model.ts keptOff).
+   * and while a deletion that ended it can be restored, History keeps it whatever its age (historyrules.ts keptOff).
    */
   turnedOff?: true;
   /** 'deleted' by Delete everywhere (agents): its Restore puts each copy back exactly as it was, and an item that was off is off again. */

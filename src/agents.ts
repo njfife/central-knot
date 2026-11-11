@@ -357,7 +357,7 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
 
 /**
  * The tools that take no part in syncing an agent now: those the person left out (the record's `off`), and those a standing Off
- * holds (Rule A, model.ts heldTools). The page reads them as its `off`; a change's `off` never adds or drops a held tool.
+ * holds (Rule A, historyrules.ts heldTools). The page reads both as its `off`; a change's `off` never puts a held tool in the record's.
  */
 const notSyncing = (item: Pick<AgentRecordItem, 'off'> | undefined, held: HarnessId[]) => [...new Set([...(item?.off ?? []), ...held])];
 /**
@@ -471,8 +471,8 @@ function recordChoices(record: AgentRecord, byKey: Map<string, AgentSlot>, chang
     if (shared && item.state !== 'shared') newlyManaged.add(change.key);
     else if (shared) rejoined.set(change.key, item.off.filter(tool => !change.off.includes(tool)));
     item.state = shared ? 'shared' : 'dont-share';
-    // Rule A: whatever the change says of a tool an Off holds, it stays as the record has it.
-    item.off = [...change.off.filter(tool => !held.includes(tool)), ...item.off.filter(tool => held.includes(tool))];
+    // Rule A: the row reads a tool an Off holds as off, but that is the Off's to end, never the record's left-out list.
+    item.off = change.off.filter(tool => !held.includes(tool));
     item.separate = separate ? true : undefined;
     // Sync stops: a stopped one-way copy stays known as stopped (its edit kept), so syncing again finds it as it was.
     if (!shared) item.copies = item.copies.filter(copy => copy.status === 'removing' || copy.stopped);
@@ -753,10 +753,10 @@ async function undoAddedAgent(context: ShareContext, tools: HarnessId[], history
 // ---------- Off where no tool has a switch, Delete everywhere, and putting copies back ----------
 //
 // No tool has a switch for a person's own agent, so Off takes each tool's copy out, kept whole in the store and named by the
-// Off's History entry. Where an agent is off is decided in one place, model.ts offTools (Rule A): a tool a standing Off holds
+// Off's History entry. Where an agent is off is decided in one place, historyrules.ts offTools (Rule A): a tool a standing Off holds
 // gets no copy from sync (the pass leaves it out, notSyncing) or from any click, but that Off's own copy, put back by
 // putBackAgent. Off changes nothing else in the record: the tools the person left out stay as they were, and a synced agent
-// stays synced until no copy is left outside its held tools. Whether an entry's action still applies is model.ts endedBy
+// stays synced until no copy is left outside its held tools. Whether an entry's action still applies is historyrules.ts endedBy
 // (Rule B), checked once in restoreAgent before any of these run.
 //
 // Each entry made here notes `before`, the agent's record as it was (synced or not, the tools left out): a put-back reads the
@@ -815,7 +815,7 @@ async function turnOffAgent(context: ShareContext, item: AgentRecordItem, key: s
 
 /**
  * Delete everywhere, the only real delete: every copy out and the agent not synced, so its row goes; on an Off row it deletes the
- * row (the deletion ends that Off, model.ts deletedSince). One whose copies all stayed deletes nothing. The caller saves the
+ * row (the deletion ends that Off, historyrules.ts deletedSince). One whose copies all stayed deletes nothing. The caller saves the
  * record and the entry.
  */
 async function deleteAgentEverywhere(context: ShareContext, item: AgentRecordItem, key: string, slot: AgentSlot, tools: HarnessId[], present: AgentTool[]): Promise<TakenOut> {
@@ -985,7 +985,7 @@ export async function convertAgentToSkill(context: ShareContext, tools: HarnessI
 }
 
 /**
- * Undo or Restore of an agent's History entry: History's actions and a click's Undo all come here. Rule B (model.ts endedBy) is
+ * Undo or Restore of an agent's History entry: History's actions and a click's Undo all come here. Rule B (historyrules.ts endedBy) is
  * checked once, first: an action that a later click or a deletion ended is refused. Then each kind goes to its own Undo:
  * - 'added': undoAddedAgent, the copies that turning it on added go again;
  * - an Off ('removed'), or Delete everywhere: putBackAgent, Turn on or Restore (`how.tool`: that tool's copy alone);

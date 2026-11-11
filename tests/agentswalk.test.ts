@@ -11,7 +11,7 @@
 //   (f) a click that went through whole, from a settled home (a plain pass would write nothing and ask nothing), is undone
 //       exactly by its Undo: the files and the row as before it. (From an unsettled one, the click's pass also does sync's
 //       waiting work, which its Undo leaves, as the band promises: it reverses the click, not what sync did alongside.)
-// The fixed seeds run in `npm test` (those that once found a bug among them); CK_WALKS=<n> runs n more, CK_SEED=<n> starts there.
+// The walks that once found a bug run in `npm test`; CK_WALKS=<n> runs n more seeds of each kind, CK_SEED=<n> starts there.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, readFile } from 'node:fs/promises';
@@ -24,7 +24,8 @@ import type { ShareContext } from '../src/share.ts';
 import type { HarnessId, HistoryDays, HistoryEvent, SkillFacts } from '../src/types.ts';
 import { age, choose, claudeAgent, codexOwn, deleteEverywhere, factOf, fields, files, filesOf, historyActions, pass, prune, sandbox, synced, toolOff, toolOn, tools, trial, turnOff, turnOn, undo, write, type Box, type Clicked, type Tool } from './agentclicks.ts';
 
-const SEEDS = [1, 2, 3, 18, 21, 22, 233, 1001];
+/** Walks that found a bug once, each with its agent (true: one-way), 1001 among them; CK_WALKS adds random ones of both kinds. */
+const FOUND: [number, boolean][] = [[1001, false], [2, false], [5071, false], [18, true], [5000, true], [5021, true], [5055, true], [5059, true]];
 const STEPS = 14;
 const random = (seed: number) => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 /** An answer that means History offered an action that is stale or does nothing. */
@@ -163,10 +164,10 @@ async function walk(seed: number, oneWay: boolean): Promise<Finding[]> {
 const extra = Number(process.env.CK_WALKS ?? 0), from = Number(process.env.CK_SEED ?? 5000);
 // CK_ONLY=<seed>[,one-way] replays that one walk (with CK_TRACE=1, step by step).
 const only = process.env.CK_ONLY?.split(',');
-const seeds = only ? [Number(only[0])] : [...SEEDS, ...Array.from({ length: extra }, (_, index) => from + index)];
-const variants = only ? [only[1] === 'one-way'] : [false, true];
-test(`A random walk of ${STEPS} clicks, ${seeds.length * 2} times (two-way and one-way agents): passes stay quiet, every action History offers does something, On puts back each kept copy, nothing a click took is lost, the row is true, and every whole click's Undo is exact`, async () => {
+const walks: [number, boolean][] = only ? [[Number(only[0]), only[1] === 'one-way']]
+  : [...FOUND, ...Array.from({ length: extra }, (_, index) => [[from + index, false], [from + index, true]] as [number, boolean][]).flat()];
+test(`A random walk of ${STEPS} clicks, ${walks.length} times (two-way and one-way agents): passes stay quiet, every action History offers does something, On puts back each kept copy, nothing a click took is lost, the row is true, and every whole click's Undo is exact`, async () => {
   const findings = new Map<string, { count: number; trace: string }>();
-  for (const seed of seeds) for (const oneWay of variants) for (const { kind, trace } of await walk(seed, oneWay)) { const had = findings.get(kind); if (had) had.count++; else findings.set(kind, { count: 1, trace }); }
+  for (const [seed, oneWay] of walks) for (const { kind, trace } of await walk(seed, oneWay)) { const had = findings.get(kind); if (had) had.count++; else findings.set(kind, { count: 1, trace }); }
   assert.deepEqual([...findings].map(([kind, { count, trace }]) => `${count}× ${kind}\n    ${trace}`), []);
 });

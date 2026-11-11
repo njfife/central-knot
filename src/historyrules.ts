@@ -2,11 +2,13 @@
 //
 // Two questions are answered here and nowhere else:
 // - Rule A, "where is this item off?": offTools / heldTools. A tool that a standing Off holds gets no copy from sync or from any
-//   click but that Off's own, put back. Read by the Agents page's rows (manage.ts heldOffFacts and goneFacts), by every agents
-//   pass and click (agents.ts notSyncing, putBackAgent, restoreVersion) and by History's prune (keptOff).
+//   click but that Off's own, put back. Read by the Agents page's rows (manage.ts heldOffFacts and goneFacts) and by every
+//   agents pass and click (agents.ts notSyncing, putBackAgent, restoreVersion). History's prune keeps an Off until it is turned
+//   on (keptOff), with every later entry of its item, so these read the same whatever History's days.
 // - Rule B, "is this History entry's action still offered?": endedBy. An entry's action stands only while no later Off,
-//   deletion, put-back or copy choice changed what it acts on. Read by the History page (historypage.ts describe), which shows
-//   sinceWords in place of the action, and by agents.ts restoreAgent, which refuses an ended action in the same words.
+//   deletion, put-back or copy choice changed what it acts on. Read by History's action table (historyactions.ts offered,
+//   drawn by historypage.ts), which shows sinceWords in place of the action, and by agents.ts restoreAgent, which refuses an
+//   ended action in the same words.
 // Entries are in History's order (oldest first); "later" means after in that list. A deletion ends what came before it by time.
 import type { HarnessId, HistoryEvent } from './types.ts';
 
