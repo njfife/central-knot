@@ -164,6 +164,10 @@ export function targetFor(harness: HarnessId, directory: string, source: Skill):
       if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Pi does not load a skill in a folder starting with a dot.' };
       if (source.piProblem) return { harness, directory, limits: [], skipped: `Pi will not load it: ${source.piProblem}.` };
       return { harness, directory, limits: [] };
+    case 'opencode-cli':
+      if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'OpenCode does not load a skill in a folder starting with a dot.' };
+      if (source.opencodeProblem) return { harness, directory, limits: [], skipped: `OpenCode 1.x will not load it: ${source.opencodeProblem}.` };
+      return { harness, directory, limits: [] };
     case 'claude-cli':
       return { harness, directory, limits: [], note: source.metadataKeys.length ? `${source.metadataKeys.join(', ')}: effect not tested in Claude Code.` : undefined };
   }

@@ -1,4 +1,4 @@
-// Agents across tools (AGT-01, TRN-01, TRN-02, D-26, D-32): Claude Code Markdown, Copilot `.agent.md`, Codex TOML.
+// Agents across tools (AGT-01, TRN-01, TRN-02, D-26, D-32): Claude Code Markdown, Copilot `.agent.md`, Codex TOML, OpenCode Markdown.
 // Name, description and prompt are Representable everywhere. Any other field (tools, model, permission mode, hooks, Codex keys and
 // tables) is its own tool's: no equivalent is recorded across tools. The origin is the copy the agent is shared from; a destination
 // that lacks the origin's fields gets it With limits, one-way: it receives the origin's changes, and any change there (to the prompt
@@ -30,7 +30,7 @@ type ContentHash = string; type FileHash = string; type AgentSlot = Partial<Reco
 /** The origin's fields a destination would lose: all of them, in any tool but the origin's own (no recorded equivalent, CD §5). */
 export const losses = (tool: HarnessId, origin: { tool: HarnessId; agent: NeutralAgent }) => (tool === origin.tool ? [] : Object.keys(origin.agent.fields));
 
-const suffixes: Record<AgentTool, string> = { 'claude-cli': '.md', 'copilot-cli': '.agent.md', 'codex-cli': '.toml' };
+const suffixes: Record<AgentTool, string> = { 'claude-cli': '.md', 'copilot-cli': '.agent.md', 'codex-cli': '.toml', 'opencode-cli': '.md' };
 const folder = (context: ShareContext, tool: HarnessId) => join(configRoot(harnesses[tool], context.home, context.overrides?.[tool]), 'agents');
 export const fileFor = (context: ShareContext, tool: AgentTool, name: string) => join(folder(context, tool), `${name}${suffixes[tool]}`);
 export const keyOf = (name: string) => name.normalize('NFC').toLowerCase();
@@ -136,7 +136,9 @@ export function agentText(tool: HarnessId, agent: Pick<NeutralAgent, 'name' | 'd
     return missing + text;
   }
   const match = existing ? FRONT.exec(existing) : undefined;
-  if (!match) return `---\nname: ${yamlScalar(agent.name)}\ndescription: ${yamlScalar(agent.description)}\n---\n\n${agent.prompt}`;
+  // A new OpenCode agent says `mode: all`: with no mode, 1.19.5 offers it both to choose and to hand work to, while 2.2.5
+  // makes it one to choose only (measured), and an agent from another tool is one work is handed to there.
+  if (!match) return `---\nname: ${yamlScalar(agent.name)}\ndescription: ${yamlScalar(agent.description)}\n${tool === 'opencode-cli' ? 'mode: all\n' : ''}---\n\n${agent.prompt}`;
   const newline = match[1].endsWith('\r\n') ? '\r\n' : '\n';
   const front = setFrontLines(match[2].replace(/\r?\n$/, ''), [['name', agent.name], ['description', agent.description]]);
   const gap = /^\r?\n/.exec(match[4])?.[0] ?? '\n';

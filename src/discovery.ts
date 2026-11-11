@@ -161,7 +161,7 @@ export function parseSkill(content: string, folder: string): Pick<Skill, 'name' 
 }
 
 /** Why each tool would refuse a skill with this SKILL.md in a folder of this name, as the Skill record holds them. */
-export const loadProblems = (content: string, folder: string) => ({ copilotProblem: copilotProblem(content, folder), codexProblem: codexProblem(content, folder), piProblem: piProblem(content) });
+export const loadProblems = (content: string, folder: string) => ({ copilotProblem: copilotProblem(content, folder), codexProblem: codexProblem(content, folder), piProblem: piProblem(content), opencodeProblem: opencodeProblem(content) });
 
 /** What Copilot CLI 1.0.107 refused when offered each case directly; its rules read the metadata name, or the folder without one. */
 export function copilotProblem(content: string, folder: string): string | undefined {
@@ -193,6 +193,18 @@ export function piProblem(content: string): string | undefined {
   try { fields = frontmatter(content); } catch { return 'its YAML frontmatter can’t be read'; }
   if (!fields) return 'it has no YAML frontmatter';
   if (typeof fields.description !== 'string' || !fields.description.trim()) return 'it has no description text';
+  return undefined;
+}
+
+/**
+ * What OpenCode 1.19.5 drops silently (measured): no frontmatter, unreadable YAML, or no name in it. OpenCode 2.2.5 loads a
+ * skill with no name; the rule here is the older line's, since a home's OpenCode may be either.
+ */
+export function opencodeProblem(content: string): string | undefined {
+  let fields: Record<string, unknown> | null;
+  try { fields = frontmatter(content); } catch { return 'its YAML frontmatter can’t be read'; }
+  if (!fields) return 'it has no YAML frontmatter';
+  if (typeof fields.name !== 'string' || !fields.name.trim()) return 'its frontmatter has no name';
   return undefined;
 }
 

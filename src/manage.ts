@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, realpath, rename, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { DAY_MS, defaultHistoryDays } from './model.ts';
-import { harnesses, writeRoot } from './harnesses.ts';
+import { configRoot, harnesses, writeRoot } from './harnesses.ts';
 import { presentTools } from './presence.ts';
 import {
   FORMAT_VERSION, changedWhileSyncing, clearStaleStages, storedRevision, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, newRecord, placeCopy, plainError, readRecord, readTree, stillOwned,
@@ -23,13 +23,16 @@ import { byKey } from './roworder.ts';
 const bodyLine = (content: string) => content.replace(/^﻿?---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/, '').split(/\r?\n/).map(line => line.trim()).find(line => line && !line.startsWith('#')) ?? '';
 
 interface Location { tool: HarnessId; copy: ToolCopy }
-interface Gathered { facts: SkillFacts; skills: Partial<Record<HarnessId, Skill[]>>; locations: Location[] }
+interface Gathered { facts: SkillFacts; skills: Partial<Record<HarnessId, Skill[]>>; locations: Location[]; /** Tools that read this skill in another present tool's own folder, and whose folder: so with or without a copy of their own. */ reads: Partial<Record<HarnessId, HarnessId>> }
 
 /** Reads every skill in every present tool once. A copy that cannot be read makes the skill held, never the whole page. */
 async function gather(context: ShareContext, snapshots: Snapshot[], record?: SyncRecord): Promise<Map<string, Gathered>> {
   const tools = presentTools(snapshots);
   const problems = new Map(await Promise.all(tools.map(async tool => [tool, await rootProblem(context, tool)] as const)));
   const map = new Map<string, Gathered>();
+  // Each present tool's own skills folder. A skill another tool reads there (OpenCode reads Claude Code's folder) is the
+  // owner's copy: shown for the reader, but never a location of its own, so it blocks no choice and is never called older.
+  const owners = new Map(tools.map(tool => [rootOf(context, tool), tool] as const));
   for (const snapshot of snapshots) {
     if (!tools.includes(snapshot.harness)) continue;
     for (const skill of snapshot.skills) {
@@ -37,7 +40,7 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
       let entry = map.get(key);
       if (!entry) {
         const recorded = record?.items[key];
-        entry = { facts: { key, name: skill.folder, description: skill.description, copies: {}, extra: [], managed: recorded?.state === 'shared', off: recorded?.off ?? [], cannot: {}, separate: recorded?.separate === true, choiceBlocks: {} }, skills: {}, locations: [] };
+        entry = { facts: { key, name: skill.folder, description: skill.description, copies: {}, extra: [], managed: recorded?.state === 'shared', off: recorded?.off ?? [], cannot: {}, separate: recorded?.separate === true, choiceBlocks: {} }, skills: {}, locations: [], reads: {} };
         map.set(key, entry);
       }
       entry.facts.description ||= skill.description;
@@ -46,13 +49,16 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
         const tree = await readTree(skill.directory);
         if (tree.held) entry.facts.held ??= tree.held;
         const info = await stat(join(skill.directory, 'SKILL.md'));
+        const owner = owners.get(dirname(skill.directory));
+        const readsFrom = owner && owner !== snapshot.harness ? owner : undefined;
         const copy: ToolCopy = {
           hash: tree.hash, directory: skill.directory, rootLabel: skill.rootLabel, lines: skill.content.split(/\r?\n/).length, modified: info.mtime.toISOString(),
-          summary: bodyLine(skill.content).slice(0, 140), folder: skill.folder, name: skill.name, writable: await writable(context, snapshot.harness, skill.directory, problems),
+          summary: bodyLine(skill.content).slice(0, 140), folder: skill.folder, name: skill.name, writable: !readsFrom && await writable(context, snapshot.harness, skill.directory, problems),
+          ...(readsFrom ? { readsFrom } : {}),
         };
-        entry.locations.push({ tool: snapshot.harness, copy });
+        if (readsFrom) entry.reads[snapshot.harness] = readsFrom; else entry.locations.push({ tool: snapshot.harness, copy });
         if (!entry.facts.copies[snapshot.harness]) entry.facts.copies[snapshot.harness] = copy;
-        else entry.facts.extra.push({ ...copy, tool: snapshot.harness });
+        else if (!readsFrom) entry.facts.extra.push({ ...copy, tool: snapshot.harness });
         // A copy the tool itself will not load is as good as none.
         const refused = targetFor(snapshot.harness, skill.directory, skill).skipped;
         if (refused) entry.facts.cannot[snapshot.harness] = refused;
@@ -98,7 +104,9 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
   // Each tool's own switch (Disable): read and parsed once, then asked about every copy there. Why a tool can't take a new
   // Disable (its settings file) applies to a copy it is about to get, too; so does the note on an unverified build.
   const switches = new Map(await Promise.all(tools.map(async tool => [tool, await readSwitchFile(context, tool)] as const)));
-  const unverified = new Map(tools.map(tool => [tool, unverifiedBuild(tool, snapshots.find(snapshot => snapshot.harness === tool)?.probe.version)] as const));
+  // With no CLI, the version is the one of the tool its desktop app carries.
+  const versionOf = (tool: HarnessId) => { const snapshot = snapshots.find(found => found.harness === tool); return snapshot?.probe.version ?? snapshot?.app?.carriedVersion; };
+  const unverified = new Map(tools.map(tool => [tool, unverifiedBuild(tool, versionOf(tool))] as const));
   for (const entry of map.values()) {
     for (const tool of tools) {
       if (entry.facts.cannot[tool]) continue;
@@ -133,6 +141,15 @@ export async function recordConverted(home: string, key: string, from: Converted
   all[key] = from;
   await mkdir(storeDirectory(home), { recursive: true });
   await writeDurably(convertedPath(home), `${JSON.stringify(all, null, 2)}\n`);
+}
+
+/** A tool's own copy: not one it only reads in another tool's folder. */
+const ownCopy = (entry: Gathered | undefined, tool: HarnessId) => (entry?.facts.copies[tool]?.readsFrom ? undefined : entry?.facts.copies[tool]);
+
+/** The tool among `tools` whose own skills folder this tool reads too (OpenCode reads Claude Code's), if there is one. */
+function readsFolderOf(context: ShareContext, tool: HarnessId, tools: HarnessId[]): HarnessId | undefined {
+  const read = harnesses[tool].skillRoots(configRoot(harnesses[tool], context.home, context.overrides?.[tool]), context.home).slice(1).map(root => root.path);
+  return tools.find(other => other !== tool && read.includes(rootOf(context, other)));
 }
 
 /** The skill as found at a tool's main copy. */
@@ -201,7 +218,7 @@ const mark = (directory: string) => { let seen = evidence.get(directory); if (!s
 export const clock = (context: ShareContext) => context.now?.() ?? Date.now();
 
 /** The fixed tie-break when order is unknown (D-04): each location ranks by its highest-ordered reader in SPEC §5.1, then by path. */
-const surfaceRank: Record<HarnessId, number> = { 'copilot-cli': 0, 'claude-cli': 1, 'codex-cli': 2, 'pi-cli': 3 };
+const surfaceRank: Record<HarnessId, number> = { 'copilot-cli': 0, 'claude-cli': 1, 'codex-cli': 2, 'pi-cli': 3, 'opencode-cli': 4 };
 const byRank = (first: Location, second: Location) => surfaceRank[first.tool] - surfaceRank[second.tool] || first.copy.directory.localeCompare(second.copy.directory);
 
 /** Revision A is proved older than B when B's location was still read at the baseline after A's change was already seen. */
@@ -521,6 +538,8 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       results.push({ item: entry.facts.name, outcome: 'held', message: `${entry.facts.name} changed since the page was read${before?.deleted ? ' (it was deleted)' : ''}. Nothing was changed; read again.` });
       continue;
     }
+    // The copy a tool reads in another tool's folder is that tool's: choosing it chooses the owner's.
+    if (change.use && change.use !== 'separate') change.use = entry.facts.copies[change.use]?.readsFrom ?? change.use;
     // A choice that cannot be carried out changes nothing at all: not even Managed.
     if (change.use && change.use !== 'separate') {
       const syncing = tools.filter(tool => !change.off.includes(tool) && !entry.facts.cannot[tool]);
@@ -598,6 +617,32 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     const name = entry.facts.name;
     if (entry.facts.held) { skip(); results.push({ item: name, outcome: 'held', message: entry.facts.held }); continue; }
     const syncing = tools.filter(tool => !item.off?.includes(tool));
+    // No tool it syncs to holds it, but one reads the copy of a tool that is left out (OpenCode reads Claude Code's): that
+    // copy becomes the reader's own, to start from. The owner's is no longer kept in sync, and this pass may remove it.
+    if (!options.observeOnly && !entry.locations.some(location => syncing.includes(location.tool))) {
+      for (const tool of syncing) {
+        const read = entry.facts.copies[tool];
+        // A reader that had a copy of its own on record deleted it: that is a deletion, never made good from here.
+        if (!read?.readsFrom || entry.facts.cannot[tool] || item.copies.some(copy => copy.harness === tool) || await rootProblem(context, tool)) continue;
+        const directory = ownCopyDir(context, tool, read.folder);
+        try {
+          await mkdir(dirname(directory), { recursive: true });
+          await placeCopy(context, read.directory, { harness: tool, directory, limits: [] }, await readTree(read.directory));
+        } catch (error) {
+          if (error instanceof Error && error.message.startsWith('fault:')) throw error;
+          results.push({ item: name, harness: tool, outcome: 'failed', message: `Could not copy to ${harnesses[tool].name}. ${plainError(error)}` });
+          continue;
+        }
+        const { readsFrom, ...copy } = { ...read, directory, writable: true };
+        entry.facts.copies[tool] = copy;
+        entry.locations.push({ tool, copy });
+        writes++;
+        // Newly managed: this copy is one Apply all added, so its Undo takes it out again.
+        if (newlyManaged.has(key)) added.set(key, { name, hash: copy.hash, copies: [...(added.get(key)?.copies ?? []), { tool, hash: copy.hash }] });
+        results.push({ item: name, harness: tool, outcome: 'written', message: `${harnesses[tool].name} read ${harnesses[readsFrom!].name}’s copy, which is left out here, so it has a copy of its own now. ${harnesses[tool].nextStep}` });
+        break;
+      }
+    }
     const locations = entry.locations.filter(location => syncing.includes(location.tool) && !entry.facts.cannot[location.tool]);
     const chosen = item.use?.tool;
     if (item.use) {
@@ -877,6 +922,11 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       const sourceSkill = entry.skills[sourceTool]?.find(skill => skill.directory === source.directory);
       for (const tool of syncing.filter(entryTool => !entry.locations.some(location => location.tool === entryTool))) {
         if (entry.facts.cannot[tool]) continue;
+        // It reads the folder of a tool this pass keeps in sync (OpenCode reads Claude Code's): the copy there is the one it
+        // reads, and one of its own would only be a second. Where that tool is left out of this skill or can't hold it,
+        // the reader gets its own.
+        const owner = readsFolderOf(context, tool, tools);
+        if (owner && syncing.includes(owner) && !entry.facts.cannot[owner]) continue;
         const directory = ownCopyDir(context, tool, entry.facts.name);
         const refused = (sourceSkill && targetFor(tool, directory, sourceSkill).skipped) || await rootProblem(context, tool);
         if (refused) { results.push({ item: name, harness: tool, outcome: 'held', message: refused }); continue; }
@@ -924,7 +974,8 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       const copy = entry.facts.copies[tool];
       // Gone since the page was read: nothing to remove, so that tool syncs as before.
       if (!copy) { await keepSyncing(tool); continue; }
-      const refusal = (copy.writable ? undefined : `${toolName(tool)} reads it at ${copy.directory}, which Central Knot does not change. Remove it there yourself.`) ?? await rootProblem(context, tool);
+      const refusal = (copy.writable ? undefined : copy.readsFrom ? `${toolName(tool)} reads ${toolName(copy.readsFrom)}’s copy. Disable it in ${toolName(tool)} to stop it loading there, or remove it from ${toolName(copy.readsFrom)}.`
+        : `${toolName(tool)} reads it at ${copy.directory}, which Central Knot does not change. Remove it there yourself.`) ?? await rootProblem(context, tool);
       if (refusal) { await keepSyncing(tool); results.push({ item: name, harness: tool, outcome: 'held', message: refusal }); continue; }
       try {
         // Kept in the store and on record first (as a removal, so a crash before History still recovers it as one).
@@ -943,7 +994,11 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       // Managed: the content last synced to it goes along, so Restore can put its sync record back.
       const synced = records.find(record => record.harness === tool)?.hash;
       removed.push({ tool, hash: copy.hash, folder: copy.folder, ...(synced ? { synced } : {}) });
-      results.push({ item: name, harness: tool, outcome: 'removed', message: `Removed from ${toolName(tool)}. Restore it from History.` });
+      // Its own copy is gone; a copy it reads in another tool's folder still loads there, and only Disable stops that.
+      const still = entry.reads[tool];
+      // And the other way: a tool that read this copy, and got none of its own in this pass, no longer has the skill.
+      const lost = tools.filter(other => entry.facts.copies[other]?.readsFrom === tool && !item.copies.some(copy => copy.harness === other && copy.status === 'written'));
+      results.push({ item: name, harness: tool, outcome: 'removed', message: `Removed from ${toolName(tool)}. Restore it from History.${still ? ` ${toolName(tool)} still reads ${toolName(still)}’s copy; Disable it in ${toolName(tool)} to stop it loading there.` : ''}${lost.length ? ` ${lost.map(toolName).join(' and ')} read this copy, so ${lost.length > 1 ? 'they no longer have' : 'it no longer has'} the skill.` : ''}` });
     }
     if (removed.length) event({ key: change.key, item: name, kind: 'removed', losers: removed, orderProved: true, stoppedSync: stoppedSync.filter(tool => removed.some(gone => gone.tool === tool)), ...(lastCopies && item.state !== 'shared' ? { unmanaged: true } : {}) });
   };
@@ -1163,7 +1218,10 @@ export async function restoreFromHistory(context: ShareContext, eventId: string,
       if (entry?.facts.cannot[tool]) continue;
       const late = await rootProblem(context, tool);
       if (late) { results.push({ item: item.name, harness: tool, outcome: 'held', message: late }); continue; }
-      const here = entry?.facts.copies[tool];
+      // A tool that reads the folder of one restored here (OpenCode reads Claude Code's) reads the restored copy: none of its own is made.
+      const owner = readsFolderOf(context, tool, tools);
+      const here = ownCopy(entry, tool);
+      if (!here && owner && !item.off?.includes(owner) && !entry?.facts.cannot[owner]) continue;
       if (here) {
         if (!here.writable) { results.push({ item: item.name, harness: tool, outcome: 'held', message: `${harnesses[tool].name} reads a copy at ${here.directory}, which Central Knot does not change.` }); continue; }
         if (here.hash !== tree.hash) {
@@ -1283,7 +1341,8 @@ async function restoreRemoved(context: ShareContext, record: SyncRecord, history
   const back = new Set(past.restoredTools ?? []);
   let writes = 0;
   for (const loser of past.losers.filter(gone => !back.has(gone.tool))) {
-    const here = entry?.facts.copies[loser.tool];
+    // Its own copy: one it reads in another tool's folder is not the copy that was removed.
+    const here = ownCopy(entry, loser.tool);
     if (here) {
       if (here.hash === loser.hash) { back.add(loser.tool); results.push({ item: item.name, harness: loser.tool, outcome: 'stayed', message: `${toolName(loser.tool)} has it back already.` }); }
       else results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: `${toolName(loser.tool)} has a different “${item.name}” now. It stays.` });

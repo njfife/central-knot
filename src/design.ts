@@ -56,6 +56,8 @@ export interface SampleSkill {
   disableNote?: Partial<Record<Tool, string>>;
   /** Skills: whether Central Knot may change each tool's copy (not a link or a shared folder), so Remove can be offered. */
   writable?: Partial<Record<Tool, boolean>>;
+  /** Skills: a tool whose copy is another tool's, read in that tool's own folder (OpenCode reads Claude Code's), and whose. */
+  reads?: Partial<Record<Tool, Tool>>;
   /** Skills, before Apply all: tools whose copy is removed then. */
   removing?: Tool[];
 }

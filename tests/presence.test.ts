@@ -29,12 +29,12 @@ async function home(skills: Record<string, string[]>, folders: string[] = []) {
 }
 
 test('a tool is present when its own folder exists; the others are missing', async () => {
-  // Claude Code has a skill; Codex has only its (empty) configuration folder; Copilot CLI and Pi have nothing.
+  // Claude Code has a skill; Codex has only its (empty) configuration folder; Copilot CLI, Pi and OpenCode have nothing.
   const box = await home({ '.claude/skills': ['brief'] }, ['.codex']);
   try {
     const snapshots = await box.read();
     assert.deepEqual(presentTools(snapshots), ['claude-cli', 'codex-cli']);
-    assert.deepEqual(absentTools(snapshots), ['copilot-cli', 'pi-cli']);
+    assert.deepEqual(absentTools(snapshots), ['copilot-cli', 'pi-cli', 'opencode-cli']);
   } finally { await box.cleanup(); }
 });
 

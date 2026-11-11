@@ -186,6 +186,7 @@ const fromFacts = (facts: SkillFacts): SampleSkill => ({
   // An MCP entry has no lines or edit date of its own: its details name the file it lives in.
   versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.lines ? { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), text: copy!.summary || facts.description } : { lines: copy!.directory.split('/').pop() ?? '', changed: 'MCP entry', text: copy!.summary }])),
   disabled: facts.disabled, switchProblem: facts.switchProblem, disableNote: facts.disableNote, writable: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.writable])),
+  reads: Object.fromEntries(Object.entries(facts.copies).flatMap(([tool, copy]) => (copy!.readsFrom ? [[tool, copy!.readsFrom]] : []))),
 });
 
 /** One item as a table row. `waiting`: MCP servers whose Claude Code entry waits for Write to Claude Code, which their cell says. */
@@ -635,7 +636,10 @@ function cell(skill: SampleSkill, tool: Tool, inDetails = false) {
   const oneWay = !!skill.limits?.[tool] && on;
   // Turned off by a profile switch (not by hand): said, and marked apart, so turning it back on here is not a surprise later.
   const byProfile = disabled && !switching && turnedOffByProfile(skill.key, tool);
-  const text = byProfile ? `${cellTooltip(skill, tool)} by a profile (see Profiles)` : cellTooltip(skill, tool);
+  // Another tool's copy, read in that tool's folder: marked, and said first.
+  const reads = skill.copies[tool] !== undefined ? skill.reads?.[tool] : undefined;
+  const said = `${reads ? `Reads ${names[reads]}’s copy. ` : ''}${cellTooltip(skill, tool)}`;
+  const text = byProfile ? `${said} by a profile (see Profiles)` : said;
   const glyph = adds ? icon('plus', 16) : replaces ? icon('refresh-cw', 14) : look.glyph ? icon(look.glyph, drawn === 'present' ? 13 : 16, drawn === 'present' ? 'glyph-fill' : '') : null;
   return h('div.ov-cell', { role: 'cell', 'data-tool': tool },
     h(`button.cell-button.${look.tone}${on ? '.cell-on' : ''}${pending ? '.cell-pending-edit' : ''}${oneWay ? '.cell-oneway' : ''}${disabled ? '.cell-disabled' : ''}${byProfile ? '.cell-profile-off' : ''}${switching ? '.cell-switch-queued' : ''}`, {
@@ -646,6 +650,7 @@ function cell(skill: SampleSkill, tool: Tool, inDetails = false) {
       glyph,
       oneWay ? h('span.cell-oneway-mark', { 'aria-hidden': 'true' }, icon('arrow-up-right', 9)) : null,
       disabled ? h(`span.cell-disabled-mark${byProfile ? '.cell-disabled-profile' : ''}`, { 'aria-hidden': 'true' }, icon(byProfile ? 'sliders-horizontal' : 'circle-off', 9)) : null,
+      reads ? h('span.cell-reads-mark', { 'aria-hidden': 'true' }, icon('link-2', 9)) : null,
       on && kind === 'agents' && skill.managed && skill.oneWay?.from === tool ? h('span.cell-source-mark', { 'aria-hidden': 'true' }) : null));
 }
 
@@ -731,6 +736,8 @@ function toolLine(skill: SampleSkill, tool: Tool): string {
   }
   // A copy that stops syncing on Apply all is said as what will happen; it still syncs until then.
   if (cellState === 'present' && stopsOnApply(skill, tool)) return 'Keeps its copy, which stops updating on Apply all.';
+  // A copy read in another tool's folder (said before this, rowLine) keeps loading whatever is ticked here.
+  if (cellState === 'present' && skill.reads?.[tool]) return skill.managed ? 'Syncing to this tool is turned off; it still loads that copy.' : '';
   if (cellState === 'present') return skill.managed ? 'Has its own copy. Syncing to this tool is turned off.'
     // Skills say "Unmanaged" once, in the status above; each row stays quiet.
     : kind === 'skills' ? '' : `Has its own copy. Central Knot is not managing this ${kindNouns[kind].short[0]}.`;
@@ -764,7 +771,12 @@ function rowLine(skill: SampleSkill, tool: Tool, quiet: boolean): string {
   // Disable is best effort: on a build older than the one verified it is only said (an unread version: the switch's tooltip).
   const note = !skill.removing?.includes(tool) && !skill.switchProblem?.[tool] && !skill.cannot?.[tool]
     && (skill.copies[tool] !== undefined || cellOf(skill, tool) === 'will-sync') && skill.disableNote?.[tool]?.startsWith('Not checked') ? skill.disableNote[tool] : undefined;
-  return [rowSentence(skill, tool, quiet), note].filter(Boolean).join(' ');
+  // A copy that is another tool's, read in that tool's folder: said first, since Disable is the only thing that changes it here.
+  const reads = skill.reads?.[tool];
+  // And on the owner's row, who else loads this copy: removing it here takes it from them too.
+  const readers = skill.copies[tool] === undefined ? [] : toolList().filter(other => skill.reads?.[other] === tool);
+  return [reads && !skill.removing?.includes(tool) ? `Reads ${names[reads]}’s copy.` : undefined, rowSentence(skill, tool, quiet),
+    readers.length ? `${andList(readers.map(other => names[other]))} ${readers.length > 1 ? 'read' : 'reads'} this copy too.` : undefined, note].filter(Boolean).join(' ');
 }
 
 /** rowLine without the note on an unverified build. */
@@ -1330,6 +1342,7 @@ function legend(list: SampleSkill[]) {
     kind === 'agents' && list.some(skill => skill.managed && (skill.stopped ?? []).some(tool => !skill.off.includes(tool) && keptEdit(skill, tool)) && !view.draft.get(skill.key)?.resolve) ? entry('Keeps its own edit', (() => { const mark = swatch('present', true); mark.replaceChildren(icon('circle-pause', 11)); return mark; })()) : null,
     seen.has('differs') || seen.has('present-differs') ? entry('Copies differ', swatch('differs', true)) : null,
     seen.has('present') || seen.has('off') ? entry('Has its own copy', swatch('present', false)) : null,
+    list.some(skill => toolList().some(tool => skill.copies[tool] !== undefined && skill.reads?.[tool])) ? entry('Reads another tool’s copy', (() => { const mark = swatch('present', false); mark.append(h('span.cell-reads-mark', {}, icon('link-2', 9))); return mark; })()) : null,
     seen.has('absent') ? entry('No copy', swatch('absent', false)) : null,
     ...pluginLegend(list, entry),
     seen.has('cannot') ? entry('Can’t load it', swatch('cannot', false)) : null,

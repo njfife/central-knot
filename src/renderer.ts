@@ -16,6 +16,7 @@ import { repo, repoPage, waitingCounts, waitingWords } from './repopage.ts';
 import { profilesPage, profileStatus } from './profilespage.ts';
 import type { HomeMode, HomeView, ManageView } from './types.ts';
 import { followUpdates, statusEnd } from './updateview.ts';
+import { followPluginUpdates } from './pluginupdateview.ts';
 
 const region = (id: string) => document.getElementById(id)!;
 /** Each page's title, in the header and the sidebar: a kind's page by its kind's title (words.ts kindNouns). */
@@ -248,4 +249,4 @@ document.addEventListener('keydown', event => {
 });
 
 // Updates are followed once the home is open, so what the opening said doesn't cover "now on the new version".
-void startHome().then(followUpdates);
+void startHome().then(() => { followUpdates(); followPluginUpdates(); });

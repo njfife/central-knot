@@ -19,12 +19,14 @@ test('Each tool’s MCP switch: off writes its own form, on takes it out, and ev
     'copilot-cli': '{\n  "theme": "dark"\n}\n',
     'codex-cli': '# mine\n[mcp_servers.docs]\ncommand = "docs"\nargs = ["a"] # keep\n\n[mcp_servers.docs.env]\nKEY = "v"\n\n[mcp_servers.other]\ncommand = "o"\nenabled = true\n',
     'pi-cli': '{\n  "mcpServers": {\n    "docs": { "command": "docs" }\n  }\n}\n',
+    'opencode-cli': '{\n  // mine\n  "mcp": {\n    "docs": { "type": "local", "command": ["docs"] },\n  },\n}\n',
   };
   const off: Record<HarnessId, RegExp> = {
     'claude-cli': /"serverName": "docs"/,
     'copilot-cli': /"disabledMcpServers": \[\s*"docs"\s*\]/,
     'codex-cli': /args = \["a"\] # keep\nenabled = false\n\n\[mcp_servers\.docs\.env\]/,
     'pi-cli': /"enabled": false/,
+    'opencode-cli': /"command": \["docs"\],\s*"enabled": false/,
   };
   for (const tool of Object.keys(before) as HarnessId[]) {
     const disabled = withMcpSwitch(tool, before[tool], 'docs', true);
