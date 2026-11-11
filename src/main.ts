@@ -26,7 +26,7 @@ import { deleteProfile, driftNow, switchFilesStamp, readProfiles, releaseProfile
 import { activeProfile, driftOf, NO_PROFILE, presentItems, profilesInUse, switchItems, type SwitchItem } from './profileplan.ts';
 import { defaultHistoryDays, historyDayChoices, plural } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
-import type { ActionReport, Appearance, ApplyResult, PartsPick, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
+import type { ActionReport, Appearance, ApplyResult, PartRef, PartsPick, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
 import { toolList } from './words.ts';
 import { startUpdater, type PendingUpdate } from './updater.ts';
@@ -857,7 +857,10 @@ function logged(channel: string, args: unknown[], result: unknown) {
   // A plugin step's request names the marketplace and the plugin second and third; a pick of single parts names them last.
   const pick = channel === 'plugins:parts' ? args[7] as PartsPick | null : null;
   const picked = pick ? ` (${[pick.on.length ? `on: ${pick.on.map(part => `${part.kind} ${part.name}`).join(', ')}` : '', pick.off.length ? `off: ${pick.off.map(part => `${part.kind} ${part.name}`).join(', ')}` : '', pick.rest ? 'with the rest' : ''].filter(Boolean).join('; ')})` : '';
-  const plugin = channel.startsWith('plugins:') && typeof args[1] === 'string' && typeof args[2] === 'string' ? ` ${args[2]}@${args[1]}${picked}` : '';
+  // One item's switch names the item fourth: a skill by its name, an MCP server or agent as a part.
+  const part = channel === 'plugins:part' ? args[3] as PartRef | null : null;
+  const switched = part ? ` (${part.kind} ${part.name})` : channel === 'plugins:skill' && typeof args[3] === 'string' ? ` (skill ${args[3]})` : '';
+  const plugin = channel.startsWith('plugins:') && typeof args[1] === 'string' && typeof args[2] === 'string' ? ` ${args[2]}@${args[1]}${picked}${switched}` : '';
   for (const report of Array.isArray(reports) ? reports as ActionReport[] : []) {
     log(`${channel}${plugin} in ${report.tool}: ${report.outcome}${report.changed ? '' : ', nothing changed'}: ${[report.message, ...(report.notes ?? [])].join(' ')}`);
     for (const run of report.runs.filter(run => !run.ok)) log(`${channel}${plugin} in ${report.tool}: \`${run.command}\` failed: ${run.output.trim().slice(0, 2000)}`);

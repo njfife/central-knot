@@ -1402,17 +1402,17 @@ span.ins-confirm { margin-top: 0; }
 .legend-cell .cell-disabled-mark svg { width: 9px; height: 9px; }
 .legend-item > .legend-cell.cell-disabled { margin-right: 5px; }
 .cell-removing, .legend-cell.cell-removing { color: var(--danger); border: 1px dashed color-mix(in oklab, var(--danger) 60%, transparent); background: var(--danger-tint); }
-/* Skills: every tool's row has the same three columns (tool, what happens there, its switch and Remove), so the switches line up. */
-.details.details-skills .details-tool-head { grid-template-columns: 196px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; }
+/* Skills, agents and a plugin's items: every tool's row has the same three columns (tool, what happens there, its switch and Remove or the plugin's page), so the switches line up. */
+.details:is(.details-skills, .details-plugin, .details-agents) .details-tool-head { grid-template-columns: 196px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; }
 .details-tool-head > .details-tool-actions { display: inline-flex; align-items: center; gap: 12px; justify-self: end; }
 .details-tools { container-type: inline-size; }
 /* In a narrow pane (the dock, the Files view's details) the tool and its controls share the first line; the sentence, if any, goes under. */
 @container (max-width: 560px) {
-  .details.details-skills .details-tool-head { grid-template-columns: minmax(0, 1fr) auto; }
-  .details.details-skills .details-tool-head > .details-tool-label { grid-row: 1; grid-column: 1; }
-  .details.details-skills .details-tool-head > .details-tool-actions { grid-row: 1; grid-column: 2; justify-self: end; }
-  .details.details-skills .details-tool-head > .details-tool-line { grid-row: 2; grid-column: 1 / -1; }
-  .details.details-skills .details-tool-head > .details-tool-line:empty { display: none; }
+  .details:is(.details-skills, .details-plugin, .details-agents) .details-tool-head { grid-template-columns: minmax(0, 1fr) auto; }
+  .details:is(.details-skills, .details-plugin, .details-agents) .details-tool-head > .details-tool-label { grid-row: 1; grid-column: 1; }
+  .details:is(.details-skills, .details-plugin, .details-agents) .details-tool-head > .details-tool-actions { grid-row: 1; grid-column: 2; justify-self: end; }
+  .details:is(.details-skills, .details-plugin, .details-agents) .details-tool-head > .details-tool-line { grid-row: 2; grid-column: 1 / -1; }
+  .details:is(.details-skills, .details-plugin, .details-agents) .details-tool-head > .details-tool-line:empty { display: none; }
 }
 .tool-switch { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-soft); }
 /* The app's switch, at its own size (the row's action-button height doesn't apply to it). */

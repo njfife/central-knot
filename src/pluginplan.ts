@@ -5,13 +5,13 @@ import type { ActionReport, HarnessId, MarketplaceView, PartPlan, PartRef, Parts
 import { andList, byToolOrder, toolNames as names } from './words.ts';
 
 /**
- * Install, update or uninstall a plugin, turn one of its skills (ENB-06) or MCP servers off or back on, or turn the whole
- * plugin off or back on (plugin-off, plugin-on), in one tool. install-parts: its parts
+ * Install, update or uninstall a plugin, turn one of its skills (ENB-06: skill-off, skill-on) or one of its MCP servers or
+ * agents (part-off, part-on) off or back on, or turn the whole plugin off or back on (plugin-off, plugin-on), in one tool. install-parts: its parts
  * as separate items in a tool that can't take the plugin (installed, or brought up to date); remove-parts: those parts out
  * again; pick-parts: single parts of it put in or taken out there (`pick`); undo-parts: an Undo of a parts run (`run`),
  * which only Undo makes.
  */
-export type PluginAction = 'install' | 'update' | 'remove' | 'skill-off' | 'skill-on' | 'server-off' | 'server-on' | 'plugin-off' | 'plugin-on' | 'install-parts' | 'remove-parts' | 'pick-parts' | 'undo-parts';
+export type PluginAction = 'install' | 'update' | 'remove' | 'skill-off' | 'skill-on' | 'part-off' | 'part-on' | 'plugin-off' | 'plugin-on' | 'install-parts' | 'remove-parts' | 'pick-parts' | 'undo-parts';
 /** The parts engine's mode for a parts action (installing also brings parts up to date; a pick installs only the parts it names); undefined for any other action. */
 const PARTS_MODES: Partial<Record<PluginAction, 'install' | 'remove' | 'undo'>> = { 'install-parts': 'install', 'remove-parts': 'remove', 'pick-parts': 'install', 'undo-parts': 'undo' };
 export const partsMode = (action: PluginAction) => PARTS_MODES[action];
@@ -27,8 +27,8 @@ export interface PluginOp {
   action: PluginAction;
   /** The skill a skill-off or skill-on switches, by its name. */
   skill?: string;
-  /** The MCP server a server-off or server-on switches, by its name in the plugin. */
-  server?: string;
+  /** The MCP server or agent a part-off or part-on switches, by its name in the plugin. */
+  part?: PartRef;
   /** For undo-parts: the parts run it reverses. */
   run?: string;
   /** For pick-parts: the single parts to put in and to take out. */
@@ -40,8 +40,8 @@ export interface ResultLine {
   plugin: string;
   /** Set on a skill switch's line: its text starts with the skill's name. */
   skill?: string;
-  /** Set on an MCP server switch's line: its text starts with the server's name. */
-  server?: string;
+  /** Set on an MCP server's or agent's switch's line: its text starts with what it is and its name. */
+  part?: PartRef;
   ok: boolean;
   text: string;
   /** The same with three or more tools counted, not named ("installed in 3 tools"), for a narrow place; a skill's tools are always named. */
@@ -58,12 +58,12 @@ export const failedFor = (tools: HarnessId[], message: string): ActionReport[] =
 
 /** One plugin in one marketplace: two marketplaces may both offer a plugin with the same name. */
 export const pluginKey = (source: string, plugin: string) => `${source}\u0000${plugin}`;
-/** What names one choice among a tool's for a plugin: the plugin's own change by nothing, a switch by its skill or MCP server. */
-type OpSlot = Pick<PluginOp, 'source' | 'plugin' | 'tool' | 'skill' | 'server'> & { action?: PluginAction };
-/** A plugin's own change in a tool, each of its skills' and MCP servers' switches there, and the single parts picked for it there are separate choices. */
-const opKey = (op: OpSlot) => `${pluginKey(op.source, op.plugin)}\u0000${op.tool}\u0000${op.action === 'pick-parts' ? PICK_SLOT : isWhole(op.action) ? WHOLE_SLOT : op.server !== undefined ? `${SERVER_SLOT}${op.server}` : op.skill ?? ''}`;
-/** An MCP server's switch's place among a tool's choices: no skill's name starts so. */
-const SERVER_SLOT = '\u0001server\u0000';
+/** What names one choice among a tool's for a plugin: the plugin's own change by nothing, a switch by its skill, MCP server or agent. */
+type OpSlot = Pick<PluginOp, 'source' | 'plugin' | 'tool' | 'skill' | 'part'> & { action?: PluginAction };
+/** A plugin's own change in a tool, the switch of each of its skills, MCP servers and agents there, and the single parts picked for it there are separate choices. */
+const opKey = (op: OpSlot) => `${pluginKey(op.source, op.plugin)}\u0000${op.tool}\u0000${op.action === 'pick-parts' ? PICK_SLOT : isWhole(op.action) ? WHOLE_SLOT : switchSlot(op)}`;
+/** An item's switch's place among a tool's choices: a skill's name, or for an MCP server or agent its kind and name (no skill's name starts so). */
+const switchSlot = (op: Pick<PluginOp, 'skill' | 'part'>) => (op.part ? `\u0001${op.part.kind}\u0000${op.part.name}` : op.skill ?? '');
 /** A pick's place among a tool's choices: no skill has this name. */
 const PICK_SLOT = '\u0001parts';
 /** The whole plugin's switch's place among a tool's choices: no skill has this name either. */
@@ -76,8 +76,8 @@ export const forSource = (key: string, source: string) => key.startsWith(`${sour
 /** The install or uninstall chosen for a plugin in a tool, or with `skill`, that skill's switch chosen there. */
 export const queued = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId, skill?: string) => draft.get(opKey({ source, plugin, tool, skill }))?.action;
 /** The whole plugin's switch chosen in a tool, if one is. */
-/** The switch chosen for one MCP server of a plugin in a tool, if one is. */
-export const queuedServer = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId, server: string) => draft.get(opKey({ source, plugin, tool, server }))?.action;
+/** The switch chosen for one MCP server or agent of a plugin in a tool, if one is. */
+export const queuedPart = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId, part: PartRef) => draft.get(opKey({ source, plugin, tool, part }))?.action;
 export const queuedWhole = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId) => draft.get(opKey({ source, plugin, tool, action: 'plugin-on' }))?.action;
 
 /** Takes one change out of the draft, once it has run. */
@@ -231,7 +231,7 @@ export function summary(draft: PluginDraft, isUpdate: (op: PluginOp) => boolean 
     return { skills: new Set(mine.map(op => `${pluginKey(op.source, op.plugin)}\u0000${op.skill}`)).size, tools: new Set(mine.map(op => op.tool)).size };
   };
   // Plugins changed as a whole in some tool; a skill's switch and single parts are counted on their own.
-  const plugins = new Set(ops.filter(op => !op.skill && !op.server && op.action !== 'pick-parts').map(op => pluginKey(op.source, op.plugin))).size;
+  const plugins = new Set(ops.filter(op => !op.skill && !op.part && op.action !== 'pick-parts').map(op => pluginKey(op.source, op.plugin))).size;
   const partsUpdates = ops.filter(op => op.action === 'install-parts' && isUpdate(op)).length;
   const picked = (which: 'on' | 'off') => ops.reduce((sum, op) => sum + (op.pick?.[which].length ?? 0), 0);
   return { plugins, installs: count('install'), updates: count('update'), removals: count('remove'), skillsOff: switches('skill-off'), skillsOn: switches('skill-on'),
@@ -239,18 +239,18 @@ export function summary(draft: PluginDraft, isUpdate: (op: PluginOp) => boolean 
 }
 
 /** One step of a run: one tool command, apart from an install or update, which runs for every tool chosen at once. */
-export interface Step { source: string; marketName: string; plugin: string; action: PluginAction; tools: HarnessId[]; skill?: string; server?: string; run?: string; pick?: PartsPick }
+export interface Step { source: string; marketName: string; plugin: string; action: PluginAction; tools: HarnessId[]; skill?: string; part?: PartRef; run?: string; pick?: PartsPick }
 
 /**
- * Runs in a fixed, readable order: per plugin, installs first, then updates (each one command per tool set), then skill
- * and MCP server switches, then the whole plugin's switches (so a plugin turned on for one item has its other items off
+ * Runs in a fixed, readable order: per plugin, installs first, then updates (each one command per tool set), then each
+ * item's own switch (a skill's, an MCP server's, an agent's), then the whole plugin's switches (so a plugin turned on for one item has its other items off
  * before it loads), then removals, tool by tool, then parts, tool by tool. Single parts picked in a tool whose parts are also installed or
  * updated are one step: that install or update with the pick as its exceptions (`pick.rest`).
  */
 export function batches(ops: PluginOp[]): Step[] {
   const out: Step[] = [];
   const plugins = [...new Map(ops.map(op => [pluginKey(op.source, op.plugin), op])).values()];
-  const one = (op: PluginOp): Step => ({ source: op.source, marketName: op.marketName, plugin: op.plugin, action: op.action, tools: [op.tool], ...(op.skill ? { skill: op.skill } : {}), ...(op.server ? { server: op.server } : {}), ...(op.run ? { run: op.run } : {}), ...(op.pick ? { pick: op.pick } : {}) });
+  const one = (op: PluginOp): Step => ({ source: op.source, marketName: op.marketName, plugin: op.plugin, action: op.action, tools: [op.tool], ...(op.skill ? { skill: op.skill } : {}), ...(op.part ? { part: op.part } : {}), ...(op.run ? { run: op.run } : {}), ...(op.pick ? { pick: op.pick } : {}) });
   for (const first of plugins) {
     const mine = ops.filter(op => op.source === first.source && op.plugin === first.plugin);
     for (const action of ['install', 'update'] as const) {
@@ -267,10 +267,10 @@ export function batches(ops: PluginOp[]): Step[] {
   return out;
 }
 
-/** Whether an action is one item's own switch: a skill's or an MCP server's. */
-const isItemSwitch = (action: PluginAction) => action === 'skill-off' || action === 'skill-on' || action === 'server-off' || action === 'server-on';
+/** Whether an action is one item's own switch: a skill's, an MCP server's or an agent's. */
+const isItemSwitch = (action: PluginAction) => action === 'skill-off' || action === 'skill-on' || action === 'part-off' || action === 'part-on';
 
-const OPPOSITE: Partial<Record<PluginAction, PluginAction>> = { install: 'remove', remove: 'install', 'skill-off': 'skill-on', 'skill-on': 'skill-off', 'server-off': 'server-on', 'server-on': 'server-off', 'plugin-off': 'plugin-on', 'plugin-on': 'plugin-off' };
+const OPPOSITE: Partial<Record<PluginAction, PluginAction>> = { install: 'remove', remove: 'install', 'skill-off': 'skill-on', 'skill-on': 'skill-off', 'part-off': 'part-on', 'part-on': 'part-off', 'plugin-off': 'plugin-on', 'plugin-on': 'plugin-off' };
 
 /**
  * The way back: only what this run really changed, reversed, last first (so each Codex skill switch is undone onto the
@@ -283,7 +283,7 @@ export const reverse = (done: PluginDone[]): PluginOp[] => done
   .map(({ report, pick: _picked, ...op }): PluginOp => (isParts(op.action) ? { ...op, action: 'undo-parts', run: report.partsRun } : { ...op, action: OPPOSITE[op.action]! }))
   .reverse();
 
-/** A tool did what was asked (installed, updated, uninstalled, turned a skill, an MCP server or the plugin off or on), whether this run changed it or it already was. */
+/** A tool did what was asked (installed, updated, uninstalled, turned a skill, an MCP server, an agent or the plugin off or on), whether this run changed it or it already was. */
 export const succeeded = (report: ActionReport) => report.outcome !== 'held' && report.outcome !== 'failed' && report.outcome !== 'not-known';
 
 /**
@@ -296,13 +296,13 @@ export const succeeded = (report: ActionReport) => report.outcome !== 'held' && 
  */
 export function resultLines(done: PluginDone[], undo = false, { after = false } = {}): ResultLine[] {
   const lines: ResultLine[] = [];
-  const lineKey = (entry: PluginDone) => `${pluginKey(entry.source, entry.plugin)}\u0000${entry.server !== undefined ? `${SERVER_SLOT}${entry.server}` : entry.skill ?? ''}`;
+  const lineKey = (entry: PluginDone) => `${pluginKey(entry.source, entry.plugin)}\u0000${switchSlot(entry)}`;
   for (const key of new Set(done.map(lineKey))) {
     const mine = done.filter(entry => lineKey(entry) === key);
-    const { plugin, source, skill, server } = mine[0]!;
-    // A switch's line starts with the item it switched: the skill's name, or "MCP server" and the server's.
-    const item = server !== undefined ? `MCP server ${server}` : skill;
-    const named = { ...(skill ? { skill } : {}), ...(server !== undefined ? { server } : {}) };
+    const { plugin, source, skill, part } = mine[0]!;
+    // A switch's line starts with the item it switched: the skill's name, or "MCP server" or "agent" and its name.
+    const item = part ? `${partWords[part.kind][0]} ${part.name}` : skill;
+    const named = { ...(skill ? { skill } : {}), ...(part ? { part } : {}) };
     // Tools in the page's column order, so "Codex and Pi" never reads "Pi and Codex" the next time. An unchanged parts
     // result is one group whatever kind of run it was: only a change tells an update from an install.
     // A pick of single parts is said as such; with the rest of the tool's parts it is that install or update.
@@ -325,7 +325,7 @@ export function resultLines(done: PluginDone[], undo = false, { after = false } 
       // A skill that went in where a link led nowhere: said, since something in the person's folder was replaced.
       [mine.filter(entry => isParts(entry.action) && entry.report.replacedLinks?.length).map(entry => names[entry.tool]), 'a broken link replaced in'],
     ];
-    const [off, on] = server !== undefined ? ['server-off', 'server-on'] as const : ['skill-off', 'skill-on'] as const;
+    const [off, on] = part ? ['part-off', 'part-on'] as const : ['skill-off', 'skill-on'] as const;
     const groups: Group[] = item
       ? [[tools(off, true), undo ? `${item} off again in` : `${item} turned off in`], [tools(on, true), undo ? `${item} back on in` : `${item} turned on in`],
         [tools(off, false), `${item} already off in`], [tools(on, false), `${item} already on in`]]
@@ -394,10 +394,10 @@ export function resultParts(lines: ResultLine[], undo: boolean, { short = false,
     if (at) parts.push('; ');
     // On the plugin's own page its name is already in the breadcrumb: "Installed in Codex." / "pdf-reader turned off in Codex."
     // Only a line that starts the sentence takes a capital, and never a skill's name.
-    const opens = !at && !undo && !line.skill && line.server === undefined;
+    const opens = !at && !undo && !line.skill && !line.part;
     if (here?.plugin === line.plugin && here.source === line.source) parts.push(opens ? capitalized(text) : text);
     // "Undone: document-tools removed from Codex" reads on; a skill's line starts with the skill, so the plugin takes a colon.
-    else parts.push({ plugin: line.plugin, source: line.source }, `${undo && !line.skill && line.server === undefined ? ' ' : ': '}${text}`);
+    else parts.push({ plugin: line.plugin, source: line.source }, `${undo && !line.skill && !line.part ? ' ' : ': '}${text}`);
   });
   return [...parts, '.'];
 }
@@ -428,7 +428,7 @@ export interface PlanApi {
   install(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstall(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
   setSkill(source: string, marketName: string, plugin: string, skill: string, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
-  setServer?(source: string, marketName: string, plugin: string, server: string, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
+  setPart?(source: string, marketName: string, plugin: string, part: PartRef, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
   setWhole?(source: string, marketName: string, plugin: string, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
   update?(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   parts?(source: string, marketName: string, plugin: string, tool: HarnessId, mode: 'install' | 'remove' | 'undo', run: string | undefined, home: string, pick?: PartsPick): Promise<PluginActionResult>;
@@ -450,12 +450,12 @@ export async function runPlan(ops: PluginOp[], api: PlanApi, home: string, onSte
         : step.action === 'remove' ? await api.uninstall(step.source, step.marketName, step.plugin, step.tools[0]!, home)
         : isParts(step.action) ? (api.parts ? await api.parts(step.source, step.marketName, step.plugin, step.tools[0]!, partsMode(step.action)!, step.run, home, step.pick) : { reports: failedFor(step.tools, 'Parts can’t be installed here.') })
         : isWhole(step.action) ? (api.setWhole ? await api.setWhole(step.source, step.marketName, step.plugin, step.tools[0]!, step.action === 'plugin-on', home) : { reports: failedFor(step.tools, 'Plugins can’t be turned on or off here.') })
-        : step.server !== undefined ? (api.setServer ? await api.setServer(step.source, step.marketName, step.plugin, step.server, step.tools[0]!, step.action === 'server-on', home) : { reports: failedFor(step.tools, 'MCP servers can’t be turned on or off here.') })
+        : step.part ? (api.setPart ? await api.setPart(step.source, step.marketName, step.plugin, step.part, step.tools[0]!, step.action === 'part-on', home) : { reports: failedFor(step.tools, 'That can’t be turned on or off here.') })
         : step.skill ? await api.setSkill(step.source, step.marketName, step.plugin, step.skill, step.tools[0]!, step.action === 'skill-on', home)
         : { reports: failedFor(step.tools, 'That choice named no skill, so nothing ran.') };
     } catch { result = { reports: failedFor(step.tools, 'It stopped unexpectedly. Refresh to see where it stands.') }; }
     if (result.stopped) return { done, stopped: result.stopped };
-    for (const report of result.reports) done.push({ source: step.source, marketName: step.marketName, plugin: step.plugin, tool: report.tool, action: step.action, ...(step.skill ? { skill: step.skill } : {}), ...(step.server !== undefined ? { server: step.server } : {}), ...(step.run ? { run: step.run } : {}), ...(step.pick ? { pick: step.pick } : {}), report });
+    for (const report of result.reports) done.push({ source: step.source, marketName: step.marketName, plugin: step.plugin, tool: report.tool, action: step.action, ...(step.skill ? { skill: step.skill } : {}), ...(step.part ? { part: step.part } : {}), ...(step.run ? { run: step.run } : {}), ...(step.pick ? { pick: step.pick } : {}), report });
   }
   return { done };
 }

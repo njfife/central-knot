@@ -12,10 +12,10 @@ import * as engine from './plugins.ts';
 import { installParts, partsCurrent, planParts, readParts, removeParts, undoParts } from './parts.ts';
 import { suggestedMarketplaces, type SuggestedMarketplace } from './suggested.ts';
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
-import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartsInstall, PartsPick, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
+import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartRef, PartsInstall, PartsPick, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
 import { writeDurably, type ShareContext } from './share.ts';
 import { SKILL_SWITCH_TESTED_FROM, copyDiffers, heldReason, keptReason, marketTitle, notCarried, partsTools, stateOf, updateTools, versionToCompare } from './pluginstatus.ts';
-import { isFolder, isHttps, onlyAllowed, shortBuild } from './values.ts';
+import { isFolder, isHttps, onlyAllowed, record, shortBuild } from './values.ts';
 
 /** What runs a tool's plugin commands when it is a desktop app's own copy: "Claude desktop’s Code tab 2.1.321". */
 export const viaLabel = (app: DesktopApp, answered = app.carriedVersion) => `${app.name}’s ${app.carries}${answered ? ` ${shortBuild(answered)}` : ''}`;
@@ -53,7 +53,7 @@ export interface MarketplaceEngine {
   uninstall: typeof engine.uninstall;
   update: typeof engine.update;
   setSkill: typeof engine.setSkill;
-  setServer: typeof engine.setServer;
+  setPart: typeof engine.setPart;
   setWhole: typeof engine.setWhole;
 }
 
@@ -78,7 +78,7 @@ async function findClis(): Promise<Routes> {
   }
   return routes;
 }
-const realEngine: MarketplaceEngine = { findClis, checkAccess: engine.checkAccess, addMarketplace: engine.addMarketplace, readCatalog: engine.readCatalog, readRemotePlugin: engine.readRemotePlugin, install: engine.install, uninstall: engine.uninstall, update: engine.update, setSkill: engine.setSkill, setServer: engine.setServer, setWhole: engine.setWhole };
+const realEngine: MarketplaceEngine = { findClis, checkAccess: engine.checkAccess, addMarketplace: engine.addMarketplace, readCatalog: engine.readCatalog, readRemotePlugin: engine.readRemotePlugin, install: engine.install, uninstall: engine.uninstall, update: engine.update, setSkill: engine.setSkill, setPart: engine.setPart, setWhole: engine.setWhole };
 
 /** Tools named by the page: only those that install plugins. */
 const toolIds = (value: unknown): PluginTool[] => onlyAllowed(value, pluginTools);
@@ -556,11 +556,11 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { reports: withoutFileBytes([await use.setSkill(ctx, marketName, plugin, skill, tool, on, source, catalog?.plugins.find(item => item.name === plugin)?.entry)]) };
   }
 
-  /** One tool's own switch for one MCP server of an installed plugin. `marketName` and `source` as for uninstall. */
-  async function setServer(source: string, marketName: string, plugin: string, server: string, tool: PluginTool, on: boolean, home: unknown): Promise<PluginActionResult> {
+  /** One tool's own switch for one MCP server or agent of an installed plugin. `marketName` and `source` as for uninstall. */
+  async function setPart(source: string, marketName: string, plugin: string, part: PartRef, tool: PluginTool, on: boolean, home: unknown): Promise<PluginActionResult> {
     const stopped = await guard(home);
     if (stopped) return { stopped, reports: [] };
-    return { reports: withoutFileBytes([await use.setServer(await context(), marketName, plugin, server, tool, on, source)]) };
+    return { reports: withoutFileBytes([await use.setPart(await context(), marketName, plugin, part, tool, on, source)]) };
   }
 
   /** One tool's own switch for a whole installed plugin. `marketName` and `source` as for uninstall. */
@@ -643,7 +643,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { report, view: await view() };
   }
 
-  return { view, detail, readme, add, forget, decline, install, update, uninstall, setSkill, setServer, setWhole, partsPlan, parts, pendingUpdates, addCarried, addCarriedTo };
+  return { view, detail, readme, add, forget, decline, install, update, uninstall, setSkill, setPart, setWhole, partsPlan, parts, pendingUpdates, addCarried, addCarriedTo };
 }
 
 type Handle = (channel: string, work: (...args: unknown[]) => Promise<unknown>) => void;
@@ -694,9 +694,10 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
     const ids = toolIds([tool]);
     return open() && isText(source) && isName(marketplace) && isName(plugin) && isText(skill, 200) && typeof on === 'boolean' && ids.length ? markets.setSkill(source, marketplace, plugin, skill, ids[0]!, on, home) : refused(tool);
   });
-  handle('plugins:server', async (source, marketplace, plugin, server, tool, on, home) => {
+  handle('plugins:part', async (source, marketplace, plugin, part, tool, on, home) => {
     const ids = toolIds([tool]);
-    return open() && isText(source) && isName(marketplace) && isName(plugin) && isText(server, 200) && typeof on === 'boolean' && ids.length ? markets.setServer(source, marketplace, plugin, server, ids[0]!, on, home) : refused(tool);
+    const { kind, name } = record(part) ?? {};
+    return open() && isText(source) && isName(marketplace) && isName(plugin) && (kind === 'mcp' || kind === 'agent') && isText(name, 200) && typeof on === 'boolean' && ids.length ? markets.setPart(source, marketplace, plugin, { kind, name }, ids[0]!, on, home) : refused(tool);
   });
   handle('plugins:whole', async (source, marketplace, plugin, tool, on, home) => {
     const ids = toolIds([tool]);

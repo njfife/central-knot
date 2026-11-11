@@ -14,7 +14,7 @@ import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sa
 import type { Change, DestinationResult, HomeView, ManageView, SkillFacts, SyncNotice, HarnessId, PartsInstall, ThroughPlugin } from './types.ts';
 import { market } from './pluginstate.ts';
 import { pluginKey, type PluginDraft } from './pluginplan.ts';
-import { cantSwitch, click as clickPluginItem, clickWords, pendingWords, prune as prunePluginSwitches, standing as pluginStanding, type PluginItemAt } from './pluginswitch.ts';
+import { cantSwitch, click as clickPluginItem, clickWords, pendingWords, prune as prunePluginSwitches, standing as pluginStanding, wholeWords, type PluginItemAt } from './pluginswitch.ts';
 import { partOfPage, samePart, versionWord } from './pluginstatus.ts';
 import { cellWords, handledWhere, inTool, insideTitle, offIn, pageRows, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
 import { folded, lineDiff } from './diff.ts';
@@ -588,7 +588,8 @@ function pendingSummary(count: number): string {
   const disabling = flips.filter(Boolean).length, enabling = flips.length - disabling;
   const copies = (n: number, what: string) => (n ? ` · ${n} ${n === 1 ? 'copy' : 'copies'} ${what}` : '');
   const plugins = pluginSwitchCount();
-  return `${plural(count, 'change')}${fresh ? ` · ${fresh} new ${fresh === 1 ? 'copy' : 'copies'}` : ''}${copies(replaced, 'to replace')}${copies(removed, 'to remove')}${copies(disabling, 'to disable')}${copies(enabling, 'to enable')}${plugins ? ` · ${plugins} through a plugin to turn ${pluginTurns()}` : ''}`;
+  const whole = wholeWords(view.pluginDraft);
+  return `${plural(count, 'change')}${fresh ? ` · ${fresh} new ${fresh === 1 ? 'copy' : 'copies'}` : ''}${copies(replaced, 'to replace')}${copies(removed, 'to remove')}${copies(disabling, 'to disable')}${copies(enabling, 'to enable')}${plugins ? ` · ${plugins} through a plugin to turn ${pluginTurns()}${whole.length ? ` (${whole.join(', ')})` : ''}` : ''}`;
 }
 
 /**
@@ -1192,7 +1193,7 @@ function details(skill: SampleSkill, placement: Placement = 'row'): HTMLElement 
     // One-way limits are said once, under the rows (oneWayNote); other kinds keep a per-tool line.
     kind !== 'agents' && skill.limits?.[tool] && !skill.stopped?.includes(tool) ? h('p.details-limits', {}, icon('arrow-up-right', 12, 'tone-warning'), skill.limits[tool]!) : null,
     null);
-  return h(`div.compare.details${placement === 'row' ? '' : '.details-bare'}${differs ? '.details-differs' : ''}${kind === 'mcp' ? '.details-mcp' : ''}${kind === 'skills' ? '.details-skills' : ''}`, { role: 'region', 'aria-label': `Details for ${skill.key}` },
+  return h(`div.compare.details${placement === 'row' ? '' : '.details-bare'}${differs ? '.details-differs' : ''}${kind === 'mcp' ? '.details-mcp' : ''}${kind === 'skills' ? '.details-skills' : ''}${kind === 'agents' ? '.details-agents' : ''}`, { role: 'region', 'aria-label': `Details for ${skill.key}` },
     placement === 'row' && differs && !draft ? h('button.details-close', { type: 'button', id: `close-${skill.key}`, 'aria-label': `Close details for ${skill.key}`, title: 'Close', onclick: () => { view.comparing = undefined; rerender(); } }, icon('x', 14)) : null,
     h('div.details-head', {},
       (inFiles && allSame) || (differs && !skill.managed && !draft) ? null

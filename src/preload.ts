@@ -70,7 +70,7 @@ const api: DesktopApi = {
   switchProfile: (id, home) => ipcRenderer.invoke('profiles:switch', id, home),
   onProfileSwitched: callback => { ipcRenderer.on('profile:switched', (_event, result) => callback(result)); },
   setPluginSkill: (source, marketName, plugin, skill, tool, on, home) => ipcRenderer.invoke('plugins:skill', source, marketName, plugin, skill, tool, on, home),
-  setPluginServer: (source, marketName, plugin, server, tool, on, home) => ipcRenderer.invoke('plugins:server', source, marketName, plugin, server, tool, on, home),
+  setPluginPart: (source, marketName, plugin, part, tool, on, home) => ipcRenderer.invoke('plugins:part', source, marketName, plugin, part, tool, on, home),
   setPluginOn: (source, marketName, plugin, tool, on, home) => ipcRenderer.invoke('plugins:whole', source, marketName, plugin, tool, on, home),
   partsPlan: (source, plugin) => ipcRenderer.invoke('plugins:parts-plan', source, plugin),
   pluginItemTexts: (plugin, marketName, kind, name) => ipcRenderer.invoke('plugin-items:texts', plugin, marketName, kind, name),
