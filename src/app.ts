@@ -1,3 +1,5 @@
+// The page's state and its actions: reading a home, the pages, and one click applied at once with its Undo (applyClick,
+// undoClick), History's Undo and Restore (restoreEvent). What a click changes is planned in clickplan.ts.
 import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';

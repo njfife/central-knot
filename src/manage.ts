@@ -1,5 +1,7 @@
 // Managing skills across tools: what each tool has, and applying the person's choices.
 // A managed skill keeps one copy in every tool it syncs to. An unmanaged skill is left alone.
+// It also owns History's file for every kind (readHistory, appendHistory, replaceHistory, pruneHistory) and the rows History
+// makes for items turned off or with no copy left (heldOffFacts, goneFacts), by the rules in historyrules.ts.
 import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, readlink, realpath, rename, stat, symlink, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';

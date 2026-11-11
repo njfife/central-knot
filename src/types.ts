@@ -1,3 +1,5 @@
+// The data shapes shared by the main process and the pages: a home's view, each kind's facts (SkillFacts), changes (Change),
+// results, and History's entries (HistoryEvent), each field documented where it is defined.
 export type HomeMode = 'fixture' | 'custom' | 'actual';
 export type HarnessId = 'claude-cli' | 'copilot-cli' | 'codex-cli' | 'pi-cli' | 'opencode-cli';
 export type ProbeState = 'ok' | 'missing' | 'timeout' | 'failed' | 'malformed' | 'restricted' | 'not-run';

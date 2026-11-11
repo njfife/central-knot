@@ -1,3 +1,5 @@
+// The Overview and the Skills, MCP servers and Agents pages' frames (their tables are matrix.ts), with the states several pages share:
+// no tools, nothing read yet, an empty kind (kindEmpty), and small parts such as a copy button.
 import { absentKinds, announce, noTools, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type Kind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, otherOwnerSaid, takeOverSync, takeOverTitle, type Page } from './app.ts';
 import { afterLayout, button, cardGrid, emptyState, fileBlocks, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, toolName } from './model.ts';

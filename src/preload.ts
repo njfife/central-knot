@@ -1,3 +1,4 @@
+// The bridge from the page to the main process: each DesktopApi call (types.ts) sent as an IPC message main.ts handles.
 import { contextBridge, ipcRenderer } from 'electron';
 import type { DesktopApi } from './types.ts';
 

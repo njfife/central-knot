@@ -1,3 +1,5 @@
+// Small pure helpers the pages and engines share: tool monograms and names, times and days, History's day window, the
+// Settings rules for Off (noSwitchRule) and History's days (keptDays), and grouping. No DOM, no files.
 import type { AppPreferences, HarnessId, HistoryDays, HomeView, ManageView, Snapshot } from './types.ts';
 
 const monograms: Record<HarnessId, string> = { 'claude-cli': 'Cc', 'copilot-cli': 'Cp', 'codex-cli': 'Cx', 'pi-cli': 'Pi', 'opencode-cli': 'Oc' };

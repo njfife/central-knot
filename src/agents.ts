@@ -6,6 +6,9 @@
 // Writing a destination changes only its name, description and prompt lines; every other byte of that file stays.
 // The safety rules are the skills engine's: unreadable is never absent, every write and removal checks the file first, every
 // replaced or removed file is kept whole for Restore, and deletions follow DEL-01 and DEL-02.
+// This file owns agents' sync (applyAgents), their Off, Delete everywhere and putting copies back, and the Undo or Restore of
+// every agent History entry (restoreAgent). Where an agent is off, and whether an entry's action still stands, are decided in
+// historyrules.ts; the page's clicks are planned in clickplan.ts.
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, readlink, stat, symlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';

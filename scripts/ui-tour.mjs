@@ -416,6 +416,20 @@ if (wanted('agents')) {
     await everyLook('agents-tool-off', 'The same.');
     await a.click('#outcome-undo'); await a.settle();
   }
+  // A one-way agent off everywhere: its receiving copies wait for their source, said on their lines, with no switch of their own.
+  await a.click('#switch-code-reviewer'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  if (!(await a.has('#sync-code-reviewer-claude-cli'))) { await a.click('#open-code-reviewer'); await a.settle(); }
+  await shot(a, 'agents-oneway-waits', 'Turned code-reviewer off, then opened it: Claude Code’s line (the source) has its switch; Copilot CLI’s and Codex’s say “Turn on Claude Code’s copy first: it is the source.” and have no switch until it is back.');
+  await a.click('#outcome-undo'); await a.settle();
+  // A tool left out of sync with a copy of its own (as a record from before step 4 has it; no click leaves an agent's tool out
+  // now): its line says so and offers Sync here.
+  await a.run(`(async () => { const view = await window.centralKnot.refresh(); await window.centralKnot.applyAgents([{ key: 'release-notes', managed: true, off: ['codex-cli'], seenManaged: true }], false, view.home); })()`);
+  edit(join(practice, '.codex/agents/release-notes.toml'), text => text.replace('one line each.', 'one line each. Codex keeps its own.'));
+  await a.click('#header-refresh'); await a.settle();
+  if (!(await a.has('#sync-here-release-notes-codex-cli'))) { await a.click('#open-release-notes'); await a.settle(); }
+  await shot(a, 'agents-sync-here', 'release-notes with Codex left out of sync and a copy of its own there: Codex’s line says “Has its own copy, not synced.” with Sync here, whose tooltip says that if its copy differs, you choose which copy every tool uses.');
+  await a.run(`(async () => { const view = await window.centralKnot.refresh(); await window.centralKnot.applyAgents([{ key: 'release-notes', managed: true, off: [], seenManaged: true, use: 'claude-cli', useHash: view.agents.servers.find(item => item.key === 'release-notes')?.copies['claude-cli']?.hash }], false, view.home); })()`);
+  await a.click('#header-refresh'); await a.settle();
   // With Settings keeping copies where a tool has no switch, Off changes nothing for an agent, and says so as a note.
   await a.click('#nav-settings'); await a.click('#remove-when-no-switch'); await waitFor(a, `document.querySelector('#remove-when-no-switch')?.getAttribute('aria-checked') === 'false'`);
   await a.click('#nav-agents'); await a.click('#switch-release-notes'); await a.settle();
