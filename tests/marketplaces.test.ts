@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
@@ -13,14 +13,14 @@ const marketplace = (root: string, name: string, plugins: string[]) => Promise.a
   ...plugins.map(plugin => put(join(root, `plugins/${plugin}/skills/${plugin}/SKILL.md`), `---\nname: ${plugin}\ndescription: ${plugin}\n---\n`)),
 ]);
 
-async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?: boolean; app?: DesktopApp; /** A bundled build: the marketplace it carries is in this folder under the base, and these plugins are not packed. */ bundled?: { folder: string; unpackaged?: string[] } } = {}) {
+async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?: boolean; app?: DesktopApp; /** Not this computer's own home. */ folderHome?: boolean; /** What adding the marketplace to a tool's own list comes to, where not `added`. */ listing?: Partial<Record<HarnessId, Awaited<ReturnType<typeof engine.addMarketplace>>>>; /** A bundled build: the marketplace it carries is in this folder under the base, and these plugins are not packed. */ bundled?: { folder: string; unpackaged?: string[] } } = {}) {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-markets-')));
   const home = join(base, 'home');
   await mkdir(home, { recursive: true });
   const calls: string[] = [];
   const ran: (string | undefined)[] = [];
   const host: MarketplaceHost = {
-    home: () => ({ home }),
+    home: () => ({ home, actual: !options.folderHome }),
     read: async () => ({ tools: ['claude-cli', 'copilot-cli', 'codex-cli'], snapshots: [] }),
     writeAccess: async () => (options.allowed === false ? { allowed: false, reason: 'Preview only.' } : { allowed: true }),
     dataDir: join(base, 'data'),
@@ -31,6 +31,7 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?:
   const use: MarketplaceEngine = {
     findClis: async () => ({ binaries: { 'claude-cli': '/bin/true', ...(options.codex ? { 'codex-cli': join(base, 'bin/codex') } : {}), ...(options.app ? { 'copilot-cli': options.app.binary } : {}) }, apps: options.app ? { 'copilot-cli': options.app } : {} }),
     checkAccess: async (context, source) => { calls.push(`check ${source}`); return engine.checkAccess(context, source); },
+    addMarketplace: async (_context, catalog, tool) => { calls.push(`list ${catalog.name} ${tool}`); return options.listing?.[tool] ?? { outcome: 'added', message: 'Added.', runs: [] }; },
     readCatalog: async (context, source) => { calls.push(`read ${source}`); return engine.readCatalog(context, source); },
     readRemotePlugin: async () => ({ problem: 'not in tests' }),
     install: async (context, _catalog, plugin, tool) => { calls.push(`install ${plugin} ${tool}`); ran.push(context.binaries[tool]); if (tool === options.throwFor) throw new Error('disk full'); return { tool, outcome: 'installed', message: 'Installed.', runs: [{ tool, command: 'x', ok: true, output: '', changed: [{ path: '/p', before: 'old', after: 'new' }] }], changed: true } satisfies ActionReport; },
@@ -38,7 +39,7 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?:
     update: async (_context, _catalog, plugin, tool) => { calls.push(`update ${plugin} ${tool}`); return { tool, outcome: 'updated', message: 'Updated.', runs: [], changed: true }; },
     setSkill: async (_context, marketplace, plugin, skill, tool, on, _source, entry) => { calls.push(`skill ${plugin}:${skill}@${marketplace} ${tool} ${on} entry=${entry?.name}`); return { tool, outcome: on ? 'skill-on' : 'skill-off', message: '', runs: [], changed: true }; },
   };
-  return { base, home, calls, ran, markets: createMarketplaces(host, use), cleanup: () => rm(base, { recursive: true, force: true }) };
+  return { base, home, calls, ran, host, markets: createMarketplaces(host, use), cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 
 test('Adding a marketplace reads it once, stores how it was given, and the view lists it with its plugins', async () => {
@@ -310,5 +311,73 @@ test('A bundled build’s own marketplace is listed first, stays listed, and off
     assert.deepEqual(refused.reports.map(report => [report.tool, report.outcome]), [['claude-cli', 'failed'], ['codex-cli', 'failed']]);
     assert.match(refused.reports[0]!.message, /^Acme Knot doesn’t include this plugin’s files, so it can’t be installed from here\. It is an npm package\.$/);
     assert.deepEqual(box.calls.filter(call => call.startsWith('install')), ['install pdf claude-cli']);
+  } finally { await box.cleanup(); }
+});
+
+test('A bundled build adds its marketplace to each tool’s own list once, and never again after that', async () => {
+  const box = await setup({ bundled: { folder: 'carried' }, codex: true, listing: { 'codex-cli': { outcome: 'held', message: 'Codex has a different marketplace named “team”.', runs: [] } } });
+  try {
+    await marketplace(join(box.base, 'carried'), 'team', ['pdf']);
+    const turns: number[] = [];
+    const turn = <T>(work: () => Promise<T>) => { turns.push(turns.length); return work(); };
+    const lists = () => box.calls.filter(call => call.startsWith('list'));
+    // Every tool found that takes plugins and whose commands can run: Claude Code and Codex here (Copilot CLI has no command-line
+    // tool in this setup, and Pi takes no plugins). Each takes its own turn.
+    const first = await box.markets.addCarried(['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'], turn);
+    assert.deepEqual(first.map(report => [report.tool, report.outcome]), [['claude-cli', 'added'], ['codex-cli', 'held']]);
+    assert.deepEqual(lists(), ['list team claude-cli', 'list team codex-cli']);
+    assert.equal(turns.length, 2);
+    assert.deepEqual(JSON.parse(await readFile(join(box.base, 'data/bundled/added-to-tools.json'), 'utf8')), { marketplace: 'team', homes: { [box.home]: ['claude-cli'] } });
+    // The next read of the home adds nothing: Claude Code has been given it (taken out there since or not), and the one
+    // that was left alone is not asked again this session.
+    assert.deepEqual(await box.markets.addCarried(['claude-cli', 'copilot-cli', 'codex-cli'], turn), []);
+    assert.deepEqual(lists().length, 2);
+    // Asked for by hand on its About tab, a tool is added to again, and the page gets the new view.
+    const byHand = await box.markets.addCarriedTo('claude-cli', box.home);
+    assert.equal(byHand.report?.outcome, 'added');
+    assert.equal(byHand.view?.marketplaces[0]?.name, 'team');
+    assert.equal((await box.markets.addCarriedTo('claude-cli', '/another/home')).stopped, 'The home on screen is not the one open. Nothing was changed. Read it again.');
+    // The page is told which tools the build added it to, so About can say it was the app's doing.
+    assert.deepEqual(byHand.view?.marketplaces[0]?.bundled?.addedTo, ['claude-cli']);
+  } finally { await box.cleanup(); }
+});
+
+test('The carried marketplace is added to no tool in a folder opened as a home, a home that is preview only, or a build that carries none', async () => {
+  for (const options of [{ bundled: { folder: 'carried' }, folderHome: true }, { bundled: { folder: 'carried' }, allowed: false }, {}]) {
+    const box = await setup(options);
+    try {
+      await marketplace(join(box.base, 'carried'), 'team', ['pdf']);
+      assert.deepEqual(await box.markets.addCarried(['claude-cli'], work => work()), []);
+      assert.deepEqual(box.calls.filter(call => call.startsWith('list')), []);
+    } finally { await box.cleanup(); }
+  }
+});
+
+test('Installing a carried plugin into a tool counts as adding the marketplace there: it is never added again by itself', async () => {
+  const box = await setup({ bundled: { folder: 'carried' }, codex: true });
+  try {
+    const carried = join(box.base, 'carried');
+    await marketplace(carried, 'team', ['pdf']);
+    // The person installs into Codex before the build's own add reaches it (its command-line tool turned up between reads).
+    assert.deepEqual((await box.markets.install(carried, 'team', 'pdf', ['codex-cli'], box.home)).reports.map(report => report.outcome), ['installed']);
+    const reports = await box.markets.addCarried(['claude-cli', 'codex-cli'], work => work());
+    assert.deepEqual(reports.map(report => report.tool), ['claude-cli']);
+    assert.deepEqual(box.calls.filter(call => call.startsWith('list')), ['list team claude-cli']);
+  } finally { await box.cleanup(); }
+});
+
+test('A home switched while a tool waits its turn adds nothing, and that tool is tried again when this computer’s home is read next', async () => {
+  let actual = true;
+  const box = await setup({ bundled: { folder: 'carried' } });
+  try {
+    await marketplace(join(box.base, 'carried'), 'team', ['pdf']);
+    const host = box.host;
+    const home = host.home;
+    host.home = () => ({ ...home()!, actual });
+    // The switch happens while Claude Code's add waits in the queue.
+    assert.deepEqual(await box.markets.addCarried(['claude-cli'], work => { actual = false; return work(); }), []);
+    assert.deepEqual(box.calls.filter(call => call.startsWith('list')), []);
+    actual = true;
+    assert.deepEqual((await box.markets.addCarried(['claude-cli'], work => work())).map(report => report.outcome), ['added']);
   } finally { await box.cleanup(); }
 });
