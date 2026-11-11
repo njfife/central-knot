@@ -516,10 +516,11 @@ test('A copy another tool could not load is not offered, and choosing it anyway 
     await skill(box.home, CLAUDE, 'loose', 'No frontmatter here.\n');
     await skill(box.home, COPILOT, 'loose', text('loose'));
     const view = await facts(box, 'loose');
-    assert.match(view.choiceBlocks['claude-cli']?.[0]?.reason ?? '', /could not load/);
+    assert.deepEqual(view.choiceBlocks['claude-cli'], [{ tool: 'copilot-cli', reason: 'Copilot CLI will not load a skill with no YAML frontmatter.' }], 'the cause alone, once, the tool named as the page names it');
     assert.deepEqual(view.choiceBlocks['copilot-cli'], []);
     const result = await applyChanges(ctx(box), [{ key: 'loose', managed: true, off: [], use: 'claude-cli' }]);
     assert.equal(result.harnessWrites, 0);
+    assert.equal(result.results[0]?.message, 'Claude Code’s copy can’t be used: Copilot CLI will not load a skill with no YAML frontmatter. Nothing was changed.');
     assert.equal(await readFile(join(box.home, COPILOT, 'loose/SKILL.md'), 'utf8'), text('loose'), 'Copilot keeps the copy it can load');
     assert.equal((await facts(box, 'loose')).managed, false);
   } finally { await box.cleanup(); }

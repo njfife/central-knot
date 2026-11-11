@@ -12,7 +12,8 @@ import {
 } from './share.ts';
 import { parseSkill } from './discovery.ts';
 import { isDisabled, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, unverifiedBuild, type SwitchTarget } from './skillswitch.ts';
-import { REPLACE_ACTION, andList, problemText, throughPlugin, toolName } from './words.ts';
+import { REPLACE_ACTION, andList, problemText, throughPlugin, toolName, toolNames } from './words.ts';
+import { cantUse } from './copywords.ts';
 import { notPutBack } from './outsidewords.ts';
 import { throughPlugins } from './plugins.ts';
 import { comparableText } from './pluginstatus.ts';
@@ -57,7 +58,7 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
         const readsFrom = owner && owner !== snapshot.harness ? owner : undefined;
         const copy: ToolCopy = {
           hash: tree.hash, directory: skill.directory, rootLabel: skill.rootLabel, lines: skill.content.split(/\r?\n/).length, modified: info.mtime.toISOString(),
-          summary: bodyLine(skill.content).slice(0, 140), folder: skill.folder, name: skill.name, writable: !readsFrom && await writable(context, snapshot.harness, skill.directory, problems),
+          summary: bodyLine(skill.content), folder: skill.folder, name: skill.name, writable: !readsFrom && await writable(context, snapshot.harness, skill.directory, problems),
           ...(readsFrom ? { readsFrom } : {}),
         };
         if (!copy.writable && !readsFrom) { const outside = await outsideOf(context, snapshot.harness, skill.directory, problems, pinned); if (outside) copy.outside = outside; }
@@ -189,13 +190,16 @@ async function liveSwitchTarget(context: ShareContext, entry: Gathered, tool: Ha
  * folder's copy), one Manage must leave (the only copy a tool can have), or one inside a skills folder that is itself a link.
  */
 function untouched(tool: HarnessId, copy: ToolCopy, what: string, name: string): string {
-  const where = `${harnesses[tool].name} ${what} at ${copy.directory}`;
+  const where = `${toolNames[tool]} ${what} at ${copy.directory}`;
   if (copy.outside?.pinned) return `${where}. ${copy.outside.pinned}`;
   if (copy.outside) return `${where}. Central Knot changes it only when you ask: open ${name} on the Skills page and use ${REPLACE_ACTION}.`;
   return `${where}, inside a skills folder that is a link or another tool’s folder, so Central Knot does not change it.`;
 }
 
-/** What stops every tool from using one tool's copy: differing copies Central Knot does not change, and tools with a copy that could not load this one. */
+/**
+ * What stops every tool from using one tool's copy: differing copies Central Knot does not change, and tools with a copy that
+ * could not load this one. Each `reason` is the cause alone, naming its tool as the page does (copywords.ts cantUse leads it in).
+ */
 function blocksFor(entry: Gathered, source: HarnessId, takeOver = true): { tool: HarnessId; reason: string }[] {
   const chosen = entry.facts.copies[source]!;
   const skill = skillAt(entry, source);
@@ -208,7 +212,7 @@ function blocksFor(entry: Gathered, source: HarnessId, takeOver = true): { tool:
   for (const tool of Object.keys(entry.facts.copies) as HarnessId[]) {
     if (tool === source || !skill || entry.facts.copies[tool]!.hash === chosen.hash) continue;
     const refused = targetFor(tool, entry.facts.copies[tool]!.directory, skill).skipped;
-    if (refused) blocks.push({ tool, reason: `${harnesses[tool].name} could not load ${harnesses[source].name}'s copy: ${refused}` });
+    if (refused) blocks.push({ tool, reason: refused });
   }
   return blocks;
 }
@@ -219,7 +223,7 @@ function choiceProblem(entry: Gathered, use: HarnessId, hash: string | undefined
   if (!copy) return { message: `The copy you chose in ${harnesses[use].name} is gone. Nothing was changed; choose again.`, chooseAgain: true };
   if (hash !== undefined && copy.hash !== hash) return { message: `The copy you chose in ${harnesses[use].name} has changed since you chose it. Nothing was changed; choose again.`, chooseAgain: true };
   const block = (takeOver ? entry.facts.choiceBlocks[use] : blocksFor(entry, use, false))?.find(entry => syncing.includes(entry.tool));
-  return block ? { message: `${block.reason} Nothing was changed.` } : undefined;
+  return block ? { message: `${cantUse(block.reason, toolNames[use])} Nothing was changed.` } : undefined;
 }
 
 const rootOf = (context: ShareContext, tool: HarnessId) => writeRoot(harnesses[tool], context.home, context.overrides?.[tool]);

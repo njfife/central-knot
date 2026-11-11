@@ -346,7 +346,7 @@ if (wanted('agents')) {
   await a.click('#header-refresh'); await a.settle();
   await a.click('#switch-release-notes'); await a.settle();
   if (await a.has('#use-release-notes-claude-cli')) {
-    await shot(a, 'agents-choice', 'Turned release-notes off (each copy stays), edited it in Codex, and turned it on again: its copies differ, so it asks which copy every tool uses. Claude Code’s and Copilot CLI’s are the same and share one card; Codex’s quotes the line only it has, the words only it has tinted, and is marked as edited most recently, with when.');
+    await shot(a, 'agents-choice', 'Turned release-notes off (each copy stays), edited it in Codex, and turned it on again: its copies differ, so it asks which copy every tool uses. Claude Code’s and Copilot CLI’s are the same and share one row; Codex’s quotes the line only it has, the words only it has tinted, and is marked as the most recent, with when it was edited.');
     await a.theme('light'); await shot(a, 'agents-choice-light', 'The same, in the light appearance: the words only Codex’s copy has, tinted.'); await a.theme('dark');
     if (await a.has('#diff-release-notes')) { await a.click('#diff-release-notes'); await a.settle(); await shot(a, 'agents-choice-read', 'Clicked “Read every copy”: each different prompt under the list of choices, the same ones shown once.'); await a.click('#diff-release-notes'); await a.settle(); }
     await a.click('#use-release-notes-claude-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);

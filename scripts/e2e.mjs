@@ -348,36 +348,113 @@ async function fitsAtMinimum(a, where, again = async () => {}) {
  * What is wrong with the open copy question's layout (style.css "The copy question"); empty when it is as `shape` says:
  * 'under' (the list under the question), 'beside' (a wide question: the list beside it, the first row's name level with the
  * question) or 'pane' (a narrow question, as in the Files view's pane: each row's name and Use this copy on one line, what it
- * says under both). In every shape the close button is over neither the question nor the list, and no row's words spill out.
+ * says under both). In every shape:
+ *  - the list reaches the right edge of the question's box, less the close button's room when it is beside the question, so
+ *    it grows with the window; an agent's copies in full, when open, sit under the list, as wide as it, each box to the
+ *    end of its line;
+ *  - every row starts what it says where the first row does (a row that can't be chosen too), and Use this copy ends at one edge;
+ *  - the close button is over neither the question nor the list, and no row's words spill out.
+ * With no copy question open it says so.
  */
 const copyQuestionMisfits = shape => `(() => {
-  const out = [], all = selector => [...document.querySelectorAll('.details-differs ' + selector)], box = selector => all(selector)[0]?.getBoundingClientRect();
-  const question = box('.compare-title > span'), note = box('.compare-note'), list = box('.compare-choices'), close = box('.details-close');
-  const who = box('.version-who'), says = box('.version-says'), use = box('.version-cta');
+  const details = document.querySelector('.details-differs');
+  if (!details?.querySelector('.version')) return ['no copy question is open'];
+  const out = [], all = selector => [...details.querySelectorAll(selector)], box = node => node.getBoundingClientRect(), near = (one, other) => Math.abs(one - other) <= 1;
+  const question = box(all('.compare-title > span')[0]), note = box(all('.compare-note')[0]), list = box(all('.compare-choices')[0]), close = all('.details-close').map(box)[0];
+  // The shape is read from the first row that can be chosen; the first row of all is the one level with the question.
+  const row = all('.version').find(each => each.querySelector('.version-cta')), who = box(row.querySelector('.version-who')), says = box(row.querySelector('.version-says')), use = box(row.querySelector('.version-cta'));
   const found = list.top < note.bottom ? 'beside' : says.top >= who.bottom ? 'pane' : 'under';
   if (found !== ${JSON.stringify(shape)}) out.push('laid out as ' + found);
-  if (found === 'beside' && Math.abs(who.top - question.top) > 1) out.push('the first row’s name is ' + Math.round(who.top - question.top) + 'px off the question’s line');
+  const top = box(all('.version-who')[0]).top;
+  if (found === 'beside' && !near(top, question.top)) out.push('the first row’s name is ' + Math.round(top - question.top) + 'px off the question’s line');
   if (found === 'pane' && !(use.top < says.top && use.left >= who.right)) out.push('Use this copy is not on the name’s line');
+  const style = getComputedStyle(details), edge = box(details).right - parseFloat(style.paddingRight) - (found === 'beside' ? parseFloat(style.getPropertyValue('--close-room')) : 0);
+  if (!near(list.right, edge)) out.push('the list ends ' + Math.round(edge - list.right) + 'px short of its box');
+  for (const each of all('.version')) {
+    if (!near(box(each.querySelector('.version-says')).left, says.left)) out.push(each.id + ' starts what it says ' + Math.round(box(each.querySelector('.version-says')).left - says.left) + 'px from where the others do');
+    if (each.querySelector('.version-cta') && !near(box(each.querySelector('.version-cta')).right, use.right)) out.push(each.id + ' ends Use this copy at another edge');
+    if (each.scrollWidth > each.clientWidth + 1) out.push('words spill out of ' + each.id);
+  }
+  const copies = all('.compare-copies')[0], blocks = all('.compare-copies > .content-block').map(box);
+  if (copies && !(near(box(copies).left, list.left) && near(box(copies).right, list.right) && box(copies).top >= list.bottom)) out.push('the copies in full are not under the list, as wide as it');
+  blocks.forEach((block, index) => {
+    const endsLine = !blocks.some(other => other.top < block.bottom && other.bottom > block.top && other.left >= block.right);
+    if ((endsLine && !near(block.right, list.right)) || !near(box(all('.compare-copies .content')[index]).right, block.right)) out.push('a copy in full stops ' + Math.round(list.right - block.right) + 'px short of the list’s edge');
+  });
   const meets = (one, other) => one.left < other.right && one.right > other.left && one.top < other.bottom && one.bottom > other.top;
   if (close && (meets(question, close) || meets(list, close))) out.push('the close button is over the question or the list');
-  for (const row of all('.version')) if (row.scrollWidth > row.clientWidth + 1) out.push('words spill out of ' + row.id);
   return out;
+})()`;
+
+/** In the Files view's two columns: how far the file's column runs past the file's own box, as a misfit; empty when it ends with it. */
+const FILE_COLUMN_BLANK = `(() => {
+  const column = document.querySelector('.detail-files').getBoundingClientRect(), file = document.querySelector('.detail-files .content').getBoundingClientRect();
+  return column.right - file.right > 1 ? ['the file’s column runs ' + Math.round(column.right - file.right) + 'px past the file’s box'] : [];
 })()`;
 
 /**
  * The copy question of the skill `key`, open under its row: its shape at each window size, then in the Files view's pane (where
- * Read both copies leads), with nothing cut off. It ends back on the table at full size, the question still open.
+ * Read both copies leads), with nothing cut off. The pane is narrow at 1728×1117; at 2560×1440 the file's column stops at the
+ * file's box and the question takes the rest. It ends back on the table at full size, the question still open.
  */
 async function copyQuestionFits(a, key) {
   for (const [width, height, shape] of [[860, 560, 'under'], [1280, 800, 'under'], [1728, 1117, 'beside'], [2560, 1440, 'beside']]) {
     await sizeTo(a, width, height);
-    same(`at ${width}×${height} the copy question’s list is ${shape} the question, clear of the close button, nothing cut off`, [...await a.run(copyQuestionMisfits(shape)), ...await a.run(CUT_OFF)], []);
+    same(`at ${width}×${height} the copy question’s list is ${shape} the question, as wide as its box, clear of the close button, nothing cut off`, [...await a.run(copyQuestionMisfits(shape)), ...await a.run(CUT_OFF)], []);
   }
   await a.click(`#diff-${key}`);
   await sizeTo(a, 1728, 1117);
   same('in the Files view’s pane, beside the file, each row has its name and Use this copy on one line and what it says under both', [...await a.run(copyQuestionMisfits('pane')), ...await a.run(CUT_OFF)], []);
+  await sizeTo(a, 2560, 1440);
+  same('at 2560×1440 the file’s column ends with the file’s box, and the question beside it has the rest: its list under the question', [...await a.run(FILE_COLUMN_BLANK), ...await a.run(copyQuestionMisfits('under')), ...await a.run(CUT_OFF)], []);
   await a.click('#skills-table');
   await fullSize(a);
+}
+
+/**
+ * An agent's copy question with Read both copies open: the two prompts in full sit under the list, as wide as it, stacked or
+ * (wide) with the question beside the list. The agent is the check's own: it is taken out again.
+ */
+async function agentCopiesUnderTheList(a, practice) {
+  const files = { '.claude/agents/changelog.md': 'Claude Code', '.copilot/agents/changelog.agent.md': 'Copilot CLI' };
+  for (const [file, tool] of Object.entries(files)) { mkdirSync(join(practice, file, '..'), { recursive: true }); writeFileSync(join(practice, file), `---\nname: changelog\ndescription: Keeps the changelog.\n---\n\nKeep the changelog short.\n${tool}’s own wording.\n`); }
+  await a.click('#header-refresh');
+  await a.click('#switch-changelog');
+  await a.click('#diff-changelog');
+  check('Read both copies opens each prompt in full', (await a.all('.compare-copies .content', 'e.textContent')).length === 2, await a.text('.details-differs'));
+  for (const [width, height, shape] of [[1280, 800, 'under'], [1728, 1117, 'beside'], [2560, 1440, 'beside']]) {
+    await sizeTo(a, width, height);
+    same(`at ${width}×${height} an agent’s copies in full are under the list and as wide as it, the list ${shape} the question`, [...await a.run(copyQuestionMisfits(shape)), ...await a.run(CUT_OFF)], []);
+  }
+  await fullSize(a);
+  await a.click('#close-changelog');
+  for (const file of Object.keys(files)) rmSync(join(practice, file), { force: true });
+  await a.click('#header-refresh');
+  check('the check’s own agent is gone again', !(await rowKeys(a)).includes('changelog'), await rowKeys(a));
+}
+
+/**
+ * A copy that can't be chosen, in a question of three rows: Claude Code's copy of `loose` has no frontmatter, which Copilot CLI
+ * will not load. Its row stays in the list, in the others' columns, disabled, with why in place of its quote and no Use this
+ * copy. The skill is the check's own: it is taken out again, so the practice home is as it was.
+ */
+async function blockedCopyKeepsItsRow(a, practice) {
+  const folders = { '.claude/skills': 'No frontmatter here.\n', '.copilot/skills': text('loose', 'Copilot CLI’s loose notes.'), '.codex/skills': text('loose', 'Codex’s loose notes.') };
+  for (const [root, content] of Object.entries(folders)) { mkdirSync(join(practice, root, 'loose'), { recursive: true }); writeFileSync(join(practice, root, 'loose/SKILL.md'), content); }
+  await a.click('#header-refresh');
+  await a.click('#switch-loose');
+  same('a copy another tool will not load keeps its row: disabled, why it can’t be used said once, and no Use this copy',
+    await a.run(`(() => { const row = document.querySelector('#use-loose-claude-cli'); return [row.disabled, row.querySelector('.version-why').textContent, !!row.querySelector('.version-cta'), document.querySelectorAll('.details-differs .version-cta').length]; })()`),
+    [true, 'Can’t be used: Copilot CLI will not load a skill with no YAML frontmatter.', false, 2]);
+  for (const [width, height, shape] of [[860, 560, 'under'], [1728, 1117, 'beside']]) {
+    await sizeTo(a, width, height);
+    same(`at ${width}×${height} the three rows, one of them not to be chosen, share their columns, ${shape} the question`, [...await a.run(copyQuestionMisfits(shape)), ...await a.run(CUT_OFF)], []);
+  }
+  await fullSize(a);
+  await a.click('#close-loose');
+  for (const root of Object.keys(folders)) rmSync(join(practice, root, 'loose'), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  check('the check’s own skill is gone again', !(await rowKeys(a)).includes('loose'), await rowKeys(a));
 }
 
 async function practiceFlow() {
@@ -459,6 +536,7 @@ async function practiceFlow() {
   same('copy bytes match', tree(join(practice, '.copilot/skills/release-notes')), tree(join(practice, '.claude/skills/release-notes')));
   check('Codex’s own .system skills stay untouched and unlisted', existsSync(join(practice, '.codex/skills/.system/openai-docs/SKILL.md')) && !(await rowKeys(a)).includes('openai-docs'));
 
+  await blockedCopyKeepsItsRow(a, practice);
   // Copies differ: the switch opens the choice and writes nothing; a choice applies at once, and its Undo puts each copy back.
   await a.click('#switch-review');
   check('the switch on a differing row opens the choice instead of turning on', await a.exists('#use-review-copilot-cli') && !(await switchOn(a, 'review')) && readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8') === reviewClaude);
@@ -889,6 +967,7 @@ async function practiceFlow() {
   same('turning an agent off stops syncing it; its copies stay, and its switch is halfway (not synced)', [await a.run(`document.querySelector('#switch-release-notes').getAttribute('aria-checked')`), existsSync(join(practice, '.claude/agents/release-notes.md'))], ['mixed', true]);
   await a.click('#outcome-undo');
   same('and Undo syncs it again', await switchOn(a, 'release-notes'), true);
+  await agentCopiesUnderTheList(a, practice);
   await a.click('#open-code-reviewer');
   check('the details name the limits', /can’t hold its tools \(.*model \(.*edits only flow out/.test(await a.text('.details') ?? ''), await a.text('.details'));
   await a.shot('practice-agents');
