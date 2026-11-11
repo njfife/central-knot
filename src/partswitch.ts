@@ -112,8 +112,10 @@ export function withPartSwitch(tool: HarnessId, text: string, at: PluginPartAt, 
     return setTomlTable(text, path.slice(0, -1), at.name, own, { endGap: true });
   }
   const line = table.entries.find(entry => entry.key === 'enabled');
-  // Turned on, a table that held only the switch has nothing left to say.
+  // Turned on, a table that held only the switch has nothing left to say. Above the person's own subtables, the table
+  // goes with the blank lines after it, as it came (unless a comment sits there, which belongs to what follows).
   if (!off && line && table.entries.length === 1 && !subtables.length) return setTomlTable(text, path.slice(0, -1), at.name, undefined, { endGap: true });
+  if (!off && line && table.entries.length === 1 && !text.slice(line.end, table.end).trim()) return `${text.slice(0, table.start)}${text.slice(table.end)}`;
   if (line) return `${text.slice(0, line.start)}${off ? `enabled = false${eol}` : ''}${text.slice(line.end)}`;
   const insertAt = table.entries.at(-1)?.end ?? (text.indexOf('\n', table.start) + 1 || text.length);
   const before = text.slice(0, insertAt);

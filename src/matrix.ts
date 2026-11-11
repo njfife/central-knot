@@ -105,7 +105,7 @@ function pluginSwitchCell(item: PluginItemAt, said: string, id: string) {
   const { now, on } = pluginStanding(pluginDraft, item);
   const why = cantSwitchHere(item);
   const pending = on !== now;
-  const text = `${said}. ${why ?? clickWords(pluginDraft, item)}`.replace(/\.\. /, '. ');
+  const text = `${said.replace(/\.$/, '')}. ${why ?? clickWords(pluginDraft, item)}`;
   return h(`button.cell-button.${PLUGIN_LOOK.tone}.cell-on${on ? '' : '.cell-disabled'}${pending ? '.cell-pending-edit' : ''}`, {
     type: 'button', id, title: text, 'aria-label': text, 'data-state': pending ? (on ? 'plugin-turns-on' : 'plugin-turns-off') : on ? 'plugin' : 'plugin-off', disabled: !!why || !!state.busy,
     onclick: (event: Event) => { event.stopPropagation(); flipPluginItem(item); } },

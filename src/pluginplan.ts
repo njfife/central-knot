@@ -283,6 +283,14 @@ export const reverse = (done: PluginDone[]): PluginOp[] => done
   .map(({ report, pick: _picked, ...op }): PluginOp => (isParts(op.action) ? { ...op, action: 'undo-parts', run: report.partsRun } : { ...op, action: OPPOSITE[op.action]! }))
   .reverse();
 
+/**
+ * What a run left behind that nobody asked for: a plugin was to come on with other items held off, the items' switches
+ * were written first (so the plugin never loads with them on) and then the plugin's own switch failed. Those held
+ * switches, for the caller to put back.
+ */
+export const strayHolds = (done: PluginDone[]): PluginDone[] => done.filter(entry => (entry.action === 'skill-off' || entry.action === 'part-off') && entry.report.changed
+  && done.some(whole => whole.action === 'plugin-on' && !succeeded(whole.report) && whole.source === entry.source && whole.plugin === entry.plugin && whole.tool === entry.tool));
+
 /** A tool did what was asked (installed, updated, uninstalled, turned a skill, an MCP server, an agent or the plugin off or on), whether this run changed it or it already was. */
 export const succeeded = (report: ActionReport) => report.outcome !== 'held' && report.outcome !== 'failed' && report.outcome !== 'not-known';
 

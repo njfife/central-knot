@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { batches, resultLines, type PluginDone, type PluginDraft, type PluginOp } from '../src/pluginplan.ts';
+import { batches, resultLines, strayHolds, type PluginDone, type PluginDraft, type PluginOp } from '../src/pluginplan.ts';
 import { LIVE_PLUGIN, cantSwitch, click, clickWords, pendingWords, prune, standing, wholeWords, type PluginItemAt } from '../src/pluginswitch.ts';
 import type { HarnessId, InstalledPlugin, PartKind } from '../src/types.ts';
 
@@ -34,7 +34,8 @@ test('an item that is off with its own switch comes back on with it', () => {
   const draft: PluginDraft = new Map();
   const copilot = installed('copilot-cli', { skillsOff: ['one'], serversOff: ['wiki'] });
   assert.deepEqual([standing(draft, item(copilot, 'skill', 'one')).now, standing(draft, item(copilot, 'mcp', 'wiki')).now, standing(draft, item(copilot, 'mcp', 'issues')).now], [false, false, true]);
-  assert.equal(clickWords(draft, item(copilot, 'mcp', 'wiki')), 'Click to turn it on in Copilot CLI on Apply all.');
+  assert.equal(clickWords(draft, item(copilot, 'mcp', 'wiki')), 'Click to turn it on in Copilot CLI on Apply all. Copilot CLI goes by the name, so any other server named “wiki” there goes on too.');
+  assert.equal(clickWords(draft, item(copilot, 'skill', 'one')), 'Click to turn it on in Copilot CLI on Apply all.');
   assert.equal(clickWords(draft, item(copilot, 'mcp', 'issues')), 'Click to turn it off in Copilot CLI on Apply all. Copilot CLI goes by the name, so any other server named “issues” there goes off too.');
   click(draft, item(copilot, 'skill', 'one'));
   click(draft, item(copilot, 'mcp', 'wiki'));
@@ -90,6 +91,12 @@ test('an item with no switch of its own flips the whole plugin, and its words na
   assert.deepEqual(chosen(draft), ['claude-cli plugin-off']);
   assert.equal(pendingWords(draft, skill), 'Apply all turns it off, with the whole plugin (4 other items).');
   assert.deepEqual(wholeWords(draft), ['the whole plugin full off in Claude Code'], 'the change bar names the plugin that goes');
+  // What its own switch already keeps off doesn't go off with the plugin, so it isn't counted.
+  const partly = item(installed('claude-cli', { serversOff: ['issues', 'wiki'] }), 'skill', 'one');
+  assert.equal(clickWords(new Map(), partly), 'Claude Code has no switch for one skill of a plugin. Click to turn the whole plugin full off in Claude Code on Apply all, with its 1 skill and 1 agent.');
+  const going: PluginDraft = new Map();
+  click(going, partly);
+  assert.equal(pendingWords(going, partly), 'Apply all turns it off, with the whole plugin (2 other items).');
   // Every item of the plugin there shows the same change.
   assert.deepEqual(standing(draft, item(claude, 'mcp', 'issues')), { now: true, on: false });
   click(draft, item(claude, 'agent', 'helper'));
@@ -127,6 +134,12 @@ test('choices that mean nothing after a read are dropped: already so, or the plu
   // Codex now has `one` and `issues` off; Copilot CLI no longer has the plugin.
   prune(draft, [installed('codex-cli', { skillsOff: ['one'], serversOff: ['issues'] })]);
   assert.deepEqual([...draft.keys()], ['c', 'd']);
+  // A plugin chosen to come on for one item, then turned on outside the app: the items held off for it go with the choice.
+  const alone: PluginDraft = new Map();
+  click(alone, item(installed('codex-cli', { off: true }), 'skill', 'one'));
+  assert.equal(alone.size, 4);
+  prune(alone, [installed('codex-cli')]);
+  assert.equal(alone.size, 0);
 });
 
 test('a plugin that came on for one item says so in one line, with what was left off', () => {
@@ -138,4 +151,12 @@ test('a plugin that came on for one item says so in one line, with what was left
   // Its Undo, as it runs: the plugin off again, then each held item's switch back. One line: the plugin is off again.
   const undone = [ran({ action: 'plugin-off' }, 'plugin-off'), ran({ part: { kind: 'mcp', name: 'wiki' }, action: 'part-on' }, 'part-on'), ran({ skill: 'two', action: 'skill-on' }, 'skill-on')];
   assert.deepEqual(resultLines(undone, true).map(line => line.text), ['off again in Codex']);
+});
+
+test('a plugin that failed to come on names the item switches written for it, to be put back', () => {
+  const ran = (more: Partial<PluginOp>, outcome: PluginDone['report']['outcome'], changed = true): PluginDone => ({ source: '/m', marketName: 'team', plugin: 'full', tool: 'codex-cli', action: 'plugin-on', ...more, report: { tool: more.tool ?? 'codex-cli', outcome, message: '', runs: [], changed } });
+  const held = ran({ part: { kind: 'mcp', name: 'wiki' }, action: 'part-off' }, 'part-off');
+  const asked = ran({ tool: 'claude-cli', skill: 'two', action: 'skill-off' }, 'skill-off');
+  assert.deepEqual(strayHolds([held, asked, ran({}, 'failed', false)]), [held], 'only the failed plugin’s own, in that tool');
+  assert.deepEqual(strayHolds([held, ran({}, 'plugin-on')]), []);
 });

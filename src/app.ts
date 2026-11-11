@@ -11,7 +11,7 @@ import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, sente
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
-import { clear as clearPluginOp, resultLines, resultSentence, reverse, runPlan, type PluginOp } from './pluginplan.ts';
+import { clear as clearPluginOp, resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, type PluginOp } from './pluginplan.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
@@ -326,15 +326,22 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
  */
 export const applyPluginSwitches = (ops: PluginOp[], draft: Map<string, PluginOp>, undo = false, before?: Outcome) => busy(undo ? 'Undoing…' : 'Applying…', async () => {
   const home = state.home!.home;
-  const result = await runPlan(ops, { install: api().installPlugin, uninstall: api().uninstallPlugin, setSkill: api().setPluginSkill, setPart: api().setPluginPart, setWhole: api().setPluginOn }, home);
+  const plan = { install: api().installPlugin, uninstall: api().uninstallPlugin, setSkill: api().setPluginSkill, setPart: api().setPluginPart, setWhole: api().setPluginOn };
+  const result = await runPlan(ops, plan, home);
   for (const entry of result.done) clearPluginOp(draft, entry);
+  // A plugin that failed to come on leaves no item switched off for it: those written before it are put back, and said
+  // only where that failed too.
+  const strays = strayHolds(result.done);
+  const putBack = strays.length ? (await runPlan(reverse(strays), plan, home)).done : [];
+  const restored = strays.filter(stray => putBack.some(back => back.tool === stray.tool && back.plugin === stray.plugin && back.skill === stray.skill && back.part?.kind === stray.part?.kind && back.part?.name === stray.part?.name && succeeded(back.report)));
+  result.done = result.done.filter(entry => !restored.includes(entry));
   setHome(await api().refresh());
   const lines = resultLines(result.done, undo);
   const failed = lines.filter(line => !line.ok);
   const back = undo ? [] : reverse(result.done);
   const text = [before?.text, result.stopped ?? resultSentence(lines, undo), ...failed.map(line => `${line.plugin}: ${line.text}.`)].filter(Boolean).join(' ') || 'Nothing changed.';
   // The switches go back first; the copies' own Undo follows only when that worked, and is still offered when it didn't.
-  const undoPlugins = () => applyPluginSwitches(back, new Map(), true, before?.act ? { page: state.page, text: '', act: before.act } : undefined);
+  const undoPlugins = () => applyPluginSwitches(back, new Map(), true, before?.act ? { page: state.page, text: '', act: { ...before.act, label: 'Undo the rest', title: 'Undo the changes to copies made in the same Apply all' } } : undefined);
   // With the copies' changes said above it and no Undo of theirs to run after, the button says what it does undo.
   const act = back.length ? { label: before && !before.act ? 'Undo plugin switches' : 'Undo', id: 'outcome-undo-plugin', title: before?.act ? 'Turn the plugin items back as they were, then undo the rest' : 'Turn them back as they were', run: () => void undoPlugins().then(() => { if (!state.outcome?.warn) before?.act?.run(); }) } : before?.act;
   tell({ ...before, page: state.page, text, warn: !!failed.length || !!result.stopped || !!before?.warn, act });
