@@ -743,6 +743,7 @@ test('Undo of a copy choice on a skill that was synced keeps it synced; the copy
     assert.ok(rejoin.results.some(entry => entry.outcome === 'held' && entry.differs), JSON.stringify(rejoin.results));
     const chose = await applyChanges(fast(box), [{ ...manage('pair'), seenManaged: true, use: 'claude-cli', useHash: (await facts(box, 'pair')).copies['claude-cli']!.hash }]);
     const chosen = (await readHistory(ctx(box))).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
+    assert.equal(chosen.wasSynced, true);
     assert.equal(await readFile(join(box.home, COPILOT, 'pair/SKILL.md'), 'utf8'), text('pair', 'Original.'));
     assert.equal((await restoreFromHistory(fast(box), chosen.id, false, 'narrow')).stopped, undefined);
     const after = await facts(box, 'pair');
@@ -762,6 +763,26 @@ test('Removed from one tool and then the other: the Off row puts back both remov
     const removals = (await readHistory(ctx(box))).filter(event => event.kind === 'removed');
     const [gone] = (await manageView(ctx(box))).gone ?? [];
     assert.deepEqual([gone?.gone?.history, gone?.gone?.also], [removals[1].id, [removals[0].id]]);
+    for (const id of [gone!.gone!.history, ...gone!.gone!.also!]) assert.equal((await restoreFromHistory(fast(box), id)).stopped, undefined);
+    assert.deepEqual([await readFile(join(box.home, CLAUDE, 'pair/SKILL.md'), 'utf8'), await readFile(join(box.home, COPILOT, 'pair/SKILL.md'), 'utf8')], [text('pair', 'Original.'), text('pair', 'Original.')]);
+    const back = await facts(box, 'pair');
+    assert.deepEqual([back.managed, back.off, (await manageView(ctx(box))).gone], [true, [], []]);
+  } finally { await box.cleanup(); }
+});
+
+test('Undo of a copy choice on a skill that was synced once, and isn’t now, leaves it not synced: the choice says whether it was', async () => {
+  const box = await sandbox();
+  try {
+    await managedPair(box);
+    // Not synced any more (a record-only change, as an Undo of On sends).
+    await applyChanges(fast(box), [{ key: 'pair', managed: false, off: [], seenManaged: true }]);
+    await writeFile(join(box.home, CLAUDE, 'pair/SKILL.md'), text('pair', 'Edited in Claude.'));
+    const chose = await applyChanges(fast(box), [{ ...manage('pair'), seenManaged: false, use: 'claude-cli', useHash: (await facts(box, 'pair')).copies['claude-cli']!.hash }]);
+    const chosen = (await readHistory(ctx(box))).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
+    assert.equal(chosen.wasSynced, undefined);
+    assert.equal((await restoreFromHistory(fast(box), chosen.id, false, 'narrow')).stopped, undefined);
+    const after = await facts(box, 'pair');
+    assert.deepEqual([after.managed, await readFile(join(box.home, COPILOT, 'pair/SKILL.md'), 'utf8')], [false, text('pair', 'Original.')]);
   } finally { await box.cleanup(); }
 });
 

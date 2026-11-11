@@ -387,17 +387,40 @@ async function practiceFlow() {
   check('the cut-off sweep reports a scroll area its outer box clips', fixture.some(line => line.endsWith('clip-fixture-button')), fixture);
   await fitsAtMinimum(a, 'Skills');
 
-  // One switch: turning notes on writes it everywhere at once, and one Undo takes back everything the click did.
+  // One switch: turning notes on writes it everywhere at once, and one Undo takes back everything the click did. The pointer
+  // is over the list, as it is for a real click, so the rows keep their places until it leaves.
+  const pointerOver = async selector => {
+    const at = await a.run(`(() => { const box = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect(); return box ? [box.left + box.width / 2, box.top + box.height / 2] : null; })()`);
+    if (at) await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at[0], y: at[1] });
+  };
+  await pointerOver('.ov-row[data-key="notes"]');
   await a.click('#switch-notes');
   same('turning a skill on copies it to every tool at once', [await switchOn(a, 'notes'), existsSync(join(practice, '.codex/skills/notes/SKILL.md'))], [true, true]);
   const statusBarShows = () => a.run(`(() => { const region = document.querySelector('#announcement'); return region.classList.contains('visually-hidden') ? '' : region.dataset.text; })()`);
   check('the result says so, with Undo, in the strip at the top only', (await a.text('.band-done') ?? '').includes('notes is on in all 3 tools') && await a.exists('#outcome-undo') && !(await statusBarShows()), [await a.text('.bands'), await statusBarShows()]);
-  same('and its row stays where it was until the page is read again', (await sectionsNow(a))[0], ['not-synced', ['notes', 'release-notes', 'review', 'standup']]);
+  same('and its row stays where it was while the pointer is over the list', (await sectionsNow(a))[0], ['not-synced', ['notes', 'release-notes', 'review', 'standup']]);
+  await pointerOver('.toolbar');
+  await a.settle();
+  same('once the pointer leaves the list, the rows regroup and the headings count again', [(await sectionsNow(a))[0], await a.text('.ov-section[data-section="on"] .ov-section-count')], [['on', ['notes']], '1']);
   await a.click('#outcome-undo');
   same('Undo takes the new copy out and leaves it not synced, as before', [existsSync(join(practice, '.codex/skills/notes')), await switchOn(a, 'notes'), existsSync(join(practice, '.claude/skills/notes/SKILL.md'))], [false, false, true]);
   check('and says so in the same strip, which goes after a few seconds', /^Undone: notes is as before\./.test(await a.text('.band-done') ?? '') && !(await statusBarShows()), [await a.text('.bands'), await statusBarShows()]);
   for (let tries = 0; tries < 80 && await a.exists('.band-done'); tries++) await wait(100);
   check('…and leaves nothing behind in the status bar', !(await a.exists('.band-done')) && !(await statusBarShows()), [await a.text('.bands'), await statusBarShows()]);
+  // From here the pointer stays off the list, so each click's row regroups at once.
+  await pointerOver('.toolbar');
+  // A skill already the same in every tool: turning it on writes nothing and changes only its record; its Undo puts that back.
+  const sameDirs = ['.claude/skills', '.copilot/skills', '.codex/skills'].map(root => join(practice, root, 'same-everywhere'));
+  for (const dir of sameDirs) { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'SKILL.md'), text('same-everywhere', 'The same in every tool.')); }
+  await a.click('#header-refresh');
+  const sameBytes = () => sameDirs.map(dir => readNow(join(dir, 'SKILL.md')));
+  const sameBefore = sameBytes();
+  await a.click('#switch-same-everywhere');
+  same('a skill already the same everywhere turns on with nothing written, and offers Undo', [await switchOn(a, 'same-everywhere'), sameBytes(), await a.exists('#outcome-undo')], [true, sameBefore, true]);
+  await a.click('#outcome-undo');
+  same('its Undo puts the record back: not synced again, nothing written', [await a.run(`document.querySelector('#switch-same-everywhere')?.getAttribute('aria-checked')`), sameBytes(), /^Undone: same-everywhere is as before\./.test(await a.text('.band-done') ?? '')], ['mixed', sameBefore, true]);
+  for (const dir of sameDirs) rmSync(dir, { recursive: true, force: true });
+  await a.click('#header-refresh');
   for (const key of ['notes', 'release-notes', 'standup']) await a.click(`#switch-${key}`);
   await a.click('#header-refresh');
   same('Refresh regroups the rows: the three are On', (await sectionsNow(a))[0], ['on', ['notes', 'release-notes', 'standup']]);
@@ -432,7 +455,7 @@ async function practiceFlow() {
   const [claudeOff, copilotOff, codexOff] = readSwitches();
   same('Off turns it off in each tool’s own settings and keeps every copy', [JSON.parse(claudeOff).skillOverrides?.['release-notes'], (JSON.parse(copilotOff).disabledSkills ?? []).includes('release-notes'), codexOff.endsWith(`[[skills.config]]\npath = ${JSON.stringify(join(practice, '.codex/skills/release-notes/SKILL.md'))}\nenabled = false\n`), ['claude', 'copilot', 'codex'].every(tool => existsSync(join(practice, `.${tool}/skills/release-notes/SKILL.md`)))],
     ['off', true, true, true]);
-  same('its marks say off in every tool, and its row stays where it was', [await offMarks(a, 'release-notes'), (await sectionsNow(a))[0][1].includes('release-notes')], [['claude-cli', 'copilot-cli', 'codex-cli'], true]);
+  same('its marks say off in every tool, and with the pointer away from the list it is under Off at once', [await offMarks(a, 'release-notes'), (await sectionsNow(a)).at(-1)], [['claude-cli', 'copilot-cli', 'codex-cli'], ['off', ['release-notes']]]);
   await a.click('#outcome-undo');
   const settledJson = (text, index) => (index === 2 ? text : JSON.stringify(Object.fromEntries(Object.entries(text.trim() ? JSON.parse(text) : {}).filter(([, value]) => !(value && typeof value === 'object' && !Object.keys(value).length)))));
   same('Undo turns it back on in each tool, config.toml as it was', [readSwitches().map(settledJson), await switchOn(a, 'release-notes')], [skillSwitchesBefore.map(settledJson), true]);

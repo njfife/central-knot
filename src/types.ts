@@ -413,6 +413,8 @@ export interface HistoryEvent {
   unmanaged?: boolean;
   /** 'added': copies for tools a managed skill syncs to again; Undo removes them and stops syncing there, and the skill stays managed. */
   rejoined?: boolean;
+  /** 'chosen': the skill was synced already when the copy was chosen, so the choice's own Undo keeps it synced. */
+  wasSynced?: boolean;
   winner?: { tool: HarnessId; hash: string };
   /** Content that gave way, kept in Central Knot's store. */
   losers: { tool: HarnessId; hash: string; /** MCP: which kept copy of that tool's own settings this replaced, for an exact Restore. */ kept?: string; /** 'removed': the copy's folder name as it was, to put it back under the same name. */ folder?: string;

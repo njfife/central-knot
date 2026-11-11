@@ -1186,7 +1186,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       }
       // What sync did on its own goes to History once, after it happened (CON-02).
       // A chosen copy that replaced others is History too, so its replaced content stays recoverable (and is never pruned).
-      if (chosenLosers.length) { const id = event({ key, item: name, kind: 'chosen', winner: { tool: sourceTool, hash: target }, losers: chosenLosers, orderProved: true, previous: baselineBefore || undefined }); if (chosenNow.has(key)) made.push(id); }
+      if (chosenLosers.length) { const id = event({ key, item: name, kind: 'chosen', winner: { tool: sourceTool, hash: target }, losers: chosenLosers, orderProved: true, previous: baselineBefore || undefined, ...(newlyManaged.has(key) ? {} : { wasSynced: true }) }); if (chosenNow.has(key)) made.push(id); }
       // An edit that changed the synced content is History even when no copy could be written yet (a failed write caught up later),
       // so the version it replaces stays restorable and is never pruned.
       if (story && (replaced.length || story.deleted.length || (baselineBefore && baselineBefore !== target))) {
@@ -1890,9 +1890,10 @@ async function placeStored(context: ShareContext, key: string, hash: string, too
 }
 
 /**
- * Undo of a copy choice: each replaced copy goes back in its own tool only, the copies the choice added are removed, and the
- * skill is as before (unmanaged again, or still synced if it was), so it shows Copies differ as before. All or nothing: if any
- * of those copies changed since, nothing is written and History's wider Undo stays available.
+ * Undo of a copy choice: each replaced copy goes back in its own tool only, and the copies the choice added are removed. A skill
+ * that wasn't synced before is unmanaged again and shows Copies differ as before; one that was (`wasSynced`) stays synced, and
+ * each tool whose copy came back different has its own copy again, left out of sync. All or nothing: if any of those copies
+ * changed since, nothing is written and History's wider Undo stays available.
  */
 async function undoChoice(context: ShareContext, record: SyncRecord, history: HistoryEvent[], chosen: HistoryEvent): Promise<ApplyResult> {
   const stop = (stopped: string): ApplyResult => ({ stopped, results: [], harnessWrites: 0 });
@@ -1938,7 +1939,7 @@ async function undoChoice(context: ShareContext, record: SyncRecord, history: Hi
     results.push({ item: item.name, harness: loser.tool, outcome: 'written', message: `Its own copy is back. ${harnesses[loser.tool].nextStep}` });
   }
   delete item.use;
-  if (chosen.previous) {
+  if (chosen.wasSynced && chosen.previous) {
     // Synced before the choice: it stays synced to what it held then. A tool whose copy now holds anything else has its own
     // copy again, left out of sync, so no later pass catches it up over that copy or spreads it as an edit.
     const synced = chosen.previous;

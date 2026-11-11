@@ -1,6 +1,7 @@
 // What one click on an item page does, and what its Undo puts back. The page sends the changes (app.ts applyClick); these
 // decide them, read their result, and plan the Undo, without touching the page.
 import type { Change, DestinationResult, HarnessId, HistoryEvent, SwitchProblem } from './types.ts';
+import { andList } from './words.ts';
 
 /** What a click needs to know of an item: where it has copies, where each tool's switch has it off, and whether it is synced. */
 export interface Switchable {
@@ -29,23 +30,24 @@ export function offPlan(item: Switchable, tools: readonly string[]): { disable: 
 export function stillOn(item: Switchable, held: readonly string[], name: (tool: string) => string, reason: (problem: SwitchProblem) => string): string | undefined {
   const byReason = new Map<string, string[]>();
   for (const tool of held) { const why = reason(item.switchProblem![tool]!); byReason.set(why, [...(byReason.get(why) ?? []), tool]); }
-  const list = (names: string[]) => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`);
-  return byReason.size ? [...byReason].map(([why, tools]) => `Still on in ${list(tools.map(name))}: ${why}`).join(' ') : undefined;
+  return byReason.size ? [...byReason].map(([why, tools]) => `Still on in ${andList(tools.map(name))}: ${why}`).join(' ') : undefined;
 }
 
 /**
  * A click's own results, out of a pass that may have done more (with Sync on, every click is a full pass), and what they say:
- * whether it did anything, a refusal of the whole click, whether something failed, and whether its copies differ (waiting for
- * a choice, which is no failure).
+ * whether it did anything, a refusal of the whole click, whether something failed, the tools where it failed or was held
+ * (`notIn`), and whether its copies differ (waiting for a choice, which is no failure).
  */
 export function clickResults(results: DestinationResult[], names: readonly string[]) {
   const own = new Set(names.map(name => name.toLowerCase()));
   const ours = results.filter(entry => own.has(entry.item.toLowerCase()));
+  const kept = (entry: DestinationResult) => entry.outcome === 'failed' || (entry.outcome === 'held' && !entry.differs);
   return {
     ours,
     did: ours.some(entry => entry.outcome === 'written' || entry.outcome === 'switched' || entry.outcome === 'removed'),
-    refusal: ours.find(entry => entry.outcome === 'held' && !entry.harness && !entry.differs)?.message,
-    failed: ours.some(entry => entry.outcome === 'failed' || (entry.outcome === 'held' && !entry.differs)),
+    refusal: ours.find(entry => entry.outcome === 'held' && !entry.harness && !entry.differs),
+    failed: ours.some(kept),
+    notIn: [...new Set(ours.filter(entry => kept(entry) && entry.harness).map(entry => entry.harness!))],
     differs: ours.some(entry => entry.outcome === 'held' && entry.differs),
   };
 }

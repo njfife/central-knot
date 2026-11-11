@@ -174,23 +174,39 @@ if (wanted('shell')) {
 if (wanted('skills')) {
   begin('skills');
   await a.click('#nav-skills');
-  await shot(a, 'skills-start', 'Clicked "Skills" in the sidebar. Nothing is synced yet: each switch, at the start of its row, sits halfway (not synced); the marks at the right end show which tools have each skill (hover one for its tool and what it has).');
+  await shot(a, 'skills-start', 'Clicked "Skills" in the sidebar. Nothing is synced yet: each switch, at the start of its row, sits halfway (not synced); the marks at the right end show which tools have each skill (hover one for its tool and what it has). A first-use tip sits above the table.');
+  // The tour's clicks come from a script, so the pointer is put over the list (or moved off it) as a person's would be, and a
+  // picture of a row that stays put is taken with the pointer still there.
+  const pointerOver = async selector => {
+    const at = await a.run(`(() => { const box = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect(); return box ? { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) } : null; })()`);
+    if (at) await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...at });
+    return at ?? undefined;
+  };
+  const overNotes = await pointerOver('.ov-row[data-key="notes"]');
   await a.click('#switch-notes');
-  await shot(a, 'turned-on', 'Clicked notes’s switch (halfway: not synced): notes is copied to every tool at once and its switch is on. The row stays where it is until the page is read again; the strip at the top says what happened, with Undo.');
+  await shot(a, 'turned-on', 'With the pointer over notes’s row, clicked its switch (halfway: not synced): notes is copied to every tool at once and its switch is on. The row stays where it is while the pointer is over the list; the strip at the top says what happened, with Undo. The first-use tip is gone: it goes after the first click, on purpose.', overNotes);
+  await pointerOver('.toolbar'); await a.settle();
+  await shot(a, 'turned-on-left', 'Moved the pointer off the list (to the toolbar): the rows regroup at once, notes under On, and the headings count again.');
   await a.click('#outcome-undo');
   await shot(a, 'turned-on-undone', 'Clicked "Undo" in that strip: Codex’s new copy is gone again and notes is not synced, as before. The strip says so for a few seconds, then goes.');
   for (const key of ['notes', 'release-notes', 'standup']) await a.click(`#switch-${key}`);
-  await a.click('#header-refresh');
-  await shot(a, 'on', 'Clicked the switches of notes, release-notes and standup (one click each), then "Refresh" at the top right: the rows regroup, the three under On.');
+  await shot(a, 'on', 'Clicked the switches of notes, release-notes and standup (one click each, the pointer off the list): the three are under On at once.');
   await a.click('#switch-review');
   await shot(a, 'review-copies-differ', 'Clicked review’s switch: its copies differ, so its row opens only the question of which copy every tool uses, with the copies. Nothing is written yet.');
+  await a.size(1728, 1117);
+  await shot(a, 'review-copies-differ-1728', 'The same at 1728×1117: the question opens under its row there too, where the switch was clicked, not in the side panel.');
+  await a.click('#switch-review');
+  await shot(a, 'review-question-closed', 'Clicked review’s switch again: the question closes, and nothing was written.');
+  await a.click('#switch-review');
+  await a.size(1280, 800);
   await a.click('#use-review-claude-cli');
   await shot(a, 'review-chosen', 'Clicked "Claude Code’s copy": every tool uses it at once, and review is on. Its details stay open, now with each tool’s own controls.');
   await a.click('#open-review');
+  const overStandup = await pointerOver('.ov-row[data-key="standup"]');
   await a.click('#switch-standup');
-  await shot(a, 'standup-off', 'Clicked review’s chevron to close its details, then standup’s switch: each tool’s own switch turns it off there and the copies stay. Its marks are grey and struck through, and the row stays where it was.');
-  await a.click('#header-refresh');
-  await shot(a, 'standup-off-regrouped', 'Clicked "Refresh": standup moves to Off, last.');
+  await shot(a, 'standup-off', 'Clicked review’s chevron to close its details, then, with the pointer over standup’s row, its switch: each tool’s own switch turns it off there and the copies stay. Its marks are grey and struck through, and the row stays where it was while the pointer is there.', overStandup);
+  await pointerOver('.toolbar'); await a.settle();
+  await shot(a, 'standup-off-regrouped', 'Moved the pointer off the list: standup moves to Off, last, whose heading says no tool loads these.');
   await a.theme('light'); await shot(a, 'standup-off-light', 'The same, in the light appearance.');
   for (const [width, height] of [[860, 560], [1728, 1117]]) {
     await a.size(width, height);
@@ -768,18 +784,23 @@ if (wanted('plugin-items')) {
   await size(860, 560); await shot(a, 'skill-open-860', 'The open row at 860×560.');
   await a.theme('light'); await shot(a, 'skill-open-860-light', 'The same at 860×560, light.'); await a.theme('dark');
   await size(1728, 1117); await shot(a, 'skill-open-1728', 'The open row at 1728×1117.'); await size(1280, 800);
-  // Each tool's switch for the item is in its opened row, and applies at once. Copilot CLI has one for a single skill of a
-  // plugin; Claude Code has none, so its switch is the whole plugin's there, and the row says so first.
-  await a.click('[id="enable-document-tools@team-tools/pdf-reader-copilot-cli"]'); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
-  await shot(a, 'switch-applied', 'Clicked pdf-reader’s Copilot CLI switch in its opened row (it was off there): it is on there at once; the band says so, with Undo.');
-  await a.click('#outcome-undo-plugin'); await a.settle();
-  await shot(a, 'switch-undone', 'Clicked Undo: pdf-reader is off in Copilot CLI again; the confirmation fades by itself.');
-  // The row's own switch turns it off in every tool with a switch for one skill of a plugin. Claude Code has none, so it is
-  // left on there and said: the row's switch never turns a whole plugin off.
+  // The row's own switch turns it off in every tool with a switch for one skill of a plugin. Copilot CLI has it off already, and
+  // Claude Code has none, so it is left on there and said: the row's switch never turns a whole plugin off.
   await a.click('[id="switch-document-tools@team-tools/pdf-reader"]'); await a.settle();
   await shot(a, 'main-switch-left', 'Clicked pdf-reader’s own switch (on in Claude Code): Copilot CLI has it off already, and Claude Code has no switch for one skill of a plugin, so nothing changes; the band says why, and where the whole plugin’s switch is.');
   await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
-  if (await a.has('#open-triage')) { await a.click('#open-triage'); await shot(a, 'part-and-plugin', 'Opened triage: its Pi part and the plugin installed in Codex share the row; both say where they come from.'); }
+  if (await a.has('#open-triage')) {
+    await a.click('#open-triage'); await shot(a, 'part-and-plugin', 'Opened triage: its Pi part and the plugin installed in Codex share the row; both say where they come from, and Codex’s line has its switch.');
+    // Each tool's switch for the item is in its opened row, and applies at once. issue-tracker is off in Codex: its switch
+    // turns the plugin on there for triage alone.
+    if (await a.has('#enable-triage-codex-cli')) {
+      await a.click('#enable-triage-codex-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin, .bands .band')`, 15000);
+      await shot(a, 'switch-applied', 'Clicked triage’s Codex switch in its opened row (the whole plugin issue-tracker was off there): the plugin is on in Codex at once with only triage on; the band says so, with Undo.');
+      await a.theme('light'); await shot(a, 'switch-applied-light', 'The same, light.'); await a.theme('dark');
+      await size(860, 560); await shot(a, 'switch-applied-860', 'The same at 860×560.'); await size(1280, 800);
+      if (await a.has('#outcome-undo-plugin')) { await a.click('#outcome-undo-plugin'); await a.settle(); await shot(a, 'switch-undone', 'Clicked Undo: issue-tracker is off in Codex again, as it was; the confirmation fades by itself.'); }
+    }
+  }
   await a.click('#nav-mcp'); await waitFor(a, `!!document.querySelector('.ov-section-plugins, [data-key^="issue-tracker@"]')`);
   await shot(a, 'mcp', 'MCP servers: issue-tracker’s issues server, installed in Codex with the plugin turned off.');
   await a.theme('light'); await shot(a, 'mcp-light', 'The same, light.'); await a.theme('dark');
@@ -869,28 +890,18 @@ async function everyPage(tag) {
       if (await a.has('.details-paths:not([open]) summary')) { await a.click('.details-paths:not([open]) summary'); await shot(a, `${tag}-skills-files-where`, `Clicked "Where each copy is", below the file, ${at}: then Delete everywhere….`); }
       else if (await a.has('.details-paths[open]')) { await a.run(`document.querySelector('.details-paths').scrollIntoView({ block: 'nearest' })`); await shot(a, `${tag}-skills-files-where`, `"Where each copy is" is open from the start ${at}: the skill's details in their column at the right, the status first and Delete everywhere… last.`); }
       const toggle = await a.run(`document.querySelector('[id^="detail-switch-"]')?.id ?? ''`);
-      if (toggle) { await a.click(`#${toggle}`); await shot(a, `${tag}-skills-files-pending`, `Turned Managed for it in the Files view: the change waits for Apply all ${at}.`); if (await a.has('#discard')) await a.click('#discard'); }
+      if (toggle) { await a.click(`#${toggle}`); await shot(a, `${tag}-skills-files-switched`, `Turned its switch in the Files view: it applies at once; the result and Undo are in the strip at the top ${at}.`); if (await a.has('#outcome-undo')) await a.click('#outcome-undo'); }
       await a.click('#skills-table');
     }
     if (await a.has('.ov-row.open')) await a.click(`#${first}`);
   }
-  // The last column's menu: the one most likely to run past the window's edge.
-  const head = await a.run(`[...document.querySelectorAll('.tool-head-button')].at(-1)?.id ?? ''`);
-  if (head) { await a.click(`#${head}`); await shot(a, `${tag}-skills-tool-menu`, `Opened the last tool column's menu ${at}.`); await a.click(`#${head}`); }
-  if (await a.has('#decide-draft')) {
-    await a.click('#decide-draft');
-    if (await a.has('#use-draft-copilot-cli')) { await a.click('#use-draft-copilot-cli'); await shot(a, `${tag}-skills-choice`, `Chose Copilot CLI's copy of draft, whose copies differ: the choice waits for Apply all ${at}.`); }
-    if (await a.has('#discard')) await a.click('#discard');
+  // draft's copies differ: its switch opens the copy question under its row, and a second click closes it.
+  if (await a.has('#switch-draft')) {
+    await a.click('#switch-draft'); await shot(a, `${tag}-skills-choice`, `Clicked draft's switch: its copies differ, so the copy question opens under its row ${at}.`);
+    if (await a.has('#use-draft-copilot-cli')) await a.click('#switch-draft');
   }
-  if (await a.has('#decide-draft')) {
-    await a.click('#decide-draft');
-    if (await a.has('#separate-draft')) { await a.click('#separate-draft'); await shot(a, `${tag}-skills-separate`, `Chose to keep draft's differing copies separate: the choice waits for Apply all ${at}.`); }
-    if (await a.has('#discard')) await a.click('#discard');
-  }
-  const off = await a.run(`document.querySelector('.ov-row[data-key] .cell-button.cell-on:not([disabled])')?.id ?? ''`);
-  if (off) { await a.click(`#${off}`); await shot(a, `${tag}-skills-pending-removal`, `Clicked a synced box: it stops syncing on Apply all ${at}.`); if (await a.has('#discard')) await a.click('#discard'); }
-  const cell = await a.run(`document.querySelector('.ov-row[data-key] .cell-button:not([disabled])')?.id ?? ''`);
-  if (cell) { await a.click(`#${cell}`); await shot(a, `${tag}-skills-pending`, `Clicked one box: a change waits for Apply all ${at}.`); if (await a.has('#discard')) await a.click('#discard'); }
+  const on = await a.run(`document.querySelector('.ov-row[data-key] .switch[aria-checked="true"]:not([disabled])')?.id ?? ''`);
+  if (on) { await a.click(`#${on}`); await shot(a, `${tag}-skills-switched-off`, `Turned one skill off: its result and Undo ${at}.`); if (await a.has('#outcome-undo')) await a.click('#outcome-undo'); }
   await a.click('#nav-mcp'); await shot(a, `${tag}-mcp`, `MCP servers ${at}, with the notice of an edit made outside the app.`);
   const server = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
   if (server) {
@@ -937,7 +948,7 @@ if (wanted('sizes')) {
   begin('sizes');
   // Four tools: Pi gets its own folder in the practice copy, so every table has its widest set of columns.
   cpSync(join(practice, '.claude/skills/notes'), join(practice, '.pi/agent/skills/notes'), { recursive: true });
-  // A skill whose copies differ, so a copy choice can be shown waiting for Apply all.
+  // A skill whose copies differ, so its copy question can be shown.
   for (const [tool, body] of [['.claude', 'Claude Code’s draft.'], ['.copilot', 'Copilot CLI’s draft.']]) {
     mkdirSync(join(practice, tool, 'skills/draft'), { recursive: true });
     writeFileSync(join(practice, tool, 'skills/draft/SKILL.md'), `---\nname: draft\ndescription: Turn notes into a first draft.\n---\n\n${body}\n`);
@@ -959,7 +970,7 @@ if (wanted('sizes')) {
     if (width === 1280) {
       await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
       await a.click('#nav-overview'); await shot(a, '1280-overview-1x', 'The Overview at 1280×800 at 100% zoom (one screen pixel per pixel), where the tools\' small marks, Pi\'s among them, are drawn at 12px.');
-      await a.click('#nav-skills'); await shot(a, '1280-skills-1x', 'Skills at 100% zoom: the tool marks in the column headers.');
+      await a.click('#nav-skills'); await shot(a, '1280-skills-1x', 'Skills at 100% zoom: each row’s tool marks at its right end, and the key under the table.');
       await a.size(width, height);
     }
     // At the minimum the sidebar folds to its rail; the person can open it, leaving the content about 650px.
@@ -967,12 +978,13 @@ if (wanted('sizes')) {
       await a.click('#sidebar-toggle'); await everyPage('860-sidebar-open'); await a.click('#sidebar-toggle');
       // A message in the status bar at the minimum: the facts keep their words, and the message shortens.
       await a.click('#nav-skills');
-      // A box whose copies differ opens the comparison instead of choosing a change, so it is skipped.
-      const box = await a.run(`document.querySelector('.ov-row[data-key] .cell-button:not([disabled]):not([data-state$="differs"])')?.id ?? ''`);
+      // A switch whose result band is dismissed leaves its result in the status bar.
+      const box = await a.run(`document.querySelector('.ov-row[data-key] .switch:not([disabled])')?.id ?? ''`);
       if (box) {
-        await a.click(`#${box}`); await a.click('#discard'); await shot(a, '860-status-message', 'Clicked a box, then Discard: the status bar says so at 860×560, with the sidebar as a rail.');
+        const said = async name => { await a.click(`#${box}`); if (await a.has('#outcome-dismiss')) await a.click('#outcome-dismiss'); await shot(a, name[0], name[1]); await a.click(`#${box}`); if (await a.has('#outcome-dismiss')) await a.click('#outcome-dismiss'); };
+        await said(['860-status-message', 'Turned a skill’s switch, then dismissed its result: the status bar says it at 860×560, with the sidebar as a rail.']);
         await a.click('#sidebar-toggle');
-        await a.click(`#${box}`); await a.click('#discard'); await shot(a, '860-sidebar-open-status-message', 'The same with the sidebar open: with too little room for the message, a mark stands in, the message its tooltip.');
+        await said(['860-sidebar-open-status-message', 'The same with the sidebar open: with too little room for the message, a mark stands in, the message its tooltip.']);
         await a.click('#sidebar-toggle');
       }
     }

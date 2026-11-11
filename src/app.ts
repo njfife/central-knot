@@ -278,22 +278,30 @@ export interface Click {
   kind: Kind;
   changes: Change[];
   items: string[];
-  /** What was done, as the result's sentence ("notes is on in every tool"). */
-  said: string;
+  /**
+   * What was done, as the result's sentence ("notes is on in all 3 tools"); as a function, given the tools where the click's
+   * write failed or was held, so it never claims those.
+   */
+  said: string | ((notIn: HarnessId[]) => string);
   /** Said after it: what the click left as it is on purpose ("Still on in Codex: …"). */
   also?: string;
   /** An Undo: its result is said for a few seconds, with no Undo of its own. */
   undoing?: boolean;
+  /**
+   * An item with no copy left: the History removals to put back first (`ids`, the latest first). Its changes are then made from
+   * the item as it is back (`then`); 'choose' when its copies came back different, so the copy choice waits.
+   */
+  putBack?: { ids: string[]; then: () => Change[] | 'choose' };
 }
 
 /** The History key of an item of this kind: a skill's key, "mcp:" and "agent:" before the others. */
 export const historyKey = (kind: Kind, key: string) => (kind === 'skills' ? key : kind === 'mcp' ? `mcp:${key}` : `agent:${key}`);
 
-/** Puts an item page's last result where its bands read it. */
-function keepResult(kind: Kind, results: DestinationResult[]) {
-  if (kind === 'skills') state.applied = { results, harnessWrites: 0 };
-  else if (kind === 'mcp') state.mcpResult = { results, writes: 0 };
-  else state.agentsResult = { results, writes: 0 };
+/** Puts an item page's last result where its bands read it, with what sync did in the same pass (`notices`), which they tell. */
+function keepResult(kind: Kind, results: DestinationResult[], notices?: SyncNotice[]) {
+  if (kind === 'skills') state.applied = { results, harnessWrites: 0, notices };
+  else if (kind === 'mcp') state.mcpResult = { results, writes: 0, notices };
+  else state.agentsResult = { results, writes: 0, notices };
 }
 
 /** The records of these items of a kind, as the open home shows them. */
@@ -313,29 +321,64 @@ const send = (kind: Kind, changes: Change[]): Promise<ApplyResult | McpResult> =
 /**
  * One click, applied at once: an item's switch, or one tool's control in its details. The result says what was done, or why
  * nothing was, in the band at the top of the page. Its one Undo reverses exactly what the click did: the History entries the
- * click itself made (never what sync did alongside), and a record change no entry covers.
+ * click itself made (never what sync did alongside), and a record change no entry covers. A click that put an item back from
+ * History first (`putBack`) is undone by taking every copy out again, kept in History, as it was before.
  */
-export const applyClick = (click: Click) => busy('Applying…', async () => {
-  const keys = click.changes.map(change => change.key);
+export const applyClick = (click: Click) => busy(click.putBack ? 'Putting it back…' : 'Applying…', async () => {
+  const names = [...click.items, ...click.changes.map(change => change.key)];
+  const back = click.putBack ? await restoreAll(click.putBack.ids) : undefined;
+  if (back?.stopped) { setHome(await api().refresh()); tell({ page: state.page, items: click.items, warn: true, band: true, text: back.stopped }); return; }
+  if (back) setHome(await api().refresh());
+  const changes = click.putBack ? click.putBack.then() : click.changes;
+  const sent = changes === 'choose' ? [] : changes;
+  const keys = sent.map(change => change.key);
   const before = standings(click.kind, keys);
-  const result = await send(click.kind, click.changes);
+  // A put-back that left nothing to change sends nothing; any other click is a pass, even with no change (Resume).
+  const result = sent.length || !click.putBack ? await send(click.kind, sent) : undefined;
   setHome(await api().refresh());
-  const { ours, did, refusal, failed, differs } = clickResults(result.results, [...click.items, ...keys]);
-  keepResult(click.kind, ours);
-  if (result.stopped) { tell({ page: state.page, items: click.items, warn: true, band: true, text: result.stopped }); return; }
+  if (back) await putHistory();
+  const { ours, did, refusal, failed, differs, notIn } = clickResults([...(back?.results ?? []), ...(result?.results ?? [])], names);
+  // A refusal is the click's result, said in its own band, not again among the failures.
+  keepResult(click.kind, ours.filter(entry => entry !== refusal), result?.notices);
+  if (result?.stopped) { tell({ page: state.page, items: click.items, warn: true, band: true, text: result.stopped }); return; }
   if (!click.undoing) retireTip(click.kind);
-  const made = 'made' in result ? result.made ?? [] : [];
+  const made = result && 'made' in result ? result.made ?? [] : [];
   const changed = recordChanged(before, standings(click.kind, keys));
-  const done = did || made.length > 0 || changed.length > 0;
-  const choose = differs ? ` Its copies differ: choose which copy every tool uses.` : '';
+  const done = !!back || did || made.length > 0 || changed.length > 0;
+  const said = changes === 'choose' ? `${click.items[0]} is back.` : typeof click.said === 'string' ? click.said : click.said(notIn);
+  const choose = differs || changes === 'choose' ? ' Its copies differ: choose which copy every tool uses.' : '';
   // A skill taken over (its links and shared copy, when it was turned on): what that did to them.
-  const outside = click.changes.some(change => change.takeOver) ? tookOverSentence(ours) : '';
-  const text = done || !refusal ? [click.said, outside, click.also].filter(Boolean).join(' ') + choose : refusal;
-  const undo = !click.undoing && done && (made.length || changed.length) ? () => void undoClick(click, made, before, changed) : undefined;
+  const outside = sent.some(change => change.takeOver) ? tookOverSentence(ours) : '';
+  const text = done || !refusal ? [said, outside, click.also].filter(Boolean).join(' ') + choose : refusal.message;
+  const undo = click.undoing || !done ? undefined : back ? () => takeOutAgain(click)
+    : made.length || changed.length ? () => void undoClick(click, made, before, changed) : undefined;
   tell({ page: state.page, items: click.items, warn: failed || !!click.also || (!done && !!refusal), band: true, fade: click.undoing && !failed,
-    text, act: undo ? { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } : undefined });
+    text, act: undo ? { label: 'Undo', id: 'outcome-undo', title: back ? 'Take it out of every tool again; History keeps it' : 'Put back everything this did', run: undo } : undefined });
   for (const item of click.items) flashRow(item);
 });
+
+/** Puts back an item's removals from History, the latest first. One that can't go back stops it only if it is the first. */
+async function restoreAll(ids: string[]): Promise<{ results: DestinationResult[]; stopped?: string }> {
+  const home = state.home!;
+  const results: DestinationResult[] = [];
+  for (const [index, id] of ids.entries()) {
+    const result = await api().restore(id, home.manage.gate.state === 'needs-resume', home.home);
+    // An older removal that can't go back (that tool has a copy again) leaves the rest as they are.
+    if (result.stopped && !index) return { results, stopped: result.stopped };
+    results.push(...result.results);
+  }
+  return { results };
+}
+
+/** Undo of a put-back: every copy it has now is taken out again, kept in History, so it is off with no copy left as before. */
+function takeOutAgain(click: Click) {
+  const key = click.changes[0]?.key ?? '';
+  const fact = (click.kind === 'skills' ? state.home?.manage.skills : click.kind === 'mcp' ? state.home?.mcp.servers : state.home?.agents.servers)?.find(item => item.key === key);
+  const holders = (Object.entries(fact?.copies ?? {}) as [HarnessId, { writable: boolean; readsFrom?: HarnessId }][]).filter(([, copy]) => copy.writable && !copy.readsFrom).map(([tool]) => tool);
+  if (!fact || !holders.length) return;
+  void applyClick({ kind: click.kind, items: click.items, undoing: true, said: `Undone: ${click.items[0]} has no copy left again. History keeps it.`,
+    changes: [{ key, managed: fact.managed, off: fact.off, seenManaged: fact.managed, remove: holders }] });
+}
 
 /** After a click that took a skill over: what it did to its links and the shared copy, from the click's own results. */
 const tookOverSentence = (ours: DestinationResult[]) => tookOverSaid(
@@ -382,50 +425,6 @@ const undoClick = (click: Click, made: string[], before: Map<string, Standing>, 
     results.filter(entry => entry.tookOver === 'shared' && entry.outcome === 'written').map(entry => ({ item: entry.item })));
   tell({ page: state.page, items: click.items, warn: !!stopped || failed.length > 0, band: true, fade: !stopped && !failed.length,
     text: stopped ? `Not all of it could be undone: ${stopped}` : [`Undone: ${what} ${click.items.length === 1 ? 'is' : 'are'} as before.`, back, ...failed].filter(Boolean).join(' ') });
-  for (const item of click.items) flashRow(item);
-});
-
-/**
- * On, for an item with no copy left: each removal still open goes back from History (`ids`, the latest first), then `then`,
- * read against the item as it is back, turns it on everywhere like any other ('choose' when its copies came back different:
- * the choice waits). Its Undo takes every copy out again, kept in History, so it is off with no copy left as before.
- */
-export const putBack = (click: Click, ids: string[], then: () => Change | 'choose' | undefined) => busy('Putting it back…', async () => {
-  const home = state.home!;
-  const resume = home.manage.gate.state === 'needs-resume';
-  const results: DestinationResult[] = [];
-  for (const [index, id] of ids.entries()) {
-    const result = await api().restore(id, resume, home.home);
-    // An older removal that can't go back (that tool has a copy again) leaves the rest as they are.
-    if (result.stopped && !index) { setHome(await api().refresh()); tell({ page: state.page, items: click.items, warn: true, band: true, text: result.stopped }); return; }
-    results.push(...result.results);
-  }
-  setHome(await api().refresh());
-  const next = then();
-  if (next === 'choose') {
-    tell({ page: state.page, items: click.items, band: true, text: `${click.items[0]} is back. Its copies differ: choose which copy every tool uses.` });
-    await putHistory();
-    return;
-  }
-  if (next) {
-    const on = await send(click.kind, [next]);
-    setHome(await api().refresh());
-    if (on.stopped) results.push({ item: click.items[0], outcome: 'failed', message: on.stopped });
-    results.push(...on.results);
-  }
-  await putHistory();
-  const { ours, failed } = clickResults(results, [...click.items, ...click.changes.map(change => change.key)]);
-  keepResult(click.kind, ours);
-  retireTip(click.kind);
-  const key = click.changes[0]?.key ?? '';
-  const undo = () => {
-    const fact = (click.kind === 'skills' ? state.home?.manage.skills : click.kind === 'mcp' ? state.home?.mcp.servers : state.home?.agents.servers)?.find(item => item.key === key);
-    const holders = (Object.entries(fact?.copies ?? {}) as [HarnessId, { writable: boolean; readsFrom?: HarnessId }][]).filter(([, copy]) => copy.writable && !copy.readsFrom).map(([tool]) => tool);
-    if (!fact || !holders.length) return;
-    void applyClick({ kind: click.kind, items: click.items, undoing: true, said: `Undone: ${click.items[0]} has no copy left again. History keeps it.`,
-      changes: [{ key, managed: fact.managed, off: fact.off, seenManaged: fact.managed, remove: holders }] });
-  };
-  tell({ page: state.page, items: click.items, warn: failed, band: true, text: click.said, act: { label: 'Undo', id: 'outcome-undo', title: 'Take it out of every tool again; History keeps it', run: undo } });
   for (const item of click.items) flashRow(item);
 });
 

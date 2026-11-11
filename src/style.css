@@ -644,7 +644,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .compare-separate .text-action { padding: 0 2px; margin: 0 -2px; font-size: 12.5px; }
 
 /* ---------- Skills: Files and contents (a list beside one skill's detail) ---------- */
-.split { --list-row: 37px; flex-direction: row; }
+/* The page holds the result strip, then the list beside one skill's pane (.split), which takes the rest of the height. */
+.split { --list-row: 37px; flex: 1; min-height: 0; display: flex; flex-direction: row; }
 /* The list grows with the window, so a wide one gives it room for long names; the content beside it keeps a reading measure. */
 .list-column { width: clamp(300px, 22%, 480px); min-width: 260px; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--line); }
 .list-toolbar .find { flex: 1 1 auto; }
@@ -706,11 +707,14 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .wrap-path { font-family: var(--mono); font-size: 11.5px; color: var(--ink); }
 /* A folder name moves to the next line whole; only one wider than the whole line breaks inside. */
 .wrap-part { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
-/* Stacked, the list shows its header and four whole rows and scrolls; the chosen skill's detail takes the rest. */
+/*
+ * Stacked, the list shows its header and four and a half rows and scrolls: the half row says there is more. The chosen skill's
+ * detail takes the rest.
+ */
 @container content (width < 880px) {
   .split { flex-direction: column; }
   .list-column { width: auto; border-right: 0; border-bottom: 1px solid var(--line); }
-  .list-scroll { flex: none; max-height: calc(30px + var(--list-row) * 4); }
+  .list-scroll { flex: none; max-height: calc(30px + var(--list-row) * 4.5); }
 }
 
 .section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
@@ -1808,8 +1812,13 @@ button.harness-card-main:focus-visible { outline: 0; }
 .list-cells .tool-mark { width: 16px; height: 16px; }
 .legend .tool-mark { width: 16px; height: 16px; }
 .tool-mark.mark-off > *, .tool-mark.mark-none > * { filter: grayscale(1); }
-.tool-mark.mark-off > * { opacity: 0.5; }
-.tool-mark.mark-none > * { opacity: 0.22; }
+/* Muted, but one step plainer in the light appearance and at 100% zoom, where thin marks fade most. */
+.tool-mark.mark-off > * { opacity: 0.62; }
+.tool-mark.mark-none > * { opacity: 0.34; }
+@media (prefers-color-scheme: dark) and (min-resolution: 1.5dppx) {
+  .tool-mark.mark-off > * { opacity: 0.5; }
+  .tool-mark.mark-none > * { opacity: 0.22; }
+}
 .tool-mark.mark-off::after { content: ""; position: absolute; left: 3px; right: 3px; top: calc(50% - 0.75px); height: 1.5px; border-radius: 1px; background: var(--ink-soft); transform: rotate(-40deg); }
 .tool-mark.mark-differs, .tool-mark.mark-waits { color: var(--warning); }
 .row-tag.row-tag-differs { color: var(--warning); }
