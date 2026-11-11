@@ -291,7 +291,7 @@ function pluginRowEl(row: PluginRow) {
 function pluginSection(list: PluginRow[]) {
   if (!list.length) return null;
   return h('div', { role: 'rowgroup' },
-    h('div.ov-section.ov-section-plugins', { role: 'row' }, h('div.ov-section-label', { role: 'cell' }, h('strong', {}, 'From plugins'), h('span.ov-section-count', {}, String(list.length)),
+    h('div.ov-section.ov-section-plugins', { role: 'row' }, h('div.ov-section-label', { role: 'cell' }, h('strong', {}, oneSwitch() ? 'Only through a plugin' : 'From plugins'), h('span.ov-section-count', {}, String(list.length)),
       sectionNote(oneSwitch() ? 'installed with their plugin · switched here like any other' : 'they come and go with their plugin; a box turns it, or its plugin, on or off in that tool'))),
     list.flatMap(pluginRowEl));
 }
@@ -1803,12 +1803,13 @@ export function outcomeBand(table = state.page === 'skills' || state.page === 'm
     text.push(rest.slice(0, hits[0].at), h('strong.item-name', {}, hits[0].name));
     rest = rest.slice(hits[0].at + hits[0].name.length);
   }
-  return h('div.band.band-done', { role: 'status', 'data-outcome': '' }, outcome.warn ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'), h('span.band-text', {}, ...text,
+  return h('div.band.band-done', { role: 'status', 'data-outcome': '' }, outcome.warn ? icon('triangle-alert', 14, 'tone-warning') : outcome.info ? icon('info', 14, 'tone-muted') : icon('check', 14, 'tone-success'), h('span.band-text', {}, ...text,
     // The space before the note sits outside it, so a note kept whole on its line never carries the last word with it.
     outcome.note ? [' ', h('span.tone-faint', {}, outcome.note.replace(/ History\.$/, ' '), h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History'), '.')] : null),
     outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
       : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), undefined)
       : outcome.history && state.page !== 'history' ? smallAction('Undo in History', 'outcome-history', () => showPage('history')) : null,
+    outcome.next ? button({ variant: 'outline', size: 'small', label: outcome.next.label, id: outcome.next.id, attrs: outcome.next.title ? { title: outcome.next.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.next!.run(); } }) : null,
     closeButton(() => { state.outcome = undefined; rerender(); }, { id: 'outcome-dismiss' }));
 }
 
@@ -2346,7 +2347,7 @@ function turnOff(skill: SampleSkill) {
     const off = [...disable, ...plugins.turned.map(item => item.tool)].filter(tool => !notIn.includes(tool as HarnessId));
     return off.length ? `${name} is off in ${toolsPhrase(off, toolList())}.` : `${name} couldn’t be turned off.`;
   };
-  mainClick(disable.length ? { kind, items: [name], changes: [{ key: skill.key, managed: skill.managed, off: skill.off as HarnessId[], seenManaged: skill.managed, disable: disable as HarnessId[] }], said } : undefined, plugins, said, also);
+  mainClick(name, false, disable.length ? [{ key: skill.key, managed: skill.managed, off: skill.off as HarnessId[], seenManaged: skill.managed, disable: disable as HarnessId[] }] : [], plugins, said, also);
 }
 
 /**
@@ -2372,7 +2373,7 @@ function turnOn(skill: SampleSkill, use?: Tool) {
     const where = onPhrase(skill, [...plugins.leftIn, ...notIn]);
     return use ? `Every tool now uses ${names[use]}’s copy of ${name}, and it is on in ${where}. Replaced copies are kept in History.` : `${name} is on in ${where}.`;
   };
-  mainClick({ kind, items: [name], changes: [onChange(skill, use)], said }, plugins, said, plugins.left);
+  mainClick(name, true, [onChange(skill, use)], plugins, said, plugins.left);
 }
 
 // ---------- Items tools have through a plugin, on a page with one switch ----------
@@ -2385,15 +2386,31 @@ const rowItems = (row: PluginRow): PluginItemAt[] => pluginTools(row).flatMap(to
 const itemOn = (item: PluginItemAt) => pluginStanding(NOW, item).now;
 
 /**
- * One click of a main switch: the item's own copies' change (`click`) with its switches in the tools that have it through a
- * plugin, applied as one click with one Undo (app.ts applyClick); or, with no copy to change, the plugins' part alone. `said`:
- * what it did, given the tools where it didn't. Said after it, what it left as it is: `also`, a problem; the tools with no
- * switch for one item of a plugin, plainly.
+ * One click of a main switch: the item's own copies' `changes` with its switches in the tools that have it through a plugin,
+ * applied as one click with one Undo (app.ts applyClick); or, with no copy to change, the plugins' part alone. `said`: what it
+ * did, given the tools where it didn't. Said after it, what it left as it is: `also`, a problem; the tools with no switch for
+ * one item of a plugin, plainly, with the whole plugin's switch there offered beside the Undo.
  */
-function mainClick(click: Click | undefined, plugins: ReturnType<typeof turnEvery>, said: (notIn: HarnessId[]) => string, also?: string) {
+function mainClick(name: string, on: boolean, changes: Change[], plugins: ReturnType<typeof turnEvery>, said: (notIn: HarnessId[]) => string, also?: string) {
   const along = plugins.turned.map(item => alongWords(item, plugins.ops)).filter(Boolean).join(' ') || undefined;
-  if (click) { void applyClick({ ...click, also, note: plugins.limit, plugins: plugins.ops.length ? { ops: plugins.ops, draft: plugins.draft, said: along } : undefined }); return; }
-  void applyPluginSwitches(plugins.ops, plugins.draft, { kind, also, note: plugins.limit, said: [said([]), along].filter(Boolean).join(' ') });
+  const next = wholePluginAct(name, plugins.whole, on);
+  if (changes.length) { void applyClick({ kind, items: [name], changes, said, also, note: plugins.limit, next, plugins: plugins.ops.length ? { ops: plugins.ops, draft: plugins.draft, said: along } : undefined }); return; }
+  const where = toolsPhrase(plugins.turned.map(item => item.tool), toolList());
+  void applyPluginSwitches(plugins.ops, plugins.draft, { kind, also, note: plugins.limit, next, said: [said([]), along].filter(Boolean).join(' '),
+    undoSaid: on ? `Undone: ${name} is off in ${where} again.` : `Undone: ${name} is back on in ${where}.` });
+}
+
+/** The whole plugin's switch in the tools that have no switch for one of its items (`whole`), as a result's second button. */
+function wholePluginAct(name: string, whole: PluginItemAt[], on: boolean) {
+  if (!whole.length) return undefined;
+  const plugin = [...new Set(whole.map(item => item.install.plugin))];
+  const where = toolsPhrase(whole.map(item => item.tool), toolList());
+  return { label: `Turn ${plugin.length === 1 ? plugin[0] : 'its plugins'} ${on ? 'on' : 'off'} in ${where}`, id: 'outcome-whole', title: 'Turn the whole plugin there, with everything it brings; Undo turns it back', run: () => {
+    const draft: PluginDraft = new Map();
+    for (const item of whole) clickPluginItem(draft, item);
+    const ops = [...draft.values()];
+    void applyPluginSwitches(ops, draft, { kind, said: whole.map(item => itemSaid(item, on, ops)).join(' '), undoSaid: `Undone: ${name} is ${on ? 'off' : 'on'} in ${where} again.` });
+  } };
 }
 
 /**
@@ -2403,30 +2420,22 @@ function mainClick(click: Click | undefined, plugins: ReturnType<typeof turnEver
 function nothingChanged(name: string, plugins: ReturnType<typeof turnEvery>, on: boolean, also?: string) {
   const left = [also, plugins.limit].filter(Boolean).join(' ');
   retireTip(kind);
-  const { whole } = plugins;
-  const plugin = [...new Set(whole.map(item => item.install.plugin))];
-  const act = whole.length ? { label: `Turn ${plugin.length === 1 ? plugin[0] : 'its plugins'} ${on ? 'on' : 'off'} in ${toolsPhrase(whole.map(item => item.tool), toolList())}`, id: 'outcome-whole', title: 'Turn the whole plugin there, with everything it brings; Undo turns it back', run: () => {
-    const draft: PluginDraft = new Map();
-    for (const item of whole) clickPluginItem(draft, item);
-    const ops = [...draft.values()];
-    void applyPluginSwitches(ops, draft, { kind, said: whole.map(item => itemSaid(item, on, ops)).join(' '), undoSaid: `Undone: ${name} is ${on ? 'off' : 'on'} in ${toolsPhrase(whole.map(item => item.tool), toolList())} again.` });
-  } } : undefined;
-  // A known limit (no switch for one item) is said plainly; a switch that can't be written is a problem.
-  tell({ page: state.page, item: name, warn: !!also, band: true, text: `${name}: nothing changed.${left ? ` ${left}` : ` It is ${on ? 'on' : 'off'} already.`}`, act });
+  // A known limit (no switch for one item) is said plainly, as information; a switch that can't be written is a problem.
+  tell({ page: state.page, item: name, warn: !!also, info: !also, band: true, text: `${name}: nothing changed.${left ? ` ${left}` : ` It is ${on ? 'on' : 'off'} already.`}`, act: wholePluginAct(name, plugins.whole, on) });
   rerender();
 }
 
 /** A plugin's row's one switch: on while some tool has it on; a click turns it on or off in every tool with a switch for one item. */
 function pluginRowSwitch(row: PluginRow) {
   const items = rowItems(row);
-  const onIn = items.filter(itemOn).map(item => item.tool);
-  const on = onIn.length > 0;
-  const label = `${row.name}: ${on ? `on in ${toolsPhrase(onIn, toolList())}` : 'off'}. Click to turn it ${on ? 'off' : 'on'} in every tool that can switch it.`;
+  const onTools = items.filter(itemOn).map(item => item.tool);
+  const on = onTools.length > 0;
+  const label = `${row.name}: ${on ? `on in ${toolsPhrase(onTools, toolList())}` : 'off'}. Click to turn it ${on ? 'off' : 'on'} in every tool that can switch it.`;
   return toggle({ on, label, disabled: !canWrite(), id: `switch-${row.key}`, onchange: next => {
     const plugins = turnEvery(items, next);
     pinRows(row.key);
     if (!plugins.ops.length) { nothingChanged(row.name, plugins, next, plugins.left); return; }
-    mainClick(undefined, plugins, () => `${row.name} is ${next ? 'on' : 'off'} in ${toolsPhrase(plugins.turned.map(item => item.tool), toolList())}.`, plugins.left);
+    mainClick(row.name, next, [], plugins, () => `${row.name} is ${next ? 'on' : 'off'} in ${toolsPhrase(plugins.turned.map(item => item.tool), toolList())}.`, plugins.left);
   } });
 }
 
@@ -2462,8 +2471,11 @@ function flip(skill: SampleSkill, on: boolean) {
   turnOn(skill);
 }
 
-/** Where an item is not synced: the tools with a copy. */
-const notSyncedIn = (skill: SampleSkill) => `Not synced · in ${toolsPhrase(holders(skill), toolList())}`;
+/** Where an item that is not synced is on (its own copy, or a plugin's item that is on: onIn), and where a copy of its own is off. */
+const notSyncedIn = (skill: SampleSkill) => {
+  const on = onIn(skill), off = holders(skill).filter(tool => !on.includes(tool));
+  return ['Not synced · ', on.length ? `on in ${toolsPhrase(on, toolList())}` : '', on.length && off.length ? '; ' : '', off.length ? `off in ${toolsPhrase(off, toolList())}` : ''].join('');
+};
 
 /**
  * An item's one switch: on (synced, some tool loads it), in between (not synced: some tools have their own copies), or off

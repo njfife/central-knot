@@ -38,10 +38,13 @@ export function stillOn(item: Switchable, held: readonly string[], name: (tool: 
  * whether it did anything, a refusal of the whole click, whether something failed, the tools where it failed or was held
  * (`notIn`), and whether its copies differ (waiting for a choice, which is no failure).
  */
+/** A result that left something undone: failed, or held for a reason (waiting for a choice of copy is none). */
+export const keptBack = (entry: DestinationResult) => entry.outcome === 'failed' || (entry.outcome === 'held' && !entry.differs);
+
 export function clickResults(results: DestinationResult[], names: readonly string[]) {
   const own = new Set(names.map(name => name.toLowerCase()));
   const ours = results.filter(entry => own.has(entry.item.toLowerCase()));
-  const kept = (entry: DestinationResult) => entry.outcome === 'failed' || (entry.outcome === 'held' && !entry.differs);
+  const kept = keptBack;
   return {
     ours,
     did: ours.some(entry => entry.outcome === 'written' || entry.outcome === 'switched' || entry.outcome === 'removed'),

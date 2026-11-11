@@ -122,7 +122,7 @@ export function turnEvery(items: PluginItemAt[], on: boolean): { draft: PluginDr
     if (!held && ownSwitch(item)) { click(draft, item); turned.push(item); continue; }
     if (held) left.push(`Still ${on ? 'off' : 'on'} in ${names[item.tool]}: ${held}`); else whole.push(item);
   }
-  const limit = whole.map(item => `Still ${on ? 'off' : 'on'} in ${names[item.tool]}: it has no switch for one ${partWords[item.kind][0]} of a plugin, only the whole plugin ${item.install.plugin}’s.`).join(' ');
+  const limit = whole.map(item => `Still ${on ? 'off' : 'on'} in ${names[item.tool]}: it has no switch for one ${partWords[item.kind][0]} of a plugin, only one for the whole plugin, ${item.install.plugin}.`).join(' ');
   const leftIn = items.filter(item => !turned.includes(item) && standing(new Map(), item).now !== on).map(item => item.tool);
   return { draft, ops: [...draft.values()], turned, whole, limit: limit || undefined, left: left.join(' ') || undefined, leftIn };
 }

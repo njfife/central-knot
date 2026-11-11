@@ -1158,6 +1158,8 @@ span.ins-confirm { margin-top: 0; }
 .plugin-file-name { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--ink); }
 .plugin-file-name .icon { flex: none; color: var(--ink-soft); }
 .plugin-file { grid-column: 1 / -1; margin: 6px 0 4px 17px; min-width: 0; }
+/* In an item's details, the file scrolls in its own box, so each tool's switch below it stays in reach at every size. */
+.details-plugin .plugin-file { max-height: 40vh; overflow: auto; overscroll-behavior: contain; }
 /* With a skill's switches at the row's end, the toggle covers name and description only */
 .plugin-parts li.with-end > .plugin-file-toggle { grid-column: 1 / 3; }
 /* A row that opens nothing starts its name where an opening row's name starts, after the chevron */

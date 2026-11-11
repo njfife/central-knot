@@ -768,6 +768,9 @@ if (wanted('plugin-items')) {
   mkdirSync(join(HOME, '.local/bin'), { recursive: true });
   writeFileSync(join(HOME, '.local/bin/codex'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli 0.167.0" && exit 0\nexit 9\n`, { mode: 0o755 });
   writeFileSync(join(HOME, '.local/bin/copilot'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.108." && exit 0\nS="$HOME/.copilot/settings.json"\ncase "$1 $2" in\n  "skill disable") printf '{"disabledSkills":["document-tools:pdf-reader","%s"]}' "$3" > "$S" ;;\n  "skill enable") printf '{"disabledSkills":["document-tools:pdf-reader"]}' > "$S" ;;\n  *) exit 9 ;;\nesac\n`, { mode: 0o755 });
+  // Claude Code's switch for a whole plugin is its own command: a stand-in that turns document-tools off and back on.
+  const claudeSettings = join(practice, '.claude/settings.json'), claudeSettingsAt = existsSync(claudeSettings) ? readFileSync(claudeSettings, 'utf8') : '{}';
+  writeFileSync(join(HOME, '.local/bin/claude'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.322 (Claude Code)" && exit 0\ncase "$*" in\n  "plugin disable document-tools@team-tools --scope user") printf '{"enabledPlugins":{"document-tools@team-tools":false}}' > "${claudeSettings}" ;;\n  "plugin enable document-tools@team-tools --scope user") printf '%s' '${claudeSettingsAt}' > "${claudeSettings}" ;;\n  *) exit 9 ;;\nesac\n`, { mode: 0o755 });
   mkdirSync(join(practice, '.pi/agent/skills/triage'), { recursive: true });
   cpSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), join(practice, '.pi/agent/skills/triage/SKILL.md'));
   mkdirSync(join(practice, '.central-knot'), { recursive: true });
@@ -775,7 +778,7 @@ if (wanted('plugin-items')) {
   const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
   const toPlugins = async () => { await a.run(`document.querySelector('.ov-section-plugins')?.scrollIntoView({ block: 'center' })`); await wait(150); };
   await a.click('#nav-skills'); await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('.ov-section-plugins')`, 15000);
-  await shot(a, 'skills', 'Skills: the plugins’ skills are rows under “From plugins” (the chip counts them), each marked “from <plugin>”, with its switch and a mark in each tool that has it (pdf-reader off in Copilot CLI and Codex, issue-tracker’s whole plugin off in Codex); triage is one row with its Pi part.');
+  await shot(a, 'skills', 'Skills: the plugins’ skills are rows under “Only through a plugin” (the From plugins chip counts every row from a plugin, triage too), each marked “from <plugin>”, with its switch and a mark in each tool that has it (pdf-reader off in Copilot CLI and Codex, issue-tracker’s whole plugin off in Codex); triage is one row with its Pi part.');
   await a.theme('light'); await shot(a, 'skills-light', 'The same, light.'); await a.theme('dark');
   for (const [width, height] of [[860, 560], [1728, 1117]]) {
     await size(width, height); await toPlugins();
@@ -786,7 +789,7 @@ if (wanted('plugin-items')) {
   await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
   await shot(a, 'skill-open', 'Opened pdf-reader: it opens with where it is on (“On in Claude Code · off in Copilot CLI and Codex · from the plugin document-tools”), then where it is handled (a link to document-tools’ page; the switches below turn it on or off in each tool), and each tool’s line with its switch.');
   await a.click('[id="pfile-document-tools@team-tools/pdf-reader"]'); await waitFor(a, `!!document.querySelector('.details-plugin .plugin-file')`, 15000);
-  await shot(a, 'skill-open-file', 'Clicked “Show its SKILL.md”: the file opens right under the link, above the tools’ lines.');
+  await shot(a, 'skill-open-file', 'Clicked “Show its SKILL.md”: the file opens right under the link, above the tools’ lines, in its own scrolling box no taller than 40% of the window.');
   await a.theme('light'); await shot(a, 'skill-open-light', 'The same, light.'); await a.theme('dark');
   await size(860, 560); await shot(a, 'skill-open-860', 'The open row at 860×560, its SKILL.md showing under the link.');
   await a.theme('light'); await shot(a, 'skill-open-860-light', 'The same at 860×560, light.'); await a.theme('dark');
@@ -795,15 +798,21 @@ if (wanted('plugin-items')) {
   // already, and Claude Code has none, so nothing changes: said plainly, with the whole plugin's switch offered (not clicked
   // here: it is Claude Code's own command). The row's switch never turns a whole plugin off itself.
   await a.click('[id="switch-document-tools@team-tools/pdf-reader"]'); await a.settle();
-  await shot(a, 'main-switch-left', 'Clicked pdf-reader’s own switch (on in Claude Code): Copilot CLI and Codex have it off already, and Claude Code has no switch for one skill of a plugin, so nothing changed. The band says so in its normal tone, naming pdf-reader, and offers “Turn document-tools off in Claude Code”. The first-use tip is gone with the first click.');
+  await shot(a, 'main-switch-left', 'Clicked pdf-reader’s own switch (on in Claude Code): Copilot CLI and Codex have it off already, and Claude Code has no switch for one skill of a plugin, so nothing changed. The band says so in its normal tone, naming pdf-reader, with the information mark, and offers “Turn document-tools off in Claude Code”. The first-use tip is gone with the first click.');
   await size(860, 560); await shot(a, 'main-switch-left-860', 'The same at 860×560.'); await size(1280, 800);
+  if (await a.has('#outcome-whole')) {
+    await a.click('#outcome-whole'); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
+    await shot(a, 'main-switch-whole', 'Clicked “Turn document-tools off in Claude Code”: the whole plugin is off there, with Claude Code’s own command, and the band names what went with it, with Undo.');
+    await a.click('#outcome-undo-plugin'); await a.settle();
+    await shot(a, 'main-switch-whole-undone', 'Clicked Undo: document-tools is on in Claude Code again.');
+  }
   await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
   // spreadsheet is on in all three: its switch turns it off in Copilot CLI and Codex with their own switches, leaves Claude
   // Code on (and says so), and its Undo turns both back on.
   await a.click('[id="switch-document-tools@team-tools/spreadsheet"]'); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
-  await shot(a, 'main-switch-changed', 'Clicked spreadsheet’s own switch: off in Copilot CLI and Codex at once, each with its own switch; still on in Claude Code, which has no switch for one skill of a plugin; with Undo.');
+  await shot(a, 'main-switch-changed', 'Clicked spreadsheet’s own switch: off in Copilot CLI and Codex at once, each with its own switch; still on in Claude Code, which has no switch for one skill of a plugin, so “Turn document-tools off in Claude Code” is offered beside Undo.');
   await a.click('#outcome-undo-plugin'); await a.settle();
-  await shot(a, 'main-switch-changed-undone', 'Clicked Undo: spreadsheet is on in Copilot CLI and Codex again.');
+  await shot(a, 'main-switch-changed-undone', 'Clicked Undo: “Undone: spreadsheet is back on in Copilot CLI and Codex.”');
   if (await a.has('#open-triage')) {
     await a.click('#open-triage'); await shot(a, 'part-and-plugin', 'Opened triage: its Pi part and the plugin installed in Codex share the row. The note says its switch also turns it on or off in Codex, through the plugin, and that deleting here removes only the separate item; Codex’s line has its switch.');
     // Each tool's switch for the item is in its opened row, and applies at once. issue-tracker is off in Codex: its switch

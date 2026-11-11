@@ -215,7 +215,7 @@ test('a main switch turns one item in every tool with a switch for it, and never
   // Claude Code has no switch for one skill of a plugin: it is left on and said; Copilot CLI has it off already.
   assert.deepEqual(chosen(off.draft), ['codex-cli skill-off one']);
   assert.deepEqual([off.leftIn, off.whole.map(entry => entry.tool), off.turned.map(entry => entry.tool)], [['claude-cli'], ['claude-cli'], ['codex-cli']]);
-  assert.deepEqual([off.limit, off.left], ['Still on in Claude Code: it has no switch for one skill of a plugin, only the whole plugin full’s.', undefined]);
+  assert.deepEqual([off.limit, off.left], ['Still on in Claude Code: it has no switch for one skill of a plugin, only one for the whole plugin, full.', undefined]);
   // On again: where the whole plugin is off, it comes on for this item alone, its other switchable items held off.
   const codexOff = installed('codex-cli', { off: true });
   const on = turnEvery([item(codexOff, 'mcp', 'issues'), item(copilot, 'skill', 'one')], true);

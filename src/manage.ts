@@ -19,7 +19,7 @@ import { comparableText } from './pluginstatus.ts';
 import { ALREADY_AS_IT_WAS, type SwitchRecord } from './types.ts';
 import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, HistoryPrune, ManageView, Outside, Skill, SkillFacts, Snapshot, SyncNotice, ToolCopy, TookOver } from './types.ts';
 import { byKey } from './roworder.ts';
-import { leftOutAfterChoice, undoChoice as undoChoiceWith } from './choiceundo.ts';
+import { undoChoice as undoChoiceWith } from './choiceundo.ts';
 
 
 const bodyLine = (content: string) => content.replace(/^﻿?---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/, '').split(/\r?\n/).map(line => line.trim()).find(line => line && !line.startsWith('#')) ?? '';
@@ -696,6 +696,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     // Removing a managed skill's every copy leaves nothing to sync: it is unmanaged (Restore manages it again).
     if (lastCopies) { item.state = 'dont-share'; item.copies = []; }
     item.separate = change.use === 'separate' ? true : change.managed ? undefined : item.separate;
+    if (item.state !== 'shared') delete item.keptOwn;
     // The choice is on record before any copy is replaced, so a crash part-way finishes it at the next pass instead of losing it.
     // Whether it was synced already is kept with it: a pass that finishes it after a crash can't tell any more.
     if (change.use && change.use !== 'separate') item.use = { tool: change.use, hash: entry.facts.copies[change.use]!.hash, ...(wasSynced ? { wasSynced: true as const } : {}) };
@@ -945,10 +946,13 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       }
       if (found) copy.directory = found.copy.directory;
     }
+    // A copy an Undo of a choice left as its tool's own stays so while it holds that content.
+    for (const [tool, hash] of Object.entries(item.keptOwn ?? {}) as [HarnessId, string][]) if (entry.facts.copies[tool]?.hash !== hash) delete item.keptOwn![tool];
+    if (item.keptOwn && !Object.keys(item.keptOwn).length) delete item.keptOwn;
     // An unrecorded copy holding the synced content, or an earlier revision of this skill from the store (a folder switched back,
     // a copy that once failed to update), is this skill's copy, just behind: adopt it rather than call it a collision.
     if (item.hash) for (const location of locations) {
-      if (item.copies.some(copy => copy.directory === location.copy.directory) || !location.copy.writable) continue;
+      if (item.copies.some(copy => copy.directory === location.copy.directory) || !location.copy.writable || item.keptOwn?.[location.tool] === location.copy.hash) continue;
       if (location.copy.hash === item.hash || await exists(storedRevision(context, key, location.copy.hash))) item.copies.push({ harness: location.tool, directory: location.copy.directory, hash: location.copy.hash, created: false, status: 'written' });
     }
     // Each recorded copy remembers the content last seen or written there: a copy that differs from that was edited; one that
@@ -1174,6 +1178,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
         }
       } else for (const location of active) inSync.add(location.copy.directory);
       delete item.use;
+      if (chosen) delete item.keptOwn;
       // The synced content is what the pass decided on (the source as first read), kept in the store from wherever it still is.
       const target = source.hash;
       for (const from of [source.directory, ...[...written].filter(([, hash]) => hash === target).map(([directory]) => directory)]) {
@@ -1637,28 +1642,34 @@ export async function restoreFromHistory(context: ShareContext, eventId: string,
  * tool whose copy had to stay keeps syncing, so nothing is left half-managed. One that was managed already (`rejoined`)
  * stays managed and stops syncing to those tools again.
  */
-async function undoAdded(context: ShareContext, record: SyncRecord, history: HistoryEvent[], past: HistoryEvent): Promise<ApplyResult> {
+async function undoAdded(context: ShareContext, record: SyncRecord, history: HistoryEvent[], past: HistoryEvent, withChoice = false): Promise<ApplyResult> {
   if (past.undoneBy) return { stopped: 'That change was already undone.', results: [], harnessWrites: 0 };
   const item = record.items[past.key];
-  if (!item || item.state !== 'shared') return { stopped: `${past.item} is not managed any more, so there is nothing to undo here.`, results: [], harnessWrites: 0 };
+  // Taken out with a choice's Undo, it may be finishing one that left the skill not synced already.
+  if (!item || (item.state !== 'shared' && !withChoice)) return { stopped: `${past.item} is not managed any more, so there is nothing to undo here.`, results: [], harnessWrites: 0 };
   const entry = (await gather(context, await context.read(), record)).get(past.key);
   const results: DestinationResult[] = [];
   const kept: HarnessId[] = [];
+  // A copy that couldn't go, not one edited since: the entry stays open, so History's Undo can take it out later.
+  let open = false;
   let writes = 0;
   for (const loser of past.losers) {
     const recorded = item.copies.find(copy => copy.harness === loser.tool && copy.created);
-    const here = recorded && entry?.locations.find(location => location.tool === loser.tool && sameDir(location.copy.directory, recorded.directory));
-    if (!recorded || !here) { results.push({ item: item.name, harness: loser.tool, outcome: 'stayed', message: `${harnesses[loser.tool].name}'s copy is already gone.` }); continue; }
+    // Off the record (a choice's Undo that stopped part-way settled the skill), the copy is the one still holding what was added.
+    const here = recorded ? entry?.locations.find(location => location.tool === loser.tool && sameDir(location.copy.directory, recorded.directory))
+      : withChoice ? entry?.locations.find(location => location.tool === loser.tool && location.copy.hash === loser.hash) : undefined;
+    if (!here) { results.push({ item: item.name, harness: loser.tool, outcome: 'stayed', message: `${harnesses[loser.tool].name}'s copy is already gone.` }); continue; }
     if (here.copy.hash !== loser.hash) { kept.push(loser.tool); results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: `${harnesses[loser.tool].name}'s copy was edited since, so it stays.` }); continue; }
-    if (!here.copy.writable) { kept.push(loser.tool); results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: untouched(loser.tool, here.copy, 'reads it', item.name) }); continue; }
+    if (!here.copy.writable) { open = true; kept.push(loser.tool); results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: untouched(loser.tool, here.copy, 'reads it', item.name) }); continue; }
     const late = await rootProblem(context, loser.tool);
-    if (late) { kept.push(loser.tool); results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: late }); continue; }
+    if (late) { open = true; kept.push(loser.tool); results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: late }); continue; }
     try {
       await importRevision(context, past.key, here.copy.directory, await readTree(here.copy.directory));
       await removeChecked(context, here.copy.directory, loser.hash);
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('fault:')) throw error;
       kept.push(loser.tool);
+      if (errorCode(error) !== 'CK_CHANGED') open = true;
       results.push({ item: item.name, harness: loser.tool, outcome: errorCode(error) === 'CK_CHANGED' ? 'held' : 'failed', message: errorCode(error) === 'CK_CHANGED' ? `${harnesses[loser.tool].name}'s copy changed just now, so it stays.` : `Could not remove ${harnesses[loser.tool].name}'s copy: ${plainError(error)}` });
       continue;
     }
@@ -1669,7 +1680,7 @@ async function undoAdded(context: ShareContext, record: SyncRecord, history: His
   if (!kept.length && !past.rejoined) { item.state = 'dont-share'; delete item.use; item.copies = []; }
   else item.off = [...new Set([...(item.off ?? []), ...past.losers.map(loser => loser.tool).filter(tool => !kept.includes(tool))])];
   await saveRecord(context.home, record);
-  past.undoneBy = randomUUID();
+  if (!open) past.undoneBy = randomUUID();
   await saveHistory(context, history);
   return { results, harnessWrites: writes };
 }
@@ -1910,7 +1921,7 @@ async function undoChoice(context: ShareContext, record: SyncRecord, history: Hi
   const undone = await undoChoiceWith(history, chosen, {
     name: item.name,
     noun: 'copy',
-    holds: (tool, own) => (copy(tool)?.hash === chosen.winner?.hash ? 'chosen' : copy(tool)?.hash === own ? 'own' : 'other'),
+    wrote: tool => copy(tool)?.hash === chosen.winner?.hash,
     cantPutBack: async (tool, own) => {
       if (!copy(tool)!.writable) return untouched(tool, copy(tool)!, `reads ${item.name}`, item.name);
       try { await readTree(storedRevision(context, chosen.key, own)); } catch { return 'The replaced copy is no longer in Central Knot’s store, so it can’t be put back.'; }
@@ -1920,29 +1931,30 @@ async function undoChoice(context: ShareContext, record: SyncRecord, history: Hi
     takeOutAdded: async added => {
       // A take-over that came with those copies (the copies outside Central Knot's own) goes back with them.
       const alongside = tookOverWith(history, added);
-      const out = alongside ? await undoTookOver(context, record, history, alongside) : await undoAdded(context, record, history, added);
+      const out = alongside ? await undoTookOver(context, record, history, alongside) : await undoAdded(context, record, history, added, true);
       return { results: out.results, writes: out.harnessWrites, stopped: out.stopped };
     },
     putBack: async (tool, own) => {
       try { await replaceCopy(context, chosen.key, storedRevision(context, chosen.key, own), copy(tool)!.directory, chosen.winner!.hash); return undefined; }
       catch (error) { if (error instanceof Error && error.message.startsWith('fault:')) throw error; return plainError(error); }
     },
+    nextStep: tool => harnesses[tool].nextStep.replace(/^Written\. /, ''),
     settle: async (synced, back) => {
       delete item.use;
-      if (synced) {
-        const own = leftOutAfterChoice(Object.keys(entry?.facts.copies ?? {}) as HarnessId[], synced, chosen, back,
-          tool => (entry!.facts.copies[tool]!.readsFrom || item.off?.includes(tool) ? undefined : copy(tool)!.hash));
-        item.state = 'shared';
-        item.hash = synced;
-        item.off = [...new Set([...(item.off ?? []), ...own])];
-        item.copies = item.copies.filter(known => !own.includes(known.harness)).map(known => ({ ...known, hash: synced, status: 'written' as const }));
-        await saveRecord(context.home, record);
-        return own;
+      delete item.keptOwn;
+      if (!synced) { item.state = 'dont-share'; item.copies = []; await saveRecord(context.home, record); return; }
+      item.state = 'shared';
+      item.hash = synced;
+      for (const [tool, here] of Object.entries(entry?.facts.copies ?? {}) as [HarnessId, ToolCopy][]) {
+        if (here.readsFrom || item.off?.includes(tool)) continue;
+        const now = back.get(tool) ?? here.hash;
+        // Put back holding the synced content: on record with it. Holding anything else: that tool's own copy, off the record
+        // and never adopted as this skill's copy just behind (its content is in the store), so the pass holds for a choice.
+        if (now === synced) { if (back.has(tool)) for (const known of item.copies) if (known.harness === tool) Object.assign(known, { hash: synced, status: 'written' }); continue; }
+        item.copies = item.copies.filter(known => known.harness !== tool);
+        (item.keptOwn ??= {})[tool] = now;
       }
-      item.state = 'dont-share';
-      item.copies = [];
       await saveRecord(context.home, record);
-      return [];
     },
     saveHistory: () => saveHistory(context, history),
   });

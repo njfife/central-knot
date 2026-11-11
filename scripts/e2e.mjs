@@ -363,7 +363,7 @@ async function practiceFlow() {
   same('rows', (await rowKeys(a)).sort(), ['notes', 'release-notes', 'review', 'standup']);
   same('nothing is on at first', await Promise.all(['notes', 'release-notes', 'review', 'standup'].map(key => switchOn(a, key))), [false, false, false, false]);
   same('and every skill is under Not synced, its switch halfway (neither on nor off), saying where it is', [await sectionsNow(a), await a.all('.ov-row[data-key] .switch', 'e.getAttribute("aria-checked")'), await a.run(`document.querySelector('#switch-notes').title`)],
-    [[['not-synced', ['notes', 'release-notes', 'review', 'standup']]], ['mixed', 'mixed', 'mixed', 'mixed'], 'notes: Not synced · in Claude Code and Copilot CLI. Click to turn it on in every tool.']);
+    [[['not-synced', ['notes', 'release-notes', 'review', 'standup']]], ['mixed', 'mixed', 'mixed', 'mixed'], 'notes: Not synced · on in Claude Code and Copilot CLI. Click to turn it on in every tool.']);
   same('no column heads, and no filter chips while All would be alone with Copies differ', [await a.exists('.ov-head'), await a.all('.chip', 'e.dataset.tip')], [false, ['All', 'Copies differ']]);
   same('marks say what each tool has', [await cellState(a, 'release-notes', 'claude-cli'), await cellState(a, 'release-notes', 'copilot-cli'), await cellState(a, 'review', 'copilot-cli')], ['present', 'absent', 'present-differs']);
   same('a row’s only controls are its switch and its chevron: marks and Copies differ are only said', await a.all('.ov-row[data-key="review"] button', 'e.id'), ['switch-review', 'open-review']);
@@ -868,7 +868,7 @@ async function practiceFlow() {
   const outsideSettings = readNow(join(practice, '.claude/settings.json'));
   await a.click(`${outsideRow} .switch`);
   check('the row’s switch never turns a whole plugin off: Claude Code is left on, and said', readNow(join(practice, '.claude/settings.json')) === outsideSettings && await switchOn(a, outside)
-    && /outside-skill: nothing changed\. Still on in Claude Code: it has no switch for one skill of a plugin, only the whole plugin outside-tools’s\./.test(await a.text('.bands') ?? '')
+    && /outside-skill: nothing changed\. Still on in Claude Code: it has no switch for one skill of a plugin, only one for the whole plugin, outside-tools\./.test(await a.text('.bands') ?? '')
     && await a.text('#outcome-whole') === 'Turn outside-tools off in Claude Code', [await a.text('.bands'), await a.text('#outcome-whole')]);
   await a.click(`[id="open-${outside}"]`);
   check('its details open with where it is on and which plugin it is from, then where it is handled', /On in Claude Code · from the plugin outside-tools[\s\S]*marketplace “ck-outside”, which isn’t added in Central Knot/.test(await a.text('main') ?? ''), await a.text('main'));
@@ -1209,10 +1209,18 @@ async function practiceFlow() {
   for (let tries = 0; tries < 60 && !(await a.exists('#outcome-undo')); tries++) await wait(100);
   const codexItemOff = () => /name = "issue-tracker:triage"[^[]*enabled = false/.test(readNow(codexToml));
   check('one click turns the copy and the plugin’s skill off, and says what it left on', codexItemOff() && piOff() && await cellState(a, 'triage', 'codex-cli') === 'plugin-off'
-    && /triage is off in [^.]*Codex[^.]*\. Still on in Claude Code: it has no switch for one skill of a plugin, only the whole plugin issue-tracker’s\./.test(await a.text('.bands') ?? ''), [readNow(codexToml), readNow(piSwitch), await a.text('.bands')]);
+    && /triage is off in [^.]*Codex[^.]*\. Still on in Claude Code: it has no switch for one skill of a plugin, only one for the whole plugin, issue-tracker\./.test(await a.text('.bands') ?? ''), [readNow(codexToml), readNow(piSwitch), await a.text('.bands')]);
   await a.click('#outcome-undo');
   for (let tries = 0; tries < 60 && (codexItemOff() || piOff()); tries++) await wait(100);
   same('its one Undo puts both back', [codexItemOff(), piOff(), await cellState(a, 'triage', 'codex-cli'), await switchOn(a, 'triage')], [false, false, 'plugin', true]);
+  // The same Off from a page read before triage stopped syncing elsewhere is refused as a whole: the plugin's skill in Codex
+  // is never switched beside the refusal. Synced again after, as it was.
+  await a.run(`(async () => { const view = await window.centralKnot.refresh(); await window.centralKnot.apply([{ key: 'triage', managed: false, off: [], seenManaged: true }], false, view.home); document.querySelector('.ov-row[data-key="triage"] .switch').click(); })()`);
+  for (let tries = 0; tries < 60 && !/changed since the page was read/.test(await a.text('.bands') ?? ''); tries++) await wait(100);
+  check('an Off from a stale page is refused, and the plugin’s skill in Codex stays on', !codexItemOff() && !piOff() && /triage changed since the page was read/.test(await a.text('.bands') ?? ''), [readNow(codexToml), await a.text('.bands')]);
+  await a.run(`(async () => { const view = await window.centralKnot.refresh(); await window.centralKnot.apply([{ key: 'triage', managed: true, off: [], seenManaged: false }], false, view.home); })()`);
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 40 && !(await switchOn(a, 'triage')); tries++) await wait(100);
   if (!triageWasOn) await a.run(`(async () => { const view = await window.centralKnot.refresh(); const added = (await window.centralKnot.history()).events.filter(event => event.key === 'triage' && event.kind === 'added' && !event.undoneBy).at(-1);
     if (added) await window.centralKnot.restore(added.id, false, view.home); else await window.centralKnot.apply([{ key: 'triage', managed: false, off: [], seenManaged: true }], false, view.home); })()`);
   rmSync(join(practice, '.codex/plugins'), { recursive: true, force: true });

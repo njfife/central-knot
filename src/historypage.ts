@@ -30,9 +30,8 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
     case 'kept-edit': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit was kept over a deletion in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}.${order}` };
     case 'chosen': {
       const text = `You chose ${who(event.winner?.tool)}’s copy; it replaced ${andList(event.losers.map(loser => who(loser.tool)))}’s.`;
-      // Its Undo stopped part-way: what went back, and the way to finish it, in the tools still to go.
-      const left = event.losers.filter(loser => !event.restoredTools?.includes(loser.tool)).map(loser => loser.tool);
-      return event.restoredTools ? { glyph: 'check', text: `${text} Undone in ${touchedToolsPhrase(event.restoredTools)}; ${touchedToolsPhrase(left)} still to go.`, action: 'Finish undo' } : { glyph: 'check', text, action: 'Undo' };
+      // Its Undo stopped part-way: what went back, and what is still to go, for its Finish undo.
+      return event.restoredTools ? { glyph: 'check', text: `${text} ${unfinished(event)}`, action: 'Finish undo' } : { glyph: 'check', text, action: 'Undo' };
     }
     case 'switched': {
       const turned = (disabled: boolean) => touchedToolsPhrase((event.switched ?? []).filter(entry => entry.disabled === disabled).map(entry => entry.tool));
@@ -115,6 +114,20 @@ const day = (iso: string) => {
   if (date.toDateString() === new Date(Date.now() - DAY_MS).toDateString()) return 'Yesterday';
   return date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 };
+/**
+ * A choice whose Undo stopped part-way: what went back and what is still to go ("Undone in Copilot CLI; Codex still to go; the
+ * new copy in Pi still to remove."), or, for its Finish undo button, what it will do.
+ */
+function unfinished(event: HistoryEvent, todo = false): string {
+  const noun = event.key.startsWith('mcp:') ? 'entry' : 'copy';
+  const back = event.restoredTools ?? [];
+  const left = event.losers.map(loser => loser.tool).filter(tool => !back.includes(tool));
+  const added = state.history.data?.find(other => other.id === event.addedId && !other.undoneBy)?.losers.map(loser => loser.tool) ?? [];
+  const said = todo ? [left.length && `put ${left.length === 1 ? 'the' : 'each'} replaced ${noun} back in ${touchedToolsPhrase(left)}`, added.length && `remove the new ${noun} in ${touchedToolsPhrase(added)}`].filter(Boolean).join(', and ')
+    : [back.length && `undone in ${touchedToolsPhrase(back)}`, left.length && `${touchedToolsPhrase(left)} still to go`, added.length && `the new ${noun} in ${touchedToolsPhrase(added)} still to remove`].filter(Boolean).join('; ');
+  return said ? `${said.charAt(0).toUpperCase()}${said.slice(1)}${todo ? '' : '.'}` : todo ? 'Finish the Undo' : '';
+}
+
 /** What an Undo, Redo or Restore button will do, said before the click. */
 const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'profile' ? `Each switch this changed goes back, where it is still as this left it; ${event.profile?.fromName ?? NO_PROFILE} is in use again if this switch is the one that chose the profile in use`
   : event.base ? 'Put the base instructions back as they were before this Pull, and in the tools that got them (where their file is unchanged since)'
@@ -122,7 +135,7 @@ const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'pro
   : event.kind === 'removed' ? `Put the removed copy back in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}`
   : event.kind === 'took-over' ? `Put the links and the shared copy back as they were${event.tookOver?.managedNow ? `, remove the copies that turning it on added, and stop syncing ${event.item}` : ''} (only while unchanged)`
   : event.kind === 'added' ? `Remove the copies ${event.via === 'repo' ? 'Pull' : 'it'} added (only while unchanged) and stop syncing ${event.item}${event.rejoined ? ' there' : ''}` : action === 'Restore' ? `Put ${event.item} back in every tool it synced to`
-  : action === 'Finish undo' ? `Put each replaced copy back in its own tool, where it isn’t yet (only while unchanged since)`
+  : action === 'Finish undo' ? `${unfinished(event, true)} (only while unchanged since)`
   : action === 'Redo edit' || action === 'Delete again' ? 'Undo the undo: put back the version that was replaced'
     : `Put ${event.item} back as it was before this change, in every tool it syncs to (including where it was edited)`);
 

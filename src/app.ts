@@ -8,7 +8,7 @@ import { h } from './dom.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
 import { backText, deletedText, leftAsIs, tookOverSaid, undoneText } from './outsidewords.ts';
-import { clickResults, inverseChanges, recordChanged, undoOrder, type Standing } from './clickplan.ts';
+import { clickResults, inverseChanges, keptBack, recordChanged, undoOrder, type Standing } from './clickplan.ts';
 import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, sentence, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
@@ -299,6 +299,8 @@ export interface Click {
    * through, never beside a click refused as a whole. `said`: what that part brought with it, said when it all worked.
    */
   plugins?: { ops: PluginOp[]; draft: Map<string, PluginOp>; said?: string };
+  /** Offered beside the Undo: the next step the result names (the whole plugin's switch where one item has none). */
+  next?: Outcome['next'];
 }
 
 /** Each item page's own: its items as the open home shows them, how its changes are sent, and where its last result is kept. */
@@ -358,7 +360,7 @@ export const applyClick = (click: Click) => busy(click.putBack ? 'Putting it bac
   const undo = click.undoing || !done ? undefined : back ? () => takeOutAgain(click)
     : made.length || changed.length || switchedBack.length ? () => void undoClick(click, made, before, changed, switchedBack) : undefined;
   const warned = failed || !!plugged?.failed.length || !!plugged?.stopped;
-  tell({ page: state.page, items: click.items, warn: warned || !!click.also || (!done && !!refusal), band: true, fade: click.undoing && !warned,
+  tell({ page: state.page, items: click.items, warn: warned || !!click.also || (!done && !!refusal), band: true, fade: click.undoing && !warned, next: click.next,
     text, act: undo ? { label: 'Undo', id: 'outcome-undo', title: back ? 'Take it out of every tool again; History keeps it' : 'Put back everything this did', run: undo } : undefined });
   for (const item of click.items) flashRow(item);
 });
@@ -413,9 +415,8 @@ const undoClick = (click: Click, made: string[], before: Map<string, Standing>, 
     if (narrow) narrowed.add(event.key);
     results.push(...result.results);
   }
-  const kept = results.filter(entry => entry.outcome === 'failed' || entry.outcome === 'held');
   // What a History entry couldn't put back stays as it is: the record goes back only once the entries all did.
-  if (!stopped && !kept.length && changed.length) {
+  if (!stopped && !results.some(keptBack) && changed.length) {
     setHome(await api().refresh());
     const inverse = inverseChanges(changed, before, standings(click.kind, changed));
     if (inverse.length) {
@@ -429,19 +430,15 @@ const undoClick = (click: Click, made: string[], before: Map<string, Standing>, 
   setHome(await api().refresh());
   await putHistory();
   kindPages[click.kind].keep(results, notices);
-  const failed = [...results.filter(entry => entry.outcome === 'failed' || entry.outcome === 'held').map(entry => entry.message), ...(unswitched ? [switchProblems(unswitched)].filter(Boolean) : [])];
+  // Waiting for a choice of copy again is how a choice's Undo leaves it, as before the choice: no failure.
+  const failed = [...results.filter(keptBack).map(entry => entry.message), ...(unswitched ? [switchProblems(unswitched)].filter(Boolean) : [])];
   const what = click.items.length === 1 ? click.items[0] : andList(click.items);
   // A take-over undone with it: the links and the shared copy it put back.
   const back = backText(results.filter(entry => entry.tookOver === 'link' && entry.outcome === 'written').map(entry => ({ tool: toolName(entry.harness ?? ''), item: entry.item })),
     results.filter(entry => entry.tookOver === 'shared' && entry.outcome === 'written').map(entry => ({ item: entry.item })));
-  // A choice undone on an item that was synced: the tools whose own copy is back are left out of sync, which is not as before.
-  const leftOut = [...new Set(results.filter(entry => entry.leftOut).map(entry => toolName(entry.harness ?? '')))];
-  const own = click.kind === 'mcp' ? 'entry' : 'copy';
-  const lead = failed.length ? `Not all of ${what} could be put back.`
-    : leftOut.length ? `Undone: ${andList(leftOut)} ${leftOut.length === 1 ? 'has its' : 'have their'} own ${own} of ${what} back, left out of sync; syncing it there again asks which ${own} every tool uses.`
-      : `Undone: ${what} ${click.items.length === 1 ? 'is' : 'are'} as before.`;
+  const lead = failed.length ? `Not all of ${what} could be put back.` : `Undone: ${what} ${click.items.length === 1 ? 'is' : 'are'} as before.`;
   // A choice whose Undo stopped part-way keeps what it put back on its History entry, whose Undo finishes it.
-  const finish = failed.length && events.some(event => event.kind === 'chosen') ? 'History’s Undo of the choice finishes it.' : '';
+  const finish = state.history.data?.some(event => made.includes(event.id) && event.kind === 'chosen' && !event.undoneBy) ? 'History’s Undo of the choice finishes it.' : '';
   tell({ page: state.page, items: click.items, warn: !!stopped || failed.length > 0, band: true, fade: !stopped && !failed.length,
     text: stopped ? `Not all of it could be undone: ${stopped}` : [lead, back, ...failed, finish].filter(Boolean).join(' ') });
   for (const item of click.items) flashRow(item);
@@ -479,8 +476,8 @@ async function runSwitches(ops: PluginOp[], draft: Map<string, PluginOp>, undo =
  * Apply all (MCP servers and Agents, until they have one switch per item), which this one's result carries with it: its
  * words first, and its Undo run after this one's.
  */
-export const applyPluginSwitches = (ops: PluginOp[], draft: Map<string, PluginOp>, options: { undo?: boolean; before?: Outcome; also?: string; note?: string; said?: string; undoSaid?: string; kind?: Kind } = {}) => busy(options.undo ? 'Undoing…' : 'Applying…', async () => {
-  const { undo = false, before, also, note, said, undoSaid, kind } = options;
+export const applyPluginSwitches = (ops: PluginOp[], draft: Map<string, PluginOp>, options: { undo?: boolean; before?: Outcome; also?: string; note?: string; said?: string; undoSaid?: string; kind?: Kind; next?: Outcome['next'] } = {}) => busy(options.undo ? 'Undoing…' : 'Applying…', async () => {
+  const { undo = false, before, also, note, said, undoSaid, kind, next } = options;
   const ran = await runSwitches(ops, draft, undo);
   setHome(await api().refresh());
   if (kind && !undo) retireTip(kind);
@@ -499,7 +496,7 @@ export const applyPluginSwitches = (ops: PluginOp[], draft: Map<string, PluginOp
     tell(state.outcome ? { ...state.outcome, text: [first?.text, state.outcome.text].filter(Boolean).join(' ') } : first && { ...first, act: undefined });
   };
   const act = ran.back.length ? { label: before && !before.act ? 'Undo plugin switches' : 'Undo', id: 'outcome-undo-plugin', title: before?.act ? 'Turn the plugin items back as they were, then undo the rest' : 'Turn them back as they were', run: () => void undoBoth() } : before?.act;
-  tell({ ...before, page: state.page, text, warn: !worked || !!before?.warn || !!also, band: true, fade: undo && worked, act });
+  tell({ ...before, page: state.page, text, warn: !worked || !!before?.warn || !!also, band: true, fade: undo && worked, act, next: worked ? next : undefined });
 });
 
 /**
@@ -829,6 +826,10 @@ export interface Outcome {
   fade?: boolean;
   undo?: { id: string; label: string };
   act?: { label: string; id: string; run: () => void; title?: string };
+  /** A second button after `act`: the next step the result offers ("Turn document-tools off in Claude Code"). */
+  next?: { label: string; id: string; run: () => void; title?: string };
+  /** Plain information, nothing done and nothing wrong: the information mark, not a tick. */
+  info?: boolean;
   /** When it was said (state.said.seq): a result newer than a table's pending changes still shows there. */
   said?: number;
 }
