@@ -9,7 +9,7 @@ import { lstat, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { configRoot, harnesses } from './harnesses.ts';
 import { mcpTools } from './presence.ts';
-import { newRecord, FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { FORMAT_VERSION, newRecord, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
 import { mcpSwitchFacts, readMcpSwitches, setMcpDisabled } from './mcpswitch.ts';

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { applyChanges, manageView } from '../src/manage.ts';
-import { gateRefusal, readRecord, storeDirectory, syncGate, takeOverSync, writeAccess, type ShareContext } from '../src/share.ts';
+import { gateRefusal, readRecord, saveRecord, storeDirectory, syncGate, takeOverSync, writeAccess, type ShareContext } from '../src/share.ts';
 import type { HarnessId, HistoryDays, Snapshot } from '../src/types.ts';
 import { DAY_MS } from '../src/model.ts';
 
@@ -1367,6 +1367,12 @@ test('One build syncs a home at a time: the other names the owner, and Take over
     const stopped = await syncGate(standard);
     assert.ok(stopped.state === 'stopped' && stopped.owner?.name === 'Acme Knot', JSON.stringify(stopped));
     assert.deepEqual(await takeOverSync(acme), {});
+    // A pass the standard app had under way when it was taken over stops at its next save: it can't take the home back by finishing.
+    const stale = { ...owned, items: { ...owned.items } };
+    await assert.rejects(saveRecord(box.home, stale), /^Error: Acme Knot took over syncing this home meanwhile, so this stopped there\. Nothing more was written\.$/);
+    assert.equal((await readRecord(box.home)).record!.owner, 'com.centralknot.custom.acme');
+    // A home that can't be written is taken over by nobody.
+    assert.match((await takeOverSync({ ...standard, mode: 'actual', home: box.home, realHome: box.home, allowActualWrites: false })).stopped ?? '', /^Preview only/);
     // And back again, by the same step.
     assert.deepEqual(await takeOverSync(standard), { from: 'Acme Knot' });
     assert.equal((await syncGate(standard)).state, 'ready');

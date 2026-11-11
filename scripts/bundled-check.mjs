@@ -327,7 +327,8 @@ await b.shot('skills-other-owner-860');
 await b.size(1280, 800);
 await b.click('#nav-overview');
 check('the Skills card on Overview doesn’t say All in sync of a home another build syncs', !(await b.run(`document.body.innerText`)).includes('All in sync'));
-check('Overview says so too', await b.run(`document.querySelector('#overview-other-owner')?.textContent ?? ''`).then(text => text.startsWith('Central Knot ') && text.endsWith('Take over syncing')) || !writes, await b.run(`document.querySelector('#overview-other-owner')?.textContent`));
+// (A preview-only home says that on Overview instead.)
+if (writes) check('Overview says so too', await b.run(`document.querySelector('#overview-other-owner')?.textContent ?? ''`).then(text => text.startsWith('Central Knot ') && text.endsWith('Take over syncing')), await b.run(`document.querySelector('#overview-other-owner')?.textContent`));
 await b.shot('overview-other-owner-1280');
 if (writes) {
   check('the status bar’s sync switch says whose it is', await b.run(`document.querySelector('#sync-switch .sync-state').textContent`) .then(text => text === 'By Central Knot' || text === 'Central Knot’s, not open'), await b.run(`document.querySelector('#sync-switch .sync-state').textContent`));

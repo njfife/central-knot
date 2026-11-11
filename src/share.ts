@@ -333,9 +333,20 @@ export async function removeFileChecked(path: string, expected: string) {
 }
 
 /** A home's first sync record, owned by this build. */
-export const newRecord = (context: ShareContext): SyncRecord => ({ formatVersion: FORMAT_VERSION, generation: randomUUID(), owner: context.build, ...(context.buildName ? { ownerName: context.buildName } : {}), items: Object.create(null) });
+export const newRecord = (context: ShareContext): SyncRecord => ({ formatVersion: FORMAT_VERSION, generation: randomUUID(), owner: context.build, ownerName: context.buildName, items: Object.create(null) });
 
-export const saveRecord = (home: string, record: SyncRecord) => writeDurably(recordPath(home), `${JSON.stringify(record, null, 2)}\n`);
+/**
+ * Saves a home's sync record. A record on disk under another owner than the one being saved means another build took
+ * over syncing since this one read it (takeOverSync): nothing is written and the work under way stops there, so a pass
+ * that was already running never takes ownership back. `takingOver` is the one save that changes the owner.
+ */
+export async function saveRecord(home: string, record: SyncRecord, takingOver = false) {
+  if (!takingOver) {
+    const onDisk = await readFile(recordPath(home), 'utf8').then(text => JSON.parse(text) as Partial<SyncRecord>, () => undefined).catch(() => undefined);
+    if (typeof onDisk?.owner === 'string' && onDisk.owner !== record.owner) throw Object.assign(new Error(`${ownerName(onDisk as SyncRecord)} took over syncing this home meanwhile, so this stopped there. Nothing more was written.`), { code: 'CK_TAKEN' });
+  }
+  await writeDurably(recordPath(home), `${JSON.stringify(record, null, 2)}\n`);
+}
 
 type Settings = { homes?: Record<string, { generation: string }> };
 async function readSettings(path: string): Promise<Settings> {
@@ -375,19 +386,20 @@ const ownerName = (record: SyncRecord) => record.ownerName || (record.owner === 
  * Takes over syncing a home from the build that owns its record (ORG-08): this build becomes the owner and carries on
  * from the record as it is, every managed item, choice and baseline with it, since the record and what it keeps live in
  * the home, not in either build. The build that owned it finds another owner at its next pass and stops; it changes
- * nothing more there until it is told to take over in turn. Ownership never moves any other way. A record that can't be
- * read stays as it is, with the reason.
+ * nothing more there until it is told to take over in turn: a pass it had under way stops at its next save of the record
+ * (saveRecord), so it can't take the home back by finishing. Ownership never moves any other way. A record that can't be
+ * read, or a home that can't be written, stays as it is, with the reason.
  */
 export async function takeOverSync(context: ShareContext): Promise<{ stopped?: string; from?: string }> {
+  const access = await writeAccess(context);
+  if (!access.allowed) return { stopped: access.reason };
   const { record, problem } = await readRecord(context.home);
   if (problem) return { stopped: `${problem} ${NOTHING_CHANGED}` };
   if (!record) return { stopped: 'Nothing is synced in this home yet, so there is nothing to take over.' };
   if (record.owner === context.build) return {};
-  const from = ownerName(record);
-  const { ownerName: _before, ...rest } = record;
-  await saveRecord(context.home, { ...rest, owner: context.build, ...(context.buildName ? { ownerName: context.buildName } : {}) });
+  await saveRecord(context.home, { ...record, owner: context.build, ownerName: context.buildName }, true);
   await remember(context, record.generation);
-  return { from };
+  return { from: ownerName(record) };
 }
 
 /** Whether this build syncs this home and may write it: History is kept tidy, and passes run, only where both hold. */

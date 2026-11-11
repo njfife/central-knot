@@ -6,8 +6,8 @@ import { dirname, join } from 'node:path';
 import { DAY_MS, defaultHistoryDays } from './model.ts';
 import { harnesses, writeRoot } from './harnesses.ts';
 import { presentTools } from './presence.ts';
-import { newRecord,
-  FORMAT_VERSION, changedWhileSyncing, clearStaleStages, storedRevision, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, placeCopy, plainError, readRecord, readTree,
+import {
+  FORMAT_VERSION, changedWhileSyncing, clearStaleStages, storedRevision, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, newRecord, placeCopy, plainError, readRecord, readTree,
   remember, removeTree, saveRecord, stagingFolder, storeDirectory, storeFolder, syncGate, syncsHere, targetFor, writeAccess, writeDurably, type RecordItem, type ShareContext, type SyncRecord,
 } from './share.ts';
 import { parseSkill } from './discovery.ts';
@@ -468,6 +468,8 @@ export async function applyChanges(context: ShareContext, changes: Change[], res
   try { return await runApply(context, changes, resume, options); }
   catch (error) {
     if (error instanceof Error && error.message.startsWith('fault:')) throw error;
+    // Another build took over syncing while this ran (saveRecord): said as it is, with nothing to refresh away.
+    if (errorCode(error) === 'CK_TAKEN') return { stopped: (error as Error).message, results: [], harnessWrites: 0 };
     return { stopped: `That could not finish. ${plainError(error)} Click Refresh to see where things stand.`, results: [], harnessWrites: 0 }; }
 }
 

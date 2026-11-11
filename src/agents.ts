@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { parseDocument, stringify as stringifyYaml } from 'yaml';
 import { configRoot, harnesses, writeRoot } from './harnesses.ts';
 import { appendHistory, readConverted, readHistory, recordConverted, replaceHistory } from './manage.ts';
-import { newRecord, FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { FORMAT_VERSION, newRecord, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, tomlValue } from './textedit.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ThroughPlugin, ToolCopy } from './types.ts';
 import { agentTools, type AgentTool } from './presence.ts';
