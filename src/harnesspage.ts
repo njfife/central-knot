@@ -3,7 +3,7 @@
 // file and its plugins. Nothing here has its own engine: every change goes through the pages it mirrors.
 import { KINDS, harnessFound as found, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type Kind } from './app.ts';
 import { installsIn, type MarketPlugin } from './pluginstatus.ts';
-import { inTool, pluginItemCount } from './pluginrows.ts';
+import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { pluginTitle } from './pluginparts.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fileName, fullToolName, plural } from './model.ts';
@@ -266,7 +266,7 @@ function unsupported(kind: Kind, tool: HarnessId) {
 
 function kindTab(home: HomeView, kind: Kind, tool: HarnessId) {
   if (!supports(home, kind, tool)) return unsupported(kind, tool);
-  if (kindSource(home, kind).facts.length || pluginItemCount(home, kind)) return designOverview(kind, tool);
+  if (rowCount(home, kind)) return designOverview(kind, tool);
   // Nothing of this kind anywhere: the kind's own empty state, under the table's bands, so a file that could not be read still says why.
   const empty = kindEmpty(kind);
   return emptyKind(kind, tool, emptyState(empty.glyph, empty.title, empty.body));

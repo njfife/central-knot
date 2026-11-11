@@ -1,6 +1,6 @@
 // Design preview: sample skills for iterating on the Overview's layout. Started only with --design-preview.
 import { comparedTools, copiesDiffer } from './syncrules.ts';
-import type { Outside, SwitchProblem, ThroughPlugin } from './types.ts';
+import type { GoneItem, Outside, SwitchProblem, ThroughPlugin } from './types.ts';
 export { comparedTools, copiesDiffer };
 // Nothing here reads or writes disk; the controls act on this sample alone.
 
@@ -66,6 +66,8 @@ export interface SampleSkill {
   outsideBack?: boolean;
   /** Skills, before Apply all: tools whose copy is removed then. */
   removing?: Tool[];
+  /** No tool has a copy any more; History can put it back. */
+  gone?: GoneItem;
 }
 
 export const sample: SampleSkill[] = [

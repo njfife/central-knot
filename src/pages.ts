@@ -6,7 +6,7 @@ import { designMode } from './design.ts';
 import { absentTools, heldKinds, isPresent } from './presence.ts';
 import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser, wrappingPath } from './matrix.ts';
 import { andList, kindNames, kindNouns, noToolsSentence, orList } from './words.ts';
-import { inTool, pluginItemCount } from './pluginrows.ts';
+import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 
 // ---------- Overview ----------
 
@@ -93,7 +93,7 @@ function practiceBanner() {
       h('span', {}, ' Sample skills, MCP servers and agents in a throwaway folder. Nothing here touches your real tools, so try anything.')),
     // The first step stays inside the sandbox; the real home is the quieter second choice.
     button({ variant: 'primary', size: 'small', label: 'Try it: open Skills', id: 'intro-try', onclick: () => showPage('skills') }),
-    (() => { const real = button({ variant: 'link', size: 'small', label: `or use ${realHomeName}`, id: 'intro-use-real', onclick: () => void loadHome('actual') }); real.title = 'Only reads your tools; nothing is written there until you click Apply all.'; return real; })(),
+    (() => { const real = button({ variant: 'link', size: 'small', label: `or use ${realHomeName}`, id: 'intro-use-real', onclick: () => void loadHome('actual') }); real.title = 'Only reads your tools; nothing is written there until you turn something on.'; return real; })(),
     button({ variant: 'ghost', size: 'small', icon: 'x', name: 'Hide this note', id: 'intro-dismiss', onclick: () => { setPracticeNote(false); rerender(); } }));
 }
 
@@ -177,7 +177,7 @@ function nextStep(home: HomeView, nothingManaged: boolean): string {
   if (noTools()) return '';
   if (!home.manage.skills.length && !home.mcp.servers.length && !home.agents.servers.length) return ' Nothing found in this home yet.';
   if (homeTools().length === 1) return ' When a second tool is installed, or its folder appears here, Central Knot finds it on its own; then manage what you want the same in both.';
-  return nothingManaged && home.manage.access.allowed ? ' Open one below, turn on Managed for what you want to sync, then click Apply all.' : '';
+  return nothingManaged && home.manage.access.allowed ? ' Open one below and turn on what you want the same in every tool.' : '';
 }
 
 export function overviewPage() {
@@ -281,7 +281,7 @@ const contents = (key: string, copies: Found[]) =>
 export function skillsPage() {
   const home = state.home;
   if (!designMode && !home) return notRead();
-  if (!designMode && !home!.manage.skills.length && !pluginItemCount(home!, 'skills')) return noSkills('empty-read');
+  if (!designMode && !rowCount(home!, 'skills')) return noSkills('empty-read');
   // The table is the Skills page; "Files" opens one skill's files and contents beside the list.
   if (state.skillsView !== 'files') return designOverview('skills');
   return skillsBrowser(key => {

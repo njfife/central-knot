@@ -1,7 +1,7 @@
 import { icons, type IconName } from './icons.ts';
 import { groupBy } from './model.ts';
 
-type Child = Node | string | null | undefined | false;
+export type Child = Node | string | null | undefined | false;
 type Props = Record<string, unknown>;
 
 
@@ -84,9 +84,12 @@ export const pathText = (text: string, full = text): HTMLElement => {
 /** A disabled control's reason, as its tooltip and its accessible description. */
 export const lockAttrs = (why: string | undefined) => (why ? { title: why, 'aria-description': why } : undefined);
 
-/** An on/off switch; its label is also its tooltip. `attrs` adds to or replaces its attributes (Settings ties it to its row's hint). */
-export function toggle({ on, label, onchange, disabled = false, id, attrs = {} }: { on: boolean; label: string; onchange: (on: boolean) => void; disabled?: boolean; id?: string; attrs?: Props }) {
-  return h('button.switch', { type: 'button', id, role: 'switch', 'aria-checked': String(on), 'aria-label': label, title: label, disabled, ...attrs, onclick: (event: Event) => { event.stopPropagation(); onchange(!on); } },
+/**
+ * An on/off switch; its label is also its tooltip. `mixed`: neither, drawn in between (its knob in the middle); a click turns
+ * it on. `attrs` adds to or replaces its attributes (Settings ties it to its row's hint).
+ */
+export function toggle({ on, mixed = false, label, onchange, disabled = false, id, attrs = {} }: { on: boolean; mixed?: boolean; label: string; onchange: (on: boolean) => void; disabled?: boolean; id?: string; attrs?: Props }) {
+  return h('button.switch', { type: 'button', id, role: 'switch', 'aria-checked': mixed ? 'mixed' : String(on), 'aria-label': label, title: label, disabled, ...attrs, onclick: (event: Event) => { event.stopPropagation(); onchange(mixed || !on); } },
     h('span.switch-knob'));
 }
 

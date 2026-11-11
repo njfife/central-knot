@@ -170,49 +170,69 @@ if (wanted('shell')) {
   await a.click('#home-fixture'); await a.click('#nav-overview'); await shot(a, 'back-to-practice', 'Clicked "Practice copy" to go back, then "Overview".');
 }
 
-// ---------- Skills: manage, apply, differing copies, tool menus ----------
+// ---------- Skills: one switch per skill, differing copies ----------
 if (wanted('skills')) {
   begin('skills');
   await a.click('#nav-skills');
-  await shot(a, 'skills-start', 'The Skills page before anything is managed. Rows are skills, columns are tools.');
-  await a.click('#tool-copilot-cli'); await shot(a, 'tool-menu', 'Clicked the "Copilot CLI" column header: its tool menu (Add all to another tool, Stop all).');
-  await a.press?.('Escape'); await a.click('#tool-copilot-cli');
-  await a.click('#manage-all'); await shot(a, 'manage-all-pending', 'Clicked "Manage all": changes are queued, not applied yet.');
-  await a.click('#apply'); await shot(a, 'applied', 'Clicked "Apply all": the copies were written.');
-  await a.click('#open-review'); await shot(a, 'review-copies-differ', 'Opened the "review" row, whose copies differ between tools: the choice of which copy to use.');
-  if (await a.has('#use-review-claude-cli')) { await a.click('#use-review-claude-cli'); await shot(a, 'review-chosen-pending', 'Chose "Use Claude Code\'s copy": queued.'); await a.click('#apply'); await shot(a, 'review-applied', 'Clicked "Apply all".'); }
-  await a.click('#open-standup'); await shot(a, 'details-synced', 'Opened standup, a managed skill whose copies are all the same.');
-  if (await a.has('#files-standup')) { await a.click('#files-standup'); await shot(a, 'files-view', 'Clicked "Files and contents" in its details.'); await a.click('#skills-table'); }
+  await shot(a, 'skills-start', 'Clicked "Skills" in the sidebar. Nothing is synced yet: each switch, at the start of its row, sits halfway (not synced); the marks at the right end show which tools have each skill (hover one for its tool and what it has).');
+  await a.click('#switch-notes');
+  await shot(a, 'turned-on', 'Clicked notes’s switch (halfway: not synced): notes is copied to every tool at once and its switch is on. The row stays where it is until the page is read again; the strip at the top says what happened, with Undo.');
+  await a.click('#outcome-undo');
+  await shot(a, 'turned-on-undone', 'Clicked "Undo" in that strip: Codex’s new copy is gone again and notes is not synced, as before. The strip says so for a few seconds, then goes.');
+  for (const key of ['notes', 'release-notes', 'standup']) await a.click(`#switch-${key}`);
+  await a.click('#header-refresh');
+  await shot(a, 'on', 'Clicked the switches of notes, release-notes and standup (one click each), then "Refresh" at the top right: the rows regroup, the three under On.');
+  await a.click('#switch-review');
+  await shot(a, 'review-copies-differ', 'Clicked review’s switch: its copies differ, so its row opens only the question of which copy every tool uses, with the copies. Nothing is written yet.');
+  await a.click('#use-review-claude-cli');
+  await shot(a, 'review-chosen', 'Clicked "Claude Code’s copy": every tool uses it at once, and review is on. Its details stay open, now with each tool’s own controls.');
+  await a.click('#open-review');
+  await a.click('#switch-standup');
+  await shot(a, 'standup-off', 'Clicked review’s chevron to close its details, then standup’s switch: each tool’s own switch turns it off there and the copies stay. Its marks are grey and struck through, and the row stays where it was.');
+  await a.click('#header-refresh');
+  await shot(a, 'standup-off-regrouped', 'Clicked "Refresh": standup moves to Off, last.');
+  await a.theme('light'); await shot(a, 'standup-off-light', 'The same, in the light appearance.');
+  for (const [width, height] of [[860, 560], [1728, 1117]]) {
+    await a.size(width, height);
+    await a.theme('dark'); await shot(a, `standup-off-${width}-dark`, `The same at ${width}×${height}, dark.`);
+    await a.theme('light'); await shot(a, `standup-off-${width}-light`, `The same at ${width}×${height}, light.`);
+  }
+  await a.size(1280, 800); await a.theme('dark');
+  await a.click('#open-standup');
+  await shot(a, 'details-off', 'Back at 1280×800, dark: clicked standup’s chevron at the right end of its row. Each tool’s row has its own switch and Remove (each says what it does on hover); "Delete everywhere…" is last.');
+  await a.size(1728, 1117);
+  await shot(a, 'details-off-1728', 'The same at 1728×1117: the details sit beside the table.');
+  await a.size(1280, 800);
+  await a.click('#files-standup');
+  await shot(a, 'files-view', 'Clicked "Files and contents" in standup’s details: the list of skills, with the same marks, beside standup’s switch, files and details.');
+  await a.click('#skills-table');
 }
 
-// ---------- Disable and Remove, per tool ----------
+// ---------- Off and Remove in one tool ----------
 if (wanted('disable')) {
   begin('disable');
   await a.click('#nav-skills');
-  await a.click('#open-notes'); await shot(a, 'unmanaged-details', 'Opened notes, an unmanaged skill in Claude Code and Copilot CLI: each tool\'s row has an Enabled switch and Remove.');
-  await a.click('#switch-notes'); await a.click('#enable-notes-codex-cli');
-  await shot(a, 'managed-codex-disabled-pending', 'Turned Managed on for notes, then switched Codex\'s row to Disabled: queued, nothing written yet.');
-  await a.click('#apply');
+  await a.click('#open-notes'); await shot(a, 'not-synced-details', 'Opened notes, not synced, in Claude Code and Copilot CLI: each tool\'s row has its own switch and Remove.');
+  await a.click('#switch-notes'); if (!(await a.has('#enable-notes-codex-cli'))) await a.click('#open-notes');
+  await a.click('#enable-notes-codex-cli');
   const toml = readFileSync(join(practice, '.codex/config.toml'), 'utf8');
-  await shot(a, 'applied-disabled', `Clicked "Apply all". Codex got a copy and has it disabled. Codex's config.toml now ends with:\n\n\`\`\`toml\n${toml.slice(toml.lastIndexOf('[[skills.config]]'))}\`\`\`\n`);
-  await a.click('#open-notes');
-  await a.click('#open-standup'); await a.click('#remove-standup-copilot-cli');
-  await shot(a, 'remove-pending', 'Opened standup (unmanaged, only in Copilot CLI) and clicked Remove in its Copilot CLI row: queued.');
-  await a.click('#apply'); await shot(a, 'removed', 'Clicked "Apply all": the copy is gone from Copilot CLI and kept in History.');
-  await a.click('#open-release-notes'); await a.click('#enable-release-notes-claude-cli'); await a.click('#apply');
-  await shot(a, 'unmanaged-disabled', 'Opened release-notes (unmanaged, only in Claude Code), switched Claude Code to Disabled and clicked "Apply all".');
+  await shot(a, 'codex-off', `Turned notes on, then off in Codex alone, each at once. Codex keeps its copy and has it off; its config.toml now ends with:\n\n\`\`\`toml\n${toml.slice(toml.lastIndexOf('[[skills.config]]'))}\`\`\`\n`);
+  if (!(await a.has('#remove-standup-copilot-cli'))) await a.click('#open-standup');
+  await a.click('#remove-standup-copilot-cli'); await shot(a, 'removed', 'Opened standup (not synced, only in Copilot CLI) and clicked Remove in its Copilot CLI row: the copy is gone at once and kept in History. With no copy left, standup stays under Off.');
+  if (!(await a.has('#enable-release-notes-claude-cli'))) await a.click('#open-release-notes');
+  await a.click('#enable-release-notes-claude-cli');
+  await shot(a, 'not-synced-off', 'Opened release-notes (not synced, only in Claude Code) and turned it off in Claude Code: it is off everywhere now.');
   await a.click('#delete-release-notes');
-  await shot(a, 'delete-everywhere-confirm', 'Opened release-notes (unmanaged, only in Claude Code) and clicked "Delete everywhere…": it asks once more.');
+  await shot(a, 'delete-everywhere-confirm', 'Clicked "Delete everywhere…" for release-notes: it asks once more.');
   await a.click('#delete-confirm-release-notes'); await shot(a, 'delete-everywhere-done', 'Clicked "Delete release-notes from every tool".');
-  await a.click('#nav-history'); await shot(a, 'history', 'Clicked "History": the Disable and the removal, each with its own Undo or Restore.');
-  const restore = await a.run(`document.querySelector('.history-row[data-kind="removed"] button')?.id ?? ''`);
-  if (restore) { await a.click(`#${restore}`); await shot(a, 'history-restored', 'Clicked Restore on the newest removal (release-notes, in Claude Code).'); }
+  await a.click('#nav-history'); await shot(a, 'history', 'Clicked "History": each switch and removal, each with its own Undo or Restore.');
   await a.click('#nav-skills');
+  if (await a.has('#switch-standup')) { await a.click('#switch-standup'); await shot(a, 'put-back', 'Turned standup on again from Off: History put its copy back.'); }
   await a.click('#open-review'); await shot(a, 'differing-details', 'Opened review, whose copies differ: the choice first, then each tool\'s switch and Remove.');
   await a.click('#open-review');
   writeFileSync(join(practice, '.copilot/settings.json'), '{ not json');
-  await a.click('#header-refresh'); await a.click('#open-notes');
-  await shot(a, 'switch-unavailable', 'Outside the app, Copilot\'s settings.json was broken, then Refresh: its row says Disable unavailable, with the reason as the row\'s text.');
+  await a.click('#header-refresh'); if (!(await a.has('#enable-notes-claude-cli'))) await a.click('#open-notes');
+  await shot(a, 'switch-unavailable', 'Outside the app, Copilot\'s settings.json was broken, then Refresh: its row says it can\'t switch there, with the reason as the row\'s text.');
   rmSync(join(practice, '.copilot/settings.json'));
   await a.click('#header-refresh');
   for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
@@ -220,13 +240,11 @@ if (wanted('disable')) {
     for (const theme of ['dark', 'light']) {
       await a.theme(theme);
       if (!(await a.has('.details'))) await a.click('#open-notes');
-      await shot(a, `size-${width}-${theme}`, `notes' details (managed, disabled in Codex) at ${width}×${height}, ${theme}.`);
+      await shot(a, `size-${width}-${theme}`, `notes' details (on, off in Codex) at ${width}×${height}, ${theme}.`);
     }
   }
   await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false });
-  await a.theme('dark'); await a.click('#enable-notes-claude-cli'); await a.click('#remove-notes-copilot-cli');
-  await shot(a, 'pending-860-dark', 'At 860×560: queued Disable in Claude Code and Remove in Copilot CLI for notes, not applied.');
-  await a.click('#discard');
+  await a.theme('dark');
   if (!(await a.has('.details'))) await a.click('#open-notes');
   await a.click('#files-notes'); await shot(a, 'files-view-860-dark', 'At 860×560: clicked "Files and contents" for notes. The details pane is narrow here, so each tool\'s switch and Remove share the tool\'s line.');
   await a.click('#skills-table');
@@ -238,7 +256,7 @@ if (wanted('disable')) {
 if (wanted('sync')) {
   begin('sync');
   await a.click('#nav-skills');
-  if (!(await a.run(`!!document.querySelector('.ov-row[data-key="standup"] .switch[aria-checked="true"]')`))) { await a.click('#manage-all'); await a.click('#apply'); }
+  if (!(await a.run(`!!document.querySelector('.ov-row[data-key="standup"] .switch[aria-checked="true"]')`))) await a.click('#switch-standup');
   edit(join(practice, '.codex/skills/standup/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Codex.\n'));
   await waitFor(a, `document.body.innerText.includes('Codex')&&!!document.querySelector('.sync-notice')`);
   await shot(a, 'edit-spread-notice', 'Outside the app, a line was added to standup\'s SKILL.md in Codex. A few seconds later, without clicking anything: the notice.');
@@ -353,10 +371,10 @@ if (wanted('profiles')) {
   await a.click('#nav-skills');
   // Rows stay open across pages, so notes may already be open from earlier.
   if (!(await a.has('#enable-notes-claude-cli'))) await a.click('#open-notes');
-  await a.click('#enable-notes-claude-cli'); await a.click('#apply');
+  await a.click('#enable-notes-claude-cli');
   await a.click('#nav-profiles');
   await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Development')).click()`); await a.settle();
-  await shot(a, 'off-by-hand', 'On the Skills page, turned notes off in Claude Code by hand (its Enabled switch, then Apply all), then came back to Development: that switch shows as off by hand (its own mark), which profiles leave alone, and the subtitle says so.');
+  await shot(a, 'off-by-hand', 'On the Skills page, turned notes off in Claude Code by hand (its own switch in notes’ details), then came back to Development: that switch shows as off by hand (its own mark), which profiles leave alone, and the subtitle says so.');
   const copilotSettings = join(practice, '.copilot/settings.json');
   const copilotKept = existsSync(copilotSettings) ? readFileSync(copilotSettings, 'utf8') : undefined;
   writeFileSync(copilotSettings, '{ not json');
@@ -734,7 +752,7 @@ if (wanted('plugin-items')) {
   const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
   const toPlugins = async () => { await a.run(`document.querySelector('.ov-section-plugins')?.scrollIntoView({ block: 'center' })`); await wait(150); };
   await a.click('#nav-skills'); await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('.ov-section-plugins')`, 15000);
-  await shot(a, 'skills', 'Skills: the plugins’ skills are rows under “From plugins”, each marked “from <plugin>”, with a filled plugin box in each tool that has it (pdf-reader off in Copilot CLI, issue-tracker’s whole plugin off in Codex); triage is one row with its Pi part.');
+  await shot(a, 'skills', 'Skills: the plugins’ skills are rows under “From plugins”, each marked “from <plugin>”, with its switch and a mark in each tool that has it (pdf-reader off in Copilot CLI, issue-tracker’s whole plugin off in Codex); triage is one row with its Pi part.');
   await a.theme('light'); await shot(a, 'skills-light', 'The same, light.'); await a.theme('dark');
   for (const [width, height] of [[860, 560], [1728, 1117]]) {
     await size(width, height); await toPlugins();
@@ -743,26 +761,24 @@ if (wanted('plugin-items')) {
   }
   await size(1280, 800);
   await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
-  await shot(a, 'skill-open', 'Opened pdf-reader: what it is, where it is handled (a link to document-tools’ page), and each tool’s copy with its switch: Enabled in Claude Code, Disabled in Copilot CLI.');
+  await shot(a, 'skill-open', 'Opened pdf-reader: what it is, where it is handled (a link to document-tools’ page), and each tool’s copy with its switch: On in Claude Code, Off in Copilot CLI.');
   await a.click('[id="pfile-document-tools@team-tools/pdf-reader"]'); await waitFor(a, `!!document.querySelector('.details-plugin .plugin-file')`, 15000);
   await shot(a, 'skill-open-file', 'Clicked “Show its SKILL.md”.');
   await a.theme('light'); await shot(a, 'skill-open-light', 'The same, light.'); await a.theme('dark');
   await size(860, 560); await shot(a, 'skill-open-860', 'The open row at 860×560.');
   await a.theme('light'); await shot(a, 'skill-open-860-light', 'The same at 860×560, light.'); await a.theme('dark');
   await size(1728, 1117); await shot(a, 'skill-open-1728', 'The open row at 1728×1117.'); await size(1280, 800);
+  // Each tool's switch for the item is in its opened row, and applies at once. Copilot CLI has one for a single skill of a
+  // plugin; Claude Code has none, so its switch is the whole plugin's there, and the row says so first.
+  await a.click('[id="enable-document-tools@team-tools/pdf-reader-copilot-cli"]'); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
+  await shot(a, 'switch-applied', 'Clicked pdf-reader’s Copilot CLI switch in its opened row (it was off there): it is on there at once; the band says so, with Undo.');
+  await a.click('#outcome-undo-plugin'); await a.settle();
+  await shot(a, 'switch-undone', 'Clicked Undo: pdf-reader is off in Copilot CLI again; the confirmation fades by itself.');
+  // The row's own switch turns it off in every tool with a switch for one skill of a plugin. Claude Code has none, so it is
+  // left on there and said: the row's switch never turns a whole plugin off.
+  await a.click('[id="switch-document-tools@team-tools/pdf-reader"]'); await a.settle();
+  await shot(a, 'main-switch-left', 'Clicked pdf-reader’s own switch (on in Claude Code): Copilot CLI has it off already, and Claude Code has no switch for one skill of a plugin, so nothing changes; the band says why, and where the whole plugin’s switch is.');
   await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
-  // A box is the item's switch in that tool. Copilot CLI has one for a single skill of a plugin; Claude Code has none, so
-  // the whole plugin goes there, and every row of that plugin shows it before Apply all.
-  await a.click('[id="cell-document-tools@team-tools/pdf-reader-copilot-cli"]');
-  await shot(a, 'switch-waiting', 'Clicked pdf-reader’s box under Copilot CLI (it was off there): it turns on there on Apply all, drawn with a dashed blue edge, and the bar counts the change.');
-  await a.click('[id="cell-document-tools@team-tools/pdf-reader-claude-cli"]');
-  await shot(a, 'whole-plugin-waiting', 'Clicked pdf-reader’s box under Claude Code, which has no switch for one skill of a plugin: the whole plugin document-tools turns off there on Apply all, so spreadsheet’s Claude Code box waits too.');
-  await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
-  await shot(a, 'whole-plugin-waiting-open', 'Opened pdf-reader: each tool’s line says what Apply all will do.');
-  await a.theme('light'); await shot(a, 'whole-plugin-waiting-open-light', 'The same, light.'); await a.theme('dark');
-  await size(860, 560); await shot(a, 'whole-plugin-waiting-open-860', 'The same at 860×560.'); await size(1280, 800);
-  await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
-  await a.click('#discard');
   if (await a.has('#open-triage')) { await a.click('#open-triage'); await shot(a, 'part-and-plugin', 'Opened triage: its Pi part and the plugin installed in Codex share the row; both say where they come from.'); }
   await a.click('#nav-mcp'); await waitFor(a, `!!document.querySelector('.ov-section-plugins, [data-key^="issue-tracker@"]')`);
   await shot(a, 'mcp', 'MCP servers: issue-tracker’s issues server, installed in Codex with the plugin turned off.');
@@ -1057,101 +1073,61 @@ if (wanted('shared-copies')) {
   };
   const open = async () => { if (!(await a.has(`#outside-${name}, #delete-${name}`))) await a.click(`#open-${name}`); };
   await open();
-  await everySize('unmanaged', `Opened ${name}: the real folder is in ~/.agents/skills, Copilot CLI's skills folder has a link to it, Pi reads the shared folder. The details say where the copies are and what Manage and Delete everywhere do; the rows say how each tool gets it.`, `#outside-${name}`, true);
-  await a.click(`.ov-row[data-key="${name}"] .switch`);
-  await everySize('manage-pending', `Switched Managed on (not applied yet): the details and the tool rows say what Apply all will do to the link and the shared copy; the count beside Apply all counts both new copies.`, `#outside-${name}`, true);
-  await a.click(`#remove-${name}-copilot-cli`);
-  await everySize('manage-pending-remove', 'Then clicked "Remove" on Copilot CLI’s row (the link): the take-over removes the shared copy too, so the row says only "Removed on Apply all."; the count says a link to remove.', `#outside-${name}`);
-  await a.click(`#remove-${name}-copilot-cli`);
-  await a.click('#apply');
-  await everySize('managed', 'Clicked "Apply all": the band says what was done to which folder, with Undo; the skill is an ordinary managed one.', '.band-done', true);
-  await a.click('#outcome-undo-added');
+  await everySize('unmanaged', `Opened ${name}: the real folder is in ~/.agents/skills, Copilot CLI's skills folder has a link to it, Pi reads the shared folder. The details say where the copies are and what turning it on and Delete everywhere do; the rows say how each tool gets it.`, `#outside-${name}`, true);
+  const turnOn = async () => { await a.click(`.ov-row[data-key="${name}"] .switch`); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000); };
+  await turnOn();
+  await everySize('turned-on', 'Clicked its switch: it is on in every tool at once; the band says what was done to the link and the shared copy, with Undo; the skill is an ordinary synced one.', '.bands', true);
+  await a.click('#outcome-undo'); await a.settle();
   await open();
-  await everySize('undone', 'Clicked "Undo Apply all" in that band: the status line leads with the conclusion: unmanaged again, the link and the shared copy back, the new copies gone.', `#outside-${name}`);
-  // Manage both: two skills in one Apply all, one of them taken over; the band's one Undo undoes the whole Apply all.
-  await a.click('#manage-all');
-  await a.click('#apply');
-  await everySize('manage-both', 'Clicked "Manage both", then "Apply all": two skills managed, one taken over (counted), with one "Undo Apply all".', '.band-done');
-  await a.click('#outcome-undo-added');
-  await open();
-  await everySize('manage-both-undone', 'Clicked "Undo Apply all" there: both skills are unmanaged again, and the link and the shared copy are back.', `#outside-${name}`);
+  await everySize('undone', 'Clicked Undo in that band: it says the skill is as before, and that the link and the shared copy are back.', '.bands');
   await a.click(`#delete-${name}`);
-  await everySize('delete-armed', `Clicked "Delete everywhere…" on the unmanaged skill: the second click is offered, and it says it also removes the link and the shared copy.`, `#delete-note-${name}`, true);
-  await a.click(`#delete-confirm-${name}`);
-  await everySize('deleted', 'Clicked "Delete from every tool now": every copy is gone, the link removed as a link, the shared copy too; the band names the skill, with Restore.', '.band-done', true);
-  // Installed again and managed; then the installer puts the shared copy and the link back: the page offers to deal with them.
+  await everySize('delete-armed', `Clicked "Delete everywhere…" on the skill that isn't synced: the second click is offered, and it says it also removes the link and the shared copy.`, `#delete-note-${name}`, true);
+  await a.click(`#delete-confirm-${name}`); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  await everySize('deleted', 'Clicked "Delete from every tool now": every copy is gone, the link removed as a link, the shared copy too; the band names the skill and the shared folder, with Undo.', '.bands', true);
+  // Installed again and turned on; then the installer puts the shared copy and the link back: the page offers to deal with them.
   install();
   await a.click('#header-refresh');
-  await a.click(`.ov-row[data-key="${name}"] .switch`);
-  await a.click('#apply');
+  await turnOn();
   install();
   await a.click('#header-refresh');
   await open();
-  await everySize('came-back', 'Managed, then the installer put the shared copy and the link back ("Refresh"): the heading says Synced only where Central Knot writes, Copilot CLI’s box is drawn as a link, the details say they came back and offer "Replace with managed copies…".', `#outside-${name}`, true);
-  await a.click(`#remove-${name}-copilot-cli`);
-  await everySize('came-back-remove', 'Clicked "Remove" on Copilot CLI’s row (the link): only the Remove is queued; nothing says the link becomes a real copy.', `#outside-${name}`, true);
-  await a.click(`#remove-${name}-copilot-cli`);
+  await everySize('came-back', 'Turned on, then the installer put the shared copy and the link back ("Refresh"): the status says which tools read the shared copy, which Central Knot doesn’t write, and the details say they came back and offer "Replace with managed copies…".', `#outside-${name}`, true);
+  await a.click(`#remove-${name}-copilot-cli`); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  await everySize('came-back-remove', 'Clicked "Remove" on Copilot CLI’s row (the link): only the link goes, at once; nothing says it becomes a real copy.', '.bands', true);
+  await a.click('#outcome-undo'); await a.settle();
+  await open();
   await a.click(`#takeover-${name}`);
   await everySize('came-back-armed', 'Clicked "Replace with managed copies…": the second click is offered, saying what goes.', `#takeover-note-${name}`);
-  await a.click(`#takeover-confirm-${name}`);
-  await everySize('came-back-replaced', 'Clicked "Replace them now": the link is a real copy again and the shared copy is gone, with Undo.', '.band-done');
+  await a.click(`#takeover-confirm-${name}`); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  await everySize('came-back-replaced', 'Clicked "Replace them now": the link is a real copy again and the shared copy is gone, with Undo.', '.bands');
   await open();
   await a.click(`#delete-${name}`);
-  await everySize('managed-delete-armed', 'Clicked "Delete everywhere…" on the managed skill: it asks once more.', `#delete-confirm-${name}`);
+  await everySize('managed-delete-armed', 'Clicked "Delete everywhere…" on the synced skill: it asks once more.', `#delete-confirm-${name}`);
   await a.click(`#delete-confirm-${name}`);
   await everySize('managed-deleted', 'Clicked "Delete from every tool now": deleted everywhere, with Restore.', '.band-done');
-  // Undo refused: managed again (taken over), then Claude Code's new copy edited before any sync: nothing is undone, and the band says why.
+  // Undo refused: on again (taken over), then Claude Code's new copy edited before any sync: nothing is undone, and the band says why.
   install();
   await a.click('#header-refresh');
   await open();
-  await a.click(`.ov-row[data-key="${name}"] .switch`);
-  await a.click('#apply');
+  await turnOn();
   writeFileSync(join(claude, name, 'SKILL.md'), `${readFileSync(join(claude, name, 'SKILL.md'), 'utf8')}\nEdited in Claude Code.\n`);
-  await a.click('#outcome-undo-added');
-  await everySize('undo-refused', 'Managed it again, edited Claude Code’s new copy, then clicked "Undo Apply all": nothing is undone, and the band says why, with History.', '.band-done', true);
-  // The same Undo from History, on the Manage's 'added' entry: refused in the same warning band; then, managed afresh, done.
-  const undoAddInHistory = async () => {
-    await a.click('#nav-history');
-    const id = await a.run(`[...document.querySelectorAll('button[id^="history-"]')].find(button => button.textContent.trim() === 'Undo add' && (button.getAttribute('aria-label') ?? button.title ?? '').includes(${JSON.stringify(name)}))?.id ?? ''`);
-    if (id) await a.click(`#${id}`);
-  };
-  await undoAddInHistory();
-  await everySize('history-undo-add-refused', 'On History, clicked "Undo add" on that Manage: refused in the same warning band, with History.', '.bands');
-  await a.click('#nav-skills');
+  await a.click('#outcome-undo'); await a.settle();
+  await everySize('undo-refused', 'Turned it on again, edited Claude Code’s new copy, then clicked Undo: nothing is undone, and the band says why.', '.bands', true);
+  // Came back, then deleted while synced: Restore gives each tool its own copy and says the link and the shared copy aren't put back.
   await open();
   await a.click(`#delete-${name}`);
   await a.click(`#delete-confirm-${name}`);
   install();
   await a.click('#header-refresh');
   await open();
-  await a.click(`.ov-row[data-key="${name}"] .switch`);
-  await a.click('#apply');
-  await undoAddInHistory();
-  await everySize('history-undo-add', 'Deleted it, installed again, managed it, then on History clicked "Undo add" on that Manage: the band says it is unmanaged again and the link and the shared copy are back.', '.bands');
-  await a.click('#nav-skills');
-  // Manage both, then an edit to one skill's new copy: "Undo Apply all" undoes the other and says why this one stays.
-  await open();
-  await a.click('#manage-all');
-  await a.click('#apply');
-  writeFileSync(join(claude, name, 'SKILL.md'), `${readFileSync(join(claude, name, 'SKILL.md'), 'utf8')}\nEdited in Claude Code.\n`);
-  await a.click('#outcome-undo-added');
-  await everySize('manage-both-partly-undone', 'Clicked "Manage both", "Apply all", edited Claude Code’s new copy of opus-sol-loop, then "Undo Apply all": the band says what was undone first, then which skill was left as it is and why.', '.bands');
-  // Came back, then deleted while managed: Restore gives each tool its own copy and says the link and the shared copy aren't put back.
-  await open();
-  await a.click(`#delete-${name}`);
-  await a.click(`#delete-confirm-${name}`);
-  install();
-  await a.click('#header-refresh');
-  await open();
-  await a.click(`.ov-row[data-key="${name}"] .switch`);
-  await a.click('#apply');
+  await turnOn();
   install();
   await a.click('#header-refresh');
   await open();
   await a.click(`#delete-${name}`);
   await a.click(`#delete-confirm-${name}`);
   await a.click('#outcome-restore-delete');
-  await everySize('came-back-deleted-restored', 'Came back again (managed, then the installer put the shared copy and the link back), deleted everywhere, then "Restore": back in every tool, and the band says the link and the shared copy aren’t put back.', '.bands');
+  await everySize('came-back-deleted-restored', 'Came back again (turned on, then the installer put the shared copy and the link back), deleted everywhere, then "Restore": back in every tool, and the band says the link and the shared copy aren’t put back.', '.bands');
   // Layout 4: Copilot CLI's whole skills folder is a link to the shared folder, so the copy there is the only one it can have.
   const linked = join(scratch, 'shared-root');
   for (const [path, version] of [['.local/bin/claude', '2.1.309 (Claude Code)'], ['.local/bin/copilot', 'GitHub Copilot CLI 1.0.107.'], ['.pi/agent/bin/pi', 'pi 1.5.0']]) { mkdirSync(join(linked, path, '..'), { recursive: true }); writeFileSync(join(linked, path), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(join(linked, path), 0o755); }
@@ -1160,14 +1136,13 @@ if (wanted('shared-copies')) {
   symlinkSync('../.agents/skills', join(linked, '.copilot/skills'));
   await openFolder(linked);
   if (!(await a.has('#outside-gamma'))) await a.click('#open-gamma');
-  await everySize('linked-skills-folder', 'A folder whose Copilot CLI skills folder is itself a link to ~/.agents/skills: opened gamma. The details say the shared copy is the only one Copilot CLI can have, what Manage does and what that means for edits; no action is offered that could not work.', '#outside-gamma', true, 'gamma');
+  await everySize('linked-skills-folder', 'A folder whose Copilot CLI skills folder is itself a link to ~/.agents/skills: opened gamma. The details say the shared copy is the only one Copilot CLI can have, what turning it on does and what that means for edits; no action is offered that could not work.', '#outside-gamma', true, 'gamma');
   await a.click('#delete-gamma');
   await everySize('linked-skills-folder-delete-armed', 'Clicked "Delete everywhere…" there: it says what it removes.', '#delete-note-gamma', false, 'gamma');
   await a.click('#delete-cancel-gamma');
-  await a.click('.ov-row[data-key="gamma"] .switch');
-  await a.click('#apply');
+  await a.click('.ov-row[data-key="gamma"] .switch'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
   if (!(await a.has('#outside-gamma'))) await a.click('#open-gamma');
-  await everySize('linked-skills-folder-managed', 'Managed gamma there: Claude Code has its own copy, Copilot CLI and Pi keep the shared copy, and the details say edits made in Claude Code don’t reach them.', '#outside-gamma', true, 'gamma');
+  await everySize('linked-skills-folder-managed', 'Turned gamma on there: Claude Code has its own copy, Copilot CLI and Pi keep the shared copy, and the details say edits made in Claude Code don’t reach them.', '#outside-gamma', true, 'gamma');
   await a.click('#delete-gamma');
   await a.click('#delete-confirm-gamma');
   await everySize('linked-skills-folder-deleted', 'Clicked "Delete from every tool now" there: deleted from all three tools and from ~/.agents/skills, with Restore.', '.band-done', false, 'gamma');
@@ -1246,11 +1221,11 @@ if (wanted('updates')) {
   await shot(a, 'settings-available', 'Settings › General › Updates: the build in use and its tag, Update and Check now, and what the last check found, with the release notes.');
   for (const [width, height] of [[860, 560], [1728, 1117]]) { await size(width, height); await shot(a, `settings-available-${width}`, `The same at ${width}×${height}.`); }
   await size(1280, 800);
-  // Something waiting for Apply all holds the restart.
-  await a.click('#nav-skills'); await a.click('#manage-all');
+  // Something waiting for Apply all (MCP servers still wait for it) holds the restart.
+  await a.click('#nav-mcp'); await a.click('#manage-all');
   await a.click('#update-button');
   await waitFor(a, `/Downloading… [1-9]/.test(document.querySelector('#update-button')?.textContent ?? '')`, 10000);
-  await shot(a, 'downloading', 'Managed every skill (not applied yet), then clicked "Update to 0.5.0 preview 5": the button shows the download.');
+  await shot(a, 'downloading', 'Managed every MCP server (not applied yet), then clicked "Update to 0.5.0 preview 5": the button shows the download.');
   await size(860, 560); await shot(a, 'downloading-860', 'The same at 860×560.'); await size(1280, 800);
   await waitFor(a, `document.querySelector('#update-button')?.textContent.trim() === 'Restart to update'`, 30000);
   await shot(a, 'held', 'Downloaded and prepared. Changes wait for Apply all, so it doesn’t restart by itself: the button says "Restart to update" and the status bar says why.');
@@ -1302,10 +1277,10 @@ if (wanted('updates')) {
   await a.click('#pf-skill\\:notes'); await a.click('#profile-switch'); await a.run(`document.activeElement?.blur()`);
   await waitFor(a, `!!document.querySelector('#update-button')`, 20000);
   await shot(a, 'narrow-update', 'At 860×560 in a folder home with a profile in use ("Incident") and sync on with nothing managed yet, a newer release is found: the button says "Update", and the "Central Knot" name makes room.');
-  await a.click('#nav-skills'); await a.click('#manage-all');
+  await a.click('#nav-mcp'); await a.click('#manage-all');
   await a.click('#update-button');
   await waitFor(a, `/Downloading… [1-9]/.test(document.querySelector('#update-button')?.textContent ?? '')`, 10000);
-  await shot(a, 'narrow-downloading', 'Managed every skill (not applied yet), then clicked "Update": the button shows the download.');
+  await shot(a, 'narrow-downloading', 'Managed every MCP server (not applied yet), then clicked "Update": the button shows the download.');
   await waitFor(a, `document.querySelector('#update-button')?.textContent.trim() === 'Restart to update'`, 30000);
   await shot(a, 'narrow-held', 'Downloaded and prepared; changes wait for Apply all, so the button says "Restart to update", with the warning mark. The message is only its mark at this width (its words are the mark’s tooltip, and the button’s).');
   await reopen('v0.5.0-preview.5', { update: { tag: 'v0.5.0-preview.5', page: 'https://github.com/njfife/central-knot/releases/tag/v0.5.0-preview.5', from: 'v0.5.0-preview.4' } });
@@ -1355,7 +1330,7 @@ if (wanted('settings')) {
   await keepFor(a, 30);
   // From here the home syncs (everything managed, as in the sync tour), so shortening removes older History at once.
   await a.click('#nav-skills');
-  if (!(await a.run(`!!document.querySelector('.ov-row[data-key="standup"] .switch[aria-checked="true"]')`))) { await a.click('#manage-all'); await a.click('#apply'); }
+  if (!(await a.run(`!!document.querySelector('.ov-row[data-key="standup"] .switch[aria-checked="true"]')`))) await a.click('#switch-standup');
   await a.click('#nav-settings');
   mkdirSync(join(practice, '.central-knot'), { recursive: true });
   writeFileSync(join(practice, '.central-knot/history.json'), JSON.stringify({ events: [
@@ -1610,9 +1585,7 @@ if (wanted('harnesses')) {
   if (await a.has('[id^="harness-claude-cli-differ-"]')) { await a.click('[id^="harness-claude-cli-differ-"]'); await shot(a, 'claude-differ-link', 'Clicked "1 skill with different copies" on the Claude Code card: its page, showing only those.'); await a.run(`[...document.querySelectorAll('.chip')].find(chip => chip.textContent.trim() === 'All')?.click()`); await a.settle(); await a.click('#harness-back'); }
   await a.click('#harness-claude-cli'); await shot(a, 'claude-skills', 'Clicked the Claude Code card: its page, on the Skills tab. Its column comes first; skills only other tools have are under "Not in Claude Code".');
   await sizes('claude-skills', 'Claude Code’s Skills tab.');
-  await a.click('#harness-add-from'); await shot(a, 'claude-add-menu', 'Clicked "Add from…" in the toolbar (the Claude Code column header opens the same menu): it adds other tools’ skills here.');
-  if (await a.has('#menu-add-copilot-cli-claude-cli:not([disabled])')) { await a.click('#menu-add-copilot-cli-claude-cli'); await shot(a, 'claude-pending', 'Clicked "Add" on the Copilot CLI row: the changes wait for Apply all.'); }
-  if (await a.has('#apply:not([disabled])')) { await a.click('#apply'); await a.settle(); await shot(a, 'claude-applied', 'Clicked "Apply all".'); }
+  if (await a.has('#switch-standup:not([aria-checked="true"])')) { await a.click('#switch-standup'); await shot(a, 'claude-switched', 'Turned standup on from Claude Code’s page: it is copied to every tool at once.'); }
   await a.click('#open-release-notes'); await shot(a, 'claude-details', 'Opened release-notes’ details from its row.');
   await a.click('#harness-tab-mcp'); await shot(a, 'claude-mcp', 'Clicked the "MCP servers" tab.');
   await a.click('#harness-tab-agents'); await shot(a, 'claude-agents', 'Clicked the "Agents" tab.');
@@ -1656,7 +1629,7 @@ if (wanted('harnesses')) {
   const last = await a.run(`[...document.querySelectorAll('.ov-head .tool-head-button')].at(-1)?.id`);
   if (last) { await a.click(`#${last}`); await shot(a, 'last-menu-860', 'Clicked the right-most column header at 860×560: its menu stays inside the window.'); await a.click(`#${last}`); }
   await a.click('#harness-tab-agents'); await shot(a, 'pi-agents-860', 'Pi’s Agents tab: Pi doesn’t use agents.');
-  await a.click('#harness-tab-skills'); await a.click('#cell-release-notes-pi-cli'); await shot(a, 'pi-pending-860', 'Ticked release-notes’ Pi box at 860×560: the change waits, and the toolbar wraps for it.'); await a.click('#discard');
+  await a.click('#harness-tab-skills'); if (!(await a.has('.ov-row.open[data-key="release-notes"]'))) await a.click('#open-release-notes'); await shot(a, 'pi-details-860', 'Opened release-notes on Pi’s page at 860×560: each tool’s own switch in its details.');
   await size(1280, 800);
   // This computer's home (in the tour, an empty throwaway folder on Linux): detection, a Not found card, and its header.
   await a.click('#home-actual'); await a.click('#nav-harnesses'); await shot(a, 'this-computer-list', 'Clicked "This computer’s home" at the bottom left, then Harnesses: each tool with how it was found; tools not found have a card that does not open.');
@@ -1688,7 +1661,7 @@ if (wanted('repo')) {
   run(author, 'add', '-A'); run(author, 'commit', '--quiet', '-m', 'Incident kit'); run(author, 'push', '--quiet', 'origin', 'HEAD:main');
 
   await a.click('#nav-skills');
-  if (await a.has('#manage-all')) { await a.click('#manage-all'); await a.click('#apply'); }
+  for (const key of await a.run(`[...document.querySelectorAll('.ov-row[data-key]')].filter(row => row.querySelector('.switch:not([aria-checked="true"]):not([disabled])') && !row.querySelector('[id^="decide-"]')).map(row => row.dataset.key)`)) await a.click(`#switch-${key}`);
   await a.click('#nav-repo');
   await shot(a, 'repo-start-dark', 'Clicked "Git repo" in the sidebar: nothing connected yet. The page says what goes where and that nothing changes until Pull or Push.');
   await a.theme('light'); await shot(a, 'repo-start-light', 'The same, light.'); await a.theme('dark');
