@@ -693,7 +693,7 @@ function oneWayNote(skill: ItemRow) {
   const source = skill.oneWay?.from;
   if (!skill.managed || !receiving.length || !source) return null;
   return h('p.details-limits.details-footnote', {},
-    `Edit it in ${orList(receiving.map(tool => names[tool]))} and that copy stops updating (amber mark). Its row then offers ${names[source]}’s copy again.`);
+    `Edit it in ${orList(receiving.map(tool => names[tool]))} and that copy stops updating (amber mark). Its switch then gives it ${names[source]}’s copy again.`);
 }
 
 /** Where an earlier Undo went, said by what it undoes: "The undo for writing files to Claude Code moved to History." */
@@ -1546,11 +1546,13 @@ function pluginRowSwitch(row: PluginRow) {
 function resumeOneWay(skill: ItemRow, source: Tool, tool: Tool) {
   const name = nameOf(skill);
   click({ kind, items: [name], changes: [{ ...asItIs(skill), managed: true, use: source as HarnessId, useHash: skill.hashes?.[source], resumeIn: tool as HarnessId }],
-    // Said for every tool it wrote: from a page read before another copy came to differ, that one takes the source's copy too.
+    // Said for every tool it wrote: from a page read before another copy came to differ, that one takes the source's copy too. Only
+    // a copy that was an edit (stopped) went to History; one that was only behind just caught up.
     said: (notIn, wrote) => {
       if (!wrote.length) return notIn.includes(tool as HarnessId) ? `${names[tool]} couldn’t be given ${names[source]}’s copy of ${name}.` : `${names[tool]} has ${names[source]}’s copy of ${name} already.`;
-      const one = wrote.length === 1;
-      return `${andList(wrote.map(entry => names[entry as Tool]))} ${one ? 'has' : 'have'} ${names[source]}’s copy of ${name} again and ${one ? 'receives' : 'receive'} its updates. ${one ? 'Its edited copy is' : 'Their own copies are'} in History.`;
+      const one = wrote.length === 1, edited = wrote.filter(entry => skill.stopped?.includes(entry));
+      const kept = edited.length > 1 ? ' Their edited copies are in History.' : !edited.length ? '' : one ? ' Its edited copy is in History.' : ` ${names[edited[0] as Tool]}’s edited copy is in History.`;
+      return `${andList(wrote.map(entry => names[entry as Tool]))} ${one ? 'has' : 'have'} ${names[source]}’s copy of ${name} again and ${one ? 'receives' : 'receive'} its updates.${kept}`;
     } });
 }
 
@@ -1749,7 +1751,7 @@ function stoppedLine(skill: ItemRow, tool: Tool): string {
   const source = names[skill.oneWay?.from ?? 'claude-cli'];
   if (keptEdit(skill, tool)) return `Edited in ${names[tool]} and kept: it doesn’t receive updates from ${source}.`;
   // While its notice is showing, the choice is offered there, above.
-  return `Edited in ${names[tool]}, so it stopped updating. ${state.dismissed.has(`stopped:${skill.key}:${tool}`) ? '' : 'Choose above. '}Either choice keeps your edit: in ${names[tool]}, or in History if you use ${source}’s copy.`;
+  return `Edited in ${names[tool]}, so it stopped updating. ${state.dismissed.has(`stopped:${skill.key}:${tool}`) ? '' : 'Choose above. '}Turn the switch on to use ${source}’s copy again (your edit goes to History), or keep ${names[tool]}’s edit.`;
 }
 
 /** What one tool has, for its row in the item's details: what its copy is, then whether its own switch has it off. */

@@ -417,8 +417,9 @@ export interface HistoryEvent {
    * 'switched': a change turned it off or on in some tools, with each tool's own switch (`switched`); Undo flips them back.
    * 'removed': a change removed it from the tools in `losers`, keeping each copy; Restore puts them back there.
    * 'profile': a profile switch (key 'profiles:switch', item the profile's name); Undo switches back.
-   * 'took-over': copies outside Central Knot were taken over (`tookOver`); Undo puts the links and the shared copy back. */
-  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed' | 'profile' | 'took-over';
+   * 'took-over': copies outside Central Knot were taken over (`tookOver`); Undo puts the links and the shared copy back.
+   * 'written': Write to Claude Code replaced an MCP entry there that History didn't hold (`previous`); Undo is Undo write. */
+  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed' | 'profile' | 'took-over' | 'written';
   /** 'took-over': what was replaced, removed and placed, so Undo can put it back exactly. */
   tookOver?: TookOver;
   /** 'profile': which profile was in use before and after, and every switch it flipped. */
@@ -702,7 +703,7 @@ export interface McpView {
 export interface McpResult { stopped?: string; results: DestinationResult[]; writes: number; /** The History events the asked changes made, for their one Undo (ApplyResult.made). */ made?: string[]; notices?: SyncNotice[]; /** A deletion is inside its settle window: look again shortly. */ settling?: boolean;
   /** What Write to Claude Code wrote, for its Undo: each entry's hash before (null when it was new) and after. */
   claudeWritten?: ClaudeWrite[] }
-export interface ClaudeWrite { name: string; before: string | null; after: string }
+export interface ClaudeWrite { name: string; before: string | null; after: string; /** Its History entry ('written'), undone with it. */ event?: string }
 
 // ---------- Instructions ----------
 

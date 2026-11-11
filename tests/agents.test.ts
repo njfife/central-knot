@@ -1117,6 +1117,23 @@ test('Undo of a choice puts back the source the agent had, not the copy with the
   }
 });
 
+test('An agent turned off and turned on again with a choice takes the fullest copy as its source, not the source it had before', async () => {
+  const box = await sandbox();
+  try {
+    // Made in Copilot CLI and synced to Claude Code, then turned off; Claude Code's copy then gets a field of its own (same content).
+    await writeFile(join(box.home, '.copilot/agents/reviewer.agent.md'), claudeAgent());
+    await applyAgents(box.context, ['claude-cli', 'copilot-cli'], [{ key: 'reviewer', managed: true, off: [] }]);
+    await applyAgents(box.context, ['claude-cli', 'copilot-cli'], [{ key: 'reviewer', managed: false, off: [], seenManaged: true }]);
+    assert.equal((await readAgentRecord(box.home)).items.reviewer.origin, 'copilot-cli', 'turned off, the record still names its old source');
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent(undefined, 'model: opus\n'));
+    await writeFile(join(box.home, '.codex/agents/reviewer.toml'), codexOwn);
+    // On again with the card Copilot CLI and Claude Code share, which names Copilot CLI.
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: false, use: 'copilot-cli' }]);
+    assert.equal((await readAgentRecord(box.home)).items.reviewer.origin, 'claude-cli');
+    assert.equal((await agentsView(box.context, tools)).servers[0].oneWay?.from, 'claude-cli');
+  } finally { await box.cleanup(); }
+});
+
 test('Using Claude Code’s copy keeps Claude Code the source when a stopped copy with the same content has more fields: its next edit spreads, and Undo is as before (probes G1c, R4)', async () => {
   const box = await sandbox();
   try {

@@ -1194,10 +1194,6 @@ app.whenReady().then(async () => {
       if (past?.base) return undoPulledBase(context(), await read(), eventId);
       const tools = await toolsNow();
       if (key.startsWith('mcp:')) {
-        // A choice's Undo that puts Claude Code's own entry back (Write to Claude Code replaced it) writes Claude Code's settings:
-        // only once Claude is closed, as Write itself.
-        const claudeBack = choice === 'narrow' && past?.losers.some(loser => loser.tool === 'claude-cli' && !past.restoredTools?.includes(loser.tool));
-        if (claudeBack && current?.mode !== 'fixture' && await claudeRunning()) return { stopped: 'Claude Code or Claude desktop is still running. Quit it first, then click Undo again: Claude Code’s own entry goes back too.', results: [], harnessWrites: 0 };
         const result = await restoreMcp(context(), tools, eventId, typeof choice === 'string' ? choice : undefined);
         // Undo of a server's Disable or Enable is a choice made by hand too.
         await releaseProfileHolds(context(), switchedByHand([{ key: key.slice('mcp:'.length) }], result.results, 'mcp'));
@@ -1256,7 +1252,7 @@ app.whenReady().then(async () => {
   // Its Undo goes through the same check: Claude Code closed, or it would write its copy back over the undone one.
   handle('mcp:unwrite-claude', async (written, home) => (home === current?.home && Array.isArray(written)
     ? current?.mode !== 'fixture' && await claudeRunning() ? { stopped: 'Claude Code or Claude desktop is still running. Quit it first, then click Undo again.', results: [], writes: 0 }
-      : undoClaudeWrite(context(), written.filter((write): write is ClaudeWrite => !!write && typeof write.name === 'string' && typeof write.after === 'string' && (write.before === null || typeof write.before === 'string')))
+      : undoClaudeWrite(context(), written.filter((write): write is ClaudeWrite => !!write && typeof write.name === 'string' && typeof write.after === 'string' && (write.before === null || typeof write.before === 'string') && (write.event === undefined || typeof write.event === 'string')))
     : { stopped: elsewhere, results: [], writes: 0 }));
   handle('mcp:write-claude', async (names, home) => (home === current?.home && Array.isArray(names)
     // The practice copy is sample files: the real Claude Code never reads them, so it need not be closed there.

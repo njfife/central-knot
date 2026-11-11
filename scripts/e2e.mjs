@@ -871,9 +871,16 @@ async function practiceFlow() {
   await a.click('#stopped-keep-code-reviewer-codex-cli-details');
   check('keeping the edit is said with an Undo, and the toolbar counts it', /Codex keeps its own edit of code-reviewer/.test(await a.text('main') ?? '') && await a.exists('#outcome-undo-keep') && /Synced · 1 kept edit/.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
   check('Keep my edit clears the warning and leaves the edit', await a.exists('#cell-code-reviewer-codex-cli[data-state="kept"]') && !(await a.text('.toolbar') ?? '').includes('stopped updating') && readFileSync(codexAgent, 'utf8').includes('Edited in Codex.'));
+  // A second copy stops too (Copilot CLI's): Codex's switch is for Codex alone (main.ts passes resumeIn through).
+  const copilotAgentFile = join(practice, '.copilot/agents/code-reviewer.agent.md');
+  writeFileSync(copilotAgentFile, readFileSync(copilotAgentFile, 'utf8').replace('description: ', 'description: Edited in Copilot. '));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 30 && !(await a.exists('#cell-code-reviewer-copilot-cli[data-state="stopped"]')); tries++) await wait(100);
+  check('the second edited copy stops too', await a.exists('#cell-code-reviewer-copilot-cli[data-state="stopped"]'), JSON.stringify(await a.all('[id^=cell-code-reviewer]', 'e.id + "=" + e.dataset.state')));
   await a.click('#sync-code-reviewer-codex-cli');
   check('the result says Codex resumed, not that an agent was newly synced', /Codex has Claude Code’s copy of code-reviewer again/.test(await a.text('main') ?? ''), (await a.text('main') ?? '').slice(0, 300));
   check('it puts Claude Code’s copy back in Codex, at once', !readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && !(await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]')), readFileSync(codexAgent, 'utf8'));
+  check('Codex’s switch leaves Copilot CLI’s stopped copy with its edit', readFileSync(copilotAgentFile, 'utf8').includes('Edited in Copilot.') && await a.exists('#cell-code-reviewer-copilot-cli[data-state="stopped"]'), readFileSync(copilotAgentFile, 'utf8'));
   check('the result offers Undo, which restores Codex’s edit', await a.exists('#outcome-undo'));
   await a.click('#outcome-undo');
   check('Undo puts the edit back with the mark the click cleared: it keeps its edit again', readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && await a.exists('#cell-code-reviewer-codex-cli[data-state="kept"]'), JSON.stringify(await a.all('[id^=cell-code-reviewer]', 'e.id + "=" + e.dataset.state')) + ' ' + (await a.text('main'))?.slice(0, 400));

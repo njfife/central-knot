@@ -1325,10 +1325,12 @@ export const writeClaudeNow = (names: string[]) => busy('Writing to Claude Code�
     act: written.length ? { label: 'Undo write', id: 'outcome-undo-write', title: `Puts back what Claude Code had before (${written.map(write => `${write.name}: ${write.before ? 'its earlier entry' : 'removed'}`).join(', ')}). Quit Claude Code first.`, run: () => void unwriteClaudeNow(written) } : undefined }, result.stopped);
 });
 
-const unwriteClaudeNow = (written: ClaudeWrite[]) => busy('Undoing the write…', async () => {
+/** Undo write, from Write's band or from its History entry ('written'): one Undo, either place. */
+export const unwriteClaudeNow = (written: ClaudeWrite[]) => busy('Undoing the write…', async () => {
   const result = await api().unwriteClaude(written, state.home!.home);
   const view = await api().refresh();
   setHome(view);
+  await putHistory();
   const names = written.map(write => write.name);
   tell(result.stopped ? undefined : { page: state.page, items: names, text: `Undone: Claude Code has what it had before. ${names.join(', ')} ${names.length === 1 ? 'waits' : 'wait'} for Write to Claude Code again.` }, result.stopped);
 });
