@@ -678,6 +678,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .version-meta, .version-effect { font-size: 11.5px; color: var(--ink-soft); }
 .version-latest { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); }
 .version-text { font-size: 12px; font-style: italic; overflow-wrap: anywhere; }
+/* Where a quote or what choosing does wraps, its last line is not one word alone. */
+.version-text, .version-effect { text-wrap: pretty; }
 /* An MCP entry is not a quote: its kind in plain words, then its command or address upright, in the font of commands. */
 .details-mcp .version-text { font-style: normal; }
 .version-entry-kind { color: var(--ink-soft); }
