@@ -339,7 +339,7 @@ export const applyPluginSwitches = (ops: PluginOp[], draft: Map<string, PluginOp
   const lines = resultLines(result.done, undo);
   const failed = lines.filter(line => !line.ok);
   const back = undo ? [] : reverse(result.done);
-  const text = [before?.text, result.stopped ?? resultSentence(lines, undo), ...failed.map(line => `${line.plugin}: ${line.text}.`)].filter(Boolean).join(' ') || 'Nothing changed.';
+  const text = [before?.text, result.stopped ?? resultSentence(lines, undo), ...failed.map(line => `${line.plugin}: ${line.text.replace(/\.$/, '')}.`)].filter(Boolean).join(' ') || 'Nothing changed.';
   // The switches go back first; the copies' own Undo follows only when that worked, and is still offered when it didn't.
   const undoPlugins = () => applyPluginSwitches(back, new Map(), true, before?.act ? { page: state.page, text: '', act: { ...before.act, label: 'Undo the rest', title: 'Undo the changes to copies made in the same Apply all' } } : undefined);
   // With the copies' changes said above it and no Undo of theirs to run after, the button says what it does undo.

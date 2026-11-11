@@ -29,6 +29,11 @@ export interface PluginOp {
   skill?: string;
   /** The MCP server or agent a part-off or part-on switches, by its name in the plugin. */
   part?: PartRef;
+  /**
+   * On a plugin-on: chosen so that single items of a plugin that is off came on, its other items held off (pluginswitch.ts),
+   * not by a click on something that takes the whole plugin. Once those items are all off again the choice has no reason left.
+   */
+  forItems?: true;
   /** For undo-parts: the parts run it reverses. */
   run?: string;
   /** For pick-parts: the single parts to put in and to take out. */
@@ -77,8 +82,9 @@ export const forSource = (key: string, source: string) => key.startsWith(`${sour
 export const queued = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId, skill?: string) => draft.get(opKey({ source, plugin, tool, skill }))?.action;
 /** The switch chosen for one MCP server or agent of a plugin in a tool, if one is. */
 export const queuedPart = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId, part: PartRef) => draft.get(opKey({ source, plugin, tool, part }))?.action;
-/** The whole plugin's switch chosen in a tool, if one is. */
-export const queuedWhole = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId) => draft.get(opKey({ source, plugin, tool, action: 'plugin-on' }))?.action;
+/** The whole plugin's switch chosen in a tool, if one is: the choice itself, and its action. */
+export const wholeChoice = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId) => draft.get(opKey({ source, plugin, tool, action: 'plugin-on' }));
+export const queuedWhole = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId) => wholeChoice(draft, source, plugin, tool)?.action;
 
 /** Takes one change out of the draft, once it has run. */
 export const clear = (draft: PluginDraft, op: OpSlot) => { draft.delete(opKey(op)); };

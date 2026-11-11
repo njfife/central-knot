@@ -3,7 +3,7 @@
 // Codex and an agent in Claude Code, partswitch.ts), else the whole plugin's. A click is a choice for Apply all, kept in the page's own plugin
 // draft (pluginplan), so it runs, reports and undoes like the Plugins page's.
 // Pure functions over plain data; the page draws and applies.
-import { choose, clear, queued, queuedPart, queuedWhole, type PluginDraft, type PluginOp } from './pluginplan.ts';
+import { choose, clear, queued, queuedPart, queuedWhole, wholeChoice, type PluginDraft, type PluginOp } from './pluginplan.ts';
 import { NO_SKILL_SWITCH, hasPartSwitch, noSwitchReason, partWords, samePart } from './pluginstatus.ts';
 import { plural } from './model.ts';
 import { andList, toolNames as names } from './words.ts';
@@ -68,10 +68,10 @@ export function cantSwitch(item: PluginItemAt): string | undefined {
 }
 
 /**
- * Turns the item on or off in its tool on Apply all, or takes that choice back:
- * - an item with its own switch flips that switch; where the whole plugin is off, the plugin goes on with the switch of
- *   every other item that has one turned off, so only this one comes on; turning that one off again, with nothing of the
- *   plugin left to come on, puts it all back as it was;
+ * Turns the item on or off in its tool on Apply all, or takes that choice back. Each click changes the clicked box:
+ * - an item with its own switch flips that switch. Where the whole plugin is off, the plugin goes on for it, with the
+ *   switch of every other item that has one turned off, so only this one comes on (and whatever of the plugin has no
+ *   switch there). Once the items it came on for are all off again, the plugin stays off and it is all back as it was;
  * - anything else flips the whole plugin there, with everything it brings.
  * Worked out as where things stand after Apply all (the whole plugin, and each item with a switch of its own), which the
  * draft is then made to say: a choice is kept only where that differs from how the tool has it now.
@@ -82,23 +82,25 @@ export function click(draft: PluginDraft, item: PluginItemAt): void {
   const parts = switchable(install);
   const mine = parts.find(part => samePart(part, item));
   let wholeOff = wholeOffAfter(draft, item);
+  // Whether the plugin is chosen to come on for single items (see PluginOp.forItems), not as a whole.
+  let forItems = !!wholeChoice(draft, at.source, install.plugin, item.tool)?.forItems;
   const partOff = new Map(parts.map(part => [part, itemOffAfter(draft, item, part)]));
   if (standing(draft, item).on) {
     if (mine) partOff.set(mine, true); else wholeOff = true;
-    // A plugin that would come on with nothing of it on (every item off again by its own switch) stays off, as it is.
-    // Where something of it has no switch there (its skills in Claude Code), that still comes on, and the plugin with it.
+    // Nothing left that the plugin would come on for: the items it was chosen for are all off again, or everything it
+    // brings is. It stays off, as it is.
     const offAfter = (entry: Part) => { const part = parts.find(candidate => samePart(candidate, entry)); return part ? !!partOff.get(part) : hasOwnSwitch(install.tool, entry.kind) && itemOffNow(install, entry); };
-    if (install.off && install.items.every(offAfter)) wholeOff = true;
+    if (install.off && ((forItems && parts.every(part => partOff.get(part))) || install.items.every(offAfter))) wholeOff = true;
   } else {
     // A plugin that is off now comes on for this item alone: its other items that have a switch are held off.
-    if (wholeOff && install.off && mine) for (const part of parts) partOff.set(part, true);
+    if (wholeOff && install.off) { forItems = !!mine; if (mine) for (const part of parts) partOff.set(part, true); }
     wholeOff = false;
     if (mine) partOff.set(mine, false);
   }
-  // While the plugin stays off as it is, no item's own switch shows or matters: none is left chosen unseen.
-  if (wholeOff && install.off) for (const part of parts) partOff.set(part, itemOffNow(install, part));
+  // While the plugin is off after Apply all, no item's own switch shows or matters: none is left chosen unseen.
+  if (wholeOff) for (const part of parts) partOff.set(part, itemOffNow(install, part));
   const put = (op: PluginOp, differs: boolean) => { if (differs) choose(draft, op); else clear(draft, op); };
-  put({ ...at, action: wholeOff ? 'plugin-off' : 'plugin-on' }, wholeOff !== !!install.off);
+  put({ ...at, action: wholeOff ? 'plugin-off' : 'plugin-on', ...(forItems && !wholeOff ? { forItems: true as const } : {}) }, wholeOff !== !!install.off);
   for (const [part, off] of partOff) {
     put(part.kind === 'skill' ? { ...at, skill: part.name, action: off ? 'skill-off' : 'skill-on' } : { ...at, part: { kind: part.kind, name: part.name }, action: off ? 'part-off' : 'part-on' }, off !== itemOffNow(install, part));
   }
@@ -142,6 +144,8 @@ export function clickWords(draft: PluginDraft, item: PluginItemAt): string {
   if (on && ownSwitch(item)) return `Click to turn it off in ${tool} on Apply all.${byName('off')}`;
   if (on) return `${tool} has no switch for one ${partWords[item.kind][0]} of a plugin. Click to turn the whole plugin ${plugin} off in ${tool} on Apply all${rest.length ? `, with its ${counted(rest)}` : ''}.`;
   if (!wholeOffAfter(draft, item)) return `Click to turn it on in ${tool} on Apply all.${byName('on')}`;
+  // Off by its own switch in a plugin that is on now and chosen to go off: a click takes that back, and turns this on.
+  if (!item.install.off) return `The whole plugin ${plugin} turns off in ${tool} on Apply all. Click to leave the plugin on and turn this ${partWords[item.kind][0]} on there.${byName('on')}`;
   if (ownSwitch(item)) {
     // What comes on beside this item: whatever the plugin brings that can't be held off there (no switch of its own, or
     // one that can't be written), and isn't off by its own switch already.
@@ -161,7 +165,9 @@ export function pendingWords(draft: PluginDraft, item: PluginItemAt): string {
   if (on === now) return ownSwitch(item) || cantSwitch(item) ? '' : `${names[item.tool]} has no switch for one ${partWords[item.kind][0]} of a plugin, so this switch turns the whole plugin ${on ? 'off' : 'on'} there.`;
   const whole = queuedWhole(draft, where(item).source, item.install.plugin, item.tool);
   const rest = item.install.items.filter(entry => !samePart(entry, item) && !(hasOwnSwitch(item.tool, entry.kind) && itemOffNow(item.install, entry)));
-  if (whole && !ownSwitch(item)) return `Apply all turns it ${on ? 'on' : 'off'}${rest.length ? `, with the whole plugin (${plural(rest.length, 'other item')})` : ''}.`;
+  // With the whole plugin: what else of it changes with this item (going off, all that is on now; coming on, all but what is chosen to stay off).
+  const along = on ? rest.filter(entry => { const part = switchable(item.install).find(candidate => samePart(candidate, entry)); return !part || !itemOffAfter(draft, item, part); }) : rest;
+  if (whole && !ownSwitch(item)) return `Apply all turns it ${on ? 'on' : 'off'}${along.length ? `, with the ${along.length === rest.length ? 'whole ' : ''}plugin (${plural(along.length, 'other item')})` : ', with the plugin'}.`;
   if (!(on && whole === 'plugin-on')) return `Apply all turns it ${on ? 'on' : 'off'}.`;
   // One item turned on in a plugin that is off: the plugin comes on, its other items' switches are written off, and
   // whatever of it can't be held off comes on too.
