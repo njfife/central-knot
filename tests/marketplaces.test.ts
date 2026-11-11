@@ -209,6 +209,26 @@ test('Each tool’s installed copy is read as that tool reads it, which may be a
   } finally { await box.cleanup(); }
 });
 
+test('Claude Code’s copy of a plugin from the Anthropic Directory shows as installed there, and is left to Claude Code: no update, no uninstall', async () => {
+  const box = await setup();
+  try {
+    const root = join(box.base, 'market');
+    await put(join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'official', plugins: [{ name: 'incident-io', version: '2.0.0', source: { source: 'git-subdir', url: 'https://github.com/incident-io/skills.git', path: 'plugins/incident-io' } }] }));
+    await box.markets.add(root);
+    const copy = join(box.home, '.claude/plugins/cache/anthropic-plugin-directory/incident-io/1.0.0-6af50e2e23e9');
+    await put(join(copy, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'incident-io', version: '1.0.0' }));
+    await put(join(copy, 'skills/incidents/SKILL.md'), '---\nname: incidents\ndescription: Incidents.\n---\n');
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'incident.io@anthropic-plugin-directory': [{ scope: 'user', installPath: copy, version: '1.0.0-6af50e2e23e9', gitCommitSha: '6af50e2e23e9c782b95a456aab5a053550fba3c9', directoryRepositoryKey: 'github.com/incident-io/skills#plugins/incident-io' }] } }));
+    const view = await box.markets.view();
+    const entry = view.marketplaces.find(candidate => candidate.name === 'official')!;
+    assert.deepEqual(entry.states['incident-io']?.['claude-cli'], { state: 'installed', path: copy, version: '1.0.0', directory: 'incident.io@anthropic-plugin-directory' });
+    assert.deepEqual(entry.states['incident-io']?.['copilot-cli'], { state: 'not-installed' }, 'only Claude Code reads the directory');
+    // An older version than the marketplace's, yet nothing is due: Claude Code keeps its directory copy.
+    assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops, []);
+    assert.deepEqual(Object.keys((await box.markets.detail(root, 'incident-io'))?.installed ?? {}), ['claude-cli'], 'its copy’s contents are read');
+  } finally { await box.cleanup(); }
+});
+
 test('A plugin the marketplace can’t give files for (an npm package) is read from the tool that installed it', async () => {
   const box = await setup();
   try {

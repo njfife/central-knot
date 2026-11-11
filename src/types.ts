@@ -439,6 +439,11 @@ export interface Catalog {
 export interface SkillOff { skill: string; held?: string }
 
 export type InstallState = { state: 'installed'; path: string; live?: boolean;
+  /**
+   * Claude Code has this plugin from the Anthropic Directory, not from this marketplace: the same plugin (the same
+   * repository and folder), under this id there. It is installed for the person, and Claude Code keeps it.
+   */
+  directory?: string;
   /** The version the tool records for its copy, or its copy's manifest gives (see plugins.ts copyVersion). */
   version?: string;
   /** Where the tool has a switch for one skill of a plugin: the skills the installed copy holds, and those of them turned off. */

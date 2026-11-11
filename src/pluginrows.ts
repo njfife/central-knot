@@ -3,7 +3,7 @@
 // part in another tool) stays on that row, whose box says "Through a plugin" (SkillFacts.plugin); one that only shares a
 // name is a row of its own here. These rows are never managed: no sync, no profile, no repo; a box turns the item on or
 // off in that tool (pluginswitch.ts), and the plugin's page is where the plugin itself is handled.
-import { partOfPage, samePart, versionWord } from './pluginstatus.ts';
+import { DIRECTORY, partOfPage, samePart, versionWord } from './pluginstatus.ts';
 import { takesPlugins } from './presence.ts';
 import { andList, byToolOrder, toolNames as names } from './words.ts';
 import type { HarnessId, HomeView, InstalledPlugin, PartKind, PluginItem, SkillFacts } from './types.ts';
@@ -129,5 +129,6 @@ export function handledWhere(row: PluginRow): { listed: boolean; text: string } 
   const listed = Object.values(row.installs).some(install => install?.listed);
   if (listed) return { listed, text: 'Installed, updated, turned off and removed with the plugin, on ' };
   const tools = pluginTools(row).map(tool => names[tool]);
+  if (row.marketName === DIRECTORY) return { listed, text: `Installed in ${andList(tools)} from the Anthropic Directory. Claude Code’s own /plugin updates, turns off or removes it.` };
   return { listed, text: `Installed in ${andList(tools)} from the marketplace “${row.marketName}”, which isn’t added in Central Knot or in ${tools.length === 1 ? 'that tool' : 'those tools'} now, so the plugin has no page here. ${tools.length === 1 ? `${tools[0]}’s` : 'Each tool’s'} own plugin commands update, turn off or remove it.` };
 }
