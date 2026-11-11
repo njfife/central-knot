@@ -388,9 +388,9 @@ function recordChoices(record: AgentRecord, byKey: Map<string, AgentSlot>, chang
     if (!slot) continue;
     // A change made from an older read of the page is refused when the agent changed since (a deletion spread meanwhile).
     const was = record.items[change.key];
-    if (change.seenManaged !== undefined && (was?.state === 'shared') !== change.seenManaged) { log.results.push({ item: was?.name ?? change.key, outcome: 'held', message: `${was?.name ?? change.key} changed since the page was read${was?.deleted ? ' (it was deleted)' : ''}. Nothing was changed; read again.` }); continue; }
+    if (change.seenManaged !== undefined && (was?.state === 'shared') !== change.seenManaged) { log.results.push({ item: was?.name ?? change.key, outcome: 'held', unchanged: true, message: `${was?.name ?? change.key} changed since the page was read${was?.deleted ? ' (it was deleted)' : ''}. Nothing was changed; read again.` }); continue; }
     const separate = change.use === 'separate', use = change.use === 'separate' ? undefined : change.use;
-    if (use && change.useHash && slot[use]?.hash !== change.useHash) { log.results.push({ item: change.key, outcome: 'held', message: 'The copy you chose changed since you chose it. Nothing was changed; choose again.', chooseAgain: true }); continue; }
+    if (use && change.useHash && slot[use]?.hash !== change.useHash) { log.results.push({ item: change.key, outcome: 'held', unchanged: true, message: 'The copy you chose changed since you chose it. Nothing was changed; choose again.', chooseAgain: true }); continue; }
     const item = record.items[change.key] ??= { name: (Object.values(slot) as AgentEntry[])[0].name, state: 'dont-share', off: [], hash: '', copies: [] };
     const syncedBefore = item.state === 'shared' ? item.hash : undefined;
     const copiesBefore = item.copies;

@@ -473,9 +473,9 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     const slot = byName.get(change.key);
     if (!slot) continue;
     // A choice of a copy that changed after the page showed it is refused: what replaces the others is only ever what was seen.
-    if (change.use && change.use !== 'separate' && change.useHash && slot[change.use]?.hash !== change.useHash) { results.push({ item: change.key, outcome: 'held', message: `The copy you chose changed since you chose it. Nothing was changed; choose again.`, chooseAgain: true }); continue; }
+    if (change.use && change.use !== 'separate' && change.useHash && slot[change.use]?.hash !== change.useHash) { results.push({ item: change.key, outcome: 'held', unchanged: true, message: `The copy you chose changed since you chose it. Nothing was changed; choose again.`, chooseAgain: true }); continue; }
     // A change made from an older read of the page is refused when the server changed since (a deletion spread meanwhile).
-    if (change.seenManaged !== undefined && (record.items[change.key]?.state === 'shared') !== change.seenManaged) { results.push({ item: change.key, outcome: 'held', message: `${change.key} changed since the page was read${record.items[change.key]?.deleted ? ' (it was deleted)' : ''}. Nothing was changed; read again.` }); continue; }
+    if (change.seenManaged !== undefined && (record.items[change.key]?.state === 'shared') !== change.seenManaged) { results.push({ item: change.key, outcome: 'held', unchanged: true, message: `${change.key} changed since the page was read${record.items[change.key]?.deleted ? ' (it was deleted)' : ''}. Nothing was changed; read again.` }); continue; }
     const item: McpRecordItem = record.items[change.key] ?? { state: 'dont-share', off: [], hash: '', copies: [] };
     const syncedBefore = item.state === 'shared' ? item.hash : undefined;
     if (change.managed && change.use !== 'separate' && item.state !== 'shared') newlyManaged.add(change.key);

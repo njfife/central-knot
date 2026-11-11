@@ -575,6 +575,7 @@ test('A click is told the History entries it made: On, and Sync here written to 
     assert.equal((await applyAgents(box.context, tools, [])).writes, 0);
     const stale = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: false, off: [], seenManaged: false }]);
     assert.match(stale.results[0]?.message ?? '', /changed since the page was read/);
+    assert.equal(stale.results[0]?.unchanged, true, 'said as a refusal that changed nothing');
     assert.equal((await agentsView(box.context, tools)).servers[0].managed, true);
   } finally { await box.cleanup(); }
 });

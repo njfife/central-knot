@@ -456,6 +456,7 @@ test('A click is told the History entries it made: On, Off, Sync here (written t
     // A change from a page read before it was synced is refused, changing nothing.
     const stale = await applyMcp(box.context, tools, [{ key: 'tool', managed: false, off: [], seenManaged: false }]);
     assert.match(stale.results.find(entry => entry.item === 'tool')?.message ?? '', /changed since the page was read/);
+    assert.equal(stale.results.find(entry => entry.item === 'tool')?.unchanged, true, 'said as a refusal that changed nothing');
     assert.equal((await mcpView(box.context, tools)).servers.find(server => server.key === 'tool')?.managed, true);
   } finally { await box.cleanup(); }
 });
