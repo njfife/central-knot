@@ -1004,7 +1004,8 @@ app.whenReady().then(async () => {
     typeof change?.key === 'string' && typeof change.managed === 'boolean' && Array.isArray(change.off)
     && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenManaged === undefined || typeof change.seenManaged === 'boolean')
   ).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged,
-    ...(change.disable ? { disable: ids(change.disable) } : {}), ...(change.enable ? { enable: ids(change.enable) } : {}), ...(change.remove ? { remove: ids(change.remove) } : {}) }));
+    ...(change.disable ? { disable: ids(change.disable) } : {}), ...(change.enable ? { enable: ids(change.enable) } : {}), ...(change.remove ? { remove: ids(change.remove) } : {}),
+    ...(change.everywhere === true ? { everywhere: true } : {}), ...(change.takeOver === true ? { takeOver: true } : {}) }));
   // Marketplaces and plugins: their own module, given only what it needs from here.
   const markets = carriedMarket = registerMarketplaces({ handle, handleNow }, {
     home: () => (current ? { home: current.home, overrides: context().overrides, actual: current.mode === 'actual' } : undefined),

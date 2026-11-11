@@ -1,6 +1,6 @@
 // Design preview: sample skills for iterating on the Overview's layout. Started only with --design-preview.
 import { comparedTools, copiesDiffer } from './syncrules.ts';
-import type { SwitchProblem, ThroughPlugin } from './types.ts';
+import type { Outside, SwitchProblem, ThroughPlugin } from './types.ts';
 export { comparedTools, copiesDiffer };
 // Nothing here reads or writes disk; the controls act on this sample alone.
 
@@ -18,7 +18,7 @@ export interface SampleSkill {
   /** Shown name, with its case. */
   name?: string;
   /** Other copies a tool also reads, for the details. */
-  extra?: { tool: Tool; directory: string; summary: string; writable: boolean; same: boolean }[];
+  extra?: { tool: Tool; directory: string; summary: string; writable: boolean; same: boolean; outside?: Outside }[];
   description: string;
   copies: Partial<Record<Tool, string>>;
   managed: boolean;
@@ -58,6 +58,10 @@ export interface SampleSkill {
   writable?: Partial<Record<Tool, boolean>>;
   /** Skills: a tool whose copy is another tool's, read in that tool's own folder (OpenCode reads Claude Code's), and whose. */
   reads?: Partial<Record<Tool, Tool>>;
+  /** Skills: a tool's copy that is a link in its own folder, or the shared folder's copy: taken over when the person asks. */
+  outside?: Partial<Record<Tool, Outside>>;
+  /** Skills: a broken link by this name in a tool's own folder, and where it led: a copy written there replaces it. */
+  brokenLink?: Partial<Record<Tool, string>>;
   /** Skills, before Apply all: tools whose copy is removed then. */
   removing?: Tool[];
 }

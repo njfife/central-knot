@@ -2272,7 +2272,8 @@ async function realHomeFlow() {
   same('exec bit kept', statSync(join(COPILOT, 'rich/scripts/run.sh')).mode & 0o777, 0o755);
   same('Codex gets the same bytes in its own folder', tree(join(CODEX, 'rich')), before.rich);
   check('a dot folder never reaches Codex', !existsSync(join(CODEX, '.dot-skill')));
-  same('nothing new in the shared .agents folder', readdirSync(AGENTS).sort(), ['linked']);
+  // Managing the linked skill took it over: Claude Code's link is a real copy now, Copilot and Codex have their own, and the shared copy is gone.
+  same('Manage all took the linked skill over, and put nothing new in the shared .agents folder', [readdirSync(AGENTS).sort(), lstatSync(join(CLAUDE, 'linked')).isDirectory(), existsSync(join(COPILOT, 'linked/SKILL.md')), existsSync(join(CODEX, 'linked/SKILL.md'))], [[], true, true, true]);
   check('Copilot-only skill reached Claude', existsSync(join(CLAUDE, 'from-copilot/SKILL.md')));
   check('the one switched back off was not copied', !existsSync(join(COPILOT, 'private-one')));
   check('refused name not copied', !existsSync(join(COPILOT, '名前-skill')));
@@ -2280,7 +2281,6 @@ async function realHomeFlow() {
   check('a skill with a read-only folder copied', existsSync(join(COPILOT, 'read-only-inside/refs/a.md')));
   check('an unreadable skill not copied', !existsSync(join(COPILOT, 'unreadable-file')));
   same('differing copies untouched', readFileSync(join(COPILOT, 'clash/SKILL.md'), 'utf8'), text('clash', 'Copilot version.'));
-  same('link stays a link', lstatSync(join(CLAUDE, 'linked')).isSymbolicLink(), true);
   same('nothing staged in a loaded folder', [...readdirSync(COPILOT), ...readdirSync(CLAUDE)].filter(name => name.startsWith('.ck-')), []);
   same('unrelated bytes unchanged', readFileSync(join(HOME, '.claude/unrelated.json'), 'utf8'), before.unrelated);
   check('expected holds do not raise a warning band', !(await a.text('.bands') ?? '').includes('does not load'), await a.text('.bands'));
@@ -2315,6 +2315,75 @@ async function realHomeFlow() {
   check('and applies', existsSync(join(COPILOT, 'private-one/SKILL.md')));
   same('no page errors, stops', b.pageErrors, []);
   await b.quit();
+}
+
+/**
+ * Skills kept the way the `npx skills` installer keeps them: the real folder in ~/.agents/skills and a link to it in Copilot's own
+ * skills folder; Pi reads the shared folder itself. From the page: the details say where the copies are, Manage says what it
+ * will do and takes the skill over, its Undo puts the link and the shared copy back, and Delete everywhere removes them, managed or not.
+ */
+async function sharedCopiesFlow() {
+  const home = join(scratch, 'home-shared'), data = join(scratch, 'shared-data');
+  const cli = (path, version) => { mkdirSync(join(home, path, '..'), { recursive: true }); writeFileSync(join(home, path), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(join(home, path), 0o755); };
+  cli('.local/bin/claude', '2.1.309 (Claude Code)');
+  cli('.local/bin/copilot', 'GitHub Copilot CLI 1.0.107.');
+  cli('.pi/agent/bin/pi', 'pi 1.5.0');
+  const [claude, copilot, pi, agents] = ['.claude/skills', '.copilot/skills', '.pi/agent/skills', '.agents/skills'].map(path => join(home, path));
+  for (const folder of [claude, copilot, pi]) mkdirSync(folder, { recursive: true });
+  const name = 'opus-sol-loop', link = `../../.agents/skills/${name}`;
+  const install = () => { skill(agents, name, text(name, 'From the installer.')); symlinkSync(link, join(copilot, name)); };
+  install();
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  const a = await launch(data);
+  await a.click('#nav-skills');
+  const row = `.ov-row[data-key="${name}"]`;
+  check('the installer’s skill is a row', (await rowKeys(a)).includes(name), await rowKeys(a));
+  await a.click(`#open-${name}`);
+  const where = await a.text(`#outside-${name}`) ?? '';
+  check('its details say where the copies are and what each action does', /Copilot CLI’s copy is a link to \.\.\/\.\.\/\.agents\/skills\/opus-sol-loop\./.test(where) && /Copilot CLI and Pi read it in [~…]\/\.agents\/skills, a folder other apps read too/.test(where) && /Manage gives each tool a real copy/.test(where), where);
+  await a.shot('shared-unmanaged');
+  await a.click(`${row} .switch`);
+  const told = await a.text(`#outside-${name}`) ?? '';
+  check('before Apply all, the page says the link becomes a real copy, Pi gets its own and the shared copy goes', /On Apply all, Central Knot also replaces the link in Copilot CLI’s skills folder with a real copy, gives Pi a copy of its own and removes the copy in [~…]\/\.agents\/skills \(History keeps it\), so other apps that read that folder won’t find it there\./.test(told), told);
+  const summary = await a.run(`document.querySelector('#apply').title`);
+  check('Apply all’s summary counts them too', /1 link to replace with a real copy · 1 copy to remove from [~…]\/\.agents\/skills/.test(summary), summary);
+  await fitsAtMinimum(a, 'a skill with copies outside Central Knot’s, about to be managed');
+  await applyAll(a);
+  same('Manage took it over: real copies in every tool, the shared copy gone',
+    [lstatSync(join(copilot, name)).isDirectory(), existsSync(join(pi, name, 'SKILL.md')), existsSync(join(claude, name, 'SKILL.md')), existsSync(join(agents, name))], [true, true, true, false]);
+  const outcome = await a.text('.band-done') ?? await a.text('.bands') ?? '';
+  check('the page says what it did, with Undo', /replaced the link in Copilot CLI’s skills folder with a real copy/.test(outcome) && /removed the copy in [~…]\/\.agents\/skills/.test(outcome) && await a.exists('#outcome-undo-takeover'), outcome);
+  check('the skill is an ordinary managed one now', !(await a.exists(`#outside-${name}`)) && await switchOn(a, name), await a.text(`${row}`));
+  await a.shot('shared-managed');
+  await a.click('#outcome-undo-takeover');
+  same('Undo puts the link and the shared copy back, and the skill is unmanaged again',
+    [lstatSync(join(copilot, name)).isSymbolicLink() && readlinkSync(join(copilot, name)), existsSync(join(agents, name, 'SKILL.md')), existsSync(join(pi, name)), existsSync(join(claude, name)), await switchOn(a, name)], [link, true, false, false, false]);
+  await a.shot('shared-undone');
+  // Managed again, then deleted from the page.
+  await a.click(`${row} .switch`);
+  await applyAll(a);
+  if (!(await a.exists(`#delete-${name}`))) await a.click(`#open-${name}`);
+  await a.click(`#delete-${name}`);
+  await a.shot('shared-delete-armed');
+  await a.click(`#delete-confirm-${name}`);
+  same('Delete everywhere removes every copy', [existsSync(join(copilot, name)), existsSync(join(pi, name)), existsSync(join(claude, name)), existsSync(join(agents, name))], [false, false, false, false]);
+  const deleted = await a.text('.band-done') ?? '';
+  check('the page says it was deleted, with Restore', /Deleted opus-sol-loop from/.test(deleted) && await a.exists('#outcome-restore-delete'), deleted);
+  await a.shot('shared-deleted');
+  // The installer puts it back; never managed, Delete everywhere removes the link (as a link) and the shared copy.
+  install();
+  await a.click('#header-refresh');
+  if (!(await a.exists(`#delete-${name}`))) await a.click(`#open-${name}`);
+  await a.click(`#delete-${name}`);
+  const armed = await a.text(`#delete-note-${name}`) ?? '';
+  check('the armed Delete says it also removes the link and the shared copy', /This also removes the link in Copilot CLI’s skills folder \(not what it leads to\) and the copy in [~…]\/\.agents\/skills, which other apps may read too\./.test(armed), armed);
+  await fitsAtMinimum(a, 'an armed Delete everywhere that removes a link and the shared copy');
+  await a.click(`#delete-confirm-${name}`);
+  same('and does', [existsSync(join(copilot, name)), existsSync(join(agents, name))], [false, false]);
+  check('nothing staged left in the shared folder', !readdirSync(join(home, '.agents')).some(entry => entry.startsWith('.ck-')), readdirSync(join(home, '.agents')));
+  same('no page errors, shared copies', a.pageErrors, []);
+  await a.quit();
 }
 
 /** Force-kills the app part-way through real copies, then checks nothing half-written is visible to a tool. */
@@ -2630,7 +2699,7 @@ const started = Date.now();
 try {
   seedHome();
   // Each flow's time is printed, so a run that grows slow says where.
-  const flows = [harnessFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, listDiffersFlow, pluginUpdatesFlow, repoBaseFlow, draftFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
+  const flows = [harnessFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, listDiffersFlow, pluginUpdatesFlow, repoBaseFlow, draftFlow, sharedCopiesFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
   const named = option('--flows')?.split(',');
   for (const flow of flows.filter(each => !named || named.includes(each.name))) {
     const from = Date.now();

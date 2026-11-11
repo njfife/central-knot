@@ -12,7 +12,7 @@ import {
 } from './share.ts';
 import { parseSkill } from './discovery.ts';
 import { isDisabled, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, unverifiedBuild, type SwitchTarget } from './skillswitch.ts';
-import { andList, problemText, throughPlugin, toolName } from './words.ts';
+import { REPLACE_ACTION, andList, problemText, throughPlugin, toolName } from './words.ts';
 import { throughPlugins } from './plugins.ts';
 import { comparableText } from './pluginstatus.ts';
 import { ALREADY_AS_IT_WAS, type SwitchRecord } from './types.ts';
@@ -181,8 +181,6 @@ async function liveSwitchTarget(context: ShareContext, entry: Gathered, tool: Ha
   try { return { folder, name: parseSkill(content, folder).name, skillFile }; } catch { return { folder, name: folder, skillFile }; }
 }
 
-/** The skill page's action that takes over copies outside Central Knot's own (matrix.ts uses the same words). */
-export const REPLACE_ACTION = 'Replace with managed copies';
 /**
  * Why a copy background sync never writes was left as it is, said by what it is: one the person can hand over (a link, the shared
  * folder's copy), one Manage must leave (the only copy a tool can have), or one inside a skills folder that is itself a link.
@@ -428,7 +426,7 @@ async function pinnedShared(context: ShareContext, tools: HarnessId[], problems:
   const shared = await landingOf(sharedFolder(context));
   if (!shared) return undefined;
   for (const tool of tools) {
-    if (problems.get(tool) && await landingOf(rootOf(context, tool)) === shared) return `${harnesses[tool].name}'s skills folder is ${sharedFolder(context)}, so the copy there is the only one ${harnesses[tool].name} can have.`;
+    if (problems.get(tool) && await landingOf(rootOf(context, tool)) === shared) return `${harnesses[tool].name}'s skills folder is that same folder, so the copy there is the only one ${harnesses[tool].name} can have.`;
   }
   return undefined;
 }
@@ -785,7 +783,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
         const own = entry.locations.find(location => location.tool === tool);
         if (own) entry.facts.copies[tool] = own.copy; else { delete entry.facts.copies[tool]; lost.push(tool); }
       }
-      results.push({ item: name, outcome: 'removed', tookOver: 'shared', message: `Removed the copy in ${shared}; History keeps it. Other apps that read that folder won’t find it there.${lost.length ? ` ${andList(lost.map(toolName))} ${lost.length > 1 ? 'aren’t' : 'isn’t'} ticked and read it only there, so ${lost.length > 1 ? 'they no longer have' : 'it no longer has'} it.` : ''}` });
+      results.push({ item: name, outcome: 'removed', tookOver: 'shared', folder: shared, message: `Removed the copy in ${shared}; History keeps it. Other apps that read that folder won’t find it there.${lost.length ? ` ${andList(lost.map(toolName))} ${lost.length > 1 ? 'aren’t' : 'isn’t'} ticked and read it only there, so ${lost.length > 1 ? 'they no longer have' : 'it no longer has'} it.` : ''}` });
     }
     // 3. A link in a tool left out that now leads nowhere (it led to the shared copy) goes too, as a link.
     for (const { location, linkTo } of links.filter(candidate => !wanted(candidate.location.tool))) {
@@ -1232,7 +1230,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
         // Managed: the content last synced to it goes along, so Restore can put its sync record back.
         const synced = main ? records.find(record => record.harness === tool)?.hash : undefined;
         removed.push({ tool, hash: copy.hash, folder: copy.folder, ...(synced ? { synced } : {}), ...(outside ? { path: copy.directory } : {}), ...(outside?.linkTo !== undefined ? { linkTo: outside.linkTo } : {}) });
-        if (outside?.kind === 'shared') results.push({ item: name, outcome: 'removed', tookOver: 'shared', message: `Removed the ${outside.linkTo !== undefined ? 'link' : 'copy'} in ${dirname(copy.directory)}, which other apps may read too. Restore it from History.` });
+        if (outside?.kind === 'shared') results.push({ item: name, outcome: 'removed', tookOver: 'shared', folder: dirname(copy.directory), message: `Removed the ${outside.linkTo !== undefined ? 'link' : 'copy'} in ${dirname(copy.directory)}, which other apps may read too. Restore it from History.` });
         else if (outside) how.set(tool, ` It was a link to ${outside.linkTo}; only the link was removed.`);
     }
     for (const tool of (change.remove ?? []).filter(candidate => removedFrom.has(candidate))) {
@@ -1871,7 +1869,7 @@ export async function deleteEverywhere(context: ShareContext, key: string, resum
       writes++;
       if (newest) lost.push({ tool: location.tool, hash: location.copy.hash });
       if (outside?.linkTo === undefined) gone.add(real.get(path)!);
-      results.push({ item: item.name, harness: location.tool, outcome: 'removed', message: outside?.kind === 'shared' ? `Removed the ${outside.linkTo !== undefined ? 'link' : 'copy'} in ${dirname(path)}, which other apps may read too. Restore it from History.`
+      results.push({ item: item.name, ...(outside?.kind === 'shared' ? { tookOver: 'shared' as const, folder: dirname(path) } : { harness: location.tool }), ...(outside?.kind === 'link' ? { tookOver: 'link' as const } : {}), outcome: 'removed', message: outside?.kind === 'shared' ? `Removed the ${outside.linkTo !== undefined ? 'link' : 'copy'} in ${dirname(path)}, which other apps may read too. Restore it from History.`
         : outside ? `Removed the link in ${harnesses[location.tool].name}’s skills folder (it led to ${outside.linkTo}); what it led to was not touched. Restore it from History.` : 'Deleted. Restore it from History.' });
     }
     // Nothing went at all: nothing is deleted, and the skill stays as it was, so a later Manage or Delete still finds it.
