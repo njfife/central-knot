@@ -1,6 +1,7 @@
 import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
+import { loadPluginUpdates } from './pluginupdateview.ts';
 import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, McpResult, ClaudeWrite, SyncNotice } from './types.ts';
 import { caughtUpNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
@@ -246,6 +247,8 @@ function accept(view: HomeView) {
   resetPageData(state.instructions);
   resetPageData(state.history);
   resetMarket();
+  // The note of what plugin updates did by themselves is about one home.
+  void loadPluginUpdates();
   setHome(view, { reload: false });
   void loadPageData(state.page, { readId: view.readId });
   // The sidebar counts what waits each way for the repo, so it is read with the home (no fetch: that waits for the page).
