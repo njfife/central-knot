@@ -1,5 +1,4 @@
 import { settingsPage } from './settingspage.ts';
-import { designMode, sample } from './design.ts';
 import packageInfo from '../package.json' with { type: 'json' };
 import { absentKinds, noTools, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
 import { button, fitBars, h, icon, runAfterLayout } from './dom.ts';
@@ -98,9 +97,9 @@ function renderSidebar() {
     navRow('overview', titles.overview, 'layout-grid'),
     navRow('harnesses', titles.harnesses, 'boxes'),
     // Each page's rows, a plugin's items included.
-    row('skills', 'wand-sparkles', designMode ? sample.length : home && home.manage.skills.length + pluginItemCount(home, 'skills')),
-    row('mcp', 'plug', designMode ? undefined : home && home.mcp.servers.length + pluginItemCount(home, 'mcp')),
-    row('agents', 'bot', designMode ? undefined : home && home.agents.servers.length + pluginItemCount(home, 'agents')),
+    row('skills', 'wand-sparkles', home && home.manage.skills.length + pluginItemCount(home, 'skills')),
+    row('mcp', 'plug', home && home.mcp.servers.length + pluginItemCount(home, 'mcp')),
+    row('agents', 'bot', home && home.agents.servers.length + pluginItemCount(home, 'agents')),
     row('instructions', 'pencil-line'),
     row('plugins', 'puzzle'),
     // Profiles switch skills and MCP servers, so like the kinds' rows it needs a tool to switch them in.

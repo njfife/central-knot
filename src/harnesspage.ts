@@ -1,5 +1,5 @@
 // Harnesses: one place per tool. The list sums up what each one has; a harness's own page manages its items with the same
-// tables, switches and Apply all as the Skills, MCP servers and Agents pages, narrowed to that tool, plus its instruction
+// tables and switches as the Skills, MCP servers and Agents pages, with that tool first, plus its instruction
 // file and its plugins. Nothing here has its own engine: every change goes through the pages it mirrors.
 import { KINDS, harnessFound as found, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type Kind } from './app.ts';
 import { installsIn, type MarketPlugin } from './pluginstatus.ts';
@@ -12,7 +12,7 @@ import { hasCowork, takesPlugins } from './presence.ts';
 import { brandMark } from './brand.ts';
 import { shortBuild } from './values.ts';
 import type { DesktopApp, HarnessId, HomeView, InstructionFile, Snapshot } from './types.ts';
-import { caughtUpBand, resetTablesForHarness, designOverview, differingIn, emptyKind, kindSource, outcomeBand, showFiltered } from './matrix.ts';
+import { caughtUpBand, resetTablesForHarness, itemsTable, differingIn, emptyKind, kindSource, outcomeBand, showFiltered } from './matrix.ts';
 import { instructionBands, instructionCard, instructionsNotRead } from './instructionspage.ts';
 import { browse, loadPlugins, market } from './pluginstate.ts';
 import { NO_PROFILE, profilesInUse } from './profileplan.ts';
@@ -95,9 +95,9 @@ function kindCount({ kind, supported, total, plugins, managed }: ReturnType<type
   if (!supported) return { value: '—', note: kindNotUsed(tool, kind), faint: true };
   // None: the words say it, without a 0 beside them.
   if (!total) return { value: '', note: 'none yet', faint: true };
-  // A plugin's items are counted and said apart: they are never managed.
+  // A plugin's items are counted and said apart: they are never synced.
   const own = total - plugins;
-  const mine = !own ? '' : managed === own ? (plugins ? `${own} managed` : 'all managed') : !managed ? (plugins ? `${own} unmanaged` : 'none managed') : `${managed} managed · ${own - managed} unmanaged`;
+  const mine = !own ? '' : managed === own ? (plugins ? `${own} synced` : 'all synced') : !managed ? (plugins ? `${own} not synced` : 'none synced') : `${managed} synced · ${own - managed} not synced`;
   return { value: String(total), note: [mine, plugins ? `${plugins} from plugins` : ''].filter(Boolean).join(' · ') };
 }
 
@@ -266,7 +266,7 @@ function unsupported(kind: Kind, tool: HarnessId) {
 
 function kindTab(home: HomeView, kind: Kind, tool: HarnessId) {
   if (!supports(home, kind, tool)) return unsupported(kind, tool);
-  if (rowCount(home, kind)) return designOverview(kind, tool);
+  if (rowCount(home, kind)) return itemsTable(kind, tool);
   // Nothing of this kind anywhere: the kind's own empty state, under the table's bands, so a file that could not be read still says why.
   const empty = kindEmpty(kind);
   return emptyKind(kind, tool, emptyState(empty.glyph, empty.title, empty.body));

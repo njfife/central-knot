@@ -28,6 +28,9 @@ test('A click reads only its own results out of the pass: another skill held or 
   // A write that failed in one tool: done elsewhere, and that tool named, so the result never calls it on there.
   const partly = clickResults([{ item: 'bar', harness: 'codex-cli', outcome: 'switched', disabled: true, message: '' }, { item: 'bar', harness: 'pi-cli', outcome: 'failed', message: 'Could not write.' }, ...results], ['bar']);
   assert.deepEqual([partly.did, partly.failed, partly.notIn], [true, true, ['pi-cli']]);
+  // Claude Code waiting for its own Write step is how it should be: no failure, and not a tool the click failed in.
+  const waiting = clickResults([{ item: 'bar', harness: 'codex-cli', outcome: 'written', message: '' }, { item: 'bar', harness: 'claude-cli', outcome: 'held', waits: true, message: 'Close Claude, then use Write now.' }], ['bar']);
+  assert.deepEqual([waiting.did, waiting.failed, waiting.notIn], [true, false, []]);
 });
 
 test('A click that only changed the record is undone by the change that puts the record back, made against the record as it is', () => {

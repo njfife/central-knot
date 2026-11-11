@@ -3,7 +3,6 @@
 // reason on the button, while something typed isn't saved.
 import { announce, baseDraftTyped, rerender, showPage, toolDraftTyped } from './app.ts';
 import { h, icon } from './dom.ts';
-import { changesWaiting } from './matrix.ts';
 import { market } from './pluginstate.ts';
 import { buildWords, restartWaits, tagWords, updateButton, updateStatus } from './updates.ts';
 import { plural } from './model.ts';
@@ -35,7 +34,8 @@ function returnFocus() {
 export function unsavedWork(): string | undefined {
   if (toolDraftTyped()) return 'Restarting now loses your unsaved instructions draft.';
   if (baseDraftTyped()) return 'Restarting now loses your unsaved base instructions draft.';
-  const waiting = changesWaiting() + market.draft.size;
+  // Only plugins still wait for Apply all: every other click applies at once.
+  const waiting = market.draft.size;
   if (waiting) return `Restarting now loses ${plural(waiting, 'change')} waiting for Apply all.`;
   return undefined;
 }

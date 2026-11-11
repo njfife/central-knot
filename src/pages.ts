@@ -2,9 +2,8 @@ import { absentKinds, announce, noTools, homeToolNames, practiceNoteOpen, setPra
 import { afterLayout, button, cardGrid, emptyState, fileBlocks, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
-import { designMode } from './design.ts';
 import { absentTools, heldKinds, isPresent } from './presence.ts';
-import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser, wrappingPath } from './matrix.ts';
+import { brandMark, itemsTable, outcomeBand, showFiltered, skillsBrowser, wrappingPath } from './matrix.ts';
 import { andList, kindNames, kindNouns, noToolsSentence, orList } from './words.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 
@@ -108,8 +107,7 @@ interface KindFact { managed: boolean; edited?: unknown[]; differs: boolean; cop
 function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof icon>[0], facts: KindFact[], holders: HarnessId[], waitsForClaude = 0) {
   const { title, short: noun } = kindNouns[page];
   // A plugin's items count with the rest, said apart: nothing here manages them.
-  // (The design preview has sample items and no home to count them in.)
-  const home = designMode ? undefined : state.home;
+  const home = state.home;
   const fromPlugins = home ? pluginItemCount(home, page) : 0;
   const total = facts.length + fromPlugins;
   const managed = facts.filter(fact => fact.managed).length;
@@ -119,7 +117,7 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof ic
     : edits ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${edits} waiting`, title: `${plural(edits, 'change')} waiting to sync` }
       : waitsForClaude ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${waitsForClaude} for Claude Code`, title: `${waitsForClaude} ${waitsForClaude === 1 ? 'waits' : 'wait'} for Write to Claude Code` }
         // Not said of a home another build syncs: whether it is in sync is that build's to say.
-        : managed && !(home?.manage.gate.state === 'stopped' && home.manage.gate.owner) ? { tone: 'tone-success', glyph: 'check' as const, text: 'All in sync', title: 'Every managed one is the same in every tool it syncs to' }
+        : managed && !(home?.manage.gate.state === 'stopped' && home.manage.gate.owner) ? { tone: 'tone-success', glyph: 'check' as const, text: 'All in sync', title: 'Every synced one is the same in every tool it syncs to' }
           : undefined;
   const status = !attention ? null : differs
     ? h(`button.kind-card-state.kind-card-link.${attention.tone}`, { type: 'button', id: `overview-${page}-differ`, title: attention.title, onclick: () => { showFiltered(page, 'attention'); showPage(page); } }, icon(attention.glyph, 13), attention.text)
@@ -133,7 +131,7 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof ic
   return h('div.kind-card', {},
     h('button.kind-card-main', { type: 'button', id: `overview-${page}`, onclick: () => showPage(page) },
       h('span.kind-card-head', {}, icon(glyph, 16), h('strong', {}, title), icon('arrow-right', 14, 'tone-faint'))),
-    h('div.kind-card-summary', {}, h('span', {}, total ? `${plural(total, noun[0], noun[1])} · ${managed ? `${managed} managed` : 'none managed'}${fromPlugins ? ` · ${fromPlugins} from plugins` : ''}` : `No ${noun[1]}`),
+    h('div.kind-card-summary', {}, h('span', {}, total ? `${plural(total, noun[0], noun[1])} · ${managed ? `${managed} synced` : 'none synced'}${fromPlugins ? ` · ${fromPlugins} from plugins` : ''}` : `No ${noun[1]}`),
       // The "·" goes with the status; a narrow card puts the status on a line of its own, without it (markWrappedStatus).
       status ? h('span.kind-card-status', {}, h('span.kind-card-dot', { 'aria-hidden': 'true' }, '·'), status) : null),
     total ? h('div.kind-card-tools', {}, tools) : null);
@@ -181,7 +179,6 @@ function nextStep(home: HomeView, nothingManaged: boolean): string {
 }
 
 export function overviewPage() {
-  if (designMode) return designOverview();
   const home = state.home;
   if (!home) return notRead();
   const differs = (fact: { managed: boolean; copies: Record<string, unknown>; separate?: boolean; off: string[] }) => !fact.separate && new Set(Object.entries(fact.copies).filter(([tool]) => !fact.off.includes(tool)).map(([, copy]) => (copy as { hash: string }).hash)).size > 1;
@@ -211,7 +208,7 @@ export function overviewPage() {
           button({ variant: 'link', size: 'micro', label: 'Take over syncing', id: 'overview-take-over', disabled: !!state.busy, attrs: { title: takeOverTitle(home.manage.gate.owner) }, onclick: () => void takeOverSync() }))
         // Green only once something syncs; before that, sync is on and waiting, in the status bar's grey.
         : home.syncOn && nothingManaged ? null : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingManaged ? 'tone-muted' : 'tone-success') : 'tone-warning'),
-          ...(home.syncOn ? [nothingManaged ? 'Automatic sync is on. Once something is managed, edits spread between tools in seconds, with Undo.' : 'Automatic sync is on: edits spread between tools in seconds, with a notice and Undo.']
+          ...(home.syncOn ? [nothingManaged ? 'Automatic sync is on. Once something is on, edits spread between tools in seconds, with Undo.' : 'Automatic sync is on: edits spread between tools in seconds, with a notice and Undo.']
             : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync once', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
         h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Every change Central Knot makes is kept in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ', with Undo.'),
         // The two pages the cards don't cover, named once so a newcomer knows what they are; Plugins only where a tool here
@@ -224,16 +221,16 @@ export function overviewPage() {
 
 export function mcpPage() {
   if (!state.home) return notRead();
-  if (!state.home.mcp.servers.length && !pluginItemCount(state.home, 'mcp')) return emptyKindPage('mcp', 'mcp-empty');
-  return designOverview('mcp');
+  if (!rowCount(state.home, 'mcp')) return emptyKindPage('mcp', 'mcp-empty');
+  return itemsTable('mcp');
 }
 
 // ---------- Agents ----------
 
 export function agentsPage() {
   if (!state.home) return notRead();
-  if (!state.home.agents.servers.length && !pluginItemCount(state.home, 'agents')) return emptyKindPage('agents', 'agents-empty');
-  return designOverview('agents');
+  if (!rowCount(state.home, 'agents')) return emptyKindPage('agents', 'agents-empty');
+  return itemsTable('agents');
 }
 
 // ---------- Skills ----------
@@ -280,12 +277,12 @@ const contents = (key: string, copies: Found[]) =>
 
 export function skillsPage() {
   const home = state.home;
-  if (!designMode && !home) return notRead();
-  if (!designMode && !rowCount(home!, 'skills')) return noSkills('empty-read');
+  if (!home) return notRead();
+  if (!rowCount(home, 'skills')) return noSkills('empty-read');
   // The table is the Skills page; "Files" opens one skill's files and contents beside the list.
-  if (state.skillsView !== 'files') return designOverview('skills');
+  if (state.skillsView !== 'files') return itemsTable('skills');
   return skillsBrowser(key => {
-    if (!home || designMode) return { where: [], contents: [] };
+    if (!home) return { where: [], contents: [] };
     const copies = copiesOf(home, key);
     const notes = [...new Set(copies.flatMap(copy => copy.skill.notes))];
     return {

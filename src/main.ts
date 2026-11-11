@@ -966,8 +966,7 @@ function createWindow(show: boolean) {
   // Coming back to the window is when a change made in the system's own settings (Login Items, Startup apps) shows: the menus
   // are rebuilt and the page re-reads, both from this one event.
   window.on('focus', () => { unseen = false; unseenPlugins = undefined; refreshTray(); send('settings:changed'); });
-  const design = process.argv.find(arg => arg.startsWith('--design-preview'));
-  loading = window.loadFile(join(__dirname, 'index.html'), design ? { query: { design: design.split('=')[1] ?? 'b3' } } : undefined);
+  loading = window.loadFile(join(__dirname, 'index.html'));
 }
 
 // One Central Knot at a time: a second launch hands over to the first (which shows its window) and exits at once, before it opens
@@ -1195,12 +1194,12 @@ app.whenReady().then(async () => {
       if (past?.base) return undoPulledBase(context(), await read(), eventId);
       const tools = await toolsNow();
       if (key.startsWith('mcp:')) {
-        const result = await restoreMcp(context(), tools, eventId);
+        const result = await restoreMcp(context(), tools, eventId, typeof choice === 'string' ? choice : undefined);
         // Undo of a server's Disable or Enable is a choice made by hand too.
         await releaseProfileHolds(context(), switchedByHand([{ key: key.slice('mcp:'.length) }], result.results, 'mcp'));
-        return { stopped: result.stopped, results: result.results, harnessWrites: result.writes };
+        return { stopped: result.stopped, results: result.results, harnessWrites: result.writes, made: result.made };
       }
-      if (key.startsWith('agent:')) return restoreAgent(context(), tools, eventId, typeof choice === 'string' ? choice : undefined).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
+      if (key.startsWith('agent:')) return restoreAgent(context(), tools, eventId, typeof choice === 'string' ? choice : undefined).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes, made: result.made }));
       const restored = await restoreFromHistory(context(), eventId, resume === true, typeof choice === 'string' ? choice : undefined);
       // Undo of a Disable or Enable is a choice made by hand, like the switch itself: profiles stop holding those switches.
       await releaseProfileHolds(context(), switchedByHand([{ key }], restored.results));
