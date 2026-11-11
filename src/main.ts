@@ -691,7 +691,7 @@ function toolsChangedHere(snapshots: Snapshot[]): boolean {
   lastPresent = noted;
   if (changed) void startWatching();
   // A tool that is new here gets the plugins the others have (selections that wait), soon after it is first seen.
-  if (changed && pluginChecksRun) void pluginUpdates?.toolsChanged().catch(error => logFailure('plugin updates', error));
+  if (pluginChecksRun) void pluginUpdates?.present(presentTools(snapshots)).catch(error => logFailure('plugin updates', error));
   return changed;
 }
 

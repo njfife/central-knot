@@ -337,7 +337,8 @@ test('Selections that wait: a tool new here gets, once, the plugins every other 
   box.clock += 8 * HOUR;
   await updates.check();
   assert.deepEqual([box.calls, box.record()?.waiting], [['install spark codex-cli', 'install spark codex-cli'], []]);
-  assert.match(box.logs.join('\n'), /spark did not go into Codex, and is not tried again: Codex is not signed in\./);
+  assert.equal(box.logs.filter(line => /spark did not go into Codex/.test(line)).length, 3);
+  assert.equal(box.logs.filter(line => /spark did not go into Codex, and is not tried again: Codex is not signed in\./.test(line)).length, 1, 'said once, at the last try');
   // A tool that was missed by one read and is found again is not new.
   box.calls.length = 0;
   box.tools = ['claude-cli'];
@@ -358,4 +359,44 @@ test('Selections that wait: a tool new here gets, once, the plugins every other 
   box.clock += 1;
   await updates.check();
   assert.deepEqual(box.record()?.waiting, []);
+});
+
+test('Selections that wait only while plugins change by themselves: a tool first seen with the switch or Automatic sync off is noted, and gets nothing later', async () => {
+  const { box, updates } = setup();
+  const join = (plugin: string, tool: HarnessId): DueUpdate => ({ source: '/market', marketName: 'team', plugin, tool, action: 'install' });
+  box.tools = ['claude-cli'];
+  await updates.check();
+  // Automatic sync is off when Codex is installed: each read of the home notes it, and nothing waits.
+  box.paused = true;
+  await updates.present(['claude-cli', 'codex-cli']);
+  assert.deepEqual([box.record()?.seenTools, box.record()?.waiting ?? [], box.calls], [['claude-cli', 'codex-cli'], [], []]);
+  // Sync on again, weeks later: Codex is not new, whatever it lacks.
+  box.paused = false;
+  box.tools = ['claude-cli', 'codex-cli'];
+  box.joins = { 'codex-cli': [join('issue-tracker', 'codex-cli')] };
+  box.clock += 60 * 24 * HOUR;
+  await updates.check();
+  assert.deepEqual(box.calls, []);
+  // The switch off and Check now: a tool first seen by that check is noted too, and gets nothing then or after.
+  box.on = false;
+  box.tools = ['claude-cli', 'codex-cli', 'copilot-cli'];
+  box.joins = { 'copilot-cli': [join('issue-tracker', 'copilot-cli')] };
+  await updates.check(true);
+  box.on = true;
+  box.clock += 4 * HOUR;
+  await updates.check();
+  assert.deepEqual([box.calls, box.record()?.seenTools], [[], ['claude-cli', 'codex-cli', 'copilot-cli']]);
+  // On, and a tool not seen before turns up in a read of the home: a check is made at once, and it gets what waits.
+  box.tools = ['claude-cli', 'codex-cli', 'copilot-cli', 'opencode-cli'];
+  box.joins = { 'opencode-cli': [{ ...join('issue-tracker', 'opencode-cli'), action: 'install-parts' }] };
+  await updates.present(box.tools);
+  assert.deepEqual(box.calls, ['parts install issue-tracker opencode-cli']);
+  // An update of the same parts due in the same check is run once.
+  box.calls.length = 0;
+  box.tools = [...box.tools, 'pi-cli'];
+  box.joins = { 'pi-cli': [{ ...join('issue-tracker', 'pi-cli'), action: 'install-parts' }] };
+  box.due = [due('issue-tracker', 'pi-cli', 'install-parts')];
+  box.clock += 4 * HOUR;
+  await updates.check();
+  assert.deepEqual(box.calls, ['parts install issue-tracker pi-cli']);
 });

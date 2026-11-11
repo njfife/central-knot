@@ -14,7 +14,7 @@ import { suggestedMarketplaces, type SuggestedMarketplace } from './suggested.ts
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
 import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartsInstall, PartsPick, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
 import { writeDurably, type ShareContext } from './share.ts';
-import { SKILL_SWITCH_TESTED_FROM, copyDiffers, heldReason, keptReason, marketTitle, notCarried, partsOffer, partsTools, stateOf, unavailable, updateTools, versionToCompare } from './pluginstatus.ts';
+import { SKILL_SWITCH_TESTED_FROM, copyDiffers, heldReason, keptReason, marketTitle, notCarried, partsOf, partsOffer, partsTools, stateOf, unavailable, updateTools, versionToCompare } from './pluginstatus.ts';
 import { isFolder, isHttps, onlyAllowed, shortBuild } from './values.ts';
 
 /** What runs a tool's plugin commands when it is a desktop app's own copy: "Claude desktop’s Code tab 2.1.321". */
@@ -491,18 +491,24 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const unread: string[] = [], unreadSources: string[] = [];
     const joins: Partial<Record<HarnessId, PluginOp[]>> = {};
     const whole = shown.tools.filter(takesPlugins);
+    // The plugins each of them has turned off, by marketplace and name.
+    const ctx = await context();
+    const offIn = new Map(await Promise.all(whole.map(async tool => [tool, new Set((await engine.installedPlugins(ctx, tool).catch(() => [])).filter(found => found.off).map(found => `${found.marketplace}\u0000${found.plugin}`))] as const)));
     for (const entry of shown.marketplaces) {
       if (entry.problem || !entry.name) { unread.push(marketTitle(entry)); unreadSources.push(entry.source); continue; }
       for (const plugin of entry.plugins) {
         if (plugin.gone) continue;
-        // A plugin every other tool that takes plugins whole has is one a tool without it would get.
-        const has = whole.filter(tool => stateOf(entry, plugin.name, tool).state === 'installed');
+        // A plugin every other tool that takes plugins whole has, and has on, is one a tool without it would get: one
+        // turned off somewhere is not wanted everywhere.
+        const installedIn = whole.filter(tool => stateOf(entry, plugin.name, tool).state === 'installed');
+        const has = installedIn.filter(tool => !offIn.get(tool)?.has(`${entry.name}\u0000${plugin.name}`));
         for (const tool of shown.tools) {
           // The others that count are those that can hold it: a tool with no way to install here neither has it nor lacks it.
-          const others = whole.filter(other => other !== tool && (has.includes(other) || !unavailable(shown, entry, plugin.name, other)));
+          const others = whole.filter(other => other !== tool && (installedIn.includes(other) || !unavailable(shown, entry, plugin.name, other)));
           if (!others.length || !others.every(other => has.includes(other))) continue;
-          const action = takesPlugins(tool) ? (has.includes(tool) || unavailable(shown, entry, plugin.name, tool) ? undefined : 'install' as const)
-            : partsOffer(shown, entry, plugin.name, tool, plugin.components) ? 'install-parts' as const : undefined;
+          // A tool that has it already (on or off), or its parts, gets nothing.
+          const action = takesPlugins(tool) ? (installedIn.includes(tool) || unavailable(shown, entry, plugin.name, tool) ? undefined : 'install' as const)
+            : !partsOf(entry, plugin.name, tool) && partsOffer(shown, entry, plugin.name, tool, plugin.components) ? 'install-parts' as const : undefined;
           if (action) (joins[tool] ??= []).push({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action });
         }
         const copied = shown.tools.some(tool => { const state = stateOf(entry, plugin.name, tool); return state.state === 'installed' && !state.live; });
