@@ -35,7 +35,7 @@ export interface ItemRow {
   /** Where each copy lives, for the details. */
   paths?: Partial<Record<Tool, string>>;
   /** For the compare view: one line per copy that differs. */
-  versions?: Partial<Record<Tool, { lines: string; changed: string; text: string }>>;
+  versions?: Partial<Record<Tool, { lines: string; changed: string; text: string; /** When it was last changed. */ at?: string; /** Agents: the prompt. */ prompt?: string }>>;
   /** Agents: the With limits label for each tool that lacks some of the origin's fields. */
   limits?: Partial<Record<Tool, string>>;
   oneWay?: { from: Tool; lost: string[] };

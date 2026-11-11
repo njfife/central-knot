@@ -12,7 +12,7 @@ import { mcpTools } from './presence.ts';
 import { FORMAT_VERSION, newRecord, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readJsonc, readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import { appendHistory, goneFacts, readHistory, replaceHistory } from './manage.ts';
-import { leftOutAfterChoice, undoChoice } from './choiceundo.ts';
+import { undoChoice } from './choiceundo.ts';
 import { mcpSwitchFacts, readMcpSwitches, setMcpDisabled } from './mcpswitch.ts';
 import { throughPlugins } from './plugins.ts';
 import { switchFailure } from './skillswitch.ts';
@@ -883,8 +883,9 @@ async function entriesNow(context: ShareContext, tools: HarnessId[], name: strin
 
 /**
  * Undo of a copy choice, right after it (choiceundo.ts, as for skills and agents): each replaced entry goes back in its own tool,
- * with its own settings as kept, the entries the choice's pass added go again, and the server is synced or not as it was
- * before. A choice never replaces Claude Code's entry (only Write to Claude Code writes it), so it is never one to put back.
+ * with its own settings as kept, the entries the choice's pass added go again, and the server is as it was before the choice.
+ * A choice never replaces Claude Code's entry (only Write to Claude Code writes it), so it is never one to put back, and its
+ * record, which waits for that step, is never changed here.
  */
 async function undoChoiceMcp(context: ShareContext, tools: HarnessId[], history: HistoryEvent[], chosen: HistoryEvent): Promise<McpResult> {
   const name = chosen.key.replace(/^mcp:/, '');
@@ -895,9 +896,9 @@ async function undoChoiceMcp(context: ShareContext, tools: HarnessId[], history:
   const present = tools.filter(tool => mcpTools.includes(tool));
   const now = await entriesNow(context, present, name);
   const own = (tool: HarnessId) => chosen.losers.find(loser => loser.tool === tool);
-  const undone = await undoChoice(history, chosen, {
+  return undoChoice(history, chosen, {
     name, noun: 'entry',
-    holds: (tool, hash) => (now.get(tool)?.hash === chosen.winner?.hash ? 'chosen' : now.get(tool)?.hash === hash ? 'own' : 'other'),
+    wrote: tool => now.get(tool)?.hash === chosen.winner?.hash,
     cantPutBack: async (_tool, hash) => ((await kept(context, name, hash)) ? undefined : 'The replaced entry is no longer in Central Knot’s store, so it can’t be put back.'),
     addedAsIs: (tool, hash) => !now.get(tool) || now.get(tool)!.hash === hash,
     takeOutAdded: async added => {
@@ -922,22 +923,25 @@ async function undoChoiceMcp(context: ShareContext, tools: HarnessId[], history:
       const ref = own(tool)?.kept;
       return editEntry(context, tool, name, chosen.winner!.hash, version.server, ref ? await keptExtras(context, name, hash, ref) : undefined);
     },
+    nextStep: tool => (tool === 'codex-cli' ? 'Start a new Codex session to use it.' : 'Start a new session to use it.'),
     settle: async (synced, back) => {
-      // Claude Code's entry waits for its own Write step, whatever the choice did: it is never left out for it.
-      const left = synced ? leftOutAfterChoice(present, synced, chosen, back, tool => (item.off.includes(tool) || tool === 'claude-cli' ? undefined : now.get(tool)?.hash)) : [];
       if (synced) {
-        Object.assign(item, { state: 'shared', hash: synced, off: [...new Set([...item.off, ...left])] });
-        item.copies = item.copies.filter(copy => !left.includes(copy.tool)).map(copy => (copy.status ? copy : { ...copy, hash: synced }));
+        Object.assign(item, { state: 'shared', hash: synced });
+        for (const tool of present.filter(candidate => candidate !== 'claude-cli' && !item.off.includes(candidate))) {
+          const held = back.get(tool) ?? now.get(tool)?.hash;
+          // Put back holding the synced entry: on record with it. Holding another: that tool's own, off the record, so the next
+          // pass holds for a choice, as before the choice.
+          if (held === synced) item.copies = item.copies.map(copy => (copy.tool === tool && !copy.status && back.has(tool) ? { ...copy, hash: synced } : copy));
+          else if (held !== undefined) item.copies = item.copies.filter(copy => copy.tool !== tool || copy.status);
+        }
       } else {
         item.state = 'dont-share';
         item.copies = item.copies.filter(copy => copy.status === 'removing');
       }
       await saveMcpRecord(context.home, record);
-      return left;
     },
     saveHistory: () => replaceHistory(context, history),
   });
-  return { results: undone.results, writes: undone.writes, stopped: undone.stopped };
 }
 
 /**

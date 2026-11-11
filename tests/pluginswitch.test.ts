@@ -193,7 +193,7 @@ test('a main switch turns one item in every tool with a switch for it, and never
   assert.deepEqual(chosen(on.draft), ['codex-cli skill-off one', 'codex-cli skill-off two', 'codex-cli part-off mcp wiki', 'copilot-cli skill-on one', 'codex-cli plugin-on']);
   assert.equal(on.left, undefined);
   // Said item first, then what came with it.
-  assert.equal(itemSaid(item(codexOff, 'mcp', 'issues'), true, on.ops), 'issues is on in Codex. Its plugin full was turned on there, with one, two and MCP server wiki left off.');
+  assert.equal(itemSaid(item(codexOff, 'mcp', 'issues'), true, on.ops), 'issues is on in Codex. Its plugin full was turned on there, with its skill one, skill two and MCP server wiki left off.');
   assert.equal(alongWords(item(copilot, 'skill', 'one'), on.ops), '', 'only its own switch turned');
   const whole: PluginDraft = new Map();
   click(whole, item(claude, 'skill', 'one'));

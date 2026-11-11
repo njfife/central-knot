@@ -227,6 +227,8 @@ export interface ToolCopy {
   modified: string;
   /** First line of the skill's body, to tell differing copies apart. */
   summary: string;
+  /** Agents: the prompt, so a copy question can say what differs and show the copies side by side. */
+  prompt?: string;
   /** False for a copy reached through a link or in a folder other tools share: background sync never writes there. */
   writable: boolean;
   /**
@@ -420,6 +422,8 @@ export interface HistoryEvent {
   wasSynced?: boolean;
   /** 'chosen': the 'added' entry its own pass wrote (the copies that came with the choice), which its Undo takes out; never another. */
   addedId?: string;
+  /** 'chosen', an agent's: the source's copy given again to copies that had stopped updating; its Undo puts their edits back, stopped again. */
+  resumed?: boolean;
   winner?: { tool: HarnessId; hash: string };
   /** Content that gave way, kept in Central Knot's store. */
   losers: { tool: HarnessId; hash: string; /** MCP: which kept copy of that tool's own settings this replaced, for an exact Restore. */ kept?: string; /** 'removed': the copy's folder name as it was, to put it back under the same name. */ folder?: string;

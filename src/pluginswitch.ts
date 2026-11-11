@@ -127,11 +127,11 @@ export function turnEvery(items: PluginItemAt[], on: boolean): { draft: PluginDr
 }
 
 /** One of a plugin's items by name, as a result says it: a skill's own name, or "MCP server issues". */
-const named = (op: PluginOp) => (op.part ? `${partWords[op.part.kind][0]} ${op.part.name}` : op.skill!);
+const named = (op: PluginOp) => (op.part ? `${partWords[op.part.kind][0]} ${op.part.name}` : `skill ${op.skill!}`);
 
 /**
  * What a click's choices (`ops`, all run) brought with one item in its tool, after the item's own sentence: "Its plugin
- * issue-tracker was turned on there, with triage left off.", "Its whole plugin document-tools was turned off there, with its 2
+ * issue-tracker was turned on there, with its skill triage left off.", "Its whole plugin document-tools was turned off there, with its 2
  * other skills."; '' where only the item's own switch turned. `there`: said in place of the tool's name.
  */
 export function alongWords(item: PluginItemAt, ops: PluginOp[], there = false): string {
@@ -140,7 +140,7 @@ export function alongWords(item: PluginItemAt, ops: PluginOp[], there = false): 
   const where = there ? 'there' : `in ${names[item.tool]}`;
   if (whole.forItems) {
     const leftOff = ops.filter(op => op.tool === whole.tool && op.plugin === whole.plugin && (op.action === 'skill-off' || op.action === 'part-off')).map(named);
-    return `Its plugin ${item.install.plugin} was turned on ${where}${leftOff.length ? `, with ${andList(leftOff)} left off` : ''}.`;
+    return `Its plugin ${item.install.plugin} was turned on ${where}${leftOff.length ? `, with its ${andList(leftOff)} left off` : ''}.`;
   }
   const rest = item.install.items.filter(entry => !samePart(entry, item) && !(hasOwnSwitch(item.tool, entry.kind) && itemOffNow(item.install, entry)));
   return `Its whole plugin ${item.install.plugin} was turned ${whole.action === 'plugin-on' ? 'on' : 'off'} ${where}${rest.length ? `, with its ${counted(rest, item.kind)}` : ''}.`;

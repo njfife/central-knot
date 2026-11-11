@@ -310,7 +310,19 @@ if (wanted('mcp')) {
   await shot(a, 'mcp-edit-notice', 'Outside the app, the files server\'s command was changed in Copilot\'s settings. A few seconds later.');
   // notes, when there: a skill whose copies agree, so its details offer Files and contents.
   const first = await a.run(`(document.querySelector('#open-notes') ?? document.querySelector('.ov-row[data-key] .row-open'))?.id ?? ''`);
-  if (first) { await a.click(`#${first}`); await shot(a, 'mcp-details', 'Opened a server\'s details.'); }
+  if (first) { await a.click(`#${first}`); await shot(a, 'mcp-details', 'Opened a server\'s details.'); await a.click(`#${first}`); }
+  // A copy choice and its Undo: a server Copilot CLI and Codex each have with a different command.
+  edit(join(practice, '.copilot/mcp-config.json'), text => { const config = JSON.parse(text); config.mcpServers.search = { type: 'local', command: 'search-mcp', args: ['--index', 'copilot'], tools: ['*'] }; return JSON.stringify(config, null, 2); });
+  edit(join(practice, '.codex/config.toml'), text => `${text}\n[mcp_servers.search]\ncommand = "search-mcp"\nargs = ["--index", "codex", "--fast"]\n`);
+  await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#switch-search')`, 15000);
+  await a.click('#switch-search'); await a.settle();
+  if (await a.has('#use-search-copilot-cli')) {
+    await shot(a, 'mcp-choice', 'A server named search is in Copilot CLI and Codex with different commands; clicked its switch: it asks which entry every tool uses, each card quoting its own command.');
+    await a.click('#use-search-copilot-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+    await shot(a, 'mcp-choice-made', 'Clicked Copilot CLI’s entry: Codex’s is replaced (kept in History), and search is on everywhere; Claude Code gets it when you Write to Claude Code. With Undo.');
+    await a.click('#outcome-undo'); await waitFor(a, `/Undone/.test(document.querySelector('.bands')?.textContent ?? '')`, 15000);
+    await shot(a, 'mcp-choice-undone', 'Clicked Undo: Codex has its own entry back, and search is as before the choice: not synced, its copies differing, so its switch asks again.');
+  }
 }
 
 // ---------- Agents ----------
@@ -330,18 +342,21 @@ if (wanted('agents')) {
   await a.click('#header-refresh'); await a.settle();
   await a.click('#switch-release-notes'); await a.settle();
   if (await a.has('#use-release-notes-claude-cli')) {
-    await shot(a, 'agents-choice', 'Turned release-notes off (each copy stays), edited it in Codex, and turned it on again: its copies differ, so it asks which copy every tool uses.');
+    await shot(a, 'agents-choice', 'Turned release-notes off (each copy stays), edited it in Codex, and turned it on again: its copies differ, so it asks which copy every tool uses. Claude Code’s and Copilot CLI’s are the same and share one card; Codex’s quotes the line only it has and is marked as edited most recently.');
+    if (await a.has('#diff-release-notes')) { await a.click('#diff-release-notes'); await a.settle(); await shot(a, 'agents-choice-read', 'Clicked “Read every copy”: each different prompt under the cards, the same ones shown once.'); await a.click('#diff-release-notes'); await a.settle(); }
     await a.click('#use-release-notes-claude-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
     await shot(a, 'agents-choice-made', 'Clicked Claude Code’s copy: Codex’s copy is replaced (kept in History), and release-notes is on in all 3 tools; with Undo.');
     await a.click('#outcome-undo'); await waitFor(a, `/Undone/.test(document.querySelector('.bands')?.textContent ?? '')`, 15000);
-    await shot(a, 'agents-choice-undone', 'Clicked Undo: Codex has its own wording back, the other copies are as they were, and release-notes is not synced, as before the choice.');
-    await a.click('#switch-release-notes'); await a.settle();
-    if (await a.has('#use-release-notes-claude-cli')) { await a.click('#use-release-notes-claude-cli'); await a.settle(); }
+    await shot(a, 'agents-choice-undone', 'Clicked Undo: Codex has its own wording back, the other copies are as they were, and release-notes is as before the choice: not synced, its copies differing.');
+    // Its copy question is open again after the Undo: chosen this time, so release-notes is synced for the edit below.
+    if (!(await a.has('#use-release-notes-claude-cli'))) { await a.click('#switch-release-notes'); await a.settle(); }
+    if (await a.has('#use-release-notes-claude-cli')) { await a.click('#use-release-notes-claude-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000); }
   }
+  await waitFor(a, `document.querySelector('#switch-release-notes')?.getAttribute('aria-checked') === 'true'`, 15000);
   await a.click('#open-code-reviewer'); await shot(a, 'agents-limits', 'Opened code-reviewer, a Claude Code agent with fields other tools can\'t hold: Claude Code\'s line is the source, with Stop syncing this agent; each other tool\'s line has its Synced switch.');
   edit(join(practice, '.codex/agents/release-notes.toml'), text => text.replace('one line each.', 'one line each. Edited in Codex.'));
-  await waitFor(a, `!!document.querySelector('.sync-notice')`);
-  await shot(a, 'agents-edit-notice', 'Outside the app, release-notes was edited in Codex. A few seconds later.');
+  await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('.sync-notice')`, 15000);
+  await shot(a, 'agents-edit-notice', 'Outside the app, release-notes (synced) was edited in Codex, then Refresh was clicked: the notice says the edit reached the other tools.');
   // The one-way edge: an edit to a receiving copy stays there, and that copy stops updating.
   edit(join(practice, '.codex/agents/code-reviewer.toml'), text => text.replace('description = "', 'description = "Edited in Codex. '));
   await a.click('#header-refresh'); await a.settle();
@@ -353,8 +368,8 @@ if (wanted('agents')) {
   await a.click('#header-refresh'); await a.settle();
   if (await a.has('#stopped-dismiss-code-reviewer-codex-cli')) { await a.click('#stopped-dismiss-code-reviewer-codex-cli'); await a.settle(); }
   if (!(await a.has('.details'))) { await a.click('#open-code-reviewer'); await a.settle(); }
-  await shot(a, 'agents-decide-later', 'code-reviewer was edited in Codex again; clicked × (Decide later) on its notice. Its details are open.');
-  if (await a.has('#stopped-keep-code-reviewer-codex-cli-details')) { await a.click('#stopped-keep-code-reviewer-codex-cli-details'); await a.settle(); await shot(a, 'agents-kept', 'Clicked "Keep Codex\'s edit" in the Codex row.'); }
+  await shot(a, 'agents-decide-later', 'code-reviewer was edited in Codex again; clicked × (Decide later) on its notice. Its details are open: Codex’s switch sits halfway, labelled “Stopped”.');
+  if (await a.has('#stopped-keep-code-reviewer-codex-cli-details')) { await a.click('#stopped-keep-code-reviewer-codex-cli-details'); await a.settle(); await shot(a, 'agents-kept', 'Clicked "Keep Codex\'s edit" in the Codex row: its switch, still halfway, reads “Keeps its edit”.'); }
 }
 
 // ---------- Plugins ----------
@@ -842,7 +857,7 @@ if (wanted('plugin-items')) {
     // turns the plugin on there for triage alone.
     if (await a.has('#enable-triage-codex-cli')) {
       await a.click('#enable-triage-codex-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin, .bands .band')`, 15000);
-      await shot(a, 'switch-applied', 'Clicked triage’s Codex switch in its opened row (the whole plugin issue-tracker was off there): it is on in Codex at once. The band leads with the skill clicked (“triage is on in Codex. Its plugin issue-tracker was turned on there, with MCP server issues left off.”), with Undo.');
+      await shot(a, 'switch-applied', 'Clicked triage’s Codex switch in its opened row (the whole plugin issue-tracker was off there): it is on in Codex at once. The band leads with the skill clicked (“triage is on in Codex. Its plugin issue-tracker was turned on there, with its MCP server issues left off.”), with Undo.');
       await a.theme('light'); await shot(a, 'switch-applied-light', 'The same, light.'); await a.theme('dark');
       await size(860, 560); await shot(a, 'switch-applied-860', 'The same at 860×560.'); await size(1280, 800);
       if (await a.has('#outcome-undo-plugin')) { await a.click('#outcome-undo-plugin'); await a.settle(); await shot(a, 'switch-undone', 'Clicked Undo: issue-tracker is off in Codex again, as it was; the confirmation fades by itself.'); }
@@ -863,7 +878,7 @@ if (wanted('plugin-items')) {
   if (await a.has('[id="open-issue-tracker@team-tools/issues"]')) {
     if (!(await a.has('[id="enable-issue-tracker@team-tools/issues-codex-cli"]'))) await a.click('[id="open-issue-tracker@team-tools/issues"]');
     await a.click('[id="enable-issue-tracker@team-tools/issues-codex-cli"]'); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin, .bands .band')`, 15000);
-    await shot(a, 'mcp-switch-applied', 'Clicked issues’ Codex switch in its opened row, where the whole plugin was off: it is on in Codex at once. The result leads with the server clicked (“issues is on in Codex. Its plugin issue-tracker was turned on there, with triage left off.”), with Undo; the first-use tip is gone.');
+    await shot(a, 'mcp-switch-applied', 'Clicked issues’ Codex switch in its opened row, where the whole plugin was off: it is on in Codex at once. The result leads with the server clicked (“issues is on in Codex. Its plugin issue-tracker was turned on there, with its skill triage left off.”), with Undo; the first-use tip is gone.');
     await size(1728, 1117); await shot(a, 'mcp-switch-applied-1728', 'The same at 1728×1117.'); await size(1280, 800);
     if (await a.has('#outcome-undo-plugin')) { await a.click('#outcome-undo-plugin'); await a.settle(); await shot(a, 'mcp-switch-undone', 'Clicked Undo: the plugin is off in Codex again, as it was.'); }
   }

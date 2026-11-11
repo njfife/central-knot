@@ -128,7 +128,8 @@ export function toolWords(row: PluginRow, tool: HarnessId): string {
   if (!row.copies[tool]) return missingWhy(row, tool);
   const version = row.installs[tool]?.version;
   const off = offIn(row, tool);
-  return `Inside ${row.plugin}${version ? ` ${version}` : ''}. ${off === 'plugin' ? 'The whole plugin is turned off here.' : off === 'item' ? 'Turned off here with its own switch.' : 'On.'}`;
+  const inside = `Inside ${row.plugin}${version ? ` ${version}` : ''}`;
+  return off === 'plugin' ? `${inside}. The whole plugin is turned off here.` : off === 'item' ? `${inside}. Turned off here with its own switch.` : `${inside}, on here.`;
 }
 
 /** Where a plugin's item is handled, in one sentence: on its page, or, with its marketplace nowhere here, in the tool itself. */

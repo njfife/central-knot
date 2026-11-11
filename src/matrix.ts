@@ -3,7 +3,7 @@
 // details, and every click's result comes with an Undo of the whole click.
 import { itemId } from './profileplan.ts';
 import { brandMark } from './brand.ts';
-import { caughtUpNames, DAY_MS } from './model.ts';
+import { caughtUpNames, DAY_MS, groupBy } from './model.ts';
 import { deletedText, deleteNote, linkTarget, managedSentence, manageSentence, pinnedSentence, readsOutside, replaceSentence, rowWords, whereSentence, type Shape } from './outsidewords.ts';
 import { REPLACE_ACTION, andList, byToolOrder, kindNouns, orList, problemText, toolName, toolNames, toolsPhrase } from './words.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
@@ -244,7 +244,7 @@ const fromFacts = (facts: SkillFacts): ItemRow => ({
   extra: facts.extra.map(extra => ({ tool: extra.tool, directory: extra.directory, summary: extra.summary, writable: extra.writable, same: extra.hash === facts.copies[extra.tool]?.hash, ...(extra.outside ? { outside: extra.outside } : {}) })),
   paths: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.directory])),
   // An MCP entry has no lines or edit date of its own: its details name the file it lives in.
-  versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.lines ? { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), text: copy!.summary || facts.description } : { lines: copy!.directory.split('/').pop() ?? '', changed: 'MCP entry', text: copy!.summary }])),
+  versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.lines ? { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), at: copy!.modified, text: copy!.summary || facts.description, ...(copy!.prompt !== undefined ? { prompt: copy!.prompt } : {}) } : { lines: copy!.directory.split('/').pop() ?? '', changed: 'MCP entry', text: copy!.summary }])),
   disabled: facts.disabled, switchProblem: facts.switchProblem, disableNote: facts.disableNote, writable: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.writable])),
   reads: Object.fromEntries(Object.entries(facts.copies).flatMap(([tool, copy]) => (copy!.readsFrom ? [[tool, copy!.readsFrom]] : []))),
   outside: Object.fromEntries(Object.entries(facts.copies).flatMap(([tool, copy]) => (copy!.outside ? [[tool, copy!.outside]] : []))),
@@ -319,6 +319,8 @@ const newView = () => ({
   find: '',
   /** The skill whose details are open under its row. */
   comparing: undefined as string | undefined,
+  /** Agents: the item whose copy question shows every copy's prompt side by side. */
+  reading: undefined as string | undefined,
   /** The harness whose page this view was last drawn on (undefined: the kind's own page). */
   shownFor: undefined as Tool | undefined,
   /** What the Skills page list is narrowed to. */
@@ -714,40 +716,71 @@ function stoppedActions(skill: ItemRow, tool: Tool, source: Tool, where = '') {
   return [replace, keep];
 }
 
-/** The decision for differing copies: each choice says what it does, and does it at once. */
+/**
+ * What one copy says that another doesn't, to tell copies apart: an agent's prompt lines found in this copy only (or, with none,
+ * a line the others have that it lacks); otherwise its description or summary, where that differs.
+ */
+function ownWords(skill: ItemRow, tool: Tool, others: Tool[]): string | undefined {
+  const versions = skill.versions ?? {};
+  const prompt = versions[tool]?.prompt;
+  if (prompt !== undefined) {
+    const lines = (text?: string) => (text ?? '').split('\n').map(line => line.trim()).filter(Boolean);
+    const theirs = others.map(other => new Set(lines(versions[other]?.prompt)));
+    const added = lines(prompt).filter(line => theirs.some(set => !set.has(line)));
+    if (added.length) return `“${added[0]}”${added.length > 1 ? ` and ${added.length - 1} more ${added.length === 2 ? 'line' : 'lines'}` : ''}`;
+    const missing = others.flatMap(other => lines(versions[other]?.prompt)).find(line => !lines(prompt).includes(line));
+    if (missing) return `Without “${missing}”`;
+  }
+  const text = versions[tool]?.text;
+  return text && others.some(other => versions[other]?.text !== text) ? `“${text}”` : undefined;
+}
+
+/** The decision for differing copies: each choice says what it does, and does it at once. Copies that are the same are one choice. */
 function compareChoices(skill: ItemRow, inFiles = false) {
   const versions = skill.versions ?? {};
   const compared = toolList().filter(tool => comparedTools(skill).includes(tool));
+  const groups = [...groupBy(compared, tool => skill.hashes?.[tool] ?? tool).values()];
   // A choice turns it on everywhere: every tool that can hold it and has no copy gets the chosen one.
   const receiving = toolList().filter(tool => !skill.cannot?.[tool] && skill.copies[tool] === undefined && !skill.waits?.includes(tool));
-  // Line counts and edit times are shown only where they tell the copies apart.
-  const metaDiffers = new Set(compared.map(tool => `${versions[tool]?.lines}|${versions[tool]?.changed}`)).size > 1;
-  const effect = (tool: Tool) => {
-    const replaced = compared.filter(entry => entry !== tool).map(entry => names[entry]);
+  // Line counts and edit times are shown only where they tell the copies apart; the copy edited last is marked.
+  const metaDiffers = new Set(groups.map(([tool]) => `${versions[tool]?.lines}|${versions[tool]?.changed}`)).size > 1;
+  const editedAt = (group: Tool[]) => Math.max(...group.map(tool => Date.parse(versions[tool]?.at ?? '') || 0));
+  const latest = groups.length > 1 && kind !== 'mcp' ? groups.reduce((last, group) => (editedAt(group) > editedAt(last) ? group : last)) : undefined;
+  const effect = (group: Tool[]) => {
+    const replaced = compared.filter(entry => !group.includes(entry)).map(entry => names[entry]);
     const parts = [replaced.length ? `replaces ${andList(replaced.map(name => `${name}’s copy`))}` : '', receiving.length ? `adds it to ${andList(receiving.map(entry => names[entry]))}` : ''].filter(Boolean);
     return `${parts.join('; ').replace(/^./, first => first.toUpperCase())}.`;
   };
-  const choice = (tool: Tool) => {
+  const choice = (group: Tool[]) => {
+    const [tool] = group;
     const version = versions[tool];
+    const whose = `${andList(group.map(entry => names[entry]))}’s copy${group.length > 1 ? ' (the same)' : ''}`;
     // A block counts only for a tool it syncs to that can load the skill.
     const block = skill.blocks?.[tool]?.find(entry => !skill.off.includes(entry.tool) && !skill.cannot?.[entry.tool]);
     if (block) return h('button.version.version-blocked', { type: 'button', id: `use-${skill.key}-${tool}`, disabled: true, title: block.reason },
-      h('span.version-head', {}, brandMark(tool, 14), h('strong', {}, `Use ${names[tool]}’s copy`)),
+      h('span.version-head', {}, brandMark(tool, 14), h('strong', {}, `Use ${whose}`)),
       h('span.version-effect.version-why', {}, icon('circle-alert', 12, 'tone-warning'), block.reason));
-    return h('button.version', { type: 'button', id: `use-${skill.key}-${tool}`, 'aria-label': `Use ${names[tool]}’s copy`, disabled: !canWrite(), onclick: () => turnOn(skill, tool) },
-      h('span.version-head', {}, brandMark(tool, 14), h('strong', {}, `${names[tool]}’s copy`)),
+    const said = ownWords(skill, tool, compared.filter(entry => !group.includes(entry))) ?? (version ? `“${version.text}”` : undefined);
+    return h('button.version', { type: 'button', id: `use-${skill.key}-${tool}`, 'aria-label': `Use ${whose}`, disabled: !canWrite(), onclick: () => turnOn(skill, tool) },
+      h('span.version-head', {}, ...group.map(entry => brandMark(entry, 14)), h('strong', {}, whose)),
       version && metaDiffers ? h('span.version-meta', {}, `${version.lines} · ${version.changed}`) : null,
-      version ? h('span.version-text', {}, `“${version.text}”`) : null,
-      h('span.version-effect', {}, effect(tool)),
+      group === latest ? h('span.version-meta.version-latest', {}, icon('pencil-line', 12), 'Edited most recently') : null,
+      said ? h('span.version-text', {}, said) : null,
+      h('span.version-effect', {}, effect(group)),
       h('span.version-cta', { 'aria-hidden': 'true' }, 'Use this copy'));
   };
-  // Comparing comes before choosing: the full files side by side, a click from the copies (the Files view shows them already).
-  const read = kind === 'skills' && !inFiles ? smallAction(compared.length > 2 ? 'Read every copy' : 'Read both copies', `diff-${skill.key}`, () => openFiles(skill.key), '.compare-read') : null;
+  // Comparing comes before choosing: the full copies side by side, a click from the choices (the Files view shows them already).
+  const every = compared.length > 2 ? 'Read every copy' : 'Read both copies';
+  const read = inFiles || kind === 'mcp' ? null : kind === 'skills' ? smallAction(every, `diff-${skill.key}`, () => openFiles(skill.key), '.compare-read')
+    : smallAction(view.reading === skill.key ? 'Hide the copies' : every, `diff-${skill.key}`, () => { view.reading = view.reading === skill.key ? undefined : skill.key; rerender(); }, '.compare-read');
+  const prompts = kind === 'agents' && view.reading === skill.key
+    ? h('div.plugin-file.compare-copies', {}, fileBlocks(`prompt-${skill.key}`, 'Prompt', compared.map(tool => ({ tool, text: versions[tool]?.prompt ?? '' })), holders => `Prompt · ${andList(holders.map(holder => names[holder.tool]))}`, { named: true }))
+    : null;
   return h('div.compare-block', {},
     h('p.compare-title', {}, icon('diff', 14, 'tone-warning'), h('span', {}, 'Which copy of ', h('strong.item-name', {}, skill.name ?? skill.key), ` should ${compared.length + receiving.length > 2 ? 'every tool' : 'both tools'} use?`)),
     h('p.compare-note', {}, `Choosing applies at once, and turns it on everywhere. Replaced copies are kept in History.${kind === 'mcp' && receiving.includes('claude-cli') ? ' Claude Code gets it when you Write to Claude Code.' : ''}`),
-    h('div.compare-choices', {}, compared.map(choice)),
-    read);
+    h('div.compare-choices', {}, groups.map(choice)),
+    read, prompts);
 }
 
 /** Whether an open row's details dock beside the table: the content is wide enough (renderer.ts sets state.wide). */
@@ -905,7 +938,7 @@ function helpBand(): HTMLElement | null {
   if (!list.length || readFlag(key) || state.skillsView === 'files') return null;
   const one = kindNouns[kind].a;
   const first = kind === 'agents'
-    ? 'Turn an agent on and every tool has it, kept the same. Off only stops syncing: tools can’t switch an agent off, so their copies stay.'
+    ? 'Turn an agent on and every tool has it, kept the same. Off only stops syncing: tools can’t switch your own agents off, so their copies stay.'
     : `Turn ${one} on and every tool has it, kept the same; turn it off and no tool ${kind === 'mcp' ? 'starts' : 'loads'} it. Each click applies at once, with Undo.`;
   const second = `A switch halfway means not synced yet: each tool keeps its own copy. Open ${one} ${kind === 'agents' ? 'to leave one tool out of it' : 'for each tool’s own switch'}.`;
   return h('div.band.band-help', { role: 'note' }, icon('info', 14, 'tone-muted'),
@@ -1688,7 +1721,7 @@ function harnessLine(skill: ItemRow, tool: Tool): string {
   // A broken link by its name in that tool's skills folder: a copy written there replaces it.
   const broken = skill.brokenLink?.[tool] !== undefined ? ` Its skills folder has a broken link by this name${skill.brokenLink[tool] ? ` (to ${skill.brokenLink[tool]})` : ''}; a copy written there replaces it.` : '';
   const copy = drawn === 'write-now' ? waitsLine(skill, tool)
-    : !has ? `${skill.managed && skill.off.includes(tool) ? 'Not synced here.' : getsCopy(skill, tool) ? `${NEXT_SYNC}.` : skill.gone ? 'No copy.' : 'No copy. Turn it on to add it here.'}${broken}`
+    : !has ? `${skill.managed && skill.off.includes(tool) ? 'Not synced here.' : getsCopy(skill, tool) ? `${NEXT_SYNC}.` : skill.gone ? 'No copy.' : 'No copy. Its switch above adds it here.'}${broken}`
       // Off with its own switch: said once, the copy kept, whatever else it is.
       : skill.disabled?.includes(tool) ? `Off here${turnedOffByProfile(skill.key, tool) ? ' by a profile' : ''} · ${kind === 'mcp' ? 'entry' : 'copy'} kept`
       // Only a link or the shared copy: said where it is (outsideRow), not as a copy of its own.
@@ -1755,10 +1788,14 @@ function harnessControls(skill: ItemRow, tool: Tool) {
     if (stopAll) stopAll.title = `${where} is the source: stop syncing ${name} in every tool. Each tool keeps its copy as it is.`;
     // Each other tool has a Synced switch, as the other pages have On: off leaves it out (its copy stays as it is), on syncs it there again.
     const leaveOut = () => click({ kind, items: [name], changes: [{ ...now, off: [...now.off, tool as HarnessId] }], said: `${name} no longer syncs to ${where}. Its copy there stays.` });
+    // A copy that stopped updating (or keeps its edit) sits halfway: its click gives it the source's copy again, its edit kept in History.
+    const paused = stopped ? (keptEdit(skill, tool) ? 'Keeps its edit' : 'Stopped') : undefined;
     const syncSwitch = !skill.managed || isSource || (synced && (!has || fewest)) ? null
-      : h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, synced ? 'Synced' : 'Not synced'),
-        toggle({ on: synced, disabled: !canWrite(), id: `sync-${skill.key}-${tool}`, onchange: next => (next ? rejoin() : leaveOut()),
-          label: `${name} in ${where}: ${synced ? 'synced' : 'not synced'}. ${synced ? `Click to leave ${where} out: its copy stays as it is and no longer gets updates.` : `Click to sync it to ${where} again${has ? '; if its copy there differs, you choose which copy every tool uses' : ''}.`}` }));
+      : h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, paused ?? (synced ? 'Synced' : 'Not synced')),
+        paused && source ? toggle({ on: false, mixed: true, disabled: !canWrite(), id: `sync-${skill.key}-${tool}`, onchange: () => resumeOneWay(skill, source),
+          label: `${name} in ${where}: ${paused === 'Stopped' ? 'stopped updating, since it was edited there' : 'keeps its own edit'}. Click to give it ${names[source]}’s copy again; the edit is kept in History.` })
+          : toggle({ on: synced, disabled: !canWrite(), id: `sync-${skill.key}-${tool}`, onchange: next => (next ? rejoin() : leaveOut()),
+            label: `${name} in ${where}: ${synced ? 'synced' : 'not synced'}. ${synced ? `Click to leave ${where} out: its copy stays as it is and no longer gets updates.` : `Click to sync it to ${where} again${has ? '; if its copy there differs, you choose which copy every tool uses' : ''}.`}` }));
     return choices.length || stopAll || syncSwitch ? h('span.details-tool-actions', {}, ...choices, stopAll, syncSwitch) : null;
   }
   if (!has) return syncHere || write ? h('span.details-tool-actions', {}, write, syncHere) : null;

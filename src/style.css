@@ -601,6 +601,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .version-head { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
 .version-meta, .version-effect { font-size: 11.5px; color: var(--ink-soft); }
 .version-text { font-size: 12px; color: var(--ink); font-style: italic; }
+.version-latest { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); }
+.compare-copies { margin: 8px 0 0; max-height: 40vh; overflow: auto; overscroll-behavior: contain; }
 .version-cta { display: inline-flex; align-self: flex-start; margin-top: auto; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--control-line); background: var(--surface); font-size: 12px; font-weight: 600; color: var(--ink); }
 .version:hover .version-cta, .version:focus-visible .version-cta { border-color: var(--accent); color: var(--accent); }
 .version-blocked { opacity: 0.75; cursor: not-allowed; }
