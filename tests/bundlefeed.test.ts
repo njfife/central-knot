@@ -56,7 +56,7 @@ test('a newer release published to the feed is taken; the same one again is not'
   try {
     // Nothing is published yet: the plugins in use stay, and the reason is said.
     const nothing = await checkFeed(box.host);
-    assert.deepEqual([nothing.outcome, nothing.message], ['failed', 'Couldn’t check for newer plugins: the feed answered 404.']);
+    assert.deepEqual([nothing.outcome, nothing.message], ['failed', 'Couldn’t check for newer plugins: the server answered 404. The ones here stay in use.']);
     await market(box.source, { docs: '1.1.0', release: '0.4.1' });
     const published = await box.publish(2);
     assert.ok('release' in published, JSON.stringify(published));
@@ -82,26 +82,27 @@ test('a broken publish leaves the last good plugins in place and says why', asyn
     await market(box.source, { docs: '1.1.0', release: '0.4.1' });
     const published = await box.publish(2);
     assert.ok('release' in published);
-    const stays = async (why: RegExp) => {
+    const stays = async (why: RegExp, detail?: RegExp) => {
       const check = await checkFeed(box.host);
       assert.equal(check.outcome, 'failed');
       assert.match(check.message, why);
+      if (detail) assert.match(check.detail ?? '', detail);
       assert.equal((await activeBundle(box.data))?.release.sequence, 1);
       assert.match(await box.skill(), /docs 1\.0\.0/);
       assert.deepEqual((await readdir(join(box.data, 'bundled'))).sort(), ['marketplace', 'release.json']);
     };
     // The archive was cut short on the way up.
     await truncate(join(box.feed, published.release.archive), 200);
-    await stays(/are published, but they couldn’t be used\. Its archive is not the one its manifest describes.*The ones here stay in use\./);
+    await stays(/^Newer plugins \(November 11, 2026\) are published, but they didn’t arrive whole, so they weren’t used\. The ones here stay in use, and it is tried again by itself\.$/, /Its archive is not the one its manifest describes/);
     // The archive is longer than the manifest says.
     await writeFile(join(box.feed, published.release.archive), Buffer.alloc(published.release.size + 10));
-    await stays(/couldn’t be downloaded: its archive is longer than its manifest says\. The ones here stay in use\./);
+    await stays(/couldn’t be downloaded: its archive is longer than its manifest says\. The ones here stay in use, and it is tried again by itself\./);
     // The manifest went up but the archive didn't.
     await rm(join(box.feed, published.release.archive));
-    await stays(/couldn’t be downloaded: the feed answered 404\./);
+    await stays(/couldn’t be downloaded: the server answered 404\./);
     // The manifest isn't one.
     await writeFile(join(box.feed, 'release.json'), '<html>Sign in</html>');
-    await stays(/isn’t a release this app can read/);
+    await stays(/what is published isn’t something this app can read\. The ones here stay in use\./);
     // The folder now holds another marketplace's releases.
     await writeFile(join(box.feed, 'release.json'), JSON.stringify({ ...published.release, marketplace: 'other-tools', sequence: 9 }));
     await stays(/another marketplace \(“other-tools”\)/);

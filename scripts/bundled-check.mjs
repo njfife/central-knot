@@ -235,7 +235,7 @@ const checkNow = async () => { await a.click('[id^="check-feed-"]'); await a.unt
 check('About has the feed’s line and Check now', await a.until(`!!document.querySelector('[id^="check-feed-"]')`), await feedSays());
 // Nothing is published yet.
 await checkNow();
-check('with nothing published, it says the feed couldn’t be read, and the plugins stay', await feedSays() === 'Couldn’t check for newer plugins: the feed answered 404.', await feedSays());
+check('with nothing published, it says the feed couldn’t be read, and the plugins stay', await feedSays() === 'Couldn’t check for newer plugins: the server answered 404. The ones here stay in use.', await feedSays());
 // Claude Code has starter-skills installed (as its own records say); then release 2 is published: document-tools moves
 // on to 1.3.0 and starter-skills is no longer offered.
 writeClaudeInstall(HOME, 'team-tools', 'starter-skills', '1.0.0', { 'skills/hello/SKILL.md': '---\nname: hello\ndescription: Says hello.\n---\n' });
@@ -248,7 +248,7 @@ check('Check now takes the newer plugins, and says so', (await feedSays()).start
 await a.shot('about-feed-1280');
 await a.click('#market-tab-plugins');
 check('the Plugins tab shows the newer version', await a.until(`document.querySelector('[data-plugin="document-tools"] .plugin-row-version')?.textContent === '1.3.0'`), await a.run(`document.querySelector('[data-plugin="document-tools"]')?.textContent`));
-check('a plugin no longer offered stays, since a tool has it installed, and says so', await a.run(`document.querySelector('[data-plugin="starter-skills"] .plugin-row-left')?.textContent`) === 'No longer offered; it stays where it is installed', await a.run(`[...document.querySelectorAll('.plugin-row')].map(row => row.dataset.plugin)`));
+check('a plugin no longer offered stays, since a tool has it installed, and says so', await a.run(`document.querySelector('[data-plugin="starter-skills"] .plugin-row-left')?.textContent`) === 'No longer offered', await a.run(`[...document.querySelectorAll('.plugin-row')].map(row => row.dataset.plugin)`));
 check('its files are still in the marketplace folder', existsSync(join(marketFolder, '_kept/starter-skills/skills/hello/SKILL.md')));
 check('the Plugins page fits with it', await a.fits());
 await a.shot('plugins-feed-1280');
@@ -259,7 +259,7 @@ rmSync(market, { recursive: true, force: true });
 truncateSync(join(feedDir, readdirSync(feedDir).filter(name => name.endsWith('.tgz')).sort().at(-1)), 300);
 await a.click('#market-tab-about');
 await checkNow();
-check('a broken publish is said, with why', /^Newer plugins \(.+\) are published, but they couldn’t be used\. Its archive is not the one its manifest describes.*The ones here stay in use\.$/.test(await feedSays()), await feedSays());
+check('a broken publish is said, with why', /^Newer plugins \(.+\) are published, but they didn’t arrive whole, so they weren’t used\. The ones here stay in use, and it is tried again by itself\.$/.test(await feedSays()), await feedSays());
 await a.shot('about-feed-broken-1280');
 await a.size(860, 560);
 check('About with the feed’s trouble fits at 860', await a.fits());

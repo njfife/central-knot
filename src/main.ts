@@ -565,7 +565,7 @@ function lookAtFeed(): Promise<void> {
     const result = await checkFeed({ feed, dataDir: app.getPath('userData'), appVersion: app.getVersion(), fetch: (url, init) => net.fetch(url, { ...init, cache: 'no-store' }), keep: carriedInstalled, turn: queued })
       .catch((error): FeedCheck => ({ outcome: 'failed', message: `Couldn’t check for newer plugins: ${error instanceof Error ? error.message : String(error)}` }));
     feedSeen = { checked: Date.now(), outcome: result.outcome, message: result.message };
-    log(`feed: ${result.outcome}: ${result.message}`);
+    log(`feed: ${result.outcome}: ${result.message}${result.detail ? ` (${result.detail})` : ''}`);
     if (result.outcome === 'updated' && result.active) {
       bundle = result.active;
       send('sync:changed');

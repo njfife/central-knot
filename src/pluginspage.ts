@@ -89,7 +89,7 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
         plugin.description && (holds || left) ? h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·') : null,
         holds ? h('span.plugin-row-holds', { title: holds }, holds) : null,
         // The link sits beside the words: a long app name shortens the words, never the link.
-        left && entry.bundled!.kept?.includes(plugin.name) ? h('span.plugin-row-left', {}, h('span.plugin-row-holds', { title: left }, 'No longer offered; it stays where it is installed'))
+        left && entry.bundled!.kept?.includes(plugin.name) ? h('span.plugin-row-left', {}, h('span.plugin-row-holds', { title: left }, 'No longer offered'))
           : left ? h('span.plugin-row-left', {}, h('span.plugin-row-holds', { title: `Can’t be installed from ${entry.bundled!.app}` }, `Can’t be installed from ${entry.bundled!.app}`), h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·'),
             h('button.text-action', { type: 'button', id: `pleft-${marketIndex}-${plugin.name}`, onclick: (event: Event) => { event.stopPropagation(); browse({ tab: 'about' }); } }, 'see why')) : null) : null,
       // A tool on another version or with another copy, on its own line under that, with Update for every tool that is behind.
