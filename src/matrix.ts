@@ -6,14 +6,15 @@ import { brandMark } from './brand.ts';
 import { caughtUpNames, DAY_MS } from './model.ts';
 import { andList, byToolOrder, capitalToolsPhrase, kindNouns, orList, problemText, toolName, toolNames, toolsPhrase } from './words.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
-import { whyReadOnly, otherOwnerSaid, saidInStatusBar, takeOverSync, takeOverTitle, tell, type Outcome, type Kind, harnessKindShown, convertAgent, flashRequests, showSkillsTable, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
+import { whyReadOnly, otherOwnerSaid, saidInStatusBar, takeOverSync, takeOverTitle, tell, type Outcome, type Kind, harnessKindShown, convertAgent, flashRequests, showSkillsTable, applyAgentsChanges, applyManage, applyMcpChanges, applyPluginSwitches, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, fitInView, h, icon, middle, pathText, pendingCount, toggle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { byKey, standing } from './roworder.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
 import type { Change, DestinationResult, HomeView, ManageView, SkillFacts, SyncNotice, HarnessId, PartsInstall, ThroughPlugin } from './types.ts';
 import { market } from './pluginstate.ts';
-import { pluginKey } from './pluginplan.ts';
+import { pluginKey, type PluginDraft } from './pluginplan.ts';
+import { cantSwitch, click as clickPluginItem, clickWords, standing as pluginStanding, type PluginItemAt } from './pluginswitch.ts';
 import { partOfPage, samePart, versionWord } from './pluginstatus.ts';
 import { cellWords, handledWhere, inTool, insideTitle, offIn, pageRows, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
 import { folded, lineDiff } from './diff.ts';
@@ -81,13 +82,58 @@ const plugged = () => (designMode || !state.home ? { rows: [] as PluginRow[], un
 /** A row of a plugin's: one of its parts, or an item some tool has through the plugin itself. */
 const fromAPlugin = (skill: SampleSkill) => fromPlugins(skill, kind).length > 0 || Object.keys(skill.plugin ?? {}).length > 0;
 
-/** One tool's box for a plugin's item: filled with the plugin's glyph where its copy brings it (marked when off there), else empty. Never a button: sync never copies or changes a plugin's own files. */
+/** One tool's box for a plugin's item: the item's switch there where the tool has the plugin (see pluginSwitchCell), else an empty box saying why not. Sync never copies or changes a plugin's own files. */
 function pluginCell(row: PluginRow, tool: Tool, id: string) {
-  const has = !!row.copies[tool as HarnessId];
-  const off = offIn(row, tool as HarnessId);
+  const install = row.installs[tool as HarnessId];
+  if (row.copies[tool as HarnessId] && install) return pluginSwitchCell({ kind: row.kind, name: row.name, tool: tool as HarnessId, install }, cellWords(row, tool as HarnessId), id);
   const words = cellWords(row, tool as HarnessId);
-  return h(`span.cell-button.cell-static${has ? '.cell-plugin.cell-on' : '.cell-absent'}${off ? '.cell-disabled' : ''}`, { id, role: 'img', title: words, 'aria-label': words, 'data-state': has ? (off ? 'plugin-off' : 'plugin') : 'plugin-none' },
-    has ? icon(PLUGIN_LOOK.glyph, 14) : null, off ? h('span.cell-disabled-mark', { 'aria-hidden': 'true' }, icon('circle-off', 9)) : null);
+  return h('span.cell-button.cell-static.cell-absent', { id, role: 'img', title: words, 'aria-label': words, 'data-state': 'plugin-none' });
+}
+
+/** The item a tool has through a plugin on a row of the person's own, with that plugin as the tool has it installed. */
+function itemThrough(skill: SampleSkill, tool: Tool): PluginItemAt | undefined {
+  const given = throughPluginHere(skill, tool);
+  const install = given && state.home?.pluginItems?.find(entry => entry.tool === tool && entry.plugin === given.plugin && entry.marketName === given.marketplace);
+  return install ? { kind: partOfPage[kind], name: given.name ?? skill.name ?? skill.key, tool: tool as HarnessId, install } : undefined;
+}
+
+/**
+ * One tool's box for an item it has through a plugin: the plugin's glyph, marked where it is off there, and a click turns
+ * it on or off there on Apply all (pluginswitch.ts), dashed blue while that waits. `said`: what the box shows, in words.
+ */
+function pluginSwitchCell(item: PluginItemAt, said: string, id: string) {
+  const { now, on } = pluginStanding(view.pluginDraft, item);
+  const why = cantSwitch(item) ?? (state.home ? whyReadOnly(state.home) : undefined);
+  const pending = on !== now;
+  const text = `${said}. ${why ?? clickWords(view.pluginDraft, item)}`.replace(/\.\. /, '. ');
+  return h(`button.cell-button.${PLUGIN_LOOK.tone}.cell-on${on ? '' : '.cell-disabled'}${pending ? '.cell-pending-edit' : ''}`, {
+    type: 'button', id, title: text, 'aria-label': text, 'data-state': pending ? (on ? 'plugin-turns-on' : 'plugin-turns-off') : on ? 'plugin' : 'plugin-off', disabled: !!why || !!state.busy,
+    onclick: (event: Event) => {
+      event.stopPropagation();
+      clickPluginItem(view.pluginDraft, item);
+      view.draftSaid = state.said.seq;
+      const count = pluginSwitchCount() + view.draft.size;
+      announce(count ? `${count} ${count === 1 ? 'change' : 'changes'} not applied yet.` : 'No changes.', true);
+      rerender();
+    } },
+    icon(PLUGIN_LOOK.glyph, 14), on ? null : h('span.cell-disabled-mark', { 'aria-hidden': 'true' }, icon('circle-off', 9)));
+}
+
+/** Every box on this page for an item a tool has through a plugin. */
+function pluginItemsShown(): PluginItemAt[] {
+  const own = committedList().flatMap(skill => toolList().map(tool => itemThrough(skill, tool)).filter((item): item is PluginItemAt => !!item));
+  const rows = plugged().rows.flatMap(row => (toolList() as HarnessId[]).flatMap(tool => (row.copies[tool] && row.installs[tool] ? [{ kind: row.kind, name: row.name, tool, install: row.installs[tool]! }] : [])));
+  return [...own, ...rows];
+}
+/** How many of those boxes turn on or off on Apply all; at least one while any plugin switch is chosen. */
+function pluginSwitchCount(): number {
+  if (!view.pluginDraft.size) return 0;
+  return Math.max(1, pluginItemsShown().filter(item => { const { now, on } = pluginStanding(view.pluginDraft, item); return now !== on; }).length);
+}
+/** "on", "off" or "on or off": which way the chosen plugin switches go. */
+function pluginTurns(): string {
+  const ways = new Set(pluginItemsShown().map(item => pluginStanding(view.pluginDraft, item)).filter(({ now, on }) => now !== on).map(({ on }) => on));
+  return ways.size === 1 ? ([...ways][0] ? 'on' : 'off') : 'on or off';
 }
 
 /** Opens the plugin's page on Plugins, found by its marketplace's name where the source each tool recorded is spelled otherwise. */
@@ -157,7 +203,7 @@ function pluginSection(list: PluginRow[]) {
   if (!list.length) return null;
   return h('div', { role: 'rowgroup' },
     h('div.ov-section.ov-section-plugins', { role: 'row' }, h('div.ov-section-label', { role: 'cell' }, h('strong', {}, 'From plugins'), h('span.ov-section-count', {}, String(list.length)),
-      sectionNote('they come and go with their plugin, and aren’t managed here'))),
+      sectionNote('they come and go with their plugin; a box turns one on or off in that tool'))),
     list.flatMap(pluginRowEl));
 }
 
@@ -260,6 +306,8 @@ interface Draft { managed: boolean; off: Tool[]; resolve?: Resolution; prior?: b
 const newView = () => ({
   committed: sample.map(skill => ({ ...skill })),
   draft: new Map<string, Draft>(),
+  /** Items that tools have through a plugin, turned on or off on Apply all with each tool's own switch (pluginswitch.ts). */
+  pluginDraft: new Map() as PluginDraft,
   /** When the draft last changed (state.said.seq): a result said before that steps aside for the pending changes. */
   draftSaid: 0,
   filter: 'all' as Filter,
@@ -285,7 +333,7 @@ const newView = () => ({
 });
 const views: Record<Kind, ReturnType<typeof newView>> = { skills: newView(), mcp: newView(), agents: newView() };
 /** Changes chosen in the skills, MCP servers and agents tables and not yet applied. */
-export const changesWaiting = () => Object.values(views).reduce((sum, view) => sum + view.draft.size, 0);
+export const changesWaiting = () => Object.values(views).reduce((sum, view) => sum + view.draft.size + view.pluginDraft.size, 0);
 /**
  * Opens a page already narrowed, for links that point at a problem (the Overview's or a harness card's "different copies").
  * `harness`: the harness page it opens on (none: the kind's own page), so the first draw there keeps this filter.
@@ -435,6 +483,12 @@ function resolve(key: string, choice: Resolution | undefined) {
 
 function applyAll() {
   const count = view.draft.size;
+  if (!designMode && view.pluginDraft.size) {
+    // Plugin switches first, on their own: the copies' Apply all (if any is chosen too) follows and says its own result.
+    const plugins = view.pluginDraft;
+    void applyPluginSwitches([...plugins.values()], plugins).then(() => { if (view.draft.size) applyAll(); });
+    return;
+  }
   if (!designMode) {
     const changes = [...view.draft].map(([key, draft]) => ({ key, managed: draft.managed, off: draft.off, use: draft.resolve, useHash: draft.seen, seenManaged: draft.seenManaged,
       ...switchChanges(key, draft), ...(draft.remove?.length ? { remove: draft.remove } : {}) })) as Change[];
@@ -507,7 +561,8 @@ function pendingSummary(count: number): string {
   const flips = next.flatMap(skill => toolList().filter(tool => hasCopyAfterApply(skill, tool) && switchQueued(skill.key, tool)).map(tool => !!skill.disabled?.includes(tool)));
   const disabling = flips.filter(Boolean).length, enabling = flips.length - disabling;
   const copies = (n: number, what: string) => (n ? ` · ${n} ${n === 1 ? 'copy' : 'copies'} ${what}` : '');
-  return `${plural(count, 'change')}${fresh ? ` · ${fresh} new ${fresh === 1 ? 'copy' : 'copies'}` : ''}${copies(replaced, 'to replace')}${copies(removed, 'to remove')}${copies(disabling, 'to disable')}${copies(enabling, 'to enable')}`;
+  const plugins = pluginSwitchCount();
+  return `${plural(count, 'change')}${fresh ? ` · ${fresh} new ${fresh === 1 ? 'copy' : 'copies'}` : ''}${copies(replaced, 'to replace')}${copies(removed, 'to remove')}${copies(disabling, 'to disable')}${copies(enabling, 'to enable')}${plugins ? ` · ${plugins} through a plugin to turn ${pluginTurns()}` : ''}`;
 }
 
 /**
@@ -525,7 +580,7 @@ function manageAllButton(ready: SampleSkill[], needChoice: number) {
 
 /** Pending changes and Apply all. `bulk` adds Manage all, which belongs with the whole list. */
 function changeBar(bulk = true) {
-  const count = view.draft.size;
+  const count = view.draft.size + pluginSwitchCount();
   const waiting = pendingSyncs(committedList());
   const ready = manageable();
   // Unmanaged items whose copies differ need a choice first, so Manage leaves them out and says so.
@@ -539,7 +594,7 @@ function changeBar(bulk = true) {
     // In a crowded toolbar the count shortens to "2 changes"; the full summary stays its tooltip and Apply all's.
     return h('div.apply', {}, manageAll,
       pendingCount(pending, plural(count, 'change')),
-      button({ variant: 'ghost', size: 'small', label: 'Discard', name: 'Discard these changes', id: 'discard', onclick: () => { view.draft.clear(); announce('Changes discarded. Nothing was written.'); rerender(); } }),
+      button({ variant: 'ghost', size: 'small', label: 'Discard', name: 'Discard these changes', id: 'discard', onclick: () => { view.draft.clear(); view.pluginDraft.clear(); announce('Changes discarded. Nothing was written.'); rerender(); } }),
       button({ variant: 'primary', size: 'small', label, id: 'apply', disabled: !canWrite(), attrs: { title: `${pending}. Nothing is written until Apply all.` }, onclick: applyAll }));
   }
   if (waiting) return h('div.apply', {}, manageAll, h('span.apply-count.apply-quiet', {}, `${waiting} to sync`), button({ variant: 'primary', size: 'small', label, id: 'apply', disabled: !canWrite(), onclick: applyAll }));
@@ -617,12 +672,15 @@ function cell(skill: SampleSkill, tool: Tool, inDetails = false) {
       h('button.cell-button.cell-removing.cell-pending-edit', { type: 'button', id: `cell-${skill.key}-${tool}${inDetails ? '-details' : ''}`, title: text, 'aria-label': text, 'data-state': 'removing',
         onclick: (event: Event) => { event.stopPropagation(); setRemoved(skill.key, [tool], false); } }, icon('minus', 16)));
   }
-  // Through a plugin installed in this tool: no copy of its own, and none is placed there. The box opens the plugin's page.
+  // Through a plugin installed in this tool: no copy of its own, and none is placed there. The box is the item's switch
+  // there (its own, or the whole plugin's), for Apply all.
   const given = throughPluginHere(skill, tool);
   if (given) {
-    const text = `${skill.cannot?.[tool] ?? `${names[tool]} has this through the plugin ${given.plugin}.`} Click to open the plugin’s page.`;
-    return h('div.ov-cell', { role: 'cell', 'data-tool': tool },
-      h(`button.cell-button.${PLUGIN_LOOK.tone}.cell-on${given.off ? '.cell-disabled' : ''}`, { type: 'button', id: `cell-${skill.key}-${tool}${inDetails ? '-details' : ''}`, 'data-state': 'plugin', title: text, 'aria-label': text,
+    const said = skill.cannot?.[tool] ?? `${names[tool]} has this through the plugin ${given.plugin}.`;
+    const item = itemThrough(skill, tool);
+    return h('div.ov-cell', { role: 'cell', 'data-tool': tool }, item
+      ? pluginSwitchCell(item, said, `cell-${skill.key}-${tool}${inDetails ? '-details' : ''}`)
+      : h(`button.cell-button.${PLUGIN_LOOK.tone}.cell-on${given.off ? '.cell-disabled' : ''}`, { type: 'button', id: `cell-${skill.key}-${tool}${inDetails ? '-details' : ''}`, 'data-state': 'plugin', title: `${said} Click to open the plugin’s page.`, 'aria-label': `${said} Click to open the plugin’s page.`,
         onclick: (event: Event) => { event.stopPropagation(); openPlugin(given); } }, icon(PLUGIN_LOOK.glyph, 14), given.off ? h('span.cell-disabled-mark', { 'aria-hidden': 'true' }, icon('circle-off', 9)) : null));
   }
   const { cell: drawn, on, pending, look, disabled, switching } = cellNow(skill, tool);
@@ -1610,7 +1668,7 @@ export { brandMark };
 function outcomeShown(outcome: Outcome, matrixPage: boolean): boolean {
   if (outcome.page !== state.page) return false;
   const named = [outcome.item, ...(outcome.items ?? [])].filter((name): name is string => !!name);
-  if (matrixPage && view.draft.size && (outcome.said ?? 0) < view.draftSaid) return false;
+  if (matrixPage && (view.draft.size || view.pluginDraft.size) && (outcome.said ?? 0) < view.draftSaid) return false;
   const choosing = matrixPage && view.comparing && committedList().some(skill => skill.key === view.comparing && syncOf(skill, toolList()) === 'attention' && named.some(name => name === skill.name || name.toLowerCase() === skill.key));
   if (choosing) return false;
   return !(state.skillsView === 'files' && state.item && !named.some(name => name.toLowerCase() === state.item));
@@ -1832,7 +1890,7 @@ function notices() {
 
 /** Pending changes belong to one home: opening another starts clean. */
 function forgetOtherHomes() {
-  if (!designMode && state.home?.home !== draftHomes[kind]) { view.draft.clear(); view.comparing = undefined; draftHomes[kind] = state.home?.home; keptNotices.delete(kind); }
+  if (!designMode && state.home?.home !== draftHomes[kind]) { view.draft.clear(); view.pluginDraft.clear(); view.comparing = undefined; draftHomes[kind] = state.home?.home; keptNotices.delete(kind); }
   // A change for a skill that is no longer there has nothing to apply to.
   // So is a choice of a copy that has gone or changed since it was chosen.
   const byKey = new Map(committedList().map(skill => [skill.key, skill]));
