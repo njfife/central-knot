@@ -249,7 +249,7 @@ test('Layout 4: a skills folder that is a link to the shared folder: the page sa
     const view = await manageView(box.context());
     assert.match(view.writes['copilot-cli']?.blocked ?? '', /is a link to .*\.agents\/skills/);
     const facts = view.skills.find(item => item.key === 'gamma')!;
-    assert.match(facts.copies['pi-cli']!.outside?.pinned ?? '', /only one GitHub Copilot can have/);
+    assert.match(facts.copies['pi-cli']!.outside?.pinned ?? '', /only one Copilot CLI can have/);
     const result = await applyChanges(box.context(), [manage('gamma')]);
     assert.equal(await readFile(join(shared, 'SKILL.md'), 'utf8'), text('gamma', 'Shared.'), 'the only copy Copilot can have stays');
     assert.equal(await there(join(box.home, PI, 'gamma')), false, 'Pi keeps reading it there: no second copy beside it');

@@ -426,7 +426,7 @@ async function pinnedShared(context: ShareContext, tools: HarnessId[], problems:
   const shared = await landingOf(sharedFolder(context));
   if (!shared) return undefined;
   for (const tool of tools) {
-    if (problems.get(tool) && await landingOf(rootOf(context, tool)) === shared) return `${harnesses[tool].name}'s skills folder is that same folder, so the copy there is the only one ${harnesses[tool].name} can have.`;
+    if (problems.get(tool) && await landingOf(rootOf(context, tool)) === shared) return `${toolName(tool)}’s skills folder is that same folder, so the copy there is the only one ${toolName(tool)} can have.`;
   }
   return undefined;
 }

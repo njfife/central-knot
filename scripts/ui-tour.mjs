@@ -993,6 +993,87 @@ async function toolViews(tag, home) {
   await a.click('#nav-harnesses'); await shot(a, `${tag}-harnesses`, `${home}: Harnesses.`);
 }
 
+// ---------- Skills kept by the `npx skills` installer: the shared ~/.agents/skills folder and links to it ----------
+// A folder home whose skill lives in .agents/skills with a link to it from Copilot CLI's folder (Pi reads the shared folder
+// itself). Each state at 860×560, 1280×800, 1728×1117 and 2560×1440; the main ones in light and dark.
+if (wanted('shared-copies')) {
+  begin('shared-copies');
+  const folder = join(scratch, 'shared-copies');
+  const cli = (path, version) => { mkdirSync(join(folder, path, '..'), { recursive: true }); writeFileSync(join(folder, path), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(join(folder, path), 0o755); };
+  cli('.local/bin/claude', '2.1.309 (Claude Code)'); cli('.local/bin/copilot', 'GitHub Copilot CLI 1.0.107.'); cli('.pi/agent/bin/pi', 'pi 1.5.0');
+  const skillAt = (dir, name, body) => { mkdirSync(join(dir, name), { recursive: true }); writeFileSync(join(dir, name, 'SKILL.md'), `---\nname: ${name}\ndescription: ${body}\n---\n\n${body}\n`); };
+  const [claude, copilot, pi, agents] = ['.claude/skills', '.copilot/skills', '.pi/agent/skills', '.agents/skills'].map(path => join(folder, path));
+  for (const dir of [claude, copilot, pi]) mkdirSync(dir, { recursive: true });
+  skillAt(claude, 'release-notes', 'Draft release notes from merged changes.');
+  const name = 'opus-sol-loop';
+  const install = () => { rmSync(join(agents, name), { recursive: true, force: true }); rmSync(join(copilot, name), { recursive: true, force: true }); skillAt(agents, name, 'Loop two models over a plan until they agree.'); symlinkSync(`../../.agents/skills/${name}`, join(copilot, name)); };
+  install();
+  const settings = join(scratch, 'data/app-settings.json');
+  const openFolder = async path => {
+    a.quit(); await wait(500);
+    writeFileSync(settings, JSON.stringify({ ...JSON.parse(existsSync(settings) ? readFileSync(settings, 'utf8') : '{}'), home: { mode: 'custom', path } }));
+    a = await launch();
+    await a.click('#nav-skills');
+  };
+  await openFolder(folder);
+  const sizes = [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]];
+  /** One state at every size (and in light too when `both`), with `into` scrolled into view first. */
+  const everySize = async (tag, caption, into, both = false) => {
+    for (const theme of both ? ['dark', 'light'] : ['dark']) {
+      await a.theme(theme);
+      for (const [width, height] of sizes) {
+        await a.size(width, height);
+        if (into) await a.run(`document.querySelector(${JSON.stringify(into)})?.scrollIntoView({ block: 'center' })`);
+        await shot(a, `${tag}-${theme}-${width}`, `${caption} (${theme}, ${width}×${height})`);
+      }
+    }
+    await a.theme('dark'); await a.size(1280, 800);
+  };
+  const open = async () => { if (!(await a.has(`#outside-${name}, #delete-${name}`))) await a.click(`#open-${name}`); };
+  await open();
+  await everySize('unmanaged', `Opened ${name}: the real folder is in ~/.agents/skills, Copilot CLI's skills folder has a link to it, Pi reads the shared folder. The details say where the copies are and what Manage and Delete everywhere do.`, `#outside-${name}`, true);
+  await a.click(`.ov-row[data-key="${name}"] .switch`);
+  await everySize('manage-pending', `Switched Managed on (not applied yet): the details say what Apply all will also do to the link and the shared copy. (Apply all's tooltip counts them too.)`, `#outside-${name}`, true);
+  await a.click('#apply');
+  await everySize('managed', 'Clicked "Apply all": the band says what was done to which folder, with Undo; the skill is an ordinary managed one.', '.band-done', true);
+  await a.click('#outcome-undo-takeover');
+  await open();
+  await everySize('undone', 'Clicked "Undo" in that band: the link and the shared copy are back, the new copies are gone, and the skill is unmanaged again.', '.band-done');
+  await a.click(`#delete-${name}`);
+  await everySize('delete-armed', `Clicked "Delete everywhere…" on the unmanaged skill: the second click is offered, and it says it also removes the link (not what it leads to) and the shared copy.`, `#delete-note-${name}`, true);
+  await a.click(`#delete-confirm-${name}`);
+  await everySize('deleted', 'Clicked "Delete opus-sol-loop from every tool now": every copy is gone, the link removed as a link, the shared copy too; History keeps them.', '.band-done', true);
+  // Installed again and managed; then the installer puts the shared copy and the link back: the page offers to deal with them.
+  install();
+  await a.click('#header-refresh');
+  await a.click(`.ov-row[data-key="${name}"] .switch`);
+  await a.click('#apply');
+  install();
+  await a.click('#header-refresh');
+  await open();
+  await everySize('came-back', 'Managed, then the installer put the shared copy and the link back ("Refresh"): the details say so and offer "Replace with managed copies…". Background sync leaves them alone.', `#outside-${name}`, true);
+  await a.click(`#takeover-${name}`);
+  await everySize('came-back-armed', 'Clicked "Replace with managed copies…": the second click is offered, saying what goes.', `#takeover-note-${name}`);
+  await a.click(`#takeover-confirm-${name}`);
+  await everySize('came-back-replaced', 'Clicked "Replace them now": the link is a real copy again and the shared copy is gone, with Undo.', '.band-done');
+  await open();
+  await a.click(`#delete-${name}`);
+  await everySize('managed-delete-armed', 'Clicked "Delete everywhere…" on the managed skill: it asks once more.', `#delete-confirm-${name}`);
+  await a.click(`#delete-confirm-${name}`);
+  await everySize('managed-deleted', 'Clicked "Delete opus-sol-loop from every tool now": deleted everywhere, with Restore.', '.band-done');
+  // Layout 4: Copilot CLI's whole skills folder is a link to the shared folder, so the copy there is the only one it can have.
+  const linked = join(scratch, 'shared-root');
+  for (const [path, version] of [['.local/bin/claude', '2.1.309 (Claude Code)'], ['.local/bin/copilot', 'GitHub Copilot CLI 1.0.107.'], ['.pi/agent/bin/pi', 'pi 1.5.0']]) { mkdirSync(join(linked, path, '..'), { recursive: true }); writeFileSync(join(linked, path), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(join(linked, path), 0o755); }
+  mkdirSync(join(linked, '.claude/skills'), { recursive: true }); mkdirSync(join(linked, '.pi/agent/skills'), { recursive: true }); mkdirSync(join(linked, '.copilot'), { recursive: true });
+  skillAt(join(linked, '.agents/skills'), 'gamma', 'A skill the installer keeps in the shared folder.');
+  symlinkSync('../.agents/skills', join(linked, '.copilot/skills'));
+  await openFolder(linked);
+  if (!(await a.has('#outside-gamma'))) await a.click('#open-gamma');
+  await everySize('linked-skills-folder', 'A folder whose Copilot CLI skills folder is itself a link to ~/.agents/skills: opened gamma. The details say the shared copy is the only one Copilot CLI can have, so Managing leaves it there; no action is offered that could not work.', '#outside-gamma', true);
+  await a.click('#delete-gamma');
+  await everySize('linked-skills-folder-delete-armed', 'Clicked "Delete everywhere…" there: it says what it removes.', '#delete-confirm-gamma');
+}
+
 if (wanted('missing')) {
   begin('missing');
   await a.click('#home-fixture');
