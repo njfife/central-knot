@@ -2216,6 +2216,13 @@ async function suggestedFlow() {
   same('with Claude Code alone, its own marketplace is suggested, and no other tool’s', await offered(a), ['claude-plugins-official · For Claude Code']);
   check('a suggestion has Add and a way to say no', await a.exists('#suggested-add-anthropics-claude-plugins-official') && await a.exists('#suggested-no-anthropics-claude-plugins-official'));
   await fitsAtMinimum(a, 'the empty Plugins page with a suggestion');
+  // Said no to on the empty page: it goes at once, with a note and Undo, and Undo offers it again.
+  await a.click('#suggested-no-anthropics-claude-plugins-official');
+  same('declined on the empty page, it leaves at once', await offered(a), []);
+  check('with a note and Undo', /claude-plugins-official won’t be suggested again\./.test(await a.text('.plugins-page') ?? '') && await a.exists('#outcome-suggest-again'), await a.text('.plugins-page'));
+  await a.click('#outcome-suggest-again');
+  const again = `${await a.text('.plugins-page') ?? ''} ${await a.run(`document.querySelector('#announcement').dataset.text`) ?? ''}`;
+  same('Undo offers it again, and says so', [await offered(a), /claude-plugins-official is suggested again\./.test(again), await a.exists('#outcome-suggest-again')], [['claude-plugins-official · For Claude Code'], true, false]);
   await pictures('suggested-empty');
   // Copilot CLI joins the home: its marketplace is offered too.
   cli('.local/bin/copilot', 'GitHub Copilot CLI 1.0.109.');
