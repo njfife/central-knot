@@ -2198,6 +2198,53 @@ async function openCodeFlow() {
   await p.quit();
 }
 
+/**
+ * Marketplaces offered without being looked for: each plugin tool's own default, where that tool is here. Nothing is
+ * fetched to offer one, so this flow never reaches the network (it never clicks Add).
+ */
+async function suggestedFlow() {
+  const home = join(scratch, 'home-suggested');
+  const cli = (path, version) => { mkdirSync(join(home, path, '..'), { recursive: true }); writeFileSync(join(home, path), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(join(home, path), 0o755); };
+  cli('.local/bin/claude', '2.1.309 (Claude Code)');
+  mkdirSync(join(home, '.claude'), { recursive: true });
+  const onlyHere = { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' };
+  const data = join(scratch, 'suggested-data');
+  const a = await launch(data, flag('--electron') ? ['--as-released'] : [], home, onlyHere);
+  const pictures = async name => { if (!shots) return; for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); await a.shot(`${name}-${width}`); } await fullSize(a); };
+  const offered = page => page.all('.market-suggestion', `e.querySelector('.market-suggestion-name').textContent + ' · ' + e.querySelector('.market-suggestion-meta').textContent`);
+  await a.click('#nav-plugins');
+  same('with Claude Code alone, its own marketplace is suggested, and no other tool’s', await offered(a), ['Claude plugins · For Claude Code']);
+  check('a suggestion has Add and a way to say no', await a.exists('#suggested-add-anthropics-claude-plugins-official') && await a.exists('#suggested-no-anthropics-claude-plugins-official'));
+  await fitsAtMinimum(a, 'the empty Plugins page with a suggestion');
+  await pictures('suggested-empty');
+  // Copilot CLI joins the home: its marketplace is offered too.
+  cli('.local/bin/copilot', 'GitHub Copilot CLI 1.0.109.');
+  mkdirSync(join(home, '.copilot'), { recursive: true });
+  await a.click('#header-refresh');
+  same('each tool here brings its own', await offered(a), ['Claude plugins · For Claude Code', 'Awesome Copilot · For Copilot CLI']);
+  // With a marketplace on the list, the suggestions sit under it.
+  const market = join(scratch, 'suggested-market');
+  writeMarket(market);
+  await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)})`);
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && !(await a.exists('.market-list .market-suggested')); tries++) await wait(100);
+  same('beside a marketplace on the list, the suggestions are under the list', await offered(a), ['Claude plugins · For Claude Code', 'Awesome Copilot · For Copilot CLI']);
+  await fitsAtMinimum(a, 'Plugins with a marketplace and two suggestions');
+  await pictures('suggested-under-list');
+  // Said no to: gone at once, and not offered again after a restart.
+  await a.click('#suggested-no-github-awesome-copilot');
+  for (let tries = 0; tries < 50 && (await offered(a)).length !== 1; tries++) await wait(100);
+  same('a declined suggestion leaves the page', await offered(a), ['Claude plugins · For Claude Code']);
+  same('no page errors, suggested marketplaces', a.pageErrors, []);
+  await a.quit();
+  const b = await launch(data, flag('--electron') ? ['--as-released'] : [], home, onlyHere);
+  await b.click('#nav-plugins');
+  for (let tries = 0; tries < 50 && !(await b.exists('.market-suggestion')); tries++) await wait(100);
+  same('and stays declined after a restart', await offered(b), ['Claude plugins · For Claude Code']);
+  same('no page errors, suggested marketplaces after a restart', b.pageErrors, []);
+  await b.quit();
+}
+
 async function realHomeFlow() {
   const before = { rich: tree(join(CLAUDE, 'rich')), unrelated: readFileSync(join(HOME, '.claude/unrelated.json'), 'utf8') };
   const a = await launch();
@@ -2474,7 +2521,7 @@ const started = Date.now();
 try {
   seedHome();
   // Each flow's time is printed, so a run that grows slow says where.
-  const flows = [harnessFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, listDiffersFlow, repoBaseFlow, draftFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
+  const flows = [harnessFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, suggestedFlow, listDiffersFlow, repoBaseFlow, draftFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
   const named = option('--flows')?.split(',');
   for (const flow of flows.filter(each => !named || named.includes(each.name))) {
     const from = Date.now();

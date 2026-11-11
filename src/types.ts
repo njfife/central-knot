@@ -149,6 +149,8 @@ export interface DesktopApi {
   /** Adds a marketplace; `source` is how it was stored, so the page can open exactly that one. */
   addMarketplace(source: string): Promise<{ problem?: string; view?: PluginsView; source?: string }>;
   forgetMarketplace(source: string): Promise<PluginsView | null>;
+  /** Stops offering a suggested marketplace. */
+  declineMarketplace(source: string): Promise<PluginsView | null>;
   pickMarketplaceFolder(): Promise<string | null>;
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
@@ -552,6 +554,8 @@ export interface PluginsView {
   desktopOnly?: Partial<Record<HarnessId, string>>;
   /** Each found CLI's version, where it could be read (a plugin skill's switch is offered only from a tested build). */
   versions?: Partial<Record<HarnessId, string>>;
+  /** Marketplaces offered without being looked for (suggested.ts): each with the tools here it is the default of. One click adds one; nothing is fetched before. */
+  suggested?: { source: string; name: string; tools: HarnessId[] }[];
 }
 
 // ---------- MCP servers ----------

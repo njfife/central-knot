@@ -279,6 +279,9 @@ export const forgetMarketplace = (source: string) => act('removing', async () =>
   tell({ page: 'plugins', item: name || undefined, text, act: { label: 'Add back', id: 'outcome-add-back', run: () => void addMarketplace(source) } });
 });
 
+/** Stops offering a suggested marketplace: it leaves the page at once and is not offered again. */
+export const declineMarketplace = (source: string) => act('removing', async () => { showView(await api().declineMarketplace(source)); });
+
 export const pickMarketplaceFolder = () => api().pickMarketplaceFolder();
 
 /** Opens an https link in the browser. */
