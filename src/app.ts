@@ -1068,6 +1068,7 @@ api().onSettingsChanged(() => { if (state.page === 'settings') void loadSettings
 
 // A background pass may change what differs from the git repo too: its page and sidebar count read again soon (no fetch).
 api().onSyncChanged(() => { loadRepoSoon(); void backgroundRefresh(); });
+api().onSaid(text => announce(text));
 
 /** Each page's sync notices in a view: what changed on its own, with its History event. */
 const noticesByPage = (view: HomeView): [Page, SyncNotice[]][] => [['skills', view.manage.notices], ['mcp', view.mcp.notices], ['agents', view.agents.notices]];

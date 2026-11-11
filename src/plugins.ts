@@ -824,27 +824,40 @@ async function native(context: PluginContext, tool: PluginTool, args: string[]):
 const installArgs = (tool: PluginTool, id: string) => ({ 'claude-cli': ['plugin', 'install', id, '--scope', 'user'], 'copilot-cli': ['plugin', 'install', id], 'codex-cli': ['plugin', 'add', id, '--json'] })[tool];
 const uninstallArgs = (tool: PluginTool, id: string) => ({ 'claude-cli': ['plugin', 'uninstall', id, '--scope', 'user'], 'copilot-cli': ['plugin', 'uninstall', id], 'codex-cli': ['plugin', 'remove', id, '--json'] })[tool];
 
-/** Installs one plugin into one tool: adds the marketplace there if needed (never replacing a different one of the same name), installs, then reads the tool's record. */
-export async function install(context: PluginContext, catalog: Catalog, plugin: string, tool: PluginTool): Promise<ActionReport> {
-  const runs: NativeRun[] = [];
+/**
+ * Adds a marketplace to one tool's own list, with the tool's own command, unless it is there already: `there` (nothing ran),
+ * `added`, `held` (the tool can't take it, or has a different marketplace under its name, which is never replaced) or
+ * `failed`, each with words to show. Nothing is installed.
+ */
+export async function addMarketplace(context: PluginContext, catalog: Catalog, tool: PluginTool): Promise<{ outcome: 'there' | 'added' | 'held' | 'failed'; message: string; runs: NativeRun[] }> {
   const name = toolNames[tool];
   const refusal = tool === 'codex-cli' ? undefined : catalog.codexOnly ?? (tool === 'copilot-cli' ? catalog.copilotRefuses : undefined);
-  if (refusal) return { tool, outcome: 'held', message: `${refusal} Nothing was added to ${name}.`, runs };
-  // Held first: a same-named plugin installed from the other marketplace is not this one "already installed".
+  if (refusal) return { outcome: 'held', message: `${refusal} Nothing was added to ${name}.`, runs: [] };
   const held = await heldBy(context, tool, catalog.name, catalog.source);
-  if (held) return { tool, outcome: 'held', message: heldReason(tool, catalog.name, held), runs };
-  const already = await installState(context, tool, catalog.name, plugin);
-  if (already.state === 'installed') return { tool, outcome: 'installed', message: `Already installed in ${name}.`, runs };
+  if (held) return { outcome: 'held', message: heldReason(tool, catalog.name, held), runs: [] };
+  if (await registeredSource(context, tool, catalog.name)) return { outcome: 'there', message: `Already in ${name}’s own plugin list.`, runs: [] };
   // Codex's CLI won't add a marketplace to a home whose .codex folder doesn't exist yet (a fresh Practice copy).
   if (tool === 'codex-cli') await mkdir(configRootOf(context, tool), { recursive: true });
-  const registered = await registeredSource(context, tool, catalog.name);
-  if (!registered) {
-    // The tool's own add fetches a Git marketplace and fails silently, so this computer's access is checked first.
-    const access = catalog.kind === 'git' && context.binaries[tool] ? await checkAccess(context, catalog.source) : undefined;
-    if (access && access.state !== 'ok') return { tool, outcome: 'failed', message: `${access.message} Nothing was added to ${name}.`, runs };
-    const add = await native(context, tool, ['plugin', 'marketplace', 'add', catalog.source]);
-    runs.push(add);
-    if (!add.ok) return { tool, outcome: 'failed', message: `Could not add the marketplace. ${lastLines(add.output)}`.trim(), runs };
+  // The tool's own add fetches a Git marketplace and fails silently, so this computer's access is checked first.
+  const access = catalog.kind === 'git' && context.binaries[tool] ? await checkAccess(context, catalog.source) : undefined;
+  if (access && access.state !== 'ok') return { outcome: 'failed', message: `${access.message} Nothing was added to ${name}.`, runs: [] };
+  const add = await native(context, tool, ['plugin', 'marketplace', 'add', catalog.source]);
+  // Only the tool's own record counts: a command that said it worked and listed nothing did not add it.
+  if (add.ok && (await registeredSource(context, tool, catalog.name))) return { outcome: 'added', message: `Added to ${name}’s own plugin list.`, runs: [add] };
+  return { outcome: 'failed', message: `Could not add the marketplace${add.ok ? `: ${name} doesn’t list it` : ''}. ${lastLines(add.output)}`.trim(), runs: [add] };
+}
+
+/** Installs one plugin into one tool: adds the marketplace there if needed (never replacing a different one of the same name), installs, then reads the tool's record. */
+export async function install(context: PluginContext, catalog: Catalog, plugin: string, tool: PluginTool): Promise<ActionReport> {
+  const name = toolNames[tool];
+  // Held first: a same-named plugin installed from the other marketplace is not this one "already installed".
+  const listed = await addMarketplace(context, catalog, tool);
+  const runs = listed.runs;
+  if (listed.outcome === 'held' || listed.outcome === 'failed') return { tool, outcome: listed.outcome, message: listed.message, runs };
+  const registered = listed.outcome === 'there';
+  if (registered) {
+    const already = await installState(context, tool, catalog.name, plugin);
+    if (already.state === 'installed') return { tool, outcome: 'installed', message: `Already installed in ${name}.`, runs };
   }
   const id = `${plugin}@${catalog.name}`;
   const installed = await native(context, tool, installArgs(tool, id));
