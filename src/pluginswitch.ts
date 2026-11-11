@@ -21,8 +21,15 @@ export const hasOwnSwitch = (tool: HarnessId, kind: PartKind) => (kind === 'skil
 export const ownSwitch = (item: PluginItemAt) => hasOwnSwitch(item.tool, item.kind);
 
 const where = (item: PluginItemAt) => ({ source: item.install.source ?? '', marketName: item.install.marketName, plugin: item.install.plugin, tool: item.tool });
-/** The plugin's items in that tool that have a switch of their own. */
-const switchable = (install: InstalledPlugin): Part[] => install.items.filter(entry => hasOwnSwitch(install.tool, entry.kind));
+/**
+ * Why an item's own switch can't be written in that tool, if it can't: Codex sets the plugin's MCP servers, or its skill
+ * rules, in a form not edited here; the skill is held off by a switch that isn't this plugin's own; or Copilot CLI's
+ * command line can't take the skill's name.
+ */
+const switchHeld = (install: InstalledPlugin, part: Part): string | undefined => (part.kind === 'mcp' ? install.serversHeld?.[part.name]
+  : part.kind === 'skill' ? install.switchesHeld ?? install.skillsHeld?.[part.name] ?? noSwitchReason(install.tool, undefined, part.name) : undefined);
+/** The plugin's items in that tool whose own switch can be written: those are held off when the plugin comes on for one item. */
+const switchable = (install: InstalledPlugin): Part[] => install.items.filter(entry => hasOwnSwitch(install.tool, entry.kind) && !switchHeld(install, entry));
 /** Whether the tool has this one item's own switch off now. */
 const itemOffNow = (install: InstalledPlugin, part: Part) => !!{ skill: install.skillsOff, mcp: install.serversOff, agent: install.agentsOff }[part.kind]?.some(name => samePart(part, { kind: part.kind, name }));
 
@@ -51,17 +58,13 @@ export function standing(draft: PluginDraft, item: PluginItemAt): { now: boolean
 export const LIVE_PLUGIN = 'Copilot CLI loads this plugin live from a folder, where turning it off is the same as uninstalling it. Uninstall it on the plugin’s page instead.';
 
 /**
- * Why this item can't be switched here, if it can't: Codex sets the plugin's MCP servers in a form not edited here; the
- * tool's skill switches are in a form not edited here, the skill is held off by a switch that isn't this plugin's own, or
- * Copilot CLI's command line can't take the skill's name; or the whole plugin would go, in Copilot CLI, where it is
- * loaded live from a folder. (A plugin whose marketplace the tool no longer lists is switched all the same: the tool
+ * Why this item can't be switched here, if it can't: its own switch can't be written (switchHeld), or the whole plugin
+ * would go, in Copilot CLI, where it is loaded live from a folder. (A plugin whose marketplace the tool no longer lists is switched all the same: the tool
  * still loads it, and has no other marketplace of that name to mistake it for.)
  */
 export function cantSwitch(item: PluginItemAt): string | undefined {
   if (!ownSwitch(item)) return item.tool === 'copilot-cli' && item.install.live ? LIVE_PLUGIN : undefined;
-  if (item.kind === 'mcp') return item.install.serversHeld?.[item.name];
-  if (item.kind !== 'skill') return undefined;
-  return item.install.switchesHeld ?? item.install.skillsHeld?.[item.name] ?? noSwitchReason(item.tool, undefined, item.name);
+  return switchHeld(item.install, item);
 }
 
 /**
@@ -129,8 +132,10 @@ export function clickWords(draft: PluginDraft, item: PluginItemAt): string {
   if (on) return `${tool} has no switch for one ${partWords[item.kind][0]} of a plugin. Click to turn the whole plugin ${plugin} off in ${tool} on Apply all${rest.length ? `, with its ${counted(rest)}` : ''}.`;
   if (!wholeOffAfter(draft, item)) return `Click to turn it on in ${tool} on Apply all.`;
   if (ownSwitch(item)) {
-    // What comes on beside this item: whatever the plugin brings that has no switch of its own there.
-    const brought = rest.filter(entry => !hasOwnSwitch(item.tool, entry.kind));
+    // What comes on beside this item: whatever the plugin brings that can't be held off there (no switch of its own, or
+    // one that can't be written), and isn't off by its own switch already.
+    const held = switchable(item.install);
+    const brought = rest.filter(entry => !held.some(part => samePart(part, entry)) && !itemOffNow(item.install, entry));
     return `Click to turn the plugin ${plugin} on in ${tool} on Apply all with only this ${partWords[item.kind][0]} on${brought.length ? `; its ${counted(brought)} ${brought.length === 1 ? 'comes' : 'come'} on too` : ''}.`;
   }
   // What comes on with the plugin: everything but the items their own switch keeps off.
@@ -144,7 +149,9 @@ export function pendingWords(draft: PluginDraft, item: PluginItemAt): string {
   if (on === now) return '';
   const whole = queuedWhole(draft, where(item).source, item.install.plugin, item.tool);
   const others = whole && !ownSwitch(item) ? item.install.items.filter(entry => !samePart(entry, item)) : [];
-  return `Apply all turns it ${on ? 'on' : 'off'}${others.length ? `, with the whole plugin (${plural(others.length, 'other item')})` : ''}.`;
+  // One item turned on in a plugin that is off: the plugin comes on, and its other items' switches are written off.
+  const alone = on && whole === 'plugin-on' && ownSwitch(item) && switchable(item.install).some(part => !samePart(part, item) && itemOffAfter(draft, item, part) && !itemOffNow(item.install, part));
+  return `Apply all turns it ${on ? 'on' : 'off'}${others.length ? `, with the whole plugin (${plural(others.length, 'other item')})` : alone ? `: the plugin ${item.install.plugin} comes on with its other items left off` : ''}.`;
 }
 
 /**

@@ -299,8 +299,10 @@ export function resultLines(ran: PluginDone[], undo = false, { after = false } =
   // A plugin that came on with other items held off (one item turned on in a plugin that was off, pluginswitch.ts) is one
   // line, "turned on in Codex with triage left off", not a line more for each item held.
   const itemSaid = (entry: PluginDone) => (entry.part ? `${partWords[entry.part.kind][0]} ${entry.part.name}` : entry.skill!);
-  const heldWith = (whole: PluginDone) => (undo || whole.action !== 'plugin-on' || !whole.report.changed ? []
-    : ran.filter(entry => entry.source === whole.source && entry.plugin === whole.plugin && entry.tool === whole.tool && (entry.action === 'skill-off' || entry.action === 'part-off') && entry.report.changed));
+  // (Its Undo is the same the other way round: the plugin is off again, and the items' own switches going back say nothing more.)
+  const heldWith = (whole: PluginDone) => (whole.action !== (undo ? 'plugin-off' : 'plugin-on') || !whole.report.changed ? []
+    : ran.filter(entry => entry.source === whole.source && entry.plugin === whole.plugin && entry.tool === whole.tool && entry.report.changed
+      && (undo ? entry.action === 'skill-on' || entry.action === 'part-on' : entry.action === 'skill-off' || entry.action === 'part-off')));
   const folded = new Set(ran.flatMap(heldWith));
   const done = ran.filter(entry => !folded.has(entry));
   const lineKey = (entry: PluginDone) => `${pluginKey(entry.source, entry.plugin)}\u0000${switchSlot(entry)}`;
@@ -333,7 +335,7 @@ export function resultLines(ran: PluginDone[], undo = false, { after = false } =
       [mine.filter(entry => isParts(entry.action) && entry.report.replacedLinks?.length).map(entry => names[entry.tool]), 'a broken link replaced in'],
     ];
     const [off, on] = part ? ['part-off', 'part-on'] as const : ['skill-off', 'skill-on'] as const;
-    const onWith = mine.filter(entry => heldWith(entry).length);
+    const onWith = undo ? [] : mine.filter(entry => heldWith(entry).length);
     const groups: Group[] = item
       ? [[tools(off, true), undo ? `${item} off again in` : `${item} turned off in`], [tools(on, true), undo ? `${item} back on in` : `${item} turned on in`],
         [tools(off, false), `${item} already off in`], [tools(on, false), `${item} already on in`]]

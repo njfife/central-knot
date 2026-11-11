@@ -127,7 +127,7 @@ export function toolWords(row: PluginRow, tool: HarnessId): string {
 /** Where a plugin's item is handled, in one sentence: on its page, or, with its marketplace nowhere here, in the tool itself. */
 export function handledWhere(row: PluginRow): { listed: boolean; text: string } {
   const listed = Object.values(row.installs).some(install => install?.listed);
-  if (listed) return { listed, text: 'Installed, updated, turned off and removed with the plugin, on ' };
+  if (listed) return { listed, text: 'Installed, updated and removed with the plugin, on ' };
   const tools = pluginTools(row).map(tool => names[tool]);
   if (row.marketName === DIRECTORY) return { listed, text: `Installed in ${andList(tools)} from the Anthropic Directory. Claude Code’s own /plugin updates, turns off or removes it.` };
   return { listed, text: `Installed in ${andList(tools)} from the marketplace “${row.marketName}”, which isn’t added in Central Knot or in ${tools.length === 1 ? 'that tool' : 'those tools'} now, so the plugin has no page here. ${tools.length === 1 ? `${tools[0]}’s` : 'Each tool’s'} own plugin commands update, turn off or remove it.` };

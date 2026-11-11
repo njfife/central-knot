@@ -50,6 +50,7 @@ test('turning on one item of a plugin that is off as a whole turns the plugin on
   // `two` is off already; the servers are held off, then the plugin comes on.
   assert.deepEqual(chosen(draft), ['codex-cli part-off mcp issues', 'codex-cli part-off mcp wiki', 'codex-cli plugin-on']);
   assert.deepEqual([standing(draft, one).on, standing(draft, item(codex, 'skill', 'two')).on, standing(draft, item(codex, 'mcp', 'issues')).on], [true, false, false]);
+  assert.equal(pendingWords(draft, one), 'Apply all turns it on: the plugin full comes on with its other items left off.');
   // A second item turned on beside it only drops its own hold.
   click(draft, item(codex, 'mcp', 'issues'));
   assert.deepEqual(chosen(draft), ['codex-cli part-off mcp wiki', 'codex-cli plugin-on']);
@@ -66,6 +67,13 @@ test('turning on one item of a plugin that is off as a whole turns the plugin on
   assert.equal(clickWords(new Map(), item(claude, 'skill', 'one')), 'Click to turn the whole plugin full on in Claude Code on Apply all, with its 1 skill, 2 MCP servers and 1 agent.');
   // An item its own switch keeps off doesn't come on with the plugin, so it isn't counted.
   assert.equal(clickWords(new Map(), item(installed('claude-cli', { off: true, serversOff: ['wiki'], agentsOff: ['helper'] }), 'skill', 'one')), 'Click to turn the whole plugin full on in Claude Code on Apply all, with its 1 skill and 1 MCP server.');
+  // An item whose own switch can't be written is never held off (its switch would fail, and it would come on unsaid): it
+  // is said as coming on with the plugin instead.
+  const inlineSkills = installed('codex-cli', { off: true, switchesHeld: 'Inline.' });
+  const held: PluginDraft = new Map();
+  assert.equal(clickWords(held, item(inlineSkills, 'mcp', 'issues')), 'Click to turn the plugin full on in Codex on Apply all with only this MCP server on; its 2 skills come on too.');
+  click(held, item(inlineSkills, 'mcp', 'issues'));
+  assert.deepEqual(chosen(held), ['codex-cli part-off mcp wiki', 'codex-cli plugin-on']);
   // Held-off items never stay chosen unseen: the plugin taken back to off takes its holds with it.
   const unseen: PluginDraft = new Map();
   click(unseen, item(claude, 'mcp', 'issues'));
@@ -127,5 +135,7 @@ test('a plugin that came on for one item says so in one line, with what was left
   assert.deepEqual(resultLines(done).map(line => line.text), ['turned on in Claude Code; turned on in Codex with two and MCP server wiki left off']);
   // On its own, each switch is its own line; an Undo says each thing that came back.
   assert.deepEqual(resultLines(done.slice(0, 2)).map(line => line.text), ['two turned off in Codex', 'MCP server wiki turned off in Codex']);
-  assert.equal(resultLines(done, true).length, 3);
+  // Its Undo, as it runs: the plugin off again, then each held item's switch back. One line: the plugin is off again.
+  const undone = [ran({ action: 'plugin-off' }, 'plugin-off'), ran({ part: { kind: 'mcp', name: 'wiki' }, action: 'part-on' }, 'part-on'), ran({ skill: 'two', action: 'skill-on' }, 'skill-on')];
+  assert.deepEqual(resultLines(undone, true).map(line => line.text), ['off again in Codex']);
 });

@@ -1036,7 +1036,11 @@ export async function update(context: PluginContext, catalog: Catalog, plugin: s
   if (!serversOff.length || !report.runs.length) return report;
   const after = await copyNow();
   const lost = serversOff.filter(server => after?.contents?.mcpServers.some(candidate => candidate.name === server) && !after.serversOff?.includes(server));
-  for (const server of lost) report.runs.push(...(await setPart(context, catalog.name, plugin, { kind: 'mcp', name: server }, tool, false, catalog.source)).runs);
+  for (const server of lost) {
+    const again = await setPart(context, catalog.name, plugin, { kind: 'mcp', name: server }, tool, false, catalog.source);
+    report.runs.push(...again.runs);
+    if (again.outcome !== 'part-off') report.notes = [...(report.notes ?? []), `Its MCP server ${server} was off in ${toolNames[tool]}, and the update turned it on. It couldn’t be turned off again: ${again.message}`];
+  }
   return report;
 }
 
