@@ -63,7 +63,7 @@ export interface ItemRow {
   /** No tool has a copy any more; History can put it back. */
   gone?: GoneItem;
   /** Each tool whose copy was removed to turn it off (no switch there), with the History removal that puts it back. */
-  removed?: { tool: Tool; history: string }[];
+  removed?: { tool: Tool; history: string; source?: Tool }[];
 }
 
 /** The tools whose copy Off removed (History keeps each): `turnedUp`, those of them with a copy again since; else those with none. */

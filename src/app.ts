@@ -559,7 +559,8 @@ const openHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mod
 
 /** At launch: the home last opened (so sync resumes where it was), else this computer's home (dev builds: the practice copy). */
 export const startHome = () => busy('Reading skills, MCP servers and agents…', async () => {
-  const view = await api().startHome();
+  // Read with the settings: an item page's Off goes by one of them, so no row is shown (or clicked) before they are known.
+  const [view] = await Promise.all([api().startHome(), loadSettings()]);
   // The first read is said the same way as a home switch: a band, not a passing status line.
   const practiceNote = view?.mode === 'fixture' && practiceNoteOpen();
   if (!view) { announce(''); return; }
@@ -1258,9 +1259,9 @@ api().onNavigate(page => {
 });
 // Settings changed by a menu, a dialog or the system: main says so after every save and whenever the window comes back, and an
 // open Settings page reads them again, so it never shows (or writes back) a value that is no longer the saved one.
-// The item pages read one of them too (what Off does where a tool has no switch), so they are read on every page.
+// The item pages read one of them too (what Off does where a tool has no switch), so they are read on every page; the first
+// read comes with the home (startHome).
 api().onSettingsChanged(() => void loadSettings());
-void loadSettings();
 
 // A background pass may change what differs from the git repo too: its page and sidebar count read again soon (no fetch).
 api().onSyncChanged(() => { loadRepoSoon(); void backgroundRefresh(); });

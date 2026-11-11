@@ -305,7 +305,7 @@ export interface SkillFacts {
    * Each tool whose copy was removed to turn it off (no switch there), with the open History removal that keeps it (the latest
    * for that tool): turning it on there puts it back. A tool listed here that has a copy again had one turn up since.
    */
-  removed?: { tool: HarnessId; history: string }[];
+  removed?: { tool: HarnessId; history: string; /** Agents: a one-way copy, and the tool it receives from: turned on after that one. */ source?: HarnessId }[];
 }
 
 /** An item with no copy left, from the History event that took the last one: when, and the event that puts it back. */

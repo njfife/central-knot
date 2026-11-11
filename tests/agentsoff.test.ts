@@ -70,8 +70,10 @@ test('Off removes every copy, History keeps them whatever its age, and On puts e
     const removal = await latest(box, 'removed');
     assert.deepEqual([turned.made, removal.turnedOff, removal.unmanaged, removal.stoppedSync], [[removal.id], true, true, tools]);
     // Its row stays, off, with each tool's copy in History; the next plain pass writes nothing and puts nothing back.
+    // It still says what it is; its receiving copies wait for their source's.
     const view = await agentsView(box.context, tools);
-    assert.deepEqual([view.servers, view.gone?.map(item => [item.key, item.gone?.turnedOff, item.removed?.map(entry => entry.tool)])], [[], [['reviewer', true, tools]]]);
+    assert.deepEqual([view.servers, view.gone?.map(item => [item.key, item.gone?.turnedOff, item.description, item.removed])], [[], [['reviewer', true, 'Reviews code',
+      [{ tool: 'claude-cli', history: removal.id }, { tool: 'copilot-cli', history: removal.id, source: 'claude-cli' }, { tool: 'codex-cli', history: removal.id, source: 'claude-cli' }]]]]);
     assert.equal((await applyAgents(box.context, tools, [], { settleMs: 0 })).writes, 0);
     // A year later, past History's days, and after a prune: the row and its way back are still there.
     const later = at(box, 365);
@@ -129,7 +131,7 @@ test('After Off everywhere, one tool’s switch puts back that tool’s copy alo
     assert.deepEqual([record?.state, record?.off, record?.origin], ['shared', ['copilot-cli', 'codex-cli'], 'claude-cli']);
     // The rest of the removal stays open, and so on offer; no pass gives the others a copy.
     assert.equal((await applyAgents(box.context, tools, [], { settleMs: 0 })).writes, 0);
-    assert.deepEqual((await agentsView(box.context, tools)).servers[0].removed, [{ tool: 'copilot-cli', history: removal }, { tool: 'codex-cli', history: removal }]);
+    assert.deepEqual((await agentsView(box.context, tools)).servers[0].removed, [{ tool: 'copilot-cli', history: removal, source: 'claude-cli' }, { tool: 'codex-cli', history: removal, source: 'claude-cli' }]);
     assert.deepEqual((await readHistory(at(box, 365))).find(event => event.id === removal)?.restoredTools, ['claude-cli'], 'still standing, a year on');
     // Its Undo: Claude Code's copy goes again, and the agent is off everywhere as before.
     assert.equal((await restoreAgent(box.context, tools, one.made![0])).stopped, undefined);

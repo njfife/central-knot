@@ -332,6 +332,17 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
     const given = through.get(tool)?.get(fact.key);
     if (given) { (fact.plugin ??= {})[tool] = given; fact.cannot[tool] = throughPlugin(tool, given, 'agent'); }
   }
+  // An Off row still says what the agent is: the description of the copy History keeps.
+  for (const fact of gone) {
+    const loser = history.find(event => event.id === fact.gone!.history)?.losers[0];
+    const version = loser && await kept(context, fact.key, loser.hash);
+    if (version) fact.description = version.agent.description;
+  }
+  // A one-way copy turned off receives from the source on record: turning it on alone, before its source, would leave it nothing to receive.
+  for (const fact of [...agents, ...gone]) if (fact.removed) {
+    const origin = record.items[fact.key]?.origin;
+    fact.removed = fact.removed.map(entry => (origin && origin !== entry.tool && history.find(event => event.id === entry.history)?.losers.find(loser => loser.tool === entry.tool)?.record?.oneWay ? { ...entry, source: origin } : entry));
+  }
   return { tools: present, servers: agents, gone, claudePending: [], access: await writeAccess(context), gate: problem ? { state: 'stopped', reason: problem } : await syncGate(context), problems, notices };
 }
 

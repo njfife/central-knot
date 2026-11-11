@@ -367,7 +367,7 @@ if (wanted('agents')) {
   writeFileSync(codexNotes, codexNotesText.replace('one line each.', 'one line each. Codex’s own wording.'));
   await a.click('#header-refresh'); await a.settle();
   if (!(await a.has('#sync-release-notes-codex-cli'))) await a.click('#open-release-notes');
-  await shot(a, 'agents-turned-up', 'Turned release-notes off, then its Codex file was written again by hand, worded otherwise, and Refresh clicked: Codex loads it, so the row is under “Not synced”, saying “also in Codex: turned up since it was turned off”; nothing was written anywhere.');
+  await shot(a, 'agents-turned-up', 'Turned release-notes off, then its Codex file was written again by hand, worded otherwise, and Refresh clicked: Codex loads it, so the row is under “Not synced”, tagged “turned up in Codex”; its status says so once, and Codex’s line that Central Knot leaves this copy alone until release-notes is turned on. Nothing was written anywhere.');
   await everyLook('agents-turned-up', 'The same.');
   // A copy choice and its Undo: turned on again, its copies differ (Codex's own), so it asks which copy every tool uses.
   await a.click('#switch-release-notes'); await a.settle();
@@ -419,16 +419,16 @@ if (wanted('agents')) {
   // With Settings keeping copies where a tool has no switch, Off changes nothing for an agent, and says so as a note.
   await a.click('#nav-settings'); await a.click('#remove-when-no-switch'); await waitFor(a, `document.querySelector('#remove-when-no-switch')?.getAttribute('aria-checked') === 'false'`);
   await a.click('#nav-agents'); await a.click('#switch-release-notes'); await a.settle();
-  await shot(a, 'agents-setting-off', 'Turned off “When a tool can’t turn something off, remove its copy there” in Settings, then clicked release-notes’ switch: nothing changed, said as a note (not a warning): “Still on in all 3 tools: they have no switch for agents.” The row stays under On.');
+  await shot(a, 'agents-setting-off', 'Turned off “When a tool can’t turn something off, remove its copy there” in Settings, then clicked release-notes’ switch: nothing changed, said as a note with nothing to click: “release-notes is still on in all 3 tools: they have no switch for agents, and Settings keeps their copies.” The row stays under On; in code-reviewer’s opened row each tool with a copy says “No switch here”, its source too.');
   await everyLook('agents-setting-off', 'The same.');
   await a.click('#nav-settings'); await a.click('#remove-when-no-switch'); await waitFor(a, `document.querySelector('#remove-when-no-switch')?.getAttribute('aria-checked') === 'true'`);
   await a.click('#nav-agents');
   // Delete everywhere: the only real delete. Every copy goes (History keeps it) and so does the row; on an Off row too.
   if (!(await a.has('#delete-release-notes'))) await a.click('#open-release-notes');
   await a.click('#delete-release-notes'); await a.settle();
-  await shot(a, 'agents-delete-armed', 'Opened release-notes and clicked “Delete everywhere…”: it asks once more, saying History keeps it.');
+  await shot(a, 'agents-delete-armed', 'Opened release-notes and clicked “Delete everywhere…”: it asks once more, saying how it differs from Off: “Removes it from every tool and from this page. History keeps it for 30 days.”');
   await a.click('#delete-confirm-release-notes'); await waitFor(a, `!document.querySelector('.ov-row[data-key="release-notes"]')`, 15000);
-  await shot(a, 'agents-deleted', 'Clicked “Delete from every tool now”: every copy is removed and the row is gone (no Off row is left); History keeps it, and the result offers Undo.');
+  await shot(a, 'agents-deleted', 'Clicked “Delete from every tool now”: every copy is removed and the row is gone (no Off row is left); the result says History keeps it for 30 days, with Undo.');
   await everyLook('agents-deleted', 'The same.');
   await a.click('#switch-code-reviewer'); await a.settle();
   if (!(await a.has('#delete-code-reviewer'))) await a.click('#open-code-reviewer');
@@ -460,9 +460,12 @@ if (wanted('agents')) {
     await a.click('#switch-release-reviewer'); await waitFor(a, `document.querySelector('#switch-release-reviewer')?.getAttribute('aria-checked') === 'true'`, 15000);
     await shot(a, 'agents-mixed-on', 'Clicked its switch again: both copies are back as they were, and Claude Code’s switch is on again, in one click with one Undo.');
     await everyLook('agents-mixed-on', 'The same.');
+    // Off once more, left standing, so History shows an Off with its Turn on.
+    await a.click('#switch-release-reviewer'); await waitFor(a, `document.querySelector('#switch-release-reviewer')?.getAttribute('aria-checked') === 'false'`, 15000);
   }
   await a.click('#nav-history'); await a.settle();
-  await shot(a, 'agents-history', 'Clicked "History": each Off says where it removed copies and that History keeps them until it is turned on again or deleted, with “Turn on” where it still stands; each On is “Turned on again”, with Undo; Delete everywhere is said as such, with Restore.');
+  await shot(a, 'agents-history', 'Clicked "History" (release-reviewer turned off once more, and left off): its Off says where it removed copies and that History keeps them until it is turned on again or deleted, with “Turn on”; an Off turned on since reads “Turned on since”; each On is “Turned on again”, with “Turn off again”; Delete everywhere reads “Deleted everywhere; Central Knot kept the copies.” (or, for one deleted while off, that Restore puts it back on its page, off), with Restore; an Off a deletion ended says “Deleted since; use Restore on that entry.”. The intro says copies of an item turned off are kept until it is turned on or deleted.');
+  await everyLook('agents-history', 'The same.');
 }
 
 // ---------- Plugins ----------

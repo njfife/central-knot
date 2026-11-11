@@ -11,8 +11,16 @@ import { checkPluginsNow, checkedWords, pluginUpdates } from './pluginupdateview
 
 /** The settings as last read from the main process; undefined until the page has loaded them. */
 let current: AppPreferences | undefined;
-/** Whether Off removes the copy in a tool with no switch for the item (the setting; on until the settings are read). */
-export const removesWhenNoSwitch = () => current?.removeWhenNoSwitch !== false;
+/**
+ * Whether Off removes the copy in a tool with no switch for the item (the setting). The home is read with the settings
+ * (app.ts startHome), so the item pages never ask before they are read; were they to, the answer would leave such tools as they
+ * are rather than guess.
+ */
+export const removesWhenNoSwitch = () => current?.removeWhenNoSwitch === true;
+/** How many days History keeps things, as Settings has it. */
+export const historyDaysNow = () => current?.historyDays ?? defaultHistoryDays;
+/** The promise History makes for what Off removed, said where History's days are. */
+export const OFF_KEPT = 'Copies of an item you turned off are kept until you turn it on or delete it.';
 
 /**
  * A line beneath a row: a note on what its last action did (note: where it went; info: what is still to come), why it failed,
@@ -353,7 +361,7 @@ async function chooseRemoveWhenNoSwitch(on: boolean): Promise<void> {
 /** Whether Off removes an item's copy in a tool that has no switch for it (today: your agents, in every tool). */
 function removeWhenNoSwitchRow(): HTMLElement {
   return settingRow('remove-when-no-switch', 'When a tool can’t turn something off, remove its copy there',
-    'History keeps it; turning it on puts it back. No tool has a switch for your own agents, so this is how an agent turns off. Turned off here, those tools keep their copy and it stays on there.',
+    'History keeps the removed copy; turning the item on puts it back. With this off, those tools keep their copy, so the item stays on there. Affects only what you turn off from now on.',
     // Unchangeable until main has said, so a click never acts on a guess.
     toggle({ on: !!current?.removeWhenNoSwitch, label: 'When a tool can’t turn something off, remove its copy there', onchange: chosen => void chooseRemoveWhenNoSwitch(chosen), disabled: !current, id: 'remove-when-no-switch',
       attrs: { 'aria-describedby': 'setting-remove-when-no-switch-hint', title: null } }));
@@ -392,7 +400,7 @@ export function settingsPage(): HTMLElement {
     settingsSection('items', 'Skills, MCP servers and agents', removeWhenNoSwitchRow()),
     settingsSection('plugins', 'Plugins', pluginUpdatesRow()),
     settingsSection('history', 'History',
-      settingRow('history', 'Keep history for', 'Changes and deleted items stay in History, ready to restore, for this long.',
+      settingRow('history', 'Keep history for', `Changes and deleted items stay in History, ready to restore, for this long. ${OFF_KEPT}`,
         // Unchangeable until main has said, so a shorter choice is never mistaken for a longer one, and while a change is under way.
         h('span.select', {},
           h('select', { id: 'history-days', 'aria-labelledby': 'setting-history-title', 'aria-describedby': 'setting-history-hint', disabled: !current || updatingHistory,

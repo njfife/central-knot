@@ -210,10 +210,10 @@ export function leftAsIs(name: string, why: string): string {
   return `${why}, so ${name} was left as it is.`;
 }
 
-/** The result of Delete everywhere, managed or not: the skill named, the tools, and the shared folder. */
-export function deletedText(name: string, tools: string[], folders: string[]): string {
+/** The result of Delete everywhere, managed or not: the item named, the tools, the shared folder, and how long History keeps it (`days`). */
+export function deletedText(name: string, tools: string[], folders: string[], days?: number): string {
   const where = [tools.length ? `from ${andList(tools)}` : '', folders.length ? `${tools.length ? ', and ' : ''}from ${andList(folders)}` : ''].join('');
-  return `Deleted ${name}${where ? ` ${where}` : ''}. History keeps it.`;
+  return `Deleted ${name}${where ? ` ${where}` : ''}. History keeps it${days ? ` for ${days} days` : ''}.`;
 }
 
 /**

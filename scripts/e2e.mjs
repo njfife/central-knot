@@ -867,8 +867,8 @@ async function practiceFlow() {
   for (let tries = 0; tries < 40 && await a.run(`document.querySelector('#remove-when-no-switch')?.getAttribute('aria-checked')`) !== 'false'; tries++) await wait(100);
   await a.click('#nav-agents');
   await a.click('#switch-release-notes');
-  same('with that setting off, an agent’s Off leaves every copy and the row on, said as a note',
-    [await switchOn(a, 'release-notes'), notesFiles.map(existsSync), /release-notes: nothing changed\. Still on in all 3 tools: they have no switch for agents\./.test(await a.text('.bands') ?? ''), await a.exists('.bands .tone-warning')], [true, [true, true, true], true, false]);
+  same('with that setting off, an agent’s Off leaves every copy and the row on, said as a note with its reason and nothing to click',
+    [await switchOn(a, 'release-notes'), notesFiles.map(existsSync), /release-notes is still on in all 3 tools: they have no switch for agents, and Settings keeps their copies\./.test(await a.text('.bands') ?? ''), await a.exists('.bands .tone-warning'), await a.exists('.bands .band-actions button')], [true, [true, true, true], true, false, false]);
   await a.click('#nav-settings');
   await a.click('#remove-when-no-switch');
   for (let tries = 0; tries < 40 && await a.run(`document.querySelector('#remove-when-no-switch')?.getAttribute('aria-checked')`) !== 'true'; tries++) await wait(100);
@@ -2190,6 +2190,9 @@ async function openCodeFlow() {
   writeFileSync(join(oc, 'agents/helper.md'), '---\ndescription: Helps.\nmode: subagent\n---\n\nYou help.\n');
   // Every tool is looked for only inside this home, so the flow reads the same on a machine that has some installed.
   const onlyHere = { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,other-apps' };
+  // Its Settings, saved before launch, keep a tool's copy where it has no switch: the Agents page goes by that from its first look.
+  mkdirSync(join(scratch, 'opencode-data'), { recursive: true });
+  writeFileSync(join(scratch, 'opencode-data/app-settings.json'), JSON.stringify({ removeWhenNoSwitch: false }));
   const a = await launch(join(scratch, 'opencode-data'), flag('--electron') ? ['--as-released'] : [], home, onlyHere);
   // With --shots, a page's picture at each window size the app must fit.
   const pictures = async (page, name) => { if (!shots) return; for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(page, width, height); await page.shot(`${name}-${width}`); } await fullSize(page); };
@@ -2213,7 +2216,9 @@ async function openCodeFlow() {
   same('its MCP server is read from its settings, off as its settings say', view.mcp.servers.map(server => [server.key, server.disabled]), [['oc-docs', ['opencode-cli']]]);
   same('its agent is read from its agents folder', view.agents.servers.map(server => [server.key, Object.keys(server.copies)]), [['helper', ['opencode-cli']]]);
   await a.click('#nav-mcp'); await a.click('#open-oc-docs'); await pictures(a, 'opencode-mcp-open');
-  await a.click('#nav-agents'); await pictures(a, 'opencode-agents');
+  await a.click('#nav-agents');
+  check('with that setting off from the start, the Agents page says Off leaves the copies on, from its first look', /Off leaves their copies on/.test(await a.text('.band-help') ?? ''), await a.text('.band-help'));
+  await pictures(a, 'opencode-agents');
   await a.click('#nav-instructions'); await pictures(a, 'opencode-instructions');
   check('its instruction file is AGENTS.md in its own folder', (await a.text('.page') ?? '').includes('~/.config/opencode/AGENTS.md') && (await a.text('.page') ?? '').includes('Be brief.'), await a.text('.page'));
   await a.click('#nav-plugins');
