@@ -191,6 +191,8 @@ export interface DesktopApi {
   onProfileSwitched(callback: (result: ProfileSwitchResult) => void): void;
   /** Turns one skill of an installed plugin off (`on` false) or back on in one tool, with that tool's own switch (ENB-06). */
   setPluginSkill(source: string, marketName: string, plugin: string, skill: string, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
+  /** Turns one MCP server of an installed plugin off (`on` false) or back on in one tool, with that tool's own switch. */
+  setPluginServer(source: string, marketName: string, plugin: string, server: string, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
   /** Turns a whole installed plugin off (`on` false) or back on in one tool, with that tool's own switch. */
   setPluginOn(source: string, marketName: string, plugin: string, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
   /** What each tool without the plugin would get as its parts, and why each other part wouldn't go in. */
@@ -451,7 +453,7 @@ export interface Outcome { component: string; result: 'works' | 'limited' | 'ign
 
 export interface NativeRun { tool: HarnessId; command: string; ok: boolean; output: string; changed: { path: string; before: string | null; after: string | null }[] }
 
-export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'updated' | 'skill-off' | 'skill-on' | 'plugin-off' | 'plugin-on' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[]; /** This action changed what the tool has (Undo reverses only these). */ changed?: boolean;
+export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'updated' | 'skill-off' | 'skill-on' | 'server-off' | 'server-on' | 'plugin-off' | 'plugin-on' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[]; /** This action changed what the tool has (Undo reverses only these). */ changed?: boolean;
   /** An update: the version the tool records now. */ version?: string;
   /** An update of a copy that differed at the same version: done by the tool's own update, or by uninstalling and installing again. */ byContent?: 'update' | 'reinstall';
   /** A failed update with nobody watching: the tool's own update kept its copy, and only a reinstall (never made unasked) would change that. */ kept?: true;
@@ -485,6 +487,9 @@ export interface PluginItem { kind: PartKind; name: string; description: string;
 export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: string; version?: string;
   /** The whole plugin is turned off in that tool. */ off?: boolean;
   /** Its skills that tool has turned off one by one (Copilot CLI's and Codex's switch). */ skillsOff?: string[];
+  /** Its MCP servers that tool has turned off one by one (pluginserver.ts). */ serversOff?: string[];
+  /** Why none of its skills can be switched here (Codex's skill rules in a form not edited), if so. */ switchesHeld?: string;
+  /** Skills held off by a switch that isn't this plugin's own, each with why it can't be turned on here. */ skillsHeld?: Record<string, string>;
   items: PluginItem[];
   /** Why what it brings couldn't be read; then `items` is empty. */ problem?: string;
   /** Its marketplace is on the Plugins page (it is added in a tool), so the plugin's page can be opened there. */ listed: boolean;

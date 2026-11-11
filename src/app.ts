@@ -325,7 +325,7 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
  */
 export const applyPluginSwitches = (ops: PluginOp[], draft: Map<string, PluginOp>, undo = false) => busy(undo ? 'Undoing…' : 'Applying…', async () => {
   const home = state.home!.home;
-  const result = await runPlan(ops, { install: api().installPlugin, uninstall: api().uninstallPlugin, setSkill: api().setPluginSkill, setWhole: api().setPluginOn }, home);
+  const result = await runPlan(ops, { install: api().installPlugin, uninstall: api().uninstallPlugin, setSkill: api().setPluginSkill, setServer: api().setPluginServer, setWhole: api().setPluginOn }, home);
   for (const entry of result.done) clearPluginOp(draft, entry);
   setHome(await api().refresh());
   const lines = resultLines(result.done, undo);

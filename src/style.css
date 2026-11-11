@@ -1432,6 +1432,8 @@ span.ins-confirm { margin-top: 0; }
 .text-action.tool-remove { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
 .text-action.tool-remove:hover, .text-action.tool-remove:focus-visible { color: var(--danger); }
 .tool-remove, .tool-remove-slot { min-width: 60px; text-align: center; }
+/* Beside a plugin item's switch, where an own copy has Remove: the way to the plugin's page. */
+.text-action.tool-link { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; white-space: nowrap; }
 .tool-remove-slot { display: inline-block; }
 /* Differing copies hide an empty foot, but not one holding Delete everywhere. */
 .details-differs .compare-foot:has(.compare-foot-start:empty):has(> .text-action, > .delete-armed) { display: flex; }

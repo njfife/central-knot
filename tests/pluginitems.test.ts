@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile, readFile } from 'node:fs/promi
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readItemTexts, readPluginItems } from '../src/pluginitems.ts';
-import { inTool, cellWords, handledWhere, offIn, pageRows, pluginItemCount } from '../src/pluginrows.ts';
+import { inTool, cellWords, handledWhere, offIn, pageRows, pluginItemCount, toolWords } from '../src/pluginrows.ts';
 import type { PluginContext } from '../src/plugins.ts';
 import type { HarnessId, HomeView, InstalledPlugin, PartsInstall, SkillFacts } from '../src/types.ts';
 
@@ -127,15 +127,16 @@ test('a personal skill that only shares the name stays its own row beside the pl
 });
 
 test('each tool’s cell says whether it is on: the skill’s own switch, the whole plugin, or not there and why', () => {
-  const home = homeOf([], [install('claude-cli', { off: true }), install('copilot-cli', { skillsOff: ['Triage'] }), install('codex-cli', { items: [] })]);
+  const home = homeOf([], [install('claude-cli', { off: true }), install('copilot-cli', { skillsOff: ['Triage'], serversOff: ['issues'] }), install('codex-cli', { items: [] })]);
   const [row] = pageRows(home, 'skills').rows;
-  assert.deepEqual((['claude-cli', 'copilot-cli', 'codex-cli'] as const).map(tool => offIn(row!, tool)), ['plugin', 'skill', undefined]);
+  assert.deepEqual((['claude-cli', 'copilot-cli', 'codex-cli'] as const).map(tool => offIn(row!, tool)), ['plugin', 'item', undefined]);
   assert.match(cellWords(row!, 'codex-cli'), /has issue-tracker installed, but its copy doesn’t have this skill/);
   assert.match(cellWords(row!, 'pi-cli'), /Pi takes no plugins/);
   assert.equal(cellWords(row!, 'claude-cli'), 'Claude Code: in the plugin issue-tracker 2.0.0; the whole plugin is turned off in Claude Code');
   const [server] = pageRows(home, 'mcp').rows;
   assert.equal(server!.description, 'Command · npx -y issues');
-  assert.deepEqual([offIn(server!, 'copilot-cli'), offIn(server!, 'claude-cli')], [undefined, 'plugin']);
+  assert.deepEqual([offIn(server!, 'copilot-cli'), offIn(server!, 'claude-cli')], ['item', 'plugin']);
+  assert.equal(toolWords(server!, 'copilot-cli'), 'Inside issue-tracker 2.0.0. Turned off here with its own switch.');
 });
 
 test('a plugin whose marketplace is on no tool any more says where it is handled instead of linking to a page', () => {
