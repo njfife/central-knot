@@ -876,3 +876,23 @@ test('Where the tool already holds the kept copy, byte for byte, Use the kept co
     assert.deepEqual([already.stopped, already.results.map(entry => entry.message), await useKept()], [undefined, ['Codex has that copy already.'], undefined]);
   } finally { await box.cleanup(); }
 });
+
+test('The row’s On also turns on an older Off left waiting for a tool: no copy stays turned up under it, and its kept copy is offered', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    const first = await readOf(box, 'codex-cli');
+    await turnOff(box);
+    await write(box, 'codex-cli', codexOwn('Second, made by hand.'));
+    const second = await readOf(box, 'codex-cli');
+    await toolOff(box, 'codex-cli');
+    // The older Off turned on for the tools it still holds; Codex is the newer Off's.
+    await (await historyActions(box)).find(action => action.label === 'Turn on in Claude Code and Copilot CLI')!.run();
+    assert.deepEqual(((await factOf(box))?.heldOff ?? []).map(entry => [entry.tool, entry.older?.length]), [['codex-cli', 1]]);
+    // One click: the newer Off's copy goes back, and the older Off, finding it there, is done with Codex too.
+    await turnOn(box);
+    assert.deepEqual([await heldIn(box), await readOf(box, 'codex-cli')], [[], second]);
+    await (await historyActions(box)).find(action => action.label === 'Use the kept copy in Codex')!.run();
+    assert.equal(await readOf(box, 'codex-cli'), first);
+  } finally { await box.cleanup(); }
+});
