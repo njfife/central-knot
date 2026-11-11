@@ -348,7 +348,7 @@ function joinDock() {
 /** One status line for both menus: where, and any news. */
 function statusLine() {
   const where = current?.label ?? 'No home open yet';
-  return unseen ? `Sync made changes · Show (${where})` : unseenPlugins ? `${unseenPlugins === 'updated' ? 'Plugins were updated' : 'A plugin couldn’t be updated'} · Show (${where})` : `Home: ${where}${current && lastManagedCount === 0 ? ' · nothing managed yet' : ''}`;
+  return unseen ? `Sync made changes · Show (${where})` : unseenPlugins ? `${unseenPlugins === 'updated' ? 'Plugins were updated' : 'A plugin couldn’t be updated'} · Show (${where})` : `Home: ${where}${current && lastManagedCount === 0 ? ' · nothing synced yet' : ''}`;
 }
 /** The status line's click: the window, on Plugins when what is unseen is an automatic update. */
 const showNews = () => (unseenPlugins && !unseen ? showPage('plugins') : showWindow());

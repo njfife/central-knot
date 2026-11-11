@@ -485,6 +485,8 @@ test('A copy choice survives a crash part-way and finishes at the next pass', as
     assert.equal(await readFile(join(box.home, COPILOT, 'pick/SKILL.md'), 'utf8'), text('pick', 'Claude.'));
     const record = JSON.parse(await readFile(join(storeDirectory(box.home), 'sync.json'), 'utf8'));
     assert.equal(record.items.pick.use, undefined, 'the finished choice leaves the record');
+    const chosen = (await readHistory(ctx(box))).find(event => event.kind === 'chosen' && event.key === 'pick');
+    assert.equal(chosen?.wasSynced, undefined, 'the crashed pass was the one turning it on: its Undo leaves it not synced');
   } finally { await box.cleanup(); }
 });
 
@@ -877,6 +879,27 @@ async function managedThree(box: Box, name = 'foo') {
   await applyChanges(three(box), [manage(name.toLowerCase())]);
   for (const root of [COPILOT, CODEX]) assert.equal(await exists(join(box.home, root, name, 'SKILL.md')), true);
 }
+
+test('Undo of a copy choice takes out only the copies its own pass added: not those a later click added', async () => {
+  const box = await sandbox();
+  try {
+    await managedThree(box);
+    // Codex's copy removed (left out of sync); Copilot CLI's left out, edited, and synced again: its copy differs.
+    await applyChanges(three(box), [{ ...manage('foo'), seenManaged: true, remove: ['codex-cli'] }]);
+    await applyChanges(three(box), [{ ...manage('foo', ['codex-cli', 'copilot-cli']), seenManaged: true }]);
+    await writeFile(join(box.home, COPILOT, 'foo/SKILL.md'), text('foo', 'Copilot’s own.'));
+    await applyChanges(three(box), [{ ...manage('foo', ['codex-cli']), seenManaged: true }]);
+    // The choice adds nothing (Codex is left out); then Sync here gives Codex a copy again, a moment later.
+    const chose = await applyChanges(three(box), [{ ...manage('foo', ['codex-cli']), seenManaged: true, use: 'claude-cli', useHash: (await facts(box, 'foo')).copies['claude-cli']!.hash }]);
+    const chosen = (await readHistory(ctx(box))).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
+    assert.equal(chosen.addedId, undefined, 'its pass added no copy');
+    await applyChanges(three(box), [{ ...manage('foo'), seenManaged: true }]);
+    assert.equal(await exists(join(box.home, CODEX, 'foo/SKILL.md')), true);
+    assert.equal((await restoreFromHistory(three(box), chosen.id, false, 'narrow')).stopped, undefined);
+    assert.equal(await readFile(join(box.home, COPILOT, 'foo/SKILL.md'), 'utf8'), text('foo', 'Copilot’s own.'), 'the replaced copy is back');
+    assert.equal(await exists(join(box.home, CODEX, 'foo/SKILL.md')), true, 'the copy Sync here added stays');
+  } finally { await box.cleanup(); }
+});
 const settleAndPass = async (box: Box, extra: Partial<ShareContext> = {}) => { await applyChanges(three(box, extra), []); return applyChanges(three(box, extra), []); };
 
 test('1: renaming a skill folder by case only is the same skill, never a deletion', async () => {

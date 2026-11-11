@@ -295,6 +295,26 @@ test('Layout 5: a different copy in the shared folder needs a choice; choosing o
   } finally { await box.cleanup(); }
 });
 
+test('Undo of a copy choice that took the skill over and added copies puts the shared copy back with the replaced copies', async () => {
+  const box = await sandbox();
+  try {
+    const shared = await skill(box.home, SHARED, 'opus', text('opus', 'Shared.'));
+    await skill(box.home, COPILOT, 'opus', text('opus', 'Copilot’s own.'));
+    await skill(box.home, PI, 'opus', text('opus', 'Pi’s own.'));
+    // Copilot CLI's copy for every tool: Pi's is replaced, Claude Code gets one, and the shared copy goes.
+    const chose = await applyChanges(box.context(), [manage('opus', { use: 'copilot-cli', useHash: (await factsOf(box, 'opus'))!.copies['copilot-cli']!.hash })]);
+    assert.ok(!chose.stopped, messages(chose));
+    const history = await readHistory(box.context());
+    const chosen = history.find(event => event.kind === 'chosen' && chose.made?.includes(event.id))!;
+    assert.ok(history.some(event => event.kind === 'took-over' && event.tookOver?.addedId === chosen.addedId && chosen.addedId), 'the take-over came with the copies the choice added');
+    assert.equal(await there(shared), false);
+    const undone = await restoreFromHistory(box.context(), chosen.id, false, 'narrow');
+    assert.ok(!undone.stopped, messages(undone));
+    assert.deepEqual([await readFile(join(shared, 'SKILL.md'), 'utf8'), await readFile(join(box.home, PI, 'opus/SKILL.md'), 'utf8'), await there(join(box.home, CLAUDE, 'opus')), (await factsOf(box, 'opus'))!.managed],
+      [text('opus', 'Shared.'), text('opus', 'Pi’s own.'), false, false]);
+  } finally { await box.cleanup(); }
+});
+
 test('Background sync never changes a shared copy or a link; asking for it on the skill does', { skip: noPosix }, async () => {
   const box = await sandbox();
   try {

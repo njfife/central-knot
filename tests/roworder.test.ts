@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { byKey, standing } from '../src/roworder.ts';
+import { byKey, loadedIn, standing } from '../src/roworder.ts';
 
 const tools = ['claude-cli', 'codex-cli', 'copilot-cli'];
 const item = (key: string, managed: boolean, copies: string[], disabled: string[] = []) => ({ key, managed, copies: Object.fromEntries(copies.map(tool => [tool, 'hash'])), disabled });
@@ -25,3 +25,13 @@ test('a copy only counts in a tool that is shown', () => {
   assert.equal(standing(item('left-behind', false, ['pi']), tools), 2);
   assert.equal(standing(item('left-behind', false, ['pi']), [...tools, 'pi']), 1);
 });
+
+test('a plugin’s item that is on counts: a row whose own copies are off stays on while a tool loads it through its plugin', () => {
+  const triage = { ...item('triage', true, ['pi'], ['pi']), pluginOn: ['claude-cli'] };
+  assert.deepEqual(loadedIn(triage, [...tools, 'pi']), ['claude-cli']);
+  assert.equal(standing(triage, [...tools, 'pi']), 0);
+  assert.equal(standing({ ...triage, pluginOn: [] }, [...tools, 'pi']), 2, 'the plugin item off too: off');
+  // A tool with a copy of its own goes by that copy, whatever a plugin there says.
+  assert.equal(standing({ ...item('own', true, ['claude-cli'], ['claude-cli']), pluginOn: ['claude-cli'] }, tools), 2);
+});
+

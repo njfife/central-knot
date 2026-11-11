@@ -28,7 +28,12 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
     case 'conflict': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit won over ${andList(event.losers.filter(loser => loser.hash !== event.previous).map(loser => who(loser.tool)))}’s.${order}`, action: 'Undo' };
     case 'deleted': return { glyph: 'trash-2', text: `Deleted${event.winner ? ` in ${who(event.winner.tool)}` : ''}, then removed from the other tools it synced to.`, action: 'Restore' };
     case 'kept-edit': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit was kept over a deletion in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}.${order}` };
-    case 'chosen': return { glyph: 'check', text: `You chose ${who(event.winner?.tool)}’s copy; it replaced ${andList(event.losers.map(loser => who(loser.tool)))}’s.`, action: 'Undo' };
+    case 'chosen': {
+      const text = `You chose ${who(event.winner?.tool)}’s copy; it replaced ${andList(event.losers.map(loser => who(loser.tool)))}’s.`;
+      // Its Undo stopped part-way: what went back, and the way to finish it, in the tools still to go.
+      const left = event.losers.filter(loser => !event.restoredTools?.includes(loser.tool)).map(loser => loser.tool);
+      return event.restoredTools ? { glyph: 'check', text: `${text} Undone in ${touchedToolsPhrase(event.restoredTools)}; ${touchedToolsPhrase(left)} still to go.`, action: 'Finish undo' } : { glyph: 'check', text, action: 'Undo' };
+    }
     case 'switched': {
       const turned = (disabled: boolean) => touchedToolsPhrase((event.switched ?? []).filter(entry => entry.disabled === disabled).map(entry => entry.tool));
       const switched = event.switched ?? [];
@@ -117,6 +122,7 @@ const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'pro
   : event.kind === 'removed' ? `Put the removed copy back in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}`
   : event.kind === 'took-over' ? `Put the links and the shared copy back as they were${event.tookOver?.managedNow ? `, remove the copies that turning it on added, and stop syncing ${event.item}` : ''} (only while unchanged)`
   : event.kind === 'added' ? `Remove the copies ${event.via === 'repo' ? 'Pull' : 'it'} added (only while unchanged) and stop syncing ${event.item}${event.rejoined ? ' there' : ''}` : action === 'Restore' ? `Put ${event.item} back in every tool it synced to`
+  : action === 'Finish undo' ? `Put each replaced copy back in its own tool, where it isn’t yet (only while unchanged since)`
   : action === 'Redo edit' || action === 'Delete again' ? 'Undo the undo: put back the version that was replaced'
     : `Put ${event.item} back as it was before this change, in every tool it syncs to (including where it was edited)`);
 
@@ -138,7 +144,9 @@ function actions(event: HistoryEvent, action?: string) {
   const verb = action === 'Undo' && event.via === 'repo' ? 'Undo pull' : action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action === 'Undo' && event.kind === 'chosen' ? 'Undo choice'
     : event.kind === 'switched' && flips.size === 1 ? (flips.has(true) ? 'Undo: enable' : 'Undo: disable') : action;
   const label = event.kind === 'profile' ? `${action} switch` : ['Undo', 'Undo edit', 'Restore', 'Delete again', 'Redo edit'].includes(action) ? `${verb} ${scope}`.trim() : action;
-  const control = button({ variant: 'link', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) });
+  // A choice whose own Undo stopped part-way is finished the same narrow way: each replaced copy back in its own tool.
+  const narrow = action === 'Finish undo' ? 'narrow' : undefined;
+  const control = button({ variant: 'link', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id, narrow) });
   control.title = actionHelp(event, action);
   return control;
 }

@@ -868,9 +868,10 @@ async function practiceFlow() {
   const outsideSettings = readNow(join(practice, '.claude/settings.json'));
   await a.click(`${outsideRow} .switch`);
   check('the row’s switch never turns a whole plugin off: Claude Code is left on, and said', readNow(join(practice, '.claude/settings.json')) === outsideSettings && await switchOn(a, outside)
-    && /Still on in Claude Code: Claude Code has no switch for one skill of a plugin; its switch in the opened row turns the whole plugin outside-tools off there\./.test(await a.text('.bands') ?? ''), await a.text('.bands'));
+    && /outside-skill: nothing changed\. Still on in Claude Code: it has no switch for one skill of a plugin, only the whole plugin outside-tools’s\./.test(await a.text('.bands') ?? '')
+    && await a.text('#outcome-whole') === 'Turn outside-tools off in Claude Code', [await a.text('.bands'), await a.text('#outcome-whole')]);
   await a.click(`[id="open-${outside}"]`);
-  check('its details say which plugin it is from and where it is handled', /From the plugin[\s\S]*marketplace “ck-outside”, which isn’t added in Central Knot/.test(await a.text('main') ?? ''), await a.text('main'));
+  check('its details open with where it is on and which plugin it is from, then where it is handled', /On in Claude Code · from the plugin outside-tools[\s\S]*marketplace “ck-outside”, which isn’t added in Central Knot/.test(await a.text('main') ?? ''), await a.text('main'));
   await a.click('#nav-mcp');
   same('its MCP server too, on the MCP servers page', await cellState(a, 'outside-tools@ck-outside/outside-server', 'claude-cli'), 'plugin');
   rmSync(join(practice, '.claude/plugins'), { recursive: true, force: true });
@@ -1177,6 +1178,46 @@ async function practiceFlow() {
   const triageSwitch = await a.run(`document.querySelector('#enable-triage-claude-cli')?.getAttribute('aria-label')`) ?? '';
   check('the opened row’s Claude Code switch says it is the whole plugin’s', /Claude Code has no switch for one skill of a plugin, so this switch turns the whole plugin off there\./.test(triageLine)
     && /Click to turn the whole plugin issue-tracker off in Claude Code, with its 1 MCP server\.$/.test(triageSwitch), [triageLine, triageSwitch]);
+  // A click on it applies at once, with Claude Code's own command (a stand-in here): the result leads with the skill clicked,
+  // and its Undo turns the plugin back on there.
+  const settingsAt = pluginSettingsNow() ?? '{}';
+  writeFileSync(claudeStub, `#!/bin/sh\ncase "$*" in\n  "plugin disable issue-tracker@ck-test-market --scope user") printf '{"enabledPlugins":{"issue-tracker@ck-test-market":false}}' > "$HOME/.claude/settings.json" ;;\n  "plugin enable issue-tracker@ck-test-market --scope user") printf '%s' '${settingsAt}' > "$HOME/.claude/settings.json" ;;\n  *) exit 9 ;;\nesac\n`);
+  const wholeOff = () => JSON.parse(pluginSettingsNow() ?? '{}').enabledPlugins?.['issue-tracker@ck-test-market'] === false;
+  await a.click('#enable-triage-claude-cli');
+  for (let tries = 0; tries < 60 && !(await a.exists('#outcome-undo-plugin')); tries++) await wait(100);
+  check('the opened row’s switch applies at once, and its result leads with the skill', wholeOff() && await cellState(a, 'triage', 'claude-cli') === 'plugin-off'
+    && /triage is off in Claude Code\. Its whole plugin issue-tracker was turned off there, with its 1 MCP server\./.test(await a.text('.bands') ?? ''), [pluginSettingsNow(), await a.text('.bands')]);
+  await a.click('#outcome-undo-plugin');
+  for (let tries = 0; tries < 60 && (wholeOff() || !/Undone: triage/.test(await a.text('.bands') ?? '')); tries++) await wait(100);
+  check('its Undo turns the plugin back on there', !wholeOff() && /Undone: triage is on in Claude Code again\./.test(await a.text('.bands') ?? ''), [pluginSettingsNow(), await a.text('.bands')]);
+  writeFileSync(claudeStub, stubBefore);
+  // Codex has the plugin too, and a switch for one skill of it: the row's switch turns Pi's copy and Codex's skill off in one
+  // click (Claude Code left on, and said), and its one Undo puts both back.
+  const codexPlugin = join(practice, '.codex/plugins/cache/ck-test-market/issue-tracker/9.9.9'), codexToml = join(practice, '.codex/config.toml');
+  const codexTomlBefore = readNow(codexToml);
+  mkdirSync(join(codexPlugin, 'skills/triage'), { recursive: true });
+  writeFileSync(join(codexPlugin, 'skills/triage/SKILL.md'), readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8'));
+  writeFileSync(codexToml, `${codexTomlBefore ?? ''}\n[plugins."issue-tracker@ck-test-market"]\nenabled = true\n`);
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 40 && await cellState(a, 'triage', 'codex-cli') !== 'plugin'; tries++) await wait(100);
+  // Turned on first if it isn't (and put back as it was after), so the click is the row's Off.
+  const triageWasOn = await switchOn(a, 'triage');
+  if (!triageWasOn) { await a.click('.ov-row[data-key="triage"] .switch'); for (let tries = 0; tries < 60 && !(await switchOn(a, 'triage')); tries++) await wait(100); }
+  // Pi's switch: its settings list the copy's exclusion while it is off.
+  const piSwitch = join(practice, '.pi/agent/settings.json'), piOff = () => /"-[^"]*skills\/triage\//.test(readNow(piSwitch));
+  await a.click('.ov-row[data-key="triage"] .switch');
+  for (let tries = 0; tries < 60 && !(await a.exists('#outcome-undo')); tries++) await wait(100);
+  const codexItemOff = () => /name = "issue-tracker:triage"[^[]*enabled = false/.test(readNow(codexToml));
+  check('one click turns the copy and the plugin’s skill off, and says what it left on', codexItemOff() && piOff() && await cellState(a, 'triage', 'codex-cli') === 'plugin-off'
+    && /triage is off in [^.]*Codex[^.]*\. Still on in Claude Code: it has no switch for one skill of a plugin, only the whole plugin issue-tracker’s\./.test(await a.text('.bands') ?? ''), [readNow(codexToml), readNow(piSwitch), await a.text('.bands')]);
+  await a.click('#outcome-undo');
+  for (let tries = 0; tries < 60 && (codexItemOff() || piOff()); tries++) await wait(100);
+  same('its one Undo puts both back', [codexItemOff(), piOff(), await cellState(a, 'triage', 'codex-cli'), await switchOn(a, 'triage')], [false, false, 'plugin', true]);
+  if (!triageWasOn) await a.run(`(async () => { const view = await window.centralKnot.refresh(); const added = (await window.centralKnot.history()).events.filter(event => event.key === 'triage' && event.kind === 'added' && !event.undoneBy).at(-1);
+    if (added) await window.centralKnot.restore(added.id, false, view.home); else await window.centralKnot.apply([{ key: 'triage', managed: false, off: [], seenManaged: true }], false, view.home); })()`);
+  rmSync(join(practice, '.codex/plugins'), { recursive: true, force: true });
+  if (codexTomlBefore === undefined) rmSync(codexToml, { force: true }); else writeFileSync(codexToml, codexTomlBefore);
+  await a.click('#header-refresh');
   // Its MCP server has a switch of its own in Claude Code: the box turns that one server off, by the name Claude Code gives a plugin's server.
   await a.click('#nav-mcp');
   same('so does its MCP server, on MCP servers', await a.run(`[document.querySelector('#cell-issues-claude-cli')?.dataset.state, /through the plugin issue-tracker[^]*Click to turn it off in Claude Code on Apply all\.$/.test(document.querySelector('#cell-issues-claude-cli')?.title ?? '')]`), ['plugin', true]);
@@ -1879,7 +1920,7 @@ async function updateFlow() {
     same('no page errors after updating', a.pageErrors, []);
     await a.quit();
     // The narrowest window with the status bar at its fullest: a folder home named as long as "This Mac’s home", a profile in
-    // use with a long name, and sync on with nothing managed yet. Nothing may run into its neighbour in any state of the button.
+    // use with a long name, and sync on with nothing synced yet. Nothing may run into its neighbour in any state of the button.
     const narrowHome = join(scratch, 'this-macs-home'), narrowData = join(scratch, 'update-narrow-data');
     cpSync(join(root, 'fixtures/home'), narrowHome, { recursive: true });
     mkdirSync(narrowData, { recursive: true });
@@ -1909,7 +1950,7 @@ async function updateFlow() {
     await a.click('#profile-switch');
     await sizeTo(a, 860, 560);
     for (let i = 0; i < 80 && !(await a.exists('#update-button')); i++) await wait(250);
-    same('the narrow bar has the profile, idle sync and the short Update button', [await a.exists('#status-profile'), await a.text('#sync-switch .sync-state'), await a.run(`getComputedStyle(document.querySelector('#update-button .update-short')).display !== 'none'`)], [true, 'On · nothing managed', true]);
+    same('the narrow bar has the profile, idle sync and the short Update button', [await a.exists('#status-profile'), await a.text('#sync-switch .sync-state'), await a.run(`getComputedStyle(document.querySelector('#update-button .update-short')).display !== 'none'`)], [true, 'On · nothing synced', true]);
     same('at 860 wide nothing in the status bar runs into its neighbour: Update', await crowding(), []);
     await typeDraft();
     await a.click('#update-button');

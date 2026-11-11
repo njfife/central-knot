@@ -73,7 +73,7 @@ export type SyncGate =
   | { state: 'needs-resume'; reason: string }
   | { state: 'stopped'; reason: string; /** Set when another build syncs this home: its identity, its name, and whether it is open now (where that can be told). */ owner?: { build: string; name: string; running?: boolean } };
 
-export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** A take-over step: a link replaced by a real copy, a tool given its own copy, or the shared copy removed (or, in its Undo, each put back). */ tookOver?: 'link' | 'placed' | 'shared'; /** With `tookOver` 'shared': the folder the copy was removed from. */ folder?: string; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true }
+export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** A take-over step: a link replaced by a real copy, a tool given its own copy, or the shared copy removed (or, in its Undo, each put back). */ tookOver?: 'link' | 'placed' | 'shared'; /** With `tookOver` 'shared': the folder the copy was removed from. */ folder?: string; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true; /** `written`, an Undo of a copy choice on a synced item: this tool's own copy is back, left out of sync. */ leftOut?: true }
 
 export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
 
@@ -405,7 +405,7 @@ export interface HistoryEvent {
   profile?: { from?: string; fromName?: string; to?: string; toName?: string; flips: ProfileFlip[] };
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false); `before`, a Claude Code override it replaced ("name-only"), for Undo. */
   switched?: SwitchRecord[];
-  /** 'removed': tools whose copy Restore has put back so far; the event is done when all are. */
+  /** 'removed': tools whose copy Restore has put back so far; the event is done when all are. 'chosen': the same for its Undo. */
   restoredTools?: HarnessId[];
   /** 'removed': tools a managed skill stopped syncing to because its copy there was removed; Restore turns syncing back on. */
   stoppedSync?: HarnessId[];
@@ -413,8 +413,13 @@ export interface HistoryEvent {
   unmanaged?: boolean;
   /** 'added': copies for tools a managed skill syncs to again; Undo removes them and stops syncing there, and the skill stays managed. */
   rejoined?: boolean;
-  /** 'chosen': the skill was synced already when the copy was chosen, so the choice's own Undo keeps it synced. */
+  /**
+   * 'chosen': the item was synced already when the copy was chosen (kept with the choice when it was made), so the choice's
+   * own Undo keeps it synced. The one sign of it: no other field is read as "was synced".
+   */
   wasSynced?: boolean;
+  /** 'chosen': the 'added' entry its own pass wrote (the copies that came with the choice), which its Undo takes out; never another. */
+  addedId?: string;
   winner?: { tool: HarnessId; hash: string };
   /** Content that gave way, kept in Central Knot's store. */
   losers: { tool: HarnessId; hash: string; /** MCP: which kept copy of that tool's own settings this replaced, for an exact Restore. */ kept?: string; /** 'removed': the copy's folder name as it was, to put it back under the same name. */ folder?: string;
