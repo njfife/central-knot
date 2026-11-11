@@ -663,7 +663,8 @@ function pendingSummary(count: number): string {
   const fresh = next.reduce((total, skill) => total + toolList().filter(tool => (cellOf(skill, tool) === 'will-sync' && skill.copies[tool] === undefined) || takingOnApply(skill, tool) === 'own').length, 0);
   const replaced = next.reduce((total, skill) => total + toolList().filter(tool => replacedOnApply(skill, tool)).length, 0);
   // Skills: copies that go, and switches that flip, on Apply all.
-  const removed = next.reduce((total, skill) => total + (skill.removing?.length ?? 0), 0);
+  const removedLinks = next.reduce((total, skill) => total + (skill.removing ?? []).filter(tool => skill.outside?.[tool]?.kind === 'link').length, 0);
+  const removed = next.reduce((total, skill) => total + (skill.removing?.length ?? 0), 0) - removedLinks;
   const flips = next.flatMap(skill => toolList().filter(tool => hasCopyAfterApply(skill, tool) && switchQueued(skill.key, tool)).map(tool => !!skill.disabled?.includes(tool)));
   const disabling = flips.filter(Boolean).length, enabling = flips.length - disabling;
   const copies = (n: number, what: string) => (n ? ` · ${n} ${n === 1 ? 'copy' : 'copies'} ${what}` : '');
@@ -673,7 +674,7 @@ function pendingSummary(count: number): string {
   const links = taking.reduce((total, skill) => total + toolList().filter(tool => takingOnApply(skill, tool) === 'link').length, 0);
   const shared = taking.flatMap(skill => outsideOf(skill, 'shared'));
   const outside = `${links ? ` · ${links} ${links === 1 ? 'link' : 'links'} to replace with a real copy` : ''}${shared.length ? ` · ${shared.length} ${shared.length === 1 ? 'copy' : 'copies'} to remove from ${folderOf(shared[0].path)}` : ''}`;
-  return `${plural(count, 'change')}${fresh ? ` · ${fresh} new ${fresh === 1 ? 'copy' : 'copies'}` : ''}${copies(replaced, 'to replace')}${copies(removed, 'to remove')}${copies(disabling, 'to disable')}${copies(enabling, 'to enable')}${outside}`;
+  return `${plural(count, 'change')}${fresh ? ` · ${fresh} new ${fresh === 1 ? 'copy' : 'copies'}` : ''}${copies(replaced, 'to replace')}${copies(removed, 'to remove')}${removedLinks ? ` · ${removedLinks} ${removedLinks === 1 ? 'link' : 'links'} to remove` : ''}${copies(disabling, 'to disable')}${copies(enabling, 'to enable')}${outside}`;
 }
 
 /**
@@ -742,7 +743,7 @@ function changeBar(bulk = true) {
 function syncedState(keptCopies: number) {
   const partly = committedList().filter(skill => inFocus(skill) && notSynced(skill).length);
   if (partly.length) {
-    const said = h('span.apply-state', {}, icon('check', 14, 'tone-success'), `Synced · ${partly.length} ${partly.length === 1 ? 'skill' : 'skills'} not synced in every tool`);
+    const said = h('span.apply-state', {}, icon('check', 14, 'tone-success'), `Synced, except ${partly.length} ${partly.length === 1 ? 'skill' : 'skills'} in some tools`);
     said.title = `${andList(partly.map(skill => skill.name ?? skill.key))}: some tools read a link or the shared copy, which Central Knot doesn’t write.`;
     return said;
   }
@@ -946,8 +947,8 @@ function toolLine(skill: SampleSkill, tool: Tool): string {
 function switchLine(skill: SampleSkill, tool: Tool): string {
   if (skill.removing?.includes(tool)) {
     const last = toolList().every(other => skill.copies[other] === undefined || skill.removing!.includes(other));
-    // Only its link goes when it also reads the shared copy, which stays: it still has the skill from there.
-    const stillShared = skill.outside?.[tool]?.kind === 'link' && (skill.extra ?? []).some(extra => extra.tool === tool && extra.outside?.kind === 'shared');
+    // Only its link goes when it also reads the shared copy, which stays (no take-over removes it): it still has the skill from there.
+    const stillShared = skill.outside?.[tool]?.kind === 'link' && (skill.extra ?? []).some(extra => extra.tool === tool && extra.outside?.kind === 'shared') && !takesOverOnApply(skill.key);
     if (stillShared) return `Its link is removed on Apply all; it still reads the shared copy in ${folderOf((skill.extra ?? []).find(extra => extra.tool === tool && extra.outside?.kind === 'shared')!.directory)}.`;
     return last ? `Removed on Apply all: its only copy, so ${skill.name ?? skill.key} leaves this list (History keeps it).` : committedOf(skill.key).managed ? 'Removed on Apply all; syncing stops here.' : 'Removed on Apply all.';
   }
@@ -1894,7 +1895,7 @@ export function outcomeBand(table = state.page === 'skills' || state.page === 'm
     outcome.note ? [' ', h('span.tone-faint', {}, outcome.note.replace(/ History\.$/, ' '), h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History'), '.')] : null),
     outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
       : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), undefined)
-      : outcome.history ? smallAction('Undo in History', 'outcome-history', () => showPage('history')) : null,
+      : outcome.history && state.page !== 'history' ? smallAction('Undo in History', 'outcome-history', () => showPage('history')) : null,
     closeButton(() => { state.outcome = undefined; rerender(); }, { id: 'outcome-dismiss' }));
 }
 

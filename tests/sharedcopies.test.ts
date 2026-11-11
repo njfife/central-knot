@@ -406,7 +406,7 @@ async function cameBack(box: Box, name = 'back') {
   assert.equal((await factsOf(box, name))!.outsideBack, true);
 }
 
-test('Came back: Remove on the tool whose copy is a link, riding a take-over, removes only that tool; the next passes spread nothing, and Restore puts the link back', { skip: noPosix }, async () => {
+test('Came back: Remove on the tool whose copy is a link, sent with a take-over anyway, removes only that tool; the next passes spread nothing, and Restore puts the link back', { skip: noPosix }, async () => {
   const box = await sandbox();
   try {
     await cameBack(box);
@@ -496,5 +496,64 @@ test('Restore of a removal is finished only when every copy is back: a link back
     assert.match(messages(back), /Something else is at .*\.agents\/skills\/opus now/);
     assert.equal(await readFile(join(shared, 'SKILL.md'), 'utf8'), text('opus', 'Something else.'));
     assert.equal((await readHistory(box.context())).find(event => event.id === removed.id)!.undoneBy, undefined, 'still offered for Restore');
+  } finally { await box.cleanup(); }
+});
+
+test('Fresh Manage with Remove queued on the only tool that reads the shared copy: that tool gets no copy on the next passes, and Restore gives it back', { skip: noPosix }, async () => {
+  const box = await sandbox(['claude-cli', 'pi-cli']);
+  try {
+    await skill(box.home, CLAUDE, 'solo', text('solo', 'Shared.'));
+    await skill(box.home, SHARED, 'solo', text('solo', 'Shared.'));
+    assert.equal((await factsOf(box, 'solo'))!.copies['pi-cli']!.outside?.kind, 'shared', 'Pi reads it only in the shared folder');
+    const result = await applyChanges(box.context(), [manage('solo', { remove: ['pi-cli'] })]);
+    assert.ok(!result.stopped, messages(result));
+    assert.ok(result.results.some(entry => entry.harness === 'pi-cli' && entry.outcome === 'removed' && /^Removed from Pi/.test(entry.message)), messages(result));
+    await applyChanges(box.context(), []);
+    await applyChanges(box.context(), []);
+    assert.equal(await there(join(box.home, PI, 'solo')), false, 'Pi got no copy');
+    assert.equal(await there(join(box.home, SHARED, 'solo')), false, 'the shared copy is gone');
+    assert.equal(await isFolder(join(box.home, CLAUDE, 'solo')), true);
+    const { record } = await readRecord(box.home);
+    assert.equal(record!.items.solo.state, 'shared');
+    assert.ok(record!.items.solo.off?.includes('pi-cli'), 'Pi is off');
+    const removed = (await readHistory(box.context())).find(event => event.kind === 'removed')!;
+    assert.ok(removed, 'the Remove is in History');
+    assert.deepEqual(removed.losers.map(loser => loser.tool), ['pi-cli']);
+    const back = await restoreFromHistory(box.context(), removed.id);
+    assert.ok(!back.stopped, messages(back));
+    await applyChanges(box.context(), []);
+    assert.equal(await readFile(join(box.home, PI, 'solo/SKILL.md'), 'utf8'), text('solo', 'Shared.'), 'Restore gives Pi the skill back');
+    assert.equal((await readRecord(box.home)).record!.items.solo.off?.includes('pi-cli') ?? false, false, 'Pi syncs again');
+  } finally { await box.cleanup(); }
+});
+
+test('Undo of a Manage that took the skill over, after the skill was unmanaged: what it did is said and recorded', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const shared = await installerLayout(box);
+    await applyChanges(box.context(), [manage('opus')]);
+    await applyChanges(box.context(), [{ key: 'opus', managed: false, off: [], seenManaged: true }]);
+    const tookOver = (await readHistory(box.context())).find(event => event.kind === 'took-over')!;
+    const undo = await restoreFromHistory(box.context(), tookOver.id);
+    assert.ok(!undo.stopped, messages(undo));
+    assert.equal(await readlink(join(box.home, COPILOT, 'opus')), `../../${SHARED}/opus`, 'the link is back');
+    assert.equal(await readFile(join(shared, 'SKILL.md'), 'utf8'), text('opus', 'Shared.'), 'the shared copy is back');
+    assert.ok(undo.results.some(entry => entry.tookOver === 'shared' && entry.outcome === 'written'), messages(undo));
+    assert.notEqual((await readHistory(box.context())).find(event => event.id === tookOver.id)!.undoneBy, undefined, 'History has it undone');
+  } finally { await box.cleanup(); }
+});
+
+test('Layout 4: Restore after Delete everywhere, with a different same-name skill made since, writes nothing', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const shared = await skill(box.home, SHARED, 'gamma', text('gamma', 'Shared.'));
+    await symlink(join(box.home, SHARED), join(box.home, COPILOT));
+    await applyChanges(box.context(), [manage('gamma')]);
+    assert.ok(!(await deleteEverywhere(box.context(), 'gamma')).stopped);
+    await skill(box.home, CLAUDE, 'gamma', text('gamma', 'A different one.'));
+    const deleted = (await readHistory(box.context())).find(event => event.kind === 'deleted')!;
+    const back = await restoreFromHistory(box.context(), deleted.id);
+    assert.match(back.stopped ?? '', /A different “gamma” is in Claude Code now/, messages(back));
+    assert.equal(await there(shared), false, 'the shared copy is not put back');
   } finally { await box.cleanup(); }
 });

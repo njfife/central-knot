@@ -2439,6 +2439,10 @@ async function sharedCopiesFlow() {
   const told = await a.text(`#outside-${name}`) ?? '';
   check('before Apply all, the page says the link becomes a real copy, Pi gets its own and the shared copy goes', /On Apply all, Central Knot replaces Copilot CLI’s link with a real copy, gives Pi its own copy and removes the shared copy \(History keeps it\)\. Other apps that read [~…]\/\.agents\/skills won’t find it there\./.test(told), told);
   same('and the rows say it too', [await rowLineOf('Copilot CLI'), await rowLineOf('Pi')], ['Its link becomes a real copy on Apply all, then it syncs.', 'Gets its own copy on Apply all, then it syncs.']);
+  // Remove queued on the linked tool with Managed switched on: the take-over removes the shared copy, so it does not still read it.
+  await a.click(`#remove-${name}-copilot-cli`);
+  same('a Remove on the link, with the take-over coming, says only that it is removed, and counts a link', [await rowLineOf('Copilot CLI'), /· 1 link to remove/.test(await a.run(`document.querySelector('#apply').title`))], ['Removed on Apply all.', true]);
+  await a.click(`#remove-${name}-copilot-cli`);
   same('Pi’s box is marked as a new copy', await a.run(`document.querySelector('#cell-${name}-pi-cli svg')?.outerHTML.includes('M5 12h14') ?? false`), true);
   const summary = await a.run(`document.querySelector('#apply').title`);
   check('Apply all’s summary counts every new copy, the link and the shared copy', /^1 change · 2 new copies · 1 link to replace with a real copy · 1 copy to remove from [~…]\/\.agents\/skills\./.test(summary), summary);
@@ -2496,6 +2500,7 @@ async function sharedCopiesFlow() {
   await a.click(`#remove-${name}-copilot-cli`);
   const removeSaid = await a.text(`#outside-${name}`) ?? '';
   check('a queued Remove on the linked tool is not described as getting a real copy', !/replaces Copilot CLI’s link/.test(removeSaid) && !/link to replace/.test(await a.run(`document.querySelector('#apply').title`)), removeSaid);
+  same('and its row says the shared copy stays, which it does here; the count says a link', [(await rowLineOf('Copilot CLI')).replace(/[~…]\/\.agents/, '~/.agents'), /^1 change · 1 link to remove\b/.test(await a.run(`document.querySelector('#apply').title`))], ['Its link is removed on Apply all; it still reads the shared copy in ~/.agents/skills.', true]);
   await a.shot('shared-came-back-remove');
   await applyAll(a);
   await wait(2500);

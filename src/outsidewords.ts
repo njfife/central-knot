@@ -218,6 +218,11 @@ export function undoneText(name: string, back: string, removedIn: string[], unma
     removedIn.length ? `Removed the new copies in ${andList(removedIn)}.` : ''].filter(Boolean).join(' ');
 }
 
+/** One skill an Undo over several left as it was, after others were undone: "Pi’s copy of opus was edited since, so opus was left as it is." */
+export function leftAsIs(name: string, why: string): string {
+  return `${why}, so ${name} was left as it is.`;
+}
+
 /** The result of Delete everywhere, managed or not: the skill named, the tools, and the shared folder. */
 export function deletedText(name: string, tools: string[], folders: string[]): string {
   const where = [tools.length ? `from ${andList(tools)}` : '', folders.length ? `${tools.length ? ', and ' : ''}from ${andList(folders)}` : ''].join('');

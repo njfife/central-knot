@@ -7,7 +7,7 @@ import { caughtUpNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
-import { backText, deletedText, replacedText, tookOverDone, undoneText } from './outsidewords.ts';
+import { backText, deletedText, leftAsIs, replacedText, tookOverDone, undoneText } from './outsidewords.ts';
 import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, sentence, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
@@ -554,6 +554,7 @@ function stillDisabled(key: string, restored: DestinationResult[]) {
 /** Undo or Restore from History: a new revision that spreads to every tool the skill syncs to. */
 export const restoreEvent = (eventId: string, choice?: string) => busy('Restoring…', async () => {
   const home = state.home!;
+  const managedBefore = new Set(home.manage.skills.filter(skill => skill.managed).map(skill => skill.key));
   const result = await api().restore(eventId, home.manage.gate.state === 'needs-resume', home.home, choice);
   // The notice for an undone event has done its job; its result band says what happened.
   if (!result.stopped) state.dismissed.add(eventId);
@@ -579,13 +580,17 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   }
   const item = restored[0]?.item ?? past?.item ?? '';
   const removedFrom = [...new Set(result.results.filter(entry => entry.outcome === 'removed').map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean);
-  if (past?.kind === 'took-over') {
+  // A take-over, or the 'added' entry of the Manage that took the skill over (its Undo undoes the take-over too).
+  const tookOverPast = past?.kind === 'took-over' ? past
+    : past?.kind === 'added' ? state.history.data?.find(event => event.kind === 'took-over' && event.tookOver?.addedId === past.id && (result.stopped ? !event.undoneBy : result.results.some(entry => entry.tookOver)))
+      : undefined;
+  if (past && tookOverPast) {
     // Refused (a copy was edited since): said on the page, with the way to an earlier version.
     if (result.stopped) { tell({ page: state.page, item: past.item, text: result.stopped, warn: true, history: true }); return; }
     const back = backText(result.results.filter(entry => entry.tookOver === 'link' && entry.outcome === 'written').map(entry => ({ tool: toolName(entry.harness ?? ''), item: past.item })),
       result.results.filter(entry => entry.tookOver === 'shared' && entry.outcome === 'written').map(() => ({ item: past.item })));
-    // "Unmanaged again" only when it is: read back from the page's view, not assumed.
-    const unmanaged = !!past.tookOver?.managedNow && state.home?.manage.skills.find(skill => skill.key === past.key)?.managed === false;
+    // "Unmanaged again" only when this Undo did it: read back from the page's view, not assumed.
+    const unmanaged = !!tookOverPast.tookOver?.managedNow && managedBefore.has(past.key) && state.home?.manage.skills.find(skill => skill.key === past.key)?.managed === false;
     // In the page's tool order, as everywhere else.
     const order = Object.values(namedTools);
     const gone = [...removedFrom].sort((first, second) => order.indexOf(first) - order.indexOf(second));
@@ -611,7 +616,9 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
     if (!result.stopped) flashRow(past.item);
     return;
   }
-  const text = past?.kind === 'deleted' ? `${item} is back in ${everywhere}.`
+  // A deletion's Restore also says what it did, or left, outside the tools' own folders (the shared copy, the links).
+  const outsideSaid = result.results.filter(entry => !entry.harness && (entry.outcome === 'written' || entry.outcome === 'stayed')).map(entry => (entry.folder ? entry.message.split(entry.folder).join(shownPath(entry.folder)) : entry.message));
+  const text = past?.kind === 'deleted' ? [`${item} is back in ${everywhere}.`, ...outsideSaid].join(' ')
     : past?.kind === 'restored' ? `Redone: ${item} is as it was before the undo, in ${everywhere}.`
       : `Undid ${past?.winner ? `${toolName(past.winner.tool) ?? past.winner.tool}’s ${past.kind === 'chosen' ? 'chosen copy' : 'edit'}` : 'the change'} to ${item}. The earlier version is back in ${everywhere}.`;
   const label = past?.kind === 'deleted' ? `Delete again in ${everywhere}` : past?.kind === 'restored' ? 'Undo again' : `Redo edit in ${everywhere}`;
@@ -1045,14 +1052,17 @@ const undoChoices = (ids: string[]) => busy('Undoing the choice…', async () =>
 export const undoAdded = (ids: string[]) => busy('Undoing Apply all…', async () => {
   const home = state.home!;
   // The run's own switches and removals ride along (undone first); only the 'added' events unmanage anything.
-  const kinds = new Map((await api().history()).events.map(event => [event.id, event.kind]));
+  const events = new Map((await api().history()).events.map(event => [event.id, event]));
   const results: DestinationResult[] = [];
   const alongside: DestinationResult[] = [];
   let stopped: string | undefined;
+  let refused: { item: string; why?: string } | undefined;
+  let undoneSome = false;
   for (const id of ids) {
     const result = await api().restore(id, home.manage.gate.state === 'needs-resume', home.home);
-    if (result.stopped) { stopped = result.stopped; break; }
-    (kinds.get(id) === 'added' ? results : alongside).push(...result.results);
+    if (result.stopped) { stopped = result.stopped; refused = { item: events.get(id)?.item ?? '', why: result.refused }; break; }
+    undoneSome = true;
+    (events.get(id)?.kind === 'added' ? results : alongside).push(...result.results);
   }
   const view = await api().refresh();
   setHome(view);
@@ -1068,13 +1078,15 @@ export const undoAdded = (ids: string[]) => busy('Undoing Apply all…', async (
   const unmanaged = items.filter(item => view?.manage.skills.find(skill => skill.name === item)?.managed !== true);
   const also = alongside.filter(entry => !entry.tookOver && (entry.outcome === 'switched' || entry.outcome === 'written')).map(entry => `${entry.item}: ${entry.outcome === 'written' ? `back in ${toolName(entry.harness ?? '')}` : entry.message.replace(/\.$/, '')}.`);
   const lead = unmanaged.length ? `Undone: ${andList(unmanaged)} ${unmanaged.length === 1 ? 'is' : 'are'} unmanaged again.` : 'Undone.';
-  // Refused (a copy edited since): said on the page, with the way to an earlier version.
-  if (stopped) { tell({ page: state.page, items, text: stopped, warn: true, history: true }); return; }
+  // Refused (a copy edited since) before anything was undone: said on the page, with the way to an earlier version.
+  if (stopped && !undoneSome) { tell({ page: state.page, items, text: stopped, warn: true, history: true }); return; }
   // One skill names the tools, in the page's order; several are counted.
   const order = Object.values(namedTools);
   const removedIn = [...new Set(results.filter(entry => entry.outcome === 'removed').map(entry => toolName(entry.harness ?? '')).filter(Boolean))].sort((first, second) => order.indexOf(first) - order.indexOf(second));
   const removedSaid = !removed ? '' : items.length === 1 && removedIn.length ? `Removed the new copies in ${andList(removedIn)}.` : `Removed ${plural(removed, 'new copy', 'new copies')}.`;
-  tell({ page: state.page, items, text: [lead, back, removedSaid, ...also, ...stayed.map(entry => entry.message)].filter(Boolean).join(' ') });
+  // Refused part-way: what was undone first, then the skill left as it is, and why.
+  const left = refused ? (refused.why ? leftAsIs(refused.item, refused.why) : stopped) : '';
+  tell({ page: state.page, items: refused ? [...items, refused.item] : items, text: [lead, back, removedSaid, ...also, ...stayed.map(entry => entry.message), left].filter(Boolean).join(' '), ...(refused ? { warn: true, history: true } : {}) });
   for (const item of items) flashRow(item);
 });
 

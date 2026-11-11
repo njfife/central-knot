@@ -2,7 +2,7 @@
 // no raw link text, and only what is true as built.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backText, deleteNote, deletedText, linkTarget, managedSentence, manageSentence, notPutBack, pendingSentence, pinnedSentence, replacedText, replaceSentence, syncedSome, tookOverDone, undoneText, whereSentence, type Shape } from '../src/outsidewords.ts';
+import { backText, deleteNote, deletedText, leftAsIs, linkTarget, managedSentence, manageSentence, notPutBack, pendingSentence, pinnedSentence, replacedText, replaceSentence, syncedSome, tookOverDone, undoneText, whereSentence, type Shape } from '../src/outsidewords.ts';
 
 const folder = '~/.agents/skills';
 /** The reported layout: the real folder in the shared folder, a link from Copilot CLI's folder, Pi reading the shared folder. */
@@ -94,4 +94,8 @@ test('Undo of a take-over leads with whether the skill is unmanaged again, then 
 test('Restore after deleting a managed skill says what it doesn’t put back', () => {
   assert.equal(notPutBack(2, 1), 'Each tool has its own copy now; the links and the shared copy aren’t put back.');
   assert.equal(notPutBack(0, 1), 'Each tool has its own copy now; the shared copy isn’t put back.');
+});
+
+test('A skill an Undo over several left as it was says why, after what was undone', () => {
+  assert.equal(leftAsIs('opus-sol-loop', 'Claude Code’s new copy of opus-sol-loop was edited since'), 'Claude Code’s new copy of opus-sol-loop was edited since, so opus-sol-loop was left as it is.');
 });

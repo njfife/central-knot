@@ -24,6 +24,7 @@ import { byKey } from './roworder.ts';
 const bodyLine = (content: string) => content.replace(/^﻿?---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/, '').split(/\r?\n/).map(line => line.trim()).find(line => line && !line.startsWith('#')) ?? '';
 
 interface Location { tool: HarnessId; copy: ToolCopy }
+type Loser = HistoryEvent['losers'][number];
 interface Gathered { facts: SkillFacts; skills: Partial<Record<HarnessId, Skill[]>>; locations: Location[]; /** Tools that read this skill in another present tool's own folder, and whose folder: so with or without a copy of their own. */ reads: Partial<Record<HarnessId, HarnessId>> }
 
 /** Reads every skill in every present tool once. A copy that cannot be read makes the skill held, never the whole page. */
@@ -407,7 +408,6 @@ export async function rootProblem(context: ShareContext, tool: HarnessId): Promi
   return undefined;
 }
 
-
 /** Only a real folder directly in the tool's own skills folder is written: never through a link, never a shared folder. */
 async function writable(context: ShareContext, tool: HarnessId, directory: string, problems: Map<HarnessId, string | undefined>): Promise<boolean> {
   if (problems.get(tool)) return false;
@@ -417,7 +417,6 @@ async function writable(context: ShareContext, tool: HarnessId, directory: strin
     return (await realpath(dirname(directory))) === own;
   } catch { return false; }
 }
-
 
 /**
  * Why the shared folder's copies stay where they are when a skill is managed: a present tool's own skills folder is that very
@@ -689,8 +688,9 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
   const events: HistoryEvent[] = [];
   const event = (fields: Omit<HistoryEvent, 'id' | 'at'>) => { const made = { id: randomUUID(), at: new Date(clock(context)).toISOString(), ...fields }; events.push(made); return made.id; };
   const tookOver = new Map<string, TookOver>();
-  // Links a take-over removed in a tool the same change removes ("key\0tool"): that tool's Remove, finished by removeCopies.
-  const linksRemoved = new Map<string, { copy: ToolCopy; linkTo: string }>();
+  // Copies a take-over removed for a tool the same change removes ("key\0tool"), its link or the shared copy it read only there:
+  // that tool's Remove, finished by removeCopies.
+  const removedByTakeOver = new Map<string, { copy: ToolCopy; linkTo?: string }>();
 
   /**
    * Takes over a skill's copies outside Central Knot's own, because the person asked (never in a background pass). Each link in a
@@ -747,6 +747,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       becomeOwn(location);
       results.push({ item: name, harness: tool, outcome: 'written', tookOver: 'link', message: `Replaced the link in ${toolName(tool)}’s skills folder (it led to ${linkTo}) with a copy of its own. ${harnesses[tool].nextStep}` });
     }
+    const removing = new Set(changes.find(change => change.key === key)?.remove ?? []);
     // 2. The shared copy: each tool it syncs to that read it there gets its own first; then it goes, unless one could not.
     const readers = tools.filter(tool => readsShared(context, tool));
     for (const path of [...new Set(sharedOnes.map(candidate => candidate.location.copy.directory))]) {
@@ -795,21 +796,25 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       for (const tool of Object.keys(entry.facts.copies) as HarnessId[]) {
         if (!sameDir(entry.facts.copies[tool]!.directory, path)) continue;
         const own = entry.locations.find(location => location.tool === tool);
-        if (own) entry.facts.copies[tool] = own.copy; else { delete entry.facts.copies[tool]; lost.push(tool); }
+        if (own) entry.facts.copies[tool] = own.copy;
+        else {
+          if (removing.has(tool)) removedByTakeOver.set(`${key}\0${tool}`, { copy: entry.facts.copies[tool]! });
+          delete entry.facts.copies[tool];
+          lost.push(tool);
+        }
       }
       results.push({ item: name, outcome: 'removed', tookOver: 'shared', folder: shared, message: `Removed the copy in ${shared}; History keeps it. Other apps that read that folder won’t find it there.${lost.length ? ` ${andList(lost.map(toolName))} ${lost.length > 1 ? 'aren’t' : 'isn’t'} ticked and read it only there, so ${lost.length > 1 ? 'they no longer have' : 'it no longer has'} it.` : ''}` });
     }
     // 3. A link in a tool left out that now leads nowhere (it led to the shared copy) goes too, as a link. In a tool this same
     // change removes, that is the Remove done: its 'removed' event names it (removeCopies), not the take-over, whose Undo
     // must not bring back a link the person asked to go.
-    const removing = new Set(changes.find(change => change.key === key)?.remove ?? []);
     for (const { location, linkTo } of links.filter(candidate => !wanted(candidate.location.tool))) {
       if ((await brokenLink(location.copy.directory)) === undefined) continue;
       try { await unlinkChecked(location.copy.directory, linkTo); } catch { continue; }
       writes++;
       entry.locations = entry.locations.filter(other => other !== location);
       if (entry.facts.copies[location.tool]?.directory === location.copy.directory) delete entry.facts.copies[location.tool];
-      if (removing.has(location.tool)) { linksRemoved.set(`${key}\0${location.tool}`, { copy: location.copy, linkTo }); continue; }
+      if (removing.has(location.tool)) { removedByTakeOver.set(`${key}\0${location.tool}`, { copy: location.copy, linkTo }); continue; }
       told.links.push({ tool: location.tool, path: location.copy.directory, linkTo, hash: location.copy.hash });
       results.push({ item: name, harness: location.tool, outcome: 'removed', tookOver: 'link', message: `${toolName(location.tool)} isn’t ticked; its link led to the removed copy, so the link was removed too.` });
     }
@@ -1214,13 +1219,14 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     const linkGone = (tool: HarnessId, linkTo: string) => how.set(tool, ` It was a link to ${linkTo}; only the link was removed.`);
     for (const tool of change.remove ?? []) {
       if (entry.facts.copies[tool]) continue;
-      // Its link went with the take-over this change also asked for: that was this Remove. Restore puts the link back; a link
-      // gets no sync record, since sync never writes one.
-      const gone = linksRemoved.get(`${change.key}\0${tool}`);
+      // Its link, or the shared copy it read only there, went with the take-over this change also asked for: that was this
+      // Remove. Restore puts the link back, or gives the tool its own copy (the shared one stays the take-over's); neither gets a
+      // sync record, since sync wrote neither.
+      const gone = removedByTakeOver.get(`${change.key}\0${tool}`);
       if (gone) {
-        removed.push({ tool, hash: gone.copy.hash, folder: gone.copy.folder, path: gone.copy.directory, linkTo: gone.linkTo });
+        removed.push({ tool, hash: gone.copy.hash, folder: gone.copy.folder, ...(gone.linkTo !== undefined ? { path: gone.copy.directory, linkTo: gone.linkTo } : {}) });
         removedFrom.add(tool);
-        linkGone(tool, gone.linkTo);
+        if (gone.linkTo !== undefined) linkGone(tool, gone.linkTo);
         continue;
       }
       // Gone since the page was read: nothing to remove, so that tool syncs as before.
@@ -1493,30 +1499,32 @@ export async function restoreFromHistory(context: ShareContext, eventId: string,
     const tools = presentTools(snapshots);
     const results: DestinationResult[] = [];
     let writes = 0;
-    // A deletion that removed the shared copy a tool can have no other of (its skills folder is the shared folder): that copy
-    // goes back as it was, so the tool has the skill again. Links and a shared copy a tool could do without stay gone: each
-    // tool gets its own copy, as Manage gives it, and the result says so.
-    const outsideLost = past.kind === 'deleted' ? past.losers.filter(loser => loser.path) : [];
-    if (outsideLost.length && (item.state !== 'shared' || item.hash === hash)) {
-      const problems = new Map(await Promise.all(tools.map(async tool => [tool, await rootProblem(context, tool)] as const)));
-      const pinned = await pinnedShared(context, tools, problems);
-      const pinnedCopies = pinned ? outsideLost.filter(loser => loser.linkTo === undefined && sameDir(dirname(loser.path!), sharedFolder(context))) : [];
-      for (const loser of pinnedCopies) {
-        const put = await putBackExact(context, past.key, item.name, loser);
-        if (put.outcome === 'written') writes++;
-        results.push({ item: item.name, outcome: put.outcome, message: put.outcome === 'written' ? `Put the shared copy back in ${dirname(loser.path!)}, the only copy ${toolName(pinned!.tool)} can have.` : put.message });
-      }
-      const left = outsideLost.filter(loser => !pinnedCopies.includes(loser));
-      const inShared = (loser: Loser) => sameDir(dirname(loser.path!), sharedFolder(context));
-      if (left.length) results.push({ item: item.name, outcome: 'stayed', message: notPutBack(left.filter(loser => !inShared(loser)).length, left.filter(inShared).length) });
-    }
-    const entry = (await gather(context, await context.read(), record)).get(past.key);
+    let entry = (await gather(context, await context.read(), record)).get(past.key);
     // A skill deleted earlier whose name is managed again with other content: restoring the old one would replace the new one.
     if (past.kind === 'deleted' && item.state === 'shared' && item.hash !== hash) return { stopped: `“${item.name}” is managed again with other content. Restoring the old one would replace it; delete or rename the new one first.`, results: [], harnessWrites: 0 };
     // A skill deleted earlier whose name is now taken by a different skill: never overwrite the new one.
     if (item.state !== 'shared') {
       const taken = Object.entries(entry?.facts.copies ?? {}).find(([, copy]) => copy && copy.hash !== tree.hash);
       if (taken) return { stopped: `A different “${item.name}” is in ${harnesses[taken[0] as HarnessId].name} now. Rename or remove it, then restore.`, results: [], harnessWrites: 0 };
+    }
+    // A deletion that removed the shared copy a tool can have no other of (its skills folder is the shared folder): that copy
+    // goes back as it was, so the tool has the skill again; only after the refusals above, so a refused Restore writes nothing.
+    // Links and a shared copy a tool could do without stay gone: each tool gets its own copy, as Manage gives it, and the result
+    // says so.
+    const outsideLost = past.kind === 'deleted' ? past.losers.filter(loser => loser.path) : [];
+    if (outsideLost.length) {
+      const problems = new Map(await Promise.all(tools.map(async tool => [tool, await rootProblem(context, tool)] as const)));
+      const pinned = await pinnedShared(context, tools, problems);
+      const inShared = (loser: Loser) => sameDir(dirname(loser.path!), sharedFolder(context));
+      const pinnedCopies = pinned ? outsideLost.filter(loser => loser.linkTo === undefined && inShared(loser)) : [];
+      for (const loser of pinnedCopies) {
+        const put = await putBackExact(context, past.key, item.name, loser);
+        if (put.outcome === 'written') writes++;
+        results.push({ item: item.name, outcome: put.outcome, folder: dirname(loser.path!), message: put.outcome === 'written' ? `Put the shared copy back in ${dirname(loser.path!)}, the only copy ${toolName(pinned!.tool)} can have.` : put.message });
+      }
+      const left = outsideLost.filter(loser => !pinnedCopies.includes(loser));
+      if (left.length) results.push({ item: item.name, outcome: 'stayed', message: notPutBack(left.filter(loser => !inShared(loser)).length, left.filter(inShared).length) });
+      if (writes) entry = (await gather(context, await context.read(), record)).get(past.key);
     }
     const before = item.state === 'shared' ? item.hash : undefined;
     // The intent is on record first: a crash part-way leaves unfinished copies, never what reads as a deletion.
@@ -1623,6 +1631,7 @@ const tookOverWith = (history: HistoryEvent[], added: HistoryEvent) => (added.un
  */
 async function undoTookOver(context: ShareContext, record: SyncRecord, history: HistoryEvent[], past: HistoryEvent): Promise<ApplyResult> {
   const stop = (stopped: string): ApplyResult => ({ stopped, results: [], harnessWrites: 0 });
+  const refuse = (why: string, earlier = false): ApplyResult => ({ ...stop(`${why}, so nothing was undone.${earlier ? ' History can still put an earlier version back.' : ''}`), refused: why });
   if (past.undoneBy) return stop('That change was already undone.');
   const told = past.tookOver;
   const item = record.items[past.key];
@@ -1632,21 +1641,21 @@ async function undoTookOver(context: ShareContext, record: SyncRecord, history: 
   // Check everything first.
   for (const copy of told.shared) {
     if (await free(copy.path)) { try { await readTree(storedRevision(context, past.key, copy.hash)); } catch { return stop('The copy that was in the shared folder is no longer in Central Knot’s store, so it can’t be put back.'); } continue; }
-    if (await holds(copy.path) !== copy.hash) return stop(`Something else is at ${copy.path} now, so nothing was undone.`);
+    if (await holds(copy.path) !== copy.hash) return refuse(`Something else is at ${copy.path} now`);
   }
   for (const link of told.links) {
     if (await free(link.path)) continue;
-    if ((await lstat(link.path)).isSymbolicLink()) { if (await readlink(link.path) === link.linkTo) continue; return stop(`${link.path} is another link now, so nothing was undone.`); }
-    if (!link.placed || await holds(link.path) !== link.placed) return stop(`${toolName(link.tool)}’s copy of ${past.item} was edited since, so nothing was undone. History can still put an earlier version back.`);
+    if ((await lstat(link.path)).isSymbolicLink()) { if (await readlink(link.path) === link.linkTo) continue; return refuse(`${link.path} is another link now`); }
+    if (!link.placed || await holds(link.path) !== link.placed) return refuse(`${toolName(link.tool)}’s copy of ${past.item} was edited since`, true);
   }
   for (const copy of told.placed) {
-    if (!(await free(copy.path)) && await holds(copy.path) !== copy.hash) return stop(`${toolName(copy.tool)}’s copy of ${past.item} was edited since, so nothing was undone. History can still put an earlier version back.`);
+    if (!(await free(copy.path)) && await holds(copy.path) !== copy.hash) return refuse(`${toolName(copy.tool)}’s copy of ${past.item} was edited since`, true);
   }
   // The copies the same Manage added go with it: if one was edited since, the skill would stay managed, so nothing is undone.
   const added = told.addedId ? history.find(entry => entry.id === told.addedId && !entry.undoneBy) : undefined;
   for (const loser of added?.losers ?? []) {
     const recorded = item.copies.find(copy => copy.harness === loser.tool && copy.created);
-    if (recorded && !(await free(recorded.directory)) && await holds(recorded.directory) !== loser.hash) return stop(`${toolName(loser.tool)}’s new copy of ${past.item} was edited since, so nothing was undone. History can still put an earlier version back.`);
+    if (recorded && !(await free(recorded.directory)) && await holds(recorded.directory) !== loser.hash) return refuse(`${toolName(loser.tool)}’s new copy of ${past.item} was edited since`, true);
   }
   const results: DestinationResult[] = [];
   let writes = 0;
@@ -1676,7 +1685,8 @@ async function undoTookOver(context: ShareContext, record: SyncRecord, history: 
   const back = [...told.links.map(link => link.path), ...told.placed.map(copy => copy.path)];
   item.copies = item.copies.filter(copy => !back.some(path => sameDir(path, copy.directory)));
   past.undoneBy = randomUUID();
-  if (added) {
+  // Its added copies go with it only while the skill is managed; unmanaged since, they are ordinary copies now and stay.
+  if (added && item.state === 'shared') {
     const removed = await undoAdded(context, record, history, added);
     return { ...removed, results: [...results, ...removed.results], harnessWrites: writes + removed.harnessWrites };
   }
@@ -1713,7 +1723,6 @@ async function undoSwitched(context: ShareContext, history: HistoryEvent[], past
   return { results, harnessWrites: 0 };
 }
 
-type Loser = HistoryEvent['losers'][number];
 /**
  * Puts a removed copy outside the tool's own folder, or a link, back exactly where and as it was: the link with its own text, or
  * the copy from the store. Already there counts as back ('stayed'); something else there stays ('held').
