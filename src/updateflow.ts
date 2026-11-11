@@ -1,5 +1,6 @@
-// An update's steps in the main process (PLT-02; updates.ts has the rules and the words): checking shortly after launch and
-// every few hours, and on the person's click downloading the Mac zip, handing it over to be prepared and restarting into it.
+// An update's steps in the main process (PLT-02; updates.ts has the rules and the words): checking shortly after launch, every
+// quarter of an hour and when the person comes back to the window, and on the person's click downloading the Mac zip, handing
+// it over to be prepared and restarting into it.
 // Nothing here is Electron's: updater.ts gives it the app's own parts (the network, Squirrel.Mac, the quit), and the tests
 // give it stand-ins, so every turn these steps can take is tested without an app.
 import { createWriteStream } from 'node:fs';
@@ -10,10 +11,15 @@ import { pipeline } from 'node:stream/promises';
 import { buildWords, checkFailure, newerRelease, prepareUnfinished, tagWords, updateFailure } from './updates.ts';
 import type { UpdateRelease, UpdateView } from './types.ts';
 
-/** Shortly after launch, then every few hours; a check that failed is tried again sooner. */
+/**
+ * When releases are read: shortly after launch, then every quarter of an hour (a failed check too), and when the person comes
+ * back to the window if the last check is older than FRESH_MS. A copy left running in the menu bar all day hears of a new
+ * release within minutes, and coming back to its window shows it at once. Settings' Updates row says this schedule in words
+ * (settingspage.ts updatesRow). At most a few requests an hour: GitHub allows 60 an hour to each address without a token.
+ */
 export const FIRST_CHECK_MS = 10_000;
-export const CHECK_EVERY_MS = 4 * 60 * 60_000;
-export const RETRY_MS = 30 * 60_000;
+export const CHECK_EVERY_MS = 15 * 60_000;
+export const FRESH_MS = 5 * 60_000;
 /** A download that receives nothing for this long has stopped. */
 export const STALLED_MS = 60_000;
 /** An app that hasn't quit this long after the restart was asked for isn't going to. */
@@ -86,23 +92,21 @@ export function updateFlow(host: UpdaterHost, system: UpdateSystem) {
   /** The check under way, so a click on Update during it waits for it rather than being dropped. */
   let checkRun: Promise<void> | undefined;
 
-  /** Asks for the releases and keeps the newest this build would update to. A failure is recorded, and tried again later. */
+  /** Asks for the releases and keeps the newest this build would update to. A failure is recorded, and tried again at the next turn. */
   function check(): Promise<void> {
     if (!checks()) return Promise.resolve();
     if (checkRun) return checkRun;
     // During an update nothing is read, but the next check stays scheduled: a download that then fails must not end the checks.
-    if (view.step) { later(RETRY_MS); return Promise.resolve(); }
+    if (view.step) { later(CHECK_EVERY_MS); return Promise.resolve(); }
     checkRun = (async () => {
       view.checking = true;
       tell();
-      let failed = false;
       try {
         view.available = await newest();
         view.checked = { at: Date.now() };
         // An earlier update's failure is old news once a check has gone through.
         view.failed = undefined;
       } catch (error) {
-        failed = true;
         host.log(`update check: ${said(error)}`);
         const { status, limited } = error as { status?: number; limited?: boolean };
         view.checked = { at: Date.now(), failed: checkFailure({ status, limited }) };
@@ -110,7 +114,7 @@ export function updateFlow(host: UpdaterHost, system: UpdateSystem) {
       view.checking = false;
       checkRun = undefined;
       tell();
-      later(failed ? RETRY_MS : CHECK_EVERY_MS);
+      later(CHECK_EVERY_MS);
     })();
     return checkRun;
   }
@@ -232,7 +236,7 @@ export function updateFlow(host: UpdaterHost, system: UpdateSystem) {
     const pending = host.pending();
     if (pending) {
       if (pending.tag === tag) view.updated = { tag: pending.tag, page: pending.page };
-      else view.failed = `The update to ${tagWords(pending.tag)} didn’t finish. Central Knot ${buildWords(view)} is still in use. Try again from the Update button.`;
+      else view.failed = `The update to ${tagWords(pending.tag)} didn’t finish. Central Knot ${buildWords(view)} is still in use. Try the update again.`;
       // Said once: a record that can't be cleared is said again at the next launch, which is all it costs.
       await host.savePending(undefined).catch(error => host.log(`update: clearing the record: ${said(error)}`));
     }
@@ -245,6 +249,11 @@ export function updateFlow(host: UpdaterHost, system: UpdateSystem) {
     view: async () => { await started; return structuredClone(view); },
     /** On demand: checks now, and answers with what it found. */
     check: async () => { await started; clearTimeout(timer); if (!view.step) view.failed = undefined; await check(); return structuredClone(view); },
+    /**
+     * The person came back to the window: checks now when the last check is older than FRESH_MS. Before the first check
+     * nothing is asked here: that one is already due, shortly after launch.
+     */
+    checkIfStale: async () => { await started; if (view.checked && Date.now() - view.checked.at >= FRESH_MS) await check(); },
     install: async () => { await started; void install(); return structuredClone(view); },
     restart,
   };

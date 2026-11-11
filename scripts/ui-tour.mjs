@@ -1226,8 +1226,9 @@ if (wanted('missing')) {
 }
 
 // ---------- Updates ----------
-// A stand-in for GitHub's releases, and the app acting as an installed copy of v0.5.0-preview.4 (CK_UPDATE_STUB): the status
-// bar's Update button at each step and the Settings row, at 860×560 and 1728×1117.
+// A stand-in for GitHub's releases, and the app acting as an installed copy of v0.5.0-preview.4 (CK_UPDATE_STUB): the sidebar's
+// update control at the bottom left at each step, open and in the rail at 860×560, 1280×800, 1728×1117 and 2560×1440, and the
+// Settings row.
 if (wanted('updates')) {
   const zip = join(scratch, 'update.zip');
   writeFileSync(zip, Buffer.alloc(4_000_000, 7));
@@ -1236,26 +1237,38 @@ if (wanted('updates')) {
   const as = tag => ({ CK_UPDATE_STUB: tag, CK_UPDATE_RELEASES: fixture.releasesUrl });
   await fresh(as('v0.5.0-preview.4'));
   begin('updates');
-  const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
-  await shot(a, 'version', 'The app as it opens: the status bar names the build, "Central Knot 0.5.0 preview 4", at the bottom right.');
-  await waitFor(a, `!!document.querySelector('#update-button')`, 20000);
-  await shot(a, 'update-button', 'Shortly after launch it checked GitHub: a newer release, so the version became a button, "Update to 0.5.0 preview 5".');
-  for (const [width, height] of [[860, 560], [1728, 1117]]) { await size(width, height); await shot(a, `update-button-${width}`, `The same at ${width}×${height}.`); }
-  await size(1280, 800);
+  const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.run(`window.dispatchEvent(new Event('resize'))`); await a.settle(); };
+  /** The state on screen at each size the UI rule names, with the sidebar as the window chooses it and then the other way. */
+  const everySize = async (name, said) => {
+    for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
+      await size(width, height);
+      const rail = await a.run(`document.body.classList.contains('rail')`);
+      await shot(a, `${name}-${width}-${rail ? 'rail' : 'open'}`, `${said} At ${width}×${height}, the sidebar ${rail ? 'folded to its rail' : 'open'}.`);
+      await a.click('#sidebar-toggle');
+      await shot(a, `${name}-${width}-${rail ? 'open' : 'rail'}`, `The same with the sidebar ${rail ? 'open' : 'folded to its rail'}.`);
+      await a.click('#sidebar-toggle');
+    }
+    await size(1280, 800);
+  };
+  await shot(a, 'check', 'The app as it opens: the sidebar ends in "Check for updates" at the bottom left, its circular arrows quiet; the status bar names the build, "Central Knot 0.5.0 preview 4".');
+  await everySize('check', 'Check for updates, before the first check.');
+  await waitFor(a, `document.querySelector('#update-control')?.dataset.look === 'available'`, 20000);
+  await shot(a, 'available', 'Shortly after launch it checked GitHub by itself: a newer release, so the control stands out as "Update available" (its tooltip and name: "Update to 0.5.0 preview 5").');
+  await everySize('available', 'Update available.');
   await a.click('#nav-settings');
   await shot(a, 'settings-available', 'Settings › General › Updates: the build in use and its tag, Update and Check now, and what the last check found, with the release notes.');
   for (const [width, height] of [[860, 560], [1728, 1117]]) { await size(width, height); await shot(a, `settings-available-${width}`, `The same at ${width}×${height}.`); }
   await size(1280, 800);
   // Something waiting for Apply all holds the restart.
   await a.click('#nav-skills'); await a.click('#manage-all');
-  await a.click('#update-button');
-  await waitFor(a, `/Downloading… [1-9]/.test(document.querySelector('#update-button')?.textContent ?? '')`, 10000);
-  await shot(a, 'downloading', 'Managed every skill (not applied yet), then clicked "Update to 0.5.0 preview 5": the button shows the download.');
-  await size(860, 560); await shot(a, 'downloading-860', 'The same at 860×560.'); await size(1280, 800);
-  await waitFor(a, `document.querySelector('#update-button')?.textContent.trim() === 'Restart to update'`, 30000);
-  await shot(a, 'held', 'Downloaded and prepared. Changes wait for Apply all, so it doesn’t restart by itself: the button says "Restart to update" and the status bar says why.');
-  for (const [width, height] of [[860, 560], [1728, 1117]]) { await size(width, height); await shot(a, `held-${width}`, `The same at ${width}×${height}.`); }
-  await size(1280, 800);
+  await a.click('#update-control');
+  await waitFor(a, `/Downloading… [1-9]/.test(document.querySelector('#update-control')?.textContent ?? '')`, 10000);
+  await shot(a, 'downloading', 'Managed every skill (not applied yet), then clicked "Update available": the control shows the download, its progress a ring round the arrow.');
+  await size(860, 560); await shot(a, 'downloading-860-rail', 'The same at 860×560, in the rail: the ring alone.');
+  await a.click('#sidebar-toggle'); await shot(a, 'downloading-860-open', 'The same with the sidebar open.'); await a.click('#sidebar-toggle'); await size(1280, 800);
+  await waitFor(a, `document.querySelector('#update-control')?.textContent.trim() === 'Restart to update'`, 30000);
+  await shot(a, 'held', 'Downloaded and prepared. Changes wait for Apply all, so it doesn’t restart by itself: the control says "Restart to update" with the warning mark, and the status bar says why.');
+  await everySize('held', 'Restart to update, held for the changes waiting for Apply all.');
   await a.click('#nav-settings'); await shot(a, 'settings-held', 'Settings while the update waits for the restart.');
   // The next launch, as the new version: it says so once.
   const settings = join(scratch, 'data', 'app-settings.json');
@@ -1267,11 +1280,14 @@ if (wanted('updates')) {
   await size(1280, 800);
   await a.click('#nav-settings'); await a.click('#check-updates'); await waitFor(a, `/Up to date/.test(document.getElementById('setting-updates').textContent)`, 10000);
   await shot(a, 'settings-up-to-date', 'Clicked "Check now": up to date.');
+  await a.click('#nav-skills'); await a.click('#update-control'); await waitFor(a, `/newest release/.test(document.getElementById('announcement').textContent)`, 10000);
+  await shot(a, 'sidebar-up-to-date', 'On Skills, clicked "Check for updates" in the sidebar: the status bar says what it found; the control is the quiet arrows again.');
+  await a.click('#nav-settings');
   // A failed check, and a failed download.
   releases.splice(0, 1, { tag: 'v0.5.0-preview.6', zip, cut: 0.3 });
   await a.click('#check-updates'); await waitFor(a, `!!document.querySelector('#setting-update')`, 10000);
   await a.click('#setting-update'); await waitFor(a, `/didn’t finish/.test(document.getElementById('setting-updates').textContent)`, 20000);
-  await shot(a, 'settings-download-failed', 'A newer release, and its download was cut off: the row says nothing changed, and offers it again.');
+  await shot(a, 'settings-download-failed', 'A newer release, and its download was cut off: the row says nothing changed and offers it again, and so does the sidebar ("Try the update again").');
   await size(860, 560); await shot(a, 'settings-download-failed-860', 'The same at 860×560.'); await size(1280, 800);
   await fixture.close();
   await a.click('#check-updates'); await waitFor(a, `/Couldn’t check/.test(document.getElementById('setting-updates').textContent)`, 40000);
@@ -1279,7 +1295,7 @@ if (wanted('updates')) {
   // A build that can't update itself (here: not made from a release) says why and offers the release page.
   await fresh({}, false);
   await a.click('#nav-settings');
-  await shot(a, 'settings-cannot', 'A build not made from a release (a development or local build): the row says why it doesn’t update itself and offers the releases page.');
+  await shot(a, 'settings-cannot', 'A build not made from a release (a development or local build): the row says why it doesn’t update itself and offers the releases page; on a Mac the sidebar’s control is a faint "Updates" that opens this row.');
   for (const [width, height] of [[860, 560], [1728, 1117]]) { await size(width, height); await shot(a, `settings-cannot-${width}`, `The same at ${width}×${height}.`); }
   await size(1280, 800);
   // The narrowest window with the status bar at its fullest: a profile in use, and sync on with nothing managed yet. In a
@@ -1300,14 +1316,14 @@ if (wanted('updates')) {
   await a.click('#nav-profiles'); await a.click('#profile-new');
   await a.run(`(() => { const input = document.querySelector('#profile-name'); input.value = 'Incident'; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`); await a.settle();
   await a.click('#pf-skill\\:notes'); await a.click('#profile-switch'); await a.run(`document.activeElement?.blur()`);
-  await waitFor(a, `!!document.querySelector('#update-button')`, 20000);
-  await shot(a, 'narrow-update', 'At 860×560 in a folder home with a profile in use ("Incident") and sync on with nothing managed yet, a newer release is found: the button says "Update", and the "Central Knot" name makes room.');
+  await waitFor(a, `document.querySelector('#update-control')?.dataset.look === 'available'`, 20000);
+  await shot(a, 'narrow-update', 'At 860×560 in a folder home with a profile in use ("Incident") and sync on with nothing managed yet, a newer release is found: the rail’s last icon stands out; the status bar keeps the version.');
   await a.click('#nav-skills'); await a.click('#manage-all');
-  await a.click('#update-button');
-  await waitFor(a, `/Downloading… [1-9]/.test(document.querySelector('#update-button')?.textContent ?? '')`, 10000);
-  await shot(a, 'narrow-downloading', 'Managed every skill (not applied yet), then clicked "Update": the button shows the download.');
-  await waitFor(a, `document.querySelector('#update-button')?.textContent.trim() === 'Restart to update'`, 30000);
-  await shot(a, 'narrow-held', 'Downloaded and prepared; changes wait for Apply all, so the button says "Restart to update", with the warning mark. The message is only its mark at this width (its words are the mark’s tooltip, and the button’s).');
+  await a.click('#update-control');
+  await waitFor(a, `/Downloading… [1-9]/.test(document.querySelector('#update-control')?.textContent ?? '')`, 10000);
+  await shot(a, 'narrow-downloading', 'Managed every skill (not applied yet), then clicked it: the ring shows the download.');
+  await waitFor(a, `document.querySelector('#update-control')?.textContent.trim() === 'Restart to update'`, 30000);
+  await shot(a, 'narrow-held', 'Downloaded and prepared; changes wait for Apply all, so the control is "Restart to update", with the warning mark. The message is only its mark at this width (its words are the mark’s tooltip, and the control’s).');
   await reopen('v0.5.0-preview.5', { update: { tag: 'v0.5.0-preview.5', page: 'https://github.com/njfife/central-knot/releases/tag/v0.5.0-preview.5', from: 'v0.5.0-preview.4' } });
   await waitFor(a, `/now on/.test(document.getElementById('announcement').textContent)`, 10000);
   await shot(a, 'narrow-updated', 'Opened again as 0.5.0 preview 5 at 860×560, the profile still in use: the version alone at the end, and the note that it is on the new version as its mark.');

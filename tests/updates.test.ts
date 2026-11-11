@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildWords, checkFailure, newerRelease, tagVersion, tagWords, updateButton, updateFailure, updatesShown, updateStatus, whyNoUpdate, type UpdateFacts } from '../src/updates.ts';
+import { buildWords, checkFailure, newerRelease, tagVersion, tagWords, updateButton, updateFailure, updateIndicator, updatesShown, updateStatus, whyNoUpdate, type UpdateFacts } from '../src/updates.ts';
 import type { UpdateReason, UpdateView } from '../src/types.ts';
 
 /** A release as GitHub's API lists it, with the Mac zip unless `assets` says otherwise. */
@@ -85,6 +85,49 @@ test('what the Update button says at each step', () => {
   assert.equal(updateButton({ ...base, step: 'downloading' })!.title, 'Downloading 0.5.0 preview 5. Central Knot restarts into it when it’s ready.');
   assert.equal(updateButton({ ...base, step: 'downloading' }, { held: 'Restarting now loses 1 change waiting for Apply all.' })!.title, 'Downloading 0.5.0 preview 5. Something here isn’t saved yet, so Central Knot will wait for you to restart.');
   assert.equal(label({ failed: 'The download didn’t finish.' }), 'Update to 0.5.0 preview 5', 'after a failure it can be tried again');
+});
+
+test('what the sidebar’s update control shows, from the quiet arrows to the button that stands out', () => {
+  const preview5 = { tag: 'v0.5.0-preview.5', zip: 'https://x/z', size: 10, page: 'https://x/p' };
+  const base: UpdateView = { shown: true, version: '0.5.0', tag: 'v0.5.0-preview.4', checking: false };
+  const shown = (view: Partial<UpdateView>, options?: Parameters<typeof updateIndicator>[1]) => {
+    const it = updateIndicator({ ...base, ...view }, options);
+    return it && { look: it.look, label: it.label, does: it.does, busy: it.busy };
+  };
+  assert.equal(updateIndicator({ ...base, shown: false }), undefined, 'where there are no releases (off a Mac) there is no control');
+  // Nothing newer: the circular arrows, and a click checks. The tooltip says what the last check found.
+  assert.deepEqual(shown({}), { look: 'check', label: 'Check for updates', does: 'check', busy: false });
+  assert.equal(updateIndicator(base)!.title, 'Central Knot checks for a newer release by itself. Click to check now.', 'before the first check');
+  assert.equal(updateIndicator({ ...base, checked: { at: 1 } })!.title, 'Up to date: 0.5.0 preview 4 is the newest release. Click to check now.');
+  assert.equal(updateIndicator({ ...base, checked: { at: 1, failed: 'Couldn’t check for updates: GitHub couldn’t be reached. Central Knot tries again later.' } })!.title,
+    'Couldn’t check for updates: GitHub couldn’t be reached. Central Knot tries again later. Click to check now.', 'a failed check gets no mark of its own: it is tried again by itself');
+  // A check under way spins the arrows, whether main's clock started it or the page did.
+  assert.deepEqual(shown({ checking: true }), { look: 'checking', label: 'Checking…', does: 'check', busy: true });
+  assert.equal(shown({}, { checking: true })!.look, 'checking');
+  // A newer release: the control stands out, and a click updates.
+  assert.deepEqual(shown({ available: preview5 }), { look: 'available', label: 'Update available', does: 'update', busy: false });
+  assert.equal(updateIndicator({ ...base, available: preview5 })!.name, 'Update to 0.5.0 preview 5', 'its full name, for a screen reader and the folded sidebar');
+  assert.equal(shown({ available: preview5, checking: true })!.look, 'available', 'a later check doesn’t take the offer away while it runs');
+  // Downloading and preparing: the Update button's words, busy, with the download's progress for the ring.
+  const downloading = updateIndicator({ ...base, available: preview5, step: 'downloading', progress: 0.427 })!;
+  assert.deepEqual([downloading.look, downloading.label, downloading.busy, downloading.progress], ['working', 'Downloading… 42%', true, 0.427]);
+  assert.deepEqual(shown({ available: preview5, step: 'installing' }), { look: 'working', label: 'Preparing update…', does: 'update', busy: true });
+  // Ready: a click restarts into it. Something unsaved holds it, and the control says what restarting loses.
+  assert.deepEqual(shown({ available: preview5, step: 'ready' }), { look: 'ready', label: 'Restart to update', does: 'restart', busy: false });
+  const held = updateIndicator({ ...base, available: preview5, step: 'ready' }, { held: 'Restarting now loses your unsaved instructions draft.' })!;
+  assert.deepEqual([held.glyph, held.title], ['triangle-alert', '0.5.0 preview 5 is ready. Restarting now loses your unsaved instructions draft. Click to restart anyway.']);
+  assert.deepEqual(shown({ available: preview5, step: 'ready' }, { restarting: true }), { look: 'ready', label: 'Restarting…', does: 'restart', busy: true });
+  // A download that failed: the release is still offered, and the click tries again.
+  const failed = updateIndicator({ ...base, available: preview5, failed: 'The download didn’t finish. Central Knot wasn’t changed. Try again.' })!;
+  assert.deepEqual([failed.look, failed.label, failed.does, failed.title], ['available', 'Try the update again', 'update', 'The download didn’t finish. Central Knot wasn’t changed. Try again.']);
+  // A newer release this copy can't install itself: Settings says why and links the release.
+  const elsewhere = updateIndicator({ ...base, available: preview5, reason: { key: 'applications', text: 'Move Central Knot to the Applications folder first.' } })!;
+  assert.deepEqual([elsewhere.look, elsewhere.label, elsewhere.does], ['elsewhere', 'Update available', 'settings']);
+  assert.equal(elsewhere.title, '0.5.0 preview 5 is available. Move Central Knot to the Applications folder first. Open Settings for the release page.');
+  // A copy that never checks (a development build, or one not made from a release) has a faint control that opens Settings.
+  assert.deepEqual(shown({ tag: undefined, reason: { key: 'untagged', text: 'This build wasn’t made from a release, so it doesn’t update itself.' } }), { look: 'off', label: 'Updates', does: 'settings', busy: false });
+  assert.equal(shown({ reason: { key: 'dev', text: 'This is a development build. It doesn’t update itself.' } })!.look, 'off');
+  assert.equal(shown({ reason: { key: 'unsigned', text: 'This build isn’t signed by its developer, so it can’t update itself.' } })!.look, 'check', 'an unsigned release still checks, and offers what it finds through Settings');
 });
 
 test('what the Settings row says about the last check or update', () => {

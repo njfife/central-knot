@@ -15,7 +15,7 @@ import { instructionsPage } from './instructionspage.ts';
 import { repo, repoPage, waitingCounts, waitingWords } from './repopage.ts';
 import { profilesPage, profileStatus } from './profilespage.ts';
 import type { HomeMode, HomeView, ManageView } from './types.ts';
-import { followUpdates, statusEnd } from './updateview.ts';
+import { followUpdates, sidebarEnd, statusEnd } from './updateview.ts';
 import { followPluginUpdates } from './pluginupdateview.ts';
 
 const region = (id: string) => document.getElementById(id)!;
@@ -118,6 +118,8 @@ function renderSidebar() {
     homeRow('actual', realHomeName, 'laptop'),
     homeRow('custom', 'Another folder…', 'folder-open'),
   ].filter((row): row is HTMLElement => !!row));
+  // Its end, at the bottom left: the update control (updateview.ts), where there are releases.
+  region('sidebar-end').replaceChildren(...sidebarEnd());
 }
 
 function renderHeader(rail: boolean) {

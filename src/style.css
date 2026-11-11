@@ -16,7 +16,7 @@
  *   - the Files view's pane from 1040px: the file and the skill's details in two columns (matrix.ts, data-columns);
  *   - a plugin's "Your tools": a column per tool once they and Choose all fit (pluginpage.ts, data-layout).
  * In this stylesheet, by window, content (#main, beside the sidebar) or component width:
- *   - window shorter than 640px: sidebar rows tighten so every page and home fits without scrolling;
+ *   - window shorter than 680px: sidebar rows tighten so every page, home and the update control fit without scrolling;
  *   - content narrower than 880px: two-pane pages stack, the list above its detail, and the marketplaces become a strip;
  *     narrow History rows put what happened on its own line;
  *   - content from 1000px: History stripes its rows;
@@ -189,6 +189,28 @@ ul { list-style: none; }
 .home-label { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
 .home-sub { font-size: 11px; color: var(--ink-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+/*
+ * The sidebar's end, at the bottom left: the update control (updateview.ts sidebarEnd), a row like the pages' rows. Quiet while
+ * there is nothing to do (a faint one in a build that doesn't update itself); a newer release this copy can install, or one
+ * ready to restart into, makes it the sidebar's one filled button; one it can't install has an outline and opens Settings.
+ */
+#sidebar-end { flex: none; padding: 0 8px 8px; display: flex; flex-direction: column; }
+#sidebar-end:empty { display: none; }
+.update-control { height: 32px; font-size: 13px; cursor: pointer; }
+.update-control:disabled { cursor: default; }
+.update-glyph { position: relative; width: 16px; height: 16px; flex: none; display: grid; place-items: center; }
+.update-control[data-look="off"] { color: var(--ink-faint); }
+.update-control[data-look="working"] { color: var(--ink); }
+.update-control[data-look="available"], .update-control[data-look="ready"] { background: var(--accent); color: #fff; font-weight: 600; box-shadow: var(--lift); }
+.update-control[data-look="available"]:hover, .update-control[data-look="ready"]:hover:not(:disabled) { background: var(--accent-hover); color: #fff; }
+.update-control[data-look="ready"]:disabled { background: var(--current); color: var(--ink); box-shadow: none; }
+/* A focus ring inside the blue fill would be lost in it: it goes outside, as on the page's primary buttons. */
+.update-control[data-look="available"]:focus-visible, .update-control[data-look="ready"]:focus-visible { outline-offset: 2px; }
+.update-control[data-look="elsewhere"] { color: var(--accent-ink); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent-ink) 45%, transparent); }
+.update-control .tone-warning { color: #fff; }
+/* The download's progress: a ring round the icon, filled as it arrives (--progress, 0 to 1). */
+.update-glyph.with-progress::before { content: ""; position: absolute; inset: -4px; border-radius: 50%; background: conic-gradient(var(--accent-ink) calc(var(--progress, 0) * 1turn), var(--line) 0); mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px)); }
+
 /* The rail: icons only, each with its name as a tooltip; the homes' title becomes a divider. */
 .rail #sidebar { width: var(--rail-width); }
 .rail .brand { padding: 0; justify-content: center; }
@@ -199,12 +221,15 @@ ul { list-style: none; }
 .rail .nav-row { position: relative; }
 .rail .nav-unseen { position: absolute; top: 5px; left: calc(50% + 4px); margin: 0; }
 
-/* A short window: tighter rows, and each home on one line, so nothing in the sidebar scrolls. */
-@media (max-height: 640px) {
-  .nav-row { height: 28px; }
-  .home-row { height: 32px; }
+/* A short window: tighter rows, and each home on one line, so nothing in the sidebar scrolls (860×560 with the Practice copy's
+   three homes leaves about 5px to spare). */
+@media (max-height: 680px) {
+  .nav-row { height: 26px; }
+  .home-row, .update-control { height: 28px; }
   .home-sub { display: none; }
-  #nav, #homes { padding-top: 6px; padding-bottom: 6px; }
+  #nav, #homes { padding-top: 4px; padding-bottom: 4px; }
+  .homes-title { padding-bottom: 4px; }
+  #sidebar-end { padding-bottom: 6px; }
 }
 
 #header { height: 48px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--surface); box-shadow: inset 0 -1px 0 var(--line); }
@@ -219,8 +244,8 @@ ul { list-style: none; }
 /* A narrow status bar gives a fact its short form (renderer.ts writeFact), the full sentence in its tooltip. */
 .fact-short { display: none; }
 @container status (width < 1000px) { .fact-long:has(+ .fact-short) { display: none; } .fact-short { display: inline; } }
-/* It also sets its parts closer, so that at the narrowest window a profile in use, sync with nothing managed yet and the Update
-   button at its widest all fit. The bar spans the window, and can't be styled by its own container query: the window's width decides. */
+/* It also sets its parts closer, so that at the narrowest window a profile in use, sync with nothing managed yet and the version
+   all fit. The bar spans the window, and can't be styled by its own container query: the window's width decides. */
 @media (width < 1000px) { #status, #status-facts { gap: 18px; } }
 /*
  * The message takes the room the facts leave. Its later sentences drop whole when they don't fit (they wrap onto a line
@@ -239,14 +264,9 @@ ul { list-style: none; }
 }
 #status-end { flex: none; margin-left: auto; }
 #status-version { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; margin-left: 2px; }
-/* A newer release to install: the version becomes a calm button in its place, the status bar's height. */
-.status-update { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border: 1px solid color-mix(in oklab, var(--accent-ink) 40%, transparent); border-radius: 999px; background: none; font: inherit; font-weight: 500; color: var(--accent-ink); cursor: pointer; font-variant-numeric: tabular-nums; }
-.status-update:hover:not(:disabled) { background: var(--hover); }
-.status-update:disabled { cursor: default; color: var(--ink-soft); border-color: var(--line); }
 #said-link { flex: none; margin-left: 4px; padding: 0 4px; line-height: 16px; }
-/* A narrow status bar: the version alone, the Update button's short label (its tooltip has it all), and no link where the message is only its mark. */
-.update-short { display: none; }
-@container status (width < 1000px) { .status-name { display: none; } .update-long { display: none; } .update-short { display: inline; } }
+/* A narrow status bar: the version alone, and no link where the message is only its mark. */
+@container status (width < 1000px) { .status-name { display: none; } }
 @container message (width < 160px) { #said-link { display: none; } }
 #setting-update { font-variant-numeric: tabular-nums; }
 .sync-switch { border: 0; background: none; font: inherit; color: inherit; cursor: pointer; padding: 0 6px; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px; }
