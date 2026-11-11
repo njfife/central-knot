@@ -1369,7 +1369,7 @@ test('One build syncs a home at a time: the other names the owner, and Take over
     assert.deepEqual(await takeOverSync(acme), {});
     // A pass the standard app had under way when it was taken over stops at its next save: it can't take the home back by finishing.
     const stale = { ...owned, items: { ...owned.items } };
-    await assert.rejects(saveRecord(box.home, stale), /^Error: Acme Knot took over syncing this home meanwhile, so this stopped there\. Nothing more was written\.$/);
+    await assert.rejects(saveRecord(box.home, stale), /^Error: Acme Knot took over syncing this home meanwhile, so this stopped there\.$/);
     assert.equal((await readRecord(box.home)).record!.owner, 'com.centralknot.custom.acme');
     // A home that can't be written is taken over by nobody.
     assert.match((await takeOverSync({ ...standard, mode: 'actual', home: box.home, realHome: box.home, allowActualWrites: false })).stopped ?? '', /^Preview only/);

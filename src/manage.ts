@@ -7,7 +7,7 @@ import { DAY_MS, defaultHistoryDays } from './model.ts';
 import { harnesses, writeRoot } from './harnesses.ts';
 import { presentTools } from './presence.ts';
 import {
-  FORMAT_VERSION, changedWhileSyncing, clearStaleStages, storedRevision, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, newRecord, placeCopy, plainError, readRecord, readTree,
+  FORMAT_VERSION, changedWhileSyncing, clearStaleStages, storedRevision, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, newRecord, placeCopy, plainError, readRecord, readTree, stillOwned,
   remember, removeTree, saveRecord, stagingFolder, storeDirectory, storeFolder, syncGate, syncsHere, targetFor, writeAccess, writeDurably, type RecordItem, type ShareContext, type SyncRecord,
 } from './share.ts';
 import { parseSkill } from './discovery.ts';
@@ -468,8 +468,8 @@ export async function applyChanges(context: ShareContext, changes: Change[], res
   try { return await runApply(context, changes, resume, options); }
   catch (error) {
     if (error instanceof Error && error.message.startsWith('fault:')) throw error;
-    // Another build took over syncing while this ran (saveRecord): said as it is, with nothing to refresh away.
-    if (errorCode(error) === 'CK_TAKEN') return { stopped: (error as Error).message, results: [], harnessWrites: 0 };
+    // Another build took over syncing while this ran (stillOwned): said as it is, with nothing to refresh away.
+    if (errorCode(error) === 'CK_TAKEN') return { stopped: plainError(error), results: [], harnessWrites: 0 };
     return { stopped: `That could not finish. ${plainError(error)} Click Refresh to see where things stand.`, results: [], harnessWrites: 0 }; }
 }
 
@@ -491,6 +491,10 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
   // The record is saved only when it changed: catch-up runs on every read, and a read that finds nothing to do writes nothing.
   let saved = JSON.stringify(record);
   const save = async () => { const text = JSON.stringify(record); if (text !== saved) { await saveRecord(context.home, record!); saved = text; } };
+  // Asked before each item, so a pass that another build took over from writes nothing more; a pass with nothing to do
+  // runs through its items in no time and asks once.
+  let ownedAt = 0;
+  const owned = async () => { if (Date.now() - ownedAt < 200) return; await stillOwned(context.home, context.build); ownedAt = Date.now(); };
 
   const results: DestinationResult[] = [];
   // Content displaced by an earlier pass that stopped before History named it (a crash, a failure part-way): named this pass.
@@ -579,6 +583,8 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
   const events: HistoryEvent[] = [];
   const event = (fields: Omit<HistoryEvent, 'id' | 'at'>) => { const made = { id: randomUUID(), at: new Date(clock(context)).toISOString(), ...fields }; events.push(made); return made.id; };
   for (const [key, entry] of gathered) {
+    // Taken over by another build meanwhile: nothing more is written, starting with this item.
+    await owned();
     const item = record.items[key];
     if (item?.state !== 'shared') continue;
     // A skill this pass leaves alone keeps its folders' old identity on record, so a reset there is still seen next time.
@@ -979,6 +985,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
   if (!options.observeOnly) {
     const now = clock(context);
     for (const [key, item] of Object.entries(record.items)) {
+      await owned();
       // Apply all with Sync off writes only what it shows: no earlier deletion finishes alongside it.
       if (options.only && !options.only.has(key)) continue;
       // A copy a deletion could not remove is retried while it still holds what it held; changed or gone, it is let go.

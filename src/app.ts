@@ -1061,7 +1061,7 @@ export const takeOverSync = () => busy('Taking over syncing…', async () => {
   const taken = await api().takeOverSync(state.home!.home);
   if (taken.view) setHome(taken.view);
   // Short enough for the status bar to keep its first sentence whole; the second says the way back.
-  announce(taken.stopped ? `Syncing was not taken over. ${taken.stopped}` : taken.from ? `Central Knot now syncs this home${taken.view?.syncOn === false ? ' (Automatic sync is off here)' : ''}. To go back, take over in ${taken.from}.` : 'Central Knot already syncs this home.');
+  announce(taken.stopped ? `Syncing was not taken over. ${taken.stopped}` : taken.from ? `Central Knot now syncs this home${taken.view?.syncOn === false ? ' (automatic sync is off here)' : ''}. To go back, take over in ${taken.from}.` : 'Central Knot already syncs this home.');
 });
 
 /** A background read is running, or one arrived while the page was busy and runs when it is done (busy). */
