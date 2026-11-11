@@ -5,7 +5,7 @@
 //   in well under a minute. It fails if a page doesn't open or throws. This is the run for every change.
 // - `--only a,b` runs the named feature sections: the ones a change touched.
 // - `--full` runs every feature section, hundreds of pictures over about ten minutes. For a new release only.
-// Features: shell, skills, sync, mcp, agents, plugins, plugin-items, instructions, updates, sizes (four tools; every page at 860×560 with the
+// Features: shell, skills, sync, mcp, agents, plugins, plugin-updates, plugin-items, instructions, updates, sizes (four tools; every page at 860×560 with the
 // sidebar as a rail and open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light) and missing
 // (a folder home with only Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
@@ -42,7 +42,7 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => p
 /** What a page threw, in any app this run started. */
 const pageErrors = [];
 async function launch(more = {}) {
-  const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), ...more };
+  const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), CK_PLUGIN_UPDATES_EVERY_MS: 'never', ...more };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   // The app picks its own free debug ports (port 0) and says them, so no other run on this machine can be on them (cdp.mjs
@@ -461,6 +461,74 @@ if (wanted('plugin-skills')) {
   await at860('mixed-switches-860', 'The same at 860×560.');
   await a.theme('light'); await shot(a, 'mixed-switches-light', 'The same, in the light appearance.'); await a.theme('dark');
   await a.click('#ppart-0-document-tools-skill-pdf-reader-pi-cli');
+}
+
+// ---------- Plugin updates that arrive by themselves ----------
+if (wanted('plugin-updates')) {
+  await fresh();
+  begin('plugin-updates');
+  const market = join(scratch, 'market-auto');
+  writeMarket(market);
+  const skillOf = (plugin, name) => readFileSync(join(market, 'plugins', plugin, 'skills', name, 'SKILL.md'), 'utf8');
+  // Claude Code has issue-tracker 1.9.0 and document-tools 1.1.0, both behind the marketplace, and release-helper, which the
+  // marketplace has since dropped. It added the marketplace itself.
+  writeClaudeInstall(practice, 'team-tools', 'issue-tracker', '1.9.0', { 'skills/triage/SKILL.md': skillOf('issue-tracker', 'triage') });
+  writeClaudeInstall(practice, 'team-tools', 'document-tools', '1.1.0', { 'skills/pdf-reader/SKILL.md': skillOf('document-tools', 'pdf-reader'), 'skills/spreadsheet/SKILL.md': skillOf('document-tools', 'spreadsheet') });
+  writeClaudeInstall(practice, 'team-tools', 'release-helper', '0.4.1', { 'commands/release-notes.md': readFileSync(join(market, 'plugins/release-helper/commands/release-notes.md'), 'utf8') });
+  writeFileSync(join(practice, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'team-tools': { source: { source: 'git', url: market } } }));
+  edit(join(market, '.claude-plugin/marketplace.json'), text => { const catalog = JSON.parse(text); catalog.plugins = catalog.plugins.filter(plugin => plugin.name !== 'release-helper'); return JSON.stringify(catalog, null, 2); });
+  // A stand-in Claude Code: its update moves issue-tracker's record on to 2.0.0, and fails for document-tools as the real one does when it can't.
+  const record = join(practice, '.claude/plugins/installed_plugins.json');
+  const moved = JSON.parse(readFileSync(record, 'utf8'));
+  const newCopy = join(practice, '.claude/plugins/cache/team-tools/issue-tracker/2.0.0');
+  moved.plugins['issue-tracker@team-tools'] = [{ scope: 'user', installPath: newCopy, version: '2.0.0' }];
+  writeFileSync(join(scratch, 'record-after.json'), JSON.stringify(moved, null, 2));
+  mkdirSync(join(HOME, '.local/bin'), { recursive: true });
+  writeFileSync(join(HOME, '.local/bin/claude'), `#!/bin/sh
+[ "$1" = "--version" ] && echo "2.1.322 (Claude Code)" && exit 0
+case "$*" in
+  "plugin update issue-tracker@team-tools --scope user") mkdir -p '${newCopy}/skills/triage' && cp '${join(market, 'plugins/issue-tracker/skills/triage/SKILL.md')}' '${newCopy}/skills/triage/' && cp '${join(scratch, 'record-after.json')}' '${record}' ;;
+  "plugin update document-tools@team-tools --scope user") echo "Failed to update document-tools: its cache folder is in use by another Claude Code session."; exit 1 ;;
+  *) exit 9 ;;
+esac
+`, { mode: 0o755 });
+  const sizes = [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]];
+  const atSizes = async (name, caption) => {
+    for (const [width, height] of sizes) {
+      await a.size(width, height);
+      await a.theme('dark'); await shot(a, `${name}-${width}-dark`, `${caption} At ${width}×${height}, dark.`);
+      await a.theme('light'); await shot(a, `${name}-${width}-light`, 'The same, light.');
+    }
+    await a.size(1280, 800); await a.theme('dark');
+  };
+  await a.click('#nav-plugins');
+  await addMarketplace(a, market);
+  await waitFor(a, `!!document.querySelector('[data-plugin="issue-tracker"]')`, 20000); await a.settle();
+  await shot(a, 'plugins-before', 'Plugins, before any check. Claude Code has issue-tracker 1.9.0 and document-tools 1.1.0, both behind the marketplace, and release-helper, which the marketplace no longer lists: it stays, marked "No longer offered".');
+  await a.click('#nav-settings');
+  await waitFor(a, `!!document.querySelector('#plugin-updates-on')`);
+  await shot(a, 'settings-before', 'Settings, before any check: "Update plugins automatically" is on, and says the first check comes soon.');
+  await a.click('#check-plugin-updates');
+  await waitFor(a, `/Last checked/.test(document.querySelector('#setting-plugin-updates')?.textContent ?? '')`, 60000); await a.settle();
+  await atSizes('settings-checked', 'Clicked "Check now" (what the schedule does by itself every four hours): one update was made, one couldn’t be.');
+  await a.click('#setting-plugin-updates-notice-action');
+  await waitFor(a, `!!document.querySelector('#plugin-updates-updated')`, 20000); await a.settle();
+  await atSizes('plugins-note', 'Clicked "See Plugins": the note says issue-tracker was updated to 2.0.0 in Claude Code, and that document-tools couldn’t be, in Claude Code’s own words. Being the first such note, it says once that plugins now update by themselves and that Settings turns that off.');
+  await a.click('#popen-0-release-helper'); await waitFor(a, `!!document.querySelector('.plugin-page')`); await a.settle();
+  await shot(a, 'plugin-no-longer-offered', 'Opened release-helper, which the marketplace dropped: its page says so, shows what Claude Code still holds, and can still uninstall it.');
+  await a.size(860, 560); await shot(a, 'plugin-no-longer-offered-860', 'The same at 860×560.'); await a.size(1280, 800);
+  await a.click('#plugin-back');
+  await a.click('#plugin-updates-updated-close'); await a.settle();
+  await shot(a, 'note-updated-closed', 'Closed the "Updated automatically" note: what couldn’t be updated stays until it is closed or the update goes through, by itself or with Update on this page.');
+  await a.click('#plugin-updates-failed-close'); await a.settle();
+  await shot(a, 'note-closed', 'Closed that one too.');
+  await a.click('#nav-settings');
+  await a.click('#sync-switch'); await waitFor(a, `/Paused/.test(document.querySelector('#setting-plugin-updates')?.textContent ?? '')`); await a.settle();
+  await shot(a, 'settings-paused', 'Turned Automatic sync off in the status bar: plugin updates pause with it, and the row says so. Check now still works.');
+  await a.size(860, 560); await shot(a, 'settings-paused-860', 'The same at 860×560.'); await a.size(1280, 800);
+  await a.click('#sync-switch'); await waitFor(a, `!/Paused/.test(document.querySelector('#setting-plugin-updates')?.textContent ?? '')`); await a.settle();
+  await a.click('#plugin-updates-on'); await waitFor(a, `document.querySelector('#plugin-updates-on')?.getAttribute('aria-checked') === 'false'`); await a.settle();
+  await shot(a, 'settings-off', 'Turned "Update plugins automatically" off: plugins are updated only with Update on the Plugins page.');
 }
 
 // ---------- Plugin versions and skill text ----------

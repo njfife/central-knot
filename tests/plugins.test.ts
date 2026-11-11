@@ -533,7 +533,7 @@ test('A copy that differs at the same version is updated, and where the tool kee
     await put(join(copy, 'skills/one/SKILL.md'), '---\nname: one\ndescription: One.\n---\nA\n');
     const recorded = JSON.stringify({ plugins: { 'full@ck-test-market': [{ scope: 'user', installPath: copy, version: '1.0.0' }] } });
     await put(record, recorded);
-    // Turned off by its person in Claude Code: it is turned off again after the reinstall.
+    // Turned off by its person in Claude Code, whose install turns a plugin on: it is turned off again after the reinstall.
     await put(join(box.home, '.claude/settings.json'), '{"enabledPlugins":{"full@ck-test-market":false}}');
     // Claude Code's stand-in: its update says it is at the latest; an install copies the marketplace's files again.
     const bin = join(box.base, 'bin');
@@ -543,7 +543,8 @@ echo "$*" >> "$HOME/calls.txt"
 case "$2" in
   update) echo "full is already at the latest version (1.0.0)." ;;
   uninstall) echo '{"plugins":{}}' > "${record}" ;;
-  install) cp "${root}/plugins/full/skills/one/SKILL.md" "${copy}/skills/one/SKILL.md"; echo '${recorded}' > "${record}" ;;
+  install) cp "${root}/plugins/full/skills/one/SKILL.md" "${copy}/skills/one/SKILL.md"; echo '${recorded}' > "${record}"; echo '{"enabledPlugins":{"full@ck-test-market":true}}' > "$HOME/.claude/settings.json" ;;
+  disable) echo '{"enabledPlugins":{"full@ck-test-market":false}}' > "$HOME/.claude/settings.json" ;;
 esac
 `, { mode: 0o755 });
     const context = { ...box.context, binaries: { 'claude-cli': join(bin, 'claude') } as PluginContext['binaries'] };
@@ -551,10 +552,87 @@ esac
     const differs = async () => (await readFile(join(copy, 'skills/one/SKILL.md'), 'utf8')) !== (await readFile(join(root, 'plugins/full/skills/one/SKILL.md'), 'utf8'));
     const report = await update(context, catalog, 'full', 'claude-cli', differs);
     assert.deepEqual([report.outcome, report.changed, report.byContent, report.version], ['updated', true, 'reinstall', '1.0.0'], report.message);
-    assert.match(report.message, /^Reinstalled from the marketplace’s copy of 1\.0\.0: Claude Code’s own update kept the copy it had\./);
+    assert.equal(report.message, 'Reinstalled from the marketplace’s copy of 1.0.0: Claude Code’s own update kept the copy it had. It is still off in Claude Code.');
     assert.deepEqual(report.runs.map(run => run.command), ['claude plugin update full@ck-test-market --scope user', 'claude plugin uninstall full@ck-test-market --scope user', 'claude plugin install full@ck-test-market --scope user', 'claude plugin disable full@ck-test-market --scope user']);
+    assert.equal(JSON.parse(await readFile(join(box.home, '.claude/settings.json'), 'utf8')).enabledPlugins['full@ck-test-market'], false);
     const again = await update(context, catalog, 'full', 'claude-cli', differs);
     assert.deepEqual([again.outcome, again.changed, again.runs.length], ['updated', undefined, 0], 'the same copy runs nothing');
+  } finally { await box.cleanup(); }
+});
+
+test('An update nobody is watching never uninstalls to reinstall: a copy the tool’s own update kept is left, and says so', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root);
+    const copy = join(box.home, '.claude/plugins/cache/ck-test-market/full/1.0.0');
+    await put(join(copy, '.claude-plugin/plugin.json'), '{"name":"full","version":"1.0.0"}');
+    await put(join(copy, 'skills/one/SKILL.md'), '---\nname: one\ndescription: One.\n---\nA\n');
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ plugins: { 'full@ck-test-market': [{ scope: 'user', installPath: copy, version: '1.0.0' }] } }));
+    const bin = join(box.base, 'bin');
+    await mkdir(bin, { recursive: true });
+    await writeFile(join(bin, 'claude'), '#!/bin/sh\necho "$*" >> "$HOME/calls.txt"\necho "full is already at the latest version (1.0.0)."\n', { mode: 0o755 });
+    const context = { ...box.context, binaries: { 'claude-cli': join(bin, 'claude') } as PluginContext['binaries'] };
+    const report = await update(context, await parseCatalog(root, root, 'folder'), 'full', 'claude-cli', async () => true, { reinstall: false });
+    assert.deepEqual([report.outcome, report.changed], ['failed', undefined]);
+    assert.match(report.message, /^Claude Code’s own update kept the copy it had, which still differs from the marketplace’s\. Update it on its page to reinstall it\./);
+    assert.equal(await readFile(join(box.home, 'calls.txt'), 'utf8'), 'plugin update full@ck-test-market --scope user\n', 'only its own update ran');
+    assert.equal((await installState(context, 'claude-cli', 'ck-test-market', 'full')).state, 'installed');
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin turned off in a tool is still off after its update, turned off again where the tool’s own update turned it on', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root);
+    // Codex has full 1.0.0, turned off. Its stand-in's `plugin add` puts 2.0.0 in and writes the plugin's table again, on.
+    await put(join(box.home, '.codex/plugins/cache/ck-test-market/full/1.0.0/skills/one/SKILL.md'), '---\nname: one\n---\n');
+    const config = join(box.home, '.codex/config.toml');
+    await put(config, 'model = "x"\n\n[plugins."full@ck-test-market"]\nenabled = false # off for now\n\n[plugins."other@ck-test-market"]\nenabled = true\n');
+    await put(join(box.base, 'on.toml'), 'model = "x"\n\n[plugins."full@ck-test-market"]\nenabled = true\n\n[plugins."other@ck-test-market"]\nenabled = true\n');
+    const bin = join(box.base, 'bin');
+    await mkdir(bin, { recursive: true });
+    await writeFile(join(bin, 'codex'), `#!/bin/sh
+mkdir -p "$HOME/.codex/plugins/cache/ck-test-market/full/2.0.0/skills/one" && cp "$HOME/.codex/plugins/cache/ck-test-market/full/1.0.0/skills/one/SKILL.md" "$HOME/.codex/plugins/cache/ck-test-market/full/2.0.0/skills/one/"
+cp "${join(box.base, 'on.toml')}" "$HOME/.codex/config.toml"
+`, { mode: 0o755 });
+    const read = await parseCatalog(root, root, 'folder');
+    const catalog = { ...read, plugins: read.plugins.map(plugin => (plugin.name === 'full' ? { ...plugin, version: '2.0.0' } : plugin)) };
+    const context = { ...box.context, binaries: { 'codex-cli': join(bin, 'codex') } as PluginContext['binaries'] };
+    const report = await update(context, catalog, 'full', 'codex-cli');
+    assert.deepEqual([report.outcome, report.changed, report.version, report.notes], ['updated', true, '2.0.0', undefined], report.message);
+    assert.equal(report.message, 'Updated to 2.0.0. It is still off in Codex.');
+    assert.equal(await readFile(config, 'utf8'), 'model = "x"\n\n[plugins."full@ck-test-market"]\nenabled = false\n\n[plugins."other@ck-test-market"]\nenabled = true\n', 'only its own switch changed');
+    assert.deepEqual(report.runs.map(run => run.command), ['codex plugin add full@ck-test-market --json', 'config.toml [plugins."full@ck-test-market"] enabled = false']);
+  } finally { await box.cleanup(); }
+});
+
+test('A tool whose update turns a plugin on, and whose switch then doesn’t hold, is said in the report', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root);
+    const copy = (version: string) => join(box.home, '.claude/plugins/cache/ck-test-market/full', version);
+    await put(join(copy('0.9.0'), '.claude-plugin/plugin.json'), '{"name":"full","version":"0.9.0"}');
+    await put(join(copy('1.0.0'), '.claude-plugin/plugin.json'), '{"name":"full","version":"1.0.0"}');
+    const record = join(box.home, '.claude/plugins/installed_plugins.json');
+    await put(record, JSON.stringify({ plugins: { 'full@ck-test-market': [{ scope: 'user', installPath: copy('0.9.0'), version: '0.9.0' }] } }));
+    await put(join(box.home, '.claude/settings.json'), '{"enabledPlugins":{"full@ck-test-market":false}}');
+    const bin = join(box.base, 'bin');
+    await mkdir(bin, { recursive: true });
+    // Its update moves the record on and turns the plugin on; its disable refuses.
+    await writeFile(join(bin, 'claude'), `#!/bin/sh
+case "$2" in
+  update) echo '${JSON.stringify({ plugins: { 'full@ck-test-market': [{ scope: 'user', installPath: copy('1.0.0'), version: '1.0.0' }] } })}' > "${record}"; echo '{"enabledPlugins":{"full@ck-test-market":true}}' > "$HOME/.claude/settings.json" ;;
+  disable) echo "Plugin could not be disabled."; exit 1 ;;
+esac
+`, { mode: 0o755 });
+    const context = { ...box.context, binaries: { 'claude-cli': join(bin, 'claude') } as PluginContext['binaries'] };
+    const report = await update(context, await parseCatalog(root, root, 'folder'), 'full', 'claude-cli');
+    assert.deepEqual([report.outcome, report.changed, report.version], ['updated', true, '1.0.0'], report.message);
+    assert.equal(report.message, 'Updated to 1.0.0.');
+    assert.deepEqual(report.notes, ['It was off in Claude Code, and the update turned it on. It couldn’t be turned off again: turn it off in Claude Code. Plugin could not be disabled.']);
   } finally { await box.cleanup(); }
 });
 

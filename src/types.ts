@@ -108,6 +108,16 @@ export interface DesktopApi {
   onSettingsChanged(callback: () => void): void;
   /** Shows Central Knot's own log in the file manager, selected where the system can (else its folder). */
   showLog(): Promise<ShownLog>;
+  /** Turns automatic plugin updates on or off (pluginupdates.ts). */
+  setPluginUpdates(on: boolean): Promise<AppPreferences>;
+  /** Automatic plugin updates: the last check, and the note of what was updated and what couldn't be. */
+  pluginUpdates(): Promise<PluginUpdatesView>;
+  /** Checks the marketplaces now and updates what is behind, failed updates included; answers once it is done. */
+  checkPluginUpdates(): Promise<PluginUpdatesView>;
+  /** Closes one half of the note of what automatic updates did: what was updated, or what couldn't be. */
+  closePluginUpdates(what: 'updated' | 'failed'): Promise<PluginUpdatesView>;
+  /** Automatic plugin updates changed (a check began or ended). `news`: it updated something, or else an update failed. */
+  onPluginUpdatesChanged(callback: (view: PluginUpdatesView, news?: 'updated' | 'failed') => void): void;
   /** The main process asks for a page (the Settings… menu item). */
   onNavigate(callback: (page: string) => void): void;
   /** Updates (updates.ts): what this build is, whether it can update itself, and the last check or update. */
@@ -158,6 +168,8 @@ export interface DesktopApi {
   declineMarketplace(source: string, again?: boolean): Promise<PluginsView | null>;
   /** Adds the marketplace this build carries to one tool's own plugin list, with that tool's own command. Installs nothing. */
   addCarriedTo(tool: HarnessId, home: string): Promise<{ stopped?: string; report?: ListedReport; view?: PluginsView }>;
+  /** Looks now at a bundled build's feed for newer plugins, and takes them if there are any. The Plugins view is read again afterwards. */
+  checkCarriedFeed(): Promise<void>;
   pickMarketplaceFolder(): Promise<string | null>;
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
@@ -438,6 +450,7 @@ export interface NativeRun { tool: HarnessId; command: string; ok: boolean; outp
 export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'updated' | 'skill-off' | 'skill-on' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[]; /** This action changed what the tool has (Undo reverses only these). */ changed?: boolean;
   /** An update: the version the tool records now. */ version?: string;
   /** An update of a copy that differed at the same version: done by the tool's own update, or by uninstalling and installing again. */ byContent?: 'update' | 'reinstall';
+  /** A failed update with nobody watching: the tool's own update kept its copy, and only a reinstall (never made unasked) would change that. */ kept?: true;
   /** Parts already there were brought up to date, not installed new. */ partsUpdated?: boolean; /** The parts run to undo, when it changed something. */ partsRun?: string;
   /** Parts left alone this run, each saying why (edited since, a same-named item already there): shown to be read. */ notes?: string[];
   /** Skills this run wrote in place of a link that led nowhere, by name. */ replacedLinks?: string[] }
@@ -484,7 +497,9 @@ export interface ListedReport { tool: HarnessId; outcome: 'there' | 'added' | 'h
  * marketplace, its release ("November 10, 2026", made from "GitHub: acme/plugins at 1a2b3c4d5e"), and each plugin the
  * marketplace lists whose files the build doesn't carry, with why.
  */
-export interface BundledView { app: string; displayName?: string; logo?: string; /** Its release's date, in words. */ release: string; /** What the release was made from, for whoever needs to tell releases apart. */ from?: string; unpackaged: { name: string; reason: string }[]; /** The tools of the open home this build added the marketplace to (by itself or when asked), as its own record has it. */ addedTo?: HarnessId[] }
+export interface BundledView { app: string; displayName?: string; logo?: string; /** Its release's date and time, in words. */ release: string; /** What the release was made from, for whoever needs to tell releases apart. */ from?: string; unpackaged: { name: string; reason: string }[]; /** The tools of the open home this build added the marketplace to (by itself or when asked), as its own record has it. */ addedTo?: HarnessId[];
+  /** Plugins the marketplace no longer offers that stay because a tool here has them installed. */ kept?: string[];
+  /** Set when the build has a feed of newer plugins: when it was last looked at, and what that came to, in words (bundlefeed.ts). */ feed?: { checked?: string; outcome?: 'current' | 'updated' | 'held' | 'failed'; message?: string } }
 
 export interface MarketplaceView {
   source: string;
@@ -675,8 +690,25 @@ export interface SignInPlace { open: string; unopened: string; unchanged: string
  * where it can, why the system has it off. `place`: where the system keeps it, wherever it can be changed here.
  */
 export interface SignIn { on: boolean; available: boolean; reason?: { key: SignInReason; text: string }; place?: SignInPlace }
-/** Central Knot's own settings, shown on its Settings page. */
-export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays; /** A custom build's own lines about itself (bundle.ts aboutBuild); none for the standard app. */ build?: string[] }
+/** Central Knot's own settings, shown on its Settings page. `pluginUpdates`: plugins are updated automatically (pluginupdates.ts). */
+export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays; pluginUpdates: boolean; /** A custom build's own lines about itself (bundle.ts aboutBuild); none for the standard app. */ build?: string[] }
+/** One line of what automatic plugin updates did: when, which plugin of which marketplace, and the words. `warn`: it needs reading (a part was left alone). */
+export interface PluginUpdateLine { at: number; source: string; plugin: string; text: string; warn?: true; /** A failed update that is tried again by itself. */ again?: true }
+/**
+ * Automatic plugin updates as the main process has them, for the open home. `on`: the switch in Settings; `paused`:
+ * Automatic sync is off, so nothing is updated by itself whatever the switch says. `checking`: a check is under way.
+ * `checked`: the last check: when, how many updates it made, how many are failing now, the
+ * marketplaces it couldn't read (`offline`: every Git one, so it is tried again sooner), and why it did nothing (`stopped`;
+ * `partway`: it stopped during its updates, so the rest are tried again sooner). `failed` counts the failures the note still shows.
+ * The note: `updated`, what was updated since the note was last closed, oldest first, and `failed`, the updates that couldn't
+ * be made (`again`: tried again by itself). `first`: no note has been closed in this home yet, so the note says once that
+ * plugins update by themselves now.
+ */
+export interface PluginUpdatesView {
+  on: boolean; paused: boolean; checking: boolean;
+  checked?: { at: number; updated: number; failed: number; unread: string[]; offline?: true; stopped?: string; partway?: true };
+  updated: PluginUpdateLine[]; failed: PluginUpdateLine[]; first: boolean;
+}
 /** Why this copy can't update itself (see updates.ts for each one's words). */
 export type UpdateReason = 'dev' | 'untagged' | 'unsigned' | 'applications' | 'readonly';
 /** A newer release: its tag, its Mac zip (where and how many bytes) and its page, which has the release notes. */
