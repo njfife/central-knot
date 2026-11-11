@@ -114,7 +114,8 @@ async function walk(seed: number, oneWay: boolean): Promise<Finding[]> {
         const at = (event: HistoryEvent) => history.indexOf(event);
         const superseded = history.some(event => named(event).includes(content) && (event.kind === 'chosen' ? endedBy(event, history)?.kind === 'chosen'
           : event.turnedUp?.some(loser => loser.tool === tool && loser.hash === content)
-            || history.some(later => at(later) > at(event) && later.kind === 'removed' && later.turnedOff && later.losers.some(loser => loser.tool === tool && loser.hash !== content))));
+            || history.some(later => at(later) > at(event) && later.kind === 'removed' && later.turnedOff && later.losers.some(loser => loser.tool === tool && loser.hash !== content)))
+          || history.some(later => at(later) > at(event) && later.turnedUp?.some(loser => loser.tool === tool)));
         if (act.name !== 'age' && !superseded) fail(`(d) a copy a click took out of ${tool} is reachable by no action`);
       }
       // (e) The row says what is true.

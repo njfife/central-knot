@@ -1126,5 +1126,6 @@ Nathan, the same day: the per-tool matrix was too complicated; turning an item o
 **Validation (step 4, round 2).** 697 tests. Each named judge sequence is a test with its next pass and click; the random walk runs fixed seeds in `npm test`, and 600 walks ran once locally (findings and fixes in the PR).
 
 **Known follow-ups.**
+- Step 4: a tool an agent's Undo add left out of sync (the only click that leaves an agent's tool out now) is synced again by On's own pass, and that On's Undo doesn't leave it out again (walk seeds 6085, 6240 one-way). A copy made by hand in a tool while the agent was off there supersedes the copy Off kept: On keeps the person's copy, and the older one is reachable through that On's Turn off again only until a later click ends it. When a newer Off took a tool over from an older one (a copy turned up there and was turned off again), On of the newer one leaves that tool turned up under the older Off, and a second click (its Own copy switch, or On) turns it on.
 - `keptEditFlag` keys aren't cleared when a copy takes the source's copy again, so one small key stays per kept edit.
 - A comfortable maximum width for the copy-question cards at 2560 is the owner's call.
