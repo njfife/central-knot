@@ -11,7 +11,8 @@ import { CODEX_MANIFEST, MANIFEST, codexManifest, inside, installedContents, par
 import { componentsFrom } from './pluginoutcomes.ts';
 import { editTomlArray, readTomlTables, type TomlValue } from './textedit.ts';
 import { codexSkillSwitches, type CodexSkillSwitch } from './skillswitch.ts';
-import { DIRECTORY, INLINE_SKILLS_CONFIG, heldReason, noCli, offByBareName, noSwitchReason, samePart } from './pluginstatus.ts';
+import { partOff, serverHeld, withPartSwitch } from './partswitch.ts';
+import { DIRECTORY, INLINE_SKILLS_CONFIG, hasPartSwitch, heldReason, noCli, offByBareName, noSwitchReason, samePart } from './pluginstatus.ts';
 import { takesPlugins, type PluginTool } from './presence.ts';
 import { errorCode, readParts, writeFileChecked } from './share.ts';
 import { SAFE_NAME, compareVersions, githubRepo, isCommitHash, isFolder, isHttps, record, strings, text, withoutBom } from './values.ts';
@@ -584,15 +585,30 @@ export async function installedPlugins(context: PluginContext, tool: PluginTool)
 export const installedOnce = (context: PluginContext, tool: PluginTool): Promise<ToolPlugin[]> => once(context, `installed-plugins:${tool}`, () => installedPlugins(context, tool));
 
 /** One installed plugin with what its copy holds, as that tool reads it; `contents` is missing where the copy isn't there or can't be read. */
-export type InstalledCopyOf = ToolPlugin & { contents?: PluginContents };
+export type InstalledCopyOf = ToolPlugin & { contents?: PluginContents; /** Its MCP servers and agents the tool has turned off one by one (partswitch.ts). */ serversOff?: string[]; agentsOff?: string[]; /** Its MCP servers whose switch can't be written here, each with why (Codex's settings in a form not edited). */ serversHeld?: Record<string, string> };
+
+/** The file that holds a tool's switches for one item of a plugin: settings.json, or Codex's config.toml. */
+const switchFileOf = (context: PluginContext, tool: PluginTool) => join(configRootOf(context, tool), tool === 'codex-cli' ? 'config.toml' : 'settings.json');
+
+/** Of a plugin's MCP servers or agents (`names`), those the tool's switch file `text` turns off. A file that can't be read turns none off. */
+function partsOffIn(tool: PluginTool, text: string, plugin: string, marketplace: string, kind: PartKind, names: string[]): string[] {
+  try { return names.filter(name => partOff(tool, text, { plugin, marketplace, kind, name })); } catch { return []; }
+}
 
 /**
  * Each plugin a tool has installed with what its copy holds, read once per pass or view (`context.reads`): the Skills,
  * MCP servers and Agents pages' "Through a plugin" boxes and their "From plugins" rows both ask.
  */
-export const installedCopies = (context: PluginContext, tool: PluginTool): Promise<InstalledCopyOf[]> => once(context, `installed-copies:${tool}`, async () =>
-  Promise.all((await installedOnce(context, tool)).map(async found => ({ ...found,
-    contents: found.state.state === 'installed' ? await installedContents(tool, found.state.path, found.entry, found.atMarketplaceRoot).catch(() => undefined) : undefined }))));
+export const installedCopies = (context: PluginContext, tool: PluginTool): Promise<InstalledCopyOf[]> => once(context, `installed-copies:${tool}`, async () => {
+  const switches = (await readOrNull(switchFileOf(context, tool))) ?? '';
+  return Promise.all((await installedOnce(context, tool)).map(async (found): Promise<InstalledCopyOf> => {
+    const contents = found.state.state === 'installed' ? await installedContents(tool, found.state.path, found.entry, found.atMarketplaceRoot).catch(() => undefined) : undefined;
+    const serversOff = partsOffIn(tool, switches, found.plugin, found.marketplace, 'mcp', (contents?.mcpServers ?? []).map(server => server.name));
+    const agentsOff = partsOffIn(tool, switches, found.plugin, found.marketplace, 'agent', (contents?.agents ?? []).map(agent => agent.name));
+    const serversHeld = Object.fromEntries(tool !== 'codex-cli' ? [] : (contents?.mcpServers ?? []).flatMap(({ name }) => { const why = serverHeld(switches, { plugin: found.plugin, marketplace: found.marketplace, kind: 'mcp', name }); return why ? [[name, why]] : []; }));
+    return { ...found, contents, ...(serversOff.length ? { serversOff } : {}), ...(agentsOff.length ? { agentsOff } : {}), ...(Object.keys(serversHeld).length ? { serversHeld } : {}) };
+  }));
+});
 
 /** One item a tool has through an installed plugin: a skill, an agent or an MCP server, with the plugin it comes through. */
 export interface PluginPart extends ThroughPlugin { kind: PartKind; name: string; /** A skill's SKILL.md, to tell it from another skill of the same name. */ text?: string }
@@ -602,19 +618,19 @@ export interface PluginPart extends ThroughPlugin { kind: PartKind; name: string
  * where the tool loads a plugin's (Claude Code and Copilot CLI; Codex ignores a plugin's agents and may not start its
  * servers). With each, the plugin, the marketplace as the tool added it and the copy's version. For Claude Code, which
  * adds a marketplace entry's parts to the plugin's own, the entry is read from the marketplace's manifest where Claude
- * Code keeps it. `off`: the plugin, or that one skill, is turned off there.
+ * Code keeps it. `off`: the plugin, or that one skill, MCP server or agent, is turned off there.
  */
 export async function pluginParts(context: PluginContext, tool: PluginTool): Promise<PluginPart[]> {
   const given: PluginPart[] = [];
-  for (const { plugin, marketplace, off, state, contents } of await installedCopies(context, tool)) {
+  for (const { plugin, marketplace, off, state, contents, serversOff, agentsOff } of await installedCopies(context, tool)) {
     if (state.state !== 'installed' || !contents) continue;
     const source = await registeredSource(context, tool, marketplace);
     const from = { plugin, marketplace, ...(source ? { source } : {}), ...(state.version ? { version: state.version } : {}) };
     const add = (kind: PartKind, name: string, more: { off?: boolean; text?: string } = {}) => given.push({ kind, name, ...from, ...(off || more.off ? { off: true as const } : {}), ...(more.text === undefined ? {} : { text: more.text }) });
     for (const skill of contents.skills) add('skill', skill.name, { off: state.skillsOff?.some(entry => entry.skill === skill.name), text: skill.text });
     if (tool === 'codex-cli') continue;
-    for (const agent of contents.agents) add('agent', agent.name);
-    for (const server of contents.mcpServers) add('mcp', server.name);
+    for (const agent of contents.agents) add('agent', agent.name, { off: agentsOff?.includes(agent.name) });
+    for (const server of contents.mcpServers) add('mcp', server.name, { off: serversOff?.includes(server.name) });
   }
   return given;
 }
@@ -640,7 +656,7 @@ export async function throughPlugins(home: { home: string; overrides?: Partial<R
     for (const { kind: partKind, name, ...plugin } of parts) {
       if (partKind !== kind) continue;
       const asParts = installs.some(install => install.plugin === plugin.plugin && (!plugin.source || sameSource(install.source, plugin.source)) && install.items.some(item => !item.removed && samePart(item, { kind, name })));
-      if (!byKey.has(keyOf(name)) || (asParts && !byKey.get(keyOf(name))!.asParts)) byKey.set(keyOf(name), { ...plugin, asParts });
+      if (!byKey.has(keyOf(name)) || (asParts && !byKey.get(keyOf(name))!.asParts)) byKey.set(keyOf(name), { ...plugin, name, asParts });
     }
     if (byKey.size) found.set(tool, byKey);
   }
@@ -782,6 +798,46 @@ export async function setSkill(context: PluginContext, marketplace: string, plug
   return fail(`Still ${on ? 'off' : 'on'} in ${name}. ${after?.held ?? lastLines(runs[0]?.output ?? '')}`.trim(), runs);
 }
 
+// ---------- One MCP server or agent of an installed plugin ----------
+
+/**
+ * Turns one MCP server or agent of an installed plugin off (`on` false) or back on in one tool, with that tool's own
+ * switch (partswitch.ts), then reads the switch again: only what the tool's file then says counts. One checked write, only
+ * over the text read. The plugin's files are never touched. A tool with no such switch, a plugin not installed there, a
+ * part its copy lacks, or a switch file in a form not edited here fails with the reason, and nothing changes.
+ */
+export async function setPart(context: PluginContext, marketplace: string, plugin: string, part: { kind: PartKind; name: string }, tool: PluginTool, on: boolean, source: string): Promise<ActionReport> {
+  const name = toolNames[tool];
+  const outcome = on ? 'part-on' : 'part-off';
+  const word = part.kind === 'mcp' ? 'MCP server' : part.kind;
+  const fail = (message: string, runs: NativeRun[] = []): ActionReport => ({ tool, outcome: 'failed', message, runs });
+  if (!hasPartSwitch(tool, part.kind)) return fail(`${name} has no switch for one ${word} of a plugin.`);
+  const held = await heldBy(context, tool, marketplace, source);
+  if (held) return { tool, outcome: 'held', message: heldReason(tool, marketplace, held), runs: [] };
+  // Read now, never from a view's shared reads.
+  const copy = (await installedCopies({ ...context, reads: new Map() }, tool)).find(candidate => candidate.plugin === plugin && candidate.marketplace === marketplace);
+  if (copy?.state.state !== 'installed') return fail(`It isn’t installed in ${name} now.`);
+  if (copy.contents && !(part.kind === 'mcp' ? copy.contents.mcpServers : copy.contents.agents).some(candidate => candidate.name === part.name)) return fail(`The copy ${name} has installed has no ${word} named “${part.name}”.`);
+  const path = switchFileOf(context, tool);
+  const file = basename(path);
+  const at = { plugin, marketplace, ...part };
+  const before = await readOrNull(path);
+  let after: string;
+  try {
+    if (partOff(tool, before ?? '', at) === !on) return { tool, outcome, message: `Already ${on ? 'on' : 'off'} in ${name}.`, runs: [] };
+    after = withPartSwitch(tool, before ?? '', at, !on);
+  } catch (error) { return fail(errorCode(error) === 'CK_FORM' && error instanceof Error ? error.message : `${name}’s ${file} couldn’t be read, so it was left as it is.`); }
+  try { await writeFileChecked(path, after, before ?? undefined); }
+  catch (error) { return fail(errorCode(error) === 'CK_CHANGED' ? `${name}’s ${file} changed just then, so it was left as it is. Try again.` : `${name}’s ${file} couldn’t be written: ${error instanceof Error ? error.message : String(error)}`); }
+  const changed = [{ path, before, after }];
+  const command = `${file}: ${word} ${part.name} of ${plugin}@${marketplace} turned ${on ? 'on' : 'off'}`;
+  await keepRecord(context, tool, command, '', changed).catch(() => undefined);
+  const took = partsOffIn(tool, (await readOrNull(path)) ?? '', plugin, marketplace, part.kind, [part.name]).length === (on ? 0 : 1);
+  const run: NativeRun = { tool, command, ok: took, output: '', changed };
+  if (!took) return fail(`Still ${on ? 'off' : 'on'} in ${name}: its ${file} did not take the change.`, [run]);
+  return { tool, outcome, changed: true, message: `Turned ${on ? 'on' : 'off'} in ${name}. ${nextStepFor(tool, 'for this to take effect')}`.trim(), runs: [run] };
+}
+
 // ---------- A whole plugin turned off ----------
 
 /** Codex's `[plugins."ID"]` table in its config.toml text, if it has one. */
@@ -803,14 +859,14 @@ async function wholeOff(context: PluginContext, tool: PluginTool, id: string): P
 }
 
 /**
- * Turns a whole plugin off with the tool's own switch: Claude Code's and Copilot CLI's `plugin disable`; Codex has no
- * command for it, so its `[plugins."ID"]` table takes `enabled = false` (capability-data section 8). Undefined where
- * Codex has no such table to switch.
+ * Turns a whole plugin off (or, `on`, back on) with the tool's own switch: Claude Code's and Copilot CLI's `plugin disable`
+ * and `plugin enable`; Codex has no command for it, so its `[plugins."ID"]` table takes `enabled = false` or `true`
+ * (capability-data section 8). Undefined where Codex has no such table to switch.
  */
-async function turnOff(context: PluginContext, tool: PluginTool, id: string): Promise<NativeRun | undefined> {
-  if (tool !== 'codex-cli') return native(context, tool, ['plugin', 'disable', id, ...(tool === 'claude-cli' ? ['--scope', 'user'] : [])]);
+async function switchWhole(context: PluginContext, tool: PluginTool, id: string, on = false): Promise<NativeRun | undefined> {
+  if (tool !== 'codex-cli') return native(context, tool, ['plugin', on ? 'enable' : 'disable', id, ...(tool === 'claude-cli' ? ['--scope', 'user'] : [])]);
   const path = join(configRootOf(context, tool), 'config.toml');
-  const command = `config.toml [plugins."${id}"] enabled = false`;
+  const command = `config.toml [plugins."${id}"] enabled = ${on}`;
   const before = await readOrNull(path);
   let table: ReturnType<typeof codexPluginTable>;
   try { table = codexPluginTable(before ?? '', id); } catch { table = undefined; }
@@ -819,11 +875,30 @@ async function turnOff(context: PluginContext, tool: PluginTool, id: string): Pr
   // An `enabled = …` line is replaced; otherwise one goes right after the table's last key (as an MCP server's switch does).
   const at = line ? line.start : table.entries.at(-1)?.end ?? (before.indexOf('\n', table.start) + 1 || before.length);
   const head = before.slice(0, at);
-  const after = `${head}${head.endsWith('\n') || !head ? '' : '\n'}enabled = false\n${before.slice(line ? line.end : at)}`;
+  const after = `${head}${head.endsWith('\n') || !head ? '' : '\n'}enabled = ${on}\n${before.slice(line ? line.end : at)}`;
   try { await writeFileChecked(path, after, before); } catch (error) { return { tool, command, ok: false, output: `Codex’s config.toml couldn’t be written: ${error instanceof Error ? error.message : String(error)}`, changed: [] }; }
   const changed = [{ path, before, after }];
   await keepRecord(context, tool, command, '', changed).catch(() => undefined);
   return { tool, command, ok: true, output: '', changed };
+}
+
+/**
+ * Turns a whole installed plugin off (`on` false) or back on in one tool, with that tool's own switch (switchWhole), then
+ * reads it again: only what the tool then records counts. Everything the plugin brings there goes with it. The plugin's
+ * files are never touched.
+ */
+export async function setWhole(context: PluginContext, marketplace: string, plugin: string, tool: PluginTool, on: boolean, source: string): Promise<ActionReport> {
+  const name = toolNames[tool];
+  const outcome = on ? 'plugin-on' : 'plugin-off';
+  const held = await heldBy(context, tool, marketplace, source);
+  if (held) return { tool, outcome: 'held', message: heldReason(tool, marketplace, held), runs: [] };
+  if ((await installState(context, tool, marketplace, plugin)).state !== 'installed') return { tool, outcome: 'failed', message: `It isn’t installed in ${name} now.`, runs: [] };
+  const id = `${plugin}@${marketplace}`;
+  if (!(await wholeOff(context, tool, id)) === on) return { tool, outcome, message: `Already ${on ? 'on' : 'off'} in ${name}.`, runs: [] };
+  const run = await switchWhole(context, tool, id, on);
+  if (!run) return { tool, outcome: 'failed', message: `Codex’s config.toml has no entry for ${id} to switch.`, runs: [] };
+  if (!(await wholeOff(context, tool, id)) === on) return { tool, outcome, changed: true, message: `Turned ${on ? 'on' : 'off'} in ${name}. ${nextStepFor(tool, 'for this to take effect')}`.trim(), runs: [run] };
+  return { tool, outcome: 'failed', message: `Still ${on ? 'off' : 'on'} in ${name}. ${lastLines(run.output)}`.trim(), runs: [run] };
 }
 
 // ---------- Install and uninstall ----------
@@ -948,17 +1023,35 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
  * that second route is not taken: an uninstall whose install then failed would leave the tool without the plugin.
  *
  * A plugin its person turned off in the tool is still off afterwards: where the tool's own commands turned it on, it is
- * turned off again with the tool's own switch (turnOff), and the report says so if that didn't hold.
+ * turned off again with the tool's own switch (switchWhole), and the report says so if that didn't hold.
  */
-export async function update(context: PluginContext, catalog: Catalog, plugin: string, tool: PluginTool, differs?: () => Promise<boolean>, { reinstall = true } = {}): Promise<ActionReport> {
-  const name = toolNames[tool];
+export async function update(context: PluginContext, catalog: Catalog, plugin: string, tool: PluginTool, differs?: () => Promise<boolean>, options: { reinstall?: boolean } = {}): Promise<ActionReport> {
   const held = await heldBy(context, tool, catalog.name, catalog.source);
   if (held) return { tool, outcome: 'held', message: heldReason(tool, catalog.name, held), runs: [] };
+  // Codex keeps a plugin's server switches under the plugin's own table, which its uninstall takes out whole: an update
+  // that reinstalls would turn those servers back on, so the ones that were off are turned off again.
+  const copyNow = async () => (await installedCopies({ ...context, reads: new Map() }, tool)).find(copy => copy.plugin === plugin && copy.marketplace === catalog.name);
+  const serversOff = tool === 'codex-cli' ? (await copyNow())?.serversOff ?? [] : [];
+  const report = await updateKeptOff(context, catalog, plugin, tool, differs, options);
+  if (!serversOff.length || !report.runs.length) return report;
+  const after = await copyNow();
+  const lost = serversOff.filter(server => after?.contents?.mcpServers.some(candidate => candidate.name === server) && !after.serversOff?.includes(server));
+  for (const server of lost) {
+    const again = await setPart(context, catalog.name, plugin, { kind: 'mcp', name: server }, tool, false, catalog.source);
+    report.runs.push(...again.runs);
+    if (again.outcome !== 'part-off') report.notes = [...(report.notes ?? []), `Its MCP server ${server} was off in ${toolNames[tool]}, and the update turned it on. It couldn’t be turned off again: ${again.message}`];
+  }
+  return report;
+}
+
+/** update, with the whole plugin's own switch kept: one that was off is off after, turned off again where the tool's update turned it on. */
+async function updateKeptOff(context: PluginContext, catalog: Catalog, plugin: string, tool: PluginTool, differs: (() => Promise<boolean>) | undefined, { reinstall = true }: { reinstall?: boolean }): Promise<ActionReport> {
+  const name = toolNames[tool];
   const id = `${plugin}@${catalog.name}`;
   const wasOff = await wholeOff(context, tool, id);
   const report = await ownUpdate(context, catalog, plugin, tool, differs, { reinstall, next: wasOff ? `It is still off in ${name}.` : nextStepFor(tool) });
   if (!wasOff || !report.runs.length || (await installState(context, tool, catalog.name, plugin)).state !== 'installed' || (await wholeOff(context, tool, id))) return report;
-  const switched = await turnOff(context, tool, id);
+  const switched = await switchWhole(context, tool, id);
   if (switched) report.runs.push(switched);
   if (await wholeOff(context, tool, id)) return report;
   return { ...report, message: report.message.replace(`It is still off in ${name}.`, '').trim(), notes: [...(report.notes ?? []), `It was off in ${name}, and the update turned it on. It couldn’t be turned off again: turn it off in ${name}. ${lastLines(switched?.output ?? '')}`.trim()] };

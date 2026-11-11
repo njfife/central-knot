@@ -38,7 +38,7 @@ test('a tool that has a skill through an installed plugin is shown as that, and 
 
     const facts = (await manageView(context)).skills;
     const triage = facts.find(skill => skill.key === 'triage')!;
-    assert.deepEqual(triage.plugin, { 'claude-cli': { plugin: 'issue-tracker', marketplace: 'team', version: '1.2.0' } });
+    assert.deepEqual(triage.plugin, { 'claude-cli': { plugin: 'issue-tracker', marketplace: 'team', version: '1.2.0', name: 'triage' } });
     assert.match(triage.cannot['claude-cli'] ?? '', /^Claude Code has this skill through the plugin issue-tracker \(version 1\.2\.0\), so no separate copy is placed there\.$/);
     // A copy of its own is an ordinary copy, whatever a plugin also holds.
     assert.equal(facts.find(skill => skill.key === 'notes')!.plugin, undefined);
@@ -85,14 +85,14 @@ test('an MCP server or agent a tool has through a plugin gets no entry or file o
       items: [{ kind: 'mcp', name: 'issues', hash: 'h' }, { kind: 'agent', name: 'triager', hash: 'h' }] }] }));
 
     const server = (await mcpView(context, tools)).servers.find(item => item.key === 'issues')!;
-    assert.deepEqual([server.plugin, server.cannot['claude-cli']], [{ 'claude-cli': from }, 'Claude Code has this MCP server through the plugin issue-tracker (version 1.2.0), so no separate copy is placed there.']);
+    assert.deepEqual([server.plugin, server.cannot['claude-cli']], [{ 'claude-cli': { ...from, name: 'issues' } }, 'Claude Code has this MCP server through the plugin issue-tracker (version 1.2.0), so no separate copy is placed there.']);
     const served = await applyMcp(context, tools, [{ key: 'issues', managed: true, off: [] }], { claudeNow: ['issues'] });
     assert.equal(served.stopped, undefined);
     assert.ok(JSON.parse(await readFile(join(home, '.copilot/mcp-config.json'), 'utf8')).mcpServers.issues, 'the tool without it gets the server');
     assert.equal(await readFile(join(home, '.claude.json'), 'utf8'), '{}\n', 'Claude Code, which has it through the plugin, is not written');
 
     const agent = (await agentsView(context, tools)).servers.find(item => item.key === 'triager')!;
-    assert.deepEqual([agent.plugin, agent.cannot['claude-cli']], [{ 'claude-cli': from }, 'Claude Code has this agent through the plugin issue-tracker (version 1.2.0), so no separate copy is placed there.']);
+    assert.deepEqual([agent.plugin, agent.cannot['claude-cli']], [{ 'claude-cli': { ...from, name: 'triager' } }, 'Claude Code has this agent through the plugin issue-tracker (version 1.2.0), so no separate copy is placed there.']);
     const sorted = await applyAgents(context, tools, [{ key: 'triager', managed: true, off: [] }]);
     assert.equal(sorted.stopped, undefined);
     assert.deepEqual([await exists(join(home, '.copilot/agents/triager.agent.md')), await exists(join(home, '.claude/agents/triager.md'))], [true, false]);

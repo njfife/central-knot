@@ -1,8 +1,8 @@
 // What plugins installed whole bring, as rows of the Skills, MCP servers and Agents pages (no DOM): one row per item of a
 // plugin across every tool that has the plugin. An item the person also has as their own (the same skill, or the plugin's
 // part in another tool) stays on that row, whose box says "Through a plugin" (SkillFacts.plugin); one that only shares a
-// name is a row of its own here. These rows are never managed: no switch, no sync, no profile, no repo; the plugin's
-// page is where they are handled.
+// name is a row of its own here. These rows are never managed: no sync, no profile, no repo; a box turns the item on or
+// off in that tool (pluginswitch.ts), and the plugin's page is where the plugin itself is handled.
 import { DIRECTORY, partOfPage, samePart, versionWord } from './pluginstatus.ts';
 import { takesPlugins } from './presence.ts';
 import { andList, byToolOrder, toolNames as names } from './words.ts';
@@ -28,12 +28,13 @@ export interface PluginRow {
 /** A page's plugin rows (those no row of the person's own already shows), and copies that couldn't be read. */
 export interface PageRows { rows: PluginRow[]; unread: InstalledPlugin[] }
 
-/** Whether this tool's copy of the plugin has this item turned off, and how: the whole plugin, or the skill's own switch. */
-export function offIn(row: PluginRow, tool: HarnessId): 'plugin' | 'skill' | undefined {
+/** Whether this tool's copy of the plugin has this item turned off, and how: the whole plugin, or the item's own switch (a skill's, an MCP server's, an agent's). */
+export function offIn(row: PluginRow, tool: HarnessId): 'plugin' | 'item' | undefined {
   const install = row.installs[tool];
   if (!install || !row.copies[tool]) return undefined;
   if (install.off) return 'plugin';
-  return row.kind === 'skill' && install.skillsOff?.some(name => samePart({ kind: 'skill', name }, row)) ? 'skill' : undefined;
+  const off = { skill: install.skillsOff, mcp: install.serversOff, agent: install.agentsOff }[row.kind];
+  return off?.some(name => samePart({ kind: row.kind, name }, row)) ? 'item' : undefined;
 }
 
 /** Whether a tool has an item of the person's: a copy of its own there, or through a plugin installed there (its box says so). The tables and every count ask this. */
@@ -112,7 +113,7 @@ export function cellWords(row: PluginRow, tool: HarnessId): string {
   const name = names[tool];
   const off = offIn(row, tool);
   const version = row.installs[tool]?.version ? ` ${row.installs[tool]!.version}` : '';
-  return `${name}: in the plugin ${row.plugin}${version}${off === 'plugin' ? `; the whole plugin is turned off in ${name}` : off === 'skill' ? `; turned off in ${name}` : ''}`;
+  return `${name}: in the plugin ${row.plugin}${version}${off === 'plugin' ? `; the whole plugin is turned off in ${name}` : off === 'item' ? `; turned off in ${name}` : ''}`;
 }
 
 /** One tool's line in the item's details: its copy in the plugin and whether it is on, or why that tool has none. */
@@ -120,13 +121,13 @@ export function toolWords(row: PluginRow, tool: HarnessId): string {
   if (!row.copies[tool]) return missingWhy(row, tool);
   const version = row.installs[tool]?.version;
   const off = offIn(row, tool);
-  return `Inside ${row.plugin}${version ? ` ${version}` : ''}. ${off === 'plugin' ? 'The whole plugin is turned off here.' : off === 'skill' ? 'Turned off here with its own switch.' : 'On.'}`;
+  return `Inside ${row.plugin}${version ? ` ${version}` : ''}. ${off === 'plugin' ? 'The whole plugin is turned off here.' : off === 'item' ? 'Turned off here with its own switch.' : 'On.'}`;
 }
 
 /** Where a plugin's item is handled, in one sentence: on its page, or, with its marketplace nowhere here, in the tool itself. */
 export function handledWhere(row: PluginRow): { listed: boolean; text: string } {
   const listed = Object.values(row.installs).some(install => install?.listed);
-  if (listed) return { listed, text: 'Installed, updated, turned off and removed with the plugin, on ' };
+  if (listed) return { listed, text: 'Installed, updated and removed with the plugin, on ' };
   const tools = pluginTools(row).map(tool => names[tool]);
   if (row.marketName === DIRECTORY) return { listed, text: `Installed in ${andList(tools)} from the Anthropic Directory. Claude Code’s own /plugin updates, turns off or removes it.` };
   return { listed, text: `Installed in ${andList(tools)} from the marketplace “${row.marketName}”, which isn’t added in Central Knot or in ${tools.length === 1 ? 'that tool' : 'those tools'} now, so the plugin has no page here. ${tools.length === 1 ? `${tools[0]}’s` : 'Each tool’s'} own plugin commands update, turn off or remove it.` };

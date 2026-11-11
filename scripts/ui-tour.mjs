@@ -743,7 +743,7 @@ if (wanted('plugin-items')) {
   }
   await size(1280, 800);
   await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
-  await shot(a, 'skill-open', 'Opened pdf-reader: what it is, where it is handled (a link to document-tools’ page), and each tool’s copy.');
+  await shot(a, 'skill-open', 'Opened pdf-reader: what it is, where it is handled (a link to document-tools’ page), and each tool’s copy with its switch: Enabled in Claude Code, Disabled in Copilot CLI.');
   await a.click('[id="pfile-document-tools@team-tools/pdf-reader"]'); await waitFor(a, `!!document.querySelector('.details-plugin .plugin-file')`, 15000);
   await shot(a, 'skill-open-file', 'Clicked “Show its SKILL.md”.');
   await a.theme('light'); await shot(a, 'skill-open-light', 'The same, light.'); await a.theme('dark');
@@ -751,6 +751,18 @@ if (wanted('plugin-items')) {
   await a.theme('light'); await shot(a, 'skill-open-860-light', 'The same at 860×560, light.'); await a.theme('dark');
   await size(1728, 1117); await shot(a, 'skill-open-1728', 'The open row at 1728×1117.'); await size(1280, 800);
   await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
+  // A box is the item's switch in that tool. Copilot CLI has one for a single skill of a plugin; Claude Code has none, so
+  // the whole plugin goes there, and every row of that plugin shows it before Apply all.
+  await a.click('[id="cell-document-tools@team-tools/pdf-reader-copilot-cli"]');
+  await shot(a, 'switch-waiting', 'Clicked pdf-reader’s box under Copilot CLI (it was off there): it turns on there on Apply all, drawn with a dashed blue edge, and the bar counts the change.');
+  await a.click('[id="cell-document-tools@team-tools/pdf-reader-claude-cli"]');
+  await shot(a, 'whole-plugin-waiting', 'Clicked pdf-reader’s box under Claude Code, which has no switch for one skill of a plugin: the whole plugin document-tools turns off there on Apply all, so spreadsheet’s Claude Code box waits too.');
+  await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
+  await shot(a, 'whole-plugin-waiting-open', 'Opened pdf-reader: each tool’s line says what Apply all will do.');
+  await a.theme('light'); await shot(a, 'whole-plugin-waiting-open-light', 'The same, light.'); await a.theme('dark');
+  await size(860, 560); await shot(a, 'whole-plugin-waiting-open-860', 'The same at 860×560.'); await size(1280, 800);
+  await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
+  await a.click('#discard');
   if (await a.has('#open-triage')) { await a.click('#open-triage'); await shot(a, 'part-and-plugin', 'Opened triage: its Pi part and the plugin installed in Codex share the row; both say where they come from.'); }
   await a.click('#nav-mcp'); await waitFor(a, `!!document.querySelector('.ov-section-plugins, [data-key^="issue-tracker@"]')`);
   await shot(a, 'mcp', 'MCP servers: issue-tracker’s issues server, installed in Codex with the plugin turned off.');
@@ -761,7 +773,17 @@ if (wanted('plugin-items')) {
     await a.theme('light'); await shot(a, `mcp-${width}-light`, `The same at ${width}×${height}, light.`); await a.theme('dark');
   }
   await size(1280, 800);
-  if (await a.has('[id="open-issue-tracker@team-tools/issues"]')) { await a.click('[id="open-issue-tracker@team-tools/issues"]'); await shot(a, 'mcp-open', 'Opened issues: its marketplace is added nowhere, so it says how Codex itself handles it.'); }
+  if (await a.has('[id="open-issue-tracker@team-tools/issues"]')) { await a.click('[id="open-issue-tracker@team-tools/issues"]'); await shot(a, 'mcp-open', 'Opened issues: its marketplace is added nowhere, so it says how Codex itself handles it; its switch is there all the same.'); }
+  // One MCP server of a plugin has a switch of its own in every tool that takes plugins: Apply all writes it, and Undo takes it back.
+  if (await a.has('[id="cell-issue-tracker@team-tools/issues-codex-cli"]')) {
+    await a.click('[id="cell-issue-tracker@team-tools/issues-codex-cli"]');
+    await shot(a, 'mcp-switch-waiting', 'Clicked issues’ box under Codex, where the whole plugin is off: the plugin turns on there on Apply all with only this server on.');
+    await a.click('#apply'); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
+    await shot(a, 'mcp-switch-applied', 'Clicked Apply all: Codex’s own switches are written, the result says what changed, and Undo is offered.');
+    await size(1728, 1117); await shot(a, 'mcp-switch-applied-1728', 'The same at 1728×1117.'); await size(1280, 800);
+    await a.click('#outcome-undo-plugin'); await a.settle();
+    await shot(a, 'mcp-switch-undone', 'Clicked Undo: the plugin is off in Codex again, as it was.');
+  }
   await a.click('#nav-agents'); await toPlugins(); await shot(a, 'agents', 'Agents: release-helper’s release-reviewer in Claude Code.');
   await a.click('#nav-overview'); await shot(a, 'overview', 'Overview: each card counts the plugins’ items apart (“from plugins”).');
   await a.click('#nav-harnesses'); await shot(a, 'harnesses', 'Harnesses: each card’s counts say how many come from plugins.');
