@@ -71,6 +71,7 @@ test('A tool managed again starts from its own entries: an edit or deletion made
       await applyMcp(box.context, tools, [], { settleMs: 0 });
       await applyMcp(box.context, tools, [], { settleMs: 0 });
       assert.equal((await copilotOf(box.home)).tool?.command, 'a', `the ${change} in Codex did not spread`);
+      assert.match(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), change === 'edit' ? /command = "b"/ : /\[mcp_servers\.tool\]\ncommand = "a"/, 'Codex keeps its edit, or gets the server back');
     } finally { await box.cleanup(); }
   }
 });

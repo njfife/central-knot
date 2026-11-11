@@ -622,7 +622,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     // No tool it syncs to holds it, but one reads the copy of a tool that is left out (OpenCode reads Claude Code's): that
     // copy becomes the reader's own, to start from. The owner's is no longer kept in sync, and this pass may remove it.
     // The same for a reader whose copy was chosen over the others: it needs a copy of its own to be chosen from.
-    const chosenReader = item.use && !entry.locations.some(location => location.tool === item.use!.tool) ? item.use.tool : undefined;
+    const chosenReader = item.use && syncing.includes(item.use.tool) && !entry.locations.some(location => location.tool === item.use!.tool) ? item.use.tool : undefined;
     if (!options.observeOnly && (chosenReader || !entry.locations.some(location => syncing.includes(location.tool)))) {
       for (const tool of chosenReader ? [chosenReader] : syncing) {
         const read = entry.facts.copies[tool];
