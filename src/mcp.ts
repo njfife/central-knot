@@ -863,6 +863,10 @@ export async function restoreMcp(context: ShareContext, tools: HarnessId[], even
   if (past.kind === 'deleted' && item.state === 'shared' && item.hash !== hash) return { stopped: `“${name}” is managed again with other settings. Restoring the old one would replace it; remove or rename the new one first.`, results: [], writes: 0 };
   if (item.state !== 'shared' && Object.values(slot).some(entry => entry && entry.hash !== hash)) return { stopped: `A different “${name}” is set up now. Remove or rename it, then restore.`, results: [], writes: 0 };
   if (past.kind !== 'deleted' && item.state !== 'shared') return { stopped: `${name} was deleted since. Restore the deletion instead.`, results: [], writes: 0 };
+  // A tool's own entry that waits for a choice of copy (not on record, and unlike the synced one: the pass holds for it) is
+  // never written over by a version: the choice comes first.
+  const awaitsChoice = (tool: HarnessId) => !!slot[tool] && slot[tool]!.hash !== item.hash && !item.off.includes(tool) && !unreadable.has(tool) && !item.copies.some(copy => copy.tool === tool && !copy.status);
+  if (item.state === 'shared' && present.some(awaitsChoice)) return { stopped: `${name}’s copies differ. Choose which copy every tool uses first.`, results: [], writes: 0 };
   const results: DestinationResult[] = [];
   let writes = 0;
   const before = item.state === 'shared' ? item.hash : undefined;

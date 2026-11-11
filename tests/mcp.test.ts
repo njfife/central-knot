@@ -103,6 +103,29 @@ test('Claude Code is written only by Write now, editing only its entry; Undo rem
   } finally { await box.cleanup(); }
 });
 
+test('An older edit’s Undo waits while a tool’s own entry waits for a choice (Sync here on an entry changed by hand): it writes over nothing, and goes through once the copy is chosen', async () => {
+  const box = await sandbox();
+  try {
+    const codex = join(box.home, '.codex/config.toml');
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), copilotOne('a'));
+    await applyMcp(box.context, tools, [{ key: 'tool', managed: true, off: ['claude-cli'] }]);
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), copilotOne('b'));
+    await applyMcp(box.context, tools, [], { settleMs: 0 });
+    const edit = (await readHistory(box.context)).find(event => event.kind === 'edit' && event.key === 'mcp:tool')!;
+    // Codex left out, its entry changed by hand, then synced there again: it waits for a choice.
+    await applyMcp(box.context, tools, [{ key: 'tool', managed: true, off: ['claude-cli', 'codex-cli'], seenManaged: true }]);
+    await writeFile(codex, (await readFile(codex, 'utf8')).replace('command = "b"', 'command = "codex-own"'));
+    await applyMcp(box.context, tools, [{ key: 'tool', managed: true, off: ['claude-cli'], seenManaged: true }]);
+    assert.equal((await restoreMcp(box.context, tools, edit.id)).stopped, 'tool’s copies differ. Choose which copy every tool uses first.');
+    assert.ok((await readFile(codex, 'utf8')).includes('codex-own'));
+    assert.equal((await applyMcp(box.context, tools, [], { settleMs: 0 })).writes, 0);
+    // The next click, the choice: Codex's entry goes to History with the choice, and the edit's Undo then goes through.
+    await applyMcp(box.context, tools, [{ key: 'tool', managed: true, off: ['claude-cli'], seenManaged: true, use: 'copilot-cli' }]);
+    assert.equal((await restoreMcp(box.context, tools, edit.id)).stopped, undefined);
+    assert.ok((await readFile(codex, 'utf8')).includes('command = "a"'));
+  } finally { await box.cleanup(); }
+});
+
 test('An edit spreads and Undo reverts it; a deletion spreads once it holds and Restore brings it back; differing copies wait for a choice', async () => {
   const box = await sandbox();
   try {

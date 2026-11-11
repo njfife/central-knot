@@ -373,6 +373,14 @@ function waitsForSource(history: HistoryEvent[], off: HistoryEvent, loser: Histo
   return sourceOff >= 0 && sourceOff >= history.findIndex(event => event.id === off.id) ? origin : undefined;
 }
 
+/**
+ * The tools a synced agent syncs to whose copy waits for a choice: one not on record that differs from the synced copy (made by
+ * hand in a tool while an Off held it there, or in a tool left out and synced to again). The next pass holds for that choice
+ * (sourceAndOrigin), and until it is made no version is written over such a copy (restoreVersion).
+ */
+const awaitingChoice = (item: AgentRecordItem, slot: AgentSlot, syncing: AgentTool[]) =>
+  syncing.filter(tool => slot[tool] && slot[tool]!.hash !== item.hash && !item.copies.some(copy => copy.tool === tool && !copy.status));
+
 /** The origin the next Apply records for this agent, from its copies as that pass would classify them; none when it would hold. */
 function originOnApply(item: AgentRecordItem | undefined, off: HarnessId[], slot: AgentSlot, present: HarnessId[]): AgentEntry | undefined {
   const found = present.filter(tool => !off.includes(tool)).flatMap(tool => {
@@ -1035,7 +1043,8 @@ export async function restoreAgent(context: ShareContext, tools: HarnessId[], ev
 /**
  * A kept version back in every tool the agent syncs to, each tool's own kept file where one was kept (an edit's or a conflict's
  * Undo, a deletion by hand's Restore, a choice undone from History); stopped one-way copies are left alone. `choice`: which
- * overwritten edit, by content id (`use`). It waits while an Off holds a tool (Rule A), and never overwrites another agent of that name.
+ * overwritten edit, by content id (`use`). It waits while an Off holds a tool (Rule A) and while a tool's own copy waits for a
+ * choice (awaitingChoice), and never overwrites another agent of that name.
  */
 async function restoreVersion(context: ShareContext, tools: HarnessId[], history: HistoryEvent[], past: HistoryEvent | undefined, key: string | undefined, use?: string): Promise<McpResult> {
   const options = past ? past.losers.filter(loser => loser.hash && loser.hash !== past.previous && loser.hash !== past.winner?.hash) : [];
@@ -1059,6 +1068,8 @@ async function restoreVersion(context: ShareContext, tools: HarnessId[], history
   const stopped = new Set(item.copies.filter(copy => copy.stopped).map(copy => copy.tool));
   const problem = blocked(key, unreadable, duplicates, present);
   if (problem) return { stopped: problem, results: [], writes: 0 };
+  const syncing = present.filter(tool => !notSyncing(item, heldAgain).includes(tool) && !stopped.has(tool));
+  if (item.state === 'shared' && awaitingChoice(item, slot, syncing).length) return { stopped: `${item.name}’s copies differ. Choose which copy every tool uses first.`, results: [], writes: 0 };
   // A deleted agent whose name another agent now uses: never overwrite that one. Its own stopped one-way copy is not another agent.
   if (item.state !== 'shared') {
     const taken = (Object.values(slot) as AgentEntry[]).find(entry => entry.hash !== hash && !stopped.has(entry.tool));
@@ -1071,7 +1082,7 @@ async function restoreVersion(context: ShareContext, tools: HarnessId[], history
   const copies: AgentCopy[] = item.copies.filter(copy => copy.stopped);
   const origin = { tool: version.tool, agent: version.agent };
   const through = await agentsThroughPlugins(context, present);
-  for (const tool of present.filter(candidate => !notSyncing(item, heldAgain).includes(candidate) && !stopped.has(candidate))) {
+  for (const tool of syncing) {
     const here = slot[tool];
     const given = here ? undefined : through.get(tool)?.get(key);
     if (given) { results.push({ item: item.name, harness: tool, outcome: 'held', message: throughPlugin(tool, given, 'agent') }); continue; }

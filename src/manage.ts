@@ -159,6 +159,15 @@ export async function recordConverted(home: string, key: string, from: Converted
 /** A tool's own copy: not one it only reads in another tool's folder. */
 const ownCopy = (entry: Gathered | undefined, tool: HarnessId) => (entry?.facts.copies[tool]?.readsFrom ? undefined : entry?.facts.copies[tool]);
 
+/**
+ * Whether a copy not on record is the synced skill's own, only behind: it holds the synced content or an earlier revision of it
+ * from the store (a folder switched back, a copy that once failed to update), and no choice's Undo left it as its tool's own
+ * (`keptOwn`). The pass adopts such a copy. Any other copy not on record that differs waits for a choice of copy: the pass holds
+ * for it, and until it is made no version is written over it (restoreFromHistory).
+ */
+const onlyBehind = async (context: ShareContext, key: string, item: RecordItem, tool: HarnessId, hash: string) =>
+  item.keptOwn?.[tool] !== hash && (hash === item.hash || await exists(storedRevision(context, key, hash)));
+
 /** The tool among `tools` whose own skills folder this tool reads too (OpenCode reads Claude Code's), if there is one. */
 function readsFolderOf(context: ShareContext, tool: HarnessId, tools: HarnessId[]): HarnessId | undefined {
   const read = harnesses[tool].skillRoots(configRoot(harnesses[tool], context.home, context.overrides?.[tool]), context.home).slice(1).map(root => root.path);
@@ -974,11 +983,10 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     // same as the rest) or gone. An edit there doesn't end it: taken back, the copy is still the tool's own, never just behind.
     for (const tool of Object.keys(item.keptOwn ?? {}) as HarnessId[]) if (!entry.facts.copies[tool] || item.copies.some(copy => copy.harness === tool)) delete item.keptOwn![tool];
     if (item.keptOwn && !Object.keys(item.keptOwn).length) delete item.keptOwn;
-    // An unrecorded copy holding the synced content, or an earlier revision of this skill from the store (a folder switched back,
-    // a copy that once failed to update), is this skill's copy, just behind: adopt it rather than call it a collision.
+    // An unrecorded copy that is this skill's own, just behind (onlyBehind), is adopted rather than called a collision.
     if (item.hash) for (const location of locations) {
-      if (item.copies.some(copy => copy.directory === location.copy.directory) || !location.copy.writable || item.keptOwn?.[location.tool] === location.copy.hash) continue;
-      if (location.copy.hash === item.hash || await exists(storedRevision(context, key, location.copy.hash))) item.copies.push({ harness: location.tool, directory: location.copy.directory, hash: location.copy.hash, created: false, status: 'written' });
+      if (item.copies.some(copy => copy.directory === location.copy.directory) || !location.copy.writable) continue;
+      if (await onlyBehind(context, key, item, location.tool, location.copy.hash)) item.copies.push({ harness: location.tool, directory: location.copy.directory, hash: location.copy.hash, created: false, status: 'written' });
     }
     // Each recorded copy remembers the content last seen or written there: a copy that differs from that was edited; one that
     // still matches it but not the synced content is only behind, and is caught up, never treated as an edit.
@@ -1590,6 +1598,12 @@ export async function restoreFromHistory(context: ShareContext, eventId: string,
     if (item.state !== 'shared') {
       const taken = Object.entries(entry?.facts.copies ?? {}).find(([, copy]) => copy && copy.hash !== tree.hash);
       if (taken) return { stopped: `A different “${item.name}” is in ${harnesses[taken[0] as HarnessId].name} now. Rename or remove it, then restore.`, results: [], harnessWrites: 0 };
+    }
+    // A tool's own copy that waits for a choice of copy is never written over by a version: the choice comes first.
+    for (const tool of item.state === 'shared' ? tools.filter(candidate => !item.off?.includes(candidate)) : []) {
+      const here = ownCopy(entry, tool);
+      const recorded = here && item.copies.some(copy => copy.directory === here.directory);
+      if (here?.writable && !recorded && !(await onlyBehind(context, past.key, item, tool, here.hash))) return { stopped: `${item.name}’s copies differ. Choose which copy every tool uses first.`, results: [], harnessWrites: 0 };
     }
     // A deletion that removed the shared copy a tool can have no other of (its skills folder is the shared folder): that copy
     // goes back as it was, so the tool has the skill again; only after the refusals above, so a refused Restore writes nothing.

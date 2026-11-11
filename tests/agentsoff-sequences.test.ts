@@ -459,3 +459,46 @@ test('Rule B: an On’s Turn off again ends with a later copy choice, even one o
     assert.equal((await recordOf(box))?.state, 'shared');
   } finally { await box.cleanup(); }
 });
+
+test('An older edit’s Undo waits while a tool’s own copy waits for a choice: it writes over nothing, and goes through once the copy is chosen', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    await write(box, 'claude-cli', claudeAgent('You review code.\nEdited before the Off.\n'));
+    await pass(box);
+    await turnOff(box);
+    await write(box, 'codex-cli', codexOwn('Made by hand while it was off.'));
+    const hand = await readOf(box, 'codex-cli');
+    // On keeps Codex's own copy and asks which copy every tool uses.
+    assert.match((await turnOn(box))!.results.map(entry => entry.message).join(' '), /that copy stays/);
+    const undoEdit = async () => (await historyActions(box)).find(action => action.label === 'Undo edit in all tools')!;
+    const before = await filesOf(box);
+    assert.equal((await (await undoEdit()).run()).stopped, 'reviewer’s copies differ. Choose which copy every tool uses first.');
+    assert.deepEqual([await filesOf(box), (await pass(box)).writes], [before, 0]);
+    // The next click, the choice the row asks for: Codex's copy goes to History with the choice's Undo, and the edit's Undo then goes through.
+    await choose(box, 'claude-cli');
+    assert.equal((await (await undoEdit()).run()).stopped, undefined);
+    assert.match((await readOf(box, 'codex-cli'))!, /Be brief/);
+    // One click further: the choice's own Undo still gives Codex the copy made by hand, and the pass after it asks again.
+    await (await historyActions(box)).find(action => action.label.startsWith('Undo choice'))!.run();
+    assert.deepEqual([await readOf(box, 'codex-cli'), (await pass(box)).writes], [hand, 0]);
+  } finally { await box.cleanup(); }
+});
+
+test('An older edit’s Undo waits the same way after Sync here on a copy changed by hand in a tool that was left out', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    await write(box, 'claude-cli', claudeAgent('You review code.\nEdited first.\n'));
+    await pass(box);
+    const edit = (await historyOf(box)).find(event => event.kind === 'edit')!;
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: ['codex-cli'], seenManaged: true }], { settleMs: 0 });
+    await write(box, 'codex-cli', codexOwn('Codex’s own, by hand.'));
+    const hand = await readOf(box, 'codex-cli');
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true }], { settleMs: 0 });
+    assert.equal((await restoreAgent(box.context, tools, edit.id)).stopped, 'reviewer’s copies differ. Choose which copy every tool uses first.');
+    assert.deepEqual([await readOf(box, 'codex-cli'), (await pass(box)).writes], [hand, 0]);
+    await choose(box, 'codex-cli');
+    assert.equal((await restoreAgent(box.context, tools, edit.id)).stopped, undefined);
+  } finally { await box.cleanup(); }
+});

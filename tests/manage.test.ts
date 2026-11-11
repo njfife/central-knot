@@ -735,6 +735,27 @@ test('Off with a broken switch file turns it off in every other tool and leaves 
   } finally { await box.cleanup(); }
 });
 
+test('An older edit’s Undo waits while a tool’s own copy waits for a choice (Sync here on a copy changed by hand): it writes over nothing, and goes through once the copy is chosen', async () => {
+  const box = await sandbox();
+  try {
+    await managedPair(box);
+    await writeFile(join(box.home, CLAUDE, 'pair/SKILL.md'), text('pair', 'Edited first.'));
+    await applyChanges(fast(box), []);
+    const edit = (await readHistory(ctx(box))).find(event => event.kind === 'edit')!;
+    // Copilot CLI left out, its copy changed by hand, then synced there again: it waits for a choice.
+    await applyChanges(fast(box), [{ ...manage('pair', ['copilot-cli']), seenManaged: true }]);
+    await writeFile(join(box.home, COPILOT, 'pair/SKILL.md'), text('pair', 'Copilot’s own, by hand.'));
+    await applyChanges(fast(box), [{ ...manage('pair'), seenManaged: true }]);
+    const refused = await restoreFromHistory(fast(box), edit.id);
+    assert.equal(refused.stopped, 'pair’s copies differ. Choose which copy every tool uses first.');
+    assert.deepEqual([await readFile(join(box.home, COPILOT, 'pair/SKILL.md'), 'utf8'), (await applyChanges(fast(box), [])).harnessWrites], [text('pair', 'Copilot’s own, by hand.'), 0]);
+    // The next click, the choice: Copilot CLI's copy goes to History with the choice, and the edit's Undo then goes through.
+    await applyChanges(fast(box), [{ ...manage('pair'), seenManaged: true, use: 'claude-cli', useHash: (await facts(box, 'pair')).copies['claude-cli']!.hash }]);
+    assert.equal((await restoreFromHistory(fast(box), edit.id)).stopped, undefined);
+    assert.equal(await readFile(join(box.home, COPILOT, 'pair/SKILL.md'), 'utf8'), text('pair', 'Original.'));
+  } finally { await box.cleanup(); }
+});
+
 test('Undo of a copy choice on a synced skill puts it back as before the choice: the tool’s own copy waits for a choice again, on every pass and on Sync here', async () => {
   const box = await sandbox();
   try {
