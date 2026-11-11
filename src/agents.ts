@@ -784,9 +784,10 @@ async function putBackAgent(context: ShareContext, tools: HarnessId[], history: 
   const whole = past.losers.every(loser => done.has(loser.tool));
   const id = randomUUID();
   if (whole) { past.undoneBy = id; delete past.restoredTools; } else past.restoredTools = [...done];
-  // Named by what came back, so its Undo takes out exactly those (a part-way one too: `turnedOff` says it puts back an Off).
+  // Named by what came back, so its Undo takes out exactly those. Part-way, the entry it put back from stays open, so this one
+  // says what it was: an Off (`turnedOff`) or Delete everywhere (`everywhere`).
   await replaceHistory(context, [...history, { id, at: new Date().toISOString(), key: past.key, item: item.name, kind: 'restored', losers: back.map(({ tool, hash, folder }) => ({ tool, hash, ...(folder ? { folder } : {}) })), orderProved: true,
-    ...(whole ? {} : { turnedOff: true as const }) }]);
+    ...(whole ? {} : past.kind === 'deleted' ? { everywhere: true as const } : { turnedOff: true as const }) }]);
   return { results, writes: back.length, made: [id] };
 }
 
@@ -852,8 +853,8 @@ export async function restoreAgent(context: ShareContext, tools: HarnessId[], ev
   // Turned off (or deleted everywhere): each copy back exactly as it was; `choice`, a tool, puts back that tool's alone.
   if (past?.kind === 'removed' || (past?.kind === 'deleted' && past.everywhere)) return putBackAgent(context, tools, history, past, choice as HarnessId | undefined);
   // Undo of putting them back: they are taken out again, as the removal or Delete everywhere did.
-  const putBack = past?.kind === 'restored' && !past.undoneBy ? history.find(entry => entry.undoneBy === past.id && (entry.kind === 'removed' || (entry.kind === 'deleted' && entry.everywhere))) ?? (past.turnedOff ? past : undefined) : undefined;
-  if (past && putBack) return takeOutAgain(context, tools, history, past, putBack.kind === 'deleted' ? 'deleted' : 'removed');
+  const putBack = past?.kind === 'restored' && !past.undoneBy ? history.find(entry => entry.undoneBy === past.id && (entry.kind === 'removed' || (entry.kind === 'deleted' && entry.everywhere))) ?? (past.turnedOff || past.everywhere ? past : undefined) : undefined;
+  if (past && putBack) return takeOutAgain(context, tools, history, past, putBack.kind === 'deleted' || putBack.everywhere ? 'deleted' : 'removed');
   const key = past?.key.replace(/^agent:/, '');
   // 'narrow': each replaced copy back in its own tool, the copies its pass added out, as for skills and MCP servers. A Stopped
   // switch (a stopped one-way copy given the source's copy again) is always undone so, History's Undo too: that tool gets back

@@ -3,7 +3,7 @@
 // the next plain pass and the next click checked after each step.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { agentsView, applyAgents, readAgentRecord, restoreAgent } from '../src/agents.ts';
@@ -231,4 +231,24 @@ test('Delete everywhere is the only real delete: no row stays, History restores 
     assert.equal(await pruneHistory(later), 'done');
     assert.deepEqual([await readHistory(later), (await agentsView(later, tools)).gone], [[], []]);
   } finally { await box.cleanup(); }
+});
+
+test('A Restore of Delete everywhere that stops part-way is undone as a deletion, and an On that stops part-way as an Off', { skip: process.getuid?.() === 0 }, async () => {
+  for (const kind of ['deleted', 'removed'] as const) {
+    const box = await sandbox();
+    try {
+      await writeFile(join(box.home, files['claude-cli']), claudeAgent());
+      await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+      const gone = await applyAgents(box.context, tools, [kind === 'deleted' ? { key: 'reviewer', managed: true, off: [], seenManaged: true, remove: tools, everywhere: true } : off()]);
+      await chmod(join(box.home, '.codex/agents'), 0o555);
+      const part = await restoreAgent(box.context, tools, gone.made![0]);
+      await chmod(join(box.home, '.codex/agents'), 0o755);
+      assert.deepEqual(part.results.map(entry => [entry.harness, entry.outcome]), [['claude-cli', 'written'], ['copilot-cli', 'written'], ['codex-cli', 'failed']], kind);
+      const undone = await restoreAgent(box.context, tools, part.made![0]);
+      assert.equal(undone.stopped, undefined, kind);
+      assert.deepEqual([Object.values(await everyFile(box)), (await latest(box, kind)).id], [[undefined, undefined, undefined], undone.made![0]], kind);
+      // Undone as what it was: a deletion leaves no row; an Off leaves its row, with every copy in History.
+      assert.deepEqual((await agentsView(box.context, tools)).gone?.flatMap(item => item.removed?.map(entry => entry.tool) ?? []), kind === 'deleted' ? [] : tools, kind);
+    } finally { await box.cleanup(); }
+  }
 });

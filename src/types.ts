@@ -451,9 +451,13 @@ export interface HistoryEvent {
   /**
    * 'removed': it turned the item off in tools with no switch for it, removing their copies. Until it is undone (turned on
    * again) or a later deletion stands, History keeps it whatever its age (manage.ts readHistory), and so its content.
+   * 'restored' (agents), part-way: it put back some of such a removal's copies; its Undo turns them off again.
    */
   turnedOff?: true;
-  /** 'deleted' by Delete everywhere (agents): its Restore puts each copy back exactly as it was, and an item that was off is off again. */
+  /**
+   * 'deleted' by Delete everywhere (agents): its Restore puts each copy back exactly as it was, and an item that was off is off
+   * again. 'restored', part-way: it put back some of such a deletion's copies; its Undo deletes them again.
+   */
   everywhere?: true;
   /** 'added': copies for tools a managed skill syncs to again; Undo removes them and stops syncing there, and the skill stays managed. */
   rejoined?: boolean;

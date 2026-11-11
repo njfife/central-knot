@@ -69,7 +69,7 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
       // Turned on again where it was turned off: its Undo turns it off there again.
       if ((undone?.kind === 'removed' && undone.turnedOff) || event.turnedOff) return { glyph: 'undo-2', text: `Turned on again: put back${where}.`, ...(event.key.startsWith('agent:') ? { action: 'Undo' } : {}) };
       if (undone?.kind === 'removed') return { glyph: 'undo-2', text: `Restored${where}.` };
-      if (undone?.kind === 'deleted') return { glyph: 'undo-2', text: `Restored after it was deleted${where}.`, action: 'Delete again' };
+      if (undone?.kind === 'deleted' || event.everywhere) return { glyph: 'undo-2', text: `Restored after it was deleted${where}.`, action: 'Delete again' };
       return { glyph: 'undo-2', text: `Undid ${undone ? named(undone) : 'a change'}; the earlier version is back${where}.`, action: 'Redo edit' };
     }
   }
