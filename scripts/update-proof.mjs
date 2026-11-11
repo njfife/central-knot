@@ -122,15 +122,17 @@ try {
   page.close(); await stopAll();
   check('after the refused zip the installed app is unchanged', tree(app) === installed);
 
-  // 3. The real update: one click, download, restart by itself into the newer build; settings and data stay.
+  // 3. The real update: the newer release shows by itself, with no check asked for; one click downloads it and the app restarts
+  // by itself into the newer build; settings and data stay.
   releases.splice(0, releases.length, { tag: newerTag, zip: newerZip, bytesPerSecond: 40_000_000 });
+  const opened = Date.now();
   page = await launch();
   await page.run(`window.centralKnot.setAppearance('dark')`);
   writeFileSync(join(environment.CK_TEST_USER_DATA, 'marker.txt'), 'kept');
   const settingsBefore = JSON.parse(readFileSync(join(environment.CK_TEST_USER_DATA, 'app-settings.json'), 'utf8'));
   const oldPids = running();
-  await page.run(`window.centralKnot.checkForUpdates()`);
-  await until(page, `document.querySelector('#update-control[data-look="available"]')`, 30_000);
+  await until(page, `document.querySelector('#update-control[data-look="available"]')`, 60_000);
+  check(`the sidebar offers the newer release by itself, ${Math.round((Date.now() - opened) / 1000)} s after launch`, await page.run(`document.querySelector('#update-control').getAttribute('aria-label')`) === `Update to ${words(newerTag)}`);
   await page.run(`window.ckLabels = []; new MutationObserver(() => { const b = document.querySelector('#update-control'); if (b && window.ckLabels.at(-1) !== b.textContent.trim()) window.ckLabels.push(b.textContent.trim()); }).observe(document.getElementById('sidebar-end'), { subtree: true, childList: true, characterData: true }); document.querySelector('#update-control').click(); true`);
   // Read until the old copy quits for the update (its page then stops answering).
   let labels = [];
