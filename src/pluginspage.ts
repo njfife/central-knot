@@ -10,7 +10,7 @@ import { pluginPage } from './pluginpage.ts';
 import { componentsOf, dotted, pluginTitle, readme, toolBox, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { allQueued, resultLines, pickOf, pluginKey, queued, resultParts, resultSentence, summary, toggleMany, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, offeredVersion, otherVersions, otherVersionsLine, partsMark, partsOf, partsOffer, stateOf, summaryOf, unavailable, updateTools, versionToCompare, whyNotCarried } from './pluginstatus.ts';
-import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, declineMarketplace, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoOps } from './pluginstate.ts';
+import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, browse, clearNotice, current, declineMarketplace, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
@@ -180,7 +180,7 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
 }
 
 /** About a marketplace: every fact about it (who, where it comes from, when it was read), Remove, then its README. */
-function aboutTab(entry: MarketplaceView, marketIndex: number) {
+function aboutTab(view: PluginsView, entry: MarketplaceView, marketIndex: number) {
   const read = market.readmes.get(entry.source);
   // Parts are removed together from their plugin's page, so a marketplace stays listed while any of its plugins' parts are in a tool.
   const holdsParts = Object.keys(entry.parts ?? {}).length > 0;
@@ -192,6 +192,7 @@ function aboutTab(entry: MarketplaceView, marketIndex: number) {
     entry.description ? h('p.market-page-about.about-only-narrow', {}, entry.description) : null,
     // A build's own marketplace says which release of it this is; where it "comes from" is the build, already among its facts.
     h('div.market-about-head', {}, h('p.market-page-meta', {}, entry.bundled ? bundledFacts(entry) : dotted([...marketFacts(entry), source])), remove),
+    inToolsNote(view, entry, marketIndex),
     notCarriedNote(entry),
     !read || read.reading ? h('p.plugin-muted', {}, 'Reading…')
       : read.value ? h('div.plugin-readme-body', {}, readme(read.value, entry.name, [entry.description ?? ''])) : h('p.plugin-muted', {}, 'This marketplace has no README.'),
@@ -203,6 +204,32 @@ function marketFacts(entry: MarketplaceView): string[] {
   if (entry.bundled) return [entry.owner ? `By ${entry.owner}` : '', entry.sourceLabel].filter(Boolean);
   const addedBy = entry.origins.includes('central-knot') ? [] : entry.origins.filter(origin => origin !== 'bundle').map(toolName);
   return [entry.owner ? `By ${entry.owner}` : '', addedBy.length ? `Added in ${andList(addedBy)}` : '', entry.fetchedAt ? `Updated ${when(entry.fetchedAt)}` : ''].filter(Boolean);
+}
+
+/**
+ * A build's own marketplace in each tool's own plugin list: which tools list it (and that the app added it, where it
+ * did), and for one that doesn't and could, a button that lists it there. The build adds it to every tool once by itself;
+ * the button is for a tool it was since taken out of, or where that didn't work.
+ */
+function inToolsNote(view: PluginsView, entry: MarketplaceView, marketIndex: number): HTMLElement | null {
+  if (!entry.bundled) return null;
+  const tools = view.tools.filter(tool => takesPlugins(tool));
+  const has = tools.filter(tool => entry.origins.includes(tool));
+  // A tool that can't take it (another marketplace under its name, no command-line tool) says why on the Plugins tab.
+  const could = view.canWrite ? tools.filter(tool => !has.includes(tool) && !blocked(view, entry, tool) && !Object.values(entry.states).some(states => states[tool]?.state === 'held')) : [];
+  if (!has.length && !could.length) return null;
+  const listOf = (list: typeof tools) => andList(list.map(tool => names[tool]));
+  const where = () => (has.length > 1 ? 'those tools’ own plugin lists' : `${names[has[0]!]}’s own plugin list`);
+  // Said as the app's own doing where it was (its own add, or an install from here), and that taking it out in a tool is respected.
+  const byApp = has.length > 0 && has.every(tool => entry.bundled!.addedTo?.includes(tool));
+  // Which tools don't, said right after which do. (That nothing was installed is said when it is true: in the status bar at the add.)
+  const lacks = has.length && could.length ? ` ${listOf(could)} ${could.length > 1 ? 'don’t' : 'doesn’t'} list it.` : '';
+  const said = !has.length ? 'None of your tools lists this marketplace yet.'
+    : byApp ? `${entry.bundled.app} added this marketplace to ${listOf(has)}, so these plugins also show in ${where()}.${lacks} Remove it in a tool and it stays out.`
+      : `${listOf(has)} ${has.length > 1 ? 'list' : 'lists'} this marketplace, so these plugins also show in ${where()}.${lacks}`;
+  return h('div.market-in-tools', {},
+    h('p', {}, said),
+    could.map(tool => button({ variant: 'outline', size: 'small', label: `List in ${names[tool]}`, name: `List ${marketTitle(entry)} in ${names[tool]}’s own plugin list. Nothing is installed.`, id: `add-carried-${marketIndex}-${tool}`, disabled: !!app.busy, onclick: () => void addCarriedTo(entry, tool) })));
 }
 
 /**
@@ -237,7 +264,7 @@ function marketPage(view: PluginsView, entry: MarketplaceView, marketIndex: numb
         (['plugins', 'about'] as const).map(tab => h(`button.market-tab${market.nav.tab === tab ? '.selected' : ''}`, { type: 'button', role: 'tab', id: `market-tab-${tab}`, 'aria-selected': String(market.nav.tab === tab), onclick: () => browse({ tab }) },
           tab === 'plugins' ? 'Plugins' : 'About'))),
       market.nav.tab === 'about' ? null : filters(entry)),
-    market.nav.tab === 'about' ? aboutTab(entry, marketIndex) : pluginsTab(view, entry, marketIndex));
+    market.nav.tab === 'about' ? aboutTab(view, entry, marketIndex) : pluginsTab(view, entry, marketIndex));
 }
 
 /**
