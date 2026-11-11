@@ -538,8 +538,10 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       results.push({ item: entry.facts.name, outcome: 'held', message: `${entry.facts.name} changed since the page was read${before?.deleted ? ' (it was deleted)' : ''}. Nothing was changed; read again.` });
       continue;
     }
-    // The copy a tool reads in another tool's folder is that tool's: choosing it chooses the owner's.
-    if (change.use && change.use !== 'separate') change.use = entry.facts.copies[change.use]?.readsFrom ?? change.use;
+    // The copy a tool reads in another managed tool's folder is that tool's: choosing it chooses the owner's. With the owner
+    // left out, it stays the reader's choice, and the reader gets a copy of its own from it.
+    const owner = change.use && change.use !== 'separate' ? entry.facts.copies[change.use]?.readsFrom : undefined;
+    if (owner && tools.includes(owner)) change.use = owner;
     // A choice that cannot be carried out changes nothing at all: not even Managed.
     if (change.use && change.use !== 'separate') {
       const syncing = tools.filter(tool => !change.off.includes(tool) && !entry.facts.cannot[tool]);
@@ -619,8 +621,10 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     const syncing = tools.filter(tool => !item.off?.includes(tool));
     // No tool it syncs to holds it, but one reads the copy of a tool that is left out (OpenCode reads Claude Code's): that
     // copy becomes the reader's own, to start from. The owner's is no longer kept in sync, and this pass may remove it.
-    if (!options.observeOnly && !entry.locations.some(location => syncing.includes(location.tool))) {
-      for (const tool of syncing) {
+    // The same for a reader whose copy was chosen over the others: it needs a copy of its own to be chosen from.
+    const chosenReader = item.use && !entry.locations.some(location => location.tool === item.use!.tool) ? item.use.tool : undefined;
+    if (!options.observeOnly && (chosenReader || !entry.locations.some(location => syncing.includes(location.tool)))) {
+      for (const tool of chosenReader ? [chosenReader] : syncing) {
         const read = entry.facts.copies[tool];
         // A reader that had a copy of its own on record deleted it: that is a deletion, never made good from here.
         if (!read?.readsFrom || entry.facts.cannot[tool] || item.copies.some(copy => copy.harness === tool) || await rootProblem(context, tool)) continue;

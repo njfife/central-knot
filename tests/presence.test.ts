@@ -91,10 +91,6 @@ test('a present tool the record leaves out is not managed: no item shows it, and
     await applyChanges(box.context, [{ key: 'brief', managed: true, off: [] }]);
     // Codex is left out from now on: a new skill managed in Claude Code goes nowhere else, and Codex's own copy is left as it is.
     assert.deepEqual(await chooseTools(box.context, ['claude-cli']), {});
-    const { record } = await readRecord(box.path);
-    await saveRecord(box.path, { ...record!, tools: ['nope' as HarnessId] });
-    assert.match((await readRecord(box.path)).problem ?? '', /damaged/, 'a list naming an unknown tool is damage');
-    await saveRecord(box.path, record!);
     await mkdir(join(box.path, '.claude/skills/later'), { recursive: true });
     await writeFile(join(box.path, '.claude/skills/later/SKILL.md'), text('later'));
     await writeFile(join(box.path, '.codex/skills/brief/SKILL.md'), text('brief edited in Codex'));
@@ -104,6 +100,16 @@ test('a present tool the record leaves out is not managed: no item shows it, and
     await applyChanges({ ...box.context, settleMs: 0 }, [{ key: 'later', managed: true, off: [] }]);
     assert.equal(await exists(join(box.path, '.codex/skills/later')), false);
     assert.equal(await readFile(join(box.path, '.claude/skills/brief/SKILL.md'), 'utf8'), text('brief'), 'an edit in a tool left out does not spread');
+  } finally { await box.cleanup(); }
+});
+
+test('a record whose list names an unknown tool reads as damaged', async () => {
+  const box = await home({ '.claude/skills': ['brief'] });
+  try {
+    await chooseTools(box.context, ['claude-cli']);
+    const { record } = await readRecord(box.path);
+    await saveRecord(box.path, { ...record!, tools: ['nope' as HarnessId] });
+    assert.match((await readRecord(box.path)).problem ?? '', /damaged/);
   } finally { await box.cleanup(); }
 });
 
@@ -138,6 +144,19 @@ test('with Claude Code left out, OpenCode gets a copy of its own and Claude Code
     await writeFile(join(box.path, '.config/opencode/skills/brief/SKILL.md'), text('brief edited in OpenCode'));
     await applyChanges({ ...box.context, settleMs: 0 }, []);
     assert.equal(await readFile(join(box.path, '.claude/skills/brief/SKILL.md'), 'utf8'), text('brief'), 'nothing is written in a tool left out');
+  } finally { await box.cleanup(); }
+});
+
+test('with Claude Code left out, the copy OpenCode reads in its folder can still be chosen over a differing one', async () => {
+  const box = await home({ '.claude/skills': ['brief'], '.codex/skills': ['brief'] }, ['.config/opencode']);
+  try {
+    await writeFile(join(box.path, '.codex/skills/brief/SKILL.md'), text('brief as Codex has it'));
+    await chooseTools(box.context, ['codex-cli', 'opencode-cli']);
+    const chosen = await applyChanges({ ...box.context, settleMs: 0 }, [{ key: 'brief', managed: true, off: [], use: 'opencode-cli' }]);
+    assert.deepEqual(chosen.results.filter(result => result.outcome === 'held'), []);
+    assert.equal(await readFile(join(box.path, '.codex/skills/brief/SKILL.md'), 'utf8'), text('brief'), 'Codex now uses the chosen copy');
+    assert.equal(await readFile(join(box.path, '.config/opencode/skills/brief/SKILL.md'), 'utf8'), text('brief'), 'OpenCode has a copy of its own');
+    assert.equal(await readFile(join(box.path, '.claude/skills/brief/SKILL.md'), 'utf8'), text('brief'));
   } finally { await box.cleanup(); }
 });
 
