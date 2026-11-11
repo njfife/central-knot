@@ -99,12 +99,21 @@ test('a broken publish leaves the last good plugins in place and says why', asyn
     // The archive was cut short on the way up.
     await truncate(join(box.feed, published.release.archive), 200);
     await stays(/^Newer plugins \(November 11, 2026\) are published, but they didn’t arrive whole, so they weren’t used\. The ones here stay in use, and the app tries again by itself\.$/, /Its archive is not the one its manifest describes/);
+    // While the feed still names that archive, it is not downloaded again: the same is said from memory.
+    const requests = box.asked.length;
+    await stays(/they didn’t arrive whole/, /Its archive is not the one its manifest describes/);
+    assert.deepEqual(box.asked.slice(requests), ['/team/release.json']);
+    // A new publish is tried afresh.
+    await market(box.source, { docs: '1.2.0', release: '0.4.1' });
+    const next = await box.publish(3);
+    assert.ok('release' in next);
+    Object.assign(published, next);
     // The archive is longer than the manifest says.
     await writeFile(join(box.feed, published.release.archive), Buffer.alloc(published.release.size + 10));
     await stays(/couldn’t be downloaded: its archive is longer than its manifest says\. The ones here stay in use, and the app tries again by itself\./);
     // The manifest went up but the archive didn't.
     await rm(join(box.feed, published.release.archive));
-    await stays(/couldn’t be downloaded: nothing is published at their address \(the server answered 404\)\./);
+    await stays(/couldn’t be downloaded: nothing is published at their address \(the server answered 404\)\./, /the feed answered 404/);
     // The manifest isn't one.
     await writeFile(join(box.feed, 'release.json'), '<html>Sign in</html>');
     await stays(/what is published isn’t something this app can read\. The ones here stay in use, and the app tries again by itself\./);

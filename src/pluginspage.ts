@@ -240,7 +240,8 @@ function bundledFacts(entry: MarketplaceView) {
 
 /** The plugins a build's marketplace lists but the build carries no files for, each with why, so "not available" has its reason in one place. */
 function notCarriedNote(entry: MarketplaceView): HTMLElement | null {
-  const left = entry.bundled?.unpackaged ?? [];
+  // One that is kept for the tools that have it is said on its own row, as no longer offered.
+  const left = (entry.bundled?.unpackaged ?? []).filter(item => !entry.bundled?.kept?.includes(item.name));
   if (!left.length) return null;
   return h('div.market-not-carried', { role: 'note' },
     h('p', {}, icon('circle-alert', 13, 'tone-warning'), h('span', {}, `${left.length === 1 ? 'One plugin listed here isn’t' : `${left.length} plugins listed here aren’t`} included in ${entry.bundled!.app}, so ${left.length === 1 ? 'it' : 'they'} can’t be installed from here.${entry.owner ? ` Ask ${entry.owner} if you need ${left.length === 1 ? 'it' : 'one'}.` : ''}`)),
