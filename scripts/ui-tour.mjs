@@ -335,30 +335,57 @@ if (wanted('agents')) {
   await a.click('#nav-agents'); await shot(a, 'agents-start', 'Clicked "Agents". code-reviewer, not synced yet, is tagged “one-way from Claude Code when on”; once on, the tag reads “one-way from Claude Code”.');
   for (const key of ['code-reviewer', 'release-notes']) if (await a.has(`#switch-${key}:not([aria-checked="true"])`)) await a.click(`#switch-${key}`);
   await shot(a, 'agents-on', 'Turned code-reviewer and release-notes on.');
-  // Off: agents have no switch in each tool, so Off stops syncing and leaves each copy; Undo syncs it again.
+  // Each new state at 860×560 and 1728×1117, dark and light; then back to 1280×800, dark.
+  const everyLook = async (name, caption) => {
+    for (const [width, height] of [[860, 560], [1728, 1117]]) {
+      await a.size(width, height); await shot(a, `${name}-${width}`, `${caption} At ${width}×${height}.`);
+      await a.theme('light'); await shot(a, `${name}-${width}-light`, `The same at ${width}×${height}, light.`); await a.theme('dark');
+    }
+    await a.size(1280, 800);
+  };
+  const codexNotes = join(practice, '.codex/agents/release-notes.toml'), codexNotesText = readFileSync(codexNotes, 'utf8');
+  // Off: no tool has a switch for a person's own agents, so Off removes each tool's copy; History keeps them, and On puts them back.
   await a.click('#switch-release-notes'); await a.settle();
-  await shot(a, 'agents-off', 'Turned release-notes off: it is no longer synced, and each tool keeps its copy; the result offers Undo.');
-  if (await a.has('#outcome-undo')) { await a.click('#outcome-undo'); await a.settle(); await shot(a, 'agents-off-undone', 'Clicked Undo: release-notes is synced again.'); }
-  // A copy choice and its Undo: off (each copy stays), edited in Codex, then on again choosing Claude Code's copy. The Undo puts
-  // Codex's edit back and takes out no copy the choice didn't add.
+  await shot(a, 'agents-off', 'Clicked release-notes’ switch to turn it off: no tool has a switch for your own agents, so each tool’s copy was removed. History keeps them; the result says so, with Undo. The row stays, under Off, its switch grey.');
+  await everyLook('agents-off', 'The same.');
+  await a.click('#open-release-notes'); await a.settle();
+  await shot(a, 'agents-off-open', 'Opened release-notes, off: the status says where its copies were removed from and that History keeps them; each tool’s line says “Removed here; History keeps it.”, with its switch to put that copy back; “Delete everywhere…” is last.');
+  await everyLook('agents-off-open', 'The same, opened.');
+  if (await a.has('#outcome-undo')) { await a.click('#outcome-undo'); await waitFor(a, `document.querySelector('#switch-release-notes')?.getAttribute('aria-checked') === 'true'`, 15000); await shot(a, 'agents-off-undone', 'Clicked Undo: every copy is back as it was, and release-notes is on and synced again.'); }
+  // On from the Off row puts them back too; one tool's switch puts back that tool's copy alone.
   await a.click('#switch-release-notes'); await a.settle();
-  edit(join(practice, '.codex/agents/release-notes.toml'), text => text.replace('one line each.', 'one line each. Codex’s own wording.'));
+  if (!(await a.has('#sync-release-notes-codex-cli'))) await a.click('#open-release-notes');
+  await a.click('#sync-release-notes-codex-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  await shot(a, 'agents-one-tool-on', 'Turned release-notes off again, then clicked Codex’s switch in its opened row: Codex’s copy alone is back; the others stay removed, in History, and the status says so.');
+  await everyLook('agents-one-tool-on', 'The same.');
+  await a.click('#outcome-undo'); await a.settle();
+  await a.click('#switch-release-notes'); await waitFor(a, `document.querySelector('#switch-release-notes')?.getAttribute('aria-checked') === 'true'`, 15000);
+  await shot(a, 'agents-on-again', 'Clicked Undo (Codex’s copy out again), then the row’s switch: release-notes is on again, each copy back as it was; the result says so, with Undo.');
+  await everyLook('agents-on-again', 'The same.');
+  // A copy that turns up by hand while it is off is that tool's own: left alone, and said; turning it on asks which copy to use.
+  await a.click('#switch-release-notes'); await a.settle();
+  writeFileSync(codexNotes, codexNotesText.replace('one line each.', 'one line each. Codex’s own wording.'));
   await a.click('#header-refresh'); await a.settle();
+  if (!(await a.has('#sync-release-notes-codex-cli'))) await a.click('#open-release-notes');
+  await shot(a, 'agents-turned-up', 'Turned release-notes off, then its Codex file was written again by hand, worded otherwise, and Refresh clicked: Codex loads it, so the row is under “Not synced”, saying “also in Codex: turned up since it was turned off”; nothing was written anywhere.');
+  await everyLook('agents-turned-up', 'The same.');
+  // A copy choice and its Undo: turned on again, its copies differ (Codex's own), so it asks which copy every tool uses.
   await a.click('#switch-release-notes'); await a.settle();
   if (await a.has('#use-release-notes-claude-cli')) {
-    await shot(a, 'agents-choice', 'Turned release-notes off (each copy stays), edited it in Codex, and turned it on again: its copies differ, so it asks which copy every tool uses. Claude Code’s and Copilot CLI’s are the same and share one card; Codex’s quotes the line only it has, the words only it has tinted, and is marked as edited most recently, with when.');
+    await shot(a, 'agents-choice', 'Clicked its switch: Claude Code’s and Copilot CLI’s copies are back from History, and Codex keeps the one that turned up, so it asks which copy every tool uses. Claude Code’s and Copilot CLI’s are the same and share one card; Codex’s quotes the line only it has, the words only it has tinted.');
     await a.theme('light'); await shot(a, 'agents-choice-light', 'The same, in the light appearance: the words only Codex’s copy has, tinted.'); await a.theme('dark');
     if (await a.has('#diff-release-notes')) { await a.click('#diff-release-notes'); await a.settle(); await shot(a, 'agents-choice-read', 'Clicked “Read every copy”: each different prompt under the cards, the same ones shown once.'); await a.click('#diff-release-notes'); await a.settle(); }
     await a.click('#use-release-notes-claude-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
     await shot(a, 'agents-choice-made', 'Clicked Claude Code’s copy: Codex’s copy is replaced (kept in History), and release-notes is on in all 3 tools; with Undo.');
     await a.click('#outcome-undo'); await waitFor(a, `/Undone/.test(document.querySelector('.bands')?.textContent ?? '')`, 15000);
-    await shot(a, 'agents-choice-undone', 'Clicked Undo: Codex has its own wording back, the other copies are as they were, and release-notes is as before the choice: not synced, its copies differing.');
+    await shot(a, 'agents-choice-undone', 'Clicked Undo: Codex has its own wording back, the other copies are as they were, and release-notes is as before the choice: its copies differing, waiting for a choice.');
     // Its copy question is open again after the Undo: chosen this time, so release-notes is synced for the edit below.
     if (!(await a.has('#use-release-notes-claude-cli'))) { await a.click('#switch-release-notes'); await a.settle(); }
     if (await a.has('#use-release-notes-claude-cli')) { await a.click('#use-release-notes-claude-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000); }
   }
   await waitFor(a, `document.querySelector('#switch-release-notes')?.getAttribute('aria-checked') === 'true'`, 15000);
-  await a.click('#open-code-reviewer'); await shot(a, 'agents-limits', 'Opened code-reviewer, a Claude Code agent with fields other tools can\'t hold: Claude Code\'s line is the source, with Stop syncing this agent; each other tool\'s line has its Synced switch.');
+  if (!(await a.has('#sync-code-reviewer-claude-cli'))) await a.click('#open-code-reviewer');
+  await shot(a, 'agents-limits', 'Opened code-reviewer, a Claude Code agent with fields other tools can\'t hold: Claude Code\'s line is the source, its switch “On” (Off there turns the whole agent off, as the others come from it); each other tool\'s line has its “Synced” switch, whose Off removes that copy alone.');
   edit(join(practice, '.codex/agents/release-notes.toml'), text => text.replace('one line each.', 'one line each. Edited in Codex.'));
   await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('.sync-notice')`, 15000);
   await shot(a, 'agents-edit-notice', 'Outside the app, release-notes (synced) was edited in Codex, then Refresh was clicked: the notice says the edit reached the other tools.');
@@ -381,6 +408,61 @@ if (wanted('agents')) {
     await shot(a, 'agents-stopped-switch-undone', 'Clicked Undo: Codex’s edit is back, and its switch reads “Stopped” again.');
   }
   if (await a.has('#stopped-keep-code-reviewer-codex-cli-details')) { await a.click('#stopped-keep-code-reviewer-codex-cli-details'); await a.settle(); await shot(a, 'agents-kept', 'Clicked "Keep Codex\'s edit" in the Codex row: its switch, still halfway, reads “Keeps its edit”.'); }
+  // One tool's switch: Copilot CLI's Off removes its copy alone, kept in History; the agent stays on in the others.
+  if (!(await a.has('#sync-code-reviewer-copilot-cli'))) await a.click('#open-code-reviewer');
+  if (await a.has('#sync-code-reviewer-copilot-cli')) {
+    await a.click('#sync-code-reviewer-copilot-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+    await shot(a, 'agents-tool-off', 'Clicked Copilot CLI’s “Synced” switch in code-reviewer’s row: its copy there is removed, kept in History, and the status says so; code-reviewer stays on in Claude Code and Codex; with Undo.');
+    await everyLook('agents-tool-off', 'The same.');
+    await a.click('#outcome-undo'); await a.settle();
+  }
+  // With Settings keeping copies where a tool has no switch, Off changes nothing for an agent, and says so as a note.
+  await a.click('#nav-settings'); await a.click('#remove-when-no-switch'); await waitFor(a, `document.querySelector('#remove-when-no-switch')?.getAttribute('aria-checked') === 'false'`);
+  await a.click('#nav-agents'); await a.click('#switch-release-notes'); await a.settle();
+  await shot(a, 'agents-setting-off', 'Turned off “When a tool can’t turn something off, remove its copy there” in Settings, then clicked release-notes’ switch: nothing changed, said as a note (not a warning): “Still on in all 3 tools: they have no switch for agents.” The row stays under On.');
+  await everyLook('agents-setting-off', 'The same.');
+  await a.click('#nav-settings'); await a.click('#remove-when-no-switch'); await waitFor(a, `document.querySelector('#remove-when-no-switch')?.getAttribute('aria-checked') === 'true'`);
+  await a.click('#nav-agents');
+  // Delete everywhere: the only real delete. Every copy goes (History keeps it) and so does the row; on an Off row too.
+  if (!(await a.has('#delete-release-notes'))) await a.click('#open-release-notes');
+  await a.click('#delete-release-notes'); await a.settle();
+  await shot(a, 'agents-delete-armed', 'Opened release-notes and clicked “Delete everywhere…”: it asks once more, saying History keeps it.');
+  await a.click('#delete-confirm-release-notes'); await waitFor(a, `!document.querySelector('.ov-row[data-key="release-notes"]')`, 15000);
+  await shot(a, 'agents-deleted', 'Clicked “Delete from every tool now”: every copy is removed and the row is gone (no Off row is left); History keeps it, and the result offers Undo.');
+  await everyLook('agents-deleted', 'The same.');
+  await a.click('#switch-code-reviewer'); await a.settle();
+  if (!(await a.has('#delete-code-reviewer'))) await a.click('#open-code-reviewer');
+  await a.click('#delete-code-reviewer'); await a.click('#delete-confirm-code-reviewer'); await waitFor(a, `!document.querySelector('.ov-row[data-key="code-reviewer"]')`, 15000);
+  await shot(a, 'agents-off-deleted', 'Turned code-reviewer off (its copies removed, its row under Off), then Delete everywhere on its row: the row goes; History keeps it for its days, with Restore.');
+  // A mixed item: release-reviewer is a part of the plugin release-helper in Copilot CLI and Codex (separate copies, no switch
+  // there) and comes with the plugin in Claude Code, whose switch for one plugin agent is a deny rule. Off removes the two
+  // copies and flips Claude Code's switch, in one click with one Undo.
+  const market = join(scratch, 'agents-market');
+  writeMarket(market);
+  const reviewer = readFileSync(join(market, 'plugins/release-helper/agents/release-reviewer.md'), 'utf8');
+  const installPath = join(practice, '.claude/plugins/cache/team-tools/release-helper/0.4.1');
+  cpSync(join(market, 'plugins/release-helper'), installPath, { recursive: true });
+  writeFileSync(join(practice, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'release-helper@team-tools': [{ scope: 'user', installPath, version: '0.4.1' }] } }));
+  // Its marketplace is added nowhere, so Claude Code's install is matched to the parts by the plugin's name.
+  writeFileSync(join(practice, '.copilot/agents/release-reviewer.agent.md'), reviewer);
+  writeFileSync(join(practice, '.codex/agents/release-reviewer.toml'), 'name = "release-reviewer"\ndescription = "Reviews a release branch before it ships."\ndeveloper_instructions = """\nReview it.\n"""\n');
+  mkdirSync(join(practice, '.central-knot'), { recursive: true });
+  const part = tool => ({ source: market, marketName: 'team-tools', plugin: 'release-helper', version: '0.4.1', tool, at: new Date().toISOString(), digest: 'tour', items: [{ kind: 'agent', name: 'release-reviewer', hash: 'tour' }] });
+  writeFileSync(join(practice, '.central-knot/plugin-parts.json'), JSON.stringify({ installs: [part('copilot-cli'), part('codex-cli')] }));
+  await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('.ov-row[data-key="release-reviewer"]')`, 15000);
+  if (!(await a.has('#sync-release-reviewer-copilot-cli'))) await a.click('#open-release-reviewer');
+  await shot(a, 'agents-mixed', 'A mixed item: release-reviewer, a part of release-helper in Copilot CLI and Codex (their own copies, not synced yet), and through the plugin itself in Claude Code, with its switch for one agent.');
+  if (!(await a.has('#switch-release-reviewer[aria-checked="true"]'))) { await a.click('#switch-release-reviewer'); await waitFor(a, `document.querySelector('#switch-release-reviewer')?.getAttribute('aria-checked') === 'true'`, 15000); }
+  if (await a.has('#switch-release-reviewer[aria-checked="true"]')) {
+    await a.click('#switch-release-reviewer'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+    await shot(a, 'agents-mixed-off', 'Clicked release-reviewer’s switch: off in all 3 tools in one click: Copilot CLI’s and Codex’s copies removed (History keeps them), and Claude Code’s own switch for the plugin’s agent turned; one Undo.');
+    await everyLook('agents-mixed-off', 'The same.');
+    await a.click('#switch-release-reviewer'); await waitFor(a, `document.querySelector('#switch-release-reviewer')?.getAttribute('aria-checked') === 'true'`, 15000);
+    await shot(a, 'agents-mixed-on', 'Clicked its switch again: both copies are back as they were, and Claude Code’s switch is on again, in one click with one Undo.');
+    await everyLook('agents-mixed-on', 'The same.');
+  }
+  await a.click('#nav-history'); await a.settle();
+  await shot(a, 'agents-history', 'Clicked "History": each Off says where it removed copies and that History keeps them until it is turned on again or deleted, with “Turn on” where it still stands; each On is “Turned on again”, with Undo; Delete everywhere is said as such, with Restore.');
 }
 
 // ---------- Plugins ----------
@@ -1406,7 +1488,17 @@ if (wanted('settings')) {
     await a.theme('dark'); await shot(a, `settings-${width}-dark`, `Settings at ${width}×${height}, dark. Start at sign-in is off and disabled in this dev build, its reason in the hint’s place.`);
     await a.theme('light'); await shot(a, `settings-${width}-light`, `Settings at ${width}×${height}, light.`);
   }
-  await size(860, 560); await a.theme('dark');
+  // Off removes an item's copy where a tool has no switch for it (your agents): on by default. Turned off, those tools keep it.
+  const removeRow = `document.querySelector('#setting-remove-when-no-switch')?.scrollIntoView({ block: 'center' })`;
+  await a.run(removeRow);
+  await a.click('#remove-when-no-switch'); await waitFor(a, `document.querySelector('#remove-when-no-switch')?.getAttribute('aria-checked') === 'false'`);
+  for (const [width, height] of [[860, 560], [1728, 1117]]) {
+    await size(width, height); await a.run(removeRow);
+    await a.theme('dark'); await shot(a, `settings-remove-off-${width}-dark`, `Turned off “When a tool can’t turn something off, remove its copy there” (Skills, MCP servers and agents): the switch is grey, and the announcement says only the next Off goes by it. At ${width}×${height}, dark.`);
+    await a.theme('light'); await shot(a, `settings-remove-off-${width}-light`, `The same at ${width}×${height}, light.`);
+  }
+  await a.theme('dark'); await a.click('#remove-when-no-switch'); await waitFor(a, `document.querySelector('#remove-when-no-switch')?.getAttribute('aria-checked') === 'true'`);
+  await size(860, 560); await a.run(`document.querySelector('.settings-scroll')?.scrollTo(0, 0)`);
   // Keyboard: the chosen card is the group's one Tab stop; the right arrow moves to Light and chooses it, with the focus ring.
   await a.run(`document.querySelector('#appearance-system').focus()`);
   for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 });

@@ -59,7 +59,8 @@ export function pageRows(home: HomeView, page: Page): PageRows {
   const known = memo.get(home) ?? {};
   if (known[page]) return known[page]!;
   const kind = partOfPage[page];
-  const facts = page === 'skills' ? home.manage.skills : page === 'mcp' ? home.mcp.servers : home.agents.servers;
+  // An item of the person's own turned off with no copy left is a row too (gone): a plugin's item it has elsewhere stays on it.
+  const facts = page === 'skills' ? [...home.manage.skills, ...home.manage.gone ?? []] : page === 'mcp' ? [...home.mcp.servers, ...home.mcp.gone ?? []] : [...home.agents.servers, ...home.agents.gone ?? []];
   const byKey = new Map<string, PluginRow>();
   for (const install of home.pluginItems ?? []) for (const item of install.items.filter(entry => entry.kind === kind)) {
     const id = `${install.plugin}@${install.marketName}/${kind === 'mcp' ? item.name : item.name.normalize('NFC').toLowerCase()}`;

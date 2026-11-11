@@ -26,7 +26,9 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
   switch (event.kind) {
     case 'edit': return { glyph: 'pencil-line', text: `Edited in ${who(event.winner?.tool)}, then copied to ${touchedToolsPhrase(event.losers.map(loser => loser.tool)) || 'the others'}.`, action: 'Undo' };
     case 'conflict': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit won over ${andList(event.losers.filter(loser => loser.hash !== event.previous).map(loser => who(loser.tool)))}’s.${order}`, action: 'Undo' };
-    case 'deleted': return { glyph: 'trash-2', text: `Deleted${event.winner ? ` in ${who(event.winner.tool)}` : ''}, then removed from the other tools it synced to.`, action: 'Restore' };
+    case 'deleted': return event.everywhere
+      ? { glyph: 'trash-2', text: `Deleted everywhere${event.losers.length ? `: removed from ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}; Central Knot kept the ${event.losers.length === 1 ? 'copy' : 'copies'}` : ', off with no copy left'}.`, action: 'Restore' }
+      : { glyph: 'trash-2', text: `Deleted${event.winner ? ` in ${who(event.winner.tool)}` : ''}, then removed from the other tools it synced to.`, action: 'Restore' };
     case 'kept-edit': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit was kept over a deletion in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}.${order}` };
     case 'chosen': {
       const text = `You chose ${who(event.winner?.tool)}’s copy; it replaced ${andList(event.losers.map(loser => who(loser.tool)))}’s.`;
@@ -41,7 +43,10 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
       return { glyph: 'circle-off', text: `${text.charAt(0).toUpperCase()}${text.slice(1)}, using ${one ? `${one}’s` : 'each tool’s'} own switch.`, action: 'Undo' };
     }
     case 'profile': return profileSwitch(event);
-    case 'removed': return { glyph: 'circle-minus', text: `Removed from ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}; Central Knot kept the ${event.losers.length === 1 ? 'copy' : 'copies'}.`, action: 'Restore' };
+    // Turned off where a tool has no switch: History keeps it until it is turned on again or deleted.
+    case 'removed': return event.turnedOff
+      ? { glyph: 'circle-off', text: `Turned off: removed from ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}, which ${event.losers.length === 1 ? 'has' : 'have'} no switch for it. History keeps ${event.losers.length === 1 ? 'it' : 'them'} until it is turned on again or deleted.${event.restoredTools?.length ? ` Back on in ${touchedToolsPhrase(event.restoredTools)}.` : ''}`, action: 'Turn on' }
+      : { glyph: 'circle-minus', text: `Removed from ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}; Central Knot kept the ${event.losers.length === 1 ? 'copy' : 'copies'}.`, action: 'Restore' };
     case 'took-over': return { glyph: 'arrow-down-to-line', text: tookOverText(event, !!event.undoneBy), action: 'Undo' };
     case 'written': return { glyph: 'pencil-line', text: 'Write to Claude Code replaced Claude Code’s own entry with the synced one; Central Knot kept it.', action: 'Undo write' };
     case 'added': {
@@ -59,6 +64,8 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
         const first = state.history.data?.find(other => other.undoneBy === undone.id);
         return { glyph: 'undo-2', text: `Redid ${first ? named(first) : 'the change'}; it is back${where}.`, action: first?.kind === 'deleted' ? 'Restore' : 'Undo edit' };
       }
+      // Turned on again where it was turned off: its Undo turns it off there again.
+      if ((undone?.kind === 'removed' && undone.turnedOff) || event.turnedOff) return { glyph: 'undo-2', text: `Turned on again: put back${where}.`, ...(event.key.startsWith('agent:') ? { action: 'Undo' } : {}) };
       if (undone?.kind === 'removed') return { glyph: 'undo-2', text: `Restored${where}.` };
       if (undone?.kind === 'deleted') return { glyph: 'undo-2', text: `Restored after it was deleted${where}.`, action: 'Delete again' };
       return { glyph: 'undo-2', text: `Undid ${undone ? named(undone) : 'a change'}; the earlier version is back${where}.`, action: 'Redo edit' };
@@ -133,7 +140,9 @@ function unfinished(event: HistoryEvent, todo = false): string {
 const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'profile' ? `Each switch this changed goes back, where it is still as this left it; ${event.profile?.fromName ?? NO_PROFILE} is in use again if this switch is the one that chose the profile in use`
   : event.base ? 'Put the base instructions back as they were before this Pull, and in the tools that got them (where their file is unchanged since)'
   : event.kind === 'switched' ? (event.switched ?? []).map(entry => `${entry.disabled ? 'Enable' : 'Disable'} it again in ${who(entry.tool)}`).join('; ')
+  : event.kind === 'removed' && event.turnedOff ? `Turn ${event.item} on again there: each copy back as it was`
   : event.kind === 'removed' ? `Put the removed copy back in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}`
+  : event.kind === 'restored' && action === 'Undo' && !event.winner ? `Turn ${event.item} off again there: each copy removed, and History keeps it`
   : event.kind === 'took-over' ? `Put the links and the shared copy back as they were${event.tookOver?.managedNow ? `, remove the copies that turning it on added, and stop syncing ${event.item}` : ''} (only while unchanged)`
   : event.kind === 'added' ? `Remove the copies ${event.via === 'repo' ? 'Pull' : 'it'} added (only while unchanged) and stop syncing ${event.item}${event.rejoined ? ' there' : ''}` : action === 'Restore' ? `Put ${event.item} back in every tool it synced to`
   : action === 'Finish undo' ? `${unfinished(event, true)} (only while unchanged since)`
@@ -151,14 +160,16 @@ function actions(event: HistoryEvent, action?: string) {
   // The scope is the tools the event touched, as the notices say it.
   // Undo and Restore write the earlier version to every tool the item syncs to (restoreFromHistory), so they say "in all tools".
   // Only an 'added' undo is narrower: it removes the copies a switch (or Pull) added, in those tools alone.
-  const touched = event.base ? event.base.list.tools : event.kind === 'added' || event.kind === 'removed' ? [...new Set(event.losers.map(loser => loser.tool))] : event.kind === 'switched' ? (event.switched ?? []).map(entry => entry.tool) : [];
+  // A removal, Delete everywhere and putting them back act on the tools they name, those not yet back for a removal.
+  const named = (event.kind === 'added' || event.kind === 'removed' || (event.kind === 'deleted' && event.everywhere) || (event.kind === 'restored' && !event.winner)) ? event.losers.map(loser => loser.tool).filter(tool => !event.restoredTools?.includes(tool)) : [];
+  const touched = event.base ? event.base.list.tools : named.length ? [...new Set(named)] : event.kind === 'switched' ? (event.switched ?? []).map(entry => entry.tool) : [];
   // A base no tool gets is undone in Central Knot alone, so its Undo names no tools.
   const scope = touched.length ? `in ${touchedToolsPhrase(touched)}` : event.base ? '' : 'in all tools';
   // A switch's Undo says that it is one, and what it does: enable where it was disabled, disable where it was enabled.
   const flips = new Set((event.switched ?? []).map(entry => entry.disabled));
   const verb = action === 'Undo' && event.via === 'repo' ? 'Undo pull' : action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action === 'Undo' && event.kind === 'chosen' ? 'Undo choice'
     : event.kind === 'switched' && flips.size === 1 ? (flips.has(true) ? 'Undo: enable' : 'Undo: disable') : action;
-  const label = event.kind === 'profile' ? `${action} switch` : ['Undo', 'Undo edit', 'Restore', 'Delete again', 'Redo edit'].includes(action) ? `${verb} ${scope}`.trim() : action;
+  const label = event.kind === 'profile' ? `${action} switch` : ['Undo', 'Undo edit', 'Restore', 'Delete again', 'Redo edit', 'Turn on'].includes(action) ? `${verb} ${scope}`.trim() : action;
   // A choice whose own Undo stopped part-way is finished the same narrow way: each replaced copy back in its own tool.
   const narrow = action === 'Finish undo' ? 'narrow' : undefined;
   const control = button({ variant: 'link', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void (event.kind === 'written' ? unwriteClaudeNow([{ name: event.item, before: event.previous!, after: event.winner!.hash, event: event.id }]) : restoreEvent(event.id, narrow)) });

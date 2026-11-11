@@ -570,19 +570,16 @@ async function practiceFlow() {
   await a.click('#header-refresh');
   same('then the deletion spreads', [existsSync(join(practice, '.claude/skills/release-notes')), existsSync(join(practice, '.codex/skills/release-notes'))], [false, false]);
   check('with a notice offering Restore', (await a.text('.sync-notices') ?? '').includes('release-notes was deleted in Copilot CLI'), await a.text('.bands'));
-  check('and the table keeps it under Off, saying no copy is left', ((await sectionsNow(a)).find(([role]) => role === 'off')?.[1] ?? []).includes('release-notes') && /no copy left/.test(await a.text('.ov-row[data-key="release-notes"]') ?? '') && !(await switchOn(a, 'release-notes')), await sectionsNow(a));
+  // A deletion is a deletion: no Off row stays (only turning an item off keeps one); History puts it back.
+  check('and the table has no row for it', !(await a.exists('.ov-row[data-key="release-notes"]')), await sectionsNow(a));
   await a.click('#nav-history');
   check('History lists it', (await a.text('#history-scroll') ?? '').includes('release-notes'), await a.text('#history-scroll'));
   await a.shot('practice-history');
-  await a.click('#nav-skills');
-  await a.click('#switch-release-notes');
   const releaseNotesIn = () => ['claude', 'copilot', 'codex'].map(tool => existsSync(join(practice, `.${tool}/skills/release-notes/SKILL.md`)));
-  same('turning it on puts it back in every tool from History', [await releaseNotesIn(), await switchOn(a, 'release-notes')], [[true, true, true], true]);
-  check('with Undo', await a.exists('#outcome-undo'), await a.text('.bands'));
-  await a.click('#outcome-undo');
-  same('whose Undo takes it out of every tool again, kept in History: off, with no copy left', [await releaseNotesIn(), /no copy left/.test(await a.text('.ov-row[data-key="release-notes"]') ?? ''), await switchOn(a, 'release-notes')], [[false, false, false], true, false]);
-  await a.click('#switch-release-notes');
-  same('and on again puts it back once more', await releaseNotesIn(), [true, true, true]);
+  await a.run(`[...document.querySelectorAll('.history-row[data-kind="deleted"]')].find(row => row.textContent.includes('release-notes')).querySelector('.history-actions button').click()`);
+  for (let tries = 0; tries < 40 && !(await releaseNotesIn()).every(Boolean); tries++) await wait(100);
+  await a.click('#nav-skills');
+  same('its Restore puts it back in every tool, on', [await releaseNotesIn(), await switchOn(a, 'release-notes')], [[true, true, true], true]);
 
   // The practice copy has no Pi folder, only a skill in the shared .agents folder that Pi (and others) read: that makes no
   // tool present, so Pi is no column, mark or control, and Tools shows no card for it.
@@ -847,11 +844,36 @@ async function practiceFlow() {
   check('code-reviewer reached Copilot with name, description and prompt, without Claude-only fields', copilotAgent.includes('description: Reviews a change') && copilotAgent.includes('You are a careful code reviewer.') && !copilotAgent.includes('tools:') && !copilotAgent.includes('model:'), copilotAgent);
   check('release-notes reached Claude Code from Codex', readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Group them as Added, Changed and Fixed.'));
   check('code-reviewer reached Codex as TOML', readFileSync(join(practice, '.codex/agents/code-reviewer.toml'), 'utf8').includes('developer_instructions = """'));
-  // An agent has no switch of its own in each tool: turning it off stops syncing it and leaves its copies; Undo syncs it again.
+  // No tool has a switch for a person's own agent: Off removes each tool's copy (History keeps it) and the row stays, off; Undo
+  // puts each back as it was, and so does On from the Off row.
+  const notesFiles = ['.claude/agents/release-notes.md', '.copilot/agents/release-notes.agent.md', '.codex/agents/release-notes.toml'].map(path => join(practice, path));
+  const notesBefore = notesFiles.map(readNow);
+  const notesState = () => a.run(`document.querySelector('#switch-release-notes')?.getAttribute('aria-checked')`);
   await a.click('#switch-release-notes');
-  same('turning an agent off stops syncing it; its copies stay, and its switch is halfway (not synced)', [await a.run(`document.querySelector('#switch-release-notes').getAttribute('aria-checked')`), existsSync(join(practice, '.claude/agents/release-notes.md'))], ['mixed', true]);
+  same('turning an agent off removes every copy, its row stays, off, and the result says what happened and how it comes back',
+    [await notesState(), notesFiles.map(existsSync), /release-notes is off in all 3 tools\. Its copies are removed; History keeps them, and turning it on puts them back\./.test(await a.text('.bands') ?? '')], ['false', [false, false, false], true]);
   await a.click('#outcome-undo');
-  same('and Undo syncs it again', await switchOn(a, 'release-notes'), true);
+  for (let tries = 0; tries < 40 && !(await switchOn(a, 'release-notes')); tries++) await wait(100);
+  same('and Undo puts each copy back as it was, synced', [await switchOn(a, 'release-notes'), notesFiles.map(readNow)], [true, notesBefore]);
+  await a.click('#switch-release-notes');
+  await a.click('#open-release-notes');
+  check('its Off row says where History keeps each copy, with each tool’s switch to put it back there', /Removed here; History keeps it\./.test(await a.text('.details') ?? '') && await a.exists('#sync-release-notes-codex-cli'), await a.text('.details'));
+  await a.click('#switch-release-notes');
+  for (let tries = 0; tries < 40 && !(await switchOn(a, 'release-notes')); tries++) await wait(100);
+  same('On from its Off row puts each copy back as it was', [await switchOn(a, 'release-notes'), notesFiles.map(readNow)], [true, notesBefore]);
+  // With Settings keeping copies where a tool has no switch, Off changes nothing, and says so as a note.
+  await a.click('#nav-settings');
+  await a.click('#remove-when-no-switch');
+  for (let tries = 0; tries < 40 && await a.run(`document.querySelector('#remove-when-no-switch')?.getAttribute('aria-checked')`) !== 'false'; tries++) await wait(100);
+  await a.click('#nav-agents');
+  await a.click('#switch-release-notes');
+  same('with that setting off, an agent’s Off leaves every copy and the row on, said as a note',
+    [await switchOn(a, 'release-notes'), notesFiles.map(existsSync), /release-notes: nothing changed\. Still on in all 3 tools: they have no switch for agents\./.test(await a.text('.bands') ?? ''), await a.exists('.bands .tone-warning')], [true, [true, true, true], true, false]);
+  await a.click('#nav-settings');
+  await a.click('#remove-when-no-switch');
+  for (let tries = 0; tries < 40 && await a.run(`document.querySelector('#remove-when-no-switch')?.getAttribute('aria-checked')`) !== 'true'; tries++) await wait(100);
+  await a.click('#nav-agents');
+  if (await a.exists('.details')) await a.click('#open-release-notes');
   await a.click('#open-code-reviewer');
   check('the details name the limits', /can’t hold its tools \(.*model \(.*edits only flow out/.test(await a.text('.details') ?? ''), await a.text('.details'));
   await a.shot('practice-agents');

@@ -111,6 +111,14 @@ test('a page whose last skill was just removed still has a row: the skill with n
   assert.deepEqual([rowCount(home, 'skills'), rowCount(homeOf([], []), 'skills')], [1, 0]);
 });
 
+test('an agent turned off with no copy left that a tool has through a plugin is that one row, the plugin’s item on it, not a second row', () => {
+  const given = { plugin: 'release-helper', marketplace: 'm' };
+  const helper: InstalledPlugin = { tool: 'claude-cli', plugin: 'release-helper', marketName: 'm', version: '0.4.1', listed: true, items: [{ kind: 'agent', name: 'release-reviewer', description: 'Reviews a release.' }] };
+  const off = fact('release-reviewer', {}, { gone: { history: 'e1', at: '', turnedOff: true }, plugin: { 'claude-cli': given } });
+  const home = (gone: SkillFacts[]) => ({ ...homeOf([], [helper]), agents: { servers: [], gone } }) as unknown as HomeView;
+  assert.deepEqual([pageRows(home([off]), 'agents').rows.length, pageRows(home([]), 'agents').rows.length, rowCount(home([off]), 'agents')], [0, 1, 1]);
+});
+
 test('a plugin’s skill the person also has (its part in Pi, shown there as through the plugin elsewhere) is that one row, not a second', () => {
   const through = { plugin: 'issue-tracker', marketplace: 'm' };
   const home = homeOf([fact('triage', { 'pi-cli': true }, { plugin: { 'claude-cli': through, 'copilot-cli': through } })], [install('claude-cli'), install('copilot-cli')], [piPart]);

@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
-import { agentsView, applyAgents } from '../src/agents.ts';
+import { agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
 import { applyChanges, manageView } from '../src/manage.ts';
 import { applyMcp, mcpView } from '../src/mcp.ts';
 import type { ShareContext } from '../src/share.ts';
@@ -101,5 +101,15 @@ test('an MCP server or agent a tool has through a plugin gets no entry or file o
     assert.deepEqual([again.writes, await exists(join(home, '.copilot/agents/triager.agent.md')), await exists(join(home, '.codex/agents/triager.toml'))], [0, true, true]);
     assert.equal((await applyMcp({ ...context, settleMs: 0 }, tools, [], { settleMs: 0 })).writes, 0);
     assert.ok(JSON.parse(await readFile(join(home, '.copilot/mcp-config.json'), 'utf8')).mcpServers.issues);
+    // Off removes its own copies (no switch for them); Claude Code's is the plugin's, switched with it. Its Off row is still the
+    // plugin's item's row, and On puts each copy back.
+    const copies = () => Promise.all(['.copilot/agents/triager.agent.md', '.codex/agents/triager.toml', '.claude/agents/triager.md'].map(path => exists(join(home, path))));
+    const turned = await applyAgents(context, tools, [{ key: 'triager', managed: true, off: [], seenManaged: true, remove: ['copilot-cli', 'codex-cli'], turnOff: true }]);
+    const off = (await agentsView(context, tools)).gone?.find(item => item.key === 'triager');
+    assert.deepEqual([off?.plugin?.['claude-cli']?.plugin, off?.cannot['claude-cli'], off?.removed?.map(entry => entry.tool), await copies()],
+      ['issue-tracker', 'Claude Code has this agent through the plugin issue-tracker (version 1.2.0), so no separate copy is placed there.', ['copilot-cli', 'codex-cli'], [false, false, false]]);
+    assert.equal((await applyAgents(context, tools, [], { settleMs: 0 })).writes, 0);
+    assert.equal((await restoreAgent(context, tools, turned.made![0])).stopped, undefined);
+    assert.deepEqual(await copies(), [true, true, false]);
   } finally { await rm(base, { recursive: true, force: true }); }
 });

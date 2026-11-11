@@ -326,6 +326,11 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
     agents.push({ key, name: shownCopy.name, description: shownCopy.agent.description, copies, extra: [], managed, off: item?.off ?? [], cannot, ...(Object.keys(plugin).length ? { plugin } : {}), held: blocked(key, unreadable, duplicates, present), separate: item?.separate, edited, choiceBlocks: {}, limits, oneWay: origin && Object.keys(limits).length ? { from: origin.tool, lost: Object.keys(origin.agent.fields) } : undefined, stopped, kept, ...removed.get(key) });
   }
   const gone = goneFacts(history, new Set(byKey.keys()), historyKey);
+  // One turned off with no copy of its own left that a tool still has through a plugin is that plugin's item's row too.
+  for (const fact of gone) for (const tool of present) {
+    const given = through.get(tool)?.get(fact.key);
+    if (given) { (fact.plugin ??= {})[tool] = given; fact.cannot[tool] = throughPlugin(tool, given, 'agent'); }
+  }
   return { tools: present, servers: agents, gone, claudePending: [], access: await writeAccess(context), gate: problem ? { state: 'stopped', reason: problem } : await syncGate(context), problems, notices };
 }
 

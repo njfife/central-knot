@@ -895,7 +895,9 @@ function nameCell(skill: ItemRow, attention: boolean) {
       attention ? h('span.row-tag.row-tag-differs', { id: `decide-${skill.key}` }, 'Copies differ') : null),
     kind === 'agents' && skill.oneWay ? oneWayTag(skill, skill.oneWay.from) : null,
     partTags(skill),
-    skill.gone ? h('span.row-tag', { title: 'No tool has a copy now. Turn it on to put it back from History.' }, 'no copy left') : null,
+    // Turned off where no tool has a switch: its copies are in History. Otherwise removed by hand, for History's days.
+    skill.gone ? (skill.gone.turnedOff ? h('span.row-tag', { title: 'Turned off: its copies were removed, as no tool has a switch for it. History keeps them; turn it on to put them back.' }, 'copies in History')
+      : h('span.row-tag', { title: 'No tool has a copy now. Turn it on to put it back from History.' }, 'no copy left')) : null,
     skill.description ? h('span.ov-name-about', { title: skill.description }, skill.description) : null);
 }
 
@@ -1594,7 +1596,11 @@ function putItBack(skill: ItemRow) {
   // MCP: Claude Code gets it back with its own Write step.
   const later = kind === 'mcp' && canHave(skill).includes('claude-cli');
   const ids = skill.gone ? [skill.gone.history, ...(skill.gone.also ?? [])] : [...new Set((skill.removed ?? []).map(entry => entry.history))];
-  void applyClick({ kind, items: [name], changes: [], said: notIn => `${name} is back, and on in ${onPhrase(skill, [...notIn, ...(later ? ['claude-cli'] : [])])}.`, note: later ? CLAUDE_LATER : undefined,
+  // Its plugin's item, where a tool has it through one, is turned on in the same click, with the same Undo.
+  const plugins = turnEvery(throughItems(skill), true);
+  void applyClick({ kind, items: [name], changes: [], said: notIn => `${name} is back, and on in ${onPhrase(skill, [...notIn, ...(later ? ['claude-cli'] : []), ...plugins.leftIn])}.`,
+    note: [later ? CLAUDE_LATER : undefined, plugins.limit].filter(Boolean).join(' ') || undefined, next: wholePluginAct(name, plugins.whole, true),
+    plugins: plugins.ops.length ? { ops: plugins.ops, draft: plugins.draft } : undefined,
     putBack: { key: skill.key, ids, then: () => {
       const back = committedList().find(entry => entry.key === skill.key && !entry.gone);
       if (!back) return [];
@@ -1632,7 +1638,7 @@ const notSyncedIn = (skill: ItemRow) => {
 function itemSwitch(skill: ItemRow, id = `switch-${skill.key}`) {
   const place = standingOf(skill);
   const name = nameOf(skill);
-  const now = place === 0 ? 'on' : place === 1 ? notSyncedIn(skill) : skill.gone ? 'off, with no copy left' : 'off';
+  const now = place === 0 ? 'on' : place === 1 ? notSyncedIn(skill) : skill.gone?.turnedOff ? 'off, its copies in History' : skill.gone ? 'off, with no copy left' : 'off';
   const asking = isDiffering(skill) && place !== 0;
   const plan = place === 0 ? planOff(skill) : undefined;
   // Where no tool can turn it off and Settings keeps their copies, a click changes nothing: said before it.
@@ -1752,11 +1758,11 @@ function section(role: 'on' | 'not-synced' | 'off' | 'away', list: ItemRow[]) {
     [...list].sort(byKey).flatMap(row));
 }
 
-/** Where Off removed its copy (History keeps it), and where a copy turned up since, as the status goes on: '' when neither. */
+/** Where a copy turned up since Off removed it there, and where Off removed its copy (History keeps it), as the status goes on: '' when neither. */
 function removedStatus(skill: ItemRow): string {
   const gone = removedIn(skill), back = removedIn(skill, true);
-  return [gone.length ? `removed from ${toolsPhrase(gone, toolList())}; History keeps ${gone.length === 1 ? 'it' : 'them'}` : '',
-    back.length ? `also in ${toolsPhrase(back, toolList())}: turned up since it was turned off` : ''].filter(Boolean).join(' · ');
+  return [back.length ? `turned up in ${toolsPhrase(back, toolList())} since it was turned off` : '',
+    gone.length ? `removed from ${toolsPhrase(gone, toolList())}; History keeps ${gone.length === 1 ? 'it' : 'them'}` : ''].filter(Boolean).join(' · ');
 }
 
 /** What the item is now, in one line: on and where, not synced and where its copies are, or off. */
@@ -1784,7 +1790,7 @@ function switchStatus(skill: ItemRow): string {
   }
   // Not every tool takes a copy: one that has it through a plugin, or can't use it, is not synced to.
   const every = toolList().some(tool => skill.cannot?.[tool]) ? 'every tool that takes a copy' : 'every tool';
-  if (place === 1) return `${[notSyncedIn(skill), removedStatus(skill)].filter(Boolean).join(' · ')}${isDiffering(skill) ? ', with different copies' : ''}. Turn it on to ${removedIn(skill).length ? 'put it back and ' : ''}sync it to ${every}.`;
+  if (place === 1) return `${[notSyncedIn(skill), removedStatus(skill)].filter(Boolean).join(' · ')}${isDiffering(skill) ? ', with different copies' : ''}. Turn it on to ${removedIn(skill).length ? `put ${removedIn(skill).length === 1 ? 'it' : 'them'} back and ` : ''}sync it to ${every}.`;
   return `Off in ${toolsPhrase(off, toolList())}.${kept ? ` The ${kept === 1 ? 'copy is' : 'copies are'} kept.` : ''}`;
 }
 
