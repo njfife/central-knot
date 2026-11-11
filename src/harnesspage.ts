@@ -194,7 +194,7 @@ function otherApps(home: HomeView) {
   if (!apps.length) return null;
   return h('section.other-apps', { id: 'other-apps', 'aria-label': `Also on ${thisMachine}` },
     h('h2.other-apps-title', {}, `Also on ${thisMachine}`),
-    h('ul', {}, apps.map(app => h('li.other-app', {}, h('strong.other-app-name', {}, app.name, app.version ? h('span.other-app-version', {}, ` ${app.version}`) : null), h('span.other-app-says', {}, app.says)))));
+    h('ul', {}, apps.map(app => h('li.other-app', {}, h('strong.other-app-name', {}, app.name, app.version ? h('span.other-app-version', {}, ` ${shortBuild(app.version)}`) : null), h('span.other-app-says', {}, app.says)))));
 }
 
 function everyHarness(home: HomeView) {

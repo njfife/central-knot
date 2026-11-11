@@ -2265,12 +2265,12 @@ async function otherAppsFlow() {
   const a = await launch(join(scratch, 'other-apps-data'), flag('--electron') ? ['--as-released'] : [], home, { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode,other-apps' });
   await a.click('#nav-harnesses');
   check('with none of them installed, nothing is said about other apps', !(await a.exists('#other-apps')));
-  app('T3 Code (Nightly).app', '0.1.9');
+  app('T3 Code (Nightly).app', '0.1.9-nightly.20261110.4478');
   app('Visual Studio Code.app', '1.99.0');
   app('pi-gui.app', '0.4.0');
   await a.click('#header-refresh');
   const also = await a.text('#other-apps') ?? '';
-  check('T3 Code and VS Code are named under the cards, each with its version and what it means here', /T3 Code 0\.1\.9Runs your tools for you\./.test(also) && /VS Code 1\.99\.0Its built-in Copilot lists skills/.test(also), also);
+  check('T3 Code and VS Code are named under the cards, each with its version (a nightly build’s shortened) and what it means here', /T3 Code 0\.1\.9-nightlyRuns your tools for you\./.test(also) && /VS Code 1\.99\.0Its built-in Copilot lists skills/.test(also), also);
   const pi = await a.text('#harness-pi-cli') ?? '';
   check('pi-gui alone makes Pi a tool here, named as the third-party app it is, with no CLI', pi.includes('pi-gui (third-party) 0.4.0 · no CLI found') && await a.exists('button#harness-pi-cli'), pi);
   await fitsAtMinimum(a, 'Harnesses with other apps named');

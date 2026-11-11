@@ -120,7 +120,7 @@ export const CLAUDE_PROCESS = '^[^ ]*node .*(@anthropic-ai/claude-code/|/bin/cla
 export const otherAppCandidates = (home: string): { name: string; says: string; apps: string[] }[] => {
   const places = (names: string[]) => [join(home, 'Applications'), '/Applications'].flatMap(apps => names.map(name => join(apps, name)));
   return [
-    { name: 'T3 Code', says: 'Runs your tools for you. A tool it starts on this computer’s home uses what is set up here.', apps: places(['T3 Code.app', 'T3 Code (Nightly).app', 'T3 Code (Alpha).app']) },
-    { name: 'VS Code', says: 'Its built-in Copilot lists skills from your tools’ folders. Central Knot doesn’t change VS Code’s own settings.', apps: places(['Visual Studio Code.app', 'Visual Studio Code - Insiders.app']) },
+    { name: 'T3 Code', says: 'Runs your tools for you. One it starts with this computer’s home uses what is set up here.', apps: places(['T3 Code.app', 'T3 Code (Nightly).app', 'T3 Code (Alpha).app']) },
+    { name: 'VS Code', says: 'Its built-in Copilot lists skills from some of your tools’ folders. Central Knot doesn’t change VS Code’s own settings.', apps: places(['Visual Studio Code.app', 'Visual Studio Code - Insiders.app']) },
   ].map(app => ({ ...app, apps: app.apps.filter(path => !homeOnly('other-apps') || path.startsWith(`${home}${sep}`)) }));
 };
