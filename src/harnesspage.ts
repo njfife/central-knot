@@ -8,7 +8,7 @@ import { pluginTitle } from './pluginparts.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fileName, fullToolName, plural } from './model.ts';
 import { andList, coworkWords, kindNouns, toolNames as names } from './words.ts';
-import { hasCowork } from './presence.ts';
+import { hasCowork, takesPlugins } from './presence.ts';
 import { brandMark } from './brand.ts';
 import { shortBuild } from './values.ts';
 import type { DesktopApp, HarnessId, HomeView, InstructionFile, Snapshot } from './types.ts';
@@ -81,7 +81,7 @@ const detectionLine = (snapshot: Snapshot, home: HomeView) => {
  * A desktop app with its version and the version of what it carries: "Claude desktop 4.16336.0 (Code tab 2.1.317)". A
  * pre-release keeps only its first word: "1.0.102-0.unstable.r41779900948.gf482387" reads "1.0.102-unstable".
  */
-const appLine = (app: DesktopApp) => `${app.name}${app.version ? ` ${app.version}` : ''}${app.carriedVersion ? ` (${app.carries} ${shortBuild(app.carriedVersion)})` : ''}`;
+const appLine = (app: DesktopApp) => `${app.name}${app.version ? ` ${app.version}` : ''}${app.carriedVersion && app.carriedVersion !== app.version ? ` (${app.carries} ${shortBuild(app.carriedVersion)})` : ''}`;
 
 // ---------- Every harness ----------
 
@@ -285,7 +285,11 @@ function pluginsTab(tool: HarnessId) {
   const page = (...body: (Node | null)[]) => h('div.page', {}, h('div.scroll.harness-scroll', { id: 'harness-body' }, body));
   if (plugins.state === 'reading') return page(h('p.empty', {}, 'Reading marketplaces…'));
   if (plugins.state === 'failed') return page(emptyState('circle-alert', 'Marketplaces could not be read', 'Nothing changed.', button({ label: 'Try again', id: 'harness-plugins-retry', onclick: () => void loadPlugins(false, state.home?.readId) })));
-  if (plugins.state === 'unsupported') return page(emptyState('puzzle', pluginsNotHandled(tool), `Central Knot installs marketplace plugins into ${andList((market.view?.tools ?? []).map(each => names[each]))}. ${names[tool]}’s own packages stay as they are.`));
+  if (plugins.state === 'unsupported') {
+    // Only the tools that take a plugin whole are named as where plugins install; this one takes a plugin's parts.
+    const takers = (market.view?.tools ?? []).filter(takesPlugins);
+    return page(emptyState('puzzle', pluginsNotHandled(tool), `${takers.length ? `Central Knot installs marketplace plugins into ${andList(takers.map(each => names[each]))}. A plugin’s page on Plugins can put its parts in ${names[tool]} as separate items. ` : ''}${names[tool]}’s own packages stay as they are.`));
+  }
   // What could not be checked is said, so the list is never taken for everything installed.
   const unsure = [...plugins.unknown.map(({ plugin, reason }) => `${pluginTitle(plugin)}: ${reason}`), ...plugins.unreadable.map(name => `${name} could not be read.`)];
   const unsureNote = unsure.length ? h('p.tools-note', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'), h('span', {}, `Not known for ${plural(unsure.length, 'plugin')}: ${unsure.join(' ')} `,

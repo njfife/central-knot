@@ -264,6 +264,11 @@ Desktop ignores a 1.x CLI on `PATH`, and a 2.x Desktop counts as a 2.x reader. W
 - `agent` with a `system` key is silently misrouted on both lines.
 - **Plugins.** A Claude-format repository fails with `missing package.json`, and a failed 1.x run still writes `$schema`. A valid plugin over private SSH was not tested. For native modules: pure 1.x `opencode plugin -g <spec>`; pure 2.x `opencode plugin add <spec>`, with removal by `plugin remove <spec>`. 1.x has no recorded update or removal command, so removal there is Not known yet. A mixed machine blocks 2.x modules (V-08).
 - **Database hazard.** A first 2.x or Desktop run on a fresh data directory makes every config-loading 1.x command exit 1, on all three OSes. The other order migrates and keeps working. Copy no OpenCode database, and show the native error unrepaired.
+- **Measured again November 10, 2026** (1.19.5 and 2.2.5 on Linux, with a stand-in model; LEDGER, "OpenCode as a tool"), and what the app now does:
+  - **Shared forms.** Both lines read `mcp.<name>` and `mcp.servers.<name>`. `enabled: false` turns off an entry under `mcp` on both; `disabled: true` one under `mcp.servers` on both; `enabled: false` under `mcp.servers` only on 1.x. So one adapter writes the forms both read: a new entry under `mcp`, an existing one where it is, each with its own off key.
+  - **Skill Disable.** `permission.skill.<name>: "deny"`, by name in any of the three skill folders; the last matching rule decides. A denied skill is left out of a new session on both lines.
+  - **Agents.** With no `mode`, 1.x reads `all` and 2.x `primary`; `mode: all` is the same on both. 1.x takes a `name` from the frontmatter, 2.x the file name. `disable: true` leaves an agent out on both.
+  - **Settings files.** `opencode.jsonc` decides over `opencode.json` on both lines; only 1.x reads `config.json`.
 
 ## 9. Proofs: method and evidence so far
 

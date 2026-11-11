@@ -6,7 +6,7 @@ import { basename, dirname, isAbsolute, join } from 'node:path';
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover } from './discovery.ts';
-import { configRoot, harnesses, harnessIds, writeRoot } from './harnesses.ts';
+import { configRoot, envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { CLAUDE_PROCESS, appCandidates, executableCandidates, searchPath } from './platform.ts';
 import { syncsHere, writeAccess, type ShareContext } from './share.ts';
 import { applyChanges, deleteEverywhere, eventChange, manageView, pruneHistory, readHistory, restoreFromHistory } from './manage.ts';
@@ -104,7 +104,7 @@ async function ensurePracticeHome(): Promise<string> {
   return home;
 }
 
-const overrideFor = (id: HarnessId) => (current?.mode === 'actual' ? process.env[harnesses[id].configEnv] : undefined);
+const overrideFor = (id: HarnessId) => (current?.mode === 'actual' ? envOverride(harnesses[id], process.env) : undefined);
 
 async function read(): Promise<Snapshot[]> {
   const { mode, home } = current!;

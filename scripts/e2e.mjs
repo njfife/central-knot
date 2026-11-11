@@ -1,5 +1,6 @@
 // Drives the real app end to end over its debug port, in a throwaway HOME, so "This Mac's home" is disposable too.
-// Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n]
+// Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n] [--flows openCodeFlow,…]
+// `--flows` runs only the named flows, for working on one; a run that counts has them all.
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { chmodSync, cpSync, existsSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -114,7 +115,9 @@ process.on('exit', () => { for (const child of launched) { try { child.kill('SIG
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
 async function launch(userData = join(scratch, 'data'), extra = [], home = HOME, more = {}) {
-  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), ...more };
+  // OpenCode is looked for only inside the throwaway home: a machine that has it installed (the Mac these run on does) would
+  // otherwise bring a tool into every flow that opens "This Mac's home".
+  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), CK_TEST_HOME_ONLY: 'opencode', ...more };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   // The app picks its own free debug ports (port 0) and says them, so no other run on this machine can be on them (cdp.mjs
@@ -2063,6 +2066,138 @@ async function fewToolsFlow() {
   await p.quit();
 }
 
+/**
+ * OpenCode as a tool, beside Claude Code, in a home of its own: its CLI and its desktop app stand in there (the CLI answers
+ * nothing but its version), and its skills, MCP servers, agents and instruction file are read from its own folder.
+ */
+async function openCodeFlow() {
+  const home = join(scratch, 'home-opencode');
+  const oc = join(home, '.config/opencode');
+  const cli = (path, version) => { mkdirSync(join(home, path, '..'), { recursive: true }); writeFileSync(join(home, path), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(join(home, path), 0o755); };
+  cli('.local/bin/claude', '2.1.309 (Claude Code)');
+  cli('.opencode/bin/opencode', '1.19.5');
+  mkdirSync(join(home, 'Applications/OpenCode.app/Contents/Resources'), { recursive: true });
+  writeFileSync(join(home, 'Applications/OpenCode.app/Contents/Info.plist'), '<?xml version="1.0"?>\n<plist><dict><key>CFBundleShortVersionString</key><string>2.2.5</string></dict></plist>\n');
+  writeFileSync(join(home, 'Applications/OpenCode.app/Contents/Resources/opencode-cli.version'), '2.2.5\n');
+  skill(join(home, '.claude/skills'), 'notes');
+  skill(join(oc, 'skills'), 'oc-only');
+  skill(join(home, '.agents/skills'), 'shared');
+  const settings = join(oc, 'opencode.json');
+  const settingsBefore = '{\n  // mine\n  "model": "a/b",\n  "mcp": {\n    "oc-docs": { "type": "local", "command": ["npx", "-y", "docs"], "environment": { "DOCS_TOKEN": "value-123" }, "enabled": false },\n  },\n}\n';
+  writeFileSync(settings, settingsBefore);
+  writeFileSync(join(oc, 'AGENTS.md'), 'Be brief.\n');
+  mkdirSync(join(oc, 'agents'));
+  writeFileSync(join(oc, 'agents/helper.md'), '---\ndescription: Helps.\nmode: subagent\n---\n\nYou help.\n');
+  // Every tool is looked for only inside this home, so the flow reads the same on a machine that has some installed.
+  const onlyHere = { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' };
+  const a = await launch(join(scratch, 'opencode-data'), flag('--electron') ? ['--as-released'] : [], home, onlyHere);
+  // With --shots, a page's picture at each window size the app must fit.
+  const pictures = async (page, name) => { if (!shots) return; for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(page, width, height); await page.shot(`${name}-${width}`); } await fullSize(page); };
+  await a.click('#nav-harnesses');
+  const card = await a.text('#harness-opencode-cli');
+  await pictures(a, 'opencode-harnesses');
+  check('OpenCode’s card names its CLI and its desktop app, each with its version, once', card.includes('Installed · 1.19.5; OpenCode desktop 2.2.5') && !card.includes('(OpenCode'), card);
+  const pages = await a.all('#nav [id^="nav-"]', 'e.id.slice(4)');
+  check('with OpenCode beside Claude Code, Agents and Plugins are pages', pages.includes('agents') && pages.includes('plugins'), pages);
+  await a.click('#nav-skills');
+  // OpenCode loads Claude Code's skills folder and the shared .agents folder as well as its own (measured on both of its lines).
+  same('OpenCode has its own skill, Claude Code’s and the shared folder’s; Claude Code only its own',
+    [await cellState(a, 'notes', 'opencode-cli'), await cellState(a, 'oc-only', 'opencode-cli'), await cellState(a, 'shared', 'opencode-cli'), await cellState(a, 'notes', 'claude-cli'), await cellState(a, 'oc-only', 'claude-cli')],
+    ['present', 'present', 'present', 'present', 'absent']);
+  await a.click('#open-notes');
+  check('a skill OpenCode reads in Claude Code’s folder says so, with its Disable there and no Remove: the copy is Claude Code’s', await a.exists('#enable-notes-opencode-cli') && !(await a.exists('#remove-notes-opencode-cli')) && await a.exists('#remove-notes-claude-cli')
+    && (await a.text('.ov-row[data-key="notes"] + *') ?? '').includes('Reads Claude Code’s copy.'), await a.text('.ov-row[data-key="notes"] + *'));
+  await fitsAtMinimum(a, 'Skills with OpenCode, a skill open');
+  await pictures(a, 'opencode-skill-open');
+  const view = await a.run('window.centralKnot.refresh()');
+  same('its MCP server is read from its settings, off as its settings say', view.mcp.servers.map(server => [server.key, server.disabled]), [['oc-docs', ['opencode-cli']]]);
+  same('its agent is read from its agents folder', view.agents.servers.map(server => [server.key, Object.keys(server.copies)]), [['helper', ['opencode-cli']]]);
+  await a.click('#nav-mcp'); await a.click('#open-oc-docs'); await pictures(a, 'opencode-mcp-open');
+  await a.click('#nav-agents'); await pictures(a, 'opencode-agents');
+  await a.click('#nav-instructions'); await pictures(a, 'opencode-instructions');
+  check('its instruction file is AGENTS.md in its own folder', (await a.text('.page') ?? '').includes('~/.config/opencode/AGENTS.md') && (await a.text('.page') ?? '').includes('Be brief.'), await a.text('.page'));
+  await a.click('#nav-plugins');
+  check('marketplaces are said to come from the tools that have them, not OpenCode', /Marketplaces you added in Claude Code show up here/.test(await a.text('.page') ?? ''), await a.text('.page'));
+  await a.click('#nav-harnesses'); await a.click('#harness-opencode-cli');
+  await pictures(a, 'opencode-page-skills');
+  await a.click('#harness-tab-plugins');
+  await pictures(a, 'opencode-page-plugins');
+  check('its Plugins tab says where plugins install and that its parts can go in', /installs marketplace plugins into Claude Code\. A plugin’s page on Plugins can put its parts in OpenCode as separate items\./.test(await a.text('#harness-body') ?? ''), await a.text('#harness-body'));
+  await a.click('#harness-tab-about');
+  const about = await a.text('#harness-body');
+  check('About names its folders and its settings file', ['~/.config/opencode/skills', '~/.claude/skills', '~/.config/opencode/opencode.json', '~/.config/opencode/agents', '~/.config/opencode/AGENTS.md'].every(path => about.includes(path)), about);
+  await fitsAtMinimum(a, 'OpenCode’s page, About');
+  await pictures(a, 'opencode-page-about');
+  same('no page errors, OpenCode', a.pageErrors, []);
+  await a.quit();
+
+  // Writes, in the Practice copy (a real home is preview only off macOS): OpenCode joins it by its folder.
+  const p = await launch(join(scratch, 'opencode-practice-data'), ['--practice-copy'], home, onlyHere);
+  const practice = await p.run(`document.querySelector('.status-home').title`);
+  const mine = join(practice, '.config/opencode');
+  skill(join(mine, 'skills'), 'oc-only');
+  writeFileSync(join(mine, 'opencode.json'), settingsBefore);
+  await p.click('#header-refresh');
+  await p.click('#nav-skills');
+  check('an OpenCode folder makes OpenCode a column', await p.exists('#tool-opencode-cli'));
+  same('a Claude Code skill is one OpenCode already reads', await cellState(p, 'notes', 'opencode-cli'), 'present');
+  await p.click('.ov-row[data-key="oc-only"] .switch');
+  await applyAll(p);
+  check('managing OpenCode’s own skill copies it to the other tools', readNow(join(practice, '.claude/skills/oc-only/SKILL.md')) === text('oc-only') && readNow(join(practice, '.copilot/skills/oc-only/SKILL.md')) === text('oc-only'), await p.text('.bands'));
+  // Disable in OpenCode is a deny rule by the skill's name in its settings, whichever folder the skill is in.
+  await p.click('#open-notes');
+  await p.click('#enable-notes-opencode-cli');
+  await applyAll(p);
+  const denied = readNow(join(mine, 'opencode.json'));
+  check('Disable in OpenCode writes its deny rule and keeps the rest of its settings', /"permission": \{\s*"skill": \{\s*"notes": "deny"\s*\}\s*\}/.test(denied) && denied.includes('// mine') && denied.includes('"DOCS_TOKEN": "value-123"') && readNow(join(practice, '.claude/skills/notes/SKILL.md')) !== '', denied);
+  same('and the page shows it disabled there', (await p.run('window.centralKnot.refresh()')).manage.skills.find(found => found.key === 'notes').disabled, ['opencode-cli']);
+  await p.click('#enable-notes-opencode-cli');
+  await applyAll(p);
+  same('Enable takes the rule out again: its settings are as they were', readNow(join(mine, 'opencode.json')), settingsBefore);
+  // Its server goes to the other tools in their own forms, values as they are; Claude Code's waits for Write to Claude Code.
+  await p.click('#nav-mcp');
+  await p.click('.ov-row[data-key="oc-docs"] .switch');
+  await applyAll(p);
+  const inCopilot = JSON.parse(readNow(join(practice, '.copilot/mcp-config.json')) || '{}').mcpServers?.['oc-docs'];
+  same('OpenCode’s server reaches Copilot CLI in Copilot’s form', [inCopilot?.command, inCopilot?.args, inCopilot?.env], ['npx', ['-y', 'docs'], { DOCS_TOKEN: 'value-123' }]);
+  // OpenCode takes no plugin whole: a plugin's skills, MCP servers and agents go in as ordinary items, in OpenCode's forms.
+  const market = join(scratch, 'opencode-market');
+  writeMarket(market);
+  await p.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)})`);
+  await p.click('#nav-plugins');
+  await p.click('#header-refresh');
+  const box = plugin => `[id^="pcell-"][id$="-${plugin}-opencode-cli"]`;
+  for (let tries = 0; tries < 50 && !(await p.exists(box('issue-tracker'))); tries++) await wait(100);
+  same('OpenCode is a column whose boxes offer a plugin’s parts', [await p.run(`document.querySelector('${box('issue-tracker')}')?.dataset.state`), await p.run(`document.querySelector('${box('release-helper')}')?.dataset.state`)], ['parts-offer', 'parts-offer']);
+  await p.click(box('issue-tracker'));
+  await p.click(box('release-helper'));
+  await p.click('#plugins-apply');
+  for (let tries = 0; tries < 50 && (await p.run(`document.querySelector('${box('release-helper')}')?.dataset.state`)) !== 'parts'; tries++) await wait(100);
+  const withParts = readNow(join(mine, 'opencode.json'));
+  check('the plugin’s skill and MCP server are in OpenCode, the server in OpenCode’s form', existsSync(join(mine, 'skills/triage/SKILL.md')) && /"issues": \{\s*"type": "local",\s*"command": \[\s*"npx",\s*"-y",\s*"@example\/issues-mcp"\s*\]\s*\}/.test(withParts) && withParts.includes('// mine'), withParts || await p.text('.bands'));
+  const partAgent = readNow(join(mine, 'agents/release-reviewer.md'));
+  check('and a plugin’s agent is an OpenCode agent', partAgent.includes('description: Reviews a release branch before it ships.') && partAgent.includes('mode: all') && partAgent.includes('Review it.'), partAgent || await p.text('.bands'));
+  await pictures(p, 'opencode-parts-four-tools');
+  // Five tools is the widest table: nothing is cut off at the smallest window.
+  mkdirSync(join(practice, '.pi/agent'), { recursive: true });
+  await p.click('#header-refresh');
+  await p.click('#nav-skills');
+  check('with Pi too, the table has five tool columns', (await p.all('.ov-tool-head')).length === 5, await p.all('.ov-tool-head'));
+  await pictures(p, 'opencode-five-skills');
+  for (const page of ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles']) {
+    await p.click(`#nav-${page}`);
+    await fitsAtMinimum(p, `${page} with five tools`);
+    if (['mcp', 'plugins', 'profiles', 'harnesses', 'overview'].includes(page)) await pictures(p, `opencode-five-${page}`);
+  }
+  await p.click('#nav-plugins');
+  await p.click('[id^="popen-"][id$="-issue-tracker"]');
+  for (let tries = 0; tries < 40 && !/Can go in|Its parts/.test(await p.text('.plugin-page') ?? ''); tries++) await wait(100);
+  await fitsAtMinimum(p, 'a plugin’s page with five tools');
+  await pictures(p, 'opencode-five-plugin-page');
+  same('no page errors, OpenCode in the Practice copy', p.pageErrors, []);
+  await p.quit();
+}
+
 async function realHomeFlow() {
   const before = { rich: tree(join(CLAUDE, 'rich')), unrelated: readFileSync(join(HOME, '.claude/unrelated.json'), 'utf8') };
   const a = await launch();
@@ -2339,7 +2474,9 @@ const started = Date.now();
 try {
   seedHome();
   // Each flow's time is printed, so a run that grows slow says where.
-  for (const flow of [harnessFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, listDiffersFlow, repoBaseFlow, draftFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])]) {
+  const flows = [harnessFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, listDiffersFlow, repoBaseFlow, draftFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
+  const named = option('--flows')?.split(',');
+  for (const flow of flows.filter(each => !named || named.includes(each.name))) {
     const from = Date.now();
     await flow();
     console.log(`${flow.name}: ${Math.round((Date.now() - from) / 1000)}s`);

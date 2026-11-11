@@ -4,6 +4,7 @@
 // name is a row of its own here. These rows are never managed: no switch, no sync, no profile, no repo; the plugin's
 // page is where they are handled.
 import { partOfPage, samePart, versionWord } from './pluginstatus.ts';
+import { takesPlugins } from './presence.ts';
 import { andList, byToolOrder, toolNames as names } from './words.ts';
 import type { HarnessId, HomeView, InstalledPlugin, PartKind, PluginItem, SkillFacts } from './types.ts';
 
@@ -101,7 +102,7 @@ function missingWhy(row: PluginRow, tool: HarnessId): string {
   if (install?.problem) return `${name} has ${row.plugin} installed, but its files couldn’t be read.`;
   if (install && tool === 'codex-cli' && row.kind === 'agent') return `${name} has ${row.plugin} installed, but Codex doesn’t load a plugin’s agents.`;
   if (install) return `${name} has ${row.plugin} installed, but its copy doesn’t have this ${row.kind === 'mcp' ? 'MCP server' : row.kind}.`;
-  if (tool === 'pi-cli') return `Pi takes no plugins.${handledWhere(row).listed ? ' The plugin’s page can put its parts in Pi as separate items.' : ''}`;
+  if (!takesPlugins(tool)) return `${name} takes no plugins.${handledWhere(row).listed ? ` The plugin’s page can put its parts in ${name} as separate items.` : ''}`;
   return `Not installed in ${name}.${handledWhere(row).listed ? ' The plugin’s page on Plugins installs it there.' : ''}`;
 }
 
