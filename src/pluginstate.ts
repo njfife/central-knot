@@ -287,7 +287,11 @@ export const checkCarriedFeed = (entry: MarketplaceView) => act('checking', asyn
   await api().checkCarriedFeed();
   await loadPlugins();
   const now = market.view?.marketplaces.find(candidate => candidate.source === entry.source)?.bundled?.feed;
-  tell({ page: 'plugins', item: marketTitle(entry), warn: now?.outcome === 'failed' || now?.outcome === 'held', text: now?.outcome === 'updated' ? `${marketTitle(entry)} ${now.message!.charAt(0).toLowerCase()}${now.message!.slice(1)}` : now?.message ?? 'No newer plugins are published.' });
+  // Short enough for the status bar to say whole; About has the rest.
+  const name = marketTitle(entry);
+  tell({ page: 'plugins', item: name, warn: now?.outcome === 'failed' || now?.outcome === 'held',
+    text: now?.outcome === 'updated' ? `${name} ${now.message!.charAt(0).toLowerCase()}${now.message!.slice(1)}` : now?.outcome === 'failed' ? `Newer ${name} couldn’t be had. The ones here stay in use.`
+      : now?.outcome === 'held' ? `Newer ${name} wait for a newer app.` : `No newer ${name} are published.` });
 });
 
 /** Adds the marketplace this build carries to one tool's own plugin list (its About tab's "List in …"). */

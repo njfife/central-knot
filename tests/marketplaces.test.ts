@@ -389,7 +389,7 @@ test('A plugin the build’s marketplace no longer offers goes into no other too
     const carried = join(box.base, 'carried');
     await marketplace(carried, 'team', ['pdf']);
     const refused = await box.markets.install(carried, 'team', 'pdf', ['codex-cli'], box.home);
-    assert.deepEqual(refused.reports.map(report => [report.outcome, report.message]), [['failed', 'Acme plugins no longer offers this plugin. It stays in the tools that have it until it is uninstalled there.']]);
+    assert.deepEqual(refused.reports.map(report => [report.outcome, report.message]), [['failed', 'Acme plugins no longer offers this plugin. It stays in the tools that have it until you uninstall it.']]);
     assert.deepEqual((await box.markets.update(carried, 'team', 'pdf', ['claude-cli'], box.home)).reports.map(report => report.outcome), ['updated']);
     assert.deepEqual(box.calls.filter(call => /^(install|update)/.test(call)), ['update pdf claude-cli']);
   } finally { await box.cleanup(); }

@@ -130,10 +130,14 @@ export function bundleRelease(value: unknown): BundleRelease | undefined {
 
 export const readRelease = async (path: string) => bundleRelease(await readJson(path));
 
-/** A release's date in words: "November 10, 2026". Empty when its manifest gives none that can be read. */
-export function releaseDate(release: Pick<BundleRelease, 'madeAt'>): string {
+/**
+ * A release's date in words: "November 10, 2026"; with `time`, "November 10, 2026, 6:00 PM", to tell two releases of one
+ * day apart. Empty when its manifest gives none that can be read.
+ */
+export function releaseDate(release: Pick<BundleRelease, 'madeAt'>, time = false): string {
   const made = new Date(release.madeAt);
-  return Number.isNaN(made.getTime()) ? '' : made.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  if (Number.isNaN(made.getTime())) return '';
+  return made.toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric', ...(time ? { hour: 'numeric', minute: '2-digit' } : {}) });
 }
 
 /** A release in words, for whoever made it: "November 10, 2026 (GitHub: acme/plugins at 1a2b3c4d5e)". */
