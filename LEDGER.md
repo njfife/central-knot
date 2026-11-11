@@ -1123,7 +1123,7 @@ Nathan, the same day: the per-tool matrix was too complicated; turning an item o
 
 - Not in this step: Claude Code's `permissions.deny` as a switch for a person's own agents (it leaves `claude --agent` working, so it is no full Off; an option for later). Every skills and MCP tool has a switch today; a skills tool without one would get the same plan, but one tool's own On and the Undo of On are built for agents only. MCP has no removal yet.
 
-**Validation (step 4, round 2).** 688 tests. Each named judge sequence is a test with its next pass and click; the random walk runs fixed seeds in `npm test`, and 600 walks ran once locally (findings and fixes in the PR).
+**Validation (step 4, round 2).** 697 tests. Each named judge sequence is a test with its next pass and click; the random walk runs fixed seeds in `npm test`, and 600 walks ran once locally (findings and fixes in the PR).
 
 **Known follow-ups.**
 - `keptEditFlag` keys aren't cleared when a copy takes the source's copy again, so one small key stays per kept edit.

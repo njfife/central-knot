@@ -109,11 +109,12 @@ async function walk(seed: number, oneWay: boolean): Promise<Finding[]> {
         if (reachable) continue;
         owed.delete(key);
         // History's days passing is how a deleted or replaced copy goes. The person's own later decision supersedes one too: a later
-        // choice of copies an earlier one's Undo, and a copy they made by hand in a tool while it was off (then turned off again
-        // and on, the newer copy coming back) the copy Off kept there before.
+        // choice of copies an earlier one's Undo, and a copy they made by hand in a tool while it was off (kept by On in its place,
+        // or turned off again and on) the copy Off kept there before.
         const at = (event: HistoryEvent) => history.indexOf(event);
         const superseded = history.some(event => named(event).includes(content) && (event.kind === 'chosen' ? endedBy(event, history)?.kind === 'chosen'
-          : history.some(later => at(later) > at(event) && later.kind === 'removed' && later.turnedOff && later.losers.some(loser => loser.tool === tool && loser.hash !== content))));
+          : event.turnedUp?.some(loser => loser.tool === tool && loser.hash === content)
+            || history.some(later => at(later) > at(event) && later.kind === 'removed' && later.turnedOff && later.losers.some(loser => loser.tool === tool && loser.hash !== content))));
         if (act.name !== 'age' && !superseded) fail(`(d) a copy a click took out of ${tool} is reachable by no action`);
       }
       // (e) The row says what is true.
