@@ -9,9 +9,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, lstat, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { applyAgents, restoreAgent } from '../src/agents.ts';
+import { applyAgents, forgetAgentCopies, restoreAgent } from '../src/agents.ts';
 import { readHistory } from '../src/manage.ts';
-import { age, choose, claudeAgent, codexOwn, deleteEverywhere, factOf, fields, files, filesOf, historyActions, historyOf, pass, prune, readOf, recordOf, sandbox, synced, toolOff, toolOn, tools, turnOff, turnOn, undo, write, type Box } from './agentclicks.ts';
+import { age, choose, claudeAgent, codexOwn, deleteEverywhere, factOf, fields, files, filesOf, historyActions, historyOf, managing, pass, prune, readOf, recordOf, sandbox, synced, toolOff, toolOn, tools, turnOff, turnOn, undo, write, type Box, type Clicked } from './agentclicks.ts';
+import type { HarnessId, McpResult } from '../src/types.ts';
 
 const offered = async (box: Box) => (await historyActions(box)).filter(action => action.event.kind !== 'added').map(action => `${action.label} (${action.event.kind}${action.event.putBackFrom ? `/${action.event.putBackFrom}` : ''})`);
 const entryOf = async (box: Box, id: string) => (await readHistory(box.context)).find(event => event.id === id)!;
@@ -896,3 +897,58 @@ test('The row’s On also turns on an older Off left waiting for a tool: no copy
     assert.equal(await readOf(box, 'codex-cli'), first);
   } finally { await box.cleanup(); }
 });
+
+// A one-way agent (Claude Code's, with fields of its own) that is off, once Claude Code is no longer a tool Central Knot manages
+// here. Its kept copy can't go back, and the copies that received it one-way must not wait for it for good: each way of turning
+// the agent on gives Copilot CLI and Codex their copies back as ordinary copies, which sync with each other from then on.
+const withoutClaude: HarnessId[] = ['copilot-cli', 'codex-cli'];
+const claudeStays = 'Claude Code isn’t one of the tools Central Knot manages here now, so its copy stays in History.';
+const said = (answer: Clicked | McpResult | undefined) => [answer?.stopped, ...(answer?.results ?? []).map(entry => entry.message)];
+const sourceGone: [string, (box: Box) => Promise<unknown>][] = [
+  ['is not installed any more', async () => undefined],
+  ['was left out by the tool choice', box => forgetAgentCopies(box.home, withoutClaude)],
+];
+const restore = async (box: Box) => (await historyActions(box)).find(action => action.label.startsWith('Restore'))!.run();
+/** Each way the agent's copies are taken out and put back: [its name, the click that takes them out, the clicks that put them back, whether the answer names Claude Code's copy]. */
+const turnedOnBy: [string, (box: Box) => Promise<unknown>, (box: Box) => Promise<Clicked | McpResult | undefined>, boolean][] = [
+  ['the row’s On', turnOff, box => turnOn(box), true],
+  ['each tool’s own switch', turnOff, async box => { await toolOn(box, 'codex-cli'); return toolOn(box, 'copilot-cli'); }, false],
+  ['History’s Turn on', turnOff, async box => (await historyActions(box)).find(action => action.label.startsWith('Turn on in'))!.run(), true],
+  ['Delete everywhere on its Off row, Restore, then the row’s On', turnOff, async box => { await deleteEverywhere(box); await restore(box); return turnOn(box); }, true],
+  ['Restore, after Delete everywhere took its copies', deleteEverywhere, restore, true],
+];
+for (const [gone, leave] of sourceGone) for (const [route, takeOut, turnItOn, saysClaudeStays] of turnedOnBy) {
+  test(`A one-way agent whose source’s tool ${gone} while it was off comes back with ${route}: the receiving copies as ordinary copies that sync with each other`, async () => {
+    const box = await sandbox();
+    try {
+      await synced(box, claudeAgent(undefined, fields));
+      const before = await filesOf(box);
+      await takeOut(box);
+      await leave(box);
+      await managing(withoutClaude, async () => {
+        // No tool's switch waits for a source that can't come back.
+        assert.deepEqual(((await factOf(box))?.heldOff ?? []).flatMap(entry => entry.source ?? []), []);
+        const answer = await turnItOn(box);
+        assert.deepEqual(await filesOf(box), { 'copilot-cli': before['copilot-cli'], 'codex-cli': before['codex-cli'] });
+        if (saysClaudeStays) assert.ok(said(answer).includes(claudeStays), said(answer).join(' | '));
+        // The next pass: quiet, a source picked among the two, neither one-way.
+        const next = await pass(box);
+        assert.deepEqual([next.writes, next.results.filter(entry => entry.outcome === 'held').map(entry => entry.message)], [0, []]);
+        const record = (await recordOf(box))!;
+        assert.deepEqual([record.state, withoutClaude.includes(record.origin!), record.copies.map(copy => [copy.tool, !!copy.oneWay]).sort()], ['shared', true, [['codex-cli', false], ['copilot-cli', false]]]);
+        // An edit in one reaches the other, both ways.
+        await write(box, 'codex-cli', before['codex-cli']!.replace('Be brief.', 'Edited in Codex.'));
+        await pass(box);
+        assert.match((await readOf(box, 'copilot-cli'))!, /Edited in Codex\./);
+        await write(box, 'copilot-cli', (await readOf(box, 'copilot-cli'))!.replace('Edited in Codex.', 'Edited in Copilot CLI.'));
+        await pass(box);
+        assert.match((await readOf(box, 'codex-cli'))!, /Edited in Copilot CLI\./);
+        // The next click: Off and On again give both back, and the pass after is quiet.
+        const now = await filesOf(box);
+        await turnOff(box);
+        await turnOn(box);
+        assert.deepEqual([await filesOf(box), (await pass(box)).writes], [now, 0]);
+      });
+    } finally { await box.cleanup(); }
+  });
+}

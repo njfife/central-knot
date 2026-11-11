@@ -200,18 +200,23 @@ export async function readAgentRecord(home: string): Promise<AgentRecord> {
 const saveAgentRecord = (home: string, record: AgentRecord) => writeDurably(recordPath(home), `${JSON.stringify(record, null, 2)}\n`);
 
 /**
- * Forgets the recorded copies in tools no longer managed (toolchoice.ts). An agent whose origin is left out has only one-way
- * copies left, which never sync with each other: they become ordinary copies, and the next pass picks an origin among them.
- * A damaged record is left as it is: it stops agent sync anyway.
+ * Forgets an agent's source once its tool is not among `managed`, the tools Central Knot manages here. Only one-way copies are
+ * left, which never sync with each other: they become ordinary copies, and the next pass picks a source among them. Done when
+ * the tool choice leaves a tool out (forgetAgentCopies), and when copies are put back (putBackAgent: a copy that an Off or a
+ * deletion kept goes back one-way only while the agent still has a source, putCopyBack).
  */
+function forgetSourceOutside(item: AgentRecordItem, managed: readonly HarnessId[]) {
+  if (!item.origin || managed.includes(item.origin)) return;
+  delete item.origin;
+  for (const copy of item.copies) delete copy.oneWay;
+}
+/** Forgets the recorded copies in tools no longer managed (toolchoice.ts). A damaged record is left as it is: it stops agent sync anyway. */
 export async function forgetAgentCopies(home: string, managed: readonly HarnessId[]) {
   const { record } = await inspectAgentRecord(home);
   if (!record) return;
   for (const item of Object.values(record.items)) {
     item.copies = item.copies.filter(copy => managed.includes(copy.tool));
-    if (!item.origin || managed.includes(item.origin)) continue;
-    delete item.origin;
-    for (const copy of item.copies) delete copy.oneWay;
+    forgetSourceOutside(item, managed);
   }
   await saveAgentRecord(home, record);
 }
@@ -364,9 +369,10 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
     const version = off && heldCopies(off)[0] && await kept(context, fact.key, heldCopies(off)[0].hash);
     if (version) fact.description = version.agent.description;
   }
-  // A one-way copy turned off waits for its source (waitsForSource): the row offers its switch once the source is back.
+  // A one-way copy turned off waits for its source (waitsForSource): the row offers its switch once the source is back. A source
+  // in a tool not managed here now can't come back, and is not waited for (putBackAgent forgets it).
   for (const fact of [...agents, ...gone]) if (fact.heldOff) {
-    const origin = record.items[fact.key]?.origin;
+    const origin = present.find(tool => tool === record.items[fact.key]?.origin);
     fact.heldOff = fact.heldOff.map(entry => {
       const off = history.find(event => event.id === entry.history)!;
       const source = waitsForSource(history, off, heldCopies(off).find(copy => copy.tool === entry.tool), origin, !!fact.copies[origin!]);
@@ -934,9 +940,9 @@ function putBackRefusal(past: HistoryEvent, history: HistoryEvent[], item: Agent
 /** The agent a put-back is for: its key, its record, each tool's file now, the tools Central Knot manages here, and what took its copies out. */
 interface PutBackAt { key: string; item: AgentRecordItem; slot: AgentSlot; present: AgentTool[]; after: 'turned it off' | 'deleted it' }
 /**
- * One copy of a put-back, in its own tool. 'back': its kept file is there again, whole, and recorded as it was (one-way and
- * stopped marks too). 'found': the tool has a copy of its own again, which stays. 'not': it couldn't go back now, and the
- * result says why (`waitsFor`: its one-way source, which goes back first).
+ * One copy of a put-back, in its own tool. 'back': its kept file is there again, whole, and recorded as it was (its stopped
+ * mark too, and one-way while the agent still has a source). 'found': the tool has a copy of its own again, which stays. 'not':
+ * it couldn't go back now, and the result says why (`waitsFor`: its one-way source, which goes back first).
  */
 async function putCopyBack(context: ShareContext, at: PutBackAt, copy: KeptCopy, waitsFor: HarnessId | undefined): Promise<{ is: 'back' | 'found' | 'not'; result: DestinationResult }> {
   const { tool } = copy, name = at.item.name;
@@ -953,7 +959,7 @@ async function putCopyBack(context: ShareContext, at: PutBackAt, copy: KeptCopy,
   const file = fileFor(context, tool, copy.folder ?? name);
   try { await putFileBack(file, text, copy.linkTo); }
   catch (error) { return { is: 'not', result: said('failed', `Could not put it back in ${harnesses[tool].name}: ${cantWrite(error)}`) }; }
-  if (copy.record) recordAgain(at.item, { ...copy.record, file });
+  if (copy.record) recordAgain(at.item, { ...copy.record, file, oneWay: at.item.origin ? copy.record.oneWay : undefined });
   return { is: 'back', result: said('written', 'Put back. Start a new session to use it.') };
 }
 
@@ -976,6 +982,8 @@ async function putBackAgent(context: ShareContext, tools: HarnessId[], history: 
   const open = openCopies(past, history);
   const refusal = putBackRefusal(past, history, item, slot, open, tools, only) ?? blocked(key, unreadable, duplicates, present);
   if (refusal) return refused(refusal);
+  // A source whose tool is gone (not installed any more, or left out by the tool choice) stays in History, and no copy waits for it.
+  forgetSourceOutside(item, present);
   const sourceFirst = (first: KeptCopy, second: KeptCopy) => Number(second.tool === item.origin) - Number(first.tool === item.origin);
   const results: DestinationResult[] = [], back: KeptCopy[] = [], turnedUp: KeptCopy[] = [];
   /** Each tool that has a copy once this is done, with that file's text (a kept copy that is the same is not offered again); `keepsOwn`: those with their own, found there. */

@@ -16,6 +16,12 @@ import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, Ski
 export const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
 export const files = { 'claude-cli': '.claude/agents/reviewer.md', 'copilot-cli': '.copilot/agents/reviewer.agent.md', 'codex-cli': '.codex/agents/reviewer.toml' } as const;
 export type Tool = keyof typeof files;
+/** Runs `body` with only `managed` as the tools Central Knot manages here (the rest not installed any more), then with every tool again. */
+export async function managing<T>(managed: HarnessId[], body: () => Promise<T>): Promise<T> {
+  const all = [...tools];
+  tools.splice(0, tools.length, ...managed);
+  try { return await body(); } finally { tools.splice(0, tools.length, ...all); }
+}
 
 export async function sandbox() {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-agent-clicks-')));
