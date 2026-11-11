@@ -490,6 +490,8 @@ test('A repository key is spelled as Claude Code keys the Anthropic Directory, h
   assert.equal(repositoryKey('git@gitlab.com:team/tools/plugins.git', './plugins/x/'), 'gitlab.com/team/tools/plugins#plugins/x');
   assert.equal(repositoryKey('ssh://git@github.com/owner/repo/', 'a\\b'), 'github.com/owner/repo#a/b');
   assert.equal(repositoryKey('/Users/me/market', 'plugins/x'), undefined);
+  // Only the repository is lowercase: the directory's own catalog keeps a folder's case ("…#HubSpot-Sales").
+  assert.equal(repositoryKey('https://github.com/HubSpot/hubspot-mcp-plugins', 'HubSpot-Sales'), 'github.com/hubspot/hubspot-mcp-plugins#HubSpot-Sales');
 });
 
 test('A plugin Claude Code has from the Anthropic Directory is the marketplace’s same plugin, installed: Install runs nothing', { skip: noPosix }, async () => {
@@ -511,6 +513,10 @@ test('A plugin Claude Code has from the Anthropic Directory is the marketplace�
     assert.deepEqual(await fromDirectory(context, catalog, item('incident-io')), { state: 'installed', path: copy, version: '1.20261014.705', directory: 'incident.io@anthropic-plugin-directory' });
     assert.equal(await fromDirectory(context, catalog, item('elsewhere')), undefined, 'another folder of the same repository is another plugin');
     assert.equal(await fromDirectory(context, catalog, item('full')), undefined, 'a plugin kept in a folder marketplace has no repository key');
+    // Keys compare ignoring case: the record may spell the folder otherwise than the marketplace does.
+    await directoryInstall(box.home, 'incident.io@anthropic-plugin-directory', 'github.com/incident-io/skills#Plugins/Incident-IO');
+    assert.equal((await fromDirectory({ ...context, reads: new Map() }, catalog, item('incident-io')))?.state, 'installed');
+    await directoryInstall(box.home, 'incident.io@anthropic-plugin-directory', 'github.com/incident-io/skills#plugins/incident-io');
     assert.deepEqual((await installState(context, 'claude-cli', 'ck-test-market', 'incident-io')).state, 'not-installed', 'not from this marketplace');
     const report = await install(context, catalog, 'incident-io', 'claude-cli');
     assert.deepEqual([report.outcome, report.changed, report.runs.length], ['installed', undefined, 0], report.message);
@@ -529,6 +535,26 @@ test('A directory install’s key is also read from plugin-directory-bindings.js
     const catalog = await parseCatalog(root, 'anthropics/claude-plugins-official', 'git');
     const found = await fromDirectory(box.context, catalog, catalog.plugins[0]!);
     assert.deepEqual([found?.state, found?.state === 'installed' && found.directory], ['installed', 'frontend-design@anthropic-plugin-directory']);
+  } finally { await box.cleanup(); }
+});
+
+test('A directory install whose files are gone is held, not offered for Install: Claude Code would refuse the marketplace’s copy', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root, [{ name: 'incident-io', source: { source: 'git-subdir', url: 'https://github.com/incident-io/skills.git', path: 'plugins/incident-io' } }]);
+    const copy = await directoryInstall(box.home, 'incident.io@anthropic-plugin-directory', 'github.com/incident-io/skills#plugins/incident-io');
+    await rm(copy, { recursive: true });
+    const bin = join(box.base, 'bin');
+    await mkdir(bin, { recursive: true });
+    await writeFile(join(bin, 'claude'), `#!/bin/sh\necho "$@" >> "${join(box.base, 'ran')}"\n`, { mode: 0o755 });
+    const context = { ...box.context, binaries: { 'claude-cli': join(bin, 'claude') } as PluginContext['binaries'] };
+    const catalog = await parseCatalog(root, root, 'folder');
+    const state = await fromDirectory(context, catalog, catalog.plugins.find(plugin => plugin.name === 'incident-io')!);
+    assert.equal(state?.state, 'held');
+    assert.match(state?.state === 'held' ? state.reason : '', /incident\.io@anthropic-plugin-directory.*Reinstall it in Claude Code/);
+    assert.equal((await install(context, catalog, 'incident-io', 'claude-cli')).outcome, 'held');
+    assert.equal(await readFile(join(box.base, 'ran'), 'utf8').catch(() => ''), '', 'nothing ran');
   } finally { await box.cleanup(); }
 });
 

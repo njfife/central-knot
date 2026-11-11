@@ -109,8 +109,10 @@ export function cantUninstall(view: PluginsView, entry: MarketplaceView, plugin:
   return view.clis[tool] ? undefined : `${cliMissing(tool)}.`;
 }
 
+/** The marketplace name Claude Code records a plugin from the Anthropic Directory under. It is in no marketplace list. */
+export const DIRECTORY = 'anthropic-plugin-directory';
 /** Why Central Knot leaves Claude Code's copy from the Anthropic Directory to Claude Code. */
-export const FROM_DIRECTORY = 'Claude Code has this plugin from the Anthropic Directory, which keeps it up to date. Uninstall it in Claude Code (/plugin).';
+export const FROM_DIRECTORY = 'Claude Code has its copy from the Anthropic Directory: update or uninstall it in Claude Code (/plugin).';
 
 /** This plugin's parts in a tool, when they were installed there as separate items (parts.ts). */
 export const partsOf = (entry: MarketplaceView, plugin: string, tool: HarnessId): PartsState | undefined => entry.parts?.[plugin]?.[tool];
