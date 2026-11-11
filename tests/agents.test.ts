@@ -8,7 +8,7 @@ import { agentText, agentsView, applyAgents, readAgentRecord, readAgents, restor
 import { readHistory } from '../src/manage.ts';
 import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
 import { chooseTools } from '../src/toolchoice.ts';
-import type { HarnessId } from '../src/types.ts';
+import type { HarnessId, HistoryEvent } from '../src/types.ts';
 import { readTomlTables } from '../src/textedit.ts';
 
 const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
@@ -1352,4 +1352,50 @@ test('A choice never makes a copy that had stopped updating the source, nor one 
       }
     } finally { await box.cleanup(); }
   }
+});
+
+test('A Stopped switch’s choice from before the record was noted still has its Undo put the edit back stopped, from the tools it names', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent(undefined, fields));
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    const codex = (await read(box.home, '.codex/agents/reviewer.toml')).replace('Be brief.', 'Codex only.');
+    await writeFile(join(box.home, '.codex/agents/reviewer.toml'), codex);
+    await applyAgents(box.context, tools, []);
+    const before = await recordOf(box.home);
+    const resumed = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, use: 'claude-cli', resumeIn: 'codex-cli' }]);
+    // As an older Central Knot wrote it: the stopped tools, without each copy's record.
+    const file = join(box.home, '.central-knot', 'history.json');
+    const saved = JSON.parse(await readFile(file, 'utf8')) as { events: HistoryEvent[] };
+    const entry = saved.events.find(event => resumed.made?.includes(event.id) && event.kind === 'chosen')!;
+    entry.before = { ...(entry.before?.origin ? { origin: entry.before.origin } : {}), stopped: ['codex-cli'] };
+    await writeFile(file, JSON.stringify(saved));
+    assert.equal((await restoreAgent(box.context, tools, entry.id, 'narrow')).stopped, undefined);
+    assert.deepEqual([await read(box.home, '.codex/agents/reviewer.toml'), (await agentsView(box.context, tools)).servers[0].stopped], [codex, ['codex-cli']]);
+    // The next pass takes the others up again as they were, writing nothing and asking nothing.
+    const next = await applyAgents(box.context, tools, [], { settleMs: 0 });
+    assert.deepEqual([next.writes, next.results.some(result => result.differs), await recordOf(box.home)], [0, false, before]);
+  } finally { await box.cleanup(); }
+});
+
+test('A choice notes each copy’s record without what a pass was still doing with it, and its Undo records again only tools it still syncs to', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: ['codex-cli'], seenManaged: true }]);
+    await writeFile(join(box.home, '.codex/agents/reviewer.toml'), (await read(box.home, '.codex/agents/reviewer.toml')).replace('Be brief.', 'Codex’s own.'));
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true }]);
+    // Copilot CLI's agents folder goes away: its copy stays on record, marked away.
+    await rm(join(box.home, '.copilot/agents'), { recursive: true });
+    await applyAgents(box.context, tools, []);
+    assert.equal((await readAgentRecord(box.home)).items.reviewer.copies.find(copy => copy.tool === 'copilot-cli')?.away, true);
+    const chose = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, use: 'claude-cli' }]);
+    const chosen = await chosenOf(box, chose.made);
+    assert.deepEqual(chosen.before?.copies?.map(copy => Object.keys(copy).filter(field => field === 'away' || field === 'status')), [[], []]);
+    // Undone once Copilot CLI is no longer one of the tools: only Claude Code's copy is recorded again.
+    const undone = await restoreAgent(box.context, ['claude-cli', 'codex-cli'], chosen.id, 'narrow');
+    assert.equal(undone.stopped, undefined, JSON.stringify(undone));
+    assert.deepEqual((await readAgentRecord(box.home)).items.reviewer.copies.map(copy => copy.tool), ['claude-cli']);
+  } finally { await box.cleanup(); }
 });

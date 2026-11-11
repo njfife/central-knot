@@ -11,7 +11,7 @@ import { configRoot, harnesses, openCodeSettings } from './harnesses.ts';
 import { mcpTools } from './presence.ts';
 import { FORMAT_VERSION, newRecord, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readJsonc, readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
-import { appendHistory, goneFacts, readHistory, removedFacts, replaceHistory } from './manage.ts';
+import { appendHistory, goneFacts, readHistory, replaceHistory } from './manage.ts';
 import { undoChoice } from './choiceundo.ts';
 import { mcpSwitchFacts, readMcpSwitches, setMcpDisabled } from './mcpswitch.ts';
 import { throughPlugins } from './plugins.ts';
@@ -404,10 +404,7 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
     servers.push({ key: name, name, description: summary(sample), copies, extra: [], managed: item?.state === 'shared', off: item?.off ?? [], cannot, ...(Object.keys(plugin).length ? { plugin } : {}), held, separate: item?.separate, choiceBlocks: {},
       edited: edited.length ? edited : undefined, ...mcpSwitchFacts(name, entries.map(entry => entry.tool), switches) });
   }
-  const history = await readHistory(context), keyOf = (event: HistoryEvent) => (event.key.startsWith('mcp:') ? event.key.slice('mcp:'.length) : undefined);
-  const removed = removedFacts(history, new Set(byName.keys()), keyOf);
-  for (const server of servers) Object.assign(server, removed.get(server.key));
-  const gone = goneFacts(history, new Set(byName.keys()), keyOf);
+  const gone = goneFacts(await readHistory(context), new Set(byName.keys()), event => (event.key.startsWith('mcp:') ? event.key.slice('mcp:'.length) : undefined));
   return { tools: present, servers, gone, claudePending, access: await writeAccess(context), gate: problem ? { state: 'stopped', reason: problem } : await syncGate(context), problems, notices };
 }
 

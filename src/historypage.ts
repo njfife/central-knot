@@ -1,5 +1,5 @@
 // History: what sync did on its own, newest first, with Undo or Restore where the kept content allows it (CON-02, DEL-03).
-import { clockTime, DAY_MS } from './model.ts';
+import { clockTime, DAY_MS, deletedSince } from './model.ts';
 import { noTools, restoreEvent, showPage, shownPath, state, touchedToolsPhrase, unwriteClaudeNow } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
@@ -12,7 +12,7 @@ import type { HistoryEvent } from './types.ts';
 
 const who = (tool?: string) => (tool ? toolName(tool) : 'Central Knot');
 /** A deletion of the item since `event` (still standing) that ended what it did: the deletion's own Restore is the way back. */
-const deletedSince = (event: HistoryEvent) => !event.undoneBy && !!state.history.data?.some(later => later.key === event.key && later.kind === 'deleted' && !later.undoneBy && Date.parse(later.at) >= Date.parse(event.at) && later.id !== event.id);
+const endedByDeletion = (event: HistoryEvent) => !event.undoneBy && deletedSince(event, state.history.data ?? []);
 
 function describe(event: HistoryEvent): { glyph: IconName; text: string; action?: string } {
   const order = event.orderProved ? '' : ' Order not proved; the fixed tool order decided.';
@@ -47,7 +47,7 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
     case 'profile': return profileSwitch(event);
     // Turned off where a tool has no switch: History keeps it until it is turned on again or deleted.
     case 'removed': return event.turnedOff
-      ? { glyph: 'circle-off', text: `Turned off: removed from ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}, which ${event.losers.length === 1 ? 'has' : 'have'} no switch for it. History keeps ${event.losers.length === 1 ? 'it' : 'them'} until it is turned on again or deleted.${event.restoredTools?.length ? ` Back on in ${touchedToolsPhrase(event.restoredTools)}.` : ''}${deletedSince(event) ? ' It was deleted since: its deletion’s Restore puts it back.' : ''}`, ...(deletedSince(event) ? {} : { action: 'Turn on' }) }
+      ? { glyph: 'circle-off', text: `Turned off: removed from ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}, which ${event.losers.length === 1 ? 'has' : 'have'} no switch for it. History keeps ${event.losers.length === 1 ? 'it' : 'them'} until it is turned on again or deleted.${event.restoredTools?.length ? ` Back on in ${touchedToolsPhrase(event.restoredTools)}.` : ''}${endedByDeletion(event) ? ' It was deleted since: its deletion’s Restore puts it back.' : ''}`, ...(endedByDeletion(event) ? {} : { action: 'Turn on' }) }
       : { glyph: 'circle-minus', text: `Removed from ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}; Central Knot kept the ${event.losers.length === 1 ? 'copy' : 'copies'}.`, action: 'Restore' };
     case 'took-over': return { glyph: 'arrow-down-to-line', text: tookOverText(event, !!event.undoneBy), action: 'Undo' };
     case 'written': return { glyph: 'pencil-line', text: 'Write to Claude Code replaced Claude Code’s own entry with the synced one; Central Knot kept it.', action: 'Undo write' };
@@ -67,7 +67,7 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
         return { glyph: 'undo-2', text: `Redid ${first ? named(first) : 'the change'}; it is back${where}.`, action: first?.kind === 'deleted' ? 'Restore' : 'Undo edit' };
       }
       // Turned on again where it was turned off: its Undo turns it off there again.
-      if ((undone?.kind === 'removed' && undone.turnedOff) || event.turnedOff) return { glyph: 'undo-2', text: `Turned on again: put back${where}.`, ...(event.key.startsWith('agent:') && !deletedSince(event) ? { action: 'Undo' } : {}) };
+      if ((undone?.kind === 'removed' && undone.turnedOff) || event.turnedOff) return { glyph: 'undo-2', text: `Turned on again: put back${where}.`, ...(event.key.startsWith('agent:') && !endedByDeletion(event) ? { action: 'Undo' } : {}) };
       if (undone?.kind === 'removed') return { glyph: 'undo-2', text: `Restored${where}.` };
       if (undone?.kind === 'deleted' || event.everywhere) return { glyph: 'undo-2', text: `Restored after it was deleted${where}.`, action: 'Delete again' };
       return { glyph: 'undo-2', text: `Undid ${undone ? named(undone) : 'a change'}; the earlier version is back${where}.`, action: 'Redo edit' };

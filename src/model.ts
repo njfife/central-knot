@@ -1,4 +1,4 @@
-import type { HarnessId, HistoryDays, HomeView, ManageView, Snapshot } from './types.ts';
+import type { HarnessId, HistoryDays, HistoryEvent, HomeView, ManageView, Snapshot } from './types.ts';
 
 const monograms: Record<HarnessId, string> = { 'claude-cli': 'Cc', 'copilot-cli': 'Cp', 'codex-cli': 'Cx', 'pi-cli': 'Pi', 'opencode-cli': 'Oc' };
 export { toolName } from './words.ts';
@@ -30,6 +30,24 @@ export const DAY_MS = 86_400_000;
 /** How many days History can keep changes and deleted items (Settings), and how many it keeps unless told otherwise. */
 export const historyDayChoices: readonly HistoryDays[] = [7, 30, 90];
 export const defaultHistoryDays: HistoryDays = 30;
+/** Whether `later` is a deletion of `event`'s item, made at or after it, that still stands (not restored). */
+const deletes = (later: HistoryEvent, event: HistoryEvent) => later.id !== event.id && later.key === event.key && later.kind === 'deleted' && !later.undoneBy
+  && Date.parse(later.at) >= Date.parse(event.at);
+/**
+ * Whether the item `event` is about was deleted after it, by a deletion that still stands: what `event` did is then that
+ * deletion's to put back. History's prune, its page, an Off row and turning an item on again all ask this one question.
+ */
+export const deletedSince = (event: HistoryEvent, events: HistoryEvent[]) => events.some(later => deletes(later, event));
+/** An Off: a removal for tools with no switch for the item (`turnedOff`), not turned on again (undone). */
+const isOff = (event: HistoryEvent) => event.kind === 'removed' && !!event.turnedOff && !event.undoneBy;
+/** Whether `event` turned an item off and still stands: an Off not deleted since. Its Off row and its way back On read it. */
+export const standingOff = (event: HistoryEvent, events: HistoryEvent[]) => isOff(event) && !deletedSince(event, events);
+/**
+ * Whether History keeps `event` whatever its age (`cutoff`: the oldest moment it keeps otherwise): an Off, and the content it
+ * names, while anything can still bring its copies back. That is while it stands, and once a deletion ended it, for as long as
+ * History keeps that deletion, whose Restore brings the Off back.
+ */
+export const keptOff = (event: HistoryEvent, events: HistoryEvent[], cutoff: number) => isOff(event) && !events.some(later => deletes(later, event) && Date.parse(later.at) < cutoff);
 /** 'today' or 'yesterday' for a time on one of those days, in the person's own time zone; undefined otherwise. */
 export function nearDay(iso: string): 'today' | 'yesterday' | undefined {
   const day = new Date(iso).toDateString();

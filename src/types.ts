@@ -358,11 +358,11 @@ export interface Change {
   /** Skills and MCP servers: tools to enable it in again. */
   enable?: HarnessId[];
   /**
-   * Tools whose copy is removed, kept in History for Restore; a synced item also stops syncing there. Agents: always to turn it
-   * off there (no tool has a switch for a person's own agent); with `everywhere`, Delete everywhere.
+   * Tools whose copy is removed, kept in History for Restore; a synced item also stops syncing there. Agents: only with
+   * `turnOff` (no tool has a switch for a person's own agent) or `everywhere` (Delete everywhere).
    */
   remove?: HarnessId[];
-  /** Skills: the removal turns it off in a tool with no switch for it (`turnedOff` on its History entry). */
+  /** The removal turns it off in tools with no switch for it (`turnedOff` on its History entry, kept until it is turned on or deleted). */
   turnOff?: boolean;
   /** Agents, with `use`: the Stopped switch of this tool. Only its stopped copy takes the chosen copy; every other copy is left as it is. */
   resumeIn?: HarnessId;
@@ -450,15 +450,26 @@ export interface HistoryEvent {
   unmanaged?: boolean;
   /**
    * 'removed': it turned the item off in tools with no switch for it, removing their copies. Until it is undone (turned on
-   * again) or a later deletion stands, History keeps it whatever its age (manage.ts readHistory), and so its content.
-   * 'restored' (agents), part-way: it put back some of such a removal's copies; its Undo turns them off again.
+   * again), and while a deletion that ended it can be restored, History keeps it whatever its age (model.ts keptOff).
    */
   turnedOff?: true;
-  /**
-   * 'deleted' by Delete everywhere (agents): its Restore puts each copy back exactly as it was, and an item that was off is off
-   * again. 'restored', part-way: it put back some of such a deletion's copies; its Undo deletes them again.
-   */
+  /** 'deleted' by Delete everywhere (agents): its Restore puts each copy back exactly as it was, and an item that was off is off again. */
   everywhere?: true;
+  /**
+   * 'restored' (agents), by turning it on again or by Restore of Delete everywhere, whole or part-way: what it put copies back
+   * from. Its Undo takes them out again as that did (an Off, or a deletion), and puts back what else it changed (resumedSync,
+   * madeSynced, turnedUp), whatever became of the entry it reversed.
+   */
+  putBackFrom?: 'off' | 'delete-everywhere';
+  /** 'restored' with putBackFrom: the tools it took back into sync (the reversed entry's stoppedSync); its Undo leaves them out again. */
+  resumedSync?: HarnessId[];
+  /** 'restored' with putBackFrom: it made the agent synced again (the reversed entry's `unmanaged`); its Undo makes it not synced. */
+  madeSynced?: true;
+  /**
+   * 'restored' with putBackFrom: copies the reversed entry kept whose tool had a copy of its own by then (one that turned up):
+   * that copy was left as it is, and History still keeps the one removed. Its Undo notes them in the Off or deletion again.
+   */
+  turnedUp?: HistoryEvent['losers'];
   /** 'added': copies for tools a managed skill syncs to again; Undo removes them and stops syncing there, and the skill stays managed. */
   rejoined?: boolean;
   /**

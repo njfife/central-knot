@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, readlink, realpath, rename, stat, symlink, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { DAY_MS, defaultHistoryDays } from './model.ts';
+import { DAY_MS, defaultHistoryDays, deletedSince, keptOff } from './model.ts';
 import { configRoot, harnessIds, harnesses, writeRoot } from './harnesses.ts';
 import { managedTools, presentTools } from './presence.ts';
 import {
@@ -289,23 +289,15 @@ const standingDeletion = (item: RecordItem) => (item.state !== 'shared' ? item.d
 const historyCutoff = (context: ShareContext) => clock(context) - (context.historyDays ?? defaultHistoryDays) * DAY_MS;
 
 /**
- * Whether `event` turned an item off and still stands: a removal for a tool with no switch (`turnedOff`), not turned on again
- * (undone), and no deletion of the item since that stands. Its Off row and its way back On read it, so History keeps it, and
- * the content it names, whatever its age.
- */
-export const standingOff = (event: HistoryEvent, events: HistoryEvent[]) => event.kind === 'removed' && !!event.turnedOff && !event.undoneBy
-  && !events.some(later => later.key === event.key && later.kind === 'deleted' && !later.undoneBy && Date.parse(later.at) >= Date.parse(event.at));
-
-/**
- * History, newest last, without events older than the window, except an Off that still stands (standingOff). The day window is
- * the only other retention rule (there is no event cap), and applying it on every read means that once the window shortens, no
- * home's History offers what it can no longer restore. Unreadable history reads as empty; sync never depends on it.
+ * History, newest last, without events older than the window, except an Off that something can still bring back (keptOff). The
+ * day window is the only other retention rule (there is no event cap), and applying it on every read means that once the window
+ * shortens, no home's History offers what it can no longer restore. Unreadable history reads as empty; sync never depends on it.
  */
 export async function readHistory(context: ShareContext): Promise<HistoryEvent[]> {
   let events: HistoryEvent[];
   try { const parsed = JSON.parse(await readFile(historyPath(context.home), 'utf8')); events = Array.isArray(parsed?.events) ? parsed.events : []; } catch { return []; }
   const cutoff = historyCutoff(context);
-  return events.filter(entry => Date.parse(entry.at) >= cutoff || standingOff(entry, events));
+  return events.filter(entry => Date.parse(entry.at) >= cutoff || keptOff(entry, events, cutoff));
 }
 
 /** Skills a plugin's parts installed, or a saved parts run can put back (plugin-parts.json and plugin-parts-runs): their kept copies are in this store. */
@@ -513,9 +505,7 @@ function openRemovals(events: HistoryEvent[], keyOf: (event: HistoryEvent) => st
   const open = new Map<string, { event: HistoryEvent; tools: HarnessId[] }[]>();
   for (const event of events) {
     const key = keyOf(event);
-    if (key === undefined) continue;
-    if (event.kind === 'deleted' && !event.undoneBy) open.delete(key);
-    if (event.kind !== 'removed' || event.undoneBy) continue;
+    if (key === undefined || event.kind !== 'removed' || event.undoneBy || deletedSince(event, events)) continue;
     const tools = event.losers.map(loser => loser.tool).filter(tool => !event.restoredTools?.includes(tool));
     if (tools.length) open.set(key, [{ event, tools }, ...(open.get(key) ?? [])]);
   }
