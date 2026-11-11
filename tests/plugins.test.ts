@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { tomlValue } from '../src/textedit.ts';
 import { compareVersions } from '../src/values.ts';
 import { INLINE_SKILLS_CONFIG } from '../src/pluginstatus.ts';
-import { cachedCatalog, checkAccess, gitFailure, whyGitFailed, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, setSkill, uninstall, update, type PluginContext } from '../src/plugins.ts';
+import { cachedCatalog, checkAccess, fromDirectory, gitFailure, repositoryKey, whyGitFailed, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, setSkill, uninstall, update, type PluginContext } from '../src/plugins.ts';
 
 const noPosix = process.platform === 'win32';
 
@@ -469,6 +469,83 @@ esac
     assert.deepEqual([removed.outcome, removed.changed], ['uninstalled', true], removed.message);
     const back = await install(context, catalog, 'marker', 'claude-cli');
     assert.deepEqual(back.runs.map(run => run.command), ['claude plugin install marker@ck-test-market --scope user'], 'the marketplace Claude Code recorded is found, so it isn’t added twice');
+  } finally { await box.cleanup(); }
+});
+
+/** Claude Code's records of a plugin it installed from the Anthropic Directory (as 2.1.322 writes them), with its files. */
+async function directoryInstall(home: string, id: string, key: string, { onRecord = true } = {}) {
+  const copy = join(home, '.claude/plugins/cache/anthropic-plugin-directory/incident-io/1.20261014.705-6af50e2e23e9');
+  await put(join(copy, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'incident-io', version: '1.20261014.705' }));
+  await put(join(copy, 'skills/incidents/SKILL.md'), '---\nname: incidents\ndescription: Incidents.\n---\n');
+  await put(join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { [id]: [{ scope: 'user', installPath: copy, version: '1.20261014.705-6af50e2e23e9',
+    gitCommitSha: '6af50e2e23e9c782b95a456aab5a053550fba3c9', ...(onRecord ? { directoryRepositoryKey: key } : {}) }] } }));
+  await put(join(home, '.claude/plugins/plugin-directory-bindings.json'), JSON.stringify({ schemaVersion: 1, bindings: { [id]: { repositoryKey: key } } }));
+  await put(join(home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { [id]: true } }));
+  return copy;
+}
+
+test('A repository key is spelled as Claude Code keys the Anthropic Directory, however the address was written', () => {
+  assert.equal(repositoryKey('https://github.com/incident-io/skills.git', 'plugins/incident-io'), 'github.com/incident-io/skills#plugins/incident-io');
+  assert.equal(repositoryKey('https://github.com/SalesforceAIResearch/agentforce-adlc.git'), 'github.com/salesforceairesearch/agentforce-adlc#');
+  assert.equal(repositoryKey('git@gitlab.com:team/tools/plugins.git', './plugins/x/'), 'gitlab.com/team/tools/plugins#plugins/x');
+  assert.equal(repositoryKey('ssh://git@github.com/owner/repo/', 'a\\b'), 'github.com/owner/repo#a/b');
+  assert.equal(repositoryKey('/Users/me/market', 'plugins/x'), undefined);
+});
+
+test('A plugin Claude Code has from the Anthropic Directory is the marketplace’s same plugin, installed: Install runs nothing', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root, [
+      { name: 'incident-io', source: { source: 'git-subdir', url: 'https://github.com/Incident-IO/skills.git', path: 'plugins/incident-io', sha: '00f7d1dc80892deb1656f1cf577dd073a4a2de10' } },
+      { name: 'elsewhere', source: { source: 'git-subdir', url: 'https://github.com/incident-io/skills.git', path: 'plugins/other' } },
+    ]);
+    // Under its directory name ("incident.io"), not the marketplace's, with the key on its record.
+    const copy = await directoryInstall(box.home, 'incident.io@anthropic-plugin-directory', 'github.com/incident-io/skills#plugins/incident-io');
+    const bin = join(box.base, 'bin');
+    await mkdir(bin, { recursive: true });
+    await writeFile(join(bin, 'claude'), `#!/bin/sh\necho "$@" >> "${join(box.base, 'ran')}"\n`, { mode: 0o755 });
+    const context = { ...box.context, binaries: { 'claude-cli': join(bin, 'claude') } as PluginContext['binaries'] };
+    const catalog = await parseCatalog(root, root, 'folder');
+    const item = (name: string) => catalog.plugins.find(plugin => plugin.name === name)!;
+    assert.deepEqual(await fromDirectory(context, catalog, item('incident-io')), { state: 'installed', path: copy, version: '1.20261014.705', directory: 'incident.io@anthropic-plugin-directory' });
+    assert.equal(await fromDirectory(context, catalog, item('elsewhere')), undefined, 'another folder of the same repository is another plugin');
+    assert.equal(await fromDirectory(context, catalog, item('full')), undefined, 'a plugin kept in a folder marketplace has no repository key');
+    assert.deepEqual((await installState(context, 'claude-cli', 'ck-test-market', 'incident-io')).state, 'not-installed', 'not from this marketplace');
+    const report = await install(context, catalog, 'incident-io', 'claude-cli');
+    assert.deepEqual([report.outcome, report.changed, report.runs.length], ['installed', undefined, 0], report.message);
+    assert.match(report.message, /from the Anthropic Directory/);
+    assert.equal(await readFile(join(box.base, 'ran'), 'utf8').catch(() => ''), '', 'nothing ran: no marketplace add, no install');
+  } finally { await box.cleanup(); }
+});
+
+test('A directory install’s key is also read from plugin-directory-bindings.json, and found for a plugin kept in a Git marketplace', async () => {
+  const box = await sandbox();
+  try {
+    const root = join(box.base, 'clone');
+    await put(join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'claude-plugins-official', plugins: [{ name: 'frontend-design', source: './plugins/frontend-design' }] }));
+    await put(join(root, 'plugins/frontend-design/.claude-plugin/plugin.json'), JSON.stringify({ name: 'frontend-design' }));
+    await directoryInstall(box.home, 'frontend-design@anthropic-plugin-directory', 'github.com/anthropics/claude-plugins-official#plugins/frontend-design', { onRecord: false });
+    const catalog = await parseCatalog(root, 'anthropics/claude-plugins-official', 'git');
+    const found = await fromDirectory(box.context, catalog, catalog.plugins[0]!);
+    assert.deepEqual([found?.state, found?.state === 'installed' && found.directory], ['installed', 'frontend-design@anthropic-plugin-directory']);
+  } finally { await box.cleanup(); }
+});
+
+test('A tool that says it already has the plugin from elsewhere is not told its copy of the marketplace may be old', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root);
+    await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'ck-test-market': { source: { source: 'directory', path: root }, installLocation: root } }));
+    const bin = join(box.base, 'bin');
+    await mkdir(bin, { recursive: true });
+    await writeFile(join(bin, 'claude'), '#!/bin/sh\necho \'✔ "marker" is already installed from Somewhere (the same plugin). Nothing to install.\'\n', { mode: 0o755 });
+    const context = { ...box.context, binaries: { 'claude-cli': join(bin, 'claude') } as PluginContext['binaries'] };
+    const report = await install(context, await parseCatalog(root, root, 'folder'), 'marker', 'claude-cli');
+    assert.equal(report.outcome, 'failed');
+    assert.match(report.message, /already installed from Somewhere/);
+    assert.doesNotMatch(report.message, /may be older/);
   } finally { await box.cleanup(); }
 });
 
