@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { HarnessId } from './types.ts';
 
@@ -9,6 +10,8 @@ export interface HarnessDefinition {
   surface: string;
   binary: string;
   configEnv: string;
+  /** The tool's folder inside the one `configEnv` names (OpenCode's `opencode` inside XDG_CONFIG_HOME); without it, `configEnv` names the folder itself. */
+  configUnder?: string;
   defaultConfig: string;
   /** Claude Code keeps this skills folder for itself. */
   reservedSkills: string[];
@@ -63,6 +66,20 @@ export const harnesses: Record<HarnessId, HarnessDefinition> = {
       { path: join(home, '.agents/skills'), label: 'Shared .agents skills' },
     ],
   },
+  // OpenCode, measured on 1.19.5 and 2.2.5 (the CLI's two lines; the desktop app carries the newer): both list its own skills
+  // folder, Claude Code's and the shared .agents folder, and send all three to the model. Its settings folder is
+  // ~/.config/opencode on every platform. Its plugins are npm packages, not handled here: it takes a plugin's parts.
+  'opencode-cli': {
+    id: 'opencode-cli', name: 'OpenCode', surface: 'CLI', binary: 'opencode',
+    configEnv: 'XDG_CONFIG_HOME', configUnder: 'opencode', defaultConfig: '.config/opencode', reservedSkills: [], loadsDotFolders: false,
+    otherReaders: ['OpenCode desktop'],
+    nextStep: 'Written. Start a new OpenCode session to use it.',
+    skillRoots: (config, home) => [
+      { path: join(config, 'skills'), label: 'OpenCode skills' },
+      { path: join(home, '.claude/skills'), label: 'Claude Code skills' },
+      { path: join(home, '.agents/skills'), label: 'Shared .agents skills' },
+    ],
+  },
 };
 
 export const harnessIds = Object.keys(harnesses) as HarnessId[];
@@ -71,8 +88,19 @@ export function configRoot(definition: HarnessDefinition, home: string, override
   return override === undefined ? join(home, definition.defaultConfig) : override;
 }
 
-/** A tool's config folder in a home, following its override (CLAUDE_CONFIG_DIR, COPILOT_HOME, CODEX_HOME, PI_CODING_AGENT_DIR). */
+/** A tool's config folder in a home, following its override (CLAUDE_CONFIG_DIR, COPILOT_HOME, CODEX_HOME, PI_CODING_AGENT_DIR, XDG_CONFIG_HOME for OpenCode). */
+export const envOverride = (definition: HarnessDefinition, env: Record<string, string | undefined>) => {
+  const named = env[definition.configEnv];
+  return named === undefined || !definition.configUnder ? named : join(named, definition.configUnder);
+};
+
 export const toolConfigRoot = (where: { home: string; overrides?: Partial<Record<HarnessId, string>> }, tool: HarnessId) => configRoot(harnesses[tool], where.home, where.overrides?.[tool]);
+
+/**
+ * OpenCode's settings file in its folder, which holds its MCP servers and its skill switches: opencode.jsonc when there is
+ * one, else opencode.json. Both lines read both and let opencode.jsonc decide (measured on 1.19.5 and 2.2.5).
+ */
+export const openCodeSettings = (root: string) => (existsSync(join(root, 'opencode.jsonc')) ? join(root, 'opencode.jsonc') : join(root, 'opencode.json'));
 
 /** Where CK writes for this harness: its own documented root (D-05). */
 export function writeRoot(definition: HarnessDefinition, home: string, override?: string): string {

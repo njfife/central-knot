@@ -270,9 +270,10 @@ export const succeeded = (report: ActionReport) => report.outcome === 'installed
  * "document-tools: pdf-reader turned off in Codex". What a tool already had is said as such ("already in Codex"), never
  * as a change this run made. An update names the version each tool records now and says plainly that it can't be undone.
  * For an Undo, the verbs say what came back: "removed from" for an install reversed, "put back
- * in" for an uninstall reversed, "back on in" for a skill turned off.
+ * in" for an uninstall reversed, "back on in" for a skill turned off. `after`: for a note read later (an update made with
+ * nobody watching), without "which can't be undone", which is said before a click.
  */
-export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
+export function resultLines(done: PluginDone[], undo = false, { after = false } = {}): ResultLine[] {
   const lines: ResultLine[] = [];
   const lineKey = (entry: PluginDone) => `${pluginKey(entry.source, entry.plugin)}\u0000${entry.skill ?? ''}`;
   for (const key of new Set(done.map(lineKey))) {
@@ -303,7 +304,7 @@ export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
     const groups: Group[] = skill
       ? [[tools('skill-off', true), undo ? `${skill} off again in` : `${skill} turned off in`], [tools('skill-on', true), undo ? `${skill} back on in` : `${skill} turned on in`],
         [tools('skill-off', false), `${skill} already off in`], [tools('skill-on', false), `${skill} already on in`]]
-      : [[tools('installed', true), undo ? 'put back in' : 'installed in'], ...updatedGroups(mine), [tools('updated', false), 'already up to date in'], [tools('uninstalled', true), undo ? 'removed from' : 'uninstalled from'],
+      : [[tools('installed', true), undo ? 'put back in' : 'installed in'], ...updatedGroups(mine, !after), [tools('updated', false), 'already up to date in'], [tools('uninstalled', true), undo ? 'removed from' : 'uninstalled from'],
         [tools('installed', false), 'already in'], [tools('uninstalled', false), 'wasn’t installed in'], ...partsGroups];
     // A skill switch only ever reaches the few tools that have one, so its tools are always named.
     const said = (counted: boolean) => groups.filter(([list]) => list.length).map(([list, verb, after = '']) => `${verb} ${counted && !skill && list.length > 2 ? `${list.length} tools` : andList(list)}${after}`).join('; ');
@@ -339,7 +340,7 @@ type Group = [string[], string, string?];
  * marketplace's copy of 1.2.0 in Codex", "reinstalled from the marketplace's copy of 1.2.0 in Claude Code"). The last
  * group says it can't be undone.
  */
-function updatedGroups(mine: PluginDone[]): Group[] {
+function updatedGroups(mine: PluginDone[], warn = true): Group[] {
   const changed = mine.filter(entry => entry.report.outcome === 'updated' && entry.report.changed).sort((first, second) => byToolOrder(first.tool, second.tool));
   const keyOf = (entry: PluginDone) => `${entry.report.byContent ?? ''}\u0000${entry.report.version ?? ''}`;
   const keys = [...new Set(changed.map(keyOf))];
@@ -348,7 +349,7 @@ function updatedGroups(mine: PluginDone[]): Group[] {
     const [how, version] = key.split('\u0000') as [string, string];
     const copy = `the marketplace’s copy${version ? ` of ${version}` : ''}`;
     const verb = how === 'reinstall' ? `reinstalled from ${copy} in` : how === 'update' ? `updated to ${copy} in` : `${at === firstPlain ? 'updated ' : ''}${version ? `to ${version} ` : ''}in`;
-    return [changed.filter(entry => keyOf(entry) === key).map(entry => names[entry.tool]), verb, at === keys.length - 1 ? ', which can’t be undone' : undefined];
+    return [changed.filter(entry => keyOf(entry) === key).map(entry => names[entry.tool]), verb, warn && at === keys.length - 1 ? ', which can’t be undone' : undefined];
   });
 }
 

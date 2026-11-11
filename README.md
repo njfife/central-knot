@@ -1,6 +1,6 @@
 # Central Knot
 
-Central Knot is a desktop app that shows the skills, MCP servers, agents, instructions and plugins each AI coding tool on your computer has, and keeps the ones you choose the same across those tools. It works with Claude Code, GitHub Copilot CLI, Codex and Pi, through their CLIs or their desktop apps (Claude desktop, the GitHub Copilot app, ChatGPT desktop), and it only reads and writes each tool's own user-wide files.
+Central Knot is a desktop app that shows the skills, MCP servers, agents, instructions and plugins each AI coding tool on your computer has, and keeps the ones you choose the same across those tools. It works with Claude Code, GitHub Copilot CLI, Codex, Pi and OpenCode, through their CLIs or their desktop apps (Claude desktop, the GitHub Copilot app, ChatGPT desktop, OpenCode desktop), and it only reads and writes each tool's own user-wide files.
 
 ## Getting it
 
@@ -33,41 +33,45 @@ Each of these pages holds the managed table: one row per item, one column per to
 
 Skills also have, per tool and for any skill, managed or not:
 
-- **Disable / Enable**, with the tool's own switch: Claude Code `skillOverrides`, Copilot `disabledSkills`, Codex `[[skills.config]]` by path, Pi's `settings.json` filter. Disable is best effort: it is offered whatever the tool's version, written and then read back. On a build older than the one it was checked on, a short note says it may not take effect.
+- **Disable / Enable**, with the tool's own switch: Claude Code `skillOverrides`, Copilot `disabledSkills`, Codex `[[skills.config]]` by path, Pi's `settings.json` filter, OpenCode a `deny` rule for the skill's name in its settings file. Disable is best effort: it is offered whatever the tool's version, written and then read back. On a build older than the one it was checked on, a short note says it may not take effect.
 - **Remove** takes that tool's copy out. History keeps it for Restore.
 - **Delete everywhere** (unmanaged skills) removes every copy Central Knot may change, kept in History.
 
-MCP servers: each tool's user-wide file (Claude Code `~/.claude.json`, Copilot `mcp-config.json`, Codex `config.toml`, Pi `mcp.json`). Writes edit only that server's entry. Claude Code's file is written only by **Write to Claude Code**, which waits while Claude Code, Claude desktop or its Code tab is open. Codex servers written inline or with dotted keys are left alone. Open a server to **disable or enable** it in one tool, with that tool's own switch (the table under Profiles); its entry stays, and History has the Undo.
+OpenCode loads Claude Code's skills folder and `~/.agents/skills` as well as its own. A skill in Claude Code's folder is Claude Code's copy, which OpenCode reads: its box carries a link mark, both rows say so, no second copy is written for it, and it never stands in the way of choosing between differing copies. Disable works on it; Remove is offered only for a copy in OpenCode's own folder, and says when OpenCode still reads Claude Code's. If Claude Code is left out of a managed skill, or its copy is removed, OpenCode gets that copy as its own first; removing an unmanaged one says OpenCode no longer has it. OpenCode settings with a `"*"` rule written after `skill` in `permission` are not edited (that rule decides for every skill), and Disable says so. OpenCode 1.x leaves out a skill with no `name` in its frontmatter, so such a skill is marked as one OpenCode can't load.
 
-Agents: Claude Code `~/.claude/agents`, Copilot `~/.copilot/agents`, Codex `~/.codex/agents`. Name, description and prompt sync. A tool that lacks the origin's other fields gets the agent **With limits**, one way: changes there stay there. Pi has no agents; **Convert to skill** writes one as a Pi skill, once.
+MCP servers: each tool's user-wide file (Claude Code `~/.claude.json`, Copilot `mcp-config.json`, Codex `config.toml`, Pi `mcp.json`, OpenCode `opencode.json`, or `opencode.jsonc` when there is one). Writes edit only that server's entry. Claude Code's file is written only by **Write to Claude Code**, which waits while Claude Code, Claude desktop or its Code tab is open. Codex servers written inline or with dotted keys are left alone. OpenCode's servers are read from both places its settings keep them (`mcp` and `mcp.servers`); an entry is changed where it is, a new one goes under `mcp`, and comments in the file stay. Open a server to **disable or enable** it in one tool, with that tool's own switch (the table under Profiles); its entry stays, and History has the Undo.
+
+Agents: Claude Code `~/.claude/agents`, Copilot `~/.copilot/agents`, Codex `~/.codex/agents`, OpenCode `~/.config/opencode/agents`. Name, description and prompt sync. A tool that lacks the origin's other fields gets the agent **With limits**, one way: changes there stay there. An agent new to OpenCode is written with `mode: all`, so both of OpenCode's lines offer it to choose and to hand work to. Pi has no agents; **Convert to skill** writes one as a Pi skill, once.
 
 Copies are written only into each tool's own folder, byte-exact with file modes, without nested `.git` or `.DS_Store`. Central Knot never writes through a link or into a folder other tools share, such as `~/.agents/skills`.
 
 ### Two-way sync
 
-- **Automatic sync** (status bar switch, on by default): a managed item edited in one tool spreads to the others within seconds. A deletion spreads after a 2 s settle. Competing skill edits are decided by the newest action, or the fixed order Copilot, Claude Code, Codex, Pi when the order can't be proved. Competing MCP server and agent edits always use that fixed order. Each outcome shows a notice with Undo or Restore.
+- **Automatic sync** (status bar switch, on by default): a managed item edited in one tool spreads to the others within seconds. A deletion spreads after a 2 s settle. Competing skill edits are decided by the newest action, or the fixed order Copilot, Claude Code, Codex, Pi, OpenCode when the order can't be proved. Competing MCP server and agent edits always use that fixed order. Each outcome shows a notice with Undo or Restore.
 - With Automatic sync off, edits and deletions are noted as waiting, and **Sync once** spreads them once.
 - A folder or file that can't be read, is half-written or was reset is held, never read as a deletion. Every write checks the file first and never overwrites a save made meanwhile.
-- Closing the window keeps Central Knot syncing. On a Mac it then leaves the Dock and runs from its menu bar icon alone, until the window is opened again. The menu bar icon has Open, Settings, the profile, Automatic sync, Sync once (while Automatic sync is off), Start at sign-in and Quit.
+- Closing the window keeps Central Knot syncing, and updating plugins (see Plugins). On a Mac it then leaves the Dock and runs from its menu bar icon alone, until the window is opened again. The menu bar icon has Open, Settings, the profile, Automatic sync, Sync once (while Automatic sync is off), Start at sign-in and Quit.
 
 ### Instructions
 
-Opens each tool's own instruction file to read and edit in place, with **Undo save**.
+Opens each tool's own instruction file to read and edit in place, with **Undo save**. OpenCode's card says when OpenCode 1.x is reading Claude Code's `CLAUDE.md` because it has no `AGENTS.md` yet.
 
 **Base instructions**: you write a base once and choose which tools get it. It is added after each tool's own instructions as one marked block; the tool's own text is never rewritten. Every write is reviewed first (**Review changes**), a copy edited outside the app is found, and each save can be undone. A typed draft is not lost when you switch homes: the app asks first.
 
-**Draft with a tool**: instead of writing the base yourself, have one of your tools write a first draft from the instruction files you already have. Choose the tool (any with a CLI on this computer); it runs once and sorts your files into a base for every tool and what stays only in each tool's file. You see the draft, including any line it did not carry over as written, and can change it; one **Save** then sets the base and updates every file, with **Undo**. Nothing is saved before that.
+**Draft with a tool**: instead of writing the base yourself, have one of your tools write a first draft from the instruction files you already have. Choose the tool (any with a CLI on this computer, except OpenCode); it runs once and sorts your files into a base for every tool and what stays only in each tool's file. You see the draft, including any line it did not carry over as written, and can change it; one **Save** then sets the base and updates every file, with **Undo**. Nothing is saved before that.
 
 ### Plugins
 
 - **Marketplaces**: add one by Git URL, `owner/repo` or folder. A Git address is checked (`git ls-remote`) before it is added. Claude-format and Codex marketplaces (including `.agents/plugins/marketplace.json`) are read.
 - Each plugin shows its parts (skills, MCP servers, agents and more), what each tool gets from them, its skill text, and each tool's installed version next to the marketplace's.
 - **Install and uninstall** run through each tool's own plugin commands, and count only when that tool's own record shows the result. Nothing runs until **Apply all**.
-- **Parts** for a tool that can't take the whole plugin (Pi always): the plugin's skills, MCP servers and agents go in as ordinary items. They are removed together, can be undone, and show **Update parts** when the plugin changes. Under **What it holds**, each part has a switch per such tool, so you can put in only the ones you want; a part turned off stays out when the parts are updated. Claude Code has no switch for one skill of a plugin, so with the plugin not installed there, the same switches put single skills into Claude Code as separate items.
+- **Parts** for a tool that can't take the whole plugin (Pi and OpenCode always): the plugin's skills, MCP servers and agents go in as ordinary items. They are removed together, can be undone, and show **Update parts** when the plugin changes. Under **What it holds**, each part has a switch per such tool, so you can put in only the ones you want; a part turned off stays out when the parts are updated. Claude Code has no switch for one skill of a plugin, so with the plugin not installed there, the same switches put single skills into Claude Code as separate items.
 - **One item, however a tool has it**: on Skills, MCP servers and Agents, a tool that has an item through the plugin itself shows **Through a plugin** (the box opens the plugin's page) rather than "No copy", and sync never places a separate copy beside the plugin's. This applies to items Central Knot installed elsewhere as that plugin's parts and to skills whose SKILL.md is the same; another item that only shares the name stays an ordinary item.
 - **What plugins bring, on the pages**: Skills, MCP servers and Agents also list every skill, server and agent an installed plugin brings, in a **From plugins** section, each marked with the plugin's icon and "from <plugin>". They are read from each tool's own records, so a plugin installed with the tool's own command counts too. They are never managed or synced there; their row says where they are handled. A **From plugins** filter shows only these.
 - **Per-skill switch**: turn off one skill of an installed plugin in Codex or Copilot CLI.
-- **Update**: where a tool has an older version than the marketplace, the plugin box, list row and plugin page offer Update (**Update all** for a marketplace with two or more behind). Each tool refreshes its copy of the marketplace and updates through its own command. An update can't be undone, and the result says so.
+- **Update**: where a tool has an older version than the marketplace, the plugin box, list row and plugin page offer Update (**Update all** for a marketplace with two or more behind). Each tool refreshes its copy of the marketplace and updates through its own command. An update can't be undone, and the result says so. A plugin turned off in a tool is still off after its update.
+- **Updates that arrive by themselves**: every four hours, with the window closed too, Central Knot reads your marketplaces again and makes the updates that Update all would offer, through each tool's own command. It only updates what a tool already has: a plugin turned off stays off, one you uninstalled from a tool is not put back, and parts in a tool that can't take the whole plugin are updated with the parts you turned off left out. A note on the Plugins page says which plugins were updated in which tools and what couldn't be; a failed update is tried again, less often each time, and the log has each step. It is on unless you turn off **Update plugins automatically** in Settings, and it pauses while Automatic sync is off. **Check now** in Settings runs a check at once.
+- **No longer offered**: a plugin its marketplace has dropped stays installed as it is, marked "No longer offered", until you uninstall it.
 - **Cowork**: where Claude desktop is installed, Claude Code's card and each plugin's page say that Cowork uses the plugins in your Claude account, so Central Knot doesn't install there; plugins for Cowork are added in Claude desktop, under Customize › Plugins (as Claude documents; not tried here). (When this was tried on Claude desktop 5.1231.0, a plugin put into Cowork's folder on the computer was listed by Claude desktop, but the new Cowork session, which ran in the cloud, didn't load it: `docs/capability-data.md`, section 7.)
 - **Desktop apps without a CLI**: Claude desktop (its Code tab), the GitHub Copilot app and ChatGPT desktop each carry their own copy of the tool. With no CLI installed, Central Knot runs the plugin commands through that copy, and the plugin box says which route it uses. A CLI is used when one is installed. If the app's copy isn't on disk yet (for example, the Code tab has never been opened), the plugin's parts are offered instead. macOS app locations only.
 
@@ -81,6 +85,7 @@ A profile is a named set of skills and MCP servers to have on, such as *Incident
 | Copilot CLI | `disabledSkills` in `~/.copilot/settings.json` | `disabledMcpServers` in the same file |
 | Codex | `[[skills.config]]` by path in `config.toml` | `enabled = false` in the server's table |
 | Pi | a `-skills/…` filter in `settings.json` | `"enabled": false` in `mcp.json` |
+| OpenCode | `"<name>": "deny"` under `permission.skill` in `opencode.json` | `"enabled": false` on the server's entry in `opencode.json` (`"disabled": true` for one under `mcp.servers`) |
 
 - A switch is one History row, and **Undo switch** puts back what it changed.
 - A skill or server you disabled by hand stays off; profiles only turn back on what a profile turned off.
@@ -97,7 +102,7 @@ Keeps the Managed set (skills, MCP servers, agents and base instructions) in a g
 
 ### Settings
 
-Start at sign-in, Appearance (System, Light or Dark), Updates, Keep history for (7, 30 or 90 days) and Show log file.
+Start at sign-in, Appearance (System, Light or Dark), Updates, Update plugins automatically (with Check now and what the last check came to), Keep history for (7, 30 or 90 days) and Show log file.
 
 ### Updates
 
@@ -128,7 +133,7 @@ Central Knot's state lives in one folder, `.central-knot/` inside the selected h
 
 ## Not here yet
 
-Windows and Linux real-home writes and desktop app locations, installing a plugin into Cowork (the one Cowork session tried had only the Claude account's plugins, see Plugins), OpenCode, and a plugin installed through a desktop app shown loading in a signed-in session. Nothing here claims an item has loaded in a session: Written means the bytes are on disk.
+Windows and Linux real-home writes and desktop app locations, installing a plugin into Cowork (the one Cowork session tried had only the Claude account's plugins, see Plugins), and a plugin installed through a desktop app shown loading in a signed-in session. For OpenCode: its own (npm) plugins, Disable for one agent, agents kept in the older `agent` folder, and writing a draft of the base instructions. Nothing here claims an item has loaded in a session: Written means the bytes are on disk.
 
 ## For developers
 
@@ -140,9 +145,9 @@ npm start            # dev build, opens the Practice copy
 npm test             # TypeScript check and unit tests (tests/*.test.ts)
 ```
 
-- **End to end:** `npm run e2e` (`scripts/e2e.mjs`) drives the app over its debug port in a throwaway HOME. `--electron` runs the dev build instead of the packaged app; on Linux add `--no-sandbox` and run it under `xvfb-run`.
+- **End to end:** `npm run e2e` (`scripts/e2e.mjs`) drives the app over its debug port in a throwaway HOME. `--electron` runs the dev build instead of the packaged app; on Linux add `--no-sandbox` and run it under `xvfb-run`. `--flows openCodeFlow,…` runs only the named flows while working on one.
 - **UI tour:** `node scripts/ui-tour.mjs <outDir> [--electron]` is the light tour: the app opens on the Practice copy and each page is opened once, one picture each, in a few seconds. `--only shell,skills,…` takes the pictures of the named features; `--full` takes every feature at 860×560 up to 2560×1440, dark and light (about ten minutes, for a new release).
-- **Harness tests:** `npm run test:harness` installs, updates and uninstalls a marker plugin with the real `claude`, `copilot` and `codex` CLIs in disposable homes (a missing one is skipped), and takes a bundled build's marketplace through being packed, unpacked, added to each tool's own list, installed and uninstalled. `CK_HARNESS_APPS=1` runs the same tests through the copy each desktop app carries.
+- **Harness tests:** `npm run test:harness` installs, updates and uninstalls a marker plugin with the real `claude`, `copilot` and `codex` CLIs in disposable homes (a missing one is skipped), checks that a plugin turned off stays off through an update and that one its marketplace dropped keeps its copy, and takes a bundled build's marketplace through being packed, unpacked, added to each tool's own list, installed and uninstalled. `CK_HARNESS_APPS=1` runs the same tests through the copy each desktop app carries.
 - **Smoke:** `npm run smoke:mac` opens a hidden window on fixture data only.
 - **CI:** `.github/workflows/mac.yml` runs the unit tests, packages the app, then runs the light tour (its pictures are the run's `light-tour` download) and the end-to-end checks against the packaged app. It runs on every push to `next`, and on any pushed branch with `gh workflow run mac.yml --ref <branch>`.
 

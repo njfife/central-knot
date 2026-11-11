@@ -248,7 +248,7 @@ check('Check now takes the newer plugins, and says so', /^Newer plugins arrive b
 await a.shot('about-feed-1280');
 await a.click('#market-tab-plugins');
 check('the Plugins tab shows the newer version', await a.until(`document.querySelector('[data-plugin="document-tools"] .plugin-row-version')?.textContent === '1.3.0'`), await a.run(`document.querySelector('[data-plugin="document-tools"]')?.textContent`));
-check('a plugin no longer offered stays, since a tool has it installed, and says so', await a.run(`document.querySelector('[data-plugin="starter-skills"] .plugin-row-left')?.textContent`) === 'No longer offered', await a.run(`[...document.querySelectorAll('.plugin-row')].map(row => row.dataset.plugin)`));
+check('a plugin no longer offered stays, since a tool has it installed, and says so', await a.run(`document.querySelector('[data-plugin="starter-skills"] .plugin-chip-gone')?.textContent`) === 'No longer offered', await a.run(`[...document.querySelectorAll('.plugin-row')].map(row => row.dataset.plugin)`));
 check('its files are still in the marketplace folder', existsSync(join(marketFolder, '_kept/starter-skills/skills/hello/SKILL.md')));
 check('the Plugins page fits with it', await a.fits());
 await a.shot('plugins-feed-1280');

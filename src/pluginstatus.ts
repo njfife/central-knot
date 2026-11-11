@@ -10,7 +10,7 @@ import { takesPlugins } from './presence.ts';
  * Tools that can take a plugin's parts as separate items (parts.ts) where the plugin itself can't go: Pi always, Codex and
  * Copilot CLI when their plugin route is blocked here, Claude Code only with no plugin route at all (its desktop app alone, before its Code tab is there).
  */
-export const partsTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'];
+export const partsTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
 
 /** The one way of saying a tool's CLI is missing. */
 export const cliMissing = (tool: HarnessId) => `${names[tool]}’s command-line tool wasn’t found`;
@@ -25,14 +25,14 @@ export const heldReason = (tool: HarnessId, marketName: string, other: string) =
 export const notCarried = (app: string, reason: string) => `${app} doesn’t include this plugin’s files, so it can’t be installed from here. ${reason}`;
 
 /** Why a plugin a bundled build's marketplace no longer offers is still listed: a tool here has it installed, and it stays until uninstalled there. */
-export const noLongerOffered = (market: string) => `${market} no longer offers this plugin. It stays in the tools that have it until you uninstall it.`;
+export const keptReason = (market: string) => `${market} no longer offers this plugin. It stays in the tools that have it until you uninstall it.`;
 
 /**
  * Why this plugin can't be installed from its marketplace at all, if the marketplace is a bundled build's: the build has
  * no files for it, or the marketplace no longer offers it and it is kept only for the tools that have it.
  */
 export const whyNotCarried = (entry: MarketplaceView, plugin: string): string | undefined => {
-  if (entry.bundled?.kept?.includes(plugin)) return noLongerOffered(entry.bundled.displayName || entry.name);
+  if (entry.bundled?.kept?.includes(plugin)) return keptReason(entry.bundled.displayName || entry.name);
   const left = entry.bundled?.unpackaged.find(item => item.name === plugin);
   return left && `${notCarried(entry.bundled!.app, left.reason)}${entry.owner ? ` Ask ${entry.owner} if you need it.` : ''}`;
 };
@@ -46,6 +46,12 @@ export function blocked(view: PluginsView, entry: MarketplaceView, tool: Harness
   if (entry.codexOnly && tool !== 'codex-cli') return entry.codexOnly;
   return tool === 'copilot-cli' ? entry.copilotRefuses : undefined;
 }
+
+/**
+ * Whether a plugin is marked "No longer offered": its marketplace's catalog was read and no longer lists it, while a tool
+ * still has it or its parts. (A plugin listed only because its marketplace can't be read now is `gone` too, without the mark.)
+ */
+export const noLongerOffered = (entry: MarketplaceView, plugin: PluginView) => (!!plugin.gone && !!entry.fetchedAt) || !!entry.bundled?.kept?.includes(plugin.name);
 
 /** A plugin's state in one tool, as last read ("not installed" when the tool has no record of it). */
 export const stateOf = (entry: MarketplaceView, plugin: string, tool: HarnessId): InstallState => entry.states[plugin]?.[tool] ?? { state: 'not-installed' };
@@ -73,10 +79,11 @@ export function installsIn(view: PluginsView, tool: HarnessId): { installed: Mar
  * marketplace is blocked there (see blocked). An installed plugin is never unavailable. Every box, panel and key uses this.
  */
 export function unavailable(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): string | undefined {
-  if (entry.plugins.find(candidate => candidate.name === plugin)?.gone) return 'It is no longer in this marketplace.';
   const state = stateOf(entry, plugin, tool);
   if (state.state === 'held') return state.reason;
   if (state.state === 'installed') return undefined;
+  // A plugin its marketplace dropped can't go anywhere new; where a tool still has it, it shows as installed and can be uninstalled.
+  if (entry.plugins.find(candidate => candidate.name === plugin)?.gone) return 'It is no longer offered in this marketplace.';
   return whyNotCarried(entry, plugin) ?? blocked(view, entry, tool);
 }
 

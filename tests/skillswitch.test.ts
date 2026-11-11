@@ -10,17 +10,17 @@ import { isDisabled, readSwitchFile, setDisabled, switchPath, unverifiedBuild } 
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
 
-const all: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'];
+const all: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
 const text = (name: string, body = 'Body.') => `---\nname: ${name}\ndescription: The ${name} skill.\n---\n\n${body}\n`;
 
 async function sandbox(tools: HarnessId[]) {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-switch-')));
   const home = join(base, 'home');
-  for (const dir of ['.claude', '.copilot', '.codex', '.pi/agent']) await mkdir(join(home, dir), { recursive: true });
+  for (const dir of ['.claude', '.copilot', '.codex', '.pi/agent', '.config/opencode']) await mkdir(join(home, dir), { recursive: true });
   const context: ShareContext = { home, mode: 'custom', read: () => Promise.all(tools.map(harness => discover({ home, mode: 'custom', harness }))), build: 'test', settingsPath: join(base, 'settings.json'), realHome: join(base, 'real'), settleMs: 0 };
   return { home, context, cleanup: () => rm(base, { recursive: true, force: true }) };
 }
-const skillsDir = { 'claude-cli': '.claude/skills', 'copilot-cli': '.copilot/skills', 'codex-cli': '.codex/skills', 'pi-cli': '.pi/agent/skills' } as const;
+const skillsDir = { 'claude-cli': '.claude/skills', 'copilot-cli': '.copilot/skills', 'codex-cli': '.codex/skills', 'pi-cli': '.pi/agent/skills', 'opencode-cli': '.config/opencode/skills' } as const;
 async function skill(home: string, tool: HarnessId, folder: string, content = text(folder)) {
   await mkdir(join(home, skillsDir[tool], folder), { recursive: true });
   await writeFile(join(home, skillsDir[tool], folder, 'SKILL.md'), content);
@@ -35,12 +35,14 @@ test('Each tool’s switch: Disable writes its own form, Enable takes it out, an
       'copilot-cli': '{\n  "disabledSkills": ["other"],\n  "theme": "dark"\n}\n',
       'codex-cli': '# my settings\nmodel = "gpt"\n\n[mcp_servers.docs]\ncommand = "docs"\n',
       'pi-cli': '{\n  "skills": ["-skills/other/SKILL.md"]\n}\n',
+      'opencode-cli': '{\n  // mine\n  "model": "a/b",\n  "permission": { "skill": { "other": "deny" } },\n}\n',
     };
     const expected: Record<HarnessId, RegExp> = {
       'claude-cli': /"alpha": "off"/,
       'copilot-cli': /"other",\s*"Alpha Skill"/,
       'codex-cli': /\[\[skills\.config\]\]\npath = ".*\/\.codex\/skills\/alpha\/SKILL\.md"\nenabled = false\n$/,
       'pi-cli': /"-skills\/alpha\/SKILL\.md"/,
+      'opencode-cli': /"other": "deny",\s*"Alpha Skill": "deny"/,
     };
     for (const tool of all) {
       await writeFile(switchPath(box.context, tool), before[tool]);

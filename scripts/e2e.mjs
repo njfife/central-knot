@@ -1,5 +1,6 @@
 // Drives the real app end to end over its debug port, in a throwaway HOME, so "This Mac's home" is disposable too.
-// Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n]
+// Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n] [--flows openCodeFlow,…]
+// `--flows` runs only the named flows, for working on one; a run that counts has them all.
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { chmodSync, cpSync, existsSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -114,7 +115,9 @@ process.on('exit', () => { for (const child of launched) { try { child.kill('SIG
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
 async function launch(userData = join(scratch, 'data'), extra = [], home = HOME, more = {}) {
-  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), ...more };
+  // OpenCode is looked for only inside the throwaway home: a machine that has it installed (the Mac these run on does) would
+  // otherwise bring a tool into every flow that opens "This Mac's home".
+  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), CK_TEST_HOME_ONLY: 'opencode', CK_PLUGIN_UPDATES_EVERY_MS: 'never', ...more };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   // The app picks its own free debug ports (port 0) and says them, so no other run on this machine can be on them (cdp.mjs
@@ -2063,6 +2066,138 @@ async function fewToolsFlow() {
   await p.quit();
 }
 
+/**
+ * OpenCode as a tool, beside Claude Code, in a home of its own: its CLI and its desktop app stand in there (the CLI answers
+ * nothing but its version), and its skills, MCP servers, agents and instruction file are read from its own folder.
+ */
+async function openCodeFlow() {
+  const home = join(scratch, 'home-opencode');
+  const oc = join(home, '.config/opencode');
+  const cli = (path, version) => { mkdirSync(join(home, path, '..'), { recursive: true }); writeFileSync(join(home, path), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(join(home, path), 0o755); };
+  cli('.local/bin/claude', '2.1.309 (Claude Code)');
+  cli('.opencode/bin/opencode', '1.19.5');
+  mkdirSync(join(home, 'Applications/OpenCode.app/Contents/Resources'), { recursive: true });
+  writeFileSync(join(home, 'Applications/OpenCode.app/Contents/Info.plist'), '<?xml version="1.0"?>\n<plist><dict><key>CFBundleShortVersionString</key><string>2.2.5</string></dict></plist>\n');
+  writeFileSync(join(home, 'Applications/OpenCode.app/Contents/Resources/opencode-cli.version'), '2.2.5\n');
+  skill(join(home, '.claude/skills'), 'notes');
+  skill(join(oc, 'skills'), 'oc-only');
+  skill(join(home, '.agents/skills'), 'shared');
+  const settings = join(oc, 'opencode.json');
+  const settingsBefore = '{\n  // mine\n  "model": "a/b",\n  "mcp": {\n    "oc-docs": { "type": "local", "command": ["npx", "-y", "docs"], "environment": { "DOCS_TOKEN": "value-123" }, "enabled": false },\n  },\n}\n';
+  writeFileSync(settings, settingsBefore);
+  writeFileSync(join(oc, 'AGENTS.md'), 'Be brief.\n');
+  mkdirSync(join(oc, 'agents'));
+  writeFileSync(join(oc, 'agents/helper.md'), '---\ndescription: Helps.\nmode: subagent\n---\n\nYou help.\n');
+  // Every tool is looked for only inside this home, so the flow reads the same on a machine that has some installed.
+  const onlyHere = { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' };
+  const a = await launch(join(scratch, 'opencode-data'), flag('--electron') ? ['--as-released'] : [], home, onlyHere);
+  // With --shots, a page's picture at each window size the app must fit.
+  const pictures = async (page, name) => { if (!shots) return; for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(page, width, height); await page.shot(`${name}-${width}`); } await fullSize(page); };
+  await a.click('#nav-harnesses');
+  const card = await a.text('#harness-opencode-cli');
+  await pictures(a, 'opencode-harnesses');
+  check('OpenCode’s card names its CLI and its desktop app, each with its version, once', card.includes('Installed · 1.19.5; OpenCode desktop 2.2.5') && !card.includes('(OpenCode'), card);
+  const pages = await a.all('#nav [id^="nav-"]', 'e.id.slice(4)');
+  check('with OpenCode beside Claude Code, Agents and Plugins are pages', pages.includes('agents') && pages.includes('plugins'), pages);
+  await a.click('#nav-skills');
+  // OpenCode loads Claude Code's skills folder and the shared .agents folder as well as its own (measured on both of its lines).
+  same('OpenCode has its own skill, Claude Code’s and the shared folder’s; Claude Code only its own',
+    [await cellState(a, 'notes', 'opencode-cli'), await cellState(a, 'oc-only', 'opencode-cli'), await cellState(a, 'shared', 'opencode-cli'), await cellState(a, 'notes', 'claude-cli'), await cellState(a, 'oc-only', 'claude-cli')],
+    ['present', 'present', 'present', 'present', 'absent']);
+  await a.click('#open-notes');
+  check('a skill OpenCode reads in Claude Code’s folder says so, with its Disable there and no Remove: the copy is Claude Code’s', await a.exists('#enable-notes-opencode-cli') && !(await a.exists('#remove-notes-opencode-cli')) && await a.exists('#remove-notes-claude-cli')
+    && (await a.text('.ov-row[data-key="notes"] + *') ?? '').includes('Reads Claude Code’s copy.'), await a.text('.ov-row[data-key="notes"] + *'));
+  await fitsAtMinimum(a, 'Skills with OpenCode, a skill open');
+  await pictures(a, 'opencode-skill-open');
+  const view = await a.run('window.centralKnot.refresh()');
+  same('its MCP server is read from its settings, off as its settings say', view.mcp.servers.map(server => [server.key, server.disabled]), [['oc-docs', ['opencode-cli']]]);
+  same('its agent is read from its agents folder', view.agents.servers.map(server => [server.key, Object.keys(server.copies)]), [['helper', ['opencode-cli']]]);
+  await a.click('#nav-mcp'); await a.click('#open-oc-docs'); await pictures(a, 'opencode-mcp-open');
+  await a.click('#nav-agents'); await pictures(a, 'opencode-agents');
+  await a.click('#nav-instructions'); await pictures(a, 'opencode-instructions');
+  check('its instruction file is AGENTS.md in its own folder', (await a.text('.page') ?? '').includes('~/.config/opencode/AGENTS.md') && (await a.text('.page') ?? '').includes('Be brief.'), await a.text('.page'));
+  await a.click('#nav-plugins');
+  check('marketplaces are said to come from the tools that have them, not OpenCode', /Marketplaces you added in Claude Code show up here/.test(await a.text('.page') ?? ''), await a.text('.page'));
+  await a.click('#nav-harnesses'); await a.click('#harness-opencode-cli');
+  await pictures(a, 'opencode-page-skills');
+  await a.click('#harness-tab-plugins');
+  await pictures(a, 'opencode-page-plugins');
+  check('its Plugins tab says where plugins install and that its parts can go in', /installs marketplace plugins into Claude Code\. A plugin’s page on Plugins can put its parts in OpenCode as separate items\./.test(await a.text('#harness-body') ?? ''), await a.text('#harness-body'));
+  await a.click('#harness-tab-about');
+  const about = await a.text('#harness-body');
+  check('About names its folders and its settings file', ['~/.config/opencode/skills', '~/.claude/skills', '~/.config/opencode/opencode.json', '~/.config/opencode/agents', '~/.config/opencode/AGENTS.md'].every(path => about.includes(path)), about);
+  await fitsAtMinimum(a, 'OpenCode’s page, About');
+  await pictures(a, 'opencode-page-about');
+  same('no page errors, OpenCode', a.pageErrors, []);
+  await a.quit();
+
+  // Writes, in the Practice copy (a real home is preview only off macOS): OpenCode joins it by its folder.
+  const p = await launch(join(scratch, 'opencode-practice-data'), ['--practice-copy'], home, onlyHere);
+  const practice = await p.run(`document.querySelector('.status-home').title`);
+  const mine = join(practice, '.config/opencode');
+  skill(join(mine, 'skills'), 'oc-only');
+  writeFileSync(join(mine, 'opencode.json'), settingsBefore);
+  await p.click('#header-refresh');
+  await p.click('#nav-skills');
+  check('an OpenCode folder makes OpenCode a column', await p.exists('#tool-opencode-cli'));
+  same('a Claude Code skill is one OpenCode already reads', await cellState(p, 'notes', 'opencode-cli'), 'present');
+  await p.click('.ov-row[data-key="oc-only"] .switch');
+  await applyAll(p);
+  check('managing OpenCode’s own skill copies it to the other tools', readNow(join(practice, '.claude/skills/oc-only/SKILL.md')) === text('oc-only') && readNow(join(practice, '.copilot/skills/oc-only/SKILL.md')) === text('oc-only'), await p.text('.bands'));
+  // Disable in OpenCode is a deny rule by the skill's name in its settings, whichever folder the skill is in.
+  await p.click('#open-notes');
+  await p.click('#enable-notes-opencode-cli');
+  await applyAll(p);
+  const denied = readNow(join(mine, 'opencode.json'));
+  check('Disable in OpenCode writes its deny rule and keeps the rest of its settings', /"permission": \{\s*"skill": \{\s*"notes": "deny"\s*\}\s*\}/.test(denied) && denied.includes('// mine') && denied.includes('"DOCS_TOKEN": "value-123"') && readNow(join(practice, '.claude/skills/notes/SKILL.md')) !== '', denied);
+  same('and the page shows it disabled there', (await p.run('window.centralKnot.refresh()')).manage.skills.find(found => found.key === 'notes').disabled, ['opencode-cli']);
+  await p.click('#enable-notes-opencode-cli');
+  await applyAll(p);
+  same('Enable takes the rule out again: its settings are as they were', readNow(join(mine, 'opencode.json')), settingsBefore);
+  // Its server goes to the other tools in their own forms, values as they are; Claude Code's waits for Write to Claude Code.
+  await p.click('#nav-mcp');
+  await p.click('.ov-row[data-key="oc-docs"] .switch');
+  await applyAll(p);
+  const inCopilot = JSON.parse(readNow(join(practice, '.copilot/mcp-config.json')) || '{}').mcpServers?.['oc-docs'];
+  same('OpenCode’s server reaches Copilot CLI in Copilot’s form', [inCopilot?.command, inCopilot?.args, inCopilot?.env], ['npx', ['-y', 'docs'], { DOCS_TOKEN: 'value-123' }]);
+  // OpenCode takes no plugin whole: a plugin's skills, MCP servers and agents go in as ordinary items, in OpenCode's forms.
+  const market = join(scratch, 'opencode-market');
+  writeMarket(market);
+  await p.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)})`);
+  await p.click('#nav-plugins');
+  await p.click('#header-refresh');
+  const box = plugin => `[id^="pcell-"][id$="-${plugin}-opencode-cli"]`;
+  for (let tries = 0; tries < 50 && !(await p.exists(box('issue-tracker'))); tries++) await wait(100);
+  same('OpenCode is a column whose boxes offer a plugin’s parts', [await p.run(`document.querySelector('${box('issue-tracker')}')?.dataset.state`), await p.run(`document.querySelector('${box('release-helper')}')?.dataset.state`)], ['parts-offer', 'parts-offer']);
+  await p.click(box('issue-tracker'));
+  await p.click(box('release-helper'));
+  await p.click('#plugins-apply');
+  for (let tries = 0; tries < 50 && (await p.run(`document.querySelector('${box('release-helper')}')?.dataset.state`)) !== 'parts'; tries++) await wait(100);
+  const withParts = readNow(join(mine, 'opencode.json'));
+  check('the plugin’s skill and MCP server are in OpenCode, the server in OpenCode’s form', existsSync(join(mine, 'skills/triage/SKILL.md')) && /"issues": \{\s*"type": "local",\s*"command": \[\s*"npx",\s*"-y",\s*"@example\/issues-mcp"\s*\]\s*\}/.test(withParts) && withParts.includes('// mine'), withParts || await p.text('.bands'));
+  const partAgent = readNow(join(mine, 'agents/release-reviewer.md'));
+  check('and a plugin’s agent is an OpenCode agent', partAgent.includes('description: Reviews a release branch before it ships.') && partAgent.includes('mode: all') && partAgent.includes('Review it.'), partAgent || await p.text('.bands'));
+  await pictures(p, 'opencode-parts-four-tools');
+  // Five tools is the widest table: nothing is cut off at the smallest window.
+  mkdirSync(join(practice, '.pi/agent'), { recursive: true });
+  await p.click('#header-refresh');
+  await p.click('#nav-skills');
+  check('with Pi too, the table has five tool columns', (await p.all('.ov-tool-head')).length === 5, await p.all('.ov-tool-head'));
+  await pictures(p, 'opencode-five-skills');
+  for (const page of ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles']) {
+    await p.click(`#nav-${page}`);
+    await fitsAtMinimum(p, `${page} with five tools`);
+    if (['mcp', 'plugins', 'profiles', 'harnesses', 'overview'].includes(page)) await pictures(p, `opencode-five-${page}`);
+  }
+  await p.click('#nav-plugins');
+  await p.click('[id^="popen-"][id$="-issue-tracker"]');
+  for (let tries = 0; tries < 40 && !/Can go in|Its parts/.test(await p.text('.plugin-page') ?? ''); tries++) await wait(100);
+  await fitsAtMinimum(p, 'a plugin’s page with five tools');
+  await pictures(p, 'opencode-five-plugin-page');
+  same('no page errors, OpenCode in the Practice copy', p.pageErrors, []);
+  await p.quit();
+}
+
 async function realHomeFlow() {
   const before = { rich: tree(join(CLAUDE, 'rich')), unrelated: readFileSync(join(HOME, '.claude/unrelated.json'), 'utf8') };
   const a = await launch();
@@ -2332,6 +2467,162 @@ async function draftFlow() {
   await a.quit();
 }
 
+/**
+ * Plugin updates that arrive by themselves, in a folder home with stand-in tools. The schedule runs every two seconds here
+ * (CK_PLUGIN_UPDATES_EVERY_MS). With the window closed, the marketplace moves on and drops a plugin: Claude Code's copies are
+ * updated through its own command, the plugin turned off there is off afterwards, Codex (which never had them) gets nothing,
+ * and the dropped plugin stays, marked. The note and the Settings row say so after a restart; a failure is said and tried
+ * again; with the switch off, or Automatic sync off, nothing runs.
+ */
+async function pluginUpdatesFlow() {
+  const home = join(scratch, 'home-auto'), data = join(scratch, 'auto-data'), market = join(scratch, 'market-auto'), tools = join(scratch, 'tools-auto'), stage = join(scratch, 'stage-auto');
+  writeMarket(market, 'ck-test-market');
+  const catalogPath = join(market, '.claude-plugin/marketplace.json');
+  const publish = (versions, dropped = []) => { const catalog = JSON.parse(readFileSync(catalogPath, 'utf8')); catalog.plugins = catalog.plugins.filter(plugin => !dropped.includes(plugin.name)).map(plugin => ({ ...plugin, ...(versions[plugin.name] ? { version: versions[plugin.name] } : {}) })); writeFileSync(catalogPath, JSON.stringify(catalog, null, 2)); };
+  const marketText = path => readFileSync(join(market, 'plugins', path), 'utf8');
+  const copies = { 'issue-tracker': { 'skills/triage/SKILL.md': marketText('issue-tracker/skills/triage/SKILL.md') }, 'document-tools': { 'skills/pdf-reader/SKILL.md': marketText('document-tools/skills/pdf-reader/SKILL.md'), 'skills/spreadsheet/SKILL.md': marketText('document-tools/skills/spreadsheet/SKILL.md') }, 'release-helper': { 'commands/release-notes.md': marketText('release-helper/commands/release-notes.md') } };
+  // Each record Claude Code's stand-in moves to, written ahead with the copies it names; the last one written is where it starts.
+  const recordPath = join(home, '.claude/plugins/installed_plugins.json');
+  mkdirSync(stage, { recursive: true });
+  for (const [name, issue, docs] of [['docs', '1.9.0', '1.2.0'], ['issue-2.0.0', '2.0.0', '1.2.0'], ['issue-3.0.0', '3.0.0', '1.2.0'], ['issue-4.0.0', '4.0.0', '1.2.0'], ['start', '1.9.0', '1.1.0']]) {
+    rmSync(recordPath, { force: true });
+    writeClaudeInstall(home, 'ck-test-market', 'issue-tracker', issue, copies['issue-tracker']);
+    writeClaudeInstall(home, 'ck-test-market', 'document-tools', docs, copies['document-tools']);
+    writeClaudeInstall(home, 'ck-test-market', 'release-helper', '0.4.1', copies['release-helper']);
+    writeFileSync(join(stage, `record-${name}.json`), readFileSync(recordPath, 'utf8'));
+  }
+  // Claude Code added the marketplace itself, and has document-tools turned off. Codex is here too and has none of the plugins.
+  writeFileSync(join(home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'ck-test-market': { source: { source: 'git', url: market } } }));
+  const claudeSettings = join(home, '.claude/settings.json');
+  writeFileSync(claudeSettings, '{"enabledPlugins":{"document-tools@ck-test-market":false}}');
+  mkdirSync(join(home, '.codex'), { recursive: true });
+  writeFileSync(join(home, '.codex/config.toml'), 'model = "gpt-test"\n');
+  // The stand-ins: Claude Code's update moves its record on (and, for document-tools, turns the plugin on, as a tool might); Codex notes anything it is asked.
+  mkdirSync(join(tools, '.local/bin'), { recursive: true });
+  writeFileSync(join(tools, '.local/bin/claude'), `#!/bin/sh
+[ "$1" = "--version" ] && echo "2.1.322 (Claude Code)" && exit 0
+echo "$*" >> "$HOME/claude-calls.txt"
+case "$*" in
+  "plugin update document-tools@ck-test-market --scope user") cp '${join(stage, 'record-docs.json')}' "$HOME/.claude/plugins/installed_plugins.json"; printf '{"enabledPlugins":{"document-tools@ck-test-market":true}}' > "$HOME/.claude/settings.json" ;;
+  "plugin disable document-tools@ck-test-market --scope user") printf '{"enabledPlugins":{"document-tools@ck-test-market":false}}' > "$HOME/.claude/settings.json" ;;
+  "plugin update issue-tracker@ck-test-market --scope user") if [ -f "$HOME/issue-fails" ]; then echo "Failed to update issue-tracker: the download stopped."; exit 1; fi; cp "${stage}/record-issue-$(cat "$HOME/issue-next").json" "$HOME/.claude/plugins/installed_plugins.json" ;;
+  *) exit 9 ;;
+esac
+`, { mode: 0o755 });
+  writeFileSync(join(tools, '.local/bin/codex'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli 0.167.0" && exit 0\necho "$*" >> "$HOME/codex-calls.txt"\nexit 9\n', { mode: 0o755 });
+  writeFileSync(join(home, 'issue-next'), '2.0.0');
+  const versions = () => Object.fromEntries(Object.entries(JSON.parse(readFileSync(recordPath, 'utf8')).plugins).map(([id, [entry]]) => [id.split('@')[0], entry.version]));
+  const calls = () => (existsSync(join(home, 'claude-calls.txt')) ? readFileSync(join(home, 'claude-calls.txt'), 'utf8').trim().split('\n') : []);
+  // The record kept for this home (the file holds one per home).
+  const noted = () => { try { return JSON.parse(readFileSync(join(data, 'plugin-updates.json'), 'utf8')).find(record => record.home === home) ?? {}; } catch { return {}; } };
+  const until = async (test, ms = 30000) => { for (let spent = 0; spent < ms; spent += 200) { if (await test()) return true; await wait(200); } return false; };
+  mkdirSync(data, { recursive: true });
+  // The first close's "still running" dialog was answered before.
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
+  // To begin with the marketplace offers what Claude Code has: nothing is due.
+  publish({ 'issue-tracker': '1.9.0', 'document-tools': '1.1.0' });
+  const first = await launch(data, [], tools);
+  same('the marketplace is added', await first.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)}).then(result => result.problem ?? 'added')`), 'added');
+  await first.quit();
+
+  // 1. The schedule, with the window closed.
+  let a = await launch(data, [], tools, { CK_PLUGIN_UPDATES_EVERY_MS: '2000' });
+  check('with nothing behind, the first check by itself changes nothing and says so', await until(() => noted().checked?.at) && noted().checked.updated === 0 && calls().length === 0 && versions()['issue-tracker'] === '1.9.0', JSON.stringify(noted()));
+  await a.click('#nav-settings');
+  for (let tries = 0; tries < 50 && !/Last checked/.test(await a.text('#setting-plugin-updates') ?? ''); tries++) await wait(100);
+  check('Settings has the switch, on, and what the last check came to', await a.run(`document.querySelector('#plugin-updates-on')?.getAttribute('aria-checked')`) === 'true' && /Last checked today at .*\. Nothing needed updating\./.test(await a.text('#setting-plugin-updates-notice') ?? '') && await a.exists('#check-plugin-updates'), await a.text('#setting-plugin-updates'));
+  // A page-made close destroys the window outright (see the practice flow): from here on this launch has no window at all.
+  await a.run(`setTimeout(() => window.close(), 50), true`);
+  await wait(800);
+  // The marketplace moves both plugins on and drops release-helper.
+  publish({ 'issue-tracker': '2.0.0', 'document-tools': '1.2.0' }, ['release-helper']);
+  check('with the window closed, the plugins Claude Code has are updated by themselves, through its own command', await until(() => versions()['issue-tracker'] === '2.0.0' && versions()['document-tools'] === '1.2.0' && noted().updated?.length === 2), JSON.stringify([versions(), calls(), noted()]));
+  const dock = () => { const found = spawnSync('lsappinfo', ['find', `pid=${a.child.pid}`], { encoding: 'utf8' }).stdout.trim(); return spawnSync('lsappinfo', ['info', '-only', 'ApplicationType', found], { encoding: 'utf8' }).stdout.trim(); };
+  same('the app ran on with no window through it (on a Mac, from its menu bar icon alone)', [a.child.exitCode, process.platform === 'darwin' ? dock() : 'no Dock'], [null, process.platform === 'darwin' ? '"ApplicationType"="UIElement"' : 'no Dock']);
+  same('the plugin turned off in Claude Code is off again after its update, by Claude Code’s own switch', [JSON.parse(readFileSync(claudeSettings, 'utf8')).enabledPlugins['document-tools@ck-test-market'], calls()],
+    [false, ['plugin update document-tools@ck-test-market --scope user', 'plugin disable document-tools@ck-test-market --scope user', 'plugin update issue-tracker@ck-test-market --scope user']]);
+  check('Codex, which has neither plugin, is asked for nothing: an update installs nowhere new', !existsSync(join(home, 'codex-calls.txt')));
+  check('the plugin the marketplace dropped is kept as it was', versions()['release-helper'] === '0.4.1' && existsSync(join(home, '.claude/plugins/cache/ck-test-market/release-helper/0.4.1/commands/release-notes.md')), JSON.stringify(versions()));
+  const logged = readFileSync(join(data, 'central-knot.log'), 'utf8');
+  check('the log says what was checked and what each update came to', /plugin updates: checked: 2 due/.test(logged) && /plugins:update \(by itself\) issue-tracker@ck-test-market in claude-cli: updated: Updated to 2\.0\.0\./.test(logged) && /document-tools@ck-test-market in claude-cli: updated: Updated to 1\.2\.0\. It is still off in Claude Code\./.test(logged), logged.split('\n').filter(line => /plugin/.test(line)).join('\n'));
+  const before = calls().length;
+  await wait(5000);
+  check('once up to date, later checks run nothing', calls().length === before && noted().checked.updated === 0, JSON.stringify([calls(), noted().checked]));
+  await a.quit();
+
+  // 2. After a restart, the note and the Settings row say what happened; the dropped plugin is marked.
+  a = await launch(data, [], tools);
+  await a.run(`(document.querySelector('#nav-plugins').click(), true)`);
+  for (let tries = 0; tries < 100 && !(await a.exists('#plugin-updates-updated')); tries++) await wait(100);
+  await a.settle();
+  const note = await a.text('#plugin-updates-updated') ?? '';
+  check('the Plugins page keeps a plain note: which plugins, which version, which tool', /Updated automatically\./.test(note) && /document-tools: updated to 1\.2\.0 in Claude Code · today at/.test(note) && /issue-tracker: updated to 2\.0\.0 in Claude Code · today at/.test(note) && !(await a.exists('#plugin-updates-failed')), note);
+  check('the first note says once that plugins update by themselves now, and where that is turned off', (await a.text('#plugin-updates-new')) === 'Plugins now update by themselves. Settings turns that off.', note);
+  same('the plugins show as up to date, and the dropped one as no longer offered, still installed in Claude Code',
+    [await a.run(`document.querySelector('#pcell-0-issue-tracker-claude-cli')?.dataset.state`), await a.text('[data-plugin="release-helper"] .plugin-chip-gone'), await a.run(`document.querySelector('#pcell-0-release-helper-claude-cli')?.dataset.state`), await a.run(`document.querySelector('#pcell-0-release-helper-codex-cli')?.dataset.state`)],
+    ['installed', 'No longer offered', 'installed', 'cannot']);
+  await a.click('#plugin-updates-updated-0');
+  check('a plugin named in the note opens its page', (await a.text('.crumb-here')) === 'document-tools', await a.text('.plugins-toolbar'));
+  await a.click('#plugin-back');
+  await a.click('#plugin-updates-updated-close');
+  check('closing the note takes it away, and it stays away', !(await a.exists('#plugin-updates-updated')) && noted().updated.length === 0, JSON.stringify(noted()));
+
+  // 3. A failure is said in the tool's own words, in the note and in Settings, and Check now tries it again.
+  publish({ 'issue-tracker': '3.0.0' });
+  writeFileSync(join(home, 'issue-next'), '3.0.0');
+  writeFileSync(join(home, 'issue-fails'), '');
+  await a.click('#nav-settings');
+  await a.click('#check-plugin-updates');
+  for (let tries = 0; tries < 100 && !/couldn’t be made/.test(await a.text('#setting-plugin-updates-notice') ?? ''); tries++) await wait(100);
+  check('Check now says what it came to: one update couldn’t be made, with the way to the note', /Last checked today at .*\. 1 update couldn’t be made\./.test(await a.text('#setting-plugin-updates-notice') ?? '') && (await a.text('#setting-plugin-updates-notice-action')) === 'See Plugins', await a.text('#setting-plugin-updates'));
+  check('Check now takes the focus back once it can be pressed again', await a.run(`document.activeElement?.id`) === 'check-plugin-updates', await a.run(`document.activeElement?.id`));
+  await a.click('#setting-plugin-updates-notice-action');
+  for (let tries = 0; tries < 50 && !(await a.exists('#plugin-updates-failed')); tries++) await wait(100);
+  check('the note says what couldn’t be updated, in the tool’s own words, and that it is tried again', /Couldn’t update automatically\./.test(await a.text('#plugin-updates-failed') ?? '') && /issue-tracker: Still 2\.0\.0 in Claude Code; the marketplace has 3\.0\.0\. Failed to update issue-tracker: the download stopped\. · today at .* · will be tried again/.test(await a.text('#plugin-updates-failed') ?? '')
+    && versions()['issue-tracker'] === '2.0.0' && /`claude plugin update issue-tracker@ck-test-market --scope user` failed: Failed to update issue-tracker: the download stopped\./.test(readFileSync(join(data, 'central-knot.log'), 'utf8')), await a.text('#plugin-updates-failed'));
+
+  // 4. The switch: off, nothing runs by itself; on again, the failed update is tried and goes through.
+  await a.click('#nav-settings');
+  await a.click('#plugin-updates-on');
+  for (let tries = 0; tries < 50 && (await a.run(`document.querySelector('#plugin-updates-on')?.getAttribute('aria-checked')`)) !== 'false'; tries++) await wait(100);
+  check('the switch turns it off: saved, with no Check now and no status', JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).pluginUpdates === false && !(await a.exists('#check-plugin-updates')) && !(await a.exists('#setting-plugin-updates-notice')), await a.text('#setting-plugin-updates'));
+  same('no page errors, plugin updates', a.pageErrors, []);
+  await a.quit();
+  rmSync(join(home, 'issue-fails'));
+  a = await launch(data, [], tools, { CK_PLUGIN_UPDATES_EVERY_MS: '2000' });
+  const whileOff = calls().length;
+  await wait(6000);
+  check('turned off, the schedule runs nothing, though an update is waiting', calls().length === whileOff && versions()['issue-tracker'] === '2.0.0', JSON.stringify(calls()));
+  // Automatic sync off pauses it too: off means nothing is written to the tools in the background.
+  await a.run(`window.centralKnot.setSync(false).then(() => true)`);
+  await a.click('#nav-settings');
+  await a.click('#plugin-updates-on');
+  await wait(6000);
+  check('turned on with Automatic sync off, it is paused and says so; nothing runs', calls().length === whileOff && versions()['issue-tracker'] === '2.0.0' && /Paused while Automatic sync is off: nothing is updated by itself\. Check now still updates what is behind\./.test(await a.text('#setting-plugin-updates-notice') ?? ''), [calls(), await a.text('#setting-plugin-updates')]);
+  await a.run(`window.centralKnot.setSync(true).then(() => true)`);
+  check('with Automatic sync on again, the update that failed goes through by itself, and its note goes', await until(() => versions()['issue-tracker'] === '3.0.0' && noted().failures?.length === 0) && noted().updated.some(line => line.plugin === 'issue-tracker' && /updated to 3\.0\.0 in Claude Code/.test(line.text)), JSON.stringify([versions(), noted()]));
+  await a.run(`(document.querySelector('#nav-plugins').click(), true)`);
+  for (let tries = 0; tries < 100 && !(await a.exists('#plugin-updates-updated')); tries++) await wait(100);
+  check('a later note no longer says that this is new', /issue-tracker: updated to 3\.0\.0 in Claude Code/.test(await a.text('#plugin-updates-updated') ?? '') && !(await a.exists('#plugin-updates-new')), await a.text('#plugin-updates-updated'));
+  check('the note scrolls with the page, so it never squeezes the list', await a.run(`!!document.querySelector('#plugins-scroll #plugin-updates-updated')`));
+
+  // 5. An update that failed by itself and is then made by hand on the page: its note goes at once, not at the next check.
+  publish({ 'issue-tracker': '4.0.0' });
+  writeFileSync(join(home, 'issue-next'), '4.0.0');
+  writeFileSync(join(home, 'issue-fails'), '');
+  check('the next version fails by itself and is said', await until(() => noted().failures?.length === 1) && await until(() => a.exists('#plugin-updates-failed'), 5000), JSON.stringify(noted()));
+  // Automatic sync off holds the schedule still, so the update below is the person's own and nothing else's.
+  await a.run(`window.centralKnot.setSync(false).then(() => true)`);
+  await wait(2500);
+  rmSync(join(home, 'issue-fails'));
+  for (let tries = 0; tries < 50 && !(await a.exists('#pupdate-0-issue-tracker')); tries++) await wait(100);
+  await a.click('#pupdate-0-issue-tracker');
+  await a.click('#plugins-apply');
+  check('Update on the page makes it, and the failure’s note goes with no check in between', await until(() => versions()['issue-tracker'] === '4.0.0' && noted().failures?.length === 0, 10000) && await until(async () => !(await a.exists('#plugin-updates-failed')), 5000), JSON.stringify([versions(), noted().failures, await a.text('#plugin-updates-failed')]));
+  same('no page errors, plugin updates on a schedule', a.pageErrors, []);
+  await a.quit();
+}
+
 const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 
 // ---------- Run ----------
@@ -2339,7 +2630,9 @@ const started = Date.now();
 try {
   seedHome();
   // Each flow's time is printed, so a run that grows slow says where.
-  for (const flow of [harnessFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, listDiffersFlow, repoBaseFlow, draftFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])]) {
+  const flows = [harnessFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, listDiffersFlow, pluginUpdatesFlow, repoBaseFlow, draftFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
+  const named = option('--flows')?.split(',');
+  for (const flow of flows.filter(each => !named || named.includes(each.name))) {
     const from = Date.now();
     await flow();
     console.log(`${flow.name}: ${Math.round((Date.now() - from) / 1000)}s`);

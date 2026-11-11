@@ -210,8 +210,8 @@ const agentFile = (context: ShareContext, tool: HarnessId, name: string) => {
 /**
  * A part as it is in the tool now, read fresh: absent, there but unreadable right now (with why), or there with `seen`, its fingerprint.
  * For an MCP entry `seen` covers the tool's own settings on it too (a narrowed Copilot `tools`, say), so an edit to those
- * counts as an edit; `neutralHash` is its neutral hash, which an MCP write is checked against. The tool's on/off key (Codex's
- * and Pi's `enabled`) is left out: profiles own that switch, and a server turned off is not one the person edited.
+ * counts as an edit; `neutralHash` is its neutral hash, which an MCP write is checked against. The tool's on/off key (Codex's,
+ * Pi's and OpenCode's `enabled`, OpenCode's `disabled`) is left out: profiles own that switch, and a server turned off is not one the person edited.
  */
 type OnDisk = { state: 'absent'; /** A link is in a skill's place whose target is gone (where it led): it holds nothing, so a part may take its place. */ brokenLink?: string }
   | { state: 'unreadable'; /** What is in its place and why it couldn't be read, to finish "Couldn't change the skill: …". */ why: string }
@@ -235,7 +235,9 @@ async function onDisk(context: ShareContext, tool: HarnessId, item: Pick<PartIte
     const entry = read.entries.find(candidate => candidate.name === item.name);
     if (!entry) return { state: 'absent' };
     const { enabled: _switch, ...settings } = entry.extras;
-    return { state: 'there', seen: sha256(JSON.stringify([entry.hash, canonical(tool === 'codex-cli' || tool === 'pi-cli' ? settings : entry.extras)])), neutralHash: entry.hash };
+    // OpenCode's other on/off key, for an entry under `mcp.servers`.
+    if (tool === 'opencode-cli') delete settings.disabled;
+    return { state: 'there', seen: sha256(JSON.stringify([entry.hash, canonical(tool === 'codex-cli' || tool === 'pi-cli' || tool === 'opencode-cli' ? settings : entry.extras)])), neutralHash: entry.hash };
   }
   const file = agentFile(context, tool, item.name);
   try { return { state: 'there', seen: sha256(await readFile(file, 'utf8')) }; }

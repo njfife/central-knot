@@ -9,11 +9,14 @@
 //   Copilot CLI  settings.json   "disabledSkills": ["<name>"]              (what `copilot skill disable` writes; by name)
 //   Codex        config.toml     [[skills.config]] path = "<…/SKILL.md>" enabled = false   (by path: a name rule would hit every same-name skill)
 //   Pi           settings.json   "skills": ["-skills/<folder>/SKILL.md"]   (the exact exclusion `pi config` writes)
+//   OpenCode     opencode.json   "permission": { "skill": { "<name>": "deny" } }   (by name, whichever folder holds it; the last
+//                                rule that matches a name decides, so the rule goes last. Measured 2026-11-10 on 1.19.5 and 2.2.5:
+//                                a denied skill is left out of what a new session is sent.)
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
-import { toolConfigRoot } from './harnesses.ts';
+import { openCodeSettings, toolConfigRoot } from './harnesses.ts';
 import { errorCode, plainError, storeDirectory, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
-import { editTomlArray, readTomlTables, setJsonMember, tomlValue, type TomlTable, type TomlValue } from './textedit.ts';
+import { editTomlArray, readJsonc, readTomlTables, setJsonMember, tomlValue, type TomlTable, type TomlValue } from './textedit.ts';
 import { SKILL_SWITCH_TESTED_FROM } from './pluginstatus.ts';
 import type { HarnessId, SwitchProblem, SwitchTarget } from './types.ts';
 export type { SwitchTarget };
@@ -26,7 +29,7 @@ import { compareVersions, record, withoutBom } from './values.ts';
 export interface SwitchFile { tool: HarnessId; path: string; text: string; exists: boolean; problem?: SwitchProblem; parsed?: ParsedSwitches }
 
 /** The lowest build of each tool where its switch was seen working (Appendix B, V-20). */
-const VERIFIED_FROM: Partial<Record<HarnessId, string>> = { 'claude-cli': '2.1.311', 'pi-cli': '1.5.0', ...SKILL_SWITCH_TESTED_FROM };
+const VERIFIED_FROM: Partial<Record<HarnessId, string>> = { 'claude-cli': '2.1.311', 'pi-cli': '1.5.0', 'opencode-cli': '1.19.5', ...SKILL_SWITCH_TESTED_FROM };
 
 /**
  * A quiet note beside a tool's switch when its build is older than VERIFIED_FROM or can't be read (no CLI found, say only a
@@ -40,7 +43,8 @@ export function unverifiedBuild(tool: HarnessId, version: string | undefined): s
 }
 
 /** The file that holds a tool's skill switches. */
-export const switchPath = (context: ShareContext, tool: HarnessId) => join(toolConfigRoot(context, tool), tool === 'codex-cli' ? 'config.toml' : 'settings.json');
+export const switchPath = (context: ShareContext, tool: HarnessId) =>
+  (tool === 'opencode-cli' ? openCodeSettings(toolConfigRoot(context, tool)) : join(toolConfigRoot(context, tool), tool === 'codex-cli' ? 'config.toml' : 'settings.json'));
 
 /** Reads a tool's switch file. A file that can't be read, or isn't the JSON or TOML expected, is reported and never written. */
 export async function readSwitchFile(context: ShareContext, tool: HarnessId): Promise<SwitchFile> {
@@ -51,12 +55,13 @@ export async function readSwitchFile(context: ShareContext, tool: HarnessId): Pr
   }
   try { return { tool, path, text, exists: true, parsed: parse(tool, text) }; }
   catch (error) {
-    const reason = errorCode(error) === 'CK_FORM' ? 'writes skills.config as a value, a form Central Knot doesn’t edit.' : `isn’t valid ${tool === 'codex-cli' ? 'TOML' : 'JSON'}.`;
-    return { tool, path, text, exists: true, problem: { file: path, reason } };
+    const form = errorCode(error) === 'CK_FORM' ? error as { reason: string; read?: ParsedSwitches } : undefined;
+    // A form that is read but not edited still says what it turns off: the page shows that, and offers no switch.
+    return { tool, path, text, exists: true, problem: { file: path, reason: form?.reason ?? `isn’t valid ${tool === 'codex-cli' ? 'TOML' : 'JSON'}.` }, ...(form?.read ? { parsed: form.read } : {}) };
   }
 }
 
-/** Whether a tool's switch file turns this copy off. False for a file with a problem (which is never written). */
+/** Whether a tool's switch file turns this copy off. False for a file that can't be read (one with a problem is never written). */
 export function isDisabled(context: ShareContext, file: SwitchFile, target: SwitchTarget): boolean {
   return !!file.parsed && stateIn(context, file.tool, file.parsed, target).disabled;
 }
@@ -69,7 +74,7 @@ export function isDisabled(context: ShareContext, file: SwitchFile, target: Swit
  */
 export async function setDisabled(context: ShareContext, tool: HarnessId, target: SwitchTarget, disabled: boolean, restore?: string): Promise<{ changed: boolean; previous?: string }> {
   const file = await readSwitchFile(context, tool);
-  if (!file.parsed) throw failure(problemText(file.problem!));
+  if (file.problem || !file.parsed) throw failure(problemText(file.problem!));
   const now = stateIn(context, tool, file.parsed, target);
   if (now.disabled === disabled) return { changed: false };
   if (tool === 'claude-cli' && !disabled) restore ??= (await readKeptOverrides(context))[target.folder];
@@ -123,15 +128,23 @@ const isPathOf = (rule: CodexRule, skillFile: string) => {
 /** A switch file parsed: JSON settings, or Codex's skill rules. */
 export type ParsedSwitches = { json: Record<string, unknown> } | { rules: CodexRule[] };
 
-const formError = () => Object.assign(new Error('Skill rules in a form not edited here.'), { code: 'CK_FORM' });
+/** `read`: the settings as parsed, where the form can still be read for what it turns off, only not edited. */
+const formError = (reason = 'writes skills.config as a value, a form Central Knot doesn’t edit.', read?: ParsedSwitches) => Object.assign(new Error('Skill rules in a form not edited here.'), { code: 'CK_FORM', reason, read });
 const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
 /** A tool's settings, parsed. Throws when the text isn't the tool's format. */
 function parse(tool: HarnessId, text: string): ParsedSwitches {
   if (tool === 'codex-cli') return { rules: codexRules(text) };
   if (!text.trim()) return { json: {} };
-  const json = record(JSON.parse(withoutBom(text)));
+  const json = record(tool === 'opencode-cli' ? readJsonc(text) : JSON.parse(withoutBom(text)));
   if (!json) throw new Error('Not a JSON object.');
+  // OpenCode's `permission` as one word ("allow") has no place for one skill's rule; and a rule after `skill` that covers
+  // skills ("*") decides for every skill, so a rule for one would count only once `skill` moved after it, which would make
+  // the rules it overrules count again. Both are forms not edited here.
+  const permission = tool === 'opencode-cli' && 'permission' in json ? record(json.permission) : {};
+  if (!permission) throw formError('sets permission as one word, a form Central Knot doesn’t edit.');
+  const keys = Object.keys(permission);
+  if ('skill' in permission && keys.slice(keys.indexOf('skill') + 1).some(key => typeof permission[key] === 'string' && openCodeMatches(key, 'skill'))) throw formError('has a rule after skill in permission that decides for every skill, a form Central Knot doesn’t edit. Move it above skill to switch one skill.', { json });
   return { json };
 }
 
@@ -194,12 +207,24 @@ function piExcludes(entry: unknown, forms: Set<string>, home: string): boolean {
   return forms.has(path.startsWith('~/') ? forwardSlashes(join(home, path.slice(2))) : isAbsolute(path) ? forwardSlashes(path) : path);
 }
 
+/** Whether an OpenCode pattern (`*` any run of characters, `?` one) is this name. */
+const openCodeMatches = (pattern: string, name: string) => new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 's').test(name);
+/**
+ * OpenCode's rules about skills, in the order it reads them: `permission.skill`, a map of name patterns or one word for
+ * every skill, and any other `permission` key that covers skills (`"*"`), whose word is for every skill too.
+ */
+const openCodeRules = (json: Record<string, unknown>): [string, unknown][] => Object.entries(record(json.permission) ?? {}).flatMap(([key, value]): [string, unknown][] =>
+  (key === 'skill' ? (typeof value === 'string' ? [['*', value]] : Object.entries(record(value) ?? {})) : typeof value === 'string' && openCodeMatches(key, 'skill') ? [['*', value]] : []));
+/** What OpenCode's rules say about a skill: the last one matching its name decides (measured, also for a `"*"` written after `skill`). */
+const openCodeAction = (rules: [string, unknown][], name: string) => rules.filter(([pattern]) => openCodeMatches(pattern, name)).at(-1)?.[1];
+
 /** Whether the parsed settings turn this copy off, and (Claude Code) what its override held otherwise. */
 function stateIn(context: ShareContext, tool: HarnessId, parsed: ParsedSwitches, target: SwitchTarget): { disabled: boolean; previous?: string } {
   if ('rules' in parsed) return { disabled: parsed.rules.filter(rule => isPathOf(rule, target.skillFile) || rule.name === target.name).at(-1)?.enabled === false };
   const { json } = parsed;
   if (tool === 'claude-cli') { const value = record(json.skillOverrides)?.[target.folder]; return { disabled: value === 'off', previous: typeof value === 'string' && value !== 'off' ? value : undefined }; }
   if (tool === 'copilot-cli') return { disabled: list(json.disabledSkills).includes(target.name) };
+  if (tool === 'opencode-cli') return { disabled: openCodeAction(openCodeRules(json), target.name) === 'deny' };
   const forms = piForms(target, toolConfigRoot(context, tool)).all;
   return { disabled: list(json.skills).some(entry => piExcludes(entry, forms, context.home)) };
 }
@@ -221,6 +246,26 @@ function withSwitch(context: ShareContext, file: SwitchFile, target: SwitchTarge
   if (file.tool === 'copilot-cli') {
     const others = list(json.disabledSkills).filter(name => name !== target.name);
     return bom + putList('disabledSkills', disabled ? [...others, target.name] : others);
+  }
+  if (file.tool === 'opencode-cli') {
+    // Already as asked: not a byte changes.
+    if ((openCodeAction(openCodeRules(json), target.name) === 'deny') === disabled) return file.text;
+    const path = ['permission', 'skill'];
+    const permission = record(json.permission) ?? {};
+    const map: Record<string, unknown> = typeof permission.skill === 'string' ? { '*': permission.skill } : record(permission.skill) ?? {};
+    const { [target.name]: own, ...others } = map;
+    const { skill: _skill, ...rest } = permission;
+    // What the other rules say once this skill's own is out: an Enable they would still deny gets an `allow` of its own.
+    const decides = openCodeAction(openCodeRules({ permission: { ...permission, skill: others } }), target.name);
+    const next = disabled ? { ...others, [target.name]: 'deny' } : decides === 'deny' ? { ...others, [target.name]: 'allow' } : others;
+    // `skill` as one word becomes a map that says the same, so one skill's rule has a place.
+    if (typeof permission.skill === 'string') return bom + setJsonMember(text, path, next);
+    // A map the Enable leaves empty goes with its last entry, and so does a `permission` that held nothing else.
+    if (!Object.keys(next).length) return bom + setJsonMember(text, Object.keys(rest).length ? path : ['permission'], undefined);
+    // Its own rule, when it is the last that matches, changes its word where it is; otherwise it goes to the end, where it decides.
+    const inPlace = own !== undefined && target.name in next && Object.keys(map).findLast(pattern => openCodeMatches(pattern, target.name)) === target.name;
+    const out = own === undefined || inPlace ? text : setJsonMember(text, [...path, target.name], undefined);
+    return bom + (target.name in next ? setJsonMember(out, [...path, target.name], (next as Record<string, unknown>)[target.name]) : out);
   }
   const { written, all } = piForms(target, toolConfigRoot(context, file.tool));
   // Only this copy's exclusions go; a `+` include the person wrote stays (an exclusion wins over it while disabled).
