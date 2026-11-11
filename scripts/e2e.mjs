@@ -344,6 +344,42 @@ async function fitsAtMinimum(a, where, again = async () => {}) {
   await fullSize(a);
 }
 
+/**
+ * What is wrong with the open copy question's layout (style.css "The copy question"); empty when it is as `shape` says:
+ * 'under' (the list under the question), 'beside' (a wide question: the list beside it, the first row's name level with the
+ * question) or 'pane' (a narrow question, as in the Files view's pane: each row's name and Use this copy on one line, what it
+ * says under both). In every shape the close button is over neither the question nor the list, and no row's words spill out.
+ */
+const copyQuestionMisfits = shape => `(() => {
+  const out = [], all = selector => [...document.querySelectorAll('.details-differs ' + selector)], box = selector => all(selector)[0]?.getBoundingClientRect();
+  const question = box('.compare-title > span'), note = box('.compare-note'), list = box('.compare-choices'), close = box('.details-close');
+  const who = box('.version-who'), says = box('.version-says'), use = box('.version-cta');
+  const found = list.top < note.bottom ? 'beside' : says.top >= who.bottom ? 'pane' : 'under';
+  if (found !== ${JSON.stringify(shape)}) out.push('laid out as ' + found);
+  if (found === 'beside' && Math.abs(who.top - question.top) > 1) out.push('the first row’s name is ' + Math.round(who.top - question.top) + 'px off the question’s line');
+  if (found === 'pane' && !(use.top < says.top && use.left >= who.right)) out.push('Use this copy is not on the name’s line');
+  const meets = (one, other) => one.left < other.right && one.right > other.left && one.top < other.bottom && one.bottom > other.top;
+  if (close && (meets(question, close) || meets(list, close))) out.push('the close button is over the question or the list');
+  for (const row of all('.version')) if (row.scrollWidth > row.clientWidth + 1) out.push('words spill out of ' + row.id);
+  return out;
+})()`;
+
+/**
+ * The copy question of the skill `key`, open under its row: its shape at each window size, then in the Files view's pane (where
+ * Read both copies leads), with nothing cut off. It ends back on the table at full size, the question still open.
+ */
+async function copyQuestionFits(a, key) {
+  for (const [width, height, shape] of [[860, 560, 'under'], [1280, 800, 'under'], [1728, 1117, 'beside'], [2560, 1440, 'beside']]) {
+    await sizeTo(a, width, height);
+    same(`at ${width}×${height} the copy question’s list is ${shape} the question, clear of the close button, nothing cut off`, [...await a.run(copyQuestionMisfits(shape)), ...await a.run(CUT_OFF)], []);
+  }
+  await a.click(`#diff-${key}`);
+  await sizeTo(a, 1728, 1117);
+  same('in the Files view’s pane, beside the file, each row has its name and Use this copy on one line and what it says under both', [...await a.run(copyQuestionMisfits('pane')), ...await a.run(CUT_OFF)], []);
+  await a.click('#skills-table');
+  await fullSize(a);
+}
+
 async function practiceFlow() {
   // A development run also opens the main process's debugger, for the menu bar menu and a failed Refresh.
   const a = await launch(undefined, ['--practice-copy']);
@@ -428,6 +464,7 @@ async function practiceFlow() {
   check('the switch on a differing row opens the choice instead of turning on', await a.exists('#use-review-copilot-cli') && !(await switchOn(a, 'review')) && readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8') === reviewClaude);
   await a.shot('practice-compare');
   await fitsAtMinimum(a, 'a copy choice open');
+  await copyQuestionFits(a, 'review');
   await a.click('#use-review-copilot-cli');
   same('the chosen copy is used in every tool, and it is on', [readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8'), readNow(join(practice, '.codex/skills/review/SKILL.md')), await switchOn(a, 'review')], [reviewCopilot, reviewCopilot, true]);
   check('the replaced copy is kept in the store', readdirSync(join(practice, '.central-knot/items/review')).some(revision => readFileSync(join(practice, '.central-knot/items/review', revision, 'SKILL.md'), 'utf8') === reviewClaude));

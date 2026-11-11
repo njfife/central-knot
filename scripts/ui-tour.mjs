@@ -321,7 +321,7 @@ if (wanted('mcp')) {
   await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#switch-search')`, 15000);
   await a.click('#switch-search'); await a.settle();
   if (await a.has('#use-search-copilot-cli')) {
-    await shot(a, 'mcp-choice', 'A server named search is in Copilot CLI and Codex with different commands; clicked its switch: it asks which entry every tool uses, each card quoting its own command.');
+    await shot(a, 'mcp-choice', 'A server named search is in Copilot CLI and Codex with different commands; clicked its switch: it asks which entry every tool uses, each row of the list quoting its own command.');
     await a.click('#use-search-copilot-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
     await shot(a, 'mcp-choice-made', 'Clicked Copilot CLI’s entry: Codex’s is replaced (kept in History). The result says “Copilot CLI and Codex now use Copilot CLI’s copy of search”, and that Claude Code gets it when you click Write to Claude Code; with Undo. The amber band names what Claude Code has of each: an older copy of files, and no search yet.');
     await a.click('#outcome-undo'); await waitFor(a, `/Undone/.test(document.querySelector('.bands')?.textContent ?? '')`, 15000);
@@ -348,7 +348,7 @@ if (wanted('agents')) {
   if (await a.has('#use-release-notes-claude-cli')) {
     await shot(a, 'agents-choice', 'Turned release-notes off (each copy stays), edited it in Codex, and turned it on again: its copies differ, so it asks which copy every tool uses. Claude Code’s and Copilot CLI’s are the same and share one card; Codex’s quotes the line only it has, the words only it has tinted, and is marked as edited most recently, with when.');
     await a.theme('light'); await shot(a, 'agents-choice-light', 'The same, in the light appearance: the words only Codex’s copy has, tinted.'); await a.theme('dark');
-    if (await a.has('#diff-release-notes')) { await a.click('#diff-release-notes'); await a.settle(); await shot(a, 'agents-choice-read', 'Clicked “Read every copy”: each different prompt under the cards, the same ones shown once.'); await a.click('#diff-release-notes'); await a.settle(); }
+    if (await a.has('#diff-release-notes')) { await a.click('#diff-release-notes'); await a.settle(); await shot(a, 'agents-choice-read', 'Clicked “Read every copy”: each different prompt under the list of choices, the same ones shown once.'); await a.click('#diff-release-notes'); await a.settle(); }
     await a.click('#use-release-notes-claude-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
     await shot(a, 'agents-choice-made', 'Clicked Claude Code’s copy: Codex’s copy is replaced (kept in History), and release-notes is on in all 3 tools; with Undo.');
     await a.click('#outcome-undo'); await waitFor(a, `/Undone/.test(document.querySelector('.bands')?.textContent ?? '')`, 15000);

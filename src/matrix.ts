@@ -764,7 +764,10 @@ function ownWords(skill: ItemRow, tool: Tool, others: Tool[]): Child[] | undefin
   return text && others.some(other => versions[other]?.text !== text) ? [`“${text}”`] : undefined;
 }
 
-/** The decision for differing copies: each choice says what it does, and does it at once. Copies that are the same are one choice. */
+/**
+ * The copy question, for an item whose copies differ: the question and its note, then one row per choice, each saying what it
+ * does, and doing it at once. Copies that are the same are one choice. Its layout at each width is style.css "The copy question".
+ */
 function compareChoices(skill: ItemRow, inFiles = false) {
   const versions = skill.versions ?? {};
   const compared = toolList().filter(tool => comparedTools(skill).includes(tool));
@@ -791,16 +794,19 @@ function compareChoices(skill: ItemRow, inFiles = false) {
     const whose = `${andList(group.map(entry => names[entry]))}’s copy${group.length > 1 ? ' (the same)' : ''}`;
     // A block counts only for a tool it syncs to that can load the skill.
     const block = skill.blocks?.[tool]?.find(entry => !skill.off.includes(entry.tool) && !skill.cannot?.[entry.tool]);
+    // A row's columns: whose copy (and what tells it apart), what it says (and what choosing it does), then Use this copy.
     if (block) return h('button.version.version-blocked', { type: 'button', id: `use-${skill.key}-${tool}`, disabled: true, title: block.reason },
-      h('span.version-head', {}, brandMark(tool, 14), h('strong', {}, `Use ${whose}`)),
-      h('span.version-effect.version-why', {}, icon('circle-alert', 12, 'tone-warning'), block.reason));
+      h('span.version-who', {}, h('span.version-head', {}, brandMark(tool, 14), h('strong', {}, whose))),
+      h('span.version-says', {}, h('span.version-effect.version-why', {}, icon('circle-alert', 12, 'tone-warning'), block.reason)));
     const said = ownWords(skill, tool, compared.filter(entry => !group.includes(entry))) ?? (version ? [`“${version.text}”`] : undefined);
     return h('button.version', { type: 'button', id: `use-${skill.key}-${tool}`, 'aria-label': `Use ${whose}`, disabled: !canWrite(), onclick: () => turnOn(skill, tool) },
-      h('span.version-head', {}, ...group.map(entry => brandMark(entry, 14)), h('strong', {}, whose)),
-      version && metaDiffers ? h('span.version-meta', {}, `${version.lines} · ${version.changed}`) : null,
-      group === latest ? h('span.version-meta.version-latest', {}, icon('pencil-line', 12), `Edited most recently, ${sinceThen(last)}`) : null,
-      said ? h('span.version-text', {}, ...said) : null,
-      h('span.version-effect', {}, effect(group)),
+      h('span.version-who', {},
+        h('span.version-head', {}, ...group.map(entry => brandMark(entry, 14)), h('strong', {}, whose)),
+        version && metaDiffers ? h('span.version-meta', {}, `${version.lines} · ${version.changed}`) : null,
+        group === latest ? h('span.version-meta.version-latest', {}, icon('pencil-line', 12), `Edited most recently, ${sinceThen(last)}`) : null),
+      h('span.version-says', {},
+        said ? h('span.version-text', {}, ...said) : null,
+        h('span.version-effect', {}, effect(group))),
       h('span.version-cta', { 'aria-hidden': 'true' }, 'Use this copy'));
   };
   // Comparing comes before choosing: the full copies side by side, a click from the choices (the Files view shows them already).
@@ -808,7 +814,7 @@ function compareChoices(skill: ItemRow, inFiles = false) {
   const read = inFiles || kind === 'mcp' ? null : kind === 'skills' ? smallAction(every, `diff-${skill.key}`, () => openFiles(skill.key), '.compare-read')
     : smallAction(view.reading === skill.key ? 'Hide the copies' : every, `diff-${skill.key}`, () => { view.reading = view.reading === skill.key ? undefined : skill.key; rerender(); }, '.compare-read');
   const prompts = kind === 'agents' && view.reading === skill.key
-    ? h('div.plugin-file.compare-copies', {}, fileBlocks(`prompt-${skill.key}`, 'Prompt', compared.map(tool => ({ tool, text: versions[tool]?.prompt ?? '' })), holders => `Prompt · ${andList(holders.map(holder => names[holder.tool]))}`, { named: true }))
+    ? h('div.compare-copies', {}, fileBlocks(`prompt-${skill.key}`, 'Prompt', compared.map(tool => ({ tool, text: versions[tool]?.prompt ?? '' })), holders => `Prompt · ${andList(holders.map(holder => names[holder.tool]))}`, { named: true }))
     : null;
   return h('div.compare-block', {},
     h('p.compare-title', {}, icon('diff', 14, 'tone-warning'), h('span', {}, 'Which copy of ', h('strong.item-name', {}, skill.name ?? skill.key), ` should ${compared.length + receiving.length > 2 ? 'every tool' : 'both tools'} use?`)),
