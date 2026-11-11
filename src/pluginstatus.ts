@@ -216,6 +216,12 @@ export const NO_SKILL_SWITCH: Partial<Record<HarnessId, string>> = {
   'claude-cli': 'Claude Code has no switch for a single skill of a plugin. To have only some of its skills there, uninstall the plugin there, then turn on the ones you want: they go in as separate items.',
 };
 
+/**
+ * Whether the tool has a switch, written by partswitch.ts, for one MCP server or one agent of a plugin: a server in every
+ * tool that takes plugins, an agent in Claude Code alone (Copilot CLI has none; Codex loads no plugin's agents).
+ */
+export const hasPartSwitch = (tool: HarnessId, kind: PartKind) => (kind === 'mcp' ? takesPlugins(tool) : kind === 'agent' && tool === 'claude-cli');
+
 /** Why a skill is off that Copilot CLI turned off by its bare name, for every skill so named: not this plugin's own switch. */
 export const offByBareName = (skill: string) => `Can’t be turned on here: Copilot CLI has every skill named “${skill}” turned off, not only this plugin’s. To turn them all on: \`copilot skill enable ${skill}\``;
 /** Why Codex's skill switches aren't edited: its config.toml writes the list as a value, which a `[[skills.config]]` block can't extend. */

@@ -1221,15 +1221,50 @@ async function practiceFlow() {
   for (let tries = 0; tries < 30 && (await a.run(`document.querySelector('#cell-triage-claude-cli')?.dataset.state`)) !== 'plugin'; tries++) await wait(100);
   same('a tool with the plugin itself has the skill through it', await a.run(`[document.querySelector('#cell-triage-claude-cli')?.dataset.state, document.querySelector('#cell-triage-pi-cli')?.dataset.state]`), ['plugin', 'present']);
   const throughTitle = await a.run(`document.querySelector('#cell-triage-claude-cli')?.title`);
-  check('its box says which plugin, and the key names the mark', /^Claude Code has this skill through the plugin issue-tracker \(version 9\.9\.9\), so no separate copy is placed there\. Click to open the plugin’s page\.$/.test(throughTitle ?? '') && /Through a plugin/.test(await a.text('.legend') ?? ''), [throughTitle, await a.text('.legend')]);
+  check('its box says which plugin and what a click does, and the key names the mark', /^Claude Code has this skill through the plugin issue-tracker \(version 9\.9\.9\), so no separate copy is placed there\. Claude Code has no switch for one skill of a plugin\. Click to turn the whole plugin issue-tracker off in Claude Code on Apply all, with its 1 MCP server\.$/.test(throughTitle ?? '') && /Through a plugin/.test(await a.text('.legend') ?? ''), [throughTitle, await a.text('.legend')]);
   await fitsAtMinimum(a, 'a skill a tool has through a plugin');
   await a.shot('skill-through-plugin');
-  await a.click('#nav-mcp');
-  same('so does its MCP server, on MCP servers', await a.run(`[document.querySelector('#cell-issues-claude-cli')?.dataset.state, /through the plugin issue-tracker/.test(document.querySelector('#cell-issues-claude-cli')?.title ?? '')]`), ['plugin', true]);
-  await a.click('#nav-skills');
+  // The box is the item's switch in that tool. Claude Code has none for one skill of a plugin, so the whole plugin goes, and
+  // the change says so before Apply all; Discard takes it back with nothing written.
+  const pluginSettings = join(practice, '.claude/settings.json');
+  const pluginSettingsBefore = existsSync(pluginSettings) ? readFileSync(pluginSettings, 'utf8') : undefined;
+  const pluginSettingsNow = () => (existsSync(pluginSettings) ? readFileSync(pluginSettings, 'utf8') : undefined);
   await a.click('#cell-triage-claude-cli');
+  check('a click on a skill’s box chooses the whole plugin off there, named in the change bar', await a.run(`document.querySelector('#cell-triage-claude-cli')?.dataset.state`) === 'plugin-turns-off'
+    && /the whole plugin issue-tracker off in Claude Code/.test(await a.run(`document.querySelector('#apply')?.title`) ?? '') && pluginSettingsNow() === pluginSettingsBefore, [await a.run(`document.querySelector('#apply')?.title`), await a.text('.toolbar')]);
+  await a.click('#discard');
+  same('Discard takes the choice back', await a.run(`document.querySelector('#cell-triage-claude-cli')?.dataset.state`), 'plugin');
+  // Its MCP server has a switch of its own in Claude Code: the box turns that one server off, by the name Claude Code gives a plugin's server.
+  await a.click('#nav-mcp');
+  same('so does its MCP server, on MCP servers', await a.run(`[document.querySelector('#cell-issues-claude-cli')?.dataset.state, /through the plugin issue-tracker[^]*Click to turn it off in Claude Code on Apply all\.$/.test(document.querySelector('#cell-issues-claude-cli')?.title ?? '')]`), ['plugin', true]);
+  await a.click('#cell-issues-claude-cli');
+  check('a click on the server’s box only chooses it', await a.run(`document.querySelector('#cell-issues-claude-cli')?.dataset.state`) === 'plugin-turns-off' && pluginSettingsNow() === pluginSettingsBefore, await a.text('.toolbar'));
+  await applyAll(a);
+  for (let tries = 0; tries < 40 && (await a.run(`document.querySelector('#cell-issues-claude-cli')?.dataset.state`)) !== 'plugin-off'; tries++) await wait(100);
+  check('Apply all turns that one server off with Claude Code’s own switch, and the page says so', JSON.stringify(JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers) === '[{"serverName":"plugin:issue-tracker:issues"}]'
+    && await a.run(`document.querySelector('#cell-issues-claude-cli')?.dataset.state`) === 'plugin-off' && /MCP server issues turned off in Claude Code/.test(await a.run('document.body.innerText') ?? ''), [pluginSettingsNow(), await a.run(`document.querySelector('#cell-issues-claude-cli')?.title`)]);
+  await a.click('#nav-skills');
+  same('the plugin’s skill is still on there', await a.run(`document.querySelector('#cell-triage-claude-cli')?.dataset.state`), 'plugin');
+  await a.click('#nav-mcp');
+  // The opened row has the same switch where a person's own server has its Enabled switch, and the way to the plugin's page.
+  if (!(await a.exists('#enable-issues-claude-cli'))) await a.click('#open-issues');
+  same('the opened row shows it Disabled in Claude Code', await a.run(`[document.querySelector('#enable-issues-claude-cli')?.getAttribute('aria-checked'), document.querySelector('#enable-issues-claude-cli')?.closest('.tool-switch')?.textContent]`), ['false', 'Disabled']);
+  await fitsAtMinimum(a, 'a server a tool has through a plugin, opened');
+  await a.shot('server-through-plugin-off');
+  await a.click('#enable-issues-claude-cli');
+  await applyAll(a);
+  for (let tries = 0; tries < 40 && (await a.run(`document.querySelector('#cell-issues-claude-cli')?.dataset.state`)) !== 'plugin'; tries++) await wait(100);
+  check('its switch turns it back on: the settings are as they were', (pluginSettingsNow() === pluginSettingsBefore || JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers === undefined) && await a.run(`document.querySelector('#cell-issues-claude-cli')?.dataset.state`) === 'plugin', pluginSettingsNow());
+  await a.click('#outcome-undo-plugin');
+  for (let tries = 0; tries < 40 && (await a.run(`document.querySelector('#cell-issues-claude-cli')?.dataset.state`)) !== 'plugin-off'; tries++) await wait(100);
+  same('Undo turns it off again', [await a.run(`document.querySelector('#cell-issues-claude-cli')?.dataset.state`), JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers?.length], ['plugin-off', 1]);
+  if (pluginSettingsBefore === undefined) rmSync(pluginSettings, { force: true }); else writeFileSync(pluginSettings, pluginSettingsBefore);
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 40 && (await a.run(`document.querySelector('#cell-issues-claude-cli')?.dataset.state`)) !== 'plugin'; tries++) await wait(100);
+  if (!(await a.exists('#enable-issues-claude-cli-page'))) await a.click('#open-issues');
+  await a.click('#enable-issues-claude-cli-page');
   for (let tries = 0; tries < 30 && !(await a.exists('#plugin-back')); tries++) await wait(100);
-  check('and opens the plugin’s page', await a.exists('#plugin-back') && /issue[- ]tracker/i.test(await a.text('.plugin-page h2') ?? ''), await a.text('.plugin-page h2'));
+  check('and its opened row leads to the plugin’s page', await a.exists('#plugin-back') && /issue[- ]tracker/i.test(await a.text('.plugin-page h2') ?? ''), await a.text('.plugin-page h2'));
   if (installsBefore === undefined) rmSync(installRecord); else writeFileSync(installRecord, installsBefore);
   rmSync(join(practice, '.claude/plugins/cache/ck-test-market/issue-tracker/9.9.9'), { recursive: true, force: true });
   await a.click('#header-refresh');

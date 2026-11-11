@@ -551,8 +551,9 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const stopped = await guard(home);
     if (stopped) return { stopped, reports: [] };
     const ctx = await context({ clis: true });
-    // Its marketplace entry says where its skills are, so the installed copy is read as the page reads the marketplace's.
-    const { catalog } = await catalogFor(ctx, source, { counts: false });
+    // Its marketplace entry says where its skills are, so the installed copy is read as the page reads the marketplace's
+    // (none to read where the tool lists no marketplace of that name now).
+    const catalog = source ? (await catalogFor(ctx, source, { counts: false })).catalog : undefined;
     return { reports: withoutFileBytes([await use.setSkill(ctx, marketName, plugin, skill, tool, on, source, catalog?.plugins.find(item => item.name === plugin)?.entry)]) };
   }
 
@@ -648,6 +649,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
 type Handle = (channel: string, work: (...args: unknown[]) => Promise<unknown>) => void;
 const isText = (value: unknown, max = 2000): value is string => typeof value === 'string' && !!value.trim() && value.length <= max;
+/** Where a tool has a plugin's marketplace from, for a switch of something installed: '' where the tool lists no marketplace of that name now. */
+const isSource = (value: unknown): value is string => value === '' || isText(value);
 /** Single parts picked for a tool, each a kind and a name (a name is only ever matched against the plugin's own parts). */
 const isPick = (value: unknown): value is PartsPick => {
   const refs = (list: unknown) => Array.isArray(list) && list.length <= 500 && list.every(ref => ['skill', 'mcp', 'agent'].includes(ref?.kind) && isText(ref?.name, 300));
@@ -692,16 +695,16 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
   // A skill keeps its own name (Codex writes it into config.toml as a string); the engine refuses one Copilot CLI's command line can't take.
   handle('plugins:skill', async (source, marketplace, plugin, skill, tool, on, home) => {
     const ids = toolIds([tool]);
-    return open() && isText(source) && isName(marketplace) && isName(plugin) && isText(skill, 200) && typeof on === 'boolean' && ids.length ? markets.setSkill(source, marketplace, plugin, skill, ids[0]!, on, home) : refused(tool);
+    return open() && isSource(source) && isName(marketplace) && isName(plugin) && isText(skill, 200) && typeof on === 'boolean' && ids.length ? markets.setSkill(source, marketplace, plugin, skill, ids[0]!, on, home) : refused(tool);
   });
   handle('plugins:part', async (source, marketplace, plugin, part, tool, on, home) => {
     const ids = toolIds([tool]);
     const { kind, name } = record(part) ?? {};
-    return open() && isText(source) && isName(marketplace) && isName(plugin) && (kind === 'mcp' || kind === 'agent') && isText(name, 200) && typeof on === 'boolean' && ids.length ? markets.setPart(source, marketplace, plugin, { kind, name }, ids[0]!, on, home) : refused(tool);
+    return open() && isSource(source) && isName(marketplace) && isName(plugin) && (kind === 'mcp' || kind === 'agent') && isText(name, 200) && typeof on === 'boolean' && ids.length ? markets.setPart(source, marketplace, plugin, { kind, name }, ids[0]!, on, home) : refused(tool);
   });
   handle('plugins:whole', async (source, marketplace, plugin, tool, on, home) => {
     const ids = toolIds([tool]);
-    return open() && isText(source) && isName(marketplace) && isName(plugin) && typeof on === 'boolean' && ids.length ? markets.setWhole(source, marketplace, plugin, ids[0]!, on, home) : refused(tool);
+    return open() && isSource(source) && isName(marketplace) && isName(plugin) && typeof on === 'boolean' && ids.length ? markets.setWhole(source, marketplace, plugin, ids[0]!, on, home) : refused(tool);
   });
   return markets;
 }

@@ -13,15 +13,12 @@
 // Text in, text out: the engine (plugins.setPart) reads, writes and reads back.
 import { mcpDisabled, withMcpSwitch } from './mcpswitch.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, type TomlTable } from './textedit.ts';
-import { takesPlugins } from './presence.ts';
+import { hasPartSwitch } from './pluginstatus.ts';
 import { record, withoutBom } from './values.ts';
 import type { HarnessId, PartKind } from './types.ts';
 
 /** One MCP server or agent of a plugin, as the tools' switches name it. */
 export interface PluginPartAt { plugin: string; marketplace: string; kind: PartKind; name: string }
-
-/** Whether the tool has a switch, written here, for one MCP server or one agent of a plugin. */
-export const hasPartSwitch = (tool: HarnessId, kind: PartKind) => (kind === 'mcp' ? takesPlugins(tool) : kind === 'agent' && tool === 'claude-cli');
 
 /** The name Claude Code gives a plugin's server, which its denied list goes by. */
 const claudeServer = ({ plugin, name }: PluginPartAt) => `plugin:${plugin}:${name}`;

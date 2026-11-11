@@ -4,8 +4,7 @@
 // draft (pluginplan), so it runs, reports and undoes like the Plugins page's.
 // Pure functions over plain data; the page draws and applies.
 import { choose, clear, queued, queuedPart, queuedWhole, type PluginDraft, type PluginOp } from './pluginplan.ts';
-import { hasPartSwitch } from './partswitch.ts';
-import { NO_SKILL_SWITCH, noSwitchReason, partWords, samePart } from './pluginstatus.ts';
+import { NO_SKILL_SWITCH, hasPartSwitch, noSwitchReason, partWords, samePart } from './pluginstatus.ts';
 import { plural } from './model.ts';
 import { andList, toolNames as names } from './words.ts';
 import type { HarnessId, InstalledPlugin, PartKind, PluginItem } from './types.ts';
@@ -49,12 +48,12 @@ export function standing(draft: PluginDraft, item: PluginItemAt): { now: boolean
 }
 
 /**
- * Why this item can't be switched here, if it can't: the tool's record of where it has the marketplace from is missing (each
- * switch checks the plugin is still the one from there), the tool's skill switches are in a form not edited here, the
- * skill is held off by a switch that isn't this plugin's own, or Copilot CLI's command line can't take the skill's name.
+ * Why this item can't be switched here, if it can't: the tool's skill switches are in a form not edited here, the skill is
+ * held off by a switch that isn't this plugin's own, or Copilot CLI's command line can't take the skill's name. (A plugin
+ * whose marketplace the tool no longer lists is switched all the same: the tool still loads it, and has no other
+ * marketplace of that name to mistake it for.)
  */
 export function cantSwitch(item: PluginItemAt): string | undefined {
-  if (!item.install.source) return `${names[item.tool]}’s record of where it has the marketplace “${item.install.marketName}” from couldn’t be read, so it can’t be switched here.`;
   if (item.kind !== 'skill' || !ownSwitch(item)) return undefined;
   return item.install.switchesHeld ?? item.install.skillsHeld?.[item.name] ?? noSwitchReason(item.tool, undefined, item.name);
 }

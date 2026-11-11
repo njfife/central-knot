@@ -84,8 +84,12 @@ test('an item with no switch of its own flips the whole plugin, and its words na
   assert.equal(clickWords(new Map(), item(installed('copilot-cli'), 'agent', 'helper')), 'Copilot CLI has no switch for one agent of a plugin. Click to turn the whole plugin full off in Copilot CLI on Apply all, with its 2 skills and 2 MCP servers.');
 });
 
-test('an item says why it can’t be switched: no record of the marketplace, skill rules in a form not edited, a skill held off by a bare name', () => {
-  assert.match(cantSwitch(item(installed('codex-cli', { source: undefined }), 'mcp', 'issues')) ?? '', /couldn’t be read, so it can’t be switched here\.$/);
+test('an item says why it can’t be switched: skill rules in a form not edited, a skill held off by a bare name; a plugin whose marketplace is listed nowhere is switched all the same', () => {
+  const unlisted = installed('codex-cli', { source: undefined, listed: false });
+  assert.equal(cantSwitch(item(unlisted, 'mcp', 'issues')), undefined);
+  const draft: PluginDraft = new Map();
+  click(draft, item(unlisted, 'mcp', 'issues'));
+  assert.deepEqual([...draft.values()].map(op => [op.source, op.action]), [['', 'part-off']]);
   assert.equal(cantSwitch(item(installed('codex-cli', { switchesHeld: 'Inline.' }), 'skill', 'one')), 'Inline.');
   assert.equal(cantSwitch(item(installed('codex-cli', { switchesHeld: 'Inline.' }), 'mcp', 'issues')), undefined, 'a server’s switch is another table');
   assert.equal(cantSwitch(item(installed('copilot-cli', { skillsOff: ['one'], skillsHeld: { one: 'Every skill named one is off.' } }), 'skill', 'one')), 'Every skill named one is off.');
