@@ -161,12 +161,12 @@ export async function undo(box: Box, click: Clicked, context = box.context): Pro
   }
   return out;
 }
-/** What History offers for this agent's entries (historyactions.ts offered), with the click that runs each. */
+/** What History offers for this agent's entries (historyactions.ts offered: each row's action, and an On's Use the kept copy), with the click that runs each. */
 export async function historyActions(box: Box, context = box.context) {
   const events = await readHistory(context);
   return events.filter(event => event.key === 'agent:reviewer').flatMap(event => {
-    const { action } = offered(event, events, tools);
-    return action ? [{ event, label: action.label, run: () => restoreAgent(context, tools, event.id, action.how) }] : [];
+    const { action, also } = offered(event, events, tools);
+    return [...(action ? [action] : []), ...also].map(each => ({ event, label: each.label, how: each.how, run: () => restoreAgent(context, tools, event.id, each.how) }));
   });
 }
 

@@ -115,7 +115,7 @@ test('N2 (Fable): Undo of an On whose copies were all edited by hand since takes
     const put = (await historyOf(box)).find(event => event.kind === 'restored' && on.made.includes(event.id))!;
     const answer = await restoreAgent(box.context, tools, put.id);
     assert.match(answer.stopped ?? '', /changed since, so it stays/);
-    assert.deepEqual([JSON.stringify(await readHistory(box.context)), await filesOf(box), await offered(box)], [history, files, ['Turn off again in Claude Code and Copilot CLI (restored/off)']]);
+    assert.deepEqual([JSON.stringify(await readHistory(box.context)), await filesOf(box), await offered(box)], [history, files, ['Turn off again in Claude Code and Copilot CLI (restored/off)', 'Use the kept copy in Codex (restored/off)']]);
   } finally { await box.cleanup(); }
 });
 
@@ -309,7 +309,7 @@ test('P3 (Opus): a copy that turned up differing only in that tool’s own field
     await toolOff(box, 'codex-cli');
     await write(box, 'codex-cli', codex.replace('description = "Reviews code"\n', 'description = "Reviews code"\nmodel = "mini"\n'));
     const own = (await toolOn(box, 'codex-cli'))!;
-    assert.deepEqual(own.results.map(entry => entry.message), ['It has its own “reviewer” now, which turned up since; that copy stays.']);
+    assert.deepEqual(own.results.map(entry => entry.message), ['It has its own “reviewer” now, which turned up since. That copy stays; the one kept when you turned it off is in History.']);
     await undo(box, own);
     assert.deepEqual([await heldIn(box), /mini/.test((await readOf(box, 'codex-cli'))!)], [['codex-cli'], true]);
     // The row's On: the copy that turned up stays, and History still names the one Off took out (gpt).
@@ -470,7 +470,7 @@ test('An older edit’s Undo waits while a tool’s own copy waits for a choice:
     await write(box, 'codex-cli', codexOwn('Made by hand while it was off.'));
     const hand = await readOf(box, 'codex-cli');
     // On keeps Codex's own copy and asks which copy every tool uses.
-    assert.match((await turnOn(box))!.results.map(entry => entry.message).join(' '), /that copy stays/);
+    assert.match((await turnOn(box))!.results.map(entry => entry.message).join(' '), /That copy stays/);
     const undoEdit = async () => (await historyActions(box)).find(action => action.label === 'Undo edit in all tools')!;
     const before = await filesOf(box);
     assert.equal((await (await undoEdit()).run()).stopped, 'reviewer’s copies differ. Choose which copy every tool uses first.');
@@ -500,5 +500,55 @@ test('An older edit’s Undo waits the same way after Sync here on a copy change
     assert.deepEqual([await readOf(box, 'codex-cli'), (await pass(box)).writes], [hand, 0]);
     await choose(box, 'codex-cli');
     assert.equal((await restoreAgent(box.context, tools, edit.id)).stopped, undefined);
+  } finally { await box.cleanup(); }
+});
+
+test('A copy Off kept stays reachable after On keeps a hand-made copy in its place: Use the kept copy puts it back, before the copy choice and after it, and what it replaces has its own Undo', async () => {
+  const box = await sandbox();
+  try {
+    // A one-way agent: Claude Code's file holds its own settings, which no other copy has.
+    await synced(box, claudeAgent(undefined, fields));
+    const keptFile = await readOf(box, 'claude-cli');
+    await turnOff(box);
+    await write(box, 'claude-cli', claudeAgent('Made by hand while it was off.\n', 'model: haiku\n'));
+    const hand = await readOf(box, 'claude-cli');
+    const on = (await turnOn(box))!;
+    assert.match(on.results.find(entry => entry.harness === 'claude-cli')!.message, /That copy stays; the one kept when you turned it off is in History\.$/);
+    const useKept = async () => (await historyActions(box)).find(action => action.label === 'Use the kept copy in Claude Code');
+    const undoUse = async () => (await historyActions(box)).find(action => action.label === 'Undo in Claude Code');
+    // Before the choice: the kept file goes back whole, the hand-made one goes to History, and its Undo brings that back.
+    assert.equal((await (await useKept())!.run()).stopped, undefined);
+    assert.deepEqual([await readOf(box, 'claude-cli'), await useKept(), (await pass(box)).writes, (await pass(box)).writes], [keptFile, undefined, 0, 0]);
+    assert.equal((await (await undoUse())!.run()).stopped, undefined);
+    assert.deepEqual([await readOf(box, 'claude-cli'), (await pass(box)).writes], [hand, 0]);
+    // The choice the row asks for, either answer: the kept copy is still offered after it.
+    await choose(box, 'copilot-cli');
+    const chosen = await readOf(box, 'claude-cli');
+    assert.match(chosen!, /model: haiku[\s\S]*Be brief/, 'Claude Code’s hand-made file took the chosen prompt and kept its own settings');
+    assert.equal((await (await useKept())!.run()).stopped, undefined);
+    assert.deepEqual([await readOf(box, 'claude-cli'), (await pass(box)).writes, (await factOf(box))?.managed], [keptFile, 0, true]);
+    // One click further: what it replaced comes back with its Undo, and the kept copy is offered again.
+    await (await undoUse())!.run();
+    assert.deepEqual([await readOf(box, 'claude-cli'), !!(await useKept()), (await pass(box)).writes], [chosen, true, 0]);
+  } finally { await box.cleanup(); }
+});
+
+test('Two files of one tool with the same name, description and prompt but other settings are both kept: each Off’s own file goes back', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    await write(box, 'codex-cli', (await readOf(box, 'codex-cli'))!.replace('name = "reviewer"', 'name = "reviewer"\nmodel = "gpt-5"\nsandbox_mode = "read-only"'));
+    await pass(box);
+    const withSettings = await readOf(box, 'codex-cli');
+    await turnOff(box);
+    // Made again by hand without its settings; On keeps that copy, and the next Off keeps it too.
+    await write(box, 'codex-cli', codexOwn('You review code.\nBe brief.'));
+    await turnOn(box);
+    await turnOff(box);
+    await turnOn(box);
+    assert.equal(await readOf(box, 'codex-cli'), codexOwn('You review code.\nBe brief.'));
+    const useKept = (await historyActions(box)).find(action => action.label === 'Use the kept copy in Codex')!;
+    assert.equal((await useKept.run()).stopped, undefined);
+    assert.equal(await readOf(box, 'codex-cli'), withSettings);
   } finally { await box.cleanup(); }
 });

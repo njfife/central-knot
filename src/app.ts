@@ -745,8 +745,8 @@ export const restoreEvent = (eventId: string, how?: RestoreHow) => busy('Restori
     tell(result.stopped ? undefined : { page: state.page, item: past.item, text: result.results.map(entry => entry.message).join(' ') }, result.stopped);
     return;
   }
-  // An agent's Off, turning it on again, Delete everywhere and its Restore: said from what the engine did (historyactions.ts).
-  const words = past && !result.stopped ? afterWords(past, state.history.data ?? [], { results: result.results, homeTools: homeTools() }) : undefined;
+  // An agent's Off, turning it on again, Delete everywhere and its Restore, Use the kept copy: said from what the engine did (historyactions.ts).
+  const words = past && !result.stopped ? afterWords(past, state.history.data ?? [], { results: result.results, homeTools: homeTools(), how }) : undefined;
   if (past && words !== undefined) { tell({ page: state.page, item: past.item, text: words }); flashRow(past.item); return; }
   const item = restored[0]?.item ?? past?.item ?? '';
   const removedFrom = [...new Set(result.results.filter(entry => entry.outcome === 'removed').map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean);

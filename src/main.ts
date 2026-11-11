@@ -1188,10 +1188,12 @@ app.whenReady().then(async () => {
   handle('instructions:undo-base', async (undo, home) => (home === current?.home && isBaseUndo(undo) ? undoBase(context(), await read(), undo) : otherHome));
   /** The page's RestoreHow, checked: anything else is the plain way. */
   const restoreHow = (given: unknown): RestoreHow | undefined => {
-    const how = given as Partial<Record<'use' | 'narrow' | 'tool', unknown>> | null;
+    const how = given as Partial<Record<'use' | 'narrow' | 'tool' | 'keptIn', unknown>> | null;
+    const tool = (value: unknown) => (typeof value === 'string' && value in harnesses ? value as HarnessId : undefined);
     if (typeof how?.use === 'string') return { use: how.use };
     if (how?.narrow === true) return { narrow: true };
-    return typeof how?.tool === 'string' && how.tool in harnesses ? { tool: how.tool as HarnessId } : undefined;
+    if (tool(how?.keptIn)) return { keptIn: tool(how?.keptIn)! };
+    return tool(how?.tool) ? { tool: tool(how?.tool)! } : undefined;
   };
   handle('history:restore', async (eventId, resume, home, given) => (home === current?.home && typeof eventId === 'string'
     ? await (async () => {

@@ -2,8 +2,8 @@
 // them: what each row offers, what it shows once something ended it, and what is said after its click.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { afterWords, entryIs, offered } from '../src/historyactions.ts';
-import { heldTools, offTools } from '../src/historyrules.ts';
+import { afterWords, offered } from '../src/historyactions.ts';
+import { entryIs, heldTools, offTools } from '../src/historyrules.ts';
 import type { DestinationResult, HarnessId, HistoryEvent } from '../src/types.ts';
 
 const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
