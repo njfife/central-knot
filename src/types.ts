@@ -112,6 +112,8 @@ export interface DesktopApi {
   showLog(): Promise<ShownLog>;
   /** Turns automatic plugin updates on or off (pluginupdates.ts). */
   setPluginUpdates(on: boolean): Promise<AppPreferences>;
+  /** Off removes the copy in a tool with no switch for the item (on), or leaves that tool as it is (off). */
+  setRemoveWhenNoSwitch(on: boolean): Promise<AppPreferences>;
   /** Automatic plugin updates: the last check, and the note of what was updated and what couldn't be. */
   pluginUpdates(): Promise<PluginUpdatesView>;
   /** Checks the marketplaces now and updates what is behind, failed updates included; answers once it is done. */
@@ -297,12 +299,18 @@ export interface SkillFacts {
   brokenLink?: Partial<Record<HarnessId, string>>;
   /** Skills, managed: its links or shared copy are back since a take-over (Manage, Replace with managed copies) removed them. */
   outsideBack?: true;
-  /** No tool has a copy any more: it was deleted or removed, and History can put it back (this event) while it keeps it. */
+  /** No tool has a copy any more: it was removed, and History puts it back (this event) while it keeps it. */
   gone?: GoneItem;
+  /**
+   * Each tool whose copy was removed to turn it off (no switch there), with the open History removal that keeps it (the latest
+   * for that tool): turning it on there puts it back. A tool listed here that has a copy again had one turn up since.
+   */
+  removed?: { tool: HarnessId; history: string }[];
 }
 
 /** An item with no copy left, from the History event that took the last one: when, and the event that puts it back. */
-export interface GoneItem { history: string; at: string; kind: 'deleted' | 'removed'; /** Older removals still open in tools the latest one didn't take it from: putting it back restores these too. */ also?: string[] }
+export interface GoneItem { history: string; at: string; /** Older removals still open in tools the latest one didn't take it from: putting it back restores these too. */ also?: string[];
+  /** Turned off (a tool with no switch: its copy removed); History keeps it until it is turned on again or deleted. Otherwise a removal by hand, kept for History's days. */ turnedOff?: true }
 
 /** Why a tool's skill switch can't be used: its settings file, and what is wrong with it ("isn’t valid JSON."). */
 export interface SwitchProblem { file: string; reason: string }
@@ -349,11 +357,16 @@ export interface Change {
   disable?: HarnessId[];
   /** Skills and MCP servers: tools to enable it in again. */
   enable?: HarnessId[];
-  /** Skills: tools whose copy is removed, kept in History for Restore. A managed skill also stops syncing there. */
+  /**
+   * Tools whose copy is removed, kept in History for Restore; a synced item also stops syncing there. Agents: always to turn it
+   * off there (no tool has a switch for a person's own agent); with `everywhere`, Delete everywhere.
+   */
   remove?: HarnessId[];
+  /** Skills: the removal turns it off in a tool with no switch for it (`turnedOff` on its History entry). */
+  turnOff?: boolean;
   /** Agents, with `use`: the Stopped switch of this tool. Only its stopped copy takes the chosen copy; every other copy is left as it is. */
   resumeIn?: HarnessId;
-  /** Skills: Delete everywhere for an unmanaged skill: the removed tools' other copies (in ~/.agents/skills) go too. */
+  /** Delete everywhere: skills, for an unmanaged skill (the removed tools' other copies in ~/.agents/skills go too); agents, for any. */
   everywhere?: boolean;
   /**
    * Skills: the person asked for the skill's copies outside Central Knot (links in tools' folders, the copy in ~/.agents/skills)
@@ -401,12 +414,14 @@ export interface ChoiceBefore {
   record?: { tool: HarnessId; hash?: string }[];
   /** A synced agent's: the tool it was shared from. */
   origin?: HarnessId;
-  /**
-   * An agent's: the tools whose copy had stopped updating. A choice on a synced agent that replaced only such copies gave them
-   * the source's copy again (a Stopped switch).
-   */
+  /** An agent's: the record's copies before the choice, each as it was (one-way and stopped marks too), which its Undo records again. */
+  copies?: AgentCopyRecord[];
+  /** An agent's, in entries written before `copies` was: the tools whose copy had stopped updating. */
   stopped?: HarnessId[];
 }
+
+/** An agent copy as Central Knot's record has it: where it is, its content and whole file, and whether it is one-way or stopped. */
+export interface AgentCopyRecord { tool: HarnessId; file: string; hash: string; bytes: string; oneWay?: boolean; stopped?: boolean }
 
 export interface HistoryEvent {
   id: string;
@@ -418,7 +433,8 @@ export interface HistoryEvent {
    * 'removed': a change removed it from the tools in `losers`, keeping each copy; Restore puts them back there.
    * 'profile': a profile switch (key 'profiles:switch', item the profile's name); Undo switches back.
    * 'took-over': copies outside Central Knot were taken over (`tookOver`); Undo puts the links and the shared copy back.
-   * 'written': Write to Claude Code replaced an MCP entry there that History didn't hold (`previous`); Undo is Undo write. */
+   * 'written': Write to Claude Code replaced an MCP entry there that History didn't hold (`previous`); Undo is Undo write.
+   * A 'removed' entry with `turnedOff` is the record that turns it on again: History keeps it whatever its age while it is open. */
   kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed' | 'profile' | 'took-over' | 'written';
   /** 'took-over': what was replaced, removed and placed, so Undo can put it back exactly. */
   tookOver?: TookOver;
@@ -432,6 +448,13 @@ export interface HistoryEvent {
   stoppedSync?: HarnessId[];
   /** 'removed': the removal took a managed skill's last copies, so it was unmanaged; Restore manages it again. */
   unmanaged?: boolean;
+  /**
+   * 'removed': it turned the item off in tools with no switch for it, removing their copies. Until it is undone (turned on
+   * again) or a later deletion stands, History keeps it whatever its age (manage.ts readHistory), and so its content.
+   */
+  turnedOff?: true;
+  /** 'deleted' by Delete everywhere (agents): its Restore puts each copy back exactly as it was, and an item that was off is off again. */
+  everywhere?: true;
   /** 'added': copies for tools a managed skill syncs to again; Undo removes them and stops syncing there, and the skill stays managed. */
   rejoined?: boolean;
   /**
@@ -449,7 +472,8 @@ export interface HistoryEvent {
     /** 'removed', managed: the content last synced to that copy, so Restore puts its sync record back and an unsynced edit in it spreads. */ synced?: string;
     /** 'removed': a copy outside the tool's own folder (in ~/.agents/skills), put back at this path. */ path?: string;
     /** 'removed': the copy was a link with this text; Restore makes the link again. */ linkTo?: string;
-    /** 'chosen', a skill's or an agent's: when the replaced copy was last edited (its file's time), which its Undo gives it again. */ editedAt?: string }[];
+    /** 'chosen', a skill's or an agent's: when the replaced copy was last edited (its file's time), which its Undo gives it again. */ editedAt?: string;
+    /** 'removed' or 'deleted', an agent's: its copy as the record had it (none: not synced there), recorded again when it is put back. */ record?: AgentCopyRecord }[];
   /** The synced content before this event, to put back on Undo. */
   previous?: string;
   orderProved: boolean;
@@ -794,7 +818,7 @@ export interface SignInPlace { open: string; unopened: string; unchanged: string
  */
 export interface SignIn { on: boolean; available: boolean; reason?: { key: SignInReason; text: string }; place?: SignInPlace }
 /** Central Knot's own settings, shown on its Settings page. `pluginUpdates`: plugins are updated automatically (pluginupdates.ts). */
-export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays; pluginUpdates: boolean; /** A custom build's own lines about itself (bundle.ts aboutBuild); none for the standard app. */ build?: string[] }
+export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays; pluginUpdates: boolean; /** Off removes the copy in a tool with no switch for the item (agents everywhere); History keeps it. On by default. */ removeWhenNoSwitch: boolean; /** A custom build's own lines about itself (bundle.ts aboutBuild); none for the standard app. */ build?: string[] }
 /** One line of what automatic plugin updates did: when, which plugin of which marketplace, and the words. `warn`: it needs reading (a part was left alone). */
 export interface PluginUpdateLine { at: number; source: string; plugin: string; text: string; warn?: true; /** A failed update that is tried again by itself. */ again?: true }
 /**

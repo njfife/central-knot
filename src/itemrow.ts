@@ -62,7 +62,12 @@ export interface ItemRow {
   outsideBack?: boolean;
   /** No tool has a copy any more; History can put it back. */
   gone?: GoneItem;
+  /** Each tool whose copy was removed to turn it off (no switch there), with the History removal that puts it back. */
+  removed?: { tool: Tool; history: string }[];
 }
+
+/** The tools whose copy Off removed (History keeps each): `turnedUp`, those of them with a copy again since; else those with none. */
+export const removedIn = (skill: ItemRow, turnedUp = false) => (skill.removed ?? []).map(entry => entry.tool).filter(tool => (skill.copies[tool] !== undefined) === turnedUp);
 
 /** What one tool has of an item, as its mark on the row shows it. */
 export type Cell = 'synced' | 'will-sync' | 'differs' | 'present' | 'present-differs' | 'absent' | 'cannot' | 'edited' | 'waiting' | 'write-now';

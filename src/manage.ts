@@ -289,15 +289,23 @@ const standingDeletion = (item: RecordItem) => (item.state !== 'shared' ? item.d
 const historyCutoff = (context: ShareContext) => clock(context) - (context.historyDays ?? defaultHistoryDays) * DAY_MS;
 
 /**
- * History, newest last, without events older than the window. The day window is the only retention rule (there is no event
- * cap), and applying it on every read means that once the window shortens, no home's History offers what it can no longer
- * restore. Unreadable history reads as empty; sync never depends on it.
+ * Whether `event` turned an item off and still stands: a removal for a tool with no switch (`turnedOff`), not turned on again
+ * (undone), and no deletion of the item since that stands. Its Off row and its way back On read it, so History keeps it, and
+ * the content it names, whatever its age.
+ */
+export const standingOff = (event: HistoryEvent, events: HistoryEvent[]) => event.kind === 'removed' && !!event.turnedOff && !event.undoneBy
+  && !events.some(later => later.key === event.key && later.kind === 'deleted' && !later.undoneBy && Date.parse(later.at) >= Date.parse(event.at));
+
+/**
+ * History, newest last, without events older than the window, except an Off that still stands (standingOff). The day window is
+ * the only other retention rule (there is no event cap), and applying it on every read means that once the window shortens, no
+ * home's History offers what it can no longer restore. Unreadable history reads as empty; sync never depends on it.
  */
 export async function readHistory(context: ShareContext): Promise<HistoryEvent[]> {
   let events: HistoryEvent[];
   try { const parsed = JSON.parse(await readFile(historyPath(context.home), 'utf8')); events = Array.isArray(parsed?.events) ? parsed.events : []; } catch { return []; }
   const cutoff = historyCutoff(context);
-  return events.filter(entry => Date.parse(entry.at) >= cutoff);
+  return events.filter(entry => Date.parse(entry.at) >= cutoff || standingOff(entry, events));
 }
 
 /** Skills a plugin's parts installed, or a saved parts run can put back (plugin-parts.json and plugin-parts-runs): their kept copies are in this store. */
@@ -490,36 +498,56 @@ export async function manageView(context: ShareContext, { caughtUp = [], notices
   const skills = [...gathered.values()].map(entry => entry.facts).sort(byKey);
   const tools = managedTools(snapshots, record?.tools);
   const writes = Object.fromEntries(await Promise.all(tools.map(async tool => [tool, { to: rootOf(context, tool), alsoReadBy: harnesses[tool].otherReaders, blocked: await rootProblem(context, tool) }] as const)));
-  const gone = goneFacts(await readHistory(context), new Set(gathered.keys()), event => (event.key.includes(':') ? undefined : event.key));
+  const history = await readHistory(context), keyOf = (event: HistoryEvent) => (event.key.includes(':') ? undefined : event.key);
+  for (const [key, removed] of removedFacts(history, new Set(gathered.keys()), keyOf)) Object.assign(gathered.get(key)!.facts, removed);
+  const gone = goneFacts(history, new Set(gathered.keys()), keyOf);
   return { tools, writes, skills, gone, access: await writeAccess(context), gate: await syncGate(context), caughtUp, notices };
 }
 
 /**
- * Items no tool has a copy of any more that History can still put back: for each, its latest deletion or removal, while that
- * is not undone. They show switched Off until History lets them go. `keyOf` reads an event's item key for one kind (undefined:
- * another kind's event); `here` are the keys some tool has now.
+ * Each item's open removals, by key (`keyOf` reads an event's item key for one kind; undefined: another kind's event): the
+ * latest first, each with the tools it hasn't put back yet. A deletion that stands since ends the ones before it: the item was
+ * deleted, not turned off.
  */
-export function goneFacts(events: HistoryEvent[], here: Set<string>, keyOf: (event: HistoryEvent) => string | undefined): SkillFacts[] {
-  const removals = new Map<string, HistoryEvent[]>();
+function openRemovals(events: HistoryEvent[], keyOf: (event: HistoryEvent) => string | undefined): Map<string, { event: HistoryEvent; tools: HarnessId[] }[]> {
+  const open = new Map<string, { event: HistoryEvent; tools: HarnessId[] }[]>();
   for (const event of events) {
     const key = keyOf(event);
-    if (key !== undefined && !here.has(key) && (event.kind === 'deleted' || event.kind === 'removed')) removals.set(key, [...(removals.get(key) ?? []), event]);
+    if (key === undefined) continue;
+    if (event.kind === 'deleted' && !event.undoneBy) open.delete(key);
+    if (event.kind !== 'removed' || event.undoneBy) continue;
+    const tools = event.losers.map(loser => loser.tool).filter(tool => !event.restoredTools?.includes(tool));
+    if (tools.length) open.set(key, [{ event, tools }, ...(open.get(key) ?? [])]);
   }
-  return [...removals].filter(([, list]) => !list.at(-1)!.undoneBy).map(([key, list]) => {
-    const latest = list.at(-1)!;
-    // A deletion puts it back in every tool it synced to. A removal puts it back where it took it from; each other tool's own
-    // latest removal, still open, puts that tool's copy back too.
-    const covered = new Set(latest.losers.map(loser => loser.tool));
-    const also: string[] = [];
-    if (latest.kind === 'removed') for (const older of list.slice(0, -1).reverse()) {
-      if (older.kind !== 'removed') break;
-      const more = older.losers.some(loser => !covered.has(loser.tool));
-      for (const loser of older.losers) covered.add(loser.tool);
-      if (more && !older.undoneBy) also.push(older.id);
-    }
+  return open;
+}
+
+/**
+ * Items no tool has a copy of any more that History can put back: for each, its latest removal still open, which shows it
+ * switched Off (a deletion leaves no row). One that turned it off stands until it is turned on again or deleted; a removal by
+ * hand, for History's days. `here` are the keys some tool has now.
+ */
+export function goneFacts(events: HistoryEvent[], here: Set<string>, keyOf: (event: HistoryEvent) => string | undefined): SkillFacts[] {
+  return [...openRemovals(events, keyOf)].filter(([key]) => !here.has(key)).map(([key, list]) => {
+    const latest = list[0].event;
+    // A removal puts it back where it took it from; each other tool's own latest removal, still open, puts that tool's copy back too.
+    const covered = new Set(list[0].tools);
+    const also = list.slice(1).filter(older => { const more = older.tools.filter(tool => !covered.has(tool)); for (const tool of more) covered.add(tool); return more.length > 0; }).map(older => older.event.id);
     return { key, name: latest.item, description: '', copies: {}, extra: [], managed: false, off: [], cannot: {}, choiceBlocks: {},
-      gone: { history: latest.id, at: latest.at, kind: latest.kind as 'deleted' | 'removed', ...(also.length ? { also } : {}) } };
+      gone: { history: latest.id, at: latest.at, ...(also.length ? { also } : {}), ...(latest.turnedOff ? { turnedOff: true as const } : {}) }, ...offRemoved(list) };
   });
+}
+
+/** Each tool an item's open Off removals hold, with the latest that holds it: what turning it on puts back (SkillFacts.removed). */
+function offRemoved(list: { event: HistoryEvent; tools: HarnessId[] }[]): Pick<SkillFacts, 'removed'> {
+  const removed: NonNullable<SkillFacts['removed']> = [];
+  for (const { event, tools } of list) if (event.turnedOff) for (const tool of tools) if (!removed.some(entry => entry.tool === tool)) removed.push({ tool, history: event.id });
+  return removed.length ? { removed } : {};
+}
+
+/** The open Off removals of each item some tool still has a copy of (SkillFacts.removed), by key. */
+export function removedFacts(events: HistoryEvent[], here: Set<string>, keyOf: (event: HistoryEvent) => string | undefined): Map<string, Pick<SkillFacts, 'removed'>> {
+  return new Map([...openRemovals(events, keyOf)].filter(([key]) => here.has(key)).map(([key, list]) => [key, offRemoved(list)] as const).filter(([, facts]) => facts.removed));
 }
 
 /**
@@ -1354,7 +1382,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
         results.push({ item: name, harness: tool, outcome: 'removed', message: `Removed from ${toolName(tool)} too: it read the copy in ${dirname([...removedPaths].find(path => its.some(copy => copy.directory === path))!)}. Restore it from History.` });
       }
     }
-    if (removed.length) made.push(event({ key: change.key, item: name, kind: 'removed', losers: removed, orderProved: true, stoppedSync: stoppedSync.filter(tool => removed.some(gone => gone.tool === tool)), ...(lastCopies && item.state !== 'shared' ? { unmanaged: true } : {}) }));
+    if (removed.length) made.push(event({ key: change.key, item: name, kind: 'removed', losers: removed, orderProved: true, stoppedSync: stoppedSync.filter(tool => removed.some(gone => gone.tool === tool)), ...(lastCopies && item.state !== 'shared' ? { unmanaged: true } : {}), ...(change.turnOff ? { turnedOff: true as const } : {}) }));
   };
 
   /**

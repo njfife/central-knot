@@ -167,7 +167,7 @@ function send(channel: 'sync:changed' | 'settings:changed' | 'navigate' | 'updat
 // ---------- Running in the background (PLT-03, PLT-04, D-36) ----------
 
 /** The home last opened, so a start at sign-in syncs it again; and whether to start at sign-in (on by default). */
-interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean; /** The first close said once that Central Knot keeps running. */ closeExplained?: boolean; /** Light, dark, or as the system is set (the default). */ appearance?: Appearance; /** How long History keeps things. */ historyDays?: HistoryDays; /** Plugins are updated automatically (pluginupdates.ts). */ pluginUpdates?: boolean; /** An update prepared for the next launch to report on (updater.ts). */ update?: PendingUpdate }
+interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean; /** The first close said once that Central Knot keeps running. */ closeExplained?: boolean; /** Light, dark, or as the system is set (the default). */ appearance?: Appearance; /** How long History keeps things. */ historyDays?: HistoryDays; /** Plugins are updated automatically (pluginupdates.ts). */ pluginUpdates?: boolean; /** Off removes the copy in a tool with no switch for the item (the page decides each Off from it). */ removeWhenNoSwitch?: boolean; /** An update prepared for the next launch to report on (updater.ts). */ update?: PendingUpdate }
 const appSettingsPath = () => join(app.getPath('userData'), 'app-settings.json');
 let appSettings: AppSettings = {};
 /** A file that isn't a JSON object (damaged, or hand-edited) counts as no settings yet: each one falls back to its default. */
@@ -229,7 +229,7 @@ async function changeHistoryWindow(days: HistoryDays): Promise<HistoryWindowSave
 }
 /** Whether plugins are updated automatically: as chosen in Settings, else the default. */
 const pluginUpdatesOn = () => (typeof appSettings.pluginUpdates === 'boolean' ? appSettings.pluginUpdates : PLUGIN_UPDATES_DEFAULT);
-const preferences = (): AppPreferences => ({ appearance: appearance(), signIn: signIn(), historyDays: historyDays(), pluginUpdates: pluginUpdatesOn(),
+const preferences = (): AppPreferences => ({ appearance: appearance(), signIn: signIn(), historyDays: historyDays(), pluginUpdates: pluginUpdatesOn(), removeWhenNoSwitch: appSettings.removeWhenNoSwitch !== false,
   ...(custom ? { build: aboutBuild(custom, app.getVersion(), bundle && { name: custom.marketplace?.displayName ?? bundle.release.marketplace, date: releaseDate(bundle.release) }) } : {}) });
 /**
  * Shows Central Knot's own log in Finder or Explorer, selected; before anything was logged, the folder it goes in. Linux
@@ -1045,6 +1045,12 @@ app.whenReady().then(async () => {
     await pluginUpdatesSwitched(on);
     return preferences();
   });
+  // Only what the next Off does: what earlier ones did stays as it is.
+  handleNow('settings:remove-when-no-switch', async on => {
+    if (typeof on !== 'boolean') throw new Error('Invalid setting.');
+    await saveAppSettings({ removeWhenNoSwitch: on });
+    return preferences();
+  });
   // Updates (PLT-02): checks run outside the queue; the restart waits in it, so it never lands in the middle of a write.
   // A custom build never asks for, or takes, the standard app's releases (ORG-07): it has no updater until it has a location of its own.
   updater = smoke || custom ? undefined : startUpdater({
@@ -1074,7 +1080,7 @@ app.whenReady().then(async () => {
     && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenManaged === undefined || typeof change.seenManaged === 'boolean')
   ).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged,
     ...(change.disable ? { disable: ids(change.disable) } : {}), ...(change.enable ? { enable: ids(change.enable) } : {}), ...(change.remove ? { remove: ids(change.remove) } : {}),
-    ...(change.everywhere === true ? { everywhere: true } : {}), ...(change.takeOver === true ? { takeOver: true } : {}), ...(change.resumeIn && harnessIds.includes(change.resumeIn) ? { resumeIn: change.resumeIn } : {}) }));
+    ...(change.everywhere === true ? { everywhere: true } : {}), ...(change.turnOff === true ? { turnOff: true } : {}), ...(change.takeOver === true ? { takeOver: true } : {}), ...(change.resumeIn && harnessIds.includes(change.resumeIn) ? { resumeIn: change.resumeIn } : {}) }));
   // Marketplaces and plugins: their own module, given only what it needs from here.
   const markets = carriedMarket = registerMarketplaces({ handle, handleNow }, {
     home: () => (current ? { home: current.home, overrides: context().overrides, actual: current.mode === 'actual' } : undefined),

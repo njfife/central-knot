@@ -106,8 +106,8 @@ const install = (tool: HarnessId, extra: Partial<InstalledPlugin> = {}): Install
 const piPart: PartsInstall = { source: '/m', marketName: 'm', plugin: 'issue-tracker', tool: 'pi-cli', at: '', digest: '', items: [{ kind: 'skill', name: 'triage', hash: '' }] };
 const homeOf = (skills: SkillFacts[], pluginItems: InstalledPlugin[], parts: PartsInstall[] = []) => ({ manage: { skills }, mcp: { servers: [] }, agents: { servers: [] }, parts, pluginItems }) as unknown as HomeView;
 
-test('a page whose last skill was just deleted still has a row: the skill with no copy left, switched off', () => {
-  const home = { ...homeOf([], []), manage: { skills: [], gone: [fact('only', {}, { gone: { history: 'e1', at: '', kind: 'deleted' } })] } } as unknown as HomeView;
+test('a page whose last skill was just removed still has a row: the skill with no copy left, switched off', () => {
+  const home = { ...homeOf([], []), manage: { skills: [], gone: [fact('only', {}, { gone: { history: 'e1', at: '' } })] } } as unknown as HomeView;
   assert.deepEqual([rowCount(home, 'skills'), rowCount(homeOf([], []), 'skills')], [1, 0]);
 });
 

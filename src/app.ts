@@ -290,10 +290,11 @@ export interface Click {
   /** An Undo: its result is said for a few seconds, with no Undo of its own. */
   undoing?: boolean;
   /**
-   * An item with no copy left: the History removals to put back first (`ids`, the latest first). Its changes are then made from
-   * the item as it is back (`then`); 'choose' when its copies came back different, so the copy choice waits.
+   * An item turned off by removing copies, or with no copy left: the History removals to put back first (`ids`, the latest
+   * first; `tool`: that tool's copy alone). Its changes are then made from the item as it is back (`then`); 'choose' when its
+   * copies came back different, so the copy choice waits.
    */
-  putBack?: { key: string; ids: string[]; then: () => Change[] | 'choose' };
+  putBack?: { key: string; ids: string[]; tool?: HarnessId; then: () => Change[] | 'choose' };
   /**
    * Its part in the tools that have the item through a plugin (pluginswitch.ts turnEvery): run once the copies' part went
    * through, never beside a click refused as a whole. `said`: what that part brought with it, said when it all worked.
@@ -326,7 +327,7 @@ const send = (kind: Kind, changes: Change[]) => kindPages[kind].send(changes, st
  */
 export const applyClick = (click: Click) => busy(click.putBack ? 'Putting it back…' : 'Applying…', async () => {
   const names = [...click.items, ...click.changes.map(change => change.key), ...(click.putBack ? [click.putBack.key] : [])];
-  const back = click.putBack ? await restoreAll(click.putBack.ids) : undefined;
+  const back = click.putBack ? await restoreAll(click.putBack.ids, click.putBack.tool) : undefined;
   if (back?.stopped) { setHome(await api().refresh()); tell({ page: state.page, items: click.items, warn: true, band: true, text: back.stopped }); return; }
   if (back) setHome(await api().refresh());
   const changes = click.putBack ? click.putBack.then() : click.changes;
@@ -372,13 +373,13 @@ export const applyClick = (click: Click) => busy(click.putBack ? 'Putting it bac
   for (const item of click.items) flashRow(item);
 });
 
-/** Puts back an item's removals from History, the latest first. One that can't go back stops it only if it is the first. */
-async function restoreAll(ids: string[]): Promise<{ results: DestinationResult[]; made: string[]; stopped?: string }> {
+/** Puts back an item's removals from History, the latest first (`tool`: that tool's copy alone). One that can't go back stops it only if it is the first. */
+async function restoreAll(ids: string[], tool?: HarnessId): Promise<{ results: DestinationResult[]; made: string[]; stopped?: string }> {
   const home = state.home!;
   const results: DestinationResult[] = [];
   const made: string[] = [];
   for (const [index, id] of ids.entries()) {
-    const result = await api().restore(id, home.manage.gate.state === 'needs-resume', home.home);
+    const result = await api().restore(id, home.manage.gate.state === 'needs-resume', home.home, tool);
     // An older removal that can't go back (that tool has a copy again) leaves the rest as they are.
     if (result.stopped && !index) return { results, made, stopped: result.stopped };
     results.push(...result.results);
@@ -1257,7 +1258,9 @@ api().onNavigate(page => {
 });
 // Settings changed by a menu, a dialog or the system: main says so after every save and whenever the window comes back, and an
 // open Settings page reads them again, so it never shows (or writes back) a value that is no longer the saved one.
-api().onSettingsChanged(() => { if (state.page === 'settings') void loadSettings(); });
+// The item pages read one of them too (what Off does where a tool has no switch), so they are read on every page.
+api().onSettingsChanged(() => void loadSettings());
+void loadSettings();
 
 // A background pass may change what differs from the git repo too: its page and sidebar count read again soon (no fetch).
 api().onSyncChanged(() => { loadRepoSoon(); void backgroundRefresh(); });

@@ -9,10 +9,11 @@ import { REPLACE_ACTION, andList, byToolOrder, capitalToolsPhrase, kindNouns, or
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
 import { whyReadOnly, otherOwnerSaid, saidInStatusBar, takeOverSync, takeOverTitle, tell, type Click, type Outcome, type Kind, harnessKindShown, convertAgent, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, deleteEverywhereKey, rerender, retireTip, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
-import { getsCopy as getsCopyNext, offPlan, stillOn } from './clickplan.ts';
+import { getsCopy as getsCopyNext, hasSwitch, offPlan, stillOn } from './clickplan.ts';
+import { removesWhenNoSwitch } from './settingspage.ts';
 import type { IconName } from './icons.ts';
 import { byKey, loadedIn, standing } from './roworder.ts';
-import { cellOf, comparedTools, needsCopyChoice, type ItemRow, type Tool } from './itemrow.ts';
+import { cellOf, comparedTools, needsCopyChoice, removedIn, type ItemRow, type Tool } from './itemrow.ts';
 import type { Change, DestinationResult, HomeView, ManageView, Outside, SkillFacts, SyncNotice, HarnessId, PartsInstall, ThroughPlugin } from './types.ts';
 import { market } from './pluginstate.ts';
 import { pluginKey, type PluginDraft } from './pluginplan.ts';
@@ -238,7 +239,7 @@ const ago = (iso: string) => { const said = sinceThen(Date.parse(iso)); return s
 
 /** The real home's facts in the shape the page works with. */
 const fromFacts = (facts: SkillFacts): ItemRow => ({
-  key: facts.key, name: facts.name, description: facts.description, gone: facts.gone, converted: facts.converted, limits: facts.limits, oneWay: facts.oneWay, kept: facts.kept, stopped: facts.stopped, managed: facts.managed, off: facts.off, cannot: facts.cannot, plugin: facts.plugin, held: facts.held, separate: facts.separate, edited: facts.edited,
+  key: facts.key, name: facts.name, description: facts.description, gone: facts.gone, removed: facts.removed, converted: facts.converted, limits: facts.limits, oneWay: facts.oneWay, kept: facts.kept, stopped: facts.stopped, managed: facts.managed, off: facts.off, cannot: facts.cannot, plugin: facts.plugin, held: facts.held, separate: facts.separate, edited: facts.edited,
   blocks: facts.choiceBlocks, hashes: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   // A tool reading two different copies has copies that differ, even if one of them matches the other tool.
   copies: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, facts.extra.some(extra => extra.tool === tool && extra.hash !== copy!.hash) ? `mixed:${tool}` : copy!.hash])
@@ -376,6 +377,13 @@ const removeEverywhere = (key: string) => {
   const shared = shapeOf(base).shared;
   return applyClick({ kind, items: [nameOf(base)], changes: [{ key, managed: false, off: base.off, remove: tools, everywhere: true, seenManaged: false }] as Change[],
     said: deletedText(nameOf(base), tools.map(tool => names[tool]), shared ? [folderOf(shared.path)] : []) });
+};
+
+/** Delete everywhere for an agent: each tool's own copy goes, kept in History, and so does its row, turned off or not. */
+const deleteAgent = (key: string) => {
+  const base = committedOf(key);
+  const tools = holders(base).filter(tool => !base.plugin?.[tool]);
+  return applyClick({ kind, items: [nameOf(base)], changes: [{ ...asItIs(base), remove: tools as HarnessId[], everywhere: true }], said: notIn => deletedText(nameOf(base), tools.filter(tool => !notIn.includes(tool as HarnessId)).map(tool => names[tool]), []) });
 };
 
 /** Whether a tool's mark shows the item off there: its own switch is off, and it has (or gets) a copy. */
@@ -574,13 +582,14 @@ function filesLayout(skill: ItemRow, where: Node[]): { head: Node | null; tail: 
 }
 
 /**
- * Delete everywhere, two clicks, the second naming what goes. Synced: DEL-02's deletion, which sync spreads. Not synced:
- * each copy's removal. History keeps it for Restore either way.
+ * Delete everywhere, two clicks, the second naming what goes: the item leaves every tool and its page at once, and History keeps
+ * it for Restore. Skills: synced, DEL-02's deletion, which sync spreads; not synced, each copy's removal. Agents: every copy, and
+ * an agent turned off with no copy left goes from the page (the only way it does).
  */
 function deleteAction(skill: ItemRow) {
-  if (kind !== 'skills' || skill.gone) return null;
+  if (kind === 'mcp' || (skill.gone && !skill.removed?.length)) return null;
   const base = committedOf(skill.key);
-  if (!base.managed && !removable(base).length) return null;
+  if (kind === 'skills' && !base.managed && !removable(base).length) return null;
   // Quiet until it is armed: the last thing in an item's details, never the first thing the eye lands on.
   if (view.confirmDelete !== skill.key) return smallAction(fromPlugins(skill, kind).length ? 'Delete this separate item…' : 'Delete everywhere…', `delete-${skill.key}`, () => { view.confirmDelete = skill.key; rerender(); }, '.text-danger-quiet', !canWrite());
   // Armed: it runs at once, so it says "now", with a plain way back beside it.
@@ -588,7 +597,7 @@ function deleteAction(skill: ItemRow) {
   return h('span.delete-armed', {},
     smallAction('Cancel', `delete-cancel-${skill.key}`, () => { view.confirmDelete = undefined; rerender(); }),
     // Short, so Cancel and it keep one line in the side panel; the panel names the skill, and the note under them says what else goes.
-    Object.assign(smallAction('Delete from every tool now', `delete-confirm-${skill.key}`, () => { view.confirmDelete = undefined; pinRows(skill.key); void (base.managed ? deleteEverywhereKey(skill.key) : removeEverywhere(skill.key)); }, '.text-danger', !canWrite()),
+    Object.assign(smallAction('Delete from every tool now', `delete-confirm-${skill.key}`, () => { view.confirmDelete = undefined; pinRows(skill.key); void (kind === 'agents' ? deleteAgent(skill.key) : base.managed ? deleteEverywhereKey(skill.key) : removeEverywhere(skill.key)); }, '.text-danger', !canWrite()),
       { title: `Delete ${skill.name ?? skill.key} from every tool now. History keeps it.` }),
     h('span.delete-armed-note', { id: `delete-note-${skill.key}` }, also));
 }
@@ -973,10 +982,13 @@ function helpBand(): HTMLElement | null {
   const key = `ck-help-dismissed-${kind}`;
   if (!list.length || readFlag(key) || state.skillsView === 'files') return null;
   const one = kindNouns[kind].a;
-  const first = kind === 'agents'
-    ? 'Turn an agent on and every tool has it, kept the same. Off only stops syncing: tools can’t switch your own agents off, so their copies stay.'
-    : `Turn ${one} on and every tool has it, kept the same; turn it off and no tool ${kind === 'mcp' ? 'starts' : 'loads'} it. Each click applies at once, with Undo.`;
-  const second = `A switch halfway means not synced yet: each tool keeps its own copy. Open ${one} ${kind === 'agents' ? 'to leave one tool out of it' : 'for each tool’s own switch'}.`;
+  // Where no tool has a switch for it (your agents), Off removes the copies, or (Settings) leaves them on.
+  const unswitched = toolList().some(tool => !hasSwitch(kind, tool));
+  const offWords = !unswitched ? `turn it off and no tool ${kind === 'mcp' ? 'starts' : 'loads'} it`
+    : removesWhenNoSwitch() ? `Off removes its copies from every tool; History keeps them, and turning it on puts them back`
+      : `tools can’t switch your own ${kindNouns[kind].many} off, so Off leaves their copies on (Settings can have it remove them)`;
+  const first = `Turn ${one} on and every tool has it, kept the same${unswitched ? '. ' : '; '}${unswitched ? offWords.charAt(0).toUpperCase() + offWords.slice(1) : offWords}. Each click applies at once, with Undo.`;
+  const second = `A switch halfway means not synced yet: each tool keeps its own copy. Open ${one} for each tool’s own switch.`;
   return h('div.band.band-help', { role: 'note' }, icon('info', 14, 'tone-muted'),
     h('span.band-text.band-lines', {}, h('span', {}, first), h('span.tone-muted', {}, second)),
     closeButton(() => { writeFlag(key); rerender(); }, { id: 'help-dismiss', label: 'Hide this tip' }));
@@ -1363,8 +1375,16 @@ const nameOf = (skill: ItemRow) => skill.name ?? skill.key;
 /** The tools with a copy of it: their own, or one they read in another tool's folder. */
 const holders = (skill: ItemRow) => toolList().filter(tool => skill.copies[tool] !== undefined);
 const getsCopy = (skill: ItemRow, tool: Tool) => getsCopyNext(skill, tool, toolList());
-/** Agents have no switch of their own in each tool (yet): turning one off stops syncing it, and its copies stay on. */
-const hasSwitch = () => kind !== 'agents';
+/** Off everywhere for this item, by the one rule (clickplan.ts offPlan): each tool's switch, or its copy removed where it has none. */
+const planOff = (skill: ItemRow) => offPlan(skill, toolList(), kind, removesWhenNoSwitch());
+/** Tools left on because they have no switch for it and Settings keeps their copies: a note, not a warning. */
+const noSwitchNote = (stays: string[]) => (stays.length ? `Still on in ${toolsPhrase(stays, toolList())}: ${stays.length > 1 ? 'they have' : 'it has'} no switch for ${kindNouns[kind].many}.` : undefined);
+/** What a removal to turn it off did, after where it is off: the copies History keeps, and the way back. */
+const removedWords = (removed: string[], off: string[]) => {
+  const one = removed.length === 1;
+  const which = removed.length === off.length ? `Its ${one ? 'copy is' : 'copies are'} removed` : `Its ${one ? 'copy' : 'copies'} in ${toolsPhrase(removed, toolList())} ${one ? 'is' : 'are'} removed`;
+  return `${which}; History keeps ${one ? 'it' : 'them'}, and turning it on puts ${one ? 'it' : 'them'} back.`;
+};
 /** What a tool does with an item it has on: loads a skill or an agent, starts an MCP server. */
 const uses = () => (kind === 'mcp' ? 'start' : 'load');
 
@@ -1412,9 +1432,10 @@ document.addEventListener('focusin', () => regroupIfLeft(), true);
 const click = (what: Click) => { pinRows(what.changes[0]?.key); void applyClick(what); };
 
 /**
- * Turns it off in every tool it is on in, each with its own switch: the copies stay (a synced one keeps syncing), and no tool
- * uses it. A tool whose switch can't be used is left on, and the result says why. Agents have no such switch: one stops
- * syncing, its copies left as they are.
+ * Turns it off in every tool it is on in, in one click with one Undo: with each tool's own switch where it has one (the copy
+ * stays, and a synced one keeps syncing), and where it has none by removing that tool's copy, kept in History, so turning it on
+ * puts it back (Settings can leave such tools as they are: then it stays on there, said as a note). A tool whose switch can't be
+ * used is left on, and the result says why: never removed to get round it.
  */
 function turnOff(skill: ItemRow) {
   const name = nameOf(skill);
@@ -1422,20 +1443,17 @@ function turnOff(skill: ItemRow) {
   pinRows(skill.key);
   // Where its plugin's item turned off too, said from what happened.
   const pluginsOff = (notIn: HarnessId[]) => plugins.turned.map(item => item.tool).filter(tool => !notIn.includes(tool));
-  if (!hasSwitch()) {
-    const said = (notIn: HarnessId[]) => { const off = pluginsOff(notIn); return `${name} is no longer synced. Its copies stay, and each tool keeps using its own.${off.length ? ` Its plugin’s copy is off in ${toolsPhrase(off, toolList())}.` : ''}`; };
-    mainClick(name, false, [{ ...asItIs(skill), managed: false }], plugins, said, plugins.left);
-    return;
-  }
-  const { disable, held } = offPlan(skill, toolList());
+  const { disable, remove, stays, held } = planOff(skill);
   const also = [stillOn(skill, held, tool => names[tool as Tool], problem => problemText(problem, shownPath)), plugins.left].filter(Boolean).join(' ') || undefined;
-  if (!disable.length && !plugins.ops.length) { nothingChanged(name, plugins, false, also); return; }
-  // Said from what happened: a tool whose switch couldn't be written is not called off.
+  if (!disable.length && !remove.length && !plugins.ops.length) { nothingChanged(name, plugins, false, also, noSwitchNote(stays)); return; }
+  // Said from what happened: a tool whose switch couldn't be written, or whose copy couldn't be removed, is not called off.
   const said = (notIn: HarnessId[]) => {
-    const off = [...disable.filter(tool => !notIn.includes(tool as HarnessId)), ...pluginsOff(notIn)];
-    return off.length ? `${name} is off in ${toolsPhrase(off, toolList())}.${kind === 'mcp' ? ' Its entries are kept.' : ''}` : `${name} couldn’t be turned off.`;
+    const removed = remove.filter(tool => !notIn.includes(tool as HarnessId));
+    const off = [...disable.filter(tool => !notIn.includes(tool as HarnessId)), ...removed, ...pluginsOff(notIn)];
+    return off.length ? `${name} is off in ${toolsPhrase(off, toolList())}.${removed.length ? ` ${removedWords(removed, off)}` : ''}${kind === 'mcp' ? ' Its entries are kept.' : ''}` : `${name} couldn’t be turned off.`;
   };
-  mainClick(name, false, disable.length ? [{ ...asItIs(skill), disable: disable as HarnessId[] }] : [], plugins, said, also);
+  const change: Change = { ...asItIs(skill), ...(disable.length ? { disable: disable as HarnessId[] } : {}), ...(remove.length ? { remove: remove as HarnessId[], turnOff: true } : {}) };
+  mainClick(name, false, disable.length || remove.length ? [change] : [], plugins, said, also, noSwitchNote(stays));
 }
 
 /**
@@ -1516,8 +1534,8 @@ function wholePluginAct(name: string, whole: PluginItemAt[], on: boolean) {
  * A main switch's click that changes nothing: every tool it is still on (or off) in has no switch for one item of a plugin, or
  * one that can't be written. Said plainly, naming the item; where a whole plugin's switch does it, that is offered, with Undo.
  */
-function nothingChanged(name: string, plugins: ReturnType<typeof turnEvery>, on: boolean, also?: string) {
-  const left = [also, plugins.limit].filter(Boolean).join(' ');
+function nothingChanged(name: string, plugins: ReturnType<typeof turnEvery>, on: boolean, also?: string, note?: string) {
+  const left = [also, note, plugins.limit].filter(Boolean).join(' ');
   retireTip(kind);
   // A known limit (no switch for one item) is said plainly, as information; a switch that can't be written is a problem.
   tell({ page: state.page, item: name, warn: !!also, info: !also, band: true, text: `${name}: nothing changed.${left ? ` ${left}` : ` It is ${on ? 'on' : 'off'} already.`}`, act: wholePluginAct(name, plugins.whole, on) });
@@ -1556,17 +1574,28 @@ function resumeOneWay(skill: ItemRow, source: Tool, tool: Tool) {
     } });
 }
 
+/** A tool's own switch where turning it off removed its copy: that copy alone goes back from History, as it was. */
+function putBackHere(skill: ItemRow, tool: Tool) {
+  const name = nameOf(skill), entry = skill.removed?.find(removed => removed.tool === tool);
+  if (!entry) return;
+  pinRows(skill.key);
+  void applyClick({ kind, items: [name], changes: [], said: notIn => (notIn.includes(tool as HarnessId) ? `${name} couldn’t be put back in ${names[tool]}.` : `${name} is on in ${names[tool]} again.`),
+    putBack: { key: skill.key, ids: [entry.history], tool: tool as HarnessId, then: () => [] } });
+}
+
 /**
- * On for an item with no copy left: every removal of it still open goes back from History, then it is on everywhere like
- * any other, or its copy choice opens when what came back differs.
+ * On for an item turned off by removing copies, or with no copy left: every removal of it still open goes back from History,
+ * each copy as it was, then it is on everywhere like any other, or its copy choice opens when what came back differs (a copy
+ * that turned up since in a tool it was removed from is that tool's own now).
  */
 function putItBack(skill: ItemRow) {
   const name = nameOf(skill);
   pinRows(skill.key);
   // MCP: Claude Code gets it back with its own Write step.
   const later = kind === 'mcp' && canHave(skill).includes('claude-cli');
+  const ids = skill.gone ? [skill.gone.history, ...(skill.gone.also ?? [])] : [...new Set((skill.removed ?? []).map(entry => entry.history))];
   void applyClick({ kind, items: [name], changes: [], said: notIn => `${name} is back, and on in ${onPhrase(skill, [...notIn, ...(later ? ['claude-cli'] : [])])}.`, note: later ? CLAUDE_LATER : undefined,
-    putBack: { key: skill.key, ids: [skill.gone!.history, ...(skill.gone!.also ?? [])], then: () => {
+    putBack: { key: skill.key, ids, then: () => {
       const back = committedList().find(entry => entry.key === skill.key && !entry.gone);
       if (!back) return [];
       if (isDiffering(back)) { view.comparing = back.key; return 'choose'; }
@@ -1578,7 +1607,7 @@ function putItBack(skill: ItemRow) {
 /** The switch's click: off everywhere, or on everywhere (put back from History when no copy is left, or after a copy choice). */
 function flip(skill: ItemRow, on: boolean) {
   if (!on) { turnOff(skill); return; }
-  if (skill.gone) { putItBack(skill); return; }
+  if (skill.gone || skill.removed?.length) { putItBack(skill); return; }
   if (isDiffering(skill)) {
     // The question opens under its row; a second click on the switch closes it.
     if (view.comparing === skill.key) { view.comparing = undefined; rerender(); return; }
@@ -1605,8 +1634,10 @@ function itemSwitch(skill: ItemRow, id = `switch-${skill.key}`) {
   const name = nameOf(skill);
   const now = place === 0 ? 'on' : place === 1 ? notSyncedIn(skill) : skill.gone ? 'off, with no copy left' : 'off';
   const asking = isDiffering(skill) && place !== 0;
-  const what = skill.held ? skill.held : place === 0 ? (hasSwitch() ? 'Click to turn it off in every tool.' : 'Click to stop syncing it; its copies stay.')
-    : skill.gone ? 'Click to put it back in every tool.'
+  const plan = place === 0 ? planOff(skill) : undefined;
+  // Where no tool can turn it off and Settings keeps their copies, a click changes nothing: said before it.
+  const what = skill.held ? skill.held : plan ? (plan.stays.length && !plan.disable.length && !plan.remove.length ? `${noSwitchNote(plan.stays)} Settings can have Off remove its copies.` : 'Click to turn it off in every tool.')
+    : skill.gone || skill.removed?.length ? 'Click to put it back in every tool.'
       : asking ? (view.comparing === skill.key ? 'Its copies differ. Click to close the question.' : 'Its copies differ. Click to choose which copy every tool uses.') : 'Click to turn it on in every tool.';
   return toggle({ on: place === 0, mixed: place === 1, label: `${name}: ${now}. ${what}`, onchange: next => flip(skill, next), disabled: !canWrite() || (!!skill.held && place !== 0), id });
 }
@@ -1616,7 +1647,7 @@ type MarkLook = 'on' | 'off' | 'none' | 'differs' | 'waits' | 'kept';
 
 /** What a mark says in the key, by what it is. */
 const keyWords = {
-  on: 'On there', off: 'Off, copy kept', 'plugin-off': 'Off there', profile: 'Off by a profile (see Profiles)', none: 'No copy', differs: 'Copies differ', edited: 'Edited, waiting to spread',
+  on: 'On there', off: 'Off, copy kept', removed: 'Off, copy in History', 'plugin-off': 'Off there', profile: 'Off by a profile (see Profiles)', none: 'No copy', differs: 'Copies differ', edited: 'Edited, waiting to spread',
   waiting: 'Gets the edit when sync runs', 'will-sync': NEXT_SYNC, 'write-now': 'Waits for Write to Claude Code', stopped: 'Stopped updating (edited in that tool)', kept: 'Keeps its own edit',
 } as const;
 
@@ -1647,6 +1678,8 @@ function markOf(skill: ItemRow, tool: Tool): { look: MarkLook; words: string; gl
   const oneWay = on && kind === 'agents' && skill.oneWay ? (skill.oneWay.from === tool ? '; the source: edits flow out from here' : skill.limits?.[tool] ? '; receives one-way: name, description and prompt only' : '') : '';
   const mark = (look: MarkLook, key: keyof typeof keyWords, words: string, glyph?: IconName) => ({ look, key, words: `${names[tool]}: ${words}`, glyph, state: drawn });
   if (drawn === 'cannot') return { ...mark('none', 'none', ''), words: skill.cannot?.[tool] ?? `${names[tool]} can’t ${uses()} it` };
+  // Turned off by removing its copy there: off, with History keeping the copy.
+  if (drawn === 'absent' && removedIn(skill).includes(tool)) return { ...mark('off', 'removed', 'off, its copy removed; History keeps it'), state: 'removed' };
   if (drawn === 'absent') return mark('none', 'none', `no copy${skill.managed && skill.off.includes(tool) ? ', not synced there' : ''}`);
   if (drawn === 'differs' || drawn === 'present-differs') return mark('differs', 'differs', `copies differ${offWords}${reading}`, 'diff');
   if (drawn === 'will-sync') return mark('waits', 'will-sync', NEXT_SYNC.toLowerCase(), 'clock');
@@ -1712,16 +1745,25 @@ function row(skill: ItemRow) {
 function section(role: 'on' | 'not-synced' | 'off' | 'away', list: ItemRow[]) {
   if (!list.length) return null;
   const label = role === 'away' ? `Not in ${names[focus!]}` : placeNames[role === 'on' ? 0 : role === 'not-synced' ? 1 : 2];
-  const note = role === 'not-synced' ? 'each tool keeps its own copy' : role === 'off' ? `no tool ${uses()}s these` : role === 'away' ? 'only other tools have these' : null;
+  const note = role === 'not-synced' ? 'each tool keeps its own copy' : role === 'off' ? 'off in every tool; turning one on puts it back' : role === 'away' ? 'only other tools have these' : null;
   return h('div', { role: 'rowgroup' },
     h(`div.ov-section${role === 'off' || role === 'away' ? '.ov-section-away' : ''}`, { role: 'row', 'data-section': role },
       h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(list.length)), note ? sectionNote(note) : null)),
     [...list].sort(byKey).flatMap(row));
 }
 
+/** Where Off removed its copy (History keeps it), and where a copy turned up since, as the status goes on: '' when neither. */
+function removedStatus(skill: ItemRow): string {
+  const gone = removedIn(skill), back = removedIn(skill, true);
+  return [gone.length ? `removed from ${toolsPhrase(gone, toolList())}; History keeps ${gone.length === 1 ? 'it' : 'them'}` : '',
+    back.length ? `also in ${toolsPhrase(back, toolList())}: turned up since it was turned off` : ''].filter(Boolean).join(' · ');
+}
+
 /** What the item is now, in one line: on and where, not synced and where its copies are, or off. */
 function switchStatus(skill: ItemRow): string {
-  if (skill.gone) return `Off · no copy left: ${skill.gone.kind === 'deleted' ? 'deleted' : 'removed'} ${daysAgo(skill.gone.at)}. Turn it on to put it back from History.`;
+  const them = (count: number) => (count === 1 ? 'it' : 'them');
+  if (skill.gone?.turnedOff) return `Off · removed from ${toolsPhrase(removedIn(skill), toolList())}; History keeps ${them(removedIn(skill).length)}. Turn it on to put ${them(removedIn(skill).length)} back.`;
+  if (skill.gone) return `Off · no copy left: removed ${daysAgo(skill.gone.at)}. Turn it on to put it back from History.`;
   if (skill.held) return `Can’t be synced: ${skill.held}`;
   const on = onIn(skill);
   // Off: its own copies turned off with each tool's switch, and a plugin's item off where a tool has it through the plugin.
@@ -1738,11 +1780,11 @@ function switchStatus(skill: ItemRow): string {
     // The other exception: a copy that keeps its own edit.
     const keeps = kind === 'agents' && skill.oneWay ? (skill.stopped ?? []).filter(tool => !skill.off.includes(tool) && keptEdit(skill, tool)) : [];
     const keeping = keeps.length ? ` · ${andList(keeps.map(tool => names[tool]))} ${keeps.length === 1 ? 'keeps its' : 'keep their'} own edit` : '';
-    return [`${lead}${lead ? 'on' : 'On'} in ${toolsPhrase(loaded, toolList())}${off.length ? ` · off in ${toolsPhrase(off, toolList())}` : ''}${waits}${keeping}`, outsideStatus(skill)].filter(Boolean).join(' · ');
+    return [`${lead}${lead ? 'on' : 'On'} in ${toolsPhrase(loaded, toolList())}${off.length ? ` · off in ${toolsPhrase(off, toolList())}` : ''}${waits}${keeping}`, removedStatus(skill), outsideStatus(skill)].filter(Boolean).join(' · ');
   }
   // Not every tool takes a copy: one that has it through a plugin, or can't use it, is not synced to.
   const every = toolList().some(tool => skill.cannot?.[tool]) ? 'every tool that takes a copy' : 'every tool';
-  if (place === 1) return `${notSyncedIn(skill)}${isDiffering(skill) ? ', with different copies' : ''}. Turn it on to sync it to ${every}.`;
+  if (place === 1) return `${[notSyncedIn(skill), removedStatus(skill)].filter(Boolean).join(' · ')}${isDiffering(skill) ? ', with different copies' : ''}. Turn it on to ${removedIn(skill).length ? 'put it back and ' : ''}sync it to ${every}.`;
   return `Off in ${toolsPhrase(off, toolList())}.${kept ? ` The ${kept === 1 ? 'copy is' : 'copies are'} kept.` : ''}`;
 }
 
@@ -1770,6 +1812,9 @@ function harnessLine(skill: ItemRow, tool: Tool): string {
   // A broken link by its name in that tool's skills folder: a copy written there replaces it.
   const broken = skill.brokenLink?.[tool] !== undefined ? ` Its skills folder has a broken link by this name${skill.brokenLink[tool] ? ` (to ${skill.brokenLink[tool]})` : ''}; a copy written there replaces it.` : '';
   const copy = drawn === 'write-now' ? waitsLine(skill, tool)
+    // Turned off by removing its copy here: History keeps it; this tool's switch, or the row's, puts it back.
+    : !has && removedIn(skill).includes(tool) ? 'Removed here; History keeps it.'
+    : has && removedIn(skill, true).includes(tool) ? 'Turned up here since it was turned off. It is left as it is until you turn it on.'
     : !has ? `${skill.managed && skill.off.includes(tool) ? 'Not synced here.' : getsCopy(skill, tool) ? `${NEXT_SYNC}.` : skill.gone ? 'No copy.' : 'No copy. Turning it on adds it here.'}${broken}`
       // Off with its own switch: said once, the copy kept, whatever else it is.
       : skill.disabled?.includes(tool) ? `Off here${turnedOffByProfile(skill.key, tool) ? ' by a profile' : ''} · ${kind === 'mcp' ? 'entry' : 'copy'} kept`
@@ -1800,8 +1845,9 @@ function waitsLine(skill: ItemRow, tool: Tool): string {
 
 /**
  * One tool's own controls in an item's details, each applied at once: its switch and (skills) Remove; Sync here for a tool a
- * synced item leaves out; an agent's Stop syncing here, and a stopped one-way copy's way back; Claude Code's Write step; the
- * plugin's page, for a tool that has it through one. Each says what it does on hover.
+ * synced item leaves out; an agent's switch, whose Off removes its copy there (History keeps it) and whose On puts it back, and
+ * a stopped one-way copy's way back; Claude Code's Write step; the plugin's page, for a tool that has it through one. Each says
+ * what it does on hover.
  */
 function harnessControls(skill: ItemRow, tool: Tool) {
   const given = throughPluginHere(skill, tool);
@@ -1809,7 +1855,7 @@ function harnessControls(skill: ItemRow, tool: Tool) {
   const through = itemThrough(skill, tool);
   if (through) return pluginItemControls(through, `enable-${skill.key}-${tool}`, () => openPlugin(given!));
   if (given) return h('span.details-tool-actions', {}, smallAction('Plugin’s page', `plugin-${skill.key}-${tool}`, () => openPlugin(given)));
-  if (skill.gone || skill.cannot?.[tool]) return null;
+  if (skill.cannot?.[tool] || (skill.gone && !removedIn(skill).includes(tool))) return null;
   const name = nameOf(skill), where = names[tool];
   const now = asItIs(skill);
   const has = skill.copies[tool] !== undefined;
@@ -1818,37 +1864,34 @@ function harnessControls(skill: ItemRow, tool: Tool) {
   // Left out of sync, with a copy of its own or none: Sync here takes it back in (a copy that differs then asks which copy).
   const rejoin = () => click({ kind, items: [name], changes: [{ ...now, off: now.off.filter(other => other !== tool), ...(skill.disabled?.includes(tool) && !skill.switchProblem?.[tool] ? { enable: [tool as HarnessId] } : {}) }],
     said: notIn => (failedHere(notIn) ? `${name} couldn’t be synced to ${where}.` : `${name} syncs to ${where} again.`) });
-  const syncHere = skill.managed && skill.off.includes(tool) && kind !== 'agents' ? smallAction('Sync here', `sync-here-${skill.key}-${tool}`, rejoin, '', !canWrite()) : null;
+  const syncHere = skill.managed && skill.off.includes(tool) && hasSwitch(kind, tool) ? smallAction('Sync here', `sync-here-${skill.key}-${tool}`, rejoin, '', !canWrite()) : null;
   if (syncHere) syncHere.title = `Sync it to ${where} again${has ? '; if its copy there differs, you choose which copy every tool uses' : ''}`;
   const write = kind === 'mcp' && tool === 'claude-cli' && skill.managed && skill.waits?.includes(tool)
     ? button({ variant: 'outline', size: 'small', label: 'Write to Claude Code', id: `write-claude-row-${skill.key}`, disabled: !canWrite(), onclick: () => void writeClaudeNow([skill.key]) }) : null;
   if (kind === 'agents') {
     const source = skill.oneWay?.from;
     const stopped = !!source && skill.managed && !!skill.stopped?.includes(tool) && !skill.off.includes(tool);
-    // On the source's row, leaving it out amounts to stopping the whole agent: said and done as that.
-    const isSource = skill.managed && source === tool;
-    const synced = skill.managed && !skill.off.includes(tool);
-    // Two tools are the fewest it syncs between: the last but one can't be left out.
-    const fewest = synced && toolList().filter(other => !skill.off.includes(other)).length < 2;
-    const hasSwitch = skill.managed && !isSource && !(synced && (!has || fewest));
-    // A stopped copy's choices: here once its notice is put aside, or once its edit is kept (it can still take the source's copy
-    // again). Its switch, where it has one, is the way to the source's copy: the button for it is then left out.
+    // A stopped copy keeps its edit, or takes the source's copy again with its switch: "Keep its edit" sits beside that switch
+    // once its notice is put aside, and goes once the edit is kept.
     const kept = stopped && keptEdit(skill, tool);
-    const [useSource, keepEdit] = stopped && (kept || state.dismissed.has(`stopped:${skill.key}:${tool}`)) ? stoppedActions(skill, tool, source, '-details') : [];
-    const choices = [hasSwitch ? undefined : useSource, kept ? undefined : keepEdit].filter((action): action is HTMLElement => !!action);
-    const stopAll = isSource && has && synced && !fewest ? smallAction('Stop syncing this agent', `stop-sync-${skill.key}-${tool}`, () => turnOff(skill), '', !canWrite()) : null;
-    if (stopAll) stopAll.title = `${where} is the source: stop syncing ${name} in every tool. Each tool keeps its copy as it is.`;
-    // Each other tool has a Synced switch, as the other pages have On: off leaves it out (its copy stays as it is), on syncs it there again.
-    const leaveOut = () => click({ kind, items: [name], changes: [{ ...now, off: [...now.off, tool as HarnessId] }], said: `${name} no longer syncs to ${where}. Its copy there stays.` });
+    const [, keepEdit] = stopped && !kept && state.dismissed.has(`stopped:${skill.key}:${tool}`) ? stoppedActions(skill, tool, source, '-details') : [];
+    const removed = removedIn(skill).includes(tool);
+    const leftOut = skill.managed && skill.off.includes(tool) && !has && !removed;
+    // The one-way source's copy is the one the others come from: its Off is the whole agent's.
+    const whole = skill.managed && source === tool && Object.keys(skill.limits ?? {}).length > 0;
+    const toolSwitch = (word: string, on: boolean, label: string, onchange: () => void, mixed = false) =>
+      h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, word), toggle({ on, mixed, disabled: !canWrite(), id: `sync-${skill.key}-${tool}`, label, onchange }));
     // A copy that stopped updating (or keeps its edit) sits halfway: its click gives it the source's copy again, its edit kept in History.
-    const paused = stopped ? (kept ? 'Keeps its edit' : 'Stopped') : undefined;
-    const syncSwitch = !hasSwitch ? null
-      : h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, paused ?? (synced ? 'Synced' : 'Not synced')),
-        paused && source ? toggle({ on: false, mixed: true, disabled: !canWrite(), id: `sync-${skill.key}-${tool}`, onchange: () => resumeOneWay(skill, source, tool),
-          label: `${name} in ${where}: ${paused === 'Stopped' ? 'stopped updating, since it was edited there' : 'keeps its own edit'}. Click to give it ${names[source]}’s copy again; the edit is kept in History.` })
-          : toggle({ on: synced, disabled: !canWrite(), id: `sync-${skill.key}-${tool}`, onchange: next => (next ? rejoin() : leaveOut()),
-            label: `${name} in ${where}: ${synced ? 'synced' : 'not synced'}. ${synced ? `Click to leave ${where} out: its copy stays as it is and no longer gets updates.` : `Click to sync it to ${where} again${has ? '; if its copy there differs, you choose which copy every tool uses' : ''}.`}` }));
-    return choices.length || stopAll || syncSwitch ? h('span.details-tool-actions', {}, ...choices, stopAll, syncSwitch) : null;
+    const control = stopped && source ? toolSwitch(kept ? 'Keeps its edit' : 'Stopped', false, `${name} in ${where}: ${kept ? 'keeps its own edit' : 'stopped updating, since it was edited there'}. Click to give it ${names[source]}’s copy again; the edit is kept in History.`, () => resumeOneWay(skill, source, tool), true)
+      // On: Off removes its copy there (no tool has a switch for your own agents), kept in History; Settings can keep it instead.
+      : has ? (!whole && !removesWhenNoSwitch() ? h('span.tool-switch-na', { title: `${where} has no switch for agents, and Settings keeps a tool’s copy when it is turned off.` }, icon('circle-alert', 12, 'tone-muted'), 'No switch here')
+        : toolSwitch(skill.managed && skill.limits?.[tool] ? 'Synced' : 'On', true,
+          whole ? `${name} in ${where}: on, the source. Click to turn it off in every tool; History keeps the copies.` : `${name} in ${where}: on. Click to turn it off there: its copy is removed, and History keeps it.`,
+          () => (whole ? turnOff(skill) : click({ kind, items: [name], changes: [{ ...now, remove: [tool as HarnessId], turnOff: true }], said: notIn => (failedHere(notIn) ? `${name} couldn’t be turned off in ${where}.` : `${name} is off in ${where}. ${removedWords([tool], [tool])}`) }))))
+        // Off: its copy removed there, kept in History, which puts it back.
+        : removed ? toolSwitch('Off', false, `${name} in ${where}: off; History keeps its copy. Click to put it back there.`, () => putBackHere(skill, tool))
+          : leftOut ? toolSwitch('Off', false, `${name} in ${where}: not synced there. Click to sync it to ${where} again.`, rejoin) : null;
+    return keepEdit || control ? h('span.details-tool-actions', {}, keepEdit, control) : null;
   }
   if (!has) return syncHere || write ? h('span.details-tool-actions', {}, write, syncHere) : null;
   // Claude Code waiting for its Write step: its line says how, and Write is its one action.
@@ -1889,7 +1932,7 @@ function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
   const box = (...children: (Child | Child[])[]) => h(`div.compare.details${placement === 'row' ? '' : '.details-bare'}${differs ? '.details-differs' : ''}${kind === 'mcp' ? '.details-mcp' : '.details-grid'}`, { role: 'region', 'aria-label': `Details for ${skill.key}` }, ...children);
   if (differs) return box(close, compareChoices(skill, inFiles));
   const files = kind === 'skills' && !inFiles && !skill.gone ? smallAction('Files and contents', `files-${skill.key}`, () => openFiles(skill.key)) : null;
-  const remove = kind === 'skills' && !inFiles && !skill.gone ? deleteAction(skill) : null;
+  const remove = !inFiles ? deleteAction(skill) : null;
   return box(
     h('div.details-head', {},
       // The Files view's pane says it under the skill's name; the row already shows the description.
@@ -1905,7 +1948,8 @@ function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
     (skill.extra ?? []).some(extra => !extra.outside) ? h('div.details-extra', {}, (skill.extra ?? []).filter(extra => !extra.outside).map(extra => h('p.details-extra-line', {}, icon(extra.same ? 'check' : 'diff', 12, extra.same ? 'tone-muted' : 'tone-warning'),
       `${names[extra.tool]} also reads ${extra.same ? 'the same copy' : 'a different copy'} at `, h('span.details-path', { title: extra.directory }, shownPath(extra.directory)),
       extra.writable ? '' : '. Central Knot does not change it: it is inside a skills folder that is a link or another tool’s.'))) : null,
-    skill.gone ? null : [h('div.details-tools', {}, toolList().map(toolRow)), kind === 'agents' && !skill.stopped?.length ? oneWayNote(skill) : null],
+    // Turned off by removing its copies, each tool's line says where History keeps one, with its switch to put it back there.
+    skill.gone && !skill.removed?.length ? null : [h('div.details-tools', {}, toolList().map(toolRow)), kind === 'agents' && !skill.stopped?.length ? oneWayNote(skill) : null],
     inFiles || kind === 'mcp' ? null : wherePaths(skill),
     kind === 'agents' ? convertBlock(skill) : null,
     skill.converted ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), `Converted from ${names[skill.converted.origin] ?? skill.converted.origin}’s agent “${skill.converted.agent}”, as a one-time copy; ${names[skill.converted.origin] ?? skill.converted.origin} keeps the agent, and edits here never change it. As a skill it has no ${andList(skill.converted.losses)}.`) : null,

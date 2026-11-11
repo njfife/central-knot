@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { clickResults, inverseChanges, offPlan, recordChanged, stillOn, undoOrder } from '../src/clickplan.ts';
+import { clickResults, hasSwitch, inverseChanges, offPlan, recordChanged, stillOn, undoOrder } from '../src/clickplan.ts';
 import type { DestinationResult, HistoryEvent } from '../src/types.ts';
 
 const tools = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'];
@@ -8,12 +8,22 @@ const broken = { file: '~/.codex/config.toml', reason: 'isn’t valid TOML.' };
 
 test('Off turns it off with each tool’s own switch, leaves a tool whose switch file is broken on, and says why for each', () => {
   const item = { copies: { 'claude-cli': 'h', 'copilot-cli': 'h', 'codex-cli': 'h', 'pi-cli': 'h' }, managed: true, off: [], disabled: ['copilot-cli'], switchProblem: { 'codex-cli': broken, 'pi-cli': { ...broken, file: '~/.pi/agent/settings.json', reason: 'isn’t valid JSON.' } } };
-  assert.deepEqual(offPlan(item, tools), { disable: ['claude-cli'], held: ['codex-cli', 'pi-cli'] });
+  assert.deepEqual(offPlan(item, tools, 'skills', true), { disable: ['claude-cli'], held: ['codex-cli', 'pi-cli'], remove: [], stays: [] });
   const names: Record<string, string> = { 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
   assert.equal(stillOn(item, ['codex-cli', 'pi-cli'], tool => names[tool]!, problem => `${problem.file} ${problem.reason}`),
     'Still on in Codex: ~/.codex/config.toml isn’t valid TOML. Still on in Pi: ~/.pi/agent/settings.json isn’t valid JSON.');
   // A synced skill also turns off where sync is about to give it a copy, so it never arrives on.
-  assert.deepEqual(offPlan({ copies: { 'claude-cli': 'h' }, managed: true, off: ['pi-cli'] }, tools).disable, ['claude-cli', 'copilot-cli', 'codex-cli']);
+  assert.deepEqual(offPlan({ copies: { 'claude-cli': 'h' }, managed: true, off: ['pi-cli'] }, tools, 'skills', true).disable, ['claude-cli', 'copilot-cli', 'codex-cli']);
+});
+
+test('Off asks each tool one question, whether it has a switch: where it has none, its copy is removed, or with the setting off left on', () => {
+  // A person's own agent: no tool has a switch. A tool still waiting for its copy has none to remove, and gets none once the rest are off.
+  const agent = { copies: { 'claude-cli': 'h', 'codex-cli': 'h' }, managed: true, off: [], switchProblem: { 'codex-cli': broken } };
+  assert.deepEqual(offPlan(agent, tools, 'agents', true), { disable: [], held: [], remove: ['claude-cli', 'codex-cli'], stays: [] });
+  assert.deepEqual(offPlan(agent, tools, 'agents', false), { disable: [], held: [], remove: [], stays: ['claude-cli', 'codex-cli'] });
+  // A switch problem is about a tool that has a switch: never a reason to remove.
+  assert.deepEqual(offPlan(agent, tools, 'skills', true), { disable: ['claude-cli', 'copilot-cli', 'pi-cli'], held: ['codex-cli'], remove: [], stays: [] });
+  assert.deepEqual([hasSwitch('skills', 'codex-cli'), hasSwitch('mcp', 'claude-cli'), hasSwitch('agents', 'claude-cli')], [true, true, false]);
 });
 
 test('A click reads only its own results out of the pass: another skill held or failing is not its warning, and copies that differ are no failure', () => {

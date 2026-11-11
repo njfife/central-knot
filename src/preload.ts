@@ -38,6 +38,7 @@ const api: DesktopApi = {
   onSettingsChanged: callback => { ipcRenderer.on('settings:changed', () => callback()); },
   showLog: () => ipcRenderer.invoke('settings:show-log'),
   setPluginUpdates: on => ipcRenderer.invoke('settings:plugin-updates', on),
+  setRemoveWhenNoSwitch: on => ipcRenderer.invoke('settings:remove-when-no-switch', on),
   pluginUpdates: () => ipcRenderer.invoke('plugin-updates:view'),
   checkPluginUpdates: () => ipcRenderer.invoke('plugin-updates:check'),
   closePluginUpdates: what => ipcRenderer.invoke('plugin-updates:close', what),

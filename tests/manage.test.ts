@@ -725,8 +725,8 @@ test('Off with a broken switch file turns it off in every other tool and leaves 
     await managedPair(box);
     await writeFile(join(box.home, '.copilot/settings.json'), '{ not json');
     const pair = await facts(box, 'pair');
-    const plan = offPlan(pair, both);
-    assert.deepEqual(plan, { disable: ['claude-cli'], held: ['copilot-cli'] });
+    const plan = offPlan(pair, both, 'skills', true);
+    assert.deepEqual(plan, { disable: ['claude-cli'], held: ['copilot-cli'], remove: [], stays: [] });
     assert.match(stillOn(pair, plan.held, tool => tool, problem => problem.reason) ?? '', /^Still on in copilot-cli: \S/);
     const off = await applyChanges(fast(box), [{ ...manage('pair'), seenManaged: true, disable: plan.disable as HarnessId[] }]);
     assert.deepEqual(off.results.filter(entry => entry.outcome === 'switched').map(entry => entry.harness), ['claude-cli']);
@@ -801,21 +801,29 @@ test('Undo of a copy choice on a skill that was synced once, and isn’t now, le
   } finally { await box.cleanup(); }
 });
 
-test('A skill with no copy left stays on offer, off, while History keeps it; putting it back takes it off that list', async () => {
+test('A skill whose last copies were removed stays on offer, off, while History keeps the removal; a deleted one leaves no row', async () => {
   const box = await sandbox();
   try {
     await managedPair(box);
-    await deleteEverywhere(fast(box), 'pair');
+    await applyChanges(fast(box), [{ ...manage('pair'), seenManaged: true, remove: ['claude-cli', 'copilot-cli'] }]);
     const gone = (await manageView(ctx(box))).gone ?? [];
-    assert.deepEqual(gone.map(item => [item.key, item.name, item.managed, Object.keys(item.copies).length, item.gone?.kind]), [['pair', 'pair', false, 0, 'deleted']]);
+    assert.deepEqual(gone.map(item => [item.key, item.name, item.managed, Object.keys(item.copies).length, item.gone?.turnedOff]), [['pair', 'pair', false, 0, undefined]]);
     assert.equal((await restoreFromHistory(fast(box), gone[0].gone!.history)).stopped, undefined);
     assert.equal(await exists(join(box.home, COPILOT, 'pair/SKILL.md')), true);
     assert.deepEqual((await manageView(ctx(box))).gone, []);
-    // Removing the last copies with Remove is the same: off, with the removal to put back.
+    // Delete everywhere is a deletion: History keeps it, and the page has no row for it.
+    await deleteEverywhere(fast(box), 'pair');
+    assert.deepEqual((await manageView(ctx(box))).gone, []);
+    // A removal by hand lasts History's days: once History lets it go, the skill goes from the list too.
+    await restoreFromHistory(fast(box), (await readHistory(ctx(box))).findLast(event => event.kind === 'deleted')!.id);
     await applyChanges(fast(box), [{ ...manage('pair'), seenManaged: true, remove: ['claude-cli', 'copilot-cli'] }]);
-    assert.deepEqual(((await manageView(ctx(box))).gone ?? []).map(item => item.gone?.kind), ['removed']);
-    // Once History lets the event go, the skill goes from the list too.
+    assert.equal(((await manageView(ctx(box))).gone ?? []).length, 1);
     assert.deepEqual((await manageView(fast(box, { now: () => Date.now() + 400 * DAY_MS }))).gone, []);
+    // One that turned it off (a tool with no switch) stands whatever its age, until it is turned on again or deleted.
+    await restoreFromHistory(fast(box), (await readHistory(ctx(box))).findLast(event => event.kind === 'removed')!.id);
+    await applyChanges(fast(box), [{ ...manage('pair'), seenManaged: true, remove: ['claude-cli', 'copilot-cli'], turnOff: true }]);
+    const later = fast(box, { now: () => Date.now() + 400 * DAY_MS });
+    assert.deepEqual(((await manageView(later)).gone ?? []).map(item => [item.key, item.gone?.turnedOff, item.removed?.map(entry => entry.tool)]), [['pair', true, ['claude-cli', 'copilot-cli']]]);
   } finally { await box.cleanup(); }
 });
 

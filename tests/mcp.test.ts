@@ -127,7 +127,7 @@ test('An edit spreads and Undo reverts it; a deletion spreads once it holds and 
     assert.ok(!(await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('[mcp_servers.tool]'), 'then removed');
     assert.equal(gone.notices?.[0]?.kind, 'deleted');
     // With no copy left it stays on offer, off, until it is put back.
-    assert.deepEqual(((await mcpView(box.context, tools)).gone ?? []).map(server => [server.key, server.gone?.history]), [['tool', gone.notices![0].history]]);
+    assert.deepEqual((await mcpView(box.context, tools)).gone, [], 'a deletion leaves no row');
     assert.equal((await restoreMcp(box.context, tools, gone.notices![0].history)).stopped, undefined);
     assert.deepEqual((await mcpView(box.context, tools)).gone, []);
     assert.equal((await copilotOf(box.home)).tool.command, 'a', 'Restore brought it back');
@@ -734,7 +734,7 @@ test('Undo of a put-back leaves an entry changed since as it is', async () => {
   } finally { await box.cleanup(); }
 });
 
-test('Undo of putting a deleted server back is the deletion again: its entries go, and it is off with no entry left, to put back again', async () => {
+test('Undo of putting a deleted server back is the deletion again: its entries go, with no row left, and History puts it back again', async () => {
   const box = await sandbox();
   try {
     await writeFile(join(box.home, '.copilot/mcp-config.json'), copilotOne('a'));
@@ -748,8 +748,7 @@ test('Undo of putting a deleted server back is the deletion again: its entries g
     assert.equal(again.stopped, undefined, JSON.stringify(again));
     assert.equal((await copilotOf(box.home)).tool, undefined);
     assert.ok(!(await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('[mcp_servers.tool]'));
-    const gone = (await mcpView(box.context, tools)).gone ?? [];
-    assert.deepEqual(gone.map(server => [server.key, server.gone?.history]), [['tool', again.made![0]]]);
+    assert.deepEqual((await mcpView(box.context, tools)).gone, []);
     assert.equal((await restoreMcp(box.context, tools, again.made![0])).stopped, undefined);
     assert.equal((await copilotOf(box.home)).tool.command, 'a', 'and it can be put back again');
   } finally { await box.cleanup(); }

@@ -17,13 +17,27 @@ export interface Switchable {
 export const getsCopy = (item: Switchable, tool: string, tools: readonly string[]) =>
   item.copies[tool] === undefined && item.managed && !item.off.includes(tool) && !item.cannot?.[tool] && tools.some(other => item.copies[other] !== undefined);
 
+/** The kinds of item a page shows. */
+export type ItemKind = 'skills' | 'mcp' | 'agents';
+
 /**
- * Off everywhere: each tool it is on in turns it off with its own switch. A tool whose switch file can't be used is left on
- * (`held`), so the rest still turn off.
+ * Whether a tool has a switch of its own for this kind of item: every tool, for skills and MCP servers (skillswitch.ts,
+ * mcpswitch.ts); none, for a person's own agents. The one question Off asks of each tool.
  */
-export function offPlan(item: Switchable, tools: readonly string[]): { disable: string[]; held: string[] } {
+export const hasSwitch = (kind: ItemKind, _tool: string) => kind !== 'agents';
+
+/**
+ * Off everywhere: each tool it is on in turns it off with its own switch (`disable`). A tool with no switch for it has its copy
+ * removed, kept in History (`remove`), when the setting allows (`removeWhenNoSwitch`); otherwise it is left as it is, still on
+ * (`stays`). A tool whose switch file can't be used is left on too (`held`): never removed to get round it. The rest still turn off.
+ */
+export function offPlan(item: Switchable, tools: readonly string[], kind: ItemKind, removeWhenNoSwitch: boolean): { disable: string[]; remove: string[]; stays: string[]; held: string[] } {
   const on = tools.filter(tool => (item.copies[tool] !== undefined || getsCopy(item, tool, tools)) && !item.disabled?.includes(tool) && !item.cannot?.[tool]);
-  return { disable: on.filter(tool => !item.switchProblem?.[tool]), held: on.filter(tool => item.switchProblem?.[tool]) };
+  const switched = on.filter(tool => hasSwitch(kind, tool)), unswitched = on.filter(tool => !hasSwitch(kind, tool));
+  // A tool still waiting for its copy has none to remove: once the others are off, sync gives it none.
+  const removable = unswitched.filter(tool => item.copies[tool] !== undefined);
+  return { disable: switched.filter(tool => !item.switchProblem?.[tool]), held: switched.filter(tool => item.switchProblem?.[tool]),
+    remove: removeWhenNoSwitch ? removable : [], stays: removeWhenNoSwitch ? [] : removable };
 }
 
 /** Each tool left on, with its reason, the tools with the same reason together ("Still on in Codex and Pi: …"). */

@@ -11,6 +11,8 @@ import { checkPluginsNow, checkedWords, pluginUpdates } from './pluginupdateview
 
 /** The settings as last read from the main process; undefined until the page has loaded them. */
 let current: AppPreferences | undefined;
+/** Whether Off removes the copy in a tool with no switch for the item (the setting; on until the settings are read). */
+export const removesWhenNoSwitch = () => current?.removeWhenNoSwitch !== false;
 
 /**
  * A line beneath a row: a note on what its last action did (note: where it went; info: what is still to come), why it failed,
@@ -22,7 +24,7 @@ interface RowMessage { text: string; detail?: string; tone: 'note' | 'info' | 'f
 /** What each row's last action said, by row id. */
 const messages = new Map<string, RowMessage>();
 /** What each row shows of the settings, so a message can say which value it is about. */
-const shownBy: Record<string, (settings: AppPreferences) => unknown> = { 'sign-in': settings => settings.signIn, appearance: settings => settings.appearance, history: settings => settings.historyDays, 'plugin-updates': settings => settings.pluginUpdates };
+const shownBy: Record<string, (settings: AppPreferences) => unknown> = { 'sign-in': settings => settings.signIn, appearance: settings => settings.appearance, history: settings => settings.historyDays, 'plugin-updates': settings => settings.pluginUpdates, 'remove-when-no-switch': settings => settings.removeWhenNoSwitch };
 const shownIn = (row: string, settings: AppPreferences | undefined) => settings && shownBy[row] ? JSON.stringify(shownBy[row](settings)) : undefined;
 /** A message about a value its row no longer shows was settled by a newer read (put right in the system, changed from a menu). */
 const settled = (row: string, message: RowMessage | undefined) => message?.about !== undefined && message.about !== shownIn(row, current);
@@ -342,6 +344,21 @@ function pluginUpdatesRow(): HTMLElement {
     notice);
 }
 
+/** Turns removing a copy where a tool has no switch on or off. Only the next Off goes by it: nothing done already changes. */
+async function chooseRemoveWhenNoSwitch(on: boolean): Promise<void> {
+  const kept = current ? `Off still ${current.removeWhenNoSwitch ? 'removes the copy where a tool has no switch' : 'leaves tools with no switch as they are'}.` : '';
+  if (await save('remove-when-no-switch', () => window.centralKnot.setRemoveWhenNoSwitch(on), kept)) announce(on ? 'From now on, Off removes the copy where a tool has no switch; History keeps it.' : 'From now on, Off leaves tools with no switch as they are, and the item stays on there. Nothing already turned off changes.', true);
+}
+
+/** Whether Off removes an item's copy in a tool that has no switch for it (today: your agents, in every tool). */
+function removeWhenNoSwitchRow(): HTMLElement {
+  return settingRow('remove-when-no-switch', 'When a tool can’t turn something off, remove its copy there',
+    'History keeps it; turning it on puts it back. No tool has a switch for your own agents, so this is how an agent turns off. Turned off here, those tools keep their copy and it stays on there.',
+    // Unchangeable until main has said, so a click never acts on a guess.
+    toggle({ on: !!current?.removeWhenNoSwitch, label: 'When a tool can’t turn something off, remove its copy there', onchange: chosen => void chooseRemoveWhenNoSwitch(chosen), disabled: !current, id: 'remove-when-no-switch',
+      attrs: { 'aria-describedby': 'setting-remove-when-no-switch-hint', title: null } }));
+}
+
 /** A custom build's own lines about itself (what it is, and that it doesn't update itself), where the standard app has Updates. */
 function buildRow(): HTMLElement | null {
   const lines = current?.build;
@@ -372,6 +389,7 @@ export function settingsPage(): HTMLElement {
             tabindex: (chosen ?? 'system') === choice.value ? '0' : '-1', onclick: () => void chooseAppearance(choice.value),
           }, icon(choice.glyph, 20), h('span', {}, choice.label))))),
       updatesRow(), buildRow()),
+    settingsSection('items', 'Skills, MCP servers and agents', removeWhenNoSwitchRow()),
     settingsSection('plugins', 'Plugins', pluginUpdatesRow()),
     settingsSection('history', 'History',
       settingRow('history', 'Keep history for', 'Changes and deleted items stay in History, ready to restore, for this long.',
