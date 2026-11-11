@@ -3,7 +3,8 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, readlink, realpath, rename, stat, symlink, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { DAY_MS, defaultHistoryDays, deletedSince, keptOff } from './model.ts';
+import { DAY_MS, defaultHistoryDays } from './model.ts';
+import { deletedSince, keptOff, offTools } from './historyrules.ts';
 import { configRoot, harnessIds, harnesses, writeRoot } from './harnesses.ts';
 import { managedTools, presentTools } from './presence.ts';
 import {
@@ -17,7 +18,7 @@ import { notPutBack } from './outsidewords.ts';
 import { throughPlugins } from './plugins.ts';
 import { comparableText } from './pluginstatus.ts';
 import { ALREADY_AS_IT_WAS, type SwitchRecord } from './types.ts';
-import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, HistoryPrune, ManageView, Outside, Skill, SkillFacts, Snapshot, SyncNotice, ToolCopy, TookOver } from './types.ts';
+import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, HistoryPrune, ManageView, Outside, RestoreHow, Skill, SkillFacts, Snapshot, SyncNotice, ToolCopy, TookOver } from './types.ts';
 import { byKey } from './roworder.ts';
 import { undoChoice as undoChoiceWith } from './choiceundo.ts';
 
@@ -297,7 +298,10 @@ export async function readHistory(context: ShareContext): Promise<HistoryEvent[]
   let events: HistoryEvent[];
   try { const parsed = JSON.parse(await readFile(historyPath(context.home), 'utf8')); events = Array.isArray(parsed?.events) ? parsed.events : []; } catch { return []; }
   const cutoff = historyCutoff(context);
-  return events.filter(entry => Date.parse(entry.at) >= cutoff || keptOff(entry, events, cutoff));
+  // An Off kept past the window keeps every later entry of its item too: they say which of its tools it still holds.
+  const since = new Map<string, number>();
+  events.forEach((entry, index) => { if (!since.has(entry.key) && keptOff(entry, events, cutoff)) since.set(entry.key, index); });
+  return events.filter((entry, index) => Date.parse(entry.at) >= cutoff || index >= (since.get(entry.key) ?? Infinity));
 }
 
 /** Skills a plugin's parts installed, or a saved parts run can put back (plugin-parts.json and plugin-parts-runs): their kept copies are in this store. */
@@ -491,7 +495,7 @@ export async function manageView(context: ShareContext, { caughtUp = [], notices
   const tools = managedTools(snapshots, record?.tools);
   const writes = Object.fromEntries(await Promise.all(tools.map(async tool => [tool, { to: rootOf(context, tool), alsoReadBy: harnesses[tool].otherReaders, blocked: await rootProblem(context, tool) }] as const)));
   const history = await readHistory(context), keyOf = (event: HistoryEvent) => (event.key.includes(':') ? undefined : event.key);
-  for (const [key, removed] of removedFacts(history, new Set(gathered.keys()), keyOf)) Object.assign(gathered.get(key)!.facts, removed);
+  for (const [key, removed] of heldOffFacts(history, new Set(gathered.keys()), keyOf)) Object.assign(gathered.get(key)!.facts, removed);
   const gone = goneFacts(history, new Set(gathered.keys()), keyOf);
   return { tools, writes, skills, gone, access: await writeAccess(context), gate: await syncGate(context), caughtUp, notices };
 }
@@ -506,7 +510,7 @@ function openRemovals(events: HistoryEvent[], keyOf: (event: HistoryEvent) => st
   for (const event of events) {
     const key = keyOf(event);
     if (key === undefined || event.kind !== 'removed' || event.undoneBy || deletedSince(event, events)) continue;
-    const tools = event.losers.map(loser => loser.tool).filter(tool => !event.restoredTools?.includes(tool));
+    const tools = event.turnedOff ? offTools(event, events) : event.losers.map(loser => loser.tool).filter(tool => !event.restoredTools?.includes(tool));
     if (tools.length) open.set(key, [{ event, tools }, ...(open.get(key) ?? [])]);
   }
   return open;
@@ -524,20 +528,20 @@ export function goneFacts(events: HistoryEvent[], here: Set<string>, keyOf: (eve
     const covered = new Set(list[0].tools);
     const also = list.slice(1).filter(older => { const more = older.tools.filter(tool => !covered.has(tool)); for (const tool of more) covered.add(tool); return more.length > 0; }).map(older => older.event.id);
     return { key, name: latest.item, description: '', copies: {}, extra: [], managed: false, off: [], cannot: {}, choiceBlocks: {},
-      gone: { history: latest.id, at: latest.at, ...(also.length ? { also } : {}), ...(latest.turnedOff ? { turnedOff: true as const } : {}) }, ...offRemoved(list) };
+      gone: { history: latest.id, at: latest.at, ...(also.length ? { also } : {}), ...(latest.turnedOff ? { turnedOff: true as const } : {}) }, ...heldOffOf(list) };
   });
 }
 
-/** Each tool an item's open Off removals hold, with the latest that holds it: what turning it on puts back (SkillFacts.removed). */
-function offRemoved(list: { event: HistoryEvent; tools: HarnessId[] }[]): Pick<SkillFacts, 'removed'> {
-  const removed: NonNullable<SkillFacts['removed']> = [];
-  for (const { event, tools } of list) if (event.turnedOff) for (const tool of tools) if (!removed.some(entry => entry.tool === tool)) removed.push({ tool, history: event.id });
-  return removed.length ? { removed } : {};
+/** Each tool an item's open Off removals hold (Rule A), with the latest that holds it: what turning it on puts back (SkillFacts.heldOff). */
+function heldOffOf(list: { event: HistoryEvent; tools: HarnessId[] }[]): Pick<SkillFacts, 'heldOff'> {
+  const heldOff: NonNullable<SkillFacts['heldOff']> = [];
+  for (const { event, tools } of list) if (event.turnedOff) for (const tool of tools) if (!heldOff.some(entry => entry.tool === tool)) heldOff.push({ tool, history: event.id });
+  return heldOff.length ? { heldOff } : {};
 }
 
-/** The open Off removals of each item some tool still has a copy of (SkillFacts.removed), by key. */
-export function removedFacts(events: HistoryEvent[], here: Set<string>, keyOf: (event: HistoryEvent) => string | undefined): Map<string, Pick<SkillFacts, 'removed'>> {
-  return new Map([...openRemovals(events, keyOf)].filter(([key]) => here.has(key)).map(([key, list]) => [key, offRemoved(list)] as const).filter(([, facts]) => facts.removed));
+/** The open Off removals of each item some tool still has a copy of (SkillFacts.heldOff), by key. */
+export function heldOffFacts(events: HistoryEvent[], here: Set<string>, keyOf: (event: HistoryEvent) => string | undefined): Map<string, Pick<SkillFacts, 'heldOff'>> {
+  return new Map([...openRemovals(events, keyOf)].filter(([key]) => here.has(key)).map(([key, list]) => [key, heldOffOf(list)] as const).filter(([, facts]) => facts.heldOff));
 }
 
 /**
@@ -1548,7 +1552,7 @@ export function restorableChoices(event: HistoryEvent): { tool: HarnessId; hash:
 }
 
 /** Restore or Undo from History: a new revision with the kept content, written to every tool the skill syncs to (DEL-03). */
-export async function restoreFromHistory(context: ShareContext, eventId: string, resume = false, choice?: string): Promise<ApplyResult> {
+export async function restoreFromHistory(context: ShareContext, eventId: string, resume = false, how?: RestoreHow): Promise<ApplyResult> {
   try {
     const start = await explicitStart(context, resume);
     if (start.stopped || !start.record) return { stopped: start.stopped, results: [], harnessWrites: 0 };
@@ -1562,9 +1566,10 @@ export async function restoreFromHistory(context: ShareContext, eventId: string,
     if (past?.kind === 'took-over') return await undoTookOver(context, record, history, past);
     if (past?.kind === 'switched') return await undoSwitched(context, history, past);
     if (past?.kind === 'removed') return await restoreRemoved(context, record, history, past);
-    if (past?.kind === 'chosen' && choice === 'narrow') return await undoChoice(context, record, history, past);
+    if (past?.kind === 'chosen' && how && 'narrow' in how) return await undoChoice(context, record, history, past);
     // A chosen loser must be one this event can put back.
-    const hash = past && (choice ? restorableChoices(past).find(entry => entry.hash === choice)?.hash : restorableHash(past));
+    const use = how && 'use' in how ? how.use : undefined;
+    const hash = past && (use ? restorableChoices(past).find(entry => entry.hash === use)?.hash : restorableHash(past));
     const item = past && record.items[past.key];
     if (!past || !hash || !item) return { stopped: 'That change can’t be restored.', results: [], harnessWrites: 0 };
     if (past.undoneBy) return { stopped: 'That change was already undone.', results: [], harnessWrites: 0 };

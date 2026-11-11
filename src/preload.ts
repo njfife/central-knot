@@ -49,7 +49,7 @@ const api: DesktopApi = {
   installUpdate: () => ipcRenderer.invoke('updates:install'),
   restartToUpdate: () => ipcRenderer.invoke('updates:restart'),
   onUpdatesChanged: callback => { ipcRenderer.on('updates:changed', (_event, view) => callback(view)); },
-  restore: (eventId, resume, home, choice) => ipcRenderer.invoke('history:restore', eventId, resume, home, choice),
+  restore: (eventId, resume, home, how) => ipcRenderer.invoke('history:restore', eventId, resume, home, how),
   deleteEverywhere: (key, resume, home) => ipcRenderer.invoke('manage:delete-everywhere', key, resume, home),
   plugins: (fresh, readId) => ipcRenderer.invoke('plugins:view', fresh, readId),
   addMarketplace: source => ipcRenderer.invoke('plugins:add', source),

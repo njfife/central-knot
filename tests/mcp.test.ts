@@ -474,7 +474,7 @@ test('Undo of an MCP copy choice puts each replaced entry back in its own tool a
     const chosen = history.find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
     assert.deepEqual(chose.made?.map(id => history.find(event => event.id === id)?.kind).sort(), ['added', 'chosen']);
     assert.match(await readFile(join(box.home, '.pi/agent/mcp.json'), 'utf8'), /"x"/);
-    assert.equal((await restoreMcp(box.context, four, chosen.id, 'narrow')).stopped, undefined);
+    assert.equal((await restoreMcp(box.context, four, chosen.id, { narrow: true })).stopped, undefined);
     assert.equal(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), codexBefore, 'Codex has its own entry back');
     assert.equal((await copilotOf(box.home)).tool.command, 'x');
     assert.ok(!(await readFile(join(box.home, '.pi/agent/mcp.json'), 'utf8')).includes('"tool"'), 'the added Pi entry is gone');
@@ -501,10 +501,10 @@ test('Undo of an MCP copy choice whose pass added nothing, after an earlier On, 
     // An entry changed since stops the Undo before anything is written.
     const piChosen = await readFile(join(box.home, '.pi/agent/mcp.json'), 'utf8');
     await writeFile(join(box.home, '.pi/agent/mcp.json'), JSON.stringify({ mcpServers: { tool: { command: 'changed since' } } }));
-    assert.match((await restoreMcp(box.context, four, chosen.id, 'narrow')).stopped ?? '', /changed since, so nothing was undone/);
+    assert.match((await restoreMcp(box.context, four, chosen.id, { narrow: true })).stopped ?? '', /changed since, so nothing was undone/);
     assert.equal(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), codex);
     await writeFile(join(box.home, '.pi/agent/mcp.json'), piChosen);
-    const undone = await restoreMcp(box.context, four, chosen.id, 'narrow');
+    const undone = await restoreMcp(box.context, four, chosen.id, { narrow: true });
     assert.equal(undone.stopped, undefined, JSON.stringify(undone));
     assert.deepEqual(undone.results.map(entry => [entry.harness, entry.outcome]), [['pi-cli', 'written']]);
     assert.match(await readFile(join(box.home, '.pi/agent/mcp.json'), 'utf8'), /pi-own/);
@@ -533,7 +533,7 @@ test('Undo of a choice on a synced server whose Claude Code entry is behind leav
     await writeFile(join(box.home, '.pi/agent/mcp.json'), JSON.stringify({ mcpServers: { tool: { command: 'pi-own' } } }));
     const chose = await applyMcp(box.context, four, [{ key: 'tool', managed: true, off: [], seenManaged: true, use: 'copilot-cli' }]);
     const chosen = (await readHistory(box.context)).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
-    const undone = await restoreMcp(box.context, four, chosen.id, 'narrow');
+    const undone = await restoreMcp(box.context, four, chosen.id, { narrow: true });
     assert.equal(undone.stopped, undefined, JSON.stringify(undone));
     assert.match(await readFile(join(box.home, '.pi/agent/mcp.json'), 'utf8'), /pi-own/);
     const codex = await readFile(join(box.home, '.codex/config.toml'), 'utf8');
@@ -567,7 +567,7 @@ test('Undo of a choice leaves Claude Code’s own entry off the record, as befor
     const before = await recordOfTool(box.home);
     const chose = await applyMcp(box.context, four, [{ key: 'tool', managed: true, off: [], seenManaged: true, use: 'copilot-cli' }]);
     const chosen = (await readHistory(box.context)).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
-    assert.equal((await restoreMcp(box.context, four, chosen.id, 'narrow')).stopped, undefined);
+    assert.equal((await restoreMcp(box.context, four, chosen.id, { narrow: true })).stopped, undefined);
     assert.deepEqual(await recordOfTool(box.home), before, 'the record is as before the choice');
     assert.deepEqual((await mcpView(box.context, four)).claudePending, [], 'Claude Code is not waiting for Write');
     const plain = await applyMcp(box.context, four, []);
@@ -597,7 +597,7 @@ test('Undo of a choice keeps an edit made in Claude Code while it waited an edit
       if (undone) {
         const chose = await applyMcp(box.context, four, [{ key: 'tool', managed: true, off: [], seenManaged: true, use: 'copilot-cli' }]);
         const chosen = (await readHistory(box.context)).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
-        assert.equal((await restoreMcp(box.context, four, chosen.id, 'narrow')).stopped, undefined);
+        assert.equal((await restoreMcp(box.context, four, chosen.id, { narrow: true })).stopped, undefined);
         assert.deepEqual(await recordOfTool(box.home), before, 'the record is as before the choice');
         assert.deepEqual((await mcpView(box.context, four)).claudePending, []);
       }
@@ -624,7 +624,7 @@ test('Undo of choosing a newcomer’s own entry puts the synced entries back on 
     const chose = await applyMcp(box.context, four, [{ key: 'tool', managed: true, off: ['claude-cli'], seenManaged: true, use: 'pi-cli' }]);
     const chosen = (await readHistory(box.context)).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
     assert.deepEqual(chosen.losers.map(loser => loser.tool).sort(), ['codex-cli', 'copilot-cli']);
-    assert.equal((await restoreMcp(box.context, four, chosen.id, 'narrow')).stopped, undefined);
+    assert.equal((await restoreMcp(box.context, four, chosen.id, { narrow: true })).stopped, undefined);
     assert.equal((await copilotOf(box.home)).tool.command, 'x');
     // An edit in Copilot CLI, with Pi left out: it reaches Codex as an edit.
     await writeFile(join(box.home, '.copilot/mcp-config.json'), copilotOne('y'));
@@ -647,7 +647,7 @@ test('Undo of an MCP choice that also synced to a left-out tool again takes that
     const chose = await applyMcp(box.context, four, [{ key: 'tool', managed: true, off: ['claude-cli'], seenManaged: true, use: 'copilot-cli' }]);
     const chosen = (await readHistory(box.context)).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
     assert.ok(chosen.addedId, JSON.stringify(chose.results));
-    assert.equal((await restoreMcp(box.context, four, chosen.id, 'narrow')).stopped, undefined);
+    assert.equal((await restoreMcp(box.context, four, chosen.id, { narrow: true })).stopped, undefined);
     const after = (await mcpView(box.context, four)).servers.find(server => server.key === 'tool')!;
     assert.match(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), /codex-own/);
     assert.ok(!(await readFile(join(box.home, '.pi/agent/mcp.json'), 'utf8')).includes('"tool"'));
@@ -667,11 +667,11 @@ test('An MCP choice’s Undo that can’t put an entry back stops part-way, and 
     const chosen = (await readHistory(box.context)).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
     const { chmod } = await import('node:fs/promises');
     for (const folder of ['.codex', '.pi/agent']) await chmod(join(box.home, folder), 0o555);
-    const once = await restoreMcp(box.context, four, chosen.id, 'narrow');
+    const once = await restoreMcp(box.context, four, chosen.id, { narrow: true });
     for (const folder of ['.codex', '.pi/agent']) await chmod(join(box.home, folder), 0o755);
     assert.deepEqual(once.results.map(entry => [entry.harness, entry.outcome]).sort(), [['codex-cli', 'failed'], ['pi-cli', 'failed']], JSON.stringify(once));
     assert.equal((await mcpView(box.context, four)).servers.find(server => server.key === 'tool')?.managed, false);
-    const finished = await restoreMcp(box.context, four, chosen.id, 'narrow');
+    const finished = await restoreMcp(box.context, four, chosen.id, { narrow: true });
     assert.equal(finished.stopped, undefined, JSON.stringify(finished));
     assert.equal(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), codexBefore);
     assert.ok(!(await readFile(join(box.home, '.pi/agent/mcp.json'), 'utf8')).includes('"tool"'));
@@ -692,11 +692,11 @@ test('Finish undo of a choice leaves a server no longer synced since as it is: o
     const chosen = (await readHistory(box.context)).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
     const { chmod } = await import('node:fs/promises');
     await chmod(join(box.home, '.codex'), 0o555);
-    const once = await restoreMcp(box.context, tools, chosen.id, 'narrow');
+    const once = await restoreMcp(box.context, tools, chosen.id, { narrow: true });
     await chmod(join(box.home, '.codex'), 0o755);
     assert.deepEqual(once.results.map(entry => [entry.harness, entry.outcome]), [['codex-cli', 'failed']]);
     await applyMcp(box.context, tools, [{ key: 'tool', managed: false, off: ['claude-cli'], seenManaged: true }]);
-    const finished = await restoreMcp(box.context, tools, chosen.id, 'narrow');
+    const finished = await restoreMcp(box.context, tools, chosen.id, { narrow: true });
     assert.equal(finished.stopped, undefined, JSON.stringify(finished));
     assert.equal(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), codex);
     assert.equal((await mcpView(box.context, tools)).servers.find(server => server.key === 'tool')?.managed, false, 'still not synced');
@@ -779,13 +779,13 @@ test('An MCP choice’s Undo stopped part-way leaves the entry it couldn’t put
       const chosen = await chosenIn(box, chose.made);
       const { chmod } = await import('node:fs/promises');
       await chmod(join(box.home, '.codex'), 0o555);
-      const once = await restoreMcp(box.context, four, chosen.id, 'narrow');
+      const once = await restoreMcp(box.context, four, chosen.id, { narrow: true });
       await chmod(join(box.home, '.codex'), 0o755);
       assert.deepEqual(once.results.map(entry => [entry.harness, entry.outcome]), [['copilot-cli', 'written'], ['codex-cli', 'failed']]);
       const between = await applyMcp(box.context, four, [], { settleMs: 0 });
       assert.deepEqual([between.writes, between.results.some(entry => entry.item === 'tool' && entry.differs)], [0, true], `${claude}: ${JSON.stringify(between.results)}`);
       assert.equal((await copilotOf(box.home)).tool.command, 'x', 'Copilot CLI’s entry put back stays');
-      assert.equal((await restoreMcp(box.context, four, chosen.id, 'narrow')).stopped, undefined);
+      assert.equal((await restoreMcp(box.context, four, chosen.id, { narrow: true })).stopped, undefined);
       assert.match(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), /command = "x"/);
       assert.deepEqual(await recordOfTool(box.home), before);
     } finally { await box.cleanup(); }
@@ -800,13 +800,13 @@ test('Finish undo of an MCP choice after the synced entry moved on leaves it whe
     const chosen = await chosenIn(box, chose.made);
     const { chmod } = await import('node:fs/promises');
     await chmod(join(box.home, '.codex'), 0o555);
-    await restoreMcp(box.context, four, chosen.id, 'narrow');
+    await restoreMcp(box.context, four, chosen.id, { narrow: true });
     await chmod(join(box.home, '.codex'), 0o755);
     // Codex and Pi left out, then an edit in Copilot CLI spreads.
     await writeFile(join(box.home, '.copilot/mcp-config.json'), copilotOne('z'));
     await applyMcp(box.context, four, [{ key: 'tool', managed: true, off: ['codex-cli', 'pi-cli'], seenManaged: true }], { settleMs: 0 });
     const moved = (await readMcpRecord(box.home)).items.tool.hash;
-    assert.equal((await restoreMcp(box.context, four, chosen.id, 'narrow')).stopped, undefined);
+    assert.equal((await restoreMcp(box.context, four, chosen.id, { narrow: true })).stopped, undefined);
     assert.equal((await readMcpRecord(box.home)).items.tool.hash, moved);
     assert.equal((await applyMcp(box.context, four, [], { settleMs: 0 })).writes, 0);
   } finally { await box.cleanup(); }
@@ -890,7 +890,7 @@ test('Undo of a choice puts back the record of each entry it replaced: an edit t
       const before = await recordOfTool(box.home);
       if (undone) {
         const chose = await applyMcp(box.context, four, [{ key: 'tool', managed: true, off: [], seenManaged: true, use: 'codex-cli' }]);
-        assert.equal((await restoreMcp(box.context, four, (await chosenIn(box, chose.made)).id, 'narrow')).stopped, undefined);
+        assert.equal((await restoreMcp(box.context, four, (await chosenIn(box, chose.made)).id, { narrow: true })).stopped, undefined);
         assert.deepEqual(await recordOfTool(box.home), before, 'the record is as before the choice');
       }
       const left = await applyMcp(box.context, four, [{ key: 'tool', managed: true, off: ['pi-cli'], seenManaged: true }], { settleMs: 0 });

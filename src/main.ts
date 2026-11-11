@@ -26,7 +26,7 @@ import { deleteProfile, driftNow, switchFilesStamp, readProfiles, releaseProfile
 import { activeProfile, driftOf, NO_PROFILE, presentItems, profilesInUse, switchItems, type SwitchItem } from './profileplan.ts';
 import { defaultHistoryDays, historyDayChoices, plural } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
-import type { ActionReport, Appearance, ApplyResult, PartRef, PartsPick, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
+import type { ActionReport, Appearance, ApplyResult, PartRef, PartsPick, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, RestoreHow, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
 import { toolList } from './words.ts';
 import { startUpdater, type PendingUpdate } from './updater.ts';
@@ -1186,7 +1186,14 @@ app.whenReady().then(async () => {
   const otherHome = { stopped: notOpenHome, written: [], left: [] };
   handle('instructions:apply-base', async (request, home) => (home === current?.home && isBaseApply(request) ? applyBase(context(), await read(), request) : otherHome));
   handle('instructions:undo-base', async (undo, home) => (home === current?.home && isBaseUndo(undo) ? undoBase(context(), await read(), undo) : otherHome));
-  handle('history:restore', async (eventId, resume, home, choice) => (home === current?.home && typeof eventId === 'string'
+  /** The page's RestoreHow, checked: anything else is the plain way. */
+  const restoreHow = (given: unknown): RestoreHow | undefined => {
+    const how = given as Partial<Record<'use' | 'narrow' | 'tool', unknown>> | null;
+    if (typeof how?.use === 'string') return { use: how.use };
+    if (how?.narrow === true) return { narrow: true };
+    return typeof how?.tool === 'string' && how.tool in harnesses ? { tool: how.tool as HarnessId } : undefined;
+  };
+  handle('history:restore', async (eventId, resume, home, given) => (home === current?.home && typeof eventId === 'string'
     ? await (async () => {
       const past = (await readHistory(context())).find(entry => entry.id === eventId);
       if (past?.kind === 'profile') {
@@ -1194,19 +1201,20 @@ app.whenReady().then(async () => {
         return { stopped: undone.stopped, results: undone.results, harnessWrites: undone.flips.length, flips: undone.flips };
       }
       const key = past?.key ?? '';
+      const how = restoreHow(given);
       // A pull that changed only an agent's Claude Code settings has its own Undo (its earlier file, kept whole).
       if (past?.settingsFile) return undoSettingsChange(context(), eventId);
       // A Pull that edited or deleted the base instructions: the base's own Undo puts the earlier base and its tools back.
       if (past?.base) return undoPulledBase(context(), await read(), eventId);
       const tools = await toolsNow();
       if (key.startsWith('mcp:')) {
-        const result = await restoreMcp(context(), tools, eventId, typeof choice === 'string' ? choice : undefined);
+        const result = await restoreMcp(context(), tools, eventId, how);
         // Undo of a server's Disable or Enable is a choice made by hand too.
         await releaseProfileHolds(context(), switchedByHand([{ key: key.slice('mcp:'.length) }], result.results, 'mcp'));
         return { stopped: result.stopped, results: result.results, harnessWrites: result.writes, made: result.made };
       }
-      if (key.startsWith('agent:')) return restoreAgent(context(), tools, eventId, typeof choice === 'string' ? choice : undefined).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes, made: result.made }));
-      const restored = await restoreFromHistory(context(), eventId, resume === true, typeof choice === 'string' ? choice : undefined);
+      if (key.startsWith('agent:')) return restoreAgent(context(), tools, eventId, how).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes, made: result.made }));
+      const restored = await restoreFromHistory(context(), eventId, resume === true, how);
       // Undo of a Disable or Enable is a choice made by hand, like the switch itself: profiles stop holding those switches.
       await releaseProfileHolds(context(), switchedByHand([{ key }], restored.results));
       return restored;

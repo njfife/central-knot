@@ -18,7 +18,7 @@ import { throughPlugins } from './plugins.ts';
 import { switchFailure } from './skillswitch.ts';
 import { throughPlugin, toolName } from './words.ts';
 import { ALREADY_AS_IT_WAS } from './types.ts';
-import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SwitchRecord, SyncNotice, ThroughPlugin, ToolCopy, ClaudeWrite } from './types.ts';
+import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, RestoreHow, SkillFacts, SwitchRecord, SyncNotice, ThroughPlugin, ToolCopy, ClaudeWrite } from './types.ts';
 export type { McpResult, McpView } from './types.ts';
 
 // ---------- Shapes ----------
@@ -829,7 +829,7 @@ async function undoAddedMcp(context: ShareContext, history: HistoryEvent[], past
  * Undo or Restore of an MCP event: the kept version becomes the managed baseline and is written to every tool it syncs to, each with
  * its own kept settings. Claude Code gets it through Write now, as always (MCP-02).
  */
-export async function restoreMcp(context: ShareContext, tools: HarnessId[], eventId: string, choice?: string): Promise<McpResult> {
+export async function restoreMcp(context: ShareContext, tools: HarnessId[], eventId: string, how?: RestoreHow): Promise<McpResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   // Restore is a write like any other: never while another build owns syncing or the record needs a resume.
@@ -841,7 +841,7 @@ export async function restoreMcp(context: ShareContext, tools: HarnessId[], even
   const past = history.find(entry => entry.id === eventId);
   if (past?.kind === 'added') return undoAddedMcp(context, history, past);
   if (past?.kind === 'switched') return undoSwitchedMcp(context, history, past);
-  if (past?.kind === 'chosen' && choice === 'narrow') return undoChoiceMcp(context, tools, history, past);
+  if (past?.kind === 'chosen' && how && 'narrow' in how) return undoChoiceMcp(context, tools, history, past);
   // Undo of a put-back from a deletion is that deletion again.
   const deletion = past?.kind === 'restored' && !past.undoneBy ? history.find(entry => entry.undoneBy === past.id && entry.kind === 'deleted') : undefined;
   if (past && deletion) return deleteAgainMcp(context, tools, history, past, deletion);

@@ -3,7 +3,7 @@
 import { announce, machine, rerender, showPage } from './app.ts';
 import { button, h, icon, toggle } from './dom.ts';
 import type { IconName } from './icons.ts';
-import { DAY_MS, defaultHistoryDays, historyDayChoices } from './model.ts';
+import { DAY_MS, historyDayChoices, keptDays, noSwitchRule } from './model.ts';
 import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, HistoryWindowSaved, SignInPlace } from './types.ts';
 import { buildWords, releasesPage, tagWords, updateStatus } from './updates.ts';
 import { checkNow, unsavedWork, updateControl, updates } from './updateview.ts';
@@ -12,13 +12,13 @@ import { checkPluginsNow, checkedWords, pluginUpdates } from './pluginupdateview
 /** The settings as last read from the main process; undefined until the page has loaded them. */
 let current: AppPreferences | undefined;
 /**
- * Whether Off removes the copy in a tool with no switch for the item (the setting). The home is read with the settings
- * (app.ts startHome), so the item pages never ask before they are read; were they to, the answer would leave such tools as they
- * are rather than guess.
+ * Whether Off removes the copy in a tool with no switch for the item (the setting, model.ts noSwitchRule). The home is read with
+ * the settings (app.ts startHome); Settings that couldn't be read leave such tools as they are, and Off says so (settingsUnread).
  */
-export const removesWhenNoSwitch = () => current?.removeWhenNoSwitch === true;
+export const removesWhenNoSwitch = () => noSwitchRule(current) === 'remove';
+export const settingsUnread = () => noSwitchRule(current) === 'unread';
 /** How many days History keeps things, as Settings has it. */
-export const historyDaysNow = () => current?.historyDays ?? defaultHistoryDays;
+export const historyDaysNow = () => keptDays(current);
 /** The promise History makes for what Off removed, said where History's days are. */
 export const OFF_KEPT = 'Copies of an item you turned off are kept until you turn it on or delete it.';
 
@@ -405,7 +405,7 @@ export function settingsPage(): HTMLElement {
         h('span.select', {},
           h('select', { id: 'history-days', 'aria-labelledby': 'setting-history-title', 'aria-describedby': 'setting-history-hint', disabled: !current || updatingHistory,
             onchange: (event: Event) => chooseHistoryDays(Number((event.target as HTMLSelectElement).value) as HistoryDays), onkeydown: cancelOnEscape },
-          historyDayChoices.map(days => h('option', { value: String(days), selected: days === (current?.historyDays ?? defaultHistoryDays) }, `${days} days`))),
+          historyDayChoices.map(days => h('option', { value: String(days), selected: days === keptDays(current) }, `${days} days`))),
           icon('chevrons-up-down', 14)),
         updatingHistory ? { text: 'Updating History…', tone: 'progress' } : undefined,
         shortening ? shortenConfirmation(shortening) : undefined)),

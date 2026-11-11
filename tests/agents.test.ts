@@ -328,7 +328,7 @@ test('Undo of using the source’s copy over a stopped one-way copy puts back on
     const chosen = (await readHistory(box.context)).filter(event => event.kind === 'chosen' && event.key === 'agent:reviewer').at(-1)!;
     assert.deepEqual([chosen.wasSynced, chosen.before?.copies?.filter(copy => copy.stopped).map(copy => copy.tool)], [true, ['codex-cli']], 'the record is noted when it is written, its stopped copies too');
     const copilotBefore = await read(box.home, '.copilot/agents/reviewer.agent.md');
-    const undone = await restoreAgent(box.context, tools, chosen.id, 'narrow');
+    const undone = await restoreAgent(box.context, tools, chosen.id, { narrow: true });
     assert.equal(undone.stopped, undefined, JSON.stringify(undone));
     assert.equal(await read(box.home, '.codex/agents/reviewer.toml'), edited);
     assert.equal(await read(box.home, '.claude/agents/reviewer.md'), source, 'the source is never touched');
@@ -591,7 +591,7 @@ test('Undo of a copy choice for a two-way agent puts the replaced copy back in i
     const history = await readHistory(box.context);
     assert.deepEqual(chose.made?.map(id => history.find(event => event.id === id)?.kind), ['added', 'chosen']);
     const chosen = history.find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
-    const undone = await restoreAgent(box.context, tools, chosen.id, 'narrow');
+    const undone = await restoreAgent(box.context, tools, chosen.id, { narrow: true });
     assert.equal(undone.stopped, undefined, JSON.stringify(undone));
     assert.equal(await read(box.home, '.copilot/agents/reviewer.agent.md'), other, 'Copilot has its own copy back');
     assert.equal(await read(box.home, '.claude/agents/reviewer.md'), claudeAgent());
@@ -618,9 +618,9 @@ test('Undo of a copy choice whose pass added nothing, after an earlier On, takes
     // A copy changed since stops the Undo before anything is written.
     const copilotNow = await read(box.home, '.copilot/agents/reviewer.agent.md');
     await writeFile(join(box.home, '.copilot/agents/reviewer.agent.md'), copilotNow.replace('Be brief.', 'Changed since.'));
-    assert.match((await restoreAgent(box.context, tools, chosen.id, 'narrow')).stopped ?? '', /changed since, so nothing was undone/);
+    assert.match((await restoreAgent(box.context, tools, chosen.id, { narrow: true })).stopped ?? '', /changed since, so nothing was undone/);
     await writeFile(join(box.home, '.copilot/agents/reviewer.agent.md'), copilotNow);
-    const undone = await restoreAgent(box.context, tools, chosen.id, 'narrow');
+    const undone = await restoreAgent(box.context, tools, chosen.id, { narrow: true });
     assert.equal(undone.stopped, undefined, JSON.stringify(undone));
     assert.deepEqual([await read(box.home, '.copilot/agents/reviewer.agent.md'), await read(box.home, '.codex/agents/reviewer.toml')], [edited, codex], 'Copilot’s edit back; Codex’s copy, from the earlier On, stays');
     assert.ok((await readHistory(box.context)).find(event => event.id === chosen.id)?.undoneBy);
@@ -642,7 +642,7 @@ test('Undo of a copy choice on a synced agent puts it back as before the choice:
     const chosen = (await readHistory(box.context)).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
     assert.deepEqual([chosen.wasSynced, chosen.addedId, chosen.losers.map(loser => loser.tool)], [true, undefined, ['codex-cli']]);
     const copilot = await read(box.home, '.copilot/agents/reviewer.agent.md');
-    const undone = await restoreAgent(box.context, tools, chosen.id, 'narrow');
+    const undone = await restoreAgent(box.context, tools, chosen.id, { narrow: true });
     assert.equal(undone.stopped, undefined, JSON.stringify(undone));
     assert.deepEqual(undone.results.map(entry => [entry.harness, entry.outcome]), [['codex-cli', 'written']]);
     const after = (await agentsView(box.context, tools)).servers[0];
@@ -665,7 +665,7 @@ test('Undo of choosing a left-out tool’s own agent copy puts the synced copies
     await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true }]);
     const chose = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, use: 'codex-cli' }]);
     const chosen = (await readHistory(box.context)).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
-    assert.equal((await restoreAgent(box.context, tools, chosen.id, 'narrow')).stopped, undefined);
+    assert.equal((await restoreAgent(box.context, tools, chosen.id, { narrow: true })).stopped, undefined);
     assert.equal(await read(box.home, '.claude/agents/reviewer.md'), claudeAgent());
     // An edit in Claude Code, then Codex out again, as before Sync here: the edit reaches Copilot CLI as an edit.
     await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent('Edited in Claude.\n'));
@@ -690,7 +690,7 @@ test('Undo of a choice that also synced to a left-out tool again takes that copy
     const chose = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, use: 'claude-cli' }]);
     const chosen = (await readHistory(box.context)).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
     assert.ok(chosen.addedId);
-    assert.equal((await restoreAgent(box.context, tools, chosen.id, 'narrow')).stopped, undefined);
+    assert.equal((await restoreAgent(box.context, tools, chosen.id, { narrow: true })).stopped, undefined);
     const after = (await agentsView(box.context, tools)).servers[0];
     assert.deepEqual([await read(box.home, '.copilot/agents/reviewer.agent.md'), await readdir(join(box.home, '.codex/agents')), after.off.includes('codex-cli')], [copilot, [], true]);
   } finally { await box.cleanup(); }
@@ -706,12 +706,12 @@ test('An agent choice’s Undo that can’t put a copy back or take an added one
     const chosen = (await readHistory(box.context)).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
     assert.ok(chosen.addedId, 'Codex’s copy came with the choice');
     for (const folder of ['.copilot/agents', '.codex/agents']) await chmod(join(box.home, folder), 0o555);
-    const once = await restoreAgent(box.context, tools, chosen.id, 'narrow');
+    const once = await restoreAgent(box.context, tools, chosen.id, { narrow: true });
     for (const folder of ['.copilot/agents', '.codex/agents']) await chmod(join(box.home, folder), 0o755);
     assert.deepEqual(once.results.map(entry => [entry.harness, entry.outcome]).sort(), [['codex-cli', 'failed'], ['copilot-cli', 'failed']]);
     assert.match(once.results.find(entry => entry.harness === 'copilot-cli')!.message, /EACCES|permission/i, 'the real reason is said');
     assert.equal((await agentsView(box.context, tools)).servers[0].managed, false);
-    const finished = await restoreAgent(box.context, tools, chosen.id, 'narrow');
+    const finished = await restoreAgent(box.context, tools, chosen.id, { narrow: true });
     assert.equal(finished.stopped, undefined, JSON.stringify(finished));
     assert.deepEqual([await read(box.home, '.copilot/agents/reviewer.agent.md'), await readdir(join(box.home, '.codex/agents'))], [other, []]);
     assert.ok((await readHistory(box.context)).filter(event => [chosen.id, chosen.addedId].includes(event.id)).every(event => event.undoneBy));
@@ -731,7 +731,7 @@ test('A choice on a synced agent whose source has Claude-only fields is no resum
     const chose = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, use: 'claude-cli' }]);
     const chosen = (await readHistory(box.context)).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
     assert.deepEqual([chosen.wasSynced, chosen.before?.stopped], [true, undefined], 'no copy had stopped: no resume');
-    assert.equal((await restoreAgent(box.context, tools, chosen.id, 'narrow')).stopped, undefined);
+    assert.equal((await restoreAgent(box.context, tools, chosen.id, { narrow: true })).stopped, undefined);
     const after = (await agentsView(box.context, tools)).servers[0];
     assert.deepEqual([await read(box.home, '.codex/agents/reviewer.toml'), after.stopped ?? [], after.off], [edited, [], []]);
     const next = await applyAgents(box.context, tools, []);
@@ -748,7 +748,7 @@ test('Undo of a copy choice whose chosen copy has Claude Code only fields is the
     const chose = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: false, use: 'claude-cli' }]);
     const chosen = (await readHistory(box.context)).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
     assert.ok(chosen.addedId, 'Codex’s copy came with the choice');
-    const undone = await restoreAgent(box.context, tools, chosen.id, 'narrow');
+    const undone = await restoreAgent(box.context, tools, chosen.id, { narrow: true });
     assert.equal(undone.stopped, undefined, JSON.stringify(undone));
     assert.equal(await read(box.home, '.copilot/agents/reviewer.agent.md'), other);
     assert.deepEqual(await readdir(join(box.home, '.codex/agents')), [], 'the copy the choice added is gone');
@@ -854,7 +854,7 @@ test('Undo of a choice of a non-source copy puts the source and its one-way copi
       const before = await recordOf(box.home);
       if (undone) {
         const chose = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, use: 'codex-cli' }]);
-        assert.equal((await restoreAgent(box.context, tools, (await chosenOf(box, chose.made)).id, 'narrow')).stopped, undefined);
+        assert.equal((await restoreAgent(box.context, tools, (await chosenOf(box, chose.made)).id, { narrow: true })).stopped, undefined);
         assert.deepEqual(await recordOf(box.home), before, 'the record is as before the choice: source and one-way marks too');
       }
       // While the choice still waits, Copilot CLI's copy is edited; then Codex is left out.
@@ -910,7 +910,7 @@ test('Undo of a choice that also replaced a stopped copy records it stopped agai
     const chose = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, use: 'claude-cli' }]);
     const chosen = await chosenOf(box, chose.made);
     assert.deepEqual(chosen.losers.map(loser => loser.tool).sort(), ['codex-cli', 'copilot-cli'], 'an ordinary choice, no resume');
-    assert.equal((await restoreAgent(box.context, tools, chosen.id, 'narrow')).stopped, undefined);
+    assert.equal((await restoreAgent(box.context, tools, chosen.id, { narrow: true })).stopped, undefined);
     assert.deepEqual([await read(box.home, '.codex/agents/reviewer.toml'), await read(box.home, '.copilot/agents/reviewer.agent.md')], [codex, copilot]);
     assert.deepEqual(await recordOf(box.home), before, 'the record is as before the choice');
     assert.deepEqual((await agentsView(box.context, tools)).servers[0].stopped, ['codex-cli']);
@@ -940,7 +940,7 @@ test('One stopped copy given the source’s copy again leaves every other stoppe
     assert.deepEqual([await read(box.home, '.codex/agents/reviewer.toml'), await read(box.home, '.copilot/agents/reviewer.agent.md')], [codexSynced, copilot]);
     assert.deepEqual((await agentsView(box.context, tools)).servers[0].stopped, ['copilot-cli']);
     assert.equal((await applyAgents(box.context, tools, [])).writes, 0);
-    const undone = await restoreAgent(box.context, tools, (await chosenOf(box, resumed.made)).id, 'narrow');
+    const undone = await restoreAgent(box.context, tools, (await chosenOf(box, resumed.made)).id, { narrow: true });
     assert.equal(undone.stopped, undefined, JSON.stringify(undone));
     assert.deepEqual([await read(box.home, '.codex/agents/reviewer.toml'), await read(box.home, '.copilot/agents/reviewer.agent.md')], [codex, copilot]);
     assert.deepEqual(await recordOf(box.home), before);
@@ -960,11 +960,11 @@ test('Finish undo of a choice leaves an agent turned off since off: only the cop
     const chose = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, use: 'claude-cli' }]);
     const chosen = await chosenOf(box, chose.made);
     await chmod(join(box.home, '.codex/agents'), 0o555);
-    const once = await restoreAgent(box.context, tools, chosen.id, 'narrow');
+    const once = await restoreAgent(box.context, tools, chosen.id, { narrow: true });
     await chmod(join(box.home, '.codex/agents'), 0o755);
     assert.deepEqual(once.results.map(entry => [entry.harness, entry.outcome]), [['codex-cli', 'failed']]);
     await applyAgents(box.context, tools, [{ key: 'reviewer', managed: false, off: [], seenManaged: true }]);
-    const finished = await restoreAgent(box.context, tools, chosen.id, 'narrow');
+    const finished = await restoreAgent(box.context, tools, chosen.id, { narrow: true });
     assert.equal(finished.stopped, undefined, JSON.stringify(finished));
     assert.equal(await read(box.home, '.codex/agents/reviewer.toml'), codex);
     assert.equal((await agentsView(box.context, tools)).servers[0].managed, false, 'still off');
@@ -1001,7 +1001,7 @@ test('Undo of a choice stops on a copy changed since in a field outside the cont
     const chose = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: false, use: 'claude-cli' }]);
     const copilot = (await read(box.home, '.copilot/agents/reviewer.agent.md')).replace('description: Reviews code\n', 'description: Reviews code\nmodel: my-model\n');
     await writeFile(join(box.home, '.copilot/agents/reviewer.agent.md'), copilot);
-    assert.match((await restoreAgent(box.context, tools, (await chosenOf(box, chose.made)).id, 'narrow')).stopped ?? '', /changed since, so nothing was undone/);
+    assert.match((await restoreAgent(box.context, tools, (await chosenOf(box, chose.made)).id, { narrow: true })).stopped ?? '', /changed since, so nothing was undone/);
     assert.equal(await read(box.home, '.copilot/agents/reviewer.agent.md'), copilot);
   } finally { await box.cleanup(); }
 });
@@ -1021,7 +1021,7 @@ test('Undo of a choice leaves a copy that stopped updating after it (a later pas
     const codex = (await read(box.home, '.codex/agents/reviewer.toml')).replace('Be brief.', 'Codex only.');
     await writeFile(join(box.home, '.codex/agents/reviewer.toml'), codex);
     await applyAgents(box.context, tools, []);
-    assert.equal((await restoreAgent(box.context, tools, chosen.id, 'narrow')).stopped, undefined);
+    assert.equal((await restoreAgent(box.context, tools, chosen.id, { narrow: true })).stopped, undefined);
     assert.deepEqual([(await agentsView(box.context, tools)).servers[0].stopped, await read(box.home, '.codex/agents/reviewer.toml')], [['codex-cli'], codex]);
     const left = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: ['copilot-cli'], seenManaged: true }]);
     assert.deepEqual([left.writes, left.results.some(entry => entry.differs)], [0, false]);
@@ -1053,11 +1053,11 @@ test('Finish undo of a choice whose first Undo put a stopped copy back finishes:
     const chose = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, use: 'claude-cli' }]);
     const chosen = await chosenOf(box, chose.made);
     await chmod(join(box.home, '.copilot/agents'), 0o555);
-    const once = await restoreAgent(box.context, tools, chosen.id, 'narrow');
+    const once = await restoreAgent(box.context, tools, chosen.id, { narrow: true });
     await chmod(join(box.home, '.copilot/agents'), 0o755);
     assert.deepEqual(once.results.map(entry => [entry.harness, entry.outcome]).sort(), [['codex-cli', 'written'], ['copilot-cli', 'failed']]);
     assert.equal((await applyAgents(box.context, tools, [])).writes, 0);
-    const finished = await restoreAgent(box.context, tools, chosen.id, 'narrow');
+    const finished = await restoreAgent(box.context, tools, chosen.id, { narrow: true });
     assert.equal(finished.stopped, undefined, JSON.stringify(finished));
     assert.ok((await readHistory(box.context)).find(event => event.id === chosen.id)?.undoneBy, 'the entry is done');
     assert.deepEqual([await read(box.home, '.codex/agents/reviewer.toml'), await read(box.home, '.copilot/agents/reviewer.agent.md')], [codex, copilot]);
@@ -1077,14 +1077,14 @@ test('An Undo that couldn’t put a stopped copy back yet leaves that copy recei
     const chose = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, use: 'claude-cli' }]);
     const chosen = await chosenOf(box, chose.made);
     await chmod(join(box.home, '.codex/agents'), 0o555);
-    const once = await restoreAgent(box.context, tools, chosen.id, 'narrow');
+    const once = await restoreAgent(box.context, tools, chosen.id, { narrow: true });
     await chmod(join(box.home, '.codex/agents'), 0o755);
     assert.deepEqual(once.results.map(entry => [entry.harness, entry.outcome]).sort(), [['codex-cli', 'failed'], ['copilot-cli', 'written']]);
     // Codex still holds Claude Code's copy: not marked stopped, so it still receives.
     assert.deepEqual((await agentsView(box.context, tools)).servers[0].stopped, []);
     assert.equal((await readAgentRecord(box.home)).items.reviewer.copies.find(copy => copy.tool === 'codex-cli')?.stopped, undefined);
     assert.equal((await applyAgents(box.context, tools, [])).writes, 0);
-    assert.equal((await restoreAgent(box.context, tools, chosen.id, 'narrow')).stopped, undefined);
+    assert.equal((await restoreAgent(box.context, tools, chosen.id, { narrow: true })).stopped, undefined);
     assert.equal(await read(box.home, '.codex/agents/reviewer.toml'), codex);
     assert.deepEqual(await recordOf(box.home), before);
     assert.deepEqual((await agentsView(box.context, tools)).servers[0].stopped, ['codex-cli']);
@@ -1106,7 +1106,7 @@ test('Undo of a choice puts back the source the agent had, not the copy with the
       assert.equal(before.origin, 'copilot-cli');
       if (undone) {
         const chose = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, use: 'codex-cli' }]);
-        assert.equal((await restoreAgent(box.context, tools, (await chosenOf(box, chose.made)).id, 'narrow')).stopped, undefined);
+        assert.equal((await restoreAgent(box.context, tools, (await chosenOf(box, chose.made)).id, { narrow: true })).stopped, undefined);
         assert.deepEqual(await fullRecordOf(box.home), before, 'the record is as before the choice: its source too');
       }
       await writeFile(join(box.home, '.copilot/agents/reviewer.agent.md'), claudeAgent('You review code.\nCopilot’s own.\n'));
@@ -1149,7 +1149,7 @@ test('Using Claude Code’s copy keeps Claude Code the source when a stopped cop
     const before = await recordOf(box.home);
     const chose = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, use: 'claude-cli' }]);
     assert.deepEqual([(await readAgentRecord(box.home)).items.reviewer.origin, (await agentsView(box.context, tools)).servers[0].oneWay?.from], ['claude-cli', 'claude-cli']);
-    assert.equal((await restoreAgent(box.context, tools, (await chosenOf(box, chose.made)).id, 'narrow')).stopped, undefined);
+    assert.equal((await restoreAgent(box.context, tools, (await chosenOf(box, chose.made)).id, { narrow: true })).stopped, undefined);
     assert.deepEqual(await recordOf(box.home), before);
     // Chosen again, then edited in Claude Code: the edit spreads to every copy (each choice gives them all Claude Code's), and
     // Copilot CLI's keeps its own fields.
@@ -1192,7 +1192,7 @@ test('The Stopped switch gives only its tool the source’s copy: another copy�
     assert.deepEqual([resumed.writes, chosen.losers.map(loser => loser.tool)], [1, ['codex-cli']], JSON.stringify(resumed.results));
     assert.equal(await read(box.home, '.copilot/agents/reviewer.agent.md'), copilot);
     assert.deepEqual((await agentsView(box.context, tools)).servers[0].stopped, ['copilot-cli']);
-    assert.equal((await restoreAgent(box.context, tools, chosen.id, 'narrow')).stopped, undefined);
+    assert.equal((await restoreAgent(box.context, tools, chosen.id, { narrow: true })).stopped, undefined);
     assert.deepEqual([await read(box.home, '.codex/agents/reviewer.toml'), await read(box.home, '.copilot/agents/reviewer.agent.md')], [codex, copilot]);
     assert.deepEqual((await agentsView(box.context, tools)).servers[0].stopped, ['copilot-cli', 'codex-cli']);
     const plain = await applyAgents(box.context, tools, []);
@@ -1229,10 +1229,10 @@ test('Finish undo leaves a copy put back holding the synced content on record wi
     const chose = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, use: 'codex-cli' }]);
     const chosen = await chosenOf(box, chose.made);
     await chmod(join(box.home, '.copilot/agents'), 0o555);
-    await restoreAgent(box.context, tools, chosen.id, 'narrow');
+    await restoreAgent(box.context, tools, chosen.id, { narrow: true });
     await chmod(join(box.home, '.copilot/agents'), 0o755);
     assert.ok((await applyAgents(box.context, tools, [])).results.some(entry => entry.differs));
-    assert.equal((await restoreAgent(box.context, tools, chosen.id, 'narrow')).stopped, undefined);
+    assert.equal((await restoreAgent(box.context, tools, chosen.id, { narrow: true })).stopped, undefined);
     assert.deepEqual(await fullRecordOf(box.home), before);
     await writeFile(join(box.home, '.copilot/agents/reviewer.agent.md'), (await read(box.home, '.copilot/agents/reviewer.agent.md')).replace('Be brief.', 'Copilot’s own.'));
     const left = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: ['codex-cli'], seenManaged: true }]);
@@ -1252,7 +1252,7 @@ test('Undo of a choice gives the copy it puts back its earlier edit time, so the
     const before = await times();
     // Codex's newer copy is chosen, then undone: Claude Code's older copy is written back.
     const chose = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: false, use: 'codex-cli' }]);
-    assert.equal((await restoreAgent(box.context, tools, (await chosenOf(box, chose.made)).id, 'narrow')).stopped, undefined);
+    assert.equal((await restoreAgent(box.context, tools, (await chosenOf(box, chose.made)).id, { narrow: true })).stopped, undefined);
     const after = await times();
     assert.equal(after['claude-cli'], before['claude-cli']);
     assert.ok(Date.parse(after['codex-cli']!) > Date.parse(after['claude-cli']!), 'Codex’s is still the one edited most recently');
@@ -1297,12 +1297,12 @@ test('An Undo stopped part-way with the source not back yet never makes a stoppe
       const chose = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, use: 'codex-cli' }]);
       const chosen = await chosenOf(box, chose.made);
       await chmod(join(box.home, '.claude/agents'), 0o555);
-      await restoreAgent(box.context, tools, chosen.id, 'narrow');
+      await restoreAgent(box.context, tools, chosen.id, { narrow: true });
       await chmod(join(box.home, '.claude/agents'), 0o755);
       const between = (await readAgentRecord(box.home)).items.reviewer;
       assert.ok(!between.copies.some(copy => copy.stopped && copy.tool === between.origin), `${stoppedIn}: a stopped copy is never the source`);
       assert.ok(between.copies.filter(copy => copy.stopped).every(copy => copy.oneWay), `${stoppedIn}: a stopped copy stays one-way`);
-      assert.equal((await restoreAgent(box.context, tools, chosen.id, 'narrow')).stopped, undefined);
+      assert.equal((await restoreAgent(box.context, tools, chosen.id, { narrow: true })).stopped, undefined);
       assert.deepEqual(await recordOf(box.home), before);
     } finally { await box.cleanup(); }
   }
@@ -1315,13 +1315,13 @@ test('Finish undo after the synced content moved on leaves it where it is: the s
     const chose = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, use: 'claude-cli' }]);
     const chosen = await chosenOf(box, chose.made);
     await chmod(join(box.home, '.codex/agents'), 0o555);
-    await restoreAgent(box.context, tools, chosen.id, 'narrow');
+    await restoreAgent(box.context, tools, chosen.id, { narrow: true });
     await chmod(join(box.home, '.codex/agents'), 0o755);
     // Copilot CLI left out, then an edit in Claude Code spreads (to Codex, which still receives).
     await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent('You review code.\nSource v2.\n', fields));
     await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: ['copilot-cli'], seenManaged: true }]);
     const moved = (await readAgentRecord(box.home)).items.reviewer.hash;
-    assert.equal((await restoreAgent(box.context, tools, chosen.id, 'narrow')).stopped, undefined);
+    assert.equal((await restoreAgent(box.context, tools, chosen.id, { narrow: true })).stopped, undefined);
     const after = (await readAgentRecord(box.home)).items.reviewer;
     assert.deepEqual([after.hash, after.origin, after.copies.find(copy => copy.tool === 'claude-cli')?.hash], [moved, 'claude-cli', moved]);
     assert.equal((await applyAgents(box.context, tools, [])).writes, 0);
@@ -1370,7 +1370,7 @@ test('A Stopped switch’s choice from before the record was noted still has its
     const entry = saved.events.find(event => resumed.made?.includes(event.id) && event.kind === 'chosen')!;
     entry.before = { ...(entry.before?.origin ? { origin: entry.before.origin } : {}), stopped: ['codex-cli'] };
     await writeFile(file, JSON.stringify(saved));
-    assert.equal((await restoreAgent(box.context, tools, entry.id, 'narrow')).stopped, undefined);
+    assert.equal((await restoreAgent(box.context, tools, entry.id, { narrow: true })).stopped, undefined);
     assert.deepEqual([await read(box.home, '.codex/agents/reviewer.toml'), (await agentsView(box.context, tools)).servers[0].stopped], [codex, ['codex-cli']]);
     // The next pass takes the others up again as they were, writing nothing and asking nothing.
     const next = await applyAgents(box.context, tools, [], { settleMs: 0 });
@@ -1394,7 +1394,7 @@ test('A choice notes each copy’s record without what a pass was still doing wi
     const chosen = await chosenOf(box, chose.made);
     assert.deepEqual(chosen.before?.copies?.map(copy => Object.keys(copy).filter(field => field === 'away' || field === 'status')), [[], []]);
     // Undone once Copilot CLI is no longer one of the tools: only Claude Code's copy is recorded again.
-    const undone = await restoreAgent(box.context, ['claude-cli', 'codex-cli'], chosen.id, 'narrow');
+    const undone = await restoreAgent(box.context, ['claude-cli', 'codex-cli'], chosen.id, { narrow: true });
     assert.equal(undone.stopped, undefined, JSON.stringify(undone));
     assert.deepEqual((await readAgentRecord(box.home)).items.reviewer.copies.map(copy => copy.tool), ['claude-cli']);
   } finally { await box.cleanup(); }

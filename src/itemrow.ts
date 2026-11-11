@@ -63,11 +63,24 @@ export interface ItemRow {
   /** No tool has a copy any more; History can put it back. */
   gone?: GoneItem;
   /** Each tool whose copy was removed to turn it off (no switch there), with the History removal that puts it back. */
-  removed?: { tool: Tool; history: string; source?: Tool }[];
+  heldOff?: { tool: Tool; history: string; source?: Tool }[];
 }
 
-/** The tools whose copy Off removed (History keeps each): `turnedUp`, those of them with a copy again since; else those with none. */
-export const removedIn = (skill: ItemRow, turnedUp = false) => (skill.removed ?? []).map(entry => entry.tool).filter(tool => (skill.copies[tool] !== undefined) === turnedUp);
+const heldTools = (skill: ItemRow) => (skill.heldOff ?? []).map(entry => entry.tool);
+/** The tools an Off holds that have no copy: off there, the copy removed and kept in History, which turning it on puts back. */
+export const offHeldIn = (skill: ItemRow) => heldTools(skill).filter(tool => skill.copies[tool] === undefined);
+/** The tools an Off holds where a copy turned up since (made there by hand): that tool's own, left alone until it is turned on. */
+export const turnedUpIn = (skill: ItemRow) => heldTools(skill).filter(tool => skill.copies[tool] !== undefined);
+/**
+ * The History entries turning it on puts back, each once: those of the Offs holding its tools, the one holding a one-way copy's
+ * source first (its receiving copies wait for it); with none held, the removals that left it no copy (`gone`).
+ */
+export function putBackOrder(skill: ItemRow): string[] {
+  const held = skill.heldOff ?? [];
+  if (!held.length) return skill.gone ? [skill.gone.history, ...(skill.gone.also ?? [])] : [];
+  const sources = new Set(held.flatMap(entry => (entry.source ? [entry.source] : [])));
+  return [...new Set([...held].sort((first, second) => Number(sources.has(second.tool)) - Number(sources.has(first.tool))).map(entry => entry.history))];
+}
 
 /** What one tool has of an item, as its mark on the row shows it. */
 export type Cell = 'synced' | 'will-sync' | 'differs' | 'present' | 'present-differs' | 'absent' | 'cannot' | 'edited' | 'waiting' | 'write-now';

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { caughtUpNames, plural } from '../src/model.ts';
+import { caughtUpNames, keptDays, noSwitchRule, plural } from '../src/model.ts';
 
 test('plural words read naturally', () => {
   assert.equal(plural(1, 'copy', 'copies'), '1 copy');
@@ -17,4 +17,9 @@ test('caught-up names list each written skill once and leave out ones a notice a
   ];
   const manage = { caughtUp } as unknown as Parameters<typeof caughtUpNames>[0];
   assert.deepEqual(caughtUpNames(manage, new Set(['deploy'])), ['review']);
+});
+
+test('Off in a tool with no switch removes its copy, keeps it, or, before Settings could be read, changes nothing; History’s days are the default until then', () => {
+  assert.deepEqual([noSwitchRule({ removeWhenNoSwitch: true }), noSwitchRule({ removeWhenNoSwitch: false }), noSwitchRule(undefined)], ['remove', 'keep', 'unread']);
+  assert.deepEqual([keptDays({ historyDays: 7 }), keptDays(undefined)], [7, 30]);
 });

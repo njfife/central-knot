@@ -135,7 +135,8 @@ export interface DesktopApi {
   /** Main's update state changed (a check, download progress, ready, failed). */
   onUpdatesChanged(callback: (view: UpdateView) => void): void;
   /** `choice`: which overwritten edit to put back, for an event with several. */
-  restore(eventId: string, resume: boolean, home: string, choice?: string): Promise<ApplyResult>;
+  /** Undo or Restore of a History entry; `how`, when not the plain way (RestoreHow). */
+  restore(eventId: string, resume: boolean, home: string, how?: RestoreHow): Promise<ApplyResult>;
   deleteEverywhere(key: string, resume: boolean, home: string): Promise<ApplyResult>;
   /** Each tool's own instruction file (INS-01). */
   instructions(readId?: number): Promise<InstructionFile[] | null>;
@@ -302,10 +303,10 @@ export interface SkillFacts {
   /** No tool has a copy any more: it was removed, and History puts it back (this event) while it keeps it. */
   gone?: GoneItem;
   /**
-   * Each tool whose copy was removed to turn it off (no switch there), with the open History removal that keeps it (the latest
-   * for that tool): turning it on there puts it back. A tool listed here that has a copy again had one turn up since.
+   * Rule A as the page reads it (historyrules.ts offTools): each tool a standing Off holds, with that Off's History entry, which
+   * puts its copy back. A tool listed here with a copy again had one turn up since (itemrow.ts offHeldIn, turnedUpIn).
    */
-  removed?: { tool: HarnessId; history: string; /** Agents: a one-way copy, and the tool it receives from: turned on after that one. */ source?: HarnessId }[];
+  heldOff?: { tool: HarnessId; history: string; /** Agents: a one-way copy, and the tool it receives from: turned on after that one. */ source?: HarnessId }[];
 }
 
 /** An item with no copy left, from the History event that took the last one: when, and the event that puts it back. */
@@ -405,8 +406,24 @@ export interface TookOver {
   addedId?: string;
 }
 
-/** What a copy choice changed in the item's record besides the copies it wrote (HistoryEvent.before). */
-export interface ChoiceBefore {
+/**
+ * How a History entry is undone or restored when not the plain way, for skills, MCP servers and agents alike: `use`, which
+ * overwritten edit to put back (its content id), for an entry with several; `narrow`, a copy choice's own Undo (each replaced copy
+ * back in its own tool, the copies its pass added out), as a click's Undo and Finish undo do; `tool`, an agent's Off put back in
+ * that one tool alone (the tool's own switch on its line).
+ */
+export type RestoreHow = { use: string } | { narrow: true } | { tool: HarnessId };
+
+/**
+ * HistoryEvent.before: the item's record as it was before the entry, as far as its Undo needs it. A copy choice's: what it changed
+ * besides the copies it wrote (origin, copies, an MCP record). An agent's Off, Delete everywhere or put-back: whether it was synced
+ * and the tools the person left out.
+ */
+export interface RecordBefore {
+  /** An agent's Off, deletion or put-back: synced ('shared') or not. A put-back makes the agent synced again only when its Off's or deletion's was 'shared' (agents.ts syncedAgain); the put-back's Undo puts its own back. */
+  state?: 'shared' | 'dont-share';
+  /** An agent's Off, deletion or put-back: the tools the person left out of sync (the record's `off`, never the tools an Off holds). */
+  off?: HarnessId[];
   /**
    * An MCP server's: the tools the choice put on record without writing them (Claude Code waiting for Write), each with what was
    * on record for it before (no hash: nothing).
@@ -444,30 +461,28 @@ export interface HistoryEvent {
   switched?: SwitchRecord[];
   /** 'removed': tools whose copy Restore has put back so far; the event is done when all are. 'chosen': the same for its Undo. */
   restoredTools?: HarnessId[];
-  /** 'removed': tools a managed skill stopped syncing to because its copy there was removed; Restore turns syncing back on. */
+  /** 'removed', a skill's: tools a managed skill stopped syncing to because its copy there was removed; Restore turns syncing back on. */
   stoppedSync?: HarnessId[];
-  /** 'removed': the removal took a managed skill's last copies, so it was unmanaged; Restore manages it again. */
+  /** 'removed', a skill's: the removal took a managed skill's last copies, so it was unmanaged; Restore manages it again. */
   unmanaged?: boolean;
   /**
-   * 'removed': it turned the item off in tools with no switch for it, removing their copies. Until it is undone (turned on
-   * again), and while a deletion that ended it can be restored, History keeps it whatever its age (model.ts keptOff).
+   * 'removed': an Off. It turned the item off in tools with no switch for it, removing their copies, and holds those tools (model.ts
+   * offTools, Rule A) until it is turned on there, a later Off takes the tool over, or a deletion ends it. While it holds a tool,
+   * and while a deletion that ended it can be restored, History keeps it whatever its age (model.ts keptOff).
    */
   turnedOff?: true;
   /** 'deleted' by Delete everywhere (agents): its Restore puts each copy back exactly as it was, and an item that was off is off again. */
   everywhere?: true;
   /**
    * 'restored' (agents), by turning it on again or by Restore of Delete everywhere, whole or part-way: what it put copies back
-   * from. Its Undo takes them out again as that did (an Off, or a deletion), and puts back what else it changed (resumedSync,
-   * madeSynced, turnedUp), whatever became of the entry it reversed.
+   * from. Its Undo (agents.ts undoPutBack) takes them out again as that did, an Off or a deletion, and puts `before` back.
    */
   putBackFrom?: 'off' | 'delete-everywhere';
-  /** 'restored' with putBackFrom: the tools it took back into sync (the reversed entry's stoppedSync); its Undo leaves them out again. */
-  resumedSync?: HarnessId[];
-  /** 'restored' with putBackFrom: it made the agent synced again (the reversed entry's `unmanaged`); its Undo makes it not synced. */
-  madeSynced?: true;
+  /** 'restored' with putBackFrom: the Off or the deletion it put copies back from (whole, or part-way), by id. */
+  reverses?: string;
   /**
    * 'restored' with putBackFrom: copies the reversed entry kept whose tool had a copy of its own by then (one that turned up):
-   * that copy was left as it is, and History still keeps the one removed. Its Undo notes them in the Off or deletion again.
+   * that copy was left as it is, and History still keeps the one removed. Its Undo has an Off hold those tools again.
    */
   turnedUp?: HistoryEvent['losers'];
   /** 'added': copies for tools a managed skill syncs to again; Undo removes them and stops syncing there, and the skill stays managed. */
@@ -479,14 +494,14 @@ export interface HistoryEvent {
   wasSynced?: boolean;
   /** 'chosen': the 'added' entry its own pass wrote (the copies that came with the choice), which its Undo takes out; never another. */
   addedId?: string;
-  /** 'chosen': what the choice changed in the record besides the copies it wrote, which its Undo puts back. */
-  before?: ChoiceBefore;
+  /** The item's record as it was before this entry, which its Undo puts back (RecordBefore): a choice's, or an agent's Off, deletion or put-back. */
+  before?: RecordBefore;
   winner?: { tool: HarnessId; hash: string };
   /** Content that gave way, kept in Central Knot's store. */
-  losers: { tool: HarnessId; hash: string; /** MCP: which kept copy of that tool's own settings this replaced, for an exact Restore. */ kept?: string; /** 'removed': the copy's folder name as it was, to put it back under the same name. */ folder?: string;
+  losers: { tool: HarnessId; hash: string; /** MCP: which kept copy of that tool's own settings this replaced, for an exact Restore. */ kept?: string; /** 'removed', or an agent's deletion: the copy's own name in its tool as it was (a skill's folder, an agent's file name without its suffix), to put it back under the same name. */ folder?: string;
     /** 'removed', managed: the content last synced to that copy, so Restore puts its sync record back and an unsynced edit in it spreads. */ synced?: string;
     /** 'removed': a copy outside the tool's own folder (in ~/.agents/skills), put back at this path. */ path?: string;
-    /** 'removed': the copy was a link with this text; Restore makes the link again. */ linkTo?: string;
+    /** 'removed', or an agent's deletion: the copy was a link with this text; putting it back makes the link again. */ linkTo?: string;
     /** 'chosen', a skill's or an agent's: when the replaced copy was last edited (its file's time), which its Undo gives it again. */ editedAt?: string;
     /** 'removed' or 'deleted', an agent's: its copy as the record had it (none: not synced there), recorded again when it is put back. */ record?: AgentCopyRecord }[];
   /** The synced content before this event, to put back on Undo. */

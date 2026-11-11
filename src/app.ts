@@ -2,8 +2,9 @@ import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
-import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, McpResult, ClaudeWrite, SkillFacts, SyncNotice } from './types.ts';
+import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, RestoreHow, HistoryDays, HomeMode, HomeView, McpResult, ClaudeWrite, SkillFacts, SyncNotice } from './types.ts';
 import { caughtUpNames, plural, withSetAside } from './model.ts';
+import { afterWords } from './historyactions.ts';
 import { h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
@@ -323,7 +324,8 @@ const send = (kind: Kind, changes: Change[]) => kindPages[kind].send(changes, st
  * One click, applied at once: an item's switch, or one tool's control in its details. The result says what was done, or why
  * nothing was, in the band at the top of the page. Its one Undo reverses exactly what the click did: the History entries the
  * click itself made (never what sync did alongside), and a record change no entry covers. A click that put an item back from
- * History first (`putBack`) is undone by taking every copy out again, kept in History, as it was before.
+ * History first (`putBack`): a skill's is undone by taking every copy out again with Remove (takeOutAgain); an MCP server's or
+ * an agent's by its 'restored' entry's own Undo, with the rest of what the click made.
  */
 export const applyClick = (click: Click) => busy(click.putBack ? 'Putting it back…' : 'Applying…', async () => {
   const names = [...click.items, ...click.changes.map(change => change.key), ...(click.putBack ? [click.putBack.key] : [])];
@@ -337,13 +339,14 @@ export const applyClick = (click: Click) => busy(click.putBack ? 'Putting it bac
   // A put-back that left nothing to change sends nothing; any other click is a pass, even with no change (Resume).
   const result = sent.length || !click.putBack ? await send(click.kind, sent) : undefined;
   setHome(await api().refresh());
-  if (back) await putHistory();
+  // History as the click left it: the page reads it (an empty page after a deletion, the History page's actions).
+  if (back || result?.made?.length) await putHistory();
   const { ours, did, refusal, failed, differs, notIn } = clickResults([...(back?.results ?? []), ...(result?.results ?? [])], names);
   // A refusal is the click's result, said in its own band, not again among the failures.
   kindPages[click.kind].keep(ours.filter(entry => entry !== refusal), result?.notices);
   if (result?.stopped) { tell({ page: state.page, items: click.items, warn: true, band: true, text: result.stopped }); return; }
   if (!click.undoing) retireTip(click.kind);
-  // An MCP server or agent put back from a deletion is undone as that deletion again (its 'restored' entry), with the rest.
+  // An MCP server or an agent put back (after an Off, or a deletion) is undone by its 'restored' entry's Undo, with the rest.
   const made = [...(click.kind === 'skills' ? [] : back?.made ?? []), ...(result?.made ?? [])];
   // A put-back's Undo is the removal or deletion again, which leaves the record as it was before it: no record change of its own.
   // A click refused before anything was done changed nothing: a record unlike the page's was changed elsewhere (the page was
@@ -379,7 +382,7 @@ async function restoreAll(ids: string[], tool?: HarnessId): Promise<{ results: D
   const results: DestinationResult[] = [];
   const made: string[] = [];
   for (const [index, id] of ids.entries()) {
-    const result = await api().restore(id, home.manage.gate.state === 'needs-resume', home.home, tool);
+    const result = await api().restore(id, home.manage.gate.state === 'needs-resume', home.home, tool ? { tool } : undefined);
     // An older removal that can't go back (that tool has a copy again) leaves the rest as they are.
     if (result.stopped && !index) return { results, made, stopped: result.stopped };
     results.push(...result.results);
@@ -388,7 +391,7 @@ async function restoreAll(ids: string[], tool?: HarnessId): Promise<{ results: D
   return { results, made };
 }
 
-/** Undo of a put-back: every copy it has now is taken out again, kept in History, so it is off with no copy left as before. */
+/** A skill's Undo of a put-back: every copy it has now is taken out again with Remove, kept in History, as before (skills only). */
 function takeOutAgain(click: Click) {
   const key = click.putBack?.key ?? '';
   const fact = factsOf(click.kind).find(item => item.key === key);
@@ -420,7 +423,7 @@ const undoClick = (click: Click, made: string[], before: Map<string, Standing>, 
   for (const event of undoOrder(events)) {
     if (takenWith.has(event.id)) continue;
     const narrow = event.kind === 'chosen';
-    const result = await api().restore(event.id, home.manage.gate.state === 'needs-resume', home.home, narrow ? 'narrow' : undefined);
+    const result = await api().restore(event.id, home.manage.gate.state === 'needs-resume', home.home, narrow ? { narrow: true } : undefined);
     if (result.stopped) { stopped = result.stopped; break; }
     if (narrow && event.addedId) takenWith.add(event.addedId);
     results.push(...result.results);
@@ -714,10 +717,10 @@ function stillDisabled(key: string, restored: DestinationResult[]) {
 }
 
 /** Undo or Restore from History: a new revision that spreads to every tool the skill syncs to. */
-export const restoreEvent = (eventId: string, choice?: string) => busy('Restoring…', async () => {
+export const restoreEvent = (eventId: string, how?: RestoreHow) => busy('Restoring…', async () => {
   const home = state.home!;
   const managedBefore = new Set(home.manage.skills.filter(skill => skill.managed).map(skill => skill.key));
-  const result = await api().restore(eventId, home.manage.gate.state === 'needs-resume', home.home, choice);
+  const result = await api().restore(eventId, home.manage.gate.state === 'needs-resume', home.home, how);
   // The notice for an undone event has done its job; its result band says what happened.
   if (!result.stopped) state.dismissed.add(eventId);
   const view = await api().refresh();
@@ -740,6 +743,9 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
     tell(result.stopped ? undefined : { page: state.page, item: past.item, text: result.results.map(entry => entry.message).join(' ') }, result.stopped);
     return;
   }
+  // An agent's Off, turning it on again, Delete everywhere and its Restore: said from what the engine did (historyactions.ts).
+  const words = past && !result.stopped ? afterWords(past, state.history.data ?? [], { results: result.results, homeTools: homeTools() }) : undefined;
+  if (past && words !== undefined) { tell({ page: state.page, item: past.item, text: words }); flashRow(past.item); return; }
   const item = restored[0]?.item ?? past?.item ?? '';
   const removedFrom = [...new Set(result.results.filter(entry => entry.outcome === 'removed').map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean);
   // A take-over, or the 'added' entry of the Manage that took the skill over (its Undo undoes the take-over too).

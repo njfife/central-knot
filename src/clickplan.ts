@@ -3,7 +3,11 @@
 import type { Change, DestinationResult, HarnessId, HistoryEvent, SwitchProblem } from './types.ts';
 import { andList } from './words.ts';
 
-/** What a click needs to know of an item: where it has copies, where each tool's switch has it off, and whether it is synced. */
+/**
+ * What a click needs to know of an item: where it has copies, whether it is synced, the tools it is not synced to (`off`: those
+ * left out, and for an agent those an Off holds, Rule A in historyrules.ts; not the Off switch itself), and where each tool's own
+ * switch has it off (`disabled`).
+ */
 export interface Switchable {
   copies: Partial<Record<string, unknown>>;
   managed: boolean;
@@ -38,6 +42,31 @@ export function offPlan(item: Switchable, tools: readonly string[], kind: ItemKi
   const removable = unswitched.filter(tool => item.copies[tool] !== undefined);
   return { disable: switched.filter(tool => !item.switchProblem?.[tool]), held: switched.filter(tool => item.switchProblem?.[tool]),
     remove: removeWhenNoSwitch ? removable : [], stays: removeWhenNoSwitch ? [] : removable };
+}
+
+/** What an agent's line needs to know of it, besides what any click does (Switchable). */
+export interface AgentLine extends Switchable { oneWay?: { from: string }; stopped?: readonly string[]; limits?: Partial<Record<string, string>>; heldOff?: readonly { tool: string; source?: string }[] }
+/**
+ * What an agent's line in its opened row offers for one tool, decided once (matrix.ts agentToolControls draws it):
+ * - 'stopped': a one-way copy that stopped updating (edited there); its switch gives it the source's copy again;
+ * - 'waits': an Off holds it and its one-way source too, so it has no switch until the source is back (agents.ts waitsForSource);
+ * - 'off': an Off holds it (Rule A); its switch puts the kept copy back, or, `turnedUp`, turns it on with the copy that turned up;
+ * - 'left-out': left out of sync; Sync here (`has`, a copy of its own) or its switch takes it back in;
+ * - 'on': its switch turns it off there, by the same rule as Off everywhere (offPlan for this one tool); `whole`: it is the
+ *   one-way source, whose Off is the whole agent's;
+ * - 'no-switch': on, and Settings keeps a tool's copy when it is turned off (that same rule leaves it on);
+ * - none: nothing here to switch (no copy, nothing held).
+ */
+export type AgentToolControl = { is: 'stopped' } | { is: 'waits'; source: string } | { is: 'off'; turnedUp: boolean } | { is: 'left-out'; has: boolean } | { is: 'on'; whole: boolean } | { is: 'no-switch' };
+export function agentToolControl(item: AgentLine, tool: string, removeWhenNoSwitch: boolean): AgentToolControl | undefined {
+  const source = item.oneWay?.from, has = item.copies[tool] !== undefined;
+  if (source && item.managed && item.stopped?.includes(tool) && !item.off.includes(tool)) return { is: 'stopped' };
+  const held = item.heldOff?.find(entry => entry.tool === tool);
+  if (held) return held.source ? { is: 'waits', source: held.source } : { is: 'off', turnedUp: has };
+  if (item.managed && item.off.includes(tool)) return { is: 'left-out', has };
+  if (!has) return undefined;
+  if (!offPlan(item, [tool], 'agents', removeWhenNoSwitch).remove.length) return { is: 'no-switch' };
+  return { is: 'on', whole: item.managed && source === tool && Object.keys(item.limits ?? {}).length > 0 };
 }
 
 /** Each tool left on, with its reason, the tools with the same reason together ("Still on in Codex and Pi: …"). */

@@ -8,7 +8,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { agentsView, applyAgents, readAgentRecord, restoreAgent } from '../src/agents.ts';
 import { pruneHistory, readHistory } from '../src/manage.ts';
-import { DAY_MS, deletedSince } from '../src/model.ts';
+import { DAY_MS } from '../src/model.ts';
+import { deletedSince } from '../src/historyrules.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId, HistoryEvent } from '../src/types.ts';
 
@@ -47,7 +48,7 @@ async function age(box: Box, days: number) {
 async function row(box: Box, context = box.context) {
   const view = await agentsView(context, tools);
   const facts = view.servers.find(item => item.key === 'reviewer') ?? view.gone?.find(item => item.key === 'reviewer');
-  return facts && { off: !!facts.gone, managed: facts.managed, copies: Object.keys(facts.copies), removed: facts.removed?.map(entry => entry.tool) ?? [] };
+  return facts && { off: !!facts.gone, managed: facts.managed, copies: Object.keys(facts.copies), removed: facts.heldOff?.map(entry => entry.tool) ?? [] };
 }
 
 /** A synced agent from Claude Code with fields of its own (one-way to the others), and Codex's copy stopped on an edit there. */
@@ -68,11 +69,11 @@ test('Off removes every copy, History keeps them whatever its age, and On puts e
     assert.deepEqual(turned.results.filter(entry => entry.outcome === 'removed').map(entry => entry.harness), tools);
     for (const folder of ['.claude/agents', '.copilot/agents', '.codex/agents']) assert.deepEqual(await readdir(join(box.home, folder)), []);
     const removal = await latest(box, 'removed');
-    assert.deepEqual([turned.made, removal.turnedOff, removal.unmanaged, removal.stoppedSync], [[removal.id], true, true, tools]);
+    assert.deepEqual([turned.made, removal.turnedOff, removal.before], [[removal.id], true, { state: 'shared', off: [] }]);
     // Its row stays, off, with each tool's copy in History; the next plain pass writes nothing and puts nothing back.
     // It still says what it is; its receiving copies wait for their source's.
     const view = await agentsView(box.context, tools);
-    assert.deepEqual([view.servers, view.gone?.map(item => [item.key, item.gone?.turnedOff, item.description, item.removed])], [[], [['reviewer', true, 'Reviews code',
+    assert.deepEqual([view.servers, view.gone?.map(item => [item.key, item.gone?.turnedOff, item.description, item.heldOff])], [[], [['reviewer', true, 'Reviews code',
       [{ tool: 'claude-cli', history: removal.id }, { tool: 'copilot-cli', history: removal.id, source: 'claude-cli' }, { tool: 'codex-cli', history: removal.id, source: 'claude-cli' }]]]]);
     assert.equal((await applyAgents(box.context, tools, [], { settleMs: 0 })).writes, 0);
     // A year later, past History's days, and after a prune: the row and its way back are still there.
@@ -125,19 +126,21 @@ test('After Off everywhere, one tool’s switch puts back that tool’s copy alo
     await syncedOneWay(box);
     const filesBefore = await everyFile(box);
     const removal = (await applyAgents(box.context, tools, [off()])).made![0];
-    const one = await restoreAgent(box.context, tools, removal, 'claude-cli');
+    const one = await restoreAgent(box.context, tools, removal, { tool: 'claude-cli' });
     assert.deepEqual([one.stopped, await everyFile(box)], [undefined, { ...filesBefore, 'copilot-cli': undefined, 'codex-cli': undefined }]);
+    // Synced, with the others off: History's Off holds them (the page reads them as left out), the record's own list stays empty.
     const record = await recordNow(box);
-    assert.deepEqual([record?.state, record?.off, record?.origin], ['shared', ['copilot-cli', 'codex-cli'], 'claude-cli']);
+    assert.deepEqual([record?.state, record?.off, record?.origin, (await agentsView(box.context, tools)).servers[0].off], ['shared', [], 'claude-cli', ['copilot-cli', 'codex-cli']]);
     // The rest of the removal stays open, and so on offer; no pass gives the others a copy.
     assert.equal((await applyAgents(box.context, tools, [], { settleMs: 0 })).writes, 0);
-    assert.deepEqual((await agentsView(box.context, tools)).servers[0].removed, [{ tool: 'copilot-cli', history: removal, source: 'claude-cli' }, { tool: 'codex-cli', history: removal, source: 'claude-cli' }]);
+    // Their source is back, so they no longer wait for it.
+    assert.deepEqual((await agentsView(box.context, tools)).servers[0].heldOff, [{ tool: 'copilot-cli', history: removal }, { tool: 'codex-cli', history: removal }]);
     assert.deepEqual((await readHistory(at(box, 365))).find(event => event.id === removal)?.restoredTools, ['claude-cli'], 'still standing, a year on');
     // Its Undo: Claude Code's copy goes again, and the agent is off everywhere as before.
     assert.equal((await restoreAgent(box.context, tools, one.made![0])).stopped, undefined);
-    assert.deepEqual([Object.values(await everyFile(box)), (await agentsView(box.context, tools)).gone?.flatMap(item => item.removed?.map(entry => entry.tool))], [[undefined, undefined, undefined], ['claude-cli', 'copilot-cli', 'codex-cli']]);
+    assert.deepEqual([Object.values(await everyFile(box)), (await agentsView(box.context, tools)).gone?.flatMap(item => item.heldOff?.map(entry => entry.tool))], [[undefined, undefined, undefined], ['claude-cli', 'copilot-cli', 'codex-cli']]);
     // On from the row: every removal still open goes back, each copy as it was.
-    for (const id of new Set((await agentsView(box.context, tools)).gone![0].removed!.map(entry => entry.history))) assert.equal((await restoreAgent(box.context, tools, id)).stopped, undefined);
+    for (const id of new Set((await agentsView(box.context, tools)).gone![0].heldOff!.map(entry => entry.history))) assert.equal((await restoreAgent(box.context, tools, id)).stopped, undefined);
     assert.deepEqual(await everyFile(box), filesBefore);
     assert.equal((await applyAgents(box.context, tools, [], { settleMs: 0 })).writes, 0);
   } finally { await box.cleanup(); }
@@ -152,21 +155,21 @@ test('Off in one tool removes its copy there only: sync never puts it back nor s
     await writeFile(join(box.home, files['codex-cli']), codexBefore);
     await applyAgents(box.context, tools, []);
     const turned = await applyAgents(box.context, tools, [off(true, ['codex-cli'])]);
-    assert.deepEqual([turned.writes, await read(box, 'codex-cli'), (await recordNow(box))?.state, (await recordNow(box))?.off], [1, undefined, 'shared', ['codex-cli']]);
+    assert.deepEqual([turned.writes, await read(box, 'codex-cli'), (await recordNow(box))?.state, (await recordNow(box))?.off], [1, undefined, 'shared', []]);
     // Not put back, not spread as a deletion; an edit reaches Copilot CLI and not Codex.
     assert.equal((await applyAgents(box.context, tools, [], { settleMs: 0 })).writes, 0);
     await writeFile(join(box.home, files['claude-cli']), claudeAgent('Edited in Claude Code.\n'));
     const spread = await applyAgents(box.context, tools, [], { settleMs: 0 });
     assert.deepEqual([spread.writes, /Edited in Claude Code/.test((await read(box, 'copilot-cli'))!), await read(box, 'codex-cli')], [1, true, undefined]);
     const view = await agentsView(box.context, tools);
-    assert.deepEqual([view.servers[0].managed, view.servers[0].removed], [true, [{ tool: 'codex-cli', history: turned.made![0] }]]);
+    assert.deepEqual([view.servers[0].managed, view.servers[0].heldOff], [true, [{ tool: 'codex-cli', history: turned.made![0] }]]);
     // Its switch: Codex's own file back (its own model line too), then the next pass catches it up, as a copy only behind.
-    const back = await restoreAgent(box.context, tools, view.servers[0].removed![0].history, 'codex-cli');
+    const back = await restoreAgent(box.context, tools, view.servers[0].heldOff![0].history, { tool: 'codex-cli' });
     assert.deepEqual([back.stopped, await read(box, 'codex-cli'), (await recordNow(box))?.off], [undefined, codexBefore, []]);
     const caught = await applyAgents(box.context, tools, [], { settleMs: 0 });
     const codexNow = (await read(box, 'codex-cli'))!;
     assert.deepEqual([caught.writes, /Edited in Claude Code/.test(codexNow), codexNow.includes('model = "gpt"'), (await readHistory(box.context)).some(event => event.kind === 'edit' && event.losers.some(loser => loser.tool === 'codex-cli'))], [1, true, true, false]);
-    assert.deepEqual([(await applyAgents(box.context, tools, [], { settleMs: 0 })).writes, (await agentsView(box.context, tools)).servers[0].removed], [0, undefined]);
+    assert.deepEqual([(await applyAgents(box.context, tools, [], { settleMs: 0 })).writes, (await agentsView(box.context, tools)).servers[0].heldOff], [0, undefined]);
     // Undo of that switch: Codex's copy goes again, as it was put back.
     const putBack = await latest(box, 'restored');
     assert.equal(putBack.turnedOff, undefined, 'the removal was put back whole');
@@ -186,7 +189,7 @@ test('Off removes the last copy: a copy that turns up again by hand is left alon
     for (let pass = 0; pass < 2; pass++) assert.equal((await applyAgents(box.context, tools, [], { settleMs: 0 })).writes, 0);
     assert.deepEqual([await read(box, 'claude-cli'), await read(box, 'copilot-cli'), await read(box, 'codex-cli')], [undefined, undefined, own]);
     const view = await agentsView(box.context, tools);
-    assert.deepEqual([view.gone, view.servers[0].managed, view.servers[0].removed?.map(entry => entry.tool), Object.keys(view.servers[0].copies)], [[], false, tools, ['codex-cli']]);
+    assert.deepEqual([view.gone, view.servers[0].managed, view.servers[0].heldOff?.map(entry => entry.tool), Object.keys(view.servers[0].copies)], [[], false, tools, ['codex-cli']]);
     // A stale page that still showed it on changes nothing.
     assert.equal((await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, remove: ['codex-cli'], turnOff: true }])).results[0].unchanged, true);
     // On: the others back as they were; Codex keeps its own, which is new input.
@@ -267,7 +270,7 @@ test('A Restore of Delete everywhere that stops part-way is undone as a deletion
       assert.equal(undone.stopped, undefined, kind);
       assert.deepEqual([Object.values(await everyFile(box)), (await latest(box, kind)).id], [[undefined, undefined, undefined], undone.made![0]], kind);
       // Undone as what it was: a deletion leaves no row; an Off leaves its row, with every copy in History.
-      assert.deepEqual((await agentsView(box.context, tools)).gone?.flatMap(item => item.removed?.map(entry => entry.tool) ?? []), kind === 'deleted' ? [] : tools, kind);
+      assert.deepEqual((await agentsView(box.context, tools)).gone?.flatMap(item => item.heldOff?.map(entry => entry.tool) ?? []), kind === 'deleted' ? [] : tools, kind);
     } finally { await box.cleanup(); }
   }
 });
@@ -342,7 +345,7 @@ test('One tool’s Off past History’s days survives a deletion of the rest and
       // Its Restore: Claude Code and Copilot CLI back; Codex still off, its Off standing again, with its switch.
       assert.equal((await restoreAgent(box.context, tools, deletion.id)).stopped, undefined, how);
       assert.deepEqual([await row(box), (await pass(box)).writes], [{ off: false, managed: true, copies: ['claude-cli', 'copilot-cli'], removed: ['codex-cli'] }, 0], how);
-      assert.equal((await restoreAgent(box.context, tools, turned, 'codex-cli')).stopped, undefined, how);
+      assert.equal((await restoreAgent(box.context, tools, turned, { tool: 'codex-cli' })).stopped, undefined, how);
       assert.deepEqual([await everyFile(box), (await pass(box)).writes, await row(box)], [filesBefore, 0, { off: false, managed: true, copies: tools, removed: [] }], how);
     } finally { await box.cleanup(); }
   }
@@ -408,14 +411,14 @@ test('Undo of On takes out a copy sync caught up since, and leaves one edited by
     const turned = (await applyAgents(box.context, tools, [off(true, ['codex-cli'])])).made![0];
     await writeFile(join(box.home, files['claude-cli']), claudeAgent('Edited in Claude Code.\n'));
     await pass(box);
-    const on = await restoreAgent(box.context, tools, turned, 'codex-cli');
+    const on = await restoreAgent(box.context, tools, turned, { tool: 'codex-cli' });
     // The next pass catches Codex up (it was only behind); the Undo then takes that copy out, and History keeps it.
     assert.equal((await pass(box)).writes, 1);
     const caughtUp = await read(box, 'codex-cli');
     assert.match(caughtUp ?? '', /Edited in Claude Code/);
     const undone = await restoreAgent(box.context, tools, on.made![0]);
     assert.deepEqual([undone.stopped, await read(box, 'codex-cli'), (await row(box))?.removed, (await pass(box)).writes], [undefined, undefined, ['codex-cli'], 0]);
-    const again = await restoreAgent(box.context, tools, undone.made![0], 'codex-cli');
+    const again = await restoreAgent(box.context, tools, undone.made![0], { tool: 'codex-cli' });
     assert.deepEqual([again.stopped, await read(box, 'codex-cli'), (await pass(box)).writes], [undefined, caughtUp, 0]);
     // Edited by hand since this On: its Undo leaves that copy and says so, and the entry keeps its Undo.
     await writeFile(join(box.home, files['codex-cli']), caughtUp!.replace('Edited in Claude Code.', 'Codex’s own edit.'));
@@ -526,7 +529,7 @@ test('One long sequence: Off, past History’s days, a copy turns up, On with a 
     await everyActionRoutes(box);
     // Its Undo, then On's: Codex's own back, then the others out; as when Codex's copy turned up, not synced.
     const chosen = await latest(box, 'chosen');
-    assert.equal((await restoreAgent(box.context, tools, chosen.id, 'narrow')).stopped, undefined);
+    assert.equal((await restoreAgent(box.context, tools, chosen.id, { narrow: true })).stopped, undefined);
     assert.deepEqual([await everyFile(box), (await pass(box)).writes], [{ ...synced, 'codex-cli': own }, 0]);
     const undone = await restoreAgent(box.context, tools, on.made![0]);
     assert.equal(undone.stopped, undefined, JSON.stringify(undone));
@@ -598,7 +601,7 @@ test('A Restore that can write nowhere changes nothing and keeps its entry; an a
     const filesBefore = await everyFile(box);
     // A removal that says neither changes nothing.
     const plain = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, remove: ['codex-cli'] }]);
-    assert.deepEqual([plain.made ?? [], await everyFile(box)], [[], filesBefore]);
+    assert.deepEqual([plain.made ?? [], await everyFile(box), plain.results.map(entry => entry.message)], [[], filesBefore, ['An agent’s copy leaves a tool only to turn it off there or with Delete everywhere, and this change asked for neither, so no copy of reviewer was removed.']]);
     await rm(join(box.home, files['claude-cli']));
     await pass(box);
     const deletion = await latest(box, 'deleted');

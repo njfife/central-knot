@@ -228,7 +228,7 @@ test('Each competing edit that lost can be put back from History', () => box(asy
   const options = restorableChoices(conflict);
   assert.equal(options.length, 2, JSON.stringify(conflict));
   const last = options[1];
-  await restoreFromHistory(b.context, conflict.id, false, last.hash);
+  await restoreFromHistory(b.context, conflict.id, false, { use: last.hash });
   const expected = (await b.copies())[0];
   assert.deepEqual(await b.copies(), [expected, expected, expected]);
   assert.ok(['CLAUDE EDIT', 'CODEX EDIT'].includes(expected!), expected!);

@@ -308,7 +308,7 @@ test('Undo of a copy choice that took the skill over and added copies puts the s
     const chosen = history.find(event => event.kind === 'chosen' && chose.made?.includes(event.id))!;
     assert.ok(history.some(event => event.kind === 'took-over' && event.tookOver?.addedId === chosen.addedId && chosen.addedId), 'the take-over came with the copies the choice added');
     assert.equal(await there(shared), false);
-    const undone = await restoreFromHistory(box.context(), chosen.id, false, 'narrow');
+    const undone = await restoreFromHistory(box.context(), chosen.id, false, { narrow: true });
     assert.ok(!undone.stopped, messages(undone));
     assert.deepEqual([await readFile(join(shared, 'SKILL.md'), 'utf8'), await readFile(join(box.home, PI, 'opus/SKILL.md'), 'utf8'), await there(join(box.home, CLAUDE, 'opus')), (await factsOf(box, 'opus'))!.managed],
       [text('opus', 'Shared.'), text('opus', 'Pi’s own.'), false, false]);

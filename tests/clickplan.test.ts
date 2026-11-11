@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { clickResults, hasSwitch, inverseChanges, offPlan, recordChanged, stillOn, undoOrder } from '../src/clickplan.ts';
+import { agentToolControl, clickResults, hasSwitch, inverseChanges, offPlan, recordChanged, stillOn, undoOrder } from '../src/clickplan.ts';
 import type { DestinationResult, HistoryEvent } from '../src/types.ts';
 
 const tools = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'];
@@ -55,4 +55,19 @@ test('A click that only changed the record is undone by the change that puts the
 test('Undo goes back switches and removals first, then a copy choice, then added copies, newest first', () => {
   const event = (id: string, kind: HistoryEvent['kind'], at: number) => ({ id, kind, at: new Date(at).toISOString(), key: 'k', item: 'k', losers: [], orderProved: true }) as HistoryEvent;
   assert.deepEqual(undoOrder([event('add', 'added', 3), event('choose', 'chosen', 2), event('off', 'switched', 1), event('out', 'removed', 4)]).map(entry => entry.id), ['out', 'off', 'choose', 'add']);
+});
+
+test('An agent’s line offers one control per tool, decided once: stopped, waiting for its source, off (or a copy turned up), left out, on, or no switch', () => {
+  const synced = { copies: { 'claude-cli': 'h', 'copilot-cli': 'h', 'codex-cli': 'h' }, managed: true, off: [] as string[] };
+  // On: its switch turns it off there, by Off's own rule for one tool; with the setting off, there is nothing to switch.
+  assert.deepEqual([agentToolControl(synced, 'codex-cli', true), agentToolControl(synced, 'codex-cli', false)], [{ is: 'on', whole: false }, { is: 'no-switch' }]);
+  // A one-way agent: the source's Off is the whole agent's; a receiver that stopped updating sits halfway.
+  const oneWay = { ...synced, oneWay: { from: 'claude-cli' }, limits: { 'copilot-cli': 'one-way', 'codex-cli': 'one-way' }, stopped: ['codex-cli'] };
+  assert.deepEqual([agentToolControl(oneWay, 'claude-cli', true), agentToolControl(oneWay, 'codex-cli', true)], [{ is: 'on', whole: true }, { is: 'stopped' }]);
+  // An Off holds a tool: its switch puts the kept copy back, or turns it on with a copy that turned up; a receiver waits for its source.
+  const held = { copies: { 'codex-cli': 'own' }, managed: true, off: ['claude-cli', 'copilot-cli', 'codex-cli'], heldOff: [{ tool: 'claude-cli' }, { tool: 'copilot-cli', source: 'claude-cli' }, { tool: 'codex-cli' }] };
+  assert.deepEqual(['claude-cli', 'copilot-cli', 'codex-cli'].map(tool => agentToolControl(held, tool, true)), [{ is: 'off', turnedUp: false }, { is: 'waits', source: 'claude-cli' }, { is: 'off', turnedUp: true }]);
+  // Left out of sync, not by an Off: Sync here with a copy of its own, its switch without.
+  const leftOut = { copies: { 'claude-cli': 'h', 'codex-cli': 'other' }, managed: true, off: ['copilot-cli', 'codex-cli'] };
+  assert.deepEqual([agentToolControl(leftOut, 'codex-cli', true), agentToolControl(leftOut, 'copilot-cli', true), agentToolControl({ ...leftOut, off: [] }, 'copilot-cli', true)], [{ is: 'left-out', has: true }, { is: 'left-out', has: false }, undefined]);
 });

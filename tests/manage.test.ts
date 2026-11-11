@@ -749,7 +749,7 @@ test('Undo of a copy choice on a synced skill puts it back as before the choice:
     const chosen = (await readHistory(ctx(box))).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
     assert.equal(chosen.wasSynced, true);
     assert.equal(await readFile(join(box.home, COPILOT, 'pair/SKILL.md'), 'utf8'), text('pair', 'Original.'));
-    const undone = await restoreFromHistory(fast(box), chosen.id, false, 'narrow');
+    const undone = await restoreFromHistory(fast(box), chosen.id, false, { narrow: true });
     assert.deepEqual(undone.results.map(entry => [entry.harness, entry.outcome, entry.message]), [['copilot-cli', 'written', `Its own copy is back. ${harnesses['copilot-cli'].nextStep}`]]);
     const after = await facts(box, 'pair');
     assert.deepEqual([await readFile(join(box.home, COPILOT, 'pair/SKILL.md'), 'utf8'), after.managed, after.off], [text('pair', 'Copilot’s own.'), true, []]);
@@ -795,7 +795,7 @@ test('Undo of a copy choice on a skill that was synced once, and isn’t now, le
     const chose = await applyChanges(fast(box), [{ ...manage('pair'), seenManaged: false, use: 'claude-cli', useHash: (await facts(box, 'pair')).copies['claude-cli']!.hash }]);
     const chosen = (await readHistory(ctx(box))).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
     assert.equal(chosen.wasSynced, undefined);
-    assert.equal((await restoreFromHistory(fast(box), chosen.id, false, 'narrow')).stopped, undefined);
+    assert.equal((await restoreFromHistory(fast(box), chosen.id, false, { narrow: true })).stopped, undefined);
     const after = await facts(box, 'pair');
     assert.deepEqual([after.managed, await readFile(join(box.home, COPILOT, 'pair/SKILL.md'), 'utf8')], [false, text('pair', 'Original.')]);
   } finally { await box.cleanup(); }
@@ -823,7 +823,7 @@ test('A skill whose last copies were removed stays on offer, off, while History 
     await restoreFromHistory(fast(box), (await readHistory(ctx(box))).findLast(event => event.kind === 'removed')!.id);
     await applyChanges(fast(box), [{ ...manage('pair'), seenManaged: true, remove: ['claude-cli', 'copilot-cli'], turnOff: true }]);
     const later = fast(box, { now: () => Date.now() + 400 * DAY_MS });
-    assert.deepEqual(((await manageView(later)).gone ?? []).map(item => [item.key, item.gone?.turnedOff, item.removed?.map(entry => entry.tool)]), [['pair', true, ['claude-cli', 'copilot-cli']]]);
+    assert.deepEqual(((await manageView(later)).gone ?? []).map(item => [item.key, item.gone?.turnedOff, item.heldOff?.map(entry => entry.tool)]), [['pair', true, ['claude-cli', 'copilot-cli']]]);
   } finally { await box.cleanup(); }
 });
 
@@ -916,7 +916,7 @@ test('Undo of a copy choice takes out only the copies its own pass added: not th
     assert.equal(chosen.addedId, undefined, 'its pass added no copy');
     await applyChanges(three(box), [{ ...manage('foo'), seenManaged: true }]);
     assert.equal(await exists(join(box.home, CODEX, 'foo/SKILL.md')), true);
-    assert.equal((await restoreFromHistory(three(box), chosen.id, false, 'narrow')).stopped, undefined);
+    assert.equal((await restoreFromHistory(three(box), chosen.id, false, { narrow: true })).stopped, undefined);
     assert.equal(await readFile(join(box.home, COPILOT, 'foo/SKILL.md'), 'utf8'), text('foo', 'Copilot’s own.'), 'the replaced copy is back');
     assert.equal(await exists(join(box.home, CODEX, 'foo/SKILL.md')), true, 'the copy Sync here added stays');
   } finally { await box.cleanup(); }
@@ -936,7 +936,7 @@ test('Undo of a choice that took two left-out tools back in leaves both out agai
     const chosen = (await readHistory(ctx(box))).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
     assert.deepEqual(chosen.losers.map(loser => loser.tool).sort(), ['codex-cli', 'copilot-cli']);
     // The click's Undo: the choice in its own tools, then the record as before the click.
-    assert.equal((await restoreFromHistory(three(box), chosen.id, false, 'narrow')).stopped, undefined);
+    assert.equal((await restoreFromHistory(three(box), chosen.id, false, { narrow: true })).stopped, undefined);
     const view = (await manageView(three(box))).skills.find(item => item.key === 'foo')!;
     const back = await applyChanges(three(box), inverseChanges(['foo'], before, new Map([['foo', { managed: view.managed, off: view.off }]])));
     assert.equal(back.harnessWrites, 0, JSON.stringify(back.results));
@@ -956,7 +956,7 @@ test('Undo of choosing a left-out tool’s own copy puts the synced copies back 
     await applyChanges(three(box), [{ ...manage('foo'), seenManaged: true }]);
     const chose = await applyChanges(three(box), [{ ...manage('foo'), seenManaged: true, use: 'codex-cli', useHash: (await manageView(three(box))).skills.find(item => item.key === 'foo')!.copies['codex-cli']!.hash }]);
     const chosen = (await readHistory(ctx(box))).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
-    assert.equal((await restoreFromHistory(three(box), chosen.id, false, 'narrow')).stopped, undefined);
+    assert.equal((await restoreFromHistory(three(box), chosen.id, false, { narrow: true })).stopped, undefined);
     assert.equal(await readFile(join(box.home, CLAUDE, 'foo/SKILL.md'), 'utf8'), text('foo', 'Original.'));
     // Codex's own copy, the one that was chosen, waits for a choice again: no pass catches it up, even after it is edited and the edit taken back.
     const waits = async (when: string) => {
@@ -993,13 +993,13 @@ test('An Undo of a choice that can’t put a copy back or take an added one out 
     const chosen = history.find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
     assert.ok(chosen.addedId && history.some(event => event.id === chosen.addedId));
     await chmod(join(box.home, COPILOT), 0o555); await chmod(join(box.home, CODEX), 0o555);
-    const once = await restoreFromHistory(three(box), chosen.id, false, 'narrow');
+    const once = await restoreFromHistory(three(box), chosen.id, false, { narrow: true });
     assert.deepEqual(once.results.map(entry => [entry.harness, entry.outcome]).sort(), [['codex-cli', 'failed'], ['copilot-cli', 'failed']]);
     const open = (await readHistory(ctx(box))).filter(event => [chosen.id, chosen.addedId].includes(event.id));
     assert.deepEqual(open.map(event => [event.kind, event.undoneBy, event.restoredTools]).sort(), [['added', undefined, undefined], ['chosen', undefined, []]]);
     assert.equal((await facts(box, 'foo')).managed, false, 'not synced, as before the choice');
     await chmod(join(box.home, COPILOT), 0o755); await chmod(join(box.home, CODEX), 0o755);
-    const finished = await restoreFromHistory(three(box), chosen.id, false, 'narrow');
+    const finished = await restoreFromHistory(three(box), chosen.id, false, { narrow: true });
     assert.equal(finished.stopped, undefined, JSON.stringify(finished));
     assert.deepEqual([await readFile(join(box.home, COPILOT, 'foo/SKILL.md'), 'utf8'), await exists(join(box.home, CODEX, 'foo'))], [text('foo', 'Copilot’s.'), false]);
     assert.ok((await readHistory(ctx(box))).filter(event => [chosen.id, chosen.addedId].includes(event.id)).every(event => event.undoneBy));
@@ -1016,11 +1016,11 @@ test('Finish undo of a choice leaves a skill no longer synced since as it is: on
     const chose = await applyChanges(three(box), [{ ...manage('foo'), seenManaged: true, use: 'claude-cli', useHash: (await facts(box, 'foo')).copies['claude-cli']!.hash }]);
     const chosen = (await readHistory(ctx(box))).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
     await chmod(join(box.home, CODEX), 0o555);
-    const once = await restoreFromHistory(three(box), chosen.id, false, 'narrow');
+    const once = await restoreFromHistory(three(box), chosen.id, false, { narrow: true });
     await chmod(join(box.home, CODEX), 0o755);
     assert.deepEqual(once.results.map(entry => [entry.harness, entry.outcome]), [['codex-cli', 'failed']]);
     await applyChanges(three(box), [{ ...manage('foo'), managed: false, seenManaged: true }]);
-    const finished = await restoreFromHistory(three(box), chosen.id, false, 'narrow');
+    const finished = await restoreFromHistory(three(box), chosen.id, false, { narrow: true });
     assert.equal(finished.stopped, undefined, JSON.stringify(finished));
     assert.equal(await readFile(join(box.home, CODEX, 'foo/SKILL.md'), 'utf8'), text('foo', 'Codex’s own.'));
     assert.equal((await facts(box, 'foo')).managed, false, 'still not synced');
@@ -1599,7 +1599,7 @@ test('Undo right after a copy choice puts the replaced copy back in its own tool
     assert.equal(await readFile(join(box.home, COPILOT, 'foo/SKILL.md'), 'utf8'), text('foo', 'CLAUDE VERSION'));
     assert.equal(await exists(join(box.home, CODEX, 'foo/SKILL.md')), true, 'the choice added a Codex copy');
     const chosen = (await readHistory(ctx(box))).find(entry => entry.kind === 'chosen')!;
-    const undone = await restoreFromHistory(three(box), chosen.id, false, 'narrow');
+    const undone = await restoreFromHistory(three(box), chosen.id, false, { narrow: true });
     assert.equal(undone.stopped, undefined, undone.stopped ?? '');
     assert.equal(await readFile(join(box.home, CLAUDE, 'foo/SKILL.md'), 'utf8'), text('foo', 'CLAUDE VERSION'), 'the chosen tool keeps its copy');
     assert.equal(await readFile(join(box.home, COPILOT, 'foo/SKILL.md'), 'utf8'), text('foo', 'COPILOT VERSION'), 'the replaced copy is back');
@@ -1621,7 +1621,7 @@ test('Undo of a copy choice writes nothing when a copy changed since', async () 
     await applyChanges(three(box), [{ key: 'foo', managed: true, off: [], use: 'claude-cli' }]);
     await writeFile(join(box.home, CODEX, 'foo/SKILL.md'), text('foo', 'EDITED IN CODEX'));
     const chosen = (await readHistory(ctx(box))).find(entry => entry.kind === 'chosen')!;
-    const undone = await restoreFromHistory(three(box), chosen.id, false, 'narrow');
+    const undone = await restoreFromHistory(three(box), chosen.id, false, { narrow: true });
     assert.ok(undone.stopped, 'stopped');
     assert.equal(await readFile(join(box.home, COPILOT, 'foo/SKILL.md'), 'utf8'), text('foo', 'CLAUDE VERSION'), 'nothing was written');
     assert.equal(await readFile(join(box.home, CODEX, 'foo/SKILL.md'), 'utf8'), text('foo', 'EDITED IN CODEX'));
@@ -1691,7 +1691,7 @@ test('Undo of a skill’s copy choice gives the copy it puts back its earlier ed
     // Copilot CLI's newer copy is chosen, then undone: Claude Code's older copy is written back.
     const chose = await applyChanges(fast(box), [{ ...manage('pair'), use: 'copilot-cli', useHash: (await facts(box, 'pair')).copies['copilot-cli']!.hash }]);
     const chosen = (await readHistory(ctx(box))).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
-    assert.equal((await restoreFromHistory(fast(box), chosen.id, false, 'narrow')).stopped, undefined);
+    assert.equal((await restoreFromHistory(fast(box), chosen.id, false, { narrow: true })).stopped, undefined);
     const [claude, copilot] = await times();
     assert.equal(claude, claudeBefore);
     assert.ok(Date.parse(copilot) > Date.parse(claude), 'Copilot CLI’s is still the one edited most recently');
@@ -1708,14 +1708,14 @@ test('Finish undo of a skill’s choice after the synced content moved on leaves
     const chose = await applyChanges(three(box), [{ ...manage('foo'), seenManaged: true, use: 'claude-cli', useHash: (await facts(box, 'foo')).copies['claude-cli']!.hash }]);
     const chosen = (await readHistory(ctx(box))).find(event => chose.made?.includes(event.id) && event.kind === 'chosen')!;
     await chmod(join(box.home, CODEX), 0o555);
-    await restoreFromHistory(three(box), chosen.id, false, 'narrow');
+    await restoreFromHistory(three(box), chosen.id, false, { narrow: true });
     await chmod(join(box.home, CODEX), 0o755);
     // Codex left out, then an edit in Claude Code spreads.
     await applyChanges(three(box), [{ ...manage('foo', ['codex-cli']), seenManaged: true }]);
     await writeFile(join(box.home, CLAUDE, 'foo/SKILL.md'), text('foo', 'Moved on.'));
     await applyChanges(three(box), []);
     const moved = (await readRecord(box.home)).record!.items.foo.hash;
-    assert.equal((await restoreFromHistory(three(box), chosen.id, false, 'narrow')).stopped, undefined);
+    assert.equal((await restoreFromHistory(three(box), chosen.id, false, { narrow: true })).stopped, undefined);
     assert.equal(await readFile(join(box.home, CODEX, 'foo/SKILL.md'), 'utf8'), text('foo', 'Codex’s own.'));
     assert.equal((await readRecord(box.home)).record!.items.foo.hash, moved);
     assert.equal((await applyChanges(three(box), [])).harnessWrites, 0);

@@ -106,7 +106,7 @@ test('an MCP server or agent a tool has through a plugin gets no entry or file o
     const copies = () => Promise.all(['.copilot/agents/triager.agent.md', '.codex/agents/triager.toml', '.claude/agents/triager.md'].map(path => exists(join(home, path))));
     const turned = await applyAgents(context, tools, [{ key: 'triager', managed: true, off: [], seenManaged: true, remove: ['copilot-cli', 'codex-cli'], turnOff: true }]);
     const off = (await agentsView(context, tools)).gone?.find(item => item.key === 'triager');
-    assert.deepEqual([off?.plugin?.['claude-cli']?.plugin, off?.cannot['claude-cli'], off?.removed?.map(entry => entry.tool), await copies()],
+    assert.deepEqual([off?.plugin?.['claude-cli']?.plugin, off?.cannot['claude-cli'], off?.heldOff?.map(entry => entry.tool), await copies()],
       ['issue-tracker', 'Claude Code has this agent through the plugin issue-tracker (version 1.2.0), so no separate copy is placed there.', ['copilot-cli', 'codex-cli'], [false, false, false]]);
     assert.equal((await applyAgents(context, tools, [], { settleMs: 0 })).writes, 0);
     assert.equal((await restoreAgent(context, tools, turned.made![0])).stopped, undefined);
