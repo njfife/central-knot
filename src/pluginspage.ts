@@ -50,10 +50,11 @@ function suggestions(view: PluginsView, first = false) {
   const id = (source: string) => source.replace(/[^A-Za-z0-9]+/g, '-');
   return h(`div.market-suggested${first ? '.market-suggested-first' : ''}`, { role: 'group', 'aria-label': 'Suggested marketplaces' },
     h('h3.market-suggested-title', {}, 'Suggested'),
-    h('ul', {}, offers.map(offer => h('li.market-suggestion', { title: `${offer.source}: the marketplace ${andList(offer.tools.map(tool => names[tool]))} ${offer.tools.length > 1 ? 'come' : 'comes'} with. Adding it lists its plugins here and installs nothing.` },
+    h('ul', {}, offers.map(offer => h('li.market-suggestion', { title: `${offer.source}. Adding it lists its plugins here and installs nothing.` },
       h('span.market-suggestion-text', {}, h('span.market-suggestion-name', {}, offer.name), h('span.market-suggestion-meta', {}, `For ${andList(offer.tools.map(tool => names[tool]))}`)),
       button({ variant: 'outline', size: 'small', label: 'Add', name: `Add ${offer.name}`, id: `suggested-add-${id(offer.source)}`, disabled: !!app.busy, onclick: () => void addMarketplace(offer.source) }),
-      closeButton(() => void declineMarketplace(offer.source), { id: `suggested-no-${id(offer.source)}`, label: `Don’t suggest ${offer.name}` })))));
+      // Not while something else is being read or added: one piece of work on the page at a time.
+      closeButton(() => { if (!app.busy) void declineMarketplace(offer.source, offer.name); }, { id: `suggested-no-${id(offer.source)}`, label: `Don’t suggest ${offer.name}` })))));
 }
 
 /** The picture a bundled build gave its marketplace, drawn small before its name; nothing for any other marketplace. */

@@ -2214,7 +2214,7 @@ async function suggestedFlow() {
   const pictures = async name => { if (!shots) return; for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); await a.shot(`${name}-${width}`); } await fullSize(a); };
   const offered = page => page.all('.market-suggestion', `e.querySelector('.market-suggestion-name').textContent + ' · ' + e.querySelector('.market-suggestion-meta').textContent`);
   await a.click('#nav-plugins');
-  same('with Claude Code alone, its own marketplace is suggested, and no other tool’s', await offered(a), ['Claude plugins · For Claude Code']);
+  same('with Claude Code alone, its own marketplace is suggested, and no other tool’s', await offered(a), ['claude-plugins-official · For Claude Code']);
   check('a suggestion has Add and a way to say no', await a.exists('#suggested-add-anthropics-claude-plugins-official') && await a.exists('#suggested-no-anthropics-claude-plugins-official'));
   await fitsAtMinimum(a, 'the empty Plugins page with a suggestion');
   await pictures('suggested-empty');
@@ -2222,26 +2222,32 @@ async function suggestedFlow() {
   cli('.local/bin/copilot', 'GitHub Copilot CLI 1.0.109.');
   mkdirSync(join(home, '.copilot'), { recursive: true });
   await a.click('#header-refresh');
-  same('each tool here brings its own', await offered(a), ['Claude plugins · For Claude Code', 'Awesome Copilot · For Copilot CLI']);
+  same('each tool here brings its own', await offered(a), ['claude-plugins-official · For Claude Code', 'copilot-plugins · For Copilot CLI']);
   // With a marketplace on the list, the suggestions sit under it.
   const market = join(scratch, 'suggested-market');
   writeMarket(market);
   await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)})`);
   await a.click('#header-refresh');
   for (let tries = 0; tries < 50 && !(await a.exists('.market-list .market-suggested')); tries++) await wait(100);
-  same('beside a marketplace on the list, the suggestions are under the list', await offered(a), ['Claude plugins · For Claude Code', 'Awesome Copilot · For Copilot CLI']);
+  same('beside a marketplace on the list, the suggestions are under the list', await offered(a), ['claude-plugins-official · For Claude Code', 'copilot-plugins · For Copilot CLI']);
   await fitsAtMinimum(a, 'Plugins with a marketplace and two suggestions');
   await pictures('suggested-under-list');
   // Said no to: gone at once, and not offered again after a restart.
-  await a.click('#suggested-no-github-awesome-copilot');
+  await a.click('#suggested-no-github-copilot-plugins');
   for (let tries = 0; tries < 50 && (await offered(a)).length !== 1; tries++) await wait(100);
-  same('a declined suggestion leaves the page', await offered(a), ['Claude plugins · For Claude Code']);
+  same('a declined suggestion leaves the page', await offered(a), ['claude-plugins-official · For Claude Code']);
+  check('with a note that it won’t be suggested again, and Undo', /copilot-plugins won’t be suggested again\./.test(await a.text('.plugins-page') ?? '') && await a.exists('#outcome-suggest-again'), await a.text('.plugins-page'));
+  await a.click('#outcome-suggest-again');
+  for (let tries = 0; tries < 50 && (await offered(a)).length !== 2; tries++) await wait(100);
+  same('Undo offers it again', (await offered(a)).length, 2);
+  await a.click('#suggested-no-github-copilot-plugins');
+  for (let tries = 0; tries < 50 && (await offered(a)).length !== 1; tries++) await wait(100);
   same('no page errors, suggested marketplaces', a.pageErrors, []);
   await a.quit();
   const b = await launch(data, flag('--electron') ? ['--as-released'] : [], home, onlyHere);
   await b.click('#nav-plugins');
   for (let tries = 0; tries < 50 && !(await b.exists('.market-suggestion')); tries++) await wait(100);
-  same('and stays declined after a restart', await offered(b), ['Claude plugins · For Claude Code']);
+  same('and stays declined after a restart', await offered(b), ['claude-plugins-official · For Claude Code']);
   same('no page errors, suggested marketplaces after a restart', b.pageErrors, []);
   await b.quit();
 }

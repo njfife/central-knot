@@ -152,8 +152,8 @@ export interface DesktopApi {
   /** Adds a marketplace; `source` is how it was stored, so the page can open exactly that one. */
   addMarketplace(source: string): Promise<{ problem?: string; view?: PluginsView; source?: string }>;
   forgetMarketplace(source: string): Promise<PluginsView | null>;
-  /** Stops offering a suggested marketplace. */
-  declineMarketplace(source: string): Promise<PluginsView | null>;
+  /** Stops offering a suggested marketplace; `again`: offers it again (the Undo of that). */
+  declineMarketplace(source: string, again?: boolean): Promise<PluginsView | null>;
   pickMarketplaceFolder(): Promise<string | null>;
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;

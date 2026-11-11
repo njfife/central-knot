@@ -279,8 +279,11 @@ export const forgetMarketplace = (source: string) => act('removing', async () =>
   tell({ page: 'plugins', item: name || undefined, text, act: { label: 'Add back', id: 'outcome-add-back', run: () => void addMarketplace(source) } });
 });
 
-/** Stops offering a suggested marketplace: it leaves the page at once and is not offered again. */
-export const declineMarketplace = (source: string) => act('removing', async () => { showView(await api().declineMarketplace(source)); });
+/** Stops offering a suggested marketplace: it leaves the page at once and is not offered again, unless its Undo is pressed. */
+export async function declineMarketplace(source: string, name: string) {
+  showView(await api().declineMarketplace(source));
+  tell({ page: 'plugins', item: name, text: `${name} won’t be suggested again.`, act: { label: 'Undo', id: 'outcome-suggest-again', run: () => void api().declineMarketplace(source, true).then(showView) } });
+}
 
 export const pickMarketplaceFolder = () => api().pickMarketplaceFolder();
 
