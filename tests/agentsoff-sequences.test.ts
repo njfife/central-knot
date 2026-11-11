@@ -428,3 +428,34 @@ test('An action already undone, asked for from a page read before, says so', asy
     assert.equal((await restoreAgent(box.context, tools, put)).stopped, 'That change was already undone.');
   } finally { await box.cleanup(); }
 });
+
+test('Rule B: a copy that turned up and was turned on with its own switch stays that tool’s own: an older Off of that tool doesn’t hold it again', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    await toolOff(box, 'codex-cli');
+    await write(box, 'codex-cli', codexOwn('Made by hand while off.'));
+    await toolOff(box, 'codex-cli');
+    await write(box, 'codex-cli', codexOwn('Made by hand again.'));
+    await toolOn(box, 'codex-cli');
+    assert.deepEqual([await heldIn(box), /again/.test((await readOf(box, 'codex-cli'))!)], [[], true]);
+  } finally { await box.cleanup(); }
+});
+
+test('Rule B: an On’s Turn off again ends with a later copy choice, even one of other tools: its Undo would make the agent not synced again under the choice', async () => {
+  const box = await sandbox();
+  try {
+    // Not synced: Claude Code and Codex the same, Copilot CLI its own.
+    await write(box, 'claude-cli', claudeAgent());
+    await write(box, 'copilot-cli', claudeAgent('Copilot’s own.\n'));
+    await write(box, 'codex-cli', codexOwn('You review code.\nBe brief.'));
+    await pass(box);
+    await toolOff(box, 'codex-cli');
+    const on = (await toolOn(box, 'codex-cli'))!;
+    await choose(box, 'claude-cli');
+    const choice = (await historyOf(box)).findLast(event => event.kind === 'chosen')!;
+    assert.deepEqual(choice.losers.map(loser => loser.tool), ['copilot-cli']);
+    assert.match((await restoreAgent(box.context, tools, on.made[0])).stopped ?? '', /chosen since/);
+    assert.equal((await recordOf(box))?.state, 'shared');
+  } finally { await box.cleanup(); }
+});

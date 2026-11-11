@@ -25,7 +25,7 @@ import type { HarnessId, HistoryDays, HistoryEvent, SkillFacts } from '../src/ty
 import { age, choose, claudeAgent, codexOwn, deleteEverywhere, factOf, fields, files, filesOf, historyActions, pass, prune, sandbox, synced, toolOff, toolOn, tools, trial, turnOff, turnOn, undo, write, type Box, type Clicked, type Tool } from './agentclicks.ts';
 
 /** Walks that found a bug once, each with its agent (true: one-way), 1001 among them; CK_WALKS adds random ones of both kinds. */
-const FOUND: [number, boolean][] = [[1001, false], [2, false], [5071, false], [18, true], [5000, true], [5021, true], [5055, true], [5059, true]];
+const FOUND: [number, boolean][] = [[1001, false], [2, false], [5071, false], [6081, false], [18, true], [5000, true], [5021, true], [5055, true], [5059, true]];
 const STEPS = 14;
 const random = (seed: number) => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 /** An answer that means History offered an action that is stale or does nothing. */
@@ -56,7 +56,8 @@ async function walk(seed: number, oneWay: boolean): Promise<Finding[]> {
     for (let step = 0; step < STEPS && !found.length; step++) {
       const fact = await factOf(box, context());
       const present = fact && !fact.gone ? tools.filter(tool => fact.copies[tool] !== undefined) : [];
-      type Act = { name: string; click?: () => Promise<Clicked | undefined>; run?: () => Promise<unknown> };
+      /** `undoes`: the History entries this step undoes, whose own copies it takes out again without owing them (d). */
+      type Act = { name: string; click?: () => Promise<Clicked | undefined>; run?: () => Promise<unknown>; undoes?: string[] };
       const acts: Act[] = [];
       const add = (weight: number, act: Act) => { for (let count = 0; count < weight; count++) acts.push(act); };
       if (present.length) add(4, { name: 'Off', click: () => turnOff(box, context()) });
@@ -65,8 +66,8 @@ async function walk(seed: number, oneWay: boolean): Promise<Finding[]> {
       for (const entry of fact?.heldOff ?? []) if (!(entry.source && fact!.copies[entry.source] === undefined)) add(1, { name: `On in ${entry.tool}`, click: () => toolOn(box, entry.tool, context()) });
       if (fact) add(1, { name: 'Delete everywhere', click: () => deleteEverywhere(box, context()) });
       for (const tool of present) add(1, { name: `choose ${tool}`, click: () => choose(box, tool, context()) });
-      for (const action of await historyActions(box, context())) add(2, { name: `History: ${action.label} (${action.event.kind}${action.event.putBackFrom ? `/${action.event.putBackFrom}` : ''})`, run: action.run });
-      if (last?.made.length) { const click = last; add(2, { name: 'Undo', run: () => undo(box, click, context()) }); }
+      for (const action of await historyActions(box, context())) add(2, { name: `History: ${action.label} (${action.event.kind}${action.event.putBackFrom ? `/${action.event.putBackFrom}` : ''})`, run: action.run, undoes: [action.event.id] });
+      if (last?.made.length) { const click = last; add(2, { name: 'Undo', run: () => undo(box, click, context()), undoes: click.made }); }
       for (const tool of tools as Tool[]) {
         if (present.includes(tool)) add(1, { name: `hand edit in ${tool}`, run: async () => { const text = (await filesOf(box))[tool]!; await write(box, tool, text.replace(/(Be brief\.|Hand \d+\.|Codex’s own\.)/, `Hand ${++marker}.`)); } });
         else add(1, { name: `hand-made copy in ${tool}`, run: () => write(box, tool, tool === 'codex-cli' ? codexOwn(`Hand ${++marker}.`) : claudeAgent(`Hand ${++marker}.\n`)) });
@@ -87,8 +88,12 @@ async function walk(seed: number, oneWay: boolean): Promise<Finding[]> {
       const filesAfter = await filesOf(box), factAfter = await factOf(box, context()), history = await readHistory(context());
       if (process.env.CK_TRACE) console.log(`\n--- ${trace.at(-1)}\n${JSON.stringify({ result: clicked && { stopped: clicked.stopped, results: clicked.results.map(entry => `${entry.harness}:${entry.outcome}:${entry.message.slice(0, 50)}`) }, row: row(factAfter), files: Object.fromEntries(Object.entries(filesAfter).map(([tool, text]) => [tool, text?.replace(/\s+/g, ' ').slice(-24)])) })}\n${history.filter(event => event.key === 'agent:reviewer').map(event => `${event.id.slice(0, 4)} ${event.kind}${event.turnedOff ? '/off' : ''}${event.everywhere ? '/everywhere' : ''}${event.putBackFrom ? `/${event.putBackFrom}` : ''}${event.undoneBy ? `(undone by ${event.undoneBy.slice(0, 4)})` : ''} [${event.losers.map(loser => loser.tool.split('-')[0])}]${event.turnedUp ? ` up:${event.turnedUp.map(loser => loser.tool.split('-')[0])}` : ''}`).join('\n')}`);
       const byClick = !act.name.startsWith('hand') && act.name !== 'pass' && act.name !== 'age';
-      // (d) What a click took out or replaced, with no tool holding that content now, is owed until it is back or reachable.
+      // (d) What a click took out or replaced, with no tool holding that content now, is owed until it is back or reachable. An
+      // Undo taking out what the entry it undoes wrote (a choice's chosen copy, the copies turning it on added, copies put back)
+      // owes nothing: those were Central Knot's copies of content the entry still names.
       const contentNow = new Set(Object.values(factAfter?.copies ?? {}).map(copy => copy!.hash));
+      const undone = history.filter(event => act.undoes?.includes(event.id));
+      for (const event of undone) for (const hash of [event.winner?.hash, event.kind === 'added' ? event.previous : undefined, ...(event.putBackFrom ? event.losers.map(loser => loser.hash) : [])]) if (hash) contentNow.add(hash);
       for (const tool of tools as Tool[]) {
         const was = filesBefore[tool];
         if (byClick && was !== undefined && filesAfter[tool] !== was && !contentNow.has(fact?.copies[tool]?.hash ?? '')) owed.set(`${tool}\0${was}`, { tool, text: was, hash: fact?.copies[tool]?.hash ?? '' });

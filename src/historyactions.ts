@@ -13,7 +13,7 @@ import type { DestinationResult, HarnessId, HistoryEvent, RestoreHow } from './t
 
 /** What an entry is, as History acts on it. */
 export type EntryIs = 'pulled-base' | 'pulled-deletion' | 'pulled-edit' | 'pulled-add' | 'edit' | 'conflict' | 'kept-edit' | 'deletion' | 'delete-everywhere'
-  | 'choice' | 'unfinished-choice' | 'switch' | 'profile' | 'off' | 'removal' | 'take-over' | 'write' | 'add'
+  | 'choice' | 'agent-choice' | 'unfinished-choice' | 'switch' | 'profile' | 'off' | 'removal' | 'take-over' | 'write' | 'add'
   | 'on-after-off' | 'delete-everywhere-again' | 'deletion-again' | 'redo' | 'restore-after-removal' | 'undo';
 
 export function entryIs(event: HistoryEvent, events: HistoryEvent[]): EntryIs {
@@ -27,7 +27,8 @@ export function entryIs(event: HistoryEvent, events: HistoryEvent[]): EntryIs {
     case 'edit': case 'conflict': case 'kept-edit': case 'switched': case 'profile': case 'took-over': case 'written': case 'added':
       return ({ edit: 'edit', conflict: 'conflict', 'kept-edit': 'kept-edit', switched: 'switch', profile: 'profile', 'took-over': 'take-over', written: 'write', added: 'add' } as const)[event.kind];
     case 'deleted': return event.everywhere ? 'delete-everywhere' : 'deletion';
-    case 'chosen': return event.restoredTools ? 'unfinished-choice' : 'choice';
+    // An agent's choice is undone from History as its click's Undo is: each replaced copy back in its own tool.
+    case 'chosen': return event.restoredTools ? 'unfinished-choice' : event.key.startsWith('agent:') ? 'agent-choice' : 'choice';
     case 'removed': return event.turnedOff ? 'off' : 'removal';
     case 'restored': {
       // A 'restored' entry is the Undo or Restore of another: what it undid says what its own action is.
@@ -80,6 +81,7 @@ const table: Record<EntryIs, Row> = {
   'delete-everywhere': { word: () => 'Restore', scope: 'named', help: (event, tools) => (event.losers.length ? `Put each copy back in ${andList(tools.map(toolName))}, as it was` : `Put ${event.item} back on its page, off, its copies in History`),
     after: (event, { results, homeTools }) => sentence(where(results, 'written').length ? `${event.item} is back in ${toolsPhrase(where(results, 'written'), homeTools)}.` : !event.losers.length ? `${event.item} is back on its page, off.` : '', ...leftAsIs(results)) },
   choice: { word: () => 'Undo choice', scope: 'all', help: event => `Put ${event.item} back as it was before this change, in every tool it syncs to (including where it was edited)` },
+  'agent-choice': { word: () => 'Undo choice', scope: 'named', how: { narrow: true }, help: (event, tools) => `Put each copy this choice replaced back in its own tool (${andList(tools.map(toolName))}), take out the copies it added, and leave ${event.item} as it was before the choice (only while unchanged since)` },
   'unfinished-choice': { word: () => 'Finish undo', scope: 'none', how: { narrow: true }, help: (event, _tools, events, homeTools) => `${unfinished(event, events, homeTools, true)} (only while unchanged since)` },
   switch: { word: event => { const flips = new Set((event.switched ?? []).map(entry => entry.disabled)); return flips.size === 1 ? (flips.has(true) ? 'Undo: enable' : 'Undo: disable') : 'Undo'; }, scope: 'switched',
     help: event => (event.switched ?? []).map(entry => `${entry.disabled ? 'Enable' : 'Disable'} it again in ${who(entry.tool)}`).join('; ') },
