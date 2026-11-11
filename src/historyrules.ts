@@ -9,13 +9,35 @@
 //   agents pass and click (agents.ts notSyncing, putBackAgent, restoreVersion). History's prune keeps an Off until it is turned
 //   on (keptOff), with every later entry of its item, so these read the same whatever History's days.
 // - Rule B, "is this History entry's action still offered?": endedBy. An entry's action stands only while no later Off,
-//   deletion, put-back or copy choice changed what it acts on. For agents only: a skill or an MCP server is turned off with each
+//   deletion, put-back or copy choice changed what it acts on; an Off's and a copy choice's, tool by tool, in each tool no
+//   later change reached (standsIn). For agents only: a skill or an MCP server is turned off with each
 //   tool's own switch, nothing is removed, and its entries keep their actions for History's days. Read by History's action
 //   table (historyactions.ts offered, drawn by historypage.ts), which shows sinceWords in place of the action, and by
 //   agents.ts restoreAgent, which refuses an ended action in the same words. One action outlives Rule B: an On's "Use the kept
 //   copy" (keptCopiesOffered).
 // Entries are in History's order (oldest first); "later" means after in that list. A deletion ends what came before it by time.
 // Worked examples on plain entries: tests/historyactions.test.ts.
+//
+// Offered is not the same as done. An action Rule B leaves standing can still wait at the click, and the engine then says in
+// words what to do first, changing nothing: a version written everywhere (an edit's Undo or Redo, a deletion by hand's
+// Restore) waits while an Off holds a tool, and while a tool's own copy waits for a choice of copy (agents.ts restoreVersion;
+// the same for skills in manage.ts restoreFromHistory and for MCP servers in mcp.ts restoreMcp); a deletion's Restore waits
+// while an Off of a newer agent stands or a tool holds another agent of that name (agents.ts putBackRefusal); and a one-way
+// copy's Turn on waits for its source (agents.ts waitsForSource). History still shows those actions: Rule B only says whether
+// an action still means what it says.
+//
+// One idea lives in five places: an older Off left open for a tool a later Off took over. Worked example: Off in Codex (Off₁
+// keeps copy A), a copy B made by hand in Codex, then the row's Off (Off₂ takes B out). Codex is Off₂'s now (Rule A:
+// standsIn(Off₁) no longer has it), and Off₁ still keeps A for it. Turning Off₂ on puts B back, and Off₁, which that On gave
+// its hold back, finds B there and leaves A in History, on offer. The places:
+// 1. here, offsWaitingFor: the Offs that still keep a copy for a tool a later Off holds (Off₁, for Codex);
+// 2. manage.ts heldOffOf: the row's fact for that tool lists them as `older`;
+// 3. itemrow.ts putBackOrder: the row's On puts the holder back first, then each `older` one;
+// 4. app.ts restoreAll: an `older` one that can't go back by then stops nothing;
+// 5. agents.ts putCopiesBack and handedOn (with keptByEarlierOffs, here): where the tool keeps a copy of its own instead (a
+//    third copy, made by hand after Off₂), Off₂'s On takes A on with B, offers both in turn, and Off₁ is done with Codex.
+// The simpler shape (Off₂ taking A onto its own entry when it takes the tool over) was not taken: Off₂'s own Undo must give
+// Off₁ its hold back exactly, which the cancelling pair gives for free and a moved copy would have to move back.
 import type { HarnessId, HistoryEvent } from './types.ts';
 
 /** What an entry is, as History acts on it: one name per kind of entry, decided by entryIs. */
@@ -58,11 +80,16 @@ export function entryIs(event: HistoryEvent, events: HistoryEvent[]): EntryIs {
 
 const toolsOf = (copies: HistoryEvent['losers'] = []) => copies.map(copy => copy.tool);
 /**
- * The copies an Off holds: those it took out (`losers`), then those it holds besides (`turnedUp`, on an Off made by Turn off
+ * The copies an Off holds: those it took out (`losers`), then those it holds besides (`keptAside`, on an Off made by Turn off
  * again): the kept copy of a tool whose own copy it left where it was, and an older kept copy of a tool it also took one out
  * of. A put-back gives each tool the first of its copies here, and leaves the rest in History, on offer.
  */
-export const heldCopies = (off: HistoryEvent) => [...off.losers, ...(off.turnedUp ?? [])];
+export const heldCopies = (off: HistoryEvent) => [...off.losers, ...(off.keptAside ?? [])];
+/**
+ * The tools whose own copy `event` left alone: those it keeps a copy aside for (`keptAside`) without having put one back, or
+ * taken one out, there itself. A put-back found the tool's own copy there; the Off its Undo wrote holds the tool with it.
+ */
+export const ownCopyLeftIn = (event: HistoryEvent) => [...new Set(toolsOf(event.keptAside))].filter(tool => !toolsOf(event.losers).includes(tool));
 /** An entry's tools that its Undo or put-back hasn't reached yet (`restoredTools`: those it has, part-way). */
 const stillOpen = (event: HistoryEvent, tools: HarnessId[]) => tools.filter(tool => !event.restoredTools?.includes(tool));
 
@@ -86,7 +113,7 @@ const reach: Record<EntryIs, Reach> = {
   // An Off changes the tools it holds, until each is put back.
   off: { changes: event => stillOpen(event, toolsOf(heldCopies(event))), actsOn: 'tools' },
   // Turning it on changes the tools it put a copy back in and those where it found a copy turned up; its Turn off again is the Off again, synced state and all.
-  'on-after-off': { changes: event => [...toolsOf(event.losers), ...toolsOf(event.turnedUp)], actsOn: 'item' },
+  'on-after-off': { changes: event => [...toolsOf(event.losers), ...toolsOf(event.keptAside)], actsOn: 'item' },
   'agent-choice': choice, 'unfinished-choice': choice, 'pulled-choice': choice, choice,
   // Use the kept copy changes its one tool.
   'kept-copy': { changes: event => stillOpen(event, [event.winner!.tool]), actsOn: 'tools' },
@@ -112,14 +139,21 @@ export const deletedSince = (event: HistoryEvent, events: HistoryEvent[]) => eve
  * Pairs that cancel. A click and the click that undid it leave things as they were: an Off and its On, an On and its Turn off
  * again, a choice and its Undo (which writes no entry of its own). So among `clicks`, an entry undone an odd number of times in
  * a row (undone; or undone, that undone, and that undone again) has cancelled out, and one undone an even number of times
- * stands, as itself. An entry that is only the undoing of another one of `clicks` never stands for itself.
+ * stands: as the entry that did it again where that is one of `clicks` too (an Off turned on and turned off again is the Off
+ * that Turn off again wrote, which holds what it took out then, maybe less), else as itself. An entry that is only the
+ * undoing of another one of `clicks` never stands for itself.
  * `later`: every entry the chain of undos may run through. Returns the clicks that stand.
  */
 function standing(clicks: HistoryEvent[], later: HistoryEvent[]): HistoryEvent[] {
   const byId = new Map(later.map(entry => [entry.id, entry]));
-  const timesUndone = (entry: HistoryEvent) => { let times = 0; for (let at: HistoryEvent | undefined = entry; at?.undoneBy; at = byId.get(at.undoneBy)) times++; return times; };
+  /** `entry`, then the entry that undid it, the one that undid that, and so on; `times`: how often it was undone (the last time maybe with no entry). */
+  const undone = (entry: HistoryEvent) => {
+    let last = entry, times = 0;
+    for (let at: HistoryEvent | undefined = entry; at?.undoneBy; at = byId.get(at.undoneBy)) { times++; last = byId.get(at.undoneBy) ?? last; }
+    return { times, last };
+  };
   const undoings = new Set(clicks.flatMap(entry => (entry.undoneBy && byId.has(entry.undoneBy) ? [entry.undoneBy] : [])));
-  return clicks.filter(entry => !undoings.has(entry.id) && timesUndone(entry) % 2 === 0);
+  return clicks.filter(entry => { const { times, last } = undone(entry); return !undoings.has(entry.id) && times % 2 === 0 && (last === entry || !clicks.includes(last)); });
 }
 /**
  * What is left: the changes made to `event`'s item after it that still stand, each with its tools (`reach`'s `changes`), oldest
@@ -134,7 +168,7 @@ function laterChanges(event: HistoryEvent, events: HistoryEvent[]): { entry: His
   const later = events.slice(events.findIndex(other => other.id === event.id) + 1).filter(entry => entry.key === event.key);
   const undoesLaterOff = (entry: HistoryEvent) => !!entry.reverses && later.some(other => other.id === entry.reverses);
   const left = standing(later.filter(entry => !undoesLaterOff(entry)), later).map(entry => ({ entry, tools: reach[entryIs(entry, events)].changes(entry) }));
-  const keptOwn = later.filter(undoesLaterOff).map(entry => ({ entry, tools: toolsOf(entry.turnedUp) }));
+  const keptOwn = later.filter(undoesLaterOff).map(entry => ({ entry, tools: toolsOf(entry.keptAside) }));
   return [...left, ...keptOwn].filter(change => change.tools.length).sort((first, second) => later.indexOf(first.entry) - later.indexOf(second.entry));
 }
 
@@ -186,11 +220,11 @@ export function endedBy(event: HistoryEvent, events: HistoryEvent[]): HistoryEve
 }
 /** What History says of an entry `endedBy` ended, by what ended it. */
 export const sinceWords = (ending: HistoryEvent) => (ending.kind === 'deleted' ? 'Deleted since' : ending.kind === 'removed' ? 'Turned off since'
-  : ending.kind === 'chosen' ? 'Chosen since' : ending.putBackFrom === 'off' ? 'Turned on since' : 'Restored since');
+  : ending.kind === 'chosen' ? 'Copy chosen since' : ending.putBackFrom === 'off' ? 'Turned on since' : 'Restored since');
 
 /**
  * The kept copies that `on`, a put-back (an On, or a deletion's Restore), still offers with "Use the kept copy", at most one
- * per tool. The put-back left them in History (`turnedUp`): the tool had a copy of its own there, or an older Off had kept a
+ * per tool. The put-back left them in History (`keptAside`): the tool had a copy of its own there, or an older Off had kept a
  * copy for a tool a later Off took over. So each can come back only from this entry, which offers it for as long as History keeps the entry, whatever is
  * clicked later (a copy choice doesn't end it), but not:
  * - while that kept copy is in use there: a use of it (a 'kept-copy' entry naming this On and that copy) that Rule B hasn't
@@ -205,13 +239,13 @@ export function keptCopiesOffered(on: HistoryEvent, events: HistoryEvent[]): His
   const held = heldTools(events, on.key);
   const inUse = (copy: HistoryEvent['losers'][number]) => events.some(use => use.keptFrom === on.id && use.winner?.tool === copy.tool && use.winner.kept === copy.kept
     && use.winner.hash === copy.hash && !use.undoneBy && !endedBy(use, events));
-  const waiting = (on.turnedUp ?? []).filter(copy => !copy.same && !held.includes(copy.tool) && !inUse(copy));
+  const waiting = (on.keptAside ?? []).filter(copy => !copy.same && !held.includes(copy.tool) && !inUse(copy));
   return waiting.filter((copy, at) => waiting.findIndex(other => other.tool === copy.tool) === at);
 }
 
 /**
  * The copies that Offs other than `by` still keep for `tool` and can no longer put back themselves, because `by`, a later Off,
- * took that tool over from them (Rule A), each with its Off. The put-back of `by` takes them on (agents.ts putBackAgent), so
+ * took that tool over from them (Rule A), each with its Off. The put-back of `by` takes them on (agents.ts putCopiesBack), so
  * no kept copy is left without a way back.
  */
 export const keptByEarlierOffs = (by: HistoryEvent, events: HistoryEvent[], tool: HarnessId) =>

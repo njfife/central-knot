@@ -482,7 +482,7 @@ if (wanted('agents')) {
   await everyLook('agents-history', 'The same.');
 
   // History's actions on an On: a standing "Turn off again", "Use the kept copy" for a tool that kept its own copy, what a
-  // later choice leaves of them ("Chosen since"), and two Ons in a row, each with its own "Turn off again".
+  // later choice leaves of them ("Copy chosen since"), and two Ons in a row, each with its own "Turn off again".
   const own = join(practice, '.codex/agents/changelog.toml');
   writeFileSync(join(practice, '.claude/agents/changelog.md'), '---\nname: changelog\ndescription: Writes the changelog for a release.\n---\n\nList what changed, newest first.\n');
   await a.click('#nav-agents'); await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#switch-changelog')`, 15000);
@@ -493,22 +493,41 @@ if (wanted('agents')) {
   await a.click('#switch-changelog'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000); await a.settle();
   await shot(a, 'agents-on-kept-own', 'Turned changelog off, made a changelog by hand in Codex, and turned it on: the result says Codex keeps its own copy, which turned up since, that the one kept when it was turned off is in History, and that its copies differ.');
   await a.click('#nav-history'); await a.settle();
-  await shot(a, 'agents-history-kept-copy', 'changelog was turned off, a changelog was made by hand in Codex, and it was turned on: in History its On says “Turned on again: put back in Claude Code and Copilot CLI; Codex kept the copy that turned up”, with a standing “Turn off again in Claude Code and Copilot CLI” and, beside it, “Use the kept copy in Codex”.');
+  await shot(a, 'agents-history-kept-copy', 'changelog was turned off, a changelog was made by hand in Codex, and it was turned on: in History its On says “Turned on again: put back in Claude Code and Copilot CLI; Codex’s own copy, which turned up, was left alone.”, with a standing “Turn off again in Claude Code and Copilot CLI” and, beside it, “Use the kept copy in Codex”.');
   await a.size(1728, 1117); await shot(a, 'agents-history-kept-copy-1728', 'The same at 1728×1117: what happened runs wider before it wraps, and the actions keep their column at the right.'); await a.size(1280, 800);
   await a.click('#nav-agents'); await a.settle();
   if (!(await a.has('#use-changelog-codex-cli'))) { await a.click('#open-changelog'); await a.settle(); }
   await a.click('#use-changelog-codex-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
   await a.click('#nav-history'); await a.settle();
-  await shot(a, 'agents-history-chosen-since', 'Chose Codex’s copy for every tool, then History: the choice has “Undo choice in Claude Code and Copilot CLI”; the On before it reads “Chosen since” in place of its Turn off again, and still offers “Use the kept copy in Codex”.');
+  await shot(a, 'agents-history-chosen-since', 'Chose Codex’s copy for every tool, then History: the choice has “Undo choice in Claude Code and Copilot CLI”; the On before it reads “Copy chosen since” in place of its Turn off again, and still offers “Use the kept copy in Codex”.');
   const useKept = await a.run(`[...document.querySelectorAll('.history-row button')].find(button => button.textContent.trim() === 'Use the kept copy in Codex')?.id ?? ''`);
   if (useKept) {
     await a.click(`#${useKept}`); await a.settle();
-    await shot(a, 'agents-history-kept-copy-used', 'Clicked “Use the kept copy in Codex”: Codex has the copy kept when changelog was turned off; the one it replaced is in History, on the new row, with “Undo in Codex”. The On no longer offers the kept copy while it is in use. (Codex’s copy now differs from the one the other tools took, so the Agents page asks which copy every tool uses.)');
+    await shot(a, 'agents-history-kept-copy-used', 'Clicked “Use the kept copy in Codex”: the new row says “In Codex, you used the copy kept when it was turned off”; the one it replaced is in History, on that row, with “Undo in Codex”. The On no longer offers the kept copy while it is in use. (Codex’s copy now differs from the one the other tools took, so the Agents page asks which copy every tool uses.)');
   }
   await a.click('#nav-agents'); await a.settle();
   await flip(false); await flip(true); await flip(false); await flip(true);
   await a.click('#nav-history'); await a.settle();
   await shot(a, 'agents-history-two-turn-off-again', 'Turned changelog off, on, off and on: the two Ons each offer “Turn off again in all 3 tools”; the second Off and its On cancel out, so the first On’s stands again. Clicking either leaves the other “Turned off since”.');
+
+  // An On that only found a tool's own copy: release-reviewer is off, a release-reviewer is made by hand in Codex, and Codex's
+  // Own copy switch turns it on there. Its row has two actions under a long name: pictured wide and narrow.
+  const reviewerOwn = join(practice, '.codex/agents/release-reviewer.toml');
+  writeFileSync(reviewerOwn, 'name = "release-reviewer"\ndescription = "Reviews a release branch before it ships."\ndeveloper_instructions = """\nReview it, in Codex’s own words.\n"""\n');
+  await a.click('#nav-agents'); await a.click('#header-refresh'); await a.settle();
+  if (!(await a.has('#sync-release-reviewer-codex-cli'))) { await a.click('#open-release-reviewer'); await a.settle(); }
+  if (await a.has('#sync-release-reviewer-codex-cli')) {
+    await a.click('#sync-release-reviewer-codex-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo') && document.body.dataset.busy !== 'true'`, 15000);
+    await a.click('#nav-history'); await a.settle();
+    await shot(a, 'agents-history-undo-turn-on', 'release-reviewer was off, a release-reviewer was made by hand in Codex, and Codex’s Own copy switch turned it on there: its On says “Turned on again: Codex’s own copy, which turned up, was left alone.”, with “Undo turn on in Codex” (nothing was put back, so nothing is turned off again) and “Use the kept copy in Codex”.');
+    await a.size(860, 700); await a.settle();
+    await shot(a, 'agents-history-two-actions-860', 'The same at 860×700: the row’s two actions sit at the right, and the name beside them is whole.');
+    await a.size(1280, 800); await a.settle();
+    // Back as it was for what comes after: the On undone, and the copy made by hand removed.
+    const undoTurnOn = await a.run(`[...document.querySelectorAll('.history-row button')].find(button => button.textContent.trim() === 'Undo turn on in Codex')?.id ?? ''`);
+    if (undoTurnOn) { await a.click(`#${undoTurnOn}`); await a.settle(); }
+    rmSync(reviewerOwn, { force: true });
+  }
 }
 
 // ---------- Plugins ----------

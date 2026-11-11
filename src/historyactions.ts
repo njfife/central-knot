@@ -10,8 +10,13 @@
 //    click changes, and what ends its action);
 // 2. here: its row in `table`;
 // 3. historypage.ts describe: the sentence its row says;
-// 4. the engine's route to its Undo: for an agent's entry, agents.ts restoreAgent (its `switch` on entryIs).
-import { endedBy, entryIs, keptCopiesOffered, sinceWords, standsIn, type EntryIs } from './historyrules.ts';
+// 4. the engine's route to its Undo: for an agent's entry, agents.ts restoreAgent (its `switch` on entryIs names every kind,
+//    so the compiler asks for this one too).
+// A second action on a row (an On's Use the kept copy) is not a kind of entry. It needs: the rule for when it is offered
+// (historyrules.ts keptCopiesOffered), its label, help and what the engine is asked here (keptCopyActions, listed by `offered`
+// as `also`), the words after its click (keptCopySaid, through afterWords), its field in types.ts RestoreHow (`keptIn`), and
+// its route in agents.ts restoreAgent, taken before Rule B, which it outlives.
+import { endedBy, entryIs, keptCopiesOffered, ownCopyLeftIn, sinceWords, standsIn, type EntryIs } from './historyrules.ts';
 import { NO_PROFILE, redoneSwitch } from './profileplan.ts';
 import { andList, toolName, toolsPhrase } from './words.ts';
 import type { DestinationResult, HarnessId, HistoryEvent, RestoreHow } from './types.ts';
@@ -31,8 +36,8 @@ interface Row {
   scope: Scope;
   /** What the button does, said before the click. */
   help: (event: HistoryEvent, tools: HarnessId[], events: HistoryEvent[], homeTools: string[]) => string;
-  /** The row's state once the entry is undone. */
-  done?: string;
+  /** The row's state once the entry is undone; none: "Undone". */
+  done?: (event: HistoryEvent) => string;
   /** What the engine is asked (RestoreHow), when not the plain way. */
   how?: RestoreHow;
   /** What is said after the click went through; none: app.ts restoreEvent says it in its own words for that kind. */
@@ -48,13 +53,12 @@ const deletedAgain = (event: HistoryEvent, results: DestinationResult[]) => { co
 const put = (verb: string) => (event: HistoryEvent, tools: HarnessId[]) => `${verb} ${event.item} again: each copy it put back removed${tools.length ? ` from ${andList(tools.map(toolName))}` : ''}, and History keeps it`;
 const pulledEdit: Row = { word: () => 'Undo pull', scope: 'all', help: event => `Put ${event.item} back as it was before this change, in every tool it syncs to (including where it was edited)` };
 
-// An On's words. Where it found a tool's own copy (`turnedUp`) it removed and wrote nothing there, so its Undo removes nothing
+// An On's words. Where it found a tool's own copy (and left the kept one aside, `keptAside`) it removed and wrote nothing there, so its Undo removes nothing
 // there either: that copy is left alone again, held by an Off as before. An On that only did that has no "Turn off again".
 const ownCopies = (tools: HarnessId[]) => `${andList(tools.map(tool => `${toolName(tool)}’s`))} own ${tools.length === 1 ? 'copy' : 'copies'}`;
 const leftAlone = (tools: HarnessId[]) => `${ownCopies(tools)} ${tools.length === 1 ? 'is' : 'are'} left alone again`;
-const turnedUpIn = (event: HistoryEvent) => [...new Set((event.turnedUp ?? []).map(copy => copy.tool))];
 function offAgainHelp(event: HistoryEvent, tools: HarnessId[]): string {
-  const own = turnedUpIn(event);
+  const own = ownCopyLeftIn(event);
   if (!event.losers.length) return `${leftAlone(own)}, as before ${event.item} was turned on there: nothing is removed, and Central Knot doesn’t sync ${own.length === 1 ? 'it' : 'them'}`;
   return `${put('Turn off')(event, tools)}${own.length ? `; ${leftAlone(own)}` : ''}`;
 }
@@ -63,6 +67,13 @@ function offAgainSaid(event: HistoryEvent, results: DestinationResult[]): string
   const said = sentence(off.length ? `${event.item} is off in ${andList(off.map(toolName))} again. History keeps ${off.length === 1 ? 'its copy' : 'the copies'}.` : '',
     own.length ? `${leftAlone(own)}.` : '', ...leftAsIs(results.filter(entry => entry.outcome !== 'stayed')));
   return said || `${event.item} is off again.`;
+}
+/** An agent's choice is undone tool by tool (Rule B): `tools`, those its Undo still reaches; a tool changed since stays as that left it. */
+function undoChoiceHelp(event: HistoryEvent, tools: HarnessId[]): string {
+  const since = event.losers.map(loser => loser.tool).filter(tool => !tools.includes(tool) && !event.restoredTools?.includes(tool));
+  const rest = since.length ? `. ${andList(since.map(toolName))}, changed since, ${since.length === 1 ? 'stays as it is' : 'stay as they are'}` : '';
+  const where = andList(tools.map(toolName));
+  return `Put each copy this choice replaced back in its own tool (${where}), take out the copies it added, and leave ${event.item} as it was before the choice (only while unchanged since)${rest}`;
 }
 /** A put-back's second action, one per tool for which it left a kept copy in History (the rule: historyrules.ts keptCopiesOffered). */
 const keptCopyActions = (event: HistoryEvent, events: HistoryEvent[]): EntryAction[] => keptCopiesOffered(event, events).map(({ tool }) => ({
@@ -83,7 +94,7 @@ const table: Record<EntryIs, Row> = {
   'delete-everywhere': { word: () => 'Restore', scope: 'named', help: (event, tools) => (event.losers.length ? `Put each copy back in ${andList(tools.map(toolName))}, as it was` : `Put ${event.item} back on its page, off, its copies in History`),
     after: (event, { results, homeTools }) => sentence(where(results, 'written').length ? `${event.item} is back in ${toolsPhrase(where(results, 'written'), homeTools)}.` : !event.losers.length ? `${event.item} is back on its page, off.` : '', ...leftAsIs(results)) },
   choice: { word: () => 'Undo choice', scope: 'all', help: event => `Put ${event.item} back as it was before this change, in every tool it syncs to (including where it was edited)` },
-  'agent-choice': { word: () => 'Undo choice', scope: 'standing', how: { narrow: true }, help: (event, tools) => `Put each copy this choice replaced back in its own tool (${andList(tools.map(toolName))}), take out the copies it added, and leave ${event.item} as it was before the choice (only while unchanged since)` },
+  'agent-choice': { word: () => 'Undo choice', scope: 'standing', how: { narrow: true }, help: undoChoiceHelp },
   'unfinished-choice': { word: () => 'Finish undo', scope: 'none', how: { narrow: true }, help: (event, _tools, events, homeTools) => `${unfinished(event, events, homeTools, true)} (only while unchanged since)` },
   // Use the kept copy: its Undo puts back the copy it replaced; where the tool had none, nothing was replaced and it has no Undo.
   'kept-copy': { word: event => (event.losers.length ? 'Undo' : undefined), scope: 'winner', help: (_event, tools) => `Put the copy this replaced back in ${andList(tools.map(toolName))}; the kept copy stays in History (only while unchanged since)`,
@@ -92,13 +103,14 @@ const table: Record<EntryIs, Row> = {
     help: event => (event.switched ?? []).map(entry => `${entry.disabled ? 'Enable' : 'Disable'} it again in ${who(entry.tool)}`).join('; ') },
   profile: { word: (event, events) => (redoneSwitch(events, event) ? 'Undo switch' : events.find(other => other.undoneBy === event.id)?.kind === 'profile' ? 'Redo switch' : 'Undo switch'), scope: 'none',
     help: event => `Each switch this changed goes back, where it is still as this left it; ${event.profile?.fromName ?? NO_PROFILE} is in use again if this switch is the one that chose the profile in use` },
-  off: { word: () => 'Turn on', scope: 'standing', done: 'Turned on since', help: event => `Turn ${event.item} on again there: each copy back as it was`,
+  off: { word: () => 'Turn on', scope: 'standing', done: () => 'Turned on since', help: event => `Turn ${event.item} on again there: each copy back as it was`,
     after: (event, { results }) => sentence(where(results, 'written').length ? `${event.item} is back in ${andList(where(results, 'written').map(toolName))}.` : '', ...leftAsIs(results)) },
-  removal: { word: () => 'Restore', scope: 'named', done: 'Restored', help: event => `Put the removed copy back in ${andList(event.losers.map(loser => toolName(loser.tool)))}` },
+  removal: { word: () => 'Restore', scope: 'named', done: () => 'Restored', help: event => `Put the removed copy back in ${andList(event.losers.map(loser => toolName(loser.tool)))}` },
   'take-over': { word: () => 'Undo', scope: 'all', help: event => `Put the links and the shared copy back as they were${event.tookOver?.managedNow ? `, remove the copies that turning it on added, and stop syncing ${event.item}` : ''} (only while unchanged)` },
   write: { word: () => 'Undo write', scope: 'none', help: () => 'Put back what Claude Code had before (quit Claude Code first)' },
   add: { word: () => 'Undo add', scope: 'none', help: event => `Remove the copies it added (only while unchanged) and stop syncing ${event.item}${event.rejoined ? ' there' : ''}` },
-  'on-after-off': { word: event => (event.losers.length ? 'Turn off again' : 'Undo turn on'), scope: 'turned-on', done: 'Turned off since', help: offAgainHelp, after: (event, { results }) => offAgainSaid(event, results) },
+  'on-after-off': { word: event => (event.losers.length ? 'Turn off again' : 'Undo turn on'), scope: 'turned-on', help: offAgainHelp,
+    done: event => (event.losers.length ? 'Turned off since' : 'Undone'), after: (event, { results }) => offAgainSaid(event, results) },
   'delete-everywhere-again': { word: () => 'Delete again', scope: 'named', help: put('Delete'), after: (event, { results }) => deletedAgain(event, results) },
   'deletion-again': { word: () => 'Delete again', scope: 'all', help: put('Delete'), after: (event, { results }) => deletedAgain(event, results) },
   redo: { word: (event, events) => { const undone = events.find(other => other.undoneBy === event.id); const first = undone && events.find(other => other.undoneBy === undone.id); return first?.kind === 'deleted' ? 'Restore' : 'Undo edit'; }, scope: 'all',
@@ -111,7 +123,7 @@ const table: Record<EntryIs, Row> = {
 function scopeTools(event: HistoryEvent, events: HistoryEvent[], scope: Scope): HarnessId[] {
   const open = (tools: HarnessId[]) => [...new Set(tools.filter(tool => !event.restoredTools?.includes(tool)))];
   if (scope === 'standing') return standsIn(event, events);
-  if (scope === 'turned-on') return event.losers.length ? open(event.losers.map(loser => loser.tool)) : turnedUpIn(event);
+  if (scope === 'turned-on') return event.losers.length ? open(event.losers.map(loser => loser.tool)) : ownCopyLeftIn(event);
   if (scope === 'winner') return event.winner ? [event.winner.tool] : [];
   if (scope === 'switched') return (event.switched ?? []).map(entry => entry.tool);
   if (scope === 'base') return (event.base?.list.tools ?? []) as HarnessId[];
@@ -127,7 +139,7 @@ export interface EntryAction { word: string; label: string; help: string; how?: 
  */
 export function offered(event: HistoryEvent, events: HistoryEvent[], homeTools: string[]): { action?: EntryAction; state?: string; also: EntryAction[] } {
   const is = entryIs(event, events), row = table[is];
-  if (event.undoneBy) return { state: row.done ?? 'Undone', also: [] };
+  if (event.undoneBy) return { state: row.done?.(event) ?? 'Undone', also: [] };
   const also = event.putBackFrom ? keptCopyActions(event, events) : [];
   const ending = endedBy(event, events);
   if (ending) return { state: sinceWords(ending), also };

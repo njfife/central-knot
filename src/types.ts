@@ -463,7 +463,12 @@ export interface HistoryEvent {
   profile?: { from?: string; fromName?: string; to?: string; toName?: string; flips: ProfileFlip[] };
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false); `before`, a Claude Code override it replaced ("name-only"), for Undo. */
   switched?: SwitchRecord[];
-  /** 'removed': tools whose copy Restore has put back so far; the event is done when all are. 'chosen': the same for its Undo. */
+  /**
+   * The tools the entry's own action is done with while others are still to go; once all are, the entry is done (`undoneBy`).
+   * - 'removed', and 'deleted' by Delete everywhere: tools whose copy was put back, or that have a copy of their own again; and,
+   *   an agent's Off, a tool a later Off took over from it whose kept copy a later On's row offers now (agents.ts handedOn);
+   * - 'chosen': tools whose replaced copy its Undo put back (the Undo stopped part-way, or a later change reached the others).
+   */
   restoredTools?: HarnessId[];
   /** 'removed', a skill's: tools a managed skill stopped syncing to because its copy there was removed; Restore turns syncing back on. */
   stoppedSync?: HarnessId[];
@@ -482,17 +487,18 @@ export interface HistoryEvent {
    * from. Its Undo (agents.ts undoPutBack) takes them out again as that did, an Off or a deletion, and puts `before` back.
    */
   putBackFrom?: 'off' | 'delete-everywhere';
-  /** 'restored' with putBackFrom: the Off or the deletion it put copies back from (whole, or part-way), by id. */
+  /** 'restored' with putBackFrom: the Off or the deletion it put copies back from (whole, or part-way), by id. No other kind carries it. */
   reverses?: string;
   /**
-   * An agent's kept copies that the entry names without having removed or written them itself. On a put-back ('restored' with
-   * putBackFrom): the copies it left in History, each because its tool had a copy by then: the tool's own, which turned up
-   * while an Off held the tool (made there by hand), or the newer kept copy just put back where an older Off had kept one too.
-   * Its row offers Use the kept copy for them (historyrules.ts keptCopiesOffered), and its Undo has an Off hold them again. On
-   * that Off or deletion ('removed' or 'deleted', made by Turn off again or Delete again): the copies it holds besides those it
-   * removed.
+   * An agent's kept copies that stay aside in History under this entry: copies an Off kept that the entry neither took out of
+   * a tool nor put back in one itself, and that are its to give back.
+   * - 'restored' with putBackFrom (an On, a deletion's Restore): the kept copies it didn't put back, each because its tool had
+   *   a copy by then (the tool's own, made there by hand while it was off, or a newer kept copy just put back). Its row offers
+   *   each with Use the kept copy (historyrules.ts keptCopiesOffered).
+   * - 'removed' with turnedOff, or 'deleted', made by that put-back's Undo (Turn off again, Delete again): the same copies,
+   *   which it holds again besides those it removed (`losers`; historyrules.ts heldCopies).
    */
-  turnedUp?: HistoryEvent['losers'];
+  keptAside?: HistoryEvent['losers'];
   /**
    * 'chosen', an agent's Use the kept copy: the put-back entry (by id) whose row offered it. The tool in `winner` took back a
    * copy an Off had kept for it (`winner.kept`: which), in place of the copy in `losers` (none: the tool had no copy), which
@@ -510,15 +516,25 @@ export interface HistoryEvent {
   addedId?: string;
   /** The item's record as it was before this entry, which its Undo puts back (RecordBefore): a choice's, or an agent's Off, deletion or put-back. */
   before?: RecordBefore;
+  /**
+   * The copy that prevailed: an edit's, a conflict's or a choice's source (its tool and content); a deletion's, the tool it was
+   * deleted in and the content; Use the kept copy's, the tool that took the kept copy back.
+   */
   winner?: { tool: HarnessId; hash: string; /** Use the kept copy: which kept copy of that content it wrote, as the store names it. */ kept?: string };
-  /** Content that gave way, kept in Central Knot's store. */
+  /**
+   * The copies the entry's click changed, each kept in Central Knot's store, by kind:
+   * - 'edit', 'conflict', 'kept-edit', 'chosen': the copies it replaced (its Undo puts them back);
+   * - 'removed', and 'deleted' by Delete everywhere: the copies it took out of their tools (its put-back gives them back);
+   * - 'restored' with putBackFrom: the copies it put back (its Undo takes them out again);
+   * - 'added': the copies it wrote where there were none (its Undo removes each while it is unchanged).
+   */
   losers: { tool: HarnessId; hash: string; /** MCP, or an agent's: which of the kept copies of that content from that tool this is (the store keeps each under its own name), for an exact put-back. */ kept?: string; /** 'removed', or an agent's deletion: the copy's own name in its tool as it was (a skill's folder, an agent's file name without its suffix), to put it back under the same name. */ folder?: string;
     /** 'removed', managed: the content last synced to that copy, so Restore puts its sync record back and an unsynced edit in it spreads. */ synced?: string;
     /** 'removed': a copy outside the tool's own folder (in ~/.agents/skills), put back at this path. */ path?: string;
     /** 'removed', or an agent's deletion: the copy was a link with this text; putting it back makes the link again. */ linkTo?: string;
     /** 'chosen', a skill's or an agent's: when the replaced copy was last edited (its file's time), which its Undo gives it again. */ editedAt?: string;
     /** 'removed' or 'deleted', an agent's: its copy as the record had it (none: not synced there), recorded again when it is put back. */ record?: AgentCopyRecord;
-    /** In `turnedUp` on a put-back: the tool holds this kept copy already, byte for byte (found so by the put-back, or by Use the kept copy since), so there is no kept copy to offer. */ same?: true }[];
+    /** In `keptAside` on a put-back: the tool holds this kept copy already, byte for byte (found so by the put-back, or by Use the kept copy since): none to offer. */ same?: true }[];
   /** The synced content before this event, to put back on Undo. */
   previous?: string;
   orderProved: boolean;

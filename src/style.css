@@ -882,6 +882,8 @@ span.ins-confirm { margin-top: 0; }
 .history-undone .history-what strong { color: var(--ink-soft); }
 .history-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 2px 12px; text-align: right; }
 .history-actions .btn.link { flex: 0 1 auto; min-width: 0; height: auto; padding: 0; white-space: normal; text-align: right; }
+/* In narrow content a row's two actions sit one above the other, so the name beside them stays whole. */
+@container content (width < 880px) { .history-actions { flex-direction: column; align-items: flex-end; row-gap: 4px; } }
 
 /* ---------- Plugins: marketplaces at the left, the chosen marketplace or plugin at the right ---------- */
 .plugins-page { --market-list-width: 236px; --market-gutter: 24px; }

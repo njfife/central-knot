@@ -1,7 +1,7 @@
 // History: what sync did on its own, newest first, with Undo or Restore where the kept content allows it (CON-02, DEL-03).
 import { clockTime, DAY_MS } from './model.ts';
 import { offered, unfinished, type EntryAction } from './historyactions.ts';
-import { entryIs } from './historyrules.ts';
+import { entryIs, ownCopyLeftIn } from './historyrules.ts';
 import { homeTools, noTools, restoreEvent, showPage, shownPath, state, touchedToolsPhrase, unwriteClaudeNow } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
@@ -42,7 +42,10 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string } {
     case 'choice': case 'agent-choice': return { glyph: 'check', text: `You chose ${who(event.winner?.tool)}’s copy; it replaced ${andList(losers.map(who))}’s.` };
     // Its Undo stopped part-way: what went back, and what is still to go, for its Finish undo.
     case 'unfinished-choice': return { glyph: 'check', text: `You chose ${who(event.winner?.tool)}’s copy; it replaced ${andList(losers.map(who))}’s. ${unfinished(event, events, homeTools())}` };
-    case 'kept-copy': return { glyph: 'check', text: `You used the copy kept when it was turned off in ${who(event.winner?.tool)}${losers.length ? '; it replaced the copy there, which Central Knot kept' : ', which had no copy'}.` };
+    case 'kept-copy': {
+      const replaced = losers.length ? '; it replaced the copy there, which Central Knot kept' : '; it had no copy';
+      return { glyph: 'check', text: `In ${who(event.winner?.tool)}, you used the copy kept when it was turned off${replaced}.` };
+    }
     case 'switch': {
       const switched = event.switched ?? [];
       const turned = (disabled: boolean) => where(switched.filter(entry => entry.disabled === disabled).map(entry => entry.tool));
@@ -88,7 +91,7 @@ function pluginPart(event: HistoryEvent): string {
  * stays).
  */
 function offText(event: HistoryEvent): string {
-  const removed = event.losers.map(loser => loser.tool), own = (event.turnedUp ?? []).map(copy => copy.tool);
+  const removed = event.losers.map(loser => loser.tool), own = ownCopyLeftIn(event);
   const what = removed.length ? (removed.length === 1 ? 'it' : 'them') : own.length === 1 ? 'the copy removed earlier' : 'the copies removed earlier';
   const kept = `History keeps ${what} until it is turned on again or deleted.`;
   const back = event.restoredTools?.length ? ` Back on in ${touchedToolsPhrase(event.restoredTools)}.` : '';
@@ -106,8 +109,11 @@ function restoredText(event: HistoryEvent, is: ReturnType<typeof entryIs>, event
   switch (is) {
     case 'redo': { const first = events.find(other => other.undoneBy === undone?.id); return `Redid ${first ? named(first) : 'the change'}; it is back${where}.`; }
     case 'on-after-off': {
-      const kept = event.turnedUp?.length ? `${event.losers.length ? '; ' : ': '}${touchedToolsPhrase(event.turnedUp.map(loser => loser.tool))} kept the copy that turned up` : '';
-      return `Turned on again${event.losers.length ? `: put back${where}` : ''}${kept}.`;
+      // "Kept" names one thing on this page, the copy Off kept in History: a tool's own copy is said to be left alone.
+      const own = ownCopyLeftIn(event), one = own.length === 1;
+      const whose = andList(own.map(tool => `${who(tool)}’s`));
+      const leftAlone = own.length ? `${event.losers.length ? '; ' : ': '}${whose} own ${one ? 'copy' : 'copies'}, which turned up, ${one ? 'was' : 'were'} left alone` : '';
+      return `Turned on again${event.losers.length ? `: put back${where}` : ''}${leftAlone}.`;
     }
     case 'delete-everywhere-again': case 'deletion-again': return `Restored after it was deleted${where}.`;
     case 'restore-after-removal': return `Restored${where}.`;

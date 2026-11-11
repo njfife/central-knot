@@ -8,8 +8,11 @@
 //       passes after it are quiet, and the row is still true;
 //   (c) on a row an Off holds copies of, On gives each such tool a copy again, and its put-back alone gives each the very file
 //       a click last took out of it (what the walk saw one click take, not what the entry noted);
-//   (d) every file a click took out or replaced is on disk again or is named by an action History offers now, or offers once
-//       an Off is turned on or a deletion restored. (A copy that was only behind, which the click's pass caught up as any
+//   (d) every file that Off, On, Delete everywhere, a copy choice, Use the kept copy or one of their Undos took out or replaced
+//       is on disk again or is named by an action History offers now, or offers once an Off is turned on or a deletion
+//       restored. (Not what a version written everywhere overwrote, an edit's Undo or Redo: it says it writes every tool,
+//       where it was edited too, and an edit made by hand that no pass had seen has no button of its own after it. That is
+//       the edits' Undo, older than Off and On; LEDGER lists it.) (A copy that was only behind, which the click's pass caught up as any
 //       pass would have, is sync's work, not the click's: History has that older version as an edit's.) Two things excuse one
 //       that no action names, by design: History's days passed for it (daysPassed), or the choice that replaced it lost its
 //       Undo in that very tool to a later decision about that tool (choiceEnded);
@@ -20,7 +23,8 @@
 //       one, the click's pass also does sync's waiting work, which its Undo leaves, as the band promises: it reverses the
 //       click, not what sync did alongside.)
 // The walks in FOUND run in `npm test`. CK_WALKS=<n> runs n more seeds of each kind, starting at CK_SEED=<n>;
-// CK_ONLY=<seed>[,one-way] replays one walk, with CK_TRACE=1 step by step; CK_LIST=1 prints which walks found something.
+// CK_ONLY=<seed>[,one-way] replays one walk, with CK_TRACE=1 step by step; CK_LIST=1 prints which walks found something, and
+// each copy (d) excused, with the excuse.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, readFile } from 'node:fs/promises';
@@ -35,13 +39,13 @@ import { age, choose, claudeAgent, codexOwn, deleteEverywhere, differs, factOf, 
 
 /**
  * The walks `npm test` runs, each with its agent (true: one-way): the seeds a judge's or a builder's longer run once failed on
- * (1001, 6079, 6203, 9010, 7080; one-way 6085, 6240, 7067, 7080), and two more that fail today with a rule turned off (6034:
- * a part-way Delete everywhere leaves no stray copy on record; one-way 6002: a choice's Undo ends with a later click on its
- * tools). A seed's steps change whenever the walk's own actions do, so what keeps each rule tested is its named test
- * (agentsoff-sequences.test.ts, historyactions.test.ts); these are the walk's sample for every run. CK_WALKS adds random
- * ones of both kinds.
+ * (1001, 6079, 6203, 9010, 7080; one-way 6085, 6240, 7067, 7080), and two that failed in fix round 4 until their rule was
+ * fixed (41044: a tool that an Off a deletion's Restore brought back holds again goes off the record; one-way 20204: an Off
+ * turned on and turned off again stands as the Off that Turn off again wrote). A seed's steps change whenever the walk's own
+ * actions do, so what keeps each rule tested is its named test (agentsoff-sequences.test.ts, historyactions.test.ts); these
+ * are the walk's sample for every run. CK_WALKS adds random ones of both kinds.
  */
-const FOUND: [number, boolean][] = [[1001, false], [6034, false], [6079, false], [6203, false], [9010, false], [7080, false], [6002, true], [6085, true], [6240, true], [7067, true], [7080, true]];
+const FOUND: [number, boolean][] = [[1001, false], [41044, false], [6079, false], [6203, false], [9010, false], [7080, false], [20204, true], [6085, true], [6240, true], [7067, true], [7080, true]];
 const STEPS = 14;
 const random = (seed: number) => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 /** An answer that means History offered an action that is stale or does nothing. */
@@ -94,12 +98,12 @@ const waitsForOnOrRestore = (ending: HistoryEvent | undefined) => ['removed', 'd
  */
 async function reachable(box: Box, history: HistoryEvent[], offeredNow: Awaited<ReturnType<typeof historyActions>>): Promise<Map<string, HistoryEvent[]>> {
   const named = (event: HistoryEvent) => broughtBackBy(event, history).filter(copy => event.kind !== 'chosen' || standsIn(event, history).includes(copy.tool));
-  const sources: { event: HistoryEvent; copies: KeptCopy[] }[] = offeredNow.map(({ event, how }) => ({ event, copies: how && 'keptIn' in how ? (event.turnedUp ?? []).filter(copy => copy.tool === how.keptIn) : named(event) }));
+  const sources: { event: HistoryEvent; copies: KeptCopy[] }[] = offeredNow.map(({ event, how }) => ({ event, copies: how && 'keptIn' in how ? (event.keptAside ?? []).filter(copy => copy.tool === how.keptIn) : named(event) }));
   const held = heldTools(history, 'agent:reviewer');
   for (const event of ours(history)) {
     if (event.kind === 'chosen') sources.push({ event, copies: event.losers.filter(copy => waitsForOnOrRestore(endedIn(event, copy.tool, history))) });
-    else if (waitsForOnOrRestore(endedBy(event, history))) sources.push({ event, copies: [...broughtBackBy(event, history), ...(event.turnedUp ?? [])] });
-    else if (event.putBackFrom === 'off' && !event.undoneBy) sources.push({ event, copies: (event.turnedUp ?? []).filter(copy => held.includes(copy.tool)) });
+    else if (waitsForOnOrRestore(endedBy(event, history))) sources.push({ event, copies: [...broughtBackBy(event, history), ...(event.keptAside ?? [])] });
+    else if (event.putBackFrom === 'off' && !event.undoneBy) sources.push({ event, copies: (event.keptAside ?? []).filter(copy => held.includes(copy.tool)) });
   }
   const found = new Map<string, HistoryEvent[]>();
   for (const { event, copies } of sources) for (const copy of copies) {
@@ -173,7 +177,7 @@ async function walk(seed: number, oneWay: boolean): Promise<Finding[]> {
       const fact = await factOf(box, context());
       const present = fact && !fact.gone ? tools.filter(tool => fact.copies[tool] !== undefined) : [];
       /** `byApp`: a click of the page's or History's (not the person's own hands, a pass or time). `undoes`: the History entries it undoes, whose own copies it takes out again without owing them (d). */
-      type Act = { name: string; click?: () => Promise<Clicked | undefined>; run?: () => Promise<unknown>; byApp?: boolean; undoes?: string[] };
+      type Act = { name: string; click?: () => Promise<Clicked | undefined>; run?: () => Promise<unknown>; byApp?: boolean; undoes?: string[]; /** It writes an earlier version into every tool. */ writesVersion?: boolean };
       const acts: Act[] = [];
       const add = (weight: number, act: Act) => { for (let count = 0; count < weight; count++) acts.push(act); };
       if (present.length) add(4, { name: 'Off', click: () => turnOff(box, context()) });
@@ -183,7 +187,7 @@ async function walk(seed: number, oneWay: boolean): Promise<Finding[]> {
       if (fact) add(1, { name: 'Delete everywhere', click: () => deleteEverywhere(box, context()) });
       // A choice of copy only where the page asks for one: the row's copies differ.
       if (fact && differs(fact)) for (const tool of present) add(1, { name: `choose ${tool}`, click: () => choose(box, tool, context()) });
-      for (const action of await historyActions(box, context())) add(2, { name: `History: ${action.label} (${action.event.kind}${action.event.putBackFrom ? `/${action.event.putBackFrom}` : ''})`, run: action.run, byApp: true, undoes: action.how && 'keptIn' in action.how ? [] : [action.event.id] });
+      for (const action of await historyActions(box, context())) add(2, { name: `History: ${action.label} (${action.event.kind}${action.event.putBackFrom ? `/${action.event.putBackFrom}` : ''})`, run: action.run, byApp: true, undoes: action.how && 'keptIn' in action.how ? [] : [action.event.id], writesVersion: WRITES_A_VERSION.includes(entryIs(action.event, ours(await readHistory(context())))) });
       if (last?.made.length) { const click = last; add(2, { name: 'Undo', run: () => undo(box, click, context()), byApp: true, undoes: click.made }); }
       for (const tool of tools as Tool[]) {
         if (present.includes(tool)) add(1, { name: `hand edit in ${tool}`, run: async () => { const text = (await filesOf(box))[tool]!; await write(box, tool, text.replace(/(Be brief\.|Hand \d+\.|Codex’s own\.)/, `Hand ${++marker}.`)); } });
@@ -206,7 +210,7 @@ async function walk(seed: number, oneWay: boolean): Promise<Finding[]> {
       if (act.name.startsWith('hand') && next() < 0.7) { trace.push('pass'); await pass(box, context()); }
       last = clicked ?? (byApp ? undefined : last);
       const filesAfter = await filesOf(box), factAfter = await factOf(box, context()), history = await readHistory(context());
-      if (process.env.CK_TRACE) console.log(`\n--- ${trace.at(-1)}\n${JSON.stringify({ result: clicked && { stopped: clicked.stopped, results: clicked.results.map(entry => `${entry.harness}:${entry.outcome}:${entry.message.slice(0, 50)}`) }, row: row(factAfter), files: Object.fromEntries(Object.entries(filesAfter).map(([tool, text]) => [tool, text?.replace(/\s+/g, ' ').slice(-24)])) })}\n${ours(history).map(event => `${event.id.slice(0, 4)} ${event.kind}${event.turnedOff ? '/off' : ''}${event.everywhere ? '/everywhere' : ''}${event.putBackFrom ? `/${event.putBackFrom}` : ''}${event.keptFrom ? '/kept-copy' : ''}${event.undoneBy ? `(undone by ${event.undoneBy.slice(0, 4)})` : ''} [${event.losers.map(loser => loser.tool.split('-')[0])}]${event.turnedUp ? ` up:${event.turnedUp.map(loser => loser.tool.split('-')[0])}` : ''}`).join('\n')}`);
+      if (process.env.CK_TRACE) console.log(`\n--- ${trace.at(-1)}\n${JSON.stringify({ result: clicked && { stopped: clicked.stopped, results: clicked.results.map(entry => `${entry.harness}:${entry.outcome}:${entry.message.slice(0, 50)}`) }, row: row(factAfter), files: Object.fromEntries(Object.entries(filesAfter).map(([tool, text]) => [tool, text?.replace(/\s+/g, ' ').slice(-24)])) })}\n${ours(history).map(event => `${event.id.slice(0, 4)} ${event.kind}${event.turnedOff ? '/off' : ''}${event.everywhere ? '/everywhere' : ''}${event.putBackFrom ? `/${event.putBackFrom}` : ''}${event.keptFrom ? '/kept-copy' : ''}${event.undoneBy ? `(undone by ${event.undoneBy.slice(0, 4)})` : ''} [${event.losers.map(loser => loser.tool.split('-')[0])}]${event.keptAside ? ` up:${event.keptAside.map(loser => loser.tool.split('-')[0])}` : ''}`).join('\n')}`);
       // (d) What a click took out or replaced, with no tool holding that content now, is owed until it is back or can be brought
       // back. An Undo taking out what the entry it undoes wrote (a choice's chosen copy, the copies turning it on added, copies
       // put back) owes nothing: those were Central Knot's copies of content the entry still names.
@@ -214,7 +218,7 @@ async function walk(seed: number, oneWay: boolean): Promise<Finding[]> {
       for (const event of history.filter(entry => act.undoes?.includes(entry.id))) for (const hash of [event.winner?.hash, event.kind === 'added' ? event.previous : undefined, ...(event.putBackFrom ? event.losers.map(loser => loser.hash) : [])]) if (hash) contentNow.add(hash);
       for (const tool of tools as Tool[]) {
         const was = filesBefore[tool];
-        if (!byApp || was === undefined || filesAfter[tool] === was) continue;
+        if (!byApp || act.writesVersion || was === undefined || filesAfter[tool] === was) continue;
         if (filesAfter[tool] === undefined) { if (oneRemoval) lastTaken[tool] = was; else delete lastTaken[tool]; }
         if (!contentNow.has(fact?.copies[tool]?.hash ?? '') && !(syncsWork.includes(tool) && filesAfter[tool] !== undefined)) owed.set(`${tool}\0${was}`, { tool, text: was, namedBy: [] });
       }
@@ -228,7 +232,9 @@ async function walk(seed: number, oneWay: boolean): Promise<Finding[]> {
         const namers = canComeBack.get(key);
         if (namers) { lost.namedBy = namers.map(event => event.id); continue; }
         owed.delete(key);
-        if (!daysPassed(lost, history) && !choiceEnded(lost, history)) fail(`(d) a copy a click took out of ${lost.tool} can be brought back by no action`);
+        const excuse = daysPassed(lost, history) ? 'History’s days passed for it' : choiceEnded(lost, history) ? 'a later change of that tool ended the choice’s Undo there' : undefined;
+        if (!excuse) fail(`(d) a copy a click took out of ${lost.tool} can be brought back by no action`);
+        else if (process.env.CK_LIST) console.log(`excused: ${seed}${oneWay ? ',one-way' : ''} a copy of ${lost.tool}: ${excuse}`);
       }
       await rowIsTrue();
       await trial(box, async () => { ({ settled, rewrites: syncWouldRewrite } = await passesAreQuiet()); });

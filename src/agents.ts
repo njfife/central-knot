@@ -389,7 +389,7 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
 const notSyncing = (item: Pick<AgentRecordItem, 'off'> | undefined, held: HarnessId[]) => [...new Set([...(item?.off ?? []), ...held])];
 /**
  * The source a one-way copy taken out by `off` waits for: while that Off, or a later one, holds its source and the source has no
- * copy, it goes back only after the source (the row offers its switch then, and putBackAgent puts the source back first). A
+ * copy, it goes back only after the source (the row offers its switch then, and putCopiesBack puts the source back first). A
  * receiver turned off after its source was already off goes back as it was; a source gone any other way (deleted) is no reason
  * to wait. `sourceHas`: the source's tool has a copy now.
  */
@@ -813,7 +813,8 @@ async function undoAddedAgent(context: ShareContext, tools: HarnessId[], history
 // agent synced again (syncedAgain), and the Undo of a put-back puts its own back (Rule B has made sure no later click changed it).
 //
 // In this section: turnOffAgent and deleteAgentEverywhere (both through takeCopiesOut), putBackAgent (On, and a deletion's
-// Restore; one copy at a time through putCopyBack), undoPutBack (Turn off again, Delete again), and useKeptCopy with its Undo.
+// Restore: what goes back is putCopiesBack's, one copy at a time through putCopyBack), undoPutBack (Turn off again, Delete
+// again), and useKeptCopy with its Undo.
 
 /** The agent's record as an Off or a deletion notes it in `before`: synced or not. */
 const recordNow = (item: AgentRecordItem): RecordBefore => ({ state: item.state });
@@ -838,7 +839,8 @@ async function takeCopiesOut(context: ShareContext, item: AgentRecordItem, slot:
     try { keptAs = await keep(context, here); await removeFileChecked(here.file, here.text); }
     catch (error) {
       const changed = errorCode(error) === 'CK_CHANGED';
-      results.push({ item: item.name, harness: tool, outcome: changed ? 'held' : 'failed', message: changed ? `${harnesses[tool].name}’s copy changed just now, so it stays.` : `Could not remove ${harnesses[tool].name}’s copy.` });
+      const message = changed ? `${harnesses[tool].name}’s copy changed just now, so it stays.` : `Could not remove ${harnesses[tool].name}’s copy.`;
+      results.push({ item: item.name, harness: tool, outcome: changed ? 'held' : 'failed', message });
       continue;
     }
     delete slot[here.tool];
@@ -852,12 +854,12 @@ async function takeCopiesOut(context: ShareContext, item: AgentRecordItem, slot:
 
 /**
  * An Off's or a deletion's History entry: the copies it took out (`losers`), the tools it holds without having removed anything
- * (`turnedUp`, only when made by undoPutBack), and the record as it was before it.
+ * (`keptAside`, only when made by undoPutBack), and the record as it was before it.
  */
-function takenOutEntry(item: AgentRecordItem, key: string, kind: 'removed' | 'deleted', losers: KeptCopy[], before: RecordBefore, turnedUp: KeptCopy[] = []): HistoryEvent {
-  const first = losers[0] ?? turnedUp[0];
+function takenOutEntry(item: AgentRecordItem, key: string, kind: 'removed' | 'deleted', losers: KeptCopy[], before: RecordBefore, keptAside: KeptCopy[] = []): HistoryEvent {
+  const first = losers[0] ?? keptAside[0];
   return { id: randomUUID(), at: new Date().toISOString(), key: `agent:${key}`, item: item.name, kind, losers, orderProved: true, previous: item.hash || undefined, before,
-    ...(turnedUp.length ? { turnedUp } : {}),
+    ...(keptAside.length ? { keptAside } : {}),
     ...(kind === 'removed' ? { turnedOff: true as const } : { everywhere: true as const, ...(first ? { winner: { tool: first.tool, hash: item.hash || first.hash } } : {}) }) };
 }
 interface TakenOut { results: DestinationResult[]; writes: number; event?: HistoryEvent }
@@ -917,7 +919,7 @@ const offNowSaid = (name: string, held: HarnessId[], tools: HarnessId[]) => (too
   ? `${name} is off now. Turn it on first.` : `${name} is off in ${andList(held.map(tool => shown[tool]))} now. Turn it on there first.`);
 /** Why an entry's action is refused once Rule B ended it (from a page read before that), in History's words. */
 const noLongerSaid = (name: string, ending: HistoryEvent) => (ending.kind === 'deleted' ? `${name} was deleted since; use Restore on that deletion in History.`
-  : `${name} was ${sinceWords(ending).toLowerCase()}, so that no longer applies. Nothing was changed.`);
+  : `${name}: ${sinceWords(ending).toLowerCase()}, so that no longer applies. Nothing was changed.`);
 
 /** The copies `past` can still put back: an Off's, in the tools it still holds (Rule A); a deletion's, those not back yet. */
 function openCopies(past: HistoryEvent, history: HistoryEvent[]): KeptCopy[] {
@@ -950,7 +952,8 @@ interface PutBackAt { key: string; item: AgentRecordItem; slot: AgentSlot; prese
 async function putCopyBack(context: ShareContext, at: PutBackAt, copy: KeptCopy, waitsFor: HarnessId | undefined): Promise<{ is: 'back' | 'found' | 'not'; result: DestinationResult }> {
   const { tool } = copy, name = at.item.name;
   const said = (outcome: DestinationResult['outcome'], message: string): DestinationResult => ({ item: name, harness: tool, outcome, message });
-  if (!isAgentTool(tool) || !at.present.includes(tool)) return { is: 'not', result: said('held', `${harnesses[tool].name} isn’t one of the tools Central Knot manages here now, so its copy stays in History.`) };
+  const notManaged = `${harnesses[tool].name} isn’t one of the tools Central Knot manages here now, so its copy stays in History.`;
+  if (!isAgentTool(tool) || !at.present.includes(tool)) return { is: 'not', result: said('held', notManaged) };
   if (waitsFor) return { is: 'not', result: said('held', `Turn on ${shown[waitsFor]}’s copy first: it is the source.`) };
   const text = await keptText(context, at.key, copy);
   const here = at.slot[tool];
@@ -966,13 +969,51 @@ async function putCopyBack(context: ShareContext, at: PutBackAt, copy: KeptCopy,
   return { is: 'back', result: said('written', 'Put back. Start a new session to use it.') };
 }
 
+/** What putting copies back did: `results`, said per tool; `back`, the copies put back; `keptAside`, those left in History; `settled`, the tools that have a copy now. */
+interface PutBack {
+  results: DestinationResult[]; back: KeptCopy[]; keptAside: KeptCopy[]; settled: HarnessId[];
+  /** Earlier Offs whose kept copy is in `keptAside`, each with the tool it was kept for. */
+  takenOn: { off: HistoryEvent; tool: HarnessId }[];
+}
 /**
- * Turning an agent on again where an Off took it out, or Restore of Delete everywhere: each copy goes back in its own tool
- * (putCopyBack), the one-way source first, since its receiving copies wait for it (waitsForSource). An Off puts back only the
- * tools it still holds; `only`, that tool's copy alone. A tool with a copy again keeps it, and the entry notes the kept copy it
- * didn't put back (`turnedUp`), which its row then offers (useKeptCopy). The 'restored' entry says what it put back from
- * (`putBackFrom`) and the record as it was before it (`before`: synced or not, and the tools left out, which the click's own
- * pass takes back in), so its Undo (undoPutBack) is exactly the Off or the deletion again.
+ * What goes back: each of `copies` in its own tool (putCopyBack), the one-way source first, since its receiving copies wait for
+ * it (waitsForSource). A kept copy stays in History (`keptAside`) where its tool has a copy by then: the tool's own, which
+ * turned up, or a newer kept copy just put back (an Off can hold two for one tool). Where a tool keeps its own copy, so does the
+ * copy an earlier Off kept for that tool before `past` took the tool over (historyrules.ts keptByEarlierOffs): that Off can
+ * never put it back. A kept copy the tool holds already, byte for byte, is marked `same`.
+ */
+async function putCopiesBack(context: ShareContext, at: PutBackAt, past: HistoryEvent, history: HistoryEvent[], copies: KeptCopy[]): Promise<PutBack> {
+  const put: PutBack = { results: [], back: [], keptAside: [], settled: [], takenOn: [] };
+  const origin = at.item.origin;
+  /** The file each settled tool holds now; `keepsOwn`: the tools that keep a copy of their own, found there. */
+  const holds = new Map<HarnessId, string | undefined>(), keepsOwn: HarnessId[] = [];
+  const keepAside = async (copy: KeptCopy) => put.keptAside.push(await keptText(context, at.key, copy) === holds.get(copy.tool) ? { ...copy, same: true } : copy);
+  for (const copy of [...copies].sort((first, second) => Number(second.tool === origin) - Number(first.tool === origin))) {
+    if (holds.has(copy.tool)) { await keepAside(copy); continue; }
+    const sourceHas = !!at.slot[origin as AgentTool] || put.back.some(entry => entry.tool === origin);
+    const { is, result } = await putCopyBack(context, at, copy, waitsForSource(history, past, copy, origin, sourceHas));
+    put.results.push(result);
+    if (is === 'not') continue;
+    holds.set(copy.tool, is === 'back' ? await keptText(context, at.key, copy) : at.slot[copy.tool as AgentTool]!.text);
+    if (is === 'back') put.back.push(copy); else { keepsOwn.push(copy.tool); await keepAside(copy); }
+  }
+  for (const tool of keepsOwn) for (const earlier of keptByEarlierOffs(past, history, tool)) { await keepAside(earlier.copy); put.takenOn.push({ off: earlier.off, tool }); }
+  put.settled = [...holds.keys()];
+  return put;
+}
+
+/**
+ * Turning an agent on again where an Off took it out, or Restore of Delete everywhere. An Off puts back only the tools it
+ * still holds; `only`, that tool's copy alone. What goes back is putCopiesBack's; this decides whether it can go ahead at all,
+ * and what the record and History say after:
+ * - the agent is synced again when it was before `past` and a copy came back (syncedAgain);
+ * - the 'restored' entry names the copies put back (`losers`), those left in History, which its row offers (`keptAside`,
+ *   useKeptCopy), what it put back from (`putBackFrom`, `reverses`) and the record as it was before it (`before`: synced or not,
+ *   and the tools left out, which the click's own pass takes back in), so its Undo (undoPutBack) is exactly the Off or the
+ *   deletion again;
+ * - `past` is done (`undoneBy`) once every copy it keeps is back or left in History with an entry that offers it, and until
+ *   then notes the tools it is done with (`restoredTools`): a tool a later Off took over keeps it open, so its copy there
+ *   still has a way back. An earlier Off whose kept copy this entry took on is done with that tool too (handedOn).
  */
 async function putBackAgent(context: ShareContext, tools: HarnessId[], history: HistoryEvent[], past: HistoryEvent, only?: HarnessId): Promise<McpResult> {
   if (past.undoneBy) return refused('That was put back already.');
@@ -987,39 +1028,25 @@ async function putBackAgent(context: ShareContext, tools: HarnessId[], history: 
   if (refusal) return refused(refusal);
   // A source whose tool is gone (not installed any more, or left out by the tool choice) stays in History, and no copy waits for it.
   forgetSourceOutside(item, present);
-  const sourceFirst = (first: KeptCopy, second: KeptCopy) => Number(second.tool === item.origin) - Number(first.tool === item.origin);
-  const results: DestinationResult[] = [], back: KeptCopy[] = [], turnedUp: KeptCopy[] = [];
-  /** Each tool that has a copy once this is done, with that file's text (a kept copy that is the same is not offered again); `keepsOwn`: those with their own, found there. */
-  const has = new Map<HarnessId, string | undefined>(), keepsOwn: HarnessId[] = [];
-  const leftInHistory = async (copy: KeptCopy) => turnedUp.push(await keptText(context, key, copy) === has.get(copy.tool) ? { ...copy, same: true } : copy);
-  for (const copy of open.filter(entry => !only || entry.tool === only).sort(sourceFirst)) {
-    // A second copy this entry holds for one tool (an older kept one, taken on from an earlier Off) stays in History.
-    if (has.has(copy.tool)) { await leftInHistory(copy); continue; }
-    const sourceHas = !!slot[item.origin as AgentTool] || back.some(entry => entry.tool === item.origin);
-    const put = await putCopyBack(context, { key, item, slot, present, after: past.kind === 'deleted' ? 'deleted it' : 'turned it off' }, copy, waitsForSource(history, past, copy, item.origin, sourceHas));
-    results.push(put.result);
-    if (put.is === 'not') continue;
-    has.set(copy.tool, put.is === 'back' ? await keptText(context, key, copy) : slot[copy.tool as AgentTool]!.text);
-    if (put.is === 'back') back.push(copy); else { keepsOwn.push(copy.tool); await leftInHistory(copy); }
-  }
-  // Where a tool keeps its own copy, an earlier Off that this one took the tool over from can never put its kept copy back
-  // (the tool's own copy is a change that stays, Rule B): that copy is left in History with this entry too.
-  const earlier = keepsOwn.flatMap(tool => keptByEarlierOffs(past, history, tool));
-  for (const { copy } of earlier) await leftInHistory(copy);
-  if (heldCopies(past).length && !back.length && !turnedUp.length) return refused(results[0]?.message ?? 'Nothing could be put back.', results);
   const before: RecordBefore = { ...recordNow(item), off: [...item.off] };
+  const at: PutBackAt = { key, item, slot, present, after: past.kind === 'deleted' ? 'deleted it' : 'turned it off' };
+  const { results, back, keptAside, settled, takenOn } = await putCopiesBack(context, at, past, history, open.filter(copy => !only || copy.tool === only));
+  if (heldCopies(past).length && !back.length && !keptAside.length) return refused(results[0]?.message ?? 'Nothing could be put back.', results);
   if (syncedAgain(past, back)) item.state = 'shared';
-  const done = [...new Set([...(past.restoredTools ?? []), ...has.keys()])];
-  // Whole once every copy it keeps is back or left in History with an entry that offers it: a tool a later Off took over
-  // keeps this one open, so its copy there still has a way back.
+  const done = [...new Set([...(past.restoredTools ?? []), ...settled])];
   const whole = heldCopies(past).every(copy => done.includes(copy.tool));
-  if (past.kind === 'deleted' && whole) delete item.deleted;
+  if (past.kind === 'deleted' && whole) {
+    delete item.deleted;
+    // Restored whole, the deletion no longer ends the Offs made before it: a tool one of them holds again has no copy on record (Rule A).
+    const heldAgain = heldTools(history.filter(entry => entry.id !== past.id), past.key);
+    item.copies = item.copies.filter(copy => !heldAgain.includes(copy.tool) || copy.status);
+  }
   await saveAgentRecord(context.home, record);
   const entry: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key: past.key, item: item.name, kind: 'restored', orderProved: true,
     losers: back.map(({ tool, hash, folder }) => ({ tool, hash, ...(folder ? { folder } : {}) })),
-    putBackFrom: past.kind === 'deleted' ? 'delete-everywhere' : 'off', reverses: past.id, before, ...(turnedUp.length ? { turnedUp } : {}) };
+    putBackFrom: past.kind === 'deleted' ? 'delete-everywhere' : 'off', reverses: past.id, before, ...(keptAside.length ? { keptAside } : {}) };
   if (whole) { past.undoneBy = entry.id; delete past.restoredTools; } else past.restoredTools = done;
-  for (const { off, copy } of earlier) handedOn(off, copy.tool, entry.id);
+  for (const { off, tool } of takenOn) handedOn(off, tool, entry.id);
   await replaceHistory(context, [...history, entry]);
   return { results, writes: back.length, made: [entry.id] };
 }
@@ -1044,7 +1071,7 @@ function stillAsPutBack(restored: HistoryEvent, item: AgentRecordItem, slot: Age
 /**
  * Undo of a put-back (putBackAgent): the Off or the deletion again, with the record as before the put-back (its `before`:
  * synced or not, and the tools that were left out are left out again). The copies it put back go again (stillAsPutBack). A tool
- * whose own copy it found (`turnedUp`) loses nothing: the new entry holds that tool again, with the kept copy the put-back
+ * whose own copy it found (`keptAside`: the kept copy left in History for it) loses nothing: the new entry holds that tool again, with the kept copy the put-back
  * named for it. When it put copies back and none can be taken out, nothing changes and the entry keeps its Undo. Rule B
  * (endedBy, in restoreAgent) has already made sure that no later click changed what it put back, so no other Off holds its tools.
  */
@@ -1060,8 +1087,9 @@ async function undoPutBack(context: ShareContext, tools: HarnessId[], history: H
   const before = recordNow(item);
   const taken = await takeCopiesOut(context, item, slot, stillAsPutBack(restored, item, slot, results), deletion ? 'Deleted' : 'Removed');
   results.push(...taken.results);
-  if (restored.losers.length && !taken.losers.length) return refused(results.find(result => result.outcome !== 'removed')?.message ?? `${item.name}’s copies aren’t as it put them back, so they stay.`, results);
-  const heldAgain = (restored.turnedUp ?? []).map(({ same: _same, ...copy }) => copy);
+  const stayed = results.find(result => result.outcome !== 'removed')?.message ?? `${item.name}’s copies aren’t as it put them back, so they stay.`;
+  if (restored.losers.length && !taken.losers.length) return refused(stayed, results);
+  const heldAgain = (restored.keptAside ?? []).map(({ same: _same, ...copy }) => copy);
   for (const tool of new Set(heldAgain.map(copy => copy.tool))) {
     item.copies = item.copies.filter(entry => entry.tool !== tool);
     // Its own copy stays where it is (one gone since leaves the tool with no copy, and the kept one to turn on).
@@ -1120,7 +1148,8 @@ async function useKeptCopy(context: ShareContext, tools: HarnessId[], history: H
   const entry: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key: on.key, item: item.name, kind: 'chosen', keptFrom: on.id, orderProved: true,
     winner: { tool, hash: copy.hash, ...(copy.kept ? { kept: copy.kept } : {}) }, losers: replaced };
   await replaceHistory(context, [...history, entry]);
-  return { results: [{ item: item.name, harness: tool, outcome: 'written', replaced: here ? true : undefined, message: 'Has the kept copy again. Start a new session to use it.' }], writes: 1, made: [entry.id] };
+  const message = 'Has the kept copy again. Start a new session to use it.';
+  return { results: [{ item: item.name, harness: tool, outcome: 'written', replaced: here ? true : undefined, message }], writes: 1, made: [entry.id] };
 }
 
 /**
@@ -1188,8 +1217,9 @@ export async function convertAgentToSkill(context: ShareContext, tools: HarnessI
  *   Stopped switch's Undo, a click's Undo);
  * - 'kept-copy': undoKeptCopy;
  * - 'deletion-again' (the Restore of a deletion sync spread from a tool): deleteAgainAgent;
- * - every other kind (an edit, a conflict, a deletion by hand, a Pull's, a Redo): restoreVersion, a kept version everywhere
- *   (`how.use`: which overwritten edit).
+ * - an edit, a conflict, a kept edit, a deletion by hand, a Pull's, a Redo or its Undo: restoreVersion, a kept version
+ *   everywhere (`how.use`: which overwritten edit).
+ * The `switch` names every kind (EntryIs), so a new one doesn't compile until it has a route.
  * One action is not an entry's Undo: `how.keptIn`, an On's Use the kept copy (useKeptCopy), which outlives Rule B.
  */
 export async function restoreAgent(context: ShareContext, tools: HarnessId[], eventId: string, how?: RestoreHow): Promise<McpResult> {
@@ -1214,7 +1244,11 @@ export async function restoreAgent(context: ShareContext, tools: HarnessId[], ev
     case 'agent-choice': case 'unfinished-choice': return undoChoiceAgent(context, tools, history, past, historyKey(past)!);
     case 'kept-copy': return undoKeptCopy(context, tools, history, past);
     case 'deletion-again': return deleteAgainAgent(context, tools, history, past, history.find(entry => entry.undoneBy === past.id)!, historyKey(past)!);
-    default: return restoreVersion(context, tools, history, past, historyKey(past)!, how && 'use' in how ? how.use : undefined);
+    case 'edit': case 'conflict': case 'kept-edit': case 'deletion': case 'pulled-edit': case 'pulled-choice': case 'pulled-deletion': case 'redo': case 'undo':
+      return restoreVersion(context, tools, history, past, historyKey(past)!, how && 'use' in how ? how.use : undefined);
+    // Kinds no agent's entry is (a skill's, an MCP server's, a profile's, the base instructions').
+    case 'pulled-base': case 'choice': case 'switch': case 'profile': case 'removal': case 'take-over': case 'write': case 'restore-after-removal':
+      return refused('That change can’t be restored.');
   }
 }
 

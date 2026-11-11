@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { afterWords, offered } from '../src/historyactions.ts';
-import { entryIs, heldTools, keptCopiesOffered, offTools, standsIn } from '../src/historyrules.ts';
+import { entryIs, heldTools, keptByEarlierOffs, keptCopiesOffered, offTools, standsIn } from '../src/historyrules.ts';
 import { putBackOrder } from '../src/itemrow.ts';
 import type { DestinationResult, HarnessId, HistoryEvent } from '../src/types.ts';
 
@@ -41,7 +41,7 @@ test('Rule B: an On’s Turn off again ends with a later Off or choice of its to
   const laterBack = undid(later, on(['codex-cli']));
   assert.equal(shown(back, [first, back, later, laterBack]), 'Turn off again in all 3 tools');
   // A copy choice that replaced one of its copies ends it too.
-  assert.equal(shown(back, [first, back, entry('chosen', ['copilot-cli'])]), 'Chosen since');
+  assert.equal(shown(back, [first, back, entry('chosen', ['copilot-cli'])]), 'Copy chosen since');
   // A choice undone by its own Undo (no entry of its own) is as if never made.
   const choice = entry('chosen', ['copilot-cli'], { undoneBy: 'gone' });
   assert.equal(shown(back, [first, back, choice]), 'Turn off again in all 3 tools');
@@ -84,7 +84,7 @@ test('Rule B: a choice’s Undo ends with a later Off of one of its tools, not o
   const chose = choice(['codex-cli']);
   const elsewhere = off(['claude-cli']);
   // Undo add shows the latest thing that ended it.
-  assert.deepEqual([shown(chose, [added, chose, elsewhere]), shown(added, [added, chose]), shown(added, [added, chose, elsewhere])], ['Undo choice in Codex', 'Chosen since', 'Turned off since']);
+  assert.deepEqual([shown(chose, [added, chose, elsewhere]), shown(added, [added, chose]), shown(added, [added, chose, elsewhere])], ['Undo choice in Codex', 'Copy chosen since', 'Turned off since']);
   const there = off(['codex-cli']);
   assert.deepEqual([shown(chose, [chose, there]), shown(added, [added, there])], ['Turned off since', 'Turned off since']);
   const back = undid(there, on(['codex-cli'], { reverses: there.id }));
@@ -99,6 +99,7 @@ test('Rule B: a choice’s Undo stands tool by tool: a later change ends it only
   // One that replaced Codex's copy again ends it there and no further, until its own Undo (which writes no entry) undid it.
   const there = choice(['codex-cli']);
   assert.deepEqual([shown(older, [older, there]), standsIn(older, [older, there])], ['Undo choice in Copilot CLI', ['copilot-cli']]);
+  assert.match(offered(older, [older, there], tools).action!.help, /back in its own tool \(Copilot CLI\), .* \(only while unchanged since\)\. Codex, changed since, stays as it is$/);
   assert.equal(shown(older, [older, { ...there, undoneBy: 'its own Undo' }]), 'Undo choice in Copilot CLI and Codex');
   // Every tool reached: ended, in the words of the last change that reached one.
   assert.equal(shown(older, [older, there, off(['copilot-cli'])]), 'Turned off since');
@@ -107,11 +108,51 @@ test('Rule B: a choice’s Undo stands tool by tool: a later change ends it only
 test('Rule B: an On counts as a change where it found a copy turned up, so an earlier choice of that tool loses its Undo', () => {
   const first = off();
   const chose = choice(['codex-cli']);
-  const back = undid(first, on(['claude-cli', 'copilot-cli'], { reverses: first.id, turnedUp: [kept('codex-cli')] }));
+  const back = undid(first, on(['claude-cli', 'copilot-cli'], { reverses: first.id, keptAside: [kept('codex-cli')] }));
   assert.equal(shown(chose, [first, chose, back]), 'Turned on since');
   const elsewhere = choice(['copilot-cli']);
   const plain = undid(first, on(['claude-cli'], { reverses: first.id }));
   assert.equal(shown(elsewhere, [first, elsewhere, plain]), 'Undo choice in Copilot CLI');
+  // The same under an Off made after the choice: that Off and its On cancel out, but Codex keeps its own copy from then on.
+  const later = off(['codex-cli']);
+  const found = undid(later, on([], { reverses: later.id, keptAside: [kept('codex-cli')] }));
+  assert.equal(shown(chose, [chose, later, found]), 'Turned on since');
+});
+
+test('Rule B: a click undone and undone again stands: as the Off that Turn off again wrote, which holds only what it took out then; turned on once more, it cancels out', () => {
+  const chose = choice(['copilot-cli']);
+  const later = off(['copilot-cli', 'codex-cli']);
+  const back = undid(later, on(['copilot-cli', 'codex-cli'], { reverses: later.id }));
+  assert.equal(shown(chose, [chose, later, back]), 'Undo choice in Copilot CLI');
+  // Turn off again took both out again: the Off stands, as the entry Turn off again wrote.
+  const again = undid(back, off(['copilot-cli', 'codex-cli']));
+  assert.deepEqual([shown(chose, [chose, later, back, again]), heldTools([chose, later, back, again], 'agent:reviewer')], ['Turned off since', ['copilot-cli', 'codex-cli']]);
+  // Had it taken out Codex's copy alone (Copilot CLI's was changed since, and stayed), Copilot CLI is as the choice left it.
+  const partly = { ...again, losers: again.losers.slice(1) };
+  assert.deepEqual([shown(chose, [chose, later, back, partly]), heldTools([chose, later, back, partly], 'agent:reviewer')], ['Undo choice in Copilot CLI', ['codex-cli']]);
+  // Turned on once more: undone three times, it has cancelled out again.
+  const once = undid(again, on(['copilot-cli', 'codex-cli'], { reverses: again.id }));
+  assert.equal(shown(chose, [chose, later, back, again, once]), 'Undo choice in Copilot CLI');
+});
+
+test('Rule B: an On undone and done again stands as itself: History’s Turn on of the Off that Turn off again wrote is no change of its own', () => {
+  const older = off(['claude-cli']), other = off(['codex-cli']);
+  const first = undid(older, on(['claude-cli'], { reverses: older.id }));
+  // Codex turned on after it: a later change, so the first On's Turn off again is not offered.
+  const second = undid(other, on(['codex-cli'], { reverses: other.id }));
+  assert.equal(shown(first, [older, other, first, second]), 'Turned on since');
+  // That undone: they cancel out. And turned on once more: Codex is on since the first On, as the second On left it.
+  const again = undid(second, off(['codex-cli']));
+  assert.equal(shown(first, [older, other, first, second, again]), 'Turn off again in Claude Code');
+  const once = undid(again, on(['codex-cli'], { reverses: again.id }));
+  assert.equal(shown(first, [older, other, first, second, again, once]), 'Turned on since');
+});
+
+test('Rule B is for agents only: a skill’s and an MCP server’s entries keep their actions whatever came later', () => {
+  for (const key of ['reviewer', 'mcp:files']) {
+    const older = choice(['codex-cli'], { key }), newer = choice(['codex-cli'], { key });
+    assert.deepEqual([shown(older, [older, newer]), shown(newer, [older, newer])], ['Undo choice in all tools', 'Undo choice in all tools']);
+  }
 });
 
 test('Rule B: a deletion keeps its Restore whatever came later, a later deletion too', () => {
@@ -122,12 +163,12 @@ test('Rule B: a deletion keeps its Restore whatever came later, a later deletion
 
 test('An On that found a tool’s own copy offers Use the kept copy there for as long as it is in History: a later choice doesn’t end it; a use of it, an Off of that tool, its own Undo or a deletion do', () => {
   const first = off();
-  const back = undid(first, on(['claude-cli', 'copilot-cli'], { reverses: first.id, turnedUp: [kept('codex-cli')] }));
+  const back = undid(first, on(['claude-cli', 'copilot-cli'], { reverses: first.id, keptAside: [kept('codex-cli')] }));
   const events = [first, back];
   assert.deepEqual([shown(back, events), also(back, events)], ['Turn off again in Claude Code and Copilot CLI', ['Use the kept copy in Codex']]);
   // A copy choice ends its Turn off again, never the kept copy.
   const chose = choice(['codex-cli']);
-  assert.deepEqual([shown(back, [...events, chose]), also(back, [...events, chose])], ['Chosen since', ['Use the kept copy in Codex']]);
+  assert.deepEqual([shown(back, [...events, chose]), also(back, [...events, chose])], ['Copy chosen since', ['Use the kept copy in Codex']]);
   // In use: not offered. Its Undo (which writes no entry), or a later choice that replaced it there, and it is offered again.
   const used = choice(['codex-cli'], { keptFrom: back.id, winner: { tool: 'codex-cli', hash: 'h-codex-cli' } });
   assert.deepEqual([entryIs(used, [...events, used]), shown(used, [...events, used]), keptOfferedIn(back, [...events, used])], ['kept-copy', 'Undo in Codex', []]);
@@ -140,26 +181,49 @@ test('An On that found a tool’s own copy offers Use the kept copy there for as
   assert.deepEqual(keptOfferedIn({ ...back, undoneBy: 'an Off again' }, events), []);
   assert.deepEqual(keptOfferedIn(back, [...events, entry('deleted', tools, { everywhere: true })]), []);
   // Found byte for byte the same as the kept one: nothing to offer.
-  assert.deepEqual(keptOfferedIn({ ...back, turnedUp: [{ ...kept('codex-cli'), same: true }] }, events), []);
+  assert.deepEqual(keptOfferedIn({ ...back, keptAside: [{ ...kept('codex-cli'), same: true }] }, events), []);
+});
+
+test('An On that keeps two copies aside for one tool offers one at a time, the next once the first is in use; a use that replaced nothing has no Undo', () => {
+  const first = off();
+  const newer = { tool: 'codex-cli' as const, hash: 'h-newer', kept: 'newer' }, older = { tool: 'codex-cli' as const, hash: 'h-older', kept: 'older' };
+  const back = undid(first, on(['claude-cli', 'copilot-cli'], { reverses: first.id, keptAside: [newer, older] }));
+  assert.deepEqual([also(back, [first, back]), keptCopiesOffered(back, [first, back])], [['Use the kept copy in Codex'], [newer]]);
+  // Where the On put Codex's newer kept copy back and kept the older aside, Codex has no copy of its own to leave alone.
+  const both = on(['codex-cli'], { keptAside: [older] });
+  assert.equal(offered(both, [both], tools).action?.help, 'Turn off reviewer again: each copy it put back removed from Codex, and History keeps it');
+  // Codex had no copy when the newer one was used: nothing was replaced, so that row has no Undo. The older one is offered now.
+  const used = choice([], { keptFrom: back.id, winner: newer });
+  assert.deepEqual([shown(used, [first, back, used]), keptCopiesOffered(back, [first, back, used])], [undefined, [older]]);
+});
+
+test('An earlier Off’s kept copy is taken on by a later Off’s On once: not again after that Off is done with the tool', () => {
+  const earlier = off(['claude-cli', 'codex-cli']), by = off(['codex-cli']);
+  assert.deepEqual(keptByEarlierOffs(by, [earlier, by], 'codex-cli').map(({ off: from, copy }) => [from.id, copy.tool]), [[earlier.id, 'codex-cli']]);
+  // Handed on (agents.ts handedOn): the earlier Off notes it is done with Codex, and still holds Claude Code.
+  earlier.restoredTools = ['codex-cli'];
+  assert.deepEqual([keptByEarlierOffs(by, [earlier, by], 'codex-cli'), offTools(earlier, [earlier, by])], [[], ['claude-cli']]);
 });
 
 test('An On that only found a tool’s own copy removed nothing, so it has no Turn off again: its Undo leaves that copy alone again, and the Off it writes says so', () => {
   const first = off(['codex-cli']);
-  const back = undid(first, on([], { reverses: first.id, turnedUp: [kept('codex-cli')] }));
+  const back = undid(first, on([], { reverses: first.id, keptAside: [kept('codex-cli')] }));
   const { action } = offered(back, [first, back], tools);
   assert.deepEqual([action?.label, action?.help], ['Undo turn on in Codex', 'Codex’s own copy is left alone again, as before reviewer was turned on there: nothing is removed, and Central Knot doesn’t sync it']);
   assert.equal(afterWords(back, [first, back], { results: results('stayed', 'codex-cli'), homeTools: tools }), 'Codex’s own copy is left alone again.');
   // The Off that Undo writes holds Codex without having removed anything: Rule A reads it, and its Turn on names it.
-  const again = undid(back, off([], { turnedUp: [kept('codex-cli')] }));
+  const again = undid(back, off([], { keptAside: [kept('codex-cli')] }));
   assert.deepEqual([offTools(again, [first, back, again]), shown(again, [first, back, again])], [['codex-cli'], 'Turn on in Codex']);
+  // Undone, the row says so: nothing was turned off. An On that put copies back, undone, reads "Turned off since".
+  assert.deepEqual([shown(back, [first, back, again]), shown({ ...on(['claude-cli']), undoneBy: again.id }, [again])], ['Undone', 'Turned off since']);
   // One that also put copies back says both.
-  const mixed = on(['claude-cli'], { turnedUp: [kept('codex-cli')] });
+  const mixed = on(['claude-cli'], { keptAside: [kept('codex-cli')] });
   assert.equal(offered(mixed, [mixed], tools).action?.help, 'Turn off reviewer again: each copy it put back removed from Claude Code, and History keeps it; Codex’s own copy is left alone again');
   assert.equal(afterWords(mixed, [mixed], { results: [...results('removed', 'claude-cli'), ...results('stayed', 'codex-cli')], homeTools: tools }), 'reviewer is off in Claude Code again. History keeps its copy. Codex’s own copy is left alone again.');
 });
 
 test('What is said after Use the kept copy, and after its Undo', () => {
-  const back = on(['claude-cli'], { turnedUp: [kept('codex-cli')] });
+  const back = on(['claude-cli'], { keptAside: [kept('codex-cli')] });
   const wrote = [{ item: 'reviewer', harness: 'codex-cli' as const, outcome: 'written' as const, replaced: true as const, message: '' }];
   assert.equal(afterWords(back, [back], { results: wrote, homeTools: tools, how: { keptIn: 'codex-cli' } }), 'Codex has the kept copy of reviewer again. The one it replaced is in History, with its own Undo.');
   const used = choice(['codex-cli'], { keptFrom: back.id, winner: { tool: 'codex-cli', hash: 'h-codex-cli' } });
@@ -173,6 +237,6 @@ test('The row’s On puts back the Off that holds a one-way copy’s source befo
 
 test('A deletion’s Restore that found a tool’s own copy offers Use the kept copy too', () => {
   const deletion = entry('deleted', tools, { everywhere: true });
-  const restored = undid(deletion, entry('restored', ['claude-cli', 'copilot-cli'], { putBackFrom: 'delete-everywhere', reverses: deletion.id, turnedUp: [kept('codex-cli')] }));
+  const restored = undid(deletion, entry('restored', ['claude-cli', 'copilot-cli'], { putBackFrom: 'delete-everywhere', reverses: deletion.id, keptAside: [kept('codex-cli')] }));
   assert.deepEqual([shown(restored, [deletion, restored]), also(restored, [deletion, restored])], ['Delete again in Claude Code and Copilot CLI', ['Use the kept copy in Codex']]);
 });

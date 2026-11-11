@@ -334,6 +334,7 @@ async function partsSkills(home: string): Promise<{ name: string; hash: string }
 }
 
 /**
+ * The skills store only (an agent's kept files are never pruned, agents.ts keep; MCP keeps its own, mcp.ts).
  * Store revisions no record, copy, retained History event or plugin parts point at any more are removed (STO-04). Never a current revision.
  * A deletion older than the window has left History, so its content goes too. The deletion record itself stays in sync.json,
  * so a stale replica still can't bring the item back. A copy still marked 'removing' is that stale replica: removing it needs
