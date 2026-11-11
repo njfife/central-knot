@@ -155,7 +155,7 @@ test('An On that only found a tool’s own copy removed nothing, so it has no Tu
 test('What is said after Use the kept copy, and after its Undo', () => {
   const back = on(['claude-cli'], { turnedUp: [kept('codex-cli')] });
   const wrote = [{ item: 'reviewer', harness: 'codex-cli' as const, outcome: 'written' as const, replaced: true as const, message: '' }];
-  assert.equal(afterWords(back, [back], { results: wrote, homeTools: tools, how: { keptIn: 'codex-cli' } }), 'Codex has the copy of reviewer kept when it was turned off. The one it replaced is in History, with its own Undo.');
+  assert.equal(afterWords(back, [back], { results: wrote, homeTools: tools, how: { keptIn: 'codex-cli' } }), 'Codex has the kept copy of reviewer again. The one it replaced is in History, with its own Undo.');
   const used = choice(['codex-cli'], { keptFrom: back.id, winner: { tool: 'codex-cli', hash: 'h-codex-cli' } });
   assert.equal(afterWords(used, [back, used], { results: results('written', 'codex-cli'), homeTools: tools }), 'Codex has the copy it had before again.');
 });
@@ -165,3 +165,8 @@ test('The row’s On puts back the Off that holds a one-way copy’s source befo
   assert.deepEqual(putBackOrder(row), ['source’s Off', 'receiver’s Off']);
 });
 
+test('A deletion’s Restore that found a tool’s own copy offers Use the kept copy too', () => {
+  const deletion = entry('deleted', tools, { everywhere: true });
+  const restored = undid(deletion, entry('restored', ['claude-cli', 'copilot-cli'], { putBackFrom: 'delete-everywhere', reverses: deletion.id, turnedUp: [kept('codex-cli')] }));
+  assert.deepEqual([shown(restored, [deletion, restored]), also(restored, [deletion, restored])], ['Delete again in Claude Code and Copilot CLI', ['Use the kept copy in Codex']]);
+});

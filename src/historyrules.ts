@@ -186,9 +186,9 @@ export const sinceWords = (ending: HistoryEvent) => (ending.kind === 'deleted' ?
   : ending.kind === 'chosen' ? 'Chosen since' : ending.putBackFrom === 'off' ? 'Turned on since' : 'Restored since');
 
 /**
- * The kept copies that `on`, an On, still offers with "Use the kept copy", at most one per tool. Turning the agent on left
- * them out (`turnedUp`): the tool had a copy of its own there, or an older Off had kept a copy for a tool a later Off took
- * over. So each can come back only from this entry, which offers it for as long as History keeps the entry, whatever is
+ * The kept copies that `on`, a put-back (an On, or a deletion's Restore), still offers with "Use the kept copy", at most one
+ * per tool. The put-back left them in History (`turnedUp`): the tool had a copy of its own there, or an older Off had kept a
+ * copy for a tool a later Off took over. So each can come back only from this entry, which offers it for as long as History keeps the entry, whatever is
  * clicked later (a copy choice doesn't end it), but not:
  * - while that kept copy is in use there: a use of it (a 'kept-copy' entry naming this On and that copy) that Rule B hasn't
  *   ended or its Undo undone. With several kept for one tool, the next one not in use is offered, so each has its turn;

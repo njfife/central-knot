@@ -63,11 +63,11 @@ function offAgainSaid(event: HistoryEvent, results: DestinationResult[]): string
     own.length ? `${leftAlone(own)}.` : '', ...leftAsIs(results.filter(entry => entry.outcome !== 'stayed')));
   return said || `${event.item} is off again.`;
 }
-/** An On's second action, one per tool for which it left a kept copy in History (the rule: historyrules.ts keptCopiesOffered). */
+/** A put-back's second action, one per tool for which it left a kept copy in History (the rule: historyrules.ts keptCopiesOffered). */
 const keptCopyActions = (event: HistoryEvent, events: HistoryEvent[]): EntryAction[] => keptCopiesOffered(event, events).map(({ tool }) => ({
   word: 'Use the kept copy', label: `Use the kept copy in ${toolName(tool)}`, how: { keptIn: tool },
-  help: `Put the copy kept when ${event.item} was turned off back in ${toolName(tool)}, in place of the one there now, which goes to History with its own Undo` }));
-const keptCopySaid = (event: HistoryEvent, results: DestinationResult[]) => sentence(...where(results, 'written').map(tool => `${toolName(tool)} has the copy of ${event.item} kept when it was turned off.`),
+  help: `Put the copy of ${event.item} that History kept back in ${toolName(tool)}, in place of the one there now, which goes to History with its own Undo` }));
+const keptCopySaid = (event: HistoryEvent, results: DestinationResult[]) => sentence(...where(results, 'written').map(tool => `${toolName(tool)} has the kept copy of ${event.item} again.`),
   results.some(entry => entry.replaced) ? 'The one it replaced is in History, with its own Undo.' : '', ...leftAsIs(results));
 
 const table: Record<EntryIs, Row> = {
@@ -122,12 +122,12 @@ export interface EntryAction { word: string; label: string; help: string; how?: 
 /**
  * What an entry's row shows in its right-hand column: its action, or (`state`) why it has none: undone (the table's `done`), or
  * ended by a later click (Rule B, in what ended it's words). Neither: a row with no action of its own. `also`: actions that
- * stand whatever became of the main one (an On's Use the kept copy).
+ * stand whatever became of the main one (Use the kept copy, on an On or on a deletion's Restore).
  */
 export function offered(event: HistoryEvent, events: HistoryEvent[], homeTools: string[]): { action?: EntryAction; state?: string; also: EntryAction[] } {
   const is = entryIs(event, events), row = table[is];
   if (event.undoneBy) return { state: row.done ?? 'Undone', also: [] };
-  const also = is === 'on-after-off' ? keptCopyActions(event, events) : [];
+  const also = event.putBackFrom ? keptCopyActions(event, events) : [];
   const ending = endedBy(event, events);
   if (ending) return { state: sinceWords(ending), also };
   const word = row.word?.(event, events);

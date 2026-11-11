@@ -20,13 +20,13 @@
 //       one, the click's pass also does sync's waiting work, which its Undo leaves, as the band promises: it reverses the
 //       click, not what sync did alongside.)
 // The walks in FOUND run in `npm test`. CK_WALKS=<n> runs n more seeds of each kind, starting at CK_SEED=<n>;
-// CK_ONLY=<seed>[,one-way] replays one walk, with CK_TRACE=1 step by step.
+// CK_ONLY=<seed>[,one-way] replays one walk, with CK_TRACE=1 step by step; CK_LIST=1 prints which walks found something.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readAgentRecord, restoreAgent } from '../src/agents.ts';
-import { endedBy, heldCopies, heldTools, offTools } from '../src/historyrules.ts';
+import { endedBy, entryIs, heldCopies, heldTools, offTools, type EntryIs } from '../src/historyrules.ts';
 import { readHistory } from '../src/manage.ts';
 import { DAY_MS } from '../src/model.ts';
 import { offHeldIn, putBackOrder } from '../src/itemrow.ts';
@@ -35,10 +35,14 @@ import type { HistoryDays, HistoryEvent, McpResult, SkillFacts } from '../src/ty
 import { age, choose, claudeAgent, codexOwn, deleteEverywhere, factOf, fields, files, filesOf, historyActions, pass, prune, sandbox, synced, toolOff, toolOn, tools, trial, turnOff, turnOn, undo, write, type Box, type Clicked, type Tool } from './agentclicks.ts';
 
 /**
- * The walks `npm test` runs, each with its agent (true: one-way). Each fails with one of this step's rules turned off, or is a
- * seed a judge's or the builder's longer run once failed on; CK_WALKS adds random ones of both kinds.
+ * The walks `npm test` runs, each with its agent (true: one-way): the seeds a judge's or a builder's longer run once failed on
+ * (1001, 6079, 6203, 9010, 7080; one-way 6085, 6240, 7067, 7080), and two more that fail today with a rule turned off (6034:
+ * a part-way Delete everywhere leaves no stray copy on record; one-way 6002: a choice's Undo ends with a later click on its
+ * tools). A seed's steps change whenever the walk's own actions do, so what keeps each rule tested is its named test
+ * (agentsoff-sequences.test.ts, historyactions.test.ts); these are the walk's sample for every run. CK_WALKS adds random
+ * ones of both kinds.
  */
-const FOUND: [number, boolean][] = [[1001, false], [5071, false], [6079, false], [6203, false], [9010, false], [18, true], [5021, true], [6085, true], [6240, true], [7067, true], [7080, true]];
+const FOUND: [number, boolean][] = [[1001, false], [6034, false], [6079, false], [6203, false], [9010, false], [7080, false], [6002, true], [6085, true], [6240, true], [7067, true], [7080, true]];
 const STEPS = 14;
 const random = (seed: number) => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 /** An answer that means History offered an action that is stale or does nothing. */
@@ -68,9 +72,16 @@ async function recordAsSyncReadsIt(box: Box) {
 type KeptCopy = HistoryEvent['losers'][number];
 /** A kept file as the store has it: the one an entry names (`kept`), else the latest kept of that content for the tool. */
 const keptFile = (box: Box, copy: Pick<KeptCopy, 'tool' | 'hash' | 'kept'>) => readFile(join(box.home, '.central-knot', 'items', 'agents', 'reviewer', copy.hash, `${copy.kept ?? copy.tool}.txt`), 'utf8').catch(() => undefined);
-/** What an entry's own action can bring back: the copies it replaced or took out (an Off's: every copy it holds), and the version it would write everywhere. */
-const broughtBackBy = (event: HistoryEvent): KeptCopy[] => [...(event.kind === 'removed' ? heldCopies(event) : event.losers),
-  ...[event.previous, event.winner?.hash].flatMap(hash => (hash ? tools.map(tool => ({ tool, hash })) : []))];
+/** The kinds of entry whose action writes an earlier version into every tool (agents.ts restoreVersion): each tool's kept file of that version comes back. */
+const WRITES_A_VERSION: EntryIs[] = ['edit', 'conflict', 'kept-edit', 'deletion', 'pulled-edit', 'pulled-choice', 'pulled-deletion', 'redo', 'undo'];
+/**
+ * What an entry's own action can bring back: the copies it replaced or took out (an Off's: every copy it holds), or, for an
+ * action that writes an earlier version everywhere, each tool's kept file of that version.
+ */
+function broughtBackBy(event: HistoryEvent, history: HistoryEvent[]): KeptCopy[] {
+  if (WRITES_A_VERSION.includes(entryIs(event, history))) return [event.previous, event.winner?.hash, ...event.losers.map(loser => loser.hash)].flatMap(hash => (hash ? tools.map(tool => ({ tool, hash })) : []));
+  return event.kind === 'removed' ? heldCopies(event) : event.losers;
+}
 /**
  * Every kept file a click can bring back now or in its turn, as `tool\0text`, each with the entries that name it:
  * - the copies an offered action brings back (an On's Use the kept copy: the kept copy of that one tool);
@@ -79,10 +90,10 @@ const broughtBackBy = (event: HistoryEvent): KeptCopy[] => [...(event.kind === '
  */
 async function reachable(box: Box, history: HistoryEvent[], offeredNow: Awaited<ReturnType<typeof historyActions>>): Promise<Map<string, HistoryEvent[]>> {
   const sources: { event: HistoryEvent; copies: KeptCopy[] }[] = offeredNow.map(({ event, how }) => ({ event,
-    copies: how && 'keptIn' in how ? (event.turnedUp ?? []).filter(copy => copy.tool === how.keptIn) : broughtBackBy(event) }));
+    copies: how && 'keptIn' in how ? (event.turnedUp ?? []).filter(copy => copy.tool === how.keptIn) : broughtBackBy(event, history) }));
   const held = heldTools(history, 'agent:reviewer');
   for (const event of ours(history)) {
-    if (['removed', 'deleted'].includes(endedBy(event, history)?.kind ?? '')) sources.push({ event, copies: [...broughtBackBy(event), ...(event.turnedUp ?? [])] });
+    if (['removed', 'deleted'].includes(endedBy(event, history)?.kind ?? '')) sources.push({ event, copies: [...broughtBackBy(event, history), ...(event.turnedUp ?? [])] });
     else if (event.putBackFrom === 'off' && !event.undoneBy) sources.push({ event, copies: (event.turnedUp ?? []).filter(copy => held.includes(copy.tool)) });
   }
   const found = new Map<string, HistoryEvent[]>();
@@ -264,7 +275,11 @@ test(`A random walk of ${STEPS} clicks, ${walks.length} times (two-way and one-w
   // A few walks at a time, each in a temp home of its own.
   const waiting = [...walks];
   await Promise.all(Array.from({ length: only ? 1 : 4 }, async () => {
-    for (let next = waiting.shift(); next; next = waiting.shift()) for (const { kind, trace } of await walk(...next)) { const had = findings.get(kind); if (had) had.count++; else findings.set(kind, { count: 1, trace }); }
+    for (let next = waiting.shift(); next; next = waiting.shift()) {
+      const found = await walk(...next);
+      if (found.length && process.env.CK_LIST) console.log(`found: ${next[0]}${next[1] ? ',one-way' : ''} ${found[0].kind.slice(0, 60)}`);
+      for (const { kind, trace } of found) { const had = findings.get(kind); if (had) had.count++; else findings.set(kind, { count: 1, trace }); }
+    }
   }));
   assert.deepEqual([...findings].map(([kind, { count, trace }]) => `${count}× ${kind}\n    ${trace}`), []);
 });

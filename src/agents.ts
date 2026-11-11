@@ -931,8 +931,8 @@ function putBackRefusal(past: HistoryEvent, history: HistoryEvent[], item: Agent
   return other && `A different “${item.name}” agent is in ${shown[other.tool]} now. Remove or rename it, then restore.`;
 }
 
-/** The agent a put-back is for: its key, its record, each tool's file now, and the tools Central Knot manages here. */
-interface PutBackAt { key: string; item: AgentRecordItem; slot: AgentSlot; present: AgentTool[] }
+/** The agent a put-back is for: its key, its record, each tool's file now, the tools Central Knot manages here, and what took its copies out. */
+interface PutBackAt { key: string; item: AgentRecordItem; slot: AgentSlot; present: AgentTool[]; after: 'turned it off' | 'deleted it' }
 /**
  * One copy of a put-back, in its own tool. 'back': its kept file is there again, whole, and recorded as it was (one-way and
  * stopped marks too). 'found': the tool has a copy of its own again, which stays. 'not': it couldn't go back now, and the
@@ -947,7 +947,7 @@ async function putCopyBack(context: ShareContext, at: PutBackAt, copy: KeptCopy,
   const here = at.slot[tool];
   if (here) {
     return { is: 'found', result: here.text === text ? said('stayed', 'It has it already.')
-      : { ...said('stayed', `It has its own “${name}” now, which turned up since. That copy stays; the one kept when you turned it off is in History.`), turnedUp: true } };
+      : { ...said('stayed', `It has its own “${name}” now, which turned up since. That copy stays; the one kept when you ${at.after} is in History.`), turnedUp: true } };
   }
   if (text === undefined) return { is: 'not', result: said('failed', 'The kept copy is no longer in Central Knot’s store.') };
   const file = fileFor(context, tool, copy.folder ?? name);
@@ -985,7 +985,7 @@ async function putBackAgent(context: ShareContext, tools: HarnessId[], history: 
     // A second copy this entry holds for one tool (an older kept one, taken on from an earlier Off) stays in History.
     if (has.has(copy.tool)) { await leftInHistory(copy); continue; }
     const sourceHas = !!slot[item.origin as AgentTool] || back.some(entry => entry.tool === item.origin);
-    const put = await putCopyBack(context, { key, item, slot, present }, copy, waitsForSource(history, past, copy, item.origin, sourceHas));
+    const put = await putCopyBack(context, { key, item, slot, present, after: past.kind === 'deleted' ? 'deleted it' : 'turned it off' }, copy, waitsForSource(history, past, copy, item.origin, sourceHas));
     results.push(put.result);
     if (put.is === 'not') continue;
     has.set(copy.tool, put.is === 'back' ? await keptText(context, key, copy) : slot[copy.tool as AgentTool]!.text);
@@ -1071,8 +1071,8 @@ const holdsWhatWasWritten = (item: AgentRecordItem, here: AgentEntry, wrote: str
   here.text === wrote || item.copies.some(copy => copy.tool === here.tool && !copy.status && copy.bytes === here.bytes);
 
 /**
- * Use the kept copy, an On's second action (historyrules.ts keptCopiesOffered): a copy that turning the agent on left in
- * History, because `tool` had a copy by then, goes there after all. What it replaces is kept and named by the entry, a choice
+ * Use the kept copy, a put-back's second action (historyrules.ts keptCopiesOffered): a copy that turning the agent on, or
+ * restoring it after Delete everywhere, left in History because `tool` had a copy by then goes there after all. What it replaces is kept and named by the entry, a choice
  * of copy in that one tool (`keptFrom`), whose Undo (undoKeptCopy) puts it back. The tool's copy is then off the record, like
  * any copy not known to be the synced one: the next pass takes it up when it holds the synced content, and holds for a choice
  * of copy when it differs. It waits while an Off holds the tool (Rule A).
