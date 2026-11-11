@@ -4,7 +4,7 @@
 // against the manifest, unpacked aside, swapped in. Anything short of that leaves the plugins in use as they are and says
 // why. Plain files over http or https, with no sign-in of the app's own: who can reach the address is the publisher's affair.
 import { createWriteStream } from 'node:fs';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, readdir, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -12,8 +12,12 @@ import { pipeline } from 'node:stream/promises';
 import { activateRelease, activeBundle, bundleRelease, releaseDate, type ActiveBundle, type BundleRelease } from './bundle.ts';
 import { compareVersions } from './values.ts';
 
-/** What one look at the feed came to: nothing newer, a newer release now in use, one held for a newer app, or why it couldn't be read or used. */
-export interface FeedCheck { outcome: 'current' | 'updated' | 'held' | 'failed'; message: string; /** The bundle in use afterwards. */ active?: ActiveBundle }
+/**
+ * What one look at the feed came to: nothing newer, a newer release now in use, one held for a newer app, or that it
+ * couldn't be read or used. `message` is for whoever uses the app; `detail` is the exact reason, for the log and whoever
+ * publishes.
+ */
+export interface FeedCheck { outcome: 'current' | 'updated' | 'held' | 'failed'; message: string; detail?: string; /** The bundle in use afterwards. */ active?: ActiveBundle }
 
 export interface FeedHost {
   /** The feed's address, ending in a slash (bundle.ts feedAddress). */
@@ -36,7 +40,7 @@ class Answered extends Error { status: number; constructor(status: number) { sup
 /** The archive ran past the size its manifest lists. */
 class TooLong extends Error {}
 /** Why a request failed, in words: what the feed answered, or that it couldn't be reached. */
-const whyNot = (error: unknown) => (error instanceof Answered ? `the feed answered ${error.status}` : error instanceof TooLong ? 'its archive is longer than its manifest says' : 'the feed couldn’t be reached');
+const whyNot = (error: unknown) => (error instanceof Answered ? `the server answered ${error.status}` : error instanceof TooLong ? 'its archive is longer than its manifest says' : 'the server they are published on couldn’t be reached');
 
 /** Downloads the release's archive into `file`: exactly the bytes its manifest lists, or it fails. */
 async function download(host: FeedHost, release: BundleRelease, file: string): Promise<void> {
@@ -66,25 +70,31 @@ async function download(host: FeedHost, release: BundleRelease, file: string): P
  */
 export async function checkFeed(host: FeedHost): Promise<FeedCheck> {
   const active = await activeBundle(host.dataDir);
-  const failed = (message: string): FeedCheck => ({ outcome: 'failed', message, active });
+  const stays = 'The ones here stay in use';
+  const failed = (message: string, detail?: string): FeedCheck => ({ outcome: 'failed', message, ...(detail ? { detail } : {}), active });
   let release: BundleRelease | undefined;
   try {
     const response = await host.fetch(new URL('release.json', host.feed).href, { signal: AbortSignal.timeout(30_000) });
     if (!response.ok) throw new Answered(response.status);
     release = bundleRelease(await response.json().catch(() => undefined));
-  } catch (error) { return failed(`Couldn’t check for newer plugins: ${whyNot(error)}.`); }
-  if (!release) return failed('Couldn’t check for newer plugins: what is published there isn’t a release this app can read.');
-  if (active && release.marketplace !== active.release.marketplace) return failed(`What is published there is another marketplace (“${release.marketplace}”), so it was not used.`);
+  } catch (error) { return failed(`Couldn’t check for newer plugins: ${whyNot(error)}. ${stays}.`); }
+  if (!release) return failed(`Couldn’t check for newer plugins: what is published isn’t something this app can read. ${stays}.`, 'release.json at the feed is not a release manifest');
+  // (With nothing in use, because the build's own release never unpacked, whatever its feed publishes is taken.)
+  if (active && release.marketplace !== active.release.marketplace) return failed(`What is published now is another marketplace (“${release.marketplace}”), so it was not used. ${stays}.`);
   if (active && release.sequence <= active.release.sequence) return { outcome: 'current', message: 'No newer plugins are published.', active };
   const date = releaseDate(release);
   if (release.minApp && compareVersions(host.appVersion, release.minApp) < 0) return { outcome: 'held', message: `Newer plugins${date ? ` (${date})` : ''} are published, but they need this app at ${release.minApp} or newer. They arrive once the app is updated.`, active };
-  const file = join(host.dataDir, 'bundled', `download-${randomUUID()}.tgz`);
+  const folder = join(host.dataDir, 'bundled'), file = join(folder, `download-${randomUUID()}.tgz`);
   try {
-    await mkdir(join(host.dataDir, 'bundled'), { recursive: true });
-    try { await download(host, release, file); } catch (error) { return failed(`Newer plugins${date ? ` (${date})` : ''} are published, but they couldn’t be downloaded: ${whyNot(error)}. The ones here stay in use.`); }
+    await mkdir(folder, { recursive: true });
+    // A download the app was quit in the middle of goes first (one look runs at a time, so it is nobody's).
+    for (const name of await readdir(folder)) if (name.startsWith('download-')) await rm(join(folder, name), { force: true });
+    // Said plainly to whoever uses the app; the exact reason goes to the log, for whoever publishes.
+    const newer = `Newer plugins${date ? ` (${date})` : ''} are published, but`, again = `${stays}, and it is tried again by itself`;
+    try { await download(host, release, file); } catch (error) { return failed(`${newer} they couldn’t be downloaded: ${whyNot(error)}. ${again}.`); }
     const use = release;
     const { problem } = await host.turn(async () => activateRelease(host.dataDir, use, file, await host.keep(use.marketplace)));
-    if (problem) return failed(`Newer plugins${date ? ` (${date})` : ''} are published, but they couldn’t be used. ${problem} The ones here stay in use.`);
+    if (problem) return failed(`${newer} they didn’t arrive whole, so they weren’t used. ${again}.`, problem);
     return { outcome: 'updated', message: `Now has the plugins published${date ? ` on ${date}` : ''}.`, active: await activeBundle(host.dataDir) };
   } finally { await rm(file, { force: true }); }
 }

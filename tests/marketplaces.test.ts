@@ -13,7 +13,7 @@ const marketplace = (root: string, name: string, plugins: string[]) => Promise.a
   ...plugins.map(plugin => put(join(root, `plugins/${plugin}/skills/${plugin}/SKILL.md`), `---\nname: ${plugin}\ndescription: ${plugin}\n---\n`)),
 ]);
 
-async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?: boolean; app?: DesktopApp; /** Not this computer's own home. */ folderHome?: boolean; /** What adding the marketplace to a tool's own list comes to, where not `added`. */ listing?: Partial<Record<HarnessId, Awaited<ReturnType<typeof engine.addMarketplace>>>>; /** A bundled build: the marketplace it carries is in this folder under the base, and these plugins are not packed. */ bundled?: { folder: string; unpackaged?: string[] } } = {}) {
+async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?: boolean; app?: DesktopApp; /** Not this computer's own home. */ folderHome?: boolean; /** What adding the marketplace to a tool's own list comes to, where not `added`. */ listing?: Partial<Record<HarnessId, Awaited<ReturnType<typeof engine.addMarketplace>>>>; /** A bundled build: the marketplace it carries is in this folder under the base, and these plugins are not packed. */ bundled?: { folder: string; unpackaged?: string[]; kept?: string[] } } = {}) {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-markets-')));
   const home = join(base, 'home');
   await mkdir(home, { recursive: true });
@@ -26,7 +26,7 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?:
     dataDir: join(base, 'data'),
     pickFolder: async () => undefined,
     openExternal: async () => {},
-    ...(options.bundled ? { bundled: () => ({ source: join(base, options.bundled!.folder), view: { app: 'Acme Knot', displayName: 'Acme plugins', release: 'November 10, 2026 (GitHub: acme/plugins)', unpackaged: (options.bundled!.unpackaged ?? []).map(name => ({ name, reason: 'It is an npm package.' })) } }) } : {}),
+    ...(options.bundled ? { bundled: () => ({ source: join(base, options.bundled!.folder), view: { app: 'Acme Knot', displayName: 'Acme plugins', release: 'November 10, 2026 (GitHub: acme/plugins)', unpackaged: (options.bundled!.unpackaged ?? []).map(name => ({ name, reason: 'It is an npm package.' })), kept: options.bundled!.kept } }) } : {}),
   };
   const use: MarketplaceEngine = {
     findClis: async () => ({ binaries: { 'claude-cli': '/bin/true', ...(options.codex ? { 'codex-cli': join(base, 'bin/codex') } : {}), ...(options.app ? { 'copilot-cli': options.app.binary } : {}) }, apps: options.app ? { 'copilot-cli': options.app } : {} }),
@@ -379,5 +379,18 @@ test('A home switched while a tool waits its turn adds nothing, and that tool is
     assert.deepEqual(box.calls.filter(call => call.startsWith('list')), []);
     actual = true;
     assert.deepEqual((await box.markets.addCarried(['claude-cli'], work => work())).map(report => report.outcome), ['added']);
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin the build’s marketplace no longer offers goes into no other tool, and still updates where it is', async () => {
+  // It is kept for the tools that have it; the release that dropped it also lists it as one it has no files for.
+  const box = await setup({ bundled: { folder: 'carried', kept: ['pdf'], unpackaged: ['pdf'] } });
+  try {
+    const carried = join(box.base, 'carried');
+    await marketplace(carried, 'team', ['pdf']);
+    const refused = await box.markets.install(carried, 'team', 'pdf', ['codex-cli'], box.home);
+    assert.deepEqual(refused.reports.map(report => [report.outcome, report.message]), [['failed', 'Acme plugins no longer offers this plugin. It stays in the tools that have it until it is uninstalled there.']]);
+    assert.deepEqual((await box.markets.update(carried, 'team', 'pdf', ['claude-cli'], box.home)).reports.map(report => report.outcome), ['updated']);
+    assert.deepEqual(box.calls.filter(call => /^(install|update)/.test(call)), ['update pdf claude-cli']);
   } finally { await box.cleanup(); }
 });

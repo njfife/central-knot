@@ -180,18 +180,21 @@ export const packArchive = (folder: string, path: string) => tar(['-czf', path, 
 
 /**
  * Points entries of the marketplace in `root` at folders inside it, in each manifest it has (Claude's and Codex's): for
- * each name, the entry's `source` becomes that path; with `entry`, the whole entry is that one (added when the manifest
- * has none of that name). A manifest it changes is written again as JSON, every other value as it was.
+ * each name, the entry's `source` becomes that path. With `from` (the marketplace these plugins are carried over from),
+ * each manifest takes the whole entry from that marketplace's own copy of the same manifest, adding it when it has none
+ * of that name, and leaves out a plugin that manifest never listed. A manifest it changes is written again as JSON, every
+ * other value as it was.
  */
-export async function pointEntries(root: string, changes: Map<string, { path: string; entry?: Record<string, unknown> }>): Promise<void> {
+export async function pointEntries(root: string, paths: Map<string, string>, from?: string): Promise<void> {
+  const read = async (folder: string, file: string) => { const manifest = parseObject(await readFile(join(folder, file), 'utf8').catch(() => '')); return manifest && Array.isArray(manifest.plugins) ? manifest as Record<string, unknown> & { plugins: unknown[] } : undefined; };
   for (const [file, local] of [[MANIFEST, (path: string): unknown => path], [CODEX_MANIFEST, (path: string): unknown => ({ source: 'local', path })]] as const) {
-    const manifest = parseObject(await readFile(join(root, file), 'utf8').catch(() => ''));
-    if (!manifest || !Array.isArray(manifest.plugins)) continue;
-    for (const [name, change] of changes) {
+    const manifest = await read(root, file), before = from ? await read(from, file) : undefined;
+    if (!manifest || (from && !before)) continue;
+    for (const [name, path] of paths) {
       const at = manifest.plugins.findIndex(item => record(item)?.name === name);
-      if (at < 0 && !change.entry) continue;
-      const entry = { ...(change.entry ?? record(manifest.plugins[at])), source: local(change.path) };
-      if (at < 0) manifest.plugins.push(entry); else manifest.plugins[at] = entry;
+      const entry = record(from ? before!.plugins.find(item => record(item)?.name === name) : manifest.plugins[at]);
+      if (!entry) continue;
+      if (at < 0) manifest.plugins.push({ ...entry, source: local(path) }); else manifest.plugins[at] = { ...entry, source: local(path) };
     }
     await writeFile(join(root, file), `${JSON.stringify(manifest, null, 2)}\n`);
   }
@@ -203,23 +206,23 @@ const KEPT_FOLDER = '_kept';
 /**
  * Carries plugins over from the content in use (`live`) into a release unpacked in `staged`: each of `keep` that the
  * release doesn't pack and the content in use has files for. Its files go into a folder of their own and its entry, as it
- * was, is pointed there, since a tool that has it installed stops loading it once its marketplace no longer lists it
- * (Claude Code 2.1: "not found in marketplace"). Returns the names carried over.
+ * was in each manifest that listed it, is pointed there, since a tool that has it installed stops loading it once its
+ * marketplace no longer lists it (Claude Code 2.1: "not found in marketplace"). Returns the names carried over.
  */
 async function carryOver(live: string, staged: string, release: BundleRelease, keep: string[]): Promise<string[]> {
   const packed = new Set(release.plugins.map(plugin => plugin.name));
   const wanted = keep.filter(name => !packed.has(name));
   if (!wanted.length || !(await exists(live))) return [];
   const before = await parseCatalog(live, live, 'folder', { counts: false });
-  const changes = new Map<string, { path: string; entry: Record<string, unknown> }>();
+  const paths = new Map<string, string>();
   for (const plugin of before.plugins) {
-    if (!wanted.includes(plugin.name) || !plugin.folder || !plugin.entry || !(await exists(plugin.folder))) continue;
+    if (!wanted.includes(plugin.name) || !plugin.folder || !(await exists(plugin.folder))) continue;
     await mkdir(join(staged, KEPT_FOLDER), { recursive: true });
     await cp(plugin.folder, join(staged, KEPT_FOLDER, plugin.name), { recursive: true, verbatimSymlinks: true });
-    changes.set(plugin.name, { path: `./${KEPT_FOLDER}/${plugin.name}`, entry: plugin.entry });
+    paths.set(plugin.name, `./${KEPT_FOLDER}/${plugin.name}`);
   }
-  if (changes.size) await pointEntries(staged, changes);
-  return [...changes.keys()];
+  if (paths.size) await pointEntries(staged, paths, live);
+  return [...paths.keys()];
 }
 
 /**
