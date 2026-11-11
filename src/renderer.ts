@@ -163,6 +163,11 @@ function syncSwitch(home: HomeView) {
     return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: home.manage.access.reason ?? 'Preview only: nothing is written here' },
       label, h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, 'Paused'));
   }
+  // Another build syncs this home (ORG-08): this one's switch is shown, not offered, and says whose it is.
+  if (home.manage.gate.state === 'stopped' && home.manage.gate.owner) {
+    return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: `${home.manage.gate.owner.name} syncs this home. Take over syncing, on Skills, MCP servers or Agents, to have Central Knot sync it instead.` },
+      label, h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, `By ${home.manage.gate.owner.name}`));
+  }
   const idle = home.syncOn && !anyManaged();
   const title = idle ? 'Automatic sync is on: it starts once you manage something. Click to turn it off.'
     : home.syncOn ? 'Automatic sync is on: an edit to a managed item spreads to the other tools on its own, even with this window closed. Click to turn it off.'
