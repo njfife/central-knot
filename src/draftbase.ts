@@ -24,18 +24,20 @@ const MOST_OUTPUT = 4 * 1024 * 1024;
  * has a switch for that (Copilot CLI has none, and without approval it runs none that change anything), and no session is kept
  * where it can be told so. Codex prints its progress, so its answer is read from the file it is told to write.
  */
-export function draftCommand(tool: HarnessId, answerFile: string): { args: string[]; answer: 'output' | 'file' } {
+export function draftCommand(tool: HarnessId, answerFile: string): { args: string[]; answer: 'output' | 'file' } | undefined {
   switch (tool) {
     case 'claude-cli': return { args: ['-p', '--tools', '', '--strict-mcp-config', '--no-session-persistence'], answer: 'output' };
     case 'codex-cli': return { args: ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--ephemeral', '--color', 'never', '-o', answerFile, '-'], answer: 'file' };
     case 'copilot-cli': return { args: ['-s', '--no-color', '--no-ask-user'], answer: 'output' };
     case 'pi-cli': return { args: ['-p', '--no-tools', '--no-session'], answer: 'output' };
+    // OpenCode writes no draft: its newer line answers through a background service that stays running, which Central Knot never starts.
+    case 'opencode-cli': return undefined;
   }
 }
 
 /** The tools on this computer that can write a draft: those with a CLI, or with a desktop app that carries a copy of one. */
 export async function draftTools(home: string, searchPath: string): Promise<Partial<Record<HarnessId, string>>> {
-  const found = await Promise.all(harnessIds.map(async tool => [tool, (await findBinary(tool, home, searchPath))?.binary] as const));
+  const found = await Promise.all(harnessIds.filter(tool => draftCommand(tool, '')).map(async tool => [tool, (await findBinary(tool, home, searchPath))?.binary] as const));
   return Object.fromEntries(found.filter(([, binary]) => binary));
 }
 
@@ -204,6 +206,7 @@ export async function writeDraft(sources: DraftSources, by: HarnessId, binary: s
   try {
     const answerFile = join(folder, 'answer.md');
     const command = draftCommand(by, answerFile);
+    if (!command) return { stopped: `${name} can’t write a draft here. Nothing was changed.` };
     const ran = await run(binary, command.args, draftPrompt(sources), { cwd: folder, signal: options.signal, timeoutMs: options.timeoutMs ?? DRAFT_TIMEOUT_MS });
     if (ran.code === 'cancelled') return { cancelled: true };
     if (ran.code === 'missing') return { stopped: `${name} could not be started, so there is no draft. Nothing was changed.` };

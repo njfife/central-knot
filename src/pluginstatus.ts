@@ -10,7 +10,7 @@ import { takesPlugins } from './presence.ts';
  * Tools that can take a plugin's parts as separate items (parts.ts) where the plugin itself can't go: Pi always, Codex and
  * Copilot CLI when their plugin route is blocked here, Claude Code only with no plugin route at all (its desktop app alone, before its Code tab is there).
  */
-export const partsTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'];
+export const partsTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
 
 /** The one way of saying a tool's CLI is missing. */
 export const cliMissing = (tool: HarnessId) => `${names[tool]}’s command-line tool wasn’t found`;

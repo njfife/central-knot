@@ -406,9 +406,12 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .matrix { container: table / inline-size; position: relative; }
 .ov { --ov-columns: minmax(200px, 1fr) 84px repeat(var(--tool-count, 3), 120px); }
 /* A narrow table: tighter columns, so names keep their room, and a chosen copy shows as its tool's mark and Change, the
-   full choice in its tooltip. Four tools need it sooner (dom.ts data-tools). */
+   full choice in its tooltip. Four tools need it sooner, five sooner still (dom.ts data-tools). Five tools in the smallest
+   window with the sidebar open are tighter again: the column menus' arrows go, the names stay. */
 @container table (width < 780px) { .ov { --narrow: 1; } }
 @container table (width < 900px) { .ov[data-tools="4"] { --narrow: 1; } }
+@container table (width < 1020px) { .ov[data-tools="5"] { --narrow: 1; } }
+@container table (width < 700px) { .ov[data-tools="5"] { --tight: 1; } }
 .decided-short, .decided-undo-icon { display: none; }
 @container style(--narrow: 1) {
   .decided-undo-text { display: none; }
@@ -416,6 +419,11 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
   .ov-row { --ov-columns: minmax(160px, 1fr) 72px repeat(var(--tool-count, 3), 92px); }
   .decided-uses, .decided-what { display: none; }
   .decided-short { display: inline; }
+  .ov .tool-head-button { padding: 6px 4px; }
+}
+@container style(--tight: 1) {
+  .ov-row { --ov-columns: minmax(160px, 1fr) 60px repeat(var(--tool-count, 3), 80px); }
+  .tool-head-name > svg { display: none; }
 }
 
 .ov-row { position: relative; display: grid; grid-template-columns: var(--ov-columns); align-items: center; height: 40px; box-shadow: inset 0 -1px 0 var(--line); scroll-margin-top: 128px; }
@@ -510,6 +518,11 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .cell-oneway-mark svg { width: 11px; height: 11px; }
 .legend-cell .cell-oneway-mark { top: -4px; right: -4px; width: 10px; height: 10px; }
 .legend-cell .cell-source-mark { top: -3px; left: -3px; width: 7px; height: 7px; }
+/* A copy that is another tool's, read in that tool's folder: a link at the lower left, clear of the other corner marks. */
+.cell-reads-mark { position: absolute; bottom: -5px; left: -5px; display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; background: var(--surface); color: var(--ink-soft); box-shadow: 0 0 0 1px var(--line); }
+.cell-reads-mark svg { width: 10px; height: 10px; }
+.legend-cell .cell-reads-mark { bottom: -4px; left: -4px; width: 11px; height: 11px; }
+.legend-cell .cell-reads-mark svg { width: 8px; height: 8px; }
 .cell-source-mark { position: absolute; top: -4px; left: -4px; width: 9px; height: 9px; border-radius: 50%; background: var(--switch-on); box-shadow: 0 0 0 2px var(--surface); }
 
 .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; padding: 14px 16px 18px; font-size: 11.5px; color: var(--ink-soft); }
@@ -1014,6 +1027,17 @@ span.ins-confirm { margin-top: 0; }
   .plugin-table > .plugin-row:nth-child(even of .plugin-row):not(:hover):not(:has(:focus-visible)) { background: var(--row-stripe); }
 }
 .plugin-table .ov-row { grid-template-columns: minmax(0, 1fr) repeat(var(--tool-count, 3), 120px) 28px; height: auto; min-height: 40px; }
+/* Four or five tool columns in a narrow table give room back to the plugin's name; with five, each tool's mark sits over its name. */
+@container table (width < 700px) { .plugin-table[data-tools="4"] .ov-row { grid-template-columns: minmax(0, 1fr) repeat(4, 96px) 28px; } }
+@container table (width < 800px) {
+  .plugin-table[data-tools="5"] .ov-row { grid-template-columns: minmax(0, 1fr) repeat(5, 84px) 28px; }
+  .plugin-table[data-tools="5"] .ov-head .ov-tool-head { flex-direction: column; gap: 3px; }
+}
+/* Five tools in the smallest window with the sidebar open: the category stays in the chips above the table. */
+@container table (width < 700px) {
+  .plugin-table[data-tools="5"] .ov-row { grid-template-columns: minmax(0, 1fr) repeat(5, 76px) 28px; }
+  .plugin-table[data-tools="5"] .plugin-row-open > .plugin-chip { display: none; }
+}
 /* Room above the tool icons, so the pinned header doesn't touch the toolbar's rule */
 .plugin-table .ov-head { min-height: 48px; }
 .plugin-table .ov-head .ov-name { padding: 6px 0; font-size: 12px; font-weight: 400; color: var(--ink-soft); }
@@ -1120,6 +1144,11 @@ span.ins-confirm { margin-top: 0; }
 .skill-switch, .skill-switch-head { width: 96px; display: inline-flex; justify-content: center; align-items: center; }
 .skill-switch-head { flex-direction: column; font-size: 11.5px; color: var(--ink); white-space: nowrap; }
 .skill-switch-tool { display: inline-flex; align-items: center; gap: 5px; }
+/* A narrow page with four or five switch columns: each a little narrower, so a part's name keeps its room. */
+@container plugin (width < 700px) {
+  .skill-switch, .skill-switch-head { width: 84px; }
+  .skill-switch-tool { gap: 3px; }
+}
 /* Under a tool's name, where one list has both kinds of switch: a skill of the installed plugin, or a separate item. */
 .skill-switch-kind { font-size: 10.5px; color: var(--ink-soft); }
 .skill-switch { position: relative; height: 22px; }

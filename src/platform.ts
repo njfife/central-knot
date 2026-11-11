@@ -1,12 +1,18 @@
 import { execFile } from 'node:child_process';
 import { userInfo } from 'node:os';
-import { delimiter, dirname, isAbsolute, join } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, sep } from 'node:path';
 
 /**
  * PATH for running a CLI: its own folder first. An app opened from Finder or a launcher gets a short PATH, and a CLI that
  * is a script (Codex and Copilot CLI from npm run on Node) finds its interpreter beside itself.
  */
 export const pathBeside = (binary: string) => [dirname(binary), process.env.PATH].filter(Boolean).join(delimiter);
+
+/**
+ * Tools an end-to-end run looks for only inside its throwaway home (CK_TEST_HOME_ONLY: their binaries' names, with commas):
+ * what the machine running the checks has installed must not change what they see.
+ */
+const homeOnly = (binary: string) => (process.env.CK_TEST_HOME_ONLY ?? '').split(',').includes(binary);
 
 /** How many folders are searched for a CLI: a terminal's PATH is a few dozen at most. */
 const SEARCHED = 40;
@@ -17,7 +23,10 @@ export function executableCandidates(home: string, searchPath: string, binary = 
   const candidates = [...new Set(directories)].slice(0, SEARCHED).map(directory => join(directory, binary));
   // Pi installs itself under its own folder (CD §3): a config folder alone does not mean a CLI.
   if (binary === 'pi') candidates.push(join(home, '.pi/agent/bin/pi'));
-  return candidates;
+  // OpenCode's own installer puts it here and adds this folder to the front of the terminal's PATH (seen on a Mac with a
+  // Homebrew copy too: the terminal ran this one), so it is looked at first.
+  if (binary === 'opencode') candidates.unshift(join(home, '.opencode/bin/opencode'));
+  return homeOnly(binary) ? candidates.filter(candidate => candidate.startsWith(`${home}${sep}`)) : candidates;
 }
 
 const PATH_MARK = '__central_knot_path__';
@@ -72,6 +81,9 @@ export function appCandidates(home: string, binary: string, platform: string = p
     claude: where.map(apps => ({ name: 'Claude desktop', app: join(apps, 'Claude.app'), carries: 'Code tab', carried: { folders: join(home, 'Library/Application Support/Claude/claude-code'), binary: 'claude.app/Contents/MacOS/claude' } })),
     copilot: where.map(apps => ({ name: 'GitHub Copilot app', app: join(apps, 'GitHub Copilot.app'), carries: 'Copilot runtime', carried: { file: 'Contents/Resources/copilot-sdk/cliVersion.d.ts', runtimes: join(home, 'Library/Caches/github-copilot-sdk/cli'), binary: 'copilot' } })),
     codex: where.map(apps => ({ name: 'ChatGPT desktop', app: join(apps, 'ChatGPT.app'), carries: 'Codex', carried: { binary: 'Contents/Resources/codex-cli/bin/codex' } })),
+    // OpenCode desktop 2.2.5 names the OpenCode it carries in a file beside it. That copy is never run from here: an OpenCode
+    // of the newer line started on a fresh data folder stops an older CLI from working (measured, capability-data §8).
+    opencode: where.map(apps => ({ name: 'OpenCode desktop', app: join(apps, 'OpenCode.app'), carries: 'OpenCode', carried: { file: 'Contents/Resources/opencode-cli.version' } })),
   };
   const own: Record<string, Record<string, AppCandidate[]>> = {
     win32: {
@@ -87,7 +99,7 @@ export function appCandidates(home: string, binary: string, platform: string = p
     },
   };
   // The macOS places stay last everywhere: harmless where they can't exist, and the Linux e2e stands in an app there.
-  return [...(own[platform]?.[binary] ?? []), ...(mac[binary] ?? [])];
+  return [...(own[platform]?.[binary] ?? []), ...(mac[binary] ?? [])].filter(candidate => !homeOnly(binary) || candidate.app.startsWith(`${home}${sep}`));
 }
 
 /**

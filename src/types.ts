@@ -1,5 +1,5 @@
 export type HomeMode = 'fixture' | 'custom' | 'actual';
-export type HarnessId = 'claude-cli' | 'copilot-cli' | 'codex-cli' | 'pi-cli';
+export type HarnessId = 'claude-cli' | 'copilot-cli' | 'codex-cli' | 'pi-cli' | 'opencode-cli';
 export type ProbeState = 'ok' | 'missing' | 'timeout' | 'failed' | 'malformed' | 'restricted' | 'not-run';
 
 export interface ProbeResult {
@@ -37,6 +37,8 @@ export interface Skill {
   codexProblem?: string;
   /** Why Pi would not load it: Pi 1.5.0 silently drops a skill with no frontmatter, invalid YAML or no description (CD §4). */
   piProblem?: string;
+  /** Why OpenCode's older line would not load it: 1.19.5 silently leaves out a skill with no frontmatter or no name in it (2.2.5 loads it). */
+  opencodeProblem?: string;
   content: string;
   notes: string[];
   status: string;
@@ -202,6 +204,11 @@ export interface ToolCopy {
   summary: string;
   /** False for a copy reached through a link or in a folder other tools share: Central Knot never writes there. */
   writable: boolean;
+  /**
+   * The tool here whose own skills folder this copy is in, when it is another tool's: OpenCode reads Claude Code's folder, so a
+   * skill there is Claude Code's copy, which OpenCode reads. It is no second copy: sync neither follows it nor writes beside it.
+   */
+  readsFrom?: HarnessId;
   /** Folder name as found, with its case. */
   folder: string;
   /** Skills: the name this tool reads for this copy (its frontmatter name), which Copilot's switch goes by. */
