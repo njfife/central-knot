@@ -927,6 +927,8 @@ span.ins-confirm { margin-top: 0; }
 .market-in-tools p { margin: 0; min-width: 0; }
 .market-in-tools p:has(> svg) { display: flex; align-items: flex-start; gap: 6px; }
 .market-in-tools p > svg { flex: none; margin-top: 2px; }
+/* "No longer offered" in the warning's own colour, so it isn't read as one more grey fact. */
+.plugin-row-left .plugin-row-warning { color: var(--warning); }
 /* The dot between "can't be installed" and its link stays where the rows drop their other dots (narrow). */
 /* Its words give way only once the description beside them has given all it can. */
 .plugin-row-left { display: flex; align-items: baseline; flex: 0 0 auto; max-width: 100%; min-width: 0; font-size: 11.5px; }

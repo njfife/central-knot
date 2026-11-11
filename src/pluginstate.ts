@@ -290,7 +290,7 @@ export const checkCarriedFeed = (entry: MarketplaceView) => act('checking', asyn
   // Short enough for the status bar to say whole; About has the rest.
   const name = marketTitle(entry);
   tell({ page: 'plugins', item: name, warn: now?.outcome === 'failed' || now?.outcome === 'held',
-    text: now?.outcome === 'updated' ? `${name} ${now.message!.charAt(0).toLowerCase()}${now.message!.slice(1)}` : now?.outcome === 'failed' ? `Newer ${name} couldn’t be had. The ones here stay in use.`
+    text: now?.outcome === 'updated' ? `${name} ${now.message!.charAt(0).toLowerCase()}${now.message!.slice(1)}` : now?.outcome === 'failed' ? `Newer ${name} couldn’t be used. The ones here stay in use.`
       : now?.outcome === 'held' ? `Newer ${name} wait for a newer app.` : `No newer ${name} are published.` });
 });
 
