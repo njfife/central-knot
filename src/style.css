@@ -1786,3 +1786,16 @@ button.harness-card-main:focus-visible { outline: 0; }
 .cell-plugin.cell-on, .cell-button.cell-static.cell-plugin.cell-on:hover { background: color-mix(in oklab, var(--accent) 16%, transparent); border-color: transparent; }
 .cell-plugin.cell-disabled.cell-on, .cell-button.cell-static.cell-plugin.cell-disabled:hover { background: transparent; border-color: var(--control-line); color: var(--ink-soft); }
 .ov-row.unmanaged .cell-static.cell-absent { border-style: dotted; border-color: var(--cell-line); }
+
+/* The note of what plugin updates did by themselves (pluginupdateview.ts): what it is about, then a line per plugin. The
+   icon and the close button stay at the first line however many lines follow. */
+.plugin-auto-note { align-items: flex-start; }
+.plugin-auto-note > svg { margin-top: 1px; }
+.plugin-auto-note .band-dismiss { margin-top: -3px; }
+.plugin-auto-lead { color: var(--ink); font-weight: 600; }
+.plugin-auto-when { color: var(--ink-faint); white-space: nowrap; }
+.plugin-auto-note .text-action { align-self: flex-start; }
+/* A plugin its marketplace dropped that a tool still has. */
+.plugin-chip-gone { border-color: color-mix(in oklab, var(--warning) 55%, var(--line)); color: var(--ink-soft); white-space: nowrap; font-weight: 500; }
+.plugin-head h2 .plugin-chip-gone { margin-left: 10px; vertical-align: middle; }
+.plugin-auto-new .text-action { padding: 0; }

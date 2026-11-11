@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { findApp } from '../../src/discovery.ts';
 import { appCandidates } from '../../src/platform.ts';
-import { addMarketplace, install, installState, parseCatalog, readCatalog, registeredMarketplaces, uninstall, update, type PluginContext } from '../../src/plugins.ts';
+import { addMarketplace, install, installState, installedPlugins, parseCatalog, readCatalog, registeredMarketplaces, uninstall, update, type PluginContext } from '../../src/plugins.ts';
 import { bundledMarketplace, openBundle } from '../../src/bundle.ts';
 import { packRelease } from '../../src/bundlepack.ts';
 import type { PluginTool } from '../../src/presence.ts';
@@ -125,6 +125,83 @@ for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli'] as PluginTool[]) {
       assert.deepEqual([report.outcome, report.changed], ['updated', true], JSON.stringify(report, null, 1));
       assert.equal(await differs(), false, 'and now it has the new text');
     } finally { server.kill(); await rm(base, { recursive: true, force: true }); }
+  });
+}
+
+/** A marketplace of several plugins (one skill each), committed; a plugin left out of `plugins` is dropped from it. */
+async function market(root: string, plugins: { name: string; version: string }[]) {
+  await put(join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'ck-test-market', owner: { name: 'tests' }, plugins: plugins.map(({ name, version }) => ({ name, source: `./plugins/${name}`, version, description: name })) }));
+  for (const { name, version } of plugins) {
+    await put(join(root, `plugins/${name}/.claude-plugin/plugin.json`), JSON.stringify({ name, version }));
+    await put(join(root, `plugins/${name}/skills/${name}-skill/SKILL.md`), `---\nname: ${name}-skill\ndescription: ${name} ${version}.\n---\n${name} ${version}\n`);
+  }
+  for (const name of await readdir(join(root, 'plugins'))) if (!plugins.some(plugin => plugin.name === name)) await rm(join(root, 'plugins', name), { recursive: true });
+  const first = !(await readdir(root)).includes('.git');
+  for (const args of [...(first ? [['init', '-q']] : []), ['add', '-A'], ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', plugins.map(plugin => `${plugin.name} ${plugin.version}`).join(', ')]]) execFileSync('git', args, { cwd: root, stdio: 'ignore' });
+}
+
+/** A served Git marketplace in a throwaway folder, with `publish` to move it on. */
+async function served(plugins: { name: string; version: string }[]) {
+  const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-harness-')));
+  const server = spawn(process.execPath, [join(import.meta.dirname, '../../scripts/git-http-fixture.mjs'), join(base, 'served'), '0']);
+  const root = join(base, 'market'), bare = join(base, 'served/market.git');
+  await market(root, plugins);
+  await mkdir(join(base, 'served'), { recursive: true });
+  execFileSync('git', ['clone', '-q', '--bare', root, bare], { stdio: 'ignore' });
+  const url = `${await new Promise<string>(done => server.stdout.once('data', chunk => done(String(chunk).trim())))}/market.git`;
+  const context: PluginContext = { home: join(base, 'home'), dataDir: join(base, 'data'), binaries, timeoutMs: 120_000 };
+  await mkdir(context.home, { recursive: true });
+  const publish = async (next: { name: string; version: string }[]) => {
+    await market(root, next);
+    execFileSync('git', ['push', '-q', bare, 'HEAD:' + execFileSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: bare, encoding: 'utf8' }).trim()], { cwd: root, stdio: 'ignore' });
+    return readCatalog(context, url);
+  };
+  return { url, context, publish, close: async () => { server.kill(); await rm(base, { recursive: true, force: true }); } };
+}
+
+/** Turns a whole plugin off the way its person would in the tool: its own `plugin disable`, or for Codex `enabled = false` in its table. */
+async function turnOffInTool(context: PluginContext, tool: PluginTool, id: string) {
+  if (tool === 'codex-cli') {
+    const path = join(context.home, '.codex/config.toml');
+    const config = await readFile(path, 'utf8');
+    const header = `[plugins."${id}"]`;
+    assert.ok(config.includes(header), config);
+    const [before, after] = config.split(header) as [string, string];
+    await writeFile(path, `${before}${header}\nenabled = false\n${after.replace(/^\nenabled = true/, '')}`);
+    return;
+  }
+  execFileSync(binaries[tool]!, ['plugin', 'disable', id, ...(tool === 'claude-cli' ? ['--scope', 'user'] : [])], { env: { ...process.env, HOME: context.home }, cwd: context.home, stdio: 'ignore' });
+}
+
+for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli'] as PluginTool[]) {
+  test(`${tool}: a plugin turned off in the tool is still off after its update`, { skip: binaries[tool] ? false : `${tool} not on PATH` }, async () => {
+    const box = await served([{ name: 'ck-marker', version: '1.0.0' }]);
+    try {
+      assert.equal((await install(box.context, await readCatalog(box.context, box.url), 'ck-marker', tool)).outcome, 'installed');
+      await turnOffInTool(box.context, tool, 'ck-marker@ck-test-market');
+      const off = async () => (await installedPlugins(box.context, tool)).find(found => found.plugin === 'ck-marker')?.off;
+      assert.equal(await off(), true, 'it is off before the update');
+      const report = await update(box.context, await box.publish([{ name: 'ck-marker', version: '2.0.0' }]), 'ck-marker', tool);
+      console.log(tool, report.message, report.notes, report.runs.map(run => `${run.command} => ${run.ok}`));
+      assert.deepEqual([report.outcome, report.changed, report.version, report.notes], ['updated', true, '2.0.0', undefined], JSON.stringify(report, null, 1));
+      assert.equal(await off(), true, 'and still off after it');
+      assert.match(report.message, /It is still off in /);
+    } finally { await box.close(); }
+  });
+
+  test(`${tool}: a plugin its marketplace dropped keeps its installed copy when the tool's copy of the marketplace is refreshed`, { skip: binaries[tool] ? false : `${tool} not on PATH` }, async () => {
+    const box = await served([{ name: 'ck-marker', version: '1.0.0' }, { name: 'ck-other', version: '1.0.0' }]);
+    try {
+      const first = await readCatalog(box.context, box.url);
+      for (const plugin of ['ck-marker', 'ck-other']) assert.equal((await install(box.context, first, plugin, tool)).outcome, 'installed');
+      const before = await installState(box.context, tool, 'ck-test-market', 'ck-marker');
+      // The marketplace drops ck-marker and moves ck-other on; updating ck-other refreshes the tool's copy of the marketplace.
+      const report = await update(box.context, await box.publish([{ name: 'ck-other', version: '2.0.0' }]), 'ck-other', tool);
+      assert.deepEqual([report.outcome, report.version], ['updated', '2.0.0'], JSON.stringify(report, null, 1));
+      const after = await installState(box.context, tool, 'ck-test-market', 'ck-marker');
+      console.log(tool, 'dropped plugin after the refresh:', JSON.stringify(after));
+      assert.deepEqual(after, before, 'the dropped plugin is installed as it was');
+    } finally { await box.close(); }
   });
 }
 
