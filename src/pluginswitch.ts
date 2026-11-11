@@ -155,12 +155,15 @@ export function pendingWords(draft: PluginDraft, item: PluginItemAt): string {
 }
 
 /**
- * The whole plugins a draft turns off or on, in words for the change bar ("the whole plugin full off in Claude Code"),
- * so a click on one item's box that takes the whole plugin with it is said before Apply all. A plugin that comes on for
- * single items, its others held off, is left out: its items say it.
+ * The plugins a draft turns off or on as a whole, in words for the change bar ("the whole plugin full off in Claude
+ * Code"), so a click on one item's box that takes the plugin with it is said before Apply all. A plugin that comes on
+ * with items of its own left off says how many ("the plugin full on in Codex with 2 items left off").
  */
 export function wholeWords(draft: PluginDraft): string[] {
   const ops = [...draft.values()];
-  const held = (whole: PluginOp) => ops.some(op => op.source === whole.source && op.plugin === whole.plugin && op.tool === whole.tool && (op.action === 'skill-off' || op.action === 'part-off'));
-  return ops.filter(op => op.action === 'plugin-off' || (op.action === 'plugin-on' && !held(op))).map(op => `the whole plugin ${op.plugin} ${op.action === 'plugin-off' ? 'off' : 'on'} in ${names[op.tool]}`);
+  const leftOff = (whole: PluginOp) => ops.filter(op => op.source === whole.source && op.plugin === whole.plugin && op.tool === whole.tool && (op.action === 'skill-off' || op.action === 'part-off')).length;
+  return ops.filter(op => op.action === 'plugin-off' || op.action === 'plugin-on').map(op => {
+    const held = op.action === 'plugin-on' ? leftOff(op) : 0;
+    return held ? `the plugin ${op.plugin} on in ${names[op.tool]} with ${plural(held, 'item')} left off` : `the whole plugin ${op.plugin} ${op.action === 'plugin-off' ? 'off' : 'on'} in ${names[op.tool]}`;
+  });
 }

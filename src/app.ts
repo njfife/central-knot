@@ -333,9 +333,10 @@ export const applyPluginSwitches = (ops: PluginOp[], draft: Map<string, PluginOp
   const failed = lines.filter(line => !line.ok);
   const back = undo ? [] : reverse(result.done);
   const text = [before?.text, result.stopped ?? resultSentence(lines, undo), ...failed.map(line => `${line.plugin}: ${line.text}.`)].filter(Boolean).join(' ') || 'Nothing changed.';
-  const undoPlugins = () => applyPluginSwitches(back, new Map(), true);
+  // The switches go back first; the copies' own Undo follows only when that worked, and is still offered when it didn't.
+  const undoPlugins = () => applyPluginSwitches(back, new Map(), true, before?.act ? { page: state.page, text: '', act: before.act } : undefined);
   // With the copies' changes said above it and no Undo of theirs to run after, the button says what it does undo.
-  const act = back.length ? { label: before && !before.act ? 'Undo plugin switches' : 'Undo', id: 'outcome-undo-plugin', title: before?.act ? 'Turn the plugin items back as they were, then undo the rest' : 'Turn them back as they were', run: () => void undoPlugins().then(() => before?.act?.run()) } : before?.act;
+  const act = back.length ? { label: before && !before.act ? 'Undo plugin switches' : 'Undo', id: 'outcome-undo-plugin', title: before?.act ? 'Turn the plugin items back as they were, then undo the rest' : 'Turn them back as they were', run: () => void undoPlugins().then(() => { if (!state.outcome?.warn) before?.act?.run(); }) } : before?.act;
   tell({ ...before, page: state.page, text, warn: !!failed.length || !!result.stopped || !!before?.warn, act });
 });
 

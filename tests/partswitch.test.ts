@@ -44,6 +44,13 @@ test('Codex keeps the person’s own keys in a server’s table, and changes onl
   const off = withPartSwitch('codex-cli', mine, at, true);
   assert.equal(off, mine.replace('startup_timeout_sec = 20\n', 'startup_timeout_sec = 20\nenabled = false\n'));
   assert.equal(withPartSwitch('codex-cli', off, at, false), mine);
+  // The person's own subtable written without the server's table stays, with the switch's table put in above it.
+  const sub = '[plugins."full@team"]\nenabled = true\n\n[plugins."full@team".mcp_servers.issues.env]\nA = "1"\n';
+  const subOff = withPartSwitch('codex-cli', sub, at, true);
+  assert.equal(subOff, '[plugins."full@team"]\nenabled = true\n\n[plugins."full@team".mcp_servers.issues]\nenabled = false\n\n[plugins."full@team".mcp_servers.issues.env]\nA = "1"\n');
+  assert.equal(partOff('codex-cli', subOff, at), true);
+  assert.equal(partOff('codex-cli', withPartSwitch('codex-cli', subOff, at, false), at), false);
+  assert.match(withPartSwitch('codex-cli', subOff, at, false), /mcp_servers\.issues\.env\]\nA = "1"\n$/);
   // An explicit `enabled = true` is replaced, and taken out again when it is turned back on: on is the default.
   const explicit = mine.replace('startup_timeout_sec = 20\n', 'startup_timeout_sec = 20\nenabled = true\n');
   assert.equal(partOff('codex-cli', explicit, at), false);

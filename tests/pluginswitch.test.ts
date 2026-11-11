@@ -63,7 +63,7 @@ test('turning on one item of a plugin that is off as a whole turns the plugin on
   assert.equal(clickWords(draft, item(claude, 'mcp', 'issues')), 'Click to turn the plugin full on in Claude Code on Apply all with only this MCP server on; its 2 skills come on too.');
   click(draft, item(claude, 'mcp', 'issues'));
   assert.deepEqual(chosen(draft), ['claude-cli part-off mcp wiki', 'claude-cli part-off agent helper', 'claude-cli plugin-on']);
-  assert.deepEqual(wholeWords(draft), [], 'a plugin that comes on for one item is said by that item');
+  assert.deepEqual(wholeWords(draft), ['the plugin full on in Claude Code with 2 items left off'], 'a plugin that comes on for one item says what it leaves off');
   assert.equal(clickWords(new Map(), item(claude, 'skill', 'one')), 'Click to turn the whole plugin full on in Claude Code on Apply all, with its 1 skill, 2 MCP servers and 1 agent.');
   // An item its own switch keeps off doesn't come on with the plugin, so it isn't counted.
   assert.equal(clickWords(new Map(), item(installed('claude-cli', { off: true, serversOff: ['wiki'], agentsOff: ['helper'] }), 'skill', 'one')), 'Click to turn the whole plugin full on in Claude Code on Apply all, with its 1 skill and 1 MCP server.');

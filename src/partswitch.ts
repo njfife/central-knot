@@ -103,11 +103,17 @@ export function withPartSwitch(tool: HarnessId, text: string, at: PluginPartAt, 
   const tables = readTomlTables(text);
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
   const table = codexTable(tables, path);
-  if (!table) return setTomlTable(text, path.slice(0, -1), at.name, `${tomlHeader(path)}${eol}enabled = false${eol}`, { endGap: true });
+  const subtables = tables.filter(other => other !== table && !other.array && startsWith(other.path, path));
+  if (!table) {
+    const own = `${tomlHeader(path)}${eol}enabled = false${eol}`;
+    // The person's own subtables (`[….<server>.env]`) written without the server's table: the table goes in above the
+    // first of them, and they stay as they are.
+    if (subtables.length) { const first = Math.min(...subtables.map(other => other.start)); return `${text.slice(0, first)}${own}${eol}${text.slice(first)}`; }
+    return setTomlTable(text, path.slice(0, -1), at.name, own, { endGap: true });
+  }
   const line = table.entries.find(entry => entry.key === 'enabled');
-  const subtables = tables.some(other => other !== table && startsWith(other.path, path));
   // Turned on, a table that held only the switch has nothing left to say.
-  if (!off && line && table.entries.length === 1 && !subtables) return setTomlTable(text, path.slice(0, -1), at.name, undefined, { endGap: true });
+  if (!off && line && table.entries.length === 1 && !subtables.length) return setTomlTable(text, path.slice(0, -1), at.name, undefined, { endGap: true });
   if (line) return `${text.slice(0, line.start)}${off ? `enabled = false${eol}` : ''}${text.slice(line.end)}`;
   const insertAt = table.entries.at(-1)?.end ?? (text.indexOf('\n', table.start) + 1 || text.length);
   const before = text.slice(0, insertAt);

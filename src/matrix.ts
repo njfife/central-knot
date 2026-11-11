@@ -205,7 +205,7 @@ function pluginDetails(row: PluginRow, placement: 'row' | 'dock' = 'row') {
       const item: PluginItemAt | undefined = install && { kind: row.kind, name: row.name, tool: tool as HarnessId, install };
       return h('div.details-tool', {}, h('div.details-tool-head', {},
         h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
-        h('span.details-tool-line', {}, [toolWords(row, tool as HarnessId), item ? pendingWords(pluginDraft, item) : ''].filter(Boolean).join(' ')),
+        h('span.details-tool-line', {}, [toolWords(row, tool as HarnessId), item ? cantSwitch(item) ?? pendingWords(pluginDraft, item) : ''].filter(Boolean).join(' ')),
         item ? pluginItemControls(item, `enable-${row.key}-${tool}`) : null));
     })),
     !shown ? null : !copies?.length ? h('p.details-limits', {}, copies ? 'Its file couldn’t be read.' : 'Reading…')
@@ -234,7 +234,7 @@ function pluginSection(list: PluginRow[]) {
   if (!list.length) return null;
   return h('div', { role: 'rowgroup' },
     h('div.ov-section.ov-section-plugins', { role: 'row' }, h('div.ov-section-label', { role: 'cell' }, h('strong', {}, 'From plugins'), h('span.ov-section-count', {}, String(list.length)),
-      sectionNote('they come and go with their plugin; a box turns one on or off in that tool'))),
+      sectionNote('they come and go with their plugin; a box turns it, or its plugin, on or off in that tool'))),
     list.flatMap(pluginRowEl));
 }
 
@@ -531,7 +531,8 @@ function applyAll() {
   // Both kinds chosen: the copies first, then the plugin items' switches, whose result carries the copies' with it. Copies
   // that could not be applied (they stay chosen) stop it there, with the plugin switches still chosen.
   void (async () => {
-    const copies = count > 0;
+    // As with no plugin switch chosen, Apply all also catches up what waits to sync and resumes after lost settings.
+    const copies = count > 0 || pendingSyncs(committedList()) > 0 || resumeNeeded();
     if (copies) await applyCopies();
     if (copies && view.draft.size) return;
     await applyPluginSwitches([...pluginDraft.values()], pluginDraft, false, copies ? state.outcome : undefined);
@@ -863,9 +864,9 @@ function switchLine(skill: SampleSkill, tool: Tool): string {
  * arrives disabled: only what Disable or Remove does there. Otherwise how the copies stand, then that.
  */
 function rowLine(skill: SampleSkill, tool: Tool, quiet: boolean): string {
-  // Through a plugin: where it comes from, then what its switch does on Apply all.
+  // Through a plugin: where it comes from, then why its switch can't be used here, or what it does on Apply all.
   const through = itemThrough(skill, tool);
-  if (through) return [skill.cannot?.[tool], pendingWords(pluginDraft, through)].filter(Boolean).join(' ');
+  if (through) return [skill.cannot?.[tool], cantSwitch(through) ?? pendingWords(pluginDraft, through)].filter(Boolean).join(' ');
   // Disable is best effort: on a build older than the one verified it is only said (an unread version: the switch's tooltip).
   const note = !skill.removing?.includes(tool) && !skill.switchProblem?.[tool] && !skill.cannot?.[tool]
     && (skill.copies[tool] !== undefined || cellOf(skill, tool) === 'will-sync') && skill.disableNote?.[tool]?.startsWith('Not checked') ? skill.disableNote[tool] : undefined;
