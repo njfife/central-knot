@@ -185,6 +185,18 @@ export function goHarness(tool: HarnessId | undefined, tab?: HarnessTab, { fromK
   else if (from && fromKeyboard) document.getElementById(`harness-${from}`)?.focus();
 }
 
+/**
+ * Apps found on this computer that run the tools or read their files without being a tool Central Knot manages (T3 Code,
+ * VS Code): each named once, with its version and what it means for what is set up here. Nothing when none is installed.
+ */
+function otherApps(home: HomeView) {
+  const apps = home.otherApps ?? [];
+  if (!apps.length) return null;
+  return h('section.other-apps', { id: 'other-apps', 'aria-label': `Also on ${thisMachine}` },
+    h('h2.other-apps-title', {}, `Also on ${thisMachine}`),
+    h('ul', {}, apps.map(app => h('li.other-app', {}, h('strong.other-app-name', {}, app.name, app.version ? h('span.other-app-version', {}, ` ${app.version}`) : null), h('span.other-app-says', {}, app.says)))));
+}
+
 function everyHarness(home: HomeView) {
   const done = outcomeBand();
   const cards = listed(home);
@@ -204,7 +216,8 @@ function everyHarness(home: HomeView) {
             button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' shows their versions.'],
           // Profiles switch items in every tool at once, so the one in use is said once here, as Profiles names it.
           profilesInUse(home.profiles) ? [' Profile in use: ', button({ variant: 'link', size: 'micro', label: home.profiles.profiles.find(profile => profile.id === home.profiles.active)?.name ?? NO_PROFILE, id: 'harnesses-profile', onclick: () => showPage('profiles') }), '.'] : null)),
-      h('div.harness-cards', { 'data-count': String(cards.length) }, cards.map(snapshot => summaryCard(snapshot, home)))));
+      h('div.harness-cards', { 'data-count': String(cards.length) }, cards.map(snapshot => summaryCard(snapshot, home))),
+      otherApps(home)));
 }
 
 // ---------- One harness ----------

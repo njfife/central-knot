@@ -5,8 +5,8 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parseDocument } from 'yaml';
 import { configRoot, harnesses, type HarnessDefinition } from './harnesses.ts';
-import { appCandidates, executableCandidates, pathBeside, type AppCandidate } from './platform.ts';
-import type { DesktopApp, HarnessId, HomeMode, ProbeResult, Skill, Snapshot } from './types.ts';
+import { appCandidates, executableCandidates, otherAppCandidates, pathBeside, type AppCandidate } from './platform.ts';
+import type { DesktopApp, HarnessId, HomeMode, OtherApp, ProbeResult, Skill, Snapshot } from './types.ts';
 import { machineNames } from './machine.ts';
 import { compareVersions } from './values.ts';
 
@@ -80,7 +80,8 @@ export async function findApp(candidates: AppCandidate[], timeoutMs?: number): P
       : (await readFile(versionFile, 'utf8').catch(() => '')).match(/<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/)?.[1]?.trim();
     const { carried } = candidate;
     let carriedVersion: string | undefined, binary: string | undefined;
-    if ('folders' in carried) {
+    if (!carried) { /* an app that only reads the tool's files: its own version is all there is */ }
+    else if ('folders' in carried) {
       const versions = (await readdir(carried.folders).catch(() => [] as string[])).filter(name => VERSION.exec(name)?.[0] === name).sort((first, second) => compareVersions(second, first));
       carriedVersion = versions[0];
       for (const each of carried.binary ? versions : []) {
@@ -100,6 +101,16 @@ export async function findApp(candidates: AppCandidate[], timeoutMs?: number): P
     return { name: candidate.name, ...(version ? { version } : {}), carries: candidate.carries, ...(carriedVersion ? { carriedVersion } : {}), ...(binary ? { binary } : {}) };
   }
   return undefined;
+}
+
+/** The apps found here that run the tools or read their files without being one (platform.ts otherAppCandidates), each with its version. */
+export async function findOtherApps(home: string): Promise<OtherApp[]> {
+  const found: OtherApp[] = [];
+  for (const { name, says, apps } of otherAppCandidates(home)) {
+    const app = await findApp(apps.map(path => ({ name, app: path, carries: '' })));
+    if (app) found.push({ name, says, ...(app.version ? { version: app.version } : {}) });
+  }
+  return found;
 }
 
 /**

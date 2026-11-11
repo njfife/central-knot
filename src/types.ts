@@ -19,6 +19,9 @@ export interface DesktopApp {
   binary?: string;
 }
 
+/** An app found on this computer that runs the tools or reads their files without being a tool Central Knot manages (T3 Code, VS Code). */
+export interface OtherApp { name: string; version?: string; says: string }
+
 export interface Skill {
   /** Folder name: what the harness root holds and what a copy is called. */
   folder: string;
@@ -72,7 +75,7 @@ export type SyncGate =
 
 export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** `switched`: which way. */ disabled?: boolean }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
