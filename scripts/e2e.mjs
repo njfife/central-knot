@@ -350,8 +350,8 @@ async function fitsAtMinimum(a, where, again = async () => {}) {
  * question) or 'pane' (a narrow question, as in the Files view's pane: each row's name and Use this copy on one line, what it
  * says under both). In every shape:
  *  - the list reaches the right edge of the question's box, less the close button's room when it is beside the question, so
- *    it grows with the window; an agent's copies in full, when open, sit under the list, as wide as it, each box to the
- *    end of its line;
+ *    it grows with the window; an agent's copies in full, when open, sit under the list, as wide as it, each copy's box
+ *    running to the copy beside it or to the list's edge;
  *  - every row starts what it says where the first row does (a row that can't be chosen too), and Use this copy ends at one edge;
  *  - the close button is over neither the question nor the list, and no row's words spill out.
  * With no copy question open it says so.
@@ -377,9 +377,11 @@ const copyQuestionMisfits = shape => `(() => {
   }
   const copies = all('.compare-copies')[0], blocks = all('.compare-copies > .content-block').map(box);
   if (copies && !(near(box(copies).left, list.left) && near(box(copies).right, list.right) && box(copies).top >= list.bottom)) out.push('the copies in full are not under the list, as wide as it');
+  // A copy's bordered box (.content) fills its share of the line (.content-block), and the last share on a line ends where the list does.
   blocks.forEach((block, index) => {
     const endsLine = !blocks.some(other => other.top < block.bottom && other.bottom > block.top && other.left >= block.right);
-    if ((endsLine && !near(block.right, list.right)) || !near(box(all('.compare-copies .content')[index]).right, block.right)) out.push('a copy in full stops ' + Math.round(list.right - block.right) + 'px short of the list’s edge');
+    const short = (endsLine ? list.right : block.right) - box(all('.compare-copies .content')[index]).right;
+    if (!near(short, 0)) out.push('a copy in full stops ' + Math.round(short) + 'px short of ' + (endsLine ? 'the list’s edge' : 'the copy beside it'));
   });
   const meets = (one, other) => one.left < other.right && one.right > other.left && one.top < other.bottom && one.bottom > other.top;
   if (close && (meets(question, close) || meets(list, close))) out.push('the close button is over the question or the list');

@@ -688,7 +688,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .version-command > .wrap-part { line-height: 16px; }
 .version-cta { grid-column: use; align-self: center; padding: 3px 10px; border: 1px solid var(--control-line); border-radius: 6px; background: var(--surface); font-size: 12px; font-weight: 600; white-space: nowrap; }
 /* A copy that can't be chosen: why (.version-why) where its quote would be, and no Use this copy. */
-.version-blocked { opacity: 0.75; cursor: not-allowed; }
+.version.version-blocked { opacity: 0.75; cursor: not-allowed; }
 /* Narrow: two columns, whose copy and Use this copy; what it says takes a second line across both. */
 @container compare (width < 560px) {
   .compare-choices { grid-template-columns: [who] minmax(0, 1fr) [use] max-content; }
@@ -745,9 +745,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /*
  * A wide pane has two tracks: the file, and a column at the right edge that holds the details, then where each copy is
  * and Delete everywhere, one under the other. The file takes 64% of the pane less the gap, until that is more than a
- * file's box can use (--file-box: .content's max-width, 120 characters of 12px monospace); from there
- * the details take the rest, so no width is left blank beside them. The script decides it from the pane's width
- * (matrix.ts settleFilesColumns, data-columns); below that the details sit above the file and the rest below it.
+ * file's box can use (--file-box: .content's max-width, 120 characters of 12px monospace; scripts/e2e.mjs
+ * FILE_COLUMN_BLANK fails if the two drift apart); from there the details take the rest, so no width is left blank
+ * beside them. The script decides it from the pane's width (matrix.ts settleFilesColumns, data-columns); below that
+ * the details sit above the file and the rest below it.
  */
 .detail-column[data-columns="2"] .detail-scroll { --file-box: 864px; display: grid; grid-template-columns: minmax(0, min(64% - 32px, var(--file-box))) minmax(320px, 1fr); grid-template-rows: auto 1fr; align-items: start; gap: 12px 32px; }
 .detail-column[data-columns="2"] .detail-files { grid-column: 1; grid-row: 1 / span 2; }

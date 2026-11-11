@@ -225,7 +225,10 @@ export interface ToolCopy {
   rootLabel: string;
   lines: number;
   modified: string;
-  /** What a copy question quotes to tell differing copies apart (copywords.ts shortQuote shortens it): a skill's first body line, whole; an agent's description; an MCP entry's "Command · …" or "HTTP · …". */
+  /**
+   * What a copy question quotes to tell differing copies apart (copywords.ts shortQuote shortens it): a skill's first body
+   * line, whole; an agent's description; an MCP entry's "Command · …" or "HTTP · …".
+   */
   summary: string;
   /** Agents: the prompt, so a copy question can say what differs and show the copies side by side. */
   prompt?: string;
