@@ -301,6 +301,8 @@ let unseenPlugins: 'updated' | 'failed' | undefined;
 /** A plugin update's tool command under way: Quit waits for it (see before-quit), so what follows it is never cut off. */
 let pluginStep: Promise<unknown> | undefined;
 let pluginUpdates: ReturnType<typeof autoUpdates> | undefined;
+/** Whether plugin checks run by themselves in this launch (an end-to-end run holds them still). */
+let pluginChecksRun = false;
 function showWindow() {
   // Startup makes the first window. macOS sends `activate` during startup too: that must never make a second one.
   if (!app.isReady() || !window) return;
@@ -688,6 +690,8 @@ function toolsChangedHere(snapshots: Snapshot[]): boolean {
   const { noted, changed } = noteTools(lastPresent, current?.home ?? '', snapshots);
   lastPresent = noted;
   if (changed) void startWatching();
+  // A tool that is new here gets the plugins the others have (selections that wait), soon after it is first seen.
+  if (changed && pluginChecksRun) void pluginUpdates?.toolsChanged().catch(error => logFailure('plugin updates', error));
   return changed;
 }
 
@@ -1090,6 +1094,8 @@ app.whenReady().then(async () => {
       home: () => current?.home, on: pluginUpdatesOn, paused: () => !syncOn, log, now: Date.now, every,
       pending: home => queued(() => markets.pendingUpdates(home)),
       api: {
+        // A selection that waits installs as Apply all does.
+        install: (source, marketName, plugin, tools, home) => step('plugins:install', [source, marketName, plugin, tools, home], () => markets.install(source, marketName, plugin, onlyAllowed(tools, pluginTools), home)),
         update: (source, marketName, plugin, tools, home) => step('plugins:update', [source, marketName, plugin, tools, home], () => markets.update(source, marketName, plugin, onlyAllowed(tools, pluginTools), home, { reinstall: false })),
         parts: (source, marketName, plugin, tool, mode, run, home, pick) => step('plugins:parts', [source, marketName, plugin, tool, mode, run, home, pick], () => markets.parts(source, marketName, plugin, tool, mode, run, home, pick)),
       },
@@ -1105,6 +1111,7 @@ app.whenReady().then(async () => {
       },
     });
     if (paced !== 'never') {
+      pluginChecksRun = true;
       const updates = pluginUpdates;
       const turn = () => void updates.tick().catch(error => logFailure('plugin updates', error));
       const pace = Math.min(5 * 60_000, Math.max(1_000, every / 4));

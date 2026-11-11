@@ -9,7 +9,7 @@ const due = (plugin: string, tool: HarnessId, action: DueUpdate['action'] = 'upd
 /** A stand-in app: what is due, what each tool answers (by `plugin tool`), the clock, and everything the updates said or saved. */
 function setup(options: { on?: boolean; every?: number } = {}) {
   const box = {
-    home: '/home/a' as string | undefined, on: options.on ?? true, paused: false, offline: false, clock: 1_000_000, due: [] as DueUpdate[], unread: [] as string[], stopped: undefined as string | undefined,
+    home: '/home/a' as string | undefined, on: options.on ?? true, paused: false, offline: false, clock: 1_000_000, due: [] as DueUpdate[], unread: [] as string[], stopped: undefined as string | undefined, tools: undefined as HarnessId[] | undefined, joins: {} as Partial<Record<HarnessId, DueUpdate[]>>,
     unreadSources: [] as string[], stops: new Set<string>(), answers: new Map<string, Partial<ActionReport>>(), calls: [] as string[], logs: [] as string[], said: [] as { view: PluginUpdatesView; news?: 'updated' | 'failed' }[], saved: undefined as UpdatesRecord[] | undefined,
     /** The saved record of the home that is open. */
     record: () => box.saved?.find(saved => saved.home === box.home),
@@ -17,8 +17,9 @@ function setup(options: { on?: boolean; every?: number } = {}) {
   const report = (plugin: string, tool: HarnessId): ActionReport => ({ tool, outcome: 'updated', changed: true, version: '2.0.0', message: 'Updated to 2.0.0.', runs: [], ...box.answers.get(`${plugin} ${tool}`) });
   const host: AutoUpdateHost = {
     home: () => box.home, on: () => box.on, paused: () => box.paused, now: () => box.clock, every: options.every ?? 4 * HOUR, log: line => box.logs.push(line),
-    pending: async () => ({ stopped: box.stopped, ops: box.stopped ? [] : box.due, unread: box.unread, unreadSources: box.unreadSources, ...(box.offline ? { offline: true as const } : {}) }),
+    pending: async () => ({ stopped: box.stopped, ops: box.stopped ? [] : box.due, unread: box.unread, unreadSources: box.unreadSources, ...(box.offline ? { offline: true as const } : {}), ...(box.tools ? { tools: box.tools, joins: box.joins } : {}) }),
     api: {
+      install: async (_source, _market, plugin, tools) => { box.calls.push(`install ${plugin} ${tools.join(',')}`); return { reports: tools.map(tool => ({ ...report(plugin, tool), outcome: 'installed' as const, message: 'Installed.', ...box.answers.get(`${plugin} ${tool}`) })) }; },
       update: async (_source, _market, plugin, tools) => {
         if (box.stops.has(plugin)) return { stopped: 'Central Knot was quitting.', reports: [] };
         box.calls.push(`update ${plugin} ${tools.join(',')}`);
@@ -303,4 +304,58 @@ test('A failure whose marketplace was taken off the list is settled at the next 
   box.due = [];
   const view = await updates.check(true);
   assert.deepEqual([view.failed, view.checked?.failed], [[], 0]);
+});
+
+test('Selections that wait: a tool new here gets, once, the plugins every other tool has; the tools here at the start get nothing', async () => {
+  const { box, updates } = setup();
+  const join = (plugin: string, tool: HarnessId, action: DueUpdate['action'] = 'install'): DueUpdate => ({ source: '/market', marketName: 'team', plugin, tool, action });
+  // The first check with this feature: the tools here are noted, and nothing is installed, though Copilot CLI lacks a plugin.
+  box.tools = ['claude-cli', 'copilot-cli'];
+  box.joins = { 'copilot-cli': [join('document-tools', 'copilot-cli')] };
+  await updates.check();
+  assert.deepEqual([box.calls, box.record()?.seenTools, box.record()?.waiting], [[], ['claude-cli', 'copilot-cli'], []]);
+  // Codex and Pi appear: what every other tool has goes in, as an install or as parts, and the note says why.
+  box.tools = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'];
+  box.joins = { 'copilot-cli': [join('document-tools', 'copilot-cli')], 'codex-cli': [join('issue-tracker', 'codex-cli'), join('spark', 'codex-cli')], 'pi-cli': [join('issue-tracker', 'pi-cli', 'install-parts')] };
+  box.answers.set('spark codex-cli', { outcome: 'failed', changed: false, message: 'Codex is not signed in.' });
+  box.clock += 4 * HOUR;
+  const view = await updates.check();
+  assert.deepEqual(box.calls, ['install issue-tracker codex-cli', 'parts install issue-tracker pi-cli', 'install spark codex-cli']);
+  assert.deepEqual(view.updated.map(line => [line.plugin, line.text]), [['issue-tracker', 'installed in Codex; parts updated in Pi (new here; your other tools have this plugin)']]);
+  assert.deepEqual(view.failed, [], 'a waiting install that fails says nothing');
+  assert.deepEqual(box.record()?.waiting?.map(wait => [wait.plugin, wait.tool, wait.tries]), [['spark', 'codex-cli', 1]]);
+  assert.equal(box.said.at(-1)?.view.updated.length, 1);
+  // What went in is off the list for good: taken out of Codex later, it is not put back. The one that failed is tried
+  // again later, not at once, and given up after three tries.
+  box.calls.length = 0;
+  box.joins = { 'codex-cli': [join('issue-tracker', 'codex-cli'), join('spark', 'codex-cli')] };
+  box.clock += 1;
+  await updates.check();
+  assert.deepEqual(box.calls, [], 'not yet');
+  box.clock += 4 * HOUR;
+  await updates.check();
+  box.clock += 8 * HOUR;
+  await updates.check();
+  assert.deepEqual([box.calls, box.record()?.waiting], [['install spark codex-cli', 'install spark codex-cli'], []]);
+  assert.match(box.logs.join('\n'), /spark did not go into Codex, and is not tried again: Codex is not signed in\./);
+  // A tool that was missed by one read and is found again is not new.
+  box.calls.length = 0;
+  box.tools = ['claude-cli'];
+  box.clock += 4 * HOUR;
+  await updates.check();
+  box.tools = ['claude-cli', 'codex-cli'];
+  box.joins = { 'codex-cli': [join('issue-tracker', 'codex-cli')] };
+  box.clock += 4 * HOUR;
+  await updates.check();
+  assert.deepEqual(box.calls, []);
+  // Put in by hand before its turn: no longer due, so it leaves the list.
+  box.tools = ['claude-cli', 'codex-cli', 'opencode-cli'];
+  box.joins = { 'opencode-cli': [join('issue-tracker', 'opencode-cli', 'install-parts')] };
+  box.answers.set('issue-tracker opencode-cli', { outcome: 'failed', changed: false, message: 'No.' });
+  box.clock += 4 * HOUR;
+  await updates.check();
+  box.joins = {};
+  box.clock += 1;
+  await updates.check();
+  assert.deepEqual(box.record()?.waiting, []);
 });

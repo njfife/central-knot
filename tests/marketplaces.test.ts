@@ -386,6 +386,11 @@ test('What is due by itself is what Update all would choose: an older copy and o
     assert.deepEqual(due.ops.map(op => [op.plugin, op.tool, op.action, op.offered, op.marketName, op.source]), [
       ['notes', 'claude-cli', 'update', '2.0.0', 'team', root], ['pdf', 'claude-cli', 'update', '2.0.0', 'team', root], ['pdf', 'pi-cli', 'install-parts', '2.0.0', 'team', root]]);
     assert.deepEqual([due.stopped, due.unread, due.unreadSources], [undefined, ['Folder: broken'], [broken]], 'named as the Plugins page names it, and by where it was added from');
+    // For selections that wait: the tools plugins go into here, and what each would get to have what every other tool that can
+    // take plugins has. Copilot CLI and Codex have no command-line tool here, so they neither count nor get anything; Pi would
+    // get the parts of what Claude Code has.
+    assert.deepEqual([due.tools, Object.fromEntries(Object.entries(due.joins ?? {}).map(([tool, ops]) => [tool, ops!.map(op => `${op.plugin}:${op.action}`)]))],
+      [['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'], { 'pi-cli': ['notes:install-parts', 'pdf:install-parts', 'xlsx:install-parts'] }]);
     // The update itself is the button's, told not to uninstall in order to reinstall.
     box.calls.length = 0;
     await box.markets.update(root, 'team', 'pdf', ['claude-cli'], box.home, { reinstall: false });
