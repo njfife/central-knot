@@ -1,8 +1,9 @@
 // History: what sync did on its own, newest first, with Undo or Restore where the kept content allows it (CON-02, DEL-03).
 import { clockTime, DAY_MS } from './model.ts';
-import { noTools, restoreEvent, showPage, state, touchedToolsPhrase } from './app.ts';
+import { noTools, restoreEvent, showPage, shownPath, state, touchedToolsPhrase } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
+import { tookOverHistory } from './outsidewords.ts';
 import { changedProfile, flipSummary, NO_PROFILE, redoneSwitch } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
 import { button, emptyState, h, icon, rereadBand } from './dom.ts';
@@ -37,11 +38,12 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
     }
     case 'profile': return profileSwitch(event);
     case 'removed': return { glyph: 'circle-minus', text: `Removed from ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}; Central Knot kept the ${event.losers.length === 1 ? 'copy' : 'copies'}.`, action: 'Restore' };
+    case 'took-over': return { glyph: 'arrow-down-to-line', text: tookOverText(event, !!event.undoneBy), action: 'Undo' };
     case 'added': return { glyph: 'plus', text: event.undoneBy ? `Apply all started managing it and added copies to ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}; they were removed again.` : `Apply all started managing it and added ${event.losers.length === 1 ? 'a copy' : 'copies'} to ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}.`, action: 'Undo add' };
     case 'restored': {
       // Name the change this undid, so Redo says what comes back.
       const undone = state.history.data?.find(other => other.undoneBy === event.id);
-      const named = (past: HistoryEvent) => ({ edit: `${who(past.winner?.tool)}’s edit`, conflict: `${who(past.winner?.tool)}’s winning edit`, deleted: 'the deletion', 'kept-edit': 'the kept edit', chosen: `your choice of ${who(past.winner?.tool)}’s copy`, restored: 'an undo', added: 'the copies Apply all added', switched: 'the switch', removed: 'the removal' , profile: 'the profile switch' } as const)[past.kind];
+      const named = (past: HistoryEvent) => ({ edit: `${who(past.winner?.tool)}’s edit`, conflict: `${who(past.winner?.tool)}’s winning edit`, deleted: 'the deletion', 'kept-edit': 'the kept edit', chosen: `your choice of ${who(past.winner?.tool)}’s copy`, restored: 'an undo', added: 'the copies Apply all added', switched: 'the switch', removed: 'the removal' , profile: 'the profile switch', 'took-over': 'the take-over' } as const)[past.kind];
       const where = event.losers.length ? ` in ${touchedToolsPhrase([...event.losers.map(loser => loser.tool), ...(event.winner ? [event.winner.tool] : [])])}` : '';
       // Undoing an undo is a redo: say what came back, and offer to take it away again.
       if (undone?.kind === 'restored') {
@@ -53,6 +55,15 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
       return { glyph: 'undo-2', text: `Undid ${undone ? named(undone) : 'a change'}; the earlier version is back${where}.`, action: 'Redo edit' };
     }
   }
+}
+
+/** A take-over, said as what it did to which folder: links replaced by real copies, tools given their own, the shared copy removed. */
+function tookOverText(event: HistoryEvent, undone: boolean): string {
+  const told = event.tookOver;
+  if (!told) return 'Took over its copies outside Central Knot.';
+  // The same words as the Skills page (outsidewords.ts), and the folder through the same path-shortening ("~/.agents/skills").
+  const text = tookOverHistory(told.links.filter(link => link.placed).map(link => who(link.tool)), told.placed.map(copy => who(copy.tool)), told.shared.length ? shownPath(told.shared[0].path.replace(/\/[^/]+$/, '')) : undefined);
+  return `${text}${undone ? '; this was undone, and they are back as they were.' : '. Central Knot kept what it replaced.'}`;
 }
 
 /** The base instructions as a Pull changed them: set for the first time, edited, or deleted; `tools` names the tools that get them. */
@@ -100,6 +111,7 @@ const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'pro
   : event.base ? 'Put the base instructions back as they were before this Pull, and in the tools that got them (where their file is unchanged since)'
   : event.kind === 'switched' ? (event.switched ?? []).map(entry => `${entry.disabled ? 'Enable' : 'Disable'} it again in ${who(entry.tool)}`).join('; ')
   : event.kind === 'removed' ? `Put the removed copy back in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}`
+  : event.kind === 'took-over' ? `Put the links and the shared copy back as they were${event.tookOver?.managedNow ? `, remove the copies that Apply all added, and stop managing ${event.item}` : ''} (only while unchanged)`
   : event.kind === 'added' ? `Remove the copies ${event.via === 'repo' ? 'Pull' : 'Apply all'} added (only while unchanged) and stop managing ${event.item}` : action === 'Restore' ? `Put ${event.item} back in every tool it synced to`
   : action === 'Redo edit' || action === 'Delete again' ? 'Undo the undo: put back the version that was replaced'
     : `Put ${event.item} back as it was before this change, in every tool it syncs to (including where it was edited)`);
@@ -140,7 +152,9 @@ export function historyPage() {
   if (!events.length) return h('div.page', {}, state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null, emptyState('history', 'No changes yet', 'When sync copies an edit, or Apply all adds or replaces a copy, it shows up here with Undo. Turn on Managed for a skill to begin.', button({ variant: 'outline', label: 'Start in Skills', id: 'history-go-skills', onclick: () => showPage('skills') })));
   const ordered = [...events].reverse();
   const reread = rereadBand(state.history);
-  return h('div.page', {}, reread ? h('div.bands', {}, reread) : null, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, `What sync, Apply all, Pull and profile switches changed in your tools, newest first. Undo puts the earlier version back${ordered.some(event => event.kind === 'removed') ? '; Restore puts a removed copy back' : ''}.`, ...keptFor()), h('ul.history-list', {}, ordered.flatMap((event, index) => {
+  // A refused Undo made here is a warning band, as on the other pages; other results here are in the status bar.
+  const refused = state.outcome?.page === 'history' && state.outcome.warn ? outcomeBand(false) : null;
+  return h('div.page', {}, reread || refused ? h('div.bands', {}, reread, refused) : null, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, `What sync, Apply all, Pull and profile switches changed in your tools, newest first. Undo puts the earlier version back${ordered.some(event => event.kind === 'removed') ? '; Restore puts a removed copy back' : ''}.`, ...keptFor()), h('ul.history-list', {}, ordered.flatMap((event, index) => {
     const about = describe(event);
     const heading = index === 0 || day(ordered[index - 1].at) !== day(event.at) ? h('li.history-day', { role: 'presentation' }, day(event.at)) : null;
     // The newest row, made by a click just now, gets the same brief highlight the tables use.

@@ -1,10 +1,10 @@
 // Managing skills across tools: what each tool has, and applying the person's choices.
 // A managed skill keeps one copy in every tool it syncs to. An unmanaged skill is left alone.
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, readFile, readdir, realpath, rename, stat } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, readlink, realpath, rename, stat, symlink, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { DAY_MS, defaultHistoryDays } from './model.ts';
-import { configRoot, harnesses, writeRoot } from './harnesses.ts';
+import { configRoot, harnessIds, harnesses, writeRoot } from './harnesses.ts';
 import { managedTools, presentTools } from './presence.ts';
 import {
   FORMAT_VERSION, changedWhileSyncing, clearStaleStages, storedRevision, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, newRecord, placeCopy, plainError, readRecord, readTree, stillOwned,
@@ -12,17 +12,19 @@ import {
 } from './share.ts';
 import { parseSkill } from './discovery.ts';
 import { isDisabled, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, unverifiedBuild, type SwitchTarget } from './skillswitch.ts';
-import { problemText, throughPlugin, toolName } from './words.ts';
+import { REPLACE_ACTION, andList, problemText, throughPlugin, toolName } from './words.ts';
+import { notPutBack } from './outsidewords.ts';
 import { throughPlugins } from './plugins.ts';
 import { comparableText } from './pluginstatus.ts';
 import { ALREADY_AS_IT_WAS, type SwitchRecord } from './types.ts';
-import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, HistoryPrune, ManageView, Skill, SkillFacts, Snapshot, SyncNotice, ToolCopy } from './types.ts';
+import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, HistoryPrune, ManageView, Outside, Skill, SkillFacts, Snapshot, SyncNotice, ToolCopy, TookOver } from './types.ts';
 import { byKey } from './roworder.ts';
 
 
 const bodyLine = (content: string) => content.replace(/^﻿?---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/, '').split(/\r?\n/).map(line => line.trim()).find(line => line && !line.startsWith('#')) ?? '';
 
 interface Location { tool: HarnessId; copy: ToolCopy }
+type Loser = HistoryEvent['losers'][number];
 interface Gathered { facts: SkillFacts; skills: Partial<Record<HarnessId, Skill[]>>; locations: Location[]; /** Tools that read this skill in another present tool's own folder, and whose folder: so with or without a copy of their own. */ reads: Partial<Record<HarnessId, HarnessId>> }
 
 /** Reads every skill in every managed tool once. A copy that cannot be read makes the skill held, never the whole page. */
@@ -33,6 +35,7 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
   // Each present tool's own skills folder, managed or not. A skill another tool reads there (OpenCode reads Claude Code's folder)
   // is the owner's copy: shown for the reader, but never a location of its own, so it blocks no choice and is never called older.
   const owners = new Map(presentTools(snapshots).map(tool => [rootOf(context, tool), tool] as const));
+  const pinned = await pinnedShared(context, tools, problems);
   for (const snapshot of snapshots) {
     if (!tools.includes(snapshot.harness)) continue;
     for (const skill of snapshot.skills) {
@@ -56,6 +59,7 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
           summary: bodyLine(skill.content).slice(0, 140), folder: skill.folder, name: skill.name, writable: !readsFrom && await writable(context, snapshot.harness, skill.directory, problems),
           ...(readsFrom ? { readsFrom } : {}),
         };
+        if (!copy.writable && !readsFrom) { const outside = await outsideOf(context, snapshot.harness, skill.directory, problems, pinned); if (outside) copy.outside = outside; }
         if (readsFrom) entry.reads[snapshot.harness] = readsFrom; else entry.locations.push({ tool: snapshot.harness, copy });
         if (!entry.facts.copies[snapshot.harness]) entry.facts.copies[snapshot.harness] = copy;
         else if (!readsFrom) entry.facts.extra.push({ ...copy, tool: snapshot.harness });
@@ -80,8 +84,13 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
       if (definition.reservedSkills.includes(source.folder)) { entry.facts.cannot[tool] = `${definition.name} reserves the name “${source.folder}”.`; continue; }
       const skipped = targetFor(tool, directory, source).skipped;
       if (skipped) { entry.facts.cannot[tool] = skipped; continue; }
-      try { await lstat(directory); entry.facts.cannot[tool] = `${definition.name} already has something at ${directory} that is not a readable skill.`; }
-      catch (error) { if (errorCode(error) !== 'ENOENT') entry.facts.cannot[tool] = `${directory} could not be checked.`; }
+      try {
+        await lstat(directory);
+        // A link that leads nowhere is no skill and holds nothing: a copy written there replaces it, and the page says so.
+        const broken = await brokenLink(directory);
+        if (broken !== undefined) (entry.facts.brokenLink ??= {})[tool] = broken;
+        else entry.facts.cannot[tool] = `${definition.name} already has something at ${directory} that is not a readable skill.`;
+      } catch (error) { if (errorCode(error) !== 'ENOENT') entry.facts.cannot[tool] = `${directory} could not be checked.`; }
     }
     for (const tool of Object.keys(entry.facts.copies) as HarnessId[]) entry.facts.choiceBlocks[tool] = blocksFor(entry, tool);
   }
@@ -174,14 +183,26 @@ async function liveSwitchTarget(context: ShareContext, entry: Gathered, tool: Ha
   try { return { folder, name: parseSkill(content, folder).name, skillFile }; } catch { return { folder, name: folder, skillFile }; }
 }
 
+/**
+ * Why a copy background sync never writes was left as it is, said by what it is: one the person can hand over (a link, the shared
+ * folder's copy), one Manage must leave (the only copy a tool can have), or one inside a skills folder that is itself a link.
+ */
+function untouched(tool: HarnessId, copy: ToolCopy, what: string, name: string): string {
+  const where = `${harnesses[tool].name} ${what} at ${copy.directory}`;
+  if (copy.outside?.pinned) return `${where}. ${copy.outside.pinned}`;
+  if (copy.outside) return `${where}. Central Knot changes it only when you ask: open ${name} on the Skills page and use ${REPLACE_ACTION}.`;
+  return `${where}, inside a skills folder that is a link or another tool’s folder, so Central Knot does not change it.`;
+}
+
 /** What stops every tool from using one tool's copy: differing copies Central Knot does not change, and tools with a copy that could not load this one. */
-function blocksFor(entry: Gathered, source: HarnessId): { tool: HarnessId; reason: string }[] {
+function blocksFor(entry: Gathered, source: HarnessId, takeOver = true): { tool: HarnessId; reason: string }[] {
   const chosen = entry.facts.copies[source]!;
   const skill = skillAt(entry, source);
   const blocks: { tool: HarnessId; reason: string }[] = [];
   for (const location of entry.locations) {
-    if (location.copy.hash === chosen.hash || location.copy.writable) continue;
-    blocks.push({ tool: location.tool, reason: `${harnesses[location.tool].name} also reads a different copy at ${location.copy.directory}, which Central Knot does not change.` });
+    // A copy outside Central Knot's own (a link, the shared folder's) is taken over along with the choice the page sends.
+    if (location.copy.hash === chosen.hash || location.copy.writable || (takeOver && location.copy.outside && !location.copy.outside.pinned)) continue;
+    blocks.push({ tool: location.tool, reason: untouched(location.tool, location.copy, 'also reads a different copy', entry.facts.name) });
   }
   for (const tool of Object.keys(entry.facts.copies) as HarnessId[]) {
     if (tool === source || !skill || entry.facts.copies[tool]!.hash === chosen.hash) continue;
@@ -192,15 +213,21 @@ function blocksFor(entry: Gathered, source: HarnessId): { tool: HarnessId; reaso
 }
 
 /** Why a choice cannot be carried out for the tools it syncs to, if it cannot. */
-function choiceProblem(entry: Gathered, use: HarnessId, hash: string | undefined, syncing: HarnessId[]): Pick<DestinationResult, 'message' | 'chooseAgain'> | undefined {
+function choiceProblem(entry: Gathered, use: HarnessId, hash: string | undefined, syncing: HarnessId[], takeOver = true): Pick<DestinationResult, 'message' | 'chooseAgain'> | undefined {
   const copy = entry.facts.copies[use];
   if (!copy) return { message: `The copy you chose in ${harnesses[use].name} is gone. Nothing was changed; choose again.`, chooseAgain: true };
   if (hash !== undefined && copy.hash !== hash) return { message: `The copy you chose in ${harnesses[use].name} has changed since you chose it. Nothing was changed; choose again.`, chooseAgain: true };
-  const block = entry.facts.choiceBlocks[use]?.find(entry => syncing.includes(entry.tool));
+  const block = (takeOver ? entry.facts.choiceBlocks[use] : blocksFor(entry, use, false))?.find(entry => syncing.includes(entry.tool));
   return block ? { message: `${block.reason} Nothing was changed.` } : undefined;
 }
 
 const rootOf = (context: ShareContext, tool: HarnessId) => writeRoot(harnesses[tool], context.home, context.overrides?.[tool]);
+/** The shared skills folder several tools read (Copilot, Codex, Pi, OpenCode), and other apps too. */
+export const sharedFolder = (context: ShareContext) => join(context.home, '.agents/skills');
+/** Whether a tool reads the shared ~/.agents/skills folder besides its own. */
+const readsShared = (context: ShareContext, tool: HarnessId) => harnesses[tool].skillRoots(configRoot(harnesses[tool], context.home, context.overrides?.[tool]), context.home).slice(1).some(root => sameDir(root.path, sharedFolder(context)));
+/** The tool a shared copy's History entry names: the first present tool that reads the shared folder. */
+const sharedReader = (context: ShareContext, tools: HarnessId[]) => tools.find(tool => readsShared(context, tool)) ?? tools[0] ?? 'copilot-cli';
 /** Where a tool's own copy of a skill goes: its folder in the tool's own skills folder. */
 const ownCopyDir = (context: ShareContext, tool: HarnessId, folder: string) => join(rootOf(context, tool), folder);
 
@@ -234,7 +261,7 @@ function newest(candidates: Location[]): { winner: Location; proved: boolean } {
 /** Same folder? Case-folded where the disk ignores case, so a case-only rename is the same copy. */
 const sameDir = (first: string, second: string) => (process.platform === 'linux' ? first === second : first.toLowerCase() === second.toLowerCase());
 /** The folders a tool reads skills from that a recorded copy may sit in. */
-const ownRoots = (context: ShareContext, tool: HarnessId) => [rootOf(context, tool), join(context.home, '.agents/skills')];
+const ownRoots = (context: ShareContext, tool: HarnessId) => [rootOf(context, tool), sharedFolder(context)];
 
 /** A deletion is inferred only from a reachable folder (DEL-01): the folder the copy sat in still exists. */
 async function folderExists(path: string): Promise<boolean> {
@@ -369,18 +396,17 @@ export async function pruneHistory(context: ShareContext): Promise<Exclude<Histo
 export async function rootProblem(context: ShareContext, tool: HarnessId): Promise<string | undefined> {
   const root = rootOf(context, tool);
   const name = harnesses[tool].name;
-  try { if ((await lstat(root)).isSymbolicLink()) return `${name}'s skills folder is a link, so Central Knot does not write through it.`; }
+  try { if ((await lstat(root)).isSymbolicLink()) return `${name}'s skills folder is a link${await readlink(root).then(target => ` to ${target}`, () => '')}, so Central Knot does not write through it.`; }
   catch (error) { if (errorCode(error) !== 'ENOENT') return `${name}'s skills folder could not be checked.`; }
   // A folder not made yet still lands somewhere: through a linked parent, or where another tool's folder is.
   const real = await landingOf(root);
   if (!real) return `${name}'s skills folder could not be checked.`;
-  const others = [...(Object.keys(harnesses) as HarnessId[]).filter(other => other !== tool).map(other => rootOf(context, other)), join(context.home, '.agents/skills')];
+  const others = [...(Object.keys(harnesses) as HarnessId[]).filter(other => other !== tool).map(other => rootOf(context, other)), sharedFolder(context)];
   for (const other of others) {
     if (await landingOf(other) === real) return `${name}'s skills folder is the same folder as ${other}, so Central Knot does not write there.`;
   }
   return undefined;
 }
-
 
 /** Only a real folder directly in the tool's own skills folder is written: never through a link, never a shared folder. */
 async function writable(context: ShareContext, tool: HarnessId, directory: string, problems: Map<HarnessId, string | undefined>): Promise<boolean> {
@@ -390,6 +416,52 @@ async function writable(context: ShareContext, tool: HarnessId, directory: strin
     const own = await realpath(rootOf(context, tool));
     return (await realpath(dirname(directory))) === own;
   } catch { return false; }
+}
+
+/**
+ * Why the shared folder's copies stay where they are when a skill is managed: a present tool's own skills folder is that very
+ * folder (a link to it), so a copy there is the only one that tool can have. Undefined when no tool's folder is.
+ */
+async function pinnedShared(context: ShareContext, tools: HarnessId[], problems: Map<HarnessId, string | undefined>): Promise<{ text: string; tool: HarnessId } | undefined> {
+  const shared = await landingOf(sharedFolder(context));
+  if (!shared) return undefined;
+  for (const tool of tools) {
+    if (problems.get(tool) && await landingOf(rootOf(context, tool)) === shared) return { text: `${toolName(tool)}’s skills folder is that same folder, so the copy there is the only one ${toolName(tool)} can have.`, tool };
+  }
+  return undefined;
+}
+
+/**
+ * A copy Central Knot does not write in the background but takes over when the person asks: a link directly in the tool's own
+ * skills folder (when that folder itself is sound), or a copy in the shared ~/.agents/skills folder. Anything else (a copy
+ * reached through a skills folder that is itself a link) is never taken over.
+ */
+async function outsideOf(context: ShareContext, tool: HarnessId, directory: string, problems: Map<HarnessId, string | undefined>, pinned?: { text: string; tool: HarnessId }): Promise<Outside | undefined> {
+  let linkTo: string | undefined;
+  try { if ((await lstat(directory)).isSymbolicLink()) linkTo = await readlink(directory); } catch { return undefined; }
+  if (sameDir(dirname(directory), sharedFolder(context))) return { kind: 'shared', ...(linkTo !== undefined ? { linkTo } : {}), ...(pinned ? { pinned: pinned.text, pinnedBy: pinned.tool } : {}) };
+  if (linkTo !== undefined && !problems.get(tool) && sameDir(dirname(directory), rootOf(context, tool))) return { kind: 'link', linkTo };
+  return undefined;
+}
+
+/** Where a link at `path` led, when it is a link that leads nowhere; undefined otherwise. */
+async function brokenLink(path: string): Promise<string | undefined> {
+  try { if (!(await lstat(path)).isSymbolicLink()) return undefined; } catch { return undefined; }
+  try { await stat(path); return undefined; } catch (error) { return errorCode(error) === 'ENOENT' ? readlink(path).catch(() => '') : undefined; }
+}
+
+/** A broken link where a copy is about to go is removed first (only the link: it leads nowhere). Returns where it led, if there was one. */
+async function clearBrokenLink(path: string): Promise<string | undefined> {
+  const led = await brokenLink(path);
+  if (led !== undefined) await unlink(path);
+  return led;
+}
+
+/** Removes a link, and only the link: never what it leads to. Refused when the link changed since it was read. */
+async function unlinkChecked(path: string, linkTo: string) {
+  const info = await lstat(path);
+  if (!info.isSymbolicLink() || await readlink(path) !== linkTo) throw changedWhileSyncing();
+  await unlink(path);
 }
 
 /**
@@ -408,6 +480,11 @@ export async function manageView(context: ShareContext, { caughtUp = [], notices
     const recorded = new Set(item.copies.filter(copy => copy.status === 'written').map(copy => copy.directory));
     const edited = entry.locations.filter(location => recorded.has(location.copy.directory) && location.copy.hash !== item.hash).map(location => location.tool);
     if (edited.length) entry.facts.edited = [...new Set(edited)];
+  }
+  // A managed skill with links or a shared copy again after a take-over removed them (an installer put them back): the page says they are back.
+  const tookOver = new Set((await readHistory(context)).filter(event => event.kind === 'took-over' && !event.undoneBy).map(event => event.key));
+  for (const [key, entry] of gathered) {
+    if (record?.items[key]?.state === 'shared' && tookOver.has(key) && entry.locations.some(location => location.copy.outside && !location.copy.outside.pinned)) entry.facts.outsideBack = true;
   }
   const skills = [...gathered.values()].map(entry => entry.facts).sort(byKey);
   const tools = managedTools(snapshots, record?.tools);
@@ -529,6 +606,10 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
   // the tools it stops syncing to and their sync records (put back if a removal doesn't happen), and whether it takes the last copies.
   const taken = new Map<string, { stoppedSync: HarnessId[]; records: RecordItem['copies']; lastCopies: boolean }>();
   const added = new Map<string, { name: string; hash: string; copies: { tool: HarnessId; hash: string }[] }>();
+  // Skills whose copies outside Central Knot's own the person asked to take over (Manage, Replace with managed copies).
+  const takeOvers = new Set<string>();
+  // Skills this run was asked to change: only these may start from a copy background sync never writes.
+  const asked = new Set(changes.map(change => change.key));
   for (const change of changes) {
     const entry = gathered.get(change.key);
     if (!entry) continue;
@@ -545,7 +626,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     // A choice that cannot be carried out changes nothing at all: not even Managed.
     if (change.use && change.use !== 'separate') {
       const syncing = tools.filter(tool => !change.off.includes(tool) && !entry.facts.cannot[tool]);
-      const problem = choiceProblem(entry, change.use, change.useHash, syncing);
+      const problem = choiceProblem(entry, change.use, change.useHash, syncing, !!change.takeOver);
       if (problem) { results.push({ item: entry.facts.name, outcome: 'held', ...problem }); continue; }
     }
     // Removing the very copy chosen for every tool would leave the choice nothing to copy from: refused, changing nothing.
@@ -560,7 +641,11 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       continue;
     }
     const item: RecordItem = record.items[change.key] ?? { name: entry.facts.name, hash: '', state: 'dont-share', startId: '', observedAt: new Date().toISOString(), copies: [] };
-    if (change.managed && change.use !== 'separate' && item.state !== 'shared') newlyManaged.add(change.key);
+    if (change.managed && change.use !== 'separate' && item.state !== 'shared') {
+      newlyManaged.add(change.key);
+      // Managed afresh: what it synced before (say, before a deletion) is no baseline for the copies it has now.
+      item.hash = '';
+    }
     const wasOff = item.off ?? [];
     item.state = change.managed && change.use !== 'separate' ? 'shared' : 'dont-share';
     // A managed skill removed from a tool stops syncing there, or the next pass would put it back.
@@ -580,16 +665,17 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     if (change.use && change.use !== 'separate') item.use = { tool: change.use, hash: entry.facts.copies[change.use]!.hash };
     else if (!change.managed || change.use === 'separate') delete item.use;
     record.items[change.key] = item;
+    if (change.takeOver && item.state === 'shared') takeOvers.add(change.key);
   }
   await save();
-  if (!options.observeOnly) await clearStaleStages(context, tools.map(tool => rootOf(context, tool)));
+  if (!options.observeOnly) await clearStaleStages(context, [...tools.map(tool => rootOf(context, tool)), sharedFolder(context)]);
 
   let writes = 0;
   let settling = false;
   // A skills folder that was deleted and made again since the last pass (a reset or reinstall, even with the app closed) has a new
   // identity: its missing copies are put back, never read as deletions. Skills deleted inside the same folder are real deletions.
   const resetRoots = new Set<string>();
-  const roots = [...new Set([...tools.map(tool => rootOf(context, tool)), join(context.home, '.agents/skills')])];
+  const roots = [...new Set([...tools.map(tool => rootOf(context, tool)), sharedFolder(context)])];
   const identities = new Map<string, { ino: number; birth: number }>();
   for (const root of roots) {
     try { const info = await stat(root); if (info.isDirectory()) identities.set(root, { ino: info.ino, birth: Math.round(info.birthtimeMs) }); } catch { /* unreachable */ }
@@ -603,6 +689,147 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
   const notices: SyncNotice[] = [];
   const events: HistoryEvent[] = [];
   const event = (fields: Omit<HistoryEvent, 'id' | 'at'>) => { const made = { id: randomUUID(), at: new Date(clock(context)).toISOString(), ...fields }; events.push(made); return made.id; };
+  const tookOver = new Map<string, TookOver>();
+  // Copies a take-over removed for a tool the same change removes ("key\0tool"), its link or the shared copy it read only there:
+  // that tool's Remove, finished by removeCopies.
+  const removedByTakeOver = new Map<string, { copy: ToolCopy; linkTo?: string }>();
+
+  /**
+   * Takes over a skill's copies outside Central Knot's own, because the person asked (never in a background pass). Each link in a
+   * tool it syncs to becomes a real copy; each tool it syncs to that read the shared copy gets one of its own; then the shared copy
+   * is removed. Everything taken is kept in the store first and told in a 'took-over' event, whose Undo puts it back. A link is
+   * removed as a link, never followed; the shared copy goes only as its own step, after every tool that needs it has its own.
+   */
+  const takeOver = async (key: string, entry: Gathered, item: RecordItem, syncing: HarnessId[]): Promise<'held' | undefined> => {
+    const outside = entry.locations.filter(location => location.copy.outside && !location.copy.outside.pinned);
+    if (!outside.length) return undefined;
+    // Sorted once, as they were read: a link replaced below is no longer outside.
+    const links = outside.filter(location => location.copy.outside!.kind === 'link').map(location => ({ location, linkTo: location.copy.outside!.linkTo! }));
+    const sharedOnes = outside.filter(location => location.copy.outside!.kind === 'shared').map(location => ({ location, linkTo: location.copy.outside!.linkTo }));
+    const name = entry.facts.name;
+    const shared = sharedFolder(context);
+    const wanted = (tool: HarnessId) => syncing.includes(tool) && !entry.facts.cannot[tool];
+    // What every copy becomes: the chosen copy; for a skill already managed, its synced content; otherwise the one content all copies hold.
+    let seed: string | undefined;
+    const chosen = item.use && entry.facts.copies[item.use.tool];
+    if (chosen) seed = chosen.directory;
+    else if (item.hash && !newlyManaged.has(key)) {
+      seed = entry.locations.find(location => location.copy.hash === item.hash)?.copy.directory;
+      if (!seed && await exists(storedRevision(context, key, item.hash))) seed = storedRevision(context, key, item.hash);
+    } else {
+      const candidates = entry.locations.filter(location => wanted(location.tool) || location.copy.outside);
+      if (new Set(candidates.map(location => location.copy.hash)).size > 1) { results.push({ item: name, outcome: 'held', message: 'Copies differ. Choose which copy to use.' }); return 'held'; }
+      seed = candidates[0]?.copy.directory;
+    }
+    if (!seed) { results.push({ item: name, outcome: 'held', message: 'Its synced content is no longer in Central Knot’s store, so its other copies were left as they are.' }); return 'held'; }
+    let tree;
+    try { tree = await readTree(seed); await importRevision(context, key, seed, tree); }
+    catch (error) { results.push({ item: name, outcome: 'failed', message: `Could not read the copy to start from. ${plainError(error)}` }); return 'held'; }
+    const kept = storedRevision(context, key, tree.hash);
+    const told: TookOver = { links: [], shared: [], placed: [], ...(newlyManaged.has(key) ? { managedNow: true } : {}) };
+    const becomeOwn = (location: Location) => { Object.assign(location.copy, { hash: tree.hash, writable: true }); delete location.copy.outside; };
+    // 1. A link in a tool it syncs to: the link goes (only the link) and a real copy takes its place.
+    for (const { location, linkTo } of links.filter(candidate => wanted(candidate.location.tool))) {
+      const { tool } = location;
+      const path = location.copy.directory;
+      const late = await rootProblem(context, tool);
+      if (late) { results.push({ item: name, harness: tool, outcome: 'held', message: late }); continue; }
+      try {
+        if (location.copy.hash !== tree.hash) await importRevision(context, key, path, await readTree(path));
+        await unlinkChecked(path, linkTo);
+        try { await placeCopy(context, kept, { harness: tool, directory: path, limits: [] }, tree); }
+        catch (error) { await symlink(linkTo, path).catch(() => undefined); throw error; }
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('fault:')) throw error;
+        results.push({ item: name, harness: tool, outcome: errorCode(error) === 'CK_CHANGED' ? 'held' : 'failed', message: `Could not replace the link in ${toolName(tool)}’s skills folder. ${plainError(error)}` });
+        continue;
+      }
+      writes++;
+      told.links.push({ tool, path, linkTo, hash: location.copy.hash, placed: tree.hash });
+      becomeOwn(location);
+      results.push({ item: name, harness: tool, outcome: 'written', tookOver: 'link', message: `Replaced the link in ${toolName(tool)}’s skills folder (it led to ${linkTo}) with a copy of its own. ${harnesses[tool].nextStep}` });
+    }
+    const removing = new Set(changes.find(change => change.key === key)?.remove ?? []);
+    // 2. The shared copy: each tool it syncs to that read it there gets its own first; then it goes, unless one could not.
+    const readers = tools.filter(tool => readsShared(context, tool));
+    for (const path of [...new Set(sharedOnes.map(candidate => candidate.location.copy.directory))]) {
+      const { location: here, linkTo } = sharedOnes.find(candidate => candidate.location.copy.directory === path)!;
+      let keep: string | undefined;
+      for (const reader of readers.filter(wanted)) {
+        if (entry.locations.some(location => location.tool === reader && location.copy.writable)) continue;
+        // It reads the folder of a tool this pass gives a copy (OpenCode reads Claude Code's): that copy is the one it will read.
+        const owner = readsFolderOf(context, reader, tools);
+        if (owner && wanted(owner)) continue;
+        const problem = await rootProblem(context, reader);
+        if (problem) { keep = problem; break; }
+        const directory = ownCopyDir(context, reader, here.copy.folder);
+        try {
+          await mkdir(dirname(directory), { recursive: true });
+          await clearBrokenLink(directory);
+          await placeCopy(context, kept, { harness: reader, directory, limits: [] }, tree);
+        } catch (error) {
+          if (error instanceof Error && error.message.startsWith('fault:')) throw error;
+          keep = `${toolName(reader)} could not get a copy of its own: ${plainError(error)}`;
+          break;
+        }
+        writes++;
+        told.placed.push({ tool: reader, path: directory, hash: tree.hash });
+        const copy: ToolCopy = { ...here.copy, directory, hash: tree.hash, writable: true, rootLabel: harnesses[reader].skillRoots(configRoot(harnesses[reader], context.home, context.overrides?.[reader]), context.home)[0].label };
+        delete copy.outside;
+        entry.locations.push({ tool: reader, copy });
+        entry.facts.copies[reader] = copy;
+        item.copies = [...item.copies.filter(known => !sameDir(known.directory, directory)), { harness: reader, directory, hash: tree.hash, created: true, status: 'written' }];
+        results.push({ item: name, harness: reader, outcome: 'written', tookOver: 'placed', message: `${toolName(reader)} read it in ${shared}; it has a copy of its own now. ${harnesses[reader].nextStep}` });
+      }
+      if (keep) { results.push({ item: name, outcome: 'held', message: `The copy in ${shared} stays: ${keep}` }); continue; }
+      try {
+        if (here.copy.hash !== tree.hash) await importRevision(context, key, path, await readTree(path));
+        if (linkTo !== undefined) await unlinkChecked(path, linkTo); else await removeChecked(context, path, here.copy.hash);
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('fault:')) throw error;
+        results.push({ item: name, outcome: errorCode(error) === 'CK_CHANGED' ? 'held' : 'failed', message: `Could not remove the copy in ${shared}. ${plainError(error)}` });
+        continue;
+      }
+      writes++;
+      told.shared.push({ path, hash: here.copy.hash, ...(linkTo !== undefined ? { linkTo } : {}) });
+      entry.locations = entry.locations.filter(location => !sameDir(location.copy.directory, path));
+      entry.facts.extra = entry.facts.extra.filter(extra => !sameDir(extra.directory, path));
+      const lost: HarnessId[] = [];
+      for (const tool of Object.keys(entry.facts.copies) as HarnessId[]) {
+        if (!sameDir(entry.facts.copies[tool]!.directory, path)) continue;
+        const own = entry.locations.find(location => location.tool === tool);
+        if (own) entry.facts.copies[tool] = own.copy;
+        else {
+          if (removing.has(tool)) removedByTakeOver.set(`${key}\0${tool}`, { copy: entry.facts.copies[tool]! });
+          delete entry.facts.copies[tool];
+          lost.push(tool);
+        }
+      }
+      results.push({ item: name, outcome: 'removed', tookOver: 'shared', folder: shared, message: `Removed the copy in ${shared}; History keeps it. Other apps that read that folder won’t find it there.${lost.length ? ` ${andList(lost.map(toolName))} ${lost.length > 1 ? 'aren’t' : 'isn’t'} ticked and read it only there, so ${lost.length > 1 ? 'they no longer have' : 'it no longer has'} it.` : ''}` });
+    }
+    // 3. A link in a tool left out that now leads nowhere (it led to the shared copy) goes too, as a link. In a tool this same
+    // change removes, that is the Remove done: its 'removed' event names it (removeCopies), not the take-over, whose Undo
+    // must not bring back a link the person asked to go.
+    for (const { location, linkTo } of links.filter(candidate => !wanted(candidate.location.tool))) {
+      if ((await brokenLink(location.copy.directory)) === undefined) continue;
+      try { await unlinkChecked(location.copy.directory, linkTo); } catch { continue; }
+      writes++;
+      entry.locations = entry.locations.filter(other => other !== location);
+      if (entry.facts.copies[location.tool]?.directory === location.copy.directory) delete entry.facts.copies[location.tool];
+      if (removing.has(location.tool)) { removedByTakeOver.set(`${key}\0${location.tool}`, { copy: location.copy, linkTo }); continue; }
+      told.links.push({ tool: location.tool, path: location.copy.directory, linkTo, hash: location.copy.hash });
+      results.push({ item: name, harness: location.tool, outcome: 'removed', tookOver: 'link', message: `${toolName(location.tool)} isn’t ticked; its link led to the removed copy, so the link was removed too.` });
+    }
+    if (told.links.length || told.shared.length || told.placed.length) tookOver.set(key, told);
+    // A recorded choice names a copy that now holds the same content somewhere Central Knot keeps it.
+    if (item.use) {
+      const holder = entry.locations.find(location => wanted(location.tool) && location.copy.writable && location.copy.hash === tree.hash);
+      if (holder) item.use = { tool: holder.tool, hash: tree.hash };
+    }
+    await save();
+    return undefined;
+  };
+
   for (const [key, entry] of gathered) {
     // Taken over by another build meanwhile: nothing more is written, starting with this item.
     await owned();
@@ -619,6 +846,8 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     const name = entry.facts.name;
     if (entry.facts.held) { skip(); results.push({ item: name, outcome: 'held', message: entry.facts.held }); continue; }
     const syncing = tools.filter(tool => !item.off?.includes(tool));
+    // Asked for: the copies outside Central Knot's own become ordinary ones first (links replaced, the shared copy removed).
+    if (takeOvers.has(key) && !options.observeOnly && await takeOver(key, entry, item, syncing) === 'held') { skip(); continue; }
     // No tool it syncs to holds it, but one reads the copy of a tool that is left out (OpenCode reads Claude Code's): that
     // copy becomes the reader's own, to start from. The owner's is no longer kept in sync, and this pass may remove it.
     // The same for a reader whose copy was chosen over the others: it needs a copy of its own to be chosen from.
@@ -668,7 +897,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       // Moved into a folder Central Knot does not change (the shared .agents folder): followed no further, and said so, since later
       // edits can't reach it there. Moving it back into the tool's own folder makes it sync again.
       if (found && !found.copy.writable && !sameDir(dirname(found.copy.directory), dirname(copy.directory))) {
-        results.push({ item: entry.facts.name, harness: copy.harness, outcome: 'held', message: `${harnesses[copy.harness].name}'s copy moved to ${found.copy.directory}, which Central Knot does not change, so edits can't reach it there. Move it back to ${rootOf(context, copy.harness)} to keep it syncing.` });
+        results.push({ item: entry.facts.name, harness: copy.harness, outcome: 'held', message: `${harnesses[copy.harness].name}'s copy moved to ${found.copy.directory}, where Automatic sync does not write, so edits can't reach it there. Move it back to ${rootOf(context, copy.harness)}, or use ${REPLACE_ACTION} on the Skills page, to keep it syncing.` });
         item.copies = item.copies.filter(other => other !== copy);
         continue;
       }
@@ -691,9 +920,12 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     const recordedHash = new Map(item.copies.filter(copy => copy.status === 'written').map(copy => [copy.directory, copy.hash]));
     const recorded = new Set(recordedHash.keys());
     // Once synced, a read-only copy outside the record (a link, or the shared .agents folder) is reported, never followed: it could not take the edit, so it must not win later.
-    const active = item.hash ? locations.filter(location => recorded.has(location.copy.directory) || location.copy.writable) : locations;
+    const followed = item.hash ? locations.filter(location => recorded.has(location.copy.directory) || location.copy.writable) : locations;
+    // Asked for by the person, with no copy sync follows (only copies it never writes, say a skill managed again after a deletion):
+    // those copies are where it starts from, as on first Manage, never "nothing to start from".
+    const active = !followed.length && asked.has(key) ? locations : followed;
     for (const location of locations.filter(candidate => !active.includes(candidate) && candidate.copy.hash !== item.hash)) {
-      results.push({ item: name, harness: location.tool, outcome: 'held', message: `${harnesses[location.tool].name} also reads an older copy at ${location.copy.directory}, which Central Knot does not change.` });
+      results.push({ item: name, harness: location.tool, outcome: 'held', message: untouched(location.tool, location.copy, 'also reads an older copy', name) });
     }
     let winner: Location | undefined;
     let story: { kind: 'edit' | 'conflict' | 'kept-edit'; orderProved: boolean; competitors: HarnessId[]; deleted: HarnessId[] } | undefined;
@@ -747,7 +979,8 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
               results.push({ item: name, harness: location.tool, outcome: 'held', message: `${harnesses[location.tool].name} has a different “${name}” that was never synced. It stays.` });
               continue;
             }
-            if (!location.copy.writable) { results.push({ item: name, harness: location.tool, outcome: 'held', message: `${harnesses[location.tool].name} also reads a copy at ${location.copy.directory}, which Central Knot does not change. Remove it yourself to finish deleting ${name}.` }); continue; }
+            // Spread by sync, not asked for on this skill: a copy outside Central Knot's own stays, and the page offers to remove it.
+            if (!location.copy.writable) { results.push({ item: name, harness: location.tool, outcome: 'held', message: location.copy.outside && !location.copy.outside.pinned ? `${harnesses[location.tool].name} still reads a copy at ${location.copy.directory}. To remove it too, open ${name} on the Skills page and use Delete everywhere.` : untouched(location.tool, location.copy, 'still reads a copy', name) }); continue; }
             const late = await rootProblem(context, location.tool);
             if (late) { results.push({ item: name, harness: location.tool, outcome: 'held', message: late }); continue; }
             try {
@@ -822,7 +1055,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
         for (const location of active) {
           if (location.copy.hash === source.hash) { inSync.add(location.copy.directory); continue; }
           const late = await rootProblem(context, location.tool);
-          const refusal = late ?? (location.copy.writable ? undefined : `${harnesses[location.tool].name} reads a copy at ${location.copy.directory}, which Central Knot does not change.`);
+          const refusal = late ?? (location.copy.writable ? undefined : untouched(location.tool, location.copy, 'reads a copy', name));
           if (refusal) { results.push({ item: name, harness: location.tool, outcome: 'held', message: refusal }); continue; }
           // The intent is on record first: a crash mid-replace then reads as an unfinished copy, never as a deletion.
           const known = item.copies.find(copy => copy.directory === location.copy.directory);
@@ -853,7 +1086,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
         for (const location of active) {
           if (location.copy.hash === item.hash) { inSync.add(location.copy.directory); continue; }
           const late = await rootProblem(context, location.tool);
-          const refusal = late ?? (location.copy.writable ? undefined : `${harnesses[location.tool].name} reads an older copy at ${location.copy.directory}, which Central Knot does not change.`);
+          const refusal = late ?? (location.copy.writable ? undefined : untouched(location.tool, location.copy, 'reads an older copy', name));
           if (refusal) { results.push({ item: name, harness: location.tool, outcome: 'held', message: refusal }); continue; }
           const known = item.copies.find(copy => copy.directory === location.copy.directory);
           if (known) { known.status = 'pending'; await save(); }
@@ -879,7 +1112,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
           const late = await rootProblem(context, location.tool);
           if (late) { results.push({ item: name, harness: location.tool, outcome: 'held', message: late }); continue; }
           if (!location.copy.writable) {
-            results.push({ item: name, harness: location.tool, outcome: 'held', message: `${harnesses[location.tool].name} also reads a different copy at ${location.copy.directory}, which is a link or a folder other tools share. Central Knot does not change it; change or remove it yourself.` });
+            results.push({ item: name, harness: location.tool, outcome: 'held', message: untouched(location.tool, location.copy, 'also reads a different copy', name) });
             continue;
           }
           displace(item, location.tool, location.copy.hash);
@@ -939,7 +1172,8 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
         const intent = { harness: tool, directory, hash: tree.hash, created: true, status: 'pending' as const };
         item.copies = [...item.copies.filter(known => known.directory !== directory), intent];
         await save();
-        try { await mkdir(dirname(directory), { recursive: true }); await placeCopy(context, source.directory, { harness: tool, directory, limits: [] }, tree); }
+        let led: string | undefined;
+        try { await mkdir(dirname(directory), { recursive: true }); led = await clearBrokenLink(directory); await placeCopy(context, source.directory, { harness: tool, directory, limits: [] }, tree); }
         catch (error) {
           item.copies = item.copies.filter(known => known !== intent);
           if (error instanceof Error && error.message.startsWith('fault:')) throw error;
@@ -951,14 +1185,20 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
         if (newlyManaged.has(key)) { const told = added.get(key) ?? { name, hash: tree.hash, copies: [] }; told.copies.push({ tool, hash: tree.hash }); added.set(key, told); }
         writes++;
         if (resetRoots.has(dirname(directory))) putBack.add(tool);
-        results.push({ item: name, harness: tool, outcome: 'written', message: harnesses[tool].nextStep });
+        results.push({ item: name, harness: tool, outcome: 'written', message: led === undefined ? harnesses[tool].nextStep : `${harnesses[tool].nextStep} It replaced a broken link there${led ? ` (it led to ${led})` : ''}.` });
       }
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('fault:')) throw error;
       results.push({ item: name, outcome: 'failed', message: plainError(error) });
     }
   }
-  for (const [key, told] of added) event({ key, item: told.name, kind: 'added', losers: told.copies, orderProved: true, previous: told.hash });
+  const addedIds = new Map([...added].map(([key, told]) => [key, event({ key, item: told.name, kind: 'added', losers: told.copies, orderProved: true, previous: told.hash })]));
+  for (const [key, told] of tookOver) {
+    if (told.managedNow && addedIds.has(key)) told.addedId = addedIds.get(key);
+    // Every content it took is a loser, so the store keeps it for Undo.
+    const losers = [...told.links.map(link => ({ tool: link.tool, hash: link.hash })), ...told.shared.map(copy => ({ tool: sharedReader(context, tools), hash: copy.hash }))];
+    event({ key, item: gathered.get(key)?.facts.name ?? key, kind: 'took-over', tookOver: told, losers, orderProved: true, previous: told.placed[0]?.hash ?? told.links.find(link => link.placed)?.placed });
+  }
   /**
    * Removes the named tools' copies of one skill (Remove), each kept in the store first, as one 'removed' event for Restore.
    * A removal that doesn't happen leaves the copy syncing as before: back in sync, with its sync record, so it never quietly
@@ -976,35 +1216,90 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       item.copies.push(...records.filter(copy => copy.harness === tool));
       await save();
     };
+    // One folder is one copy, however many tools read it (the shared folder's): removed once, and every tool that read it counts.
+    const removedPaths = new Set<string>();
+    const removing = new Set(change.remove ?? []);
+    const removedFrom = new Set<HarnessId>();
+    // What was removed for a tool besides an ordinary copy (its link), said in its line.
+    const how = new Map<HarnessId, string>();
+    const linkGone = (tool: HarnessId, linkTo: string) => how.set(tool, ` It was a link to ${linkTo}; only the link was removed.`);
     for (const tool of change.remove ?? []) {
-      const copy = entry.facts.copies[tool];
+      if (entry.facts.copies[tool]) continue;
+      // Its link, or the shared copy it read only there, went with the take-over this change also asked for: that was this
+      // Remove. Restore puts the link back, or gives the tool its own copy (the shared one stays the take-over's); neither gets a
+      // sync record, since sync wrote neither.
+      const gone = removedByTakeOver.get(`${change.key}\0${tool}`);
+      if (gone) {
+        removed.push({ tool, hash: gone.copy.hash, folder: gone.copy.folder, ...(gone.linkTo !== undefined ? { path: gone.copy.directory, linkTo: gone.linkTo } : {}) });
+        removedFrom.add(tool);
+        if (gone.linkTo !== undefined) linkGone(tool, gone.linkTo);
+        continue;
+      }
       // Gone since the page was read: nothing to remove, so that tool syncs as before.
-      if (!copy) { await keepSyncing(tool); continue; }
-      const refusal = (copy.writable ? undefined : copy.readsFrom ? `${toolName(tool)} reads ${toolName(copy.readsFrom)}’s copy. Disable it in ${toolName(tool)} to stop it loading there, or remove it from ${toolName(copy.readsFrom)}.`
-        : `${toolName(tool)} reads it at ${copy.directory}, which Central Knot does not change. Remove it there yourself.`) ?? await rootProblem(context, tool);
-      if (refusal) { await keepSyncing(tool); results.push({ item: name, harness: tool, outcome: 'held', message: refusal }); continue; }
+      await keepSyncing(tool);
+    }
+    // Each tool's copy, and for Delete everywhere the other copies it reads (Copilot's in the shared folder). Links go first, each as
+    // a link, so none is left leading to a copy already removed.
+    const work = (change.remove ?? []).flatMap(tool => {
+      const main = entry.facts.copies[tool];
+      return main ? [main, ...(change.everywhere ? entry.facts.extra.filter(extra => extra.tool === tool && !extra.readsFrom) : [])].map(copy => ({ tool, copy, main: copy === main })) : [];
+    }).sort((first, second) => Number(first.copy.outside?.kind !== 'link') - Number(second.copy.outside?.kind !== 'link'));
+    for (const { tool, copy, main } of work) {
+      if (removedPaths.has(copy.directory)) { removedFrom.add(tool); continue; }
+      const outside = copy.outside;
+      // The shared folder's copy is read by other tools too: removing it for one tool alone would take it from them as well.
+      // Delete everywhere takes it from all of them, as its confirming click says.
+      const alsoReading = outside?.kind === 'shared' && !change.everywhere ? tools.filter(other => other !== tool && !removing.has(other) && [entry.facts.copies[other], ...entry.facts.extra.filter(extra => extra.tool === other)].some(found => found && sameDir(found.directory, copy.directory))) : [];
+      const refusal = copy.writable ? await rootProblem(context, tool)
+        : copy.readsFrom ? `${toolName(tool)} reads ${toolName(copy.readsFrom)}’s copy. Disable it in ${toolName(tool)} to stop it loading there, or remove it from ${toolName(copy.readsFrom)}.`
+        : alsoReading.length ? `${toolName(tool)} reads it in ${dirname(copy.directory)}, which ${andList(alsoReading.map(toolName))} ${alsoReading.length > 1 ? 'read' : 'reads'} too. Disable it in ${toolName(tool)}, or use Delete everywhere.`
+        : outside?.kind === 'link' ? await rootProblem(context, tool)
+        : outside ? undefined
+        : `${toolName(tool)} reads it at ${copy.directory}, inside a skills folder that is a link or another tool’s folder, so Central Knot does not change it.`;
+      if (refusal) { if (main) { await keepSyncing(tool); results.push({ item: name, harness: tool, outcome: 'held', message: refusal }); } continue; }
       try {
         // Kept in the store and on record first (as a removal, so a crash before History still recovers it as one).
         await importRevision(context, change.key, copy.directory, await readTree(copy.directory));
         displace(item, tool, copy.hash, { folder: copy.folder, stoppedSync: stoppedSync.includes(tool) });
         await save();
-        await removeChecked(context, copy.directory, copy.hash);
+        // A link goes as a link: what it leads to is never touched by removing it.
+        if (outside?.linkTo !== undefined) await unlinkChecked(copy.directory, outside.linkTo); else await removeChecked(context, copy.directory, copy.hash);
       } catch (error) {
         if (error instanceof Error && error.message.startsWith('fault:')) throw error;
         if (item.displaced) item.displaced = item.displaced.filter(kept => !(kept.hash === copy.hash && kept.tool === tool));
-        await keepSyncing(tool);
+        if (main) await keepSyncing(tool);
         results.push({ item: name, harness: tool, outcome: errorCode(error) === 'CK_CHANGED' ? 'held' : 'failed', message: errorCode(error) === 'CK_CHANGED' ? `${toolName(tool)}’s copy changed just now, so it was kept.` : `Could not remove ${toolName(tool)}’s copy: ${plainError(error)}` });
         continue;
       }
       writes++;
-      // Managed: the content last synced to it goes along, so Restore can put its sync record back.
-      const synced = records.find(record => record.harness === tool)?.hash;
-      removed.push({ tool, hash: copy.hash, folder: copy.folder, ...(synced ? { synced } : {}) });
+      removedPaths.add(copy.directory);
+      removedFrom.add(tool);
+      // Managed: the content last synced to it goes along, so Restore can put its sync record back. Not for a link: sync never writes one.
+      const synced = main && outside?.linkTo === undefined ? records.find(record => record.harness === tool)?.hash : undefined;
+      removed.push({ tool, hash: copy.hash, folder: copy.folder, ...(synced ? { synced } : {}), ...(outside ? { path: copy.directory } : {}), ...(outside?.linkTo !== undefined ? { linkTo: outside.linkTo } : {}) });
+      if (outside?.kind === 'shared') results.push({ item: name, outcome: 'removed', tookOver: 'shared', folder: dirname(copy.directory), message: `Removed the ${outside.linkTo !== undefined ? 'link' : 'copy'} in ${dirname(copy.directory)}, which other apps may read too. Restore it from History.` });
+      else if (outside) linkGone(tool, outside.linkTo!);
+    }
+    for (const tool of (change.remove ?? []).filter(candidate => removedFrom.has(candidate))) {
       // Its own copy is gone; a copy it reads in another tool's folder still loads there, and only Disable stops that.
       const still = entry.reads[tool];
       // And the other way: a tool that read this copy, and got none of its own in this pass, no longer has the skill.
       const lost = tools.filter(other => entry.facts.copies[other]?.readsFrom === tool && !item.copies.some(copy => copy.harness === other && copy.status === 'written'));
-      results.push({ item: name, harness: tool, outcome: 'removed', message: `Removed from ${toolName(tool)}. Restore it from History.${still ? ` ${toolName(tool)} still reads ${toolName(still)}’s copy; Disable it in ${toolName(tool)} to stop it loading there.` : ''}${lost.length ? ` ${lost.map(toolName).join(' and ')} read this copy, so ${lost.length > 1 ? 'they no longer have' : 'it no longer has'} the skill.` : ''}` });
+      // A copy it still reads in the shared folder (only Remove for one tool leaves that): it still has the skill from there.
+      const left = change.everywhere ? undefined : entry.facts.extra.find(extra => extra.tool === tool && !removedPaths.has(extra.directory));
+      results.push({ item: name, harness: tool, outcome: 'removed', message: `Removed from ${toolName(tool)}.${how.get(tool) ?? ''} Restore it from History.${still ? ` ${toolName(tool)} still reads ${toolName(still)}’s copy; Disable it in ${toolName(tool)} to stop it loading there.` : ''}${left ? ` ${toolName(tool)} still reads the copy in ${dirname(left.directory)}.` : ''}${lost.length ? ` ${lost.map(toolName).join(' and ')} read this copy, so ${lost.length > 1 ? 'they no longer have' : 'it no longer has'} the skill.` : ''}` });
+    }
+    // Delete everywhere: a tool not asked about that read only the removed copies (its skills folder is a link to the shared
+    // folder) no longer has the skill either, and the result names it with the others.
+    if (change.everywhere && removedPaths.size) {
+      for (const tool of tools.filter(other => !removing.has(other))) {
+        const its = [entry.facts.copies[tool], ...entry.facts.extra.filter(extra => extra.tool === tool)].filter((copy): copy is ToolCopy => !!copy && !copy.readsFrom);
+        if (!its.some(copy => removedPaths.has(copy.directory))) continue;
+        const left = [];
+        for (const copy of its) if (!removedPaths.has(copy.directory) && await exists(copy.directory)) left.push(copy);
+        if (left.length) continue;
+        results.push({ item: name, harness: tool, outcome: 'removed', message: `Removed from ${toolName(tool)} too: it read the copy in ${dirname([...removedPaths].find(path => its.some(copy => copy.directory === path))!)}. Restore it from History.` });
+      }
     }
     if (removed.length) event({ key: change.key, item: name, kind: 'removed', losers: removed, orderProved: true, stoppedSync: stoppedSync.filter(tool => removed.some(gone => gone.tool === tool)), ...(lastCopies && item.state !== 'shared' ? { unmanaged: true } : {}) });
   };
@@ -1189,7 +1484,11 @@ export async function restoreFromHistory(context: ShareContext, eventId: string,
     const record = start.record;
     const history = await readHistory(context);
     const past = history.find(entry => entry.id === eventId);
+    // A take-over Apply all made along with these new copies is undone with them: its Undo undoes both.
+    const alongside = past?.kind === 'added' ? tookOverWith(history, past) : undefined;
+    if (alongside) return await undoTookOver(context, record, history, alongside);
     if (past?.kind === 'added') return await undoAdded(context, record, history, past);
+    if (past?.kind === 'took-over') return await undoTookOver(context, record, history, past);
     if (past?.kind === 'switched') return await undoSwitched(context, history, past);
     if (past?.kind === 'removed') return await restoreRemoved(context, record, history, past);
     if (past?.kind === 'chosen' && choice === 'narrow') return await undoChoice(context, record, history, past);
@@ -1204,7 +1503,9 @@ export async function restoreFromHistory(context: ShareContext, eventId: string,
     try { tree = await readTree(kept); } catch { return { stopped: 'The kept content is no longer in Central Knot’s store, so it can’t be restored.', results: [], harnessWrites: 0 }; }
     const snapshots = await context.read();
     const tools = managedTools(snapshots, record.tools);
-    const entry = (await gather(context, snapshots, record)).get(past.key);
+    const results: DestinationResult[] = [];
+    let writes = 0;
+    let entry = (await gather(context, snapshots, record)).get(past.key);
     // A skill deleted earlier whose name is managed again with other content: restoring the old one would replace the new one.
     if (past.kind === 'deleted' && item.state === 'shared' && item.hash !== hash) return { stopped: `“${item.name}” is managed again with other content. Restoring the old one would replace it; delete or rename the new one first.`, results: [], harnessWrites: 0 };
     // A skill deleted earlier whose name is now taken by a different skill: never overwrite the new one.
@@ -1212,16 +1513,36 @@ export async function restoreFromHistory(context: ShareContext, eventId: string,
       const taken = Object.entries(entry?.facts.copies ?? {}).find(([, copy]) => copy && copy.hash !== tree.hash);
       if (taken) return { stopped: `A different “${item.name}” is in ${harnesses[taken[0] as HarnessId].name} now. Rename or remove it, then restore.`, results: [], harnessWrites: 0 };
     }
+    // A deletion that removed the shared copy a tool can have no other of (its skills folder is the shared folder): that copy
+    // goes back as it was, so the tool has the skill again; only after the refusals above, so a refused Restore writes nothing.
+    // Links and a shared copy a tool could do without stay gone: each tool gets its own copy, as Manage gives it, and the result
+    // says so.
+    const outsideLost = past.kind === 'deleted' ? past.losers.filter(loser => loser.path) : [];
+    if (outsideLost.length) {
+      const problems = new Map(await Promise.all(tools.map(async tool => [tool, await rootProblem(context, tool)] as const)));
+      const pinned = await pinnedShared(context, tools, problems);
+      const inShared = (loser: Loser) => sameDir(dirname(loser.path!), sharedFolder(context));
+      const pinnedCopies = pinned ? outsideLost.filter(loser => loser.linkTo === undefined && inShared(loser)) : [];
+      for (const loser of pinnedCopies) {
+        const put = await putBackExact(context, past.key, item.name, loser);
+        if (put.outcome === 'written') writes++;
+        results.push({ item: item.name, outcome: put.outcome, folder: dirname(loser.path!), message: put.outcome === 'written' ? `Put the shared copy back in ${dirname(loser.path!)}, the only copy ${toolName(pinned!.tool)} can have.` : put.message });
+      }
+      const left = outsideLost.filter(loser => !pinnedCopies.includes(loser));
+      if (left.length) results.push({ item: item.name, outcome: 'stayed', message: notPutBack(left.filter(loser => !inShared(loser)).length, left.filter(inShared).length) });
+      if (writes) entry = (await gather(context, await context.read(), record)).get(past.key);
+    }
     const before = item.state === 'shared' ? item.hash : undefined;
     // The intent is on record first: a crash part-way leaves unfinished copies, never what reads as a deletion.
     for (const copy of item.copies) copy.status = 'pending';
     await saveRecord(context.home, record);
-    const results: DestinationResult[] = [];
     const replaced: { tool: HarnessId; hash: string }[] = [];
     const copies: RecordItem['copies'] = [];
-    let writes = 0;
     for (const tool of tools.filter(candidate => !item.off?.includes(candidate))) {
       if (entry?.facts.cannot[tool]) continue;
+      // It reads the restored content where Central Knot doesn't write (the shared copy just put back): it has it again.
+      const reading = ownCopy(entry, tool);
+      if (reading && !reading.writable && reading.hash === tree.hash) { results.push({ item: item.name, harness: tool, outcome: 'written', message: `${toolName(tool)} has it again: it reads the shared copy.` }); continue; }
       const late = await rootProblem(context, tool);
       if (late) { results.push({ item: item.name, harness: tool, outcome: 'held', message: late }); continue; }
       // A tool that reads the folder of one restored here (OpenCode reads Claude Code's) reads the restored copy: none of its own is made.
@@ -1229,7 +1550,7 @@ export async function restoreFromHistory(context: ShareContext, eventId: string,
       const here = ownCopy(entry, tool);
       if (!here && owner && !item.off?.includes(owner) && !entry?.facts.cannot[owner]) continue;
       if (here) {
-        if (!here.writable) { results.push({ item: item.name, harness: tool, outcome: 'held', message: `${harnesses[tool].name} reads a copy at ${here.directory}, which Central Knot does not change.` }); continue; }
+        if (!here.writable) { results.push({ item: item.name, harness: tool, outcome: 'held', message: untouched(tool, here, 'reads a copy', item.name) }); continue; }
         if (here.hash !== tree.hash) {
           displace(item, tool, here.hash);
           await saveRecord(context.home, record);
@@ -1281,7 +1602,7 @@ async function undoAdded(context: ShareContext, record: SyncRecord, history: His
     const here = recorded && entry?.locations.find(location => location.tool === loser.tool && sameDir(location.copy.directory, recorded.directory));
     if (!recorded || !here) { results.push({ item: item.name, harness: loser.tool, outcome: 'stayed', message: `${harnesses[loser.tool].name}'s copy is already gone.` }); continue; }
     if (here.copy.hash !== loser.hash) { kept.push(loser.tool); results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: `${harnesses[loser.tool].name}'s copy was edited since, so it stays.` }); continue; }
-    if (!here.copy.writable) { kept.push(loser.tool); results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: `${harnesses[loser.tool].name} reads it at ${here.copy.directory}, which Central Knot does not change.` }); continue; }
+    if (!here.copy.writable) { kept.push(loser.tool); results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: untouched(loser.tool, here.copy, 'reads it', item.name) }); continue; }
     const late = await rootProblem(context, loser.tool);
     if (late) { kept.push(loser.tool); results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: late }); continue; }
     try {
@@ -1301,6 +1622,82 @@ async function undoAdded(context: ShareContext, record: SyncRecord, history: His
   else item.off = [...new Set([...(item.off ?? []), ...past.losers.map(loser => loser.tool).filter(tool => !kept.includes(tool))])];
   await saveRecord(context.home, record);
   past.undoneBy = randomUUID();
+  await saveHistory(context, history);
+  return { results, harnessWrites: writes };
+}
+
+/** The take-over that came with an Apply all's new copies, while neither is undone. */
+const tookOverWith = (history: HistoryEvent[], added: HistoryEvent) => (added.undoneBy ? undefined : history.find(entry => entry.kind === 'took-over' && !entry.undoneBy && entry.tookOver?.addedId === added.id));
+
+/**
+ * Undo of a take-over: the shared copy goes back where it was (as a link, if it was one), each real copy that replaced a link is
+ * a link again, and the copies made for tools that read the shared one are removed. All or nothing: if any of those copies was
+ * edited since, or something else is where one goes back, nothing is written. When the same Apply all started managing the
+ * skill, its new copies go too and the skill is unmanaged again, as it was.
+ */
+async function undoTookOver(context: ShareContext, record: SyncRecord, history: HistoryEvent[], past: HistoryEvent): Promise<ApplyResult> {
+  const stop = (stopped: string): ApplyResult => ({ stopped, results: [], harnessWrites: 0 });
+  const refuse = (why: string, earlier = false): ApplyResult => ({ ...stop(`${why}, so nothing was undone.${earlier ? ' History can still put an earlier version back.' : ''}`), refused: why });
+  if (past.undoneBy) return stop('That change was already undone.');
+  const told = past.tookOver;
+  const item = record.items[past.key];
+  if (!told || !item) return stop('That change can’t be undone.');
+  const holds = async (path: string): Promise<string | undefined> => { try { return (await readTree(path)).hash; } catch { return undefined; } };
+  const free = async (path: string) => { try { await lstat(path); return false; } catch (error) { return errorCode(error) === 'ENOENT'; } };
+  // Check everything first.
+  for (const copy of told.shared) {
+    if (await free(copy.path)) { try { await readTree(storedRevision(context, past.key, copy.hash)); } catch { return stop('The copy that was in the shared folder is no longer in Central Knot’s store, so it can’t be put back.'); } continue; }
+    if (await holds(copy.path) !== copy.hash) return refuse(`Something else is at ${copy.path} now`);
+  }
+  for (const link of told.links) {
+    if (await free(link.path)) continue;
+    if ((await lstat(link.path)).isSymbolicLink()) { if (await readlink(link.path) === link.linkTo) continue; return refuse(`${link.path} is another link now`); }
+    if (!link.placed || await holds(link.path) !== link.placed) return refuse(`${toolName(link.tool)}’s copy of ${past.item} was edited since`, true);
+  }
+  for (const copy of told.placed) {
+    if (!(await free(copy.path)) && await holds(copy.path) !== copy.hash) return refuse(`${toolName(copy.tool)}’s copy of ${past.item} was edited since`, true);
+  }
+  // The copies the same Manage added go with it: if one was edited since, the skill would stay managed, so nothing is undone.
+  const added = told.addedId ? history.find(entry => entry.id === told.addedId && !entry.undoneBy) : undefined;
+  for (const loser of added?.losers ?? []) {
+    const recorded = item.copies.find(copy => copy.harness === loser.tool && copy.created);
+    if (recorded && !(await free(recorded.directory)) && await holds(recorded.directory) !== loser.hash) return refuse(`${toolName(loser.tool)}’s new copy of ${past.item} was edited since`, true);
+  }
+  const results: DestinationResult[] = [];
+  let writes = 0;
+  for (const copy of told.shared) {
+    if (!(await free(copy.path))) continue;
+    await mkdir(dirname(copy.path), { recursive: true });
+    if (copy.linkTo !== undefined) await symlink(copy.linkTo, copy.path);
+    else { const kept = storedRevision(context, past.key, copy.hash); await placeCopy(context, kept, { harness: sharedReader(context, harnessIds), directory: copy.path, limits: [] }, await readTree(kept)); }
+    writes++;
+    results.push({ item: past.item, outcome: 'written', tookOver: 'shared', folder: dirname(copy.path), message: `Put the copy back in ${dirname(copy.path)}.` });
+  }
+  for (const link of told.links) {
+    const isLink = !(await free(link.path)) && (await lstat(link.path)).isSymbolicLink();
+    if (isLink) continue;
+    if (!(await free(link.path))) await removeChecked(context, link.path, link.placed!);
+    await symlink(link.linkTo, link.path);
+    writes++;
+    results.push({ item: past.item, harness: link.tool, outcome: 'written', tookOver: 'link', message: `${toolName(link.tool)}’s skills folder has its link back (to ${link.linkTo}).` });
+  }
+  for (const copy of told.placed) {
+    if (await free(copy.path)) continue;
+    await removeChecked(context, copy.path, copy.hash);
+    writes++;
+    results.push({ item: past.item, harness: copy.tool, outcome: 'removed', tookOver: 'placed', message: `Removed ${toolName(copy.tool)}’s own copy; it reads the one in ${sharedFolder(context)} again.` });
+  }
+  // The copies Central Knot now follows no longer include these: they are a link or gone again.
+  const back = [...told.links.map(link => link.path), ...told.placed.map(copy => copy.path)];
+  item.copies = item.copies.filter(copy => !back.some(path => sameDir(path, copy.directory)));
+  past.undoneBy = randomUUID();
+  // Its added copies go with it only while the skill is managed; unmanaged since, they are ordinary copies now and stay.
+  if (added && item.state === 'shared') {
+    const removed = await undoAdded(context, record, history, added);
+    return { ...removed, results: [...results, ...removed.results], harnessWrites: writes + removed.harnessWrites };
+  }
+  if (told.managedNow && item.state === 'shared') { item.state = 'dont-share'; delete item.use; item.copies = []; }
+  await saveRecord(context.home, record);
   await saveHistory(context, history);
   return { results, harnessWrites: writes };
 }
@@ -1333,6 +1730,27 @@ async function undoSwitched(context: ShareContext, history: HistoryEvent[], past
 }
 
 /**
+ * Puts a removed copy outside the tool's own folder, or a link, back exactly where and as it was: the link with its own text, or
+ * the copy from the store. Already there counts as back ('stayed'); something else there stays ('held').
+ */
+async function putBackExact(context: ShareContext, key: string, name: string, loser: Loser): Promise<DestinationResult> {
+  const path = loser.path ?? ownCopyDir(context, loser.tool, loser.folder ?? name);
+  let there: { link?: string; hash?: string } | undefined;
+  try { const info = await lstat(path); there = info.isSymbolicLink() ? { link: await readlink(path) } : { hash: await readTree(path).then(tree => tree.hash, () => undefined) }; } catch { /* free */ }
+  if (there && (loser.linkTo !== undefined ? there.link === loser.linkTo : there.hash === loser.hash)) return { item: name, harness: loser.tool, outcome: 'stayed', message: `${path} is back already.` };
+  if (there) return { item: name, harness: loser.tool, outcome: 'held', message: `Something else is at ${path} now. It stays.` };
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    if (loser.linkTo !== undefined) await symlink(loser.linkTo, path);
+    else { const kept = storedRevision(context, key, loser.hash); await placeCopy(context, kept, { harness: loser.tool, directory: path, limits: [] }, await readTree(kept)); }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('fault:')) throw error;
+    return { item: name, harness: loser.tool, outcome: 'failed', message: errorCode(error) === 'ENOENT' ? 'The kept copy is no longer in Central Knot’s store.' : `Could not put ${path} back: ${plainError(error)}` };
+  }
+  return { item: name, harness: loser.tool, outcome: 'written', message: loser.linkTo !== undefined ? `Put the link back at ${path}.` : `Put the copy back in ${dirname(path)}.` };
+}
+
+/**
  * Restore of a removal: each removed copy goes back in its own tool under its own folder name, from the store, unless that tool
  * has a different copy by now. A copy already back (put back by hand) counts as back. A managed skill syncs there again, and the
  * next pass catches the copy up if it is behind. Tools put back are remembered on the event, so a retry does only the rest; when
@@ -1345,8 +1763,20 @@ async function restoreRemoved(context: ShareContext, record: SyncRecord, history
   const entry = (await gather(context, await context.read(), record)).get(past.key);
   const results: DestinationResult[] = [];
   const back = new Set(past.restoredTools ?? []);
+  // A link or a copy outside the tool's own folder is looked at on every try, and is back only when it is there itself.
+  const exact = (loser: Loser) => !!loser.path || loser.linkTo !== undefined;
+  const exactBack = new Set<Loser>();
   let writes = 0;
-  for (const loser of past.losers.filter(gone => !back.has(gone.tool))) {
+  for (const loser of past.losers.filter(gone => !back.has(gone.tool) || exact(gone))) {
+    // A copy outside the tool's own folder, or a link: put back exactly where and as it was.
+    if (exact(loser)) {
+      const put = await putBackExact(context, past.key, item.name, loser);
+      results.push(put);
+      if (put.outcome === 'written') writes++;
+      if (put.outcome === 'written' || put.outcome === 'stayed') { back.add(loser.tool); exactBack.add(loser); }
+      continue;
+    }
+    if (back.has(loser.tool)) continue;
     // Its own copy: one it reads in another tool's folder is not the copy that was removed.
     const here = ownCopy(entry, loser.tool);
     if (here) {
@@ -1378,7 +1808,7 @@ async function restoreRemoved(context: ShareContext, record: SyncRecord, history
     }
   }
   await saveRecord(context.home, record);
-  const done = past.losers.every(loser => back.has(loser.tool));
+  const done = past.losers.every(loser => (exact(loser) ? exactBack.has(loser) : back.has(loser.tool)));
   if (done) {
     const id = randomUUID();
     past.undoneBy = id;
@@ -1435,7 +1865,7 @@ async function undoChoice(context: ShareContext, record: SyncRecord, history: Hi
   for (const loser of chosen.losers) {
     const here = entry?.facts.copies[loser.tool];
     if (!here || here.hash !== chosen.winner.hash) return stop(`${harnesses[loser.tool].name}’s copy of ${item.name} changed since, so nothing was undone here. History can still put an earlier version back.`);
-    if (!here.writable) return stop(`${harnesses[loser.tool].name} reads ${item.name} at ${here.directory}, which Central Knot does not change.`);
+    if (!here.writable) return stop(untouched(loser.tool, here, `reads ${item.name}`, item.name));
     try { await readTree(storedRevision(context, chosen.key, loser.hash)); } catch { return stop('The replaced copy is no longer in Central Knot’s store, so it can’t be put back.'); }
     const late = await rootProblem(context, loser.tool);
     if (late) return stop(late);
@@ -1494,35 +1924,59 @@ export async function deleteEverywhere(context: ShareContext, key: string, resum
     const entry = (await gather(context, snapshots, record)).get(key);
     if (!item || !entry) return { stopped: 'That skill is not there any more.', results: [], harnessWrites: 0 };
     const results: DestinationResult[] = [];
-    const lost: { tool: HarnessId; hash: string }[] = [];
+    const lost: Loser[] = [];
     const leftover: RecordItem['copies'] = [];
     let writes = 0;
     const own = new Map(item.copies.map(copy => [copy.directory, copy.hash]));
-    for (const location of entry.locations.filter(candidate => !item.off?.includes(candidate.tool))) {
+    // Links first: each is removed as a link before the copy it may lead to (the shared one) goes as its own step.
+    const order = (location: Location) => (location.copy.outside?.kind === 'link' ? 0 : location.copy.outside ? 1 : 2);
+    const candidates = entry.locations.filter(candidate => !item.off?.includes(candidate.tool)).sort((first, second) => order(first) - order(second));
+    // One folder is one copy, however many tools read it (the shared folder's): it is removed once, and said once.
+    const done = new Set<string>();
+    const real = new Map(await Promise.all(candidates.map(async candidate => [candidate.copy.directory, await realpath(candidate.copy.directory).catch(() => candidate.copy.directory)] as const)));
+    // Folders removed so far, as they really are: a copy reached through a linked skills folder that was one of them is gone with it.
+    const gone = new Set<string>();
+    for (const location of candidates) {
+      const path = location.copy.directory;
+      if (done.has(path) || (!location.copy.outside?.linkTo && gone.has(real.get(path)!))) continue;
+      done.add(path);
+      const outside = location.copy.outside;
       // Only the skill's own copies: recorded ones, or one identical to its synced content. A different copy that was never synced stays.
-      if (!own.has(location.copy.directory) && location.copy.hash !== item.hash) { results.push({ item: item.name, harness: location.tool, outcome: 'held', message: `${harnesses[location.tool].name} has a different “${item.name}” that was never synced. It stays.` }); continue; }
-      if (!location.copy.writable) { results.push({ item: item.name, harness: location.tool, outcome: 'held', message: `${harnesses[location.tool].name} reads a copy at ${location.copy.directory}, which Central Knot does not change. Remove it yourself.` }); continue; }
-      const late = await rootProblem(context, location.tool);
+      if (!own.has(path) && location.copy.hash !== item.hash) { results.push({ item: item.name, harness: location.tool, outcome: 'held', message: `${harnesses[location.tool].name} has a different “${item.name}” that was never synced. It stays.` }); continue; }
+      if (!location.copy.writable && !outside) {
+        const why = await rootProblem(context, location.tool);
+        results.push({ item: item.name, harness: location.tool, outcome: 'held', message: `${harnesses[location.tool].name} reads a copy at ${path}, inside a skills folder that is a link or another tool’s folder. Central Knot does not change what is in it.${why ? ` ${why}` : ''}` });
+        continue;
+      }
+      const late = outside ? (outside.kind === 'link' ? await rootProblem(context, location.tool) : undefined) : await rootProblem(context, location.tool);
       if (late) { results.push({ item: item.name, harness: location.tool, outcome: 'held', message: late }); continue; }
       // An edit not yet spread is the newest content: Restore prefers it. A copy only behind is an older revision, already kept.
-      const newest = location.copy.hash === item.hash || location.copy.hash !== own.get(location.copy.directory);
+      const newest = location.copy.hash === item.hash || location.copy.hash !== own.get(path);
       try {
-        await importRevision(context, key, location.copy.directory, await readTree(location.copy.directory));
+        await importRevision(context, key, path, await readTree(path));
         // On record before it goes, so a crash or a failure later in this action never lets it be pruned.
         if (newest) { displace(item, location.tool, location.copy.hash); await saveRecord(context.home, record); }
-        await removeChecked(context, location.copy.directory, location.copy.hash);
+        // A link goes as a link: what it leads to is never touched by removing it.
+        if (outside?.linkTo !== undefined) await unlinkChecked(path, outside.linkTo); else await removeChecked(context, path, location.copy.hash);
       } catch (error) {
         if (error instanceof Error && error.message.startsWith('fault:')) throw error;
-        if (errorCode(error) === 'CK_CHANGED') { results.push({ item: item.name, harness: location.tool, outcome: 'held', message: `${harnesses[location.tool].name}'s copy changed just now, so it was kept. Delete it there yourself, or use Delete everywhere again.` }); continue; }
+        if (errorCode(error) === 'CK_CHANGED') { results.push({ item: item.name, harness: location.tool, outcome: 'held', message: `${harnesses[location.tool].name}'s copy changed just now, so it was kept. Use Delete everywhere again to remove it.` }); continue; }
+        // A copy outside Central Knot's own is never retried in the background: the person asks again.
+        if (outside) { results.push({ item: item.name, harness: location.tool, outcome: 'failed', message: `Could not remove ${path}: ${plainError(error)}` }); continue; }
         // One copy that can't go never stops the rest: it is retried by later passes while it is unchanged.
-        leftover.push({ harness: location.tool, directory: location.copy.directory, hash: location.copy.hash, created: false, status: 'removing' });
+        leftover.push({ harness: location.tool, directory: path, hash: location.copy.hash, created: false, status: 'removing' });
         results.push({ item: item.name, harness: location.tool, outcome: 'failed', message: `Could not remove ${harnesses[location.tool].name}'s copy yet: ${plainError(error)} Central Knot will try again.` });
         continue;
       }
       writes++;
-      if (newest) lost.push({ tool: location.tool, hash: location.copy.hash });
-      results.push({ item: item.name, harness: location.tool, outcome: 'removed', message: 'Deleted. Restore it from History.' });
+      // A link or the shared copy says where it was, so Restore can put back the shared copy a tool can have no other of.
+      if (newest) lost.push({ tool: location.tool, hash: location.copy.hash, ...(outside ? { path } : {}), ...(outside?.linkTo !== undefined ? { linkTo: outside.linkTo } : {}) });
+      if (outside?.linkTo === undefined) gone.add(real.get(path)!);
+      results.push({ item: item.name, ...(outside?.kind === 'shared' ? { tookOver: 'shared' as const, folder: dirname(path) } : { harness: location.tool }), ...(outside?.kind === 'link' ? { tookOver: 'link' as const } : {}), outcome: 'removed', message: outside?.kind === 'shared' ? `Removed the ${outside.linkTo !== undefined ? 'link' : 'copy'} in ${dirname(path)}, which other apps may read too. Restore it from History.`
+        : outside ? `Removed the link in ${harnesses[location.tool].name}’s skills folder (it led to ${outside.linkTo}); what it led to was not touched. Restore it from History.` : 'Deleted. Restore it from History.' });
     }
+    // Nothing went at all: nothing is deleted, and the skill stays as it was, so a later Manage or Delete still finds it.
+    if (!writes && !leftover.length) return { stopped: results.find(result => result.outcome !== 'removed')?.message ?? 'Nothing could be removed.', results, harnessWrites: 0 };
     const hash = item.hash || lost[0]?.hash || '';
     item.copies = [...leftover, ...item.copies.filter(copy => copy.status === 'written' && !entry.locations.some(location => location.copy.directory === copy.directory)).map(copy => ({ ...copy, status: 'removing' as const }))];
     item.state = 'dont-share';
