@@ -11,8 +11,8 @@ import type { IconName } from './icons.ts';
 import type { HistoryEvent } from './types.ts';
 
 const who = (tool?: string) => (tool ? toolName(tool) : 'Central Knot');
-/** A deletion of the item since `event` that still stands: it ended what `event` did (an Off), and its own Restore is the way back. */
-const deletedSince = (event: HistoryEvent) => !!state.history.data?.some(later => later.key === event.key && later.kind === 'deleted' && !later.undoneBy && Date.parse(later.at) >= Date.parse(event.at) && later.id !== event.id);
+/** A deletion of the item since `event` (still standing) that ended what it did: the deletion's own Restore is the way back. */
+const deletedSince = (event: HistoryEvent) => !event.undoneBy && !!state.history.data?.some(later => later.key === event.key && later.kind === 'deleted' && !later.undoneBy && Date.parse(later.at) >= Date.parse(event.at) && later.id !== event.id);
 
 function describe(event: HistoryEvent): { glyph: IconName; text: string; action?: string } {
   const order = event.orderProved ? '' : ' Order not proved; the fixed tool order decided.';
@@ -67,7 +67,7 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
         return { glyph: 'undo-2', text: `Redid ${first ? named(first) : 'the change'}; it is back${where}.`, action: first?.kind === 'deleted' ? 'Restore' : 'Undo edit' };
       }
       // Turned on again where it was turned off: its Undo turns it off there again.
-      if ((undone?.kind === 'removed' && undone.turnedOff) || event.turnedOff) return { glyph: 'undo-2', text: `Turned on again: put back${where}.`, ...(event.key.startsWith('agent:') ? { action: 'Undo' } : {}) };
+      if ((undone?.kind === 'removed' && undone.turnedOff) || event.turnedOff) return { glyph: 'undo-2', text: `Turned on again: put back${where}.`, ...(event.key.startsWith('agent:') && !deletedSince(event) ? { action: 'Undo' } : {}) };
       if (undone?.kind === 'removed') return { glyph: 'undo-2', text: `Restored${where}.` };
       if (undone?.kind === 'deleted' || event.everywhere) return { glyph: 'undo-2', text: `Restored after it was deleted${where}.`, action: 'Delete again' };
       return { glyph: 'undo-2', text: `Undid ${undone ? named(undone) : 'a change'}; the earlier version is back${where}.`, action: 'Redo edit' };
