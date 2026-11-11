@@ -163,7 +163,7 @@ if (writes) {
   check('each was given the folder in the build’s own data folder', addedBy('claude')[0] === marketFolder && addedBy('codex')[0] === marketFolder, addedBy('claude'));
   check('Copilot CLI, which refuses this marketplace, was not asked', addedBy('copilot').length === 0);
   check('nothing was installed by it', !existsSync(join(HOME, '.claude/plugins/installed_plugins.json')));
-  check('the status bar says once that nothing was installed, and where the marketplace is now listed', await a.until(`document.querySelector('#announcement').textContent.startsWith('Nothing was installed: Acme plugins is now listed in Claude Code and Codex (see Plugins).')`), await a.run(`document.querySelector('#announcement').textContent`));
+  check('the status bar says once that nothing was installed, and where the marketplace is now listed', await a.until(`document.querySelector('#announcement').textContent.startsWith('Nothing was installed: Acme plugins is listed in Claude Code and Codex (see Plugins).')`), await a.run(`document.querySelector('#announcement').textContent`));
   await a.shot('first-open-1280');
   await a.size(860, 560);
   await a.shot('first-open-860');
@@ -235,7 +235,7 @@ const checkNow = async () => { await a.click('[id^="check-feed-"]'); await a.unt
 check('About has the feed’s line and Check now', await a.until(`!!document.querySelector('[id^="check-feed-"]')`), await feedSays());
 // Nothing is published yet.
 await checkNow();
-check('with nothing published, it says the feed couldn’t be read, and the plugins stay', await feedSays() === 'Couldn’t check for newer plugins: the server answered 404. The ones here stay in use.', await feedSays());
+check('with nothing published, it says the feed couldn’t be read, and the plugins stay', /^Couldn’t check for newer plugins: nothing is published at their address \(the server answered 404\)\. The ones here stay in use, and the app tries again by itself\. Last tried .+\. If it keeps happening, tell Platform team\.$/.test(await feedSays()), await feedSays());
 // Claude Code has starter-skills installed (as its own records say); then release 2 is published: document-tools moves
 // on to 1.3.0 and starter-skills is no longer offered.
 writeClaudeInstall(HOME, 'team-tools', 'starter-skills', '1.0.0', { 'skills/hello/SKILL.md': '---\nname: hello\ndescription: Says hello.\n---\n' });
@@ -244,7 +244,7 @@ const published = publish(Math.floor(Date.now() / 1000) + 100);
 check('publish: the report says what went out', /^Published team-tools: .*\n[\s\S]*Plugins packed \(4\): document-tools 1\.3\.0[\s\S]*NOT PACKED \(1\)/.test(published), published);
 rmSync(market, { recursive: true, force: true });
 await checkNow();
-check('Check now takes the newer plugins, and says so', (await feedSays()).startsWith('Newer plugins arrive by themselves. Last checked ') && await a.run(`document.querySelector('#announcement').textContent`).then(text => text.startsWith('Acme plugins now has the plugins published on ')), [await feedSays(), await a.run(`document.querySelector('#announcement').textContent`)]);
+check('Check now takes the newer plugins, and says so', /^Newer plugins arrive by themselves; a tool that has one installed uses the new one from its next session, or shows Update here\. Last checked /.test(await feedSays()) && await a.run(`document.querySelector('#announcement').textContent`).then(text => text.startsWith('Acme plugins now has the plugins published on ')), [await feedSays(), await a.run(`document.querySelector('#announcement').textContent`)]);
 await a.shot('about-feed-1280');
 await a.click('#market-tab-plugins');
 check('the Plugins tab shows the newer version', await a.until(`document.querySelector('[data-plugin="document-tools"] .plugin-row-version')?.textContent === '1.3.0'`), await a.run(`document.querySelector('[data-plugin="document-tools"]')?.textContent`));
@@ -259,7 +259,8 @@ rmSync(market, { recursive: true, force: true });
 truncateSync(join(feedDir, readdirSync(feedDir).filter(name => name.endsWith('.tgz')).sort().at(-1)), 300);
 await a.click('#market-tab-about');
 await checkNow();
-check('a broken publish is said, with why', /^Newer plugins \(.+\) are published, but they didn’t arrive whole, so they weren’t used\. The ones here stay in use, and it is tried again by itself\.$/.test(await feedSays()), await feedSays());
+check('a broken publish is said, with why', /^Newer plugins \(.+\) are published, but they didn’t arrive whole, so they weren’t used\. The ones here stay in use, and the app tries again by itself\. Last tried .+\. If it keeps happening, tell Platform team\.$/.test(await feedSays()), await feedSays());
+check('the status bar says it short enough to read whole', await a.run(`document.querySelector('#announcement').textContent`) === 'Newer Acme plugins couldn’t be had. The ones here stay in use.', await a.run(`document.querySelector('#announcement').textContent`));
 await a.shot('about-feed-broken-1280');
 await a.size(860, 560);
 check('About with the feed’s trouble fits at 860', await a.fits());

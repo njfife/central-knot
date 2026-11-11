@@ -89,7 +89,7 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
         plugin.description && (holds || left) ? h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·') : null,
         holds ? h('span.plugin-row-holds', { title: holds }, holds) : null,
         // The link sits beside the words: a long app name shortens the words, never the link.
-        left && entry.bundled!.kept?.includes(plugin.name) ? h('span.plugin-row-left', {}, h('span.plugin-row-holds', { title: left }, 'No longer offered'))
+        left && entry.bundled!.kept?.includes(plugin.name) ? h('span.plugin-row-left', {}, h('span.plugin-row-holds.plugin-row-warning', { title: left }, 'No longer offered'))
           : left ? h('span.plugin-row-left', {}, h('span.plugin-row-holds', { title: `Can’t be installed from ${entry.bundled!.app}` }, `Can’t be installed from ${entry.bundled!.app}`), h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·'),
             h('button.text-action', { type: 'button', id: `pleft-${marketIndex}-${plugin.name}`, onclick: (event: Event) => { event.stopPropagation(); browse({ tab: 'about' }); } }, 'see why')) : null) : null,
       // A tool on another version or with another copy, on its own line under that, with Update for every tool that is behind.
@@ -193,7 +193,10 @@ function feedNote(entry: MarketplaceView, marketIndex: number): HTMLElement | nu
   const feed = entry.bundled?.feed;
   if (!feed) return null;
   const trouble = feed.outcome === 'failed' || feed.outcome === 'held';
-  const said = trouble ? feed.message! : `Newer plugins arrive by themselves.${feed.checked ? ` Last checked ${when(feed.checked)}.` : ''}`;
+  const at = feed.checked ? when(feed.checked) : '';
+  // Trouble says when it was last tried and, when it didn't mend itself, who to tell; otherwise what "arrive" means for a plugin a tool already has.
+  const said = trouble ? `${feed.message!}${at ? ` Last tried ${at}.` : ''}${feed.outcome === 'failed' && entry.owner ? ` If it keeps happening, tell ${entry.owner}.` : ''}`
+    : `Newer plugins arrive by themselves; a tool that has one installed uses the new one from its next session, or shows Update here.${at ? ` Last checked ${at}.` : ''}`;
   return h('div.market-in-tools', { id: 'market-feed' },
     h('p', {}, trouble ? icon('circle-alert', 13, 'tone-warning') : null, said),
     button({ variant: 'outline', size: 'small', icon: 'refresh-cw', label: 'Check now', name: 'Check now for newer plugins', id: `check-feed-${marketIndex}`, disabled: !!app.busy, onclick: () => void checkCarriedFeed(entry) }));
@@ -237,7 +240,8 @@ function bundledFacts(entry: MarketplaceView) {
 
 /** The plugins a build's marketplace lists but the build carries no files for, each with why, so "not available" has its reason in one place. */
 function notCarriedNote(entry: MarketplaceView): HTMLElement | null {
-  const left = entry.bundled?.unpackaged ?? [];
+  // One that is kept for the tools that have it is said on its own row, as no longer offered.
+  const left = (entry.bundled?.unpackaged ?? []).filter(item => !entry.bundled?.kept?.includes(item.name));
   if (!left.length) return null;
   return h('div.market-not-carried', { role: 'note' },
     h('p', {}, icon('circle-alert', 13, 'tone-warning'), h('span', {}, `${left.length === 1 ? 'One plugin listed here isn’t' : `${left.length} plugins listed here aren’t`} included in ${entry.bundled!.app}, so ${left.length === 1 ? 'it' : 'they'} can’t be installed from here.${entry.owner ? ` Ask ${entry.owner} if you need ${left.length === 1 ? 'it' : 'one'}.` : ''}`)),

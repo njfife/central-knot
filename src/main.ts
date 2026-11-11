@@ -600,9 +600,10 @@ function addCarriedSoon(present: HarnessId[]) {
     for (const report of reports) log(`bundle: ${bundle?.release.marketplace} in ${report.tool}: ${report.outcome}: ${report.message}`);
     const added = reports.filter(report => report.outcome === 'added').map(report => report.tool);
     if (!added.length) return;
-    // The page reads the tools again, and the status bar says once what was done on the person's behalf: first, that nothing was installed.
+    // The page reads the tools again, and the status bar says once what was done on the person's behalf: first, that nothing
+    // was installed, and short enough to be read whole (About names every tool).
     send('sync:changed');
-    send('said', `Nothing was installed: ${custom?.marketplace?.displayName ?? bundle?.release.marketplace} is now listed in ${toolList(added)} (see Plugins).`);
+    send('said', `Nothing was installed: ${custom?.marketplace?.displayName ?? bundle?.release.marketplace} is listed in ${added.length > 2 ? 'your tools' : toolList(added)} (see Plugins).`);
   }, error => logFailure('adding the carried marketplace to the tools', error));
 }
 

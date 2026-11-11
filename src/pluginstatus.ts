@@ -25,7 +25,7 @@ export const heldReason = (tool: HarnessId, marketName: string, other: string) =
 export const notCarried = (app: string, reason: string) => `${app} doesn’t include this plugin’s files, so it can’t be installed from here. ${reason}`;
 
 /** Why a plugin a bundled build's marketplace no longer offers is still listed: a tool here has it installed, and it stays until uninstalled there. */
-export const noLongerOffered = (market: string) => `${market} no longer offers this plugin. It stays in the tools that have it until it is uninstalled there.`;
+export const noLongerOffered = (market: string) => `${market} no longer offers this plugin. It stays in the tools that have it until you uninstall it.`;
 
 /**
  * Why this plugin can't be installed from its marketplace at all, if the marketplace is a bundled build's: the build has

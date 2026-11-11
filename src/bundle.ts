@@ -129,10 +129,14 @@ export function bundleRelease(value: unknown): BundleRelease | undefined {
 
 export const readRelease = async (path: string) => bundleRelease(await readJson(path));
 
-/** A release's date in words: "November 10, 2026". Empty when its manifest gives none that can be read. */
-export function releaseDate(release: Pick<BundleRelease, 'madeAt'>): string {
+/**
+ * A release's date in words: "November 10, 2026"; with `time`, "November 10, 2026, 6:00 PM", to tell two releases of one
+ * day apart. Empty when its manifest gives none that can be read.
+ */
+export function releaseDate(release: Pick<BundleRelease, 'madeAt'>, time = false): string {
   const made = new Date(release.madeAt);
-  return Number.isNaN(made.getTime()) ? '' : made.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  if (Number.isNaN(made.getTime())) return '';
+  return made.toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric', ...(time ? { hour: 'numeric', minute: '2-digit' } : {}) });
 }
 
 /** A release in words, for whoever made it: "November 10, 2026 (GitHub: acme/plugins at 1a2b3c4d5e)". */
@@ -190,13 +194,15 @@ export async function pointEntries(root: string, paths: Map<string, string>, fro
   for (const [file, local] of [[MANIFEST, (path: string): unknown => path], [CODEX_MANIFEST, (path: string): unknown => ({ source: 'local', path })]] as const) {
     const manifest = await read(root, file), before = from ? await read(from, file) : undefined;
     if (!manifest || (from && !before)) continue;
+    let changed = false;
     for (const [name, path] of paths) {
       const at = manifest.plugins.findIndex(item => record(item)?.name === name);
       const entry = record(from ? before!.plugins.find(item => record(item)?.name === name) : manifest.plugins[at]);
       if (!entry) continue;
       if (at < 0) manifest.plugins.push({ ...entry, source: local(path) }); else manifest.plugins[at] = { ...entry, source: local(path) };
+      changed = true;
     }
-    await writeFile(join(root, file), `${JSON.stringify(manifest, null, 2)}\n`);
+    if (changed) await writeFile(join(root, file), `${JSON.stringify(manifest, null, 2)}\n`);
   }
 }
 
@@ -207,7 +213,8 @@ const KEPT_FOLDER = '_kept';
  * Carries plugins over from the content in use (`live`) into a release unpacked in `staged`: each of `keep` that the
  * release doesn't pack and the content in use has files for. Its files go into a folder of their own and its entry, as it
  * was in each manifest that listed it, is pointed there, since a tool that has it installed stops loading it once its
- * marketplace no longer lists it (Claude Code 2.1: "not found in marketplace"). Returns the names carried over.
+ * marketplace no longer lists it (Claude Code 2.1: "not found in marketplace"). Returns the names carried over. (The plugins are
+ * the ones the app itself lists: in a marketplace with both manifests, one listed only in Codex's is not among them.)
  */
 async function carryOver(live: string, staged: string, release: BundleRelease, keep: string[]): Promise<string[]> {
   const packed = new Set(release.plugins.map(plugin => plugin.name));
