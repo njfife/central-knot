@@ -1884,8 +1884,9 @@ async function repoBaseFlow() {
 /**
  * Updates, with a stand-in for GitHub's releases and the install step stubbed (CK_UPDATE_STUB: the app acts as an installed copy
  * of that release, and "installing" records the update and quits; scripts/update-proof.mjs proves the real install on a Mac).
- * The status bar offers the newer release after the first check; one click downloads it with progress; changes waiting for
- * Apply all hold the restart, and the button says so; the next launch says once that it is on the new version.
+ * The sidebar's update control, at the bottom left, is the quiet Check for updates until the first check finds a newer release;
+ * then it stands out, and one click downloads it with progress; something unsaved holds the restart, and the control says so;
+ * the next launch says once that it is on the new version. It fits, open and in the rail, in the smallest window.
  */
 async function updateFlow() {
   const zip = join(scratch, 'update.zip');
@@ -1894,12 +1895,31 @@ async function updateFlow() {
   const fixture = await serveReleases(releases);
   const data = join(scratch, 'update-data');
   const as = tag => ({ CK_UPDATE_STUB: tag, CK_UPDATE_RELEASES: fixture.releasesUrl });
+  let a;
+  /** The sidebar's update control as the person and a screen reader meet it: its look, its words, its name and its tooltip. */
+  const control = () => a.run(`(b => b && { look: b.dataset.look, label: b.textContent.trim(), name: b.getAttribute('aria-label'), title: b.title, disabled: b.disabled })(document.getElementById('update-control'))`);
+  const reaches = async (look, tries = 80) => { for (let i = 0; i < tries && (await control())?.look !== look; i++) await wait(250); return (await control())?.look; };
+  // Every look the control takes, in order, from the moment this is called (main's steps can pass faster than a poll).
+  const watchLooks = () => a.run(`window.ckLooks = []; new MutationObserver(() => { const b = document.getElementById('update-control'); const seen = b && b.dataset.look + ' ' + b.textContent.trim(); if (seen && window.ckLooks.at(-1) !== seen) window.ckLooks.push(seen); }).observe(document.getElementById('sidebar-end'), { subtree: true, childList: true, characterData: true, attributes: true }); true`);
+  /** Whatever in the sidebar doesn't fit: its pages scrolling, the control past its edge, or the control's words cut short. */
+  const sidebarFit = () => a.run(`(() => {
+    const out = [], nav = document.getElementById('nav'), side = document.getElementById('sidebar').getBoundingClientRect();
+    if (nav.scrollHeight > nav.clientHeight + 1) out.push('the pages scroll by ' + (nav.scrollHeight - nav.clientHeight) + 'px');
+    const control = document.getElementById('update-control'), box = control.getBoundingClientRect(), label = control.querySelector('.nav-label');
+    if (box.bottom > side.bottom + 0.5 || box.right > side.right + 0.5 || box.left < side.left - 0.5) out.push('the update control is cut off');
+    if (label.getBoundingClientRect().width > 0 && label.scrollWidth > label.clientWidth + 1) out.push('its words are cut: ' + label.textContent);
+    return out;
+  })()`);
   try {
-    let a = await launch(data, ['--practice-copy'], HOME, as('v0.5.0-preview.4'));
+    a = await launch(data, ['--practice-copy'], HOME, as('v0.5.0-preview.4'));
     same('the status bar names the build by its release', await a.text('#status-end'), 'Central Knot 0.5.0 preview 4');
+    same('before the first check the sidebar ends in the quiet Check for updates', [(await control())?.look, (await control())?.label], ['check', 'Check for updates']);
     // The first check runs shortly after launch, on its own.
-    for (let i = 0; i < 80 && !(await a.exists('#update-button')); i++) await wait(250);
-    same('after the first check the version becomes the Update button', [await a.text('#update-button .update-long'), await a.text('#update-button .update-short')], ['Update to 0.5.0 preview 5', 'Update']);
+    same('after the first check the control stands out with the newer release', await reaches('available'), 'available');
+    const offer = await control();
+    same('it says so, and its name says which release', [offer.label, offer.name, offer.title], ['Update available', 'Update to 0.5.0 preview 5', '0.5.0 preview 5 is available. Click to download it and restart Central Knot. Your settings and data stay as they are.']);
+    same('a screen reader is told of the new release', await a.text('#update-news'), 'Central Knot 0.5.0 preview 5 is available.');
+    same('the status bar keeps the version', await a.text('#status-end'), 'Central Knot 0.5.0 preview 4');
     await a.click('#nav-settings');
     const row = await a.text('#setting-updates') ?? '';
     check('Settings › Updates names the build and what is available', row.includes('This is Central Knot 0.5.0 preview 4.') && row.includes('0.5.0 preview 5 is available.') && await a.exists('#check-updates') && await a.exists('#setting-update'), row);
@@ -1920,23 +1940,26 @@ async function updateFlow() {
       await a.settle();
     };
     await typeDraft();
-    await a.run(`window.ckLabels = []; new MutationObserver(() => { const b = document.querySelector('#update-button'); if (b && window.ckLabels.at(-1) !== b.textContent.trim()) window.ckLabels.push(b.textContent.trim()); }).observe(document.getElementById('status-end'), { subtree: true, childList: true, characterData: true }); true`);
-    await press('update-button');
+    await watchLooks();
+    await press('update-control');
     same('the click says it won’t restart by itself, with changes waiting', await a.run(`document.getElementById('announcement').dataset.text`), 'Downloading 0.5.0 preview 5. Something here isn’t saved yet, so Central Knot will wait for you to restart.');
-    for (let i = 0; i < 80 && (await a.text('#update-button'))?.trim() !== 'Restart to update'; i++) await wait(250);
-    const labels = await a.run('window.ckLabels');
-    check('one click downloads, with progress on the button', labels.filter(label => /^Downloading… \d+%$/.test(label)).length >= 2, labels);
-    same('an unsaved draft holds the restart', (await a.text('#update-button'))?.trim(), 'Restart to update');
-    same('the button, disabled while it worked, takes the focus back', await focused(), 'update-button');
+    same('downloaded and prepared, it waits to restart', await reaches('held'), 'held');
+    const looks = await a.run('window.ckLooks');
+    check('one click downloads, with progress on the control, then prepares', looks.filter(look => /^working Downloading… \d+%$/.test(look)).length >= 2 && looks.includes('working Preparing update…'), looks);
+    same('an unsaved draft holds the restart', (await control()).label, 'Restart to update…');
+    same('the control, disabled while it worked, takes the focus back', await focused(), 'update-control');
     await wait(1500);
     check('and the app is still running', a.child.exitCode === null);
     check('the status bar says what restarting loses, first', /^Restarting now loses your unsaved instructions draft\./.test(await a.text('#announcement') ?? ''), await a.text('#announcement'));
-    check('so does the button', /unsaved instructions draft\. Click to restart anyway\.$/.test(await a.run(`document.querySelector('#update-button').title`)), await a.run(`document.querySelector('#update-button').title`));
+    check('so does the control, whose name says it too', /unsaved instructions draft\. Click to open Settings, where you can restart anyway\.$/.test((await control()).title) && /^Restart to update: Restarting now loses your unsaved instructions draft\. Opens Settings$/.test((await control()).name), await control());
+    // A click on the held control never restarts: it opens Settings, which says what restarting loses beside its Restart button.
+    await a.click('#update-control');
+    check('the held control opens Settings’ Updates row, which says what would be lost, and the app keeps running', await a.run(`document.querySelector('#nav-settings').getAttribute('aria-current') === 'page'`) && /is ready\. Restarting now loses your unsaved instructions draft\./.test(await a.text('#setting-updates') ?? '') && a.child.exitCode === null, await a.text('#setting-updates'));
     same('no page errors while updating', a.pageErrors, []);
-    // Clicking it is the person's choice: the app restarts (here: quits, the stub's install).
+    // Restarting there is the person's choice: the app restarts (here: quits, the stub's install).
     const exited = new Promise(done => a.child.once('exit', done));
     // Clicked a moment later, from the page: the app quits at once, so a reply to the click itself might never come.
-    await a.run(`(setTimeout(() => document.querySelector('#update-button').click(), 100), true)`);
+    await a.run(`(setTimeout(() => document.getElementById('setting-update').click(), 100), true)`);
     check('Restart to update quits for the update', await Promise.race([exited.then(() => true), wait(15000).then(() => false)]));
     const pending = JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).update;
     same('the update is recorded for the next launch', pending && [pending.tag, pending.from], ['v0.5.0-preview.5', 'v0.5.0-preview.4']);
@@ -1956,6 +1979,16 @@ async function updateFlow() {
     await a.click('#check-updates');
     for (let i = 0; i < 40 && !/newest release/.test(await a.text('#setting-updates') ?? ''); i++) await wait(250);
     same('Check now: nothing newer, and the note stays', await updatedLine(), ['Updated to 0.5.0 preview 5, the newest release.', 'Release notes']);
+    // The sidebar's control checks from any page: the arrows spin while it checks, and the status bar says what it found.
+    await a.click('#nav-skills');
+    await watchLooks();
+    await press('update-control');
+    const found = 'Updated to 0.5.0 preview 5, the newest release.';
+    for (let i = 0; i < 40 && (await a.run(`document.getElementById('announcement').dataset.text`)) !== found; i++) await wait(100);
+    same('clicked on another page, it checks and the status bar says what it found', [await a.run(`document.getElementById('announcement').dataset.text`), await a.run(`document.getElementById('announcement').classList.contains('visually-hidden')`)], [found, false]);
+    check('the control showed the check, then went back to the quiet arrows', (await a.run('window.ckLooks')).includes('checking Checking…') && (await control()).look === 'check', await a.run('window.ckLooks'));
+    same('its tooltip says it is up to date', (await control()).title, 'Up to date. Click to check now.');
+    same('and it takes the focus back', await focused(), 'update-control');
     await a.quit();
     // An update that didn't take (the old build opens again) says so, in Settings.
     writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')), update: { tag: 'v0.5.0-preview.6', page: 'https://github.com/njfife/central-knot/releases/tag/v0.5.0-preview.6', from: 'v0.5.0-preview.5' } }));
@@ -1965,20 +1998,23 @@ async function updateFlow() {
     check('an update that didn’t finish is said in Settings', (await a.text('#setting-updates') ?? '').includes('The update to 0.5.0 preview 6 didn’t finish. Central Knot 0.5.0 preview 5 is still in use.'), await a.text('#setting-updates'));
     // An interrupted download says so and offers the update again.
     await a.click('#check-updates');
-    for (let i = 0; i < 40 && !(await a.exists('#update-button')); i++) await wait(250);
-    // Started from the status bar on another page: said there, and still said in Settings afterwards.
+    await reaches('available', 40);
+    // Started from the sidebar on another page: said in the status bar, and still said in Settings afterwards.
     await a.click('#nav-skills');
-    await a.run(`(document.getElementById('update-button').focus(), document.getElementById('update-button').click(), true)`);
+    await a.run(`(document.getElementById('update-control').focus(), document.getElementById('update-control').click(), true)`);
     for (let i = 0; i < 80 && !/download didn’t finish/.test(await a.text('#announcement') ?? ''); i++) await wait(250);
     same('an interrupted download is said in the status bar', await a.run(`document.getElementById('announcement').dataset.text`), 'The download didn’t finish. Central Knot wasn’t changed. Try again.');
-    same('and the button takes the focus back', await a.run(`document.activeElement?.id ?? ''`), 'update-button');
+    same('and the control takes the focus back', await a.run(`document.activeElement?.id ?? ''`), 'update-control');
+    const retry = await control();
+    same('the control offers it again, saying the last try failed', [retry.look, retry.label, retry.name, retry.title], ['available', 'Try the update again', 'Try the update to 0.5.0 preview 6 again', 'The download didn’t finish. Central Knot wasn’t changed. Try again.']);
     await a.click('#nav-settings');
     check('an interrupted download is still said in Settings, and nothing changed', (await a.text('#setting-updates') ?? '').includes('The download didn’t finish. Central Knot wasn’t changed.') && await a.text('#setting-updates-notice-action') === 'Open the release page', await a.text('#setting-updates'));
-    same('and the button offers it again', (await a.text('#update-button .update-long'))?.trim(), 'Update to 0.5.0 preview 6');
+    same('and Settings’ button offers it again', (await a.text('#setting-update'))?.trim(), 'Update to 0.5.0 preview 6');
     same('no page errors after updating', a.pageErrors, []);
     await a.quit();
     // The narrowest window with the status bar at its fullest: a folder home named as long as "This Mac’s home", a profile in
-    // use with a long name, and sync on with nothing synced yet. Nothing may run into its neighbour in any state of the button.
+    // use with a long name, and sync on with nothing synced yet. Nothing may run into its neighbour, and the sidebar, in the rail
+    // and open, fits with its update control in every state.
     const narrowHome = join(scratch, 'this-macs-home'), narrowData = join(scratch, 'update-narrow-data');
     cpSync(join(root, 'fixtures/home'), narrowHome, { recursive: true });
     mkdirSync(narrowData, { recursive: true });
@@ -2007,15 +2043,26 @@ async function updateFlow() {
     await a.click('#pf-skill\\:notes');
     await a.click('#profile-switch');
     await sizeTo(a, 860, 560);
-    for (let i = 0; i < 80 && !(await a.exists('#update-button')); i++) await wait(250);
-    same('the narrow bar has the profile, idle sync and the short Update button', [await a.exists('#status-profile'), await a.text('#sync-switch .sync-state'), await a.run(`getComputedStyle(document.querySelector('#update-button .update-short')).display !== 'none'`)], [true, 'On · nothing synced', true]);
-    same('at 860 wide nothing in the status bar runs into its neighbour: Update', await crowding(), []);
+    /** In the rail, then open: the sidebar fits, and nothing in the status bar runs into its neighbour. */
+    const fitsBothWays = async when => {
+      same(`at 860×560, in the rail, the sidebar fits and the control is its icon alone: ${when}`, [await a.run(`document.body.classList.contains('rail')`), await sidebarFit(), await a.run(`getComputedStyle(document.querySelector('#update-control .nav-label')).display`)], [true, [], 'none']);
+      await a.click('#sidebar-toggle');
+      same(`and open, it fits with its words whole: ${when}`, [await a.run(`document.body.classList.contains('rail')`), await sidebarFit()], [false, []]);
+      same(`and the status bar fits: ${when}`, await crowding(), []);
+      await a.click('#sidebar-toggle');
+    };
+    same('the narrow bar has the profile, idle sync and the version', [await a.exists('#status-profile'), await a.text('#sync-switch .sync-state'), await a.text('#status-version')], [true, 'On · nothing synced', '0.5.0 preview 5']);
+    await fitsBothWays('Check for updates');
+    await reaches('available');
+    await fitsBothWays('Update available');
     await typeDraft();
-    await a.click('#update-button');
-    for (let i = 0; i < 40 && !/^Downloading… \d+%$/.test((await a.text('#update-button'))?.trim() ?? ''); i++) await wait(100);
-    same('nor while downloading', await crowding(), []);
-    for (let i = 0; i < 80 && (await a.text('#update-button'))?.trim() !== 'Restart to update'; i++) await wait(250);
+    await a.click('#update-control');
+    for (let i = 0; i < 40 && !/^Downloading… \d+%$/.test((await control()).label); i++) await wait(100);
+    same('while downloading, the icon is ringed by the progress', await a.run(`Number(document.querySelector('#update-control .update-glyph.with-progress')?.style.getPropertyValue('--progress')) > 0`), true);
+    same('nor while downloading', [await sidebarFit(), await crowding()], [[], []]);
+    await reaches('held');
     same('nor with the restart held and its reason as a mark', [await a.run(`getComputedStyle(document.getElementById('message-mark')).display !== 'none'`), await crowding()], [true, []]);
+    await fitsBothWays('Restart to update, held');
     await a.quit();
     writeFileSync(join(narrowData, 'app-settings.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(narrowData, 'app-settings.json'), 'utf8')), update: { tag: 'v0.5.0-preview.6', page: 'https://github.com/njfife/central-knot/releases/tag/v0.5.0-preview.6', from: 'v0.5.0-preview.5' } }));
     a = await launch(narrowData, [], HOME, as('v0.5.0-preview.6'));
@@ -2029,7 +2076,8 @@ async function updateFlow() {
     await a.click('#nav-settings');
     if (process.platform === 'darwin') check('an untagged or development build says it doesn’t update itself', /(development build|wasn’t made from a release)/.test(await a.text('#setting-updates') ?? ''), await a.text('#setting-updates'));
     else same('off macOS there is no Updates row', await a.exists('#setting-updates'), false);
-    same('and no Update button', await a.exists('#update-button'), false);
+    // On a Mac its sidebar control is faint and opens Settings, which says why; elsewhere there is none (no releases there).
+    same('and its sidebar control never offers an update', (await control())?.look, process.platform === 'darwin' ? 'off' : undefined);
     await a.quit();
   } finally { await fixture.close(); }
 }
