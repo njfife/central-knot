@@ -1,4 +1,4 @@
-import { absentKinds, announce, noTools, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type Kind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, type Page } from './app.ts';
+import { absentKinds, announce, noTools, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type Kind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, otherOwnerSaid, takeOverSync, takeOverTitle, type Page } from './app.ts';
 import { afterLayout, button, cardGrid, emptyState, fileBlocks, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
@@ -118,7 +118,8 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof ic
   const attention = differs ? { tone: 'tone-warning', glyph: 'diff' as const, text: `${differs} ${differs === 1 ? 'differs' : 'differ'}`, title: `${differs} ${differs === 1 ? 'has' : 'have'} different copies. Show only these.` }
     : edits ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${edits} waiting`, title: `${plural(edits, 'change')} waiting to sync` }
       : waitsForClaude ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${waitsForClaude} for Claude Code`, title: `${waitsForClaude} ${waitsForClaude === 1 ? 'waits' : 'wait'} for Write to Claude Code` }
-        : managed ? { tone: 'tone-success', glyph: 'check' as const, text: 'All in sync', title: 'Every managed one is the same in every tool it syncs to' }
+        // Not said of a home another build syncs: whether it is in sync is that build's to say.
+        : managed && !(home?.manage.gate.state === 'stopped' && home.manage.gate.owner) ? { tone: 'tone-success', glyph: 'check' as const, text: 'All in sync', title: 'Every managed one is the same in every tool it syncs to' }
           : undefined;
   const status = !attention ? null : differs
     ? h(`button.kind-card-state.kind-card-link.${attention.tone}`, { type: 'button', id: `overview-${page}-differ`, title: attention.title, onclick: () => { showFiltered(page, 'attention'); showPage(page); } }, icon(attention.glyph, 13), attention.text)
@@ -205,6 +206,9 @@ export function overviewPage() {
       h('div.overview-more', {},
         absent.length && !empty ? h('p.overview-line', { id: 'overview-absent' }, icon('info', 14, 'tone-muted'), `No tool here holds ${orList(absent.map(kind => kindNames[kind]))}.`) : null,
         !home.manage.access.allowed ? h('p.overview-line', {}, icon('lock', 14, 'tone-warning'), `Automatic sync is paused. Preview only: ${previewReason(home.manage.access.reason)}.`)
+        // Another build syncs this home: said here, with the way to take over.
+        : home.manage.gate.state === 'stopped' && home.manage.gate.owner ? h('p.overview-line', { id: 'overview-other-owner' }, icon('circle-alert', 14, 'tone-warning'), `${otherOwnerSaid(home.manage.gate.owner)} `,
+          button({ variant: 'link', size: 'micro', label: 'Take over syncing', id: 'overview-take-over', disabled: !!state.busy, attrs: { title: takeOverTitle(home.manage.gate.owner) }, onclick: () => void takeOverSync() }))
         // Green only once something syncs; before that, sync is on and waiting, in the status bar's grey.
         : home.syncOn && nothingManaged ? null : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingManaged ? 'tone-muted' : 'tone-success') : 'tone-warning'),
           ...(home.syncOn ? [nothingManaged ? 'Automatic sync is on. Once something is managed, edits spread between tools in seconds, with Undo.' : 'Automatic sync is on: edits spread between tools in seconds, with a notice and Undo.']

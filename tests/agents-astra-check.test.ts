@@ -83,7 +83,7 @@ test('R8 Restore must respect ownership gate', async () => {
     await writeFile(b.paths[0], md()); await applyAgents(b.context, tools, manage);
     await writeFile(b.paths[0], md('Edited')); await applyAgents(b.context, tools, []);
     const event = (await readHistory(b.context)).find(e => e.kind === 'edit')!;
-    const { record } = await readRecord(b.home); record!.owner = 'other-build'; await saveRecord(b.home, record!);
+    const { record } = await readRecord(b.home); record!.owner = 'other-build'; await saveRecord(b.home, record!, true);
     assert.equal((await syncGate(b.context)).state, 'stopped');
     const result = await restoreAgent(b.context, tools, event.id);
     assert.equal(result.writes, 0, JSON.stringify(result));

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { PRODUCT } from './values.ts';
+import { STANDARD_BUILD, PRODUCT } from './values.ts';
 import { createReadStream } from 'node:fs';
 import { access, chmod, constants, copyFile, link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
@@ -25,6 +25,8 @@ export interface ShareContext {
   /** Always reads disk, so every plan and result reflects what is there now. */
   read: () => Promise<Snapshot[]>;
   build: string;
+  /** What this build calls itself, written into a record it owns so another build can say whose it is. */
+  buildName?: string;
   settingsPath: string;
   /** The person's real home, written only when reached by explicitly choosing it. */
   realHome: string;
@@ -47,7 +49,7 @@ export interface RecordCopy { harness: HarnessId; directory: string; hash: strin
 export interface RecordItem { name: string; hash: string; state: 'shared' | 'dont-share'; startId: string; observedAt: string; copies: RecordCopy[]; /** Tools this managed skill does not sync to. */ off?: HarnessId[]; /** Differing copies kept as they are on purpose. */ separate?: boolean; /** A chosen copy not yet in every tool: the tool whose copy wins, and that copy's content ID. */ use?: { tool: HarnessId; hash: string }; /** Deleted everywhere it synced: when, from which tool, and the content it had. A copy turning up later is new input, never a revival (D-37). */ deleted?: { at: string; tool: HarnessId; hash: string };
   /** Content about to be overwritten or removed, put on record before the disk changes, so a crash or a partial failure never lets it be pruned. Cleared once History names it. */
   displaced?: { tool: HarnessId; hash: string; /** A per-tool Remove (its folder, and whether it stopped syncing there), recovered as one if History never named it. */ removal?: { folder: string; stoppedSync: boolean } }[] }
-export interface SyncRecord { formatVersion: number; generation: string; owner: string; /** Each skills folder's identity at the last pass, so a folder made again reads as a reset, not as deletions. */ roots?: Record<string, { ino: number; birth: number }>; lastStartId?: string; /** Set while a Start is copying, so a crash and retry stay one Start. */ activeStartId?: string; items: Record<string, RecordItem> }
+export interface SyncRecord { formatVersion: number; generation: string; owner: string; /** The owner's own name, as people know it (a record made before there were custom builds has none). */ ownerName?: string; /** Each skills folder's identity at the last pass, so a folder made again reads as a reset, not as deletions. */ roots?: Record<string, { ino: number; birth: number }>; lastStartId?: string; /** Set while a Start is copying, so a crash and retry stay one Start. */ activeStartId?: string; items: Record<string, RecordItem> }
 
 export function storeDirectory(home: string): string { return join(home, '.central-knot'); }
 /** Where the plugins' parts are recorded (parts.ts writes it): which plugin's parts went into which tool as separate items. */
@@ -73,6 +75,8 @@ export function plainError(error: unknown): string {
   if (code === 'ENAMETOOLONG') return 'A file name is too long for this disk.';
   if (code === 'EXDEV') return 'That folder is on a different disk from its parent.';
   if (code === 'CK_EXISTS') return 'Something appeared at the destination, so it was left alone.';
+  // Another build took over syncing meanwhile (stillOwned): its own words say what happened.
+  if (code === 'CK_TAKEN') return (error as Error).message;
   return 'It could not finish.';
 }
 
@@ -334,7 +338,24 @@ export async function removeFileChecked(path: string, expected: string) {
   await unlink(parked);
 }
 
-export const saveRecord = (home: string, record: SyncRecord) => writeDurably(recordPath(home), `${JSON.stringify(record, null, 2)}\n`);
+/** A home's first sync record, owned by this build. */
+export const newRecord = (context: ShareContext): SyncRecord => ({ formatVersion: FORMAT_VERSION, generation: randomUUID(), owner: context.build, ownerName: context.buildName, items: Object.create(null) });
+
+/**
+ * Stops work under way once another build has taken over syncing this home (takeOverSync): the record on disk is then
+ * under another owner than `owner`, the one this work began with. Asked before each save of the record and before each
+ * item of a pass, so a pass that was already running writes nothing more and never takes ownership back by finishing.
+ */
+export async function stillOwned(home: string, owner: string): Promise<void> {
+  const onDisk = await readFile(recordPath(home), 'utf8').then(text => JSON.parse(text) as Partial<SyncRecord>).catch(() => undefined);
+  if (typeof onDisk?.owner === 'string' && onDisk.owner !== owner) throw Object.assign(new Error(`${ownerName(onDisk as SyncRecord)} took over syncing this home meanwhile, so this stopped there.`), { code: 'CK_TAKEN' });
+}
+
+/** Saves a home's sync record, unless another build has taken over since (stillOwned). `takingOver` is the one save that changes the owner. */
+export async function saveRecord(home: string, record: SyncRecord, takingOver = false) {
+  if (!takingOver) await stillOwned(home, record.owner);
+  await writeDurably(recordPath(home), `${JSON.stringify(record, null, 2)}\n`);
+}
 
 type Settings = { homes?: Record<string, { generation: string }> };
 async function readSettings(path: string): Promise<Settings> {
@@ -357,10 +378,37 @@ export async function syncGate(context: ShareContext): Promise<SyncGate> {
   if (problem) return { state: 'stopped', reason: `${problem} ${NOTHING_CHANGED}` };
   const remembered = (await readSettings(context.settingsPath)).homes?.[context.home]?.generation;
   if (!record) return remembered ? { state: 'stopped', reason: `The sync record this app created is missing. ${NOTHING_CHANGED}` } : { state: 'first-setup' };
-  if (record.owner !== context.build) return { state: 'stopped', reason: `Sharing here belongs to another ${PRODUCT} build (${record.owner}). Nothing was written or deleted.` };
+  // One build syncs a home at a time (ORG-08). Another build's home is left alone until this one is told to take over.
+  if (record.owner !== context.build) {
+    const name = ownerName(record);
+    return { state: 'stopped', reason: `${name} syncs this home, so nothing was written or deleted. Take over syncing to have ${context.buildName ?? 'this app'} sync it instead.`, owner: { build: record.owner, name } };
+  }
   if (!remembered) return { state: 'needs-resume', reason: 'This app has an intact sync record but no memory of it. Resuming keeps every recorded choice.' };
   if (remembered !== record.generation) return { state: 'stopped', reason: `The sync record is not the one this app last used. ${NOTHING_CHANGED}` };
   return { state: 'ready' };
+}
+
+/** The build that owns a record, by the name people know it by: the one it recorded, the standard app's, or failing both, its identity. */
+const ownerName = (record: SyncRecord) => record.ownerName || (record.owner === STANDARD_BUILD ? PRODUCT : `Another ${PRODUCT} build (${record.owner})`);
+
+/**
+ * Takes over syncing a home from the build that owns its record (ORG-08): this build becomes the owner and carries on
+ * from the record as it is, every managed item, choice and baseline with it, since the record and what it keeps live in
+ * the home, not in either build. The build that owned it finds another owner at its next pass and stops; it changes
+ * nothing more there until it is told to take over in turn: a pass it had under way stops before its next item and at
+ * its next save of the record (stillOwned), so it can't take the home back by finishing. Ownership never moves any other way. A record that can't be
+ * read, or a home that can't be written, stays as it is, with the reason.
+ */
+export async function takeOverSync(context: ShareContext): Promise<{ stopped?: string; from?: string }> {
+  const access = await writeAccess(context);
+  if (!access.allowed) return { stopped: access.reason };
+  const { record, problem } = await readRecord(context.home);
+  if (problem) return { stopped: `${problem} ${NOTHING_CHANGED}` };
+  if (!record) return { stopped: 'Nothing is synced in this home yet, so there is nothing to take over.' };
+  if (record.owner === context.build) return {};
+  await saveRecord(context.home, { ...record, owner: context.build, ownerName: context.buildName }, true);
+  await remember(context, record.generation);
+  return { from: ownerName(record) };
 }
 
 /** Whether this build syncs this home and may write it: History is kept tidy, and passes run, only where both hold. */

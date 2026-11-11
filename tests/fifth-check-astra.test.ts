@@ -105,7 +105,7 @@ test('C1 MCP Restore ownership gate holds',()=>box(async b=>{
   await fs.writeFile(join(b.home,'.copilot','mcp-config.json'),json('EDIT'));
   await applyMcp(b.context,tools.slice(1),[]);
   const event=(await readHistory(b.context)).find(e=>e.kind==='edit')!;
-  const {record}=await readRecord(b.home);record!.owner='other';await saveRecord(b.home,record!);
+  const {record}=await readRecord(b.home);record!.owner='other';await saveRecord(b.home,record!,true);
   assert.equal((await restoreMcp(b.context,tools.slice(1),event.id)).writes,0);
   assert.equal(await command(b.context,'copilot-cli'),'EDIT');
 }));
