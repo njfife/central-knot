@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile, readFile } from 'node:fs/promi
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readItemTexts, readPluginItems } from '../src/pluginitems.ts';
-import { inTool, cellWords, handledWhere, offIn, pageRows, pluginItemCount, toolWords } from '../src/pluginrows.ts';
+import { inTool, cellWords, handledWhere, offIn, pageRows, pluginItemCount, rowCount, toolWords } from '../src/pluginrows.ts';
 import type { PluginContext } from '../src/plugins.ts';
 import type { HarnessId, HomeView, InstalledPlugin, PartsInstall, SkillFacts } from '../src/types.ts';
 
@@ -105,6 +105,11 @@ const fact = (key: string, copies: Partial<Record<HarnessId, true>>, extra: Part
 const install = (tool: HarnessId, extra: Partial<InstalledPlugin> = {}): InstalledPlugin => ({ tool, plugin: 'issue-tracker', marketName: 'm', version: '2.0.0', listed: true, items: [{ kind: 'skill', name: 'triage', description: 'Sorts issues.' }, { kind: 'mcp', name: 'issues', description: '', runs: 'npx -y issues' }], ...extra });
 const piPart: PartsInstall = { source: '/m', marketName: 'm', plugin: 'issue-tracker', tool: 'pi-cli', at: '', digest: '', items: [{ kind: 'skill', name: 'triage', hash: '' }] };
 const homeOf = (skills: SkillFacts[], pluginItems: InstalledPlugin[], parts: PartsInstall[] = []) => ({ manage: { skills }, mcp: { servers: [] }, agents: { servers: [] }, parts, pluginItems }) as unknown as HomeView;
+
+test('a page whose last skill was just deleted still has a row: the skill with no copy left, switched off', () => {
+  const home = { ...homeOf([], []), manage: { skills: [], gone: [fact('only', {}, { gone: { history: 'e1', at: '', kind: 'deleted' } })] } } as unknown as HomeView;
+  assert.deepEqual([rowCount(home, 'skills'), rowCount(homeOf([], []), 'skills')], [1, 0]);
+});
 
 test('a plugin’s skill the person also has (its part in Pi, shown there as through the plugin elsewhere) is that one row, not a second', () => {
   const through = { plugin: 'issue-tracker', marketplace: 'm' };

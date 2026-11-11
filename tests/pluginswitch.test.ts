@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { batches, resultLines, strayHolds, type PluginDone, type PluginDraft, type PluginOp } from '../src/pluginplan.ts';
-import { LIVE_PLUGIN, cantSwitch, click, clickWords, pendingWords, prune, standing, wholeWords, type PluginItemAt } from '../src/pluginswitch.ts';
+import { LIVE_PLUGIN, alongWords, cantSwitch, click, clickWords, itemSaid, pendingWords, prune, standing, turnEvery, wholeWords, type PluginItemAt } from '../src/pluginswitch.ts';
 import type { HarnessId, InstalledPlugin, PartKind } from '../src/types.ts';
 
 /** The plugin `full` as a tool has it: skills `one` and `two`, MCP servers `issues` and `wiki`, agent `helper`. */
@@ -207,4 +207,32 @@ test('a plugin that failed to come on names the item switches written for it, to
   const asked = ran({ tool: 'claude-cli', skill: 'two', action: 'skill-off' }, 'skill-off');
   assert.deepEqual(strayHolds([held, asked, ran({}, 'failed', false)]), [held], 'only the failed plugin’s own, in that tool');
   assert.deepEqual(strayHolds([held, ran({}, 'plugin-on')]), []);
+});
+
+test('a main switch turns one item in every tool with a switch for it, and never a whole plugin', () => {
+  const claude = installed('claude-cli'), codex = installed('codex-cli'), copilot = installed('copilot-cli', { skillsOff: ['one'] });
+  const off = turnEvery([item(claude, 'skill', 'one'), item(codex, 'skill', 'one'), item(copilot, 'skill', 'one')], false);
+  // Claude Code has no switch for one skill of a plugin: it is left on and said; Copilot CLI has it off already.
+  assert.deepEqual(chosen(off.draft), ['codex-cli skill-off one']);
+  assert.deepEqual([off.leftIn, off.whole.map(entry => entry.tool), off.turned.map(entry => entry.tool)], [['claude-cli'], ['claude-cli'], ['codex-cli']]);
+  assert.deepEqual([off.limit, off.left], ['Still on in Claude Code: it has no switch for one skill of a plugin, only one for the whole plugin, full.', undefined]);
+  // On again: where the whole plugin is off, it comes on for this item alone, its other switchable items held off.
+  const codexOff = installed('codex-cli', { off: true });
+  const on = turnEvery([item(codexOff, 'mcp', 'issues'), item(copilot, 'skill', 'one')], true);
+  assert.deepEqual(chosen(on.draft), ['codex-cli skill-off one', 'codex-cli skill-off two', 'codex-cli part-off mcp wiki', 'copilot-cli skill-on one', 'codex-cli plugin-on']);
+  assert.equal(on.left, undefined);
+  // Said item first, then what came with it.
+  assert.equal(itemSaid(item(codexOff, 'mcp', 'issues'), true, on.ops), 'issues is on in Codex. Its plugin full was turned on there, with one, two and MCP server wiki left off.');
+  assert.equal(alongWords(item(copilot, 'skill', 'one'), on.ops), '', 'only its own switch turned');
+  const whole: PluginDraft = new Map();
+  click(whole, item(claude, 'skill', 'one'));
+  assert.equal(itemSaid(item(claude, 'skill', 'one'), false, [...whole.values()]), 'one is off in Claude Code. Its whole plugin full was turned off there, with its 1 other skill, 2 MCP servers and 1 agent.');
+});
+
+test('a main switch never falls back to the whole plugin where the item’s own switch can’t be written', () => {
+  // Codex's skill rules for this plugin are written in a form not edited here: its own switch can't be used.
+  const held = installed('codex-cli', { switchesHeld: 'Codex’s skills.config is written inline.' });
+  const off = turnEvery([item(held, 'skill', 'one')], false);
+  assert.deepEqual([chosen(off.draft), off.whole, off.limit, off.leftIn], [[], [], undefined, ['codex-cli']]);
+  assert.equal(off.left, 'Still on in Codex: Codex’s skills.config is written inline.');
 });

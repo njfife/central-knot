@@ -31,7 +31,7 @@ const reads = (tools: string[]) => (tools.length > 1 ? 'read' : 'reads');
 const has = (tools: string[]) => (tools.length > 1 ? 'have' : 'has');
 const its = (tools: string[]) => (tools.length > 1 ? 'their' : 'its');
 const sharedNoun = (shared: SharedShape) => (shared.isLink ? 'the shared link' : 'the shared copy');
-/** What goes on Manage or Delete everywhere besides each tool's own copy: "the link and the shared copy". */
+/** What goes when it is turned on or on Delete everywhere besides each tool's own copy: "the link and the shared copy". */
 export function outsideNouns(shape: Shape): string[] {
   const links = (shape.shared?.linkers.length ?? 0) + shape.elsewhere.length;
   return [links ? (links > 1 ? 'the links' : 'the link') : '', shape.shared ? sharedNoun(shape.shared) : ''].filter(Boolean);
@@ -61,15 +61,15 @@ export function whereSentence(shape: Shape): string {
   return out.join(' ');
 }
 
-/** What taking the skill over does, for the tools as ticked: links replaced, tools given their own copy, tools that lose it. */
+/** What taking the skill over does, for the tools it syncs to: links replaced, tools given their own copy, tools that lose it. */
 export interface TakeOverPlan {
-  /** Ticked tools whose link becomes a real copy. */
+  /** Tools it syncs to whose link becomes a real copy. */
   links: string[];
-  /** Ticked tools that read the shared copy and get their own. */
+  /** Tools it syncs to that read the shared copy and get their own. */
   gets: string[];
-  /** Tools left unticked that read it only in the shared folder, so lose it. */
+  /** Tools left out that read it only in the shared folder, so lose it. */
   loses: string[];
-  /** After Manage, every tool it syncs to has its own copy. */
+  /** Once it is on, every tool it syncs to has its own copy. */
   everyTool: boolean;
 }
 
@@ -85,26 +85,15 @@ function takeOverClauses(shape: Shape, plan: TakeOverPlan, awayNote = true): str
   ].filter(Boolean);
 }
 const clauseList = (clauses: string[]) => (clauses.length > 2 ? `${clauses.slice(0, -1).join(', ')} and ${clauses.at(-1)}` : clauses.join(' and '));
-const losesSentence = (plan: TakeOverPlan) => (plan.loses.length ? ` ${andList(plan.loses)} ${plan.loses.length > 1 ? 'aren’t' : 'isn’t'} ticked and ${reads(plan.loses)} it only there, so ${plan.loses.length > 1 ? 'they' : 'it'} won’t have it any more.` : '');
+const losesSentence = (plan: TakeOverPlan) => (plan.loses.length ? ` ${andList(plan.loses)} ${plan.loses.length > 1 ? 'are' : 'is'} left out and ${reads(plan.loses)} it only there, so ${plan.loses.length > 1 ? 'they' : 'it'} won’t have it any more.` : '');
 
-/** Unmanaged, nothing waiting: what Manage and Delete everywhere would do. */
+/** Not synced: what turning it on and Delete everywhere would do. */
 export function manageSentence(shape: Shape, plan: TakeOverPlan): string {
   const nouns = outsideNouns(shape);
   const away = shape.elsewhere.length && !shape.shared ? '; what it leads to stays' : '';
   const gives = plan.everyTool ? 'gives each tool its own copy' : clauseList(takeOverClauses({ ...shape, elsewhere: [] }, plan));
   const count = (shape.shared?.linkers.length ?? 0) + shape.elsewhere.length + (shape.shared ? 1 : 0);
-  return `Manage ${gives ? `${gives} and ` : ''}removes ${andList(nouns)}${away}. Delete everywhere removes ${them(count)} too. ${keeps(count)}`;
-}
-
-/** Managed switched on, waiting for Apply all: what Apply all will do to them, and what other apps lose. */
-export function pendingSentence(shape: Shape, plan: TakeOverPlan): string {
-  const clauses = takeOverClauses(shape, plan, !!shape.shared);
-  if (shape.shared) clauses.push(`removes ${sharedNoun(shape.shared)} (History keeps it)`);
-  if (!clauses.length) return '';
-  // Only links that lead elsewhere: what they lead to stays, and History keeps the links.
-  const away = plan.links.length > 1 ? 'What they lead to stays. History keeps the links.' : 'What it leads to stays. History keeps the link.';
-  const others = shape.shared ? ` Other apps that read ${shape.shared.folder} won’t find it there.` : ` ${away}`;
-  return `On Apply all, Central Knot ${clauseList(clauses)}.${others}${losesSentence(plan)}`;
+  return `Turning it on ${gives ? `${gives} and ` : ''}removes ${andList(nouns)}${away}. Delete everywhere removes ${them(count)} too. ${keeps(count)}`;
 }
 
 /** Replace with managed copies, armed: what the confirming click does. */
@@ -117,7 +106,7 @@ export function replaceSentence(shape: Shape, plan: TakeOverPlan): string {
 }
 
 /**
- * A managed skill with them: back since it was taken over (an installer may have put them there), or never taken over. What
+ * A synced skill with them: back since it was taken over (an installer may have put them there), or never taken over. What
  * leaving them means, as built: background sync never writes a link or the shared copy, so an edit never reaches them, nor a tool
  * that reads only them (`only`).
  */
@@ -125,13 +114,13 @@ export function managedSentence(shape: Shape, back: boolean, only: string[]): st
   const nouns = outsideNouns(shape);
   const count = (shape.shared?.linkers.length ?? 0) + shape.elsewhere.length + (shape.shared ? 1 : 0);
   const what = sentence(andList(nouns));
-  const lead = back ? `${what} came back after you managed this skill; an installer may have put ${them(count)} there.` : `Central Knot doesn’t manage ${andList(nouns)}.`;
+  const lead = back ? `${what} came back after you turned this skill on; an installer may have put ${them(count)} there.` : `Central Knot doesn’t write ${andList(nouns)}.`;
   return `${lead} Automatic sync never changes ${them(count)}, so edits won’t reach ${them(count)}${only.length ? `, or ${andList(only)}, which ${has(only)} no other copy` : ''}.`;
 }
 
 /**
- * The shared copy that is the only one a tool can have (its skills folder is a link to the shared folder): what Manage does with
- * it, and what that means for edits. `own`: tools with or getting a copy of their own; `gets`: those Manage gives one; `left`:
+ * The shared copy that is the only one a tool can have (its skills folder is a link to the shared folder): what turning it on
+ * does with it, and what that means for edits. `own`: tools with or getting a copy of their own; `gets`: those turning it on gives one; `left`:
  * those that keep reading the shared copy.
  */
 export function pinnedSentence(shared: SharedShape, managed: boolean, own: string[], left: string[], gets: string[] = []): string {
@@ -139,7 +128,7 @@ export function pinnedSentence(shared: SharedShape, managed: boolean, own: strin
   // The other way does work: sync reads the shared copy, so an edit there spreads to the tools with their own copy.
   const back = own.length && left.length ? ` Edits made in the shared copy ${managed ? 'still reach' : 'will still reach'} ${andList(own)}.` : '';
   if (managed) return `Central Knot does not write into the shared copy${edits}.${back}`;
-  const manage = gets.length ? `Manage gives ${andList(gets)} ${its(gets)} own ${gets.length > 1 ? 'copies' : 'copy'} and leaves the shared copy for ${andList(left)}.` : `Manage leaves the shared copy for ${andList(left)}.`;
+  const manage = gets.length ? `Turning it on gives ${andList(gets)} ${its(gets)} own ${gets.length > 1 ? 'copies' : 'copy'} and leaves the shared copy for ${andList(left)}.` : `Turning it on leaves the shared copy for ${andList(left)}.`;
   return `${manage} Central Knot does not write into it${edits}.${back} Delete everywhere removes the shared copy too. History keeps it.`;
 }
 
@@ -153,24 +142,21 @@ export function deleteNote(shape: Shape, linkers: string[]): string {
   return parts.length ? `This also removes ${andList(parts)}.` : '';
 }
 
-/** One tool's row: where it gets the skill today, or what Apply all does to it. */
+/** One tool's row: where it gets the skill today. */
 export const rowWords = {
   linkToShared: (folder: string) => `A link to the shared copy in ${folder}.`,
   linkElsewhere: (target: string) => `A link to ${target}.`,
   readsShared: (folder: string) => `Reads the shared copy in ${folder}.`,
   alsoShared: (folder: string) => `Also reads the shared copy in ${folder}.`,
   pinned: (folder: string) => `Its skills folder is a link to ${folder}, so it reads the shared copy there.`,
-  linkBecomesCopy: 'Its link becomes a real copy on Apply all, then it syncs.',
-  getsOwn: 'Gets its own copy on Apply all, then it syncs.',
-  loses: 'Reads only the shared copy, which goes on Apply all, so it won’t have this skill any more.',
 } as const;
 
 /** "replaced Copilot CLI’s link with a real copy", or for several tools "replaced Copilot CLI’s and Pi’s links with real copies". */
 const replacedLinks = (tools: string[]) => `replaced ${possessive(tools)} ${tools.length > 1 ? 'links with real copies' : 'link with a real copy'}`;
 
 /**
- * What a take-over did, after Apply all or Replace with managed copies, as clauses: the links replaced and the shared copy
- * removed. One skill names the tools; several skills are counted, as the count before Apply all counted them.
+ * What a take-over did, after turning a skill on or Replace with managed copies, as clauses: the links replaced and the shared
+ * copy removed. One skill names the tools; several skills are counted.
  */
 export function tookOverDone(links: { tool: string; item: string }[], shared: { folder: string; item: string }[]): string[] {
   const folders = [...new Set(shared.map(copy => copy.folder))];
@@ -182,9 +168,10 @@ export function tookOverDone(links: { tool: string; item: string }[], shared: { 
   return [tools.length ? replacedLinks(tools) : '', shared.length ? `removed the shared copy in ${andList(folders)}` : ''].filter(Boolean);
 }
 
-/** The band after Replace with managed copies: "opus: replaced Copilot CLI’s link with a real copy and removed the shared copy in ~/.agents/skills. History keeps both." */
-export function replacedText(name: string, clauses: string[], count: number): string {
-  return `${name}: ${clauses.join(' and ')}. ${keeps(count)}`;
+/** After a click took a skill over: "It replaced Copilot CLI’s link with a real copy and removed the shared copy in ~/.agents/skills. History keeps both." */
+export function tookOverSaid(links: { tool: string; item: string }[], shared: { folder: string; item: string }[]): string {
+  const clauses = tookOverDone(links, shared);
+  return clauses.length ? `It ${clauses.join(' and ')}. ${keeps(links.length + shared.length)}` : '';
 }
 
 /** A take-over as History tells it: links replaced, tools given their own copy, the shared copy removed. */
@@ -210,11 +197,11 @@ export function backText(links: { tool: string; item: string }[], shared: { item
 }
 
 /**
- * Undo of a take-over, conclusion first so a narrow status bar keeps what matters: "Undone: opus is unmanaged again. Copilot
+ * Undo of a take-over, conclusion first so a narrow status bar keeps what matters: "Undone: opus is not synced again. Copilot
  * CLI’s link and the shared copy are back."
  */
 export function undoneText(name: string, back: string, removedIn: string[], unmanaged: boolean): string {
-  return [`Undone${unmanaged ? `: ${name} is unmanaged again.` : '.'}`, back || 'Its copies are back as they were.',
+  return [`Undone${unmanaged ? `: ${name} is not synced again.` : '.'}`, back || 'Its copies are back as they were.',
     removedIn.length ? `Removed the new copies in ${andList(removedIn)}.` : ''].filter(Boolean).join(' ');
 }
 
@@ -230,16 +217,15 @@ export function deletedText(name: string, tools: string[], folders: string[]): s
 }
 
 /**
- * A managed skill whose copies are the same, where some tools have only a link or the shared copy: "Synced" is said only for the
- * tools Central Knot writes, since edits never reach the others. `synced` is said as a phrase ("Claude Code", "all 3 tools");
- * `via`: whether those tools reach the shared copy, a link elsewhere, or some of each.
+ * A synced skill's tools that have only a link or the shared copy, which edits never reach: "Copilot CLI and Pi read the shared
+ * copy, which Central Knot doesn’t write". `via`: whether they reach the shared copy, a link elsewhere, or some of each.
  */
-export function syncedSome(synced: string, readers: string[], via: 'shared' | 'link' | 'both'): string {
+export function readsOutside(readers: string[], via: 'shared' | 'link' | 'both'): string {
   const what = via === 'shared' ? 'the shared copy' : via === 'link' ? 'it through a link' : 'a link or the shared copy';
-  return `${synced ? `Synced in ${synced}` : 'Same copy everywhere'} · ${andList(readers)} ${reads(readers)} ${what}, which Central Knot doesn’t write`;
+  return `${andList(readers)} ${reads(readers)} ${what}, which Central Knot doesn’t write`;
 }
 
-/** Restore after deleting a managed skill, for the links and the shared copy it doesn't put back: each tool has its own copy instead, as Manage gives it. */
+/** Restore after deleting a synced skill, for the links and the shared copy it doesn't put back: each tool has its own copy instead, as turning it on gives it. */
 export function notPutBack(links: number, shared: number): string {
   const nouns = [links ? (links > 1 ? 'the links' : 'the link') : '', shared ? 'the shared copy' : ''].filter(Boolean);
   return `Each tool has its own copy now; ${andList(nouns)} ${links + shared > 1 ? 'aren’t' : 'isn’t'} put back.`;

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { byKey, standing } from '../src/roworder.ts';
+import { byKey, loadedIn, standing } from '../src/roworder.ts';
 
 const tools = ['claude-cli', 'codex-cli', 'copilot-cli'];
 const item = (key: string, managed: boolean, copies: string[], disabled: string[] = []) => ({ key, managed, copies: Object.fromEntries(copies.map(tool => [tool, 'hash'])), disabled });
 
-test('managed items come first, then items some tool uses, then items no tool uses, by name within each', () => {
+test('items that are on come first, then items some tool has that are not synced, then items that are off, by name within each', () => {
   const list = [
     item('zeta', false, ['claude-cli']),
     item('off-everywhere', false, ['claude-cli', 'codex-cli'], ['claude-cli', 'codex-cli']),
@@ -26,8 +26,12 @@ test('a copy only counts in a tool that is shown', () => {
   assert.equal(standing(item('left-behind', false, ['pi']), [...tools, 'pi']), 1);
 });
 
-test('a tool that has the item through a plugin uses it, unless that plugin is turned off there', () => {
-  const own = item('pdf', false, ['claude-cli'], ['claude-cli']);
-  assert.equal(standing({ ...own, plugin: { 'codex-cli': {} } }, tools), 1);
-  assert.equal(standing({ ...own, plugin: { 'codex-cli': { off: true } } }, tools), 2);
+test('a plugin’s item that is on counts: a row whose own copies are off stays on while a tool loads it through its plugin', () => {
+  const triage = { ...item('triage', true, ['pi'], ['pi']), pluginOn: ['claude-cli'] };
+  assert.deepEqual(loadedIn(triage, [...tools, 'pi']), ['claude-cli']);
+  assert.equal(standing(triage, [...tools, 'pi']), 0);
+  assert.equal(standing({ ...triage, pluginOn: [] }, [...tools, 'pi']), 2, 'the plugin item off too: off');
+  // A tool with a copy of its own goes by that copy, whatever a plugin there says.
+  assert.equal(standing({ ...item('own', true, ['claude-cli'], ['claude-cli']), pluginOn: ['claude-cli'] }, tools), 2);
 });
+

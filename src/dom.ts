@@ -1,7 +1,7 @@
 import { icons, type IconName } from './icons.ts';
 import { groupBy } from './model.ts';
 
-type Child = Node | string | null | undefined | false;
+export type Child = Node | string | null | undefined | false;
 type Props = Record<string, unknown>;
 
 
@@ -84,9 +84,12 @@ export const pathText = (text: string, full = text): HTMLElement => {
 /** A disabled control's reason, as its tooltip and its accessible description. */
 export const lockAttrs = (why: string | undefined) => (why ? { title: why, 'aria-description': why } : undefined);
 
-/** An on/off switch; its label is also its tooltip. `attrs` adds to or replaces its attributes (Settings ties it to its row's hint). */
-export function toggle({ on, label, onchange, disabled = false, id, attrs = {} }: { on: boolean; label: string; onchange: (on: boolean) => void; disabled?: boolean; id?: string; attrs?: Props }) {
-  return h('button.switch', { type: 'button', id, role: 'switch', 'aria-checked': String(on), 'aria-label': label, title: label, disabled, ...attrs, onclick: (event: Event) => { event.stopPropagation(); onchange(!on); } },
+/**
+ * An on/off switch; its label is also its tooltip. `mixed`: neither, drawn in between (its knob in the middle); a click turns
+ * it on. `attrs` adds to or replaces its attributes (Settings ties it to its row's hint).
+ */
+export function toggle({ on, mixed = false, label, onchange, disabled = false, id, attrs = {} }: { on: boolean; mixed?: boolean; label: string; onchange: (on: boolean) => void; disabled?: boolean; id?: string; attrs?: Props }) {
+  return h('button.switch', { type: 'button', id, role: 'switch', 'aria-checked': mixed ? 'mixed' : String(on), 'aria-label': label, title: label, disabled, ...attrs, onclick: (event: Event) => { event.stopPropagation(); onchange(mixed || !on); } },
     h('span.switch-knob'));
 }
 
@@ -110,45 +113,6 @@ export function emptyState(glyph: IconName, title: string, body: string | undefi
 
 export const eyebrow = (text: string, count?: number) => h('h3.eyebrow', {}, text, count === undefined ? null : h('span.eyebrow-count', {}, String(count)));
 export const section = (title: string, ...body: (Child | Child[])[]) => h('section.section', {}, eyebrow(title), ...body);
-
-/** Stops fitting the popover fitted last: one popover is open at a time, so a new one, or its removal, ends the old watch. */
-let stopFitting = () => {};
-
-/**
- * Keeps an open popover inside the scrolling area it opens in, now and whenever that area resizes (a window resize
- * included) or scrolls. It opens below its anchor, or above when there is more room there (.popover-above), with the
- * height that side really has (--fit-height), and moves sideways rather than run past an edge (--fit-shift). Values go
- * through the style object: the page's security policy refuses inline style attributes.
- */
-export function fitInView(popover: HTMLElement): HTMLElement {
-  requestAnimationFrame(() => {
-    stopFitting();
-    // Closed before the first frame: nothing to fit, and nothing is left watching.
-    if (!popover.isConnected) return;
-    const frame = popover.closest<HTMLElement>('.scroll'), anchor = popover.parentElement;
-    if (!frame || !anchor) return;
-    const fit = () => {
-      if (!popover.isConnected) { stop(); return; }
-      // The area's inside, without its scrollbar gutter: a popover over the gutter would make the area scroll sideways.
-      const outer = frame.getBoundingClientRect(), around = anchor.getBoundingClientRect();
-      const area = { left: outer.left + frame.clientLeft, right: outer.left + frame.clientLeft + frame.clientWidth, top: outer.top + frame.clientTop, bottom: outer.top + frame.clientTop + frame.clientHeight };
-      const below = area.bottom - around.bottom, above = around.top - area.top;
-      popover.classList.toggle('popover-above', above > below);
-      popover.style.setProperty('--fit-height', `${Math.max(0, Math.max(above, below) - 8)}px`);
-      popover.style.setProperty('--fit-shift', '0px');
-      const box = popover.getBoundingClientRect();
-      popover.style.setProperty('--fit-shift', `${Math.min(0, area.right - 8 - box.right) + Math.max(0, area.left + 8 - box.left)}px`);
-    };
-    const watcher = new ResizeObserver(fit);
-    const stop = () => { watcher.disconnect(); frame.removeEventListener('scroll', fit); if (stopFitting === stop) stopFitting = () => {}; };
-    watcher.observe(frame);
-    // Watching the popover too: when a draw removes it, the observer reports it at once, and fit() stops.
-    watcher.observe(popover);
-    frame.addEventListener('scroll', fit, { passive: true });
-    stopFitting = stop;
-  });
-  return popover;
-}
 
 /** A pending-change count that shortens first in a crowded bar (fitBars): `short` replaces `full`, which stays its tooltip. */
 export const pendingCount = (full: string, short: string): HTMLElement =>

@@ -82,6 +82,13 @@ export function pageRows(home: HomeView, page: Page): PageRows {
 /** How many plugin rows the page lists; in `tool`, those it has there. */
 export const pluginItemCount = (home: HomeView, page: Page, tool?: HarnessId): number => pageRows(home, page).rows.filter(row => !tool || row.copies[tool]).length;
 
+/**
+ * The rows a page has: its own items, those with no copy left that History can put back (shown Off, even when the last one
+ * just went), and a plugin's. None: the page shows its empty state instead.
+ */
+export const rowCount = (home: HomeView, page: Page): number =>
+  (page === 'skills' ? home.manage.skills.length + (home.manage.gone?.length ?? 0) : page === 'mcp' ? home.mcp.servers.length : home.agents.servers.length) + pluginItemCount(home, page);
+
 /** The tools that have this item through the plugin, in column order. */
 export const pluginTools = (row: PluginRow) => (Object.keys(row.copies) as HarnessId[]).sort(byToolOrder);
 

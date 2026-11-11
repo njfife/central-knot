@@ -7,7 +7,8 @@ import { caughtUpNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
-import { backText, deletedText, leftAsIs, replacedText, tookOverDone, undoneText } from './outsidewords.ts';
+import { backText, deletedText, leftAsIs, tookOverSaid, undoneText } from './outsidewords.ts';
+import { clickResults, inverseChanges, keptBack, recordChanged, undoOrder, type Standing } from './clickplan.ts';
 import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, sentence, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
@@ -87,6 +88,8 @@ export const state = {
   skillsView: 'table' as 'table' | 'files',
   /** Counts moves to another page, so what belongs to one visit (an armed Delete everywhere) can tell it has ended. */
   visit: 0,
+  /** Counts reads the person asked for (Refresh): the tables regroup their rows then (matrix.ts pinRows). */
+  reads: 0,
   /**
    * What the status bar says (announce): the newest message, whether it is for screen readers only, and its place in
    * the order messages were said, so the newest always wins.
@@ -153,7 +156,11 @@ export function tell(outcome: Outcome | undefined, otherwise = ''): void {
   state.outcome = outcome;
   if (!outcome) announce(otherwise);
   else { announce(outcome.text, !saidInStatusBar(outcome)); outcome.said = state.said.seq; }
+  if (outcome?.fade) setTimeout(() => { if (state.outcome !== outcome) return; state.outcome = undefined; rerender(); }, FADE_MS);
 }
+
+/** How long an Undo's confirmation stays in its band. */
+const FADE_MS = 5000;
 
 /** Paints the status bar's message from state.said, keeping its whole text as its tooltip. */
 export function paintStatusMessage() {
@@ -261,111 +268,226 @@ function accept(view: HomeView) {
 export const flashRequests = new Set<string>();
 const flashRow = (item: string) => { if (item) flashRequests.add(item.toLowerCase()); };
 
-/** After the first Apply all on a page, its tip has done its job. */
-const retireTip = (kind: Kind) => writeFlag(`ck-help-dismissed-${kind}`);
+/** After the first click on a page (any click that applies something, or says it changed nothing), its tip has done its job. */
+export const retireTip = (kind: Kind) => writeFlag(`ck-help-dismissed-${kind}`);
 
-/** `replace`: Replace with managed copies on a managed skill, said as what it did to the link and the shared copy. */
-export const applyManage = (changes: Change[], onDone: () => void, options: { replace?: boolean } = {}) => busy('Applying…', async () => {
-  const home = state.home!;
-  const before = new Map(home.manage.skills.map(skill => [skill.key, skill]));
-  const started = Date.now();
-  const result = await api().apply(changes, home.manage.gate.state === 'needs-resume', home.home);
-  const view = await api().refresh();
-  setHome(view);
-  state.applied = result;
-  if (!result.stopped) { onDone(); retireTip('skills'); }
-  // Skills this Apply all starts managing: a change on a skill managed already (a Disable, say) manages nothing new.
-  const managed = changes.filter(change => change.managed && before.get(change.key)?.managed !== true).length;
-  // History holds what Apply all replaced; new copies are undone by turning Managed off, which leaves them in place.
-  const names = new Set(changes.map(change => state.home?.manage.skills.find(skill => skill.key === change.key)?.name ?? change.key));
-  const ours = result.results.filter(entry => names.has(entry.item));
-  const replacedSome = ours.some(entry => entry.replaced);
-  // Say what was added and what was replaced, apart: only a replacement is kept in History.
-  const order = Object.values(namedTools);
-  // The tools whose results match, by name, in the page's tool order.
-  const toolsWhere = (match: (entry: DestinationResult) => boolean) => [...new Set(ours.filter(match).map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean).sort((a, b) => order.indexOf(a) - order.indexOf(b));
-  // A tool a take-over gave its own copy (it read the shared one) counts as a new copy, as the count before Apply all did.
-  const writtenTo = (replaced: boolean) => toolsWhere(entry => entry.outcome === 'written' && !entry.caughtUp && entry.tookOver !== 'link' && !!entry.replaced === replaced);
-  const added = writtenTo(false), replacedIn = writtenTo(true);
-  const single = managed === 1 ? changes.find(change => change.managed && before.get(change.key)?.managed !== true)?.key : undefined;
-  const singleName = single ? state.home?.manage.skills.find(skill => skill.key === single)?.name ?? single : undefined;
-  // The result matches the bar before it: how many new copies, and of which skills.
-  const newCopies = ours.filter(entry => entry.outcome === 'written' && !entry.replaced && !entry.caughtUp && entry.tookOver !== 'link');
-  // A take-over, said as what it did to the links and the shared copy (the tools given their own are among the new copies).
-  const linksIn = ours.filter(entry => entry.tookOver === 'link' && entry.outcome === 'written').map(entry => ({ tool: toolName(entry.harness ?? ''), item: entry.item }));
-  const sharedGone = ours.filter(entry => entry.tookOver === 'shared' && entry.outcome === 'removed').map(entry => ({ folder: shownPath(entry.folder ?? ''), item: entry.item }));
-  const tookOverClauses = tookOverDone(linksIn, sharedGone);
-  const newItems = [...new Set(newCopies.map(entry => entry.item))];
-  // Disable, Enable and Remove, per tool, said after the copies.
-  const disabledIn = toolsWhere(entry => entry.outcome === 'switched' && entry.disabled === true), enabledIn = toolsWhere(entry => entry.outcome === 'switched' && entry.disabled === false), removedFrom = toolsWhere(entry => entry.outcome === 'removed');
-  const touched = [...new Set(ours.filter(entry => entry.outcome === 'switched' || entry.outcome === 'removed').map(entry => entry.item))];
-  const parts = [
-    managed ? (singleName ? `${singleName} managed` : `${plural(managed, 'skill')} managed`) : '',
-    newCopies.length ? `${plural(newCopies.length, 'new copy', 'new copies')} written${!singleName && newItems.length <= 3 ? ` (${newItems.join(', ')})` : ` to ${andList(added)}`}` : '',
-    replacedIn.length ? `replaced ${andList(replacedIn.map(name => `${name}’s copy`))} (kept in History)` : '',
-    ...tookOverClauses.map((clause, index) => (index === tookOverClauses.length - 1 ? `${clause} (kept in History)` : clause)),
-  ].filter(Boolean);
-  const switches = [disabledIn.length ? `disabled in ${andList(disabledIn)}` : '', enabledIn.length ? `enabled in ${andList(enabledIn)}` : '', removedFrom.length ? `removed from ${andList(removedFrom)} (kept in History)` : ''].filter(Boolean);
-  // One skill's switches with nothing else to say name the skill once, at the front: "notes disabled in Codex · removed from …".
-  if (switches.length && !parts.length && touched.length === 1) switches[0] = `${touched[0]} ${switches[0]}`;
-  // Delete everywhere on an unmanaged skill, and Replace with managed copies: said like the managed Delete, naming the skill.
-  const everywhere = changes.length === 1 && changes[0].everywhere ? changes[0] : undefined;
-  const everywhereName = everywhere ? state.home?.manage.skills.find(skill => skill.key === everywhere.key)?.name ?? ours[0]?.item ?? everywhere.key : undefined;
-  const deletedFolders = [...new Set(ours.filter(entry => entry.tookOver === 'shared' && entry.outcome === 'removed').map(entry => shownPath(entry.folder ?? '')))];
-  const replaceName = options.replace ? singleName ?? ours[0]?.item : undefined;
-  const lostBy = everywhere ? toolsThatLost(everywhere.key, before.get(everywhere.key)) : [];
-  const what = everywhereName && lostBy.length ? deletedText(everywhereName, lostBy, deletedFolders).replace(/\.$/, '')
-    : replaceName && tookOverClauses.length ? replacedText(replaceName, tookOverClauses, linksIn.length + sharedGone.length).replace(/\.$/, '')
-    : [...parts, ...switches].join(' · ') || 'nothing needed copying';
-  // New copies are in History as 'added': one Undo here removes them again (while unchanged) and unmanages those skills.
-  // Only when nothing was replaced: undoing a replacement is its own History entry, and a half-undone choice would mislead.
-  // Only this Apply all's own History entries (from the moment it started): an earlier batch is undone from History, never here.
-  const recent = result.stopped ? [] : (await api().history()).events.filter(event => !event.undoneBy && changes.some(change => change.key === event.key) && Date.parse(event.at) >= started - 1000);
-  // Only a run that wrote new copies offers to undo them: an earlier Apply all's copies are undone from History.
-  const addedNow = replacedSome || !newCopies.length ? [] : recent.filter(event => event.kind === 'added');
-  // A copy choice gets its own inline Undo: each replaced copy back in its own tool, new copies removed, the skill unmanaged.
-  const chosenNow = replacedSome ? recent.filter(event => event.kind === 'chosen') : [];
-  // A lone Disable, Enable or Remove gets its own Undo here; more than one is undone from History.
-  const switchedNow = recent.filter(event => event.kind === 'switched' || event.kind === 'removed');
-  // A take-over: the links and the shared copy back. One that came with new copies (Manage) is undone with them, so the band's
-  // one Undo undoes the whole Apply all; one on its own (Replace with managed copies) gets its own Undo.
-  const tookOverNow = recent.filter(event => event.kind === 'took-over' && ours.some(entry => entry.tookOver && entry.item === event.item));
-  const tookOverAlone = tookOverNow.filter(event => !addedNow.some(added => added.id === event.tookOver?.addedId));
-  const takeOverUndo = tookOverNow.length === 1 && !addedNow.length ? { label: 'Undo', id: 'outcome-undo-takeover', title: 'Put the links and the shared copy back as they were', run: () => void restoreEvent(tookOverNow[0].id) } : undefined;
-  const switchUndo = switchedNow.length === 1 && !addedNow.length && !chosenNow.length
-    ? { label: switchedNow[0].kind === 'removed' ? 'Restore' : 'Undo', id: 'outcome-undo-switch', title: switchedNow[0].kind === 'removed' ? 'Put the removed copy back' : 'Flip it back', run: () => void restoreEvent(switchedNow[0].id) } : undefined;
-  const firstApply = !readFlag('ck-applied-once');
-  writeFlag('ck-applied-once');
-  const failed = result.results.filter(entry => entry.outcome === 'failed').length;
-  const kept = everywhereName ? ours.filter(entry => entry.outcome === 'held' || entry.outcome === 'failed').map(entry => entry.message) : [];
-  tell(result.stopped ? undefined : { page: state.page, history: replacedSome && !chosenNow.length, text: `${what}.` + (kept.length ? ` ${kept.join(' ')}` : '') + (managed && firstApply && !replaceName ? ' Edits now spread between tools.' : '') + (failed ? ` ${failed} failed.` : ''), item: singleName ?? everywhereName ?? replaceName, items: newItems,
-    act: addedNow.length ? addedUndo(addedNow, [...switchedNow, ...tookOverAlone]) : takeOverUndo ?? (chosenNow.length ? choiceUndo(chosenNow) : switchUndo) }, result.stopped);
-});
+// ---------- One switch per item ----------
+
+/** One click on an item page: the changes it makes, the item names it concerns, and what the result says it did. */
+export interface Click {
+  kind: Kind;
+  changes: Change[];
+  items: string[];
+  /**
+   * What was done, as the result's sentence ("notes is on in all 3 tools"); as a function, given the tools where the click's
+   * write failed or was held, so it never claims those.
+   */
+  said: string | ((notIn: HarnessId[]) => string);
+  /** Said after it, as a warning: what the click left as it is, and why ("Still on in Codex: its settings file can’t be read."). */
+  also?: string;
+  /** Said after it, as a plain note: what it leaves as it should ("Still on in Claude Code: it has no switch for one skill of a plugin…"). */
+  note?: string;
+  /** An Undo: its result is said for a few seconds, with no Undo of its own. */
+  undoing?: boolean;
+  /**
+   * An item with no copy left: the History removals to put back first (`ids`, the latest first). Its changes are then made from
+   * the item as it is back (`then`); 'choose' when its copies came back different, so the copy choice waits.
+   */
+  putBack?: { key: string; ids: string[]; then: () => Change[] | 'choose' };
+  /**
+   * Its part in the tools that have the item through a plugin (pluginswitch.ts turnEvery): run once the copies' part went
+   * through, never beside a click refused as a whole. `said`: what that part brought with it, said when it all worked.
+   */
+  plugins?: { ops: PluginOp[]; draft: Map<string, PluginOp>; said?: string };
+  /** Offered beside the Undo: the next step the result names (the whole plugin's switch where one item has none). */
+  next?: Outcome['next'];
+}
+
+/** Each item page's own: its items as the open home shows them, how its changes are sent, and where its last result is kept. */
+const kindPages: Record<Kind, { facts: (home: HomeView) => SkillFacts[]; send: (changes: Change[], resume: boolean, home: string) => Promise<ApplyResult | McpResult>; keep: (results: DestinationResult[], notices?: SyncNotice[]) => void }> = {
+  skills: { facts: home => home.manage.skills, send: (...args) => api().apply(...args), keep: (results, notices) => { state.applied = { results, harnessWrites: 0, notices }; } },
+  mcp: { facts: home => home.mcp.servers, send: (...args) => api().applyMcp(...args), keep: (results, notices) => { state.mcpResult = { results, writes: 0, notices }; } },
+  agents: { facts: home => home.agents.servers, send: (...args) => api().applyAgents(...args), keep: (results, notices) => { state.agentsResult = { results, writes: 0, notices }; } },
+};
+const factsOf = (kind: Kind) => (state.home ? kindPages[kind].facts(state.home) : []);
+
+/** The records of these items of a kind, as the open home shows them. */
+const standings = (kind: Kind, keys: string[]): Map<string, Standing> =>
+  new Map(factsOf(kind).filter(fact => keys.includes(fact.key)).map(fact => [fact.key, { managed: fact.managed, off: fact.off }]));
+
+/** Sends one kind's changes for the open home. */
+const send = (kind: Kind, changes: Change[]) => kindPages[kind].send(changes, state.home!.manage.gate.state === 'needs-resume', state.home!.home);
 
 /**
- * Turns plugins' items on or off from the Skills, MCP servers and Agents pages (pluginswitch.ts), with each tool's own
- * switch, then reads the home again. What ran leaves `draft`; what wasn't reached stays chosen. The result offers Undo,
- * which runs what this run changed, reversed. `before`: the result of the copies' Apply all that ran just before in the
- * same click, which this one's result carries with it: its words first, and its Undo run after this one's.
+ * One click, applied at once: an item's switch, or one tool's control in its details. The result says what was done, or why
+ * nothing was, in the band at the top of the page. Its one Undo reverses exactly what the click did: the History entries the
+ * click itself made (never what sync did alongside), and a record change no entry covers. A click that put an item back from
+ * History first (`putBack`) is undone by taking every copy out again, kept in History, as it was before.
  */
-export const applyPluginSwitches = (ops: PluginOp[], draft: Map<string, PluginOp>, undo = false, before?: Outcome) => busy(undo ? 'Undoing…' : 'Applying…', async () => {
+export const applyClick = (click: Click) => busy(click.putBack ? 'Putting it back…' : 'Applying…', async () => {
+  const names = [...click.items, ...click.changes.map(change => change.key), ...(click.putBack ? [click.putBack.key] : [])];
+  const back = click.putBack ? await restoreAll(click.putBack.ids) : undefined;
+  if (back?.stopped) { setHome(await api().refresh()); tell({ page: state.page, items: click.items, warn: true, band: true, text: back.stopped }); return; }
+  if (back) setHome(await api().refresh());
+  const changes = click.putBack ? click.putBack.then() : click.changes;
+  const sent = changes === 'choose' ? [] : changes;
+  const keys = sent.map(change => change.key);
+  const before = standings(click.kind, keys);
+  // A put-back that left nothing to change sends nothing; any other click is a pass, even with no change (Resume).
+  const result = sent.length || !click.putBack ? await send(click.kind, sent) : undefined;
+  setHome(await api().refresh());
+  if (back) await putHistory();
+  const { ours, did, refusal, failed, differs, notIn } = clickResults([...(back?.results ?? []), ...(result?.results ?? [])], names);
+  // A refusal is the click's result, said in its own band, not again among the failures.
+  kindPages[click.kind].keep(ours.filter(entry => entry !== refusal), result?.notices);
+  if (result?.stopped) { tell({ page: state.page, items: click.items, warn: true, band: true, text: result.stopped }); return; }
+  if (!click.undoing) retireTip(click.kind);
+  const made = result && 'made' in result ? result.made ?? [] : [];
+  // A click refused before anything was done changed nothing: a record unlike the page's was changed elsewhere (the page was
+  // read before it), never by this click. A hold that came after the record was changed (an edit waiting for sync) is no such refusal.
+  const changed = refusal?.unchanged ? [] : recordChanged(before, standings(click.kind, keys));
+  const copied = !!back || did || made.length > 0 || changed.length > 0;
+  // The plugins' part, once the copies' part went through (a whole-click refusal leaves it unrun).
+  const plugged = click.plugins?.ops.length && (copied || !refusal) ? await runSwitches(click.plugins.ops, click.plugins.draft) : undefined;
+  if (plugged) setHome(await api().refresh());
+  const done = copied || !!plugged?.done.length;
+  // Said from what happened: a tool whose write failed, copy or plugin switch, is not called on (or off).
+  const said = changes === 'choose' ? `${click.items[0]} is back.` : typeof click.said === 'string' ? click.said : click.said([...notIn, ...(plugged?.failedIn ?? [])]);
+  const choose = differs || changes === 'choose' ? ' Its copies differ: choose which copy every tool uses.' : '';
+  // A skill taken over (its links and shared copy, when it was turned on): what that did to them.
+  const outside = sent.some(change => change.takeOver) ? tookOverSentence(ours) : '';
+  const plugText = !plugged ? '' : plugged.failed.length || plugged.stopped ? switchProblems(plugged) : click.plugins?.said ?? '';
+  // A hold that came after the change is said beside what was done, not dropped.
+  const text = done || !refusal ? [said, plugText, outside, click.also, click.note, refusal?.message].filter(Boolean).join(' ') + choose : refusal.message;
+  const switchedBack = plugged?.back ?? [];
+  const undo = click.undoing || !done ? undefined : back ? () => takeOutAgain(click)
+    : made.length || changed.length || switchedBack.length ? () => void undoClick(click, made, before, changed, switchedBack) : undefined;
+  const warned = failed || !!plugged?.failed.length || !!plugged?.stopped;
+  tell({ page: state.page, items: click.items, warn: warned || !!click.also || !!refusal, band: true, fade: click.undoing && !warned, next: done || !refusal ? click.next : undefined,
+    text, act: undo ? { label: 'Undo', id: 'outcome-undo', title: back ? 'Take it out of every tool again; History keeps it' : 'Put back everything this did', run: undo } : undefined });
+  for (const item of click.items) flashRow(item);
+});
+
+/** Puts back an item's removals from History, the latest first. One that can't go back stops it only if it is the first. */
+async function restoreAll(ids: string[]): Promise<{ results: DestinationResult[]; stopped?: string }> {
+  const home = state.home!;
+  const results: DestinationResult[] = [];
+  for (const [index, id] of ids.entries()) {
+    const result = await api().restore(id, home.manage.gate.state === 'needs-resume', home.home);
+    // An older removal that can't go back (that tool has a copy again) leaves the rest as they are.
+    if (result.stopped && !index) return { results, stopped: result.stopped };
+    results.push(...result.results);
+  }
+  return { results };
+}
+
+/** Undo of a put-back: every copy it has now is taken out again, kept in History, so it is off with no copy left as before. */
+function takeOutAgain(click: Click) {
+  const key = click.putBack?.key ?? '';
+  const fact = factsOf(click.kind).find(item => item.key === key);
+  const holders = (Object.entries(fact?.copies ?? {}) as [HarnessId, { writable: boolean; readsFrom?: HarnessId }][]).filter(([, copy]) => copy.writable && !copy.readsFrom).map(([tool]) => tool);
+  if (!fact || !holders.length) return;
+  void applyClick({ kind: click.kind, items: click.items, undoing: true, said: `Undone: ${click.items[0]} has no copy left again. History keeps it.`,
+    changes: [{ key, managed: fact.managed, off: fact.off, seenManaged: fact.managed, remove: holders }] });
+}
+
+/** After a click that took a skill over: what it did to its links and the shared copy, from the click's own results. */
+const tookOverSentence = (ours: DestinationResult[]) => tookOverSaid(
+  ours.filter(entry => entry.tookOver === 'link' && entry.outcome === 'written').map(entry => ({ tool: toolName(entry.harness ?? ''), item: entry.item })),
+  ours.filter(entry => entry.tookOver === 'shared' && entry.outcome === 'removed').map(entry => ({ folder: shownPath(entry.folder ?? ''), item: entry.item })));
+
+/**
+ * Undo of one click: each History entry it made goes back (clickplan.ts undoOrder), then an item whose record is still not
+ * as before (a click that only changed the record, or more than its entries cover) gets the change that puts it back.
+ */
+const undoClick = (click: Click, made: string[], before: Map<string, Standing>, changed: string[], switchedBack: PluginOp[] = []) => busy('Undoing…', async () => {
+  const home = state.home!;
+  // The plugin items' switches go back first: other tools than the copies', so the rest is undone whatever they do.
+  const unswitched = switchedBack.length ? await runSwitches(switchedBack, new Map(), true) : undefined;
+  const events = (await api().history()).events.filter(event => made.includes(event.id));
+  // A choice undone in its own tools also takes out the copies added with it.
+  const narrowed = new Set<string>();
+  const results: DestinationResult[] = [];
+  const notices: SyncNotice[] = [];
+  let stopped: string | undefined;
+  for (const event of undoOrder(events)) {
+    if (event.kind === 'added' && narrowed.has(event.key)) continue;
+    const narrow = event.kind === 'chosen' && click.kind !== 'mcp';
+    const result = await api().restore(event.id, home.manage.gate.state === 'needs-resume', home.home, narrow ? 'narrow' : undefined);
+    if (result.stopped) { stopped = result.stopped; break; }
+    if (narrow) narrowed.add(event.key);
+    results.push(...result.results);
+  }
+  // What a History entry couldn't put back stays as it is: the record goes back only once the entries all did.
+  if (!stopped && !results.some(keptBack) && changed.length) {
+    setHome(await api().refresh());
+    const inverse = inverseChanges(changed, before, standings(click.kind, changed));
+    if (inverse.length) {
+      const back = await send(click.kind, inverse);
+      if (back.stopped) stopped = back.stopped;
+      results.push(...clickResults(back.results, [...click.items, ...changed]).ours);
+      // What sync did in that pass (an edit it spread) is told as after any click.
+      notices.push(...(back.notices ?? []));
+    }
+  }
+  setHome(await api().refresh());
+  await putHistory();
+  kindPages[click.kind].keep(results, notices);
+  // Waiting for a choice of copy again is how a choice's Undo leaves it, as before the choice: no failure.
+  const failed = [...results.filter(keptBack).map(entry => entry.message), ...(unswitched ? [switchProblems(unswitched)].filter(Boolean) : [])];
+  const what = click.items.length === 1 ? click.items[0] : andList(click.items);
+  // A take-over undone with it: the links and the shared copy it put back.
+  const back = backText(results.filter(entry => entry.tookOver === 'link' && entry.outcome === 'written').map(entry => ({ tool: toolName(entry.harness ?? ''), item: entry.item })),
+    results.filter(entry => entry.tookOver === 'shared' && entry.outcome === 'written').map(entry => ({ item: entry.item })));
+  const lead = failed.length ? `Not all of ${what} could be put back.` : `Undone: ${what} ${click.items.length === 1 ? 'is' : 'are'} as before.`;
+  // A choice whose Undo stopped part-way keeps what it put back on its History entry, whose Undo finishes it.
+  const finish = state.history.data?.some(event => made.includes(event.id) && event.kind === 'chosen' && !event.undoneBy) ? 'History’s Undo of the choice finishes it.' : '';
+  tell({ page: state.page, items: click.items, warn: !!stopped || failed.length > 0, band: true, fade: !stopped && !failed.length,
+    text: stopped ? `Not all of it could be undone: ${stopped}` : [lead, back, ...failed, finish].filter(Boolean).join(' ') });
+  for (const item of click.items) flashRow(item);
+});
+
+/** What a run of plugin switches couldn't do, in words ("issue-tracker: couldn’t turn it on in Codex."), or ''. */
+const switchProblems = (ran: Awaited<ReturnType<typeof runSwitches>>) => [ran.stopped, ...ran.failed.map(line => `${line.plugin}: ${line.text.replace(/\.$/, '')}.`)].filter(Boolean).join(' ');
+
+/**
+ * Runs plugin switch choices (pluginswitch.ts) with each tool's own switch. What ran leaves `draft`. A plugin that failed to
+ * come on leaves no item switched off for it: those written before it are put back. Returns what ran, in lines, the tools where
+ * something didn't, and the choices that turn it all back.
+ */
+async function runSwitches(ops: PluginOp[], draft: Map<string, PluginOp>, undo = false) {
   const home = state.home!.home;
   const plan = { install: api().installPlugin, uninstall: api().uninstallPlugin, setSkill: api().setPluginSkill, setPart: api().setPluginPart, setWhole: api().setPluginOn };
   const result = await runPlan(ops, plan, home);
   for (const entry of result.done) clearPluginOp(draft, entry);
-  // A plugin that failed to come on leaves no item switched off for it: those written before it are put back, and said
-  // only where that failed too.
   const strays = strayHolds(result.done);
   const putBack = strays.length ? (await runPlan(reverse(strays), plan, home)).done : [];
   const restored = strays.filter(stray => putBack.some(back => back.tool === stray.tool && back.plugin === stray.plugin && back.skill === stray.skill && back.part?.kind === stray.part?.kind && back.part?.name === stray.part?.name && succeeded(back.report)));
-  result.done = result.done.filter(entry => !restored.includes(entry));
+  const done = result.done.filter(entry => !restored.includes(entry));
+  const lines = resultLines(done, undo);
+  const ran = (op: PluginOp) => done.some(entry => entry.tool === op.tool && entry.plugin === op.plugin && succeeded(entry.report));
+  const failedIn = [...new Set([...done.filter(entry => !succeeded(entry.report)).map(entry => entry.tool), ...ops.filter(op => !ran(op)).map(op => op.tool)])];
+  return { done, lines, failed: lines.filter(line => !line.ok), failedIn, back: undo ? [] : reverse(done), stopped: result.stopped };
+}
+
+/**
+ * Turns plugins' items on or off from the Skills, MCP servers and Agents pages (pluginswitch.ts), with each tool's own
+ * switch, then reads the home again. What ran leaves `draft`; what wasn't reached stays chosen. The result offers Undo,
+ * which runs what this run changed, reversed. `said`: the result's words when everything ran (else what ran and what
+ * didn't), and `undoSaid` its Undo's. Said after it, what the click left as it is: `also` as a warning (a switch that can't
+ * be written), `note` plainly (a tool with no switch for one item). `kind`: the page's, whose tip a click retires. `before`: the result of the copies' change that ran just before on
+ * Apply all (MCP servers and Agents, until they have one switch per item), which this one's result carries with it: its
+ * words first, and its Undo run after this one's.
+ */
+export const applyPluginSwitches = (ops: PluginOp[], draft: Map<string, PluginOp>, options: { undo?: boolean; before?: Outcome; also?: string; note?: string; said?: string; undoSaid?: string; kind?: Kind; next?: Outcome['next'] } = {}) => busy(options.undo ? 'Undoing…' : 'Applying…', async () => {
+  const { undo = false, before, also, note, said, undoSaid, kind, next } = options;
+  const ran = await runSwitches(ops, draft, undo);
   setHome(await api().refresh());
-  const lines = resultLines(result.done, undo);
-  const failed = lines.filter(line => !line.ok);
-  const back = undo ? [] : reverse(result.done);
-  const text = [before?.text, result.stopped ?? resultSentence(lines, undo), ...failed.map(line => `${line.plugin}: ${line.text.replace(/\.$/, '')}.`)].filter(Boolean).join(' ') || 'Nothing changed.';
+  if (kind && !undo) retireTip(kind);
+  const worked = !ran.failed.length && !ran.stopped;
+  const text = [before?.text, worked && said ? said : ran.stopped ?? resultSentence(ran.lines, undo), worked ? '' : switchProblems({ ...ran, stopped: undefined }), also, note].filter(Boolean).join(' ') || 'Nothing changed.';
   // The switches go back first; the copies' own Undo follows only when that worked, and is still offered when it didn't.
-  const undoPlugins = () => applyPluginSwitches(back, new Map(), true, before?.act ? { page: state.page, text: '', act: { ...before.act, label: 'Undo the rest', title: 'Undo the changes to copies made in the same Apply all' } } : undefined);
+  const undoPlugins = () => applyPluginSwitches(ran.back, new Map(), { undo: true, said: undoSaid, before: before?.act ? { page: state.page, text: '', act: { ...before.act, label: 'Undo the rest', title: 'Undo the changes to copies made in the same click' } } : undefined });
   // With the copies' changes said above it and no Undo of theirs to run after, the button says what it does undo.
   // After them the copies' own Undo runs, when they worked; its result then says both.
   const undoBoth = async () => {
@@ -376,8 +498,8 @@ export const applyPluginSwitches = (ops: PluginOp[], draft: Map<string, PluginOp
     while (state.busy) await new Promise(done => setTimeout(done, 50));
     tell(state.outcome ? { ...state.outcome, text: [first?.text, state.outcome.text].filter(Boolean).join(' ') } : first && { ...first, act: undefined });
   };
-  const act = back.length ? { label: before && !before.act ? 'Undo plugin switches' : 'Undo', id: 'outcome-undo-plugin', title: before?.act ? 'Turn the plugin items back as they were, then undo the rest' : 'Turn them back as they were', run: () => void undoBoth() } : before?.act;
-  tell({ ...before, page: state.page, text, warn: !!failed.length || !!result.stopped || !!before?.warn, act });
+  const act = ran.back.length ? { label: before && !before.act ? 'Undo plugin switches' : 'Undo', id: 'outcome-undo-plugin', title: before?.act ? 'Turn the plugin items back as they were, then undo the rest' : 'Turn them back as they were', run: () => void undoBoth() } : before?.act;
+  tell({ ...before, page: state.page, text, warn: !worked || !!before?.warn || !!also, band: true, fade: undo && worked, act, next: worked ? next : undefined });
 });
 
 /**
@@ -454,6 +576,7 @@ export async function readAgain() {
     const view = await api().refresh();
     if (!view) return;
     state.applied = undefined;
+    state.reads += 1;
     // Said first, so a page that leaves (setHome) adds its reason after what was read.
     announce(readSummary(view));
     setHome(view, { reload: false });
@@ -640,7 +763,8 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   }
   if (past?.kind === 'added') {
     const stayed = result.results.filter(entry => entry.outcome === 'held');
-    tell(result.stopped ? undefined : { page: state.page, item: past.item, text: `Removed the new copies of ${past.item}${removedFrom.length ? ` from ${andList(removedFrom)}` : ''}.${stayed.length ? ` ${stayed.map(entry => entry.message).join(' ')}` : ` ${past.item} is unmanaged again.`}` }, result.stopped);
+    const after = past.rejoined ? ` ${past.item} stays synced and leaves ${andList(past.losers.map(loser => toolName(loser.tool) ?? loser.tool))} out again.` : ` ${past.item} is not synced again.`;
+    tell(result.stopped ? undefined : { page: state.page, item: past.item, text: `Removed the new copies of ${past.item}${removedFrom.length ? ` from ${andList(removedFrom)}` : ''}.${stayed.length ? ` ${stayed.map(entry => entry.message).join(' ')}` : after}` }, result.stopped);
     if (!result.stopped) flashRow(past.item);
     return;
   }
@@ -699,8 +823,16 @@ export interface Outcome {
   kind?: 'saved';
   tool?: HarnessId;
   history?: boolean;
+  /** Shown as a band even with nothing to offer: a click's result, which belongs where the click's Undo would be. */
+  band?: boolean;
+  /** The band goes after a few seconds: an Undo's confirmation. */
+  fade?: boolean;
   undo?: { id: string; label: string };
   act?: { label: string; id: string; run: () => void; title?: string };
+  /** A second button after `act`: the next step the result offers ("Turn document-tools off in Claude Code"). */
+  next?: { label: string; id: string; run: () => void; title?: string };
+  /** Plain information, nothing done and nothing wrong: the information mark, not a tick. */
+  info?: boolean;
   /** When it was said (state.said.seq): a result newer than a table's pending changes still shows there. */
   said?: number;
 }
@@ -709,7 +841,7 @@ export interface Outcome {
  * Whether a result is said in the status bar rather than as a band: it offers nothing to do (no button, Undo or History
  * link), so it needs no room of its own.
  */
-export const saidInStatusBar = (outcome: Outcome): boolean => !(outcome.act || outcome.undo || outcome.history || outcome.note);
+export const saidInStatusBar = (outcome: Outcome): boolean => !(outcome.act || outcome.undo || outcome.history || outcome.note || outcome.band);
 
 // ---------- Instructions ----------
 
@@ -1065,27 +1197,6 @@ function addedUndo(addedNow: HistoryEvent[], alongside: HistoryEvent[] = []) {
   const items = addedNow.length === 1 ? addedNow[0].item : addedNow.length === 2 ? 'both' : `all ${addedNow.length}`;
   return { label: 'Undo Apply all', id: 'outcome-undo-added', title: `Removes the ${copies === 1 ? 'new copy' : `${copies} new copies`} Apply all added (only while unchanged) and stops managing ${items}. Your original copies stay.`, run: () => void undoAdded([...alongside, ...addedNow].map(event => event.id)) };
 }
-
-/** The Undo a copy choice offers: it names the copies it puts back. */
-function choiceUndo(chosenNow: HistoryEvent[]) {
-  const back = [...new Set(chosenNow.flatMap(event => event.losers.map(loser => toolName(loser.tool))))];
-  return { label: 'Undo choice', id: 'outcome-undo-choice',
-    title: `Puts ${back.length === 1 ? `${back[0]}’s copy` : 'each replaced copy'} back, removes copies this choice added, and stops managing it again. Nothing is undone if a copy changed since.`,
-    run: () => void undoChoices(chosenNow.map(event => event.id)) };
-}
-
-const undoChoices = (ids: string[]) => busy('Undoing the choice…', async () => {
-  const home = state.home!;
-  let stopped: string | undefined;
-  for (const id of ids) {
-    const result = await api().restore(id, home.manage.gate.state === 'needs-resume', home.home, 'narrow');
-    if (result.stopped) { stopped = result.stopped; break; }
-  }
-  const view = await api().refresh();
-  setHome(view);
-  const items = [...new Set((state.history.data ?? []).filter(event => ids.includes(event.id)).map(event => event.item))];
-  tell(stopped ? undefined : { page: state.page, items, text: 'Undone: each replaced copy is back in its own tool, and the skill is unmanaged again, with its copies differing as before.' }, stopped);
-});
 
 /** Undo of Apply all's new copies, for every skill it made Managed: each goes back to unmanaged, its new copies removed. */
 export const undoAdded = (ids: string[]) => busy('Undoing Apply all…', async () => {

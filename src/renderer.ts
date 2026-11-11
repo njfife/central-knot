@@ -151,7 +151,7 @@ function writeFact(manage: ManageView): { glyph: IconName; text: string; short?:
 
 /**
  * The Automatic sync switch, the same one the menus carry. A preview-only home keeps it, disabled and grey, so it is
- * recognisably the same setting. With sync on and nothing managed yet it reads "On · nothing managed"; its tooltip says
+ * recognisably the same setting. With sync on and nothing synced yet it reads "On · nothing synced"; its tooltip says
  * sync starts once something is.
  */
 function syncSwitch(home: HomeView) {
@@ -172,11 +172,11 @@ function syncSwitch(home: HomeView) {
       label, h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, home.manage.gate.owner.running === false ? `${home.manage.gate.owner.name}’s, not open` : `By ${home.manage.gate.owner.name}`));
   }
   const idle = home.syncOn && !anyManaged();
-  const title = idle ? 'Automatic sync is on: it starts once you manage something. Click to turn it off.'
+  const title = idle ? 'Automatic sync is on: it starts once you turn something on. Click to turn it off.'
     : home.syncOn ? 'Automatic sync is on: an edit to a managed item spreads to the other tools on its own, even with this window closed. Click to turn it off.'
     : 'Automatic sync is off: edits wait until you turn it on or use Sync once. Click to turn it on.';
   return h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(home.syncOn), 'aria-label': 'Automatic sync', disabled: !!state.busy, title, onclick: () => void setSync(!home.syncOn) },
-    label, h(`span.sync-track${home.syncOn ? '.on' : ''}${idle ? '.idle' : ''}`, { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, !home.syncOn ? 'Off' : idle ? 'On · nothing managed' : 'On'));
+    label, h(`span.sync-track${home.syncOn ? '.on' : ''}${idle ? '.idle' : ''}`, { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, !home.syncOn ? 'Off' : idle ? 'On · nothing synced' : 'On'));
 }
 
 function renderStatus() {
