@@ -6,7 +6,7 @@ import type { IconName } from './icons.ts';
 import { DAY_MS, defaultHistoryDays, historyDayChoices } from './model.ts';
 import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, HistoryWindowSaved, SignInPlace } from './types.ts';
 import { buildWords, releasesPage, tagWords, updateStatus } from './updates.ts';
-import { checkNow, unsavedWork, updateControl, updates } from './updateview.ts';
+import { checkNow, settingUpdateButton, unsavedWork, updates } from './updateview.ts';
 import { checkPluginsNow, checkedWords, pluginUpdates } from './pluginupdateview.ts';
 
 /** The settings as last read from the main process; undefined until the page has loaded them. */
@@ -302,7 +302,8 @@ function updatesRow(): HTMLElement | null {
   const view = updates.view;
   if (!view?.shown) return null;
   const checks = !!view.tag && view.reason?.key !== 'dev' && view.reason?.key !== 'untagged';
-  const hint = `This is Central Knot ${buildWords(view)}.${checks ? ' It checks GitHub for a newer release every few hours.' : ''}`;
+  // The schedule, in words: updateflow.ts has it.
+  const hint = `This is Central Knot ${buildWords(view)}.${checks ? ' It checks GitHub for a newer release every 15 minutes, and when you come back to its window. A new release shows at the bottom of the sidebar.' : ''}`;
   // A restart held for unsaved work says so here too, not only on the button.
   const held = view.step === 'ready' && view.available ? unsavedWork() : undefined;
   const { page: about, ...status } = (held ? { text: `${tagWords(view.available!.tag)} is ready. ${held}`, tone: 'info' as const, page: view.available!.page } : updateStatus(view)) ?? {};
@@ -312,7 +313,7 @@ function updatesRow(): HTMLElement | null {
     { id: 'setting-updates-reason', announce: false });
   return settingRow('updates', 'Updates', hint,
     h('div.setting-actions', {},
-      updateControl('setting-update', 'setting'),
+      settingUpdateButton(),
       checks ? button({ variant: 'outline', label: 'Check now', id: 'check-updates', disabled: updates.checking || view.checking || !!view.step, onclick: () => void checkNow(), attrs: { 'aria-describedby': 'setting-updates-hint' } }) : null),
     notice, why || undefined);
 }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CHECK_EVERY_MS, FIRST_CHECK_MS, RESTART_MS, RETRY_MS, STALLED_MS, updateFlow, type PendingUpdate } from '../src/updateflow.ts';
+import { CHECK_EVERY_MS, FIRST_CHECK_MS, FRESH_MS, RESTART_MS, STALLED_MS, updateFlow, type PendingUpdate } from '../src/updateflow.ts';
 import { prepareUnfinished } from '../src/updates.ts';
 import type { UpdateRelease, UpdateView } from '../src/types.ts';
 
@@ -29,7 +29,7 @@ async function until(what: string, met: () => boolean) {
  * releases), `download` (the zip's answer), `prepare` (Squirrel's), `quit` (the restart), `save` (the settings file).
  */
 function installed(t: TestContext, { tag = 'v0.5.0-preview.6', untagged = false, pending = undefined as PendingUpdate | undefined, page = true } = {}) {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const temp = mkdtempSync(join(tmpdir(), 'ck-updateflow-'));
   t.after(() => rmSync(temp, { recursive: true, force: true }));
   const world = {
@@ -89,7 +89,7 @@ async function offered(t: TestContext, options?: Parameters<typeof installed>[1]
 }
 const step = (world: { view?: UpdateView }) => world.view?.step;
 
-test('the first check runs shortly after launch, and then every few hours', async t => {
+test('the first check runs shortly after launch, and then every quarter of an hour', async t => {
   const { world, flow } = installed(t);
   await flow.view();
   assert.equal(world.reads, 0, 'nothing is asked at the launch itself');
@@ -100,7 +100,7 @@ test('the first check runs shortly after launch, and then every few hours', asyn
   await until('the next check', () => world.reads === 2);
 });
 
-test('a check that failed is said, and tried again sooner', async t => {
+test('a check that failed is said, and tried again at the next turn', async t => {
   const { world, flow } = installed(t);
   world.status = 503;
   await flow.view();
@@ -108,9 +108,31 @@ test('a check that failed is said, and tried again sooner', async t => {
   await until('the first check', () => !!world.view?.checked);
   assert.match(world.view!.checked!.failed!, /GitHub answered 503/);
   world.status = 200;
-  world.tick(RETRY_MS);
+  world.tick(CHECK_EVERY_MS);
   await until('the retry', () => world.view?.available?.tag === 'v0.5.0-preview.7');
   assert.equal(world.view!.checked!.failed, undefined);
+});
+
+test('coming back to the window checks again once the last check is five minutes old, and never before the first', async t => {
+  const { world, flow } = installed(t);
+  await flow.checkIfStale();
+  assert.equal(world.reads, 0, 'before the launch’s own check, coming back asks nothing: that check is already due');
+  world.tick(FIRST_CHECK_MS);
+  await until('the first check', () => world.reads === 1 && !world.view?.checking);
+  world.tick(FRESH_MS - 1000);
+  await flow.checkIfStale();
+  assert.equal(world.reads, 1, 'a check four minutes old is fresh enough');
+  // A release published meanwhile shows as soon as the person comes back.
+  world.list = [listed('v0.5.0-preview.8'), listed('v0.5.0-preview.7')];
+  world.tick(1000);
+  await flow.checkIfStale();
+  assert.deepEqual([world.reads, world.view?.available?.tag], [2, 'v0.5.0-preview.8']);
+  // That check starts the quarter of an hour again: the clock's next check is a full turn later.
+  world.tick(CHECK_EVERY_MS - 1000);
+  await settle();
+  assert.equal(world.reads, 2);
+  world.tick(1000);
+  await until('the clock’s next check', () => world.reads === 3);
 });
 
 test('a build that wasn’t made from a release never checks', async t => {
@@ -216,7 +238,7 @@ test('checks stay scheduled through a download that fails, whether the clock or 
       assert.equal(world.reads, before, 'nothing is read during an update');
       end();
       await until('the failure', () => !!world.view?.failed);
-      world.tick(RETRY_MS);
+      world.tick(CHECK_EVERY_MS);
       await until('the next check', () => world.reads === before + 1);
       await until('its answer', () => !world.view?.checking);
       assert.equal(world.view!.failed, undefined, 'a check that went through clears the old failure');
@@ -352,6 +374,6 @@ test('the launch after an update says it is on the new version, once', async t =
 test('the launch after an update that didn’t take says the old version is still in use', async t => {
   const { world, flow } = installed(t, { pending: { tag: 'v0.5.0-preview.7', page: 'https://example.test/7', from: 'v0.5.0-preview.6' } });
   const view = await flow.view();
-  assert.equal(view.failed, 'The update to 0.5.0 preview 7 didn’t finish. Central Knot 0.5.0 preview 6 is still in use. Try again from the Update button.');
+  assert.equal(view.failed, 'The update to 0.5.0 preview 7 didn’t finish. Central Knot 0.5.0 preview 6 is still in use.');
   assert.deepEqual([view.updated, world.pending], [undefined, undefined]);
 });

@@ -1,5 +1,6 @@
-// Updates (PLT-02): which GitHub release this build would update to, whether this copy can replace itself, and what the status
-// bar and Settings say about it. No Node imports: the main process (updater.ts) checks and installs, the page shows these words.
+// Updates (PLT-02): which GitHub release this build would update to, whether this copy can replace itself, and what the
+// sidebar's update control and Settings say about it. No Node imports: the main process (updater.ts, updateflow.ts) checks and
+// installs, the page (updateview.ts) shows these words.
 import { compareVersions, isHttps, record, text } from './values.ts';
 import type { UpdateReason, UpdateRelease, UpdateView } from './types.ts';
 
@@ -97,11 +98,11 @@ export const restartWaits = 'Something here isn’t saved yet, so Central Knot w
 export const buildWords = (view: Pick<UpdateView, 'tag' | 'version'>) => (view.tag && tagVersion(view.tag) ? tagWords(view.tag) : view.version);
 
 /**
- * The status bar's update button, or nothing while there is no update this copy can install (the version shows as text).
- * `held`: why the page won't restart by itself once the update is ready (something typed and not saved); `restarting`: the
- * page has asked main to restart.
+ * The Update button's words while there is an update this copy can install (Settings' button, and the sidebar control in
+ * those steps), or nothing otherwise. `held`: why the page won't restart by itself once the update is ready (something typed
+ * and not saved); `restarting`: the page has asked main to restart.
  */
-export function updateButton(view: UpdateView, { held, restarting = false }: { held?: string; restarting?: boolean } = {}): { label: string; title: string; busy: boolean; short?: string; held?: boolean } | undefined {
+export function updateButton(view: UpdateView, { held, restarting = false }: { held?: string; restarting?: boolean } = {}): { label: string; title: string; busy: boolean; held?: boolean } | undefined {
   const next = view.available;
   if (!view.shown || !next || view.reason) return undefined;
   const words = tagWords(next.tag);
@@ -114,7 +115,55 @@ export function updateButton(view: UpdateView, { held, restarting = false }: { h
     if (restarting) return { label: 'Restarting…', title: `Restarting into ${words}.`, busy: true };
     return { label: 'Restart to update', title: held ? `${words} is ready. ${held} Click to restart anyway.` : `${words} is ready. Click to restart into it.`, busy: false, held: !!held };
   }
-  return { label: `Update to ${words}`, short: 'Update', title: `Downloads ${words}, then restarts Central Knot. Your settings and data stay as they are.`, busy: false };
+  return { label: `Update to ${words}`, title: `Downloads ${words}, then restarts Central Knot. Your settings and data stay as they are.`, busy: false };
+}
+
+/**
+ * What the sidebar's update control shows (updateview.ts sidebarEnd draws it), one look per state:
+ * - `off`: this copy never checks (a development build, or one not made from a release). It opens Settings, which says why.
+ * - `check`: the quiet circular arrows. A click is Check now; the tooltip says what the last check found.
+ * - `checking`: the arrows spin while a check runs, whoever asked for it.
+ * - `available`: a newer release this copy can install. It stands out; a click downloads it, prepares it and restarts.
+ * - `working`: downloading (with its progress) or preparing it.
+ * - `ready`: prepared; a click restarts into it.
+ * - `held`: prepared, but something unsaved keeps it from restarting by itself. It never restarts on a click: it opens Settings'
+ *   Updates row, which says what restarting would lose, beside its own Restart button.
+ * - `elsewhere`: a newer release this copy can't install itself (Settings says why and links the release). It opens Settings.
+ * `does` is what a click does; `name` is the control's full name for a screen reader and the folded sidebar, whose control
+ * shows only its icon; `title` is the tooltip.
+ */
+export type IndicatorLook = 'off' | 'check' | 'checking' | 'available' | 'working' | 'ready' | 'held' | 'elsewhere';
+export interface Indicator {
+  look: IndicatorLook; glyph: 'refresh-cw' | 'circle-arrow-down' | 'arrow-down' | 'circle-alert' | 'circle-check' | 'triangle-alert' | 'clock';
+  label: string; name: string; title: string; busy: boolean;
+  does: 'check' | 'update' | 'restart' | 'settings';
+  /** While downloading: how much has arrived, 0 to 1. */
+  progress?: number;
+}
+export function updateIndicator(view: UpdateView, { held, restarting = false, checking = false }: { held?: string; restarting?: boolean; checking?: boolean } = {}): Indicator | undefined {
+  if (!view.shown) return undefined;
+  const button = updateButton(view, { held, restarting });
+  if (button) {
+    const words = tagWords(view.available!.tag);
+    if (view.step === 'downloading' || view.step === 'installing') return { look: 'working', glyph: view.step === 'installing' ? 'clock' : 'arrow-down', label: button.label, name: button.label, title: button.title, busy: true, does: 'update', progress: view.step === 'downloading' ? view.progress ?? 0 : undefined };
+    if (view.step === 'ready' && held && !restarting) return { look: 'held', glyph: 'triangle-alert', label: 'Restart to update…', name: `Restart to update: ${held} Opens Settings`, title: `${words} is ready. ${held} Click to open Settings, where you can restart anyway.`, busy: false, does: 'settings' };
+    if (view.step === 'ready') return { look: 'ready', glyph: 'circle-check', label: button.label, name: button.busy ? button.label : `Restart to update to ${words}`, title: button.title, busy: button.busy, does: 'restart' };
+    // After a failed download or prepare the release is still offered: the control says so (the failure's own words already
+    // say what to do) and the click tries again.
+    if (view.failed) return { look: 'available', glyph: 'circle-alert', label: 'Try the update again', name: `Try the update to ${words} again`, title: view.failed, busy: false, does: 'update' };
+    return { look: 'available', glyph: 'circle-arrow-down', label: 'Update available', name: button.label, title: `${words} is available. Click to download it and restart Central Knot. Your settings and data stay as they are.`, busy: false, does: 'update' };
+  }
+  if (view.available && view.reason) {
+    const words = tagWords(view.available.tag);
+    return { look: 'elsewhere', glyph: 'circle-arrow-down', label: 'Update available', name: `${words} is available. Open Settings`, title: `${words} is available. ${view.reason.text} Open Settings for the release page.`, busy: false, does: 'settings' };
+  }
+  if (!view.tag || view.reason?.key === 'dev' || view.reason?.key === 'untagged') {
+    return { look: 'off', glyph: 'refresh-cw', label: 'Updates', name: 'Updates: open Settings', title: `${view.reason?.text ?? 'This build doesn’t update itself.'} Open Settings for the releases page.`, busy: false, does: 'settings' };
+  }
+  if (checking || view.checking) return { look: 'checking', glyph: 'refresh-cw', label: 'Checking…', name: 'Checking for updates', title: 'Checking GitHub for a newer release…', busy: true, does: 'check' };
+  // What the last check found, said in the tooltip: nothing here is worth a mark of its own (Central Knot tries again by itself).
+  const found = view.failed ?? view.checked?.failed ?? (view.checked ? 'Up to date.' : 'Central Knot checks for a newer release by itself.');
+  return { look: 'check', glyph: 'refresh-cw', label: 'Check for updates', name: 'Check for updates', title: `${found} Click to check now.`, busy: false, does: 'check' };
 }
 
 /**
@@ -126,7 +175,7 @@ export function updateStatus(view: UpdateView): { text: string; tone: 'done' | '
   const page = view.available?.page;
   if (view.failed) return { text: view.failed, tone: 'failure', page };
   if (view.checking) return { text: 'Checking for updates…', tone: 'progress', page };
-  // The newest check failing is said even when an earlier one found a release: its Update button stays.
+  // The newest check failing is said even when an earlier one found a release: it is still offered.
   if (view.checked?.failed && !view.step) return { text: view.checked.failed, tone: 'failure', page };
   if (view.available) {
     const words = tagWords(view.available.tag);
