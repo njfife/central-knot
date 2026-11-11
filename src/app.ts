@@ -343,7 +343,8 @@ export const applyClick = (click: Click) => busy(click.putBack ? 'Putting it bac
   if (result?.stopped) { tell({ page: state.page, items: click.items, warn: true, band: true, text: result.stopped }); return; }
   if (!click.undoing) retireTip(click.kind);
   const made = result && 'made' in result ? result.made ?? [] : [];
-  const changed = recordChanged(before, standings(click.kind, keys));
+  // A refused click changed nothing: a record unlike the page's was changed elsewhere (the page was read before it), never by this click.
+  const changed = refusal ? [] : recordChanged(before, standings(click.kind, keys));
   const copied = !!back || did || made.length > 0 || changed.length > 0;
   // The plugins' part, once the copies' part went through (a whole-click refusal leaves it unrun).
   const plugged = click.plugins?.ops.length && (copied || !refusal) ? await runSwitches(click.plugins.ops, click.plugins.draft) : undefined;
