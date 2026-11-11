@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path';
 import { parseDocument, stringify as stringifyYaml } from 'yaml';
 import { configRoot, harnesses, writeRoot } from './harnesses.ts';
 import { appendHistory, goneFacts, readConverted, readHistory, recordConverted, replaceHistory } from './manage.ts';
+import { leftOutAfterChoice, undoChoice } from './choiceundo.ts';
 import { FORMAT_VERSION, newRecord, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, tomlValue } from './textedit.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ThroughPlugin, ToolCopy } from './types.ts';
@@ -333,7 +334,7 @@ function originOnApply(item: AgentRecordItem | undefined, slot: AgentSlot, prese
 const firstSeenMissingAt = new Map<AgentCopy['file'], AgentPass['now']>();
 
 interface AgentPass { context: ShareContext; present: AgentTool[]; through: Awaited<ReturnType<typeof agentsThroughPlugins>>; record: AgentRecord; onDisk: Awaited<ReturnType<typeof gatherAgents>>; folderIds: NonNullable<AgentRecord['roots']>;
-  resetTools: Set<HarnessId>; chosen: Set<string>; newlyManaged: Set<string>; /** Synced agents that sync to tools again, and which. */ rejoined: Map<string, HarnessId[]>; deletedNow: Set<string>; limitedToKeys?: Set<string>; now: number; settleMs: number; decideNow?: Set<string> }
+  resetTools: Set<HarnessId>; /** Agents whose copy the person chose this pass, with the content each synced before (undefined: not synced then). */ chosen: Map<string, string | undefined>; newlyManaged: Set<string>; /** Synced agents that sync to tools again, and which. */ rejoined: Map<string, HarnessId[]>; deletedNow: Set<string>; limitedToKeys?: Set<string>; now: number; settleMs: number; decideNow?: Set<string> }
 interface PassLog { results: DestinationResult[]; events: HistoryEvent[]; notices: SyncNotice[]; writes: number; /** The events the asked changes made, for their Undo. */ made: string[] } type Loser = { tool: HarnessId; hash: string };
 type Situation = 'rootMoved' | 'removalOwed' | 'folderRemade' | 'stopped' | 'away' | 'off' | 'oneWay' | 'oneWayChanged' | 'deleted' | 'unchanged' | 'edited';
 type StaysRecorded = Exclude<Situation, 'rootMoved' | 'folderRemade'>; interface CopyNow<Is = Exclude<StaysRecorded, 'oneWayChanged'>> { copy: AgentCopy; entry?: AgentEntry; is: Is }
@@ -381,7 +382,7 @@ async function readFolderIds(context: ShareContext, present: HarnessId[], roots:
   return { folderIds, resetTools };
 }
 function recordChoices(record: AgentRecord, byKey: Map<string, AgentSlot>, changes: Change[], log: PassLog) {
-  const chosen = new Set<string>(), newlyManaged = new Set<string>(), rejoined = new Map<string, HarnessId[]>();
+  const chosen = new Map<string, string | undefined>(), newlyManaged = new Set<string>(), rejoined = new Map<string, HarnessId[]>();
   for (const change of changes) {
     const slot = byKey.get(change.key);
     if (!slot) continue;
@@ -391,6 +392,7 @@ function recordChoices(record: AgentRecord, byKey: Map<string, AgentSlot>, chang
     const separate = change.use === 'separate', use = change.use === 'separate' ? undefined : change.use;
     if (use && change.useHash && slot[use]?.hash !== change.useHash) { log.results.push({ item: change.key, outcome: 'held', message: 'The copy you chose changed since you chose it. Nothing was changed; choose again.', chooseAgain: true }); continue; }
     const item = record.items[change.key] ??= { name: (Object.values(slot) as AgentEntry[])[0].name, state: 'dont-share', off: [], hash: '', copies: [] };
+    const syncedBefore = item.state === 'shared' ? item.hash : undefined;
     const copiesBefore = item.copies;
     const shared = change.managed && !separate;
     if (shared && item.state !== 'shared') newlyManaged.add(change.key);
@@ -402,7 +404,7 @@ function recordChoices(record: AgentRecord, byKey: Map<string, AgentSlot>, chang
     if (!shared) item.copies = item.copies.filter(copy => copy.status === 'removing' || copy.stopped);
     else delete item.deleted;
     const used = use && slot[use];
-    if (used) { item.origin = used.tool; item.hash = used.hash; item.name = used.name; item.copies = []; chosen.add(change.key); }
+    if (used) { item.origin = used.tool; item.hash = used.hash; item.name = used.name; item.copies = []; chosen.set(change.key, syncedBefore); }
     for (const copy of copiesBefore) if (!item.copies.includes(copy)) firstSeenMissingAt.delete(copy.file);
   }
   return { chosen, newlyManaged, rejoined };
@@ -496,7 +498,7 @@ async function spreadContent(pass: AgentPass, log: PassLog, key: string, item: A
     if (wrote && target.entry) replaced.push({ tool: target.tool, hash: target.entry.hash });
     else if (wrote && (pass.newlyManaged.has(key) || pass.rejoined.get(key)?.includes(target.tool))) added.push({ tool: target.tool, hash: copy.bytes });
   }
-  logSpreadEvents(log, key, item, source, { chosen: pass.chosen.has(key), edited, deletedMeanwhile, rejoined: !pass.newlyManaged.has(key) }, replaced, added);
+  logSpreadEvents(log, key, item, source, { chosen: pass.chosen.has(key), syncedBefore: pass.chosen.get(key), edited, deletedMeanwhile, rejoined: !pass.newlyManaged.has(key) }, replaced, added);
   Object.assign(item, { name: source.name, hash: source.hash, copies: nextCopies } satisfies Partial<AgentRecordItem>);
 }
 /** What a pass spreads and the origin it records (the page shows the same), or nothing when it holds for a choice. */
@@ -542,11 +544,13 @@ async function keepOverwrittenForHistory(pass: AgentPass, item: AgentRecordItem,
   await keep(pass.context, here);
   if (historyWillName) { (item.displaced ??= []).push({ tool: here.tool, hash: here.hash }); await saveAgentRecord(pass.context.home, pass.record); }
 }
-function logSpreadEvents(log: PassLog, key: string, item: AgentRecordItem, source: AgentEntry, why: { chosen: boolean; edited: AgentEntry[]; deletedMeanwhile: HarnessId[]; rejoined: boolean }, replaced: Loser[], added: Loser[]) {
+function logSpreadEvents(log: PassLog, key: string, item: AgentRecordItem, source: AgentEntry, why: { chosen: boolean; syncedBefore?: string; edited: AgentEntry[]; deletedMeanwhile: HarnessId[]; rejoined: boolean }, replaced: Loser[], added: Loser[]) {
   const historyKey = `agent:${key}`;
   const winner = { tool: source.tool, hash: source.hash };
-  if (added.length) log.made.push(logEvent(log, { key: historyKey, item: item.name, kind: 'added', losers: added, orderProved: true, previous: source.hash, ...(why.rejoined ? { rejoined: true } : {}) }));
-  if (why.chosen && replaced.length) log.made.push(logEvent(log, { key: historyKey, item: item.name, kind: 'chosen', winner, losers: replaced, orderProved: true, previous: undefined, ...(why.rejoined ? { wasSynced: true } : {}) }));
+  const addedId = added.length ? logEvent(log, { key: historyKey, item: item.name, kind: 'added', losers: added, orderProved: true, previous: source.hash, ...(why.rejoined ? { rejoined: true } : {}) }) : undefined;
+  if (addedId) log.made.push(addedId);
+  // A choice names the copies its own pass added (its Undo takes out those, never others) and, synced before, what it synced then.
+  if (why.chosen && replaced.length) log.made.push(logEvent(log, { key: historyKey, item: item.name, kind: 'chosen', winner, losers: replaced, orderProved: true, previous: why.syncedBefore || undefined, ...(why.syncedBefore !== undefined ? { wasSynced: true } : {}), ...(addedId ? { addedId } : {}) }));
   else if (why.deletedMeanwhile.length) {
     const id = logEvent(log, { key: historyKey, item: item.name, kind: 'kept-edit', winner, losers: [...why.deletedMeanwhile.map(tool => ({ tool, hash: item.hash })), ...replaced], orderProved: false, previous: item.hash });
     log.notices.push({ key: historyKey, item: item.name, kind: 'kept-edit', winner: source.tool, losers: why.deletedMeanwhile, orderProved: false, history: id });
@@ -679,12 +683,12 @@ export async function restoreAgent(context: ShareContext, tools: HarnessId[], ev
   const past = history.find(entry => entry.id === eventId);
   if (past?.kind === 'added') return undoAddedAgent(context, tools, history, past);
   const key = past?.key.replace(/^agent:/, '');
-  // A one-way copy that a choice replaced: it gets back only that tool's own edited file, and it stops updating again. The source
-  // and the other receiving tools keep what they have; the agent stays one-way from the same source. Any other choice, 'narrow':
-  // each replaced copy back in its own tool, the copies it added out.
+  // A resume (a stopped one-way copy given the source's copy again, on an agent that was synced): it gets back only that tool's
+  // own edited file, and it stops updating again; the agent stays one-way from the same source. Any other choice, 'narrow':
+  // each replaced copy back in its own tool, the copies its pass added out, as for skills and MCP servers.
   if (past && key && past.kind === 'chosen' && !past.undoneBy) {
     const copies = (await readAgentRecord(context.home)).items[key]?.copies ?? [];
-    if (past.losers.length && past.losers.every(loser => copies.find(copy => copy.tool === loser.tool)?.oneWay)) return restoreReplacedOneWay(context, tools, history, past, key);
+    if (past.wasSynced && past.losers.length && past.losers.every(loser => copies.find(copy => copy.tool === loser.tool)?.oneWay)) return restoreReplacedOneWay(context, tools, history, past, key);
     if (choice === 'narrow') return undoChoiceAgent(context, tools, history, past, key);
   }
   // Undo of a put-back from a deletion is that deletion again.
@@ -747,58 +751,68 @@ export async function restoreAgent(context: ShareContext, tools: HarnessId[], ev
 }
 
 /**
- * Undo of a copy choice for a two-way agent, right after it: each replaced copy goes back in its own tool, whole as it was kept,
- * and the copies the choice added go again; the agent is not synced again, each tool keeping its own copy, as before. All or
- * nothing: a copy changed since stops it, and History's own Undo stays.
+ * Undo of a copy choice, right after it (choiceundo.ts, as for skills and MCP servers): each replaced copy goes back in its own
+ * tool, whole as it was kept, the copies the choice's pass added go again, and the agent is synced or not as it was before. A
+ * stopped one-way copy stays as it is.
  */
 async function undoChoiceAgent(context: ShareContext, tools: HarnessId[], history: HistoryEvent[], chosen: HistoryEvent, key: string): Promise<McpResult> {
   const stop = (stopped: string): McpResult => ({ stopped, results: [], writes: 0 });
   const record = await readAgentRecord(context.home);
   const item = record.items[key];
-  if (!item || item.state !== 'shared') return stop(`${chosen.item} is not synced any more, so there is nothing to undo here.`);
-  // The copies the same pass added: told just before the choice.
-  const prior = history[history.indexOf(chosen) - 1];
-  const added = prior?.key === chosen.key && prior.kind === 'added' && !prior.undoneBy ? prior : undefined;
+  // Not synced any more, unless it is a choice whose Undo stopped part-way and is being finished.
+  if (!item || (item.state !== 'shared' && !chosen.restoredTools)) return stop(`${chosen.item} is not synced any more, so there is nothing to undo here.`);
   const { present, onDisk: { byKey, unreadable, duplicates } } = await gatherAgentsAfterRecovery(context, tools);
   const problem = blocked(key, unreadable, duplicates, present);
   if (problem) return stop(problem);
   const slot = byKey.get(key) ?? {};
-  // Check everything first: each replaced tool still holds what the choice wrote, its own copy is kept, added copies unchanged.
-  const putBack: { tool: HarnessId; here: AgentEntry; text: string }[] = [];
-  for (const loser of chosen.losers) {
-    const here = slot[loser.tool];
-    const written = item.copies.find(copy => copy.tool === loser.tool);
-    if (!here || !written || here.bytes !== written.bytes) return stop(`${harnesses[loser.tool].name}’s copy of ${item.name} changed since, so nothing was undone here. History can still put an earlier version back.`);
-    const text = (await kept(context, key, loser.hash))?.texts[loser.tool];
-    if (!text) return stop('The replaced copy is no longer in Central Knot’s store, so it can’t be put back.');
-    putBack.push({ tool: loser.tool, here, text });
-  }
-  for (const loser of added?.losers ?? []) {
-    const here = slot[loser.tool];
-    if (here && here.bytes !== loser.hash) return stop(`${harnesses[loser.tool].name}’s new copy of ${item.name} was edited since, so nothing was undone here.`);
-  }
-  const results: DestinationResult[] = [];
-  let writes = 0;
-  for (const loser of added?.losers ?? []) {
-    const here = slot[loser.tool];
-    if (!here) continue;
-    try { await keep(context, here); await removeFileChecked(here.file, here.text); } catch { results.push({ item: item.name, harness: loser.tool, outcome: 'failed', message: `Could not remove ${harnesses[loser.tool].name}'s copy.` }); continue; }
-    writes++;
-    results.push({ item: item.name, harness: loser.tool, outcome: 'removed', message: 'Removed the copy it added.' });
-  }
-  for (const { tool, here, text } of putBack) {
-    try { await keep(context, here); await writeFileChecked(here.file, text, here.text); } catch { results.push({ item: item.name, harness: tool, outcome: 'failed', message: `Could not put ${harnesses[tool].name}'s copy back.` }); continue; }
-    writes++;
-    results.push({ item: item.name, harness: tool, outcome: 'written', message: 'Its own copy is back.' });
-  }
-  // Not synced again: each tool keeps the copy it has now, and the agent shows Copies differ as before.
-  Object.assign(item, { state: 'dont-share', copies: item.copies.filter(copy => copy.stopped) } satisfies Partial<AgentRecordItem>);
-  await saveAgentRecord(context.home, record);
-  const id = randomUUID();
-  chosen.undoneBy = id;
-  if (added) added.undoneBy = id;
-  await replaceHistory(context, history);
-  return { results, writes };
+  // What the choice wrote in a tool: the bytes on record for it (each tool's own format), else its content.
+  const wrote = (tool: HarnessId) => { const here = slot[tool], written = item.copies.find(copy => copy.tool === tool); return !!here && (written ? here.bytes === written.bytes : here.hash === chosen.winner?.hash); };
+  const texts = new Map<HarnessId, string>();
+  const undone = await undoChoice(history, chosen, {
+    name: item.name, noun: 'copy',
+    holds: (tool, hash) => (wrote(tool) ? 'chosen' : slot[tool]?.hash === hash ? 'own' : 'other'),
+    cantPutBack: async (tool, hash) => {
+      const text = (await kept(context, key, hash))?.texts[tool];
+      if (!text) return 'The replaced copy is no longer in Central Knot’s store, so it can’t be put back.';
+      texts.set(tool, text);
+      return undefined;
+    },
+    addedAsIs: (tool, hash) => !slot[tool] || slot[tool]!.bytes === hash,
+    takeOutAdded: async added => {
+      const results: DestinationResult[] = [];
+      let writes = 0;
+      for (const loser of added.losers) {
+        const here = slot[loser.tool];
+        if (!here) continue;
+        try { await keep(context, here); await removeFileChecked(here.file, here.text); } catch { results.push({ item: item.name, harness: loser.tool, outcome: 'failed', message: `Could not remove ${harnesses[loser.tool].name}'s copy.` }); continue; }
+        writes++;
+        item.copies = item.copies.filter(copy => copy.tool !== loser.tool);
+        // A tool synced to again by that pass is left out again, as it was.
+        if (added.rejoined && !item.off.includes(loser.tool)) item.off = [...item.off, loser.tool];
+        results.push({ item: item.name, harness: loser.tool, outcome: 'removed', message: 'Removed the copy it added.' });
+      }
+      return { results, writes };
+    },
+    putBack: async tool => {
+      const here = slot[tool]!;
+      try { await keep(context, here); await writeFileChecked(here.file, texts.get(tool)!, here.text); return undefined; }
+      catch { return 'its file changed just then, or couldn’t be written.'; }
+    },
+    settle: async (synced, back) => {
+      // A one-way copy holds less than the source by design: it is never left out for that.
+      const left = synced ? leftOutAfterChoice(present, synced, chosen, back, tool => (item.off.includes(tool) || item.copies.find(copy => copy.tool === tool)?.oneWay ? undefined : slot[tool]?.hash)) : [];
+      if (synced) {
+        Object.assign(item, { state: 'shared', hash: synced, off: [...new Set([...item.off, ...left])] } satisfies Partial<AgentRecordItem>);
+        item.copies = item.copies.filter(copy => !left.includes(copy.tool));
+        // Each copy put back holds what it held before: so it is on record, so it is never read as an edit.
+        for (const copy of item.copies) { const here = back.includes(copy.tool) ? slot[copy.tool] : undefined; if (here) Object.assign(copy, { hash: synced, bytes: sha256(texts.get(copy.tool) ?? here.text) }); }
+      } else Object.assign(item, { state: 'dont-share', copies: item.copies.filter(copy => copy.stopped) } satisfies Partial<AgentRecordItem>);
+      await saveAgentRecord(context.home, record);
+      return left;
+    },
+    saveHistory: () => replaceHistory(context, history),
+  });
+  return { results: undone.results, writes: undone.writes, stopped: undone.stopped };
 }
 
 /**

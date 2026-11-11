@@ -16,7 +16,7 @@ import { cellOf, comparedTools, needsCopyChoice, type ItemRow, type Tool } from 
 import type { Change, DestinationResult, HomeView, ManageView, Outside, SkillFacts, SyncNotice, HarnessId, PartsInstall, ThroughPlugin } from './types.ts';
 import { market } from './pluginstate.ts';
 import { pluginKey, type PluginDraft } from './pluginplan.ts';
-import { alongWords, cantSwitch, click as clickPluginItem, clickWords, itemSaid, standing as pluginStanding, switchWords, turnEvery, type PluginItemAt } from './pluginswitch.ts';
+import { alongWords, cantSwitch, click as clickPluginItem, clickWords, itemSaid, onNow as itemOn, switchWords, turnEvery, type PluginItemAt } from './pluginswitch.ts';
 import { partOfPage, samePart, versionWord } from './pluginstatus.ts';
 import { cellWords, handledWhere, inTool, insideTitle, offIn, pageRows, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
 import { folded, lineDiff } from './diff.ts';
@@ -98,10 +98,6 @@ function itemThrough(skill: ItemRow, tool: Tool): PluginItemAt | undefined {
   return install ? { kind: partOfPage[kind], name: given.name ?? skill.name ?? skill.key, tool: tool as HarnessId, install } : undefined;
 }
 
-/** Nothing waiting: where a plugin's item stands, read from the tools as they are (a click applies at once). */
-const NOW: PluginDraft = new Map();
-/** Whether a plugin's item is on in its tool now. */
-const itemOn = (item: PluginItemAt) => pluginStanding(NOW, item).now;
 
 /** Turns a plugin's item on or off in its tool at once, with its own switch or the whole plugin's (pluginswitch.ts). */
 function switchPluginItem(item: PluginItemAt) {
@@ -333,6 +329,8 @@ const newView = () => ({
   confirmTakeOver: undefined as string | undefined,
   /** The visit on which a row was last opened or closed (state.visit): a copy question doesn't outlive it. */
   openedOn: 0,
+  /** When a row was last opened (state.said.seq): its copy question hides only results said before it. */
+  openedAt: 0,
   /** The Files view's "Where each copy is", once the person opens or closes it; until then it follows the pane's width. */
   whereOpen: undefined as boolean | undefined,
   /** Each row's group when a click on this visit first changed something (pinRows), and when that was (pinKey). */
@@ -786,6 +784,7 @@ function pluginDock(row: PluginRow) {
 function openRow(key: string) {
   view.comparing = view.comparing === key ? undefined : key;
   view.openedOn = state.visit;
+  view.openedAt = state.said.seq;
   rerender();
   // Bring the details into view without losing the row (its name and close button) under the sticky header. Docked
   // details sit beside the table and are always in view.
@@ -848,7 +847,8 @@ export { brandMark };
 function outcomeShown(outcome: Outcome, matrixPage: boolean): boolean {
   if (outcome.page !== state.page) return false;
   const named = [outcome.item, ...(outcome.items ?? [])].filter((name): name is string => !!name);
-  const choosing = matrixPage && view.comparing && committedList().some(skill => skill.key === view.comparing && needsCopyChoice(skill, toolList()) && named.some(name => name === skill.name || name.toLowerCase() === skill.key));
+  // A newer result (an Undo that brings the question back) is still said.
+  const choosing = matrixPage && view.comparing && (outcome.said ?? 0) <= view.openedAt && committedList().some(skill => skill.key === view.comparing && needsCopyChoice(skill, toolList()) && named.some(name => name === skill.name || name.toLowerCase() === skill.key));
   if (choosing) return false;
   return !(state.skillsView === 'files' && state.item && !named.some(name => name.toLowerCase() === state.item));
 }
@@ -1117,7 +1117,7 @@ function toldNotices(): Told[] {
   const news = fresh.filter(notice => !kept!.has(keyOf(notice)) && !folded!.has(keyOf(notice)));
   const clicked = state.outcome?.band && state.outcome.page === state.page ? state.outcome.said ?? 0 : 0;
   for (const [key, notice] of [...kept]) if (news.length || notice.seq < clicked) { folded.add(key); kept.delete(key); }
-  else if (keptSync.get(kind) !== state.home.syncOn) for (const key of [...kept.keys()]) if (!fresh.some(notice => keyOf(notice) === key)) kept.delete(key);
+  if (keptSync.get(kind) !== state.home.syncOn) for (const key of [...kept.keys()]) if (!fresh.some(notice => keyOf(notice) === key)) kept.delete(key);
   keptSync.set(kind, state.home.syncOn);
   // The wording is fixed when the notice first shows: a Sync once stays "Synced once" after sync is turned on.
   for (const notice of fresh) { const key = keyOf(notice); if (!kept.has(key) && !folded.has(key)) kept.set(key, { ...notice, once: !state.home.syncOn, seq: state.said.seq }); }
@@ -1828,11 +1828,11 @@ function toolbarState() {
   const edits = committedList().filter(skill => skill.managed && skill.edited?.length).length;
   if (edits) return h('span.apply-state.apply-waiting', {}, icon('clock', 14, 'tone-warning'), `${edits} ${edits === 1 ? 'change' : 'changes'} waiting`);
   // A server waiting for Claude Code is said once, by the band that carries Write to Claude Code, and by its row's mark.
-  // A stopped one-way copy whose notice is put aside is said here, with a way to it; one whose notice shows is only counted.
+  // A stopped one-way copy whose notice is put aside is said here, with a way to it; one whose notice shows is said there only.
   const stoppedAll = kind === 'agents' ? committedList().filter(skill => skill.managed).flatMap(skill => stoppedLive(skill).map(tool => `stopped:${skill.key}:${tool}`)) : [];
   const aside = stoppedAll.filter(key => state.dismissed.has(key));
   if (aside.length) return h('button.apply-state.apply-waiting.text-action', { type: 'button', id: 'go-stopped', title: 'Show it', onclick: () => { view.comparing = undefined; openRow(aside[0].split(':')[1]); } }, icon('circle-pause', 14, 'tone-warning'), `${aside.length} ${aside.length === 1 ? 'copy' : 'copies'} stopped updating`);
-  if (stoppedAll.length) return h('span.apply-state.apply-waiting', {}, icon('circle-pause', 14, 'tone-warning'), `${stoppedAll.length} ${stoppedAll.length === 1 ? 'copy' : 'copies'} stopped updating`);
+  if (stoppedAll.length) return null;
   if (state.home && !state.home.syncOn) return h('span.apply-state.apply-quiet', {}, icon('circle-minus', 14, 'tone-muted'), 'Nothing waiting · sync off');
   // A copy that keeps its own edit is a settled choice, but not "the same everywhere": the toolbar counts it.
   const kept = kind === 'agents' ? committedList().filter(skill => skill.managed).reduce((total, skill) => total + (skill.stopped ?? []).filter(tool => !skill.off.includes(tool) && keptEdit(skill, tool)).length, 0) : 0;

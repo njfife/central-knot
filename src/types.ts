@@ -382,9 +382,9 @@ export interface TookOver {
   links: { tool: HarnessId; path: string; linkTo: string; hash: string; placed?: string }[];
   shared: { path: string; hash: string; linkTo?: string }[];
   placed: { tool: HarnessId; path: string; hash: string }[];
-  /** The same Apply all started managing the skill: Undo also undoes that. */
+  /** The same click started syncing the skill: Undo also undoes that. */
   managedNow?: boolean;
-  /** The 'added' event the same Apply all made for this skill's new copies: one Undo undoes both. */
+  /** The 'added' event the same click made for this skill's new copies: one Undo undoes both. */
   addedId?: string;
 }
 

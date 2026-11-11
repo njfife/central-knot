@@ -46,12 +46,11 @@ const itemOffAfter = (draft: PluginDraft, item: PluginItemAt, part: Part) => {
 
 /** Where the item stands in its tool: on now, and on once the draft runs. */
 export function standing(draft: PluginDraft, item: PluginItemAt): { now: boolean; on: boolean } {
-  const own = ownSwitch(item);
-  return {
-    now: !item.install.off && !(own && itemOffNow(item.install, item)),
-    on: !wholeOffAfter(draft, item) && !(own && itemOffAfter(draft, item, item)),
-  };
+  return { now: onNow(item), on: !wholeOffAfter(draft, item) && !(ownSwitch(item) && itemOffAfter(draft, item, item)) };
 }
+
+/** Whether the item is on in its tool now: the plugin is on there, and its own switch (where it has one) hasn't turned it off. */
+export const onNow = (item: PluginItemAt) => !item.install.off && !(ownSwitch(item) && itemOffNow(item.install, item));
 
 /** Why Copilot CLI's whole-plugin switch isn't offered for a plugin it loads live from a folder. */
 export const LIVE_PLUGIN = 'Copilot CLI loads this plugin live from a folder, where turning it off is the same as uninstalling it. Uninstall it on the plugin’s page instead.';
@@ -123,7 +122,7 @@ export function turnEvery(items: PluginItemAt[], on: boolean): { draft: PluginDr
     if (held) left.push(`Still ${on ? 'off' : 'on'} in ${names[item.tool]}: ${held}`); else whole.push(item);
   }
   const limit = whole.map(item => `Still ${on ? 'off' : 'on'} in ${names[item.tool]}: it has no switch for one ${partWords[item.kind][0]} of a plugin, only one for the whole plugin, ${item.install.plugin}.`).join(' ');
-  const leftIn = items.filter(item => !turned.includes(item) && standing(new Map(), item).now !== on).map(item => item.tool);
+  const leftIn = items.filter(item => !turned.includes(item) && onNow(item) !== on).map(item => item.tool);
   return { draft, ops: [...draft.values()], turned, whole, limit: limit || undefined, left: left.join(' ') || undefined, leftIn };
 }
 
@@ -160,7 +159,7 @@ const counted = (items: Part[], beside?: PartKind) => andList((['skill', 'mcp', 
 export function clickWords(item: PluginItemAt): string {
   const tool = names[item.tool];
   const plugin = item.install.plugin;
-  const on = standing(new Map(), item).now;
+  const on = onNow(item);
   // What else of the plugin is on there now: what its own switch already keeps off neither goes with it nor comes back with it.
   const rest = item.install.items.filter(entry => !samePart(entry, item) && !(hasOwnSwitch(item.tool, entry.kind) && itemOffNow(item.install, entry)));
   // Copilot CLI's switch for a server goes by its bare name, whoever's server it is.
@@ -181,6 +180,6 @@ export function clickWords(item: PluginItemAt): string {
 /** The line beside the item's switch where the tool has none for one item: that its switch is the whole plugin's there; else ''. */
 export function switchWords(item: PluginItemAt): string {
   if (ownSwitch(item) || cantSwitch(item)) return '';
-  return `${names[item.tool]} has no switch for one ${partWords[item.kind][0]} of a plugin, so this switch turns the whole plugin ${standing(new Map(), item).now ? 'off' : 'on'} there.`;
+  return `${names[item.tool]} has no switch for one ${partWords[item.kind][0]} of a plugin, so this switch turns the whole plugin ${onNow(item) ? 'off' : 'on'} there.`;
 }
 

@@ -849,8 +849,8 @@ async function practiceFlow() {
   check('Claude Code’s copy was not touched', !readFileSync(join(practice, '.claude/agents/code-reviewer.md'), 'utf8').includes('Edited in Codex.'));
   // Keep my edit settles it: the mark turns quiet and the warning count goes away; its row can still bring the source back.
   check('the stopped copy has its own notice with both choices', await a.exists('#stopped-keep-code-reviewer-codex-cli') && await a.exists('#stopped-use-code-reviewer-codex-cli'));
-  check('while its notice shows, the toolbar says it without a link', (await a.text('.toolbar') ?? '').includes('1 copy stopped updating') && !(await a.exists('#go-stopped')), await a.text('.toolbar'));
-  check('the status line leads with the copy that stopped, and no longer lists it as receiving', /^Codex’s copy stopped updating · on in all 3 tools · Claude Code is the source · one-way to Copilot CLI$/.test((await a.text('.details-status') ?? '').trim()), await a.text('.details-status'));
+  check('while its notice shows, the toolbar doesn’t say it again', !(await a.text('.toolbar') ?? '').includes('stopped updating') && !(await a.exists('#go-stopped')), await a.text('.toolbar'));
+  check('the status line leads with the copy that stopped, then where it is on, and no more', /^Codex’s copy stopped updating · on in all 3 tools$/.test((await a.text('.details-status') ?? '').trim()), await a.text('.details-status'));
   await a.click('#stopped-dismiss-code-reviewer-codex-cli');
   check('deciding later keeps both choices in the Codex row', await a.exists('#stopped-keep-code-reviewer-codex-cli-details') && await a.exists('#stopped-use-code-reviewer-codex-cli-details') && await a.exists('#go-stopped'));
   await a.click('#stopped-keep-code-reviewer-codex-cli-details');
@@ -1249,7 +1249,7 @@ async function practiceFlow() {
   await a.click('#enable-issues-claude-cli');
   for (let tries = 0; tries < 40 && (await cellState(a, 'issues', 'claude-cli')) !== 'plugin-off'; tries++) await wait(100);
   check('a click turns that one server off at once with Claude Code’s own switch, and the page says so, with Undo', JSON.stringify(JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers) === '[{"serverName":"plugin:issue-tracker:issues"}]'
-    && await cellState(a, 'issues', 'claude-cli') === 'plugin-off' && /MCP server issues turned off in Claude Code/.test(await a.text('.bands') ?? '') && await a.exists('#outcome-undo-plugin'), [pluginSettingsNow(), await a.text('.bands')]);
+    && await cellState(a, 'issues', 'claude-cli') === 'plugin-off' && /issues is off in Claude Code\./.test(await a.text('.bands') ?? '') && await a.exists('#outcome-undo-plugin'), [pluginSettingsNow(), await a.text('.bands')]);
   await a.click('#nav-skills');
   same('the plugin’s skill is still on there', await cellState(a, 'triage', 'claude-cli'), 'plugin');
   await a.click('#nav-mcp');

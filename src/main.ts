@@ -1235,8 +1235,8 @@ app.whenReady().then(async () => {
     if (taken.from) log(`sync: took over syncing ${home} from ${taken.from}`);
     return { ...taken, view: await syncThenView() };
   });
-  // With Sync off, Apply all writes exactly the skills it shows; spreading anything else waits for Sync.
-  // MCP: Apply all writes every tool but Claude Code; Claude Code only through Write now, once Claude is closed (MCP-02).
+  // With Sync off, a click writes exactly the items it is about; spreading anything else waits for Sync.
+  // MCP: a click writes every tool but Claude Code; Claude Code only through Write to Claude Code, once Claude is closed (MCP-02).
   handle('mcp:apply', async (list, resume, home) => {
     if (home !== current?.home) return { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 };
     const asked = changes(list);
