@@ -196,7 +196,7 @@ function feedNote(entry: MarketplaceView, marketIndex: number): HTMLElement | nu
   const at = feed.checked ? when(feed.checked) : '';
   // Trouble says when it was last tried and, when it didn't mend itself, who to tell; otherwise what "arrive" means for a plugin a tool already has.
   const said = trouble ? `${feed.message!}${at ? ` Last tried ${at}.` : ''}${feed.outcome === 'failed' && entry.owner ? ` If it keeps happening, tell ${entry.owner}.` : ''}`
-    : `Newer plugins arrive by themselves; a tool that has one installed uses the new one from its next session, or shows Update here.${at ? ` Last checked ${at}.` : ''}`;
+    : `Newer plugins arrive by themselves. Tools that have one installed pick up the new version when they next start; if a tool can’t, Update shows here.${at ? ` Last checked ${at}.` : ''}`;
   return h('div.market-in-tools', { id: 'market-feed' },
     h('p', {}, trouble ? icon('circle-alert', 13, 'tone-warning') : null, said),
     button({ variant: 'outline', size: 'small', icon: 'refresh-cw', label: 'Check now', name: 'Check now for newer plugins', id: `check-feed-${marketIndex}`, disabled: !!app.busy, onclick: () => void checkCarriedFeed(entry) }));
