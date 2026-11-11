@@ -175,7 +175,7 @@ test('An interrupted copy leaves nothing half-written, and the next pass complet
   } finally { await box.cleanup(); }
 });
 
-test('A different copy Copilot reads in the shared .agents folder is shown, never written, reported, and counts as a copy that differs', async () => {
+test('A different copy Copilot reads in the shared .agents folder is shown, never written unless the person asks for it to be taken over, and counts as a copy that differs', async () => {
   const box = await sandbox();
   try {
     await skill(box.home, CLAUDE, 'dup', text('dup', 'A'));
@@ -184,14 +184,15 @@ test('A different copy Copilot reads in the shared .agents folder is shown, neve
     const view = await facts(box, 'dup');
     assert.equal(view.extra.length, 1);
     assert.equal(view.extra[0].writable, false);
+    assert.equal(view.extra[0].outside?.kind, 'shared');
     const result = await applyChanges(ctx(box), [{ ...manage('dup'), use: 'claude-cli' }]);
-    assert.equal(await readFile(join(shared, 'SKILL.md'), 'utf8'), text('dup', 'B'), 'the shared folder is never changed');
-    assert.ok(result.results.some(entry => /\.agents\/skills\/dup, which Central Knot does not change/.test(entry.message)), JSON.stringify(result.results));
+    assert.equal(await readFile(join(shared, 'SKILL.md'), 'utf8'), text('dup', 'B'), 'without a take-over the shared folder is never changed');
+    assert.ok(result.results.some(entry => /\.agents\/skills\/dup\. Central Knot changes it only when you ask/.test(entry.message)), JSON.stringify(result.results));
     assert.equal(result.harnessWrites, 0);
     assert.equal((await facts(box, 'dup')).managed, false, 'a choice that cannot be carried out changes nothing, not even Managed');
     const differ = await applyChanges(ctx(box), [manage('dup')]);
     assert.ok(differ.harnessWrites === 0 && /Copies differ/.test(differ.results[0].message), JSON.stringify(differ.results));
-    assert.deepEqual(view.choiceBlocks['claude-cli']?.map(block => block.tool), ['copilot-cli'], 'the page is told before anyone chooses');
+    assert.deepEqual(view.choiceBlocks['claude-cli'], [], 'the page may offer the choice: it sends a take-over with it');
   } finally { await box.cleanup(); }
 });
 
@@ -574,7 +575,8 @@ test('A skill in the shared .agents folder counts as a copy for both Copilot and
     const context = ctx(box, { read: readAll(box.home) });
     const facts3 = (await manageView(context)).skills.find(item => item.key === 'both')!;
     assert.ok(facts3.copies['copilot-cli'] && facts3.copies['codex-cli']);
-    assert.deepEqual(facts3.choiceBlocks['claude-cli']?.map(block => block.tool).sort(), ['codex-cli', 'copilot-cli']);
+    assert.equal(facts3.copies['codex-cli']!.outside?.kind, 'shared');
+    assert.deepEqual(facts3.choiceBlocks['claude-cli'], [], 'the shared copy is taken over with the choice, so it blocks nothing');
   } finally { await box.cleanup(); }
 });
 

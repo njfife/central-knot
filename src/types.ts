@@ -70,7 +70,7 @@ export type SyncGate =
   | { state: 'needs-resume'; reason: string }
   | { state: 'stopped'; reason: string };
 
-export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** `switched`: which way. */ disabled?: boolean }
+export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** A take-over step: a link replaced by a real copy, a tool given its own copy, or the shared copy removed. */ tookOver?: 'link' | 'placed' | 'shared'; /** `switched`: which way. */ disabled?: boolean }
 
 export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
 
@@ -194,6 +194,16 @@ export interface PluginActionResult { stopped?: string; reports: ActionReport[] 
 
 // ---------- Managing skills across tools ----------
 
+/** Where a copy outside Central Knot's own copies sits, so the page can say it and an explicit action can take it over. */
+export interface Outside {
+  /** 'link': a link in the tool's own skills folder. 'shared': a copy (folder or link) in ~/.agents/skills, which other apps read too. */
+  kind: 'link' | 'shared';
+  /** The link's own text, when this entry is a link. Removing it removes only the link. */
+  linkTo?: string;
+  /** 'shared': why Manage can't give each tool its own copy instead: a tool's own skills folder is this folder. Delete still removes it. */
+  pinned?: string;
+}
+
 export interface ToolCopy {
   hash: string;
   directory: string;
@@ -202,8 +212,13 @@ export interface ToolCopy {
   modified: string;
   /** First line of the skill's body, to tell differing copies apart. */
   summary: string;
-  /** False for a copy reached through a link or in a folder other tools share: Central Knot never writes there. */
+  /** False for a copy reached through a link or in a folder other tools share: background sync never writes there. */
   writable: boolean;
+  /**
+   * A copy that is not writable but that Central Knot takes over when the person asks (Manage, Delete everywhere, Remove,
+   * Replace with managed copies): a link in the tool's own skills folder, or a copy in the shared ~/.agents/skills folder.
+   */
+  outside?: Outside;
   /**
    * The tool here whose own skills folder this copy is in, when it is another tool's: OpenCode reads Claude Code's folder, so a
    * skill there is Claude Code's copy, which OpenCode reads. It is no second copy: sync neither follows it nor writes beside it.
@@ -261,6 +276,8 @@ export interface SkillFacts {
   switchProblem?: Partial<Record<HarnessId, SwitchProblem>>;
   /** Skills: a quiet note that Disable isn't verified on a tool's build (older than verified, or unreadable). Disable is still offered. */
   disableNote?: Partial<Record<HarnessId, string>>;
+  /** Skills: tools whose own skills folder has a broken link by this name, with where it led: a copy written there replaces it. */
+  brokenLink?: Partial<Record<HarnessId, string>>;
 }
 
 /** Why a tool's skill switch can't be used: its settings file, and what is wrong with it ("isn’t valid JSON."). */
@@ -308,6 +325,13 @@ export interface Change {
   enable?: HarnessId[];
   /** Skills: tools whose copy is removed, kept in History for Restore. A managed skill also stops syncing there. */
   remove?: HarnessId[];
+  /** Skills: Delete everywhere for an unmanaged skill: the removed tools' other copies (in ~/.agents/skills) go too. */
+  everywhere?: boolean;
+  /**
+   * Skills: the person asked for the skill's copies outside Central Knot (links in tools' folders, the copy in ~/.agents/skills)
+   * to be taken over: each link becomes a real copy and the shared copy is removed, kept first so Undo can put them back.
+   */
+  takeOver?: boolean;
 }
 
 export interface ApplyResult { stopped?: string; results: DestinationResult[]; harnessWrites: number; /** An Undo of a profile switch: the switches it flipped. */ flips?: ProfileFlip[]; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
@@ -328,6 +352,16 @@ export interface SyncNotice {
 }
 
 /** One entry in History: what changed, which content won, and what is kept to Undo or Restore it. */
+/** A take-over, for its Undo: links replaced by real copies, shared copies removed, and copies made for tools that read the shared one. */
+export interface TookOver {
+  /** Each link and its text. `placed`: the content put in its place (none: a link left leading nowhere, removed). */
+  links: { tool: HarnessId; path: string; linkTo: string; hash: string; placed?: string }[];
+  shared: { path: string; hash: string; linkTo?: string }[];
+  placed: { tool: HarnessId; path: string; hash: string }[];
+  /** The same Apply all started managing the skill: Undo also undoes that. */
+  managedNow?: boolean;
+}
+
 export interface HistoryEvent {
   id: string;
   at: string;
@@ -336,8 +370,11 @@ export interface HistoryEvent {
   /** 'added': Apply all wrote new copies of a skill that was not managed before; Undo removes them, if unchanged, and unmanages it.
    * 'switched': Apply all disabled or enabled it in some tools (`switched`); Undo flips them back.
    * 'removed': Apply all removed it from the tools in `losers`, keeping each copy; Restore puts them back there.
-   * 'profile': a profile switch (key 'profiles:switch', item the profile's name); Undo switches back. */
-  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed' | 'profile';
+   * 'profile': a profile switch (key 'profiles:switch', item the profile's name); Undo switches back.
+   * 'took-over': copies outside Central Knot were taken over (`tookOver`); Undo puts the links and the shared copy back. */
+  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed' | 'profile' | 'took-over';
+  /** 'took-over': what was replaced, removed and placed, so Undo can put it back exactly. */
+  tookOver?: TookOver;
   /** 'profile': which profile was in use before and after, and every switch it flipped. */
   profile?: { from?: string; fromName?: string; to?: string; toName?: string; flips: ProfileFlip[] };
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false); `before`, a Claude Code override it replaced ("name-only"), for Undo. */
@@ -351,7 +388,9 @@ export interface HistoryEvent {
   winner?: { tool: HarnessId; hash: string };
   /** Content that gave way, kept in Central Knot's store. */
   losers: { tool: HarnessId; hash: string; /** MCP: which kept copy of that tool's own settings this replaced, for an exact Restore. */ kept?: string; /** 'removed': the copy's folder name as it was, to put it back under the same name. */ folder?: string;
-    /** 'removed', managed: the content last synced to that copy, so Restore puts its sync record back and an unsynced edit in it spreads. */ synced?: string }[];
+    /** 'removed', managed: the content last synced to that copy, so Restore puts its sync record back and an unsynced edit in it spreads. */ synced?: string;
+    /** 'removed': a copy outside the tool's own folder (in ~/.agents/skills), put back at this path. */ path?: string;
+    /** 'removed': the copy was a link with this text; Restore makes the link again. */ linkTo?: string }[];
   /** The synced content before this event, to put back on Undo. */
   previous?: string;
   orderProved: boolean;

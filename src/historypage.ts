@@ -37,11 +37,12 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
     }
     case 'profile': return profileSwitch(event);
     case 'removed': return { glyph: 'circle-minus', text: `Removed from ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}; Central Knot kept the ${event.losers.length === 1 ? 'copy' : 'copies'}.`, action: 'Restore' };
+    case 'took-over': return { glyph: 'arrow-down-to-line', text: tookOverText(event, !!event.undoneBy), action: 'Undo' };
     case 'added': return { glyph: 'plus', text: event.undoneBy ? `Apply all started managing it and added copies to ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}; they were removed again.` : `Apply all started managing it and added ${event.losers.length === 1 ? 'a copy' : 'copies'} to ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}.`, action: 'Undo add' };
     case 'restored': {
       // Name the change this undid, so Redo says what comes back.
       const undone = state.history.data?.find(other => other.undoneBy === event.id);
-      const named = (past: HistoryEvent) => ({ edit: `${who(past.winner?.tool)}’s edit`, conflict: `${who(past.winner?.tool)}’s winning edit`, deleted: 'the deletion', 'kept-edit': 'the kept edit', chosen: `your choice of ${who(past.winner?.tool)}’s copy`, restored: 'an undo', added: 'the copies Apply all added', switched: 'the switch', removed: 'the removal' , profile: 'the profile switch' } as const)[past.kind];
+      const named = (past: HistoryEvent) => ({ edit: `${who(past.winner?.tool)}’s edit`, conflict: `${who(past.winner?.tool)}’s winning edit`, deleted: 'the deletion', 'kept-edit': 'the kept edit', chosen: `your choice of ${who(past.winner?.tool)}’s copy`, restored: 'an undo', added: 'the copies Apply all added', switched: 'the switch', removed: 'the removal' , profile: 'the profile switch', 'took-over': 'the take-over' } as const)[past.kind];
       const where = event.losers.length ? ` in ${touchedToolsPhrase([...event.losers.map(loser => loser.tool), ...(event.winner ? [event.winner.tool] : [])])}` : '';
       // Undoing an undo is a redo: say what came back, and offer to take it away again.
       if (undone?.kind === 'restored') {
@@ -53,6 +54,20 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
       return { glyph: 'undo-2', text: `Undid ${undone ? named(undone) : 'a change'}; the earlier version is back${where}.`, action: 'Redo edit' };
     }
   }
+}
+
+/** A take-over, said as what it did to which folder: links replaced by real copies, tools given their own, the shared copy removed. */
+function tookOverText(event: HistoryEvent, undone: boolean): string {
+  const told = event.tookOver;
+  if (!told) return 'Took over its copies outside Central Knot.';
+  const replaced = told.links.filter(link => link.placed).map(link => link.tool);
+  const parts = [
+    replaced.length ? `replaced the link in ${andList(replaced.map(tool => `${who(tool)}’s`))} skills folder with a real copy` : '',
+    told.placed.length ? `gave ${andList(told.placed.map(copy => who(copy.tool)))} ${told.placed.length > 1 ? 'copies' : 'a copy'} of ${told.placed.length > 1 ? 'their' : 'its'} own` : '',
+    told.shared.length ? `removed the copy in ${told.shared[0].path.replace(/\/[^/]+$/, '')}` : '',
+  ].filter(Boolean);
+  const text = parts.length ? parts.join('; ') : 'took over its copies outside Central Knot';
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}${undone ? '; this was undone, and they are back as they were.' : '. Central Knot kept what it replaced.'}`;
 }
 
 /** The base instructions as a Pull changed them: set for the first time, edited, or deleted; `tools` names the tools that get them. */
@@ -100,6 +115,7 @@ const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'pro
   : event.base ? 'Put the base instructions back as they were before this Pull, and in the tools that got them (where their file is unchanged since)'
   : event.kind === 'switched' ? (event.switched ?? []).map(entry => `${entry.disabled ? 'Enable' : 'Disable'} it again in ${who(entry.tool)}`).join('; ')
   : event.kind === 'removed' ? `Put the removed copy back in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}`
+  : event.kind === 'took-over' ? `Put the links and the shared copy back as they were${event.tookOver?.managedNow ? `, remove the copies that Apply all added, and stop managing ${event.item}` : ''} (only while unchanged)`
   : event.kind === 'added' ? `Remove the copies ${event.via === 'repo' ? 'Pull' : 'Apply all'} added (only while unchanged) and stop managing ${event.item}` : action === 'Restore' ? `Put ${event.item} back in every tool it synced to`
   : action === 'Redo edit' || action === 'Delete again' ? 'Undo the undo: put back the version that was replaced'
     : `Put ${event.item} back as it was before this change, in every tool it syncs to (including where it was edited)`);
