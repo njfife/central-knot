@@ -65,7 +65,7 @@ test('turning on one item of a plugin that is off as a whole turns the plugin on
   click(draft, item(claude, 'mcp', 'issues'));
   assert.deepEqual(chosen(draft), ['claude-cli part-off mcp wiki', 'claude-cli part-off agent helper', 'claude-cli plugin-on']);
   assert.deepEqual(wholeWords(draft), ['the plugin full on in Claude Code with 2 items left off'], 'a plugin that comes on for one item says what it leaves off');
-  assert.equal(pendingWords(draft, item(claude, 'mcp', 'issues')), 'Apply all turns it on: the plugin full comes on with its 1 MCP server and 1 agent left off; its 2 skills come on too.');
+  assert.equal(pendingWords(draft, item(claude, 'mcp', 'issues')), 'Apply all turns it on: the plugin full comes on with its 1 other MCP server and 1 agent left off; its 2 skills come on too.');
   // A skill, which comes on with the plugin, says how much of the plugin comes on with it.
   assert.equal(pendingWords(draft, item(claude, 'skill', 'one')), 'Apply all turns it on, with the plugin (2 other items).');
   // A second click on the same box takes it back: the plugin was to come on only for that server, so nothing stays chosen.
@@ -83,6 +83,10 @@ test('turning on one item of a plugin that is off as a whole turns the plugin on
   const whole: PluginDraft = new Map();
   click(whole, item(claude, 'skill', 'one'));
   click(whole, item(claude, 'mcp', 'issues'));
+  // After the skill's click alone, a server's line names everything that comes on with the plugin, not only its skills.
+  const afterSkill: PluginDraft = new Map();
+  click(afterSkill, item(claude, 'skill', 'one'));
+  assert.equal(pendingWords(afterSkill, item(claude, 'mcp', 'issues')), 'Apply all turns it on: the plugin full comes on; its 2 skills, 1 other MCP server and 1 agent come on too.');
   assert.deepEqual(chosen(whole), ['claude-cli part-off mcp issues', 'claude-cli plugin-on']);
   assert.equal(pendingWords(whole, item(claude, 'skill', 'one')), 'Apply all turns it on, with the plugin (3 other items).');
   // Even with every server and the agent kept off, the plugin still comes on, for its skills: that is what was clicked.

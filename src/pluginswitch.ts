@@ -125,10 +125,10 @@ export function prune(draft: PluginDraft, installs: InstalledPlugin[]): void {
   }
 }
 
-/** A list of the plugin's items by kind, in words: "2 skills and 1 MCP server", or ''. */
-const counted = (items: Part[]) => andList((['skill', 'mcp', 'agent'] as PartKind[]).flatMap(kind => {
+/** A list of the plugin's items by kind, in words: "2 skills and 1 MCP server", or ''. `beside`: the kind of the item they are counted beside, said as "1 other MCP server". */
+const counted = (items: Part[], beside?: PartKind) => andList((['skill', 'mcp', 'agent'] as PartKind[]).flatMap(kind => {
   const n = items.filter(entry => entry.kind === kind).length;
-  return n ? [n === 1 ? `1 ${partWords[kind][0]}` : `${n} ${partWords[kind][1]}`] : [];
+  return n ? [`${n} ${kind === beside ? 'other ' : ''}${partWords[kind][n === 1 ? 0 : 1]}`] : [];
 }));
 
 /** What a click on the item's box does, as the sentence after its state ("Click to turn it off in Codex on Apply all."). */
@@ -151,7 +151,7 @@ export function clickWords(draft: PluginDraft, item: PluginItemAt): string {
     // one that can't be written), and isn't off by its own switch already.
     const held = switchable(item.install);
     const brought = rest.filter(entry => !held.some(part => samePart(part, entry)));
-    return `Click to turn the plugin ${plugin} on in ${tool} on Apply all with only this ${partWords[item.kind][0]} on${brought.length ? `; its ${counted(brought)} ${brought.length === 1 ? 'comes' : 'come'} on too` : ''}.`;
+    return `Click to turn the plugin ${plugin} on in ${tool} on Apply all with only this ${partWords[item.kind][0]} on${brought.length ? `; its ${counted(brought, item.kind)} ${brought.length === 1 ? 'comes' : 'come'} on too` : ''}.`;
   }
   return `Click to turn the whole plugin ${plugin} on in ${tool} on Apply all${rest.length ? `, with its ${counted(rest)}` : ''}.`;
 }
@@ -169,11 +169,11 @@ export function pendingWords(draft: PluginDraft, item: PluginItemAt): string {
   const along = on ? rest.filter(entry => { const part = switchable(item.install).find(candidate => samePart(candidate, entry)); return !part || !itemOffAfter(draft, item, part); }) : rest;
   if (whole && !ownSwitch(item)) return `Apply all turns it ${on ? 'on' : 'off'}${along.length ? `, with the ${along.length === rest.length ? 'whole ' : ''}plugin (${plural(along.length, 'other item')})` : ', with the plugin'}.`;
   if (!(on && whole === 'plugin-on')) return `Apply all turns it ${on ? 'on' : 'off'}.`;
-  // One item turned on in a plugin that is off: the plugin comes on, its other items' switches are written off, and
-  // whatever of it can't be held off comes on too.
+  // An item with its own switch coming on with a plugin that is off: the plugin comes on, what is chosen to stay off is
+  // left off (the other items held off for it, when it was clicked alone), and everything else of it comes on too.
   const leftOff = rest.filter(entry => { const part = switchable(item.install).find(candidate => samePart(candidate, entry)); return !!part && itemOffAfter(draft, item, part); });
-  const brought = rest.filter(entry => !switchable(item.install).some(part => samePart(part, entry)));
-  return `Apply all turns it on: the plugin ${item.install.plugin} comes on${leftOff.length ? ` with its ${counted(leftOff)} left off` : ''}${brought.length ? `; its ${counted(brought)} ${brought.length === 1 ? 'comes' : 'come'} on too` : ''}.`;
+  const brought = rest.filter(entry => !leftOff.includes(entry));
+  return `Apply all turns it on: the plugin ${item.install.plugin} comes on${leftOff.length ? ` with its ${counted(leftOff, item.kind)} left off` : ''}${brought.length ? `; its ${counted(brought, item.kind)} ${brought.length === 1 ? 'comes' : 'come'} on too` : ''}.`;
 }
 
 /**
