@@ -89,10 +89,10 @@ try {
   let page = await launch();
   check('the installed app reports its own tag', (await updatesOf(page)).tag === olderTag, await updatesOf(page));
   await page.run(`window.centralKnot.checkForUpdates()`);
-  await until(page, `document.querySelector('#update-button')`, 30_000);
-  const offered = await page.run(`document.querySelector('#update-button').textContent`);
-  check('the status bar offers the newer release', offered === `Update to ${words(newerTag)}`, offered);
-  await page.run(`document.querySelector('#update-button').click()`);
+  await until(page, `document.querySelector('#update-control[data-look="available"]')`, 30_000);
+  const offered = await page.run(`document.querySelector('#update-control').getAttribute('aria-label')`);
+  check('the sidebar’s update control offers the newer release', offered === `Update to ${words(newerTag)}`, offered);
+  await page.run(`document.querySelector('#update-control').click()`);
   const cut = await failedText(page);
   check('an interrupted download is refused and says so', /download didn’t finish.*wasn’t changed/.test(cut), cut);
   page.close(); await stopAll();
@@ -102,12 +102,12 @@ try {
   releases.splice(0, releases.length, { tag: newerTag, zip: newerZip, stall: 0.3 });
   page = await launch();
   await page.run(`window.centralKnot.checkForUpdates()`);
-  await until(page, `document.querySelector('#update-button')`, 30_000);
-  await page.run(`document.querySelector('#update-button').click()`);
+  await until(page, `document.querySelector('#update-control[data-look="available"]')`, 30_000);
+  await page.run(`document.querySelector('#update-control').click()`);
   const began = Date.now();
   const quiet = await failedText(page);
   check('a download that goes quiet is ended and says so', /download didn’t finish.*wasn’t changed/.test(quiet) && Date.now() - began > 55_000, [quiet, Date.now() - began]);
-  check('and the button offers the update again', await page.run(`(b => !b.disabled && b.textContent)(document.querySelector('#update-button'))`) === `Update to ${words(newerTag)}`);
+  check('and the control offers the update again', await page.run(`(b => !b.disabled && b.getAttribute('aria-label'))(document.querySelector('#update-control'))`) === `Try the update to ${words(newerTag)} again`);
   page.close(); await stopAll();
   check('after the quiet download the installed app is unchanged', tree(app) === installed);
 
@@ -115,31 +115,33 @@ try {
   releases.splice(0, releases.length, { tag: adhocTag, zip: adhocZip });
   page = await launch();
   await page.run(`window.centralKnot.checkForUpdates()`);
-  await until(page, `document.querySelector('#update-button')`, 30_000);
-  await page.run(`document.querySelector('#update-button').click()`);
+  await until(page, `document.querySelector('#update-control[data-look="available"]')`, 30_000);
+  await page.run(`document.querySelector('#update-control').click()`);
   const foreign = await failedText(page);
   check('a zip signed by another identity is refused and says so', /isn’t signed by Central Knot’s developer.*wasn’t changed/.test(foreign), foreign);
   page.close(); await stopAll();
   check('after the refused zip the installed app is unchanged', tree(app) === installed);
 
-  // 3. The real update: one click, download, restart by itself into the newer build; settings and data stay.
+  // 3. The real update: the newer release shows by itself, with no check asked for; one click downloads it and the app restarts
+  // by itself into the newer build; settings and data stay.
   releases.splice(0, releases.length, { tag: newerTag, zip: newerZip, bytesPerSecond: 40_000_000 });
+  const opened = Date.now();
   page = await launch();
   await page.run(`window.centralKnot.setAppearance('dark')`);
   writeFileSync(join(environment.CK_TEST_USER_DATA, 'marker.txt'), 'kept');
   const settingsBefore = JSON.parse(readFileSync(join(environment.CK_TEST_USER_DATA, 'app-settings.json'), 'utf8'));
   const oldPids = running();
-  await page.run(`window.centralKnot.checkForUpdates()`);
-  await until(page, `document.querySelector('#update-button')`, 30_000);
-  await page.run(`window.ckLabels = []; new MutationObserver(() => { const b = document.querySelector('#update-button'); if (b && window.ckLabels.at(-1) !== b.textContent.trim()) window.ckLabels.push(b.textContent.trim()); }).observe(document.getElementById('status-end'), { subtree: true, childList: true, characterData: true }); document.querySelector('#update-button').click(); true`);
+  await until(page, `document.querySelector('#update-control[data-look="available"]')`, 60_000);
+  check(`the sidebar offers the newer release by itself, ${Math.round((Date.now() - opened) / 1000)} s after launch`, await page.run(`document.querySelector('#update-control').getAttribute('aria-label')`) === `Update to ${words(newerTag)}`);
+  await page.run(`window.ckLabels = []; new MutationObserver(() => { const b = document.querySelector('#update-control'); if (b && window.ckLabels.at(-1) !== b.textContent.trim()) window.ckLabels.push(b.textContent.trim()); }).observe(document.getElementById('sidebar-end'), { subtree: true, childList: true, characterData: true }); document.querySelector('#update-control').click(); true`);
   // Read until the old copy quits for the update (its page then stops answering).
   let labels = [];
   for (let i = 0; i < 3000 && oldPids.some(pid => running().includes(pid)); i++) {
     labels = await Promise.race([page.run('window.ckLabels'), wait(1000).then(() => labels)]).catch(() => labels);
     await wait(100);
   }
-  console.log(`button said: ${labels.join(' → ')}`);
-  check('the button showed download progress', labels.some(label => /^Downloading… \d+%$/.test(label)) && labels.includes('Preparing update…'), labels);
+  console.log(`the control said: ${labels.join(' → ')}`);
+  check('the control showed download progress', labels.some(label => /^Downloading… \d+%$/.test(label)) && labels.includes('Preparing update…'), labels);
   page.close();
   for (let i = 0; i < 300 && oldPids.some(pid => running().includes(pid)); i++) await wait(200);
   check('the old copy quit for the update', !oldPids.some(pid => running().includes(pid)));
