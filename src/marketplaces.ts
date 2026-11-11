@@ -13,7 +13,7 @@ import { installParts, partsCurrent, planParts, readParts, removeParts, undoPart
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
 import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartsInstall, PartsPick, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
 import { writeDurably, type ShareContext } from './share.ts';
-import { SKILL_SWITCH_TESTED_FROM, copyDiffers, heldReason, marketTitle, notCarried, partsTools, stateOf, updateTools, versionToCompare } from './pluginstatus.ts';
+import { SKILL_SWITCH_TESTED_FROM, copyDiffers, heldReason, keptReason, marketTitle, notCarried, partsTools, stateOf, updateTools, versionToCompare } from './pluginstatus.ts';
 import { isFolder, isHttps, onlyAllowed, shortBuild } from './values.ts';
 
 /** What runs a tool's plugin commands when it is a desktop app's own copy: "Claude desktop’s Code tab 2.1.321". */
@@ -411,8 +411,11 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     if (!catalog?.plugins.some(item => item.name === plugin)) return { reports: failedFor(tools, 'It is no longer in the marketplace as last read. Refresh the marketplace.') };
     if (catalog.name !== marketName) return { reports: failedFor(tools, `Its marketplace is now named “${catalog.name}”, not “${marketName}”. Refresh, then choose it again.`) };
     // A plugin the build's marketplace lists but carries no files for is not installed from it.
+    // The build's own marketplace: a plugin it no longer offers, kept for the tools that have it, goes into no other tool
+    // (an update of it there runs as usual); one it lists but carries no files for is not installed from it.
     const carried = carriedAs(source), left = carried?.unpackaged.find(item => item.name === plugin);
-    if (carried && left) return { reports: failedFor(tools, notCarried(carried.app, left.reason)) };
+    if (carried?.kept?.includes(plugin)) { if (run === use.install) return { reports: failedFor(tools, keptReason(carried.displayName || catalog.name)) }; }
+    else if (carried && left) return { reports: failedFor(tools, notCarried(carried.app, left.reason)) };
     // One tool's error fails that tool only: what earlier tools did stays reported (and undoable), and later tools still run.
     const reports: ActionReport[] = [];
     for (const tool of tools) {

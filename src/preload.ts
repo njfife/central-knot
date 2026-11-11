@@ -53,6 +53,7 @@ const api: DesktopApi = {
   addMarketplace: source => ipcRenderer.invoke('plugins:add', source),
   forgetMarketplace: source => ipcRenderer.invoke('plugins:forget', source),
   addCarriedTo: (tool, home) => ipcRenderer.invoke('plugins:add-carried', tool, home),
+  checkCarriedFeed: () => ipcRenderer.invoke('bundle:check-feed'),
   pickMarketplaceFolder: () => ipcRenderer.invoke('plugins:pick-folder'),
   installPlugin: (source, marketName, plugin, tools, home) => ipcRenderer.invoke('plugins:install', source, marketName, plugin, tools, home),
   uninstallPlugin: (source, marketName, plugin, tool, home) => ipcRenderer.invoke('plugins:uninstall', source, marketName, plugin, tool, home),

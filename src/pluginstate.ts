@@ -16,13 +16,14 @@ export type MarketTab = 'plugins' | 'about';
  * The action the page is running, so it can say so; set by each action, cleared when it ends. Reading the marketplaces
  * is not an action: it is the page's data (market.read), and a read never clears an action's activity.
  */
-export type MarketActivity = 'adding' | 'removing' | 'applying' | 'undoing' | 'listing';
+export type MarketActivity = 'adding' | 'removing' | 'applying' | 'undoing' | 'listing' | 'checking';
 /** Each activity's short label (the app's busy line) and what the page's band says while it runs. */
 export const ACTIVITIES: Record<MarketActivity, { label: string; band: string }> = {
   adding: { label: 'Reading the marketplace…', band: 'Reading the marketplace… Nothing is installed by this.' },
   removing: { label: 'Removing from the list…', band: 'Removing from the list…' },
   applying: { label: 'Applying…', band: 'Applying… Each change runs that tool’s own command and can take a few seconds.' },
   undoing: { label: 'Undoing…', band: 'Undoing… Each change runs that tool’s own command and can take a few seconds.' },
+  checking: { label: 'Checking for newer plugins…', band: 'Checking for newer plugins… Nothing is installed by this.' },
   listing: { label: 'Listing the marketplace…', band: 'Listing the marketplace in the tool’s own plugin list… Nothing is installed by this.' },
 };
 
@@ -279,6 +280,18 @@ export const forgetMarketplace = (source: string) => act('removing', async () =>
   showView(view);
   const text = `${name || 'It'} was removed from this list. Tools that added it keep it, and nothing was uninstalled.`;
   tell({ page: 'plugins', item: name || undefined, text, act: { label: 'Add back', id: 'outcome-add-back', run: () => void addMarketplace(source) } });
+});
+
+/** Looks now at a bundled build's feed for newer plugins (its About tab's "Check now"), then reads the marketplace again and says what that came to. */
+export const checkCarriedFeed = (entry: MarketplaceView) => act('checking', async () => {
+  await api().checkCarriedFeed();
+  await loadPlugins();
+  const now = market.view?.marketplaces.find(candidate => candidate.source === entry.source)?.bundled?.feed;
+  // Short enough for the status bar to say whole; About has the rest.
+  const name = marketTitle(entry);
+  tell({ page: 'plugins', item: name, warn: now?.outcome === 'failed' || now?.outcome === 'held',
+    text: now?.outcome === 'updated' ? `${name} ${now.message!.charAt(0).toLowerCase()}${now.message!.slice(1)}` : now?.outcome === 'failed' ? `Newer ${name} couldn’t be used. The ones here stay in use.`
+      : now?.outcome === 'held' ? `Newer ${name} wait for a newer app.` : `No newer ${name} are published.` });
 });
 
 /** Adds the marketplace this build carries to one tool's own plugin list (its About tab's "List in …"). */

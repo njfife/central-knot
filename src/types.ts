@@ -163,6 +163,8 @@ export interface DesktopApi {
   forgetMarketplace(source: string): Promise<PluginsView | null>;
   /** Adds the marketplace this build carries to one tool's own plugin list, with that tool's own command. Installs nothing. */
   addCarriedTo(tool: HarnessId, home: string): Promise<{ stopped?: string; report?: ListedReport; view?: PluginsView }>;
+  /** Looks now at a bundled build's feed for newer plugins, and takes them if there are any. The Plugins view is read again afterwards. */
+  checkCarriedFeed(): Promise<void>;
   pickMarketplaceFolder(): Promise<string | null>;
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
@@ -490,7 +492,9 @@ export interface ListedReport { tool: HarnessId; outcome: 'there' | 'added' | 'h
  * marketplace, its release ("November 10, 2026", made from "GitHub: acme/plugins at 1a2b3c4d5e"), and each plugin the
  * marketplace lists whose files the build doesn't carry, with why.
  */
-export interface BundledView { app: string; displayName?: string; logo?: string; /** Its release's date, in words. */ release: string; /** What the release was made from, for whoever needs to tell releases apart. */ from?: string; unpackaged: { name: string; reason: string }[]; /** The tools of the open home this build added the marketplace to (by itself or when asked), as its own record has it. */ addedTo?: HarnessId[] }
+export interface BundledView { app: string; displayName?: string; logo?: string; /** Its release's date and time, in words. */ release: string; /** What the release was made from, for whoever needs to tell releases apart. */ from?: string; unpackaged: { name: string; reason: string }[]; /** The tools of the open home this build added the marketplace to (by itself or when asked), as its own record has it. */ addedTo?: HarnessId[];
+  /** Plugins the marketplace no longer offers that stay because a tool here has them installed. */ kept?: string[];
+  /** Set when the build has a feed of newer plugins: when it was last looked at, and what that came to, in words (bundlefeed.ts). */ feed?: { checked?: string; outcome?: 'current' | 'updated' | 'held' | 'failed'; message?: string } }
 
 export interface MarketplaceView {
   source: string;
