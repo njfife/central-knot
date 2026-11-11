@@ -68,21 +68,20 @@ const stillOpen = (event: HistoryEvent, tools: HarnessId[]) => tools.filter(tool
 
 /**
  * Rule B's table, one row per kind of entry.
- * - `changes`: the tools its click changed and that are still as it left them. A later entry's `changes` are what ends an
- *   earlier entry's action.
+ * - `changes`: the tools its click changed, until its own Undo or put-back reached them. A later entry's `changes` are what
+ *   ends an earlier entry's action in those tools.
  * - `actsOn`: what its own action reaches, which says what ends it:
- *     'tools'   its own `changes`: ended by a later change of one of those tools;
- *     'choice'  its own `changes` and the agent's record as the choice left it: ended by a later change of one of those tools,
- *               and by any later choice, so choices are undone newest first;
+ *     'tools'   its own `changes`, tool by tool: it stands in each tool no later change reached (standsIn), and is ended once
+ *               every one was. An Off holds the tools left; a choice's Undo puts back the copies it replaced in the tools left;
  *     'item'    the whole item (its Undo puts the synced state back too): ended by any later change;
  *     'nothing' that a later click can end: it keeps its action for History's days (sync's own entries, an edit's Undo or
  *               Redo, a deletion's Restore; they wait, in agents.ts restoreVersion, while an Off holds a tool).
  */
-interface Reach { changes: (event: HistoryEvent) => HarnessId[]; actsOn: 'tools' | 'choice' | 'item' | 'nothing' }
+interface Reach { changes: (event: HistoryEvent) => HarnessId[]; actsOn: 'tools' | 'item' | 'nothing' }
 const none = () => [];
 const keepsItsAction: Reach = { changes: none, actsOn: 'nothing' };
 /** A copy choice changes the tools whose copy it replaced. */
-const choice: Reach = { changes: event => stillOpen(event, toolsOf(event.losers)), actsOn: 'choice' };
+const choice: Reach = { changes: event => stillOpen(event, toolsOf(event.losers)), actsOn: 'tools' };
 const reach: Record<EntryIs, Reach> = {
   // An Off changes the tools it holds, until each is put back.
   off: { changes: event => stillOpen(event, toolsOf(heldCopies(event))), actsOn: 'tools' },
@@ -139,19 +138,24 @@ function laterChanges(event: HistoryEvent, events: HistoryEvent[]): { entry: His
   return [...left, ...keptOwn].filter(change => change.tools.length).sort((first, second) => later.indexOf(first.entry) - later.indexOf(second.entry));
 }
 
+/**
+ * The tools `event`'s action still reaches: those its click changed (`reach`) that no later change reached. An Off still holds
+ * them (a copy that turned up in one, turned off again, is held by that later Off); a choice's Undo still puts back the copy
+ * it replaced there, whatever was clicked in other tools since.
+ */
+export function standsIn(event: HistoryEvent, events: HistoryEvent[]): HarnessId[] {
+  const changed = new Set(laterChanges(event, events).flatMap(change => change.tools));
+  return reach[entryIs(event, events)].changes(event).filter(tool => !changed.has(tool));
+}
+
 /** An Off: a removal for tools with no switch for the item (`turnedOff`), not turned on again (undone). */
 const isOff = (event: HistoryEvent) => event.kind === 'removed' && !!event.turnedOff && !event.undoneBy;
-/** An Off's tools that no later click changed: a copy that turned up there, turned off again, is held by that later Off. */
-const unchangedOff = (event: HistoryEvent, events: HistoryEvent[]) => {
-  if (!isOff(event)) return [];
-  const changed = new Set(laterChanges(event, events).flatMap(change => change.tools));
-  return reach.off.changes(event).filter(tool => !changed.has(tool));
-};
 /**
- * Rule A, one answer to "where is this item off?": the tools `event`, an Off, still holds. No copy goes into such a tool, from
- * sync or any click, but this Off's own, put back. Its Off row, sync, every click and History's prune read it.
+ * Rule A, one answer to "where is this item off?": the tools `event`, an Off, still holds (standsIn), until a deletion ends it.
+ * No copy goes into such a tool, from sync or any click, but this Off's own, put back. Its Off row, sync, every click and
+ * History's prune read it.
  */
-export const offTools = (event: HistoryEvent, events: HistoryEvent[]) => (deletedSince(event, events) ? [] : unchangedOff(event, events));
+export const offTools = (event: HistoryEvent, events: HistoryEvent[]) => (isOff(event) && !deletedSince(event, events) ? standsIn(event, events) : []);
 /**
  * The Offs of item `key` that still keep a copy for `tool` though a later Off holds it now (that one took the tool over),
  * newest first. Once the holder's copy is back, the newest of these holds the tool again, its copy there one that turned up.
@@ -159,27 +163,26 @@ export const offTools = (event: HistoryEvent, events: HistoryEvent[]) => (delete
  * in History, on offer (itemrow.ts putBackOrder).
  */
 export const offsWaitingFor = (events: HistoryEvent[], key: string, tool: HarnessId) =>
-  events.filter(event => event.key === key && isOff(event) && !deletedSince(event, events) && reach.off.changes(event).includes(tool) && !unchangedOff(event, events).includes(tool)).reverse();
+  events.filter(event => event.key === key && isOff(event) && !deletedSince(event, events) && reach.off.changes(event).includes(tool) && !standsIn(event, events).includes(tool)).reverse();
 /** Every tool a standing Off of item `key` holds (offTools). */
 export const heldTools = (events: HistoryEvent[], key: string) => [...new Set(events.filter(event => event.key === key).flatMap(event => offTools(event, events)))];
 
 /**
  * Rule B, one answer to "is this History entry's action still offered?": it stands only while it still means what it says. This
- * returns what ended it, if anything did: a deletion since, or a later change that reaches what it acts on (`reach`). An Off
- * stands while it still holds a tool. An agent's entries only: every other item's keep their actions. The History page shows
- * the ending's words (sinceWords) in place of the action, and agents.ts restoreAgent refuses the action in the same words when
- * a page read before asks for it.
+ * returns what ended it, if anything did: a deletion since, or a later change that reaches what it acts on (`reach`). An entry
+ * that acts on its tools stands while one of them is as it left it (standsIn): its action then reaches those tools only. An
+ * agent's entries only: every other item's keep their actions. The History page shows the ending's words (sinceWords) in place
+ * of the action, and agents.ts restoreAgent refuses the action in the same words when a page read before asks for it.
  */
 export function endedBy(event: HistoryEvent, events: HistoryEvent[]): HistoryEvent | undefined {
   if (!event.key.startsWith('agent:') || event.undoneBy || event.kind === 'deleted') return undefined;
   const deletion = events.findLast(later => deletes(later, event));
   const { changes, actsOn } = reach[entryIs(event, events)];
   if (deletion || actsOn === 'nothing') return deletion;
-  if (unchangedOff(event, events).length) return undefined;
+  const later = laterChanges(event, events);
+  if (actsOn === 'item') return later.at(-1)?.entry;
   const tools = changes(event);
-  const reaches = (change: { entry: HistoryEvent; tools: HarnessId[] }) => actsOn === 'item' || change.tools.some(tool => tools.includes(tool))
-    || (actsOn === 'choice' && reach[entryIs(change.entry, events)].actsOn === 'choice');
-  return laterChanges(event, events).findLast(reaches)?.entry;
+  return standsIn(event, events).length ? undefined : later.findLast(change => change.tools.some(tool => tools.includes(tool)))?.entry;
 }
 /** What History says of an entry `endedBy` ended, by what ended it. */
 export const sinceWords = (ending: HistoryEvent) => (ending.kind === 'deleted' ? 'Deleted since' : ending.kind === 'removed' ? 'Turned off since'
@@ -217,9 +220,12 @@ export const keptByEarlierOffs = (by: HistoryEvent, events: HistoryEvent[], tool
 
 /**
  * Whether History keeps `event` whatever its age (`cutoff`: the oldest moment it keeps otherwise): an Off, and the content it
- * names, while anything can still bring its copies back. That is until it is turned on again (undone), and once a deletion ended
- * it, for as long as History keeps that deletion, whose Restore brings the Off back. A tool a later Off took over still counts:
- * turning that Off on gives this one its hold back. readHistory keeps every later entry of its item with it, so what it holds
- * reads the same whatever the window.
+ * names, while anything can still bring its copies back, and for History's days after. That is until the click that turned it
+ * on again (the entry that undid it) is older than the window, and once a deletion ended it, for as long as History keeps that
+ * deletion, whose Restore brings the Off back. A tool a later Off took over still counts: turning that Off on gives this one
+ * its hold back. readHistory keeps every later entry of its item with it, so what it holds reads the same whatever the
+ * window, and what those entries still offer (a kept copy, say) doesn't go at the click that turns the Off on.
  */
-export const keptOff = (event: HistoryEvent, events: HistoryEvent[], cutoff: number) => isOff(event) && !events.some(later => deletes(later, event) && Date.parse(later.at) < cutoff);
+export const keptOff = (event: HistoryEvent, events: HistoryEvent[], cutoff: number) => event.kind === 'removed' && !!event.turnedOff
+  && (!event.undoneBy || events.some(later => later.id === event.undoneBy && Date.parse(later.at) >= cutoff))
+  && !events.some(later => deletes(later, event) && Date.parse(later.at) < cutoff);

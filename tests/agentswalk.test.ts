@@ -1,18 +1,18 @@
-// A seeded random walk over every click the Agents page and History offer for one agent (agentclicks.ts), on real files in a temp
-// home, with History's days passing, its retention changed, folders read-only for a click, a History action or an Undo, and
-// copies made or edited by hand in between. Two-way agents and one-way ones (Claude Code's own fields). After every step, in a
-// copy of the home put back after:
+// A seeded random walk over every click the Agents page and History offer for one agent (agentclicks.ts; a choice of copy only
+// where the page asks for one, its copies differing), on real files in a temp home, with History's days passing, its retention
+// changed, folders read-only for a click, a History action or an Undo, and copies made or edited by hand in between. Two-way
+// agents and one-way ones (Claude Code's own fields). After every step, in a copy of the home put back after:
 //   (a) two plain passes: the first writes nothing into a tool an Off holds, and the second writes nothing at all;
 //   (b) every action History offers does something: none answers that it no longer applies, can't be restored or has nothing
 //       to do; and one click further (for one of them, picked by the seed): every action offered after it is as good, the
 //       passes after it are quiet, and the row is still true;
 //   (c) on a row an Off holds copies of, On gives each such tool a copy again, and its put-back alone gives each the very file
 //       a click last took out of it (what the walk saw one click take, not what the entry noted);
-//   (d) every file a click took out or replaced is on disk again or can be brought back by an action History offers now, or
-//       offers once an Off is turned on or a deletion restored. (A copy that was only behind, which the click's pass caught
-//       up as any pass would have, is sync's work, not the click's: History has that older version as an edit's.) Two things
-//       excuse one that can't come back, by design: History's days passed for it (daysPassed), or the choice that replaced it
-//       lost its Undo to a later decision (choiceEnded);
+//   (d) every file a click took out or replaced is on disk again or is named by an action History offers now, or offers once
+//       an Off is turned on or a deletion restored. (A copy that was only behind, which the click's pass caught up as any
+//       pass would have, is sync's work, not the click's: History has that older version as an edit's.) Two things excuse one
+//       that no action names, by design: History's days passed for it (daysPassed), or the choice that replaced it lost its
+//       Undo in that very tool to a later decision about that tool (choiceEnded);
 //   (e) the row says what is true: each tool an Off holds is off there, has no copy on record, and is held by a standing Off whose
 //       kept file is in the store; an Off row has no copy anywhere;
 //   (f) a click that went through whole, from a settled home (a plain pass would write nothing, hold nothing and leave the
@@ -26,13 +26,12 @@ import assert from 'node:assert/strict';
 import { chmod, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readAgentRecord, restoreAgent } from '../src/agents.ts';
-import { endedBy, entryIs, heldCopies, heldTools, offTools, type EntryIs } from '../src/historyrules.ts';
+import { endedBy, entryIs, heldCopies, heldTools, offTools, standsIn, type EntryIs } from '../src/historyrules.ts';
 import { readHistory } from '../src/manage.ts';
-import { DAY_MS } from '../src/model.ts';
 import { offHeldIn, putBackOrder } from '../src/itemrow.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HistoryDays, HistoryEvent, McpResult, SkillFacts } from '../src/types.ts';
-import { age, choose, claudeAgent, codexOwn, deleteEverywhere, factOf, fields, files, filesOf, historyActions, pass, prune, sandbox, synced, toolOff, toolOn, tools, trial, turnOff, turnOn, undo, write, type Box, type Clicked, type Tool } from './agentclicks.ts';
+import { age, choose, claudeAgent, codexOwn, deleteEverywhere, differs, factOf, fields, files, filesOf, historyActions, pass, prune, sandbox, synced, toolOff, toolOn, tools, trial, turnOff, turnOn, undo, write, type Box, type Clicked, type Tool } from './agentclicks.ts';
 
 /**
  * The walks `npm test` runs, each with its agent (true: one-way): the seeds a judge's or a builder's longer run once failed on
@@ -82,18 +81,24 @@ function broughtBackBy(event: HistoryEvent, history: HistoryEvent[]): KeptCopy[]
   if (WRITES_A_VERSION.includes(entryIs(event, history))) return [event.previous, event.winner?.hash, ...event.losers.map(loser => loser.hash)].flatMap(hash => (hash ? tools.map(tool => ({ tool, hash })) : []));
   return event.kind === 'removed' ? heldCopies(event) : event.losers;
 }
+/** What ended a choice's Undo in `tool` alone, if anything did: Rule B is tool by tool for a choice (historyrules.ts standsIn). */
+const endedIn = (choice: HistoryEvent, tool: string, history: HistoryEvent[]) => endedBy({ ...choice, losers: choice.losers.filter(loser => loser.tool === tool) }, history);
+const waitsForOnOrRestore = (ending: HistoryEvent | undefined) => ['removed', 'deleted'].includes(ending?.kind ?? '');
 /**
- * Every kept file a click can bring back now or in its turn, as `tool\0text`, each with the entries that name it:
- * - the copies an offered action brings back (an On's Use the kept copy: the kept copy of that one tool);
- * - those of an entry whose action waits only for an Off to be turned on again or a deletion to be restored, and an On's kept
- *   copy for a tool an Off holds now (offered again once that Off is turned on).
+ * Every kept file that an action names, as `tool\0text`, each with the entries that name it. Named, not clicked: the walk
+ * takes an offered action's word for the copies it brings back (check (b) clicks each one, and fails one that does nothing).
+ * - the copies an offered action names: those its entry replaced or took out, a choice's only in the tools its Undo still
+ *   reaches, and for an On's Use the kept copy, the kept copy of that one tool;
+ * - those of an entry whose action waits only for an Off to be turned on again or a deletion to be restored (a choice's: in
+ *   the tools where that is what ended its Undo), and an On's kept copy for a tool an Off holds now.
  */
 async function reachable(box: Box, history: HistoryEvent[], offeredNow: Awaited<ReturnType<typeof historyActions>>): Promise<Map<string, HistoryEvent[]>> {
-  const sources: { event: HistoryEvent; copies: KeptCopy[] }[] = offeredNow.map(({ event, how }) => ({ event,
-    copies: how && 'keptIn' in how ? (event.turnedUp ?? []).filter(copy => copy.tool === how.keptIn) : broughtBackBy(event, history) }));
+  const named = (event: HistoryEvent) => broughtBackBy(event, history).filter(copy => event.kind !== 'chosen' || standsIn(event, history).includes(copy.tool));
+  const sources: { event: HistoryEvent; copies: KeptCopy[] }[] = offeredNow.map(({ event, how }) => ({ event, copies: how && 'keptIn' in how ? (event.turnedUp ?? []).filter(copy => copy.tool === how.keptIn) : named(event) }));
   const held = heldTools(history, 'agent:reviewer');
   for (const event of ours(history)) {
-    if (['removed', 'deleted'].includes(endedBy(event, history)?.kind ?? '')) sources.push({ event, copies: [...broughtBackBy(event, history), ...(event.turnedUp ?? [])] });
+    if (event.kind === 'chosen') sources.push({ event, copies: event.losers.filter(copy => waitsForOnOrRestore(endedIn(event, copy.tool, history))) });
+    else if (waitsForOnOrRestore(endedBy(event, history))) sources.push({ event, copies: [...broughtBackBy(event, history), ...(event.turnedUp ?? [])] });
     else if (event.putBackFrom === 'off' && !event.undoneBy) sources.push({ event, copies: (event.turnedUp ?? []).filter(copy => held.includes(copy.tool)) });
   }
   const found = new Map<string, HistoryEvent[]>();
@@ -104,20 +109,17 @@ async function reachable(box: Box, history: HistoryEvent[], offeredNow: Awaited<
   return found;
 }
 /** A file a click took out or replaced that no tool holds now, and the entries that named it when it was last reachable. */
-interface Owed { tool: Tool; text: string; namedBy: { id: string; at: string }[] }
+interface Owed { tool: Tool; text: string; namedBy: string[] }
+/** Excuse: History's days passed for it. Every entry that last named it has left History, which only its days take an entry out of. */
+const daysPassed = (owed: Owed, history: HistoryEvent[]) => owed.namedBy.length > 0 && owed.namedBy.every(id => !history.some(event => event.id === id));
 /**
- * Excuse: History's days passed for it. The step aged History, or every entry that last named it has left History since and
- * was older than its window: such an entry is kept only beside a standing Off, and goes once that Off is turned on or deleted.
+ * Excuse: the choice that replaced it lost its Undo in that tool to a later decision of the person's about that same tool
+ * (Rule B, tool by tool): they chose a copy for it again, or made a copy of their own there while it was off, which turning it
+ * on kept. What a choice replaced in a tool is theirs to give up there. A change in another tool never excuses it.
  */
-const daysPassed = (owed: Owed, aged: boolean, history: HistoryEvent[], cutoff: number) =>
-  aged || (owed.namedBy.length > 0 && owed.namedBy.every(namer => !history.some(event => event.id === namer.id) && Date.parse(namer.at) < cutoff));
-/**
- * Excuse: the choice that replaced it lost its Undo to a later decision of the person's (Rule B): they chose a copy again, or
- * made a copy of their own in that tool while it was off, which turning it on kept. What a choice replaces is theirs to give up.
- */
-const choiceEnded = (owed: Owed, history: HistoryEvent[]) => owed.namedBy.some(namer => {
-  const choice = history.find(event => event.id === namer.id && event.kind === 'chosen' && !event.undoneBy);
-  const ending = choice && endedBy(choice, history);
+const choiceEnded = (owed: Owed, history: HistoryEvent[]) => owed.namedBy.some(id => {
+  const choice = history.find(event => event.id === id && event.kind === 'chosen' && !event.undoneBy);
+  const ending = choice && endedIn(choice, owed.tool, history);
   return !!ending && (ending.kind === 'chosen' || ending.putBackFrom === 'off');
 });
 
@@ -179,7 +181,8 @@ async function walk(seed: number, oneWay: boolean): Promise<Finding[]> {
       if (fact) add(fact.gone || fact.heldOff?.length || !fact.managed ? 4 : 1, { name: 'On', click: () => turnOn(box, context()) });
       for (const entry of fact?.heldOff ?? []) if (!(entry.source && fact!.copies[entry.source] === undefined)) add(1, { name: `On in ${entry.tool}`, click: () => toolOn(box, entry.tool, context()) });
       if (fact) add(1, { name: 'Delete everywhere', click: () => deleteEverywhere(box, context()) });
-      for (const tool of present) add(1, { name: `choose ${tool}`, click: () => choose(box, tool, context()) });
+      // A choice of copy only where the page asks for one: the row's copies differ.
+      if (fact && differs(fact)) for (const tool of present) add(1, { name: `choose ${tool}`, click: () => choose(box, tool, context()) });
       for (const action of await historyActions(box, context())) add(2, { name: `History: ${action.label} (${action.event.kind}${action.event.putBackFrom ? `/${action.event.putBackFrom}` : ''})`, run: action.run, byApp: true, undoes: action.how && 'keptIn' in action.how ? [] : [action.event.id] });
       if (last?.made.length) { const click = last; add(2, { name: 'Undo', run: () => undo(box, click, context()), byApp: true, undoes: click.made }); }
       for (const tool of tools as Tool[]) {
@@ -194,6 +197,7 @@ async function walk(seed: number, oneWay: boolean): Promise<Finding[]> {
       const blocked = byApp && process.getuid?.() !== 0 && next() < 0.12 ? pick(tools as Tool[]) : undefined;
       trace.push(`${act.name}${blocked ? ` [${blocked} read-only]` : ''}`);
       const filesBefore = await filesOf(box), rowBefore = row(fact), recordBefore = await recordAsSyncReadsIt(box), settledBefore = settled, syncsWork = syncWouldRewrite;
+      const entriesBefore = new Set((await readHistory(context())).map(event => event.id));
       if (blocked) await readOnly(blocked, true);
       let clicked: Clicked | undefined;
       try { if (act.click) clicked = await act.click(); else await act.run!(); }
@@ -216,12 +220,15 @@ async function walk(seed: number, oneWay: boolean): Promise<Finding[]> {
       }
       const offeredNow = await historyActions(box, context());
       const canComeBack = await reachable(box, history, offeredNow);
+      // A copy that a put-back of this step put back is back, even where the same click's pass then caught it up (sync's work).
+      const putBackNow = new Set<string>();
+      for (const event of history.filter(entry => entry.putBackFrom && !entriesBefore.has(entry.id))) for (const copy of event.losers) putBackNow.add(`${copy.tool}\0${await keptFile(box, copy)}`);
       for (const [key, lost] of owed) {
-        if (filesAfter[lost.tool] === lost.text) { owed.delete(key); continue; }
+        if (filesAfter[lost.tool] === lost.text || putBackNow.has(key)) { owed.delete(key); continue; }
         const namers = canComeBack.get(key);
-        if (namers) { lost.namedBy = namers.map(event => ({ id: event.id, at: event.at })); continue; }
+        if (namers) { lost.namedBy = namers.map(event => event.id); continue; }
         owed.delete(key);
-        if (!daysPassed(lost, act.name === 'age', history, Date.now() - days * DAY_MS) && !choiceEnded(lost, history)) fail(`(d) a copy a click took out of ${lost.tool} can be brought back by no action`);
+        if (!daysPassed(lost, history) && !choiceEnded(lost, history)) fail(`(d) a copy a click took out of ${lost.tool} can be brought back by no action`);
       }
       await rowIsTrue();
       await trial(box, async () => { ({ settled, rewrites: syncWouldRewrite } = await passesAreQuiet()); });

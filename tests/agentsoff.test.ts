@@ -392,9 +392,12 @@ test('On of an Off past History’s days keeps its own Undo: its entry says what
     await age(box, 40);
     const on = await restoreAgent(box.context, tools, removal);
     assert.deepEqual([on.stopped, await everyFile(box), await recordNow(box)], [undefined, filesBefore, recordBefore]);
-    // The Off it turned on is done and old, so History lets it go; the On's own entry says what it reversed.
+    // The Off it turned on is done: History keeps it for its days from this click, then lets it go. The On's own entry says what it reversed.
     const history = await readHistory(box.context);
-    assert.deepEqual([history.some(event => event.id === removal), history.find(event => event.id === on.made![0])?.putBackFrom], [false, 'off']);
+    assert.deepEqual([history.some(event => event.id === removal), history.find(event => event.id === on.made![0])?.putBackFrom], [true, 'off']);
+    await age(box, 40);
+    assert.equal((await readHistory(box.context)).some(event => event.id === removal), false);
+    await age(box, -40);
     const undone = await restoreAgent(box.context, tools, on.made![0]);
     assert.equal(undone.stopped, undefined, JSON.stringify(undone));
     assert.deepEqual([Object.values(await everyFile(box)), await recordNow(box), (await pass(box)).writes], [[undefined, undefined, undefined], recordOff, 0]);
@@ -521,11 +524,11 @@ test('One long sequence: Off, past History’s days, a copy turns up, On with a 
     // On: the others back, Codex's copy stays, and the copies differ: the pass holds for a choice, writing nothing.
     const on = await restoreAgent(box.context, tools, removal);
     assert.deepEqual([on.writes, (await pass(box)).writes, await everyFile(box)], [2, 0, { ...synced, 'codex-cli': own }]);
-    assert.deepEqual(await kinds(), ['restored']);
+    assert.deepEqual(await kinds(), ['removed(undone)', 'restored']);
     // The choice: Claude Code's copy for every tool; Codex's own kept by its entry.
     const view = (await agentsView(box.context, tools)).servers[0];
     const chose = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, use: 'claude-cli', useHash: view.copies['claude-cli']!.hash }]);
-    assert.deepEqual([chose.writes, await everyFile(box), await kinds()], [1, synced, ['restored', 'chosen']]);
+    assert.deepEqual([chose.writes, await everyFile(box), await kinds()], [1, synced, ['removed(undone)', 'restored', 'chosen']]);
     await everyActionRoutes(box);
     // Its Undo, then On's: Codex's own back, then the others out; as when Codex's copy turned up, not synced.
     const chosen = await latest(box, 'chosen');
@@ -536,7 +539,7 @@ test('One long sequence: Off, past History’s days, a copy turns up, On with a 
     assert.deepEqual([await everyFile(box), { ...await recordNow(box), hash: '' }, await row(box)], [{ 'claude-cli': undefined, 'copilot-cli': undefined, 'codex-cli': own }, { ...recordUp, hash: '' }, rowUp]);
     // A plain pass, twice: nothing written.
     for (let round = 0; round < 2; round++) assert.equal((await pass(box)).writes, 0);
-    assert.deepEqual(await kinds(), ['restored(undone)', 'chosen(undone)', 'removed']);
+    assert.deepEqual(await kinds(), ['removed(undone)', 'restored(undone)', 'chosen(undone)', 'removed']);
     await everyActionRoutes(box);
     // Delete everywhere: Codex's own copy goes too, and the row; History keeps it.
     const deleted = await applyAgents(box.context, tools, [deleteEverywhere(false, [], ['codex-cli'])]);

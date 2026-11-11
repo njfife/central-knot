@@ -11,7 +11,7 @@
 // 2. here: its row in `table`;
 // 3. historypage.ts describe: the sentence its row says;
 // 4. the engine's route to its Undo: for an agent's entry, agents.ts restoreAgent (its `switch` on entryIs).
-import { endedBy, entryIs, keptCopiesOffered, offTools, sinceWords, type EntryIs } from './historyrules.ts';
+import { endedBy, entryIs, keptCopiesOffered, sinceWords, standsIn, type EntryIs } from './historyrules.ts';
 import { NO_PROFILE, redoneSwitch } from './profileplan.ts';
 import { andList, toolName, toolsPhrase } from './words.ts';
 import type { DestinationResult, HarnessId, HistoryEvent, RestoreHow } from './types.ts';
@@ -19,11 +19,12 @@ import type { DestinationResult, HarnessId, HistoryEvent, RestoreHow } from './t
 /** What a click on an entry's action led to, for the words said after it; `how`: which action it was, when not the row's main one. */
 export interface AfterClick { results: DestinationResult[]; homeTools: string[]; how?: RestoreHow }
 /**
- * How far the action reaches, for its label: the tools it names ('named': those it replaced or removed copies in; 'held': those
- * an Off still holds; 'turned-on': those an On put a copy back in, or with none put back, those it turned on with their own
- * copy; 'winner': the one tool that took a copy; 'switched'; 'base': a Pull's base's), every tool ('all'), or none said.
+ * How far the action reaches, for its label: the tools it names ('named': those it replaced or removed copies in; 'standing':
+ * those no later change reached, which an Off still holds and a choice's Undo still puts a copy back in (historyrules.ts
+ * standsIn); 'turned-on': those an On put a copy back in, or with none put back, those it turned on with their own copy;
+ * 'winner': the one tool that took a copy; 'switched'; 'base': a Pull's base's), every tool ('all'), or none said.
  */
-type Scope = 'named' | 'held' | 'turned-on' | 'winner' | 'switched' | 'base' | 'all' | 'none';
+type Scope = 'named' | 'standing' | 'turned-on' | 'winner' | 'switched' | 'base' | 'all' | 'none';
 interface Row {
   /** The button's word, or none: the row has no action (one with several overwritten edits has one button per edit, historypage.ts). */
   word?: (event: HistoryEvent, events: HistoryEvent[]) => string | undefined;
@@ -82,7 +83,7 @@ const table: Record<EntryIs, Row> = {
   'delete-everywhere': { word: () => 'Restore', scope: 'named', help: (event, tools) => (event.losers.length ? `Put each copy back in ${andList(tools.map(toolName))}, as it was` : `Put ${event.item} back on its page, off, its copies in History`),
     after: (event, { results, homeTools }) => sentence(where(results, 'written').length ? `${event.item} is back in ${toolsPhrase(where(results, 'written'), homeTools)}.` : !event.losers.length ? `${event.item} is back on its page, off.` : '', ...leftAsIs(results)) },
   choice: { word: () => 'Undo choice', scope: 'all', help: event => `Put ${event.item} back as it was before this change, in every tool it syncs to (including where it was edited)` },
-  'agent-choice': { word: () => 'Undo choice', scope: 'named', how: { narrow: true }, help: (event, tools) => `Put each copy this choice replaced back in its own tool (${andList(tools.map(toolName))}), take out the copies it added, and leave ${event.item} as it was before the choice (only while unchanged since)` },
+  'agent-choice': { word: () => 'Undo choice', scope: 'standing', how: { narrow: true }, help: (event, tools) => `Put each copy this choice replaced back in its own tool (${andList(tools.map(toolName))}), take out the copies it added, and leave ${event.item} as it was before the choice (only while unchanged since)` },
   'unfinished-choice': { word: () => 'Finish undo', scope: 'none', how: { narrow: true }, help: (event, _tools, events, homeTools) => `${unfinished(event, events, homeTools, true)} (only while unchanged since)` },
   // Use the kept copy: its Undo puts back the copy it replaced; where the tool had none, nothing was replaced and it has no Undo.
   'kept-copy': { word: event => (event.losers.length ? 'Undo' : undefined), scope: 'winner', help: (_event, tools) => `Put the copy this replaced back in ${andList(tools.map(toolName))}; the kept copy stays in History (only while unchanged since)`,
@@ -91,7 +92,7 @@ const table: Record<EntryIs, Row> = {
     help: event => (event.switched ?? []).map(entry => `${entry.disabled ? 'Enable' : 'Disable'} it again in ${who(entry.tool)}`).join('; ') },
   profile: { word: (event, events) => (redoneSwitch(events, event) ? 'Undo switch' : events.find(other => other.undoneBy === event.id)?.kind === 'profile' ? 'Redo switch' : 'Undo switch'), scope: 'none',
     help: event => `Each switch this changed goes back, where it is still as this left it; ${event.profile?.fromName ?? NO_PROFILE} is in use again if this switch is the one that chose the profile in use` },
-  off: { word: () => 'Turn on', scope: 'held', done: 'Turned on since', help: event => `Turn ${event.item} on again there: each copy back as it was`,
+  off: { word: () => 'Turn on', scope: 'standing', done: 'Turned on since', help: event => `Turn ${event.item} on again there: each copy back as it was`,
     after: (event, { results }) => sentence(where(results, 'written').length ? `${event.item} is back in ${andList(where(results, 'written').map(toolName))}.` : '', ...leftAsIs(results)) },
   removal: { word: () => 'Restore', scope: 'named', done: 'Restored', help: event => `Put the removed copy back in ${andList(event.losers.map(loser => toolName(loser.tool)))}` },
   'take-over': { word: () => 'Undo', scope: 'all', help: event => `Put the links and the shared copy back as they were${event.tookOver?.managedNow ? `, remove the copies that turning it on added, and stop syncing ${event.item}` : ''} (only while unchanged)` },
@@ -109,7 +110,7 @@ const table: Record<EntryIs, Row> = {
 /** The tools an action names in its label, by its scope. */
 function scopeTools(event: HistoryEvent, events: HistoryEvent[], scope: Scope): HarnessId[] {
   const open = (tools: HarnessId[]) => [...new Set(tools.filter(tool => !event.restoredTools?.includes(tool)))];
-  if (scope === 'held') return offTools(event, events);
+  if (scope === 'standing') return standsIn(event, events);
   if (scope === 'turned-on') return event.losers.length ? open(event.losers.map(loser => loser.tool)) : turnedUpIn(event);
   if (scope === 'winner') return event.winner ? [event.winner.tool] : [];
   if (scope === 'switched') return (event.switched ?? []).map(entry => entry.tool);

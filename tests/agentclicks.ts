@@ -66,7 +66,7 @@ const holders = (fact: SkillFacts) => tools.filter(tool => fact.copies[tool] !==
 const asItIs = (fact: SkillFacts) => ({ key: fact.key, managed: fact.managed, off: fact.off, seenManaged: fact.managed });
 const onChange = (fact: SkillFacts, use?: HarnessId): Change => ({ key: fact.key, managed: true, off: [], seenManaged: fact.managed, ...(use ? { use, useHash: fact.copies[use]?.hash } : {}) });
 /** Whether the page opens the copy choice for this row (itemrow.ts needsCopyChoice, on the row as the page draws it). */
-const differs = (fact: SkillFacts) => needsCopyChoice({ key: fact.key, description: '', copies: Object.fromEntries(Object.entries(fact.copies).map(([tool, copy]) => [tool, copy!.hash])),
+export const differs = (fact: SkillFacts) => needsCopyChoice({ key: fact.key, description: '', copies: Object.fromEntries(Object.entries(fact.copies).map(([tool, copy]) => [tool, copy!.hash])),
   managed: fact.managed, off: fact.off, cannot: fact.cannot, held: fact.held, separate: fact.separate, edited: fact.edited }, tools);
 
 /** What a click did, for its Undo (app.ts undoClick): the History entries it made, and the record as it was when it was sent. */

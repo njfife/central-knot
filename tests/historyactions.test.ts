@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { afterWords, offered } from '../src/historyactions.ts';
-import { entryIs, heldTools, keptCopiesOffered, offTools } from '../src/historyrules.ts';
+import { entryIs, heldTools, keptCopiesOffered, offTools, standsIn } from '../src/historyrules.ts';
 import { putBackOrder } from '../src/itemrow.ts';
 import type { DestinationResult, HarnessId, HistoryEvent } from '../src/types.ts';
 
@@ -91,11 +91,17 @@ test('Rule B: a choice’s Undo ends with a later Off of one of its tools, not o
   assert.deepEqual([shown(chose, [chose, there, back]), shown(added, [added, there, back])], ['Undo choice in Codex', 'Undo add']);
 });
 
-test('Rule B: choices are undone newest first: a later choice ends an earlier one’s Undo, whatever its tools, until its own Undo undid it', () => {
-  const older = choice(['codex-cli']), newer = choice(['copilot-cli']);
-  assert.deepEqual([shown(older, [older, newer]), shown(newer, [older, newer])], ['Chosen since', 'Undo choice in Copilot CLI']);
-  newer.undoneBy = 'its own Undo, which writes no entry';
-  assert.equal(shown(older, [older, newer]), 'Undo choice in Codex');
+test('Rule B: a choice’s Undo stands tool by tool: a later change ends it only in the tools it reached, and it is ended once every one was', () => {
+  const older = choice(['copilot-cli', 'codex-cli']);
+  // A later choice that replaced another tool's copy reaches neither.
+  const elsewhere = choice(['claude-cli']);
+  assert.deepEqual([shown(older, [older, elsewhere]), shown(elsewhere, [older, elsewhere])], ['Undo choice in Copilot CLI and Codex', 'Undo choice in Claude Code']);
+  // One that replaced Codex's copy again ends it there and no further, until its own Undo (which writes no entry) undid it.
+  const there = choice(['codex-cli']);
+  assert.deepEqual([shown(older, [older, there]), standsIn(older, [older, there])], ['Undo choice in Copilot CLI', ['copilot-cli']]);
+  assert.equal(shown(older, [older, { ...there, undoneBy: 'its own Undo' }]), 'Undo choice in Copilot CLI and Codex');
+  // Every tool reached: ended, in the words of the last change that reached one.
+  assert.equal(shown(older, [older, there, off(['copilot-cli'])]), 'Turned off since');
 });
 
 test('Rule B: an On counts as a change where it found a copy turned up, so an earlier choice of that tool loses its Undo', () => {

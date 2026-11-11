@@ -44,15 +44,16 @@ export interface ChoiceUndone { results: DestinationResult[]; writes: number; st
  * Undoes the choice `chosen`. Everything is checked first: each replaced tool still holds what the choice wrote and the added
  * copies are unchanged; otherwise nothing is written. The entries are marked undone only when every copy went back and every
  * added one went: a write that fails is said, the tools put back are kept on the entry (`restoredTools`) and the added entry
- * stays open, and History's Undo of the same entry finishes the rest.
+ * stays open, and History's Undo of the same entry finishes the rest. `only` (an agent's, Rule B): the tools the Undo still
+ * reaches; a tool a later change reached is left as that left it, and the entry stays open for it.
  */
-export async function undoChoice(history: HistoryEvent[], chosen: HistoryEvent, sides: ChoiceSides): Promise<ChoiceUndone> {
+export async function undoChoice(history: HistoryEvent[], chosen: HistoryEvent, sides: ChoiceSides, only?: HarnessId[]): Promise<ChoiceUndone> {
   const stop = (stopped: string): ChoiceUndone => ({ stopped, results: [], writes: 0 });
   if (chosen.undoneBy) return stop('That choice was already undone.');
   if (!chosen.winner) return stop('That choice can’t be undone.');
   const added = chosen.addedId ? history.find(entry => entry.id === chosen.addedId && !entry.undoneBy) : undefined;
   const done = new Set(chosen.restoredTools ?? []);
-  const pending = chosen.losers.filter(loser => !done.has(loser.tool));
+  const pending = chosen.losers.filter(loser => !done.has(loser.tool) && (!only || only.includes(loser.tool)));
   for (const loser of pending) {
     if (!sides.wrote(loser.tool)) return stop(`${toolName(loser.tool)}’s ${sides.noun} of ${sides.name} changed since, so nothing was undone here. History can still put an earlier version back.`);
     const problem = await sides.cantPutBack(loser.tool, loser.hash);

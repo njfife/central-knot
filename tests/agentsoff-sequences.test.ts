@@ -18,6 +18,8 @@ const offered = async (box: Box) => (await historyActions(box)).filter(action =>
 const entryOf = async (box: Box, id: string) => (await readHistory(box.context)).find(event => event.id === id)!;
 const heldIn = async (box: Box) => ((await factOf(box))?.heldOff ?? []).map(entry => entry.tool).sort();
 const asRoot = process.getuid?.() === 0;
+/** The agents the files hold, each as its name, description and prompt: one when every tool has the same agent. */
+const agentHashes = (files: Record<string, string | undefined>) => new Set(Object.values(files).map(text => text?.replace(/\s+/g, ' ').match(/(You review code\..*?)("""|$)/)?.[1].trim()));
 
 test('An earlier On’s Turn off again is not offered after a later Off, and the row’s On puts back the newer copy that Off kept', async () => {
   const box = await sandbox();
@@ -602,7 +604,7 @@ test('Undo of On leaves out again a tool that was left out before it, though On�
   } finally { await box.cleanup(); }
 });
 
-test('Choices are undone newest first: the older one’s Undo is refused while the newer stands, and goes through once that is undone', async () => {
+test('Two choices that replaced copies in different tools are undone in either order: the older one first leaves the newer its Undo', async () => {
   const box = await sandbox();
   try {
     // Not synced, each tool with its own copy; two choices in a row.
@@ -611,16 +613,81 @@ test('Choices are undone newest first: the older one’s Undo is refused while t
     await write(box, 'codex-cli', codexOwn('You review code.\nBe brief.'));
     const start = await filesOf(box);
     await choose(box, 'claude-cli');
-    await write(box, 'codex-cli', codexOwn('Edited in Codex since.'));
+    const edited = codexOwn('Edited in Codex since.');
+    await write(box, 'codex-cli', edited);
     await choose(box, 'copilot-cli');
     const [older, newer] = (await historyOf(box)).filter(event => event.kind === 'chosen');
-    // The first replaced Copilot CLI's copy, the second Codex's: other tools, and still only the newer has its Undo.
-    assert.deepEqual(await offered(box), ['Undo choice in Codex (chosen)']);
-    assert.match((await restoreAgent(box.context, tools, older.id)).stopped ?? '', /chosen since, so that no longer applies/);
-    assert.equal((await restoreAgent(box.context, tools, newer.id)).stopped, undefined);
-    assert.deepEqual(await offered(box), ['Undo choice in Copilot CLI (chosen)']);
+    // The first replaced Copilot CLI's copy, the second Codex's: neither reached the other's tool.
+    assert.deepEqual(await offered(box), ['Undo choice in Copilot CLI (chosen)', 'Undo choice in Codex (chosen)']);
     assert.equal((await restoreAgent(box.context, tools, older.id)).stopped, undefined);
-    assert.deepEqual([(await filesOf(box))['copilot-cli'], (await recordOf(box))?.state, (await pass(box)).writes], [start['copilot-cli'], 'dont-share', 0]);
+    assert.deepEqual([await readOf(box, 'copilot-cli'), (await recordOf(box))?.state, await offered(box)], [start['copilot-cli'], 'dont-share', ['Undo choice in Codex (chosen)']]);
+    assert.equal((await restoreAgent(box.context, tools, newer.id)).stopped, undefined);
+    assert.deepEqual([await filesOf(box), (await recordOf(box))?.state, (await pass(box)).writes, await offered(box)], [{ ...start, 'codex-cli': edited }, 'dont-share', 0, []]);
+  } finally { await box.cleanup(); }
+});
+
+test('A copy choice keeps its Undo for a tool nothing changed since, whatever was clicked in other tools: the copy it replaced there still comes back', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    // Codex gets a copy of its own (off, made by hand, on), and the first choice replaces it.
+    const own = codexOwn('Made by hand in Codex.');
+    await toolOff(box, 'codex-cli'); await write(box, 'codex-cli', own); await toolOn(box, 'codex-cli');
+    await choose(box, 'claude-cli');
+    // Then in Claude Code alone: off, a copy by hand, on, and a second choice replaces that; off, by hand and on once more.
+    await toolOff(box, 'claude-cli'); await write(box, 'claude-cli', claudeAgent('First by hand.\n')); await toolOn(box, 'claude-cli');
+    await choose(box, 'copilot-cli');
+    const second = claudeAgent('Second by hand.\n');
+    await toolOff(box, 'claude-cli'); await write(box, 'claude-cli', second); await toolOn(box, 'claude-cli');
+    // The second choice's Undo ended in Claude Code, its one tool. The first's stands in Codex, which nothing reached since.
+    assert.deepEqual((await offered(box)).filter(label => label.includes('choice')), ['Undo choice in Codex (chosen)']);
+    const untouched = await readOf(box, 'copilot-cli');
+    await (await historyActions(box)).find(action => action.label === 'Undo choice in Codex')!.run();
+    // Codex has its own copy back. Claude Code's copy made by hand stays off the record: no pass takes it up as the synced copy.
+    assert.deepEqual([await filesOf(box), (await pass(box)).writes], [{ 'claude-cli': second, 'copilot-cli': untouched, 'codex-cli': own }, 0]);
+    // The next click: a choice of copy settles all three.
+    await choose(box, 'copilot-cli');
+    const now = await filesOf(box);
+    assert.deepEqual([agentHashes(now).size, (await pass(box)).writes], [1, 0]);
+  } finally { await box.cleanup(); }
+});
+
+test('A choice’s Undo in one tool leaves a tool that a later On left its own copy as it is: off the record, never read as an edit that spreads', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    // An edit made in Codex that no pass has seen; the choice replaces it.
+    const edit = codexOwn('Edited in Codex, not synced yet.');
+    await write(box, 'codex-cli', edit);
+    await choose(box, 'claude-cli');
+    // Later, in Claude Code alone: off, a copy made by hand, on. That copy is Claude Code's own, waiting for a choice.
+    const own = claudeAgent('Made by hand in Claude Code.\n');
+    await toolOff(box, 'claude-cli'); await write(box, 'claude-cli', own); await toolOn(box, 'claude-cli');
+    const untouched = await readOf(box, 'copilot-cli');
+    await (await historyActions(box)).find(action => action.label === 'Undo choice in Codex')!.run();
+    // Codex's edit is back and waits as before the choice; Claude Code's own copy is not on record, so the pass asks and writes nothing.
+    const next = await pass(box);
+    assert.deepEqual([await filesOf(box), next.writes, next.results.map(entry => entry.message), (await recordOf(box))?.copies.map(copy => copy.tool).sort()],
+      [{ 'claude-cli': own, 'copilot-cli': untouched, 'codex-cli': edit }, 0, ['Copies differ. Choose which copy to use.'], ['codex-cli', 'copilot-cli']]);
+  } finally { await box.cleanup(); }
+});
+
+test('A choice that replaced two tools’ copies is undone in the one nothing changed since: its own copy comes back, and the other keeps the copy made there later', async () => {
+  const box = await sandbox();
+  try {
+    const copilotOwn = claudeAgent('Copilot’s own before the choice.\n'), made = codexOwn('Made in Codex later.');
+    await write(box, 'claude-cli', claudeAgent());
+    await write(box, 'copilot-cli', copilotOwn);
+    await write(box, 'codex-cli', codexOwn('Codex’s own before the choice.'));
+    await choose(box, 'claude-cli');
+    await toolOff(box, 'codex-cli'); await write(box, 'codex-cli', made); await toolOn(box, 'codex-cli');
+    // Codex keeps a copy made since, so the choice's Undo ended there; nothing touched Copilot CLI.
+    assert.deepEqual((await offered(box)).filter(label => label.includes('choice')), ['Undo choice in Copilot CLI (chosen)']);
+    await (await historyActions(box)).find(action => action.label === 'Undo choice in Copilot CLI')!.run();
+    // As before the choice in Copilot CLI: its own copy, and the agent not synced. Codex keeps what it has, and no pass writes.
+    assert.deepEqual([await readOf(box, 'copilot-cli'), await readOf(box, 'codex-cli'), (await recordOf(box))?.state, (await pass(box)).writes], [copilotOwn, made, 'dont-share', 0]);
+    // The choice's row says what ended the rest of it; the next click, On, asks which copy every tool uses.
+    assert.deepEqual([(await offered(box)).filter(label => label.includes('choice')), (await turnOn(box))?.choose], [[], true]);
   } finally { await box.cleanup(); }
 });
 
@@ -830,12 +897,12 @@ test('Undo of Use the kept copy needs only its own entry: it still goes through 
     await turnOff(box);
     await write(box, 'codex-cli', codexOwn('Made by hand while it was off.'));
     const hand = await readOf(box, 'codex-cli');
-    await toolOn(box, 'codex-cli');
-    await age(box, 91);
+    await turnOn(box);
+    await age(box, 29);
     await (await historyActions(box)).find(action => action.label === 'Use the kept copy in Codex')!.run();
-    // The rest is turned on: nothing keeps the old entries any longer, and they go.
-    await (await historyActions(box)).find(action => action.label === 'Turn on in Claude Code and Copilot CLI')!.run();
-    assert.deepEqual((await historyOf(box)).map(event => event.kind), ['chosen', 'restored']);
+    // History's days pass for the Off and for the On that offered the kept copy; the use of it is newer, and stays.
+    await age(box, 2);
+    assert.deepEqual((await historyOf(box)).map(event => event.kind), ['chosen']);
     assert.equal((await (await historyActions(box)).find(action => action.label === 'Undo in Codex')!.run()).stopped, undefined);
     assert.equal(await readOf(box, 'codex-cli'), hand);
   } finally { await box.cleanup(); }
@@ -896,6 +963,79 @@ test('The row’s On also turns on an older Off left waiting for a tool: no copy
     await (await historyActions(box)).find(action => action.label === 'Use the kept copy in Codex')!.run();
     assert.equal(await readOf(box, 'codex-cli'), first);
   } finally { await box.cleanup(); }
+});
+
+test('Restore of a Delete everywhere made on an Off row is refused while a tool holds another agent of that name, made since: the Off it brings back never mixes the two', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    const before = await filesOf(box);
+    await turnOff(box);
+    await deleteEverywhere(box);
+    const made = codexOwn('Another reviewer, made after the deletion.');
+    await write(box, 'codex-cli', made);
+    await pass(box);
+    const restore = (await historyActions(box)).find(action => action.label === 'Restore')!;
+    assert.equal((await restore.run()).stopped, 'A different “reviewer” agent is in Codex now. Remove or rename it, then restore.');
+    // Nothing changed: the new agent is Codex's own, no Off row came back, and the pass writes nothing.
+    assert.deepEqual([await filesOf(box), await heldIn(box), (await pass(box)).writes], [{ 'claude-cli': undefined, 'copilot-cli': undefined, 'codex-cli': made }, [], 0]);
+    // The next click: with the new one out of the way, Restore brings the Off row back, and On each copy.
+    await rm(join(box.home, files['codex-cli']));
+    assert.equal((await restore.run()).stopped, undefined);
+    await turnOn(box);
+    assert.deepEqual([await filesOf(box), (await pass(box)).writes], [before, 0]);
+  } finally { await box.cleanup(); }
+});
+
+test('Turn off again on an On that made the agent synced leaves it not synced with no copy on record: a later edit in a tool that stayed on asks, and never spreads', async () => {
+  const box = await sandbox();
+  try {
+    await synced(box);
+    const original = (await readOf(box, 'claude-cli'))!;
+    await turnOff(box);
+    // Claude Code gets the same agent again by hand, turned on there as its own; the row's On then puts the other two back.
+    await write(box, 'claude-cli', original);
+    await toolOn(box, 'claude-cli');
+    await turnOn(box);
+    assert.deepEqual([(await recordOf(box))?.state, (await pass(box)).writes, (await recordOf(box))?.copies.length], ['shared', 0, 3]);
+    await (await historyActions(box)).find(action => action.label === 'Turn off again in Copilot CLI and Codex')!.run();
+    assert.deepEqual([(await recordOf(box))?.state, (await recordOf(box))?.copies, await heldIn(box)], ['dont-share', [], ['codex-cli', 'copilot-cli']]);
+    // The next click: an edit by hand in Claude Code, then On. Its copy was never the synced one again, so the pass asks.
+    const edited = original.replace('Be brief.', 'Edited while the others were off.');
+    await write(box, 'claude-cli', edited);
+    await turnOn(box);
+    const next = await pass(box);
+    assert.deepEqual([next.writes, next.results.map(entry => entry.message), await readOf(box, 'claude-cli'), /Be brief\./.test((await readOf(box, 'copilot-cli'))!)], [0, ['Copies differ. Choose which copy to use.'], edited, true]);
+  } finally { await box.cleanup(); }
+});
+
+test('A kept copy still on offer doesn’t go at the click that finishes its Off after History’s days: the Off’s rows stay for History’s days from that click', { skip: asRoot }, async () => {
+  const box = await sandbox();
+  const context = { ...box.context, historyDays: 7 as const };
+  try {
+    await synced(box);
+    const kept = await readOf(box, 'codex-cli');
+    await turnOff(box);
+    await write(box, 'codex-cli', codexOwn('Made by hand while it was off.'));
+    // On goes part-way (Copilot CLI's folder can't be written): the Off stays open, and the On's row offers Codex's kept copy.
+    await chmod(dirname(join(box.home, files['copilot-cli'])), 0o555);
+    await turnOn(box, context);
+    await chmod(dirname(join(box.home, files['copilot-cli'])), 0o755);
+    await age(box, 31);
+    await prune(context);
+    const labels = async () => (await historyActions(box, context)).map(action => action.label);
+    assert.ok((await labels()).includes('Use the kept copy in Codex'));
+    // The click that finishes the Off, long after History's days.
+    await turnOn(box, context);
+    await prune(context);
+    assert.deepEqual([await heldIn(box), (await labels()).includes('Use the kept copy in Codex')], [[], true]);
+    await (await historyActions(box, context)).find(action => action.label === 'Use the kept copy in Codex')!.run();
+    assert.equal(await readOf(box, 'codex-cli'), kept);
+    // History's days after that click, the Off and its rows go.
+    await age(box, 8);
+    await prune(context);
+    assert.deepEqual((await historyOf(box, context)).filter(event => event.turnedOff || event.putBackFrom), []);
+  } finally { await chmod(dirname(join(box.home, files['copilot-cli'])), 0o755).catch(() => undefined); await box.cleanup(); }
 });
 
 // A one-way agent (Claude Code's, with fields of its own) that is off, once Claude Code is no longer a tool Central Knot manages
