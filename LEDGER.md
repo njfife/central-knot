@@ -1201,6 +1201,13 @@ This is the first step of that change: the model, and agents moved onto it end t
 - Pictures: `node scripts/ui-tour.mjs <out> --electron --only agents` takes 74, every new state at the four sizes; each was looked at.
 - The Mac run is named in the pull request.
 
+**Fix round 1 (November 12; four reviews: two of the code, two of the page).** What changed is said in place above. Its checks:
+- `npm test`: 714 tests, about 29 s; the suite's own walk about 13 s.
+- The walk on three fresh ranges (`CK_SEED` 110000, 120000 and 130000, each as two halves of 150 seeds: 1,848 walks with the suite's own), clean. It now also checks that every click makes a History entry (a crashed one too) and that its Undo puts every file back where every copy was the agent's, each tool's own part after every step, a second agent nothing is done to, and steps with a settle window of 2 s on a clock of their own (a copy deleted by hand; a folder away across three passes). What it found on the way was its own model (what a background pass sees; a copy On adopts), fixed in the walk.
+- Each rule this round added or that no test held before, switched off, 51 in all: 43 failed a named test at once; the 8 that survived (a losing edit removed where the agent isn't wanted, a locked folder with no copy, a write keeping what it wrote, Pull's Claude Code settings for an Off agent, a clock that went back, a removal in the repo deleting an Off agent, a record without `own`, what a version changed) each got a test that fails without it.
+- End to end (`scripts/e2e.mjs`, the dev build on Linux): 693 passed, 0 failed. It reads the new words: the Found line, each version's note, Read's marks and upright prompt, the made-current line, the whole description, Delete's line and its armed note with History's days, kept out on the closed row.
+- Pictures: the agents tour takes 105, the new states included (hover and keyboard focus, a found row opened, a long name and a 40-line prompt read, three differing copies, Off while kept out and then On, Make current while kept out and while Off, many versions, many agents, the copy question and the armed Delete in the light theme); each was looked at.
+
 **Not done, or open.**
 - Skills and MCP servers are not on the library yet; profiles, first setup, "synchronize everything" (a found item taken in by itself) and plugins as references are later steps.
 - `docs/SPEC.md` keeps its earlier rules for agents; each row that states them (the shared item, CON-01, DEL-02, TRN-02, AGT-01, D-26, D-32) now carries a dated pointer to `src/library.ts`.
