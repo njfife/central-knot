@@ -170,6 +170,25 @@ inBox('An Off agent is in no tool, also after a tool comes back: turned off whil
   }
 });
 
+inBox('A tool managed again, with a click’s pass on another agent first: the agents that pass left alone are written there afresh, never read as deleted by hand', async box => {
+  // helper and reviewer, On in all three tools.
+  await writeFile(join(box.home, '.claude/agents/helper.md'), claudeAgent('You help.\n').replace('name: reviewer', 'name: helper'));
+  await applyAgents(box.context, tools, [{ key: 'helper', managed: true, off: [] }]);
+  await on(box);
+  for (const leftOut of [false, true]) {
+    const without: HarnessId[] = ['claude-cli', 'copilot-cli'];
+    if (leftOut) await chooseTools(box.context, without); else await applyAgents(box.context, without, []);
+    // reviewer's Codex copy goes while Codex is out.
+    await rm(fileOf(box, 'codex-cli'));
+    if (leftOut) await chooseTools(box.context, tools);
+    // Codex is back. With Automatic sync off, a click on helper runs a pass about helper alone; then the next full pass.
+    await applyAgents(box.context, tools, [{ key: 'helper', managed: true, off: ['copilot-cli'] }], { only: new Set(['helper']) });
+    const done = await pass(box);
+    assert.deepEqual([done.notices, (await itemOf(box))!.on, !!(await readOf(box, 'codex-cli'))], [[], true, true], leftOut ? 'left out' : 'uninstalled');
+    await applyAgents(box.context, tools, [{ key: 'helper', managed: true, off: [] }]);
+  }
+});
+
 inBox('Off clicked while a tool’s agents folder has been gone past the settle window: its copy goes when the folder comes back', async box => {
   await on(box);
   await rename(join(box.home, '.codex/agents'), join(box.home, '.codex/agents-away'));
@@ -659,6 +678,28 @@ inBox('A removal Central Knot carried out is on record at once: after a crash, T
   await (await historyActions(box)).find(action => action.label === 'Restore')!.run();
   await applyAgents(waiting, tools, [], { now: Date.now() + 5000 });
   assert.deepEqual([await filesOf(box), (await itemOf(box))!.on], [before, true]);
+});
+
+inBox('A deleted agent can always be restored: a Delete whose pass saved another agent’s edit first, then crashed, gets its History entry at the next pass', async box => {
+  // "helper" comes first in the record, with an edit in Copilot CLI that no pass has taken in yet.
+  const helper = (prompt: string) => claudeAgent(prompt).replace('name: reviewer', 'name: helper');
+  await writeFile(join(box.home, '.claude/agents/helper.md'), helper('You help.\n'));
+  await applyAgents(box.context, tools, [{ key: 'helper', managed: true, off: [] }]);
+  await on(box, claudeAgent(undefined, claudeOwn));
+  const before = await filesOf(box);
+  await writeFile(join(box.home, '.copilot/agents/helper.agent.md'), (await readFile(join(box.home, '.copilot/agents/helper.agent.md'), 'utf8')).replace('You help.', 'You help a lot.'));
+  // Delete reviewer: the click's pass carries out helper's edit first, which saves the record (reviewer deleted with it), and
+  // dies writing helper's edit, before reviewer's own entry is told.
+  await assert.rejects(deleteIt(box, crashAt(box, 'before-rename')), /crash at before-rename/);
+  assert.deepEqual((await historyOf(box)).map(event => event.kind), ['on'], 'the crash left no deletion entry');
+  // The next pass finds the deleted agent with no deletion entry, and writes one: Restore is offered and puts every file back.
+  await pass(box);
+  assert.deepEqual((await historyActions(box)).map(action => `${action.event.kind}: ${action.label}`), ['deleted: Restore']);
+  await (await historyActions(box)).find(action => action.label === 'Restore')!.run();
+  assert.deepEqual(await filesOf(box), before);
+  // Once it is told, nothing is written twice.
+  await pass(box);
+  assert.equal((await historyOf(box)).filter(event => event.kind === 'deleted').length, 1);
 });
 
 // ---------- The record, and the things around it ----------

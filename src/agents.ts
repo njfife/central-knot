@@ -5,6 +5,7 @@
 // so a save that lands meanwhile is never lost. In the order a pass runs (applyAgents):
 //
 //   lookAt         each managed harness's agent files (readDisk; a file that can't be read for sure is unseen, never missing)
+//   deletionsTold  a deleted agent that History has no standing entry for gets one, so it always has its Restore
 //   pull, click    what Pull brings, and what the person asked (On, Off, a harness kept out, a version made current, Delete,
 //                  Restore, a found agent taken in), recorded on the item
 //   guardFolders   on the items as the clicks left them: a harness managed again, a folder moved, made again or gone
@@ -24,7 +25,7 @@ import { agentShelf, fileTextFor, keepOwn, openLibrary, readVersion, saveLibrary
 import { agentAction } from './historyactions.ts';
 import { carryOut, keepVersion, listed, newItem, plan, setCurrent, wantedIn } from './library.ts';
 import type { Copies, HarnessCopy, LibraryItem, Plan, Shelf, Source, Version } from './library.ts';
-import { appendHistory, readHistory, replaceHistory } from './manage.ts';
+import { appendHistory, historyCutoff, readHistory, replaceHistory } from './manage.ts';
 import { throughPlugins } from './plugins.ts';
 import type { AgentTool } from './presence.ts';
 import { errorCode, exists, newRecord, sha256, readRecord, recoverParked, remember, removeFileChecked, saveRecord, syncGate, writeAccess, writeFileChecked } from './share.ts';
@@ -123,13 +124,15 @@ async function lookAt(context: ShareContext, managed: AgentTool[], library: Agen
 }
 
 /**
- * "H unknown is never H gone" for a whole folder, run on `items` as a pass's clicks left them. A harness Central Knot manages
- * again (uninstalled or left out by the tool choice, so its folder's identity was let go: keepFolders), whose agents folder is
- * somewhere else than at the last full pass (its config root moved), was made again since (a reset or reinstall, or back
- * after being away), or is gone for longer than the settle window: what was applied there is forgotten, so the agent is
- * written there afresh and never read as deleted by hand. An agent not wanted there keeps it: a copy Central Knot put there
- * is still its own to remove. A folder that is gone is unseen inside the settle window, and afterwards for an agent whose
- * removal it still owes, which waits for the folder.
+ * "H unknown is never H gone" for a whole folder, run on `items` as a pass's clicks left them. When a tool comes back (managed
+ * again after it was uninstalled or left out by the tool choice, so its folder's identity was let go: keepFolders), what was
+ * applied there is forgotten for every agent in the library wanted there, whichever pass sees it first: each is written there
+ * afresh, and a copy that went while the tool was out is never read as deleted by hand. An agent not wanted there keeps it:
+ * a copy Central Knot put there is still its own to remove. A folder somewhere else than at the last full pass (its config
+ * root moved), made again since (a reset or reinstall, or back after being away), or gone for longer than the settle window
+ * has what was applied there forgotten for the pass's items (a click's pass leaves the identity for the next full pass). A
+ * folder that is gone is unseen inside the settle window, and afterwards for an agent whose removal it still owes, which
+ * waits for the folder.
  */
 async function guardFolders(look: Look, items: LibraryItem[]) {
   for (const tool of look.managed) {
@@ -150,7 +153,8 @@ async function guardFolders(look: Look, items: LibraryItem[]) {
       continue;
     }
     seenAgain(look, path);
-    if (!was) { forget(items.filter(item => wantedIn(item, tool))); continue; }
+    // Every agent, not only the pass's own: a click's pass notes the folder (keepFolders), so the next pass can't tell.
+    if (!was) { forget(Object.values(look.library.items).filter(item => wantedIn(item, tool))); continue; }
     const moved = was.path !== path;
     if (moved) forget(items);
     else if ('away' in was || was.ino !== here.ino || was.birth !== here.birth) forget(items.filter(item => !look.disk.byKey.get(item.key)?.[tool]));
@@ -249,6 +253,7 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
   const pass: Pass = {
     ...look, shelf: agentShelf(context, () => saveIfChanged(pass)), saved, asked: new Map(), results: [], notices: [], writes: 0, made: [],
   };
+  await deletionsTold(pass);
   for (const [key, brought] of options.pulled ?? []) await pull(pass, key, brought);
   for (const change of changes) await click(pass, change);
   const items = Object.values(library.items).filter(item => inScope(item.key));
@@ -261,8 +266,9 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
 
 /**
  * The folder identities a pass leaves on the record (guardFolders reads them): those of harnesses no longer managed are let
- * go, so one managed again is told apart; one seen for the first time is noted; and a full pass moves every identity on. A
- * click's pass with Sync off moves none on: the agents it leaves alone must still see a reset at the next full pass.
+ * go, so one managed again is told apart; one seen for the first time (a tool back: guardFolders has just let go what was
+ * applied there for every agent wanted there) is noted by any pass; and a full pass moves every identity on. A click's pass with Sync off moves no
+ * known one on: the agents it leaves alone must still see a reset at the next full pass.
  */
 function keepFolders(library: AgentLibrary, now: AgentLibrary['folders'], managed: readonly HarnessId[], full: boolean) {
   const still = Object.fromEntries(Object.entries(library.folders).filter(([tool]) => managed.includes(tool as HarnessId)));
@@ -355,6 +361,22 @@ async function removeCopy(pass: Pass, item: LibraryItem, here: AgentEntry): Prom
   pass.writes++;
   pass.results.push({ item: item.name, harness: here.tool, outcome: 'removed', message: 'Removed. Central Knot keeps it.' });
   return true;
+}
+
+/**
+ * A deleted agent always has its Restore. carryOut tells History first for its own item, but a pass saves the whole record,
+ * so another agent's save in the same pass can carry a Delete to disk before that Delete's entry is told; a crash then would
+ * leave the agent with no row and no Restore. So each pass, before any click, gives every agent deleted within History's
+ * days that has no standing `deleted` entry (one not undone) that entry, dated when it was deleted.
+ */
+async function deletionsTold(pass: Pass) {
+  const cutoff = historyCutoff(pass.context);
+  const recent = Object.values(pass.library.items).filter(item => item.deleted && Date.parse(item.deleted.at) >= cutoff);
+  if (!recent.length) return;
+  const told = new Set((await readHistory(pass.context)).filter(event => event.kind === 'deleted' && !event.undoneBy).map(event => event.key));
+  const untold = recent.filter(item => !told.has(`agent:${item.key}`));
+  await appendHistory(pass.context, untold.map(item => ({
+    id: randomUUID(), at: item.deleted!.at, key: `agent:${item.key}`, item: item.name, kind: 'deleted', losers: [], orderProved: true })));
 }
 
 /**

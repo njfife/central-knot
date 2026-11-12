@@ -290,7 +290,7 @@ export async function appendHistory(context: ShareContext, events: HistoryEvent[
 const standingDeletion = (item: RecordItem) => (item.state !== 'shared' ? item.deleted : undefined);
 
 /** The oldest moment History keeps (STO-04): the days chosen in Settings back from now. */
-const historyCutoff = (context: ShareContext) => clock(context) - (context.historyDays ?? defaultHistoryDays) * DAY_MS;
+export const historyCutoff = (context: ShareContext) => clock(context) - (context.historyDays ?? defaultHistoryDays) * DAY_MS;
 
 /**
  * History, newest last, without events older than the window. The day window is the only retention rule (there is no event

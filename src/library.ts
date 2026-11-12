@@ -293,6 +293,9 @@ export interface Hands<Content> extends Shelf<Content> {
 
 /**
  * Carries out one item's plan in the model's order; every kind's adapter calls this, and none orders these steps itself.
+ * The order holds for this item: a pass that carries out several saves the whole record each time (Shelf.save), so another
+ * item's save can carry this one's click to disk before this item's History is told. The adapter's pass covers what that
+ * leaves (agents.ts deletionsTold: a deleted item with no entry gets one).
  * - History first: an entry whose change never lands offers nothing (every action is worked out from the item as it is),
  *   while a change on record with no entry could leave a deleted item with no Restore.
  * - Version second: each content about to give way is kept, the edit taken in is made current, the item turns Off where a
