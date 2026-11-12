@@ -10,7 +10,7 @@ Read this first. Each area says what it is for, its files (one entry each: what 
 
 ## The library, and agents on it
 An item Central Knot holds with its versions, On or Off, applied to every managed tool it is not kept out of.
-- `library.ts` the model and its one rule, pure · `librarypass.ts` the pass on real files, the same for every kind; `Kind`, what a kind implements
+- `library.ts` the model and its one rule, pure; `carryOut`, the order one item's plan is carried out in · `librarypass.ts` the pass on real files, the same for every kind; `Kind`, what a kind implements
 - `agents.ts` agents' `Kind` (`agentKind`), their clicks (`applyAgents`) and page view (`agentsView`) · `agentfiles.ts` each tool's agent file, read and written
 - `agentstore.ts` where agents are kept in `.central-knot/` · `agentmigrate.ts` the record from before the library, made items once · `agentskill.ts` Convert to a Pi skill (a copy, not sync)
 - `libraryrow.ts` a library item's row without the DOM: marks, clicks, sentences in the kind's words · `librarypages.ts` what else a kind gives its page · `versionlist.ts` an opened row's versions
@@ -20,7 +20,7 @@ An item Central Knot holds with its versions, On or Off, applied to every manage
 The two kinds not on the library yet: each tool's own files are the truth; Central Knot records what it syncs, spreads edits and deletions, and keeps what it replaces.
 - `manage.ts` skills: what each tool has (`manageView`), a click and a pass (`applyChanges`), Restore, Delete everywhere; and History's file, for every kind (`appendHistory`)
 - `skillswitch.ts` a skill off in one tool, by that tool's own switch · `outsidewords.ts` words for a skill's links and shared copy · `choiceundo.ts` a copy choice's Undo, both engines
-- `mcp.ts` MCP servers: each tool's entries in one shape (`NeutralServer`), sync (`applyMcp`), Restore, Write to Claude Code · `mcpswitch.ts` a server off in one tool, by its own switch
+- `mcp.ts` MCP servers: each tool's entries in one shape (`NeutralServer`, read from a tool's file by `fromJson`; a tool's own fields ride along as extras), sync (`applyMcp`), Restore, Write to Claude Code · `mcpswitch.ts` a server off in one tool, by its own switch
 - **Start:** `manage.ts applyChanges`, `mcp.ts applyMcp`. **Examples:** `tests/manage.test.ts`, `tests/twoway-recovery.test.ts`, `tests/sharedcopies.test.ts`, `tests/skillswitch.test.ts`, `tests/mcp.test.ts`, `tests/opencode.test.ts`; the `tests/*-check-*.test.ts` files are regressions from earlier review rounds.
 
 ## The tools in a home
@@ -114,10 +114,11 @@ How each is run: `AGENTS.md` ("Checking a change") and README ("For developers")
 - **A kind:** `app.ts PageKind` is a page's name for it (agents), `library.ts ItemKind` the library's (agent), `profileplan.ts ItemKind` a profile's (skill or mcp), `presence.ts HomeKind` every kind with a page of its own (instructions and plugins too); `librarypass.ts Kind` is what a kind implements.
 - **A switch:** `skillswitch.ts` and `mcpswitch.ts` are a tool's own off-switch for a skill or a server; `partswitch.ts` the same for one part of a plugin; `pluginswitch.ts` the item pages' switch for an item a plugin brings; `plugins.ts setSkill` one skill of a plugin.
 - **History:** stored for every kind by `manage.ts` (a skills module); worded by `historypage.ts`, except agents' entries, which `historyactions.ts` words.
-- **One name, two things:** `Outcome` (`app.ts Outcome` a result the page tells; `types.ts Outcome` a plugin component in a tool), `standing`, `toggle`, `updateButton`, `Waiting`, `CHECK_EVERY_MS`, `PassOptions`, `pluginTools`: read each with its file. `model.ts fileName` and `words.ts fileName` are one function written twice.
+- **One name, two things:** `Outcome` (`app.ts Outcome` a result the page tells; `types.ts Outcome` a plugin component in a tool), `standing`, `toggle`, `updateButton`, `Waiting`, `CHECK_EVERY_MS` (`updateflow.ts`: the app's own updates; `pluginupdates.ts`: plugins'), `PassOptions`, `pluginTools`: read each with its file. `model.ts fileName` and `words.ts fileName` are one function written twice.
 
 ## To add or change
 - **A kind of item onto the library:** every place it is wired in is the recipe in `librarypass.ts`'s header.
+- **A tool:** its definition in `harnesses.ts`, its id in `types.ts HarnessId`, its name in `words.ts toolNames`, and each kind's reader and writer for it (`agentfiles.ts`, `mcp.ts`, `skillswitch.ts`, `discovery.ts`).
 - **A field on a click (`types.ts Change`):** `main.ts changes` must copy it too, or the packaged app drops it while the unit tests pass.
 - **A History entry or action:** for agents, the recipe at the end of `historyactions.ts`'s header; for the other kinds, a case in `historypage.ts describe`.
 - **A call from the page to main:** `types.ts DesktopApi`, `preload.ts`, and its handler in `main.ts`.
