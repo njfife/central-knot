@@ -1219,8 +1219,8 @@ This is the first step of that change: the model, and agents moved onto it end t
 **Last pass (November 12; three reviews of round 3).** What changed is said in place above. Besides:
 - *A tool managed again* (both code reviews: a tool left out or uninstalled, a copy there gone meanwhile, the tool back, a click on another agent first, then a full pass turned that agent Off everywhere). `guardFolders` now lets go what was applied there for every agent in the library wanted there, not only the pass's own, since a click's pass notes the folder and the next pass can't tell. A worked example covers both ways a tool leaves.
 - *A tool whose folder can't be written*: an edit's entry and notice name only the tools it reaches, so they no longer say "in Copilot CLI and Codex too" or "Undo edit in all 3 tools" above Codex's line. That line no longer offers to keep the agent out of Codex (that would need a write there too; the row has no switch).
-- History at 860: a name takes the line it is on, and an agent entry's links sit side by side; they read "Use Claude Code's copy".
-- Checks: LAST-CHECKS
+- History at 860: a name takes the line it is on, and an agent entry's links sit side by side; they read "Use Claude Code's copy". At wider sizes an entry with copies to choose from has those links on a line of their own under its sentence, so the longer labels never widen the actions column every row shares (which wrapped every sentence at 1280); a name's room there starts at 150px.
+- Checks: `npm test`, 727 tests. End to end (`scripts/e2e.mjs`, the dev build on Linux): 696 passed, 0 failed. Pictures of the changed states only: `tour-l1-r4/agents/` (History at 860 to 2560, a folder that can't be written, Restore over a newer agent, Make current's result, Undo while kept out), each looked at.
 
 **Not this round** (for the start of the skills step, which lifts the pass out of `agents.ts`):
 - Lifting `logItem` and the clicks (`click`, `turn`, `takeIn`, `makeCurrent`) out of `agents.ts` the way `carryOut` was, with the pass skeleton and the guards.

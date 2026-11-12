@@ -220,7 +220,7 @@ export function historyPage() {
       h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event)), h('strong', { title: event.item }, event.item)),
       h('span.history-about', {}, about.text),
       event.undoneBy ? h('span.history-actions', {}, h('span.history-done', {}, isAgentEntry(event) ? doneWords(event) : event.kind === 'removed' ? 'Restored' : 'Undone'))
-        : h(`span.history-actions${isAgentEntry(event) ? '.history-actions-stacked' : ''}`, {},
+        : h(`span.history-actions${isAgentEntry(event) && versionChoices(event, agentOf(event)).length ? '.history-actions-below' : ''}`, {},
           !event.base && (event.kind === 'edit' || event.kind === 'conflict') ? seeChangeLink(event.id, event.key, true) : null,
           isAgentEntry(event) ? agentButtons(event) : actions(event, about.action)),
       changePanel(event.id))];

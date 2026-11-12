@@ -952,24 +952,25 @@ span.ins-confirm { margin-top: 0; }
   .history-row { grid-template-columns: minmax(80px, max-content) minmax(0, 1fr) auto; column-gap: 16px; row-gap: 2px; }
   .history-about { grid-column: 2 / -1; grid-row: 2; margin-left: 22px; }
   .history-row > .change-panel { margin-top: 10px; }
-  /* The name takes the line it is on, and an agent entry's links sit side by side above the sentence. */
+  /* The name takes the line it is on, and an agent entry's copies to choose from sit beside it, above the sentence. */
   .history-row .history-what > strong { max-width: none; }
-  .history-row .history-actions-stacked { flex-direction: row; }
+  .history-row .history-actions-below { grid-column: auto; grid-row: auto; justify-content: flex-end; margin: 0; }
 }
 .history-row > .history-when { padding-top: 2px; }
 .history-when { font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .history-what { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
 .history-what > svg { flex: none; margin-top: 2px; }
-/* A name's room grows with the window (180px up to 1280, about 600px at 2560), so a long one is not cut beside an empty row. */
-.history-what > strong { flex: 0 1 auto; min-width: 0; max-width: max(180px, 40cqw - 300px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+/* A name's room grows with the window (150px up to 1280, about 600px at 2560), so a long one is not cut beside an empty row. */
+.history-what > strong { flex: 0 1 auto; min-width: 0; max-width: max(150px, 40cqw - 300px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .history-kind { flex: none; min-width: 6em; font-size: 11px; color: var(--ink-faint); }
 .history-done { font-size: 12px; color: var(--ink-faint); }
 .history-undone .history-what, .history-undone .history-about { color: var(--ink-faint); }
 .history-undone .history-what strong { color: var(--ink-soft); }
 .history-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 2px 12px; text-align: right; }
 .history-actions .btn.link { flex: 0 1 auto; min-width: 0; height: auto; padding: 0; white-space: normal; text-align: right; }
-/* An agent entry's links stand one under another, so the column is as wide as the widest one, not a row of them. */
-.history-actions-stacked { flex-direction: column; align-items: flex-end; }
+/* An agent entry with copies to choose from ("Use Claude Code’s copy") has its links on a line of their own under the
+   sentence, side by side: a cell spanning the sentence's flexible column never widens the actions column every row shares. */
+.history-actions-below { grid-column: 3 / -1; grid-row: 2; justify-content: flex-start; margin: -6px 0 0 -8px; }
 
 /* ---------- Plugins: marketplaces at the left, the chosen marketplace or plugin at the right ---------- */
 .plugins-page { --market-list-width: 236px; --market-gutter: 24px; }
