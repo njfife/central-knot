@@ -551,6 +551,13 @@ async function practiceFlow() {
     if (at) await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at[0], y: at[1] });
   };
   await pointerOver('.ov-row[data-key="notes"]');
+  // The strip's Undo of taking it in leaves every folder as it was before the click: the copies it made go, the tools it was
+  // found in keep theirs, and notes is found again. Then it is taken in again for the checks below.
+  const notesFound = folders('notes');
+  await a.click('#switch-notes');
+  await a.click('#outcome-undo');
+  same('Undo of taking a found skill in leaves every folder as before, and it is found again', [folders('notes'), await a.run(`document.querySelector('#switch-notes').getAttribute('aria-checked')`), /^Undone: notes is as before\./.test(await a.text('.band-done') ?? '')], [notesFound, 'mixed', true]);
+  await pointerOver('.ov-row[data-key="notes"]');
   await a.click('#switch-notes');
   same('turning a found skill on takes it in and writes it to every tool at once, byte for byte', [await switchOn(a, 'notes'), folders('notes')[2], folders('notes')[1]], [true, folders('notes')[0], folders('notes')[0]]);
   const statusBarShows = () => a.run(`(() => { const region = document.querySelector('#announcement'); return region.classList.contains('visually-hidden') ? '' : region.dataset.text; })()`);

@@ -347,6 +347,12 @@ export interface Change {
   version?: string;
   /** A library item: true deletes it from Central Knot (out of every harness; History can restore it); false restores a deleted one. */
   deleted?: boolean;
+  /**
+   * A library item, sent by an Undo (History's entry `tookFrom`): each harness whose own copy the undone click took over, and
+   * that copy's content (a version). Where the item no longer goes there after this click, that copy is given back as the
+   * harness's own instead of being removed.
+   */
+  giveBack?: Partial<Record<HarnessId, string>>;
 }
 
 export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch: the switches it flipped. */ flips?: ProfileFlip[]; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
@@ -453,6 +459,13 @@ export interface HistoryEvent {
     /** 'removed': a copy outside the tool's own folder (in ~/.agents/skills), put back at this path. */ path?: string;
     /** 'removed': the copy was a link with this text; Restore makes the link again. */ linkTo?: string;
     /** 'chosen', a skill's or an agent's: when the replaced copy was last edited (its file's time), which its Undo gives it again. */ editedAt?: string }[];
+  /**
+   * A library item's click: each harness whose own copy (one Central Knot had not put there) the click took over, by writing
+   * over it or by counting it as the item's because it was the same, with that copy's content. Its Undo gives each back.
+   */
+  tookFrom?: { tool: HarnessId; hash: string }[];
+  /** A library item's Undo: the harnesses whose own copy it gave back instead of removing it (the undone entry's `tookFrom`). */
+  gaveBack?: HarnessId[];
   /** The synced content before this event, to put back on Undo. */
   previous?: string;
   orderProved: boolean;

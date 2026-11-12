@@ -83,9 +83,12 @@ test('Competing edits and a choice among found copies offer each copy that gave 
   assert.deepEqual(libraryAction(conflict, item(), 'x')?.change, { ...asIs, version: 'x' });
   assert.deepEqual(versionChoices(conflict, item({ hash: 'x' })), [], 'that copy’s version is current now');
   assert.equal(libraryAction(conflict, item(), 'a'), undefined, 'only a copy the entry offers');
-  const chosen = entry({ kind: 'chosen', winner: { tool: 'codex-cli', hash: 'b' }, losers: [{ tool: 'copilot-cli', hash: 'x' }] });
+  const chosen = entry({ kind: 'chosen', winner: { tool: 'codex-cli', hash: 'b' }, losers: [{ tool: 'copilot-cli', hash: 'x' }], tookFrom: [{ tool: 'codex-cli', hash: 'b' }, { tool: 'copilot-cli', hash: 'x' }] });
   assert.equal(librarySentence(chosen, libraryWords.agents, tools)?.text, 'You chose Codex’s copy; Copilot CLI’s is kept as a version.');
-  assert.deepEqual([offered(chosen, item()), versionChoices(chosen, item())], [undefined, [{ tool: 'copilot-cli', hash: 'x' }]]);
+  assert.deepEqual(versionChoices(chosen, item()), [{ tool: 'copilot-cli', hash: 'x' }]);
+  // While the item is as the choice left it, its Undo takes it out again and gives each tool its own copy back.
+  assert.deepEqual(offered(chosen, item()), ['Undo', { ...asIs, deleted: true, giveBack: { 'codex-cli': 'b', 'copilot-cli': 'x' } }]);
+  assert.equal(offered(chosen, item({ hash: 'x' })), undefined, 'not once it has moved on');
 });
 
 test('A deletion offers Restore while the agent is deleted; every other entry of a deleted agent offers nothing', () => {

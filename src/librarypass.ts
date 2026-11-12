@@ -92,6 +92,12 @@ export interface Disk<Entry extends Seen> {
    */
   held(item: Wanted, harness: HarnessId): { why: string; anotherWay?: true } | undefined;
   /**
+   * Why a harness won't load the item's current version, where that holds whether or not it has a copy (a skill's shape a tool
+   * refuses): nothing of the item is written there, so a copy it has stays as it is and is `held`. A kind with no such reason
+   * leaves it out.
+   */
+  refuses?(item: Wanted, harness: HarnessId): string | undefined;
+  /**
    * Copies a harness has another way, read but never written or removed by Central Knot (a link in its folder, a copy in a
    * folder it doesn't own), by key, then harness: a found item can be taken in from one (foundCopies). A kind with none leaves
    * it out.
@@ -170,6 +176,8 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
 export interface ItemClick {
   key: string; on: boolean; except: HarnessId[]; seenOn?: boolean;
   use?: HarnessId | 'separate'; useHash?: string; version?: string; deleted?: boolean;
+  /** An Undo's: each harness whose own copy the undone click took over, given back there where the item no longer goes (types.ts Change). */
+  giveBack?: Partial<Record<HarnessId, string>>;
 }
 
 /**
@@ -178,8 +186,8 @@ export interface ItemClick {
  * (disable, enable, remove, everywhere, takeOver) are left behind.
  */
 export function itemClick(change: Change): ItemClick {
-  const { key, managed: on, off, seenManaged: seenOn, use, useHash, version, deleted } = change;
-  return { key, on, except: [...off], seenOn, use, useHash, version, deleted };
+  const { key, managed: on, off, seenManaged: seenOn, use, useHash, version, deleted, giveBack } = change;
+  return { key, on, except: [...off], seenOn, use, useHash, version, deleted, giveBack };
 }
 
 // ---------- What the harnesses hold ----------
@@ -303,6 +311,9 @@ function copyIn(look: AnyLook, item: LibraryItem, tool: HarnessId, here: Seen | 
   const wanted = wantedIn(item, tool), kindHeld = wanted ? look.disk.held(item, tool) : undefined;
   if (here) {
     seenAgain(look, path);
+    // A harness that won't load the current version keeps the copy it has: nothing is written over it.
+    const refused = wanted && !kindHeld?.anotherWay ? look.disk.refuses?.(item, tool) : undefined;
+    if (refused) return { is: 'held', why: refused };
     // A copy of its own where the harness has the item another way too: the table's last row (library.ts wantedHere).
     return { is: 'present', hash: here.hash, at: here.at, ...(kindHeld?.anotherWay ? { anotherWay: kindHeld.why } : {}) };
   }
@@ -362,6 +373,8 @@ interface Pass extends AnyLook {
   saved: string;
   /** What was asked of this pass for each item (a click, or Pull), as the History entry it becomes. */
   asked: Map<string, Asked>;
+  /** An Undo's copies to give back, by item (ItemClick giveBack). */
+  giveBack: Map<string, Partial<Record<HarnessId, string>>>;
   results: DestinationResult[]; notices: SyncNotice[]; writes: number; made: string[];
 }
 /** What may be asked of a pass besides its clicks. */
@@ -392,7 +405,7 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   const settle = { clock: options.now ?? Date.now(), ms: options.settleMs ?? context.settleMs ?? 2000, settling: false };
   const look: AnyLook = await lookAt(kind, context, managed, library, settle);
   const store = (item: LibraryItem, hash: string, content: unknown) => kind.store(context, item, hash, content as C);
-  const pass: Pass = { ...look, shelf: { store, save: () => saveIfChanged(pass) }, saved, asked: new Map(), results: [], notices: [], writes: 0, made: [] };
+  const pass: Pass = { ...look, shelf: { store, save: () => saveIfChanged(pass) }, saved, asked: new Map(), giveBack: new Map(), results: [], notices: [], writes: 0, made: [] };
   await deletionsTold(pass);
   for (const [key, brought] of options.pulled ?? []) await pull(pass, key, brought);
   for (const asked of clicks) await click(pass, asked);
@@ -452,7 +465,7 @@ async function refusal(context: ShareContext, asked: boolean, resume = false): P
 
 /** Brings one item into line with its harnesses: the library's plan, carried out in the library's order (carryOut). */
 async function syncItem(pass: Pass, item: LibraryItem) {
-  const { kind, context } = pass, slot = pass.disk.byKey.get(item.key) ?? {};
+  const { kind, context } = pass, slot = pass.disk.byKey.get(item.key) ?? {}, giveBack = pass.giveBack.get(item.key) ?? {};
   const copies = copiesOf(pass, item), made = plan(item, copies);
   await carryOut(item, made, {
     ...pass.shelf,
@@ -466,7 +479,8 @@ async function syncItem(pass: Pass, item: LibraryItem) {
     },
     log: () => appendHistory(context, logItem(pass, item, made, slot)),
     write: harness => writeCopy(pass, item, harness, slot[harness]),
-    remove: harness => removeCopy(pass, item, slot[harness]!),
+    // An Undo gives a harness back the copy its click took over, as that harness's own, instead of removing what is there.
+    remove: harness => (giveBack[harness] ? giveBackCopy(pass, item, slot[harness]!, giveBack[harness]!) : removeCopy(pass, item, slot[harness]!)),
   });
 }
 
@@ -494,6 +508,22 @@ async function removeCopy(pass: Pass, item: LibraryItem, here: Seen): Promise<bo
   }
   pass.writes++;
   pass.results.push({ item: item.name, harness: here.tool, outcome: 'removed', message: 'Removed. Central Knot keeps it.' });
+  return true;
+}
+
+/**
+ * Gives a harness back its own copy (`hash`, a version) over the one Central Knot applied there, which carryOut then no
+ * longer counts as applied: the harness's copy is its own again, as before the click this undoes. True when it is there.
+ */
+async function giveBackCopy(pass: Pass, item: LibraryItem, here: Seen, hash: string): Promise<boolean> {
+  const where = toolName(here.tool), result = (outcome: 'written' | 'held', message: string) => pass.results.push({ item: item.name, harness: here.tool, outcome, message });
+  if (here.hash === hash) { result('written', `${where} keeps its own copy, as before.`); return true; }
+  const content = await pass.kind.readVersion(pass.context, item.key, hash);
+  if (!content) { result('held', `${where}’s own copy is no longer in Central Knot’s store, so it can’t be given back.`); return false; }
+  const refused = await pass.kind.write(pass.context, item, here.tool, here, content);
+  if (refused) { result('held', refused.stopped); return false; }
+  pass.writes++;
+  result('written', `${where} has its own copy back, as before.`);
   return true;
 }
 
@@ -528,7 +558,11 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
   const key = `${pass.kind.historyPrefix}${item.key}`, events: HistoryEvent[] = [];
   // What the plan will change: not in a harness whose folder can't be written, so no entry or notice claims it.
   const can = (tools: HarnessId[]) => tools.filter(tool => !pass.disk.locked.has(tool));
-  const did = { written: can(made.write), removed: can(made.remove) };
+  // An Undo gives a harness its own copy back instead of removing what is there (syncItem): not a removal.
+  const giveBack = pass.giveBack.get(item.key) ?? {}, gaveBack = made.remove.filter(tool => giveBack[tool]);
+  const did = { written: can(made.write), removed: can(made.remove.filter(tool => !giveBack[tool])) };
+  // The copies a click takes over: each one Central Knot had not put there, which it writes over or counts as the item's.
+  const tookFrom = [...made.current, ...made.write].filter(tool => slot[tool] && item.applied[tool] === undefined).map(tool => ({ tool, hash: slot[tool]!.hash }));
   const log = (fields: Omit<HistoryEvent, 'id' | 'at' | 'key' | 'item' | 'orderProved'>) => {
     const event: HistoryEvent = { id: randomUUID(), at: now(), key, item: item.name, orderProved: true, ...fields };
     events.push(event);
@@ -541,10 +575,8 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
   const asked = pass.asked.get(item.key);
   if (asked) {
     const { fill, ...entry } = asked;
-    const id = log({ ...entry, losers: entry.losers ?? (fill ? before(did[fill]) : []) });
-    // A found item taken in has no click that puts things back as they were, so it is not offered as the click's Undo.
-    const tookIn = entry.kind === 'chosen' || entry.cause === 'found';
-    if (!tookIn) pass.made.push(id);
+    const id = log({ ...entry, losers: entry.losers ?? (fill ? before(did[fill]) : []), ...(tookFrom.length ? { tookFrom } : {}), ...(gaveBack.length ? { gaveBack } : {}) });
+    pass.made.push(id);
     pass.asked.delete(item.key);
   }
   if (made.takeIn) {
@@ -603,6 +635,7 @@ async function click(pass: Pass, asked: ItemClick) {
   const refuse: Refuse = (message, more = {}) => { pass.results.push({ item: name, outcome: 'held', unchanged: true, message, ...more }); };
   const stale = asked.seenOn !== undefined && !!item?.on !== asked.seenOn;
   if (stale) return refuse(`${name} changed since the page was read. Nothing was changed; read again.`);
+  if (asked.giveBack) pass.giveBack.set(asked.key, asked.giveBack);
   if (asked.deleted === false) {
     if (!known?.deleted) return;
     delete known.deleted;

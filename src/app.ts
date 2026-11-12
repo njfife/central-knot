@@ -3,7 +3,7 @@ import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
 import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, McpResult, PassResult, ClaudeWrite, SkillFacts, SyncNotice } from './types.ts';
-import { anyManaged, kindSource } from './itemrow.ts';
+import { anyManaged, kindSource, onLibrary } from './itemrow.ts';
 import { caughtUpNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
@@ -351,8 +351,8 @@ export const applyClick = (click: Click) => busy(click.putBack ? 'Putting it bac
   // A put-back's Undo is the removal or deletion again, which leaves the record as it was before it: no record change of its own.
   // A click refused before anything was done changed nothing: a record unlike the page's was changed elsewhere (the page was
   // read before it), never by this click. A hold that came after the record was changed (an edit waiting for sync) is no such refusal.
-  // An agent's click is one History entry, whose own action undoes it (historyactions.ts): no record change is undone besides.
-  const changed = back || refusal?.unchanged || click.kind === 'agents' ? [] : recordChanged(before, standings(click.kind, keys));
+  // A library kind's click is undone by its History entries' own actions (historyactions.ts): no record change is undone besides.
+  const changed = back || refusal?.unchanged || onLibrary(click.kind) ? [] : recordChanged(before, standings(click.kind, keys));
   const copied = !!back || did || made.length > 0 || changed.length > 0;
   // The plugins' part, once the copies' part went through (a whole-click refusal leaves it unrun).
   const plugged = click.plugins?.ops.length && (copied || !refusal) ? await runSwitches(click.plugins.ops, click.plugins.draft) : undefined;
@@ -406,7 +406,7 @@ const undoClick = (click: Click, made: string[], before: Map<string, Standing>, 
   let stopped: string | undefined;
   for (const event of undoOrder(events)) {
     if (takenWith.has(event.id)) continue;
-    const narrow = event.kind === 'chosen' && click.kind !== 'agents';
+    const narrow = event.kind === 'chosen' && !onLibrary(click.kind);
     const result = await api().restore(event.id, home.sync.gate.state === 'needs-resume', home.home, narrow ? 'narrow' : undefined);
     if (result.stopped) { stopped = result.stopped; break; }
     if (narrow && event.addedId) takenWith.add(event.addedId);

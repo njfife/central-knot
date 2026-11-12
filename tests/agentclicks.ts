@@ -49,7 +49,8 @@ export async function seen(box: Box, context = box.context): Promise<{ fact?: Li
 }
 export const itemOf = async (box: Box) => (await seen(box)).item;
 
-const send = (box: Box, change: Change, context = box.context) => applyAgents(context, box.tools, [change]);
+export const applyClick = (box: Box, change: Change, context = box.context) => applyAgents(context, box.tools, [change]);
+const send = applyClick;
 /** The row's switch, On. A found agent whose copies differ opens the copy question instead: `choose` answers it. */
 export async function turnOn(box: Box, context = box.context): Promise<PassResult | 'choose'> {
   const { row, item } = await seen(box, context);

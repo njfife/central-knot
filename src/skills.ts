@@ -88,6 +88,8 @@ export async function readDisk(context: ShareContext, managed: HarnessId[]): Pro
       const why = disk.cannotTake(item, tool);
       return why ? { why } : undefined;
     },
+    // A tool that won't take the skill (its shape, a name it reserves, the agent it was converted from) keeps any copy it has.
+    refuses: (item, tool) => disk.cannotTake(item, tool),
   };
   const add = <T>(map: Map<string, Partial<Record<HarnessId, T>>>, key: string, tool: HarnessId, value: T) => { if (!map.get(key)?.[tool]) map.set(key, { ...map.get(key), [tool]: value }); };
   const sound: HarnessId[] = [];
@@ -228,6 +230,10 @@ export const skillKind: Kind<SkillContent, SkillCopy, SkillDisk> = {
  */
 async function writeSkill(context: ShareContext, item: LibraryItem, tool: HarnessId, here: SkillCopy | undefined, content: SkillContent) {
   const target = here?.directory ?? join(rootOf(context, tool), item.name);
+  // A version this tool won't load (an edit taken in by this same pass) is never written there; the copy it has stays.
+  const read = await readCopy(tool, content.directory, '');
+  const refused = 'unseen' in read ? undefined : targetFor(tool, target, { ...read.skill, folder: item.name }).skipped;
+  if (refused) return { stopped: refused };
   try {
     if (here) await swapFolder(context, content.directory, target, here.hash);
     else await placeFolder(context, tool, content.directory, target, await readTree(content.directory));

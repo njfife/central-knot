@@ -544,6 +544,26 @@ test('A tool that won’t load a skill of that shape can’t be given it, and it
   } finally { await box.cleanup(); }
 });
 
+test('An edit Codex won’t load is never written over Codex’s copy, which stays as it was; its line says why, as for a fresh take-in', async () => {
+  const box = await sandbox();
+  try {
+    await put(box, 'claude-cli');
+    await turnOn(box);
+    const codexBefore = await bytes(folderOf(box, 'codex-cli'));
+    // The description line deleted by hand in Claude Code: Codex won't load a skill without one; Claude Code and Copilot CLI do.
+    await writeFile(join(folderOf(box, 'claude-cli'), 'SKILL.md'), '---\nname: notes\n---\n\nTake notes.\n');
+    const done = await pass(box);
+    assert.deepEqual(await bytes(folderOf(box, 'codex-cli')), codexBefore, 'Codex’s copy stays as it was');
+    assert.ok(!done.results.some(result => result.harness === 'codex-cli' && result.outcome === 'written'), 'nothing written to Codex');
+    await pass(box);
+    const { fact, item, row } = await seen(box);
+    assert.equal(harnessIs(row, item, 'codex-cli'), 'cannot');
+    assert.match(fact!.cannot['codex-cli'] ?? '', /^Codex will not load it/);
+    assert.equal(await readFile(join(folderOf(box, 'copilot-cli'), 'SKILL.md'), 'utf8'), '---\nname: notes\n---\n\nTake notes.\n', 'the others get the edit');
+    assert.equal((await pass(box)).writes, 0, 'and later passes write nothing');
+  } finally { await box.cleanup(); }
+});
+
 test('A partial skill (kept out of a tool by its switch in the opened row) says where it is, and the main switch is all or nothing', async () => {
   const box = await sandbox();
   try {

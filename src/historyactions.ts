@@ -69,20 +69,25 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
   const where = event.only ? toolName(event.only) : '', from = event.winner ? toolName(event.winner.tool) : '';
   // What made it happen is the entry's `cause` alone (types.ts HistoryEvent); none is the person's own switch or click.
   const pulled = event.cause === 'pulled', keeps = 'Central Knot keeps it.';
+  // An Undo that gave tools their own copies back instead of removing what was there (types.ts HistoryEvent gaveBack).
+  const gave = (event.gaveBack ?? []).map(toolName);
+  const gaveSaid = gave.length ? ` ${andList(gave)} ${gave.length === 1 ? 'has its own copy' : 'have their own copies'} back, as before.` : '';
   switch (event.kind) {
     case 'on': {
-      if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}: its ${words.copy} there is back.` };
+      if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}: its ${words.copy} there is back.${gaveSaid}` };
       const said = {
         switch: { glyph: 'circle-check', text: `Turned on${also(': put in')}.` },
         found: { glyph: 'plus', text: `Found in ${from} and taken into Central Knot${also('; put in')}.` },
         pulled: { glyph: 'git-branch', text: `Pulled from the Git repo into Central Knot${also('; put in')}.` },
       } as const;
-      return said[event.cause === 'found' || event.cause === 'pulled' ? event.cause : 'switch'];
+      const { glyph, text } = said[event.cause === 'found' || event.cause === 'pulled' ? event.cause : 'switch'];
+      return { glyph, text: `${text}${gaveSaid}` };
     }
     case 'off':
-      if (event.only) return { glyph: 'circle-off', text: `Kept out of ${where}: its copy there was removed. ${keeps}` };
+      if (event.only && event.gaveBack?.includes(event.only)) return { glyph: 'circle-off', text: `Kept out of ${where}: ${where} has its own copy back, as before. ${keeps}` };
+      if (event.only) return { glyph: 'circle-off', text: `Kept out of ${where}: its copy there was removed. ${keeps}${gaveSaid}` };
       if (event.cause === 'deleted-by-hand') return { glyph: 'trash-2', text: `Its copy was deleted in ${from}, so it was turned off${also(' and removed from')}. ${keeps}` };
-      return { glyph: 'circle-off', text: `Turned off${also(': removed from')}. ${keeps}` };
+      return { glyph: 'circle-off', text: `Turned off${also(': removed from')}.${gaveSaid} ${keeps}` };
     case 'current': {
       // The version as it was first kept says where the content came from; the entry that made it current again doesn't.
       const made = item?.versions.findLast(version => version.hash === event.version), when = made && item && versionClock(item, made);
@@ -93,7 +98,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       // One with a `winner` is from before the library (a deletion sync spread from a tool): the general sentence says it.
       if (event.winner) return undefined;
       const how = pulled ? 'Removed in the Git repo, so Pull deleted it' : 'Deleted';
-      return { glyph: pulled ? 'git-branch' : 'trash-2', text: `${how} from Central Knot${also(' and removed from')}. History keeps it.` };
+      return { glyph: pulled ? 'git-branch' : 'trash-2', text: `${how} from Central Knot${also(' and removed from')}.${gaveSaid} History keeps it.` };
     }
     case 'restored': {
       // Likewise: an Undo or Restore from before the library names a tool or an earlier version.
@@ -168,12 +173,28 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
     const offered = versionChoices(event, item).some(choice => choice.hash === version);
     return offered ? { label: 'Use it', help: `Make that copy’s version of ${name} the current one${everywhere}`, change: { ...now, version } } : undefined;
   }
-  if (event.kind === 'off' || event.kind === 'on') return switchAction(event.kind === 'off', event.only, item);
+  // A found item taken in, while it is still as that click left it: its Undo takes it out again (found once more), each tool
+  // it was found in keeping its own copy.
+  const tookIn = event.kind === 'chosen' || (event.kind === 'on' && event.cause === 'found');
+  if (tookIn && item.on && event.winner?.hash === item.hash) {
+    return { label: 'Undo', help: `Take ${name} out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own`, change: { ...now, deleted: true, ...givenBack(event, item) } };
+  }
+  if (event.kind === 'off' || event.kind === 'on') {
+    const action = switchAction(event.kind === 'off', event.only, item);
+    return action && { ...action, change: { ...action.change, ...givenBack(event, item) } };
+  }
   // Copies an earlier engine added, removed, switched or took over: there is no earlier version to go back to.
   if (['added', 'removed', 'switched', 'took-over'].includes(event.kind) || !isVersion(item, event.previous)) return undefined;
   // Undo while what this entry made is still current; once later changes came, it says what it does instead.
   const latest = (event.version ?? event.winner?.hash) === item.hash;
   return { label: latest ? 'Undo' : 'Go back before this', help: `Make the version from before this change current again${everywhere}`, change: { ...now, version: event.previous } };
+}
+
+/** The copies an entry's click took over from tools (`tookFrom`), each a version still, for its Undo to give back (types.ts Change giveBack). */
+function givenBack(event: HistoryEvent, item: LibraryItem): Pick<Change, 'giveBack'> {
+  // The current version counts too: a copy the click counted as the item's because it was the same.
+  const back = (event.tookFrom ?? []).filter(copy => item.versions.some(version => version.hash === copy.hash)).map(copy => [copy.tool, copy.hash] as const);
+  return back.length ? { giveBack: Object.fromEntries(back) } : {};
 }
 
 /** An Off entry's Turn on (`turnOn`), or an On entry's Turn off: for the whole item, or (`only`) for one harness of an item that is On. */

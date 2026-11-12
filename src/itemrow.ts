@@ -107,7 +107,9 @@ export function kindSource(home: Pick<HomeView, 'skills' | 'mcp' | 'agents'> & {
  * still on their own engine. kindSource and the page's bands (matrix.ts listView) read a kind's view here.
  */
 export const libraryView = (home: Pick<HomeView, 'skills' | 'agents'>, which: 'skills' | 'mcp' | 'agents'): LibraryView | undefined =>
-  (which === 'mcp' ? undefined : home[which]);
+  (onLibrary(which) ? home[which as 'skills' | 'agents'] : undefined);
+/** Whether a page's kind is on the library (skills and agents); MCP servers are not yet. The one place this is said. */
+export const onLibrary = (which: 'skills' | 'mcp' | 'agents') => which !== 'mcp';
 /**
  * A library view's rows as SkillFacts, made once per view read, so a page that caches by them redraws only on a new read.
  * A tool whose own switch turns a skill off (`loads`, `off`) is said as its mark says it: by a profile, naming the profile in

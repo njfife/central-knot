@@ -636,8 +636,8 @@ inBox('An agent a harness has that Central Knot doesn’t is found: never writte
   assert.equal((await pass(box)).writes, 0);
   assert.deepEqual(await readdir(join(box.home, '.copilot/agents')), []);
   const taken = await turnOn(box);
-  // Taking in has no click that puts things back as they were, so its result offers no Undo (History's entry has Turn off).
-  assert.deepEqual(taken !== 'choose' && [taken.writes, taken.made], [2, []]);
+  // Taking in offers an Undo: its History entry, which takes the agent out again and leaves Claude Code's file (tests/undo.test.ts).
+  assert.deepEqual(taken !== 'choose' && [taken.writes, taken.made?.length], [2, 1]);
   assert.deepEqual([placeOf(await itemOf(box)), await versions(box)], ['on', ['Be brief. (found in Claude Code) *']]);
 });
 
@@ -663,8 +663,8 @@ inBox('Found copies that differ: the switch asks; the chosen copy is taken in, a
   assert.deepEqual((await seen(box)).fact?.versionChanges, ['none', { differs: ['prompt'] }]);
   // A library item never waits for a choice, and History can make the other copy's version current.
   const actions = await historyActions(box);
-  assert.deepEqual(actions.map(action => `${action.event.kind}: ${action.label}`), ['chosen: Use claude-cli’s']);
-  await actions[0].run();
+  assert.deepEqual(actions.map(action => `${action.event.kind}: ${action.label}`), ['chosen: Undo', 'chosen: Use claude-cli’s']);
+  await actions[1].run();
   assert.match((await readOf(box, 'codex-cli'))!, /Be brief\./);
   // The choice's entry stays open: what it offers is whatever would still change something (now nothing), and the version
   // made current has its own Undo.
@@ -726,7 +726,8 @@ inBox('Delete removes the agent from every harness and leaves a tombstone: a sta
   assert.deepEqual(actions.map(action => `${action.event.kind}: ${action.label}`), ['deleted: Restore']);
   await actions[0].run();
   assert.deepEqual(await filesOf(box), before, 'every file as it was');
-  assert.deepEqual((await historyActions(box)).map(action => action.label), ['Turn off']);
+  // Back as the take-in left it: that entry's Undo (take it out again, each tool keeping its own copy) is offered again.
+  assert.deepEqual((await historyActions(box)).map(action => action.label), ['Undo']);
   // Restore over a newer agent of that name, made in Claude Code since: it is kept as a version, and the result says so.
   await deleteIt(box);
   await write(box, 'claude-cli', claudeAgent('You review code.\nA new reviewer.\n'));
