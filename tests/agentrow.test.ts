@@ -66,10 +66,10 @@ test('An Off agent has no copy anywhere; one that turns up is its harness’s ow
 });
 
 test('A harness that can’t be given a copy, or whose copy can’t be read, says why in its own words', () => {
-  const why = { cannot: { 'codex-cli': 'Codex can’t store this name (é). Rename the agent to use it there.' }, unseen: { 'copilot-cli': 'Copilot CLI’s file for this agent is there but could not be read.' } };
+  const why = { cannot: { 'codex-cli': 'Codex can’t store this name (é). Rename it in Claude Code to use it there.' }, unseen: { 'copilot-cli': 'Copilot CLI’s file for this agent is there but could not be read.' } };
   const agent = item({ applied: { 'claude-cli': 'b', 'copilot-cli': 'b' } });
   assert.deepEqual(marks({ 'claude-cli': 'b' }, agent, why), ['current', 'unseen', 'cannot']);
-  assert.equal(lineIn({ 'claude-cli': 'b' }, agent, 'codex-cli', 'Codex', why), 'Codex can’t store this name (é). Rename the agent to use it there.');
+  assert.equal(lineIn({ 'claude-cli': 'b' }, agent, 'codex-cli', 'Codex', why), 'Codex can’t store this name (é). Rename it in Claude Code to use it there.');
 });
 
 test('Only a found agent whose copies differ asks which copy; an agent in the library never does', () => {
@@ -106,7 +106,7 @@ test('While a copy deleted by hand waits for sync, the status says the agent is 
 });
 
 test('A tool that can’t take the agent is said in the status: on in the others only', () => {
-  const why = { cannot: { 'copilot-cli': 'Copilot CLI can’t store this name (é). Rename the agent to use it there.', 'codex-cli': 'Codex can’t store this name (é). Rename the agent to use it there.' } };
+  const why = { cannot: { 'copilot-cli': 'Copilot CLI can’t store this name (é). Rename it in Claude Code to use it there.', 'codex-cli': 'Codex can’t store this name (é). Rename it in Claude Code to use it there.' } };
   const agent = item({ applied: { 'claude-cli': 'b' } });
   assert.equal(statusLine(row({ 'claude-cli': 'b' }, why, agent), agent, tools), 'On in Claude Code only · Copilot CLI and Codex can’t take it (see below)');
 });
