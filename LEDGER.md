@@ -1465,6 +1465,7 @@ Skills are the second kind on the library, by implementing `librarypass.ts Kind`
 - Git repo: Pull makes the repo's content the current version and leaves On or Off alone; Push sends every skill in the library, On or Off (on `next`, managed skills). An Undo of a Pull is Make current of the version before.
 - Profiles: unchanged (each tool's own switch), reading skills through `profileplan.ts profileSkills`.
 - A found skill whose only copy can't be copied as it is is a row (on `next` too, as "Can’t sync"), but one whose SKILL.md can't be parsed or that has none is no row, as on `next`.
+- A click that takes several skills in at once (only a script sends one: the page's switch takes one) is carried out skill by skill, each on record once it is: killed part-way, the ones carried out are caught up on the next opening and the rest are still found (on `next`, Apply all saved every choice before copying). Nothing is half-written either way.
 
 **Decisions made in this step, beyond the brief.**
 - *Found rows with nothing to take in* show (`canTakeIn`), their switch waiting, so a skill the person has is never invisible; one with no SKILL.md or an unparsable one stays no row, as on `next`.
@@ -1473,6 +1474,7 @@ Skills are the second kind on the library, by implementing `librarypass.ts Kind`
 - *Take over is offered only for a skill in Central Knot*; the brief says a found skill is taken in first.
 - *A version named in a sentence* is "the version that was in Codex" (`library.ts theVersion`), for agents too.
 - *Paths in sentences* are said as the page shows them (from `~`, or "…" inside another home).
+- *A record that stops every write* (damaged, newer, another generation) is said in the item pages' bands, once (the skills engine's own bands said it; the bands every item page shares now do, so MCP servers and Agents say it too).
 
 **Deleted.** `src/manage.ts`, `src/outsidewords.ts`; `tests/manage.test.ts`, `tests/outsidewords.test.ts`, `tests/sharedcopies.test.ts`, `tests/twoway-recovery.test.ts` (their cases carried to `skills.test.ts`, `skillsafety.test.ts` and `skillmigrate.test.ts` where the library keeps them); the IPC `manage:apply` and `manage:delete-everywhere` and `preload.ts` `apply`, `deleteEverywhere`; `types.ts Change`'s `remove`, `everywhere` and `takeOver`; `words.ts REPLACE_ACTION`; `skillswitch.ts unverifiedBuild`; `matrix.ts`'s skills-engine branches (Remove, Delete everywhere, Sync here for skills, the outside-copies note and its take-over, `confirmTakeOver`); the tour's `disable` section; `sync.json`'s skills (`items`, `roots`, carried only until the migration runs).
 
@@ -1487,7 +1489,7 @@ Skills are the second kind on the library, by implementing `librarypass.ts Kind`
 - End to end (`scripts/e2e.mjs`, the dev build on Linux): 679 passed, 1 failed: "Show log file opens the log’s folder", a Linux-only check in Settings this step doesn't touch (the file manager stand-in isn't called on this machine).
 - Pictures: `node scripts/ui-tour.mjs <out> --electron --no-sandbox --only skills`, 96 pictures, every state of a skill's row at 860×560, 1280×800, 1728×1117 and 2560×1440 and in light, each looked at.
 - One check loosened, said here: the safety test of a repeat pass runs one settling pass first, since the first pass after a take-in notes the skills folders' identity once.
-- The Mac run is named in the pull request.
+- The first Mac run (43305709354) failed two Mac-only end-to-end checks, both fixed: a damaged `sync.json` had no band (above), and the crash flow assumed every choice of a bulk take-in was on record before copying (above); a check of the damaged record's band now runs in the practice flow on Linux too. The Mac run on the head is named in the pull request.
 
 **Follow-ups.**
 - The armed Take over… says what it does in its tooltip only; a visible note like Delete's would be better.
