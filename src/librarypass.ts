@@ -23,7 +23,7 @@
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { carryOut, keepVersion, managedAgain, newItem, plan, setCurrent, versionAt, wantedIn } from './library.ts';
-import type { Copies, HarnessCopy, ItemKind, LibraryItem, Plan, Shelf, Source } from './library.ts';
+import type { Copies, HarnessCopy, ItemKind, LibraryItem, Plan, Shelf, Source, Version } from './library.ts';
 import { appendHistory, historyCutoff, readHistory, replaceHistory } from './manage.ts';
 import { newRecord, readRecord, remember, saveRecord, syncGate, writeAccess } from './share.ts';
 import type { ShareContext } from './share.ts';
@@ -126,6 +126,8 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
 export interface Look<Content, Entry extends Seen, D extends Disk<Entry> = Disk<Entry>> {
   kind: Kind<Content, Entry, D>; context: ShareContext; managed: HarnessId[]; library: KindLibrary; disk: D;
   foldersNow: KindLibrary['folders'];
+  /** By item, the copies a harness managed again holds that give way to the library (cameBack): what the page says will be kept. */
+  givingWay: Map<string, Plan['keep']>;
   /** How long a copy must stay missing before it counts as deleted by hand, the clock it is measured on, and whether a copy is inside it now. */
   settle?: { clock: number; ms: number; settling: boolean };
 }
@@ -135,7 +137,7 @@ type AnyLook = Look<unknown, Seen, Disk<Seen>>;
 async function lookAt<C, E extends Seen, D extends Disk<E>>(
   kind: Kind<C, E, D>, context: ShareContext, managed: HarnessId[], library: KindLibrary, settle?: Look<C, E, D>['settle'],
 ): Promise<Look<C, E, D>> {
-  return { kind, context, managed, library, disk: await kind.read(context, managed), foldersNow: {}, settle };
+  return { kind, context, managed, library, disk: await kind.read(context, managed), foldersNow: {}, givingWay: new Map(), settle };
 }
 
 /**
@@ -163,7 +165,7 @@ export const unseenIn = (disk: Disk<Seen>, tool: HarnessId, key: string) => disk
  * - There, but elsewhere than at the last full pass (its config root moved): what was applied is forgotten for `items`.
  * - There, but made again since (reset, reinstalled, or back after being away): the same, for `items` with no copy there.
  * A click's pass moves no known identity on, so the next full pass still sees the change for the others (keepFolders).
- * `shelf`: a pass keeps the versions a harness managed again gives way with; the page's look keeps nothing.
+ * `shelf`: a pass tells History and keeps the copies a harness managed again gives way with; the page's look only notes them.
  */
 export async function guardFolders(look: AnyLook, items: LibraryItem[], shelf?: Shelf<unknown>) {
   for (const tool of look.managed) {
@@ -193,17 +195,28 @@ export async function guardFolders(look: AnyLook, items: LibraryItem[], shelf?: 
 
 /**
  * A harness managed again (library.ts managedAgain), for every item in the record, deleted ones too, not only the pass's: A
- * becomes what the harness holds now, each content the item doesn't hold kept as a version first. Saved before any harness
- * file changes (keepVersion saves; carryOut saves before it writes), so a pass that runs later finds it settled, and only
- * edits and deletions made after it count as such. A missing copy went while the harness was away: no settle window.
+ * becomes what the harness holds now, and each content the item doesn't hold gives way to the library. Each such copy is
+ * noted on the look (`givingWay`, which the page shows), and a pass tells History of it first (a `kept-edit` entry, cause
+ * `tool-back`, whose "Use <harness>’s" makes it current) and then keeps it as a version. Both happen here, for every item,
+ * because the item may be outside this pass and written over or removed only by a later one; and before any harness file
+ * changes (keepVersion saves; carryOut saves before it writes), so a pass that runs later finds the harness settled, and
+ * only edits and deletions made after it count as such. A missing copy went while the harness was away: no settle window.
  */
 async function cameBack(look: AnyLook, tool: HarnessId, shelf?: Shelf<unknown>) {
+  const givingWay: { item: LibraryItem; version: Version; content: unknown }[] = [];
   for (const item of Object.values(look.library.items)) {
     const here = look.disk.byKey.get(item.key)?.[tool], unseen = unseenIn(look.disk, tool, item.key);
     const copy: HarnessCopy = unseen ? { is: 'unknown', why: unseen } : here ? { is: 'present', hash: here.hash, at: here.at } : { is: 'absent' };
-    const kept = managedAgain(item, tool, copy);
-    if (kept && here && shelf) await keepVersion(shelf, item, kept, look.kind.contentOf(here));
+    const version = managedAgain(item, tool, copy);
+    if (!version || !here) continue;
+    givingWay.push({ item, version, content: look.kind.contentOf(here) });
+    look.givingWay.set(item.key, [...(look.givingWay.get(item.key) ?? []), { harness: tool, from: version.from }]);
   }
+  if (!shelf || !givingWay.length) return;
+  const told = givingWay.map(({ item, version }): HistoryEvent => ({ id: randomUUID(), at: now(), key: `${look.kind.historyPrefix}${item.key}`,
+    item: item.name, kind: 'kept-edit', cause: 'tool-back', losers: [{ tool, hash: version.hash }], orderProved: true }));
+  await appendHistory(look.context, told);
+  for (const { item, version, content } of givingWay) await keepVersion(shelf, item, version, content);
 }
 
 /**
@@ -429,7 +442,8 @@ async function deletionsTold(pass: Pass) {
  * History's entries for one item's pass, made before anything of it is saved (carryOut): what was asked (with the harnesses
  * its plan writes or removes), an edit taken in, and a copy deleted by hand that turned it Off. The last two are also notices,
  * since no one asked for them. A harness whose copy can't be changed this time is said in the pass's results, and the next
- * pass finishes it.
+ * pass finishes it. A copy a harness managed again gives way with has its entry from cameBack, which may concern an item
+ * outside this pass.
  */
 function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record<HarnessId, Seen>>): HistoryEvent[] {
   // The item as it is before the plan is carried out: the edit taken in is current only after this is told.

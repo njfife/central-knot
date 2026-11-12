@@ -76,7 +76,10 @@ export function harnessLine(row: AgentRow, item: LibraryItem | undefined, tool: 
       return `Edited in ${where}. When sync runs it becomes the current version${reaches}, then its copy here is removed: ${inLib!.on ? 'the agent is kept out of this tool' : 'the agent is off'}.`;
     }
     case 'deleted': return `Its copy was deleted in ${where}. When sync runs, the agent turns off everywhere; Central Knot keeps it.`;
-    case 'leaving': return 'Its copy is removed when sync runs. Central Knot keeps it.';
+    case 'leaving': {
+      const kept = row.plan?.keep.some(entry => entry.harness === tool);
+      return kept ? 'Has a copy Central Knot doesn’t have yet. When sync runs it is kept as a version, then removed.' : 'Its copy is removed when sync runs. Central Knot keeps it.';
+    }
     case 'own-copy':
       if (!inLib) return 'Has it.';
       return `Has a copy Central Knot didn’t put there. It is left alone while ${inLib.on ? 'this tool is kept out' : 'the agent is off'}; ${KEPT_FIRST}.`;

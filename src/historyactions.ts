@@ -21,7 +21,8 @@
 //     the library that names `previous`      the version before
 //                                            this current"
 //   conflict, chosen, kept-edit (an edit     Use <harness>’s        that copy's version is not the current one
-//     not taken in that was written over):
+//     not taken in that was written over,
+//     or a copy a tool managed again held):
 //     copies that gave way
 //
 // One entry is not here: a Pull that changed only Claude Code's own settings of an agent (`settingsFile`) keeps its own Undo
@@ -98,6 +99,7 @@ export function agentSentence(event: HistoryEvent, homeTools: string[], item?: L
       // One with a `winner` is from before the library (an edit kept over a deletion): the general sentence says it.
       if (event.winner) return undefined;
       const where = andList([...new Set(event.losers.map(loser => toolName(loser.tool)))]);
+      if (event.cause === 'tool-back') return { glyph: 'diff', text: `${where}’s copy changed while Central Knot didn’t manage ${where}; it gave way to the current version and is kept as a version.` };
       return { glyph: 'diff', text: `Edited in ${where}, not taken in yet, and written over by the current version: the edit is kept as a version.` };
     }
     case 'conflict': {

@@ -279,6 +279,36 @@ for (const state of ['Off', 'On, with a click on another agent first'] as const)
   });
 }
 
+for (const state of ['On', 'Off', 'On, with a click on another agent first'] as const) {
+  inBox(`A tool managed again with a copy edited meanwhile (${state}): the page says it is kept first, and History says it gave way and can make it current`, async box => {
+    await writeFile(join(box.home, '.claude/agents/helper.md'), claudeAgent('You help.\n').replace('name: reviewer', 'name: helper'));
+    await on(box);
+    const codexBefore = await readOf(box, 'codex-cli');
+    const without: HarnessId[] = ['claude-cli', 'copilot-cli'];
+    await chooseTools(box.context, without);
+    const away = await seen({ ...box, tools: without });
+    if (state === 'Off') await applyAgents(box.context, without, [agentClicks.off(away.row, away.item)]);
+    await edit(box, 'codex-cli', 'Edit away.');
+    await chooseTools(box.context, tools);
+    const before = await seen(box);
+    assert.match(harnessLine(before.row, before.item, 'codex-cli', 'Codex'), /kept as a version/, 'the page says so before the pass');
+    if (state === 'On, with a click on another agent first') {
+      // With Automatic sync off, a click on helper runs a pass about helper alone: reviewer's copy is kept and told already.
+      await applyAgents(box.context, tools, [{ key: 'helper', managed: true, off: ['copilot-cli'] }], { only: new Set(['helper']) });
+      assert.match((await readOf(box, 'codex-cli'))!, /Edit away\./, 'not written over by a pass about helper');
+    }
+    await pass(box);
+    assert.equal(await readOf(box, 'codex-cli'), state === 'Off' ? undefined : codexBefore);
+    const kept = (await historyOf(box)).filter(event => event.kind === 'kept-edit');
+    assert.deepEqual(kept.map(event => [event.cause, event.losers.map(loser => loser.tool)]), [['tool-back', ['codex-cli']]]);
+    assert.equal(agentSentence(kept[0], tools)?.text, 'Codex’s copy changed while Central Knot didn’t manage Codex; it gave way to the current version and is kept as a version.');
+    const use = (await historyActions(box)).find(action => action.event.id === kept[0].id && action.label === 'Use codex-cli’s');
+    assert.ok(use, 'History offers that copy back');
+    await use.run();
+    assert.equal((await versions(box))[0].startsWith('Edit away. (made current again)'), true);
+  });
+}
+
 inBox('A tool managed again with a copy gone meanwhile turns nothing Off, whatever the settle window', async box => {
   await on(box);
   await chooseTools(box.context, ['claude-cli', 'copilot-cli']);

@@ -270,7 +270,9 @@ async function rowFacts(look: AgentLook, key: string, item: LibraryItem | undefi
   const edited = made ? [made.takeIn, ...made.keep.filter(kept => kept.from.how === 'edited').map(kept => kept.harness)].filter(tool => tool !== undefined) : [];
   return {
     key, name, description: current?.description ?? '', copies, extra: [], managed: !!item?.on, off: item?.except ?? [], cannot, choiceBlocks: {}, edited,
-    ...(made && item ? { plan: made, versionChanges: await changesOf(look.context, item) } : { differs: differ(foundCopies(look, key, [])) }),
+    // The copies a harness managed again gives way with are kept before the plan, by the pass (librarypass.ts cameBack): said with it.
+    ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
+      : { differs: differ(foundCopies(look, key, [])) }),
     ...(Object.keys(plugin).length ? { plugin } : {}), ...(Object.keys(unseen).length ? { unseen } : {}),
   };
 }
