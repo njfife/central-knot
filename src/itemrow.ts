@@ -1,5 +1,8 @@
 // An item (a skill, an MCP server or an agent) as the item pages draw it, and what each tool's mark says about it. Pure: no DOM.
+// A skill's and an MCP server's marks are here (cellOf); an agent's follow Central Knot's library and are in agentrow.ts.
 import { comparedTools, copiesDiffer } from './syncrules.ts';
+import type { VersionChange } from './agentfiles.ts';
+import type { Plan } from './library.ts';
 import type { GoneItem, Outside, SwitchProblem, ThroughPlugin } from './types.ts';
 export { comparedTools, copiesDiffer };
 
@@ -36,12 +39,16 @@ export interface ItemRow {
   paths?: Partial<Record<Tool, string>>;
   /** For the compare view: one line per copy that differs. */
   versions?: Partial<Record<Tool, { lines: string; changed: string; text: string; /** When it was last changed. */ at?: string; /** Agents: the prompt. */ prompt?: string }>>;
-  /** Agents: the With limits label for each tool that lacks some of the origin's fields. */
-  limits?: Partial<Record<Tool, string>>;
-  oneWay?: { from: Tool; lost: string[] };
-  kept?: string[];
-  /** Agents: one-way tools edited or deleted there, no longer updated. */
-  stopped?: Tool[];
+  /** Agents: harnesses whose copy can't be seen for sure right now, and why. */
+  unseen?: Partial<Record<Tool, string>>;
+  /** Agents in the library: what the next pass does in each harness (types.ts SkillFacts plan). */
+  plan?: Plan;
+  /** Agents found in a harness: their copies differ, so the switch asks which one to take in. */
+  differs?: boolean;
+  /** Agents in the library: what each listed version changed (types.ts SkillFacts versionChanges). */
+  versionChanges?: VersionChange[];
+  /** Agents: each harness's own settings in its file, by name (its own part). */
+  ownFields?: Partial<Record<Tool, string[]>>;
   /** MCP: tools whose copy waits for an explicit write (Claude Code, Write now). */
   waits?: Tool[];
   /** Skills: tools whose copy is disabled with the tool's own switch (it stays there; the tool doesn't load it). */

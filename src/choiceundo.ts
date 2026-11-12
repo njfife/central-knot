@@ -1,4 +1,5 @@
-// Undo of a copy choice, one way for skills, MCP servers and agents: each copy the choice replaced goes back in its own tool,
+// Undo of a copy choice, one way for skills and MCP servers (an agent's choice is the library's: the copies not chosen
+// become versions, historyactions.ts): each copy the choice replaced goes back in its own tool,
 // the copies its own pass added (its 'added' entry, named on it as `addedId`) go again, and the item is as it was before the
 // choice: synced or not, and a tool that held a copy of its own waits for a choice again. Each kind reads and writes its own
 // copies through `sides`; the checks, the order and the end state are here.

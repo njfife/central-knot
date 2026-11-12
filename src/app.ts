@@ -9,6 +9,7 @@ import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
 import { backText, deletedText, leftAsIs, tookOverSaid, undoneText } from './outsidewords.ts';
 import { clickResults, inverseChanges, keptBack, recordChanged, undoOrder, type Standing } from './clickplan.ts';
+import { agentAction, agentKeyOf, agentSentence, isAgentEntry } from './historyactions.ts';
 import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, sentence, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
@@ -347,7 +348,8 @@ export const applyClick = (click: Click) => busy(click.putBack ? 'Putting it bac
   // A put-back's Undo is the removal or deletion again, which leaves the record as it was before it: no record change of its own.
   // A click refused before anything was done changed nothing: a record unlike the page's was changed elsewhere (the page was
   // read before it), never by this click. A hold that came after the record was changed (an edit waiting for sync) is no such refusal.
-  const changed = back || refusal?.unchanged ? [] : recordChanged(before, standings(click.kind, keys));
+  // An agent's click is one History entry, whose own action undoes it (historyactions.ts): no record change is undone besides.
+  const changed = back || refusal?.unchanged || click.kind === 'agents' ? [] : recordChanged(before, standings(click.kind, keys));
   const copied = !!back || did || made.length > 0 || changed.length > 0;
   // The plugins' part, once the copies' part went through (a whole-click refusal leaves it unrun).
   const plugged = click.plugins?.ops.length && (copied || !refusal) ? await runSwitches(click.plugins.ops, click.plugins.draft) : undefined;
@@ -418,7 +420,7 @@ const undoClick = (click: Click, made: string[], before: Map<string, Standing>, 
   let stopped: string | undefined;
   for (const event of undoOrder(events)) {
     if (takenWith.has(event.id)) continue;
-    const narrow = event.kind === 'chosen';
+    const narrow = event.kind === 'chosen' && click.kind !== 'agents';
     const result = await api().restore(event.id, home.manage.gate.state === 'needs-resume', home.home, narrow ? 'narrow' : undefined);
     if (result.stopped) { stopped = result.stopped; break; }
     if (narrow && event.addedId) takenWith.add(event.addedId);
@@ -502,18 +504,16 @@ const switchPlugins = (ops: PluginOp[], draft: Map<string, PluginOp>, { said, un
 
 /**
  * What a read found, naming only the kinds a tool in that home can hold ("Read 1 skill and 0 MCP servers from pi-only."),
- * or that it found no tools at all. `from` names the home, for the status bar. "Nothing changed" means nothing was
- * written; a copy that stopped updating is still news, so then it isn't said.
+ * or that it found no tools at all. `from` names the home, for the status bar. "Nothing changed" means nothing was written.
  */
 function readFound(view: HomeView, from?: string): string {
   if (!view.manage.tools.length) return noToolsSentence;
   // A plugin's items count as the pages list them.
   const found = { skills: view.manage.skills.length + pluginItemCount(view, 'skills'), mcp: view.mcp.servers.length + pluginItemCount(view, 'mcp'), agents: view.agents.servers.length + pluginItemCount(view, 'agents') };
   const counts = heldKinds(view).map(kind => plural(found[kind], kindNouns[kind].one, kindNouns[kind].many));
-  const stopped = view.agents.servers.some(server => server.managed && server.stopped?.length);
   // A catch-up that copied something has its own Caught up band (tables and the Harnesses list), so it is not "Nothing changed".
   const caught = caughtUpNames(view.manage, new Set(view.manage.notices.map(notice => notice.item))).length > 0;
-  return `Read ${andList(counts)}${from ? ` from ${from}` : ''}.${stopped || caught ? '' : ' Nothing changed.'}`;
+  return `Read ${andList(counts)}${from ? ` from ${from}` : ''}.${caught ? '' : ' Nothing changed.'}`;
 }
 
 /** A home just opened, as its band says it: an empty one (no tools, or nothing in them) says only that it opened; the page says the rest. */
@@ -738,6 +738,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
     tell(result.stopped ? undefined : { page: state.page, item: past.item, text: result.results.map(entry => entry.message).join(' ') }, result.stopped);
     return;
   }
+  if (past && isAgentEntry(past)) { sayAgentAction(past, result); return; }
   const item = restored[0]?.item ?? past?.item ?? '';
   const removedFrom = [...new Set(result.results.filter(entry => entry.outcome === 'removed').map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean);
   // A take-over, or the 'added' entry of the Manage that took the skill over (its Undo undoes the take-over too).
@@ -788,6 +789,23 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   // The restored row flashes like a synced one.
   if (done) flashRow(item);
 });
+
+/**
+ * After a History action on an agent (historyactions.ts): what it did, in the words of the entry it made, with that entry's
+ * own action as the way back. A refusal is said on the page, where the action was clicked.
+ */
+function sayAgentAction(past: HistoryEvent, result: ApplyResult) {
+  if (result.stopped) { tell({ page: state.page, item: past.item, text: result.stopped, warn: true, history: true }); return; }
+  const library = state.home?.agents.library, tools = state.home?.agents.tools ?? [];
+  const made = state.history.data?.find(event => event.id === past.undoneBy);
+  const item = library?.[agentKeyOf(past)];
+  const said = made && agentSentence(made, tools, item, true)?.text;
+  const back = made && agentAction(made, item);
+  const notDone = result.results.filter(keptBack).map(entry => entry.message);
+  const text = [`${past.item}: ${said ? said.replace(/^./, first => first.toLowerCase()) : 'done.'}`, ...notDone].join(' ');
+  tell({ page: state.page, item: past.item, warn: notDone.length > 0, text, undo: back && made ? { id: made.id, label: back.label } : undefined });
+  flashRow(past.item);
+}
 
 // ---------- Convert to skill ----------
 

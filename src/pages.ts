@@ -6,6 +6,7 @@ import { absentTools, heldKinds, isPresent } from './presence.ts';
 import { brandMark, itemsTable, outcomeBand, showFiltered, skillsBrowser, wrappingPath } from './matrix.ts';
 import { andList, kindNames, kindNouns, noToolsSentence, orList } from './words.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
+import { needsChoice } from './agentrow.ts';
 
 // ---------- Overview ----------
 
@@ -183,6 +184,9 @@ export function overviewPage() {
   if (!home) return notRead();
   const differs = (fact: { managed: boolean; copies: Record<string, unknown>; separate?: boolean; off: string[] }) => !fact.separate && new Set(Object.entries(fact.copies).filter(([tool]) => !fact.off.includes(tool)).map(([, copy]) => (copy as { hash: string }).hash)).size > 1;
   const pick = (list: typeof home.manage.skills): KindFact[] => list.map(fact => ({ managed: fact.managed, edited: fact.edited, differs: !fact.managed && differs(fact), copies: fact.copies }));
+  // An agent's copies need a choice only while it is found: one in Central Knot's library never asks (agentrow.ts needsChoice).
+  const agents: KindFact[] = home.agents.servers.map(fact => ({ managed: fact.managed, edited: fact.edited, copies: fact.copies,
+    differs: needsChoice(fact, home.agents.library?.[fact.key]) }));
   // Kinds no tool here can hold have no card (app.ts absentKinds); they are named once, below.
   const absent = absentKinds();
   const empty = noTools();
@@ -199,7 +203,7 @@ export function overviewPage() {
       empty ? null : h('div.kind-cards', { 'data-count': String(heldKinds(home).length) },
         kindCard('skills', 'wand-sparkles', pick(home.manage.skills), homeTools()),
         absent.includes('mcp') ? null : kindCard('mcp', 'plug', pick(home.mcp.servers), home.mcp.tools, home.mcp.claudePending.length),
-        absent.includes('agents') ? null : kindCard('agents', 'bot', pick(home.agents.servers), home.agents.tools)),
+        absent.includes('agents') ? null : kindCard('agents', 'bot', agents, home.agents.tools)),
       h('div.overview-more', {},
         absent.length && !empty ? h('p.overview-line', { id: 'overview-absent' }, icon('info', 14, 'tone-muted'), `No tool here holds ${orList(absent.map(kind => kindNames[kind]))}.`) : null,
         !home.manage.access.allowed ? h('p.overview-line', {}, icon('lock', 14, 'tone-warning'), `Automatic sync is paused. Preview only: ${previewReason(home.manage.access.reason)}.`)

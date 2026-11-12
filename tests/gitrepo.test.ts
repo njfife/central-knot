@@ -28,12 +28,12 @@ test('Push puts the Managed set in the repo’s layout; another computer pulls i
     assert.deepEqual(git(box.remote, 'ls-tree', '-r', '--name-only', 'main').split('\n'), ['agents/planner.md', 'mcp/docs.json', 'skills/review/SKILL.md', 'skills/review/notes.log']);
     assert.deepEqual(JSON.parse(git(box.remote, 'show', 'main:mcp/docs.json')), { type: 'stdio', command: 'docs-server', args: ['--port', '7'], env: { TOKEN: 'abc' } });
     assert.match(git(box.remote, 'show', 'main:agents/planner.md'), /model: opus/, 'Claude Code’s own agent file goes as written');
-    // A Managed agent one tool can't read just now is never offered as removed (Push would delete it from the repo).
-    const copilotPlanner = join(first.home, '.copilot/agents/planner.agent.md');
-    const kept = await readFile(copilotPlanner, 'utf8');
-    await writeFile(copilotPlanner, 'half saved');
-    assert.deepEqual(live(await repoView(first)).outgoing.map(row => [row.name, !!row.held]), [['planner', true]]);
-    await writeFile(copilotPlanner, kept);
+    // The repo is sent each agent's current version from Central Knot's library, so copies no tool can read just now change nothing.
+    const planners = [join(first.home, '.copilot/agents/planner.agent.md'), join(first.home, '.claude/agents/planner.md')];
+    const kept = await Promise.all(planners.map(file => readFile(file, 'utf8')));
+    for (const file of planners) await writeFile(file, 'half saved');
+    assert.deepEqual(live(await repoView(first)).outgoing, []);
+    for (const [index, file] of planners.entries()) await writeFile(file, kept[index]);
 
     const second = await box.home('second');
     view = live((await connectRepo(second, box.remote, '')).view);
@@ -48,17 +48,22 @@ test('Push puts the Managed set in the repo’s layout; another computer pulls i
     const docs = (await mcpView(second, tools)).servers.find(server => server.key === 'docs')!;
     assert.ok(docs.managed && docs.copies['copilot-cli']);
     assert.ok((await agentsView(second, tools)).servers.find(agent => agent.key === 'planner')!.managed);
+    assert.deepEqual((await agentsView(second, tools)).library!.planner.versions.map(version => version.from), [{ how: 'pulled' }], 'its version says where it came from');
     assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: opus/);
     view = live(pulled.view);
     assert.deepEqual([view.incoming, view.outgoing, view.base?.id], [[], [], view.latest?.id]);
-    // Undo add after a Pull takes back every copy Pull made, whatever the kind.
-    const addedBy = (key: string) => readHistory(second).then(events => events.find(event => event.key === key && event.kind === 'added')!);
+    // Undo add after a Pull takes back every copy Pull made of a skill or an MCP server. An agent Pull brought in is in Central
+    // Knot now: its entry turns it off, which takes it out of every harness and keeps it.
+    const addedBy = (key: string, kind = 'added') => readHistory(second).then(events => events.find(event => event.key === key && event.kind === kind)!);
     const review = await addedBy('review');
     assert.deepEqual([review.via, review.losers.map(loser => loser.tool).sort()], ['repo', tools]);
     assert.equal((await restoreFromHistory(second, review.id)).stopped, undefined);
     assert.equal((await restoreMcp(second, tools, (await addedBy('mcp:docs')).id)).stopped, undefined);
-    assert.equal((await restoreAgent(second, tools, (await addedBy('agent:planner')).id)).stopped, undefined);
-    assert.deepEqual([(await manageView(second)).skills, (await mcpView(second, tools)).servers, (await agentsView(second, tools)).servers].map(list => list.length), [0, 0, 0]);
+    const takenIn = await addedBy('agent:planner', 'on');
+    assert.deepEqual([takenIn.via, takenIn.cause], ['repo', 'pulled']);
+    assert.equal((await restoreAgent(second, tools, takenIn.id)).stopped, undefined);
+    assert.deepEqual([(await manageView(second)).skills, (await mcpView(second, tools)).servers].map(list => list.length), [0, 0]);
+    assert.deepEqual((await agentsView(second, tools)).servers.map(agent => [agent.key, agent.managed, Object.keys(agent.copies)]), [['planner', false, []]]);
   } finally { await box.cleanup(); }
 });
 
@@ -88,7 +93,7 @@ test('An MCP server’s edit and an agent setting only Claude Code has arrive th
   } finally { await box.cleanup(); }
 });
 
-test('A repo change to an agent this computer can’t read just now waits, and comes in once its copy reads again', async () => {
+test('A repo change to an agent comes in though one tool’s copy can’t be read just now; that tool gets it once its copy reads again', async () => {
   const box = await world();
   try {
     const { first, second, firstPlanner, secondPlanner } = await serverAndAgentOnTwo(box);
@@ -98,10 +103,11 @@ test('A repo change to an agent this computer can’t read just now waits, and c
     await edit(firstPlanner, 'Plan carefully.', 'Plan in small steps.');
     await applyAgents(first, tools, []);
     await pushRepo(first);
-    assert.equal((await pullRepo(second)).pulled, 0, 'a change left waiting is not counted as pulled');
-    assert.deepEqual(live(await repoView(second)).incoming.map(row => [row.name, !!row.held]), [['planner', true]]);
-    await writeFile(secondCopilot, readable);
-    await pullRepo(second);
+    assert.equal((await pullRepo(second)).pulled, 1);
     assert.match(await readFile(secondPlanner, 'utf8'), /Plan in small steps/);
+    assert.equal(await readFile(secondCopilot, 'utf8'), 'half saved', 'a copy that can’t be read is never written over');
+    await writeFile(secondCopilot, readable);
+    await applyAgents(second, tools, []);
+    assert.match(await readFile(secondCopilot, 'utf8'), /Plan in small steps/);
   } finally { await box.cleanup(); }
 });

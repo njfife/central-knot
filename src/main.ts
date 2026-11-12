@@ -14,7 +14,8 @@ import { agentTools, mcpTools, noteTools, pluginTools, presentTools } from './pr
 import { installedPlugins } from './plugins.ts';
 import { checkFeed, type FeedCheck } from './bundlefeed.ts';
 import { applyMcp, mcpFile, mcpView, restoreMcp, undoClaudeWrite } from './mcp.ts';
-import { agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
+import { agentVersion, agentsView, applyAgents, restoreAgent } from './agents.ts';
+import { convertAgentToSkill } from './agentskill.ts';
 import { applyBase, baseView, instructionsView, instructionVersion, repoBase, saveInstruction, undoBase } from './instructions.ts';
 import { clearDraftFolders, draftSources, draftTools, writeDraft } from './draftbase.ts';
 import { registerMarketplaces } from './marketplaces.ts';
@@ -1074,7 +1075,8 @@ app.whenReady().then(async () => {
     && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenManaged === undefined || typeof change.seenManaged === 'boolean')
   ).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged,
     ...(change.disable ? { disable: ids(change.disable) } : {}), ...(change.enable ? { enable: ids(change.enable) } : {}), ...(change.remove ? { remove: ids(change.remove) } : {}),
-    ...(change.everywhere === true ? { everywhere: true } : {}), ...(change.takeOver === true ? { takeOver: true } : {}), ...(change.resumeIn && harnessIds.includes(change.resumeIn) ? { resumeIn: change.resumeIn } : {}) }));
+    ...(change.everywhere === true ? { everywhere: true } : {}), ...(change.takeOver === true ? { takeOver: true } : {}),
+    ...(typeof change.version === 'string' ? { version: change.version } : {}), ...(typeof change.deleted === 'boolean' ? { deleted: change.deleted } : {}) }));
   // Marketplaces and plugins: their own module, given only what it needs from here.
   const markets = carriedMarket = registerMarketplaces({ handle, handleNow }, {
     home: () => (current ? { home: current.home, overrides: context().overrides, actual: current.mode === 'actual' } : undefined),
@@ -1152,6 +1154,7 @@ app.whenReady().then(async () => {
   handle('agents:convert', async (key, home) => (home === current?.home && typeof key === 'string'
     ? convertAgentToSkill(context(), await toolsNow(), key)
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.' }));
+  handleNow('agents:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await agentVersion(context(), key, hash)) ?? null : null));
   handle('instructions:view', async readId => (current ? instructionsView(context(), await readFor(readId as number | undefined)) : null));
   handle('instructions:save', async (tool, text, expected, home, restoring) => (home === current?.home && isTool(tool) && typeof text === 'string' && typeof expected === 'string'
     ? saveInstruction(context(), await read(), tool, text, expected, restoring === true)

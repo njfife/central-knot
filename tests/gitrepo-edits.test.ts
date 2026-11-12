@@ -244,13 +244,13 @@ test('classify: an edit in the repo brings back an item removed here; an edit he
   assert.deepEqual(classify(unread, { 'skill:review': { reason: 'unreadable', heldFor: true } }).incoming.map(row => [row.change, row.pull]), [['removed', 'stuck']]);
 });
 
-test('sourceTool: the copy that stands for an item is a full one before a one-way one, never one edited where it is one-way, and none when the edits disagree', () => {
+test('sourceTool: the copy that stands for an item is the first tool’s it syncs to, a waiting edit before that, and none when the edits disagree', () => {
   const copy = (hash: string) => ({ hash }) as never;
   const facts = (more: object) => ({ key: 'planner', name: 'planner', managed: true, off: [], copies: { 'claude-cli': copy('a'), 'copilot-cli': copy('a') }, ...more }) as never;
   assert.deepEqual(sourceTool(facts({})), { tool: 'claude-cli' });
-  assert.deepEqual(sourceTool(facts({ limits: { 'claude-cli': 'without tools' } })), { tool: 'copilot-cli' }, 'a full copy first');
-  assert.deepEqual(sourceTool(facts({ stopped: ['claude-cli'] })), { tool: 'copilot-cli' }, 'not a one-way copy edited there');
-  assert.ok('why' in sourceTool(facts({ stopped: ['claude-cli', 'copilot-cli'] })), 'no copy left to stand for it');
+  assert.deepEqual(sourceTool(facts({ off: ['claude-cli'] })), { tool: 'copilot-cli' }, 'not a copy in a tool it is kept out of');
+  assert.deepEqual(sourceTool(facts({ copies: { 'claude-cli': copy('a'), 'copilot-cli': copy('b') }, edited: ['copilot-cli'] })), { tool: 'copilot-cli' }, 'the one edit waiting to spread');
+  assert.ok('why' in sourceTool(facts({ off: ['claude-cli', 'copilot-cli'] })), 'no copy left to stand for it');
   const disagree = facts({ copies: { 'claude-cli': copy('a'), 'copilot-cli': copy('b') }, edited: ['claude-cli', 'copilot-cli'] });
   const unsettled = sourceTool(disagree);
   assert.ok('why' in unsettled && /haven’t synced/.test(unsettled.why), 'edits waiting to spread that disagree');
