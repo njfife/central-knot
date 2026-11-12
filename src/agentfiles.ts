@@ -47,7 +47,8 @@ export function fromMarkdown(name: string, text: string): NeutralAgent | undefin
   const front = (document.toJS() ?? {}) as Record<string, unknown>;
   if (typeof front !== 'object' || Array.isArray(front)) return undefined;
   const { name: named, description, ...fields } = front;
-  return { name: typeof named === 'string' && named ? named : name, description: typeof description === 'string' ? description : '', prompt: match[4].replace(/^\r?\n/, ''), fields };
+  const prompt = match[4].replace(/^\r?\n/, '');
+  return { name: typeof named === 'string' && named ? named : name, description: typeof description === 'string' ? description : '', prompt, fields };
 }
 
 function fromToml(name: string, text: string): NeutralAgent | undefined {
@@ -56,7 +57,8 @@ function fromToml(name: string, text: string): NeutralAgent | undefined {
   const value = (key: string) => { const found = root.entries.find(entry => entry.key === key)?.value; return typeof found === 'string' ? found : undefined; };
   // No prompt: an empty file, or one cut off mid-save. Not an agent (yet), so it is held, never read as an edit that empties the others.
   if (value('developer_instructions') === undefined) return undefined;
-  const fields: Record<string, unknown> = Object.fromEntries(root.entries.filter(entry => !['name', 'description', 'developer_instructions'].includes(entry.key)).map(entry => [entry.key, entry.value]));
+  const own = root.entries.filter(entry => !['name', 'description', 'developer_instructions'].includes(entry.key));
+  const fields: Record<string, unknown> = Object.fromEntries(own.map(entry => [entry.key, entry.value]));
   for (const table of tables.slice(1)) fields[table.array ? `[[${table.path.join('.')}]]` : `[${table.path.join('.')}]`] = true;
   return { name: value('name') || name, description: value('description') ?? '', prompt: value('developer_instructions') ?? '', fields };
 }
@@ -66,8 +68,11 @@ export function parseAgent(tool: AgentTool, name: string, text: string): Neutral
   try { return tool === 'codex-cli' ? fromToml(name, text) : fromMarkdown(name, text); } catch { return undefined; }
 }
 
+/** One harness's agents as read: `unreadable` has each file that is there but can't be read as an agent, by key (`*`: the whole folder). */
+export interface AgentsRead { entries: AgentEntry[]; problems: string[]; unreadable: Map<string, string>; folderExists: boolean }
+
 /** Reads one tool's agents. A file that cannot be read as an agent is reported in `unreadable` and never written or deleted. */
-export async function readAgents(context: ShareContext, tool: AgentTool): Promise<{ entries: AgentEntry[]; problems: string[]; unreadable: Map<string, string>; folderExists: boolean }> {
+export async function readAgents(context: ShareContext, tool: AgentTool): Promise<AgentsRead> {
   const entries: AgentEntry[] = [];
   const problems: string[] = [];
   const unreadable = new Map<string, string>();
@@ -124,7 +129,11 @@ function setFrontLines(front: string, values: [string, string][]): string {
  */
 export function agentText(tool: HarnessId, agent: SharedAgent, existing?: string): string {
   if (tool === 'codex-cli') {
-    const lines: Record<string, string> = { name: `name = ${tomlValue(agent.name)}\n`, description: `description = ${tomlValue(agent.description)}\n`, developer_instructions: `developer_instructions = ${tomlPrompt(agent.prompt)}\n` };
+    const lines: Record<string, string> = {
+      name: `name = ${tomlValue(agent.name)}\n`,
+      description: `description = ${tomlValue(agent.description)}\n`,
+      developer_instructions: `developer_instructions = ${tomlPrompt(agent.prompt)}\n`,
+    };
     const keys = Object.keys(lines);
     if (!existing) return keys.map(key => lines[key]).join('');
     const root = readTomlTables(existing)[0];
@@ -139,7 +148,8 @@ export function agentText(tool: HarnessId, agent: SharedAgent, existing?: string
   const match = existing ? FRONT.exec(existing) : undefined;
   // A new OpenCode agent says `mode: all`: with no mode, 1.19.5 offers it both to choose and to hand work to, while 2.2.5
   // makes it one to choose only (measured), and an agent from another tool is one work is handed to there.
-  if (!match) return `---\nname: ${yamlScalar(agent.name)}\ndescription: ${yamlScalar(agent.description)}\n${tool === 'opencode-cli' ? 'mode: all\n' : ''}---\n\n${agent.prompt}`;
+  const mode = tool === 'opencode-cli' ? 'mode: all\n' : '';
+  if (!match) return `---\nname: ${yamlScalar(agent.name)}\ndescription: ${yamlScalar(agent.description)}\n${mode}---\n\n${agent.prompt}`;
   const newline = match[1].endsWith('\r\n') ? '\r\n' : '\n';
   const front = setFrontLines(match[2].replace(/\r?\n$/, ''), [['name', agent.name], ['description', agent.description]]);
   const gap = /^\r?\n/.exec(match[4])?.[0] ?? '\n';

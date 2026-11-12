@@ -34,7 +34,8 @@ function versionRow(view: VersionListView, version: Version, index: number) {
   const makeCurrent = current || same ? null
     : button({ variant: 'link', size: 'small', label: 'Make current', id: `version-current-${id}`, name: `Make ${which} current`, disabled: !view.canWrite,
       onclick: () => view.onMakeCurrent(version) });
-  if (makeCurrent) makeCurrent.title = `Make this the current version of ${item.name}${item.on ? ', in every harness it is on in' : ''}. Undo makes today’s current again.`;
+  const everywhere = item.on ? ', in every tool it is on in' : '';
+  if (makeCurrent) makeCurrent.title = `Make this the current version of ${item.name}${everywhere}. Undo makes today’s current again.`;
   const mark = current ? h('span.version-current', {}, icon('check', 12), 'Current') : same ? h('span.version-same', {}, 'same as current') : null;
   return h(`li.version-row${current ? '.version-row-current' : ''}`, { 'data-version': version.hash },
     h('span.version-when', { title: new Date(version.at).toLocaleString() }, dayAndTime(version.at)),
@@ -53,7 +54,8 @@ function versionText(read: VersionText) {
 export function versionList(view: VersionListView): HTMLElement {
   const { item } = view, all = item.versions;
   const { shown, rest } = foldVersions(all, view.unfolded);
-  const unfold = rest > 0 ? button({ variant: 'link', size: 'small', label: `Show ${rest} earlier ${rest === 1 ? 'version' : 'versions'}`, id: `versions-all-${item.key}`, onclick: view.onUnfold }) : null;
+  const more = `Show ${rest} earlier ${rest === 1 ? 'version' : 'versions'}`;
+  const unfold = rest > 0 ? button({ variant: 'link', size: 'small', label: more, id: `versions-all-${item.key}`, onclick: view.onUnfold }) : null;
   return h('div.versions', { role: 'group', 'aria-label': `Versions of ${item.name}` },
     h('p.versions-title', {}, h('strong', {}, 'Versions'), h('span.versions-count', {}, String(all.length)),
       h('span.versions-note', {}, 'Central Knot keeps every version until the agent is deleted.')),

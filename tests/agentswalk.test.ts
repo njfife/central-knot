@@ -34,7 +34,7 @@ const SEEDS: [number, boolean][] = [[1, false], [2, true], [3, false], [4, true]
 const STEPS = 16;
 const random = (seed: number) => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 /** An answer that means the page or History offered an action that is stale or does nothing. */
-const STALE = /nothing left to undo|no longer in Central Knot’s store|changed since the page was read|at that version already|No harness has a copy/;
+const STALE = /nothing left to undo|no longer in Central Knot’s store|changed since the page was read|at that version already|No tool has a copy/;
 const same = (first: unknown, second: unknown) => JSON.stringify(first) === JSON.stringify(second);
 const contentOf = (tool: Tool, text: string | undefined) => { const agent = text === undefined ? undefined : parseAgent(tool, 'reviewer', text); return agent ? agentHash(agent) : undefined; };
 /** Each harness's file as a content (its shared part's hash); a file that is no agent has none. */

@@ -335,6 +335,10 @@ inBox('Found copies that differ: the switch asks; the chosen copy is taken in, a
   assert.deepEqual(actions.map(action => `${action.event.kind}: ${action.label}`), ['chosen: Use claude-cli’s']);
   await actions[0].run();
   assert.match((await readOf(box, 'codex-cli'))!, /Be brief\./);
+  // The choice's entry stays open: what it offers is whatever would still change something (now nothing), and the version
+  // made current has its own Undo.
+  assert.equal((await historyOf(box)).find(event => event.kind === 'chosen')!.undoneBy, undefined);
+  assert.deepEqual((await historyActions(box)).map(action => `${action.event.kind}: ${action.label}`), ['current: Undo']);
 });
 
 // ---------- Versions ----------

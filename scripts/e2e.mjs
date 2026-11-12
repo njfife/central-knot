@@ -1022,7 +1022,7 @@ async function practiceFlow() {
   await a.click('#switch-code-reviewer');
   same('Off takes the agent out of every harness; its row stays, off, in Central Knot only, with its description',
     [reviewerNow(), await switchState('code-reviewer'), /in Central Knot only/.test(await agentRow('code-reviewer') ?? ''), /Reviews a change/.test(await agentRow('code-reviewer') ?? '')], [[null, null, null], 'false', true, true]);
-  check('the result says Central Knot keeps it', /code-reviewer is off: no harness has it\. Central Knot keeps it/.test(await a.text('main') ?? ''), (await a.text('main') ?? '').slice(0, 300));
+  check('the result says Central Knot keeps it', /code-reviewer is off: no tool has it\. Central Knot keeps it/.test(await a.text('main') ?? ''), (await a.text('main') ?? '').slice(0, 300));
   await a.click('#outcome-undo');
   same('Undo turns it on again: every harness’s file is back byte for byte', reviewerNow(), taken);
   await agentCopiesUnderTheList(a, practice);

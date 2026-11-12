@@ -8,6 +8,8 @@ import type { HarnessId } from './types.ts';
  * Makes `tools` the ones Central Knot manages in this home. Every record forgets its copies in the tools left out, so a tool
  * managed again later starts as one with copies of its own: an edit or a deletion made there meanwhile is never spread, whether
  * or not a pass ran while it was out. Run between passes, like any other write to the records.
+ * (For agents: what was applied there is forgotten, so the library wins when the tool is managed again, and a copy that
+ * differs is kept as a version first.)
  */
 export async function chooseTools(context: ShareContext, tools: HarnessId[]): Promise<{ stopped?: string }> {
   const access = await writeAccess(context);

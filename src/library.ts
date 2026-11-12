@@ -47,6 +47,8 @@
 // Nothing else is stored. Whether a harness is waiting, can't hold the item or has it another way is worked out at each
 // pass and shown as that harness's mark. A library item never waits for a choice: the copy question exists only when a
 // found item whose copies differ is taken in.
+//
+// Worked examples, one per row of the table: tests/library.test.ts. The same on real files: tests/agents.test.ts.
 import type { HarnessId } from './types.ts';
 import { toolName } from './words.ts';
 

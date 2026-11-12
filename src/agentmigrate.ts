@@ -3,9 +3,9 @@
 //
 // The rule: no harness file changes because of the migration, and every content the old record could still reach is a version.
 // - Synced, every copy the synced content: On at that content, each recorded copy `applied`.
-// - A copy the old engine left alone on purpose (one it had stopped updating, a receive-only copy with an edit of its own, a
-//   copy that differs and was never on record): that harness is `except`, with nothing applied there, so the copy is a found
-//   copy and stays as it is; its content is a version ("was in Codex").
+// - A copy the old engine left alone on purpose (one it had stopped updating, a receive-only copy edited or deleted in its
+//   harness, a copy that differs and was never on record): that harness is `except`, with nothing applied there, so the
+//   copy is a found copy and stays as it is (a deleted one stays deleted); its content is a version ("was in Codex").
 // - Not synced (turned off, or copies kept separate): Off, at the content it last synced (never synced: its latest copy), with
 //   nothing applied, so every copy is a found copy and stays.
 // - Deleted everywhere: a tombstone, at the content it had; a copy the deletion still owed a removal stays `applied`, so it
@@ -67,7 +67,8 @@ export function migrateItem(key: string, old: OldItem, kept: KeptContent[], onDi
     const here = onDisk.find(entry => entry.tool === copy.tool);
     if (copy.status === 'removing') { if (!synced) item.applied[copy.tool] = copy.hash; }
     else if (!synced) continue;
-    else if (copy.stopped || (copy.oneWay && here && here.hash !== copy.hash)) leftAlone.add(copy.tool);
+    // What the earlier engine left to its harness: a stopped copy, and a receive-only one edited or deleted there since.
+    else if (copy.stopped || (copy.oneWay && here?.hash !== copy.hash)) leftAlone.add(copy.tool);
     else item.applied[copy.tool] = copy.hash;
   }
   // A copy that differs and was never on record: the old engine held for a choice of copy and wrote nothing there.

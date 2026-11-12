@@ -48,7 +48,8 @@ export function agentSentence(event: HistoryEvent, homeTools: string[], item?: L
     case 'on':
       if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}: its file there is back.` };
       if (!event.winner) return { glyph: 'circle-check', text: `Turned on${also(': put in')}.` };
-      return { glyph: pulled ? 'git-branch' : 'plus', text: `${pulled ? `Pulled from the Git repo into ${from}` : `Found in ${from}`} and taken into Central Knot${also('; put in')}.` };
+      return pulled ? { glyph: 'git-branch', text: `Pulled from the Git repo into ${from} and taken into Central Knot${also('; put in')}.` }
+        : { glyph: 'plus', text: `Found in ${from} and taken into Central Knot${also('; put in')}.` };
     case 'off':
       if (event.only) return { glyph: 'circle-off', text: `Kept out of ${where}: its copy there was removed. ${keeps}` };
       if (!event.winner) return { glyph: 'circle-off', text: `Turned off${also(': removed from')}. ${keeps}` };
@@ -105,9 +106,9 @@ const isVersion = (item: LibraryItem, hash: string | undefined): hash is string 
  */
 export function agentAction(event: HistoryEvent, item: LibraryItem | undefined, version?: string): EntryAction | undefined {
   if (!item || event.undoneBy) return undefined;
-  const name = item.name, now = asItIs(item), everywhere = item.on ? ', in every harness it is on in' : '';
+  const name = item.name, now = asItIs(item), everywhere = item.on ? ', in every tool it is on in' : '';
   if (event.kind === 'deleted') {
-    const help = `Put ${name} back in Central Knot as it was${item.on ? ', and in every harness it was on in' : ''}`;
+    const help = `Put ${name} back in Central Knot as it was${item.on ? ', and in every tool it was on in' : ''}`;
     return item.deleted ? { label: 'Restore', help, change: { ...now, deleted: false } } : undefined;
   }
   if (item.deleted) return undefined;
@@ -126,8 +127,8 @@ function switchAction(turnOn: boolean, only: HarnessId | undefined, item: Librar
   const name = item.name, now = asItIs(item);
   if (!only) {
     if (item.on === turnOn) return undefined;
-    return turnOn ? { label: 'Turn on', help: `Put ${name} back in every harness it is not kept out of, each file as it was`, change: { ...now, managed: true } }
-      : { label: 'Turn off', help: `Take ${name} out of every harness; Central Knot keeps it`, change: { ...now, managed: false } };
+    return turnOn ? { label: 'Turn on', help: `Put ${name} back in every tool it is not kept out of, each file as it was`, change: { ...now, managed: true } }
+      : { label: 'Turn off', help: `Take ${name} out of every tool; Central Knot keeps it`, change: { ...now, managed: false } };
   }
   const there = toolName(only), out = item.except.includes(only);
   if (!item.on || out !== turnOn) return undefined;

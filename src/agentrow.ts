@@ -62,13 +62,13 @@ export function harnessLine(row: AgentRow, item: LibraryItem | undefined, tool: 
   switch (harnessIs(row, item, tool)) {
     case 'current': return 'Has the current version.';
     case 'gets-it': return has ? `Has another copy. It gets the current version when sync runs; ${KEPT_FIRST}.` : 'Gets it when sync runs next.';
-    case 'edited': return `Edited in ${where}. It becomes the current version when sync runs, and reaches the other harnesses.`;
+    case 'edited': return `Edited in ${where}. It becomes the current version when sync runs, and reaches the other tools.`;
     case 'deleted': return `Its copy was deleted in ${where}. When sync runs, the agent turns off everywhere; Central Knot keeps it.`;
     case 'leaving': return 'Its copy is removed when sync runs. Central Knot keeps it.';
     case 'own-copy':
       if (!held) return 'Has it.';
-      return `Has a copy Central Knot didn’t put there. It is left alone while ${held.on ? 'this harness is kept out' : 'the agent is off'}; ${KEPT_FIRST}.`;
-    case 'kept-out': return 'Kept out of this harness. Central Knot keeps its file for when you turn it on here.';
+      return `Has a copy Central Knot didn’t put there. It is left alone while ${held.on ? 'this tool is kept out' : 'the agent is off'}; ${KEPT_FIRST}.`;
+    case 'kept-out': return 'Kept out of this tool. Central Knot keeps its file for when you turn it on here.';
     case 'none': return held ? 'No copy while it is off.' : 'No copy. Turning it on adds it here.';
     case 'cannot': return row.cannot![tool]!;
     case 'unseen': return row.unseen![tool]!;
@@ -121,8 +121,9 @@ const harnessesWhere = (row: AgentRow, item: LibraryItem | undefined, tools: rea
 /** The tag after an agent's name when it isn't plainly on: where it stands, and (its tooltip) what that means. */
 export function placeTag(item: LibraryItem | undefined): { text: string; title: string } | undefined {
   const place = placeOf(item);
-  if (place === 'off') return { text: 'in Central Knot only', title: 'Central Knot keeps this agent and its versions. No harness has it until you turn it on.' };
-  if (place === 'found') return { text: 'not in Central Knot', title: 'A harness has this agent; Central Knot doesn’t yet. Turn it on to take it in and apply it to every harness.' };
+  if (place === 'off') return { text: 'in Central Knot only', title: 'Central Knot keeps this agent and its versions. No tool has it until you turn it on.' };
+  const found = 'A tool has this agent; Central Knot doesn’t yet. Turn it on to take it in and apply it to every tool.';
+  if (place === 'found') return { text: 'not in Central Knot', title: found };
   return undefined;
 }
 
@@ -132,10 +133,10 @@ export function statusLine(row: AgentRow, item: LibraryItem | undefined, tools: 
   const own = where('own-copy'), place = placeOf(item);
   if (place === 'found') {
     const differ = needsChoice(row, item, tools) ? ', with different copies' : '';
-    return `Not in Central Knot · in ${named(own, tools)}${differ}. Turn it on to take it in and put it in every harness.`;
+    return `Not in Central Knot · in ${named(own, tools)}${differ}. Turn it on to take it in and put it in every tool.`;
   }
   const ownSaid = own.length ? ` ${sentence(named(own, tools))} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there.` : '';
-  if (place === 'off') return `Off · in Central Knot only. Turn it on to put it in every harness.${ownSaid}`;
+  if (place === 'off') return `Off · in Central Knot only. Turn it on to put it in every tool.${ownSaid}`;
   const gets = where('gets-it'), out = where('kept-out', 'leaving');
   const parts = [`On in ${named(where('current', 'edited'), tools)}`,
     gets.length ? `${named(gets, tools)} ${gets.length === 1 ? 'gets' : 'get'} it when sync runs` : '',
@@ -149,25 +150,27 @@ export function statusLine(row: AgentRow, item: LibraryItem | undefined, tools: 
  */
 export function switchLabel(row: AgentRow, item: LibraryItem | undefined, tools: readonly string[], question?: 'open' | 'closed'): string {
   const name = row.name ?? row.key, place = placeOf(item);
-  if (place === 'on') return `${name}: on. Click to take it out of every harness; Central Knot keeps it.`;
+  if (place === 'on') return `${name}: on. Click to take it out of every tool; Central Knot keeps it.`;
   const own = harnessesWhere(row, item, tools, 'own-copy');
   if (place === 'off') {
     const kept = own.length === 1 ? 'has a copy of its own, which is' : 'have copies of their own, which are';
-    return `${name}: off, in Central Knot only. Click to put it in every harness${own.length ? `; ${named(own, tools)} ${kept} kept as versions first` : ''}.`;
+    return `${name}: off, in Central Knot only. Click to put it in every tool${own.length ? `; ${named(own, tools)} ${kept} kept as versions first` : ''}.`;
   }
-  if (question) return `${name}: not in Central Knot, and its copies differ. Click to ${question === 'open' ? 'close the question' : 'choose which copy every harness uses'}.`;
-  return `${name}: in ${named(own, tools)}, not in Central Knot. Click to take it in and put it in every harness.`;
+  const ask = question === 'open' ? 'close the question' : 'choose which copy every tool uses';
+  if (question) return `${name}: not in Central Knot, and its copies differ. Click to ${ask}.`;
+  return `${name}: in ${named(own, tools)}, not in Central Knot. Click to take it in and put it in every tool.`;
 }
 
 /** What the result says after each click. `notIn`: the harnesses where the click's write or removal didn't go through. */
 export const said = {
   off(name: string, notIn: readonly string[], tools: readonly string[]): string {
-    const left = notIn.length ? `, but still in ${named(notIn, tools)}` : ': no harness has it';
+    const left = notIn.length ? `, but still in ${named(notIn, tools)}` : ': no tool has it';
     return `${name} is off${left}. Central Knot keeps it, and turning it on puts each file back as it was.`;
   },
   /** A found agent taken in; `use`: the harness whose copy was chosen where they differed. */
   takenIn(name: string, on: readonly string[], tools: readonly string[], use?: string): string {
-    return `${name} is in Central Knot now${use ? `, with ${toolName(use)}’s copy` : ''}, and on in ${named(on, tools)}.${use ? ' The other copies are kept as its versions.' : ''}`;
+    const chosen = use ? `, with ${toolName(use)}’s copy` : '', others = use ? ' The other copies are kept as its versions.' : '';
+    return `${name} is in Central Knot now${chosen}, and on in ${named(on, tools)}.${others}`;
   },
   /** One harness's switch: kept out (`out`), or let in again. */
   inHarness(name: string, tool: string, out: boolean, failed: boolean): string {
@@ -179,7 +182,7 @@ export const said = {
   madeCurrent(name: string, version: Version, on: readonly string[] | undefined, tools: readonly string[]): string {
     return `${name}: the version ${sourceWords(version.from)}, ${dayAndTime(version.at)}, is current again${on ? `, in ${named(on, tools)}` : ''}.`;
   },
-  deleted: (name: string, wasOn: boolean) => `${name} is deleted from Central Knot${wasOn ? ', and out of every harness' : ''}. History can restore it.`,
+  deleted: (name: string, wasOn: boolean) => `${name} is deleted from Central Knot${wasOn ? ', and out of every tool' : ''}. History can restore it.`,
 };
 
 /**
@@ -189,8 +192,14 @@ export const said = {
  */
 export function noticeWords(notice: Pick<SyncNotice, 'kind' | 'item' | 'winner' | 'losers'>): { text: string; action: 'undo' | 'turn-on'; help: string } {
   const who = toolName(notice.winner), others = andList(notice.losers.map(toolName)), name = notice.item;
-  const earlier = `Make the version from before ${who}’s edit current again, in every harness ${name} is on in`;
-  if (notice.kind === 'deleted') return { text: `${name} was deleted in ${who}, so it is off everywhere. Central Knot keeps it.`, action: 'turn-on', help: `Put ${name} back in every harness, each file as it was` };
-  if (notice.kind === 'conflict') return { text: `${name}: ${who}’s edit is the latest, so it is the current version. ${others}’s is kept as a version.`, action: 'undo', help: earlier };
+  const earlier = `Make the version from before ${who}’s edit current again, in every tool ${name} is on in`;
+  if (notice.kind === 'deleted') {
+    const text = `${name} was deleted in ${who}, so it is off everywhere. Central Knot keeps it.`;
+    return { text, action: 'turn-on', help: `Put ${name} back in every tool, each file as it was` };
+  }
+  if (notice.kind === 'conflict') {
+    const text = `${name}: ${who}’s edit is the latest, so it is the current version. ${others}’s is kept as a version.`;
+    return { text, action: 'undo', help: earlier };
+  }
   return { text: `${name} was edited in ${who}; that is its current version now${others ? `, in ${others} too` : ''}.`, action: 'undo', help: earlier };
 }

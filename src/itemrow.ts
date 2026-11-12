@@ -1,4 +1,5 @@
 // An item (a skill, an MCP server or an agent) as the item pages draw it, and what each tool's mark says about it. Pure: no DOM.
+// A skill's and an MCP server's marks are here (cellOf); an agent's follow Central Knot's library and are in agentrow.ts.
 import { comparedTools, copiesDiffer } from './syncrules.ts';
 import type { GoneItem, Outside, SwitchProblem, ThroughPlugin } from './types.ts';
 export { comparedTools, copiesDiffer };

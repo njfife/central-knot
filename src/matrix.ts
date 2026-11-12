@@ -1002,9 +1002,9 @@ function helpBand(): HTMLElement | null {
   if (!list.length || readFlag(key) || state.skillsView === 'files') return null;
   const one = kindNouns[kind].a;
   const first = kind === 'agents'
-    ? 'Turn an agent on and every harness has it, kept the same. Turn it off and no harness has it: Central Knot keeps it, with its versions, and puts each file back when you turn it on.'
+    ? 'Turn an agent on and every tool has it, kept the same. Turn it off and no tool has it: Central Knot keeps it, with its versions, and puts each file back when you turn it on.'
     : `Turn ${one} on and every tool has it, kept the same; turn it off and no tool ${kind === 'mcp' ? 'starts' : 'loads'} it. Each click applies at once, with Undo.`;
-  const second = kind === 'agents' ? 'A switch halfway is an agent a harness has that Central Knot doesn’t yet: turning it on takes it in. Open an agent for each harness’s own switch and its versions.'
+  const second = kind === 'agents' ? 'A switch halfway is an agent a tool has that Central Knot doesn’t yet: turning it on takes it in. Open an agent for each tool’s own switch and its versions.'
     : `A switch halfway means not synced yet: each tool keeps its own copy. Open ${one} for each tool’s own switch.`;
   return h('div.band.band-help', { role: 'note' }, icon('info', 14, 'tone-muted'),
     h('span.band-text.band-lines', {}, h('span', {}, first), h('span.tone-muted', {}, second)),
@@ -1752,8 +1752,8 @@ function section(role: 'on' | 'not-synced' | 'off' | 'away', list: ItemRow[]) {
   if (!list.length) return null;
   const label = role === 'away' ? `Not in ${names[focus!]}` : kind === 'agents' && role === 'not-synced' ? 'Found' : placeNames[role === 'on' ? 0 : role === 'not-synced' ? 1 : 2];
   const agents = kind === 'agents';
-  const note = role === 'not-synced' ? (agents ? 'a harness has these; Central Knot doesn’t yet' : 'each tool keeps its own copy')
-    : role === 'off' ? (agents ? 'in Central Knot only; no harness has these' : `no tool ${uses()}s these`) : role === 'away' ? 'only other tools have these' : null;
+  const note = role === 'not-synced' ? (agents ? 'a tool has these; Central Knot doesn’t yet' : 'each tool keeps its own copy')
+    : role === 'off' ? (agents ? 'in Central Knot only; no tool has these' : `no tool ${uses()}s these`) : role === 'away' ? 'only other tools have these' : null;
   return h('div', { role: 'rowgroup' },
     h(`div.ov-section${role === 'off' || role === 'away' ? '.ov-section-away' : ''}`, { role: 'row', 'data-section': role },
       h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(list.length)), note ? sectionNote(note) : null)),
@@ -1855,7 +1855,7 @@ function agentDelete(skill: ItemRow) {
   const now = smallAction('Delete it now', `delete-confirm-${skill.key}`, run, '.text-danger', !canWrite());
   now.title = `Delete ${name} from Central Knot now. History can restore it.`;
   return h('span.delete-armed', {}, smallAction('Cancel', `delete-cancel-${skill.key}`, disarm), now,
-    h('span.delete-armed-note', { id: `delete-note-${skill.key}` }, 'It leaves every harness and this page. History keeps it, with its versions, and can restore it.'));
+    h('span.delete-armed-note', { id: `delete-note-${skill.key}` }, 'It leaves every tool and this page. History keeps it, with its versions, and can restore it.'));
 }
 
 /** Versions read in an opened row, by home, agent and version, so a version read once shows at once the next time. */
@@ -1957,7 +1957,7 @@ function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
       files ? h('div.details-actions', {}, files) : null),
     // Agents: what is kept the same, and what stays each harness's own (AGT-01).
     kind === 'agents' && toolList().length > 1 ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'),
-      'Central Knot keeps the name, description and prompt the same in every harness. Each harness’s other settings stay in its own file, and each decides how to run the agent.') : null,
+      'Central Knot keeps the name, description and prompt the same in every tool. Each tool’s other settings stay in its own file, and each decides how to run the agent.') : null,
     // A copy outside Central Knot's own (a link, the shared copy) is said in the note above, and its path under Where each copy is.
     (skill.extra ?? []).some(extra => !extra.outside) ? h('div.details-extra', {}, (skill.extra ?? []).filter(extra => !extra.outside).map(extra => h('p.details-extra-line', {}, icon(extra.same ? 'check' : 'diff', 12, extra.same ? 'tone-muted' : 'tone-warning'),
       `${names[extra.tool]} also reads ${extra.same ? 'the same copy' : 'a different copy'} at `, h('span.details-path', { title: extra.directory }, shownPath(extra.directory)),

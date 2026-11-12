@@ -369,7 +369,7 @@ async function takeIn(pass: Pass, change: Change, tombstone: LibraryItem | undef
   const slot = pass.disk.byKey.get(change.key) ?? {};
   const seen = (tool: AgentTool) => slot[tool] && !change.off.includes(tool) && !unseenIn(pass.disk, tool, change.key);
   const found = pass.managed.flatMap(tool => (seen(tool) ? [slot[tool]!] : []));
-  if (!found.length) return refuse('No harness has a copy of it to take in any more.');
+  if (!found.length) return refuse('No tool has a copy of it to take in any more.');
   const chosen = change.use && change.use !== 'separate' ? slot[change.use as AgentTool] : undefined;
   const changedSince = change.use && (!chosen || (change.useHash && chosen.hash !== change.useHash));
   if (changedSince) return refuse('The copy you chose changed since you chose it. Nothing was changed; choose again.', { chooseAgain: true });
@@ -402,7 +402,8 @@ async function makeCurrent(pass: Pass, item: LibraryItem, version: string, refus
 
 /**
  * A History entry's action on an agent. historyactions.ts says which click it is, from the entry and the agent as it is now;
- * that click runs like any other, and the entry is marked done by the entry the click makes.
+ * that click runs like any other, and the entry is marked done by the entry the click makes. `version`: one of the entry's
+ * version choices instead of its own action.
  */
 export async function restoreAgent(context: ShareContext, tools: HarnessId[], eventId: string, version?: string): Promise<McpResult> {
   const past = (await readHistory(context)).find(entry => entry.id === eventId);
@@ -412,7 +413,8 @@ export async function restoreAgent(context: ShareContext, tools: HarnessId[], ev
   const action = past && agentAction(past, library.items[key], version);
   if (!action) return { stopped: 'That change has nothing left to undo: the agent is as that would leave it.', results: [], writes: 0 };
   const done = await applyAgents(context, tools, [action.change], { only: new Set([key]) });
-  if (!done.made?.length) return done;
+  // One of an entry's version choices ("Use Codex’s") leaves the entry open: its other choices still stand.
+  if (!done.made?.length || version) return done;
   const history = await readHistory(context);
   const entry = history.find(event => event.id === eventId);
   if (entry) { entry.undoneBy = done.made[0]; await replaceHistory(context, history); }
@@ -471,14 +473,18 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
   const live = Object.values(library.items).filter(item => !item.deleted);
   const keys = [...new Set([...disk.byKey.keys(), ...live.map(item => item.key)])].sort((first, second) => first.localeCompare(second));
   const agents: SkillFacts[] = [];
-  for (const key of keys) agents.push(await rowFacts(context, managed, disk, through, key, live.find(item => item.key === key)));
+  for (const key of keys) agents.push(await rowFacts(context, { managed, disk, through }, key, live.find(item => item.key === key)));
   const gate = problem ? { state: 'stopped' as const, reason: problem } : await syncGate(context);
   const problems = problem ? [problem, ...disk.problems] : disk.problems;
   return { tools: managed, servers: agents, library: library.items, claudePending: [], access: await writeAccess(context), gate, problems, notices };
 }
 
+/** What a view read of the managed harnesses, once for every row. */
+interface Seen { managed: AgentTool[]; disk: Disk; through: ThroughPlugins }
+
 /** One agent's row: what each managed harness holds, and for a harness without a copy, why it can't be given one. */
-async function rowFacts(context: ShareContext, managed: AgentTool[], disk: Disk, through: ThroughPlugins, key: string, item: LibraryItem | undefined): Promise<SkillFacts> {
+async function rowFacts(context: ShareContext, seen: Seen, key: string, item: LibraryItem | undefined): Promise<SkillFacts> {
+  const { managed, disk, through } = seen;
   const slot = disk.byKey.get(key) ?? {};
   const entries = managed.flatMap(tool => (slot[tool] ? [slot[tool]!] : []));
   const name = item?.name ?? entries[0].name;
@@ -486,7 +492,8 @@ async function rowFacts(context: ShareContext, managed: AgentTool[], disk: Disk,
   const copies: Partial<Record<HarnessId, ToolCopy>> = {};
   for (const { tool, hash, file, agent, at, name: folder } of entries) {
     const lines = agent.prompt.split('\n').length, ownFields = Object.keys(agent.fields);
-    copies[tool] = { hash, directory: file, rootLabel: nameOf(tool), lines, modified: iso(at), summary: agent.description, prompt: agent.prompt, writable: true, folder, ownFields };
+    const { description: summary, prompt } = agent;
+    copies[tool] = { hash, directory: file, rootLabel: nameOf(tool), lines, modified: iso(at), summary, prompt, writable: true, folder, ownFields };
   }
   const cannot: SkillFacts['cannot'] = {}, plugin: NonNullable<SkillFacts['plugin']> = {}, unseen: NonNullable<SkillFacts['unseen']> = {};
   for (const tool of managed) {

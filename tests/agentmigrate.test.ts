@@ -95,6 +95,14 @@ const fixtures: Fixture[] = [
       await oldRecord(box, { ...synced, copies: [copy(box, 'claude-cli', claudeAgent(undefined, claudeOwn)), copy(box, 'copilot-cli', copilotAgent(), { oneWay: true }), copy(box, 'codex-cli', codexAgent(), { oneWay: true })] });
     },
     expect: { place: 'on', except: ['codex-cli'], applied: ['claude-cli', 'copilot-cli'], versions: ['Be brief. (from before Central Knot kept versions) *', 'Be exact. (was in Codex)'] } },
+  { name: 'synced, with a receive-only copy deleted there that no pass had seen yet',
+    async build(box) {
+      await write(box, { 'claude-cli': claudeAgent(undefined, claudeOwn), 'copilot-cli': copilotAgent() });
+      await oldKept(box, 'claude-cli', claudeAgent(undefined, claudeOwn));
+      await oldRecord(box, { ...synced, copies: [copy(box, 'claude-cli', claudeAgent(undefined, claudeOwn)), copy(box, 'copilot-cli', copilotAgent(), { oneWay: true }), copy(box, 'codex-cli', codexAgent(), { oneWay: true })] });
+    },
+    // The earlier engine kept such a deletion to its own harness; it must not turn the agent Off everywhere now.
+    expect: { place: 'on', except: ['codex-cli'], applied: ['claude-cli', 'copilot-cli'], versions: ['Be brief. (from before Central Knot kept versions) *'] } },
   { name: 'synced, with a copy that differs and was never on record (it waited for a choice of copy)',
     async build(box) {
       await write(box, { 'claude-cli': claudeAgent(), 'copilot-cli': copilotAgent(), 'codex-cli': codexAgent('You review code.\nBe quick.\n') });
