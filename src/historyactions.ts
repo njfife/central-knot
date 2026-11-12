@@ -72,16 +72,19 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
   // An Undo that gave tools their own copies back instead of removing what was there (types.ts HistoryEvent gaveBack).
   const gave = (event.gaveBack ?? []).map(toolName);
   const gaveSaid = gave.length ? ` ${andList(gave)} ${gave.length === 1 ? 'has its own copy' : 'have their own copies'} back, as before.` : '';
+  // A click that wrote over a copy a tool had of its own (tookFrom, and written: in `losers`), which is kept as a version.
+  const over = (event.tookFrom ?? []).filter(copy => event.losers.some(loser => loser.tool === copy.tool)).map(copy => toolName(copy.tool));
+  const overSaid = over.length ? ` ${andList(over)}’s own ${words.copy}${over.length === 1 ? ' was' : 's were'} written over and kept as a version.` : '';
   switch (event.kind) {
     case 'on': {
-      if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}: its ${words.copy} there is back.${gaveSaid}` };
+      if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}: its ${words.copy} there is back.${overSaid}${gaveSaid}` };
       const said = {
         switch: { glyph: 'circle-check', text: `Turned on${also(': put in')}.` },
         found: { glyph: 'plus', text: `Found in ${from} and taken into Central Knot${also('; put in')}.` },
         pulled: { glyph: 'git-branch', text: `Pulled from the Git repo into Central Knot${also('; put in')}.` },
       } as const;
       const { glyph, text } = said[event.cause === 'found' || event.cause === 'pulled' ? event.cause : 'switch'];
-      return { glyph, text: `${text}${gaveSaid}` };
+      return { glyph, text: `${text}${overSaid}${gaveSaid}` };
     }
     case 'off':
       if (event.only && event.gaveBack?.includes(event.only)) return { glyph: 'circle-off', text: `Kept out of ${where}: ${where} has its own copy back, as before. ${keeps}` };
@@ -124,7 +127,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       const [copy] = event.losers;
       if (!copy) return undefined;
       const what = copy.linkTo !== undefined ? `the link in ${toolName(copy.tool)}’s skills folder (to ${copy.linkTo})` : `the copy at ${copy.path}`;
-      return { glyph: 'arrow-right-left', text: `Took over ${what}: ${toolName(copy.tool)} has Central Knot’s copy now, and that one is kept as a version.` };
+      return { glyph: 'arrow-right-left', text: `Took over ${what}: ${toolName(copy.tool)} has Central Knot’s copy now, and what that copy held is a version. This has no Undo.` };
     }
     case 'kept-edit': {
       // One with a `winner` is from before the library (an edit kept over a deletion): the general sentence says it.
@@ -213,10 +216,12 @@ function switchAction(turnOn: boolean, only: HarnessId | undefined, item: Librar
 
 /** The copies an entry says gave way, each of which is a version that can be made current now: one "Use <harness>’s" each. */
 export function versionChoices(event: HistoryEvent, item: LibraryItem | undefined): { tool: HarnessId; hash: string }[] {
-  if (!item || item.deleted || event.undoneBy || !['conflict', 'chosen', 'kept-edit'].includes(event.kind)) return [];
+  // An On entry offers the copies of a tool's own its click wrote over (each kept as a version), as the others offer theirs.
+  if (!item || item.deleted || event.undoneBy || !['conflict', 'chosen', 'kept-edit', 'on'].includes(event.kind)) return [];
   const seen = new Set<string>([event.previous ?? '', event.winner?.hash ?? '']);
   const choices: { tool: HarnessId; hash: string }[] = [];
-  for (const { tool, hash } of event.losers) {
+  const gaveWay = event.kind === 'on' ? event.losers.filter(loser => event.tookFrom?.some(copy => copy.tool === loser.tool)) : event.losers;
+  for (const { tool, hash } of gaveWay) {
     if (!isVersion(item, hash) || seen.has(hash)) continue;
     seen.add(hash);
     choices.push({ tool, hash });

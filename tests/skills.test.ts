@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { chmod, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readHistory } from '../src/history.ts';
+import { librarySentence } from '../src/historyactions.ts';
 import { canTakeIn, harnessIs, libraryWords, placeOf, sentences, statusLine } from '../src/libraryrow.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
 import { clearSwitch, skillChange, skillsView, takeOver } from '../src/skills.ts';
@@ -14,7 +15,7 @@ import { pruneDeleted } from '../src/skillstore.ts';
 import { isDisabled, readSwitchFile, setDisabled } from '../src/skillswitch.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import type { HarnessId } from '../src/types.ts';
-import { bytes, choose, everywhere, folderOf, historyOf, inTool, itemOf, makeCurrent, pass, put, remove, restore, roots, sandbox, seen, send, skillText, tools, turnOff, turnOn, type Tool } from './skillclicks.ts';
+import { bytes, choose, everywhere, folderOf, historyActions, historyOf, inTool, itemOf, makeCurrent, pass, put, remove, restore, roots, sandbox, seen, send, skillText, tools, turnOff, turnOn, type Tool } from './skillclicks.ts';
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 10, 12, 9, minutes));
 /** Sets a whole folder's time (every file and folder in it), as a save in an editor would leave it. */
@@ -306,6 +307,18 @@ test('A name a tool keeps for itself (Claude Code’s “synced”) is never giv
   } finally { await box.cleanup(); }
 });
 
+test('A found skill only Codex has: OpenCode’s line says what is true before it is turned on, not that it reads a copy Claude Code doesn’t have', async () => {
+  const box = await sandbox(['claude-cli', 'codex-cli', 'opencode-cli']);
+  try {
+    await put(box, 'codex-cli');
+    const before = (await seen(box)).fact!.anotherWay?.['opencode-cli'] ?? '';
+    assert.doesNotMatch(before, /reads Claude Code’s copy/);
+    assert.match(before, /^OpenCode reads Claude Code’s skills folder, so it gets the skill from there once it is on in Claude Code\.$/);
+    await turnOn(box);
+    assert.match((await seen(box)).fact!.anotherWay?.['opencode-cli'] ?? '', /^OpenCode reads Claude Code’s copy, in Claude Code’s skills folder\./);
+  } finally { await box.cleanup(); }
+});
+
 test('A copy in ~/.agents/skills is not Central Knot’s: the tools that read it have the skill another way, an Off row says so, and Take over makes Central Knot’s copy theirs', async () => {
   const box = await sandbox();
   try {
@@ -336,6 +349,74 @@ test('A copy in ~/.agents/skills is not Central Knot’s: the tools that read it
     assert.ok(versions.some(version => version.from.how === 'found'), 'what the shared copy held is a version');
     assert.equal((await historyOf(box)).at(-1)?.kind, 'took-over');
   } finally { await box.cleanup(); }
+});
+
+test('Turned on over a different copy made by hand in one tool: History says that copy was written over and kept, and offers it', async () => {
+  const box = await sandbox();
+  try {
+    await put(box, 'claude-cli');
+    await turnOn(box);
+    await turnOff(box);
+    await put(box, 'codex-cli', { 'SKILL.md': skillText('Codex’s own, by hand.') });
+    await pass(box);
+    await turnOn(box);
+    const on = (await historyOf(box)).at(-1)!;
+    const { item } = await seen(box);
+    assert.equal(librarySentence(on, libraryWords.skills, tools, item)?.text, 'Turned on: put in all 3 tools. Codex’s own folder was written over and kept as a version.');
+    const use = (await historyActions(box)).find(action => action.event.id === on.id && action.label === 'Use codex-cli’s');
+    assert.ok(use, 'History offers that version');
+    await use!.run();
+    for (const tool of tools) assert.equal(await readFile(join(folderOf(box, tool), 'SKILL.md'), 'utf8'), skillText('Codex’s own, by hand.'), tool);
+  } finally { await box.cleanup(); }
+});
+
+test('A copy in ~/.agents/skills edited after it was taken in: the tools that read it say it differs, and offer Take over', async () => {
+  const box = await sandbox();
+  try {
+    const shared = join(box.home, '.agents/skills/notes');
+    await mkdir(shared, { recursive: true });
+    await writeFile(join(shared, 'SKILL.md'), skillText('In the shared folder.'));
+    await turnOn(box);
+    assert.doesNotMatch((await seen(box)).fact!.anotherWay?.['codex-cli'] ?? '', /differs/);
+    await writeFile(join(shared, 'SKILL.md'), skillText('Edited in the shared folder.'));
+    assert.equal((await pass(box)).writes, 0, 'nothing of Central Knot’s goes there');
+    const { fact } = await seen(box);
+    for (const tool of ['copilot-cli', 'codex-cli'] as const) {
+      assert.match(fact!.anotherWay?.[tool] ?? '', /That copy differs from the current version, and isn’t one of its versions\./, tool);
+      assert.equal(fact!.takeOver?.[tool]?.kind, 'shared', tool);
+    }
+  } finally { await box.cleanup(); }
+});
+
+test('Take over carries a tool’s own switch: a skill Codex had off where it read ~/.agents/skills stays off in Codex’s new copy', async () => {
+  const box = await sandbox();
+  try {
+    const shared = join(box.home, '.agents/skills/notes');
+    await mkdir(shared, { recursive: true });
+    await writeFile(join(shared, 'SKILL.md'), skillText('In the shared folder.'));
+    await turnOn(box);
+    // Codex's switch goes by the SKILL.md's path (a profile's hold, or the person's).
+    await setDisabled(box.context, 'codex-cli', { folder: 'notes', name: 'notes', skillFile: join(shared, 'SKILL.md') }, true);
+    assert.equal((await takeOver(box.context, box.tools, 'notes', 'codex-cli')).stopped, undefined);
+    const codex = await readSwitchFile(box.context, 'codex-cli');
+    assert.equal(isDisabled(box.context, codex, { folder: 'notes', name: 'notes', skillFile: join(folderOf(box, 'codex-cli'), 'SKILL.md') }), true, 'still off in Codex');
+    assert.equal((await seen(box)).fact!.loads?.['codex-cli']?.off, true);
+  } finally { await box.cleanup(); }
+});
+
+test('A take-over that couldn’t happen leaves no History entry saying it did', { skip: process.getuid?.() === 0 }, async () => {
+  const box = await sandbox();
+  const sharedRoot = join(box.home, '.agents/skills');
+  try {
+    await mkdir(join(sharedRoot, 'notes'), { recursive: true });
+    await writeFile(join(sharedRoot, 'notes/SKILL.md'), skillText('In the shared folder.'));
+    await turnOn(box);
+    await chmod(sharedRoot, 0o555);
+    const done = await takeOver(box.context, box.tools, 'notes', 'codex-cli');
+    assert.ok(done.stopped, 'the shared copy could not be removed');
+    assert.ok(await bytes(join(sharedRoot, 'notes')), 'and it is still there');
+    assert.equal((await historyOf(box)).filter(event => event.kind === 'took-over').length, 0);
+  } finally { await chmod(sharedRoot, 0o755).catch(() => undefined); await box.cleanup(); }
 });
 
 test('A link to a copy the tool also reads in ~/.agents/skills (as the skills installer leaves them) is said and taken over as that copy: the link goes with it', async () => {
