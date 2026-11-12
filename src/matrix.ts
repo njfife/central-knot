@@ -839,7 +839,9 @@ function compareChoices(skill: ItemRow, inFiles = false) {
     : null;
   return h('div.compare-block', {},
     h('p.compare-title', {}, icon('diff', 14, 'tone-warning'), h('span', {}, 'Which copy of ', h('strong.item-name', {}, skill.name ?? skill.key), ` should ${compared.length + receiving.length > 2 ? 'every tool' : 'both tools'} use?`)),
-    h('p.compare-note', {}, `Choosing applies at once, with Undo, and turns it on everywhere. Replaced copies are kept in History.${kind === 'mcp' && receiving.includes('claude-cli') ? ` ${CLAUDE_LATER}` : ''}`),
+    // An agent's choice takes it into Central Knot: the copies not chosen become its versions, each of which can be made current later.
+    h('p.compare-note', {}, kind === 'agents' ? 'Choosing applies at once: the agent is taken into Central Knot with that copy, and turned on everywhere. The other copies are kept as its versions.'
+      : `Choosing applies at once, with Undo, and turns it on everywhere. Replaced copies are kept in History.${kind === 'mcp' && receiving.includes('claude-cli') ? ` ${CLAUDE_LATER}` : ''}`),
     h('div.compare-choices', {}, groups.map(choice)),
     read, prompts);
 }
