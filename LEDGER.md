@@ -1294,6 +1294,13 @@ This replaces step 1's rule (a harness managed again forgot what was applied the
 - End to end (`scripts/e2e.mjs`, the dev build on Linux): 698 passed, 0 failed. New: a tool uninstalled and back (its folder taken away and put back) with an Off agent edited there meanwhile, read on the Agents page; with step 1's rule in its place it fails (the edit became the current version, and On spread it).
 - The Mac run is named in the pull request.
 
+**Last pass** (five readers: two code reviews, a break-it pass, a small model answering from the repository alone, and a mid-sized model that added a toy second kind without touching `src/`; what changed is said in place above).
+- A file a person made under a deleted agent's name, in a tool that comes back, is a found agent, left alone (it was removed with no word).
+- A tool that comes back before its agents folder is there stays unsettled until the folder appears, so the same rule holds.
+- A copy that gives way when its tool comes back has its History line, and the page says so before the pass.
+- `librarypass.ts`'s header has the whole recipe for a new kind and a glossary; `unseen` is one word for a copy that can't be seen; a kind's `Disk.held` gives only its own reasons; `guardFolders`' comment is one line per branch.
+- Checks: `npm test`, 753 tests. Each rule this pass added switched off, 9 in all: each failed a named test. The walk on one fresh range (`CK_SEED` 250000, as two halves of 150 seeds: 616 walks), clean. End to end (the dev build on Linux): 698 passed, 0 failed. The toy second kind's fixture type-checks and passes against this head. The Mac run is named in the pull request.
+
 **Follow-ups** (from step 1's list; done here: lifting `logItem` and the clicks with the pass skeleton and the guards; "has it another way" and a time for kinds whose copies have none; one durable rule for a tool managed again; an Off agent whose tool comes back with a different hand-made file of its name).
 - A crash right after History is told and before the record is saved leaves the entry, and the retried pass writes it again: two identical entries with two Undos.
 - A Restore's own Undo ("Delete again" on the newest Restore).
