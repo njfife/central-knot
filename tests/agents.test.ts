@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { agentText, readAgents } from '../src/agentfiles.ts';
 import { agentVersion, agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
 import { convertAgentToSkill } from '../src/agentskill.ts';
-import { harnessIs, placeOf } from '../src/agentrow.ts';
+import { harnessIs, harnessLine, placeOf } from '../src/agentrow.ts';
 import { listed, sourceWords } from '../src/library.ts';
 import { readHistory } from '../src/manage.ts';
 import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
@@ -344,6 +344,21 @@ inBox('A harness that can’t hold the agent (its name is no file name there) is
   assert.deepEqual([fact.managed, fact.cannot], [true, { 'copilot-cli': why('Copilot CLI'), 'codex-cli': why('Codex') }]);
   assert.equal((await pass(box)).writes, 0);
 });
+
+inBox('A tool whose agents folder can’t be written says why on its line, pass after pass, instead of promising the agent; once it can be, it gets it', async box => {
+  await on(box);
+  const folder = join(box.home, '.copilot/agents');
+  await chmod(folder, 0o555);
+  try {
+    await edit(box, 'claude-cli', 'Be exact.');
+    for (let count = 0; count < 2; count++) await pass(box);
+    const { row, item } = await seen(box);
+    assert.equal(harnessIs(row, item, 'copilot-cli'), 'cannot');
+    assert.match(harnessLine(row, item, 'copilot-cli', 'Copilot CLI'), /^Copilot CLI’s agents folder can’t be written.* or keep the agent out of Copilot CLI\.$/);
+  } finally { await chmod(folder, 0o755); }
+  assert.equal((await pass(box)).writes, 1);
+  assert.match((await readOf(box, 'copilot-cli'))!, /Be exact\./);
+}, { skip: process.getuid?.() === 0 });
 
 // ---------- Found agents ----------
 
