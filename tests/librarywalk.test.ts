@@ -128,7 +128,8 @@ async function walk(seed: number): Promise<Finding[]> {
       if (held?.on) for (const tool of tools) clicks(1, `${held.except.includes(tool) ? 'let in' : 'keep out of'} ${tool}`, rowClicks.inHarness(row, item, tool, !held.except.includes(tool)));
       for (const version of held?.versions.filter(version => version.hash !== held.hash).slice(0, 3) ?? []) clicks(1, `make current ${version.from.how}`, rowClicks.makeCurrent(row, item, version.hash));
       if (held) clicks(1, 'Delete', rowClicks.remove(row, item));
-      for (const action of await historyActions(box, context())) add(2, { name: `History: ${action.label} (${action.event.kind})`, app: true, run: () => action.run() });
+      // Clear the switch's Undo sets that tool's own switch again: the one History action that writes it.
+      for (const action of await historyActions(box, context())) add(2, { name: `History: ${action.label} (${action.event.kind})`, app: true, writes: action.event.kind === 'switched' ? 'switch' : undefined, run: () => action.run() });
       if (last?.made?.length) { const click = last; add(2, { name: 'Undo', app: true, run: () => undo(box, click, context()) }); }
       for (const [tool, take] of Object.entries(fact?.takeOver ?? {})) add(2, { name: `Take over (${take!.kind}) in ${tool}`, app: true, writes: 'shared', run: () => takeOver(context(), tools, 'notes', tool as HarnessId) });
       for (const [tool, load] of Object.entries(fact?.loads ?? {})) if (load?.off) add(2, { name: `Clear the switch in ${tool}`, app: true, writes: 'switch', run: () => clearSwitch(context(), tools, 'notes', tool as HarnessId) });
@@ -223,10 +224,9 @@ async function walk(seed: number): Promise<Finding[]> {
       const answer = act.click && !crashed ? done as PassResult : undefined;
       const refused = !!answer && (!!answer.stopped || answer.results.some(entry => entry.unchanged || entry.differs));
       if (act.click && !refused && await historyCount() === entriesBefore) fail(`(f) ${act.name} made no History entry`);
-      // (f) From a settled home, a click's Undo puts every folder back as it was, where every copy in a managed tool was one
-      // the skill had (a copy it never had, which the click takes in or writes over, is kept as a version, not put back).
-      const onlyItsOwn = (managedBefore as Tool[]).every(tool => !before[tool] || contentsBefore[tool] === held?.applied[tool]);
-      if (act.click && settledBefore && !crashed && !blocked && onlyItsOwn && last?.made?.length) {
+      // (f) From a settled home, a click's Undo puts every folder back as it was, a copy the click took over from a tool too
+      // (taken in, written over, or counted as the skill's: its Undo gives it back).
+      if (act.click && settledBefore && !crashed && !blocked && last?.made?.length) {
         const click = last;
         await trial(box, async () => {
           await undo(box, click, context());

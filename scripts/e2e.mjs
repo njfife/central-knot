@@ -2512,15 +2512,13 @@ async function openCodeFlow() {
   same('a Claude Code skill is one OpenCode already reads', await cellState(p, 'notes', 'opencode-cli'), 'another-way');
   await p.click('.ov-row[data-key="oc-only"] .switch');
   check('turning OpenCode’s own skill on copies it to the other tools', readNow(join(practice, '.claude/skills/oc-only/SKILL.md')) === text('oc-only') && readNow(join(practice, '.copilot/skills/oc-only/SKILL.md')) === text('oc-only'), await p.text('.bands'));
-  // Taken in, notes goes to every tool but OpenCode, which reads Claude Code's copy. Kept out of OpenCode, Claude Code's
-  // folder stays: OpenCode's line says it still has it that way, and its settings are untouched.
+  // Taken in, notes goes to every tool but OpenCode, which reads Claude Code's copy: OpenCode's line says so, with no switch
+  // of Central Knot's (nothing of it goes there), and its settings are untouched.
   await p.click('.ov-row[data-key="notes"] .switch');
   same('a skill OpenCode reads in Claude Code’s folder gets no second copy in OpenCode', [existsSync(join(mine, 'skills/notes')), await cellState(p, 'notes', 'opencode-cli')], [false, 'another-way']);
   if (await p.run(`document.querySelector('#open-notes')?.getAttribute('aria-expanded')`) !== 'true') await p.click('#open-notes');
-  await p.click('#enable-notes-opencode-cli');
-  check('kept out of OpenCode, Claude Code’s folder stays, OpenCode’s settings are untouched, and its line says it still has it', readNow(join(practice, '.claude/skills/notes/SKILL.md')) !== '' && readNow(join(mine, 'opencode.json')) === settingsBefore
-    && (await p.text('.ov-row[data-key="notes"] + *') ?? '').includes('Kept out of this tool, but it still has it another way. OpenCode reads Claude Code’s copy'), await p.text('.ov-row[data-key="notes"] + *'));
-  await p.click('#enable-notes-opencode-cli');
+  same('OpenCode’s line says it reads Claude Code’s copy, has no switch there, and its settings are untouched',
+    [/OpenCode reads Claude Code’s copy/.test(await p.text('.ov-row[data-key="notes"] + *') ?? ''), await p.exists('#enable-notes-opencode-cli'), readNow(join(mine, 'opencode.json')) === settingsBefore], [true, false, true]);
   // Its server goes to the other tools in their own forms, values as they are; Claude Code's waits for Write to Claude Code.
   await p.click('#nav-mcp');
   await p.click('.ov-row[data-key="oc-docs"] .switch');
@@ -2801,7 +2799,7 @@ async function sharedCopiesFlow() {
   await a.click(`${row} .switch`);
   for (let tries = 0; tries < 40 && !(await switchOn(a, name)); tries++) await wait(100);
   same('turning it on takes it in, gives Claude Code a copy, and leaves the link and the shared copy alone', onDisk(), [`link:${link}`, true, false, true]);
-  check('the result says it is in Central Knot now', /opus-sol-loop is in Central Knot now, and on in all 3 tools\./.test(await a.text('.bands') ?? ''), await a.text('.bands'));
+  check('the result says where it is on, and which tools have it another way', /opus-sol-loop is in Central Knot now, and on in Claude Code; Copilot CLI and Pi have it another way\./.test(await a.text('.bands') ?? ''), await a.text('.bands'));
   same('Copilot CLI and Pi are marked as having it another way', [await cellState(a, name, 'copilot-cli'), await cellState(a, name, 'pi-cli')], ['another-way', 'another-way']);
   await opened();
   check('each of their lines says nothing of Central Knot’s goes there while it does', /Nothing of Central Knot’s goes there while it does\./.test(await rowLineOf('Pi')) && /Nothing of Central Knot’s goes there while it does\./.test(await rowLineOf('Copilot CLI')), [await rowLineOf('Pi'), await rowLineOf('Copilot CLI')]);

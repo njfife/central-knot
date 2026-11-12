@@ -94,9 +94,9 @@ export const restore = (box: Box, eventId: string, version?: string, context = b
 
 /** Every action History offers on the skill's entries (its main one, and each copy choice), as History's buttons send them. */
 export async function historyActions(box: Box, context = box.context, key = 'notes') {
-  const { item } = await seen(box, context, key);
+  const { item, fact } = await seen(box, context, key);
   return (await historyOf(box, context, key)).flatMap(event => {
-    const main = libraryAction(event, item);
+    const main = libraryAction(event, item, undefined, fact?.loads);
     const run = (version?: string) => () => restoreSkill(context, box.tools, event.id, version);
     return [...(main ? [{ event, label: main.label, run: run() }] : []), ...versionChoices(event, item).map(choice => ({ event, label: `Use ${choice.tool}’s`, run: run(choice.hash) }))];
   });

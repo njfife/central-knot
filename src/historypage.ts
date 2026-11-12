@@ -150,7 +150,10 @@ const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'pro
 
 /** A library entry's buttons (historyactions.ts): its own action, and one "Use <harness>’s copy" for each copy that gave way. */
 function libraryButtons(event: HistoryEvent) {
-  const item = itemOf(event), own = libraryAction(event, item), entry = libraryEntry(event)!;
+  const entry = libraryEntry(event)!, item = itemOf(event);
+  // A skill's own switches as the page last read them, so an action that would change nothing there is not offered.
+  const loads = entry.kind === 'skills' ? state.home?.skills.items.find(row => row.key === entry.key)?.loads : undefined;
+  const own = libraryAction(event, item, undefined, loads);
   const link = (label: string, help: string, id: string, version?: string) => {
     const control = button({ variant: 'link', size: 'small', label, name: `${label} (${event.item}): ${help}`, id, disabled: !!state.busy, onclick: () => void restoreEvent(event.id, version) });
     control.title = help;

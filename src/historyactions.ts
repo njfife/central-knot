@@ -36,7 +36,7 @@
 import type { IconName } from './icons.ts';
 import { theVersion, type LibraryItem } from './library.ts';
 import { asItIs, versionClock, type RowWords } from './libraryrow.ts';
-import type { Change, HarnessId, HistoryEvent } from './types.ts';
+import type { Change, HarnessId, HistoryEvent, LibraryFacts } from './types.ts';
 import { andList, toolName, toolsPhrase } from './words.ts';
 
 /**
@@ -165,9 +165,10 @@ const isVersion = (item: LibraryItem, hash: string | undefined): hash is string 
 
 /**
  * The action `event` offers for the item `item` now, if any (the table at the top). `version`: one of versionChoices
- * instead of the entry's own action ("Use Codex’s").
+ * instead of the entry's own action ("Use Codex’s"). `loads`: a skill row's own switches now, so Clear the switch's Undo
+ * is not offered once each tool has it off again.
  */
-export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined, version?: string): EntryAction | undefined {
+export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined, version?: string, loads?: LibraryFacts['loads']): EntryAction | undefined {
   if (!item || event.undoneBy) return undefined;
   const name = item.name, now = asItIs(item.key, item), everywhere = item.on ? ', in every tool it is on in' : '';
   if (event.kind === 'deleted') {
@@ -181,7 +182,9 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
   }
   // Clear the switch (a skill's): its Undo turns that tool's own switch off again (skills.ts restoreSkill does it, not a Change).
   const cleared = event.kind === 'switched' && event.cause !== 'switch' && !!event.switched?.length && event.switched.every(entry => !entry.disabled);
-  if (cleared) return { label: 'Undo', help: `Turn ${name} off again in ${andList(event.switched!.map(entry => toolName(entry.tool)))}’s own settings`, change: now };
+  // Offered while one of those tools still loads it (`loads`, the row's: each tool's own switch now; unknown, it is offered).
+  const stillCleared = !loads || event.switched?.some(entry => !loads[entry.tool]?.off);
+  if (cleared && stillCleared) return { label: 'Undo', help: `Turn ${name} off again in ${andList(event.switched!.map(entry => toolName(entry.tool)))}’s own settings`, change: now };
   // A found item taken in, while it is still as that click left it: its Undo takes it out again (found once more), each tool
   // it was found in keeping its own copy.
   const tookIn = event.kind === 'chosen' || (event.kind === 'on' && event.cause === 'found');

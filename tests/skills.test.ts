@@ -499,6 +499,12 @@ test('A switch set in a tool is left exactly as it is: the folder stays and the 
     assert.equal(isDisabled(box.context, await readSwitchFile(box.context, 'codex-cli'), target), true);
     assert.equal(librarySentence((await historyOf(box)).at(-1)!, libraryWords.skills, tools)?.text, 'Undone: Codex’s own switch has it off again.');
     assert.equal((await historyActions(box)).some(action => action.event.kind === 'switched'), false, 'and that entry is done');
+    // Cleared again, then switched off again by hand: that Clear's Undo is no longer offered, and if sent it changes nothing.
+    await clearSwitch(box.context, box.tools, 'notes', 'codex-cli');
+    await setDisabled(box.context, 'codex-cli', target, true);
+    assert.equal((await historyActions(box)).some(action => action.event.kind === 'switched'), false, 'not offered while Codex has it off');
+    const clearedAgain = (await historyOf(box)).filter(event => event.kind === 'switched').at(-1)!;
+    assert.match((await restore(box, clearedAgain.id)).stopped ?? '', /off already\. Nothing was changed\./);
   } finally { await box.cleanup(); }
 });
 

@@ -32,7 +32,7 @@ import { openLibrary, readConverted, readVersion, recordedSkills, saveLibrary, s
 import { isDisabled, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, type SwitchFile } from './skillswitch.ts';
 import { harnesses } from './harnesses.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, Skill, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy } from './types.ts';
-import { throughPlugin, toolName } from './words.ts';
+import { andList, throughPlugin, toolName } from './words.ts';
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const nameOf = (tool: HarnessId) => toolName(tool);
@@ -299,6 +299,8 @@ async function switchBack(context: ShareContext, past: HistoryEvent): Promise<Pa
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   const entries = past.switched!.filter(entry => entry.target);
+  const already = await Promise.all(entries.map(async ({ tool, target }) => isDisabled(context, await readSwitchFile(context, tool), target!)));
+  if (already.every(Boolean)) return { stopped: `${andList(entries.map(entry => toolName(entry.tool)))}’s own switch has it off already. Nothing was changed.`, results: [], writes: 0 };
   for (const { tool, target } of entries) {
     try { await setDisabled(context, tool, target!, true); }
     catch (error) { return { stopped: `Could not set ${toolName(tool)}’s switch: ${switchFailure(error)}`, results: [], writes: 0 }; }
