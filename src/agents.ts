@@ -214,8 +214,8 @@ function cannotHold(through: Pass['through'], item: Pick<LibraryItem, 'key' | 'n
 /** Writes the current version into one harness. True when it is there. What stops it is said, not stored: the next pass tries again. */
 async function writeCopy(pass: Pass, item: LibraryItem, tool: AgentTool, here: AgentEntry | undefined): Promise<boolean> {
   const held = (message: string) => { pass.results.push({ item: item.name, harness: tool, outcome: 'held', message }); return false; };
-  const cannot = here ? undefined : cannotHold(pass.through, item, tool);
-  if (cannot) return held(cannot);
+  // A harness that can't be given a copy is passed over without a word: its mark on the page says why, at every look.
+  if (!here && cannotHold(pass.through, item, tool)) return false;
   const agent = await readVersion(pass.context, item.key, item.hash);
   if (!agent) return held('This version is no longer in Central Knot’s store, so it can’t be written.');
   let text: string;

@@ -330,57 +330,102 @@ if (wanted('mcp')) {
 }
 
 // ---------- Agents ----------
+// Central Knot holds each agent itself, with its versions (src/library.ts). Every state of an agent's row, at four sizes.
 if (wanted('agents')) {
   begin('agents');
-  await a.click('#nav-agents'); await shot(a, 'agents-start', 'Clicked "Agents". code-reviewer, not synced yet, is tagged “one-way from Claude Code when on”; once on, the tag reads “one-way from Claude Code”.');
-  for (const key of ['code-reviewer', 'release-notes']) if (await a.has(`#switch-${key}:not([aria-checked="true"])`)) await a.click(`#switch-${key}`);
-  await shot(a, 'agents-on', 'Turned code-reviewer and release-notes on.');
-  // Off: agents have no switch in each tool, so Off stops syncing and leaves each copy; Undo syncs it again.
-  await a.click('#switch-release-notes'); await a.settle();
-  await shot(a, 'agents-off', 'Turned release-notes off: it is no longer synced, and each tool keeps its copy; the result offers Undo.');
-  if (await a.has('#outcome-undo')) { await a.click('#outcome-undo'); await a.settle(); await shot(a, 'agents-off-undone', 'Clicked Undo: release-notes is synced again.'); }
-  // A copy choice and its Undo: off (each copy stays), edited in Codex, then on again choosing Claude Code's copy. The Undo puts
-  // Codex's edit back and takes out no copy the choice didn't add.
-  await a.click('#switch-release-notes'); await a.settle();
-  edit(join(practice, '.codex/agents/release-notes.toml'), text => text.replace('one line each.', 'one line each. Codex’s own wording.'));
-  await a.click('#header-refresh'); await a.settle();
-  await a.click('#switch-release-notes'); await a.settle();
-  if (await a.has('#use-release-notes-claude-cli')) {
-    await shot(a, 'agents-choice', 'Turned release-notes off (each copy stays), edited it in Codex, and turned it on again: its copies differ, so it asks which copy every tool uses. Claude Code’s and Copilot CLI’s are the same and share one row; Codex’s quotes the line only it has, the words only it has tinted, and is marked as the most recent, with when it was edited.');
-    await a.theme('light'); await shot(a, 'agents-choice-light', 'The same, in the light appearance: the words only Codex’s copy has, tinted.'); await a.theme('dark');
-    if (await a.has('#diff-release-notes')) { await a.click('#diff-release-notes'); await a.settle(); await shot(a, 'agents-choice-read', 'Clicked “Read every copy”: each different prompt under the list of choices, the same ones shown once.'); await a.click('#diff-release-notes'); await a.settle(); }
-    await a.click('#use-release-notes-claude-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
-    await shot(a, 'agents-choice-made', 'Clicked Claude Code’s copy: Codex’s copy is replaced (kept in History), and release-notes is on in all 3 tools; with Undo.');
-    await a.click('#outcome-undo'); await waitFor(a, `/Undone/.test(document.querySelector('.bands')?.textContent ?? '')`, 15000);
-    await shot(a, 'agents-choice-undone', 'Clicked Undo: Codex has its own wording back, the other copies are as they were, and release-notes is as before the choice: not synced, its copies differing.');
-    // Its copy question is open again after the Undo: chosen this time, so release-notes is synced for the edit below.
-    if (!(await a.has('#use-release-notes-claude-cli'))) { await a.click('#switch-release-notes'); await a.settle(); }
-    if (await a.has('#use-release-notes-claude-cli')) { await a.click('#use-release-notes-claude-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000); }
-  }
-  await waitFor(a, `document.querySelector('#switch-release-notes')?.getAttribute('aria-checked') === 'true'`, 15000);
-  await a.click('#open-code-reviewer'); await shot(a, 'agents-limits', 'Opened code-reviewer, a Claude Code agent with fields other tools can\'t hold: Claude Code\'s line is the source, with Stop syncing this agent; each other tool\'s line has its Synced switch.');
-  edit(join(practice, '.codex/agents/release-notes.toml'), text => text.replace('one line each.', 'one line each. Edited in Codex.'));
+  const SIZES = [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]];
+  /** One state at every size (and, `light`, once in the light appearance), then back to 1280×800. */
+  const sizes = async (name, caption, light = false) => {
+    for (const [width, height] of SIZES) { await a.size(width, height); await shot(a, `${name}-${width}`, `${caption} (${width}×${height})`); }
+    await a.size(1280, 800);
+    if (light) { await a.theme('light'); await shot(a, `${name}-light`, `${caption} (light appearance)`); await a.theme('dark'); }
+  };
+  const refresh = async () => { await a.click('#header-refresh'); await a.settle(); };
+  const reviewer = tool => join(practice, { claude: '.claude/agents/code-reviewer.md', copilot: '.copilot/agents/code-reviewer.agent.md', codex: '.codex/agents/code-reviewer.toml' }[tool]);
+  const isOpen = key => a.has(`.ov-row[data-key="${key}"][aria-expanded="true"]`);
+  const openRow = async key => { if (!(await isOpen(key))) { await a.click(`#open-${key}`); await a.settle(); } };
+  const closeRow = async key => { if (await isOpen(key)) { await a.click(`#open-${key}`); await a.settle(); } };
+
+  await a.click('#nav-agents');
+  await sizes('agents-found', 'Clicked "Agents". Both agents are found: a harness has them and Central Knot doesn’t yet, so each switch sits halfway and each row says "not in Central Knot"');
+  for (const key of ['code-reviewer', 'release-notes']) { await a.click(`#switch-${key}`); await waitFor(a, `document.querySelector('#switch-${key}')?.getAttribute('aria-checked') === 'true'`, 15000); }
+  await shot(a, 'agents-on', 'Clicked both switches: each agent is taken into Central Knot and on in all 3 tools. The result says so.');
+
+  // Off: out of every harness, kept in Central Knot. On puts each file back.
+  await a.click('#switch-code-reviewer'); await a.settle();
+  await sizes('agents-off', 'Turned code-reviewer off: it left every harness, and its row stays under Off, "in Central Knot only", with its description; the result offers Undo', true);
+  await openRow('code-reviewer');
+  await sizes('agents-off-open', 'Opened the Off row: its status, each harness with no copy while it is off, its versions, and Delete from Central Knot', true);
+  await a.click('#switch-code-reviewer'); await waitFor(a, `document.querySelector('#switch-code-reviewer')?.getAttribute('aria-checked') === 'true'`, 15000);
+  await shot(a, 'agents-on-again', 'Clicked its switch again: on in all 3 tools, each file as it was.');
+
+  // The opened row of an agent that is On: each harness's line and switch, what stays its own, and one version.
+  await openRow('code-reviewer');
+  await sizes('agents-open', 'Opened code-reviewer, on: each harness has the current version and its own switch; Claude Code’s line names the settings that stay in its file; one version so far');
+
+  // Edits made in a harness: each becomes the current version. Several make the versions list long enough to fold.
+  edit(reviewer('codex'), text => text.replace('description = "', 'description = "Checks tests too. '));
   await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('.sync-notice')`, 15000);
-  await shot(a, 'agents-edit-notice', 'Outside the app, release-notes (synced) was edited in Codex, then Refresh was clicked: the notice says the edit reached the other tools.');
-  // The one-way edge: an edit to a receiving copy stays there, and that copy stops updating.
-  edit(join(practice, '.codex/agents/code-reviewer.toml'), text => text.replace('description = "', 'description = "Edited in Codex. '));
-  await a.click('#header-refresh'); await a.settle();
-  await shot(a, 'agents-oneway-stopped', 'Outside the app, code-reviewer (one-way from Claude Code) was edited in Codex, then Refresh was clicked. The notice offers both choices; the toolbar doesn’t say it again while the notice shows.');
-  await a.size(860, 560); await shot(a, 'agents-oneway-stopped-860', 'The same at 860×560: the notice with its two buttons.'); await a.size(1280, 800);
-  if (await a.has('#stopped-use-code-reviewer-codex-cli')) { await a.click('#stopped-use-code-reviewer-codex-cli'); await a.settle(); await shot(a, 'agents-oneway-resumed', 'Clicked "Use Claude Code’s copy" in its notice: Codex has Claude Code\'s copy of code-reviewer again.'); }
-  // Deciding later, then keeping the edit.
-  edit(join(practice, '.codex/agents/code-reviewer.toml'), text => text.replace('description = "', 'description = "Edited in Codex again. '));
-  await a.click('#header-refresh'); await a.settle();
-  if (await a.has('#stopped-dismiss-code-reviewer-codex-cli')) { await a.click('#stopped-dismiss-code-reviewer-codex-cli'); await a.settle(); }
-  if (!(await a.has('.details'))) { await a.click('#open-code-reviewer'); await a.settle(); }
-  await shot(a, 'agents-decide-later', 'code-reviewer was edited in Codex again; clicked × (Decide later) on its notice. Its details are open: Codex’s switch sits halfway, labelled “Stopped”, with “Keep Codex’s edit” beside it.');
-  if (await a.has('#sync-code-reviewer-codex-cli')) {
-    await a.click('#sync-code-reviewer-codex-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
-    await shot(a, 'agents-stopped-switch', 'Clicked Codex’s “Stopped” switch: Codex has Claude Code’s copy of code-reviewer again and receives its updates; its edit is in History, with Undo.');
-    await a.click('#outcome-undo'); await waitFor(a, `/Undone/.test(document.querySelector('.bands')?.textContent ?? '')`, 15000);
-    await shot(a, 'agents-stopped-switch-undone', 'Clicked Undo: Codex’s edit is back, and its switch reads “Stopped” again.');
+  await shot(a, 'agents-edit-notice', 'Outside the app, code-reviewer was edited in Codex, then Refresh was clicked: the notice says the edit is its current version now, in the other tools too, with Undo.');
+  for (const [tool, words] of [['claude', 'Names risky changes. '], ['copilot', 'Asks for tests. '], ['codex', 'Keeps comments short. '], ['claude', 'Reads the whole change first. ']]) {
+    edit(reviewer(tool), text => text.replace(/(description(?: =|:) "?)/, `$1${words}`));
+    await refresh(); await wait(400);
   }
-  if (await a.has('#stopped-keep-code-reviewer-codex-cli-details')) { await a.click('#stopped-keep-code-reviewer-codex-cli-details'); await a.settle(); await shot(a, 'agents-kept', 'Clicked "Keep Codex\'s edit" in the Codex row: its switch, still halfway, reads “Keeps its edit”.'); }
+  await openRow('code-reviewer');
+  await sizes('agents-versions-folded', 'Four more edits, in Claude Code, Copilot CLI and Codex: the versions list shows its newest four, each with when and where it was edited, and one line for the earlier ones');
+  await a.click('#versions-all-code-reviewer'); await a.settle();
+  await sizes('agents-versions-all', 'Clicked "Show 2 earlier versions": every version, newest first, the current one marked', true);
+  await a.click('#version-read-code-reviewer-2'); await waitFor(a, `/careful code reviewer/.test(document.querySelector('.version-text')?.textContent ?? '')`, 15000);
+  const show = selector => a.run(`document.querySelector('${selector}')?.scrollIntoView({ block: 'center' })`);
+  await show('.version-text');
+  await sizes('agents-version-read', 'Clicked Read on an earlier version: its description and prompt open under its line');
+  await a.click('#version-read-code-reviewer-2'); await a.settle();
+  await a.click('#version-current-code-reviewer-5'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  await sizes('agents-made-current', 'Clicked Make current on the first version: it is a new version at the top, written to all 3 tools; the result names it and offers Undo');
+
+  // One harness kept out.
+  await a.click('#enable-code-reviewer-codex-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  await sizes('agents-kept-out', 'Turned Codex’s own switch off: code-reviewer is kept out of Codex (its copy there is gone, its mark struck through) and stays on in the others', true);
+
+  // A harness that waits: with Automatic sync off, an edit shows as waiting to become the current version.
+  await a.click('#sync-switch'); await a.settle();
+  edit(reviewer('copilot'), text => text.replace('description: ', 'description: Edited while sync is off. '));
+  await refresh();
+  await openRow('code-reviewer');
+  await sizes('agents-edit-waits', 'Turned Automatic sync off, edited code-reviewer in Copilot CLI, clicked Refresh: Copilot CLI’s mark and line say its edit waits to become the current version; the toolbar counts it');
+  await a.click('#sync-switch'); await a.settle(); await refresh();
+
+  // A harness that can't hold it: a name that can't be a file name there.
+  writeFileSync(join(practice, '.claude/agents/réviseur.md'), '---\nname: réviseur\ndescription: Relit un changement avant sa fusion.\n---\n\nRelis le changement.\n');
+  await refresh();
+  await a.click('#switch-réviseur'); await a.settle();
+  await openRow('réviseur');
+  await sizes('agents-cannot', 'An agent in Claude Code whose name can’t be a file name in the other tools, turned on: it is in Central Knot and on in Claude Code; each other harness’s line says why it has no copy');
+  await closeRow('réviseur');
+
+  // Found copies that differ: the copy question; the copies not chosen become versions.
+  writeFileSync(join(practice, '.claude/agents/changelog.md'), '---\nname: changelog\ndescription: Keeps the changelog.\n---\n\nKeep the changelog short.\nOne line each.\n');
+  writeFileSync(join(practice, '.codex/agents/changelog.toml'), 'name = "changelog"\ndescription = "Keeps the changelog."\ndeveloper_instructions = """\nKeep the changelog short.\nOne line each. Link the pull request.\n"""\n');
+  await refresh();
+  await a.click('#switch-changelog'); await a.settle();
+  await sizes('agents-choice', 'A found agent whose copies differ, its switch clicked: it asks which copy every tool uses, and says the others are kept as its versions');
+  await a.click('#use-changelog-codex-cli'); await waitFor(a, `document.querySelector('#switch-changelog')?.getAttribute('aria-checked') === 'true'`, 15000);
+  await openRow('changelog');
+  await sizes('agents-choice-made', 'Chose Codex’s copy: changelog is in Central Knot with it, on in all 3 tools; Claude Code’s copy is in its versions, "was in Claude Code", with Make current');
+
+  // Delete from Central Knot, and History's Restore.
+  await a.click('#delete-changelog'); await a.settle();
+  await show('#delete-note-changelog');
+  await sizes('agents-delete-armed', 'Clicked "Delete from Central Knot…": it asks once more, with Cancel beside it and what will happen under them');
+  await a.click('#delete-confirm-changelog'); await a.settle();
+  await shot(a, 'agents-deleted', 'Clicked "Delete it now": changelog left every harness and this page; the result offers Undo.');
+  await a.click('#nav-history'); await a.settle();
+  await sizes('agents-history', 'History: each click and each edit taken in, in the library’s words, with its action: Restore on the deletion, Undo on an edit or a version made current, Turn off or Turn on on a switch', true);
+  await a.run(`[...document.querySelectorAll('.history-row[data-kind="deleted"]')].find(row => row.textContent.includes('changelog'))?.querySelector('.history-actions button')?.click()`);
+  await waitFor(a, `/Restored/.test(document.querySelector('#history-scroll')?.textContent ?? '')`, 15000);
+  await sizes('agents-history-restored', 'Clicked Restore on the deletion: changelog is back in Central Knot and in every harness; the deletion’s row reads Restored');
+  await a.click('#nav-agents'); await a.settle();
+  await shot(a, 'agents-end', 'Back on Agents: changelog is on again.');
 }
 
 // ---------- Plugins ----------
