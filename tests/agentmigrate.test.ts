@@ -5,7 +5,7 @@
 //   a second pass writes nothing; and a crash at either step of the migration leaves the old files as they were.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, readFile, readdir, rename, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, stat, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { agentHash, parseAgent } from '../src/agentfiles.ts';
 import { agentVersion, agentsView } from '../src/agents.ts';
@@ -22,12 +22,12 @@ const BRIEF = hashOf('claude-cli', claudeAgent());
 
 /** A copy as the old record named it: where it was, its content, its whole file, and its marks. */
 const copy = (box: Box, tool: Tool, text: string, marks: object = {}) => ({ tool, file: fileOf(box, tool), hash: hashOf(tool, text), bytes: sha256(text), ...marks });
-/** Writes the old record with one item, "reviewer". */
-async function oldRecord(box: Box, item: object) {
+/** Writes the old record with one item, "reviewer" (`more`: the record's other fields, such as its folders' `roots`). */
+async function oldRecord(box: Box, item: object, more: object = {}) {
   await mkdir(join(box.home, '.central-knot'), { recursive: true });
   await writeFile(join(box.home, '.central-knot/sync.json'), JSON.stringify({ formatVersion: 1, generation: 'g', owner: 'test', items: {} }));
   await writeFile(box.context.settingsPath, JSON.stringify({ homes: { [box.home]: { generation: 'g' } } }));
-  await writeFile(join(box.home, '.central-knot/agents.json'), `${JSON.stringify({ formatVersion: 2, items: { reviewer: { name: 'reviewer', off: [], ...item } } }, null, 2)}\n`);
+  await writeFile(join(box.home, '.central-knot/agents.json'), `${JSON.stringify({ formatVersion: 2, items: { reviewer: { name: 'reviewer', off: [], ...item } }, ...more }, null, 2)}\n`);
 }
 /** Keeps a harness's file as the old engine did: under the content's hash, `agent.json` and `<harness>.txt`. */
 async function oldKept(box: Box, tool: Tool, text: string) {
@@ -136,6 +136,40 @@ const fixtures: Fixture[] = [
         copies: [copy(box, 'copilot-cli', copilotAgent(), { oneWay: true, stopped: true }), copy(box, 'codex-cli', codexAgent(), { oneWay: true, status: 'removing', away: true })] });
     },
     expect: { place: 'found', deleted: true, applied: ['codex-cli'], versions: ['Be brief. (from before Central Knot kept versions) *', 'Be exact. (was in Copilot CLI)'] } },
+  { name: 'synced, with a harness the person had left out that holds no copy: it stays kept out',
+    async build(box) {
+      await write(box, { 'claude-cli': claudeAgent(), 'copilot-cli': copilotAgent() });
+      await oldKept(box, 'claude-cli', claudeAgent());
+      await oldRecord(box, { ...synced, off: ['codex-cli'], copies: [copy(box, 'claude-cli', claudeAgent()), copy(box, 'copilot-cli', copilotAgent())] });
+    },
+    expect: { place: 'on', except: ['codex-cli'], applied: ['claude-cli', 'copilot-cli'], versions: ['Be brief. (from before Central Knot kept versions) *'] } },
+  { name: 'synced again after a deletion it still carries: the deletion no longer stands',
+    async build(box) {
+      await write(box, { 'claude-cli': claudeAgent(), 'copilot-cli': copilotAgent(), 'codex-cli': codexAgent() });
+      await oldKept(box, 'claude-cli', claudeAgent());
+      await oldRecord(box, { ...synced, deleted: { at: new Date().toISOString(), tool: 'claude-cli', hash: BRIEF }, copies: [copy(box, 'claude-cli', claudeAgent()), copy(box, 'copilot-cli', copilotAgent()), copy(box, 'codex-cli', codexAgent())] });
+    },
+    expect: { place: 'on', applied: ['claude-cli', 'copilot-cli', 'codex-cli'], versions: ['Be brief. (from before Central Knot kept versions) *'] } },
+  { name: 'deleted everywhere at a content other than the one last synced: the deleted content is current',
+    async build(box) {
+      await oldKept(box, 'claude-cli', claudeAgent());
+      await oldKept(box, 'claude-cli', claudeAgent('You review code.\nBe early.\n'));
+      await oldRecord(box, { state: 'dont-share', hash: hashOf('claude-cli', claudeAgent('You review code.\nBe early.\n')), deleted: { at: new Date().toISOString(), tool: 'claude-cli', hash: BRIEF }, copies: [] });
+    },
+    expect: { place: 'found', deleted: true, versions: ['Be brief. (from before Central Knot kept versions) *', 'Be early. (from before Central Knot kept versions)'] } },
+  { name: 'synced, with a copy the earlier engine had stopped updating though it still held the synced content',
+    async build(box) {
+      await write(box, { 'claude-cli': claudeAgent(), 'copilot-cli': copilotAgent(), 'codex-cli': codexAgent() });
+      await oldKept(box, 'claude-cli', claudeAgent());
+      await oldRecord(box, { ...synced, copies: [copy(box, 'claude-cli', claudeAgent()), copy(box, 'copilot-cli', copilotAgent(), { stopped: true }), copy(box, 'codex-cli', codexAgent())] });
+    },
+    expect: { place: 'on', except: ['copilot-cli'], applied: ['claude-cli', 'codex-cli'], versions: ['Be brief. (from before Central Knot kept versions) *'] } },
+  { name: 'synced, but its synced content is kept nowhere while its harnesses hold another: no item, its copies are found',
+    async build(box) {
+      await write(box, { 'claude-cli': claudeAgent('You review code.\nBe early.\n') });
+      await oldRecord(box, { ...synced, copies: [copy(box, 'claude-cli', claudeAgent())] });
+    },
+    expect: 'found' },
   { name: 'on record but never synced, with nothing kept and no copy left',
     async build(box) { await oldRecord(box, { state: 'dont-share', hash: '', copies: [] }); },
     expect: 'found' },
@@ -226,10 +260,45 @@ test('A record from before agents were rewritten (format 1) carries nothing over
   const box = await sandbox();
   try {
     await write(box, { 'claude-cli': claudeAgent() });
+    await oldKept(box, 'claude-cli', claudeAgent());
     await oldRecord(box, {});
-    const old = JSON.stringify({ formatVersion: 1, items: {} });
+    const old = JSON.stringify({ formatVersion: 1, items: { reviewer: { name: 'reviewer', state: 'shared', off: [], hash: BRIEF, copies: [copy(box, 'claude-cli', claudeAgent())] } } });
     await writeFile(join(box.home, '.central-knot/agents.json'), old);
     assert.equal((await pass(box)).writes, 0);
     assert.deepEqual([await itemOf(box), await readFile(join(box.home, '.central-knot/agents.v1.json'), 'utf8')], [undefined, old]);
+  } finally { await box.cleanup(); }
+});
+
+test('A folder that was away or reset before the library: a copy missing from it is written again, never read as deleted by hand or as one left alone', async () => {
+  const folders = { 'claude-cli': '.claude/agents', 'copilot-cli': '.copilot/agents', 'codex-cli': '.codex/agents' } as const;
+  for (const how of ['receive-only, recorded away', 'synced both ways, recorded away', 'receive-only, its folder made again since'] as const) {
+    const box = await sandbox();
+    try {
+      const texts = { 'claude-cli': claudeAgent(undefined, claudeOwn), 'copilot-cli': copilotAgent() };
+      await write(box, texts);
+      await oldKept(box, 'claude-cli', texts['claude-cli']);
+      const roots: Record<string, { ino: number; birth: number }> = {};
+      for (const [tool, folder] of Object.entries(folders)) { const info = await stat(join(box.home, folder)); roots[tool] = { ino: info.ino, birth: Math.round(info.birthtimeMs) }; }
+      const away = how.includes('away'), oneWay = how.startsWith('receive-only');
+      if (!away) roots['codex-cli'] = { ino: 1, birth: 1 };
+      await oldRecord(box, { ...synced, copies: [copy(box, 'claude-cli', texts['claude-cli']), copy(box, 'copilot-cli', texts['copilot-cli'], { oneWay: true }), copy(box, 'codex-cli', codexAgent(), { oneWay, away })] }, { roots });
+      const first = await pass(box);
+      const item = (await itemOf(box))!;
+      assert.deepEqual([first.writes, item.on, item.except, await readOf(box, 'codex-cli') !== undefined], [1, true, [], true], how);
+      assert.deepEqual(Object.values(await filesOf(box)).slice(0, 2), Object.values(texts), `${how}: the other harnesses’ files are as they were`);
+      assert.equal((await pass(box)).writes, 0, how);
+    } finally { await box.cleanup(); }
+  }
+});
+
+test('Before any pass may write (a reader, or a home that can’t be written), the migrated agents show their descriptions and every version reads', async () => {
+  const box = await sandbox();
+  try {
+    await stoppedAfterAnEdit.build(box);
+    const view = await agentsView(box.context, tools);
+    const item = view.library!.reviewer;
+    assert.deepEqual([view.servers[0].description, (await agentVersion(box.context, 'reviewer', item.hash))?.prompt], ['Reviews code', 'You review code.\nBe brief.\n']);
+    assert.ok(await Promise.all(item.versions.map(version => agentVersion(box.context, 'reviewer', version.hash))).then(texts => texts.every(Boolean)));
+    assert.equal(JSON.parse(await readFile(join(box.home, '.central-knot/agents.json'), 'utf8')).formatVersion, 2, 'nothing was written');
   } finally { await box.cleanup(); }
 });

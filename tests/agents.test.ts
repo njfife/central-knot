@@ -445,6 +445,16 @@ inBox('Delete removes the agent from every harness and leaves a tombstone: a sta
   assert.deepEqual((await historyActions(box)).map(action => action.label), ['Turn off']);
 });
 
+inBox('A found copy taken in over a deleted agent of that name is the same agent again: its earlier versions come back with it', async box => {
+  await on(box);
+  await edit(box, 'claude-cli', 'Edit one.');
+  await pass(box);
+  await deleteIt(box);
+  await write(box, 'codex-cli', codexAgent('You review code.\nBe late.\n'));
+  assert.notEqual(await turnOn(box), 'choose');
+  assert.deepEqual(await versions(box), ['Be late. (found in Codex) *', 'Edit one. (edited in Claude Code)', 'Be brief. (found in Claude Code)']);
+});
+
 // ---------- A removal never takes content the library doesn't have ----------
 
 inBox('Off with Automatic sync off, after an edit no pass has seen: the edit becomes the current version before its file goes, and On brings it back everywhere', async box => {
@@ -538,6 +548,14 @@ inBox('A crash after the record is saved leaves the click in History: a Delete c
   await edit(box, 'codex-cli', 'Edit one.');
   await assert.rejects(pass(box, crashAt(box, 'before-rename')), /crash at before-rename/);
   assert.equal((await offered()).at(-1), 'edit: Undo');
+});
+
+inBox('A file a crash left moved aside, mid-removal, is put back before the pass reads: it is never a copy deleted by hand', async box => {
+  await on(box);
+  const parked = join(box.home, '.codex/agents/.reviewer.toml.ck-00000000-0000-4000-8000-000000000000.old');
+  await rename(fileOf(box, 'codex-cli'), parked);
+  const done = await pass(box);
+  assert.deepEqual([done.notices, (await itemOf(box))!.on, await readOf(box, 'codex-cli') !== undefined], [[], true, true]);
 });
 
 // ---------- The record, and the things around it ----------

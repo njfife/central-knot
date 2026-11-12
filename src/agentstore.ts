@@ -57,7 +57,9 @@ export async function openLibrary(context: ShareContext, persist = false): Promi
   if ('library' in read) return { library: read.library };
   if (!('older' in read)) return { library: emptyLibrary() };
   const migrated = await migrateAgents(context, read.older);
-  const library: AgentLibrary = { ...emptyLibrary(), items: migrated.items };
+  const library: AgentLibrary = { ...emptyLibrary(), items: migrated.items, folders: migrated.folders };
+  // A reader, or a home that can't be written: the migrated contents are read from memory until a writer stores them.
+  for (const { key, hash, agent } of migrated.versions) notStoredYet.set(versionPath(context, key, hash), agent);
   if (!persist) return { library };
   for (const { key, hash, agent } of migrated.versions) await storeVersion(context, key, hash, agent);
   for (const { key, text } of migrated.own) await storeOwn(context, key, text);
@@ -85,9 +87,12 @@ const storeVersion = (context: ShareContext, key: string, hash: string, { name, 
   storeOnce(versionPath(context, key, hash), `${JSON.stringify({ name, description, prompt }, null, 2)}\n`);
 const storeOwn = (context: ShareContext, key: string, text: string) => storeOnce(ownPath(context, key, sha256(text)), text);
 
+/** Versions a migration made that no writer has stored yet (openLibrary), by where they will be stored. */
+const notStoredYet = new Map<string, SharedAgent>();
 /** A version's content, or undefined when the store no longer has it. */
 export async function readVersion(context: ShareContext, key: string, hash: string): Promise<SharedAgent | undefined> {
-  try { return JSON.parse(await readFile(versionPath(context, key, hash), 'utf8')) as SharedAgent; } catch { return undefined; }
+  const path = versionPath(context, key, hash);
+  try { return JSON.parse(await readFile(path, 'utf8')) as SharedAgent; } catch { return notStoredYet.get(path); }
 }
 
 /** The library's shelf for agents (library.ts Shelf): where a version's content goes, and the caller's save of the record. */

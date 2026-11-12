@@ -12,10 +12,14 @@
 //   still goes once it can.
 // - Every content kept under `items/agents/<key>/<hash>/` is a version, and each harness's kept file of the current content is
 //   that harness's own part, so On or Restore writes that very file back.
+// - The record's folder identities (`roots`) and its copies' `away` marks become the library's `folders`, so the first pass's
+//   guards (agents.ts guardFolders) still see a folder that was reset or away before the library: a copy missing from it is
+//   written again, never read as deleted by hand, and a receive-only copy missing from it is not one deleted in its harness.
 // An agent of which no content is left anywhere gets no item: what its harnesses hold is found, as for one never recorded.
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { agentHash, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
+import { agentHash, agentsFolder, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
+import type { AgentLibrary } from './agentstore.ts';
 import { newItem, type LibraryItem, type Source } from './library.ts';
 import { agentTools } from './presence.ts';
 import { sha256, storeDirectory, type ShareContext } from './share.ts';
@@ -25,13 +29,14 @@ import type { HarnessId } from './types.ts';
  * A copy on the old record: `stopped`, no longer updated after an edit there; `oneWay`, receive-only; `removing`, a removal a
  * deletion still owed.
  */
-interface OldCopy { tool: HarnessId; hash: string; oneWay?: boolean; stopped?: boolean; status?: 'removing' }
+interface OldCopy { tool: HarnessId; hash: string; oneWay?: boolean; stopped?: boolean; status?: 'removing'; /** Its folder was gone at the last look. */ away?: boolean }
 /** An agent on the old record: synced (`shared`) or not, the harnesses left out (`off`), the content last synced, and a deletion that spread. */
 interface OldItem {
   name: string; state: 'shared' | 'dont-share'; off: HarnessId[]; hash: string; copies: OldCopy[];
   deleted?: { at: string; hash: string };
 }
-export interface OldAgentRecord { formatVersion: number; items: Record<string, OldItem> }
+/** `roots`: each harness's agents folder's identity at the last pass. */
+export interface OldAgentRecord { formatVersion: number; items: Record<string, OldItem>; roots?: Partial<Record<HarnessId, { ino: number; birth: number }>> }
 
 export function isOldRecord(record: unknown): record is OldAgentRecord {
   const items = (record as Partial<OldAgentRecord> | null)?.items;
@@ -47,9 +52,10 @@ const iso = (ms: number) => new Date(ms).toISOString();
 
 /**
  * One old item as a library item, from what is kept of it (`kept`) and what the harnesses hold now (`onDisk`); undefined when
- * no content of it is left. Pure: the worked examples are tests/agentmigrate.test.ts.
+ * no content of it is left. `reset`: the harnesses whose folder was reset or away since the old record's last pass. Pure: the
+ * worked examples are tests/agentmigrate.test.ts.
  */
-export function migrateItem(key: string, old: OldItem, kept: KeptContent[], onDisk: AgentEntry[]): LibraryItem | undefined {
+export function migrateItem(key: string, old: OldItem, kept: KeptContent[], onDisk: AgentEntry[], reset: ReadonlySet<HarnessId> = new Set()): LibraryItem | undefined {
   const contents = new Map<string, { at: number; from: Source }>(kept.map(content => [content.hash, { at: content.at, from: { how: 'migrated' } }]));
   for (const entry of onDisk) if (!contents.has(entry.hash)) contents.set(entry.hash, { at: entry.at, from: { how: 'was-in', harness: entry.tool } });
   const synced = old.state === 'shared';
@@ -68,8 +74,9 @@ export function migrateItem(key: string, old: OldItem, kept: KeptContent[], onDi
     const here = onDisk.find(entry => entry.tool === copy.tool);
     if (copy.status === 'removing') { if (!synced) item.applied[copy.tool] = copy.hash; }
     else if (!synced) continue;
-    // What the earlier engine left to its harness: a stopped copy, and a receive-only one edited or deleted there since.
-    else if (copy.stopped || (copy.oneWay && here?.hash !== copy.hash)) leftAlone.add(copy.tool);
+    // What the earlier engine left to its harness: a stopped copy, and a receive-only one edited or deleted there since (not
+    // one missing from a folder that was reset or away: the old engine wrote that again, and so does the first pass).
+    else if (copy.stopped || (copy.oneWay && here?.hash !== copy.hash && !(here === undefined && reset.has(copy.tool)))) leftAlone.add(copy.tool);
     else item.applied[copy.tool] = copy.hash;
   }
   // A copy that differs and was never on record: the old engine held for a choice of copy and wrote nothing there.
@@ -99,29 +106,38 @@ async function readKept(context: ShareContext, key: string): Promise<KeptContent
   return found;
 }
 
-/** A migrated record: its items, and the contents the new store needs for them (each version, and each harness's own file). */
+/** A migrated record: its items and folders, and the contents the new store needs for them (each version, and each harness's own file). */
 export interface Migrated {
   items: Record<string, LibraryItem>;
+  folders: AgentLibrary['folders'];
   versions: { key: string; hash: string; agent: SharedAgent }[];
   own: { key: string; text: string }[];
 }
 
 /** The whole old record as library items. Reads the old store and the harnesses; writes nothing. */
 export async function migrateAgents(context: ShareContext, old: OldAgentRecord): Promise<Migrated> {
-  const { items, versions, own }: Migrated = { items: {}, versions: [], own: [] };
+  const { items, folders, versions, own }: Migrated = { items: {}, folders: {}, versions: [], own: [] };
   // Format 1 is from before agents were rewritten: nothing in it is carried over.
-  if (old.formatVersion < 2) return { items, versions, own };
+  if (old.formatVersion < 2) return { items, folders, versions, own };
+  const reset = new Set<HarnessId>();
+  for (const tool of agentTools) {
+    const path = agentsFolder(context, tool), root = old.roots?.[tool], info = await stat(path).catch(() => undefined);
+    const away = Object.values(old.items).some(item => item.copies.some(copy => copy.tool === tool && copy.away));
+    if (away) folders[tool] = { path, away: true };
+    else if (root) folders[tool] = { path, ...root };
+    if (info && (away || (root && (root.ino !== info.ino || root.birth !== Math.round(info.birthtimeMs))))) reset.add(tool);
+  }
   // Every harness's folder in this home is looked at, managed or not: a copy is left alone wherever it is.
   const onDisk: AgentEntry[] = [];
   for (const tool of agentTools) onDisk.push(...(await readAgents(context, tool)).entries);
   for (const [key, was] of Object.entries(old.items)) {
     const kept = await readKept(context, key), here = onDisk.filter(entry => entry.key === key);
-    const item = migrateItem(key, was, kept, here);
+    const item = migrateItem(key, was, kept, here, reset);
     if (!item) continue;
     items[key] = item;
     for (const content of kept) versions.push({ key, hash: content.hash, agent: content.agent });
     for (const entry of here) if (!kept.some(content => content.hash === entry.hash)) versions.push({ key, hash: entry.hash, agent: entry.agent });
     for (const text of Object.values(kept.find(content => content.hash === item.hash)?.files ?? {})) own.push({ key, text });
   }
-  return { items, versions, own };
+  return { items, folders, versions, own };
 }
