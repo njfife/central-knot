@@ -181,9 +181,11 @@ async function guardFolders(pass: Pass, items: LibraryItem[]) {
     const info = await stat(path).catch(() => undefined);
     const here: FolderSeen = info ? { path, ino: info.ino, birth: Math.round(info.birthtimeMs) } : { path, away: true };
     pass.foldersNow[tool] = here;
-    if (!was || 'away' in here) continue;
-    const moved = was.path !== path, remade = 'away' in was || was.ino !== here.ino || was.birth !== here.birth;
-    for (const item of items) if (moved || (remade && !pass.disk.byKey.get(item.key)?.[tool])) delete item.applied[tool];
+    if (!was) continue;
+    const moved = was.path !== path;
+    const remade = !moved && !('away' in here) && ('away' in was || was.ino !== here.ino || was.birth !== here.birth);
+    if (!moved && !remade) continue;
+    for (const item of items) if (moved || !pass.disk.byKey.get(item.key)?.[tool]) delete item.applied[tool];
   }
 }
 
@@ -230,7 +232,6 @@ async function syncItem(pass: Pass, item: LibraryItem) {
     const edit = fileIn(made.takeIn);
     const from: Source = pass.pulled.has(item.key) ? { how: 'pulled' } : { how: 'edited', harness: edit.tool };
     await setCurrent(pass.shelf, item, { hash: edit.hash, at: iso(edit.at), from }, edit.agent);
-    item.applied[edit.tool] = edit.hash;
   }
   if (made.turnedOffBy) item.on = false;
   for (const harness of made.remove) await keepOwn(pass.context, item, fileIn(harness));

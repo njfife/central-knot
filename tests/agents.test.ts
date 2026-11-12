@@ -82,7 +82,8 @@ inBox('A harness with no agents folder yet gets the agent', async box => {
 
 inBox('Off removes the agent from every harness and keeps it in Central Knot; On writes every file back byte for byte', async box => {
   await write(box, 'codex-cli', codexAgent());
-  await on(box, claudeAgent(undefined, claudeOwn));
+  // Claude Code's file as a person wrote it: a quoted description and a comment, which a rewrite would not reproduce.
+  await on(box, claudeAgent(undefined, claudeOwn).replace('description: Reviews code', '# mine\ndescription: "Reviews code"'));
   const before = await filesOf(box);
   assert.deepEqual(Object.values(before).map(text => text !== undefined), [true, true, true]);
   const off = await turnOff(box);
@@ -256,6 +257,43 @@ inBox('A folder made again gets its agents back; a harness no longer managed is 
   assert.equal((await itemOf(box))!.on, true);
 });
 
+inBox('A harness whose folder is somewhere else now (its config root moved) is written afresh there; nothing turns Off', async box => {
+  await on(box);
+  await pass(box);
+  const moved: ShareContext = { ...box.context, overrides: { 'codex-cli': join(box.base, 'codex-elsewhere') } };
+  for (const now of [1000, 9000]) await applyAgents(moved, tools, [], { now });
+  assert.equal((await itemOf(box))!.on, true);
+  assert.match(await readFile(join(box.base, 'codex-elsewhere/agents/reviewer.toml'), 'utf8'), /Be brief/);
+  assert.ok(await readOf(box, 'copilot-cli'));
+});
+
+inBox('With Automatic sync off, a click’s pass doesn’t settle a folder reset for the agents it leaves alone: the next full pass still puts their copies back', async box => {
+  await on(box);
+  await writeFile(join(box.home, '.claude/agents/writer.md'), claudeAgent('You write docs.\n').replace('name: reviewer', 'name: writer'));
+  await applyAgents(box.context, tools, [{ key: 'writer', managed: true, off: [] }]);
+  await pass(box);
+  await rm(join(box.home, '.codex/agents'), { recursive: true });
+  await mkdir(join(box.home, '.codex/agents'));
+  // Sync off: a click on reviewer concerns reviewer alone.
+  const { row, item } = await seen(box);
+  await applyAgents(box.context, tools, [{ key: row.key, managed: true, off: ['copilot-cli'], seenManaged: !!item?.on }], { only: new Set(['reviewer']) });
+  assert.deepEqual([await readOf(box, 'codex-cli') !== undefined, await readFile(join(box.home, '.codex/agents/writer.toml'), 'utf8').catch(() => undefined)], [true, undefined]);
+  for (const now of [1000, 9000]) await applyAgents(box.context, tools, [], { now });
+  const view = await agentsView(box.context, tools);
+  assert.equal(view.library!.writer.on, true, 'writer was not deleted by hand: its folder was made again');
+  assert.match(await readFile(join(box.home, '.codex/agents/writer.toml'), 'utf8'), /You write docs/);
+});
+
+inBox('A harness that can’t hold the agent (its name is no file name there) is passed over: no copy, no result, and its mark says why', async box => {
+  await writeFile(join(box.home, '.claude/agents/réviseur.md'), '---\nname: réviseur\ndescription: Relit\n---\n\nRelis.\n');
+  const taken = await applyAgents(box.context, tools, [{ key: 'réviseur', managed: true, off: [], seenManaged: false }]);
+  assert.deepEqual([taken.writes, taken.results], [0, []]);
+  assert.deepEqual(await readdir(join(box.home, '.copilot/agents')), []);
+  const fact = (await agentsView(box.context, tools)).servers.find(agent => agent.key === 'réviseur')!;
+  assert.deepEqual([fact.managed, fact.cannot], [true, { 'copilot-cli': 'This name can’t be a file name here.', 'codex-cli': 'This name can’t be a file name here.' }]);
+  assert.equal((await pass(box)).writes, 0);
+});
+
 // ---------- Found agents ----------
 
 inBox('An agent a harness has that Central Knot doesn’t is found: never written by itself; its switch takes it in everywhere', async box => {
@@ -269,7 +307,8 @@ inBox('An agent a harness has that Central Knot doesn’t is found: never writte
   assert.equal((await pass(box)).writes, 0);
   assert.deepEqual(await readdir(join(box.home, '.copilot/agents')), []);
   const taken = await turnOn(box);
-  assert.equal(taken !== 'choose' && taken.writes, 2);
+  // Taking in has no click that puts things back as they were, so its result offers no Undo (History's entry has Turn off).
+  assert.deepEqual(taken !== 'choose' && [taken.writes, taken.made], [2, []]);
   assert.deepEqual([placeOf(await itemOf(box)), await versions(box)], ['on', ['Be brief. (found in Claude Code) *']]);
 });
 
@@ -281,6 +320,13 @@ inBox('Found copies that differ: the switch asks; the chosen copy is taken in, a
   const unanswered = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: false }]);
   assert.deepEqual(unanswered.results.map(entry => [entry.outcome, entry.differs]), [['held', true]]);
   assert.equal(await itemOf(box), undefined, 'nothing is taken in without an answer');
+  // A choice made on a page read before the chosen copy changed is refused.
+  const { row } = await seen(box);
+  await write(box, 'codex-cli', codexAgent('You review code.\nBe late.\n'));
+  const stale = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: false, use: 'codex-cli', useHash: row.hashes!['codex-cli'] }]);
+  assert.deepEqual([stale.results.map(entry => [entry.outcome, entry.chooseAgain]), await itemOf(box)], [[['held', true]], undefined]);
+  await write(box, 'codex-cli', codexAgent('You review code.\nBe quick.\n'));
+  await utimes(fileOf(box, 'codex-cli'), new Date(), new Date(Date.now() + 5000));
   await choose(box, 'codex-cli');
   assert.match((await readOf(box, 'claude-cli'))!, /Be quick\./);
   assert.deepEqual(await versions(box), ['Be quick. (chosen from Codex) *', 'Be brief. (was in Claude Code)']);

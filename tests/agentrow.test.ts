@@ -2,7 +2,7 @@
 // harness's mark says, when its switch asks which copy, and the click each control sends.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { agentClicks, harnessIs, harnessLine, needsChoice, noticeWords, placeOf, placeTag, said, statusLine, switchLabel, type AgentRow } from '../src/agentrow.ts';
+import { FOLDED_VERSIONS, agentClicks, foldVersions, harnessIs, harnessLine, needsChoice, noticeWords, placeOf, placeTag, said, statusLine, switchLabel, type AgentRow } from '../src/agentrow.ts';
 import { newItem, type LibraryItem } from '../src/library.ts';
 
 const tools = ['claude-cli', 'copilot-cli', 'codex-cli'];
@@ -102,4 +102,10 @@ test('A notice says what sync did by itself, and which action its button runs', 
   assert.deepEqual([notice('edit', ['claude-cli']).text, notice('edit', ['claude-cli']).action], ['reviewer was edited in Codex; that is its current version now, in Claude Code too.', 'undo']);
   assert.equal(notice('conflict', ['copilot-cli']).text, 'reviewer: Codex’s edit is the latest, so it is the current version. Copilot CLI’s is kept as a version.');
   assert.deepEqual([notice('deleted', ['claude-cli']).text, notice('deleted', ['claude-cli']).action], ['reviewer was deleted in Codex, so it is off everywhere. Central Knot keeps it.', 'turn-on']);
+});
+
+test('A long versions list folds to its newest four, and says how many more there are; four fit without a fold', () => {
+  const versions = (count: number) => Array.from({ length: count }, (_, index) => ({ hash: String(index), at: '2026-11-08T09:20:00.000Z', from: { how: 'edited' as const } }));
+  assert.deepEqual([foldVersions(versions(4), false).rest, foldVersions(versions(5), false).rest, foldVersions(versions(5), false).shown.length], [0, 1, FOLDED_VERSIONS]);
+  assert.deepEqual([foldVersions(versions(9), true).rest, foldVersions(versions(9), true).shown.length, foldVersions([], false).rest], [0, 9, 0]);
 });

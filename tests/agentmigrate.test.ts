@@ -80,6 +80,14 @@ const fixtures: Fixture[] = [
       await oldRecord(box, { ...synced, copies: [copy(box, 'claude-cli', claudeAgent(undefined, claudeOwn)), copy(box, 'copilot-cli', copilotAgent(), { oneWay: true, stopped: true }), copy(box, 'codex-cli', codexAgent(), { oneWay: true })] });
     },
     expect: { place: 'on', except: ['copilot-cli'], applied: ['claude-cli', 'codex-cli'], versions: ['Be brief. (from before Central Knot kept versions) *', 'Be exact. (was in Copilot CLI)'] } },
+  { name: 'synced, with a receive-only copy that had stopped updating because it was deleted there',
+    async build(box) {
+      await write(box, { 'claude-cli': claudeAgent(undefined, claudeOwn), 'codex-cli': codexAgent() });
+      await oldKept(box, 'claude-cli', claudeAgent(undefined, claudeOwn));
+      await oldRecord(box, { ...synced, copies: [copy(box, 'claude-cli', claudeAgent(undefined, claudeOwn)), copy(box, 'copilot-cli', copilotAgent(), { oneWay: true, stopped: true }), copy(box, 'codex-cli', codexAgent(), { oneWay: true })] });
+    },
+    // Not read as a copy deleted by hand, which would turn the agent Off everywhere: that harness is kept out, as it was.
+    expect: { place: 'on', except: ['copilot-cli'], applied: ['claude-cli', 'codex-cli'], versions: ['Be brief. (from before Central Knot kept versions) *'] } },
   { name: 'synced, with a receive-only copy edited there that no pass had seen yet',
     async build(box) {
       await write(box, { 'claude-cli': claudeAgent(undefined, claudeOwn), 'copilot-cli': copilotAgent(), 'codex-cli': codexAgent('You review code.\nBe exact.\n') });
@@ -125,6 +133,8 @@ const fixtures: Fixture[] = [
     expect: 'found' },
 ];
 
+const stoppedAfterAnEdit = fixtures.find(fixture => fixture.name.includes('stopped updating after an edit'))!;
+
 for (const fixture of fixtures) {
   test(`Migration, ${fixture.name}: no harness file changes, every content is a version, and a second pass writes nothing`, async () => {
     const box = await sandbox();
@@ -153,7 +163,7 @@ test('A crash at either step of the migration leaves the old record and its kept
   for (const step of ['before-replace', 'mid-replace'] as const) {
     const box = await sandbox();
     try {
-      await fixtures[2].build(box);
+      await stoppedAfterAnEdit.build(box);
       const before = { harnesses: await filesOf(box), kept: await oldFiles(box) };
       const crashing: ShareContext = { ...box.context, fault: at => { if (at === step) throw new Error(`crash at ${step}`); } };
       await assert.rejects(pass(box, crashing), new RegExp(`crash at ${step}`));
@@ -170,7 +180,7 @@ test('A crash at either step of the migration leaves the old record and its kept
 test('After migration the model takes over: Off then On writes each harness’s kept file back, and a copy left alone is taken in only when asked', async () => {
   const box = await sandbox();
   try {
-    await fixtures[2].build(box);
+    await stoppedAfterAnEdit.build(box);
     await pass(box);
     // Copilot CLI's edited copy stays out of sync until its own switch lets it in: its content is a version already, so the
     // current version is written over it.

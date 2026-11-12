@@ -41,6 +41,9 @@
 //   file is written over or removed. A crash in between leaves a version too many, never a content too few, and the next
 //   pass finds H = A and finishes the write or the removal.
 //
+// To put another kind on the library, follow agents.ts: read H for each managed harness (unknown when in doubt), give the
+// library a Shelf for the kind's contents, and carry out `plan` in its order: keep, take in, save; then write and remove.
+//
 // Nothing else is stored. Whether a harness is waiting, can't hold the item or has it another way is worked out at each
 // pass and shown as that harness's mark. A library item never waits for a choice: the copy question exists only when a
 // found item whose copies differ is taken in.

@@ -138,3 +138,43 @@ test('A skill of the repo’s name that this computer never Managed: the row say
     assert.match(await readFile(join(second.home, '.claude/skills/review/SKILL.md'), 'utf8'), /Mine/);
   } finally { await box.cleanup(); }
 });
+
+test('Pull brings an agent into Central Knot as a version pulled from the Git repo; a different agent of that name found here is a version first', async () => {
+  const box = await world();
+  try {
+    const first = await box.home('first');
+    await seedServerAndAgent(first);
+    await connectRepo(first, box.remote, '');
+    await pushRepo(first);
+    const second = await box.home('second');
+    // The second computer has its own planner in Copilot CLI, which Central Knot there never took in.
+    await mkdir(join(second.home, '.copilot/agents'), { recursive: true });
+    await writeFile(join(second.home, '.copilot/agents/planner.agent.md'), '---\nname: planner\ndescription: Plans work.\n---\n\nPlan loosely.\n');
+    await connectRepo(second, box.remote, '');
+    await pullRepo(second);
+    const planner = (await agentsView(second, tools)).library!.planner;
+    assert.deepEqual([planner.on, planner.versions.map(version => version.from.how)], [true, ['pulled', 'found']]);
+    for (const file of ['.claude/agents/planner.md', '.copilot/agents/planner.agent.md']) assert.match(await readFile(join(second.home, file), 'utf8'), /Plan carefully/);
+    // The planner found here is still there to go back to.
+    const { agentVersion } = await import('../src/agents.ts');
+    assert.equal((await agentVersion(second, 'planner', planner.versions[1].hash))?.prompt, 'Plan loosely.\n');
+  } finally { await box.cleanup(); }
+});
+
+test('Pull over an edit made here that sync had not taken in yet: the edit is a version before its file is written over', async () => {
+  const box = await world();
+  try {
+    const { first, second, firstPlanner, secondPlanner } = await serverAndAgentOnTwo(box);
+    await edit(firstPlanner, 'Plan carefully.', 'Plan in small steps.');
+    await applyAgents(first, tools, []);
+    await pushRepo(first);
+    // Edited on the second computer with Automatic sync off: no pass has seen it.
+    await edit(secondPlanner, 'Plan carefully.', 'Plan boldly.');
+    await pullRepo(second, { syncOn: false });
+    const planner = (await agentsView(second, tools)).library!.planner;
+    const { agentVersion } = await import('../src/agents.ts');
+    const prompts = await Promise.all(planner.versions.map(async version => (await agentVersion(second, 'planner', version.hash))?.prompt.trim()));
+    assert.ok(prompts.includes('Plan boldly.'), `the edit is among the versions: ${prompts.join(' | ')}`);
+    assert.match(await readFile(secondPlanner, 'utf8'), /Plan in small steps|Plan boldly/);
+  } finally { await box.cleanup(); }
+});

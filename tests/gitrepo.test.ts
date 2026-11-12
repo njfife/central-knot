@@ -51,6 +51,7 @@ test('Push puts the Managed set in the repo’s layout; another computer pulls i
     const docs = (await mcpView(second, tools)).servers.find(server => server.key === 'docs')!;
     assert.ok(docs.managed && docs.copies['copilot-cli']);
     assert.ok((await agentsView(second, tools)).servers.find(agent => agent.key === 'planner')!.managed);
+    assert.deepEqual((await agentsView(second, tools)).library!.planner.versions.map(version => version.from), [{ how: 'pulled' }], 'its version says where it came from');
     assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: opus/);
     view = live(pulled.view);
     assert.deepEqual([view.incoming, view.outgoing, view.base?.id], [[], [], view.latest?.id]);

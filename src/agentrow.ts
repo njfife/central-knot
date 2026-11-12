@@ -103,6 +103,14 @@ export const agentClicks = {
   remove: (row: AgentRow, item: LibraryItem | undefined): Change => ({ ...asItIs(row, item), deleted: true }),
 };
 
+/** How many versions a folded list shows. */
+export const FOLDED_VERSIONS = 4;
+/** The versions an opened row shows: all of them once unfolded, else the newest few, and how many more there are. */
+export function foldVersions(versions: readonly Version[], unfolded: boolean): { shown: readonly Version[]; rest: number } {
+  const shown = unfolded ? versions : versions.slice(0, FOLDED_VERSIONS);
+  return { shown, rest: versions.length - shown.length };
+}
+
 // ---------- Words ----------
 
 /** The home's harnesses by name, as a sentence lists them ("all 3 tools", or their names). */
