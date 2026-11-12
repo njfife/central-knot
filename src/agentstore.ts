@@ -3,7 +3,7 @@
 //   agents.json                               the record: each agent as a LibraryItem, and each harness's agents folder as last seen
 //   agents.v2.json                            the record from before the library, as it was (agentmigrate.ts made the new one from it)
 //   items/agents/<key>/versions/<hash>.json   one version's content: the shared part (name, description, prompt)
-//   items/agents/<key>/own/<file hash>.txt    one harness's whole file, kept when Central Knot took it out: that harness's own part
+//   items/agents/<key>/own/<file hash>.txt    one harness's whole file as a pass last saw or wrote it: that harness's own part
 //   items/agents/<key>/<hash>/…               files kept before the library; read once by the migration, never deleted
 //
 // Every file under items/ is named by what it holds, so a second file never replaces a first, and nothing here is pruned.

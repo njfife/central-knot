@@ -16,7 +16,8 @@
 //
 // Content has two parts for agents and MCP servers: the shared part, which a version's hash names (an agent's name,
 // description and prompt), and each harness's own part (the other fields of its file). The library keeps the latest own
-// part per harness (`own`), so Off then On writes the same file back, byte for byte. A skill's version is its whole folder.
+// part per harness (`own`: its file as a pass last saw or wrote it), so Off then On, or Turn on after a copy was deleted by
+// hand, writes the same file back, byte for byte. A skill's version is its whole folder.
 //
 // THE RULE. What happens in one harness follows from three contents: L, the item's current version; H, what the harness
 // holds now; A, what was applied there last. `decide` is this table, one line per row:
@@ -81,7 +82,7 @@ export interface LibraryItem {
   except: HarnessId[];
   /** A: the version Central Knot last put or saw in each harness. No entry: nothing applied there. */
   applied: Partial<Record<HarnessId, string>>;
-  /** Each harness's own part as last seen, by the name the kind's store keeps it under. Stays after Off, for the next On. */
+  /** Each harness's own part as a pass last saw or wrote it, by the name the kind's store keeps it under. Stays after Off, for the next On. */
   own: Partial<Record<HarnessId, string>>;
   /** Deleted from Central Knot (a tombstone): in no harness, and a copy that turns up is found, never taken in by itself. */
   deleted?: { at: string };

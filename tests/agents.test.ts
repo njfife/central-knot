@@ -200,6 +200,21 @@ inBox('A copy deleted by hand turns the agent Off everywhere, once it has stayed
   assert.equal(await readOf(box, 'copilot-cli'), '---\nname: reviewer\ndescription: Reviews code\n---\n\nYou review code.\nBe brief.\n');
 });
 
+inBox('Turn on after a copy was deleted by hand gives that tool back its own settings as they were last seen, narrowed ones included', async box => {
+  await on(box, claudeAgent(undefined, claudeOwn));
+  await turnOff(box);
+  await turnOn(box);
+  // Claude Code's own settings narrowed by hand since; then its file deleted by hand, which turns the agent off everywhere.
+  const narrowed = claudeAgent(undefined, 'tools: Read\nmodel: opus\n');
+  await write(box, 'claude-cli', narrowed);
+  await pass(box);
+  await rm(fileOf(box, 'claude-cli'));
+  await pass(box);
+  assert.equal(placeOf(await itemOf(box)), 'off');
+  await (await historyActions(box)).find(action => action.label === 'Turn on')!.run();
+  assert.equal(await readOf(box, 'claude-cli'), narrowed);
+});
+
 inBox('A copy put back inside the settle window was a save, not a deletion', async box => {
   await on(box);
   const text = await readOf(box, 'codex-cli');
@@ -269,7 +284,8 @@ inBox('A harness’s agents folder removed by hand is written afresh once the se
   assert.deepEqual([first.writes, first.settling, await readOf(box, 'codex-cli')], [0, true, undefined], 'inside the window nothing happens there');
   const second = await applyAgents(waiting, tools, [], { now: 3500 });
   assert.deepEqual([second.writes, (await itemOf(box))!.on, (await marks(box))['codex-cli']], [1, true, 'current']);
-  assert.match((await readOf(box, 'codex-cli'))!, /Be brief/);
+  // Codex's own part (its keys and table) comes back with it: the library keeps each tool's file as last seen.
+  assert.equal(await readOf(box, 'codex-cli'), codexAgent());
   // An Off agent's removal owed there waits for the folder: it is not forgotten.
   await turnOff(box, { ...box.context, fault: at => { if (at === 'before-remove') throw new Error('crash'); } }).catch(() => undefined);
   await rename(join(box.home, '.codex/agents'), join(box.home, '.codex/agents-away'));

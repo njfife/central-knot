@@ -265,9 +265,9 @@ async function syncItem(pass: Pass, item: LibraryItem) {
   const slot = pass.disk.byKey.get(item.key) ?? {};
   const fileIn = (harness: HarnessId) => slot[harness as AgentTool]!;
   const hashBefore = item.hash;
-  const made = plan(item, copiesOf(pass, item));
-  // Version first: each content about to give way is kept, the edit taken in is current, and each file about to go is kept
-  // as its harness's own part. The item is saved as it will be (the click on it included) before any file changes.
+  const copies = copiesOf(pass, item), made = plan(item, copies);
+  // Version first: each content about to give way is kept, the edit taken in is current, and each harness's file as seen now is
+  // its own part. The item is saved as it will be (the click on it included) before any file changes.
   for (const { harness, from } of made.keep) {
     const here = fileIn(harness);
     await keepVersion(pass.shelf, item, { hash: here.hash, at: iso(here.at), from }, here.agent);
@@ -277,7 +277,10 @@ async function syncItem(pass: Pass, item: LibraryItem) {
     await setCurrent(pass.shelf, item, { hash: edit.hash, at: iso(edit.at), from: { how: 'edited', harness: edit.tool } }, edit.agent);
   }
   if (made.turnedOffBy) item.on = false;
-  for (const harness of made.remove) await keepOwn(pass.context, item, harness, fileIn(harness).text);
+  for (const harness of pass.managed) {
+    const here = slot[harness];
+    if (here && copies[harness]?.is === 'present' && item.own[harness] !== here.bytes) await keepOwn(pass.context, item, harness, here.text);
+  }
   for (const harness of made.current) item.applied[harness] = item.hash;
   for (const harness of made.forget) delete item.applied[harness];
   await saveIfChanged(pass);
@@ -302,6 +305,7 @@ async function writeCopy(pass: Pass, item: LibraryItem, tool: AgentTool, here: A
   try { await writeFileChecked(path, text, here?.text); }
   catch (error) { return held(errorCode(error).startsWith('CK_') ? (error as Error).message : `Could not write ${nameOf(tool)}’s copy.`); }
   item.applied[tool] = item.hash;
+  await keepOwn(pass.context, item, tool, text);
   pass.writes++;
   firstSeenMissingAt.delete(path);
   const message = `${here ? 'Now has the current version' : 'Added'}. Start a new session to use it.`;
