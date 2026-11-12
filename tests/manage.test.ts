@@ -11,6 +11,7 @@ import { gateRefusal, readRecord, saveRecord, storeDirectory, syncGate, takeOver
 import type { HarnessId, HistoryDays, Snapshot } from '../src/types.ts';
 import { DAY_MS } from '../src/model.ts';
 import { harnesses } from '../src/harnesses.ts';
+import { lineApp, releaseLine } from '../src/updates.ts';
 
 const both: HarnessId[] = ['claude-cli', 'copilot-cli'];
 const CLAUDE = '.claude/skills', COPILOT = '.copilot/skills';
@@ -1673,6 +1674,22 @@ test('One build syncs a home at a time: the other names the owner, and Take over
     await writeFile(path, '{ damaged');
     assert.match((await takeOverSync(acme)).stopped ?? '', /^The sync record is damaged\./);
     assert.equal(await readFile(path, 'utf8'), '{ damaged');
+  } finally { await box.cleanup(); }
+});
+
+test('The preview and the alpha on one home: each names the other as the person knows it, and either can take over', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, '.claude/skills', 'notes');
+    // Each app's identity as main.ts takes it from its release tag (updates.ts lineApp), with its own settings.
+    const app = (tag: string, settings: string) => { const own = lineApp(releaseLine(tag)); return ctx(box, { build: own.bundleId, buildName: own.name, settingsPath: join(box.base, settings) }); };
+    const preview = app('v0.5.0-preview.9', 'preview-settings.json'), alpha = app('v0.6.0-alpha.1', 'alpha-settings.json');
+    assert.equal((await applyChanges(preview, [manage('notes')])).stopped, undefined);
+    assert.deepEqual(await syncGate(alpha), { state: 'stopped', reason: 'Central Knot syncs this home, so nothing was written or deleted. Take over syncing to have Central Knot Alpha sync it instead.', owner: { build: 'com.centralknot.firstlook', name: 'Central Knot' } });
+    assert.deepEqual(await takeOverSync(alpha), { from: 'Central Knot' });
+    assert.deepEqual(await syncGate(preview), { state: 'stopped', reason: 'Central Knot Alpha syncs this home, so nothing was written or deleted. Take over syncing to have Central Knot sync it instead.', owner: { build: 'com.centralknot.alpha', name: 'Central Knot Alpha' } });
+    assert.deepEqual(await takeOverSync(preview), { from: 'Central Knot Alpha' });
+    assert.equal((await syncGate(preview)).state, 'ready');
   } finally { await box.cleanup(); }
 });
 

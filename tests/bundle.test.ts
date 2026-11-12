@@ -64,6 +64,9 @@ test('build inputs that describe no build are refused in plain words', () => {
   assert.throws(() => describeBuild({ marketplace: '/m' }), /needs its own name: add --app-name/);
   assert.throws(() => describeBuild({ appId: 'acme' }), /needs its own name: add --app-name/);
   for (const name of ['Central Knot', 'central knot', 'Central-Knot']) assert.throws(() => describeBuild({ appName: name, appId: 'acme' }), /--app-name can’t be “Central Knot”/, name);
+  // Nor the alpha's: its file would take the alpha's place.
+  for (const name of ['Central Knot Alpha', 'central knot alpha', 'Central-Knot-Alpha']) assert.throws(() => describeBuild({ appName: name, appId: 'acme' }), /--app-name can’t be “Central Knot Alpha”/, name);
+  assert.equal(describeBuild({ appName: 'Central Knot Beta' }).name, 'Central Knot Beta', 'any other name is the build’s own');
   assert.throws(() => describeBuild({ marketplaceName: 'Acme plugins' }), /add --marketplace/);
   assert.throws(() => describeBuild({ marketplaceLogo: '/x/logo.png' }), /add --marketplace/);
   assert.throws(() => describeBuild({ appName: 'Acme', appId: 'central-knot' }), /--app-id/);

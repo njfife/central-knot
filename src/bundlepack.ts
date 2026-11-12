@@ -10,6 +10,7 @@ import { BUILD_ID, CARRIED_FOLDER, CUSTOM_FILE, RELEASE_FILE, feedAddress, fileD
 import { CODEX_MANIFEST, MANIFEST, sourceLabel } from './catalogdetail.ts';
 import { parseCatalog, readCatalog, readRemotePlugin, type PluginContext } from './plugins.ts';
 import { isFolder, record, text } from './values.ts';
+import { downloadName, lineApp } from './updates.ts';
 import type { CatalogPlugin } from './types.ts';
 
 // ---------- The build's optional inputs ----------
@@ -81,7 +82,10 @@ export function describeBuild(inputs: BuildInputs): CustomBuild {
   const name = inputs.appName.trim();
   // The name is also the app's file name, so nothing a file name can't hold as written.
   if (!name || name.length > 60 || /[\\/:?*"<>|\n\r\t]/.test(name) || name.startsWith('.') || name.endsWith('.')) throw new Error('--app-name is the app’s name as people see it, and its file’s name: up to 60 characters, without / \\ : ? * " < > | or line breaks, and not starting or ending with a period.');
-  if (downloadName(name).toLowerCase() === downloadName(STANDARD_NAME).toLowerCase()) throw new Error(`--app-name can’t be “${STANDARD_NAME}”: under that name the build’s file would take the standard app’s place in Applications.`);
+  // Nor a release line's app's name (the standard app's or the alpha's, updates.ts lineApp): its file would take that app's place.
+  for (const taken of [STANDARD_NAME, lineApp('alpha').name]) {
+    if (downloadName(name).toLowerCase() === downloadName(taken).toLowerCase()) throw new Error(`--app-name can’t be “${taken}”: under that name the build’s file would take that app’s place in Applications.`);
+  }
   const id = inputs.appId ?? slug(name);
   if (!BUILD_ID.test(id) || id === 'central-knot') throw new Error(inputs.appId ? '--app-id is lower-case letters, digits, dots and dashes (not “central-knot”, the standard app’s).' : 'Give the build an identity with --app-id: lower-case letters, digits, dots and dashes.');
   for (const [option, file, kinds] of [['--app-icon', inputs.appIcon, ['.png', '.icns']], ['--marketplace-logo', inputs.marketplaceLogo, ['.png', '.svg', '.jpg', '.jpeg', '.webp']]] as const) {
@@ -293,6 +297,3 @@ export async function publishRelease(input: { source: string; out: string; work:
   ];
   return { release, report: `${lines.join('\n')}\n` };
 }
-
-/** A file name for the build's downloads: "Acme Knot" is "Acme-Knot". */
-export const downloadName = (name: string) => name.trim().replace(/\s+/g, '-');

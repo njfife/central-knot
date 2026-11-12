@@ -1,4 +1,4 @@
-import { PRODUCT, onlyAllowed, record, strings } from './values.ts';
+import { onlyAllowed, record, strings } from './values.ts';
 import { execFile } from 'node:child_process';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, shell, Tray, type MenuItemConstructorOptions } from 'electron';
 import { homedir, hostname, tmpdir } from 'node:os';
@@ -30,7 +30,8 @@ import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, PartRef, PartsPick, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
 import { toolList } from './words.ts';
-import { startUpdater, type PendingUpdate } from './updater.ts';
+import { buildTag, startUpdater, type PendingUpdate } from './updater.ts';
+import { lineApp, releaseLine } from './updates.ts';
 import { autoUpdates, CHECK_EVERY_MS, PLUGIN_UPDATES_DEFAULT, type UpdatesRecord } from './pluginupdates.ts';
 import { CARRIED_FOLDER, STANDARD_BUILD, aboutBuild, openBundle, readCustomBuildSync, releaseDate, releaseLabel, type ActiveBundle } from './bundle.ts';
 
@@ -48,16 +49,19 @@ function trimLog() {
     writeFileSync(logPath(), text.slice(text.indexOf('\n', Math.floor(text.length / 2)) + 1));
   } catch { /* no log yet, or it can't be read: nothing to trim */ }
 }
-/**
- * A custom build (bundle.ts): its identity file sits beside this code. It keeps its settings in a folder of its own, so it
- * runs beside the standard app and never reads or writes that app's settings (ORG-07). A data folder named on the command
- * line (tests) still wins.
- */
+/** A custom build (bundle.ts): its identity file sits beside this code. */
 const custom = readCustomBuildSync(__dirname);
-if (custom) {
-  app.setName(custom.name);
+/**
+ * The app this build is: a custom build's own, or the one its release tag's line is (updates.ts lineApp: an alpha is
+ * "Central Knot Alpha"); the standard app otherwise. Any other app than the standard one keeps its settings and log in a
+ * folder of its own, so it runs beside the standard app and never reads or writes that app's settings (ORG-07). A data
+ * folder named on the command line (tests) still wins.
+ */
+const own = custom ?? lineApp(releaseLine(buildTag()));
+if (own.bundleId !== STANDARD_BUILD) {
+  app.setName(own.name);
   // Named by its bundle id, which no other app's folder is (a build named after a company could otherwise land in that company's own app's folder).
-  if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', join(app.getPath('appData'), custom.bundleId));
+  if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', join(app.getPath('appData'), own.bundleId));
 }
 if (smoke) app.setPath('userData', mkdtempSync(join(tmpdir(), 'central-knot-smoke-')));
 // Test-only, read only when set: an update's restart is opened by macOS afresh, with no arguments and the login's own HOME, so
@@ -68,8 +72,8 @@ if (process.env.CK_TEST_USER_DATA) app.setPath('userData', process.env.CK_TEST_U
 if (process.env.CK_TEST_DEBUG_PORT) app.commandLine.appendSwitch('remote-debugging-port', process.env.CK_TEST_DEBUG_PORT);
 // Asked now, while the window is being made, so the first read of this computer's tools doesn't wait on a shell's startup.
 void searchPath();
-/** This build's name in a home's sync record: the standard app's, or a custom build's own. */
-const BUILD = custom?.bundleId ?? STANDARD_BUILD;
+/** This build's name in a home's sync record: its app's bundle id (the standard app's, the alpha's or a custom build's own). */
+const BUILD = own.bundleId;
 /** The marketplace a bundled build carries, as unpacked at open (bundle.ts); undefined for any other build, or when it couldn't be unpacked. */
 let bundle: ActiveBundle | undefined;
 let window: BrowserWindow;
@@ -129,7 +133,7 @@ let handoff = { id: 0, home: '', snapshots: [] as Snapshot[] };
 
 function context(): ShareContext {
   return {
-    home: current!.home, mode: current!.mode, read, build: BUILD, buildName: custom?.name ?? PRODUCT,
+    home: current!.home, mode: current!.mode, read, build: BUILD, buildName: own.name,
     settingsPath: join(app.getPath('userData'), 'sharing-settings.json'), realHome: homedir(),
     allowActualWrites: process.platform === 'darwin' && !smoke,
     overrides: Object.fromEntries(harnessIds.map(id => [id, overrideFor(id)])),

@@ -31,8 +31,12 @@ const stub = process.env.CK_UPDATE_STUB;
 /** Squirrel is given this long to check and unpack the zip before the wait for it ends. */
 const PREPARE_MS = 10 * 60_000;
 
-/** The release tag recorded in the app at packaging (scripts/package-mac.mjs); none for a dev or ad hoc build. */
-function builtTag(): string | undefined {
+/**
+ * The release tag this build is: the one recorded in the app at packaging (scripts/package-mac.mjs), none for a dev or ad
+ * hoc build, or the test stand-in's (CK_UPDATE_STUB) when set. The updater checks as that release, and main.ts reads it at
+ * start: the tag's release line says which app this build is (updates.ts lineApp).
+ */
+export function buildTag(): string | undefined {
   if (stub) return stub;
   try {
     const tag = JSON.parse(readFileSync(join(__dirname, 'build-info.json'), 'utf8')).tag;
@@ -47,7 +51,7 @@ const signingTeam = (bundle: string) => new Promise<string | undefined>(done =>
 const writable = (path: string) => access(path, constants.W_OK).then(() => true, () => false);
 
 export function startUpdater(host: UpdaterHost) {
-  const tag = builtTag();
+  const tag = buildTag();
   const shown = updatesShown(process.platform) || !!stub;
   /** A `prepare` is waiting for Squirrel's answer; without one, the answer is a late one (updateflow.ts's `onLate`). */
   let waiting = false;

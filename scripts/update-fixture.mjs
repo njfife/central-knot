@@ -6,11 +6,13 @@ import { readFileSync, statSync } from 'node:fs';
 /**
  * Serves `releases`: each `{ tag, zip }`, `zip` a file path, newest first. Options per release: `cut` (send only that share of
  * the zip, then drop the connection: an interrupted download), `stall` (send only that share, then say nothing more with the
- * connection left open: a download that goes quiet), `bytesPerSecond` (a slow download, for watching progress).
+ * connection left open: a download that goes quiet), `bytesPerSecond` (a slow download, for watching progress), `asset` (the
+ * zip's name in the list: the standard app's `Central-Knot-0.5.0-mac-arm64.zip` unless given, as for an alpha's zip).
  * `port`: a fixed port, for builds that have the fixture's address built in. Returns `{ url, releasesUrl, served, close }`;
  * `served` lists the zip requests.
  */
 export async function serveReleases(releases, port = 0) {
+  const assetOf = release => release.asset ?? 'Central-Knot-0.5.0-mac-arm64.zip';
   const served = [];
   const server = createServer((request, response) => {
     const { pathname } = new URL(request.url, 'http://fixture');
@@ -19,11 +21,11 @@ export async function serveReleases(releases, port = 0) {
       response.end(JSON.stringify(releases.map(release => ({
         tag_name: release.tag, name: `Central Knot ${release.tag}`, draft: false, prerelease: release.tag.includes('-'),
         html_url: `https://github.com/njfife/central-knot/releases/tag/${release.tag}`,
-        assets: [{ name: 'Central-Knot-0.5.0-mac-arm64.zip', size: statSync(release.zip).size, browser_download_url: `${url}/download/${release.tag}/Central-Knot-0.5.0-mac-arm64.zip` }],
+        assets: [{ name: assetOf(release), size: statSync(release.zip).size, browser_download_url: `${url}/download/${release.tag}/${assetOf(release)}` }],
       }))));
       return;
     }
-    const release = releases.find(entry => pathname === `/download/${entry.tag}/Central-Knot-0.5.0-mac-arm64.zip`);
+    const release = releases.find(entry => pathname === `/download/${entry.tag}/${assetOf(entry)}`);
     if (!release) { response.writeHead(404); response.end(); return; }
     served.push(release.tag);
     const bytes = readFileSync(release.zip);
