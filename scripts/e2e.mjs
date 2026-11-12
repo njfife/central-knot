@@ -737,6 +737,14 @@ async function practiceFlow() {
   await a.click('#switch-release-notes');
   same('and on again puts it back once more', releaseNotesIn(), [true, true, true]);
 
+  // A damaged record stops every write, and the page says so in its bands; put back, sync carries on.
+  const syncRecord = join(practice, '.central-knot/sync.json'), goodRecord = readFileSync(syncRecord, 'utf8');
+  writeFileSync(syncRecord, '{ damaged');
+  await a.click('#header-refresh');
+  same('a damaged record is said in the bands, and every switch is off', [/The sync record is damaged/.test(await a.text('.bands') ?? ''), await a.run(`[...document.querySelectorAll('.ov-row[data-key] .switch')].every(item => item.disabled)`)], [true, true]);
+  writeFileSync(syncRecord, goodRecord);
+  await a.click('#header-refresh');
+  check('put back, the switches work again', !(await a.run(`document.querySelector('#switch-notes').disabled`)), await a.text('.bands'));
   // The practice copy has no Pi folder, only a skill in the shared .agents folder that Pi (and others) read: that makes no
   // tool present, so Pi is no column, mark or control, and Tools shows no card for it.
   mkdirSync(join(practice, '.agents/skills/shared-only'), { recursive: true });
@@ -2841,12 +2849,12 @@ async function crashFlow() {
     const a = await launch(join(scratch, 'crash-data'));
     await a.click('#home-actual');
   await a.click('#nav-skills');
-    // Until the choices are on record (a kill can land before Apply all saves them), choose again; after that, opening catches up.
+    // Each skill a click takes in is on record once it is carried out, one after another, so a kill leaves some taken in
+    // (opening catches their copies up) and the rest still found: those are taken in again, in one request (no bulk switch on
+    // the page), not waited for, so the kill lands while it copies.
     const record = join(HOME, '.central-knot/skills.json');
-    const chosen = existsSync(record) && (() => { try { return Object.values(JSON.parse(readFileSync(record, 'utf8')).items).some(item => item.on); } catch { return false; } })();
-    // Every bulk skill turned on in one request (no bulk switch on the page yet), not waited for: the kill lands while it copies.
-    if (!chosen) await a.run(`(window.centralKnot.applySkills([...document.querySelectorAll('.ov-row[data-key^="bulk-"]')].map(row => ({ key: row.dataset.key, managed: true, off: [] })), false, document.querySelector('.status-home').title), true)`);
-    else await a.run(`document.querySelector('#header-refresh').click()`);
+    await a.run(`(() => { const found = [...document.querySelectorAll('.ov-row[data-key^="bulk-"]')].filter(row => row.querySelector('.switch')?.getAttribute('aria-checked') === 'mixed').map(row => ({ key: row.dataset.key, managed: true, off: [] }));
+      if (found.length) window.centralKnot.applySkills(found, false, document.querySelector('.status-home').title); else document.querySelector('#header-refresh').click(); return true; })()`);
     await wait(30 + Math.round(round * 700 / Math.max(1, crashRounds - 1)) + randomInt(40));
     await a.crash();
     if (readdirSync(COPILOT).length < 40) interrupted++;
@@ -2856,13 +2864,13 @@ async function crashFlow() {
     }
     if (existsSync(record)) { try { JSON.parse(readFileSync(record, 'utf8')); passes++; } catch { check(`round ${round}: record stays valid`, false); } }
   }
-  const onRecord = (() => { try { return Object.values(JSON.parse(readFileSync(join(HOME, '.central-knot/skills.json'), 'utf8')).items).some(item => item.on); } catch { return false; } })();
+  const onRecord = (() => { try { return Object.values(JSON.parse(readFileSync(join(HOME, '.central-knot/skills.json'), 'utf8')).items).filter(item => item.on).length; } catch { return 0; } })();
   const a = await launch(join(scratch, 'crash-data'));
   await a.click('#home-actual');
   await a.click('#nav-skills');
-  // If every kill landed before the choices were saved, there is nothing to catch up: finish by turning each on.
-  if (!onRecord) for (const key of await rowKeys(a)) if (key.startsWith('bulk-')) await a.click(`#switch-${key}`);
-  console.log(`crash finish: ${onRecord ? 'caught up on open' : 'no choices were saved before the kills; turned on again'}`);
+  // Opening catches up every skill on record; the ones a kill left found are turned on, each.
+  for (const key of await rowKeys(a)) if (key.startsWith('bulk-') && !(await switchOn(a, key))) await a.click(`#switch-${key}`);
+  console.log(`crash finish: ${onRecord} of 40 on record before opening, caught up on open; the rest turned on again`);
   same('after crashes, opening again completes every copy', readdirSync(COPILOT).filter(name => name.startsWith('bulk-')).length, 40);
   for (const name of Object.keys(expected)) same(`final ${name} bytes`, tree(join(COPILOT, name)), expected[name]);
   same('stale stages are cleared', readdirSync(join(HOME, '.copilot')).filter(name => name.startsWith('.ck-')), []);

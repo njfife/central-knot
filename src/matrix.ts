@@ -846,6 +846,8 @@ function listNotices() {
   if (!mcp.access.allowed) bands.push(h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, mcp.access.reason)));
   const owned = otherOwnerBand();
   if (owned) bands.push(owned);
+  // A record that stops every write (damaged, newer, another generation): said once, unless a problem below says it already.
+  else if (mcp.gate.state === 'stopped' && !mcp.problems.includes(mcp.gate.reason)) bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, mcp.gate.reason)));
   const resume = resumeBand();
   if (resume) bands.push(resume);
   for (const problem of mcp.problems) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), h('span.band-text', {}, problem)));
