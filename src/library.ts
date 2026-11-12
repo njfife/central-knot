@@ -117,8 +117,11 @@ export function sourceWords({ how, harness }: Source): string {
 
 // ---------- The rule ----------
 
-/** H: what a harness holds of an item now. `at`: when its file was last changed (ms). `unknown`: it can't be seen for sure. */
-export type HarnessCopy = { is: 'present'; hash: string; at: number } | { is: 'absent' } | { is: 'unknown' };
+/**
+ * H: what a harness holds of an item now. `at`: when its file was last changed (ms). Nothing happens in a harness whose copy
+ * is `unknown` (it can't be seen for sure) or `held` (it can't be given the item), and `why` says it on the page.
+ */
+export type HarnessCopy = { is: 'present'; hash: string; at: number } | { is: 'absent' } | { is: 'unknown'; why: string } | { is: 'held'; why: string };
 
 /** The table's results, one per row, and two with nothing left to do: `forget` (a removal that is already done). */
 export type Verdict = 'nothing' | 'write' | 'take-in' | 'latest-wins' | 'keep-then-write' | 'turn-off'
@@ -129,7 +132,7 @@ export type Verdict = 'nothing' | 'write' | 'take-in' | 'latest-wins' | 'keep-th
  * `current` is L, `copy` is H, `applied` is A.
  */
 export function decide(wanted: boolean, current: string, copy: HarnessCopy, applied: string | undefined): Verdict {
-  if (copy.is === 'unknown') return 'nothing';
+  if (copy.is === 'unknown' || copy.is === 'held') return 'nothing';
   if (!wanted) {
     if (copy.is === 'absent') return applied === undefined ? 'nothing' : 'forget';
     if (applied === undefined) return 'found';

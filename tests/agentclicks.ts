@@ -45,7 +45,7 @@ export async function seen(box: Box, context = box.context): Promise<{ fact?: Sk
   const view = await agentsView(context, box.tools);
   const fact = view.servers.find(entry => entry.key === 'reviewer');
   const hashes = Object.fromEntries(Object.entries(fact?.copies ?? {}).map(([tool, copy]) => [tool, copy!.hash]));
-  return { fact, item: view.library?.reviewer, row: { key: 'reviewer', name: fact?.name, hashes, cannot: fact?.cannot, unseen: fact?.unseen } };
+  return { fact, item: view.library?.reviewer, row: { key: 'reviewer', name: fact?.name, hashes, plan: fact?.plan, cannot: fact?.cannot, unseen: fact?.unseen, differs: fact?.differs } };
 }
 export const itemOf = async (box: Box) => (await seen(box)).item;
 
@@ -53,7 +53,7 @@ const send = (box: Box, change: Change, context = box.context) => applyAgents(co
 /** The row's switch, On. A found agent whose copies differ opens the copy question instead: `choose` answers it. */
 export async function turnOn(box: Box, context = box.context): Promise<McpResult | 'choose'> {
   const { row, item } = await seen(box, context);
-  return needsChoice(row, item, box.tools) ? 'choose' : send(box, agentClicks.on(row, item), context);
+  return needsChoice(row, item) ? 'choose' : send(box, agentClicks.on(row, item), context);
 }
 export const choose = async (box: Box, use: Tool, context = box.context) => { const { row, item } = await seen(box, context); return send(box, agentClicks.on(row, item, use), context); };
 export const turnOff = async (box: Box, context = box.context) => { const { row, item } = await seen(box, context); return send(box, agentClicks.off(row, item), context); };

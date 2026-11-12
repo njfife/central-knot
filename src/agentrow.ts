@@ -6,20 +6,25 @@
 //   on     in Central Knot's library and On: applied to every managed harness it is not kept out of
 //   off    in the library and Off: in Central Knot only, in no harness
 //   found  in a managed harness, not in the library; its switch takes it in
-// What a harness holds is told by the library's own rule (library.ts decide), so a mark says what the next pass will do
-// there and never something of its own.
-import { decide, sourceWords, wantedIn, type LibraryItem, type Version } from './library.ts';
+// What each harness's mark says is the library's plan for the agent (library.ts plan), worked out by agents.ts from the same
+// reading a pass makes (copiesOf), so a mark says what the next pass will do there and never something of its own.
+import { sourceWords, type LibraryItem, type Plan, type Version } from './library.ts';
 import { dayAndTime } from './model.ts';
 import type { Change, HarnessId, SyncNotice } from './types.ts';
 import { andList, sentence, toolName, toolsPhrase } from './words.ts';
 
-/** What the page knows of an agent besides its library item: each harness's copy by content, and why a harness can't hold or show it. */
+/** What the page knows of an agent besides its library item (agents.ts rowFacts gives it; types.ts SkillFacts). */
 export interface AgentRow {
   key: string; name?: string;
   /** Each harness's copy, by its content. */
   hashes?: Partial<Record<string, string>>;
+  /** In the library: what the next pass does in each harness. */
+  plan?: Plan;
+  /** Why a harness the agent should be in can't be given a copy, and why a harness's copy can't be seen for sure. */
   cannot?: Partial<Record<string, string>>;
   unseen?: Partial<Record<string, string>>;
+  /** Found: its copies differ, so the switch asks which one to take in. */
+  differs?: boolean;
 }
 
 export type Place = 'on' | 'off' | 'found';
@@ -28,7 +33,7 @@ export const inLibrary = (item: LibraryItem | undefined) => (item && !item.delet
 export const placeOf = (item: LibraryItem | undefined): Place => { const held = inLibrary(item); return !held ? 'found' : held.on ? 'on' : 'off'; };
 
 /**
- * What one harness has of an agent, as its mark and its line say it:
+ * What one harness has of an agent, as its mark and its line say it, from the plan:
  * - `current`: the current version; `gets-it`: it is written there at the next pass; `edited`: its copy was edited there and
  *   becomes the current version at the next pass; `deleted`: its copy was deleted there by hand, which turns the agent Off at
  *   the next pass; `leaving`: its copy is removed at the next pass;
@@ -39,19 +44,15 @@ export const placeOf = (item: LibraryItem | undefined): Place => { const held = 
 export type HarnessIs = 'current' | 'gets-it' | 'edited' | 'deleted' | 'leaving' | 'own-copy' | 'kept-out' | 'none' | 'cannot' | 'unseen';
 
 export function harnessIs(row: AgentRow, item: LibraryItem | undefined, tool: string): HarnessIs {
-  const hash = row.hashes?.[tool], held = inLibrary(item), harness = tool as HarnessId;
+  const held = inLibrary(item), made = row.plan, harness = tool as HarnessId;
   if (row.unseen?.[tool]) return 'unseen';
-  if (!held) return hash === undefined ? 'none' : 'own-copy';
-  const wanted = wantedIn(held, harness), keptOut = held.on && held.except.includes(harness);
-  if (hash === undefined && wanted && row.cannot?.[tool]) return 'cannot';
-  switch (decide(wanted, held.hash, hash === undefined ? { is: 'absent' } : { is: 'present', hash, at: 0 }, held.applied[harness])) {
-    case 'write': case 'keep-then-write': return 'gets-it';
-    case 'take-in': case 'latest-wins': return 'edited';
-    case 'turn-off': return 'deleted';
-    case 'remove': case 'keep-then-remove': return 'leaving';
-    case 'found': return 'own-copy';
-    default: return hash !== undefined ? 'current' : keptOut ? 'kept-out' : 'none';
-  }
+  if (!held || !made) return row.hashes?.[tool] === undefined ? 'none' : 'own-copy';
+  if (row.cannot?.[tool]) return 'cannot';
+  if (made.takeIn === harness) return 'edited';
+  if (made.turnedOffBy === harness) return 'deleted';
+  const step = (['write', 'remove', 'found', 'current'] as const).find(list => made[list].includes(harness));
+  if (step) return ({ write: 'gets-it', remove: 'leaving', found: 'own-copy', current: 'current' } as const)[step];
+  return held.on && held.except.includes(harness) ? 'kept-out' : 'none';
 }
 
 const KEPT_FIRST = 'before it is written over, a copy Central Knot doesn’t have yet is kept as a version';
@@ -75,9 +76,8 @@ export function harnessLine(row: AgentRow, item: LibraryItem | undefined, tool: 
   }
 }
 
-/** Whether the switch must ask which copy to take in: a found agent whose copies differ. A library item never asks. */
-export const needsChoice = (row: AgentRow, item: LibraryItem | undefined, tools: readonly string[]) =>
-  !inLibrary(item) && new Set(tools.map(tool => row.hashes?.[tool]).filter(hash => hash !== undefined)).size > 1;
+/** Whether the switch must ask which copy to take in: a found agent whose copies differ (agents.ts foundCopies). A library item never asks. */
+export const needsChoice = (row: AgentRow, item: LibraryItem | undefined) => !inLibrary(item) && !!row.differs;
 
 /** The agent as it is, as a click that changes nothing: each click below changes one thing of it. */
 function asItIs(row: AgentRow, item: LibraryItem | undefined): Change {
@@ -132,7 +132,7 @@ export function statusLine(row: AgentRow, item: LibraryItem | undefined, tools: 
   const where = (...states: HarnessIs[]) => harnessesWhere(row, item, tools, ...states);
   const own = where('own-copy'), place = placeOf(item);
   if (place === 'found') {
-    const differ = needsChoice(row, item, tools) ? ', with different copies' : '';
+    const differ = needsChoice(row, item) ? ', with different copies' : '';
     return `Not in Central Knot · in ${named(own, tools)}${differ}. Turn it on to take it in and put it in every tool.`;
   }
   const ownSaid = own.length ? ` ${sentence(named(own, tools))} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there.` : '';

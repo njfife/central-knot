@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { decide, isLibraryItem, keepVersion, newItem, plan, setCurrent, sourceWords, type HarnessCopy, type LibraryItem, type Shelf } from '../src/library.ts';
 
 const has = (hash: string, at = 0): HarnessCopy => ({ is: 'present', hash, at });
-const none: HarnessCopy = { is: 'absent' }, unknown: HarnessCopy = { is: 'unknown' };
+const none: HarnessCopy = { is: 'absent' }, unknown: HarnessCopy = { is: 'unknown', why: 'it can’t be read' }, held: HarnessCopy = { is: 'held', why: 'it can’t hold this name' };
 const ON = true, OFF = false;
 
 // ---------- decide: the table, row by row ----------
@@ -24,6 +24,9 @@ test('Off or excepted, a copy where nothing was applied: a found copy, left alon
 
 test('H unknown is never H gone: nothing happens there, On or Off, whatever was applied', () => {
   for (const wanted of [ON, OFF]) for (const applied of ['b', 'a', undefined]) assert.equal(decide(wanted, 'b', unknown, applied), 'nothing');
+});
+test('A harness that can’t be given the item (held) is passed over: nothing happens there', () => {
+  for (const wanted of [ON, OFF]) for (const applied of ['b', undefined]) assert.equal(decide(wanted, 'b', held, applied), 'nothing');
 });
 test('Off, and the copy a removal was owed for is gone already: only forgotten', () => {
   assert.equal(decide(OFF, 'b', none, 'b'), 'forget');

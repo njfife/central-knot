@@ -228,7 +228,7 @@ const unseeable: [string, (box: Box) => Promise<unknown>, (box: Box) => Promise<
   ['an unreadable file', box => chmod(fileOf(box, 'codex-cli'), 0o000), box => chmod(fileOf(box, 'codex-cli'), 0o644)],
   ['a half-written save', box => write(box, 'codex-cli', 'name = "reviewer"\n'), async () => undefined],
   ['a file that is no agent', box => write(box, 'claude-cli', 'no frontmatter yet'), async () => undefined],
-  ['its agents folder away', box => rename(join(box.home, '.codex/agents'), join(box.home, '.codex/agents-away')), box => rename(join(box.home, '.codex/agents-away'), join(box.home, '.codex/agents'))],
+  ['its agents folder away', box => rename(join(box.home, '.codex/agents'), join(box.home, '.codex/agents-away')), async box => { await rm(join(box.home, '.codex/agents'), { recursive: true, force: true }); await rename(join(box.home, '.codex/agents-away'), join(box.home, '.codex/agents')); }],
   ['its agents folder made again, empty', async box => { await rm(join(box.home, '.codex/agents'), { recursive: true }); await mkdir(join(box.home, '.codex/agents')); }, async () => undefined],
 ];
 for (const [what, hide, show] of unseeable) {
@@ -255,6 +255,28 @@ inBox('A folder made again gets its agents back; a harness no longer managed is 
   await rm(fileOf(box, 'codex-cli'));
   for (const now of [1000, 9000]) assert.equal((await applyAgents(box.context, ['claude-cli', 'copilot-cli'], [], { now })).writes, 0);
   assert.equal((await itemOf(box))!.on, true);
+});
+
+inBox('A harness’s agents folder removed by hand is written afresh once the settle window has passed, and its mark says so meanwhile', async box => {
+  await write(box, 'codex-cli', codexAgent());
+  await on(box);
+  await pass(box);
+  await rm(join(box.home, '.codex/agents'), { recursive: true });
+  // The page reads what the pass will do: the folder's agent is written again, never "deleted… turns off everywhere".
+  assert.equal((await marks(box))['codex-cli'], 'gets-it');
+  const waiting = { ...box.context, settleMs: 2000 };
+  const first = await applyAgents(waiting, tools, [], { now: 1000 });
+  assert.deepEqual([first.writes, first.settling, await readOf(box, 'codex-cli')], [0, true, undefined], 'inside the window nothing happens there');
+  const second = await applyAgents(waiting, tools, [], { now: 3500 });
+  assert.deepEqual([second.writes, (await itemOf(box))!.on, (await marks(box))['codex-cli']], [1, true, 'current']);
+  assert.match((await readOf(box, 'codex-cli'))!, /Be brief/);
+  // An Off agent's removal owed there waits for the folder: it is not forgotten.
+  await turnOff(box, { ...box.context, fault: at => { if (at === 'before-remove') throw new Error('crash'); } }).catch(() => undefined);
+  await rename(join(box.home, '.codex/agents'), join(box.home, '.codex/agents-away'));
+  for (const now of [5000, 9000]) await applyAgents(waiting, tools, [], { now });
+  await rename(join(box.home, '.codex/agents-away'), join(box.home, '.codex/agents'));
+  await pass(box);
+  assert.deepEqual(await filesOf(box), { 'claude-cli': undefined, 'copilot-cli': undefined, 'codex-cli': undefined });
 });
 
 inBox('A harness whose folder is somewhere else now (its config root moved) is written afresh there; nothing turns Off', async box => {
@@ -290,7 +312,8 @@ inBox('A harness that can’t hold the agent (its name is no file name there) is
   assert.deepEqual([taken.writes, taken.results], [0, []]);
   assert.deepEqual(await readdir(join(box.home, '.copilot/agents')), []);
   const fact = (await agentsView(box.context, tools)).servers.find(agent => agent.key === 'réviseur')!;
-  assert.deepEqual([fact.managed, fact.cannot], [true, { 'copilot-cli': 'This name can’t be a file name here.', 'codex-cli': 'This name can’t be a file name here.' }]);
+  const why = (tool: string) => `${tool} can’t store this name (é). Rename the agent to use it there.`;
+  assert.deepEqual([fact.managed, fact.cannot], [true, { 'copilot-cli': why('Copilot CLI'), 'codex-cli': why('Codex') }]);
   assert.equal((await pass(box)).writes, 0);
 });
 

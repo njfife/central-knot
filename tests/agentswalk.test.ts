@@ -93,7 +93,7 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
       if (place === 'on') clicks(4, 'Off', agentClicks.off(row, item));
       if (place === 'off') clicks(4, 'On', agentClicks.on(row, item));
       if (place === 'found' && present.length) {
-        if (!needsChoice(row, item, tools)) clicks(4, 'On (take in)', agentClicks.on(row, item));
+        if (!needsChoice(row, item)) clicks(4, 'On (take in)', agentClicks.on(row, item));
         else for (const tool of present.filter(tool => tools.includes(tool))) clicks(2, `choose ${tool}`, agentClicks.on(row, item, tool));
       }
       if (held?.on) for (const tool of tools) clicks(1, `${held.except.includes(tool) ? 'let in' : 'keep out of'} ${tool}`, agentClicks.inHarness(row, item, tool, !held.except.includes(tool)));
@@ -137,7 +137,8 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
         } });
         if (process.getuid?.() !== 0) unseen('an unreadable file', () => chmod(fileOf(box, hidden), 0o000), () => chmod(fileOf(box, hidden), 0o644));
         unseen('a half-written save', () => write(box, hidden, hidden === 'codex-cli' ? 'name = "reviewer"\n' : '---\nname: rev'), () => write(box, hidden, text));
-        unseen('its folder away', () => rename(folder, `${folder}-away`), () => rename(`${folder}-away`, folder));
+        // With no settle window a folder away is written afresh at once; the folder that comes back takes its place.
+        unseen('its folder away', () => rename(folder, `${folder}-away`), async () => { await rm(folder, { recursive: true, force: true }); await rename(`${folder}-away`, folder); });
         unseen('its folder made again', async () => { await rm(folder, { recursive: true }); await mkdir(folder); }, async () => undefined);
       }
 

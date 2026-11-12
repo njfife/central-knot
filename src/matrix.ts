@@ -243,7 +243,7 @@ const ago = (iso: string) => { const said = sinceThen(Date.parse(iso)); return s
 
 /** The real home's facts in the shape the page works with. */
 const fromFacts = (facts: SkillFacts): ItemRow => ({
-  key: facts.key, name: facts.name, description: facts.description, gone: facts.gone, converted: facts.converted, unseen: facts.unseen, managed: facts.managed, off: facts.off, cannot: facts.cannot, plugin: facts.plugin, held: facts.held, separate: facts.separate, edited: facts.edited,
+  key: facts.key, name: facts.name, description: facts.description, gone: facts.gone, converted: facts.converted, unseen: facts.unseen, plan: facts.plan, differs: facts.differs, managed: facts.managed, off: facts.off, cannot: facts.cannot, plugin: facts.plugin, held: facts.held, separate: facts.separate, edited: facts.edited,
   blocks: facts.choiceBlocks, hashes: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   // A tool reading two different copies has copies that differ, even if one of them matches the other tool.
   copies: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, facts.extra.some(extra => extra.tool === tool && extra.hash !== copy!.hash) ? `mixed:${tool}` : copy!.hash])),
@@ -316,7 +316,7 @@ const placeOf = (skill: ItemRow) => (view.pinned?.at === pinKey() ? view.pinned.
 /** The headings, by place. */
 const placeNames = ['On', 'Not synced', 'Off'] as const;
 /** Whether its copies differ so that its switch must ask which copy every tool uses. An agent in the library never asks. */
-const differs = (skill: ItemRow, tools: Tool[] = toolList()) => (kind === 'agents' ? agentNeedsChoice(skill, itemOf(skill), tools) : needsCopyChoice(skill, tools));
+const differs = (skill: ItemRow, tools: Tool[] = toolList()) => (kind === 'agents' ? agentNeedsChoice(skill, itemOf(skill)) : needsCopyChoice(skill, tools));
 /** Copies differ and need a choice, among the items this page is about: on a harness's page, the ones it has. */
 const needsChoice = (skill: ItemRow) => inFocus(skill) && differs(skill);
 
@@ -326,7 +326,7 @@ const needsChoice = (skill: ItemRow) => inFocus(skill) && differs(skill);
  */
 export function differingIn({ facts, tools, waiting, library }: ReturnType<typeof kindSource>, tool: Tool) {
   const waits = new Set(waiting);
-  const asks = (row: ItemRow) => (library ? agentNeedsChoice(row, library[row.key], tools) : needsCopyChoice(row, tools));
+  const asks = (row: ItemRow) => (library ? agentNeedsChoice(row, library[row.key]) : needsCopyChoice(row, tools));
   return facts.filter(fact => fact.copies[tool as HarnessId] !== undefined && asks(rowOf(fact, waits))).length;
 }
 type Filter = 'all' | 'attention' | 'plugins';

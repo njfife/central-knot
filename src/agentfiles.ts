@@ -30,8 +30,18 @@ const suffixes: Record<AgentTool, string> = { 'claude-cli': '.md', 'copilot-cli'
 export const agentsFolder = (context: ShareContext, tool: HarnessId) => join(configRoot(harnesses[tool], context.home, context.overrides?.[tool]), 'agents');
 export const fileFor = (context: ShareContext, tool: AgentTool, name: string) => join(agentsFolder(context, tool), `${name}${suffixes[tool]}`);
 export const keyOf = (name: string) => name.normalize('NFC').toLowerCase();
-/** Agent names become file names: no separators, no dot-files. */
-export const safeName = (name: string) => /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name) && !name.includes('..');
+/**
+ * Why an agent's name can't become a file name in a harness, in a few words ("é", "starts with “.”"); none when it can.
+ * Agent names become file names: letters, digits, dot, dash, underscore and space only, no separators, no dot-files.
+ */
+export function nameProblem(name: string): string | undefined {
+  const others = [...new Set(name.replace(/[A-Za-z0-9._ -]/g, ''))];
+  if (others.length) return others.slice(0, 3).join(' ');
+  if (!/^[A-Za-z0-9]/.test(name)) return `starts with “${name[0] ?? ''}”`;
+  if (name.length > 128) return 'longer than 128 characters';
+  return name.includes('..') ? 'has “..”' : undefined;
+}
+export const safeName = (name: string) => !nameProblem(name);
 
 /** The shared part's identity: a harness's own fields never make two copies differ. */
 export const agentHash = (agent: SharedAgent) => sha256(JSON.stringify([agent.name, agent.description, agent.prompt.replace(/\s+$/, '')]));
@@ -69,7 +79,7 @@ export function parseAgent(tool: AgentTool, name: string, text: string): Neutral
 }
 
 /** One harness's agents as read: `unreadable` has each file that is there but can't be read as an agent, by key (`*`: the whole folder). */
-export interface AgentsRead { entries: AgentEntry[]; problems: string[]; unreadable: Map<string, string>; folderExists: boolean }
+export interface AgentsRead { entries: AgentEntry[]; problems: string[]; unreadable: Map<string, string> }
 
 /** Reads one tool's agents. A file that cannot be read as an agent is reported in `unreadable` and never written or deleted. */
 export async function readAgents(context: ShareContext, tool: AgentTool): Promise<AgentsRead> {
@@ -82,7 +92,7 @@ export async function readAgents(context: ShareContext, tool: AgentTool): Promis
     const gone = errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR';
     // A folder that is there but can't be listed is not absent: its agents are all treated as unreadable (held, never deleted).
     if (!gone) { problems.push(`${agentsFolder(context, tool)} could not be read.`); unreadable.set('*', agentsFolder(context, tool)); }
-    return { entries, problems, unreadable, folderExists: !gone };
+    return { entries, problems, unreadable };
   }
   const suffix = suffixes[tool];
   for (const file of names.filter(entry => entry.endsWith(suffix) && !entry.startsWith('.') && !entry.includes('.ck-'))) {
@@ -95,7 +105,7 @@ export async function readAgents(context: ShareContext, tool: AgentTool): Promis
     const at = await stat(path).then(info => info.mtimeMs, () => 0);
     entries.push({ name, key: keyOf(name), tool, file: path, text, agent, hash: agentHash(agent), bytes: sha256(text), at });
   }
-  return { entries, problems, unreadable, folderExists: true };
+  return { entries, problems, unreadable };
 }
 
 const CONTROL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]|\r(?!\n)/;

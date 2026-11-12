@@ -15,23 +15,22 @@
 // formats, agentfiles.ts; an agent's row and the clicks its controls send, agentrow.ts; Convert to skill, agentskill.ts.
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-import { agentText, agentsFolder, fileFor, isAgentTool, keyOf, readAgents, safeName, type AgentEntry, type SharedAgent } from './agentfiles.ts';
+import { agentText, agentsFolder, fileFor, isAgentTool, keyOf, nameProblem, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
 import { agentShelf, fileTextFor, keepOwn, openLibrary, readVersion, saveLibrary, type AgentLibrary, type FolderSeen } from './agentstore.ts';
-import { harnesses } from './harnesses.ts';
 import { agentAction } from './historyactions.ts';
-import { decide, keepVersion, newItem, plan, setCurrent, wantedIn } from './library.ts';
-import type { Copies, LibraryItem, Plan, Shelf, Source } from './library.ts';
+import { keepVersion, newItem, plan, setCurrent, wantedIn } from './library.ts';
+import type { Copies, HarnessCopy, LibraryItem, Plan, Shelf, Source } from './library.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
 import { throughPlugins } from './plugins.ts';
 import type { AgentTool } from './presence.ts';
 import { errorCode, newRecord, readRecord, recoverParked, remember, removeFileChecked, saveRecord, syncGate, writeAccess, writeFileChecked } from './share.ts';
 import type { ShareContext } from './share.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ThroughPlugin, ToolCopy } from './types.ts';
-import { throughPlugin } from './words.ts';
+import { throughPlugin, toolName } from './words.ts';
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const now = () => new Date().toISOString();
-const nameOf = (tool: HarnessId) => harnesses[tool].name;
+const nameOf = (tool: HarnessId) => toolName(tool);
 
 // ---------- What the harnesses hold ----------
 
@@ -39,19 +38,16 @@ type Slot = Partial<Record<AgentTool, AgentEntry>>;
 /** The managed harnesses' agent files now, by agent then harness, and what can't be seen for sure. */
 interface Disk {
   byKey: Map<string, Slot>;
-  /** The harnesses whose agents folder is there. */
-  folders: Set<HarnessId>;
   /** Why an agent's copy in a harness can't be seen for sure, by `harness:key` (`harness:*`: its whole folder). */
   unseen: Map<string, string>;
   problems: string[];
 }
 
 async function readDisk(context: ShareContext, managed: AgentTool[]): Promise<Disk> {
-  const disk: Disk = { byKey: new Map(), folders: new Set(), unseen: new Map(), problems: [] };
+  const disk: Disk = { byKey: new Map(), unseen: new Map(), problems: [] };
   for (const tool of managed) {
     const read = await readAgents(context, tool);
     disk.problems.push(...read.problems);
-    if (read.folderExists) disk.folders.add(tool);
     for (const key of read.unreadable.keys()) {
       const what = key === '*' ? 'agents folder' : 'file for this agent';
       disk.unseen.set(`${tool}:${key}`, `${nameOf(tool)}’s ${what} is there but could not be read. Nothing changes there until it reads again.`);
@@ -87,26 +83,121 @@ async function agentsThroughPlugins(context: ShareContext, tools: HarnessId[]): 
 function cannotHold(through: ThroughPlugins, item: Pick<LibraryItem, 'key' | 'name'>, tool: HarnessId): string | undefined {
   const given = through.get(tool)?.get(item.key);
   if (given) return throughPlugin(tool, given, 'agent');
-  return safeName(item.name) ? undefined : 'This name can’t be a file name here.';
+  const why = nameProblem(item.name);
+  return why && `${nameOf(tool)} can’t store this name (${why}). Rename the agent to use it there.`;
 }
+
+/**
+ * What one pass, or one look of the Agents page, read once: the managed harnesses' agent files, what their plugins bring,
+ * each agents folder as it is now, and (`settle`) the settle window's clock. Only a pass has that clock: the page's look
+ * reads the window as passed and records nothing, so its marks say what the pass will do once the window has passed.
+ */
+interface Look {
+  context: ShareContext; managed: AgentTool[]; library: AgentLibrary; disk: Disk; through: ThroughPlugins;
+  foldersNow: AgentLibrary['folders'];
+  /** How long a copy must stay missing before it counts as deleted by hand, the clock it is measured on, and whether a copy is inside it now. */
+  settle?: { clock: number; ms: number; settling: boolean };
+}
+
+/** Reads the managed harnesses once for `items`, with the folder guards applied to them (guardFolders). */
+async function lookAt(context: ShareContext, managed: AgentTool[], library: AgentLibrary, items: LibraryItem[], settle?: Look['settle']): Promise<Look> {
+  const look: Look = { context, managed, library, disk: await readDisk(context, managed), through: await agentsThroughPlugins(context, managed), foldersNow: {}, settle };
+  await guardFolders(look, items);
+  return look;
+}
+
+/**
+ * "H unknown is never H gone" for a whole folder. A harness's agents folder that is somewhere else than at the last full pass
+ * (its config root moved), was made again since (a reset or reinstall, or back after being away), or is gone for longer than
+ * the settle window: what was applied there is forgotten, so the agent is written there afresh and never read as deleted by
+ * hand. A folder that is gone is unseen inside the settle window, and afterwards for an agent whose removal it still owes,
+ * which waits for the folder.
+ */
+async function guardFolders(look: Look, items: LibraryItem[]) {
+  for (const tool of look.managed) {
+    const path = agentsFolder(look.context, tool), was = look.library.folders[tool];
+    const info = await stat(path).catch(() => undefined);
+    const here: FolderSeen = info?.isDirectory() ? { path, ino: info.ino, birth: Math.round(info.birthtimeMs) } : { path, away: true };
+    look.foldersNow[tool] = here;
+    const forget = (which: LibraryItem[]) => { for (const item of which) delete item.applied[tool]; };
+    if ('away' in here) {
+      const applied = items.filter(item => item.applied[tool] !== undefined);
+      if (!applied.length) continue;
+      const waiting = stillSettling(look, path);
+      if (waiting) look.disk.unseen.set(`${tool}:*`, `${nameOf(tool)}’s agents folder isn’t there just now. If it stays away, Central Knot writes it afresh.`);
+      if (waiting) continue;
+      forget(applied.filter(item => wantedIn(item, tool)));
+      const owed = `${nameOf(tool)}’s agents folder isn’t there. Its copy is removed once the folder is back.`;
+      for (const item of applied.filter(item => !wantedIn(item, tool))) look.disk.unseen.set(`${tool}:${item.key}`, owed);
+      continue;
+    }
+    seenAgain(look, path);
+    if (!was) continue;
+    const moved = was.path !== path;
+    if (moved) forget(items);
+    else if ('away' in was || was.ino !== here.ino || was.birth !== here.birth) forget(items.filter(item => !look.disk.byKey.get(item.key)?.[tool]));
+  }
+}
+
+/**
+ * H for each managed harness (library.ts HarnessCopy): the one place that says what a harness holds of an agent, read by a
+ * pass and by the page. `unknown`, so that nothing happens there: a file that can't be read for sure, a folder away inside the
+ * settle window, and a copy missing for less than the settle window (an editor's save moves the file away for a moment).
+ * `held`: a harness the agent should be in that can't be given a copy (cannotHold).
+ */
+function copiesOf(look: Look, item: LibraryItem): Copies {
+  const slot = look.disk.byKey.get(item.key) ?? {};
+  return Object.fromEntries(look.managed.map(tool => [tool, copyIn(look, item, tool, slot[tool])]));
+}
+function copyIn(look: Look, item: LibraryItem, tool: AgentTool, here: AgentEntry | undefined): HarnessCopy {
+  const unseen = unseenIn(look.disk, tool, item.key);
+  if (unseen) return { is: 'unknown', why: unseen };
+  const path = here?.file ?? fileFor(look.context, tool, item.name);
+  if (here) { seenAgain(look, path); return { is: 'present', hash: here.hash, at: here.at }; }
+  const wanted = wantedIn(item, tool), cannot = wanted ? cannotHold(look.through, item, tool) : undefined;
+  if (cannot) return { is: 'held', why: cannot };
+  const missing = `${nameOf(tool)}’s file for it is missing just now. If it stays missing, the agent turns off everywhere.`;
+  if (wanted && item.applied[tool] !== undefined && stillSettling(look, path)) return { is: 'unknown', why: missing };
+  seenAgain(look, path);
+  return { is: 'absent' };
+}
+
+/** When each file or folder was first seen missing, kept while the app runs (the settle window). A restart forgets them, which only delays an Off. */
+const firstSeenMissingAt = new Map<string, number>();
+/** Whether something missing at `path` may still be a save in progress. Only a pass keeps the clock (Look `settle`). */
+function stillSettling(look: Look, path: string): boolean {
+  if (!look.settle) return false;
+  const first = firstSeenMissingAt.get(path) ?? look.settle.clock;
+  firstSeenMissingAt.set(path, first);
+  if (look.settle.clock - first >= look.settle.ms) return false;
+  look.settle.settling = true;
+  return true;
+}
+const seenAgain = (look: Look, path: string) => { if (look.settle) firstSeenMissingAt.delete(path); };
+
+/**
+ * The copies a found agent is taken in from: one per managed harness that has it, can be read and isn't kept out (`off`).
+ * Where they differ, the person chooses which one every harness takes (the copy question): the switch asks, and takeIn waits.
+ */
+function foundCopies(look: Look, key: string, off: readonly HarnessId[]): AgentEntry[] {
+  const slot = look.disk.byKey.get(key) ?? {};
+  return look.managed.flatMap(tool => (slot[tool] && !off.includes(tool) && !unseenIn(look.disk, tool, key) ? [slot[tool]!] : []));
+}
+const differ = (copies: AgentEntry[]) => new Set(copies.map(entry => entry.hash)).size > 1;
 
 // ---------- A pass ----------
 
 /** A click's History entry, begun when the click is recorded and finished with the harnesses its plan writes or removes (`fill`: which of them it names). */
 type ClickEntry = Pick<HistoryEvent, 'kind' | 'winner' | 'only' | 'version' | 'previous'> & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed' };
-interface Pass {
-  context: ShareContext; managed: AgentTool[]; library: AgentLibrary; disk: Disk; through: ThroughPlugins;
+interface Pass extends Look {
   shelf: Shelf<SharedAgent>;
   /** The record as last saved, to save it again only when it changed. */
   saved: string;
-  /** The settle window: how long a copy must stay missing before it counts as deleted by hand, and the clock it is measured on. */
-  clock: number; settleMs: number;
   /** Agents whose new content Pull wrote into one harness: the version taken in says "pulled". */
   pulled: Set<string>;
-  foldersNow: AgentLibrary['folders'];
   /** The click on each agent this pass, as the History entry it becomes. */
   clicked: Map<string, ClickEntry>;
-  results: DestinationResult[]; notices: SyncNotice[]; writes: number; made: string[]; settling: boolean;
+  results: DestinationResult[]; notices: SyncNotice[]; writes: number; made: string[];
 }
 /** What may be asked of a pass besides its clicks. */
 export interface PassOptions {
@@ -120,9 +211,6 @@ export interface PassOptions {
   settleMs?: number; now?: number;
 }
 
-/** When each file was first seen missing, kept while the app runs (the settle window). A restart forgets them, which only delays an Off. */
-const firstSeenMissingAt = new Map<string, number>();
-
 /** One pass: the clicks in `changes`, then every agent in the library brought into line with its harnesses (library.ts plan). */
 export async function applyAgents(context: ShareContext, tools: HarnessId[], changes: Change[], options: PassOptions = {}): Promise<McpResult> {
   const refused = await refusal(context, changes.length > 0, options.resume);
@@ -132,20 +220,20 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
   const managed = tools.filter(isAgentTool);
   // A write or removal a crash interrupted is finished first, so a file moved aside is never read as deleted.
   for (const tool of managed) await recoverParked(agentsFolder(context, tool));
-  const pass: Pass = {
-    context, managed, library, disk: await readDisk(context, managed), through: await agentsThroughPlugins(context, managed),
-    shelf: agentShelf(context, () => saveIfChanged(pass)), saved: JSON.stringify(library),
-    clock: options.now ?? Date.now(), settleMs: options.settleMs ?? context.settleMs ?? 2000, pulled: options.pulled ?? new Set(),
-    foldersNow: {}, clicked: new Map(), results: [], notices: [], writes: 0, made: [], settling: false,
-  };
+  const saved = JSON.stringify(library);
   const inScope = (key: string) => !options.only || options.only.has(key) || changes.some(change => change.key === key);
-  await guardFolders(pass, Object.values(library.items).filter(item => inScope(item.key)));
+  const settle = { clock: options.now ?? Date.now(), ms: options.settleMs ?? context.settleMs ?? 2000, settling: false };
+  const look = await lookAt(context, managed, library, Object.values(library.items).filter(item => inScope(item.key)), settle);
+  const pass: Pass = {
+    ...look, shelf: agentShelf(context, () => saveIfChanged(pass)), saved, pulled: options.pulled ?? new Set(),
+    clicked: new Map(), results: [], notices: [], writes: 0, made: [],
+  };
   for (const change of changes) await click(pass, change);
   for (const item of Object.values(library.items)) if (inScope(item.key)) await syncItem(pass, item);
   // Folder identities are kept only by a full pass: a click with Sync off skips other agents, so they must still see a reset.
   if (!options.only) library.folders = { ...library.folders, ...pass.foldersNow };
   await saveIfChanged(pass);
-  return { results: pass.results, writes: pass.writes, notices: pass.notices, settling: pass.settling, made: pass.made };
+  return { results: pass.results, writes: pass.writes, notices: pass.notices, settling: settle.settling, made: pass.made };
 }
 
 /** Saves the record when it is not as last saved: before any harness file changes (syncItem), and when the pass ends. */
@@ -167,52 +255,6 @@ async function refusal(context: ShareContext, hasChanges: boolean, resume = fals
   if (!syncRecord) { syncRecord = newRecord(context); await saveRecord(context.home, syncRecord); }
   if (gate.state !== 'ready') await remember(context, syncRecord.generation);
   return undefined;
-}
-
-/**
- * "H unknown is never H gone" for a whole folder. A harness's agents folder that is somewhere else than at the last full pass
- * (its config root moved), or that was made again since (a reset or reinstall, or back after being away): what was applied
- * there is forgotten, so a copy missing from it is written again and never read as deleted by hand.
- */
-async function guardFolders(pass: Pass, items: LibraryItem[]) {
-  for (const tool of pass.managed) {
-    const path = agentsFolder(pass.context, tool), was = pass.library.folders[tool];
-    const info = await stat(path).catch(() => undefined);
-    const here: FolderSeen = info ? { path, ino: info.ino, birth: Math.round(info.birthtimeMs) } : { path, away: true };
-    pass.foldersNow[tool] = here;
-    if (!was) continue;
-    const moved = was.path !== path;
-    const remade = !moved && !('away' in here) && ('away' in was || was.ino !== here.ino || was.birth !== here.birth);
-    if (!moved && !remade) continue;
-    for (const item of items) if (moved || !pass.disk.byKey.get(item.key)?.[tool]) delete item.applied[tool];
-  }
-}
-
-/**
- * H for each managed harness (library.ts HarnessCopy). `unknown`, so that nothing happens there: a file that can't be read
- * for sure, a folder that is away where a copy was applied, and a copy missing for less than the settle window (an editor's
- * save moves the file away for a moment).
- */
-function copiesOf(pass: Pass, item: LibraryItem): Copies {
-  const slot = pass.disk.byKey.get(item.key) ?? {};
-  const copies: Copies = {};
-  for (const tool of pass.managed) {
-    const here = slot[tool], applied = item.applied[tool] !== undefined;
-    const path = here?.file ?? fileFor(pass.context, tool, item.name);
-    const hidden = unseenIn(pass.disk, tool, item.key) || (!pass.disk.folders.has(tool) && applied);
-    if (hidden) copies[tool] = { is: 'unknown' };
-    else if (here) copies[tool] = { is: 'present', hash: here.hash, at: here.at };
-    else copies[tool] = applied && wantedIn(item, tool) && stillSettling(pass, path) ? { is: 'unknown' } : { is: 'absent' };
-    if (copies[tool]!.is !== 'unknown') firstSeenMissingAt.delete(path);
-  }
-  return copies;
-}
-function stillSettling(pass: Pass, path: string): boolean {
-  const first = firstSeenMissingAt.get(path) ?? pass.clock;
-  firstSeenMissingAt.set(path, first);
-  if (pass.clock - first >= pass.settleMs) return false;
-  pass.settling = true;
-  return true;
 }
 
 /** Brings one agent into line with its harnesses: the library's plan, carried out versions first, files second. */
@@ -247,8 +289,6 @@ async function syncItem(pass: Pass, item: LibraryItem) {
 /** Writes the current version into one harness. What stops it is said, not stored: the next pass tries again. */
 async function writeCopy(pass: Pass, item: LibraryItem, tool: AgentTool, here: AgentEntry | undefined) {
   const held = (message: string) => { pass.results.push({ item: item.name, harness: tool, outcome: 'held', message }); };
-  // A harness that can't be given a copy is passed over without a word: its mark on the page says why, at every look.
-  if (!here && cannotHold(pass.through, item, tool)) return;
   const agent = await readVersion(pass.context, item.key, item.hash);
   if (!agent) return held('This version is no longer in Central Knot’s store, so it can’t be written.');
   let text: string;
@@ -366,15 +406,13 @@ function turn(pass: Pass, item: LibraryItem, change: Change) {
  * writes over them. An agent deleted from Central Knot before is the same item again, its earlier versions with it.
  */
 async function takeIn(pass: Pass, change: Change, tombstone: LibraryItem | undefined, refuse: Refuse) {
-  const slot = pass.disk.byKey.get(change.key) ?? {};
-  const seen = (tool: AgentTool) => slot[tool] && !change.off.includes(tool) && !unseenIn(pass.disk, tool, change.key);
-  const found = pass.managed.flatMap(tool => (seen(tool) ? [slot[tool]!] : []));
+  const found = foundCopies(pass, change.key, change.off);
   if (!found.length) return refuse('No tool has a copy of it to take in any more.');
-  const chosen = change.use && change.use !== 'separate' ? slot[change.use as AgentTool] : undefined;
+  const chosen = change.use && change.use !== 'separate' ? found.find(entry => entry.tool === change.use) : undefined;
   const changedSince = change.use && (!chosen || (change.useHash && chosen.hash !== change.useHash));
   if (changedSince) return refuse('The copy you chose changed since you chose it. Nothing was changed; choose again.', { chooseAgain: true });
-  const differ = new Set(found.map(entry => entry.hash)).size > 1;
-  if (differ && !chosen) {
+  const differs = differ(found);
+  if (differs && !chosen) {
     pass.results.push({ item: found[0].name, outcome: 'held', differs: true, message: 'Copies differ. Choose which copy to use.' });
     return;
   }
@@ -383,11 +421,11 @@ async function takeIn(pass: Pass, change: Change, tombstone: LibraryItem | undef
   Object.assign(item, { on: true, except: [...change.off], name: source.name } satisfies Partial<LibraryItem>);
   delete item.deleted;
   pass.library.items[item.key] = item;
-  const from: Source = pass.pulled.has(item.key) ? { how: 'pulled' } : { how: differ ? 'chosen' : 'found', harness: source.tool };
+  const from: Source = pass.pulled.has(item.key) ? { how: 'pulled' } : { how: differs ? 'chosen' : 'found', harness: source.tool };
   await setCurrent(pass.shelf, item, { hash: source.hash, at: iso(source.at), from }, source.agent);
   const winner = { tool: source.tool, hash: source.hash };
   const gaveWay = found.filter(entry => entry.hash !== source.hash).map(entry => ({ tool: entry.tool, hash: entry.hash }));
-  pass.clicked.set(item.key, differ ? { kind: 'chosen', winner, losers: gaveWay } : { kind: 'on', winner, fill: 'written' });
+  pass.clicked.set(item.key, differs ? { kind: 'chosen', winner, losers: gaveWay } : { kind: 'on', winner, fill: 'written' });
 }
 
 /** Makes an earlier version current: a new version (library.ts setCurrent), which the pass then applies like any other. */
@@ -467,28 +505,27 @@ export async function agentsOn(context: ShareContext): Promise<Map<string, Libra
  */
 export async function agentsView(context: ShareContext, tools: HarnessId[], notices: SyncNotice[] = []): Promise<McpView> {
   const managed = tools.filter(isAgentTool);
-  const disk = await readDisk(context, managed);
   const { library, problem } = await openLibrary(context);
-  const through = await agentsThroughPlugins(context, managed);
   const live = Object.values(library.items).filter(item => !item.deleted);
-  const keys = [...new Set([...disk.byKey.keys(), ...live.map(item => item.key)])].sort((first, second) => first.localeCompare(second));
+  const look = await lookAt(context, managed, library, live);
+  const keys = [...new Set([...look.disk.byKey.keys(), ...live.map(item => item.key)])].sort((first, second) => first.localeCompare(second));
   const agents: SkillFacts[] = [];
-  for (const key of keys) agents.push(await rowFacts(context, { managed, disk, through }, key, live.find(item => item.key === key)));
+  for (const key of keys) agents.push(await rowFacts(look, key, live.find(item => item.key === key)));
   const gate = problem ? { state: 'stopped' as const, reason: problem } : await syncGate(context);
-  const problems = problem ? [problem, ...disk.problems] : disk.problems;
+  const problems = problem ? [problem, ...look.disk.problems] : look.disk.problems;
   return { tools: managed, servers: agents, library: library.items, claudePending: [], access: await writeAccess(context), gate, problems, notices };
 }
 
-/** What a view read of the managed harnesses, once for every row. */
-interface Seen { managed: AgentTool[]; disk: Disk; through: ThroughPlugins }
-
-/** One agent's row: what each managed harness holds, and for a harness without a copy, why it can't be given one. */
-async function rowFacts(context: ShareContext, seen: Seen, key: string, item: LibraryItem | undefined): Promise<SkillFacts> {
-  const { managed, disk, through } = seen;
-  const slot = disk.byKey.get(key) ?? {};
-  const entries = managed.flatMap(tool => (slot[tool] ? [slot[tool]!] : []));
+/**
+ * One agent's row: what each managed harness holds and, for an agent in the library, what the next pass does in each
+ * (`plan`, from the same reading a pass makes: copiesOf) and why nothing can happen in one (`unseen`, `cannot`). A found
+ * agent's row says whether its copies differ, so its switch asks which one to take in.
+ */
+async function rowFacts(look: Look, key: string, item: LibraryItem | undefined): Promise<SkillFacts> {
+  const slot = look.disk.byKey.get(key) ?? {};
+  const entries = look.managed.flatMap(tool => (slot[tool] ? [slot[tool]!] : []));
   const name = item?.name ?? entries[0].name;
-  const current = item ? await readVersion(context, key, item.hash) : entries[0].agent;
+  const current = item ? await readVersion(look.context, key, item.hash) : entries[0].agent;
   const copies: Partial<Record<HarnessId, ToolCopy>> = {};
   for (const { tool, hash, file, agent, at, name: folder } of entries) {
     const lines = agent.prompt.split('\n').length, ownFields = Object.keys(agent.fields);
@@ -496,20 +533,23 @@ async function rowFacts(context: ShareContext, seen: Seen, key: string, item: Li
     copies[tool] = { hash, directory: file, rootLabel: nameOf(tool), lines, modified: iso(at), summary, prompt, writable: true, folder, ownFields };
   }
   const cannot: SkillFacts['cannot'] = {}, plugin: NonNullable<SkillFacts['plugin']> = {}, unseen: NonNullable<SkillFacts['unseen']> = {};
-  for (const tool of managed) {
-    const hidden = unseenIn(disk, tool, key), given = through.get(tool)?.get(key);
+  for (const tool of look.managed) { const given = look.through.get(tool)?.get(key); if (given && !slot[tool]) plugin[tool] = given; }
+  const held = item ? copiesOf(look, item) : undefined, made = item && held ? plan(item, held) : undefined;
+  for (const tool of look.managed) {
+    const copy = held?.[tool];
+    if (copy?.is === 'unknown') unseen[tool] = copy.why;
+    if (copy?.is === 'held') cannot[tool] = copy.why;
+    if (held) continue;
+    // A found agent: what can't be seen, and where it couldn't be given a copy once taken in.
+    const hidden = unseenIn(look.disk, tool, key), why = slot[tool] ? undefined : cannotHold(look.through, { key, name }, tool);
     if (hidden) unseen[tool] = hidden;
-    if (slot[tool]) continue;
-    if (given) plugin[tool] = given;
-    const why = cannotHold(through, { key, name }, tool);
     if (why) cannot[tool] = why;
   }
-  // An edit made in a harness that the next pass takes in.
-  const takenInNext = ({ tool, hash, at }: AgentEntry) =>
-    !!item && ['take-in', 'latest-wins'].includes(decide(wantedIn(item, tool), item.hash, { is: 'present', hash, at }, item.applied[tool]));
+  // The edits the next pass handles: the one that becomes the current version, and any that give way to it.
+  const edited = made ? [made.takeIn, ...made.keep.filter(kept => kept.from.how === 'edited').map(kept => kept.harness)].filter(tool => tool !== undefined) : [];
   return {
-    key, name, description: current?.description ?? '', copies, extra: [], managed: !!item?.on, off: item?.except ?? [], cannot, choiceBlocks: {},
-    edited: entries.filter(takenInNext).map(entry => entry.tool),
+    key, name, description: current?.description ?? '', copies, extra: [], managed: !!item?.on, off: item?.except ?? [], cannot, choiceBlocks: {}, edited,
+    ...(made ? { plan: made } : { differs: differ(foundCopies(look, key, [])) }),
     ...(Object.keys(plugin).length ? { plugin } : {}), ...(Object.keys(unseen).length ? { unseen } : {}),
   };
 }

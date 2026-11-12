@@ -3,56 +3,76 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { FOLDED_VERSIONS, agentClicks, foldVersions, harnessIs, harnessLine, needsChoice, noticeWords, placeOf, placeTag, said, statusLine, switchLabel, type AgentRow } from '../src/agentrow.ts';
-import { newItem, type LibraryItem } from '../src/library.ts';
+import { newItem, plan, type Copies, type LibraryItem } from '../src/library.ts';
 
 const tools = ['claude-cli', 'copilot-cli', 'codex-cli'];
 /** "reviewer" On at version 'b', applied to all three harnesses. */
 const item = (changes: Partial<LibraryItem> = {}): LibraryItem => ({ ...newItem('agent', 'reviewer', 'reviewer'), on: true, hash: 'b',
   versions: [{ hash: 'b', at: '2026-11-08T09:20:00.000Z', from: { how: 'found', harness: 'claude-cli' } }], applied: { 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'b' }, ...changes });
-const row = (hashes: AgentRow['hashes'], more: Partial<AgentRow> = {}): AgentRow => ({ key: 'reviewer', name: 'reviewer', hashes, ...more });
-const marks = (agentRow: AgentRow, agent: LibraryItem | undefined) => tools.map(tool => harnessIs(agentRow, agent, tool));
+/**
+ * The row agents.ts gives the page for `agent` when the harnesses hold `hashes`: for an agent in the library, its plan from
+ * those copies (a harness in `cannot` is held, one in `unseen` unknown, as agents.ts copiesOf reads them).
+ */
+function row(hashes: AgentRow['hashes'], more: Partial<AgentRow> = {}, agent?: LibraryItem): AgentRow {
+  const copyOf = (tool: string): Copies[keyof Copies] => (more.unseen?.[tool] ? { is: 'unknown', why: more.unseen[tool]! } : more.cannot?.[tool] ? { is: 'held', why: more.cannot[tool]! }
+    : hashes?.[tool] !== undefined ? { is: 'present', hash: hashes[tool]!, at: 0 } : { is: 'absent' });
+  const copies: Copies = Object.fromEntries(tools.map(tool => [tool, copyOf(tool)]));
+  return { key: 'reviewer', name: 'reviewer', hashes, ...more, ...(agent && !agent.deleted ? { plan: plan(agent, copies) } : {}) };
+}
+const marks = (hashes: AgentRow['hashes'], agent: LibraryItem | undefined, more: Partial<AgentRow> = {}) => tools.map(tool => harnessIs(row(hashes, more, agent), agent, tool));
+/** A row and its item, for the functions that take both. */
+const withItem = (hashes: AgentRow['hashes'], agent: LibraryItem) => [row(hashes, {}, agent), agent] as const;
+const markIn = (hashes: AgentRow['hashes'], agent: LibraryItem, tool: string) => harnessIs(row(hashes, {}, agent), agent, tool);
+const lineIn = (hashes: AgentRow['hashes'], agent: LibraryItem | undefined, tool: string, where: string, more: Partial<AgentRow> = {}) => harnessLine(row(hashes, more, agent), agent, tool, where);
 
 test('An agent stands in one of three places: on, off (in Central Knot only), or found; a deleted one is found again', () => {
   assert.deepEqual([placeOf(item()), placeOf(item({ on: false })), placeOf(undefined), placeOf(item({ deleted: { at: 'then' } }))], ['on', 'off', 'found', 'found']);
 });
 
 test('An On agent’s marks say what the next pass does in each harness', () => {
-  assert.deepEqual(marks(row({ 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'b' }), item()), ['current', 'current', 'current']);
-  // Edited in Copilot CLI; Codex's copy was deleted by hand.
-  assert.deepEqual(marks(row({ 'claude-cli': 'b', 'copilot-cli': 'c' }), item()), ['current', 'edited', 'deleted']);
+  assert.deepEqual(marks({ 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'b' }, item()), ['current', 'current', 'current']);
+  // Edited in Copilot CLI; Codex's copy was deleted by hand: the edit becomes the current version, and the agent turns Off.
+  assert.deepEqual(marks({ 'claude-cli': 'b', 'copilot-cli': 'c' }, item()), ['leaving', 'edited', 'deleted']);
   // The current version moved on to 'c' and reached only Claude Code yet; nothing was ever applied to Codex.
   const moved = item({ hash: 'c', applied: { 'claude-cli': 'c', 'copilot-cli': 'b' } });
-  assert.deepEqual(marks(row({ 'claude-cli': 'c', 'copilot-cli': 'b' }), moved), ['current', 'gets-it', 'gets-it']);
-  assert.match(harnessLine(row({ 'copilot-cli': 'c' }), item(), 'copilot-cli', 'Copilot CLI'), /^Edited in Copilot CLI\. It becomes the current version when sync runs/);
+  assert.deepEqual(marks({ 'claude-cli': 'c', 'copilot-cli': 'b' }, moved), ['current', 'gets-it', 'gets-it']);
+  assert.match(lineIn({ 'claude-cli': 'b', 'copilot-cli': 'c', 'codex-cli': 'b' }, item(), 'copilot-cli', 'Copilot CLI'), /^Edited in Copilot CLI\. It becomes the current version when sync runs/);
+});
+
+test('Two edits no pass has taken in yet: only the latest is marked as the one that becomes current; the other is written over', () => {
+  const both = { 'claude-cli': 'c', 'copilot-cli': 'b', 'codex-cli': 'd' };
+  const copies: Copies = { 'claude-cli': { is: 'present', hash: 'c', at: 1 }, 'copilot-cli': { is: 'present', hash: 'b', at: 0 }, 'codex-cli': { is: 'present', hash: 'd', at: 2 } };
+  const agentRow = { ...row(both), plan: plan(item(), copies) };
+  assert.deepEqual(tools.map(tool => harnessIs(agentRow, item(), tool)), ['gets-it', 'gets-it', 'edited']);
 });
 
 test('A harness the agent is kept out of: no copy, a copy still to go, or a copy of its own that is left alone', () => {
   const out = item({ except: ['codex-cli'], applied: { 'claude-cli': 'b', 'copilot-cli': 'b' } });
-  assert.equal(harnessIs(row({ 'claude-cli': 'b', 'copilot-cli': 'b' }), out, 'codex-cli'), 'kept-out');
-  assert.equal(harnessIs(row({ 'codex-cli': 'x' }), out, 'codex-cli'), 'own-copy');
-  assert.equal(harnessIs(row({ 'codex-cli': 'b' }), item({ except: ['codex-cli'] }), 'codex-cli'), 'leaving');
+  assert.equal(markIn({ 'claude-cli': 'b', 'copilot-cli': 'b' }, out, 'codex-cli'), 'kept-out');
+  assert.equal(markIn({ 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'x' }, out, 'codex-cli'), 'own-copy');
+  assert.equal(markIn({ 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'b' }, item({ except: ['codex-cli'] }), 'codex-cli'), 'leaving');
 });
 
 test('An Off agent has no copy anywhere; one that turns up is its harness’s own; a found agent’s copies are just there', () => {
   const off = item({ on: false, applied: {} });
-  assert.deepEqual(marks(row({ 'codex-cli': 'x' }), off), ['none', 'none', 'own-copy']);
-  assert.match(harnessLine(row({ 'codex-cli': 'x' }), off, 'codex-cli', 'Codex'), /left alone while the agent is off/);
-  assert.deepEqual(marks(row({ 'claude-cli': 'a' }), undefined), ['own-copy', 'none', 'none']);
-  assert.equal(harnessLine(row({ 'claude-cli': 'a' }), undefined, 'claude-cli', 'Claude Code'), 'Has it.');
+  assert.deepEqual(marks({ 'codex-cli': 'x' }, off), ['none', 'none', 'own-copy']);
+  assert.match(lineIn({ 'codex-cli': 'x' }, off, 'codex-cli', 'Codex'), /left alone while the agent is off/);
+  assert.deepEqual(marks({ 'claude-cli': 'a' }, undefined), ['own-copy', 'none', 'none']);
+  assert.equal(lineIn({ 'claude-cli': 'a' }, undefined, 'claude-cli', 'Claude Code'), 'Has it.');
 });
 
 test('A harness that can’t be given a copy, or whose copy can’t be read, says why in its own words', () => {
-  const cannot = row({ 'claude-cli': 'b' }, { cannot: { 'codex-cli': 'This name can’t be a file name here.' }, unseen: { 'copilot-cli': 'Copilot CLI’s file for this agent is there but could not be read.' } });
+  const why = { cannot: { 'codex-cli': 'Codex can’t store this name (é). Rename the agent to use it there.' }, unseen: { 'copilot-cli': 'Copilot CLI’s file for this agent is there but could not be read.' } };
   const agent = item({ applied: { 'claude-cli': 'b', 'copilot-cli': 'b' } });
-  assert.deepEqual(marks(cannot, agent), ['current', 'unseen', 'cannot']);
-  assert.equal(harnessLine(cannot, agent, 'codex-cli', 'Codex'), 'This name can’t be a file name here.');
+  assert.deepEqual(marks({ 'claude-cli': 'b' }, agent, why), ['current', 'unseen', 'cannot']);
+  assert.equal(lineIn({ 'claude-cli': 'b' }, agent, 'codex-cli', 'Codex', why), 'Codex can’t store this name (é). Rename the agent to use it there.');
 });
 
 test('Only a found agent whose copies differ asks which copy; an agent in the library never does', () => {
-  const differing = row({ 'claude-cli': 'a', 'codex-cli': 'x' });
-  assert.deepEqual([needsChoice(differing, undefined, tools), needsChoice(differing, item({ on: false }), tools), needsChoice(differing, item({ deleted: { at: 'then' } }), tools)], [true, false, true]);
-  assert.equal(needsChoice(row({ 'claude-cli': 'a', 'codex-cli': 'a' }), undefined, tools), false);
-  assert.equal(needsChoice(differing, undefined, ['claude-cli', 'copilot-cli']), false, 'a harness Central Knot doesn’t manage has no say');
+  // Whether the found copies differ is agents.ts foundCopies' answer (tests/agents.test.ts has it on real files).
+  const differing = row({ 'claude-cli': 'a', 'codex-cli': 'x' }, { differs: true });
+  assert.deepEqual([needsChoice(differing, undefined), needsChoice(differing, item({ on: false })), needsChoice(differing, item({ deleted: { at: 'then' } }))], [true, false, true]);
+  assert.equal(needsChoice(row({ 'claude-cli': 'a', 'codex-cli': 'a' }, { differs: false }), undefined), false);
 });
 
 test('Each control sends the agent as it is with one thing changed', () => {
@@ -70,16 +90,16 @@ test('Each control sends the agent as it is with one thing changed', () => {
 
 test('The status line says where the agent stands, and in which harnesses', () => {
   const all = { 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'b' };
-  assert.equal(statusLine(row(all), item(), tools), 'On in all 3 tools');
-  assert.equal(statusLine(row({ 'claude-cli': 'b', 'copilot-cli': 'b' }), item({ except: ['codex-cli'], applied: { 'claude-cli': 'b', 'copilot-cli': 'b' } }), tools), 'On in Claude Code and Copilot CLI · kept out of Codex');
-  assert.equal(statusLine(row({ 'claude-cli': 'b' }), item({ applied: { 'claude-cli': 'b' } }), tools), 'On in Claude Code · Copilot CLI and Codex get it when sync runs');
-  assert.equal(statusLine(row({ 'codex-cli': 'x' }), item({ on: false, applied: {} }), tools), 'Off · in Central Knot only. Turn it on to put it in every tool. Codex has a copy Central Knot didn’t put there.');
-  assert.equal(statusLine(row({ 'claude-cli': 'a', 'codex-cli': 'x' }), undefined, tools), 'Not in Central Knot · in Claude Code and Codex, with different copies. Turn it on to take it in and put it in every tool.');
+  assert.equal(statusLine(row(all, {}, item()), item(), tools), 'On in all 3 tools');
+  assert.equal(statusLine(...withItem({ 'claude-cli': 'b', 'copilot-cli': 'b' }, item({ except: ['codex-cli'], applied: { 'claude-cli': 'b', 'copilot-cli': 'b' } })), tools), 'On in Claude Code and Copilot CLI · kept out of Codex');
+  assert.equal(statusLine(...withItem({ 'claude-cli': 'b' }, item({ applied: { 'claude-cli': 'b' } })), tools), 'On in Claude Code · Copilot CLI and Codex get it when sync runs');
+  assert.equal(statusLine(...withItem({ 'codex-cli': 'x' }, item({ on: false, applied: {} })), tools), 'Off · in Central Knot only. Turn it on to put it in every tool. Codex has a copy Central Knot didn’t put there.');
+  assert.equal(statusLine(row({ 'claude-cli': 'a', 'codex-cli': 'x' }, { differs: true }), undefined, tools), 'Not in Central Knot · in Claude Code and Codex, with different copies. Turn it on to take it in and put it in every tool.');
 });
 
 test('The switch says what a click does: off everywhere, on everywhere, take a found agent in, or ask which copy', () => {
-  assert.equal(switchLabel(row({ 'claude-cli': 'b' }), item(), tools), 'reviewer: on. Click to take it out of every tool; Central Knot keeps it.');
-  assert.equal(switchLabel(row({ 'codex-cli': 'x' }), item({ on: false, applied: {} }), tools), 'reviewer: off, in Central Knot only. Click to put it in every tool; Codex has a copy of its own, which is kept as versions first.');
+  assert.equal(switchLabel(...withItem({ 'claude-cli': 'b' }, item()), tools), 'reviewer: on. Click to take it out of every tool; Central Knot keeps it.');
+  assert.equal(switchLabel(...withItem({ 'codex-cli': 'x' }, item({ on: false, applied: {} })), tools), 'reviewer: off, in Central Knot only. Click to put it in every tool; Codex has a copy of its own, which is kept as versions first.');
   assert.equal(switchLabel(row({ 'claude-cli': 'a' }), undefined, tools), 'reviewer: in Claude Code, not in Central Knot. Click to take it in and put it in every tool.');
   assert.match(switchLabel(row({ 'claude-cli': 'a', 'codex-cli': 'x' }), undefined, tools, 'closed'), /its copies differ\. Click to choose which copy every tool uses\.$/);
   assert.deepEqual([placeTag(item())?.text, placeTag(item({ on: false }))?.text, placeTag(undefined)?.text], [undefined, 'in Central Knot only', 'not in Central Knot']);

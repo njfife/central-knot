@@ -1,4 +1,4 @@
-import type { LibraryItem } from './library.ts';
+import type { LibraryItem, Plan } from './library.ts';
 
 export type HomeMode = 'fixture' | 'custom' | 'actual';
 export type HarnessId = 'claude-cli' | 'copilot-cli' | 'codex-cli' | 'pi-cli' | 'opencode-cli';
@@ -292,6 +292,10 @@ export interface SkillFacts {
   choiceBlocks: Partial<Record<HarnessId, { tool: HarnessId; reason: string }[]>>;
   /** Agents: harnesses whose copy can't be seen for sure right now, and why. Nothing changes there until it can. */
   unseen?: Partial<Record<HarnessId, string>>;
+  /** Agents in the library: what the next pass does in each harness (library.ts plan, from agents.ts copiesOf), which the marks say. */
+  plan?: Plan;
+  /** Agents found in a harness, not in the library: their copies differ, so the switch asks which one every harness takes. */
+  differs?: boolean;
   /** Skills and MCP servers: tools whose copy is turned off with the tool's own switch. The copy stays there and keeps syncing; the tool doesn't load it. */
   disabled?: HarnessId[];
   /** Skills and MCP servers: why a tool's switch can't be used at all: its settings file can't be read or is in a form Central Knot doesn't edit. */

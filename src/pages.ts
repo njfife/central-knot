@@ -185,9 +185,8 @@ export function overviewPage() {
   const differs = (fact: { managed: boolean; copies: Record<string, unknown>; separate?: boolean; off: string[] }) => !fact.separate && new Set(Object.entries(fact.copies).filter(([tool]) => !fact.off.includes(tool)).map(([, copy]) => (copy as { hash: string }).hash)).size > 1;
   const pick = (list: typeof home.manage.skills): KindFact[] => list.map(fact => ({ managed: fact.managed, edited: fact.edited, differs: !fact.managed && differs(fact), copies: fact.copies }));
   // An agent's copies need a choice only while it is found: one in Central Knot's library never asks (agentrow.ts needsChoice).
-  const hashes = (fact: (typeof home.agents.servers)[number]) => Object.fromEntries(Object.entries(fact.copies).map(([tool, copy]) => [tool, copy!.hash]));
   const agents: KindFact[] = home.agents.servers.map(fact => ({ managed: fact.managed, edited: fact.edited, copies: fact.copies,
-    differs: needsChoice({ key: fact.key, hashes: hashes(fact) }, home.agents.library?.[fact.key], home.agents.tools) }));
+    differs: needsChoice(fact, home.agents.library?.[fact.key]) }));
   // Kinds no tool here can hold have no card (app.ts absentKinds); they are named once, below.
   const absent = absentKinds();
   const empty = noTools();
