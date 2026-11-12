@@ -3,7 +3,7 @@
 // applied there last. Contents are single letters: 'a' is older than 'b', and so on.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decide, isLibraryItem, keepVersion, newItem, plan, setCurrent, sourceWords, type HarnessCopy, type LibraryItem, type Shelf } from '../src/library.ts';
+import { decide, isLibraryItem, keepVersion, listed, newItem, plan, setCurrent, sourceWords, type HarnessCopy, type LibraryItem, type Shelf } from '../src/library.ts';
 
 const has = (hash: string, at = 0): HarnessCopy => ({ is: 'present', hash, at });
 const none: HarnessCopy = { is: 'absent' }, unknown: HarnessCopy = { is: 'unknown', why: 'it can’t be read' }, held: HarnessCopy = { is: 'held', why: 'it can’t hold this name' };
@@ -148,15 +148,26 @@ test('Making an earlier version current is a new version, so the list says when 
   assert.deepEqual(agent.versions.map(version => [version.hash, sourceWords(version.from)]), [['a', 'made current again'], ['b', 'edited in Codex'], ['a', 'found in Claude Code']]);
 });
 
-test('keepVersion keeps a content without making it current, once, in order of when it was made', async () => {
+test('keepVersion keeps a content without making it current, once, as the newest taken; the list still shows the current one first', async () => {
   const agent = item({ hash: 'c', versions: [{ hash: 'c', at: day(3), from: { how: 'edited', harness: 'claude-cli' } }, ...item().versions] });
   const { calls, made } = shelf(agent);
   const gaveWay = { hash: 'b', at: day(2), from: { how: 'was-in', harness: 'copilot-cli' } } as const;
   await keepVersion(made, agent, gaveWay, 'text of b');
   await keepVersion(made, agent, gaveWay, 'text of b');
   assert.equal(agent.hash, 'c');
-  assert.deepEqual(agent.versions.map(version => version.hash), ['c', 'b', 'a']);
-  assert.deepEqual(calls, ['store b=text of b', 'save current=c versions=c,b,a', 'store b=text of b', 'save current=c versions=c,b,a']);
+  assert.deepEqual(agent.versions.map(version => version.hash), ['b', 'c', 'a']);
+  assert.deepEqual(listed(agent).map(version => version.hash), ['c', 'b', 'a']);
+  assert.deepEqual(calls, ['store b=text of b', 'save current=c versions=b,c,a', 'store b=text of b', 'save current=c versions=b,c,a']);
+});
+
+test('Versions are listed in the order they were taken, whatever their files’ times say; the current one first', async () => {
+  // An edit whose file carries an old time (copied with its time kept) becomes current: it is still listed first.
+  const agent = item();
+  await setCurrent(shelf(agent).made, agent, { hash: 'b', at: '2020-01-01T00:00:00.000Z', from: { how: 'edited', harness: 'codex-cli' } }, 'text of b');
+  // A file with a time ahead of the clock, then a Make current after it: the Make current is first.
+  await setCurrent(shelf(agent).made, agent, { hash: 'c', at: '2099-01-01T00:00:00.000Z', from: { how: 'edited', harness: 'claude-cli' } }, 'text of c');
+  await setCurrent(shelf(agent).made, agent, { hash: 'b', at: day(9), from: { how: 'made-current' } }, 'text of b');
+  assert.deepEqual(listed(agent).map(version => [version.hash, version.from.how]), [['b', 'made-current'], ['c', 'edited'], ['b', 'edited'], ['a', 'found']]);
 });
 
 test('A record’s value is an item only with every field in its shape', () => {

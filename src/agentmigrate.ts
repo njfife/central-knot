@@ -60,8 +60,9 @@ export function migrateItem(key: string, old: OldItem, kept: KeptContent[], onDi
   if (current === undefined) return undefined;
   const item: LibraryItem = { ...newItem('agent', key, old.name), on: synced || !!deleted, hash: current };
   if (deleted) item.deleted = { at: deleted.at };
-  item.versions = [...contents].map(([hash, { at, from }]) => ({ hash, at: iso(at), from }))
-    .sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
+  // The order the library takes them in: the current one last taken (first), then the others newest first.
+  const versions = [...contents].map(([hash, { at, from }]) => ({ hash, at: iso(at), from })).sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
+  item.versions = [...versions.filter(version => version.hash === current), ...versions.filter(version => version.hash !== current)];
   const leftAlone = new Set(old.off);
   for (const copy of old.copies) {
     const here = onDisk.find(entry => entry.tool === copy.tool);

@@ -66,7 +66,7 @@ export type ItemKind = 'skill' | 'agent' | 'mcp';
  */
 export interface Source { how: 'found' | 'chosen' | 'edited' | 'was-in' | 'pulled' | 'made-current' | 'migrated'; harness?: HarnessId }
 
-/** One content an item has had. `at`: when it was made (a harness file's own time for a copy taken in; else the click's). */
+/** One content an item has had. `at`: when it was made (a harness file's own time for a copy taken in; else the click's), shown beside it. */
 export interface Version { hash: string; at: string; from: Source }
 
 /** One item as Central Knot holds it. The same shape for every kind. */
@@ -80,7 +80,7 @@ export interface LibraryItem {
   on: boolean;
   /** The current version: the content On applies. */
   hash: string;
-  /** Every content it has had, newest first. */
+  /** Every content it has had, in the order Central Knot took them, newest first (`listed` puts the current one first). */
   versions: Version[];
   /** The harnesses the person keeps it out of. */
   except: HarnessId[];
@@ -108,6 +108,15 @@ export function isLibraryItem(value: unknown): value is LibraryItem {
 
 /** Where the current version is in `versions`: the newest entry that holds the current content (an earlier entry may hold it too). */
 export const currentIndex = (item: Pick<LibraryItem, 'hash' | 'versions'>) => item.versions.findIndex(version => version.hash === item.hash);
+
+/**
+ * The versions as a person reads them: the current one first, then the others in the order Central Knot took them, newest
+ * first. Not by their times: a file can carry any time, and a copy kept as a version may be taken after the current one.
+ */
+export function listed(item: Pick<LibraryItem, 'hash' | 'versions'>): Version[] {
+  const at = currentIndex(item);
+  return at < 0 ? [...item.versions] : [item.versions[at], ...item.versions.filter((_, index) => index !== at)];
+}
 
 /** Whether the item should be in this harness: On, not deleted, and not kept out of it. */
 export const wantedIn = (item: Pick<LibraryItem, 'on' | 'deleted' | 'except'>, harness: HarnessId) =>
@@ -228,10 +237,6 @@ export interface Shelf<Content> {
   save(): Promise<void>;
 }
 
-/** The versions with one more, newest first (by when each was made; the new one first among equals). */
-const withVersion = (item: LibraryItem, version: Version) =>
-  [version, ...item.versions].sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
-
 /**
  * Keeps a content as a version of the item without making it current (a copy that gave way). Stored, recorded and saved
  * before it returns, so the caller may then write over or remove the file it came from. A content the item has already is
@@ -239,7 +244,7 @@ const withVersion = (item: LibraryItem, version: Version) =>
  */
 export async function keepVersion<Content>(shelf: Shelf<Content>, item: LibraryItem, version: Version, content: Content): Promise<void> {
   await shelf.store(item, version.hash, content);
-  if (!item.versions.some(known => known.hash === version.hash)) item.versions = withVersion(item, version);
+  if (!item.versions.some(known => known.hash === version.hash)) item.versions = [version, ...item.versions];
   await shelf.save();
 }
 
@@ -250,7 +255,7 @@ export async function keepVersion<Content>(shelf: Shelf<Content>, item: LibraryI
  */
 export async function setCurrent<Content>(shelf: Shelf<Content>, item: LibraryItem, version: Version, content: Content): Promise<void> {
   await shelf.store(item, version.hash, content);
-  item.versions = withVersion(item, version);
+  item.versions = [version, ...item.versions];
   item.hash = version.hash;
   await shelf.save();
 }

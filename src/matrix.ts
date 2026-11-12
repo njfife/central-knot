@@ -17,7 +17,7 @@ import { cellOf, comparedTools, needsCopyChoice, type ItemRow, type Tool } from 
 import { agentClicks, harnessIs, harnessLine as agentLine, inLibrary, needsChoice as agentNeedsChoice } from './agentrow.ts';
 import { noticeWords, placeOf as agentPlace, placeTag, said as agentSaid, statusLine, switchLabel, type HarnessIs } from './agentrow.ts';
 import { versionList, type VersionText } from './versionlist.ts';
-import type { Version } from './library.ts';
+import { listed, type Version } from './library.ts';
 import type { Change, DestinationResult, HomeView, ManageView, Outside, SkillFacts, SyncNotice, HarnessId, PartsInstall, ThroughPlugin } from './types.ts';
 import { market } from './pluginstate.ts';
 import { pluginKey, type PluginDraft } from './pluginplan.ts';
@@ -1872,7 +1872,7 @@ function agentVersions(skill: ItemRow) {
   const name = nameOf(skill), textKey = (hash: string) => `${state.home?.home}:${item.key}:${hash}`;
   const at = view.readingVersion?.key === item.key ? view.readingVersion.index : undefined;
   const read = (index: number) => {
-    const hash = item.versions[index].hash;
+    const hash = listed(item)[index].hash;
     view.readingVersion = at === index ? undefined : { key: item.key, index };
     if (view.readingVersion && !versionTexts.has(textKey(hash))) {
       versionTexts.set(textKey(hash), 'reading');
@@ -1884,7 +1884,7 @@ function agentVersions(skill: ItemRow) {
   const makeCurrent = (version: Version) => click({ kind, items: [name], changes: [agentClicks.makeCurrent(skill, item, version.hash)],
     said: notIn => agentSaid.madeCurrent(name, version, on(notIn), toolList()) });
   return versionList({ item, canWrite: canWrite(), unfolded: view.versionsUnfolded === item.key, onUnfold: () => { view.versionsUnfolded = item.key; rerender(); },
-    reading: at === undefined || !item.versions[at] ? undefined : { index: at, text: versionTexts.get(textKey(item.versions[at].hash)) ?? 'reading' }, onRead: read, onMakeCurrent: makeCurrent });
+    reading: at === undefined || !listed(item)[at] ? undefined : { index: at, text: versionTexts.get(textKey(listed(item)[at].hash)) ?? 'reading' }, onRead: read, onMakeCurrent: makeCurrent });
 }
 
 /**

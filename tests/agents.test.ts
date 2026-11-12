@@ -11,7 +11,7 @@ import { agentText, readAgents } from '../src/agentfiles.ts';
 import { agentVersion, agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
 import { convertAgentToSkill } from '../src/agentskill.ts';
 import { harnessIs, placeOf } from '../src/agentrow.ts';
-import { currentIndex, sourceWords } from '../src/library.ts';
+import { listed, sourceWords } from '../src/library.ts';
 import { readHistory } from '../src/manage.ts';
 import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
 import { readTomlTables } from '../src/textedit.ts';
@@ -22,11 +22,11 @@ import { choose, claudeAgent, claudeOwn, codexAgent, deleteIt, fileOf, filesOf, 
 const inBox = (name: string, body: (box: Box) => Promise<void>, options: { skip?: boolean } = {}) => test(name, options, async () => { const box = await sandbox(); try { await body(box); } finally { await box.cleanup(); } });
 /** An agent written in Claude Code, taken into Central Knot and applied to every harness. */
 async function on(box: Box, text = claudeAgent()) { await write(box, 'claude-cli', text); assert.notEqual(await turnOn(box), 'choose'); }
-/** Each version of the agent as the opened row lists it: its prompt's last line and where it came from, newest first. */
+/** Each version of the agent as the opened row lists it (library.ts listed): its prompt's last line and where it came from, the current one first. */
 async function versions(box: Box) {
   const item = (await itemOf(box))!;
   const lastLine = async (hash: string) => (await agentVersion(box.context, 'reviewer', hash))!.prompt.trim().split('\n').at(-1);
-  return Promise.all(item.versions.map(async (version, index) => `${await lastLine(version.hash)} (${sourceWords(version.from)})${index === currentIndex(item) ? ' *' : ''}`));
+  return Promise.all(listed(item).map(async (version, index) => `${await lastLine(version.hash)} (${sourceWords(version.from)})${index === 0 && version.hash === item.hash ? ' *' : ''}`));
 }
 /** A hand edit: the file's last prompt line replaced. `seconds`: saved that long after now, where a test compares edit times. */
 async function edit(box: Box, tool: Tool, line: string, seconds?: number) {
@@ -151,7 +151,7 @@ inBox('A harness managed again: the library wins, and the copy it held is a vers
   await chooseTools(box.context, tools);
   assert.equal((await pass(box)).writes, 1);
   assert.match((await readOf(box, 'codex-cli'))!, /Be brief\./);
-  assert.deepEqual(await versions(box), ['Edit away. (was in Codex)', 'Be brief. (found in Claude Code) *']);
+  assert.deepEqual(await versions(box), ['Be brief. (found in Claude Code) *', 'Edit away. (was in Codex)']);
 });
 
 inBox('A harness uninstalled changes nothing: its copy deleted meanwhile, installed again, it gets the agent back and nothing turns Off', async box => {

@@ -5,7 +5,7 @@
 // read, and sends Make current as the item's click.
 import { foldVersions } from './agentrow.ts';
 import { button, h, icon } from './dom.ts';
-import { currentIndex, sourceWords, type LibraryItem, type Version } from './library.ts';
+import { listed, sourceWords, type LibraryItem, type Version } from './library.ts';
 import { dayAndTime } from './model.ts';
 
 /** A version's content as read from the library: its text, `'reading'` while it is fetched, or null when it is no longer kept. */
@@ -16,7 +16,7 @@ export interface VersionListView {
   canWrite: boolean;
   /** Whether the whole list shows (else its newest few: agentrow.ts foldVersions). */
   unfolded: boolean;
-  /** The version being read (its place in the list), and its text. */
+  /** The version being read (its place in library.ts listed), and its text. */
   reading?: { index: number; text: VersionText };
   onUnfold(): void;
   onRead(index: number): void;
@@ -25,8 +25,8 @@ export interface VersionListView {
 
 function versionRow(view: VersionListView, version: Version, index: number) {
   const { item } = view, id = `${item.key}-${index}`;
-  // The newest entry with the current content is the current version; an earlier entry with the same content says so.
-  const current = index === currentIndex(item), same = !current && version.hash === item.hash;
+  // The list starts with the current version (library.ts listed); an older entry with the same content says so.
+  const current = index === 0 && version.hash === item.hash, same = !current && version.hash === item.hash;
   const read = view.reading?.index === index ? view.reading.text : undefined;
   const which = `the version ${sourceWords(version.from)}, ${dayAndTime(version.at)}`;
   const readIt = button({ variant: 'link', size: 'small', label: read === undefined ? 'Read' : 'Hide', id: `version-read-${id}`,
@@ -52,7 +52,7 @@ function versionText(read: VersionText) {
 }
 
 export function versionList(view: VersionListView): HTMLElement {
-  const { item } = view, all = item.versions;
+  const { item } = view, all = listed(item);
   const { shown, rest } = foldVersions(all, view.unfolded);
   const more = `Show ${rest} earlier ${rest === 1 ? 'version' : 'versions'}`;
   const unfold = rest > 0 ? button({ variant: 'link', size: 'small', label: more, id: `versions-all-${item.key}`, onclick: view.onUnfold }) : null;
