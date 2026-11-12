@@ -190,6 +190,45 @@ inBox('A tool managed again, with a click’s pass on another agent first: the a
   }
 });
 
+inBox('A tool managed again, with a click on another agent first: an Off agent whose copy went meanwhile turns On, and stays On', async box => {
+  await writeFile(join(box.home, '.claude/agents/helper.md'), claudeAgent('You help.\n').replace('name: reviewer', 'name: helper'));
+  await applyAgents(box.context, tools, [{ key: 'helper', managed: true, off: [] }]);
+  await on(box);
+  for (const leftOut of [false, true]) {
+    const without: HarnessId[] = ['claude-cli', 'copilot-cli'];
+    if (leftOut) await chooseTools(box.context, without); else await applyAgents(box.context, without, []);
+    // reviewer is turned Off while Codex is out, and its Codex copy goes meanwhile.
+    const away = await seen({ ...box, tools: without });
+    await applyAgents(box.context, without, [agentClicks.off(away.row, away.item)]);
+    await rm(fileOf(box, 'codex-cli'));
+    if (leftOut) await chooseTools(box.context, tools);
+    // Codex is back. With Automatic sync off, a click on helper runs a pass about helper alone; then reviewer is turned On.
+    await applyAgents(box.context, tools, [{ key: 'helper', managed: true, off: ['copilot-cli'] }], { only: new Set(['helper']) });
+    const back = await seen(box);
+    const done = await applyAgents(box.context, tools, [agentClicks.on(back.row, back.item)], { only: new Set(['reviewer']) });
+    assert.deepEqual([done.notices, (await itemOf(box))!.on], [[], true], leftOut ? 'left out' : 'uninstalled');
+    assert.deepEqual(Object.values(await filesOf(box)).map(text => /Be brief\./.test(text ?? '')), [true, true, true]);
+    await applyAgents(box.context, tools, [{ key: 'helper', managed: true, off: [] }]);
+  }
+});
+
+for (const kept of ['Off', 'kept out of it'] as const) {
+  inBox(`A tool managed again with another file of the name of an agent that is ${kept}: it is kept as a version, the current one stays, and the file goes`, async box => {
+    await on(box);
+    const without: HarnessId[] = ['claude-cli', 'copilot-cli'];
+    await chooseTools(box.context, without);
+    const { row, item } = await seen({ ...box, tools: without });
+    await applyAgents(box.context, without, [kept === 'Off' ? agentClicks.off(row, item) : agentClicks.inHarness(row, item!, 'codex-cli', true)]);
+    // Codex, out of Central Knot's hands meanwhile, gets a hand-made agent of the same name.
+    await write(box, 'codex-cli', codexAgent('Someone else entirely.\n'));
+    await chooseTools(box.context, tools);
+    assert.deepEqual((await pass(box)).notices, []);
+    assert.equal(await readOf(box, 'codex-cli'), undefined);
+    assert.deepEqual(await versions(box), ['Be brief. (found in Claude Code) *', 'Someone else entirely. (was in Codex)']);
+    assert.ok(!(await historyOf(box)).some(event => event.kind === 'edit'), 'no edit was taken in');
+  });
+}
+
 inBox('Off clicked while a tool’s agents folder has been gone past the settle window: its copy goes when the folder comes back', async box => {
   await on(box);
   await rename(join(box.home, '.codex/agents'), join(box.home, '.codex/agents-away'));
