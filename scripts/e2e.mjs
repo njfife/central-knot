@@ -1082,8 +1082,14 @@ async function practiceFlow() {
   const deletedRow = `[...document.querySelectorAll('.history-row[data-kind="deleted"]')].find(row => row.textContent.includes('release-notes'))`;
   same('History says it was deleted from Central Knot, and offers Restore', await a.run(`[${deletedRow}.querySelector('.history-about').textContent, ${deletedRow}.querySelector('.history-actions button').textContent]`),
     ['Deleted from Central Knot and removed from all 3 tools. History keeps it.', 'Restore']);
-  const editRow = `[...document.querySelectorAll('.history-row[data-kind="edit"]')].find(row => row.textContent.includes('code-reviewer'))`;
-  same('an older edit offers the short "Go back before this", the full sentence its tooltip', await a.run(`[${editRow}.querySelector('.history-actions button').textContent, ${editRow}.querySelector('.history-actions button').title]`),
+  // One more edit, so the Make current entry is no longer the latest: it offers to go back to the version before it.
+  await a.click('#nav-agents');
+  writeFileSync(codexAgent, taken[2].replace('description = "', 'description = "Edited again. '));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 30 && !readFileSync(claudeAgent, 'utf8').includes('Edited again.'); tries++) await wait(100);
+  await a.click('#nav-history');
+  const currentRow = `[...document.querySelectorAll('.history-row[data-kind="current"]')].find(row => row.textContent.includes('code-reviewer'))`;
+  same('an older Make current offers the short "Go back before this", the full sentence its tooltip', await a.run(`[${currentRow}?.querySelector('.history-actions button')?.textContent, ${currentRow}?.querySelector('.history-actions button')?.title]`),
     ['Go back before this', 'Make the version from before this change current again, in every tool it is on in']);
   const whens = await a.all('.history-when', 'e.textContent');
   check('every History row says its time in one form', whens.every(when => /\d:\d\d/.test(when)) || whens.every(when => /ago$|^just now$/.test(when)), whens);
