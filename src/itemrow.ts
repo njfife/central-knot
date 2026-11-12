@@ -38,7 +38,7 @@ export interface ItemRow {
   /** Where each copy lives, for the details. */
   paths?: Partial<Record<Tool, string>>;
   /** For the compare view: one line per copy that differs. */
-  versions?: Partial<Record<Tool, { lines: string; changed: string; text: string; /** When it was last changed. */ at?: string; /** Agents: the prompt. */ prompt?: string }>>;
+  versions?: Partial<Record<Tool, { lines: string; changed: string; text: string; /** When it was last changed. */ at?: string; /** A library kind: its body (types.ts ToolCopy). */ body?: string }>>;
   /** A library kind: harnesses whose copy can't be seen for sure right now, and why. */
   unseen?: Partial<Record<Tool, string>>;
   /** A library kind, in the library: what the next pass does in each harness (types.ts LibraryFacts plan). */
@@ -47,8 +47,8 @@ export interface ItemRow {
   differs?: boolean;
   /** A library kind, in the library: what each listed version changed (types.ts LibraryFacts versionChanges). */
   versionChanges?: VersionChange[];
-  /** Agents: each harness's own settings in its file, by name (its own part). */
-  ownFields?: Partial<Record<Tool, string[]>>;
+  /** A library kind: the names in each harness's own part of its copy (types.ts ToolCopy ownPart). */
+  ownPart?: Partial<Record<Tool, string[]>>;
   /** MCP: tools whose copy waits for an explicit write (Claude Code, Write now). */
   waits?: Tool[];
   /** Skills: tools whose copy is disabled with the tool's own switch (it stays there; the tool doesn't load it). */
@@ -107,11 +107,17 @@ export interface KindSource { tools: HarnessId[]; facts: SkillFacts[]; waiting: 
  * are `off`, and it has no copies read elsewhere (`extra`) and no choice blocks.
  */
 export function kindSource(home: Pick<HomeView, 'manage' | 'mcp' | 'agents'>, which: 'skills' | 'mcp' | 'agents'): KindSource {
-  if (which === 'skills') return { tools: home.manage.tools, facts: home.manage.skills, waiting: [], gone: home.manage.gone ?? [] };
+  const view = libraryView(home, which);
+  if (view) return { tools: view.tools, facts: libraryRows(view), waiting: [], gone: [], library: view.library };
   if (which === 'mcp') return { tools: home.mcp.tools, facts: home.mcp.servers, waiting: home.mcp.claudePending, gone: home.mcp.gone ?? [] };
-  const view = home[which];
-  return { tools: view.tools, facts: libraryRows(view), waiting: [], gone: [], library: view.library };
+  return { tools: home.manage.tools, facts: home.manage.skills, waiting: [], gone: home.manage.gone ?? [] };
 }
+/**
+ * A library kind's view in a home (types.ts HomeView keeps it under the page's name for the kind); undefined for a kind still
+ * on its own engine (skills, MCP servers). kindSource and the page's bands (matrix.ts listView) read a kind's view here.
+ */
+export const libraryView = (home: Pick<HomeView, 'agents'>, which: 'skills' | 'mcp' | 'agents'): LibraryView | undefined =>
+  (which === 'agents' ? home[which] : undefined);
 /** A library view's rows as SkillFacts, made once per view read, so a page that caches by them redraws only on a new read. */
 const rowsOf = new WeakMap<LibraryView, SkillFacts[]>();
 function libraryRows(view: LibraryView): SkillFacts[] {

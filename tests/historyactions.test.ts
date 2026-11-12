@@ -13,13 +13,13 @@ const at = '2026-11-08T09:20:00.000Z';
 const item = (changes: Partial<LibraryItem> = {}): LibraryItem => ({ ...newItem('agent', 'reviewer', 'reviewer'), on: true, hash: 'b', versions: [
   { hash: 'b', at, from: { how: 'edited', harness: 'codex-cli' } }, { hash: 'x', at, from: { how: 'was-in', harness: 'copilot-cli' } }, { hash: 'a', at, from: { how: 'found', harness: 'claude-cli' } }], ...changes });
 const entry = (fields: Partial<HistoryEvent>): HistoryEvent => ({ id: 'e', at, key: 'agent:reviewer', item: 'reviewer', kind: 'edit', losers: [], orderProved: true, ...fields });
-const offered = (event: HistoryEvent, agent: LibraryItem | undefined) => { const action = agentAction(event, agent); return action && [action.label, action.click]; };
-const asIs = { key: 'reviewer', on: true, except: [] };
+const offered = (event: HistoryEvent, agent: LibraryItem | undefined) => { const action = agentAction(event, agent); return action && [action.label, action.change]; };
+const asIs = { key: 'reviewer', managed: true, off: [] };
 
 test('An Off entry offers Turn on while the agent is Off, and nothing once it is On again', () => {
   const off = entry({ kind: 'off', cause: 'switch', losers: [{ tool: 'claude-cli', hash: 'b' }, { tool: 'codex-cli', hash: 'b' }] });
   assert.equal(agentSentence(off, tools)?.text, 'Turned off: removed from Claude Code and Codex. Central Knot keeps it.');
-  assert.deepEqual(offered(off, item({ on: false })), ['Turn on', { ...asIs, on: true }]);
+  assert.deepEqual(offered(off, item({ on: false })), ['Turn on', { ...asIs, managed: true }]);
   assert.equal(offered(off, item()), undefined);
 });
 
@@ -32,7 +32,7 @@ test('A copy deleted by hand says where, and its entry turns the agent on again'
 test('An On entry offers Turn off while the agent is On; a found agent taken in says where it was found, and one Pull brought says so', () => {
   const on = entry({ kind: 'on', cause: 'switch', losers: tools.map(tool => ({ tool: tool as 'claude-cli', hash: 'b' })) });
   assert.equal(agentSentence(on, tools)?.text, 'Turned on: put in all 3 tools.');
-  assert.deepEqual(offered(on, item()), ['Turn off', { ...asIs, on: false }]);
+  assert.deepEqual(offered(on, item()), ['Turn off', { ...asIs, managed: false }]);
   assert.equal(offered(on, item({ on: false })), undefined);
   const takenIn = entry({ kind: 'on', cause: 'found', winner: { tool: 'claude-cli', hash: 'a' }, losers: [{ tool: 'codex-cli', hash: '' }] });
   assert.equal(agentSentence(takenIn, tools)?.text, 'Found in Claude Code and taken into Central Knot; put in Codex.');
@@ -44,12 +44,12 @@ test('An On entry offers Turn off while the agent is On; a found agent taken in 
 test('One harness’s switch: its entry turns that harness on or off again, while that would change something', () => {
   const out = entry({ kind: 'off', only: 'codex-cli', losers: [{ tool: 'codex-cli', hash: 'b' }] });
   assert.equal(agentSentence(out, tools)?.text, 'Kept out of Codex: its copy there was removed. Central Knot keeps it.');
-  assert.deepEqual(offered(out, item({ except: ['codex-cli', 'copilot-cli'] })), ['Turn on in Codex', { ...asIs, except: ['copilot-cli'] }]);
+  assert.deepEqual(offered(out, item({ except: ['codex-cli', 'copilot-cli'] })), ['Turn on in Codex', { ...asIs, off: ['copilot-cli'] }]);
   assert.equal(offered(out, item()), undefined, 'it is in Codex again');
   assert.equal(offered(out, item({ on: false, except: ['codex-cli'] })), undefined, 'the whole agent is off: its row’s switch comes first');
   const back = entry({ kind: 'on', only: 'codex-cli', losers: [{ tool: 'codex-cli', hash: 'b' }] });
   assert.equal(agentSentence(back, tools)?.text, 'Turned on in Codex: its file there is back.');
-  assert.deepEqual(offered(back, item()), ['Turn off in Codex', { ...asIs, except: ['codex-cli'] }]);
+  assert.deepEqual(offered(back, item()), ['Turn off in Codex', { ...asIs, off: ['codex-cli'] }]);
   assert.equal(offered(back, item({ except: ['codex-cli'] })), undefined);
 });
 
@@ -64,7 +64,7 @@ test('A content change offers Undo: the version from before it made current, unl
   assert.deepEqual(offered(edit, item()), ['Undo', { ...asIs, version: 'a' }]);
   assert.equal(offered(edit, item({ hash: 'a' })), undefined, 'the earlier version is current already');
   assert.equal(offered({ ...edit, previous: 'gone' }, item()), undefined, 'not a version of this agent');
-  assert.deepEqual(offered(edit, item({ on: false }))?.[1], { key: 'reviewer', on: false, except: [], version: 'a' }, 'an Off agent’s version changes too; it stays off');
+  assert.deepEqual(offered(edit, item({ on: false }))?.[1], { key: 'reviewer', managed: false, off: [], version: 'a' }, 'an Off agent’s version changes too; it stays off');
   // Once later changes came, an older entry's action says what it does: it doesn't roll back everything after it.
   assert.deepEqual(offered(edit, item({ hash: 'x' })), ['Go back before this', { ...asIs, version: 'a' }]);
   const current = entry({ kind: 'current', version: 'a', previous: 'b', losers: [{ tool: 'claude-cli', hash: 'b' }] });
@@ -79,7 +79,7 @@ test('Competing edits and a choice among found copies offer each copy that gave 
   const conflict = entry({ kind: 'conflict', winner: { tool: 'codex-cli', hash: 'b' }, previous: 'a', losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'claude-cli', hash: 'a' }] });
   assert.equal(agentSentence(conflict, tools)?.text, 'Codex’s edit was the latest, so it became the current version. Copilot CLI’s is kept as a version.');
   assert.deepEqual(versionChoices(conflict, item()), [{ tool: 'copilot-cli', hash: 'x' }]);
-  assert.deepEqual(agentAction(conflict, item(), 'x')?.click, { ...asIs, version: 'x' });
+  assert.deepEqual(agentAction(conflict, item(), 'x')?.change, { ...asIs, version: 'x' });
   assert.deepEqual(versionChoices(conflict, item({ hash: 'x' })), [], 'that copy’s version is current now');
   assert.equal(agentAction(conflict, item(), 'a'), undefined, 'only a copy the entry offers');
   const chosen = entry({ kind: 'chosen', winner: { tool: 'codex-cli', hash: 'b' }, losers: [{ tool: 'copilot-cli', hash: 'x' }] });
@@ -120,5 +120,5 @@ test('A Pull that changed only Claude Code’s own settings is not one of these 
 
 test('An action leaves the rest of the agent as it is: one kept out of a tool stays kept out of it', () => {
   const edit = entry({ kind: 'edit', previous: 'a', winner: { tool: 'codex-cli', hash: 'b' } });
-  assert.deepEqual(offered(edit, item({ except: ['copilot-cli'] })), ['Undo', { key: 'reviewer', on: true, except: ['copilot-cli'], version: 'a' }]);
+  assert.deepEqual(offered(edit, item({ except: ['copilot-cli'] })), ['Undo', { key: 'reviewer', managed: true, off: ['copilot-cli'], version: 'a' }]);
 });

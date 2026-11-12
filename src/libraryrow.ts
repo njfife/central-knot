@@ -2,7 +2,7 @@
 // mark says, the clicks its controls send, and every sentence the page says about it (its status, its switch, a click's
 // result, a notice). The same for every kind on the library: a kind supplies only its words (RowWords; each kind's are in
 // libraryWords), and the sentences that name the item or its copies are made in them (sentences). matrix.ts draws these, with
-// what else a kind's opened row shows of its own (librarykinds.ts); the tests click them exactly as the page does
+// what else a kind's opened row shows of its own (librarypages.ts); the tests click them exactly as the page does
 // (tests/agentclicks.ts).
 //
 // An item stands in one of three places (library.ts has the model):
@@ -27,18 +27,21 @@ export interface RowWords {
   copy: string;
   /** Said once in the opened row, where there is more than one tool: what every tool shares of it, and what stays each tool's own. */
   shared: string;
-  /** After a harness's line, what of its copy stays that harness's own (`fields`: its own part's names, at least one). */
-  own(fields: readonly string[]): string;
-  /** The part of a copy the copy question shows side by side, as its heading names it ("Prompt"). */
+  /** After a harness's line, what of its copy stays that harness's own (`names`: its own part's, types.ts ToolCopy ownPart; at least one). */
+  own(names: readonly string[]): string;
+  /** The part of a copy the copy question compares and shows side by side (types.ts ToolCopy body), as its heading names it ("Prompt"). */
   body: string;
 }
 
-/** Each kind on the library, in its words. A kind put on the library adds its words here (and its entry in librarykinds.ts libraryKinds). */
+/**
+ * Each kind on the library, in its words, keyed by the page's name for it (app.ts PageKind); the one place they are written
+ * (agents.ts takes its Kind's from here). Every other place a kind is wired in is in librarypass.ts's recipe.
+ */
 export const libraryWords = {
   agents: {
     item: kindNouns.agents.one, an: kindNouns.agents.a, copy: 'file', body: 'Prompt',
     shared: 'Name, description and prompt are the same in every tool; other settings stay in each tool’s file.',
-    own: fields => `Its own settings stay in its file: ${andList([...fields])}.`,
+    own: names => `Its own settings stay in its file: ${andList([...names])}.`,
   },
 } satisfies Record<string, RowWords>;
 
@@ -93,32 +96,35 @@ export const needsChoice = (row: LibraryRow, item: LibraryItem | undefined) => !
 
 // ---------- The clicks ----------
 
-/** The item as it is, as a click that changes nothing: each click below changes one thing of it. */
-function asItIs(row: LibraryRow, item: LibraryItem | undefined): Change {
-  const inLib = inLibrary(item);
-  return { key: row.key, managed: !!inLib?.on, off: inLib ? [...inLib.except] : [], seenManaged: !!inLib?.on };
-}
+/**
+ * The item as it is, as a click that changes nothing (a types.ts Change: `managed` is On, `off` the harnesses it is kept out
+ * of): each click a row's controls or a History entry sends (historyactions.ts) changes one thing of it. `item` as the caller
+ * means it: a row's, in the library or none (inLibrary); History's, deleted or not.
+ */
+export const asItIs = (key: string, item: LibraryItem | undefined): Change => ({ key, managed: !!item?.on, off: item ? [...item.except] : [] });
+/** A row's item as it is, with whether the page showed it On (`seenManaged`): a click made from an older read is refused. */
+const rowAsItIs = (row: LibraryRow, item: LibraryItem | undefined): Change =>
+  ({ ...asItIs(row.key, inLibrary(item)), seenManaged: !!inLibrary(item)?.on });
 
 /**
- * The clicks a row's controls send. Each is a types.ts Change, as every item page sends it: `managed` is On, `off` the
- * harnesses it is kept out of. main.ts's `changes` sanitizer passes it on field by field, and librarypass.ts itemClick makes
- * it the library's click.
+ * The clicks a row's controls send. Each is a types.ts Change, as every item page sends it. main.ts's `changes` sanitizer
+ * passes it on field by field, and librarypass.ts itemClick makes it the library's click.
  */
 export const rowClicks = {
   /** The row's switch, On: a found item is taken in (`use`: the copy every harness takes, where they differ); one in the library is applied. */
   on: (row: LibraryRow, item: LibraryItem | undefined, use?: string): Change =>
-    ({ ...asItIs(row, item), managed: true, ...(use ? { use: use as HarnessId, useHash: row.hashes?.[use] } : {}) }),
+    ({ ...rowAsItIs(row, item), managed: true, ...(use ? { use: use as HarnessId, useHash: row.hashes?.[use] } : {}) }),
   /** The row's switch, Off: out of every harness; Central Knot keeps it. */
-  off: (row: LibraryRow, item: LibraryItem | undefined): Change => ({ ...asItIs(row, item), managed: false }),
+  off: (row: LibraryRow, item: LibraryItem | undefined): Change => ({ ...rowAsItIs(row, item), managed: false }),
   /** A harness's own switch in the opened row: kept out of it (`out`), or let in again. */
   inHarness: (row: LibraryRow, item: LibraryItem | undefined, tool: string, out: boolean): Change => {
-    const now = asItIs(row, item);
+    const now = rowAsItIs(row, item);
     return { ...now, off: out ? [...now.off, tool as HarnessId] : now.off.filter(other => other !== tool) };
   },
   /** Make current, on an earlier version in the opened row. */
-  makeCurrent: (row: LibraryRow, item: LibraryItem | undefined, version: string): Change => ({ ...asItIs(row, item), version }),
+  makeCurrent: (row: LibraryRow, item: LibraryItem | undefined, version: string): Change => ({ ...rowAsItIs(row, item), version }),
   /** Delete from Central Knot. */
-  remove: (row: LibraryRow, item: LibraryItem | undefined): Change => ({ ...asItIs(row, item), deleted: true }),
+  remove: (row: LibraryRow, item: LibraryItem | undefined): Change => ({ ...rowAsItIs(row, item), deleted: true }),
 };
 
 // ---------- Versions ----------
@@ -241,7 +247,8 @@ export function sentences(words: RowWords) {
       case 'edited': {
         if (wantedIn(inLib!, tool as HarnessId)) return `Edited in ${where}. It becomes the current version when sync runs, and reaches the other tools.`;
         const reaches = inLib!.on ? ' and reaches the other tools' : '';
-        return `Edited in ${where}. When sync runs it becomes the current version${reaches}, then its copy here is removed: ${inLib!.on ? `the ${noun} is kept out of this tool` : `the ${noun} is off`}.`;
+        const gone = inLib!.on ? `the ${noun} is kept out of this tool` : `the ${noun} is off`;
+        return `Edited in ${where}. When sync runs it becomes the current version${reaches}, then its copy here is removed: ${gone}.`;
       }
       case 'deleted': return `Its copy was deleted in ${where}. When sync runs, the ${noun} turns off everywhere; Central Knot keeps it.`;
       case 'leaving': {

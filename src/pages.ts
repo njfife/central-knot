@@ -1,4 +1,4 @@
-import { absentKinds, announce, noTools, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type Kind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, otherOwnerSaid, takeOverSync, takeOverTitle, type Page } from './app.ts';
+import { absentKinds, announce, noTools, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type PageKind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, otherOwnerSaid, takeOverSync, takeOverTitle, type Page } from './app.ts';
 import { afterLayout, button, cardGrid, emptyState, fileBlocks, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
@@ -52,11 +52,11 @@ function addHint(holders: HarnessId[], noun: string) {
   return `${andList(homeToolNames())} can’t hold ${noun}.`;
 }
 /** What each kind's page says when no tool in this home has one: also used on a harness's page for that kind. */
-export function kindEmpty(kind: Kind): { glyph: Parameters<typeof emptyState>[0]; title: string; body: string } {
+export function kindEmpty(kind: PageKind): { glyph: Parameters<typeof emptyState>[0]; title: string; body: string } {
   const holders = kind === 'skills' ? homeTools() : state.home?.[kind].tools ?? [];
   return { glyph: ({ skills: 'wand-sparkles', mcp: 'plug', agents: 'bot' } as const)[kind], title: `No ${kindNouns[kind].many} here yet`, body: `None of your tools has ${kindNouns[kind].a} in this home. ${addHint(holders, kindNouns[kind].many)}` };
 }
-const emptyKindPage = (kind: Kind, id: string) => { const empty = kindEmpty(kind); return nothingHere(empty.glyph, empty.title, empty.body, id); };
+const emptyKindPage = (kind: PageKind, id: string) => { const empty = kindEmpty(kind); return nothingHere(empty.glyph, empty.title, empty.body, id); };
 const noSkills = (id: string) => emptyKindPage('skills', id);
 
 /**

@@ -27,21 +27,25 @@
 // with `outcome: 'held'` (types.ts DestinationResult, the app's word for an action not done this time) is not a held copy.
 //
 // Where the library meets the app's types, which the skills and MCP engines share and name for themselves: a click comes
-// as a types.ts Change and itemClick makes it an ItemClick (`managed` is On); a kind's page view is a types.ts LibraryView,
-// which the page reads through itemrow.ts kindSource.
+// as a types.ts Change (a row's, or a History entry's action) and itemClick makes it an ItemClick (`managed` is On); a
+// kind's page view is a types.ts LibraryView, which the pages read through itemrow.ts kindSource.
 //
-// To put another kind on the library (agents are the worked example; the compiler names a member `Kind` lacks):
-// - its name in library.ts ItemKind, and one object implementing `Kind`, like agents.ts agentKind. A kind with no part of
-//   its own per tool has `ownOf` answer undefined and `keepOwn` false;
-// - its callers: runPass for its passes (the page's clicks through itemClick), restore for History's actions, lookFor for
-//   its page, and forgetFolders from toolchoice.ts chooseTools.
-// Outside the contract, one place each:
-// - its page's rows: what each says and the clicks it sends (agents.ts agentsView gives a LibraryView; its words in
-//   libraryrow.ts libraryWords and its entry in librarykinds.ts libraryKinds; matrix.ts draws them);
-// - History's sentences and actions for its entries (historyactions.ts for agents; historypage.ts asks it);
-// - the app's wiring: main.ts (its passes, in the background and on a click through the `changes` sanitizer; its view; a
-//   History action sent on by its key's prefix), preload.ts (the page's calls), types.ts HomeView (its LibraryView in the
-//   home's), itemrow.ts kindSource (where every page reads it), app.ts (its page: the call it sends, where its result is kept).
+// To put another kind on the library, every place it is wired in (this is the one list; librarypages.ts and LEDGER point
+// here, and the compiler names a member `Kind` lacks):
+// - the contract: its name in library.ts ItemKind, and one object implementing `Kind`, like agents.ts agentKind (a kind with
+//   no part of its own per tool has `ownOf` answer undefined and `keepOwn` false);
+// - its callers: runPass for its passes (the app's clicks through itemClick), restore for History's actions, lookFor for its
+//   page's view, and forgetFolders from toolchoice.ts chooseTools;
+// - its view: a types.ts LibraryView (as agents.ts agentsView gives), kept in types.ts HomeView under the page's name for the
+//   kind (app.ts PageKind), and found there by itemrow.ts libraryView, which kindSource and the page's bands and notices
+//   (matrix.ts listView) read with no edit of their own;
+// - its page: its words in libraryrow.ts libraryWords (agents.ts takes its Kind's from there), and its entry in
+//   librarypages.ts libraryPages (how Read gets a version, what its opened row shows of its own); matrix.ts then draws its
+//   rows as library rows, with no edit;
+// - the app's wiring: app.ts kindPages (how its clicks are sent; where its last result is kept, which lastResult reads),
+//   main.ts (its passes, in the background and on a click through the `changes` sanitizer; its view; a History action
+//   sent on by its key's prefix), preload.ts (the page's calls);
+// - History's sentences and actions for its entries (historyactions.ts for agents; historypage.ts asks it).
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { carryOut, keepVersion, managedAgain, newItem, plan, setCurrent, versionAt, wantedIn } from './library.ts';
@@ -141,28 +145,33 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
   write(context: ShareContext, item: LibraryItem, harness: HarnessId, here: Entry | undefined, content: Content): Promise<{ stopped: string } | undefined>;
   /** Removes one harness's copy, only while it is as read: `changed` when a save landed meanwhile. */
   remove(context: ShareContext, item: LibraryItem, here: Entry): Promise<'removed' | 'changed' | 'failed'>;
-  /** A History entry's action as the click it is, from the entry and the item now; undefined when it has nothing left to do. */
-  historyAction(entry: HistoryEvent, item: LibraryItem | undefined, version?: string): { click: ItemClick } | undefined;
+  /**
+   * A History entry's action as the click it is (the app's, as the page would send it: restore makes it the library's with
+   * itemClick), from the entry and the item now; undefined when it has nothing left to do.
+   */
+  historyAction(entry: HistoryEvent, item: LibraryItem | undefined, version?: string): { change: Change } | undefined;
 }
 
 /**
  * What a person asked of one item: On or Off (`on`), the harnesses it is kept out of (`except`), a version to make current,
  * Delete from Central Knot (`deleted`: true) or its Restore (false), and, for a found item whose copies differ, the copy
  * every harness takes (`use`, as seen: `useHash`). `seenOn`: whether the page showed it On; a click made from an older read
- * is refused if that no longer holds.
+ * is refused if that no longer holds. `use: 'separate'` is the skills engine's "keep both", no choice here: a click carrying
+ * it is refused (click, takeIn), so the pass does only what it is asked.
  */
 export interface ItemClick {
   key: string; on: boolean; except: HarnessId[]; seenOn?: boolean;
-  use?: HarnessId; useHash?: string; version?: string; deleted?: boolean;
+  use?: HarnessId | 'separate'; useHash?: string; version?: string; deleted?: boolean;
 }
 
 /**
- * The page's click (types.ts Change, which the skills and MCP engines share) as the library's: the one place the two meet.
- * `managed` is On, `off` the harnesses it is kept out of; a Change's fields for the other engines are left behind.
+ * The app's click (types.ts Change, which the skills and MCP engines share; the page's and History's) as the library's: the
+ * one place the two meet. `managed` is On, `off` the harnesses it is kept out of; a Change's fields for the other engines
+ * (disable, enable, remove, everywhere, takeOver) are left behind.
  */
 export function itemClick(change: Change): ItemClick {
-  const { key, managed: on, off, seenManaged: seenOn, useHash, version, deleted } = change;
-  return { key, on, except: [...off], seenOn, use: change.use === 'separate' ? undefined : change.use, useHash, version, deleted };
+  const { key, managed: on, off, seenManaged: seenOn, use, useHash, version, deleted } = change;
+  return { key, on, except: [...off], seenOn, use, useHash, version, deleted };
 }
 
 // ---------- What the harnesses hold ----------
@@ -553,7 +562,7 @@ export async function restore<C, E extends Seen, D extends Disk<E>>(
   if (problem) return { stopped: problem, results: [], writes: 0 };
   const action = past && kind.historyAction(past, library.items[key], version);
   if (!action) return { stopped: `That change has nothing left to undo: the ${kind.words.item} is as that would leave it.`, results: [], writes: 0 };
-  const done = await runPass(kind, context, tools, [action.click], { only: new Set([key]) });
+  const done = await runPass(kind, context, tools, [itemClick(action.change)], { only: new Set([key]) });
   // One of an entry's version choices ("Use Codex’s") leaves the entry open: its other choices still stand.
   if (!done.made?.length || version) return done;
   const history = await readHistory(context);
@@ -610,7 +619,7 @@ function turn(pass: Pass, item: LibraryItem, asked: ItemClick) {
 async function takeIn(pass: Pass, asked: ItemClick, tombstone: LibraryItem | undefined, refuse: Refuse) {
   const found = foundCopies(pass, asked.key, asked.except);
   if (!found.length) return refuse('No tool has a copy of it to take in any more.');
-  const chosen = asked.use ? found.find(entry => entry.tool === asked.use) : undefined;
+  const chosen = asked.use && asked.use !== 'separate' ? found.find(entry => entry.tool === asked.use) : undefined;
   const changedSince = asked.use && (!chosen || (asked.useHash && chosen.hash !== asked.useHash));
   if (changedSince) return refuse('The copy you chose changed since you chose it. Nothing was changed; choose again.', { chooseAgain: true });
   const differs = differ(found);

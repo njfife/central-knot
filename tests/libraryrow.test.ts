@@ -206,3 +206,27 @@ test('The sentences that name the item or its copies are in the kind’s words: 
     ['Central Knot keeps this agent and its versions. No tool has it until you turn it on.', 'A tool has this agent; Central Knot doesn’t yet. Turn it on to take it in and put it in every tool.']);
   assert.equal(noticeWords({ kind: 'deleted', item: 'reviewer', winner: 'codex-cli', losers: [] }).help, 'Put reviewer back in every tool, each file as it was');
 });
+
+test('The same sentences in another kind’s words name that kind and its copies, never an agent or a file', () => {
+  const notes = sentences({ item: 'note', an: 'a note', copy: 'page', shared: '', own: () => '', body: 'Text' });
+  const out = item({ except: ['codex-cli'], applied: { 'claude-cli': 'b', 'copilot-cli': 'b' } });
+  const said = [
+    notes.harnessLine(row({ 'claude-cli': 'b', 'copilot-cli': 'b' }, {}, out), out, 'codex-cli', 'Codex'),
+    notes.harnessLine(row({ 'claude-cli': 'b', 'copilot-cli': 'b' }, {}, item()), item(), 'codex-cli', 'Codex'),
+    notes.harnessLine(row({ 'copilot-cli': 'c' }, {}, item({ on: false })), item({ on: false }), 'copilot-cli', 'Copilot CLI'),
+    notes.placeTag(row({}), item({ on: false }), tools)?.title, notes.placeTag(row({ 'codex-cli': 'x' }), undefined, tools)?.title,
+    notes.said.off('plan', [], tools), notes.said.inHarness('plan', 'codex-cli', true, false),
+    notes.noticeWords({ kind: 'deleted', item: 'plan', winner: 'codex-cli', losers: [] }).help,
+  ];
+  assert.deepEqual(said, [
+    'Kept out of this tool. Central Knot keeps its page for when you turn it on here.',
+    'Its copy was deleted in Codex. When sync runs, the note turns off everywhere; Central Knot keeps it.',
+    'Edited in Copilot CLI. When sync runs it becomes the current version, then its copy here is removed: the note is off.',
+    'Central Knot keeps this note and its versions. No tool has it until you turn it on.',
+    'A tool has this note; Central Knot doesn’t yet. Turn it on to take it in and put it in every tool.',
+    'plan is off: no tool has it. Central Knot keeps it, and turning it on puts each page back as it was.',
+    'plan is kept out of Codex. Central Knot keeps its page for when you turn it on there.',
+    'Put plan back in every tool, each page as it was',
+  ]);
+  assert.ok(said.every(line => !/\bagent|\bfile\b/.test(line ?? '')), 'no word of the agents’ own');
+});

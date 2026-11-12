@@ -33,11 +33,11 @@ export const machine = machineNames(pagePlatform(navigator.userAgent));
 export const { home: realHomeName, machine: thisMachine, tray: trayPlace } = machine;
 
 /** The kinds of item the tables manage. */
-export type Kind = 'skills' | 'mcp' | 'agents';
-export const KINDS: Kind[] = ['skills', 'mcp', 'agents'];
-export const isKind = (tab: string | undefined): tab is Kind => (KINDS as (string | undefined)[]).includes(tab);
+export type PageKind = 'skills' | 'mcp' | 'agents';
+export const KINDS: PageKind[] = ['skills', 'mcp', 'agents'];
+export const isKind = (tab: string | undefined): tab is PageKind => (KINDS as (string | undefined)[]).includes(tab);
 /** What a harness's page shows: one kind of item, its instruction file, its plugins, or where its files are. */
-export type HarnessTab = Kind | 'instructions' | 'plugins' | 'about';
+export type HarnessTab = PageKind | 'instructions' | 'plugins' | 'about';
 /** Found: Central Knot reads and writes this harness in this home, so it has a page. */
 export const harnessFound = (home: HomeView, tool: HarnessId) => home.manage.tools.includes(tool);
 /** A harness's page whose tool a new read no longer finds closes, so it doesn't reopen by itself if a later read finds it again. */
@@ -45,7 +45,7 @@ function forgetLostHarness() { if (state.harness && state.home && !harnessFound(
 /** The tab of the harness page on screen, if one is: Harnesses with a harness open that this home still finds. */
 export const harnessTabShown = (): HarnessTab | undefined => (state.page === 'harnesses' && state.harness && state.home && harnessFound(state.home, state.harness) ? state.harnessTab : undefined);
 /** The kind whose table is on screen on a harness's page, if one is. */
-export const harnessKindShown = (): Kind | undefined => { const tab = harnessTabShown(); return isKind(tab) ? tab : undefined; };
+export const harnessKindShown = (): PageKind | undefined => { const tab = harnessTabShown(); return isKind(tab) ? tab : undefined; };
 export interface BaseEdit {
   text: string; hash: string; tools: HarnessId[]; stage: 'edit' | 'review';
   /** Where the draft came from: a tool's own instructions (they move into the base), a tool's edited copy (to use as the base),
@@ -271,13 +271,13 @@ export const flashRequests = new Set<string>();
 const flashRow = (item: string) => { if (item) flashRequests.add(item.toLowerCase()); };
 
 /** After the first click on a page (any click that applies something, or says it changed nothing), its tip has done its job. */
-export const retireTip = (kind: Kind) => writeFlag(`ck-help-dismissed-${kind}`);
+export const retireTip = (kind: PageKind) => writeFlag(`ck-help-dismissed-${kind}`);
 
 // ---------- One switch per item ----------
 
 /** One click on an item page: the changes it makes, the item names it concerns, and what the result says it did. */
 export interface Click {
-  kind: Kind;
+  kind: PageKind;
   changes: Change[];
   items: string[];
   /**
@@ -306,19 +306,21 @@ export interface Click {
 }
 
 /** Each item page's own: how its changes are sent, and where its last result is kept. Its items are itemrow.ts kindSource's. */
-const kindPages: Record<Kind, { send: (changes: Change[], resume: boolean, home: string) => Promise<ApplyResult | McpResult | PassResult>; keep: (results: DestinationResult[], notices?: SyncNotice[]) => void }> = {
+const kindPages: Record<PageKind, { send: (changes: Change[], resume: boolean, home: string) => Promise<ApplyResult | McpResult | PassResult>; keep: (results: DestinationResult[], notices?: SyncNotice[]) => void }> = {
   skills: { send: (...args) => api().apply(...args), keep: (results, notices) => { state.applied = { results, harnessWrites: 0, notices }; } },
   mcp: { send: (...args) => api().applyMcp(...args), keep: (results, notices) => { state.mcpResult = { results, writes: 0, notices }; } },
   agents: { send: (...args) => api().applyAgents(...args), keep: (results, notices) => { state.agentsResult = { results, writes: 0, notices }; } },
 };
-const factsOf = (kind: Kind) => (state.home ? kindSource(state.home, kind).facts : []);
+/** Each item page's last click's result, as kindPages keeps it: what the page's bands and notices read. */
+export const lastResult = (kind: PageKind): ApplyResult | PassResult | undefined => ({ skills: state.applied, mcp: state.mcpResult, agents: state.agentsResult })[kind];
+const factsOf = (kind: PageKind) => (state.home ? kindSource(state.home, kind).facts : []);
 
 /** The records of these items of a kind, as the open home shows them. */
-const standings = (kind: Kind, keys: string[]): Map<string, Standing> =>
+const standings = (kind: PageKind, keys: string[]): Map<string, Standing> =>
   new Map(factsOf(kind).filter(fact => keys.includes(fact.key)).map(fact => [fact.key, { managed: fact.managed, off: fact.off }]));
 
 /** Sends one kind's changes for the open home. */
-const send = (kind: Kind, changes: Change[]) => kindPages[kind].send(changes, state.home!.manage.gate.state === 'needs-resume', state.home!.home);
+const send = (kind: PageKind, changes: Change[]) => kindPages[kind].send(changes, state.home!.manage.gate.state === 'needs-resume', state.home!.home);
 
 /**
  * One click, applied at once: an item's switch, or one tool's control in its details. The result says what was done, or why

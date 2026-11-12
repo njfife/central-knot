@@ -10,7 +10,7 @@
 // agentsView is the Agents page's reading (types.ts LibraryView: lookFor, copiesOf, plan), so a mark says what a pass will
 // do; agentsForRepo is what the Git repo's Push sends. Elsewhere: where each thing is kept on disk, agentstore.ts; the
 // harnesses' file formats, agentfiles.ts; an agent's row, the clicks its controls send and its words, libraryrow.ts (the
-// same row for every kind on the library) with librarykinds.ts; History's sentences and actions for agents,
+// same row for every kind on the library) with librarypages.ts; History's sentences and actions for agents,
 // historyactions.ts; Convert to skill, agentskill.ts; the Git repo's Push and Pull, gitrepo.ts (agentsForRepo, and Pull
 // through applyAgents).
 import { constants } from 'node:fs';
@@ -19,6 +19,7 @@ import { agentHash, agentText, agentsFolder, changedFields, fileFor, isAgentTool
 import { fileTextFor, keepOwn, openLibrary, readVersion, saveLibrary, storeVersion } from './agentstore.ts';
 import { agentAction } from './historyactions.ts';
 import { listed, plan } from './library.ts';
+import { libraryWords } from './libraryrow.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, differ, forgetFolders, foundCopies, itemClick, lookFor, restore, runPass, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { throughPlugins } from './plugins.ts';
@@ -106,7 +107,8 @@ function cannotTake(disk: AgentDisk, managed: HarnessId[], item: Wanted, tool: H
 /** Agents as a kind of item (librarypass.ts Kind): one file per agent in each harness's agents folder. */
 export const agentKind: Kind<SharedAgent, AgentEntry, AgentDisk> = {
   kind: 'agent',
-  words: { item: 'agent', copy: 'file', folder: 'agents folder' },
+  // The item and its copy as the page names them (libraryrow.ts libraryWords); a harness's folder of them only the pass says.
+  words: { item: libraryWords.agents.item, copy: libraryWords.agents.copy, folder: 'agents folder' },
   historyPrefix: 'agent:',
   harnesses: tools => tools.filter(isAgentTool),
   folder: agentsFolder,
@@ -250,9 +252,10 @@ async function rowFacts(look: AgentLook, key: string, item: LibraryItem | undefi
   const current = item ? await readVersion(look.context, key, item.hash) : entries[0].agent;
   const copies: Partial<Record<HarnessId, ToolCopy>> = {};
   for (const { tool, hash, file, agent, at, name: folder } of entries) {
-    const lines = agent.prompt.split('\n').length, ownFields = Object.keys(agent.fields);
-    const { description: summary, prompt } = agent;
-    copies[tool] = { hash, directory: file, rootLabel: nameOf(tool), lines, modified: iso(at), summary, prompt, writable: true, folder, ownFields };
+    const lines = agent.prompt.split('\n').length, ownPart = Object.keys(agent.fields);
+    // What a copy question compares is the prompt (libraryrow.ts libraryWords: its `body`).
+    const { description: summary, prompt: body } = agent;
+    copies[tool] = { hash, directory: file, rootLabel: nameOf(tool), lines, modified: iso(at), summary, body, writable: true, folder, ownPart };
   }
   const cannot: LibraryFacts['cannot'] = {}, plugin: NonNullable<LibraryFacts['plugin']> = {}, unseen: NonNullable<LibraryFacts['unseen']> = {};
   for (const tool of look.managed) { const given = look.disk.through.get(tool)?.get(key); if (given && !slot[tool]) plugin[tool] = given; }

@@ -3,7 +3,7 @@
 // buttons), by app.ts (what is said after a click), by librarypass.ts restore (the click an action runs, through agents.ts restoreAgent) and by the tests.
 // Pure: no files, no DOM. The entries of skills and MCP servers are still historypage.ts's own.
 //
-// Every action is a click the Agents page could send as well (librarypass.ts ItemClick), decided from the entry and the agent as the
+// Every action is a click the Agents page could send as well (types.ts Change), decided from the entry and the agent as the
 // library holds it now (library.ts LibraryItem). So an action is offered exactly while it would change something, and it is
 // always safe to click: nothing has to be worked out about what happened since the entry was made.
 //
@@ -31,9 +31,8 @@
 // agentAction, the entry librarypass.ts logItem makes for it, and its case in historypage.ts describe.
 import type { IconName } from './icons.ts';
 import { sourceWords, type LibraryItem } from './library.ts';
-import type { ItemClick } from './librarypass.ts';
-import { versionClock } from './libraryrow.ts';
-import type { HarnessId, HistoryEvent } from './types.ts';
+import { asItIs, versionClock } from './libraryrow.ts';
+import type { Change, HarnessId, HistoryEvent } from './types.ts';
 import { andList, toolName, toolsPhrase } from './words.ts';
 
 /** Whether an entry is one of these: about an agent, and not a Pull's change to Claude Code's own settings alone. */
@@ -122,10 +121,7 @@ export function doneWords(event: HistoryEvent): string {
 }
 
 /** An entry's action: the button's words, what it does (said before the click), and the click it sends. */
-export interface EntryAction { label: string; help: string; click: ItemClick }
-
-/** The agent as it is, as a click that changes nothing: each action changes one thing of it. */
-const asItIs = (item: LibraryItem): ItemClick => ({ key: item.key, on: item.on, except: [...item.except] });
+export interface EntryAction { label: string; help: string; change: Change }
 /** Whether a content is a version of the agent that could be made current: one it has, other than the current one. */
 const isVersion = (item: LibraryItem, hash: string | undefined): hash is string =>
   !!hash && hash !== item.hash && item.versions.some(version => version.hash === hash);
@@ -136,36 +132,36 @@ const isVersion = (item: LibraryItem, hash: string | undefined): hash is string 
  */
 export function agentAction(event: HistoryEvent, item: LibraryItem | undefined, version?: string): EntryAction | undefined {
   if (!item || event.undoneBy) return undefined;
-  const name = item.name, now = asItIs(item), everywhere = item.on ? ', in every tool it is on in' : '';
+  const name = item.name, now = asItIs(item.key, item), everywhere = item.on ? ', in every tool it is on in' : '';
   if (event.kind === 'deleted') {
     const help = `Put ${name} back in Central Knot as it was${item.on ? ', and in every tool it was on in' : ''}`;
-    return item.deleted ? { label: 'Restore', help, click: { ...now, deleted: false } } : undefined;
+    return item.deleted ? { label: 'Restore', help, change: { ...now, deleted: false } } : undefined;
   }
   if (item.deleted) return undefined;
   if (version) {
     const offered = versionChoices(event, item).some(choice => choice.hash === version);
-    return offered ? { label: 'Use it', help: `Make that copy’s version of ${name} the current one${everywhere}`, click: { ...now, version } } : undefined;
+    return offered ? { label: 'Use it', help: `Make that copy’s version of ${name} the current one${everywhere}`, change: { ...now, version } } : undefined;
   }
   if (event.kind === 'off' || event.kind === 'on') return switchAction(event.kind === 'off', event.only, item);
   // Copies an earlier engine added: there is no earlier version to go back to.
   if (event.kind === 'added' || !isVersion(item, event.previous)) return undefined;
   // Undo while what this entry made is still current; once later changes came, it says what it does instead.
   const latest = (event.version ?? event.winner?.hash) === item.hash;
-  return { label: latest ? 'Undo' : 'Go back before this', help: `Make the version from before this change current again${everywhere}`, click: { ...now, version: event.previous } };
+  return { label: latest ? 'Undo' : 'Go back before this', help: `Make the version from before this change current again${everywhere}`, change: { ...now, version: event.previous } };
 }
 
 /** An Off entry's Turn on (`turnOn`), or an On entry's Turn off: for the whole agent, or (`only`) for one harness of an agent that is On. */
 function switchAction(turnOn: boolean, only: HarnessId | undefined, item: LibraryItem): EntryAction | undefined {
-  const name = item.name, now = asItIs(item);
+  const name = item.name, now = asItIs(item.key, item);
   if (!only) {
     if (item.on === turnOn) return undefined;
-    return turnOn ? { label: 'Turn on', help: `Put ${name} back in every tool it is not kept out of, each file as it was`, click: { ...now, on: true } }
-      : { label: 'Turn off', help: `Take ${name} out of every tool; Central Knot keeps it`, click: { ...now, on: false } };
+    return turnOn ? { label: 'Turn on', help: `Put ${name} back in every tool it is not kept out of, each file as it was`, change: { ...now, managed: true } }
+      : { label: 'Turn off', help: `Take ${name} out of every tool; Central Knot keeps it`, change: { ...now, managed: false } };
   }
   const there = toolName(only), out = item.except.includes(only);
   if (!item.on || out !== turnOn) return undefined;
-  return turnOn ? { label: `Turn on in ${there}`, help: `Put ${name} back in ${there}, as it was`, click: { ...now, except: item.except.filter(tool => tool !== only) } }
-    : { label: `Turn off in ${there}`, help: `Take ${name} out of ${there}; Central Knot keeps it`, click: { ...now, except: [...item.except, only] } };
+  return turnOn ? { label: `Turn on in ${there}`, help: `Put ${name} back in ${there}, as it was`, change: { ...now, off: item.except.filter(tool => tool !== only) } }
+    : { label: `Turn off in ${there}`, help: `Take ${name} out of ${there}; Central Knot keeps it`, change: { ...now, off: [...item.except, only] } };
 }
 
 /** The copies an entry says gave way, each of which is a version that can be made current now: one "Use <harness>’s" each. */

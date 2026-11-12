@@ -234,8 +234,11 @@ export interface ToolCopy {
    * line, whole; an agent's description; an MCP entry's "Command · …" or "HTTP · …".
    */
   summary: string;
-  /** Agents: the prompt, so a copy question can say what differs and show the copies side by side. */
-  prompt?: string;
+  /**
+   * A library kind: the part of a copy the copy question compares and shows side by side, under the kind's word for it
+   * (libraryrow.ts RowWords body: an agent's prompt).
+   */
+  body?: string;
   /** False for a copy reached through a link or in a folder other tools share: background sync never writes there. */
   writable: boolean;
   /**
@@ -252,8 +255,8 @@ export interface ToolCopy {
   folder: string;
   /** Skills: the name this tool reads for this copy (its frontmatter name), which Copilot's switch goes by. */
   name?: string;
-  /** Agents: the names of this harness's own settings in its file (tools, model, …): its own part, which never leaves it. */
-  ownFields?: string[];
+  /** A library kind: the names in this harness's own part of its copy (an agent's settings in its file: tools, model, …), which never leave it. */
+  ownPart?: string[];
 }
 
 /** What is true now for one skill, across every tool. The page derives its marks from this. */

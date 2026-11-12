@@ -1,7 +1,7 @@
 // Harnesses: one place per tool. The list sums up what each one has; a harness's own page manages its items with the same
 // tables and switches as the Skills, MCP servers and Agents pages, with that tool first, plus its instruction
 // file and its plugins. Nothing here has its own engine: every change goes through the pages it mirrors.
-import { KINDS, harnessFound as found, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type Kind } from './app.ts';
+import { KINDS, harnessFound as found, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type PageKind } from './app.ts';
 import { installsIn, type MarketPlugin } from './pluginstatus.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { pluginTitle } from './pluginparts.ts';
@@ -32,15 +32,15 @@ const readProblems = (snapshot: Snapshot) => (snapshot.discovery === 'missing' ?
 /** The harnesses this home shows: this computer's home lists every tool, found or not; a folder only the ones it has. */
 const listed = (home: HomeView) => home.snapshots.filter(snapshot => home.mode === 'actual' || found(home, snapshot.harness));
 
-const supports = (home: HomeView, kind: Kind, tool: HarnessId) => kindSource(home, kind).tools.includes(tool);
+const supports = (home: HomeView, kind: PageKind, tool: HarnessId) => kindSource(home, kind).tools.includes(tool);
 /** Said on the card, the tab's tooltip and the empty tab when a tool can't hold a kind. */
-const kindNotUsed = (tool: HarnessId, kind: Kind) => `${names[tool]} doesn’t use ${kindNouns[kind].many}`;
+const kindNotUsed = (tool: HarnessId, kind: PageKind) => `${names[tool]} doesn’t use ${kindNouns[kind].many}`;
 
 /**
  * What one tool has of one kind: every item with a copy there, how many of those are managed, and how many have copies that
  * differ and need a choice (the same count as that tool's "Copies differ" chip). `supported`: the tool can hold this kind.
  */
-function tally(home: HomeView, kind: Kind, tool: HarnessId) {
+function tally(home: HomeView, kind: PageKind, tool: HarnessId) {
   const source = kindSource(home, kind);
   const here = source.facts.filter(item => inTool(item, tool));
   const plugins = pluginItemCount(home, kind, tool);
@@ -173,7 +173,7 @@ function summaryCard(snapshot: Snapshot, home: HomeView) {
  * tables closed and Copies differ filters off. `showOnly`: open that kind's tab showing only items whose copies differ.
  * `fromKeyboard`: going back to the list from the keyboard puts focus (and its ring) on the harness's card; a mouse return leaves it alone.
  */
-export function goHarness(tool: HarnessId | undefined, tab?: HarnessTab, { fromKeyboard = true, showOnly }: { fromKeyboard?: boolean; showOnly?: Kind } = {}) {
+export function goHarness(tool: HarnessId | undefined, tab?: HarnessTab, { fromKeyboard = true, showOnly }: { fromKeyboard?: boolean; showOnly?: PageKind } = {}) {
   const from = state.harness;
   if (tool !== from) resetTablesForHarness();
   state.harness = tool;
@@ -258,14 +258,14 @@ function switcher(home: HomeView, tool: HarnessId) {
 }
 
 /** A kind the tool has no place for (Pi's agents): what it has instead. */
-function unsupported(kind: Kind, tool: HarnessId) {
+function unsupported(kind: PageKind, tool: HarnessId) {
   const body = kind === 'agents' ? `On the Agents page, Convert to skill turns an agent into a skill that ${names[tool]} can use.`
     : `Central Knot can’t read or write ${kindNouns[kind].many} for ${names[tool]}.`;
   return h('div.page', {}, emptyState(kind === 'agents' ? 'bot' : 'plug', kindNotUsed(tool, kind), body,
     kind === 'agents' ? button({ variant: 'outline', label: 'Open Agents', id: 'harness-open-agents', onclick: () => showPage('agents') }) : undefined));
 }
 
-function kindTab(home: HomeView, kind: Kind, tool: HarnessId) {
+function kindTab(home: HomeView, kind: PageKind, tool: HarnessId) {
   if (!supports(home, kind, tool)) return unsupported(kind, tool);
   if (rowCount(home, kind)) return itemsTable(kind, tool);
   // Nothing of this kind anywhere: the kind's own empty state, under the table's bands, so a file that could not be read still says why.
