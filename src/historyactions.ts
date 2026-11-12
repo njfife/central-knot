@@ -100,8 +100,10 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
     case 'deleted': {
       // One with a `winner` is from before the library (a deletion sync spread from a tool): the general sentence says it.
       if (event.winner) return undefined;
+      // The Undo of taking a found item in: out of Central Knot again, each tool it was found in keeping its own copy.
+      if (gave.length) return { glyph: 'undo-2', text: `Undone: taken out of Central Knot again${also(' and removed from')}; ${andList(gave)} ${gave.length === 1 ? 'keeps its own copy' : 'keep their own copies'}, as before. History keeps it.` };
       const how = pulled ? 'Removed in the Git repo, so Pull deleted it' : 'Deleted';
-      return { glyph: pulled ? 'git-branch' : 'trash-2', text: `${how} from Central Knot${also(' and removed from')}.${gaveSaid} History keeps it.` };
+      return { glyph: pulled ? 'git-branch' : 'trash-2', text: `${how} from Central Knot${also(' and removed from')}. History keeps it.` };
     }
     case 'restored': {
       // Likewise: an Undo or Restore from before the library names a tool or an earlier version.

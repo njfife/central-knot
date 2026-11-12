@@ -4,9 +4,10 @@
 // the strip's Undo does (the History action of each entry the click made).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { rowClicks } from '../src/libraryrow.ts';
+import { librarySentence } from '../src/historyactions.ts';
+import { libraryWords, rowClicks } from '../src/libraryrow.ts';
 import * as agent from './agentclicks.ts';
-import { bytes, choose, everywhere, folderOf, inTool, pass, put, sandbox, seen, send, skillText, turnOn, undo } from './skillclicks.ts';
+import { bytes, choose, everywhere, folderOf, historyOf, inTool, pass, put, sandbox, seen, send, skillText, turnOn, undo } from './skillclicks.ts';
 
 test('Undo right after taking in a found skill: the copies it made go, the tool it was found in keeps its folder, and the skill is found again', async () => {
   const box = await sandbox();
@@ -20,6 +21,8 @@ test('Undo right after taking in a found skill: the copies it made go, the tool 
     assert.deepEqual(await everywhere(box), before);
     const { item } = await seen(box);
     assert.ok(!item || item.deleted, 'found again');
+    const said = librarySentence((await historyOf(box)).at(-1)!, libraryWords.skills, box.tools);
+    assert.equal(said?.text, 'Undone: taken out of Central Knot again and removed from Copilot CLI and Codex; Claude Code keeps its own copy, as before. History keeps it.');
     await pass(box);
     assert.deepEqual(await everywhere(box), before, 'and a later pass leaves it so');
   } finally { await box.cleanup(); }

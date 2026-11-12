@@ -470,8 +470,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 @container content (width >= 1000px) {
   .history-row:nth-child(even of .history-row):not(:hover):not(:has(:focus-visible)) { background: var(--row-stripe); }
 }
-/* The opened row stays in view, under its section's heading, while its details below it are scrolled and used. */
-.ov-row.open { position: sticky; top: 92px; z-index: 1; background: var(--chrome); }
+.ov-row.open { background: var(--chrome); }
+/* On the item pages (one switch per row, section headings not sticky), the opened row stays at the top of the table's scroll
+   area while its details below it are scrolled and used, so its name and switch stay in view. */
+.ov-switched .ov-row.open { position: sticky; top: 0; z-index: 1; }
 .ov-row.changed { box-shadow: inset 3px 0 0 var(--accent), inset 0 -1px 0 var(--line); }
 .ov-head { position: sticky; top: 0; z-index: 3; height: 60px; background: var(--surface); font-size: 12px; font-weight: 500; color: var(--ink-soft); }
 .ov-head > * { align-self: center; }

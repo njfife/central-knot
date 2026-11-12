@@ -205,11 +205,14 @@ if (wanted('skills')) {
   await atEverySize('found', 'Clicked "Skills". Every skill is found: a tool has it and Central Knot doesn’t yet, so each switch sits halfway; review’s copies differ', true);
   await shot(a, 'found-hover', 'The pointer on notes’s halfway switch: its tooltip says a click takes it into Central Knot and puts it in every tool.', await middleOf('#switch-notes'));
   await openRow('notes');
-  await atEverySize('found-open', 'Opened notes while it is found: its status, what every tool shares of a skill (its whole folder), each tool’s line, and Files and contents', true, '.details');
+  await atEverySize('found-open', 'Opened notes while it is found: its status, what every tool it is on in gets of a skill (its whole folder), each tool’s line, and Files and contents', true, '.details');
   await closeRow('notes');
-  // Taken in: written to every tool, its whole folder.
+  // Taken in: written to every tool, its whole folder. Its Undo takes it out again: found once more, the tools it was found in keeping theirs.
   await a.click('#switch-notes'); await switchOn('notes');
-  await atEverySize('taken-in', 'Clicked notes’s switch: it is in Central Knot now, and on in all 3 tools; the strip at the top says so', false, '.bands');
+  await atEverySize('taken-in', 'Clicked notes’s switch: it is in Central Knot now, and on in all 3 tools; the strip at the top says so, with Undo', false, '.bands');
+  await a.click('#outcome-undo'); await a.settle();
+  await atEverySize('taken-in-undone', 'Clicked Undo in that strip: the copy Codex got is gone, Claude Code and Copilot CLI keep theirs, and notes is found again', false, '.bands');
+  await a.click('#switch-notes'); await switchOn('notes');
   // Off: out of every tool, kept in Central Knot.
   await a.click('#switch-notes'); await a.settle();
   await atEverySize('off', 'Turned notes off: its folder left every tool; its row stays under Off, "in Central Knot only"; the result offers Undo', true);
@@ -241,9 +244,9 @@ if (wanted('skills')) {
   writeFileSync(claudeSettings, JSON.stringify({ ...JSON.parse(settingsBefore), skillOverrides: { 'release-notes': 'off' } }, null, 2));
   await refresh();
   await openRow('release-notes');
-  await atEverySize('switched-off', 'Outside the app, Claude Code’s settings turned release-notes off, then Refresh: its folder stays; its mark in Claude Code is off, the row says "switched off in Claude Code", and Claude Code’s line offers Clear the switch', true, '.details');
+  await atEverySize('switched-off', 'Outside the app, Claude Code’s settings turned release-notes off, then Refresh: its folder stays; Claude Code is not counted as on (status line, a partial switch, its own mark); its line says "Switched off" and offers Let Claude Code load it', true, '.details');
   await a.click('#clear-switch-release-notes-claude-cli'); await a.settle();
-  await shot(a, 'switch-cleared', 'Clicked "Clear the switch": Claude Code loads it again, and the result says so.');
+  await atEverySize('switch-cleared', 'Clicked "Let Claude Code load it": Claude Code loads it again; the strip says so, with Undo (which sets that switch again)', false, '.bands');
   await closeRow('release-notes');
   // An edit made in a tool becomes the current version and reaches the others; its notice offers Undo.
   writeFileSync(join(folderIn('codex', 'standup'), 'SKILL.md'), `${readFileSync(join(folderIn('codex', 'standup'), 'SKILL.md'), 'utf8')}\nEdited in Codex.\n`);
@@ -260,10 +263,10 @@ if (wanted('skills')) {
   mkdirSync(folderIn('claude', 'plain-notes'), { recursive: true }); writeFileSync(join(folderIn('claude', 'plain-notes'), 'SKILL.md'), 'Notes with no frontmatter, which Copilot CLI and Codex won’t load.\n');
   await refresh();
   await openRow('has-link');
-  await atEverySize('cannot-copy', 'A skill in Claude Code with a link inside its folder: its row says its copy can’t be read for sure, its switch waits, and Claude Code’s line says why', true, '.details');
+  await atEverySize('cannot-copy', 'A skill in Claude Code with a link inside its folder: its row says it can’t be taken in yet, its switch looks unavailable, and Claude Code’s line says why and what to do (replace the link with the file, then Refresh)', true, '.details');
   await closeRow('has-link');
   await openRow('plain-notes');
-  await atEverySize('cannot-take', 'A skill with no frontmatter in Claude Code, found: Copilot CLI’s and Codex’s marks and lines say they can’t take it, and why', false, '.details');
+  await atEverySize('cannot-take', 'A skill with no frontmatter in Claude Code, found: the status says it goes nowhere else, Copilot CLI and Codex can’t take it; their marks (their own) and lines say why, in the same words', false, '.details');
   await closeRow('plain-notes');
   rmSync(folderIn('claude', 'has-link'), { recursive: true, force: true }); rmSync(folderIn('claude', 'plain-notes'), { recursive: true, force: true });
   await refresh();
@@ -273,11 +276,11 @@ if (wanted('skills')) {
   await refresh();
   await a.click('#switch-shared-notes'); await switchOn('shared-notes');
   await openRow('shared-notes');
-  await atEverySize('another-way', 'A skill in ~/.agents/skills, taken in: Claude Code has Central Knot’s copy; Copilot CLI and Codex read the shared copy, so nothing of Central Knot’s goes there, and each line offers Take over…', true, '.details');
+  await atEverySize('another-way', 'A skill in ~/.agents/skills, taken in: the strip says it is on in Claude Code and that Copilot CLI and Codex have it another way; their lines say "Another way" (no switch: nothing of Central Knot’s goes there) and offer Take over…', true, '.details');
   await a.click('#take-over-shared-notes-copilot-cli');
-  await atEverySize('take-over-armed', 'Clicked "Take over…" on Copilot CLI’s line: it asks once more, saying other apps that read that folder won’t find it there', false, '.details');
+  await atEverySize('take-over-armed', 'Clicked "Take over…" on Copilot CLI’s line: its armed line says which folder goes, which tools get Central Knot’s copy instead, that other apps won’t find it there, and that it has no Undo', false, '.details');
   await a.click('#take-over-confirm-shared-notes-copilot-cli'); await a.settle();
-  await atEverySize('taken-over', 'Clicked "Take over now": the shared copy is gone, and Copilot CLI and Codex have Central Knot’s copy', false, '.details');
+  await atEverySize('taken-over', 'Clicked "Take over now": the shared copy is gone, Copilot CLI and Codex have Central Knot’s copy; the strip says so and that it has no Undo', false, '.bands');
   await closeRow('shared-notes');
   // Delete from Central Knot, armed, then done.
   await openRow('shared-notes');
@@ -288,11 +291,11 @@ if (wanted('skills')) {
   // The Files view.
   await openRow('standup');
   await a.click('#files-standup'); await a.settle();
-  await atEverySize('files-view', 'Clicked "Files and contents" in standup’s details: the list of skills beside standup’s switch, its SKILL.md and where each copy is', true);
+  await atEverySize('files-view', 'Clicked "Files and contents" in standup’s details: the list of skills beside standup’s switch; stacked, its SKILL.md comes first, then each tool’s line and where each copy is ("← Skills" goes back)', true);
   await a.click('#skills-table');
   // History.
   await a.click('#nav-history'); await a.settle();
-  await atEverySize('history', 'Clicked "History": each skill’s entries in words, each with its own Undo, Turn on or Restore where one can still be done', true);
+  await atEverySize('history', 'Clicked "History": each skill’s entries in words, each with its own Undo, Turn on, Restore or Use … copy where one can still be done, all in the actions column', true);
   await a.click('#nav-skills');
   if (existsSync(claudeSettings)) writeFileSync(claudeSettings, settingsBefore);
 }
