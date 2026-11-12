@@ -345,7 +345,8 @@ export function sentences(words: RowWords) {
     // A tool's own switch that turns it off: said too, so an item switched off everywhere never reads as plainly on.
     const switched = tools.filter(tool => row.switched?.[tool] && !out.includes(tool as HarnessId));
     const off = !switched.length ? '' : switched.length === tools.length && switched.length > 1 ? `switched off in all ${switched.length} tools` : `switched off in ${andList(switched.map(toolName))}`;
-    const offTitle = switched.length ? `${sentence(andList(switched.map(tool => row.switched![tool]!)))}: each tool’s own switch, which Central Knot leaves as it is. The opened row can clear it.` : '';
+    const whose = sentence(andList(switched.map(tool => row.switched![tool]!)));
+    const offTitle = switched.length ? `${whose}: each tool’s own switch, which Central Knot leaves as it is. The opened row can clear it.` : '';
     const text = [where, off].filter(Boolean).join(' · ');
     return text ? { text, title: [whereTitle, offTitle].filter(Boolean).join(' ') } : undefined;
   }

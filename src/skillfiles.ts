@@ -20,7 +20,10 @@ import { access, constants, lstat, mkdir, readFile, readdir, readlink, realpath,
 import { dirname, join, relative, sep } from 'node:path';
 import { loadProblems, parseSkill } from './discovery.ts';
 import { configRoot, harnesses, writeRoot } from './harnesses.ts';
-import { changedWhileSyncing, clearStaleStages, copyTree, errorCode, finishCopy, itemKey, landingOf, notCopied, placeCopy, readTree, removeTree, storeDirectory, writeDurably, type ShareContext, type Tree } from './share.ts';
+import {
+  changedWhileSyncing, clearStaleStages, copyTree, errorCode, finishCopy, itemKey, landingOf, notCopied, placeCopy, readTree, removeTree, storeDirectory,
+  writeDurably, type ShareContext, type Tree,
+} from './share.ts';
 import type { HarnessId, Skill } from './types.ts';
 import { toolName } from './words.ts';
 
@@ -38,7 +41,10 @@ export const sharedFolder = (context: ShareContext) => join(context.home, '.agen
  */
 export async function rootProblem(context: ShareContext, tool: HarnessId): Promise<string | undefined> {
   const root = rootOf(context, tool), name = toolName(tool);
-  try { if ((await lstat(root)).isSymbolicLink()) return `${name}’s skills folder is a link${await readlink(root).then(target => ` to ${target}`, () => '')}, so Central Knot does not write through it.`; }
+  try {
+    const to = await readlink(root).then(target => ` to ${target}`, () => '');
+    if ((await lstat(root)).isSymbolicLink()) return `${name}’s skills folder is a link${to}, so Central Knot does not write through it.`;
+  }
   catch (error) { if (errorCode(error) !== 'ENOENT') return `${name}’s skills folder could not be checked.`; }
   // A folder not made yet still lands somewhere: through a linked parent, or where another tool's folder is.
   const real = await landingOf(root);

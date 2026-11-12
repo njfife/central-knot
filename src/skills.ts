@@ -40,7 +40,8 @@ const nameOf = (tool: HarnessId) => toolName(tool);
 const pathWords = (context: ShareContext, path: string) =>
   (path.startsWith(`${context.home}/`) ? `${context.mode === 'actual' ? '~' : '…'}${path.slice(context.home.length)}` : path);
 /** A skill's first line of body text, which the copy question quotes to tell copies apart. */
-const bodyLine = (content: string) => content.replace(/^﻿?---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/, '').split(/\r?\n/).map(line => line.trim()).find(line => line && !line.startsWith('#')) ?? '';
+const bodyLine = (content: string) => content.replace(/^﻿?---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/, '').split(/\r?\n/)
+  .map(line => line.trim()).find(line => line && !line.startsWith('#')) ?? '';
 
 // ---------- What the tools hold ----------
 
@@ -109,7 +110,9 @@ export async function readDisk(context: ShareContext, managed: HarnessId[]): Pro
     if (locked) disk.locked.set(tool, locked);
     for (const copy of read.copies) add(disk.byKey, copy.key, tool, copy);
     for (const link of read.links) {
-      add(disk.ways, link.key, tool, { why: `${nameOf(tool)} has it through a link in its skills folder (to ${pathWords(context, resolve(dirname(link.path), link.linkTo))}), which is not Central Knot’s copy.`, path: link.path, take: 'link', linkTo: link.linkTo });
+      const to = pathWords(context, resolve(dirname(link.path), link.linkTo));
+      const why = `${nameOf(tool)} has it through a link in its skills folder (to ${to}), which is not Central Knot’s copy.`;
+      add(disk.ways, link.key, tool, { why, path: link.path, take: 'link', linkTo: link.linkTo });
       if (link.copy) add(disk.outside, link.key, tool, link.copy);
     }
   }
@@ -161,7 +164,8 @@ function anotherWay(disk: SkillDisk, managed: HarnessId[], item: Wanted, tool: H
   const source = disk.readsFrom[tool];
   if (!source || !managed.includes(source) || depth) return undefined;
   const there = toolName(source);
-  if (wantedIn(item, source) && !disk.locked.has(source) && !disk.cannotTake(item, source) && !anotherWay(disk, managed, item, source, depth + 1)) return `${nameOf(tool)} reads ${there}’s copy, in ${there}’s skills folder.`;
+  const reallyThere = wantedIn(item, source) && !disk.locked.has(source) && !disk.cannotTake(item, source) && !anotherWay(disk, managed, item, source, depth + 1);
+  if (reallyThere) return `${nameOf(tool)} reads ${there}’s copy, in ${there}’s skills folder.`;
   const left = !!disk.byKey.get(item.key)?.[source] && item.applied[source] === undefined;
   if (!wantedIn(item, source) && (left || unseenIn(disk, source, item.key))) return `${nameOf(tool)} reads a copy in ${there}’s skills folder, which is not Central Knot’s.`;
   return undefined;
@@ -230,7 +234,8 @@ async function writeSkill(context: ShareContext, item: LibraryItem, tool: Harnes
     return undefined;
   } catch (error) {
     if (!errorCode(error)) throw error;
-    return { stopped: errorCode(error) === 'CK_CHANGED' ? `${nameOf(tool)}’s copy changed just now, so it stays until the next look.` : `Could not write ${nameOf(tool)}’s copy. ${plainError(error)}` };
+    const changed = errorCode(error) === 'CK_CHANGED';
+    return { stopped: changed ? `${nameOf(tool)}’s copy changed just now, so it stays until the next look.` : `Could not write ${nameOf(tool)}’s copy. ${plainError(error)}` };
   }
 }
 
@@ -325,13 +330,16 @@ export async function takeOver(context: ShareContext, tools: HarnessId[], key: s
   if (!item) return stop('Turn it on first: Central Knot takes over a copy only of a skill it has.');
   const way = look.disk.ways.get(key)?.[tool], copy = look.disk.outside.get(key)?.[tool];
   if (!way?.take || !copy) return stop(`${toolName(tool)} has no copy of ${item.name} for Central Knot to take over now. Nothing was changed.`);
-  const keep: Version | undefined = item.versions.some(version => version.hash === copy.hash) ? undefined : { hash: copy.hash, at: iso(copy.at), from: { how: 'was-in', harness: tool, replacedBy: item.hash } };
-  const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key, item: item.name, kind: 'took-over', losers: [{ tool, hash: copy.hash, path: way.path, ...(way.linkTo ? { linkTo: way.linkTo } : {}) }], orderProved: true };
+  const known = item.versions.some(version => version.hash === copy.hash);
+  const keep: Version | undefined = known ? undefined : { hash: copy.hash, at: iso(copy.at), from: { how: 'was-in', harness: tool, replacedBy: item.hash } };
+  const loser = { tool, hash: copy.hash, path: way.path, ...(way.linkTo ? { linkTo: way.linkTo } : {}) };
+  const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key, item: item.name, kind: 'took-over', losers: [loser], orderProved: true };
   await appendHistory(context, [event]);
   const result = await runTakeOver(context, item, keep, way);
   if (result) return stop(result);
   const done = await applySkills(context, tools, [], { only: new Set([key]) });
-  const said = way.take === 'link' ? `Replaced the link in ${toolName(tool)}’s skills folder with Central Knot’s copy.` : `Removed the copy at ${pathWords(context, way.path)}; other apps that read that folder won’t find it there.`;
+  const said = way.take === 'link' ? `Replaced the link in ${toolName(tool)}’s skills folder with Central Knot’s copy.`
+    : `Removed the copy at ${pathWords(context, way.path)}; other apps that read that folder won’t find it there.`;
   return { ...done, results: [{ item: item.name, harness: tool, outcome: 'written', message: `${said}${keep ? ' It is kept as a version.' : ''}` }, ...done.results], made: [event.id] };
 }
 
@@ -500,7 +508,8 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
 
 /** Where each tool keeps its skills, which other apps read that folder too, and why Central Knot doesn't write there, if it doesn't. */
 export async function skillFolders(context: ShareContext, tools: HarnessId[]): Promise<SyncView['writes']> {
-  return Object.fromEntries(await Promise.all(tools.map(async tool => [tool, { to: rootOf(context, tool), alsoReadBy: harnesses[tool].otherReaders, blocked: await rootProblem(context, tool) }] as const)));
+  const folderOf = async (tool: HarnessId) => ({ to: rootOf(context, tool), alsoReadBy: harnesses[tool].otherReaders, blocked: await rootProblem(context, tool) });
+  return Object.fromEntries(await Promise.all(tools.map(async tool => [tool, await folderOf(tool)] as const)));
 }
 
 /** An edit's SKILL.md before and after, for History's "See the change": both are versions of the skill. */

@@ -102,6 +102,23 @@ test('Two edits: the latest wins by the folder’s time, where a file removed in
   } finally { await box.cleanup(); }
 });
 
+test('A file edited inside a folder makes its time: the later edit wins although its folder’s own time is the earlier', async () => {
+  const box = await sandbox();
+  try {
+    await put(box, 'claude-cli');
+    await turnOn(box);
+    // Codex's folder was touched later; Claude Code's SKILL.md was saved later still.
+    await put(box, 'codex-cli', { 'SKILL.md': skillText('Codex’s edit.') });
+    await touch(folderOf(box, 'codex-cli'), at(10));
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Claude Code’s edit.') });
+    await utimes(join(folderOf(box, 'claude-cli'), 'SKILL.md'), at(20), at(20));
+    await utimes(folderOf(box, 'claude-cli'), at(1), at(1));
+    const done = await pass(box);
+    assert.deepEqual(done.notices?.map(notice => [notice.kind, notice.winner]), [['conflict', 'claude-cli']]);
+    for (const tool of tools) assert.equal(await readFile(join(folderOf(box, tool), 'SKILL.md'), 'utf8'), skillText('Claude Code’s edit.'), tool);
+  } finally { await box.cleanup(); }
+});
+
 test('A folder really deleted by hand in one tool turns the skill Off everywhere; Central Knot keeps it, and Turn on puts it back', async () => {
   const box = await sandbox();
   try {
@@ -245,6 +262,50 @@ test('A tool that reads Claude Code’s folder has the skill one way: from Claud
   } finally { await box.cleanup(); }
 });
 
+test('Kept out of Claude Code, which holds a copy of its own, OpenCode reads that copy: Central Knot’s copy in OpenCode goes, so it is loaded once', async () => {
+  const box = await sandbox(['claude-cli', 'opencode-cli']);
+  try {
+    await put(box, 'claude-cli');
+    await turnOn(box);
+    await inTool(box, 'claude-cli', true);
+    assert.ok(await bytes(folderOf(box, 'opencode-cli')), 'OpenCode got a copy of its own');
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Mine, in Claude Code.') });
+    await pass(box);
+    const { fact } = await seen(box);
+    assert.deepEqual([await bytes(folderOf(box, 'opencode-cli')), await readFile(join(folderOf(box, 'claude-cli'), 'SKILL.md'), 'utf8')], [undefined, skillText('Mine, in Claude Code.')]);
+    assert.match(fact!.anotherWay?.['opencode-cli'] ?? '', /^OpenCode reads a copy in Claude Code’s skills folder, which is not Central Knot’s\.$/);
+  } finally { await box.cleanup(); }
+});
+
+test('A tool whose skills folder is itself a link is never written through: its line says why, and a skill in it is one it has another way', async () => {
+  const box = await sandbox(['claude-cli', 'copilot-cli']);
+  try {
+    const shared = join(box.home, '.agents/skills');
+    await mkdir(shared, { recursive: true });
+    await rm(join(box.home, roots['copilot-cli']), { recursive: true });
+    await symlink('../.agents/skills', join(box.home, roots['copilot-cli']));
+    await put(box, 'claude-cli');
+    await turnOn(box);
+    assert.deepEqual(await readdir(shared), [], 'nothing is written into the folder the link leads to');
+    const { fact, item, row } = await seen(box);
+    assert.equal(harnessIs(row, item, 'copilot-cli'), 'cannot');
+    assert.match(fact!.cannot['copilot-cli'] ?? '', /skills folder is a link/);
+    await mkdir(join(shared, 'gamma'));
+    await writeFile(join(shared, 'gamma/SKILL.md'), skillText('In the shared folder.', 'gamma'));
+    assert.match((await seen(box, box.context, 'gamma')).fact!.anotherWay?.['copilot-cli'] ?? '', /reads it in .*skills folder is a link/);
+  } finally { await box.cleanup(); }
+});
+
+test('A name a tool keeps for itself (Claude Code’s “synced”) is never given to it: its line says why', async () => {
+  const box = await sandbox();
+  try {
+    await put(box, 'copilot-cli', { 'SKILL.md': skillText('Take notes.', 'synced') }, [], 'synced');
+    await turnOn(box, box.context, 'synced');
+    assert.equal(await bytes(folderOf(box, 'claude-cli', 'synced')), undefined);
+    assert.match((await seen(box, box.context, 'synced')).fact!.cannot['claude-cli'] ?? '', /Claude Code reserves the name “synced”/);
+  } finally { await box.cleanup(); }
+});
+
 test('A copy in ~/.agents/skills is not Central Knot’s: the tools that read it have the skill another way, an Off row says so, and Take over makes Central Knot’s copy theirs', async () => {
   const box = await sandbox();
   try {
@@ -363,7 +424,12 @@ test('Every version is kept while the skill is in Central Knot; a deleted skill�
     await remove(box);
     await pruneDeleted(box.context, Date.parse((await itemOf(box))!.deleted!.at) - 1);
     assert.equal((await readdir(store)).length, 4, 'within History’s days, its Restore still has them');
-    await pruneDeleted(box.context, Date.now() + 1);
+    // Its deletion older than History's days: the next History entry (another skill taken in) takes its versions.
+    const record = join(box.home, '.central-knot/skills.json'), saved = JSON.parse(await readFile(record, 'utf8'));
+    saved.items.notes.deleted.at = new Date(Date.now() - 31 * 86_400_000).toISOString();
+    await writeFile(record, JSON.stringify(saved, null, 2));
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Other.', 'other') }, [], 'other');
+    await turnOn(box, { ...box.context, historyDays: 30 }, 'other');
     assert.deepEqual(await readdir(store).catch(() => []), []);
     assert.ok((await itemOf(box))!.deleted, 'its tombstone stays');
   } finally { await box.cleanup(); }
@@ -465,8 +531,10 @@ test('A folder that can’t be written holds the write there, and the tool catch
 test('A tool that won’t load a skill of that shape can’t be given it, and its line says why', async () => {
   const box = await sandbox();
   try {
-    // No frontmatter: Copilot CLI and Codex won't load it; Claude Code does.
+    // No frontmatter: Copilot CLI and Codex won't load it; Claude Code does. Found, the row already marks them so.
     await put(box, 'claude-cli', { 'SKILL.md': 'Just text.\n' });
+    const found = await seen(box);
+    assert.deepEqual(tools.map(tool => harnessIs(found.row, found.item, tool)), ['own-copy', 'cannot', 'cannot']);
     await turnOn(box);
     assert.deepEqual([await bytes(folderOf(box, 'copilot-cli')), await bytes(folderOf(box, 'codex-cli'))], [undefined, undefined]);
     const { item, row, fact } = await seen(box);

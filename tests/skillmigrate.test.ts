@@ -50,6 +50,9 @@ async function oldHome() {
   for (const tool of ['claude-cli', 'copilot-cli'] as Tool[]) await put(box, tool, { 'SKILL.md': text('Synced.', 'leftout') }, [], 'leftout');
   await put(box, 'codex-cli', { 'SKILL.md': text('Codex’s own.', 'leftout') }, [], 'leftout');
   await synced('leftout', ['claude-cli', 'copilot-cli'], { off: ['codex-cli'] });
+  // Left out of Codex, which has no copy: nothing goes there.
+  for (const tool of ['claude-cli', 'copilot-cli'] as Tool[]) await put(box, tool, { 'SKILL.md': text('Synced.', 'leftbare') }, [], 'leftbare');
+  await synced('leftbare', ['claude-cli', 'copilot-cli'], { off: ['codex-cli'] });
   // Copies kept different on purpose; and copies never synced (no record at all); and one turned off since it synced.
   await put(box, 'claude-cli', { 'SKILL.md': text('One.', 'apart') }, [], 'apart');
   await put(box, 'codex-cli', { 'SKILL.md': text('Two.', 'apart') }, [], 'apart');
@@ -63,6 +66,8 @@ async function oldHome() {
   for (const tool of ['claude-cli', 'copilot-cli'] as Tool[]) await put(box, tool, { 'SKILL.md': text('Chosen once.', 'ownkept') }, [], 'ownkept');
   await put(box, 'codex-cli', { 'SKILL.md': text('Codex kept its own.', 'ownkept') }, [], 'ownkept');
   await synced('ownkept', ['claude-cli', 'copilot-cli'], { keptOwn: { 'codex-cli': await hashOf(box, 'codex-cli', 'ownkept') } });
+  // The Undo kept Codex's content in the store too, so it is a kept revision as well as Codex's own.
+  await keep('ownkept', folderOf(box, 'codex-cli', 'ownkept'));
   // A choice not carried out yet: Claude Code's copy chosen; Copilot CLI has it; Codex has another it would have replaced.
   for (const tool of ['claude-cli', 'copilot-cli'] as Tool[]) await put(box, tool, { 'SKILL.md': text('Chosen.', 'choosing') }, [], 'choosing');
   await put(box, 'codex-cli', { 'SKILL.md': text('Not chosen.', 'choosing') }, [], 'choosing');
@@ -139,6 +144,7 @@ test('Migration: every state lands where its table says, every folder byte for b
     const where = (key: string) => { const item = items[key]; return item && { on: item.on, deleted: !!item.deleted, except: [...item.except].sort(), applied: Object.keys(item.applied).sort() }; };
     assert.deepEqual(where('steady'), { on: true, deleted: false, except: [], applied: ['claude-cli', 'codex-cli', 'copilot-cli'] });
     assert.deepEqual(where('leftout'), { on: true, deleted: false, except: ['codex-cli'], applied: ['claude-cli', 'copilot-cli'] });
+    assert.deepEqual(where('leftbare'), { on: true, deleted: false, except: ['codex-cli'], applied: ['claude-cli', 'copilot-cli'] });
     assert.deepEqual([where('apart'), where('unrecorded'), where('stopped')], [undefined, undefined, undefined], 'not in the library: found');
     assert.deepEqual(where('ownkept'), { on: true, deleted: false, except: ['codex-cli'], applied: ['claude-cli', 'copilot-cli'] });
     assert.deepEqual(where('choosing'), { on: true, deleted: false, except: ['codex-cli'], applied: ['claude-cli', 'copilot-cli'] });

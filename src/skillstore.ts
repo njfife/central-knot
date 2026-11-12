@@ -55,7 +55,8 @@ async function inspect(home: string): Promise<Inspected> {
  * names only), then sync.json's copy (sync.v1.json), then skills.json, then sync.json without its skills. A crash after
  * skills.json is written is finished by the next opening (finishMigration).
  */
-export async function openLibrary(context: ShareContext, persist: boolean, read: (context: ShareContext, managed: HarnessId[]) => Promise<ToolsRead>): Promise<{ library: SkillLibrary; problem?: string }> {
+export async function openLibrary(context: ShareContext, persist: boolean, read: (context: ShareContext, managed: HarnessId[]) => Promise<ToolsRead>)
+  : Promise<{ library: SkillLibrary; problem?: string }> {
   const found = await inspect(context.home);
   if ('problem' in found) return { library: emptyLibrary(), problem: found.problem };
   const { record, problem } = await readRecord(context.home);
