@@ -162,9 +162,9 @@ test('A click’s result says what happened, and never claims a harness where it
   assert.equal(said.takenIn('reviewer', ['claude-cli', 'codex-cli'], tools, 'codex-cli'), 'reviewer is in Central Knot now, with Codex’s copy, and on in Claude Code and Codex. The other copies are kept as its versions.');
   assert.deepEqual([said.inHarness('reviewer', 'codex-cli', true, false), said.inHarness('reviewer', 'codex-cli', false, false), said.inHarness('reviewer', 'codex-cli', true, true)],
     ['reviewer is kept out of Codex. Central Knot keeps its file for when you turn it on there.', 'reviewer is on in Codex again.', 'reviewer couldn’t be taken out of Codex yet.']);
-  assert.match(said.madeCurrent('reviewer', item().versions[0], tools, tools), /^reviewer: the version found in Claude Code, .*, is current again, in all 3 tools\.$/);
+  assert.equal(said.madeCurrent('reviewer', item().versions[0], '9:20:05 AM', tools, tools), 'reviewer: the version found in Claude Code, 9:20:05 AM, is current again, in all 3 tools.');
   // Off: no tool gets it, and the result says so.
-  assert.match(said.madeCurrent('reviewer', item().versions[0], undefined, tools), /is current again\. It is Off, so no tool was changed\.$/);
+  assert.match(said.madeCurrent('reviewer', item().versions[0], '9:20:05 AM', undefined, tools), /is current again\. It is Off, so no tool was changed\.$/);
   assert.deepEqual([said.deleted('reviewer', true), said.deleted('reviewer', false)],
     ['reviewer is deleted from Central Knot, and out of every tool. History can restore it.', 'reviewer is deleted from Central Knot. History can restore it.']);
 });

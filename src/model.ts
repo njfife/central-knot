@@ -49,13 +49,17 @@ export const dayAndTime = (iso: string) => `${dayWords(iso)} at ${clockTime(iso)
  * 9:20 AM"); History, under day headings, says the time alone.
  */
 export function timesApart(isos: readonly string[], now = Date.now(), withDay = false): string[] {
-  const apart = (said: string[]) => new Set(said).size === said.length;
-  const days = isos.map(iso => new Date(iso).toDateString()), today = new Date(now).toDateString();
   const ago = isos.map(iso => {
     const minutes = Math.floor((now - Date.parse(iso)) / 60_000);
     return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ago`;
   });
-  if (days.every(day => day === today) && apart(ago)) return ago;
+  const today = new Date(now).toDateString();
+  return isos.every(iso => new Date(iso).toDateString() === today) && apart(ago) ? ago : clockTimesApart(isos, now, withDay);
+}
+const apart = (said: readonly string[]) => new Set(said).size === said.length;
+/** timesApart's clock form alone, for a time named in a sentence (History's, a result's), which "3 min ago" would leave behind. */
+export function clockTimesApart(isos: readonly string[], now = Date.now(), withDay = false): string[] {
+  const days = isos.map(iso => new Date(iso).toDateString()), today = new Date(now).toDateString();
   const clock = (seconds: boolean) => isos.map(iso => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', ...(seconds ? { second: '2-digit' } : {}) }));
   const minutes = clock(false);
   const times = apart(minutes.map((time, index) => `${days[index]} ${time}`)) ? minutes : clock(true);

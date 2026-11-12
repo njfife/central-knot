@@ -30,7 +30,7 @@
 // agentAction, the entry agents.ts logItem makes for it, and its case in historypage.ts describe.
 import type { IconName } from './icons.ts';
 import { sourceWords, type LibraryItem } from './library.ts';
-import { dayAndTime } from './model.ts';
+import { versionClock } from './agentrow.ts';
 import type { Change, HarnessId, HistoryEvent } from './types.ts';
 import { andList, toolName, toolsPhrase } from './words.ts';
 
@@ -38,12 +38,18 @@ import { andList, toolName, toolsPhrase } from './words.ts';
 export const isAgentEntry = (event: HistoryEvent) => event.key.startsWith('agent:') && !event.settingsFile;
 export const agentKeyOf = (event: HistoryEvent) => event.key.slice('agent:'.length);
 
+/** Restore over an agent of the same name made since: what becomes of it, for Restore's result and its tooltip. */
+export function keptOver(name: string, tools: readonly string[]): string {
+  const where = andList(tools.map(toolName));
+  return tools.length === 1 ? `Your newer ${name} from ${where} is kept as a version.` : `Your newer copies of ${name} in ${where} are kept as versions.`;
+}
+
 /**
  * What an agent's entry says happened, or undefined for a kind from before the library whose general sentence still holds
  * (historypage.ts describe). `homeTools`: the home's harnesses, so "all 3 tools" can be said. `item`: the agent now, to name
- * a version.
+ * a version. `undid`: the entry is another's Undo (that one's `undoneBy` names it), so it reads as one.
  */
-export function agentSentence(event: HistoryEvent, homeTools: string[], item?: LibraryItem): { glyph: IconName; text: string } | undefined {
+export function agentSentence(event: HistoryEvent, homeTools: string[], item?: LibraryItem, undid = false): { glyph: IconName; text: string } | undefined {
   const tools = toolsPhrase(event.losers.map(loser => loser.tool), homeTools);
   /** " and removed from Codex", or nothing when no harness was touched. */
   const also = (words: string) => (tools ? `${words} ${tools}` : '');
@@ -66,9 +72,9 @@ export function agentSentence(event: HistoryEvent, homeTools: string[], item?: L
       return { glyph: 'circle-off', text: `Turned off${also(': removed from')}. ${keeps}` };
     case 'current': {
       // The version as it was first kept says where the content came from; the entry that made it current again doesn't.
-      const made = item?.versions.findLast(version => version.hash === event.version);
-      const which = made ? `The version ${sourceWords(made.from)} (${dayAndTime(made.at)})` : 'An earlier version';
-      return { glyph: 'undo-2', text: `${which} was made current${also(', in')}.` };
+      const made = item?.versions.findLast(version => version.hash === event.version), when = made && item && versionClock(item, made);
+      if (undid) return { glyph: 'undo-2', text: `Undone: ${when ? `the version from ${when}` : 'the version before'} is current again${also(', in')}.` };
+      return { glyph: 'undo-2', text: `${made ? `The version ${sourceWords(made.from)} (${when})` : 'An earlier version'} was made current${also(', in')}.` };
     }
     case 'deleted': {
       // One with a `winner` is from before the library (a deletion sync spread from a tool): the general sentence says it.
@@ -76,9 +82,13 @@ export function agentSentence(event: HistoryEvent, homeTools: string[], item?: L
       const how = pulled ? 'Removed in the Git repo, so Pull deleted it' : 'Deleted';
       return { glyph: pulled ? 'git-branch' : 'trash-2', text: `${how} from Central Knot${also(' and removed from')}. History keeps it.` };
     }
-    case 'restored':
+    case 'restored': {
       // Likewise: an Undo or Restore from before the library names a tool or an earlier version.
-      return event.winner || event.previous ? undefined : { glyph: 'undo-2', text: `Restored to Central Knot${also(' and put back in')}.` };
+      if (event.winner || event.previous) return undefined;
+      // A tool that had a copy of its own by then (a newer agent of that name) had it kept as a version before the write.
+      const over = event.losers.filter(loser => loser.hash).map(loser => loser.tool);
+      return { glyph: 'undo-2', text: `Restored to Central Knot${also(' and put back in')}.${over.length ? ` ${keptOver(event.item, over)}` : ''}` };
+    }
     case 'edit':
       // Pull's own entry names no harness. With no version before it, only Claude Code's own settings came, for later.
       if (pulled && !event.previous) return { glyph: 'git-branch', text: 'Pulled from the Git repo: Claude Code’s own settings for it, which Claude Code gets when it has the agent.' };

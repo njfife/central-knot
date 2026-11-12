@@ -68,7 +68,10 @@ test('A content change offers Undo: the version from before it made current, unl
   // Once later changes came, an older entry's action says what it does: it doesn't roll back everything after it.
   assert.deepEqual(offered(edit, item({ hash: 'x' })), ['Go back before this', { ...asIs, version: 'a' }]);
   const current = entry({ kind: 'current', version: 'a', previous: 'b', losers: [{ tool: 'claude-cli', hash: 'b' }] });
-  assert.match(agentSentence(current, tools, item({ hash: 'a' }))!.text, /^The version found in Claude Code \(.*\) was made current, in Claude Code\.$/);
+  // Named as the versions list names it: this agent's versions share a minute, so to the second.
+  assert.match(agentSentence(current, tools, item({ hash: 'a' }))!.text, /^The version found in Claude Code \(.*\d:\d\d:\d\d.*\) was made current, in Claude Code\.$/);
+  // An entry that undid another (that one's undoneBy names it) reads as an Undo, so the two never read alike.
+  assert.match(agentSentence(current, tools, item({ hash: 'a' }), true)!.text, /^Undone: the version from .*\d:\d\d:\d\d.* is current again, in Claude Code\.$/);
   assert.deepEqual(offered(current, item({ hash: 'a' }))?.[1], { ...asIs, version: 'b' });
 });
 
@@ -93,6 +96,9 @@ test('A deletion offers Restore while the agent is deleted; every other entry of
   assert.equal(offered(entry({ kind: 'edit', previous: 'a' }), gone), undefined);
   assert.deepEqual(versionChoices(entry({ kind: 'chosen', losers: [{ tool: 'copilot-cli', hash: 'x' }] }), gone), []);
   assert.equal(agentSentence(entry({ kind: 'restored' }), tools)?.text, 'Restored to Central Knot.');
+  // Over newer copies of that name, which were kept as versions before the write.
+  const over = entry({ kind: 'restored', losers: [{ tool: 'claude-cli', hash: 'n' }, { tool: 'codex-cli', hash: 'm' }, { tool: 'copilot-cli', hash: '' }] });
+  assert.equal(agentSentence(over, tools)?.text, 'Restored to Central Knot and put back in all 3 tools. Your newer copies of reviewer in Claude Code and Codex are kept as versions.');
 });
 
 test('An entry whose action was used offers nothing, and its row says what became of it', () => {

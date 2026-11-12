@@ -6,7 +6,7 @@ import { andList, toolName } from './words.ts';
 import { tookOverHistory } from './outsidewords.ts';
 import { changedProfile, flipSummary, NO_PROFILE, redoneSwitch } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
-import { agentAction, agentKeyOf, agentSentence, doneWords, isAgentEntry, versionChoices } from './historyactions.ts';
+import { agentAction, agentKeyOf, agentSentence, doneWords, isAgentEntry, keptOver, versionChoices } from './historyactions.ts';
 import { button, emptyState, h, icon, rereadBand } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HistoryEvent } from './types.ts';
@@ -15,10 +15,12 @@ const who = (tool?: string) => (tool ? toolName(tool) : 'Central Knot');
 
 /** The agent an entry is about, as Central Knot's library holds it now (deleted or not). */
 const agentOf = (event: HistoryEvent) => state.home?.agents.library?.[agentKeyOf(event)];
+/** Whether the entry is another's Undo: that one's `undoneBy` names it. */
+const undid = (event: HistoryEvent) => !!state.history.data?.some(other => other.undoneBy === event.id);
 
 function describe(event: HistoryEvent): { glyph: IconName; text: string; action?: string } {
   // An agent's entry says it in the library's words (historyactions.ts); an older kind keeps the general sentence below.
-  const agent = isAgentEntry(event) ? agentSentence(event, state.home?.agents.tools ?? [], agentOf(event)) : undefined;
+  const agent = isAgentEntry(event) ? agentSentence(event, state.home?.agents.tools ?? [], agentOf(event), undid(event)) : undefined;
   if (agent) return agent;
   const order = event.orderProved ? '' : ' Order not proved; the fixed tool order decided.';
   // A Pull's edit or deletion of the base instructions: said as the pull, undone or not.
@@ -49,7 +51,7 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
     }
     case 'profile': return profileSwitch(event);
     // An agent's own kinds: agentSentence says every one of them, so they are answered before this switch.
-    case 'on': case 'off': case 'current': return agentSentence(event, state.home?.agents.tools ?? [], agentOf(event))!;
+    case 'on': case 'off': case 'current': return agentSentence(event, state.home?.agents.tools ?? [], agentOf(event), undid(event))!;
     case 'removed': return { glyph: 'circle-minus', text: `Removed from ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}; Central Knot kept the ${event.losers.length === 1 ? 'copy' : 'copies'}.`, action: 'Restore' };
     case 'took-over': return { glyph: 'arrow-down-to-line', text: tookOverText(event, !!event.undoneBy), action: 'Undo' };
     case 'written': return { glyph: 'pencil-line', text: 'Write to Claude Code replaced Claude Code’s own entry with the synced one; Central Knot kept it.', action: 'Undo write' };
@@ -150,7 +152,7 @@ const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'pro
   : action === 'Redo edit' || action === 'Delete again' ? 'Undo the undo: put back the version that was replaced'
     : `Put ${event.item} back as it was before this change, in every tool it syncs to (including where it was edited)`);
 
-/** An agent entry's buttons (historyactions.ts): its own action, and one "Use <harness>’s" for each copy that gave way. */
+/** An agent entry's buttons (historyactions.ts): its own action, and one "Use <harness>’s copy" for each copy that gave way. */
 function agentButtons(event: HistoryEvent) {
   const item = agentOf(event), own = agentAction(event, item);
   const link = (label: string, help: string, id: string, version?: string) => {
@@ -158,8 +160,12 @@ function agentButtons(event: HistoryEvent) {
     control.title = help;
     return control;
   };
-  return [own ? link(own.label, own.help, `history-${event.id}`) : null,
-    ...versionChoices(event, item).map(choice => link(`Use ${who(choice.tool)}’s`, `Make ${who(choice.tool)}’s version of ${event.item} the current one`, `history-${event.id}-${choice.tool}`, choice.hash))];
+  // Restore over an agent of that name made since (a found copy that isn't the restored version): it is kept as a version.
+  const found = own?.label === 'Restore' ? state.home?.agents.servers.find(row => row.key === agentKeyOf(event)) : undefined;
+  const over = Object.entries(found?.copies ?? {}).filter(([, copy]) => copy && copy.hash !== item?.hash).map(([tool]) => tool);
+  const help = own && over.length ? `${own.help}. ${keptOver(event.item, over)}` : own?.help;
+  return [own ? link(own.label, help!, `history-${event.id}`) : null,
+    ...versionChoices(event, item).map(choice => link(`Use ${who(choice.tool)}’s copy`, `Make ${who(choice.tool)}’s version of ${event.item} the current one`, `history-${event.id}-${choice.tool}`, choice.hash))];
 }
 
 /** Undo or Restore; with several overwritten edits, one button per edit, so each can be put back. */

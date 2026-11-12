@@ -56,7 +56,7 @@ async function readDisk(context: ShareContext, managed: AgentTool[]): Promise<Di
     const read = await readAgents(context, tool), folder = agentsFolder(context, tool);
     disk.problems.push(...read.problems);
     const locked = `${nameOf(tool)}’s agents folder can’t be written, so Central Knot can’t change the agent there. `
-      + `Let it write there (the folder’s permissions) and it does at the next look, or keep the agent out of ${nameOf(tool)}.`;
+      + `Once the folder’s permissions let it, ${nameOf(tool)} catches up when sync runs.`;
     if (await exists(folder) && await access(folder, constants.W_OK).then(() => false, () => true)) disk.locked.set(tool, locked);
     for (const key of read.unreadable.keys()) {
       const what = key === '*' ? 'agents folder' : 'file for this agent';
@@ -389,7 +389,9 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Slot): History
   // The item as it is before the plan is carried out: the edit taken in is current only after this is told.
   const taken = made.takeIn ? slot[made.takeIn as AgentTool]!.hash : item.hash;
   const key = `agent:${item.key}`, events: HistoryEvent[] = [];
-  const did = { written: made.write, removed: made.remove };
+  // What the plan will change: not in a harness whose folder can't be written, so no entry or notice claims it.
+  const can = (tools: HarnessId[]) => tools.filter(tool => !pass.disk.locked.has(tool));
+  const did = { written: can(made.write), removed: can(made.remove) };
   const log = (fields: Omit<HistoryEvent, 'id' | 'at' | 'key' | 'item' | 'orderProved'>) => {
     const event: HistoryEvent = { id: randomUUID(), at: now(), key, item: item.name, orderProved: true, ...fields };
     events.push(event);

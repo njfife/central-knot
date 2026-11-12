@@ -10,7 +10,7 @@
 // reading a pass makes (copiesOf), so a mark says what the next pass will do there and never something of its own.
 import type { VersionChange } from './agentfiles.ts';
 import { sourceWords, wantedIn, type LibraryItem, type Plan, type Version } from './library.ts';
-import { dayAndTime } from './model.ts';
+import { clockTimesApart, dayAndTime } from './model.ts';
 import type { Change, HarnessId, SyncNotice } from './types.ts';
 import { andList, sentence, toolName, toolsPhrase } from './words.ts';
 
@@ -132,6 +132,14 @@ export function versionChangeHelp(changed: VersionChange | undefined): string | 
 
 /** When a version was made, said short: its time today, else its day and time. */
 export const madeAt = (version: Version) => dayAndTime(version.at).replace(/^today at /, '');
+/**
+ * A version as a sentence names it (History, a Make current's result): its clock time, to the second where two of the
+ * agent's versions would read the same minute, as the versions list says them (model.ts clockTimesApart).
+ */
+export function versionClock(item: Pick<LibraryItem, 'versions'>, version: Version, now = Date.now()): string {
+  const at = item.versions.indexOf(version), all = at < 0 ? [...item.versions, version] : item.versions;
+  return clockTimesApart(all.map(entry => entry.at), now, true)[at < 0 ? all.length - 1 : at];
+}
 
 /** The version a "made current again" one was made from: the earlier entry with its content that came from somewhere else. */
 export function madeFrom(item: Pick<LibraryItem, 'versions'>, version: Version): Version | undefined {
@@ -241,10 +249,10 @@ export const said = {
     if (!out) return failed ? `${name} couldn’t be put in ${where}.` : `${name} is on in ${where} again.`;
     return failed ? `${name} couldn’t be taken out of ${where} yet.` : `${name} is kept out of ${where}. Central Knot keeps its file for when you turn it on there.`;
   },
-  /** `on`: the harnesses it was written to; undefined for an agent that is Off, which no harness gets. */
-  madeCurrent(name: string, version: Version, on: readonly string[] | undefined, tools: readonly string[]): string {
+  /** `when`: the version's time (versionClock). `on`: the harnesses it was written to; undefined for an agent that is Off. */
+  madeCurrent(name: string, version: Version, when: string, on: readonly string[] | undefined, tools: readonly string[]): string {
     const where = on ? `, in ${named(on, tools)}.` : '. It is Off, so no tool was changed.';
-    return `${name}: the version ${sourceWords(version.from)}, ${dayAndTime(version.at)}, is current again${where}`;
+    return `${name}: the version ${sourceWords(version.from)}, ${when}, is current again${where}`;
   },
   deleted: (name: string, wasOn: boolean) => `${name} is deleted from Central Knot${wasOn ? ', and out of every tool' : ''}. History can restore it.`,
   /** Beside Delete from Central Knot, before it is armed: how it differs from Off. */

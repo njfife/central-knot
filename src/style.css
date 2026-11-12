@@ -952,6 +952,9 @@ span.ins-confirm { margin-top: 0; }
   .history-row { grid-template-columns: minmax(80px, max-content) minmax(0, 1fr) auto; column-gap: 16px; row-gap: 2px; }
   .history-about { grid-column: 2 / -1; grid-row: 2; margin-left: 22px; }
   .history-row > .change-panel { margin-top: 10px; }
+  /* The name takes the line it is on, and an agent entry's links sit side by side above the sentence. */
+  .history-row .history-what > strong { max-width: none; }
+  .history-row .history-actions-stacked { flex-direction: row; }
 }
 .history-row > .history-when { padding-top: 2px; }
 .history-when { font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }

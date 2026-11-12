@@ -10,7 +10,8 @@ import { join } from 'node:path';
 import { agentText, readAgents } from '../src/agentfiles.ts';
 import { agentVersion, agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
 import { convertAgentToSkill } from '../src/agentskill.ts';
-import { agentClicks, harnessIs, harnessLine, placeOf } from '../src/agentrow.ts';
+import { agentClicks, harnessIs, harnessLine, noticeWords, placeOf } from '../src/agentrow.ts';
+import { agentSentence } from '../src/historyactions.ts';
 import { listed, sourceWords } from '../src/library.ts';
 import { readHistory } from '../src/manage.ts';
 import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
@@ -416,10 +417,15 @@ inBox('A tool whose agents folder can’t be written says why on its line, pass 
   await chmod(folder, 0o555);
   try {
     await edit(box, 'claude-cli', 'Be exact.');
-    for (let count = 0; count < 2; count++) await pass(box);
+    // The edit's notice and History name only the tool it reached.
+    const told = (await pass(box)).notices![0];
+    assert.equal(noticeWords(told).text, 'reviewer was edited in Claude Code; that is its current version now, in Codex too.');
+    assert.deepEqual((await historyOf(box)).at(-1)!.losers.map(loser => loser.tool), ['codex-cli']);
+    await pass(box);
     const { row, item } = await seen(box);
     assert.equal(harnessIs(row, item, 'copilot-cli'), 'cannot');
-    assert.match(harnessLine(row, item, 'copilot-cli', 'Copilot CLI'), /^Copilot CLI’s agents folder can’t be written.* or keep the agent out of Copilot CLI\.$/);
+    assert.equal(harnessLine(row, item, 'copilot-cli', 'Copilot CLI'),
+      'Copilot CLI’s agents folder can’t be written, so Central Knot can’t change the agent there. Once the folder’s permissions let it, Copilot CLI catches up when sync runs.');
   } finally { await chmod(folder, 0o755); }
   assert.equal((await pass(box)).writes, 1);
   assert.match((await readOf(box, 'copilot-cli'))!, /Be exact\./);
@@ -548,6 +554,13 @@ inBox('Delete removes the agent from every harness and leaves a tombstone: a sta
   await actions[0].run();
   assert.deepEqual(await filesOf(box), before, 'every file as it was');
   assert.deepEqual((await historyActions(box)).map(action => action.label), ['Turn off']);
+  // Restore over a newer agent of that name, made in Claude Code since: it is kept as a version, and the result says so.
+  await deleteIt(box);
+  await write(box, 'claude-cli', claudeAgent('You review code.\nA new reviewer.\n'));
+  await (await historyActions(box)).find(action => action.label === 'Restore')!.run();
+  assert.equal(agentSentence((await historyOf(box)).at(-1)!, tools)?.text,
+    'Restored to Central Knot and put back in all 3 tools. Your newer reviewer from Claude Code is kept as a version.');
+  assert.ok((await versions(box)).includes('A new reviewer. (was in Claude Code)'));
 });
 
 inBox('A found copy taken in over a deleted agent of that name is the same agent again: its earlier versions come back with it', async box => {

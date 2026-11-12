@@ -14,7 +14,7 @@ import { getsCopy as getsCopyNext, offPlan, stillOn } from './clickplan.ts';
 import type { IconName } from './icons.ts';
 import { byKey, loadedIn, standing } from './roworder.ts';
 import { cellOf, comparedTools, needsCopyChoice, type ItemRow, type Tool } from './itemrow.ts';
-import { agentClicks, harnessIs, harnessLine as agentLine, inLibrary, madeFrom, needsChoice as agentNeedsChoice } from './agentrow.ts';
+import { agentClicks, harnessIs, harnessLine as agentLine, inLibrary, madeFrom, needsChoice as agentNeedsChoice, versionClock } from './agentrow.ts';
 import { noticeWords, placeOf as agentPlace, placeTag, said as agentSaid, statusLine, switchLabel, type HarnessIs } from './agentrow.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
@@ -1900,7 +1900,8 @@ function agentVersions(skill: ItemRow) {
   const on = (notIn: HarnessId[]) => (item.on ? canHave(skill).filter(tool => !notIn.includes(tool as HarnessId) && !skill.off.includes(tool)) : undefined);
   const makeCurrent = (version: Version) => click({ kind, items: [name], changes: [agentClicks.makeCurrent(skill, item, version.hash)],
     // A version that was itself made current again is named by the one it came from.
-    said: notIn => agentSaid.madeCurrent(name, (version.from.how === 'made-current' && madeFrom(item, version)) || version, on(notIn), toolList()) });
+    said: notIn => { const source = (version.from.how === 'made-current' && madeFrom(item, version)) || version;
+      return agentSaid.madeCurrent(name, source, versionClock(item, source), on(notIn), toolList()); } });
   const reading = at === undefined || !listed(item)[at] ? undefined : { index: at, text: textOf(listed(item)[at].hash), current: textOf(item.hash) };
   return versionList({ item, canWrite: canWrite(), unfolded: view.versionsUnfolded === item.key, onUnfold: () => { view.versionsUnfolded = item.key; rerender(); },
     changes: skill.versionChanges, reading, now: Date.now(), onRead: read, onMakeCurrent: makeCurrent });

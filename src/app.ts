@@ -799,7 +799,7 @@ function sayAgentAction(past: HistoryEvent, result: ApplyResult) {
   const library = state.home?.agents.library, tools = state.home?.agents.tools ?? [];
   const made = state.history.data?.find(event => event.id === past.undoneBy);
   const item = library?.[agentKeyOf(past)];
-  const said = made && agentSentence(made, tools, item)?.text;
+  const said = made && agentSentence(made, tools, item, true)?.text;
   const back = made && agentAction(made, item);
   const notDone = result.results.filter(keptBack).map(entry => entry.message);
   const text = [`${past.item}: ${said ? said.replace(/^./, first => first.toLowerCase()) : 'done.'}`, ...notDone].join(' ');
