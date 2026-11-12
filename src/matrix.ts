@@ -5,6 +5,7 @@ import { itemId } from './profileplan.ts';
 import { brandMark } from './brand.ts';
 import { caughtUpNames, DAY_MS, dayAndTime, groupBy } from './model.ts';
 import { deletedText, deleteNote, linkTarget, managedSentence, manageSentence, pinnedSentence, readsOutside, replaceSentence, rowWords, whereSentence, type Shape } from './outsidewords.ts';
+import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
 import { REPLACE_ACTION, andList, byToolOrder, capitalToolsPhrase, kindNouns, orList, problemText, toolName, toolNames, toolsPhrase } from './words.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { whyReadOnly, otherOwnerSaid, saidInStatusBar, takeOverSync, takeOverTitle, tell, type Click, type Outcome, type Kind, harnessKindShown, convertAgent, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, deleteEverywhereKey, rerender, retireTip, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
@@ -703,9 +704,10 @@ function movedUndoText(label: string, items: string[]): (string | HTMLElement)[]
  */
 function markedWords(from: string, to: string, keep: 'removed' | 'added'): Child[] {
   const parts = lineDiff(from.split(/(\s+)/).join('\n'), to.split(/(\s+)/).join('\n')).filter(part => part.kind === 'same' || part.kind === keep);
-  // Words marked together are one mark, its spaces at either end left outside it.
-  const runs = parts.reduce<{ marked: boolean; text: string }[]>((all, part) => {
-    const marked = part.kind === keep, last = all.at(-1);
+  // Neighbouring marked words are one mark, the spaces between them inside it and those at either end left outside.
+  const runs = parts.reduce<{ marked: boolean; text: string }[]>((all, part, index) => {
+    const between = !part.text.trim() && parts[index - 1]?.kind === keep && parts[index + 1]?.kind === keep;
+    const marked = part.kind === keep || between, last = all.at(-1);
     if (last?.marked === marked) last.text += part.text; else all.push({ marked, text: part.text });
     return all;
   }, []);
@@ -713,72 +715,119 @@ function markedWords(from: string, to: string, keep: 'removed' | 'added'): Child
 }
 
 /**
- * What one copy says that another doesn't, to tell copies apart: an agent's prompt lines found in this copy only, the words
- * only it has marked against the others' line most like it (or, with none, a line the others have that it lacks); otherwise
- * its description or summary, where that differs.
+ * The stretch of a marked line that starts at character `start` and is `length` long, each mark kept as it is around what is
+ * left of its words. `parts` are markedWords' strings and marks: their text, joined, is the line character for character,
+ * which is what the offsets rest on.
  */
-function ownWords(skill: ItemRow, tool: Tool, others: Tool[]): Child[] | undefined {
-  const versions = skill.versions ?? {};
-  const prompt = versions[tool]?.prompt;
-  if (prompt !== undefined) {
-    const lines = (text?: string) => (text ?? '').split('\n').map(line => line.trim()).filter(Boolean);
-    const theirs = others.map(other => new Set(lines(versions[other]?.prompt)));
-    const added = lines(prompt).filter(line => theirs.some(set => !set.has(line)));
-    if (added.length) {
-      // The other copies' line most like it (the most runs of words left unmarked) shows which of its words only it has.
-      const unmarkedRuns = (line: string) => markedWords(line, added[0], 'added').filter(part => typeof part === 'string' && part.trim()).length;
-      let nearest: string | undefined, best = 0;
-      for (const line of others.flatMap(other => lines(versions[other]?.prompt))) {
-        const runs = unmarkedRuns(line);
-        if (runs > best) { nearest = line; best = runs; }
-      }
-      const more = added.length > 1 ? ` and ${added.length - 1} more ${added.length === 2 ? 'line' : 'lines'}` : '';
-      return ['“', ...(nearest === undefined ? [added[0]] : markedWords(nearest, added[0], 'added')), `”${more}`];
-    }
-    const missing = others.flatMap(other => lines(versions[other]?.prompt)).find(line => !lines(prompt).includes(line));
-    if (missing) return [`Without “${missing}”`];
-  }
-  const text = versions[tool]?.text;
-  return text && others.some(other => versions[other]?.text !== text) ? [`“${text}”`] : undefined;
+function cutMarked(parts: Child[], start: number, length: number): Child[] {
+  let at = 0;
+  return parts.flatMap((part): Child[] => {
+    const text = part instanceof Node ? part.textContent ?? '' : String(part);
+    const kept = text.slice(Math.max(0, start - at), Math.max(0, start + length - at));
+    at += text.length;
+    if (!kept || !(part instanceof Node)) return kept ? [kept] : [];
+    const mark = part.cloneNode(false);
+    mark.textContent = kept;
+    return [mark];
+  });
 }
 
-/** The decision for differing copies: each choice says what it does, and does it at once. Copies that are the same are one choice. */
+/**
+ * An MCP entry as a row of the copy question shows it: its kind in words ("Command", "HTTP"), then its command or address set
+ * as one: whole, monospace, a line breaking only at a space or after a "/" (style.css .wrap-part), never inside "--flag". The
+ * words only this entry has are marked against the other entry most like it.
+ */
+function entryWords(summary: string, others: string[]): Child[] {
+  const split = (entry: string) => { const [label, ...rest] = entry.split(' · '); return { label, value: rest.join(' · ') }; };
+  const { label, value } = split(summary);
+  const nearest = nearestLine(value, others.map(other => split(other).value));
+  // Each word is one unit, and so is each folder of a path with the "/" that ends it (a path's first "/" and an address's
+  // "//" stay with what follows): a line breaks only between units. A run of marked words keeps one mark around its units.
+  const units = (words: string) => words.split(/(\s+)/).filter(Boolean).flatMap((word): Child[] => (word.trim() ? word.split(/(?<=[^/:]\/)(?=[^/])/).map(part => h('span.wrap-part', {}, part)) : [' ']));
+  const parts = nearest === undefined ? [value] : markedWords(nearest, value, 'added');
+  return [h('span.version-entry-kind', {}, `${label} · `), h('code.version-command', {}, ...parts.flatMap(part => (part instanceof Node ? [h('span.change-added', {}, ...units(part.textContent ?? ''))] : units(String(part)))))];
+}
+
+/**
+ * What a row of the copy question quotes from one copy, to tell it from the others. How much of it is copywords.ts shortQuote's
+ * to decide; cutMarked only carries an agent line's marks across that cut.
+ *  - an MCP server: its command or address (entryWords);
+ *  - an agent: the first prompt line only this copy has, the words only it has marked against the others' line most like it
+ *    (or, with no such line, a line the others have that it lacks); with the same prompt, its description;
+ *  - a skill: the first line of its body.
+ */
+function copyQuote(skill: ItemRow, tool: Tool, others: Tool[]): Child[] | undefined {
+  const versions = skill.versions ?? {};
+  const text = versions[tool]?.text;
+  // A command or address is quoted whole: its row is the only place the question shows it.
+  if (kind === 'mcp') return text ? entryWords(text, others.map(other => versions[other]?.text ?? '')) : undefined;
+  const inMarks = (said: string) => { const { lead, words, tail } = shortQuote(kind, said); return `“${lead}${words}${tail}”`; };
+  const prompt = versions[tool]?.prompt;
+  if (prompt !== undefined) {
+    const lines = (from?: string) => (from ?? '').split('\n').map(line => line.trim()).filter(Boolean);
+    const theirs = others.map(other => lines(versions[other]?.prompt));
+    const [line, ...further] = lines(prompt).filter(mine => theirs.some(other => !other.includes(mine)));
+    if (line !== undefined) {
+      const nearest = nearestLine(line, theirs.flat());
+      const marked = nearest === undefined ? [line] : markedWords(nearest, line, 'added');
+      // Where this line parts from the one most like it, so a line too long to quote whole is quoted there: at the words only
+      // this copy has or, having none, where that line's own words would go. Both rows then quote the same stretch of text.
+      const partsAt = (parts: Child[]) => { const at = parts.findIndex(part => part instanceof Node); return at < 0 ? undefined : parts.slice(0, at).join('').length; };
+      const differsAt = partsAt(marked) ?? (nearest === undefined ? undefined : partsAt(markedWords(line, nearest, 'added')));
+      const { lead, words, tail, start } = shortQuote(kind, line, differsAt);
+      return [`“${lead}`, ...cutMarked(marked, start, words.length), `${tail}”${further.length ? ` and ${further.length} more ${further.length === 1 ? 'line' : 'lines'}` : ''}`];
+    }
+    const missing = theirs.flat().find(other => !lines(prompt).includes(other));
+    if (missing) return [`Without ${inMarks(missing)}`];
+  }
+  return text ? [inMarks(text)] : undefined;
+}
+
+/**
+ * The copy question, for an item whose copies differ: the question ("Which copy of <name> should every tool use?", or "both
+ * tools") and its note, then one row per choice, each saying what it does, and doing it at once. Copies that are the same are
+ * one choice. Its layout at each width is style.css "The copy question"; its words' rules are copywords.ts.
+ */
 function compareChoices(skill: ItemRow, inFiles = false) {
   const versions = skill.versions ?? {};
   const compared = toolList().filter(tool => comparedTools(skill).includes(tool));
   const groups = [...groupBy(compared, tool => skill.hashes?.[tool] ?? tool).values()];
   // A choice turns it on everywhere: every tool that can hold it and has no copy gets the chosen one.
   const receiving = toolList().filter(tool => !skill.cannot?.[tool] && skill.copies[tool] === undefined && !skill.waits?.includes(tool));
-  // Line counts and edit times are shown only where they tell the copies apart; the copy edited last is marked.
-  const metaDiffers = new Set(groups.map(([tool]) => `${versions[tool]?.lines}|${versions[tool]?.changed}`)).size > 1;
   // A group's content was made when its earliest copy was: a copy sync wrote is newer than the edit it carries. Marked only when
   // every copy's time is known and one group's is the latest. A copy an Undo of a choice puts back has its earlier time again.
   // Left so: a copy sync wrote into a tool that was behind, alone in its group, carries the time of that write, not of the edit
-  // it holds; "edited most recently" gets its full meaning with first setup (one-switch step 7).
+  // it holds; "most recent" gets its full meaning with first setup (one-switch step 7).
   const editedAt = groups.map(group => Math.min(...group.map(tool => Date.parse(versions[tool]?.at ?? ''))));
   const last = Math.max(...editedAt);
   const latest = groups.length > 1 && kind !== 'mcp' && editedAt.every(Number.isFinite) && editedAt.filter(at => at === last).length === 1 ? groups[editedAt.indexOf(last)] : undefined;
-  const effect = (group: Tool[]) => {
-    const replaced = compared.filter(entry => !group.includes(entry)).map(entry => names[entry]);
-    const parts = [replaced.length ? `replaces ${andList(replaced.map(name => `${name}’s copy`))}` : '', receiving.length ? `adds it to ${andList(receiving.map(entry => names[entry]))}` : ''].filter(Boolean);
-    return `${parts.join('; ').replace(/^./, first => first.toUpperCase())}.`;
+  // The line under each name, in one form: the copy's size and when it was edited ("7 lines · edited 2 days ago"), or an MCP
+  // entry's file. It shows on every row or on none: only where it tells the copies apart. The copy edited most recently has the
+  // line's one emphasis.
+  const facts = groups.map(([tool], index) => (versions[tool] ? `${versions[tool]!.lines} · ${Number.isFinite(editedAt[index]) ? `edited ${sinceThen(editedAt[index])}` : versions[tool]!.changed}` : ''));
+  const factsDiffer = !!latest || new Set(facts).size > 1;
+  const about = (group: Tool[]) => {
+    const said = facts[groups.indexOf(group)];
+    if (!factsDiffer || !said) return null;
+    return group === latest ? h('span.version-meta.version-latest', {}, icon('pencil-line', 12), `${said} · most recent`) : h('span.version-meta', {}, said);
   };
   const choice = (group: Tool[]) => {
     const [tool] = group;
-    const version = versions[tool];
-    const whose = `${andList(group.map(entry => names[entry]))}’s copy${group.length > 1 ? ' (the same)' : ''}`;
+    const tools = andList(group.map(entry => names[entry]));
+    // A row's columns: whose copy (and what tells it apart), what it says (and what choosing it does), then Use this copy.
+    const who = h('span.version-who', {}, h('span.version-head', {}, ...group.map(entry => brandMark(entry, 14)), h('strong', {}, group.length > 1 ? `${tools} (same copy)` : `${tools}’s copy`)), about(group));
     // A block counts only for a tool it syncs to that can load the skill.
     const block = skill.blocks?.[tool]?.find(entry => !skill.off.includes(entry.tool) && !skill.cannot?.[entry.tool]);
+    // A copy that can't be chosen keeps its row: why, where its quote would be, and no Use this copy.
     if (block) return h('button.version.version-blocked', { type: 'button', id: `use-${skill.key}-${tool}`, disabled: true, title: block.reason },
-      h('span.version-head', {}, brandMark(tool, 14), h('strong', {}, `Use ${whose}`)),
-      h('span.version-effect.version-why', {}, icon('circle-alert', 12, 'tone-warning'), block.reason));
-    const said = ownWords(skill, tool, compared.filter(entry => !group.includes(entry))) ?? (version ? [`“${version.text}”`] : undefined);
-    return h('button.version', { type: 'button', id: `use-${skill.key}-${tool}`, 'aria-label': `Use ${whose}`, disabled: !canWrite(), onclick: () => turnOn(skill, tool) },
-      h('span.version-head', {}, ...group.map(entry => brandMark(entry, 14)), h('strong', {}, whose)),
-      version && metaDiffers ? h('span.version-meta', {}, `${version.lines} · ${version.changed}`) : null,
-      group === latest ? h('span.version-meta.version-latest', {}, icon('pencil-line', 12), `Edited most recently, ${sinceThen(last)}`) : null,
-      said ? h('span.version-text', {}, ...said) : null,
-      h('span.version-effect', {}, effect(group)),
+      who, h('span.version-says', {}, h('span.version-effect.version-why', {}, icon('circle-alert', 12, 'tone-warning'), cantUse(block.reason))));
+    const others = compared.filter(entry => !group.includes(entry));
+    const said = copyQuote(skill, tool, others);
+    return h('button.version', { type: 'button', id: `use-${skill.key}-${tool}`, 'aria-label': `Use ${tools}’s copy`, disabled: !canWrite(), onclick: () => turnOn(skill, tool) },
+      who,
+      h('span.version-says', {},
+        said ? h('span.version-text', {}, ...said) : null,
+        h('span.version-effect', {}, choiceEffect(others.map(entry => names[entry]), receiving.map(entry => names[entry])))),
       h('span.version-cta', { 'aria-hidden': 'true' }, 'Use this copy'));
   };
   // Comparing comes before choosing: the full copies side by side, a click from the choices (the Files view shows them already).
@@ -786,11 +835,11 @@ function compareChoices(skill: ItemRow, inFiles = false) {
   const read = inFiles || kind === 'mcp' ? null : kind === 'skills' ? smallAction(every, `diff-${skill.key}`, () => openFiles(skill.key), '.compare-read')
     : smallAction(view.reading === skill.key ? 'Hide the copies' : every, `diff-${skill.key}`, () => { view.reading = view.reading === skill.key ? undefined : skill.key; rerender(); }, '.compare-read');
   const prompts = kind === 'agents' && view.reading === skill.key
-    ? h('div.plugin-file.compare-copies', {}, fileBlocks(`prompt-${skill.key}`, 'Prompt', compared.map(tool => ({ tool, text: versions[tool]?.prompt ?? '' })), holders => `Prompt · ${andList(holders.map(holder => names[holder.tool]))}`, { named: true }))
+    ? h('div.compare-copies', {}, fileBlocks(`prompt-${skill.key}`, 'Prompt', compared.map(tool => ({ tool, text: versions[tool]?.prompt ?? '' })), holders => `Prompt · ${andList(holders.map(holder => names[holder.tool]))}`, { named: true }))
     : null;
   return h('div.compare-block', {},
     h('p.compare-title', {}, icon('diff', 14, 'tone-warning'), h('span', {}, 'Which copy of ', h('strong.item-name', {}, skill.name ?? skill.key), ` should ${compared.length + receiving.length > 2 ? 'every tool' : 'both tools'} use?`)),
-    h('p.compare-note', {}, `Choosing applies at once, and turns it on everywhere. Replaced copies are kept in History.${kind === 'mcp' && receiving.includes('claude-cli') ? ` ${CLAUDE_LATER}` : ''}`),
+    h('p.compare-note', {}, `Choosing applies at once, with Undo, and turns it on everywhere. Replaced copies are kept in History.${kind === 'mcp' && receiving.includes('claude-cli') ? ` ${CLAUDE_LATER}` : ''}`),
     h('div.compare-choices', {}, groups.map(choice)),
     read, prompts);
 }
