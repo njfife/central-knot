@@ -185,6 +185,7 @@ test('Pull into an agent that is Off here: the repo’s version becomes its curr
     const { first, second, firstPlanner, secondPlanner } = await serverAndAgentOnTwo(box);
     await applyAgents(second, tools, [{ key: 'planner', managed: false, off: [] }]);
     await edit(firstPlanner, 'Plan carefully.', 'Plan in small steps.');
+    await edit(firstPlanner, 'model: opus', 'model: sonnet');
     await applyAgents(first, tools, []);
     await pushRepo(first);
     const pulled = await pullRepo(second);
@@ -201,7 +202,7 @@ test('Pull into an agent that is Off here: the repo’s version becomes its curr
     const entry = (await readHistory(second)).filter(event => event.key === 'agent:planner').at(-1)!;
     assert.deepEqual([entry.kind, entry.via], ['edit', 'repo']);
     await applyAgents(second, tools, [{ key: 'planner', managed: true, off: [], seenManaged: false }]);
-    assert.match(await readFile(secondPlanner, 'utf8'), /^---\nname: planner\ndescription: Plans work\.\nmodel: opus\n---\n\nPlan in small steps\.\n$/);
+    assert.match(await readFile(secondPlanner, 'utf8'), /^---\nname: planner\ndescription: Plans work\.\nmodel: sonnet\n---\n\nPlan in small steps\.\n$/);
     assert.match(await readFile(join(second.home, '.copilot/agents/planner.agent.md'), 'utf8'), /Plan in small steps/);
   } finally { await box.cleanup(); }
 });
@@ -215,8 +216,12 @@ test('An agent turned Off here stays in the repo at the next Push: the other com
     await pushRepo(second);
     await pullRepo(first);
     assert.deepEqual([(await agentsView(first, tools)).library!.planner.on, await readFile(firstPlanner, 'utf8').then(() => true)], [true, true]);
-    // Delete from Central Knot is what leaves the repo.
+    // Delete from Central Knot is what leaves the repo, and the other computer's Pull deletes it there, Off or On.
+    await applyAgents(first, tools, [{ key: 'planner', managed: false, off: [] }]);
     await applyAgents(second, tools, [{ key: 'planner', managed: false, off: [], deleted: true }]);
     assert.deepEqual(rows(live(await repoView(second, { check: true })).outgoing), ['planner:removed']);
+    await pushRepo(second);
+    await pullRepo(first);
+    assert.equal((await agentsView(first, tools)).library!.planner.deleted !== undefined, true);
   } finally { await box.cleanup(); }
 });

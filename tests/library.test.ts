@@ -94,6 +94,12 @@ test('Off: copies as applied are removed; an edit no pass took in becomes the cu
     { ...quiet, takeIn: 'copilot-cli', remove: ['claude-cli', 'copilot-cli'], found: ['codex-cli'], current: [] });
 });
 
+test('Off with two edits no pass took in: the latest becomes the current version, the other is kept, and both copies are removed', () => {
+  const off = item({ on: false });
+  assert.deepEqual(plan(off, { 'claude-cli': has('b', time(2)), 'copilot-cli': has('c', time(3)), 'codex-cli': has('a') }),
+    { ...quiet, takeIn: 'copilot-cli', keep: [{ harness: 'claude-cli', from: { how: 'edited', harness: 'claude-cli' } }], remove: ['claude-cli', 'copilot-cli', 'codex-cli'], current: [] });
+});
+
 test('A single edit is taken in even when its file’s time is older than the current version (a file copied with its time kept)', () => {
   const since = item({ versions: [{ hash: 'a', at: day(5), from: { how: 'found', harness: 'claude-cli' } }] });
   assert.equal(plan(since, { 'claude-cli': has('a'), 'codex-cli': has('b', time(2)) }).takeIn, 'codex-cli');
@@ -173,5 +179,5 @@ test('Versions are listed in the order they were taken, whatever their files’ 
 test('A record’s value is an item only with every field in its shape', () => {
   assert.equal(isLibraryItem(item()), true);
   assert.equal(isLibraryItem({ ...item(), deleted: { at: day(1) } }), true);
-  for (const broken of [null, {}, { ...item(), on: 'yes' }, { ...item(), versions: [{ hash: 'a' }] }, { ...item(), applied: { 'claude-cli': 3 } }, { name: 'reviewer', state: 'shared', off: [], copies: [] }]) assert.equal(isLibraryItem(broken), false);
+  for (const broken of [null, {}, { ...item(), own: undefined }, { ...item(), on: 'yes' }, { ...item(), versions: [{ hash: 'a' }] }, { ...item(), applied: { 'claude-cli': 3 } }, { name: 'reviewer', state: 'shared', off: [], copies: [] }]) assert.equal(isLibraryItem(broken), false);
 });

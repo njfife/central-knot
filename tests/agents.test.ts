@@ -179,7 +179,12 @@ inBox('An edit in a harness becomes the current version, from that harness, and 
   await actions[1].run();
   assert.match((await readOf(box, 'codex-cli'))!, /Be brief\./);
   assert.deepEqual(await versions(box), ['Be brief. (made current again) *', 'Be exact. (edited in Codex)', 'Be brief. (found in Claude Code)']);
-  assert.equal((await pass(box)).writes, 0);
+  // Each says what it changed from the one taken before it.
+  assert.deepEqual((await seen(box)).fact?.versionChanges, [['prompt'], ['prompt'], 'first']);
+  // A write keeps what it wrote as that tool's own part: the next pass changes nothing, not even the record.
+  const record = () => readFile(join(box.home, '.central-knot/agents.json'), 'utf8');
+  const was = await record();
+  assert.deepEqual([(await pass(box)).writes, await record()], [0, was]);
 });
 
 inBox('Two edits: the latest wins, the other is a version, and History can make it current', async box => {
@@ -225,6 +230,16 @@ inBox('Turn on after a copy was deleted by hand gives that tool back its own set
   assert.equal(placeOf(await itemOf(box)), 'off');
   await (await historyActions(box)).find(action => action.label === 'Turn on')!.run();
   assert.equal(await readOf(box, 'claude-cli'), narrowed);
+});
+
+inBox('A clock that went back restarts the settle window: it never holds a deletion open', async box => {
+  await on(box);
+  await rm(fileOf(box, 'copilot-cli'));
+  const far = Date.now() + 1e9;
+  assert.equal((await applyAgents({ ...box.context, settleMs: 2000 }, tools, [], { now: far })).settling, true);
+  // The clock is back where it was: the window starts again from now, and with none to wait the deletion counts.
+  await applyAgents(box.context, tools, []);
+  assert.equal(placeOf(await itemOf(box)), 'off');
 });
 
 inBox('A copy put back inside the settle window was a save, not a deletion', async box => {
@@ -358,6 +373,15 @@ inBox('A tool whose agents folder can’t be written says why on its line, pass 
   } finally { await chmod(folder, 0o755); }
   assert.equal((await pass(box)).writes, 1);
   assert.match((await readOf(box, 'copilot-cli'))!, /Be exact\./);
+  // With no copy there either, nothing is tried pass after pass: its line says why, and no pass reports a failed write.
+  await rm(fileOf(box, 'copilot-cli'));
+  await chmod(folder, 0o555);
+  try {
+    await keepOut(box, 'copilot-cli');
+    await keepOut(box, 'copilot-cli', false);
+    const tried = await pass(box);
+    assert.deepEqual([tried.results.filter(entry => entry.harness === 'copilot-cli'), (await marks(box))['copilot-cli']], [[], 'cannot']);
+  } finally { await chmod(folder, 0o755); }
 }, { skip: process.getuid?.() === 0 });
 
 // ---------- Found agents ----------
