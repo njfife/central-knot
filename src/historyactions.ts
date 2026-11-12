@@ -16,9 +16,10 @@
 //     agent Pull brought
 //   on in one harness (`only`)               Turn off in <harness>  the agent is On and in that harness
 //   deleted                                  Restore                the agent is deleted
-//   a content change: edit, conflict,        Undo                   the version from before it (`previous`) is not the
-//     current, and any entry from before                              current one
-//     the library that names `previous`
+//   a content change: edit, conflict,        Undo; once later       the version from before it (`previous`) is not the
+//     current, and any entry from before     changes came, "Make    current one
+//     the library that names `previous`      the version before
+//                                            this current"
 //   conflict, chosen: copies that gave way   Use <harness>’s        that copy's version is not the current one
 //
 // One entry is not here: a Pull that changed only Claude Code's own settings of an agent (`settingsFile`) keeps its own Undo
@@ -121,7 +122,9 @@ export function agentAction(event: HistoryEvent, item: LibraryItem | undefined, 
   if (event.kind === 'off' || event.kind === 'on') return switchAction(event.kind === 'off', event.only, item);
   // Copies an earlier engine added: there is no earlier version to go back to.
   if (event.kind === 'added' || !isVersion(item, event.previous)) return undefined;
-  return { label: 'Undo', help: `Make the version from before this change current again${everywhere}`, change: { ...now, version: event.previous } };
+  // Undo while what this entry made is still current; once later changes came, it says what it does instead.
+  const latest = (event.version ?? event.winner?.hash) === item.hash;
+  return { label: latest ? 'Undo' : 'Make the version before this current', help: `Make the version from before this change current again${everywhere}`, change: { ...now, version: event.previous } };
 }
 
 /** An Off entry's Turn on (`turnOn`), or an On entry's Turn off: for the whole agent, or (`only`) for one harness of an agent that is On. */

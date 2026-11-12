@@ -1,6 +1,7 @@
 // An item (a skill, an MCP server or an agent) as the item pages draw it, and what each tool's mark says about it. Pure: no DOM.
 // A skill's and an MCP server's marks are here (cellOf); an agent's follow Central Knot's library and are in agentrow.ts.
 import { comparedTools, copiesDiffer } from './syncrules.ts';
+import type { VersionChange } from './agentfiles.ts';
 import type { Plan } from './library.ts';
 import type { GoneItem, Outside, SwitchProblem, ThroughPlugin } from './types.ts';
 export { comparedTools, copiesDiffer };
@@ -44,6 +45,8 @@ export interface ItemRow {
   plan?: Plan;
   /** Agents found in a harness: their copies differ, so the switch asks which one to take in. */
   differs?: boolean;
+  /** Agents in the library: what each listed version changed (types.ts SkillFacts versionChanges). */
+  versionChanges?: VersionChange[];
   /** Agents: each harness's own settings in its file, by name (its own part). */
   ownFields?: Partial<Record<Tool, string[]>>;
   /** MCP: tools whose copy waits for an explicit write (Claude Code, Write now). */

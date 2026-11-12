@@ -32,3 +32,13 @@ export function folded(diff: Line[], full: boolean): (Line | { kind: 'fold'; cou
   }
   return out;
 }
+
+/**
+ * A word diff of two texts, line breaks kept: each word or run of spaces as unchanged, removed (only in `before`) or added
+ * (only in `after`), in order. Reading a version against the current one (versionlist.ts) shows both.
+ */
+export function wordDiff(before: string, after: string): Line[] {
+  // Each token on a line of its own for lineDiff; a line break inside a run of spaces travels as \u0000 and comes back.
+  const tokens = (text: string) => text.split(/(\s+)/).filter(Boolean).map(token => token.replace(/\n/g, '\u0000')).join('\n');
+  return lineDiff(tokens(before), tokens(after)).map(part => ({ ...part, text: part.text.replace(/\u0000/g, '\n') }));
+}

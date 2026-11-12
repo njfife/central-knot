@@ -1,3 +1,4 @@
+import type { VersionChange } from './agentfiles.ts';
 import type { LibraryItem, Plan } from './library.ts';
 
 export type HomeMode = 'fixture' | 'custom' | 'actual';
@@ -296,6 +297,8 @@ export interface SkillFacts {
   plan?: Plan;
   /** Agents found in a harness, not in the library: their copies differ, so the switch asks which one every harness takes. */
   differs?: boolean;
+  /** Agents in the library: for each version as library.ts listed orders them, what it changed from the one taken before it. */
+  versionChanges?: VersionChange[];
   /** Skills and MCP servers: tools whose copy is turned off with the tool's own switch. The copy stays there and keeps syncing; the tool doesn't load it. */
   disabled?: HarnessId[];
   /** Skills and MCP servers: why a tool's switch can't be used at all: its settings file can't be read or is in a form Central Knot doesn't edit. */
@@ -438,7 +441,7 @@ export interface HistoryEvent {
    * was found). `pulled`: Pull brought an agent new here. `deleted-by-hand`: its copy was deleted by hand (`winner`: where).
    */
   cause?: 'switch' | 'found' | 'pulled' | 'deleted-by-hand';
-  /** 'current': the version made current. */
+  /** 'current': the version made current; an agent's 'edit' Pull made: the version pulled. */
   version?: string;
   /** 'took-over': what was replaced, removed and placed, so Undo can put it back exactly. */
   tookOver?: TookOver;

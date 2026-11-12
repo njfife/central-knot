@@ -8,6 +8,7 @@
 //   found  in a managed harness, not in the library; its switch takes it in
 // What each harness's mark says is the library's plan for the agent (library.ts plan), worked out by agents.ts from the same
 // reading a pass makes (copiesOf), so a mark says what the next pass will do there and never something of its own.
+import type { VersionChange } from './agentfiles.ts';
 import { sourceWords, wantedIn, type LibraryItem, type Plan, type Version } from './library.ts';
 import { dayAndTime } from './model.ts';
 import type { Change, HarnessId, SyncNotice } from './types.ts';
@@ -107,6 +108,38 @@ export const agentClicks = {
   remove: (row: AgentRow, item: LibraryItem | undefined): Change => ({ ...asItIs(row, item), deleted: true }),
 };
 
+// ---------- Versions ----------
+
+/** What a version changed from the one Central Knot took before it ("prompt changed"), or "first version". */
+export function versionChange(changed: VersionChange | undefined): string {
+  if (changed === undefined || changed === 'unknown') return '';
+  if (changed === 'first') return 'first version';
+  return changed.length ? `${andList([...changed])} changed` : 'same content';
+}
+
+const withSeconds = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+/** One version's time: today as how long ago, before today its day and time; `seconds`: its day and time to the second. */
+function versionTime(iso: string, now: number, seconds: boolean): string {
+  const today = new Date(iso).toDateString() === new Date(now).toDateString();
+  if (seconds) return today ? withSeconds(iso) : `${dayAndTime(iso).replace(/ at .*$/, '')} at ${withSeconds(iso)}`;
+  if (!today) return dayAndTime(iso);
+  const minutes = Math.floor((now - Date.parse(iso)) / 60_000);
+  return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ago`;
+}
+/** When each listed version was made, as its line says it, so neighbours read apart: to the second only where two would read the same. */
+export function versionTimes(versions: readonly Version[], now = Date.now()): string[] {
+  const said = versions.map(version => versionTime(version.at, now, false));
+  return versions.map((version, index) => (said.filter(text => text === said[index]).length > 1 ? versionTime(version.at, now, true) : said[index]));
+}
+
+/** When a version was made, said short: its time today, else its day and time. */
+export const madeAt = (version: Version) => dayAndTime(version.at).replace(/^today at /, '');
+
+/** The version a "made current again" one was made from: the earlier entry with its content that came from somewhere else. */
+export function madeFrom(item: Pick<LibraryItem, 'versions'>, version: Version): Version | undefined {
+  return item.versions.slice(item.versions.indexOf(version) + 1).find(older => older.hash === version.hash && older.from.how !== 'made-current');
+}
+
 /** How many versions a folded list shows. */
 export const FOLDED_VERSIONS = 4;
 /** The versions an opened row shows: all of them once unfolded, else the newest few, and how many more there are. */
@@ -122,13 +155,19 @@ const named = (some: readonly string[], tools: readonly string[]) => toolsPhrase
 const harnessesWhere = (row: AgentRow, item: LibraryItem | undefined, tools: readonly string[], ...states: HarnessIs[]) =>
   tools.filter(tool => states.includes(harnessIs(row, item, tool)));
 
-/** The tag after an agent's name when it isn't plainly on: where it stands, and (its tooltip) what that means. */
-export function placeTag(item: LibraryItem | undefined): { text: string; title: string } | undefined {
+/**
+ * The tag after an agent's name when it isn't plainly on everywhere: where it stands, or the tools it is kept out of, and (its
+ * tooltip) what that means. `tools`: the home's harnesses.
+ */
+export function placeTag(item: LibraryItem | undefined, tools: readonly string[]): { text: string; title: string } | undefined {
   const place = placeOf(item);
   if (place === 'off') return { text: 'in Central Knot only', title: 'Central Knot keeps this agent and its versions. No tool has it until you turn it on.' };
-  const found = 'A tool has this agent; Central Knot doesn’t yet. Turn it on to take it in and apply it to every tool.';
+  const found = 'A tool has this agent; Central Knot doesn’t yet. Turn it on to take it in and put it in every tool.';
   if (place === 'found') return { text: 'not in Central Knot', title: found };
-  return undefined;
+  const out = item!.except.filter(tool => tools.includes(tool));
+  if (!out.length) return undefined;
+  const where = andList(out.map(toolName));
+  return { text: `not in ${where}`, title: `Kept out of ${where}. Its switch there, in the opened row, puts it back.` };
 }
 
 /** An agent's status in one line: on and where, in Central Knot only, or found in a harness and not in Central Knot yet. */
@@ -141,9 +180,10 @@ export function statusLine(row: AgentRow, item: LibraryItem | undefined, tools: 
   }
   const ownSaid = own.length ? ` ${sentence(named(own, tools))} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there.` : '';
   if (place === 'off') return `Off · in Central Knot only. Turn it on to put it in every tool.${ownSaid}`;
-  const gets = where('gets-it'), out = where('kept-out', 'leaving');
-  const parts = [`On in ${named(where('current', 'edited'), tools)}`,
+  const gets = where('gets-it'), out = where('kept-out', 'leaving'), cannot = where('cannot');
+  const parts = [`On in ${named(where('current', 'edited'), tools)}${cannot.length ? ' only' : ''}`,
     gets.length ? `${named(gets, tools)} ${gets.length === 1 ? 'gets' : 'get'} it when sync runs` : '',
+    cannot.length ? `${andList(cannot.map(toolName))} can’t take it (see below)` : '',
     out.length ? `kept out of ${named(out, tools)}` : ''];
   return `${parts.filter(Boolean).join(' · ')}${ownSaid ? `.${ownSaid}` : ''}`;
 }
@@ -187,6 +227,10 @@ export const said = {
     return `${name}: the version ${sourceWords(version.from)}, ${dayAndTime(version.at)}, is current again${on ? `, in ${named(on, tools)}` : ''}.`;
   },
   deleted: (name: string, wasOn: boolean) => `${name} is deleted from Central Knot${wasOn ? ', and out of every tool' : ''}. History can restore it.`,
+  /** Beside Delete from Central Knot, before it is armed: how it differs from Off. */
+  deleteOffer: 'Off keeps it here; Delete removes it from Central Knot.',
+  /** Under Delete it now: what happens, and for how long History can undo it (`days`: History's days, from Settings). */
+  deleteArmed: (days: number) => `It leaves every tool and this page. History keeps it, with its versions, for ${days} days, and can restore it.`,
 };
 
 /**

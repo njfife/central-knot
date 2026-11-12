@@ -2,7 +2,7 @@
 // harness's mark says, when its switch asks which copy, and the click each control sends.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FOLDED_VERSIONS, agentClicks, foldVersions, harnessIs, harnessLine, needsChoice, noticeWords, placeOf, placeTag, said, statusLine, switchLabel, type AgentRow } from '../src/agentrow.ts';
+import { FOLDED_VERSIONS, agentClicks, foldVersions, harnessIs, harnessLine, madeFrom, needsChoice, noticeWords, placeOf, placeTag, said, statusLine, switchLabel, versionChange, versionTimes, type AgentRow } from '../src/agentrow.ts';
 import { newItem, plan, type Copies, type LibraryItem } from '../src/library.ts';
 
 const tools = ['claude-cli', 'copilot-cli', 'codex-cli'];
@@ -91,6 +91,25 @@ test('Each control sends the agent as it is with one thing changed', () => {
   assert.deepEqual(agentClicks.on(row({ 'claude-cli': 'a', 'codex-cli': 'x' }), undefined, 'codex-cli'), { key: 'reviewer', managed: true, off: [], seenManaged: false, use: 'codex-cli', useHash: 'x' });
 });
 
+test('A tool that can’t take the agent is said in the status: on in the others only', () => {
+  const why = { cannot: { 'copilot-cli': 'Copilot CLI can’t store this name (é). Rename the agent to use it there.', 'codex-cli': 'Codex can’t store this name (é). Rename the agent to use it there.' } };
+  const agent = item({ applied: { 'claude-cli': 'b' } });
+  assert.equal(statusLine(row({ 'claude-cli': 'b' }, why, agent), agent, tools), 'On in Claude Code only · Copilot CLI and Codex can’t take it (see below)');
+});
+
+test('A version says what it changed, and neighbours’ times read apart: how long ago today, to the second where two would read the same', () => {
+  assert.deepEqual([versionChange('first'), versionChange(['prompt']), versionChange(['name', 'description']), versionChange([]), versionChange('unknown')],
+    ['first version', 'prompt changed', 'name and description changed', 'same content', '']);
+  const now = Date.parse('2026-11-12T15:00:00.000Z'), at = (minutes: number, seconds = 0) => new Date(now - minutes * 60_000 - seconds * 1000).toISOString();
+  const said = versionTimes([at(3), at(3, 20), at(130), at(0, 10)].map(when => ({ hash: 'x', at: when, from: { how: 'edited' as const } })), now);
+  assert.deepEqual([said[2], said[3]], ['2 h ago', 'just now']);
+  assert.match(said[0], /^\d+:\d\d:\d\d/);
+  assert.notEqual(said[0], said[1]);
+  // A version made current again names the one it was made from.
+  const found = { hash: 'a', at: at(9), from: { how: 'found' as const, harness: 'claude-cli' as const } }, again = { hash: 'a', at: at(1), from: { how: 'made-current' as const } };
+  assert.equal(madeFrom({ versions: [again, { hash: 'b', at: at(5), from: { how: 'edited' as const } }, found] }, again), found);
+});
+
 test('The status line says where the agent stands, and in which harnesses', () => {
   const all = { 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'b' };
   assert.equal(statusLine(row(all, {}, item()), item(), tools), 'On in all 3 tools');
@@ -105,7 +124,9 @@ test('The switch says what a click does: off everywhere, on everywhere, take a f
   assert.equal(switchLabel(...withItem({ 'codex-cli': 'x' }, item({ on: false, applied: {} })), tools), 'reviewer: off, in Central Knot only. Click to put it in every tool; Codex has a copy of its own, which is kept as versions first.');
   assert.equal(switchLabel(row({ 'claude-cli': 'a' }), undefined, tools), 'reviewer: in Claude Code, not in Central Knot. Click to take it in and put it in every tool.');
   assert.match(switchLabel(row({ 'claude-cli': 'a', 'codex-cli': 'x' }), undefined, tools, 'closed'), /its copies differ\. Click to choose which copy every tool uses\.$/);
-  assert.deepEqual([placeTag(item())?.text, placeTag(item({ on: false }))?.text, placeTag(undefined)?.text], [undefined, 'in Central Knot only', 'not in Central Knot']);
+  assert.deepEqual([placeTag(item(), tools)?.text, placeTag(item({ on: false }), tools)?.text, placeTag(undefined, tools)?.text], [undefined, 'in Central Knot only', 'not in Central Knot']);
+  // Kept out of a tool shows on the closed row too, in the words used everywhere else.
+  assert.deepEqual(placeTag(item({ except: ['codex-cli'] }), tools), { text: 'not in Codex', title: 'Kept out of Codex. Its switch there, in the opened row, puts it back.' });
 });
 
 test('A click’s result says what happened, and never claims a harness where it didn’t', () => {

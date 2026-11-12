@@ -18,10 +18,10 @@
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
-import { agentHash, agentText, agentsFolder, fileFor, isAgentTool, keyOf, nameProblem, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
+import { agentHash, agentText, agentsFolder, changedFields, fileFor, isAgentTool, keyOf, nameProblem, readAgents, type AgentEntry, type SharedAgent, type VersionChange } from './agentfiles.ts';
 import { agentShelf, fileTextFor, keepOwn, openLibrary, readVersion, saveLibrary, type AgentLibrary, type FolderSeen } from './agentstore.ts';
 import { agentAction } from './historyactions.ts';
-import { carryOut, keepVersion, newItem, plan, setCurrent, wantedIn } from './library.ts';
+import { carryOut, keepVersion, listed, newItem, plan, setCurrent, wantedIn } from './library.ts';
 import type { Copies, HarnessCopy, LibraryItem, Plan, Shelf, Source } from './library.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
 import { throughPlugins } from './plugins.ts';
@@ -462,7 +462,7 @@ async function pull(pass: Pass, key: string, { agent, claudeFile }: Pulled) {
   const hash = agentHash(agent), previous = item.hash;
   if (hash !== item.hash) await setCurrent(pass.shelf, item, { hash, at: now(), from: { how: 'pulled' } }, agent);
   if (!known) pass.clicked.set(key, { kind: 'on', cause: 'pulled', fill: 'written' });
-  else if (hash !== previous) pass.clicked.set(key, { kind: 'edit', previous, fill: 'written' });
+  else if (hash !== previous) pass.clicked.set(key, { kind: 'edit', previous, version: hash, fill: 'written' });
   await saveIfChanged(pass);
 }
 
@@ -534,6 +534,16 @@ export async function agentsForRepo(context: ShareContext, tools: HarnessId[]): 
 
 // ---------- View ----------
 
+/** For each version as library.ts listed orders them, what it changed from the version Central Knot took before it. */
+async function changesOf(context: ShareContext, item: LibraryItem): Promise<VersionChange[]> {
+  return Promise.all(listed(item).map(async version => {
+    const before = item.versions[item.versions.indexOf(version) + 1];
+    if (!before) return 'first' as const;
+    const [was, is] = await Promise.all([readVersion(context, item.key, before.hash), readVersion(context, item.key, version.hash)]);
+    return was && is ? changedFields(was, is) : 'unknown' as const;
+  }));
+}
+
 /**
  * The Agents page's rows: every agent in the library (On, or Off: in Central Knot only) and every found one (in a managed
  * harness, not in the library). `managed` on a row is On; `off` the harnesses it is kept out of. `library` gives the page and
@@ -587,7 +597,7 @@ async function rowFacts(look: Look, key: string, item: LibraryItem | undefined):
   const edited = made ? [made.takeIn, ...made.keep.filter(kept => kept.from.how === 'edited').map(kept => kept.harness)].filter(tool => tool !== undefined) : [];
   return {
     key, name, description: current?.description ?? '', copies, extra: [], managed: !!item?.on, off: item?.except ?? [], cannot, choiceBlocks: {}, edited,
-    ...(made ? { plan: made } : { differs: differ(foundCopies(look, key, [])) }),
+    ...(made && item ? { plan: made, versionChanges: await changesOf(look.context, item) } : { differs: differ(foundCopies(look, key, [])) }),
     ...(Object.keys(plugin).length ? { plugin } : {}), ...(Object.keys(unseen).length ? { unseen } : {}),
   };
 }

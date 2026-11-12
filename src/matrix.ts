@@ -3,7 +3,7 @@
 // details, and every click's result comes with an Undo of the whole click.
 import { itemId } from './profileplan.ts';
 import { brandMark } from './brand.ts';
-import { caughtUpNames, DAY_MS, groupBy } from './model.ts';
+import { caughtUpNames, DAY_MS, defaultHistoryDays, groupBy } from './model.ts';
 import { deletedText, deleteNote, linkTarget, managedSentence, manageSentence, pinnedSentence, readsOutside, replaceSentence, rowWords, whereSentence, type Shape } from './outsidewords.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
 import { REPLACE_ACTION, andList, byToolOrder, capitalToolsPhrase, kindNouns, problemText, toolName, toolNames, toolsPhrase } from './words.ts';
@@ -14,7 +14,7 @@ import { getsCopy as getsCopyNext, offPlan, stillOn } from './clickplan.ts';
 import type { IconName } from './icons.ts';
 import { byKey, loadedIn, standing } from './roworder.ts';
 import { cellOf, comparedTools, needsCopyChoice, type ItemRow, type Tool } from './itemrow.ts';
-import { agentClicks, harnessIs, harnessLine as agentLine, inLibrary, needsChoice as agentNeedsChoice } from './agentrow.ts';
+import { agentClicks, harnessIs, harnessLine as agentLine, inLibrary, madeFrom, needsChoice as agentNeedsChoice } from './agentrow.ts';
 import { noticeWords, placeOf as agentPlace, placeTag, said as agentSaid, statusLine, switchLabel, type HarnessIs } from './agentrow.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
@@ -243,7 +243,7 @@ const ago = (iso: string) => { const said = sinceThen(Date.parse(iso)); return s
 
 /** The real home's facts in the shape the page works with. */
 const fromFacts = (facts: SkillFacts): ItemRow => ({
-  key: facts.key, name: facts.name, description: facts.description, gone: facts.gone, converted: facts.converted, unseen: facts.unseen, plan: facts.plan, differs: facts.differs, managed: facts.managed, off: facts.off, cannot: facts.cannot, plugin: facts.plugin, held: facts.held, separate: facts.separate, edited: facts.edited,
+  key: facts.key, name: facts.name, description: facts.description, gone: facts.gone, converted: facts.converted, unseen: facts.unseen, plan: facts.plan, differs: facts.differs, versionChanges: facts.versionChanges, managed: facts.managed, off: facts.off, cannot: facts.cannot, plugin: facts.plugin, held: facts.held, separate: facts.separate, edited: facts.edited,
   blocks: facts.choiceBlocks, hashes: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   // A tool reading two different copies has copies that differ, even if one of them matches the other tool.
   copies: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, facts.extra.some(extra => extra.tool === tool && extra.hash !== copy!.hash) ? `mixed:${tool}` : copy!.hash])),
@@ -809,11 +809,13 @@ function compareChoices(skill: ItemRow, inFiles = false) {
   // entry's file. It shows on every row or on none: only where it tells the copies apart. The copy edited most recently has the
   // line's one emphasis.
   const facts = groups.map(([tool], index) => (versions[tool] ? `${versions[tool]!.lines} · ${Number.isFinite(editedAt[index]) ? `edited ${sinceThen(editedAt[index])}` : versions[tool]!.changed}` : ''));
-  const factsDiffer = !!latest || new Set(facts).size > 1;
+  // An agent's copies always say when each was edited, and the newer one is marked: latest wins everywhere else for agents.
+  const factsDiffer = kind === 'agents' || !!latest || new Set(facts).size > 1;
+  const newest = kind === 'agents' ? (groups.length > 2 ? 'Newest' : 'Newer') : 'most recent';
   const about = (group: Tool[]) => {
     const said = facts[groups.indexOf(group)];
     if (!factsDiffer || !said) return null;
-    return group === latest ? h('span.version-meta.version-latest', {}, icon('pencil-line', 12), `${said} · most recent`) : h('span.version-meta', {}, said);
+    return group === latest ? h('span.version-meta.version-latest', {}, icon('pencil-line', 12), `${said} · ${newest}`) : h('span.version-meta', {}, said);
   };
   const choice = (group: Tool[]) => {
     const [tool] = group;
@@ -832,7 +834,7 @@ function compareChoices(skill: ItemRow, inFiles = false) {
       h('span.version-says', {},
         said ? h('span.version-text', {}, ...said) : null,
         h('span.version-effect', {}, choiceEffect(others.map(entry => names[entry]), receiving.map(entry => names[entry])))),
-      h('span.version-cta', { 'aria-hidden': 'true' }, 'Use this copy'));
+      h(`span.version-cta${kind === 'agents' && group === latest ? '.version-cta-main' : ''}`, { 'aria-hidden': 'true' }, 'Use this copy'));
   };
   // Comparing comes before choosing: the full copies side by side, a click from the choices (the Files view shows them already).
   const every = compared.length > 2 ? 'Read every copy' : 'Read both copies';
@@ -842,7 +844,7 @@ function compareChoices(skill: ItemRow, inFiles = false) {
     ? h('div.compare-copies', {}, fileBlocks(`prompt-${skill.key}`, 'Prompt', compared.map(tool => ({ tool, text: versions[tool]?.prompt ?? '' })), holders => `Prompt · ${andList(holders.map(holder => names[holder.tool]))}`, { named: true }))
     : null;
   return h('div.compare-block', {},
-    h('p.compare-title', {}, icon('diff', 14, 'tone-warning'), h('span', {}, 'Which copy of ', h('strong.item-name', {}, skill.name ?? skill.key), ` should ${compared.length + receiving.length > 2 ? 'every tool' : 'both tools'} use?`)),
+    h('p.compare-title', {}, icon(kind === 'agents' ? 'circle-question-mark' : 'diff', 14, 'tone-warning'), h('span', {}, 'Which copy of ', h('strong.item-name', {}, skill.name ?? skill.key), ` should ${compared.length + receiving.length > 2 ? 'every tool' : 'both tools'} use?`)),
     // An agent's choice takes it into Central Knot: the copies not chosen become its versions, each of which can be made current later.
     h('p.compare-note', {}, kind === 'agents' ? 'Choosing applies at once: the agent is taken into Central Knot with that copy, and turned on everywhere. The other copies are kept as its versions.'
       : `Choosing applies at once, with Undo, and turns it on everywhere. Replaced copies are kept in History.${kind === 'mcp' && receiving.includes('claude-cli') ? ` ${CLAUDE_LATER}` : ''}`),
@@ -899,7 +901,7 @@ function openRow(key: string) {
 
 /** An agent's tag after its name, when it isn't plainly on (agentrow.ts placeTag). */
 function agentTag(skill: ItemRow) {
-  const tag = kind === 'agents' ? placeTag(itemOf(skill)) : undefined;
+  const tag = kind === 'agents' ? placeTag(itemOf(skill), toolList()) : undefined;
   return tag ? h('span.row-tag', { title: tag.title }, tag.text) : null;
 }
 
@@ -1378,7 +1380,8 @@ export function itemsTable(which: Kind, harness?: Tool) {
       withToolCount(h('div.ov.ov-switched', { role: 'table', 'aria-label': `${nouns[kind][1]} and where they are on` }, sections), toolList().length),
       markLegend(all, plugins))];
   if (openRow) return h('div.page.ov-page.docked', {}, h('div.dock-main', {}, table), pluginDock(openRow));
-  return open ? h('div.page.ov-page.docked', {}, h('div.dock-main', {}, table), itemDock(open))
+  // An agent's details hold its versions: its dock takes a share of the width that grows with the window (style.css .dock-wide).
+  return open ? h(`div.page.ov-page.docked${kind === 'agents' ? '.dock-wide' : ''}`, {}, h('div.dock-main', {}, table), itemDock(open))
     : h('div.page.ov-page', {}, table);
 }
 
@@ -1634,7 +1637,10 @@ function agentSwitch(skill: ItemRow, id: string) {
   const item = itemOf(skill), place = agentPlace(item);
   const question = isDiffering(skill) ? (view.comparing === skill.key ? 'open' : 'closed') : undefined;
   const label = switchLabel(skill, item, toolList(), question);
-  return toggle({ on: place === 'on', mixed: place === 'found', label, onchange: next => flip(skill, next), disabled: !canWrite(), id });
+  const knob = toggle({ on: place === 'on', mixed: place === 'found', label, onchange: next => flip(skill, next), disabled: !canWrite(), id });
+  // The halfway switch says on hover what a click does: it isn't blocked, it takes the agent in.
+  if (place === 'found') knob.title = question ? 'Its copies differ: click to choose which one Central Knot takes in' : 'Click to take it into Central Knot and put it in every tool';
+  return knob;
 }
 
 /** How a tool's mark looks: on there, off there (copy kept), no copy, copies differ, or something waits. */
@@ -1646,7 +1652,7 @@ const keyWords = {
   waiting: 'Gets the edit when sync runs', 'will-sync': NEXT_SYNC, 'write-now': 'Waits for Write to Claude Code',
   // Agents (agentrow.ts HarnessIs).
   taken: 'Edited, becomes the current version', deleted: 'Deleted there; turns off when sync runs', leaving: 'Removed when sync runs', own: 'Its own copy, not from Central Knot',
-  'kept-in-ck': 'Off there, kept in Central Knot', unseen: 'Can’t be read',
+  'kept-out': 'Kept out', 'off-in-ck': 'Off: in Central Knot only', unseen: 'Can’t be read', 'cannot-take': 'Can’t take it',
 } as const;
 
 /**
@@ -1688,9 +1694,9 @@ function markOf(skill: ItemRow, tool: Tool): { look: MarkLook; words: string; gl
 const agentMarks: Record<HarnessIs, { look: MarkLook; key: keyof typeof keyWords; glyph?: IconName }> = {
   current: { look: 'on', key: 'on' },
   'own-copy': { look: 'on', key: 'own' },
-  'kept-out': { look: 'off', key: 'kept-in-ck' },
+  'kept-out': { look: 'off', key: 'kept-out' },
   none: { look: 'none', key: 'none' },
-  cannot: { look: 'none', key: 'none' },
+  cannot: { look: 'none', key: 'cannot-take' },
   'gets-it': { look: 'waits', key: 'will-sync', glyph: 'clock' },
   edited: { look: 'waits', key: 'taken', glyph: 'pencil-line' },
   deleted: { look: 'waits', key: 'deleted', glyph: 'trash-2' },
@@ -1701,7 +1707,7 @@ function agentMark(skill: ItemRow, tool: Tool): ReturnType<typeof markOf> {
   const item = itemOf(skill), is = harnessIs(skill, item, tool);
   const words = `${names[tool]}: ${agentLine(skill, item, tool, names[tool]).replace(/^./, first => first.toLowerCase())}`;
   // Off, or found: a harness with no copy while Central Knot keeps the agent is off there; a found agent's own copy is simply on.
-  const drawn = is === 'none' && inLibrary(item) ? agentMarks['kept-out'] : is === 'own-copy' && !inLibrary(item) ? agentMarks.current : agentMarks[is];
+  const drawn = is === 'none' && inLibrary(item) ? { look: 'off' as const, key: 'off-in-ck' as const } : is === 'own-copy' && !inLibrary(item) ? agentMarks.current : agentMarks[is];
   return { ...drawn, state: is, words };
 }
 
@@ -1756,7 +1762,7 @@ function section(role: 'on' | 'not-synced' | 'off' | 'away', list: ItemRow[]) {
   if (!list.length) return null;
   const label = role === 'away' ? `Not in ${names[focus!]}` : kind === 'agents' && role === 'not-synced' ? 'Found' : placeNames[role === 'on' ? 0 : role === 'not-synced' ? 1 : 2];
   const agents = kind === 'agents';
-  const note = role === 'not-synced' ? (agents ? 'a tool has these; Central Knot doesn’t yet' : 'each tool keeps its own copy')
+  const note = role === 'not-synced' ? (agents ? 'in a tool, not in Central Knot yet. Turn one on to take it in and put it in every tool.' : 'each tool keeps its own copy')
     : role === 'off' ? (agents ? 'in Central Knot only; no tool has these' : `no tool ${uses()}s these`) : role === 'away' ? 'only other tools have these' : null;
   return h('div', { role: 'rowgroup' },
     h(`div.ov-section${role === 'off' || role === 'away' ? '.ov-section-away' : ''}`, { role: 'row', 'data-section': role },
@@ -1853,13 +1859,17 @@ function agentDelete(skill: ItemRow) {
   const item = inLibrary(itemOf(skill));
   if (!item) return null;
   const name = nameOf(skill), disarm = () => { view.confirmDelete = undefined; rerender(); };
-  if (view.confirmDelete !== skill.key) return smallAction('Delete from Central Knot…', `delete-${skill.key}`, () => { view.confirmDelete = skill.key; rerender(); }, '.text-danger-quiet', !canWrite());
+  if (view.confirmDelete !== skill.key) {
+    const arm = button({ variant: 'outline', size: 'micro', label: 'Delete from Central Knot…', id: `delete-${skill.key}`, disabled: !canWrite(), onclick: () => { view.confirmDelete = skill.key; rerender(); } });
+    arm.classList.add('delete-quiet');
+    return h('span.delete-offer', {}, arm, h('span.delete-offer-note', {}, agentSaid.deleteOffer));
+  }
   const said = agentSaid.deleted(name, item.on);
   const run = () => { view.confirmDelete = undefined; click({ kind, items: [name], changes: [agentClicks.remove(skill, item)], said }); };
   const now = smallAction('Delete it now', `delete-confirm-${skill.key}`, run, '.text-danger', !canWrite());
   now.title = `Delete ${name} from Central Knot now. History can restore it.`;
   return h('span.delete-armed', {}, smallAction('Cancel', `delete-cancel-${skill.key}`, disarm), now,
-    h('span.delete-armed-note', { id: `delete-note-${skill.key}` }, 'It leaves every tool and this page. History keeps it, with its versions, and can restore it.'));
+    h('span.delete-armed-note', { id: `delete-note-${skill.key}` }, agentSaid.deleteArmed(state.historyDays ?? defaultHistoryDays)));
 }
 
 /** Versions read in an opened row, by home, agent and version, so a version read once shows at once the next time. */
@@ -1871,20 +1881,25 @@ function agentVersions(skill: ItemRow) {
   if (!item) return null;
   const name = nameOf(skill), textKey = (hash: string) => `${state.home?.home}:${item.key}:${hash}`;
   const at = view.readingVersion?.key === item.key ? view.readingVersion.index : undefined;
+  const fetch = (hash: string) => {
+    if (versionTexts.has(textKey(hash))) return;
+    versionTexts.set(textKey(hash), 'reading');
+    void window.centralKnot.agentVersion(item.key, hash).then(text => { versionTexts.set(textKey(hash), text); rerender(); });
+  };
+  // Reading a version reads the current one too, so what differs from it can be marked.
   const read = (index: number) => {
-    const hash = listed(item)[index].hash;
     view.readingVersion = at === index ? undefined : { key: item.key, index };
-    if (view.readingVersion && !versionTexts.has(textKey(hash))) {
-      versionTexts.set(textKey(hash), 'reading');
-      void window.centralKnot.agentVersion(item.key, hash).then(text => { versionTexts.set(textKey(hash), text); rerender(); });
-    }
+    if (view.readingVersion) { fetch(listed(item)[index].hash); fetch(item.hash); }
     rerender();
   };
+  const textOf = (hash: string) => versionTexts.get(textKey(hash)) ?? 'reading';
   const on = (notIn: HarnessId[]) => (item.on ? canHave(skill).filter(tool => !notIn.includes(tool as HarnessId) && !skill.off.includes(tool)) : undefined);
   const makeCurrent = (version: Version) => click({ kind, items: [name], changes: [agentClicks.makeCurrent(skill, item, version.hash)],
-    said: notIn => agentSaid.madeCurrent(name, version, on(notIn), toolList()) });
+    // A version that was itself made current again is named by the one it came from.
+    said: notIn => agentSaid.madeCurrent(name, (version.from.how === 'made-current' && madeFrom(item, version)) || version, on(notIn), toolList()) });
+  const reading = at === undefined || !listed(item)[at] ? undefined : { index: at, text: textOf(listed(item)[at].hash), current: textOf(item.hash) };
   return versionList({ item, canWrite: canWrite(), unfolded: view.versionsUnfolded === item.key, onUnfold: () => { view.versionsUnfolded = item.key; rerender(); },
-    reading: at === undefined || !listed(item)[at] ? undefined : { index: at, text: versionTexts.get(textKey(listed(item)[at].hash)) ?? 'reading' }, onRead: read, onMakeCurrent: makeCurrent });
+    changes: skill.versionChanges, reading, now: Date.now(), onRead: read, onMakeCurrent: makeCurrent });
 }
 
 /**
@@ -1955,13 +1970,14 @@ function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
     h('div.details-head', {},
       // The Files view's pane says it under the skill's name; the row already shows the description.
       inFiles ? null : h('p.details-status', {}, switchStatus(skill)),
+      // An agent's description whole: the closed row cuts it.
+      kind === 'agents' && skill.description ? h('p.details-description.details-description-whole', {}, skill.description) : null,
       kind === 'mcp' && skill.description ? definition(skill.description, skill.managed) : null,
       partNote(skill),
       kind === 'skills' && !skill.gone ? outsideNote(skill) : null,
       files ? h('div.details-actions', {}, files) : null),
     // Agents: what is kept the same, and what stays each harness's own (AGT-01).
-    kind === 'agents' && toolList().length > 1 ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'),
-      'Central Knot keeps the name, description and prompt the same in every tool. Each tool’s other settings stay in its own file, and each decides how to run the agent.') : null,
+    kind === 'agents' && toolList().length > 1 ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), 'Name, description and prompt are the same in every tool; other settings stay in each tool’s file.') : null,
     // A copy outside Central Knot's own (a link, the shared copy) is said in the note above, and its path under Where each copy is.
     (skill.extra ?? []).some(extra => !extra.outside) ? h('div.details-extra', {}, (skill.extra ?? []).filter(extra => !extra.outside).map(extra => h('p.details-extra-line', {}, icon(extra.same ? 'check' : 'diff', 12, extra.same ? 'tone-muted' : 'tone-warning'),
       `${names[extra.tool]} also reads ${extra.same ? 'the same copy' : 'a different copy'} at `, h('span.details-path', { title: extra.directory }, shownPath(extra.directory)),

@@ -89,10 +89,13 @@ const storeOwn = (context: ShareContext, key: string, text: string) => storeOnce
 
 /** Versions a migration made that no writer has stored yet (openLibrary), by where they will be stored. */
 const notStoredYet = new Map<string, SharedAgent>();
+/** Versions read once, by where they are stored: a version's file is named by its content, so it never changes. */
+const readBefore = new Map<string, SharedAgent>();
 /** A version's content, or undefined when the store no longer has it. */
 export async function readVersion(context: ShareContext, key: string, hash: string): Promise<SharedAgent | undefined> {
   const path = versionPath(context, key, hash);
-  try { return JSON.parse(await readFile(path, 'utf8')) as SharedAgent; } catch { return notStoredYet.get(path); }
+  if (readBefore.has(path)) return readBefore.get(path);
+  try { const agent = JSON.parse(await readFile(path, 'utf8')) as SharedAgent; readBefore.set(path, agent); return agent; } catch { return notStoredYet.get(path); }
 }
 
 /** The library's shelf for agents (library.ts Shelf): where a version's content goes, and the caller's save of the record. */
