@@ -220,8 +220,8 @@ function blocksFor(entry: Gathered, source: HarnessId, takeOver = true): { tool:
 /** Why a choice cannot be carried out for the tools it syncs to, if it cannot. */
 function choiceProblem(entry: Gathered, use: HarnessId, hash: string | undefined, syncing: HarnessId[], takeOver = true): Pick<DestinationResult, 'message' | 'chooseAgain'> | undefined {
   const copy = entry.facts.copies[use];
-  if (!copy) return { message: `The copy you chose in ${harnesses[use].name} is gone. Nothing was changed; choose again.`, chooseAgain: true };
-  if (hash !== undefined && copy.hash !== hash) return { message: `The copy you chose in ${harnesses[use].name} has changed since you chose it. Nothing was changed; choose again.`, chooseAgain: true };
+  if (!copy) return { message: `The copy you chose in ${toolNames[use]} is gone. Nothing was changed; choose again.`, chooseAgain: true };
+  if (hash !== undefined && copy.hash !== hash) return { message: `The copy you chose in ${toolNames[use]} has changed since you chose it. Nothing was changed; choose again.`, chooseAgain: true };
   const block = (takeOver ? entry.facts.choiceBlocks[use] : blocksFor(entry, use, false))?.find(entry => syncing.includes(entry.tool));
   return block ? { message: `${cantUse(block.reason, toolNames[use])} Nothing was changed.` } : undefined;
 }
@@ -400,7 +400,7 @@ export async function pruneHistory(context: ShareContext): Promise<Exclude<Histo
  */
 export async function rootProblem(context: ShareContext, tool: HarnessId): Promise<string | undefined> {
   const root = rootOf(context, tool);
-  const name = harnesses[tool].name;
+  const name = toolNames[tool];
   try { if ((await lstat(root)).isSymbolicLink()) return `${name}'s skills folder is a link${await readlink(root).then(target => ` to ${target}`, () => '')}, so Central Knot does not write through it.`; }
   catch (error) { if (errorCode(error) !== 'ENOENT') return `${name}'s skills folder could not be checked.`; }
   // A folder not made yet still lands somewhere: through a linked parent, or where another tool's folder is.
@@ -1031,7 +1031,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
               continue;
             }
             // Spread by sync, not asked for on this skill: a copy outside Central Knot's own stays, and the page offers to remove it.
-            if (!location.copy.writable) { results.push({ item: name, harness: location.tool, outcome: 'held', message: location.copy.outside && !location.copy.outside.pinned ? `${harnesses[location.tool].name} still reads a copy at ${location.copy.directory}. To remove it too, open ${name} on the Skills page and use Delete everywhere.` : untouched(location.tool, location.copy, 'still reads a copy', name) }); continue; }
+            if (!location.copy.writable) { results.push({ item: name, harness: location.tool, outcome: 'held', message: location.copy.outside && !location.copy.outside.pinned ? `${toolNames[location.tool]} still reads a copy at ${location.copy.directory}. To remove it too, open ${name} on the Skills page and use Delete everywhere.` : untouched(location.tool, location.copy, 'still reads a copy', name) }); continue; }
             const late = await rootProblem(context, location.tool);
             if (late) { results.push({ item: name, harness: location.tool, outcome: 'held', message: late }); continue; }
             try {
@@ -2012,7 +2012,7 @@ export async function deleteEverywhere(context: ShareContext, key: string, resum
       if (!own.has(path) && location.copy.hash !== item.hash) { results.push({ item: item.name, harness: location.tool, outcome: 'held', message: `${harnesses[location.tool].name} has a different “${item.name}” that was never synced. It stays.` }); continue; }
       if (!location.copy.writable && !outside) {
         const why = await rootProblem(context, location.tool);
-        results.push({ item: item.name, harness: location.tool, outcome: 'held', message: `${harnesses[location.tool].name} reads a copy at ${path}, inside a skills folder that is a link or another tool’s folder. Central Knot does not change what is in it.${why ? ` ${why}` : ''}` });
+        results.push({ item: item.name, harness: location.tool, outcome: 'held', message: `${untouched(location.tool, location.copy, 'reads a copy', item.name)}${why ? ` ${why}` : ''}` });
         continue;
       }
       const late = outside ? (outside.kind === 'link' ? await rootProblem(context, location.tool) : undefined) : await rootProblem(context, location.tool);

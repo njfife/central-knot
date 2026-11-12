@@ -3,7 +3,7 @@
 // `--flows` runs only the named flows, for working on one; a run that counts has them all.
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
-import { chmodSync, cpSync, existsSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -350,8 +350,8 @@ async function fitsAtMinimum(a, where, again = async () => {}) {
  * question) or 'pane' (a narrow question, as in the Files view's pane: each row's name and Use this copy on one line, what it
  * says under both). In every shape:
  *  - the list reaches the right edge of the question's box, less the close button's room when it is beside the question, so
- *    it grows with the window; an agent's copies in full, when open, sit under the list, as wide as it, each copy's box
- *    running to the copy beside it or to the list's edge;
+ *    it grows with the window; an agent's copies in full, when open, sit under the list, as wide as it, all beside each
+ *    other or all one under the other, each copy's box running to the copy beside it or to the list's edge;
  *  - every row starts what it says where the first row does (a row that can't be chosen too), and Use this copy ends at one edge;
  *  - the close button is over neither the question nor the list, and no row's words spill out.
  * With no copy question open it says so.
@@ -377,6 +377,7 @@ const copyQuestionMisfits = shape => `(() => {
   }
   const copies = all('.compare-copies')[0], blocks = all('.compare-copies > .content-block').map(box);
   if (copies && !(near(box(copies).left, list.left) && near(box(copies).right, list.right) && box(copies).top >= list.bottom)) out.push('the copies in full are not under the list, as wide as it');
+  if (!blocks.every(block => near(block.top, blocks[0].top)) && !blocks.every(block => near(block.left, blocks[0].left))) out.push('the copies in full sit some beside each other and some under');
   // A copy's bordered box (.content) fills its share of the line (.content-block), and the last share on a line ends where the list does.
   blocks.forEach((block, index) => {
     const endsLine = !blocks.some(other => other.top < block.bottom && other.bottom > block.top && other.left >= block.right);
@@ -388,6 +389,16 @@ const copyQuestionMisfits = shape => `(() => {
   return out;
 })()`;
 
+/**
+ * The open copy question's rows as the page words them (matrix.ts compareChoices, copywords.ts), one per row: its quote, the
+ * words tinted in it (those only this copy has), the line under its name, and what choosing it does or why it can't be chosen.
+ * `timed` false leaves the line under the name out, where it goes by when the files happened to be written.
+ */
+const copyQuestionWords = async (a, timed = true) => (await a.run(`[...document.querySelectorAll('.details-differs .version')].map(row => {
+  const said = part => row.querySelector(part)?.textContent ?? '';
+  return { quote: said('.version-text'), tinted: [...row.querySelectorAll('.change-added')].map(mark => mark.textContent), under: said('.version-meta'), does: said('.version-effect') };
+})`)).map(({ under, ...row }) => (timed ? { ...row, under } : row));
+
 /** In the Files view's two columns: how far the file's column runs past the file's own box, as a misfit; empty when it ends with it. */
 const FILE_COLUMN_BLANK = `(() => {
   const column = document.querySelector('.detail-files').getBoundingClientRect(), file = document.querySelector('.detail-files .content').getBoundingClientRect();
@@ -395,11 +406,13 @@ const FILE_COLUMN_BLANK = `(() => {
 })()`;
 
 /**
- * The copy question of the skill `key`, open under its row: its shape at each window size, then in the Files view's pane (where
- * Read both copies leads), with nothing cut off. The pane is narrow at 1728×1117; at 2560×1440 the file's column stops at the
- * file's box and the question takes the rest. It ends back on the table at full size, the question still open.
+ * The copy question of the skill `key`, open under its row: what its rows say (`words`), its shape at each window size, then in
+ * the Files view's pane (where Read both copies leads), with nothing cut off. The pane is narrow at 1728×1117; at 2560×1440 the
+ * file's column stops at the file's box and the question takes the rest. It ends back on the table at full size, the question
+ * still open.
  */
-async function copyQuestionFits(a, key) {
+async function copyQuestionFits(a, key, words) {
+  same('each row quotes its copy’s first line, in quotation marks, and says what choosing it does', await copyQuestionWords(a, false), words);
   for (const [width, height, shape] of [[860, 560, 'under'], [1280, 800, 'under'], [1728, 1117, 'beside'], [2560, 1440, 'beside']]) {
     await sizeTo(a, width, height);
     same(`at ${width}×${height} the copy question’s list is ${shape} the question, as wide as its box, clear of the close button, nothing cut off`, [...await a.run(copyQuestionMisfits(shape)), ...await a.run(CUT_OFF)], []);
@@ -414,23 +427,44 @@ async function copyQuestionFits(a, key) {
 }
 
 /**
- * An agent's copy question with Read both copies open: the two prompts in full sit under the list, as wide as it, stacked or
- * (wide) with the question beside the list. The agent is the check's own: it is taken out again.
+ * An agent's copy question, three copies of one long line: Claude Code's stops where Copilot CLI's and Codex's each add a
+ * sentence of their own, and each was edited on a day of its own.
+ *  - Its rows' words: every row quotes the same stretch of the line (so the copy that stops sooner is seen to), a copy's own
+ *    words are tinted as one piece, the line under each name gives its size and when it was edited, the latest marked.
+ *  - With Read every copy open, the three prompts in full sit under the list, as wide as it, one under the other until all
+ *    three fit beside each other (at 2560×1440), never two beside and one under.
+ * The agent is the check's own: it is taken out again.
  */
 async function agentCopiesUnderTheList(a, practice) {
-  const files = { '.claude/agents/changelog.md': 'Claude Code', '.copilot/agents/changelog.agent.md': 'Copilot CLI' };
-  for (const [file, tool] of Object.entries(files)) { mkdirSync(join(practice, file, '..'), { recursive: true }); writeFileSync(join(practice, file), `---\nname: changelog\ndescription: Keeps the changelog.\n---\n\nKeep the changelog short.\n${tool}’s own wording.\n`); }
+  const line = 'List what changed for the person using the app, newest first, leaving out refactors and test-only changes unless they change what someone sees. One line each.';
+  const prompt = own => `Keep the changelog short.\n${line}${own}\n`;
+  const markdown = own => `---\nname: changelog\ndescription: Keeps the changelog.\n---\n\n${prompt(own)}`;
+  const files = [
+    ['.claude/agents/changelog.md', markdown(''), 9],
+    ['.copilot/agents/changelog.agent.md', markdown(' Say who asked.'), 5],
+    ['.codex/agents/changelog.toml', `name = "changelog"\ndescription = "Keeps the changelog."\ndeveloper_instructions = """\n${prompt(' Link the pull request.')}"""\n`, 2],
+  ];
+  for (const [file, content, daysAgo] of files) {
+    mkdirSync(join(practice, file, '..'), { recursive: true }); writeFileSync(join(practice, file), content);
+    const edited = new Date(Date.now() - daysAgo * 86_400_000); utimesSync(join(practice, file), edited, edited);
+  }
   await a.click('#header-refresh');
   await a.click('#switch-changelog');
+  same('an agent’s rows quote one stretch of a long line, each copy’s own words tinted, with its size and when it was edited under its name', await copyQuestionWords(a), [
+    { quote: '“…change what someone sees. One line each.”', tinted: [], does: 'Replaces Copilot CLI’s copy and Codex’s copy.', under: '3 lines · edited 9 days ago' },
+    { quote: '“…change what someone sees. One line each. Say who asked.”', tinted: ['Say who asked.'], does: 'Replaces Claude Code’s copy and Codex’s copy.', under: '3 lines · edited 5 days ago' },
+    { quote: '“…change what someone sees. One line each. Link the pull request.”', tinted: ['Link the pull request.'], does: 'Replaces Claude Code’s copy and Copilot CLI’s copy.', under: '3 lines · edited 2 days ago · most recent' },
+  ]);
   await a.click('#diff-changelog');
-  check('Read both copies opens each prompt in full', (await a.all('.compare-copies .content', 'e.textContent')).length === 2, await a.text('.details-differs'));
-  for (const [width, height, shape] of [[1280, 800, 'under'], [1728, 1117, 'beside'], [2560, 1440, 'beside']]) {
+  check('Read every copy opens each of the three prompts in full', (await a.all('.compare-copies .content', 'e.textContent')).length === 3, await a.text('.details-differs'));
+  for (const [width, height, shape, copies] of [[1280, 800, 'under', 'one under the other'], [1728, 1117, 'beside', 'one under the other'], [2560, 1440, 'beside', 'beside each other']]) {
     await sizeTo(a, width, height);
-    same(`at ${width}×${height} an agent’s copies in full are under the list and as wide as it, the list ${shape} the question`, [...await a.run(copyQuestionMisfits(shape)), ...await a.run(CUT_OFF)], []);
+    same(`at ${width}×${height} an agent’s three copies in full are under the list and as wide as it, ${copies}, the list ${shape} the question`,
+      [...await a.run(copyQuestionMisfits(shape)), ...await a.run(CUT_OFF), await a.run(`new Set([...document.querySelectorAll('.compare-copies .content')].map(e => Math.round(e.getBoundingClientRect().top))).size`)], [copies === 'beside each other' ? 1 : 3]);
   }
   await fullSize(a);
   await a.click('#close-changelog');
-  for (const file of Object.keys(files)) rmSync(join(practice, file), { force: true });
+  for (const [file] of files) rmSync(join(practice, file), { force: true });
   await a.click('#header-refresh');
   check('the check’s own agent is gone again', !(await rowKeys(a)).includes('changelog'), await rowKeys(a));
 }
@@ -438,16 +472,23 @@ async function agentCopiesUnderTheList(a, practice) {
 /**
  * A copy that can't be chosen, in a question of three rows: Claude Code's copy of `loose` has no frontmatter, which Copilot CLI
  * will not load. Its row stays in the list, in the others' columns, disabled, with why in place of its quote and no Use this
- * copy. The skill is the check's own: it is taken out again, so the practice home is as it was.
+ * copy. Codex's copy has a first line too long for a row: it is cut after a whole word, with "…" inside the quotation marks.
+ * The skill is the check's own: it is taken out again, so the practice home is as it was.
  */
 async function blockedCopyKeepsItsRow(a, practice) {
-  const folders = { '.claude/skills': 'No frontmatter here.\n', '.copilot/skills': text('loose', 'Copilot CLI’s loose notes.'), '.codex/skills': text('loose', 'Codex’s loose notes.') };
+  const folders = { '.claude/skills': 'No frontmatter here.\n', '.copilot/skills': text('loose', 'Copilot CLI’s loose notes.'),
+    '.codex/skills': text('loose', 'Codex’s loose notes run on well past what a row has room to quote: every open question, each decision and who made it, and what is still to do before the next release.') };
   for (const [root, content] of Object.entries(folders)) { mkdirSync(join(practice, root, 'loose'), { recursive: true }); writeFileSync(join(practice, root, 'loose/SKILL.md'), content); }
   await a.click('#header-refresh');
   await a.click('#switch-loose');
-  same('a copy another tool will not load keeps its row: disabled, why it can’t be used said once, and no Use this copy',
-    await a.run(`(() => { const row = document.querySelector('#use-loose-claude-cli'); return [row.disabled, row.querySelector('.version-why').textContent, !!row.querySelector('.version-cta'), document.querySelectorAll('.details-differs .version-cta').length]; })()`),
-    [true, 'Can’t be used: Copilot CLI will not load a skill with no YAML frontmatter.', false, 2]);
+  same('a copy another tool will not load keeps its row, disabled, with no Use this copy; the other two have theirs',
+    await a.run(`[...document.querySelectorAll('.details-differs .version')].map(row => [row.id, row.disabled, !!row.querySelector('.version-cta')])`),
+    [['use-loose-claude-cli', true, false], ['use-loose-copilot-cli', false, true], ['use-loose-codex-cli', false, true]]);
+  same('its row says why it can’t be used, once; a first line too long for its row is cut after a word and says so', await copyQuestionWords(a, false), [
+    { quote: '', tinted: [], does: 'Can’t be used: Copilot CLI will not load a skill with no YAML frontmatter.' },
+    { quote: '“Copilot CLI’s loose notes.”', tinted: [], does: 'Replaces Claude Code’s copy and Codex’s copy.' },
+    { quote: '“Codex’s loose notes run on well past what a row has room to quote: every open question, each decision and who made it, and what is still to…”', tinted: [], does: 'Replaces Claude Code’s copy and Copilot CLI’s copy.' },
+  ]);
   for (const [width, height, shape] of [[860, 560, 'under'], [1728, 1117, 'beside']]) {
     await sizeTo(a, width, height);
     same(`at ${width}×${height} the three rows, one of them not to be chosen, share their columns, ${shape} the question`, [...await a.run(copyQuestionMisfits(shape)), ...await a.run(CUT_OFF)], []);
@@ -544,7 +585,10 @@ async function practiceFlow() {
   check('the switch on a differing row opens the choice instead of turning on', await a.exists('#use-review-copilot-cli') && !(await switchOn(a, 'review')) && readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8') === reviewClaude);
   await a.shot('practice-compare');
   await fitsAtMinimum(a, 'a copy choice open');
-  await copyQuestionFits(a, 'review');
+  await copyQuestionFits(a, 'review', [
+    { quote: '“Read the supplied changes. Explain what changed, what to check, and what is still unknown.”', tinted: [], does: 'Replaces Copilot CLI’s copy; adds it to Codex.' },
+    { quote: '“Read the pull request. List defects first, then missing tests. Ignore style unless it hides a bug.”', tinted: [], does: 'Replaces Claude Code’s copy; adds it to Codex.' },
+  ]);
   await a.click('#use-review-copilot-cli');
   same('the chosen copy is used in every tool, and it is on', [readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8'), readNow(join(practice, '.codex/skills/review/SKILL.md')), await switchOn(a, 'review')], [reviewCopilot, reviewCopilot, true]);
   check('the replaced copy is kept in the store', readdirSync(join(practice, '.central-knot/items/review')).some(revision => readFileSync(join(practice, '.central-knot/items/review', revision, 'SKILL.md'), 'utf8') === reviewClaude));

@@ -24,15 +24,45 @@ test('one word longer than the limit is cut at the limit', () => {
 });
 
 test('an agent’s long line keeps the words only this copy has: it starts a few words before them, with “…” at both ends', () => {
-  const line = `${long} Codex’s own wording goes here, and then the line carries on for a while longer than a row has room for.`;
+  const line = `${long} Codex’s own wording goes here, and then the line carries on for a good while longer than any one row of the list has the room to quote.`;
   const own = line.indexOf('Codex’s own wording');
   const quote = shortQuote('agents', line, own);
-  assert.deepEqual([quote.lead, quote.tail], ['…', '…']);
-  assert.match(quote.words, /^(tied to|the commit|commit or).* Codex’s own wording goes here/);
-  assert.ok(quote.words.length <= QUOTE_LIMIT);
+  // The last word that starts 40 characters or more before them begins it, so a few words lead up to what differs.
+  assert.deepEqual(quote, { lead: '…', words: 'tied to the commit or note it came from. Codex’s own wording goes here, and then the line carries on for a good while longer than any one', tail: '…', start: 163 });
+  assert.ok(own - quote.start >= 40 && quote.words.length <= QUOTE_LIMIT);
   assert.equal(line.slice(quote.start, quote.start + quote.words.length), quote.words, 'start says where the kept words begin');
   // Words of its own near the start need no such move.
   assert.equal(shortQuote('agents', line, 5).lead, '');
+});
+
+test('two copies of one long line are quoted through the same stretch: the one that stops sooner is seen to stop', () => {
+  const longer = `${long} Codex’s own wording.`;
+  const partsAt = longer.indexOf('Codex’s own wording');
+  // The shorter copy has no words of its own: it is quoted where the longer one's words would go.
+  const [short, more] = [shortQuote('agents', long, partsAt), shortQuote('agents', longer, partsAt)];
+  assert.equal(short.start, more.start, 'both rows start at the same word');
+  assert.deepEqual([short.lead, short.tail], ['…', ''], 'the shorter copy is quoted to its end');
+  assert.equal(more.words, `${short.words} Codex’s own wording.`);
+});
+
+test('the word where the copies part is never the part left out, however long it or the word before it is', () => {
+  const before = 'Read the commits since the last tag and write the release notes, grouped as Added, Changed and Fixed,'; // 100 characters
+  const path = `/Users/someone/Library/Caches/${'x'.repeat(20)}`; // 50 characters: it starts within the limit and ends past it
+  const line = `${before} ${path} and then the line carries on for a while longer than a row has room for.`;
+  const quote = shortQuote('agents', line, line.indexOf(path));
+  assert.ok(quote.words.includes(path), 'a word that would run past the limit moves the start instead of being left out');
+  assert.deepEqual([quote.lead, quote.words.length <= QUOTE_LIMIT], ['…', true]);
+  // A long word before it would take the room: the quote starts at the differing word itself.
+  const afterLong = `Start ${'y'.repeat(150)} Mine only, and then the line carries on for a while.`;
+  assert.match(shortQuote('agents', afterLong, afterLong.indexOf('Mine only')).words, /^Mine only, and then/);
+  // A differing word longer than the room is cut at the limit, not dropped.
+  const huge = `${before} ${'z'.repeat(200)} and more.`;
+  const cut = shortQuote('agents', huge, huge.indexOf('zzz'));
+  assert.match(cut.words, /z{90,}$/);
+  assert.deepEqual([cut.tail, cut.words.length <= QUOTE_LIMIT], ['…', true]);
+  // A shorter copy quoted where the other's words would go always has something to quote, even with one long last word.
+  const lastLong = `${before} ${'w'.repeat(60)}`;
+  assert.equal(shortQuote('agents', lastLong, lastLong.length + 1).words, 'w'.repeat(60));
 });
 
 test('an MCP server’s command is never shortened: its row is the only place the question shows it', () => {

@@ -44,7 +44,11 @@ test('The view reports each tool’s copy; neither it nor a catch-up pass with n
     await skill(box.home, CLAUDE, 'twin'); await skill(box.home, COPILOT, 'twin');
     await skill(box.home, CLAUDE, 'plain', 'No frontmatter.\n');
     await skill(box.home, COPILOT, 'cafe', text('café'));
+    const longLine = `A first line ${'that runs on '.repeat(20)}to its end.`;
+    await skill(box.home, CLAUDE, 'wordy', text('wordy', longLine));
     const view = await manageView(ctx(box));
+    // A copy's first line is sent whole: the page decides how much of it a row quotes, and says so when it cuts (copywords.ts shortQuote).
+    assert.equal(view.skills.find(item => item.key === 'wordy')!.copies['claude-cli']!.summary, longLine);
     assert.deepEqual(view.tools, both);
     const only = view.skills.find(item => item.key === 'only-claude')!;
     assert.ok(only.copies['claude-cli'] && !only.copies['copilot-cli']);

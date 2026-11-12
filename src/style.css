@@ -647,12 +647,15 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .compare-choices { grid-area: choices; display: grid; grid-template-columns: [who] fit-content(40%) [says] minmax(0, 1fr) [use] max-content; column-gap: 20px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 .text-action.compare-read { grid-area: read; justify-self: start; margin: 8px 0 0 -6px; font-size: 12.5px; }
 /*
- * An agent's copies in full, as wide as the list. Each copy's box takes a share of that width: side by side where each
- * gets 480px or more (about 63 characters a line), otherwise one under the other; a box alone on its line spans it. A box
- * wider than a file's reading measure (.content's 120ch) keeps its lines to that measure: its right padding takes the rest.
+ * An agent's copies in full, as wide as the list, in equal shares: all side by side where every one gets --copy-least
+ * (about 63 characters a line) or more, otherwise all one under the other, each as wide as the list; never some beside
+ * each other and one under. A box wider than a file's reading measure (.content's 120ch) keeps its lines to that measure:
+ * its right padding takes the rest.
  */
-.compare-copies { grid-area: copies; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 12px; margin: 8px 0 0; max-height: 40vh; overflow: auto; overscroll-behavior: contain; }
-.compare-copies > .content-block { flex: 1 1 480px; min-width: 0; }
+.compare-copies { --copy-least: 480px; --copy-gap: 12px; grid-area: copies; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px var(--copy-gap); margin: 8px 0 0; max-height: 40vh; overflow: auto; overscroll-behavior: contain; }
+/* A copy's basis is nothing when all of them fit on one line, which they then share, and far wider than the line when
+   they don't, so each takes a line of its own. */
+.compare-copies > .content-block { flex: 1 1 calc((sibling-count() * (var(--copy-least) + var(--copy-gap)) - var(--copy-gap) - 100%) * 999); min-width: 0; }
 /* The gap spaces them, side by side or stacked, in place of the margin stacked files have between them (.content-block). */
 .compare-copies > .content-block + .content-block { margin-top: 0; }
 .compare-copies .content { max-width: none; padding-right: max(12px, 100% - 120ch + 12px); }
@@ -684,8 +687,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .details-mcp .version-text { font-style: normal; }
 .version-entry-kind { color: var(--ink-soft); }
 .version-command { font-family: var(--mono); font-size: 11.5px; }
-/* A unit is lower than its line, so the tint of words on one line doesn't run into the next line's. */
-.version-command > .wrap-part { line-height: 16px; }
 .version-cta { grid-column: use; align-self: center; padding: 3px 10px; border: 1px solid var(--control-line); border-radius: 6px; background: var(--surface); font-size: 12px; font-weight: 600; white-space: nowrap; }
 /* A copy that can't be chosen: why (.version-why) where its quote would be, and no Use this copy. */
 .version.version-blocked { opacity: 0.75; cursor: not-allowed; }

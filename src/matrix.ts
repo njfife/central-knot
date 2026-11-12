@@ -726,23 +726,31 @@ function stoppedActions(skill: ItemRow, tool: Tool, source: Tool, where = '') {
  */
 function markedWords(from: string, to: string, keep: 'removed' | 'added'): Child[] {
   const parts = lineDiff(from.split(/(\s+)/).join('\n'), to.split(/(\s+)/).join('\n')).filter(part => part.kind === 'same' || part.kind === keep);
-  // Words marked together are one mark, its spaces at either end left outside it.
-  const runs = parts.reduce<{ marked: boolean; text: string }[]>((all, part) => {
-    const marked = part.kind === keep, last = all.at(-1);
+  // Neighbouring marked words are one mark, the spaces between them inside it and those at either end left outside.
+  const runs = parts.reduce<{ marked: boolean; text: string }[]>((all, part, index) => {
+    const between = !part.text.trim() && parts[index - 1]?.kind === keep && parts[index + 1]?.kind === keep;
+    const marked = part.kind === keep || between, last = all.at(-1);
     if (last?.marked === marked) last.text += part.text; else all.push({ marked, text: part.text });
     return all;
   }, []);
   return runs.flatMap(run => { if (!run.marked) return [run.text]; const [, lead, core, tail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(run.text)!; return [lead, core ? h(`span.change-${keep}`, {}, core) : '', tail].filter(Boolean); });
 }
 
-/** The stretch of marked words (markedWords' strings and marks) that starts at character `start` and is `length` long, its marks kept. */
+/**
+ * The stretch of a marked line that starts at character `start` and is `length` long, each mark kept as it is around what is
+ * left of its words. `parts` are markedWords' strings and marks: their text, joined, is the line character for character,
+ * which is what the offsets rest on.
+ */
 function cutMarked(parts: Child[], start: number, length: number): Child[] {
   let at = 0;
   return parts.flatMap((part): Child[] => {
     const text = part instanceof Node ? part.textContent ?? '' : String(part);
     const kept = text.slice(Math.max(0, start - at), Math.max(0, start + length - at));
     at += text.length;
-    return !kept ? [] : part instanceof Node ? [h('span.change-added', {}, kept)] : [kept];
+    if (!kept || !(part instanceof Node)) return kept ? [kept] : [];
+    const mark = part.cloneNode(false);
+    mark.textContent = kept;
+    return [mark];
   });
 }
 
@@ -756,14 +764,15 @@ function entryWords(summary: string, others: string[]): Child[] {
   const { label, value } = split(summary);
   const nearest = nearestLine(value, others.map(other => split(other).value));
   // Each word is one unit, and so is each folder of a path with the "/" that ends it (a path's first "/" and an address's
-  // "//" stay with what follows): a line breaks only between units.
-  const units = (words: string, marked: boolean) => words.split(/(\s+)/).filter(Boolean).flatMap((word): Child[] => (word.trim() ? word.split(/(?<=[^/:]\/)(?=[^/])/).map(part => h(`span.wrap-part${marked ? '.change-added' : ''}`, {}, part)) : [' ']));
+  // "//" stay with what follows): a line breaks only between units. A run of marked words keeps one mark around its units.
+  const units = (words: string) => words.split(/(\s+)/).filter(Boolean).flatMap((word): Child[] => (word.trim() ? word.split(/(?<=[^/:]\/)(?=[^/])/).map(part => h('span.wrap-part', {}, part)) : [' ']));
   const parts = nearest === undefined ? [value] : markedWords(nearest, value, 'added');
-  return [h('span.version-entry-kind', {}, `${label} · `), h('code.version-command', {}, ...parts.flatMap(part => (part instanceof Node ? units(part.textContent ?? '', true) : units(String(part), false))))];
+  return [h('span.version-entry-kind', {}, `${label} · `), h('code.version-command', {}, ...parts.flatMap(part => (part instanceof Node ? [h('span.change-added', {}, ...units(part.textContent ?? ''))] : units(String(part)))))];
 }
 
 /**
- * What a row of the copy question quotes from one copy, to tell it from the others (copywords.ts shortQuote decides how much):
+ * What a row of the copy question quotes from one copy, to tell it from the others. How much of it is copywords.ts shortQuote's
+ * to decide; cutMarked only carries an agent line's marks across that cut.
  *  - an MCP server: its command or address (entryWords);
  *  - an agent: the first prompt line only this copy has, the words only it has marked against the others' line most like it
  *    (or, with no such line, a line the others have that it lacks); with the same prompt, its description;
@@ -772,7 +781,8 @@ function entryWords(summary: string, others: string[]): Child[] {
 function copyQuote(skill: ItemRow, tool: Tool, others: Tool[]): Child[] | undefined {
   const versions = skill.versions ?? {};
   const text = versions[tool]?.text;
-  if (kind === 'mcp') return text ? entryWords(shortQuote(kind, text).words, others.map(other => versions[other]?.text ?? '')) : undefined;
+  // A command or address is quoted whole: its row is the only place the question shows it.
+  if (kind === 'mcp') return text ? entryWords(text, others.map(other => versions[other]?.text ?? '')) : undefined;
   const inMarks = (said: string) => { const { lead, words, tail } = shortQuote(kind, said); return `“${lead}${words}${tail}”`; };
   const prompt = versions[tool]?.prompt;
   if (prompt !== undefined) {
@@ -782,9 +792,11 @@ function copyQuote(skill: ItemRow, tool: Tool, others: Tool[]): Child[] | undefi
     if (line !== undefined) {
       const nearest = nearestLine(line, theirs.flat());
       const marked = nearest === undefined ? [line] : markedWords(nearest, line, 'added');
-      // Where the words only this copy has start, so a line too long to quote whole keeps them.
-      const own = marked.findIndex(part => part instanceof Node);
-      const { lead, words, tail, start } = shortQuote(kind, line, own < 0 ? 0 : marked.slice(0, own).join('').length);
+      // Where this line parts from the one most like it, so a line too long to quote whole is quoted there: at the words only
+      // this copy has or, having none, where that line's own words would go. Both rows then quote the same stretch of text.
+      const partsAt = (parts: Child[]) => { const at = parts.findIndex(part => part instanceof Node); return at < 0 ? undefined : parts.slice(0, at).join('').length; };
+      const differsAt = partsAt(marked) ?? (nearest === undefined ? undefined : partsAt(markedWords(line, nearest, 'added')));
+      const { lead, words, tail, start } = shortQuote(kind, line, differsAt);
       return [`“${lead}`, ...cutMarked(marked, start, words.length), `${tail}”${further.length ? ` and ${further.length} more ${further.length === 1 ? 'line' : 'lines'}` : ''}`];
     }
     const missing = theirs.flat().find(other => !lines(prompt).includes(other));

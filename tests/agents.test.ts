@@ -872,14 +872,14 @@ test('Undo of a choice of a non-source copy puts the source and its one-way copi
   }
 });
 
-test('A choice of identical copies takes the one with the most fields as the source, whichever tool the card named: Codex’s copy is then one-way (probe G1)', async () => {
+test('A choice of identical copies takes the one with the most fields as the source, whichever tool the choice named: Codex’s copy is then one-way (probe G1)', async () => {
   const box = await sandbox();
   try {
     const source = claudeAgent(undefined, fields);
     await writeFile(join(box.home, '.claude/agents/reviewer.md'), source);
     await writeFile(join(box.home, '.copilot/agents/reviewer.agent.md'), claudeAgent());
     await writeFile(join(box.home, '.codex/agents/reviewer.toml'), codexOwn);
-    // The shared card "Copilot CLI and Claude Code’s copy (the same)" sends Copilot CLI.
+    // The two share one row, "Claude Code and Copilot CLI (same copy)". Here the choice names Copilot CLI's.
     await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: false, use: 'copilot-cli' }]);
     const view = (await agentsView(box.context, tools)).servers[0];
     assert.equal(view.oneWay?.from, 'claude-cli');
@@ -1127,7 +1127,7 @@ test('An agent turned off and turned on again with a choice takes the fullest co
     assert.equal((await readAgentRecord(box.home)).items.reviewer.origin, 'copilot-cli', 'turned off, the record still names its old source');
     await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent(undefined, 'model: opus\n'));
     await writeFile(join(box.home, '.codex/agents/reviewer.toml'), codexOwn);
-    // On again with the card Copilot CLI and Claude Code share, which names Copilot CLI.
+    // On again with the row Claude Code and Copilot CLI share, the choice naming Copilot CLI.
     await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: false, use: 'copilot-cli' }]);
     assert.equal((await readAgentRecord(box.home)).items.reviewer.origin, 'claude-cli');
     assert.equal((await agentsView(box.context, tools)).servers[0].oneWay?.from, 'claude-cli');
@@ -1270,7 +1270,7 @@ test('Choosing the content a synced agent’s source holds keeps that source, wh
       await writeFile(join(box.home, '.codex/agents/reviewer.toml'), codexOwn);
       await applyAgents(box.context, tools, []);
       await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, use }]);
-      assert.equal((await readAgentRecord(box.home)).items.reviewer.origin, 'copilot-cli', `the card named ${use}`);
+      assert.equal((await readAgentRecord(box.home)).items.reviewer.origin, 'copilot-cli', `the choice named ${use}`);
     } finally { await box.cleanup(); }
   }
 });
