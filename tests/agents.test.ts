@@ -481,6 +481,23 @@ inBox('A harness that can’t hold the agent (its name is no file name there) is
   assert.equal((await pass(box)).writes, 0);
 });
 
+inBox('An Off agent is in no tool, so no tool is named as one that can’t take it: its lines say it has no copy there', async box => {
+  await writeFile(join(box.home, '.claude/agents/réviseur.md'), '---\nname: réviseur\ndescription: Relit\n---\n\nRelis.\n');
+  await applyAgents(box.context, tools, [{ key: 'réviseur', managed: true, off: [], seenManaged: false }]);
+  await applyAgents(box.context, tools, [{ key: 'réviseur', managed: false, off: [], seenManaged: true }]);
+  const view = await agentsView(box.context, tools), fact = view.servers.find(agent => agent.key === 'réviseur')!;
+  assert.deepEqual([fact.managed, fact.cannot], [false, {}]);
+  assert.deepEqual(tools.map(tool => harnessIs(fact, view.library!['réviseur'], tool)), ['none', 'none', 'none']);
+});
+
+inBox('Pi has no agents: with Pi among the tools Central Knot manages, an agent goes to the others and nothing is written for Pi', async box => {
+  await write(box, 'claude-cli', claudeAgent());
+  const withPi: HarnessId[] = [...tools, 'pi-cli'];
+  const done = await applyAgents(box.context, withPi, [{ key: 'reviewer', managed: true, off: [], seenManaged: false }]);
+  assert.deepEqual([done.writes, done.results.filter(entry => entry.harness === 'pi-cli')], [2, []]);
+  assert.deepEqual((await agentsView(box.context, withPi)).tools, tools);
+});
+
 inBox('A tool whose agents folder can’t be written says why on its line, pass after pass, instead of promising the agent; once it can be, it gets it', async box => {
   await on(box);
   const folder = join(box.home, '.copilot/agents');

@@ -35,12 +35,13 @@ type ThroughPlugins = Map<HarnessId, Map<string, ThroughPlugin>>;
 interface AgentDisk extends Disk<AgentEntry> { through: ThroughPlugins }
 type AgentLook = Look<SharedAgent, AgentEntry, AgentDisk>;
 
+/** Reads each managed harness's agents folder (`managed`: the harnesses that hold agents, agentKind.harnesses). */
 async function readDisk(context: ShareContext, managed: HarnessId[]): Promise<AgentDisk> {
   const disk: AgentDisk = {
     byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], through: await agentsThroughPlugins(context, managed),
     held: (item, tool) => { const why = cannotTake(disk, managed, item, tool, false); return why ? { why } : undefined; },
   };
-  for (const tool of managed.filter(isAgentTool)) {
+  for (const tool of managed as AgentTool[]) {
     const read = await readAgents(context, tool), folder = agentsFolder(context, tool);
     disk.problems.push(...read.problems);
     const locked = `${nameOf(tool)}’s agents folder can’t be written, so Central Knot can’t change the agent there. `
