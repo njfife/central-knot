@@ -184,7 +184,8 @@ const firstSeenMissingAt = new Map<string, number>();
 /** Whether something missing at `path` may still be a save in progress. Only a pass keeps the clock (Look `settle`). */
 function stillSettling(look: Look, path: string): boolean {
   if (!look.settle) return false;
-  const first = firstSeenMissingAt.get(path) ?? look.settle.clock;
+  // A clock that went back (the system's, or a test's) restarts the window rather than holding it open.
+  const first = Math.min(firstSeenMissingAt.get(path) ?? look.settle.clock, look.settle.clock);
   firstSeenMissingAt.set(path, first);
   if (look.settle.clock - first >= look.settle.ms) return false;
   look.settle.settling = true;

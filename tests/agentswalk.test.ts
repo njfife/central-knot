@@ -1,7 +1,8 @@
 // A seeded random walk over one agent on real files in a temp home: every click the Agents page and History offer
 // (tests/agentclicks.ts), edits, copies and deletions made by hand, Automatic sync off and on, History's days passing, a
 // folder that can't be written during a click, a crash before a write or a removal, a harness uninstalled or left out, and
-// copies that can't be seen. Two agents: a plain one, and one with Claude Code fields and Codex tables of its own.
+// copies that can't be seen, and passes inside a settle window that is not zero. Walked twice: a plain agent, and one with
+// Claude Code fields and Codex tables of its own; beside it, a second agent ("writer") nothing is done to.
 // After every step:
 //   (a) nothing is lost: each file Central Knot wrote over or removed held a content that is a version of the agent, or is
 //       still in a harness. Checked for the step, and for every such content since the walk began;
@@ -9,16 +10,21 @@
 //       managed harness it is not kept out of, and an Off or deleted one has nothing applied anywhere;
 //   (c) every action the page and History offer does something: none is refused as stale, and each changes a file or the record;
 //   (d) from a settled home, Off then On puts every harness's file back byte for byte;
-//   (e) a harness Central Knot doesn't manage is never written or removed from.
+//   (e) a harness Central Knot doesn't manage is never written or removed from;
+//   (f) every click made a History entry, after a crash too, and from a settled home its Undo puts every file back as it was;
+//   (g) each file Central Knot wrote keeps its harness's own part as last seen (not only the shared part);
+//   (h) the second agent is On and its files are as they were in every managed harness.
 // A step that makes a copy unseeable (an unreadable file, a half-written save, its folder away or made again, its harness
-// uninstalled) is made from a settled home, and asserts that the pass turns nothing Off and removes nothing.
+// uninstalled) is made from a settled home, and asserts that the pass turns nothing Off and removes nothing. Two more run
+// passes with a settle window of 2 s on a clock of their own: a copy deleted by hand, and a folder away across three passes
+// (inside the window nothing happens; after it the folder is written afresh, and the folder that comes back takes its place).
 // The walks in SEEDS run in `npm test`. CK_WALKS=<n> runs n more seeds of each agent, from CK_SEED=<n>;
 // CK_ONLY=<seed>[,own] replays one walk, with CK_TRACE=1 step by step.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, mkdir, readFile, rename, rm, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { agentHash, parseAgent } from '../src/agentfiles.ts';
+import { agentHash, agentText, parseAgent } from '../src/agentfiles.ts';
 import { agentClicks, harnessIs, needsChoice, placeOf } from '../src/agentrow.ts';
 import { applyAgents } from '../src/agents.ts';
 import { pruneHistory, readHistory } from '../src/manage.ts';
@@ -39,6 +45,10 @@ const same = (first: unknown, second: unknown) => JSON.stringify(first) === JSON
 const contentOf = (tool: Tool, text: string | undefined) => { const agent = text === undefined ? undefined : parseAgent(tool, 'reviewer', text); return agent ? agentHash(agent) : undefined; };
 /** Each harness's file as a content (its shared part's hash); a file that is no agent has none. */
 const contentsOf = (texts: Record<Tool, string | undefined>) => Object.fromEntries(allTools.map(tool => [tool, contentOf(tool as Tool, texts[tool as Tool])])) as Record<Tool, string | undefined>;
+/** A file's own part: the file with its shared part (name, description, prompt) written over by one fixed agent. */
+const ownOf = (tool: Tool, text: string | undefined) => { try { return text === undefined || !contentOf(tool, text) ? undefined : agentText(tool, { name: 'x', description: 'x', prompt: 'x' }, text); } catch { return undefined; } };
+/** The second agent, which no step touches: its file in each harness. */
+const writerFiles = { 'claude-cli': '.claude/agents/writer.md', 'copilot-cli': '.copilot/agents/writer.agent.md', 'codex-cli': '.codex/agents/writer.toml' } as const;
 
 interface Finding { kind: string; trace: string }
 async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
@@ -58,6 +68,14 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
   const send = (change: Change, more: Partial<ShareContext> = {}) => applyAgents(context(more), tools, [change], syncOn ? {} : { only: new Set(['reviewer']) });
   const readOnly = (tool: Tool, on: boolean) => chmod(join(box.home, files[tool], '..'), on ? 0o555 : 0o755).catch(() => undefined);
   const versionsNow = async () => new Set(((await seen(box, context())).item?.versions ?? []).map(version => version.hash));
+  const writerNow = async () => Object.fromEntries(await Promise.all(allTools.map(async tool => [tool, await readFile(join(box.home, writerFiles[tool as Tool]), 'utf8').catch(() => undefined)] as const)));
+  const historyCount = async () => (await readHistory(context())).filter(event => event.key === 'agent:reviewer').length;
+  /** The second agent's files once it is taken in (h). */
+  let writerAsWritten: Record<string, string | undefined> = {};
+  /** Each harness's own part as Central Knot last saw it: in a managed harness, around a step where it acted (g). */
+  const lastOwn: Partial<Record<Tool, string>> = {};
+  /** A clock for passes with a settle window, far from the real one; each such step moves it on. */
+  let clock = Date.now() + 1e9;
 
   /** (b) on the home as it is, in a trial: two passes; whether the first found nothing to do (no write, nothing held, the agent as it was). */
   const settles = async (when = '') => trial(box, async () => {
@@ -65,6 +83,8 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
     const first = await pass(box, context()), unchanged = record === await recordText();
     const second = await pass(box, context());
     if (second.writes) fail(`(b${when}) a second plain pass writes: ${second.results.map(entry => entry.message).join(' | ').slice(0, 120)}`);
+    const writer = await writerNow();
+    for (const tool of tools) if (writer[tool] !== writerAsWritten[tool]) fail(`(h) the second agent's file in ${tool} is not as it was`);
     const { row, item } = await seen(box, context());
     if (!item) return !first.writes && unchanged;
     for (const tool of tools) {
@@ -81,6 +101,9 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
     await write(box, 'claude-cli', claudeAgent(undefined, ownParts ? claudeOwn : ''));
     if (ownParts) await write(box, 'codex-cli', codexAgent());
     await applyAgents(context(), tools, [agentClicks.on((await seen(box)).row, undefined)]);
+    await writeFile(join(box.home, writerFiles['claude-cli']), claudeAgent('You write docs.\n').replace('name: reviewer', 'name: writer'));
+    await applyAgents(context(), tools, [{ key: 'writer', managed: true, off: [], seenManaged: false }]);
+    writerAsWritten = await writerNow();
     for (let step = 0; step < STEPS && !found.length; step++) {
       const { row, item, fact } = await seen(box, context());
       const place = placeOf(item), held = item && !item.deleted ? item : undefined;
@@ -140,13 +163,36 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
         // With no settle window a folder away is written afresh at once; the folder that comes back takes its place.
         unseen('its folder away', () => rename(folder, `${folder}-away`), async () => { await rm(folder, { recursive: true, force: true }); await rename(`${folder}-away`, folder); });
         unseen('its folder made again', async () => { await rm(folder, { recursive: true }); await mkdir(folder); }, async () => undefined);
+        // With a settle window of 2 s: a copy deleted by hand changes nothing inside it.
+        const waiting = (now: number) => applyAgents({ ...context(), settleMs: 2000 }, tools, [], { now });
+        add(1, { name: `deleted by hand in ${hidden}, passes inside the settle window`, app: true, run: async () => {
+          await rm(fileOf(box, hidden));
+          clock += 1e6;
+          for (const now of [clock, clock + 1000]) {
+            const done = await waiting(now);
+            if (done.writes || !(await seen(box, context())).item?.on) fail(`(settle) a copy deleted inside the settle window ${done.writes ? 'had files written or removed' : 'turned the agent Off'}`);
+          }
+        } });
+        // Its folder away across three passes: nothing inside the window, then written afresh; the folder that comes back takes its place.
+        add(1, { name: `${hidden}'s folder away across passes`, app: true, run: async () => {
+          await rename(folder, `${folder}-away`);
+          try {
+            clock += 1e6;
+            for (const now of [clock, clock + 1000]) if ((await waiting(now)).writes) fail('(settle) a folder away inside the settle window had files written');
+            await waiting(clock + 3000);
+            if (!(await filesOf(box))[hidden]) fail('(settle) a folder away past the settle window was not written afresh');
+            if (!(await seen(box, context())).item?.on) fail('(settle) a folder away turned the agent Off');
+          } finally { await rm(folder, { recursive: true, force: true }); await rename(`${folder}-away`, folder); }
+        } });
       }
 
       const act = pick(acts);
       const blocked = act.app && !act.name.startsWith('unseeable') && process.getuid?.() !== 0 && next() < 0.12 ? pick(tools as Tool[]) : undefined;
       const crash = act.app && !blocked && next() < 0.1 ? pick(['before-remove', 'before-rename'] as const) : undefined;
       trace.push(`${act.name}${blocked ? ` [${blocked} read-only]` : ''}${crash ? ` [crash ${crash}]` : ''}`);
-      const before = await filesOf(box), managedBefore = [...tools];
+      const before = await filesOf(box), managedBefore = [...tools], entriesBefore = await historyCount(), settledBefore = settled;
+      // What the pass of an acting step reads first: each managed harness's own part as it is now.
+      if (act.app) for (const tool of managedBefore as Tool[]) { const own = ownOf(tool, before[tool]); if (own !== undefined && !blocked) lastOwn[tool] = own; }
       let done: unknown, crashed = false;
       if (blocked) await readOnly(blocked, true);
       try { done = await act.run(crash ? { fault: at => { if (at === crash) throw new Error('crash'); } } : {}); }
@@ -168,6 +214,27 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
         if (was) taken.add(was);
       }
       for (const content of taken) if (!versions.has(content) && !here.has(content)) { taken.delete(content); fail('(a) a content Central Knot wrote over or removed is neither a version nor in any harness'); }
+      // (f) Every click has its History entry, a crashed one too; (g) a file Central Knot wrote keeps its harness's own part.
+      const answer = act.click && !crashed ? done as McpResult : undefined;
+      const refused = !!answer && (!!answer.stopped || answer.results.some(entry => entry.unchanged || entry.differs));
+      if (act.click && !refused && await historyCount() === entriesBefore) fail(`(f) ${act.name} made no History entry`);
+      if (act.app) for (const tool of allTools as Tool[]) {
+        const now = after[tool], was = before[tool];
+        if (now === undefined || now === was || !contentOf(tool, now)) continue;
+        const expected = was !== undefined && contentOf(tool, was) ? ownOf(tool, was) : lastOwn[tool];
+        if (expected !== undefined && ownOf(tool, now) !== expected) fail(`(g) ${act.name} wrote ${tool}’s file without its own part as last seen`);
+      }
+      if (act.app) for (const tool of managedBefore.filter(tool => tools.includes(tool)) as Tool[]) { const own = ownOf(tool, after[tool]); if (own !== undefined) lastOwn[tool] = own; }
+      // (f) From a settled home, a click's Undo puts every file back as it was, where the click changed only copies the agent
+      // had: a copy it never had, written over, is kept as a version, and its Undo (a switch) doesn't put that file back.
+      const onlyItsOwn = allTools.every(tool => before[tool as Tool] === after[tool as Tool] || before[tool as Tool] === undefined || contentOf(tool as Tool, before[tool as Tool]) === held?.applied[tool]);
+      if (act.click && settledBefore && !crashed && !blocked && onlyItsOwn && last?.made?.length) {
+        const click = last;
+        await trial(box, async () => {
+          await undo(box, click, context());
+          if (!same(await filesOf(box), before)) fail(`(f) the Undo of ${act.name} left a harness’s file other than it was`);
+        });
+      }
       settled = await settles();
       // (c) Every action offered now does something.
       const offered: { name: string; run: () => Promise<McpResult | McpResult[]> }[] = (await historyActions(box, context())).map(action => ({ name: `History’s ${action.label} on ${action.event.kind}`, run: action.run }));
