@@ -16,7 +16,7 @@ An item Central Knot holds with its versions, On or Off, applied to every manage
 - `agents.ts` agents' `Kind` (`agentKind`), their clicks (`applyAgents`) and page view (`agentsView`) · `agentfiles.ts` each tool's agent file, read and written
 - `agentstore.ts` where agents are kept in `.central-knot/` · `agentmigrate.ts` the record from before the library, made items once · `agentskill.ts` Convert to a Pi skill (a copy, not sync)
 - `libraryrow.ts` a library item's row without the DOM: marks, clicks, sentences in the kind's words · `librarypages.ts` what else a kind gives its page · `versionlist.ts` an opened row's versions
-- `skillswitch.ts` a tool's own switch for a skill: read for its mark, cleared by `skills.ts clearSwitch`, flipped by profiles (`profiles.ts`) and for a plugin's skill (`plugins.ts`)
+- `skillswitch.ts` a tool's own switch for a skill: read for its mark, cleared by `skills.ts clearSwitch`, flipped by profiles and for a plugin's skill
 - **Start:** `library.ts`'s header, then `librarypass.ts`'s. **Examples:** `tests/library.test.ts` (one per row of the rule), `tests/librarypass.test.ts` (a toy kind), `tests/skills.test.ts` and `tests/agents.test.ts` (real files), `tests/skillmigrate.test.ts` and `tests/agentmigrate.test.ts`, `tests/skillsafety.test.ts`, `tests/libraryrow.test.ts`, `tests/agentswalk.test.ts` (the seeded walk, clicking through `tests/agentclicks.ts`; skills' clicks are `tests/skillclicks.ts`).
 
 ## MCP servers, on their own engine
