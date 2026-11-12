@@ -99,11 +99,21 @@ interface Look {
   settle?: { clock: number; ms: number; settling: boolean };
 }
 
-/** Reads the managed harnesses once for `items`, with the folder guards applied to them (guardFolders). */
+/** Reads the managed harnesses once for `items`, with the guards applied to them (forgetUnmanaged, guardFolders). */
 async function lookAt(context: ShareContext, managed: AgentTool[], library: AgentLibrary, items: LibraryItem[], settle?: Look['settle']): Promise<Look> {
   const look: Look = { context, managed, library, disk: await readDisk(context, managed), through: await agentsThroughPlugins(context, managed), foldersNow: {}, settle };
+  forgetUnmanaged(items, managed);
   await guardFolders(look, items);
   return look;
+}
+
+/**
+ * A harness Central Knot doesn't manage now (uninstalled, or left out by the tool choice: toolchoice.ts) changes nothing: what
+ * was applied there is forgotten, so when it is managed again the library wins there, and a copy that differs, or one deleted
+ * meanwhile, is never read as an edit or a deletion by hand.
+ */
+function forgetUnmanaged(items: LibraryItem[], managed: readonly HarnessId[]) {
+  for (const item of items) for (const tool of Object.keys(item.applied) as HarnessId[]) if (!managed.includes(tool)) delete item.applied[tool];
 }
 
 /**
@@ -493,16 +503,11 @@ export async function restoreAgent(context: ShareContext, tools: HarnessId[], ev
 /** One version's content, for the Agents page to show: undefined when the store no longer has it. */
 export const agentVersion = (context: ShareContext, key: string, hash: string) => readVersion(context, key, hash);
 
-/**
- * Forgets what was applied in harnesses Central Knot no longer manages (toolchoice.ts). A harness managed again later starts
- * as one never applied to: the library wins there, and a copy that differs is kept as a version first.
- */
+/** The tool choice's forgetting (toolchoice.ts), at once, so it holds whether or not a pass runs before the tool is back: forgetUnmanaged. */
 export async function forgetAgentCopies(context: ShareContext, managed: readonly HarnessId[]) {
   const { library, problem } = await openLibrary(context, true);
   if (problem) return;
-  for (const item of Object.values(library.items)) {
-    for (const tool of Object.keys(item.applied) as HarnessId[]) if (!managed.includes(tool)) delete item.applied[tool];
-  }
+  forgetUnmanaged(Object.values(library.items), managed);
   await saveLibrary(context.home, library);
 }
 

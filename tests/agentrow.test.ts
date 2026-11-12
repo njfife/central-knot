@@ -37,6 +37,9 @@ test('An On agent’s marks say what the next pass does in each harness', () => 
   const moved = item({ hash: 'c', applied: { 'claude-cli': 'c', 'copilot-cli': 'b' } });
   assert.deepEqual(marks({ 'claude-cli': 'c', 'copilot-cli': 'b' }, moved), ['current', 'gets-it', 'gets-it']);
   assert.match(lineIn({ 'claude-cli': 'b', 'copilot-cli': 'c', 'codex-cli': 'b' }, item(), 'copilot-cli', 'Copilot CLI'), /^Edited in Copilot CLI\. It becomes the current version when sync runs/);
+  // Off, or kept out: the edit still becomes the current version, and then the copy goes.
+  assert.match(lineIn({ 'copilot-cli': 'c' }, item({ on: false }), 'copilot-cli', 'Copilot CLI'), /becomes the current version, then its copy here is removed: the agent is off\.$/);
+  assert.match(lineIn({ 'claude-cli': 'b', 'copilot-cli': 'c', 'codex-cli': 'b' }, item({ except: ['copilot-cli'] }), 'copilot-cli', 'Copilot CLI'), /reaches the other tools, then its copy here is removed: the agent is kept out of this tool\.$/);
 });
 
 test('Two edits no pass has taken in yet: only the latest is marked as the one that becomes current; the other is written over', () => {

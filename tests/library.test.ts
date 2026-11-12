@@ -18,9 +18,11 @@ test('On, H changed while L = A: H becomes the current version', () => assert.eq
 test('On, H changed and L moved on too: the latest wins', () => assert.equal(decide(ON, 'c', has('b'), 'a'), 'latest-wins'));
 test('On, a copy where nothing was applied: kept as a version, then L is written', () => assert.equal(decide(ON, 'b', has('x'), undefined), 'keep-then-write'));
 test('On, the copy is gone where one was applied: the item turns Off everywhere', () => assert.equal(decide(ON, 'b', none, 'b'), 'turn-off'));
-test('Off or excepted, H = A: removed', () => assert.equal(decide(OFF, 'b', has('b'), 'b'), 'remove'));
-test('Off or excepted, H changed: kept as a version, then removed', () => assert.equal(decide(OFF, 'b', has('c'), 'b'), 'keep-then-remove'));
-test('Off or excepted, a copy where nothing was applied: a found copy, left alone', () => assert.equal(decide(OFF, 'b', has('x'), undefined), 'found'));
+test('Off or kept out, H = A: removed', () => assert.equal(decide(OFF, 'b', has('b'), 'b'), 'remove'));
+test('Off or kept out, H = L though A is older: removed (it holds the current version: nothing to take in)', () => assert.equal(decide(OFF, 'b', has('b'), 'a'), 'remove'));
+test('Off or kept out, H changed while L = A: H becomes the current version, then it is removed', () => assert.equal(decide(OFF, 'b', has('c'), 'b'), 'take-in'));
+test('Off or kept out, H changed and L moved on too: the latest wins, then it is removed', () => assert.equal(decide(OFF, 'c', has('b'), 'a'), 'latest-wins'));
+test('Off or kept out, a copy where nothing was applied: a found copy, left alone', () => assert.equal(decide(OFF, 'b', has('x'), undefined), 'found'));
 
 test('H unknown is never H gone: nothing happens there, On or Off, whatever was applied', () => {
   for (const wanted of [ON, OFF]) for (const applied of ['b', 'a', undefined]) assert.equal(decide(wanted, 'b', unknown, applied), 'nothing');
@@ -86,10 +88,20 @@ test('A copy deleted in one harness and edited in another: the edit becomes the 
     { ...quiet, takeIn: 'claude-cli', turnedOffBy: 'copilot-cli', remove: ['claude-cli', 'codex-cli'], forget: ['copilot-cli'], current: [] });
 });
 
-test('Off: copies as applied are removed, a changed one is kept first, one never applied is a found copy', () => {
+test('Off: copies as applied are removed; an edit no pass took in becomes the current version first; one never applied is a found copy', () => {
   const off = item({ on: false, applied: { 'claude-cli': 'a', 'copilot-cli': 'a' } });
   assert.deepEqual(plan(off, { 'claude-cli': has('a'), 'copilot-cli': has('b', time(2)), 'codex-cli': has('x') }),
-    { ...quiet, keep: [{ harness: 'copilot-cli', from: { how: 'edited', harness: 'copilot-cli' } }], remove: ['claude-cli', 'copilot-cli'], found: ['codex-cli'], current: [] });
+    { ...quiet, takeIn: 'copilot-cli', remove: ['claude-cli', 'copilot-cli'], found: ['codex-cli'], current: [] });
+});
+
+test('A single edit is taken in even when its file’s time is older than the current version (a file copied with its time kept)', () => {
+  const since = item({ versions: [{ hash: 'a', at: day(5), from: { how: 'found', harness: 'claude-cli' } }] });
+  assert.equal(plan(since, { 'claude-cli': has('a'), 'codex-cli': has('b', time(2)) }).takeIn, 'codex-cli');
+});
+
+test('A harness kept out with an edit no pass took in: the edit becomes the current version and reaches the others; its copy is removed', () => {
+  assert.deepEqual(plan(item({ except: ['codex-cli'] }), { 'claude-cli': has('a'), 'copilot-cli': has('a'), 'codex-cli': has('b', time(2)) }),
+    { ...quiet, takeIn: 'codex-cli', write: ['claude-cli', 'copilot-cli'], remove: ['codex-cli'], current: [] });
 });
 
 test('A harness the person keeps it out of loses its copy; the others stay', () => {

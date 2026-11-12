@@ -154,6 +154,18 @@ inBox('A harness managed again: the library wins, and the copy it held is a vers
   assert.deepEqual(await versions(box), ['Edit away. (was in Codex)', 'Be brief. (found in Claude Code) *']);
 });
 
+inBox('A harness uninstalled changes nothing: its copy deleted meanwhile, installed again, it gets the agent back and nothing turns Off', async box => {
+  await on(box);
+  const without: HarnessId[] = ['claude-cli', 'copilot-cli'];
+  // Uninstalled (not left out by the tool choice): passes run without it.
+  assert.equal((await applyAgents(box.context, without, [])).writes, 0);
+  await rm(fileOf(box, 'codex-cli'));
+  const back = await pass(box);
+  assert.deepEqual([back.writes, (await itemOf(box))!.on, back.notices], [1, true, []]);
+  assert.match((await readOf(box, 'copilot-cli'))!, /Be brief/);
+  assert.match((await readOf(box, 'codex-cli'))!, /Be brief/);
+});
+
 // ---------- Edits and deletions by hand ----------
 
 inBox('An edit in a harness becomes the current version, from that harness, and reaches the others; its Undo makes the earlier one current', async box => {
@@ -420,17 +432,30 @@ inBox('Delete removes the agent from every harness and leaves a tombstone: a sta
 
 // ---------- A removal never takes content the library doesn't have ----------
 
-inBox('Off with Automatic sync off, after an edit no pass has seen: the edit is a version before its file goes', async box => {
+inBox('Off with Automatic sync off, after an edit no pass has seen: the edit becomes the current version before its file goes, and On brings it back everywhere', async box => {
   await on(box);
   await edit(box, 'codex-cli', 'Edit unseen.');
   // Sync off: the click's pass concerns this agent alone, and no pass ran since the edit.
   const { row, item } = await seen(box);
   const off = await applyAgents(box.context, tools, [{ key: row.key, managed: false, off: item!.except, seenManaged: true }], { only: new Set(['reviewer']) });
   assert.equal(off.writes, 3);
-  assert.deepEqual(await versions(box), ['Edit unseen. (edited in Codex)', 'Be brief. (found in Claude Code) *']);
+  assert.deepEqual(await versions(box), ['Edit unseen. (edited in Codex) *', 'Be brief. (found in Claude Code)']);
+  await turnOn(box);
+  assert.deepEqual(Object.values(await filesOf(box)).map(text => /Edit unseen\./.test(text ?? '')), [true, true, true]);
 });
 
-inBox('An edit saved between the read and the removal stays where it is, and is a version before the next pass removes it', async box => {
+inBox('A harness kept out with an edit no pass has seen: the edit becomes the current version and reaches the others; its copy goes', async box => {
+  await on(box);
+  await edit(box, 'codex-cli', 'Edit unseen.');
+  const { row, item } = await seen(box);
+  await applyAgents(box.context, tools, [{ key: row.key, managed: true, off: ['codex-cli'], seenManaged: true }], { only: new Set(['reviewer']) });
+  assert.deepEqual([await readOf(box, 'codex-cli'), (await versions(box))[0]], [undefined, 'Edit unseen. (edited in Codex) *']);
+  assert.match((await readOf(box, 'claude-cli'))!, /Edit unseen\./);
+  await keepOut(box, 'codex-cli', false);
+  assert.match((await readOf(box, 'codex-cli'))!, /Edit unseen\./);
+});
+
+inBox('An edit saved between the read and the removal stays where it is, and becomes the current version before the next pass removes it', async box => {
   await on(box);
   let saved = false;
   const racing: ShareContext = { ...box.context, fault: step => { if (step === 'before-remove' && !saved) { saved = true; writeFileSync(fileOf(box, 'claude-cli'), claudeAgent('You review code.\nEdit late.\n')); } } };
@@ -438,7 +463,7 @@ inBox('An edit saved between the read and the removal stays where it is, and is 
   assert.match(off.results.find(entry => entry.harness === 'claude-cli')!.message, /changed just now/);
   assert.match((await readOf(box, 'claude-cli'))!, /Edit late\./, 'the save is not lost');
   await pass(box);
-  assert.deepEqual([await readOf(box, 'claude-cli'), await versions(box)], [undefined, ['Edit late. (edited in Claude Code)', 'Be brief. (found in Claude Code) *']]);
+  assert.deepEqual([await readOf(box, 'claude-cli'), await versions(box)], [undefined, ['Edit late. (edited in Claude Code) *', 'Be brief. (found in Claude Code)']]);
 });
 
 // ---------- A crash in the middle ----------
@@ -458,9 +483,10 @@ inBox('A crash before a removal during Off: after restart the agent is Off, ever
   await pass(box);
   assert.deepEqual(await filesOf(box), { 'claude-cli': undefined, 'copilot-cli': undefined, 'codex-cli': undefined });
   assert.equal((await pass(box)).writes, 0);
-  // And On still writes each harness's own file back (the edit that was never taken in is a version, not the current one).
+  // And On writes each harness's own file back, with the edit that was taken in on the way out.
   await turnOn(box);
-  assert.deepEqual([(await filesOf(box))['claude-cli'], (await filesOf(box))['codex-cli']], [before['claude-cli'], before['codex-cli']]);
+  const withEdit = (text: string | undefined) => text!.replace('Be brief.', 'Edit unseen.');
+  assert.deepEqual([(await filesOf(box))['claude-cli'], (await filesOf(box))['codex-cli']], [withEdit(before['claude-cli']), withEdit(before['codex-cli'])]);
 });
 
 inBox('A crash before a write during On, and while an edit is taken in: after restart every content is a version and the next pass settles', async box => {

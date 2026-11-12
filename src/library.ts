@@ -29,11 +29,15 @@
 //   On                  H changed and L moved on                   the latest wins; the other is kept as a version
 //   On                  a copy, no A                               kept as a version, then L is written
 //   On                  no copy, after A                           it was deleted by hand: the item turns Off everywhere
-//   Off, or excepted    H = A                                      removed
-//   Off, or excepted    H changed                                  kept as a version, then removed
-//   Off, or excepted    a copy, no A                               a found copy: left alone
+//   Off, or kept out    H = A, or H = L                            removed
+//   Off, or kept out    H changed, L = A                           H becomes the current version, then it is removed
+//   Off, or kept out    H changed and L moved on                   the latest wins, the other is kept as a version; then removed
+//   Off, or kept out    a copy, no A                               a found copy: left alone
 //
-// `plan` applies the table to every managed harness of one item at once and says what to keep, write and remove.
+// "H changed" is an edit made in that harness: it flows back into Central Knot whether the item is On or Off there. Of two
+// edits the latest wins: an edit made on the current version (L = A) always counts, one made where L had moved on as well
+// only when it is later than L. `plan` applies the table to every managed harness of one item at once and says what to
+// keep, write and remove.
 //
 // Two promises hold the model together:
 // - H unknown is never H gone. A copy the adapter can't see for sure (unreadable, half saved, inside the settle window,
@@ -124,9 +128,11 @@ export function sourceWords({ how, harness }: Source): string {
  */
 export type HarnessCopy = { is: 'present'; hash: string; at: number } | { is: 'absent' } | { is: 'unknown'; why: string } | { is: 'held'; why: string };
 
-/** The table's results, one per row, and two with nothing left to do: `forget` (a removal that is already done). */
-export type Verdict = 'nothing' | 'write' | 'take-in' | 'latest-wins' | 'keep-then-write' | 'turn-off'
-  | 'remove' | 'keep-then-remove' | 'found' | 'forget';
+/**
+ * The table's results, one per row, and `forget`: a removal owed where the copy is gone already. `take-in` (L = A) and
+ * `latest-wins` (L moved on too) are both an edit in that harness; they differ only in when the edit counts (latestEdit).
+ */
+export type Verdict = 'nothing' | 'write' | 'take-in' | 'latest-wins' | 'keep-then-write' | 'turn-off' | 'remove' | 'found' | 'forget';
 
 /**
  * The rule for one harness (the table above). `wanted`: the item is On and this harness is not excepted (wantedIn).
@@ -137,7 +143,8 @@ export function decide(wanted: boolean, current: string, copy: HarnessCopy, appl
   if (!wanted) {
     if (copy.is === 'absent') return applied === undefined ? 'nothing' : 'forget';
     if (applied === undefined) return 'found';
-    return copy.hash === applied ? 'remove' : 'keep-then-remove';
+    if (copy.hash === applied || copy.hash === current) return 'remove';
+    return applied === current ? 'take-in' : 'latest-wins';
   }
   if (copy.is === 'absent') return applied === undefined ? 'write' : 'turn-off';
   if (copy.hash === current) return 'nothing';
@@ -170,45 +177,45 @@ export type Copies = Partial<Record<HarnessId, HarnessCopy>>;
 
 /**
  * Applies the rule to every managed harness of one item (`copies`: what each holds now, in the harnesses' order).
- * Two things concern the whole item, so they are settled first: which changed copy becomes the current version (the latest
- * one; with equal times, the first harness), and whether a copy deleted by hand turns the item Off. Then each harness
- * follows the table against the item as it will be.
+ * Two things concern the whole item, so they are settled first: which edit becomes the current version (latestEdit), and
+ * whether a copy deleted by hand turns the item Off. Then each harness follows the table against the item as it will be:
+ * there the harness taken in holds the current version, and every other edit has lost to it.
  */
 export function plan(item: LibraryItem, copies: Copies): Plan {
   const harnesses = Object.keys(copies) as HarnessId[];
   const verdict = (state: LibraryItem, harness: HarnessId) => decide(wantedIn(state, harness), state.hash, copies[harness]!, state.applied[harness]);
-  const takeIn = latestEdit(item, copies, harnesses.filter(harness => ['take-in', 'latest-wins'].includes(verdict(item, harness))));
+  const takeIn = latestEdit(item, copies, new Map(harnesses.map(harness => [harness, verdict(item, harness)])));
   const turnedOffBy = harnesses.find(harness => verdict(item, harness) === 'turn-off');
   const taken = takeIn ? (copies[takeIn] as { hash: string }).hash : item.hash;
-  const applied = takeIn ? { ...item.applied, [takeIn]: taken } : item.applied;
-  const after: LibraryItem = { ...item, on: item.on && !turnedOffBy, hash: taken, applied };
+  const after: LibraryItem = { ...item, on: item.on && !turnedOffBy, hash: taken };
   const made: Plan = { takeIn, turnedOffBy, keep: [], write: [], remove: [], forget: [], current: [], found: [] };
   const known = new Set([taken, ...item.versions.map(version => version.hash)]);
   for (const harness of harnesses) {
-    const copy = copies[harness]!, does = verdict(after, harness);
-    // A copy about to be written over or removed is kept first, unless the library has that content already.
+    const copy = copies[harness]!, does = verdict(after, harness), wanted = wantedIn(after, harness);
     const lost = does === 'take-in' || does === 'latest-wins';
-    if (copy.is === 'present' && !known.has(copy.hash) && (lost || does === 'keep-then-write' || does === 'keep-then-remove')) {
+    // A copy about to be written over or removed is kept first, unless the library has that content already.
+    if (copy.is === 'present' && !known.has(copy.hash) && (lost || does === 'keep-then-write')) {
       made.keep.push({ harness, from: { how: does === 'keep-then-write' ? 'was-in' : 'edited', harness } });
       known.add(copy.hash);
     }
-    if (does === 'write' || does === 'keep-then-write' || lost) made.write.push(harness);
-    else if (does === 'remove' || does === 'keep-then-remove') made.remove.push(harness);
+    if (does === 'write' || does === 'keep-then-write' || (lost && wanted)) made.write.push(harness);
+    else if (does === 'remove' || lost) made.remove.push(harness);
     else if (does === 'forget' || does === 'found') made[does].push(harness);
-    else if (does === 'nothing' && copy.is === 'present' && copy.hash === after.hash && wantedIn(after, harness)) made.current.push(harness);
+    else if (does === 'nothing' && copy.is === 'present' && copy.hash === after.hash && wanted) made.current.push(harness);
   }
   return made;
 }
 
 /**
- * Among the harnesses whose copy was edited, the one whose copy becomes the current version: the latest edit. A copy edited
- * where the current version had moved on as well (both changed) only counts when it is later than the current version.
+ * The edit that becomes the current version, among the harnesses whose copy is one (`verdicts`): the latest. An edit made on
+ * the current version (`take-in`) always counts; one made where the current version had moved on as well (`latest-wins`)
+ * only when it is later than the current version.
  */
-function latestEdit(item: LibraryItem, copies: Copies, edited: HarnessId[]): HarnessId | undefined {
+function latestEdit(item: LibraryItem, copies: Copies, verdicts: Map<HarnessId, Verdict>): HarnessId | undefined {
   const at = (harness: HarnessId) => (copies[harness] as { at: number }).at;
   const currentSince = Date.parse(item.versions[currentIndex(item)]?.at ?? '') || 0;
-  const candidates = edited.filter(harness => item.applied[harness] === item.hash || at(harness) > currentSince);
-  return candidates.sort((first, second) => at(second) - at(first))[0];
+  const counts = [...verdicts].filter(([harness, does]) => does === 'take-in' || (does === 'latest-wins' && at(harness) > currentSince));
+  return counts.map(([harness]) => harness).sort((first, second) => at(second) - at(first))[0];
 }
 
 // ---------- Versions ----------

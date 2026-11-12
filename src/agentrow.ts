@@ -8,7 +8,7 @@
 //   found  in a managed harness, not in the library; its switch takes it in
 // What each harness's mark says is the library's plan for the agent (library.ts plan), worked out by agents.ts from the same
 // reading a pass makes (copiesOf), so a mark says what the next pass will do there and never something of its own.
-import { sourceWords, type LibraryItem, type Plan, type Version } from './library.ts';
+import { sourceWords, wantedIn, type LibraryItem, type Plan, type Version } from './library.ts';
 import { dayAndTime } from './model.ts';
 import type { Change, HarnessId, SyncNotice } from './types.ts';
 import { andList, sentence, toolName, toolsPhrase } from './words.ts';
@@ -63,7 +63,11 @@ export function harnessLine(row: AgentRow, item: LibraryItem | undefined, tool: 
   switch (harnessIs(row, item, tool)) {
     case 'current': return 'Has the current version.';
     case 'gets-it': return has ? `Has another copy. It gets the current version when sync runs; ${KEPT_FIRST}.` : 'Gets it when sync runs next.';
-    case 'edited': return `Edited in ${where}. It becomes the current version when sync runs, and reaches the other tools.`;
+    case 'edited': {
+      if (wantedIn(held!, tool as HarnessId)) return `Edited in ${where}. It becomes the current version when sync runs, and reaches the other tools.`;
+      const reaches = held!.on ? ' and reaches the other tools' : '';
+      return `Edited in ${where}. When sync runs it becomes the current version${reaches}, then its copy here is removed: ${held!.on ? 'the agent is kept out of this tool' : 'the agent is off'}.`;
+    }
     case 'deleted': return `Its copy was deleted in ${where}. When sync runs, the agent turns off everywhere; Central Knot keeps it.`;
     case 'leaving': return 'Its copy is removed when sync runs. Central Knot keeps it.';
     case 'own-copy':
