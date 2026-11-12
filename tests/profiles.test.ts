@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { readHistory } from '../src/history.ts';
-import { clearSwitch, restoreSkill } from '../src/skills.ts';
+import { clearSwitch } from '../src/skills.ts';
 import { applyMcp } from '../src/mcp.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { choseProfileInUse, holdsOnWhatIsHere, itemKeyOf, offAfterFailures, planSwitch, switchItems, type SwitchItem } from '../src/profileplan.ts';
