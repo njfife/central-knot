@@ -117,3 +117,8 @@ test('A Pull that changed only Claude Code’s own settings is not one of these 
   assert.equal(isAgentEntry(entry({ settingsFile: { path: '/x', kept: '/y', wrote: 'z' } })), false);
   assert.deepEqual([isAgentEntry(entry({})), isAgentEntry(entry({ key: 'mcp:docs' }))], [true, false]);
 });
+
+test('An action leaves the rest of the agent as it is: one kept out of a tool stays kept out of it', () => {
+  const edit = entry({ kind: 'edit', previous: 'a', winner: { tool: 'codex-cli', hash: 'b' } });
+  assert.deepEqual(offered(edit, item({ except: ['copilot-cli'] })), ['Undo', { key: 'reviewer', on: true, except: ['copilot-cli'], version: 'a' }]);
+});

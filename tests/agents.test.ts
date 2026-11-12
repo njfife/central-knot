@@ -64,6 +64,14 @@ inBox('Writing a version changes only the name, description and prompt: a harnes
   assert.equal(agentText('claude-cli', { name: 'reviewer', description: 'Reviews code', prompt: 'x' }, claude), '---\n# keep me\nname: reviewer\ndescription: Reviews code\nhooks: {PreToolUse: [{matcher: Bash}]}\n---\n\nx');
 });
 
+inBox('The Agents page reads an agent as On or Off, with the tools it is kept out of', async box => {
+  await on(box);
+  await keepOut(box, 'codex-cli');
+  assert.deepEqual([(await seen(box)).fact?.on, (await seen(box)).fact?.except], [true, ['codex-cli']]);
+  await turnOff(box);
+  assert.deepEqual([(await seen(box)).fact?.on, (await seen(box)).fact?.except], [false, ['codex-cli']]);
+});
+
 inBox('A Copilot CLI copy with quoted "name" and "description" keys stays readable after an update', async box => {
   await write(box, 'copilot-cli', '---\n"name": reviewer\n"description": Reviews code\n---\n\nYou review code.\nBe brief.\n');
   await on(box);

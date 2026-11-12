@@ -5,6 +5,8 @@ import assert from 'node:assert/strict';
 import { FOLDED_VERSIONS, rowClicks, foldVersions, harnessIs, madeFrom, needsChoice, placeOf, libraryWords, sentences, statusLine, switchLabel, versionChange, versionSource, type LibraryRow } from '../src/libraryrow.ts';
 import { wordDiff } from '../src/diff.ts';
 import { newItem, plan, type Copies, type LibraryItem } from '../src/library.ts';
+import { anyManaged, kindSource } from '../src/itemrow.ts';
+import type { HomeView, LibraryFacts } from '../src/types.ts';
 
 const { harnessLine, noticeWords, placeTag, said } = sentences(libraryWords.agents);
 
@@ -182,4 +184,25 @@ test('A long versions list folds to its newest four, and says how many more ther
   const versions = (count: number) => Array.from({ length: count }, (_, index) => ({ hash: String(index), at: '2026-11-08T09:20:00.000Z', from: { how: 'edited' as const } }));
   assert.deepEqual([foldVersions(versions(4), false).rest, foldVersions(versions(5), false).rest, foldVersions(versions(5), false).shown.length], [0, 1, FOLDED_VERSIONS]);
   assert.deepEqual([foldVersions(versions(9), true).rest, foldVersions(versions(9), true).shown.length, foldVersions([], false).rest], [0, 9, 0]);
+});
+
+test('A library kind’s rows reach the item pages through itemrow.ts kindSource: On is `managed`, kept out is `off`, once per read', () => {
+  const facts = (key: string, on: boolean, except: LibraryFacts['except'] = []): LibraryFacts => ({ key, name: key, description: '', copies: {}, on, except, cannot: {}, edited: [] });
+  const home = (items: LibraryFacts[]) => ({ manage: { tools, skills: [] }, mcp: { tools, servers: [], claudePending: [] },
+    agents: { tools, items, library: { reviewer: item() } } }) as unknown as HomeView;
+  const read = home([facts('reviewer', true, ['codex-cli']), facts('writer', false)]);
+  const source = kindSource(read, 'agents');
+  assert.deepEqual(source.facts.map(fact => [fact.key, fact.managed, fact.off]), [['reviewer', true, ['codex-cli']], ['writer', false, []]]);
+  assert.deepEqual([source.library?.reviewer.on, source.gone, source.waiting], [true, [], []]);
+  assert.equal(kindSource(read, 'agents').facts, source.facts, 'the same rows for the same read, so a page that caches by them keeps them');
+  assert.deepEqual([anyManaged(read), anyManaged(home([facts('writer', false)]))], [true, false], 'an item On in the library is something the home manages; one Off is not');
+});
+
+test('The sentences that name the item or its copies are in the kind’s words: an agent, and its file', () => {
+  const out = item({ except: ['codex-cli'], applied: { 'claude-cli': 'b', 'copilot-cli': 'b' } });
+  assert.equal(lineIn({ 'claude-cli': 'b', 'copilot-cli': 'b' }, out, 'codex-cli', 'Codex'), 'Kept out of this tool. Central Knot keeps its file for when you turn it on here.');
+  assert.equal(lineIn({ 'claude-cli': 'b', 'copilot-cli': 'b' }, item(), 'codex-cli', 'Codex'), 'Its copy was deleted in Codex. When sync runs, the agent turns off everywhere; Central Knot keeps it.');
+  assert.deepEqual([placeTag(row({}), item({ on: false }), tools)?.title, placeTag(row({ 'codex-cli': 'x' }), undefined, tools)?.title],
+    ['Central Knot keeps this agent and its versions. No tool has it until you turn it on.', 'A tool has this agent; Central Knot doesn’t yet. Turn it on to take it in and put it in every tool.']);
+  assert.equal(noticeWords({ kind: 'deleted', item: 'reviewer', winner: 'codex-cli', losers: [] }).help, 'Put reviewer back in every tool, each file as it was');
 });
