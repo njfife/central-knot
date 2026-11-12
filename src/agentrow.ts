@@ -31,7 +31,7 @@ export interface AgentRow {
 export type Place = 'on' | 'off' | 'found';
 /** The item when the agent is in the library (a deleted one is not: what a harness holds of it is found). */
 export const inLibrary = (item: LibraryItem | undefined) => (item && !item.deleted ? item : undefined);
-export const placeOf = (item: LibraryItem | undefined): Place => { const held = inLibrary(item); return !held ? 'found' : held.on ? 'on' : 'off'; };
+export const placeOf = (item: LibraryItem | undefined): Place => { const inLib = inLibrary(item); return !inLib ? 'found' : inLib.on ? 'on' : 'off'; };
 
 /**
  * What one harness has of an agent, as its mark and its line say it, from the plan:
@@ -45,43 +45,43 @@ export const placeOf = (item: LibraryItem | undefined): Place => { const held = 
 export type HarnessIs = 'current' | 'gets-it' | 'edited' | 'deleted' | 'leaving' | 'own-copy' | 'kept-out' | 'none' | 'cannot' | 'unseen';
 
 export function harnessIs(row: AgentRow, item: LibraryItem | undefined, tool: string): HarnessIs {
-  const held = inLibrary(item), made = row.plan, harness = tool as HarnessId;
+  const inLib = inLibrary(item), made = row.plan, harness = tool as HarnessId;
   if (row.unseen?.[tool]) return 'unseen';
-  if (!held || !made) return row.hashes?.[tool] === undefined ? 'none' : 'own-copy';
+  if (!inLib || !made) return row.hashes?.[tool] === undefined ? 'none' : 'own-copy';
   if (row.cannot?.[tool]) return 'cannot';
   if (made.takeIn === harness) return 'edited';
   if (made.turnedOffBy === harness) return 'deleted';
   const step = (['write', 'remove', 'found', 'current'] as const).find(list => made[list].includes(harness));
   if (step) return ({ write: 'gets-it', remove: 'leaving', found: 'own-copy', current: 'current' } as const)[step];
-  return held.on && held.except.includes(harness) ? 'kept-out' : 'none';
+  return inLib.on && inLib.except.includes(harness) ? 'kept-out' : 'none';
 }
 
 const KEPT_FIRST = 'before it is written over, a copy Central Knot doesn’t have yet is kept as a version';
 
 /** A harness's line in the opened row: what it has, in a sentence. `where` is the harness's name. */
 export function harnessLine(row: AgentRow, item: LibraryItem | undefined, tool: string, where: string): string {
-  const held = inLibrary(item), has = row.hashes?.[tool] !== undefined;
+  const inLib = inLibrary(item), has = row.hashes?.[tool] !== undefined;
   switch (harnessIs(row, item, tool)) {
     case 'current': return 'Has the current version.';
     case 'gets-it': {
       if (!has) return 'Gets it when sync runs next.';
       // While an edit waits elsewhere, a harness with the current version gets that edit; a copy the library lacks is kept first.
       const edit = row.plan?.takeIn, kept = row.plan?.keep.some(entry => entry.harness === tool);
-      const now = row.hashes?.[tool] === held?.hash ? 'Has the current version' : 'Has another copy';
+      const now = row.hashes?.[tool] === inLib?.hash ? 'Has the current version' : 'Has another copy';
       return `${now}. It gets ${edit ? `${toolName(edit)}’s edit` : 'the current version'} when sync runs${kept ? `; ${KEPT_FIRST}` : ''}.`;
     }
     case 'edited': {
-      if (wantedIn(held!, tool as HarnessId)) return `Edited in ${where}. It becomes the current version when sync runs, and reaches the other tools.`;
-      const reaches = held!.on ? ' and reaches the other tools' : '';
-      return `Edited in ${where}. When sync runs it becomes the current version${reaches}, then its copy here is removed: ${held!.on ? 'the agent is kept out of this tool' : 'the agent is off'}.`;
+      if (wantedIn(inLib!, tool as HarnessId)) return `Edited in ${where}. It becomes the current version when sync runs, and reaches the other tools.`;
+      const reaches = inLib!.on ? ' and reaches the other tools' : '';
+      return `Edited in ${where}. When sync runs it becomes the current version${reaches}, then its copy here is removed: ${inLib!.on ? 'the agent is kept out of this tool' : 'the agent is off'}.`;
     }
     case 'deleted': return `Its copy was deleted in ${where}. When sync runs, the agent turns off everywhere; Central Knot keeps it.`;
     case 'leaving': return 'Its copy is removed when sync runs. Central Knot keeps it.';
     case 'own-copy':
-      if (!held) return 'Has it.';
-      return `Has a copy Central Knot didn’t put there. It is left alone while ${held.on ? 'this tool is kept out' : 'the agent is off'}; ${KEPT_FIRST}.`;
+      if (!inLib) return 'Has it.';
+      return `Has a copy Central Knot didn’t put there. It is left alone while ${inLib.on ? 'this tool is kept out' : 'the agent is off'}; ${KEPT_FIRST}.`;
     case 'kept-out': return 'Kept out of this tool. Central Knot keeps its file for when you turn it on here.';
-    case 'none': return held ? 'No copy while it is off.' : 'No copy. Turning it on adds it here.';
+    case 'none': return inLib ? 'No copy while it is off.' : 'No copy. Turning it on adds it here.';
     case 'cannot': return row.cannot![tool]!;
     case 'unseen': return row.unseen![tool]!;
   }
@@ -92,8 +92,8 @@ export const needsChoice = (row: AgentRow, item: LibraryItem | undefined) => !in
 
 /** The agent as it is, as a click that changes nothing: each click below changes one thing of it. */
 function asItIs(row: AgentRow, item: LibraryItem | undefined): Change {
-  const held = inLibrary(item);
-  return { key: row.key, managed: !!held?.on, off: held ? [...held.except] : [], seenManaged: !!held?.on };
+  const inLib = inLibrary(item);
+  return { key: row.key, managed: !!inLib?.on, off: inLib ? [...inLib.except] : [], seenManaged: !!inLib?.on };
 }
 
 /** The clicks an agent's controls send. Each is a types.ts Change, which main.ts's `changes` sanitizer passes on field by field to agents.ts click. */

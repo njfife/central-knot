@@ -54,7 +54,8 @@ async function readDisk(context: ShareContext, managed: AgentTool[]): Promise<Di
   for (const tool of managed) {
     const read = await readAgents(context, tool), folder = agentsFolder(context, tool);
     disk.problems.push(...read.problems);
-    const locked = `${nameOf(tool)}’s agents folder can’t be written, so Central Knot can’t change the agent there. Let it write there (the folder’s permissions) and it does at the next look, or keep the agent out of ${nameOf(tool)}.`;
+    const locked = `${nameOf(tool)}’s agents folder can’t be written, so Central Knot can’t change the agent there. `
+      + `Let it write there (the folder’s permissions) and it does at the next look, or keep the agent out of ${nameOf(tool)}.`;
     if (await exists(folder) && await access(folder, constants.W_OK).then(() => false, () => true)) disk.locked.set(tool, locked);
     for (const key of read.unreadable.keys()) {
       const what = key === '*' ? 'agents folder' : 'file for this agent';
@@ -87,12 +88,21 @@ async function agentsThroughPlugins(context: ShareContext, tools: HarnessId[]): 
   return found;
 }
 
-/** Why a harness with no copy can't be given one, if it can't. Worked out at each look and never stored. */
-function cannotHold(through: ThroughPlugins, item: Pick<LibraryItem, 'key' | 'name'>, tool: HarnessId): string | undefined {
-  const given = through.get(tool)?.get(item.key);
+/**
+ * Why a harness can't take the agent, if it can't: the one place that decides it, worked out at each look and never stored.
+ * Where it has no copy: a plugin brings the agent there, or its name can't be stored there. Where it has one, or none: its
+ * agents folder can't be written. Read by a pass (copyIn: a held copy where it has none) and by the page (rowFacts: also
+ * where the plan writes over or removes its copy). An edit in a folder that can't be written is still read and taken in;
+ * only the writes and removals there wait, and writeCopy and removeCopy say so when they fail.
+ */
+function cannotTake(look: Look, item: Pick<LibraryItem, 'key' | 'name'>, tool: HarnessId, hasCopy: boolean): string | undefined {
+  const given = hasCopy ? undefined : look.through.get(tool)?.get(item.key);
   if (given) return throughPlugin(tool, given, 'agent');
-  const why = nameProblem(item.name);
-  return why && `${nameOf(tool)} can’t store this name (${why}). Rename the agent to use it there.`;
+  const why = hasCopy ? undefined : nameProblem(item.name);
+  // Where to rename it: a tool that has it.
+  const holder = look.managed.find(other => look.disk.byKey.get(item.key)?.[other]);
+  if (why) return `${nameOf(tool)} can’t store this name (${why}). Rename it ${holder ? `in ${nameOf(holder)} ` : ''}to use it there.`;
+  return look.disk.locked.get(tool);
 }
 
 /**
@@ -151,7 +161,7 @@ async function guardFolders(look: Look, items: LibraryItem[]) {
  * H for each managed harness (library.ts HarnessCopy): the one place that says what a harness holds of an agent, read by a
  * pass and by the page. `unknown`, so that nothing happens there: a file that can't be read for sure, a folder away inside the
  * settle window, and a copy missing for less than the settle window (an editor's save moves the file away for a moment).
- * `held`: a harness the agent should be in that can't be given a copy (cannotHold, or its folder can't be written).
+ * `held`: a harness the agent should be in that can't be given a copy (cannotTake).
  */
 function copiesOf(look: Look, item: LibraryItem): Copies {
   const slot = look.disk.byKey.get(item.key) ?? {};
@@ -162,7 +172,7 @@ function copyIn(look: Look, item: LibraryItem, tool: AgentTool, here: AgentEntry
   if (unseen) return { is: 'unknown', why: unseen };
   const path = here?.file ?? fileFor(look.context, tool, item.name);
   if (here) { seenAgain(look, path); return { is: 'present', hash: here.hash, at: here.at }; }
-  const wanted = wantedIn(item, tool), cannot = wanted ? cannotHold(look.through, item, tool) ?? look.disk.locked.get(tool) : undefined;
+  const wanted = wantedIn(item, tool), cannot = wanted ? cannotTake(look, item, tool, false) : undefined;
   if (cannot) return { is: 'held', why: cannot };
   const missing = `${nameOf(tool)}’s file for it is missing just now. If it stays missing, the agent turns off everywhere.`;
   if (wanted && item.applied[tool] !== undefined && stillSettling(look, path)) return { is: 'unknown', why: missing };
@@ -400,7 +410,7 @@ type Refuse = (message: string, more?: Partial<DestinationResult>) => void;
 
 /**
  * One click on an agent, recorded on its item (types.ts Change: `managed` is On, `off` the harnesses it is kept out of); the
- * same pass then applies it. A click that can't be taken is a `held` result and changes nothing.
+ * same pass then applies it. A click that can't be taken is said in the results (`unchanged`) and changes nothing.
  */
 async function click(pass: Pass, change: Change) {
   const known = pass.library.items[change.key];
@@ -619,18 +629,21 @@ async function rowFacts(look: Look, key: string, item: LibraryItem | undefined):
   }
   const cannot: SkillFacts['cannot'] = {}, plugin: NonNullable<SkillFacts['plugin']> = {}, unseen: NonNullable<SkillFacts['unseen']> = {};
   for (const tool of look.managed) { const given = look.through.get(tool)?.get(key); if (given && !slot[tool]) plugin[tool] = given; }
-  const held = item ? copiesOf(look, item) : undefined, made = item && held ? plan(item, held) : undefined;
+  const copiesNow = item ? copiesOf(look, item) : undefined, made = item && copiesNow ? plan(item, copiesNow) : undefined;
+  const tombstone = item ? undefined : look.library.items[key];
   for (const tool of look.managed) {
-    const copy = held?.[tool], locked = look.disk.locked.get(tool);
+    const copy = copiesNow?.[tool], touched = made?.write.includes(tool) || made?.remove.includes(tool);
     if (copy?.is === 'unknown') unseen[tool] = copy.why;
-    if (copy?.is === 'held') cannot[tool] = copy.why;
-    // A copy the plan writes over or removes, in a folder that can't be written: said, so the mark never promises it.
-    if (locked && (made?.write.includes(tool) || made?.remove.includes(tool))) cannot[tool] = locked;
-    if (held) continue;
-    // A found agent: what can't be seen, and where it couldn't be given a copy once taken in.
-    const hidden = unseenIn(look.disk, tool, key), why = slot[tool] ? undefined : cannotHold(look.through, { key, name }, tool);
+    // Why it can't take the agent (cannotTake): a held copy says it; so does a copy the plan writes over or removes, and a
+    // harness a found agent would go to once taken in.
+    const why = copy?.is === 'held' ? copy.why : cannotTake(look, { key, name }, tool, !!slot[tool]);
+    if (why && (copy?.is === 'held' || touched || (!copiesNow && !slot[tool]))) cannot[tool] = why;
+    if (copiesNow) continue;
+    // A found agent: what can't be seen there. One deleted from Central Knot whose copy there is still owed a removal says so.
+    const owed = tombstone?.applied[tool] !== undefined && slot[tool] && look.disk.locked.get(tool);
+    const removedLater = `Central Knot removes this copy once it can write in ${nameOf(tool)}’s agents folder.`;
+    const hidden = unseenIn(look.disk, tool, key) ?? (owed ? removedLater : undefined);
     if (hidden) unseen[tool] = hidden;
-    if (why) cannot[tool] = why;
   }
   // The edits the next pass handles: the one that becomes the current version, and any that give way to it.
   const edited = made ? [made.takeIn, ...made.keep.filter(kept => kept.from.how === 'edited').map(kept => kept.harness)].filter(tool => tool !== undefined) : [];

@@ -384,7 +384,7 @@ inBox('A harness that can’t hold the agent (its name is no file name there) is
   assert.deepEqual([taken.writes, taken.results], [0, []]);
   assert.deepEqual(await readdir(join(box.home, '.copilot/agents')), []);
   const fact = (await agentsView(box.context, tools)).servers.find(agent => agent.key === 'réviseur')!;
-  const why = (tool: string) => `${tool} can’t store this name (é). Rename the agent to use it there.`;
+  const why = (tool: string) => `${tool} can’t store this name (é). Rename it in Claude Code to use it there.`;
   assert.deepEqual([fact.managed, fact.cannot], [true, { 'copilot-cli': why('Copilot CLI'), 'codex-cli': why('Codex') }]);
   assert.equal((await pass(box)).writes, 0);
 });
@@ -402,6 +402,16 @@ inBox('A tool whose agents folder can’t be written says why on its line, pass 
   } finally { await chmod(folder, 0o755); }
   assert.equal((await pass(box)).writes, 1);
   assert.match((await readOf(box, 'copilot-cli'))!, /Be exact\./);
+  // Deleted from Central Knot while the folder can't be written: the row says its copy there goes once it can be.
+  await chmod(folder, 0o555);
+  try {
+    await deleteIt(box);
+    const { row } = await seen(box);
+    assert.match(harnessLine(row, undefined, 'copilot-cli', 'Copilot CLI'), /^Central Knot removes this copy once it can write in Copilot CLI’s agents folder\.$/);
+  } finally { await chmod(folder, 0o755); }
+  await pass(box);
+  assert.equal(await readOf(box, 'copilot-cli'), undefined);
+  await (await historyActions(box)).find(action => action.label === 'Restore')!.run();
   // With no copy there either, nothing is tried pass after pass: its line says why, and no pass reports a failed write.
   await rm(fileOf(box, 'copilot-cli'));
   await chmod(folder, 0o555);
