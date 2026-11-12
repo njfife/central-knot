@@ -161,7 +161,7 @@ function agentButtons(event: HistoryEvent) {
     return control;
   };
   // Restore over an agent of that name made since (a found copy that isn't the restored version): it is kept as a version.
-  const found = own?.label === 'Restore' ? state.home?.agents.servers.find(row => row.key === agentKeyOf(event)) : undefined;
+  const found = own?.label === 'Restore' ? state.home?.agents.items.find(row => row.key === agentKeyOf(event)) : undefined;
   const over = Object.entries(found?.copies ?? {}).filter(([, copy]) => copy && copy.hash !== item?.hash).map(([tool]) => tool);
   const help = own && over.length ? `${own.help}. ${keptOver(event.item, over)}` : own?.help;
   return [own ? link(own.label, help!, `history-${event.id}`) : null,

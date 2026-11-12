@@ -7,6 +7,7 @@ import { DIRECTORY, partOfPage, samePart, versionWord } from './pluginstatus.ts'
 import { takesPlugins } from './presence.ts';
 import { andList, byToolOrder, toolNames as names } from './words.ts';
 import type { HarnessId, HomeView, InstalledPlugin, PartKind, PluginItem, SkillFacts } from './types.ts';
+import { kindSource } from './itemrow.ts';
 
 type Page = keyof typeof partOfPage;
 
@@ -59,7 +60,7 @@ export function pageRows(home: HomeView, page: Page): PageRows {
   const known = memo.get(home) ?? {};
   if (known[page]) return known[page]!;
   const kind = partOfPage[page];
-  const facts = page === 'skills' ? home.manage.skills : page === 'mcp' ? home.mcp.servers : home.agents.servers;
+  const { facts } = kindSource(home, page);
   const byKey = new Map<string, PluginRow>();
   for (const install of home.pluginItems ?? []) for (const item of install.items.filter(entry => entry.kind === kind)) {
     const id = `${install.plugin}@${install.marketName}/${kind === 'mcp' ? item.name : item.name.normalize('NFC').toLowerCase()}`;
@@ -87,7 +88,7 @@ export const pluginItemCount = (home: HomeView, page: Page, tool?: HarnessId): n
  * just went), and a plugin's. None: the page shows its empty state instead.
  */
 export const rowCount = (home: HomeView, page: Page): number =>
-  (page === 'skills' ? home.manage.skills.length + (home.manage.gone?.length ?? 0) : page === 'mcp' ? home.mcp.servers.length + (home.mcp.gone?.length ?? 0) : home.agents.servers.length + (home.agents.gone?.length ?? 0)) + pluginItemCount(home, page);
+  (({ facts, gone }) => facts.length + gone.length)(kindSource(home, page)) + pluginItemCount(home, page);
 
 /** The tools that have this item through the plugin, in column order. */
 export const pluginTools = (row: PluginRow) => (Object.keys(row.copies) as HarnessId[]).sort(byToolOrder);

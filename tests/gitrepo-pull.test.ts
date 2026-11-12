@@ -32,13 +32,13 @@ test('Deletions of an MCP server and an agent wait while Automatic sync is off, 
     assert.deepEqual(await syncState(false), [['planner', 'waits', false], ['docs', 'waits', false]], 'said before Pull, not discovered by it');
     const waited = await pullRepo(second, { syncOn: false });
     assert.equal(waited.pulled, 0);
-    assert.equal(Object.keys((await agentsView(second, tools)).servers[0].copies).length, 2, 'no copy removed while the deletion waits');
+    assert.equal(Object.keys((await agentsView(second, tools)).items[0].copies).length, 2, 'no copy removed while the deletion waits');
     assert.ok((await mcpView(second, tools)).servers.some(server => server.key === 'docs'));
     assert.deepEqual(await syncState(false), [['planner', 'waits', true], ['docs', 'waits', true]]);
     assert.deepEqual(await syncState(true), [['planner', 'ready', true], ['docs', 'ready', true]]);
     const view = live((await pullRepo(second, { syncOn: true })).view);
     assert.deepEqual([view.incoming, view.outgoing], [[], []]);
-    assert.deepEqual([(await mcpView(second, tools)).servers.length, (await agentsView(second, tools)).servers.length], [0, 0]);
+    assert.deepEqual([(await mcpView(second, tools)).servers.length, (await agentsView(second, tools)).items.length], [0, 0]);
     const deleted = (await readHistory(second)).filter(event => event.key === 'agent:planner' && event.kind === 'deleted').at(-1)!;
     assert.equal(deleted.cause, 'pulled', 'Pull did it, said by the entry itself');
     assert.equal((await restoreAgent(second, tools, deleted.id)).stopped, undefined);

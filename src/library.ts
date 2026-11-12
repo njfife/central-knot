@@ -98,6 +98,15 @@ export interface Source { how: 'found' | 'chosen' | 'edited' | 'was-in' | 'pulle
 /** One content an item has had. `at`: when it was made (a harness file's own time for a copy taken in; else the click's), shown beside it. */
 export interface Version { hash: string; at: string; from: Source }
 
+/**
+ * A listed version's note, as the kind works it out (agents.ts changesOf) and its row says it (libraryrow.ts versionChange):
+ * `changed`, the parts of it that differ from the version current before it; `differs`, for a copy that gave way (`was-in`),
+ * the parts that differ from the version written over it. Each part by the kind's word for it ("prompt"). `first`: the first
+ * version, taken alone. `none`: nothing to note (the copy chosen among several: its words say so). `unknown`: a content no
+ * longer kept.
+ */
+export type VersionChange = { changed: string[] } | { differs: string[] } | 'first' | 'none' | 'unknown';
+
 /** One item as Central Knot holds it. The same shape for every kind. */
 export interface LibraryItem {
   kind: ItemKind;

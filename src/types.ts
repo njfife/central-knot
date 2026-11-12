@@ -1,5 +1,4 @@
-import type { VersionChange } from './agentfiles.ts';
-import type { LibraryItem, Plan } from './library.ts';
+import type { LibraryItem, Plan, VersionChange } from './library.ts';
 
 export type HomeMode = 'fixture' | 'custom' | 'actual';
 export type HarnessId = 'claude-cli' | 'copilot-cli' | 'codex-cli' | 'pi-cli' | 'opencode-cli';
@@ -78,7 +77,7 @@ export type SyncGate =
 
 export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** A refusal made before anything was changed, the record included: the click did nothing. */ unchanged?: true; /** A take-over step: a link replaced by a real copy, a tool given its own copy, or the shared copy removed (or, in its Undo, each put back). */ tookOver?: 'link' | 'placed' | 'shared'; /** With `tookOver` 'shared': the folder the copy was removed from. */ folder?: string; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true; /** `held`: waits for Write to Claude Code (MCP-02), as it should (not a failure). */ waits?: true; }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
@@ -89,7 +88,7 @@ export interface DesktopApi {
   writeClaude(names: string[], home: string): Promise<McpResult>;
   /** Undo of Write to Claude Code: entries back to what Claude Code held before. Claude Code must be closed. */
   unwriteClaude(written: ClaudeWrite[], home: string): Promise<McpResult>;
-  applyAgents(changes: Change[], resume: boolean, home: string): Promise<McpResult>;
+  applyAgents(changes: Change[], resume: boolean, home: string): Promise<PassResult>;
   /** The home last opened, else this computer's home (dev builds: the practice copy). */
   startHome(): Promise<HomeView | null>;
   setSync(on: boolean): Promise<HomeView | null>;
@@ -291,14 +290,11 @@ export interface SkillFacts {
    * sentence naming that tool as the page does (copywords.ts cantUse makes it a row's or a result's sentence).
    */
   choiceBlocks: Partial<Record<HarnessId, { tool: HarnessId; reason: string }[]>>;
-  /** Agents: harnesses whose copy can't be seen for sure right now, and why. Nothing changes there until it can. */
-  unseen?: Partial<Record<HarnessId, string>>;
-  /** Agents in the library: what the next pass does in each harness (library.ts plan, from librarypass.ts copiesOf), which the marks say. */
-  plan?: Plan;
-  /** Agents found in a harness, not in the library: their copies differ, so the switch asks which one every harness takes. */
-  differs?: boolean;
-  /** Agents in the library: for each version as library.ts listed orders them, what it changed from the one taken before it. */
-  versionChanges?: VersionChange[];
+  /** A library kind's row (LibraryFacts, as itemrow.ts kindSource gives the page): its `unseen`, `plan`, `differs` and `versionChanges`. */
+  unseen?: LibraryFacts['unseen'];
+  plan?: LibraryFacts['plan'];
+  differs?: LibraryFacts['differs'];
+  versionChanges?: LibraryFacts['versionChanges'];
   /** Skills and MCP servers: tools whose copy is turned off with the tool's own switch. The copy stays there and keeps syncing; the tool doesn't load it. */
   disabled?: HarnessId[];
   /** Skills and MCP servers: why a tool's switch can't be used at all: its settings file can't be read or is in a form Central Knot doesn't edit. */
@@ -344,10 +340,11 @@ export interface ManageView {
 }
 
 /**
- * One skill's change for applyChanges. `managed` and `off` always say how it should be managed afterwards: a caller changing only
- * switches or removals passes the skill's current ones (from its SkillFacts), with `seenManaged`, or it changes those too.
- * For an agent (librarypass.ts click): `managed` is On in Central Knot's library, `off` the harnesses it is kept out of. A field
- * added here reaches an engine only once main.ts's `changes` sanitizer copies it.
+ * One click on an item, as the page sends it to any kind's engine. `managed` and `off` always say how it should be managed
+ * afterwards: a caller changing only switches or removals passes the skill's current ones (from its SkillFacts), with
+ * `seenManaged`, or it changes those too. A library kind's pass reads it as its own click (librarypass.ts ItemClick, made by
+ * itemClick: `managed` is On, `off` the harnesses it is kept out of). A field added here reaches an engine only once main.ts's
+ * `changes` sanitizer copies it.
  */
 export interface Change {
   key: string;
@@ -365,9 +362,9 @@ export interface Change {
   enable?: HarnessId[];
   /** Skills: tools whose copy is removed, kept in History for Restore. A managed skill also stops syncing there. */
   remove?: HarnessId[];
-  /** Agents: the version to make current (its hash), in every harness the agent is on in. */
+  /** A library item: the version to make current (its hash), in every harness the item is on in. */
   version?: string;
-  /** Agents: true deletes it from Central Knot (out of every harness; History can restore it); false restores a deleted one. */
+  /** A library item: true deletes it from Central Knot (out of every harness; History can restore it); false restores a deleted one. */
   deleted?: boolean;
   /** Skills: Delete everywhere for an unmanaged skill: the removed tools' other copies (in ~/.agents/skills) go too. */
   everywhere?: boolean;
@@ -712,6 +709,54 @@ export interface PluginsView {
   suggested?: { source: string; name: string; tools: HarnessId[] }[];
 }
 
+// ---------- A kind on Central Knot's library (library.ts): its page's view ----------
+
+/**
+ * A library kind's page (agents.ts agentsView): every item in the library and every one found in a managed harness, read
+ * the way a pass reads them, so each mark says what the next pass will do. The page reads it through itemrow.ts kindSource.
+ */
+export interface LibraryView {
+  /** The managed harnesses that can hold this kind. */
+  tools: HarnessId[];
+  /** One row per item: in the library (On or Off), or found in a harness. */
+  items: LibraryFacts[];
+  /** Every item in the library by key, deleted ones too, as the library holds it. */
+  library: Record<string, LibraryItem>;
+  access: WriteAccess;
+  gate: SyncGate;
+  /** What could not be read, so it is not offered. */
+  problems: string[];
+  /** What a pass did on its own since the page last read. */
+  notices: SyncNotice[];
+}
+
+/** One row of a library kind's page: what each managed harness holds of the item and, for one in the library, what the next pass does. */
+export interface LibraryFacts {
+  key: string;
+  name: string;
+  description: string;
+  /** Each managed harness's copy. */
+  copies: Partial<Record<HarnessId, ToolCopy>>;
+  /** On (library.ts LibraryItem `on`); false for an item that is Off and for one only found. */
+  on: boolean;
+  /** The harnesses it is kept out of. */
+  except: HarnessId[];
+  /** Why a harness it should be in can't be given a copy (a held copy, or one its plan would write but can't). */
+  cannot: Partial<Record<HarnessId, string>>;
+  /** Harnesses with no copy of their own that have it through a plugin installed there. */
+  plugin?: Partial<Record<HarnessId, ThroughPlugin>>;
+  /** Harnesses whose copy can't be seen for sure right now, and why. Nothing changes there until it can. */
+  unseen?: Partial<Record<HarnessId, string>>;
+  /** Harnesses whose copy holds an edit the next pass takes in, or that gives way to that edit. */
+  edited: HarnessId[];
+  /** In the library: what the next pass does in each harness (library.ts plan, from librarypass.ts copiesOf), which the marks say. */
+  plan?: Plan;
+  /** In the library: for each version as library.ts listed orders them, what it changed. */
+  versionChanges?: VersionChange[];
+  /** Found, not in the library: its copies differ, so the switch asks which one every harness takes. */
+  differs?: boolean;
+}
+
 // ---------- MCP servers ----------
 export interface McpView {
   tools: HarnessId[];
@@ -726,11 +771,15 @@ export interface McpView {
   problems: string[];
   /** What MCP sync did on its own since the page last read. */
   notices: SyncNotice[];
-  /** Agents: every agent in Central Knot's library by key, deleted ones too, as the library holds it. */
-  library?: Record<string, LibraryItem>;
 }
 
-export interface McpResult { stopped?: string; results: DestinationResult[]; writes: number; /** The History events the asked changes made, for their one Undo (ApplyResult.made). */ made?: string[]; notices?: SyncNotice[]; /** A deletion is inside its settle window: look again shortly. */ settling?: boolean;
+/**
+ * What one pass did (librarypass.ts runPass, restore; MCP's engine adds its own: McpResult). `made`: the History entries the
+ * asked changes made, for their one Undo (ApplyResult.made). `outcome: 'held'` on a result is an action not done this time
+ * (DestinationResult), not a held copy.
+ */
+export interface PassResult { stopped?: string; results: DestinationResult[]; writes: number; made?: string[]; notices?: SyncNotice[]; /** A deletion is inside its settle window: look again shortly. */ settling?: boolean }
+export interface McpResult extends PassResult {
   /** What Write to Claude Code wrote, for its Undo: each entry's hash before (null when it was new) and after. */
   claudeWritten?: ClaudeWrite[] }
 export interface ClaudeWrite { name: string; before: string | null; after: string; /** Its History entry ('written'), undone with it. */ event?: string }

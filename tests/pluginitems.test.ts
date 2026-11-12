@@ -104,7 +104,7 @@ test('a copy that can’t be read is said, and neither it nor broken records sto
 const fact = (key: string, copies: Partial<Record<HarnessId, true>>, extra: Partial<SkillFacts> = {}): SkillFacts => ({ key, name: key, description: '', copies: Object.fromEntries(Object.keys(copies).map(tool => [tool, { hash: 'h', directory: '', rootLabel: '', lines: 1, modified: '', summary: '', writable: true, folder: key }])), extra: [], managed: false, off: [], cannot: {}, choiceBlocks: {}, ...extra });
 const install = (tool: HarnessId, extra: Partial<InstalledPlugin> = {}): InstalledPlugin => ({ tool, plugin: 'issue-tracker', marketName: 'm', version: '2.0.0', listed: true, items: [{ kind: 'skill', name: 'triage', description: 'Sorts issues.' }, { kind: 'mcp', name: 'issues', description: '', runs: 'npx -y issues' }], ...extra });
 const piPart: PartsInstall = { source: '/m', marketName: 'm', plugin: 'issue-tracker', tool: 'pi-cli', at: '', digest: '', items: [{ kind: 'skill', name: 'triage', hash: '' }] };
-const homeOf = (skills: SkillFacts[], pluginItems: InstalledPlugin[], parts: PartsInstall[] = []) => ({ manage: { skills }, mcp: { servers: [] }, agents: { servers: [] }, parts, pluginItems }) as unknown as HomeView;
+const homeOf = (skills: SkillFacts[], pluginItems: InstalledPlugin[], parts: PartsInstall[] = []) => ({ manage: { skills }, mcp: { servers: [] }, agents: { items: [] }, parts, pluginItems }) as unknown as HomeView;
 
 test('a page whose last skill was just deleted still has a row: the skill with no copy left, switched off', () => {
   const home = { ...homeOf([], []), manage: { skills: [], gone: [fact('only', {}, { gone: { history: 'e1', at: '', kind: 'deleted' } })] } } as unknown as HomeView;

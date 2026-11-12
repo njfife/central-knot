@@ -1,10 +1,12 @@
-// An agent's row on the Agents page as worked examples on plain values (src/agentrow.ts): where it stands, what each
-// harness's mark says, when its switch asks which copy, and the click each control sends.
+// A library item's row as worked examples on plain values (src/libraryrow.ts), an agent's on the Agents page: where it
+// stands, what each harness's mark says, when its switch asks which copy, and the click each control sends.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FOLDED_VERSIONS, agentClicks, foldVersions, harnessIs, harnessLine, madeFrom, needsChoice, noticeWords, placeOf, placeTag, said, statusLine, switchLabel, versionChange, versionSource, type AgentRow } from '../src/agentrow.ts';
+import { FOLDED_VERSIONS, rowClicks, foldVersions, harnessIs, madeFrom, needsChoice, placeOf, libraryWords, sentences, statusLine, switchLabel, versionChange, versionSource, type LibraryRow } from '../src/libraryrow.ts';
 import { wordDiff } from '../src/diff.ts';
 import { newItem, plan, type Copies, type LibraryItem } from '../src/library.ts';
+
+const { harnessLine, noticeWords, placeTag, said } = sentences(libraryWords.agents);
 
 const tools = ['claude-cli', 'copilot-cli', 'codex-cli'];
 /** "reviewer" On at version 'b', applied to all three harnesses. */
@@ -14,17 +16,17 @@ const item = (changes: Partial<LibraryItem> = {}): LibraryItem => ({ ...newItem(
  * The row agents.ts gives the page for `agent` when the harnesses hold `hashes`: for an agent in the library, its plan from
  * those copies (a harness in `cannot` is held, one in `unseen` unknown, as librarypass.ts copiesOf reads them).
  */
-function row(hashes: AgentRow['hashes'], more: Partial<AgentRow> = {}, agent?: LibraryItem): AgentRow {
+function row(hashes: LibraryRow['hashes'], more: Partial<LibraryRow> = {}, agent?: LibraryItem): LibraryRow {
   const copyOf = (tool: string): Copies[keyof Copies] => (more.unseen?.[tool] ? { is: 'unseen', why: more.unseen[tool]! } : more.cannot?.[tool] ? { is: 'held', why: more.cannot[tool]! }
     : hashes?.[tool] !== undefined ? { is: 'present', hash: hashes[tool]!, at: 0 } : { is: 'absent' });
   const copies: Copies = Object.fromEntries(tools.map(tool => [tool, copyOf(tool)]));
   return { key: 'reviewer', name: 'reviewer', hashes, ...more, ...(agent && !agent.deleted ? { plan: plan(agent, copies) } : {}) };
 }
-const marks = (hashes: AgentRow['hashes'], agent: LibraryItem | undefined, more: Partial<AgentRow> = {}) => tools.map(tool => harnessIs(row(hashes, more, agent), agent, tool));
+const marks = (hashes: LibraryRow['hashes'], agent: LibraryItem | undefined, more: Partial<LibraryRow> = {}) => tools.map(tool => harnessIs(row(hashes, more, agent), agent, tool));
 /** A row and its item, for the functions that take both. */
-const withItem = (hashes: AgentRow['hashes'], agent: LibraryItem) => [row(hashes, {}, agent), agent] as const;
-const markIn = (hashes: AgentRow['hashes'], agent: LibraryItem, tool: string) => harnessIs(row(hashes, {}, agent), agent, tool);
-const lineIn = (hashes: AgentRow['hashes'], agent: LibraryItem | undefined, tool: string, where: string, more: Partial<AgentRow> = {}) => harnessLine(row(hashes, more, agent), agent, tool, where);
+const withItem = (hashes: LibraryRow['hashes'], agent: LibraryItem) => [row(hashes, {}, agent), agent] as const;
+const markIn = (hashes: LibraryRow['hashes'], agent: LibraryItem, tool: string) => harnessIs(row(hashes, {}, agent), agent, tool);
+const lineIn = (hashes: LibraryRow['hashes'], agent: LibraryItem | undefined, tool: string, where: string, more: Partial<LibraryRow> = {}) => harnessLine(row(hashes, more, agent), agent, tool, where);
 
 test('An agent stands in one of three places: on, off (in Central Knot only), or found; a deleted one is found again', () => {
   assert.deepEqual([placeOf(item()), placeOf(item({ on: false })), placeOf(undefined), placeOf(item({ deleted: { at: 'then' } }))], ['on', 'off', 'found', 'found']);
@@ -82,14 +84,14 @@ test('Only a found agent whose copies differ asks which copy; an agent in the li
 test('Each control sends the agent as it is with one thing changed', () => {
   const here = row({ 'claude-cli': 'b' }), agent = item({ except: ['copilot-cli'] });
   const asIs = { key: 'reviewer', managed: true, off: ['copilot-cli'], seenManaged: true };
-  assert.deepEqual(agentClicks.off(here, agent), { ...asIs, managed: false });
-  assert.deepEqual(agentClicks.on(here, item({ on: false, except: ['copilot-cli'] })), { ...asIs, seenManaged: false });
-  assert.deepEqual(agentClicks.inHarness(here, agent, 'codex-cli', true), { ...asIs, off: ['copilot-cli', 'codex-cli'] });
-  assert.deepEqual(agentClicks.inHarness(here, agent, 'copilot-cli', false), { ...asIs, off: [] });
-  assert.deepEqual(agentClicks.makeCurrent(here, agent, 'a'), { ...asIs, version: 'a' });
-  assert.deepEqual(agentClicks.remove(here, agent), { ...asIs, deleted: true });
+  assert.deepEqual(rowClicks.off(here, agent), { ...asIs, managed: false });
+  assert.deepEqual(rowClicks.on(here, item({ on: false, except: ['copilot-cli'] })), { ...asIs, seenManaged: false });
+  assert.deepEqual(rowClicks.inHarness(here, agent, 'codex-cli', true), { ...asIs, off: ['copilot-cli', 'codex-cli'] });
+  assert.deepEqual(rowClicks.inHarness(here, agent, 'copilot-cli', false), { ...asIs, off: [] });
+  assert.deepEqual(rowClicks.makeCurrent(here, agent, 'a'), { ...asIs, version: 'a' });
+  assert.deepEqual(rowClicks.remove(here, agent), { ...asIs, deleted: true });
   // A found agent: taken in, with the copy chosen where they differ, as it was seen.
-  assert.deepEqual(agentClicks.on(row({ 'claude-cli': 'a', 'codex-cli': 'x' }), undefined, 'codex-cli'), { key: 'reviewer', managed: true, off: [], seenManaged: false, use: 'codex-cli', useHash: 'x' });
+  assert.deepEqual(rowClicks.on(row({ 'claude-cli': 'a', 'codex-cli': 'x' }), undefined, 'codex-cli'), { key: 'reviewer', managed: true, off: [], seenManaged: false, use: 'codex-cli', useHash: 'x' });
 });
 
 test('While an edit waits in one tool, the others have the current version and get that edit; the status says so', () => {

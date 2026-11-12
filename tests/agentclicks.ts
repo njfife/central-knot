@@ -1,16 +1,16 @@
 // One agent ("reviewer") in a temp home, and the clicks the Agents page and History send for it, built by the page's own
-// code (src/agentrow.ts agentClicks, src/historyactions.ts). Shared by the tests that replay clicks on real files:
+// code (src/libraryrow.ts rowClicks, src/historyactions.ts). Shared by the tests that replay clicks on real files:
 // agents.test.ts and agentswalk.test.ts.
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { agentClicks, needsChoice, type AgentRow } from '../src/agentrow.ts';
+import { rowClicks, needsChoice, type LibraryRow } from '../src/libraryrow.ts';
 import { agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
 import { agentAction, versionChoices } from '../src/historyactions.ts';
 import type { LibraryItem } from '../src/library.ts';
 import { readHistory } from '../src/manage.ts';
 import type { ShareContext } from '../src/share.ts';
-import type { Change, HarnessId, McpResult, SkillFacts } from '../src/types.ts';
+import type { Change, HarnessId, LibraryFacts, PassResult } from '../src/types.ts';
 
 /** The harnesses of a test home. Which of them Central Knot manages there is the home's own `tools` (sandbox). */
 export const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
@@ -41,26 +41,26 @@ export const historyOf = async (box: Box, context = box.context) => (await readH
 export const pass = (box: Box, context = box.context) => applyAgents(context, box.tools, []);
 
 /** The agent as the Agents page reads it: its row's facts, and its item in the library (deleted or not). */
-export async function seen(box: Box, context = box.context): Promise<{ fact?: SkillFacts; item?: LibraryItem; row: AgentRow }> {
+export async function seen(box: Box, context = box.context): Promise<{ fact?: LibraryFacts; item?: LibraryItem; row: LibraryRow }> {
   const view = await agentsView(context, box.tools);
-  const fact = view.servers.find(entry => entry.key === 'reviewer');
+  const fact = view.items.find(entry => entry.key === 'reviewer');
   const hashes = Object.fromEntries(Object.entries(fact?.copies ?? {}).map(([tool, copy]) => [tool, copy!.hash]));
-  return { fact, item: view.library?.reviewer, row: { key: 'reviewer', name: fact?.name, hashes, plan: fact?.plan, cannot: fact?.cannot, unseen: fact?.unseen, differs: fact?.differs } };
+  return { fact, item: view.library.reviewer, row: { key: 'reviewer', name: fact?.name, hashes, plan: fact?.plan, cannot: fact?.cannot, unseen: fact?.unseen, differs: fact?.differs } };
 }
 export const itemOf = async (box: Box) => (await seen(box)).item;
 
 const send = (box: Box, change: Change, context = box.context) => applyAgents(context, box.tools, [change]);
 /** The row's switch, On. A found agent whose copies differ opens the copy question instead: `choose` answers it. */
-export async function turnOn(box: Box, context = box.context): Promise<McpResult | 'choose'> {
+export async function turnOn(box: Box, context = box.context): Promise<PassResult | 'choose'> {
   const { row, item } = await seen(box, context);
-  return needsChoice(row, item) ? 'choose' : send(box, agentClicks.on(row, item), context);
+  return needsChoice(row, item) ? 'choose' : send(box, rowClicks.on(row, item), context);
 }
-export const choose = async (box: Box, use: Tool, context = box.context) => { const { row, item } = await seen(box, context); return send(box, agentClicks.on(row, item, use), context); };
-export const turnOff = async (box: Box, context = box.context) => { const { row, item } = await seen(box, context); return send(box, agentClicks.off(row, item), context); };
+export const choose = async (box: Box, use: Tool, context = box.context) => { const { row, item } = await seen(box, context); return send(box, rowClicks.on(row, item, use), context); };
+export const turnOff = async (box: Box, context = box.context) => { const { row, item } = await seen(box, context); return send(box, rowClicks.off(row, item), context); };
 /** A harness's own switch in the opened row. */
-export const keepOut = async (box: Box, tool: Tool, out = true, context = box.context) => { const { row, item } = await seen(box, context); return send(box, agentClicks.inHarness(row, item, tool, out), context); };
-export const makeCurrent = async (box: Box, version: string, context = box.context) => { const { row, item } = await seen(box, context); return send(box, agentClicks.makeCurrent(row, item, version), context); };
-export const deleteIt = async (box: Box, context = box.context) => { const { row, item } = await seen(box, context); return send(box, agentClicks.remove(row, item), context); };
+export const keepOut = async (box: Box, tool: Tool, out = true, context = box.context) => { const { row, item } = await seen(box, context); return send(box, rowClicks.inHarness(row, item, tool, out), context); };
+export const makeCurrent = async (box: Box, version: string, context = box.context) => { const { row, item } = await seen(box, context); return send(box, rowClicks.makeCurrent(row, item, version), context); };
+export const deleteIt = async (box: Box, context = box.context) => { const { row, item } = await seen(box, context); return send(box, rowClicks.remove(row, item), context); };
 
 /** Every action History offers for this agent now, with the click that runs it. */
 export async function historyActions(box: Box, context = box.context) {
@@ -72,8 +72,8 @@ export async function historyActions(box: Box, context = box.context) {
   });
 }
 /** A click's Undo (app.ts undoClick): the History action of each entry the click made. */
-export async function undo(box: Box, click: McpResult, context = box.context) {
-  const done: McpResult[] = [];
+export async function undo(box: Box, click: PassResult, context = box.context) {
+  const done: PassResult[] = [];
   for (const id of click.made ?? []) done.push(await restoreAgent(context, box.tools, id));
   return done;
 }

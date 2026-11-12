@@ -80,7 +80,7 @@ test('an MCP server or agent a tool has through a plugin gets no entry or file o
 
     // A name alone could be another server or agent: nothing is claimed until they are on record as that plugin's parts.
     assert.equal((await mcpView(context, tools)).servers.find(item => item.key === 'issues')!.plugin, undefined);
-    assert.equal((await agentsView(context, tools)).servers.find(item => item.key === 'triager')!.plugin, undefined);
+    assert.equal((await agentsView(context, tools)).items.find(item => item.key === 'triager')!.plugin, undefined);
     await put(join(home, '.central-knot/plugin-parts.json'), JSON.stringify({ installs: [{ source: '/markets/team', marketName: 'team', plugin: 'issue-tracker', version: '1.2.0', tool: 'codex-cli', at: '2026-11-10T00:00:00.000Z', digest: 'd',
       items: [{ kind: 'mcp', name: 'issues', hash: 'h' }, { kind: 'agent', name: 'triager', hash: 'h' }] }] }));
 
@@ -91,7 +91,7 @@ test('an MCP server or agent a tool has through a plugin gets no entry or file o
     assert.ok(JSON.parse(await readFile(join(home, '.copilot/mcp-config.json'), 'utf8')).mcpServers.issues, 'the tool without it gets the server');
     assert.equal(await readFile(join(home, '.claude.json'), 'utf8'), '{}\n', 'Claude Code, which has it through the plugin, is not written');
 
-    const agent = (await agentsView(context, tools)).servers.find(item => item.key === 'triager')!;
+    const agent = (await agentsView(context, tools)).items.find(item => item.key === 'triager')!;
     assert.deepEqual([agent.plugin, agent.cannot['claude-cli']], [{ 'claude-cli': { ...from, name: 'triager' } }, 'Claude Code has this agent through the plugin issue-tracker (version 1.2.0), so no separate copy is placed there.']);
     const sorted = await applyAgents(context, tools, [{ key: 'triager', managed: true, off: [] }]);
     assert.equal(sorted.stopped, undefined);

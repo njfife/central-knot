@@ -9,7 +9,7 @@ import { mkdir, readFile, readdir, rename, stat, utimes, writeFile } from 'node:
 import { join } from 'node:path';
 import { agentHash, parseAgent } from '../src/agentfiles.ts';
 import { agentVersion, agentsView } from '../src/agents.ts';
-import { placeOf } from '../src/agentrow.ts';
+import { placeOf } from '../src/libraryrow.ts';
 import { sourceWords } from '../src/library.ts';
 import { readHistory } from '../src/manage.ts';
 import { sha256, type ShareContext } from '../src/share.ts';
@@ -297,7 +297,7 @@ test('Before any pass may write (a reader, or a home that can’t be written), t
     await stoppedAfterAnEdit.build(box);
     const view = await agentsView(box.context, tools);
     const item = view.library!.reviewer;
-    assert.deepEqual([view.servers[0].description, (await agentVersion(box.context, 'reviewer', item.hash))?.prompt], ['Reviews code', 'You review code.\nBe brief.\n']);
+    assert.deepEqual([view.items[0].description, (await agentVersion(box.context, 'reviewer', item.hash))?.prompt], ['Reviews code', 'You review code.\nBe brief.\n']);
     assert.ok(await Promise.all(item.versions.map(version => agentVersion(box.context, 'reviewer', version.hash))).then(texts => texts.every(Boolean)));
     assert.equal(JSON.parse(await readFile(join(box.home, '.central-knot/agents.json'), 'utf8')).formatVersion, 2, 'nothing was written');
   } finally { await box.cleanup(); }

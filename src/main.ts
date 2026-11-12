@@ -554,7 +554,7 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   addCarriedSoon(presentTools(snapshots));
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   // How many items are managed, so the first-close note says truthfully whether anything syncs.
-  lastManagedCount = [...made.manage.skills, ...made.mcp.servers, ...made.agents.servers].filter(fact => fact.managed).length;
+  lastManagedCount = [...made.manage.skills, ...made.mcp.servers].filter(fact => fact.managed).length + made.agents.items.filter(fact => fact.on).length;
   return made;
 }
 

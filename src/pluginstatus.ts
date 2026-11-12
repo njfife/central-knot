@@ -5,6 +5,7 @@ import { groupBy, plural } from './model.ts';
 import { SAFE_NAME, compareVersions, isCommitHash } from './values.ts';
 import { andList, toolNames as names } from './words.ts';
 import { takesPlugins } from './presence.ts';
+import { kindSource } from './itemrow.ts';
 
 /**
  * Tools that can take a plugin's parts as separate items (parts.ts) where the plugin itself can't go: Pi always, Codex and
@@ -179,7 +180,7 @@ export const partOfPage = { skills: 'skill', mcp: 'mcp', agents: 'agent' } as co
 
 /** Whether the home, as last read, still has this part in the tool: a copy removed by hand since is no longer installed there. */
 export function partStillIn(home: Pick<HomeView, 'manage' | 'mcp' | 'agents'>, tool: HarnessId, part: Pick<PartItem, 'kind' | 'name'>): boolean {
-  const { tools, facts } = part.kind === 'skill' ? { tools: home.manage.tools, facts: home.manage.skills } : part.kind === 'mcp' ? { tools: home.mcp.tools, facts: home.mcp.servers } : { tools: home.agents.tools, facts: home.agents.servers };
+  const { tools, facts } = kindSource(home, pageOfPart[part.kind]);
   // A kind the home doesn't read in that tool can't be checked: the part counts as there.
   return !tools.includes(tool) || facts.some(fact => fact.copies[tool] !== undefined && [fact.key, fact.name].some(name => !!name && samePart(part, { kind: part.kind, name })));
 }

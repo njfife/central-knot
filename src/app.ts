@@ -2,7 +2,8 @@ import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
-import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, McpResult, ClaudeWrite, SkillFacts, SyncNotice } from './types.ts';
+import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, McpResult, PassResult, ClaudeWrite, SkillFacts, SyncNotice } from './types.ts';
+import { anyManaged, kindSource } from './itemrow.ts';
 import { caughtUpNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
@@ -78,7 +79,7 @@ export const state = {
   busy: undefined as string | undefined,
   /** What the last click on MCP servers, or Write to Claude Code, did. */
   mcpResult: undefined as McpResult | undefined,
-  agentsResult: undefined as McpResult | undefined,
+  agentsResult: undefined as PassResult | undefined,
   /** What sync and actions did, newest last: read when the History page opens or the home changes (pagedata.ts). */
   history: pageData<HistoryEvent[]>(),
   /** How long History keeps things, for History's intro; read with History's events. */
@@ -308,7 +309,7 @@ export interface Click {
 const kindPages: Record<Kind, { facts: (home: HomeView) => SkillFacts[]; send: (changes: Change[], resume: boolean, home: string) => Promise<ApplyResult | McpResult>; keep: (results: DestinationResult[], notices?: SyncNotice[]) => void }> = {
   skills: { facts: home => home.manage.skills, send: (...args) => api().apply(...args), keep: (results, notices) => { state.applied = { results, harnessWrites: 0, notices }; } },
   mcp: { facts: home => home.mcp.servers, send: (...args) => api().applyMcp(...args), keep: (results, notices) => { state.mcpResult = { results, writes: 0, notices }; } },
-  agents: { facts: home => home.agents.servers, send: (...args) => api().applyAgents(...args), keep: (results, notices) => { state.agentsResult = { results, writes: 0, notices }; } },
+  agents: { facts: home => kindSource(home, 'agents').facts, send: (...args) => api().applyAgents(...args), keep: (results, notices) => { state.agentsResult = { results, writes: 0, notices }; } },
 };
 const factsOf = (kind: Kind) => (state.home ? kindPages[kind].facts(state.home) : []);
 
@@ -509,7 +510,7 @@ const switchPlugins = (ops: PluginOp[], draft: Map<string, PluginOp>, { said, un
 function readFound(view: HomeView, from?: string): string {
   if (!view.manage.tools.length) return noToolsSentence;
   // A plugin's items count as the pages list them.
-  const found = { skills: view.manage.skills.length + pluginItemCount(view, 'skills'), mcp: view.mcp.servers.length + pluginItemCount(view, 'mcp'), agents: view.agents.servers.length + pluginItemCount(view, 'agents') };
+  const found = { skills: view.manage.skills.length + pluginItemCount(view, 'skills'), mcp: view.mcp.servers.length + pluginItemCount(view, 'mcp'), agents: view.agents.items.length + pluginItemCount(view, 'agents') };
   const counts = heldKinds(view).map(kind => plural(found[kind], kindNouns[kind].one, kindNouns[kind].many));
   // A catch-up that copied something has its own Caught up band (tables and the Harnesses list), so it is not "Nothing changed".
   const caught = caughtUpNames(view.manage, new Set(view.manage.notices.map(notice => notice.item))).length > 0;
@@ -517,7 +518,7 @@ function readFound(view: HomeView, from?: string): string {
 }
 
 /** A home just opened, as its band says it: an empty one (no tools, or nothing in them) says only that it opened; the page says the rest. */
-const openedText = (view: HomeView) => (!view.manage.skills.length && !view.mcp.servers.length && !view.agents.servers.length ? `Opened ${view.label}.` : `Opened ${view.label}. ${readFound(view)}`);
+const openedText = (view: HomeView) => (!view.manage.skills.length && !view.mcp.servers.length && !view.agents.items.length ? `Opened ${view.label}.` : `Opened ${view.label}. ${readFound(view)}`);
 
 /** A read said in the status bar: what it found, and in which home. */
 const readSummary = (view: HomeView) => readFound(view, view.label);
@@ -548,7 +549,7 @@ const openHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mod
   const view = await api().selectHome(mode);
   if (view && view.home !== previous?.home) forgetRepoPrompts(true);
   // Sync follows the open home: leaving one with managed items stops its syncing, so the band says so and offers the way back.
-  const left = previous && view && previous.home !== view.home && [...previous.manage.skills, ...previous.mcp.servers, ...previous.agents.servers].some(fact => fact.managed) ? previous : undefined;
+  const left = previous && view && previous.home !== view.home && anyManaged(previous) ? previous : undefined;
   const leftText = left ? ` ${left.label} is not syncing while another home is open.` : '';
   if (!view) { announce(''); return; }
   accept(view);

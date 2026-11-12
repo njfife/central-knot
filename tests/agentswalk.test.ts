@@ -25,14 +25,14 @@ import assert from 'node:assert/strict';
 import { chmod, mkdir, readFile, rename, rm, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { agentHash, agentText, parseAgent } from '../src/agentfiles.ts';
-import { agentClicks, harnessIs, needsChoice, placeOf } from '../src/agentrow.ts';
+import { rowClicks, harnessIs, needsChoice, placeOf } from '../src/libraryrow.ts';
 import { applyAgents } from '../src/agents.ts';
 import { pruneHistory, readHistory } from '../src/manage.ts';
 import { wantedIn } from '../src/library.ts';
 import { DAY_MS } from '../src/model.ts';
 import type { ShareContext } from '../src/share.ts';
 import { chooseTools } from '../src/toolchoice.ts';
-import type { Change, HarnessId, HistoryDays, HistoryEvent, McpResult } from '../src/types.ts';
+import type { Change, HarnessId, HistoryDays, HistoryEvent, PassResult } from '../src/types.ts';
 import { claudeAgent, claudeOwn, codexAgent, fileOf, files, filesOf, historyActions, pass, sandbox, seen, tools as allTools, trial, undo, write, type Tool } from './agentclicks.ts';
 
 /** The walks every `npm test` runs: [seed, with own parts]. */
@@ -58,7 +58,7 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
   const manage = (managed: HarnessId[]) => { tools.splice(0, tools.length, ...allTools.filter(tool => managed.includes(tool))); };
   /** The agent as the record has it, as text: what a click or a pass changed besides files. */
   const recordText = () => readFile(join(box.home, '.central-knot', 'agents.json'), 'utf8').catch(() => '');
-  let days: HistoryDays = 30, marker = 0, syncOn = true, settled = true, last: McpResult | undefined;
+  let days: HistoryDays = 30, marker = 0, syncOn = true, settled = true, last: PassResult | undefined;
   const context = (more: Partial<ShareContext> = {}): ShareContext => ({ ...box.context, historyDays: days, ...more });
   const trace = [`seed ${seed}${ownParts ? ' own' : ''}`];
   const found: Finding[] = [];
@@ -100,7 +100,7 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
   try {
     await write(box, 'claude-cli', claudeAgent(undefined, ownParts ? claudeOwn : ''));
     if (ownParts) await write(box, 'codex-cli', codexAgent());
-    await applyAgents(context(), tools, [agentClicks.on((await seen(box)).row, undefined)]);
+    await applyAgents(context(), tools, [rowClicks.on((await seen(box)).row, undefined)]);
     await writeFile(join(box.home, writerFiles['claude-cli']), claudeAgent('You write docs.\n').replace('name: reviewer', 'name: writer'));
     await applyAgents(context(), tools, [{ key: 'writer', managed: true, off: [], seenManaged: false }]);
     writerAsWritten = await writerNow();
@@ -116,15 +116,15 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
       const acts: Act[] = [];
       const add = (weight: number, act: Act) => { for (let count = 0; count < weight; count++) acts.push(act); };
       const clicks = (weight: number, name: string, change: Change) => add(weight, { name, app: true, click: true, run: more => send(change, more) });
-      if (place === 'on') clicks(4, 'Off', agentClicks.off(row, item));
-      if (place === 'off') clicks(4, 'On', agentClicks.on(row, item));
+      if (place === 'on') clicks(4, 'Off', rowClicks.off(row, item));
+      if (place === 'off') clicks(4, 'On', rowClicks.on(row, item));
       if (place === 'found' && present.length) {
-        if (!needsChoice(row, item)) clicks(4, 'On (take in)', agentClicks.on(row, item));
-        else for (const tool of present.filter(tool => tools.includes(tool))) clicks(2, `choose ${tool}`, agentClicks.on(row, item, tool));
+        if (!needsChoice(row, item)) clicks(4, 'On (take in)', rowClicks.on(row, item));
+        else for (const tool of present.filter(tool => tools.includes(tool))) clicks(2, `choose ${tool}`, rowClicks.on(row, item, tool));
       }
-      if (held?.on) for (const tool of tools) clicks(1, `${held.except.includes(tool) ? 'let in' : 'keep out of'} ${tool}`, agentClicks.inHarness(row, item, tool, !held.except.includes(tool)));
-      for (const version of held?.versions.filter(version => version.hash !== held.hash).slice(0, 3) ?? []) clicks(1, `make current ${version.from.how}`, agentClicks.makeCurrent(row, item, version.hash));
-      if (held) clicks(1, 'Delete', agentClicks.remove(row, item));
+      if (held?.on) for (const tool of tools) clicks(1, `${held.except.includes(tool) ? 'let in' : 'keep out of'} ${tool}`, rowClicks.inHarness(row, item, tool, !held.except.includes(tool)));
+      for (const version of held?.versions.filter(version => version.hash !== held.hash).slice(0, 3) ?? []) clicks(1, `make current ${version.from.how}`, rowClicks.makeCurrent(row, item, version.hash));
+      if (held) clicks(1, 'Delete', rowClicks.remove(row, item));
       for (const action of await historyActions(box, context())) add(2, { name: `History: ${action.label} (${action.event.kind})`, app: true, run: () => action.run() });
       if (last?.made?.length) { const click = last; add(2, { name: 'Undo', app: true, run: () => undo(box, click, context()) }); }
       for (const tool of allTools as Tool[]) {
@@ -209,7 +209,7 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
         await pass(box, context());
         noteOwn(await filesOf(box));
       }
-      last = act.click && !crashed ? done as McpResult : act.app ? undefined : last;
+      last = act.click && !crashed ? done as PassResult : act.app ? undefined : last;
       const after = await filesOf(box), versions = await versionsNow();
       if (process.env.CK_TRACE) {
         const now = (await seen(box, context())).item;
@@ -225,7 +225,7 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
       }
       for (const content of taken) if (!versions.has(content) && !here.has(content)) { taken.delete(content); fail('(a) a content Central Knot wrote over or removed is neither a version nor in any harness'); }
       // (f) Every click has its History entry, a crashed one too; (g) a file Central Knot wrote keeps its harness's own part.
-      const answer = act.click && !crashed ? done as McpResult : undefined;
+      const answer = act.click && !crashed ? done as PassResult : undefined;
       const refused = !!answer && (!!answer.stopped || answer.results.some(entry => entry.unchanged || entry.differs));
       if (act.click && !refused && await historyCount() === entriesBefore) fail(`(f) ${act.name} made no History entry`);
       if (act.app) for (const tool of allTools as Tool[]) {
@@ -248,13 +248,13 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
       }
       settled = await settles();
       // (c) Every action offered now does something.
-      const offered: { name: string; run: () => Promise<McpResult | McpResult[]> }[] = (await historyActions(box, context())).map(action => ({ name: `History’s ${action.label} on ${action.event.kind}`, run: action.run }));
+      const offered: { name: string; run: () => Promise<PassResult | PassResult[]> }[] = (await historyActions(box, context())).map(action => ({ name: `History’s ${action.label} on ${action.event.kind}`, run: action.run }));
       const now = await seen(box, context()), live = now.item && !now.item.deleted ? now.item : undefined;
       const page = (name: string, change: Change) => offered.push({ name: `the page’s ${name}`, run: () => send(change) });
-      if (live) page(live.on ? 'Off' : 'On', live.on ? agentClicks.off(now.row, live) : agentClicks.on(now.row, live));
-      if (live) page('Delete', agentClicks.remove(now.row, live));
-      if (live?.on) for (const tool of tools) page(`switch in ${tool}`, agentClicks.inHarness(now.row, live, tool, !live.except.includes(tool)));
-      for (const [index, version] of (live?.versions ?? []).entries()) if (version.hash !== live!.hash) page(`Make current #${index}`, agentClicks.makeCurrent(now.row, live, version.hash));
+      if (live) page(live.on ? 'Off' : 'On', live.on ? rowClicks.off(now.row, live) : rowClicks.on(now.row, live));
+      if (live) page('Delete', rowClicks.remove(now.row, live));
+      if (live?.on) for (const tool of tools) page(`switch in ${tool}`, rowClicks.inHarness(now.row, live, tool, !live.except.includes(tool)));
+      for (const [index, version] of (live?.versions ?? []).entries()) if (version.hash !== live!.hash) page(`Make current #${index}`, rowClicks.makeCurrent(now.row, live, version.hash));
       for (const action of offered) await trial(box, async () => {
         const record = await recordText(), answers = [await action.run()].flat();
         const refusal = answers.map(answer => answer.stopped ?? answer.results.find(entry => entry.unchanged)?.message).find(Boolean);
@@ -263,9 +263,9 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
       });
       // (d) Off then On, from a settled home: every file byte for byte.
       if (settled && live?.on) await trial(box, async () => {
-        await send(agentClicks.off(now.row, live));
+        await send(rowClicks.off(now.row, live));
         const off = await seen(box, context());
-        await send(agentClicks.on(off.row, off.item));
+        await send(rowClicks.on(off.row, off.item));
         if (!same(after, await filesOf(box))) fail('(d) Off then On left a harness’s file other than it was');
       });
     }
