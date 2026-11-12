@@ -48,8 +48,9 @@
 //
 // "Held" has two reasons, both worked out at each look and never stored: it can't be given the item (a name it can't store, a
 // folder it can't write), or it has the item another way (`anotherWay`: through a plugin; for skills, OpenCode reading Claude
-// Code's folder, a link, or a copy in ~/.agents/skills that Central Knot doesn't own). Only the second lets A go, since
-// Central Knot's copy is not what the harness has.
+// Code's folder while the item is wanted there, a link, or a copy in ~/.agents/skills that Central Knot doesn't own). Only the
+// second lets A go, since Central Knot's copy is not what the harness has. The kind answers (librarypass.ts Disk.held, told
+// where the item is wanted); tests/librarypass.test.ts has a reader on a toy kind.
 //
 // A HARNESS MANAGED AGAIN (left out by the tool choice, or uninstalled, then back): the library wins there.
 //
