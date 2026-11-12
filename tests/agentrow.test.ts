@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { FOLDED_VERSIONS, agentClicks, foldVersions, harnessIs, harnessLine, madeFrom, needsChoice, noticeWords, placeOf, placeTag, said, statusLine, switchLabel, versionChange, versionTimes, type AgentRow } from '../src/agentrow.ts';
+import { wordDiff } from '../src/diff.ts';
 import { newItem, plan, type Copies, type LibraryItem } from '../src/library.ts';
 
 const tools = ['claude-cli', 'copilot-cli', 'codex-cli'];
@@ -95,6 +96,12 @@ test('A tool that can’t take the agent is said in the status: on in the others
   const why = { cannot: { 'copilot-cli': 'Copilot CLI can’t store this name (é). Rename the agent to use it there.', 'codex-cli': 'Codex can’t store this name (é). Rename the agent to use it there.' } };
   const agent = item({ applied: { 'claude-cli': 'b' } });
   assert.equal(statusLine(row({ 'claude-cli': 'b' }, why, agent), agent, tools), 'On in Claude Code only · Copilot CLI and Codex can’t take it (see below)');
+});
+
+test('Reading a version against the current one compares word by word and keeps its line breaks', () => {
+  const words = (kind: string) => wordDiff('Read the whole change,\nthen report:\n1. Bugs', 'Read the change,\nthen report:\n1. Bugs and more').filter(part => part.kind === kind && part.text.trim()).map(part => part.text);
+  assert.deepEqual([words('removed'), words('added')], [['whole'], ['and', 'more']]);
+  assert.equal(wordDiff('a\nb', 'a\nb').map(part => part.text).join(''), 'a\nb');
 });
 
 test('A version says what it changed, and neighbours’ times read apart: how long ago today, to the second where two would read the same', () => {

@@ -6,7 +6,7 @@
 // read, and sends Make current as the item's click.
 import type { VersionChange } from './agentfiles.ts';
 import { foldVersions, madeAt, madeFrom, versionChange, versionTimes } from './agentrow.ts';
-import { wordDiff } from './diff.ts';
+import { wordDiff, type Line } from './diff.ts';
 import { button, h, icon, type Child } from './dom.ts';
 import { listed, sourceWords, type LibraryItem, type Version } from './library.ts';
 import { dayAndTime } from './model.ts';
@@ -54,12 +54,23 @@ function versionRow(view: VersionListView, version: Version, index: number, when
     read ? h('div.version-read', { id: `version-read-text-${id}` }, versionText(read.text, current ? undefined : read.current)) : null);
 }
 
-/** `text` against `current`: its own words tinted as the copy question tints them, the current one's it lacks struck through. */
+/**
+ * `text` against `current`: its own words tinted as the copy question tints them, the current one's it lacks struck through.
+ * Neighbouring marked words are one mark; a line break only the current version has is left out, so the lines are this one's.
+ */
 function againstCurrent(current: string, text: string): Child[] {
-  // Spaces read as they are; a line break only the current version has is left out, so the lines are this version's.
-  const space = (part: { kind: string; text: string }) => (part.kind === 'removed' ? (part.text.includes('\n') ? null : ' ') : part.text);
-  return wordDiff(current, text).map(part => (part.kind === 'same' ? part.text : !part.text.trim() ? space(part)
-    : h(part.kind === 'added' ? 'span.change-added' : 'span.change-gone', {}, part.text)));
+  const parts = wordDiff(current, text).filter(part => !(part.kind === 'removed' && part.text.includes('\n') && !part.text.trim()));
+  const runs: Line[] = [];
+  parts.forEach((part, index) => {
+    const before = parts[index - 1]?.kind, after = parts[index + 1]?.kind;
+    // A space joins the mark on both its sides; any other space reads plain, once.
+    const kind = part.text.trim() ? part.kind : before === after && before !== 'same' ? before! : 'same';
+    const last = runs.at(-1);
+    if (last?.kind === 'removed' && kind === 'added') runs.push({ kind: 'same', text: ' ' });
+    if (runs.at(-1)?.kind === kind) runs.at(-1)!.text += part.text;
+    else runs.push({ kind, text: kind === 'same' && !part.text.trim() && part.kind === 'removed' ? ' ' : part.text });
+  });
+  return runs.map(run => (run.kind === 'same' ? run.text : h(run.kind === 'added' ? 'span.change-added' : 'span.change-gone', {}, run.text)));
 }
 
 /** A version being read: its description and prompt, with what differs from the current version marked; or what stands in for them. */
