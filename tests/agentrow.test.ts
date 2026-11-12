@@ -2,7 +2,7 @@
 // harness's mark says, when its switch asks which copy, and the click each control sends.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FOLDED_VERSIONS, agentClicks, foldVersions, harnessIs, harnessLine, madeFrom, needsChoice, noticeWords, placeOf, placeTag, said, statusLine, switchLabel, versionChange, versionTimes, type AgentRow } from '../src/agentrow.ts';
+import { FOLDED_VERSIONS, agentClicks, foldVersions, harnessIs, harnessLine, madeFrom, needsChoice, noticeWords, placeOf, placeTag, said, statusLine, switchLabel, versionChange, versionSource, type AgentRow } from '../src/agentrow.ts';
 import { wordDiff } from '../src/diff.ts';
 import { newItem, plan, type Copies, type LibraryItem } from '../src/library.ts';
 
@@ -117,17 +117,15 @@ test('Reading a version against the current one compares word by word and keeps 
   assert.equal(wordDiff('a\nb', 'a\nb').map(part => part.text).join(''), 'a\nb');
 });
 
-test('A version says what it changed, and neighbours’ times read apart: how long ago today, to the second where two would read the same', () => {
-  assert.deepEqual([versionChange('first'), versionChange(['prompt']), versionChange(['name', 'description']), versionChange([]), versionChange('unknown')],
-    ['first version', 'prompt changed', 'name and description changed', 'same content', '']);
-  const now = Date.parse('2026-11-12T15:00:00.000Z'), at = (minutes: number, seconds = 0) => new Date(now - minutes * 60_000 - seconds * 1000).toISOString();
-  const said = versionTimes([at(3), at(3, 20), at(130), at(0, 10)].map(when => ({ hash: 'x', at: when, from: { how: 'edited' as const } })), now);
-  assert.deepEqual([said[2], said[3]], ['2 h ago', 'just now']);
-  assert.match(said[0], /^\d+:\d\d:\d\d/);
-  assert.notEqual(said[0], said[1]);
-  // A version made current again names the one it was made from.
+test('A version’s note says what it changed, or what a copy that gave way differs in; one made current again says what it went back to', () => {
+  assert.deepEqual([versionChange('first'), versionChange({ changed: ['prompt'] }), versionChange({ changed: ['name', 'description'] }), versionChange({ differs: ['prompt'] }), versionChange({ differs: ['description', 'prompt'] }), versionChange('none'), versionChange('unknown')],
+    ['first version', 'prompt changed', 'name and description changed', 'prompt differs', 'description and prompt differ', '', '']);
+  const at = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
   const found = { hash: 'a', at: at(9), from: { how: 'found' as const, harness: 'claude-cli' as const } }, again = { hash: 'a', at: at(1), from: { how: 'made-current' as const } };
-  assert.equal(madeFrom({ versions: [again, { hash: 'b', at: at(5), from: { how: 'edited' as const } }, found] }, again), found);
+  const item = { versions: [again, { hash: 'b', at: at(5), from: { how: 'edited' as const, harness: 'codex-cli' as const } }, found] };
+  assert.equal(madeFrom(item, again), found);
+  assert.match(versionSource(item, again), /^back to: found in Claude Code, \d+:\d\d/);
+  assert.equal(versionSource(item, item.versions[1]), 'edited in Codex');
 });
 
 test('The status line says where the agent stands, and in which harnesses', () => {
@@ -157,6 +155,8 @@ test('A click’s result says what happened, and never claims a harness where it
   assert.deepEqual([said.inHarness('reviewer', 'codex-cli', true, false), said.inHarness('reviewer', 'codex-cli', false, false), said.inHarness('reviewer', 'codex-cli', true, true)],
     ['reviewer is kept out of Codex. Central Knot keeps its file for when you turn it on there.', 'reviewer is on in Codex again.', 'reviewer couldn’t be taken out of Codex yet.']);
   assert.match(said.madeCurrent('reviewer', item().versions[0], tools, tools), /^reviewer: the version found in Claude Code, .*, is current again, in all 3 tools\.$/);
+  // Off: no tool gets it, and the result says so.
+  assert.match(said.madeCurrent('reviewer', item().versions[0], undefined, tools), /is current again\. It is Off, so no tool was changed\.$/);
   assert.deepEqual([said.deleted('reviewer', true), said.deleted('reviewer', false)],
     ['reviewer is deleted from Central Knot, and out of every tool. History can restore it.', 'reviewer is deleted from Central Knot. History can restore it.']);
 });

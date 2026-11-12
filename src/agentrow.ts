@@ -116,26 +116,18 @@ export const agentClicks = {
 
 // ---------- Versions ----------
 
-/** What a version changed from the one Central Knot took before it ("prompt changed"), or "first version". */
+/** A version's note: what it changed ("prompt changed"), what a copy that gave way differs in ("prompt differs"), or "first version". */
 export function versionChange(changed: VersionChange | undefined): string {
-  if (changed === undefined || changed === 'unknown') return '';
+  if (changed === undefined || changed === 'unknown' || changed === 'none') return '';
   if (changed === 'first') return 'first version';
-  return changed.length ? `${andList([...changed])} changed` : 'same content';
+  const fields = 'differs' in changed ? changed.differs : changed.changed;
+  if (!fields.length) return 'same content';
+  return `${andList([...fields])} ${'differs' in changed ? (fields.length > 1 ? 'differ' : 'differs') : 'changed'}`;
 }
-
-const withSeconds = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' });
-/** One version's time: today as how long ago, before today its day and time; `seconds`: its day and time to the second. */
-function versionTime(iso: string, now: number, seconds: boolean): string {
-  const today = new Date(iso).toDateString() === new Date(now).toDateString();
-  if (seconds) return today ? withSeconds(iso) : `${dayAndTime(iso).replace(/ at .*$/, '')} at ${withSeconds(iso)}`;
-  if (!today) return dayAndTime(iso);
-  const minutes = Math.floor((now - Date.parse(iso)) / 60_000);
-  return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ago`;
-}
-/** When each listed version was made, as its line says it, so neighbours read apart: to the second only where two would read the same. */
-export function versionTimes(versions: readonly Version[], now = Date.now()): string[] {
-  const said = versions.map(version => versionTime(version.at, now, false));
-  return versions.map((version, index) => (said.filter(text => text === said[index]).length > 1 ? versionTime(version.at, now, true) : said[index]));
+/** What a version's note is compared with, for its tooltip. */
+export function versionChangeHelp(changed: VersionChange | undefined): string | undefined {
+  if (changed === undefined || typeof changed === 'string') return undefined;
+  return 'differs' in changed ? 'Against the version written over this copy' : 'Against the version that was current before it';
 }
 
 /** When a version was made, said short: its time today, else its day and time. */
@@ -144,6 +136,11 @@ export const madeAt = (version: Version) => dayAndTime(version.at).replace(/^tod
 /** The version a "made current again" one was made from: the earlier entry with its content that came from somewhere else. */
 export function madeFrom(item: Pick<LibraryItem, 'versions'>, version: Version): Version | undefined {
   return item.versions.slice(item.versions.indexOf(version) + 1).find(older => older.hash === version.hash && older.from.how !== 'made-current');
+}
+/** Where a listed version came from, as its row says it: a version made current again names the one it went back to. */
+export function versionSource(item: Pick<LibraryItem, 'versions'>, version: Version): string {
+  const source = version.from.how === 'made-current' ? madeFrom(item, version) : undefined;
+  return source ? `back to: ${sourceWords(source.from)}, ${madeAt(source)}` : sourceWords(version.from);
 }
 
 /** How many versions a folded list shows. */
@@ -236,9 +233,10 @@ export const said = {
     if (!out) return failed ? `${name} couldn’t be put in ${where}.` : `${name} is on in ${where} again.`;
     return failed ? `${name} couldn’t be taken out of ${where} yet.` : `${name} is kept out of ${where}. Central Knot keeps its file for when you turn it on there.`;
   },
-  /** `on`: the harnesses it was written to; none said for an agent that is off. */
+  /** `on`: the harnesses it was written to; undefined for an agent that is Off, which no harness gets. */
   madeCurrent(name: string, version: Version, on: readonly string[] | undefined, tools: readonly string[]): string {
-    return `${name}: the version ${sourceWords(version.from)}, ${dayAndTime(version.at)}, is current again${on ? `, in ${named(on, tools)}` : ''}.`;
+    const where = on ? `, in ${named(on, tools)}.` : '. It is Off, so no tool was changed.';
+    return `${name}: the version ${sourceWords(version.from)}, ${dayAndTime(version.at)}, is current again${where}`;
   },
   deleted: (name: string, wasOn: boolean) => `${name} is deleted from Central Knot${wasOn ? ', and out of every tool' : ''}. History can restore it.`,
   /** Beside Delete from Central Knot, before it is armed: how it differs from Off. */

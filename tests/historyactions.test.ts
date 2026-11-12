@@ -61,7 +61,7 @@ test('A content change offers Undo: the version from before it made current, unl
   assert.equal(offered({ ...edit, previous: 'gone' }, item()), undefined, 'not a version of this agent');
   assert.deepEqual(offered(edit, item({ on: false }))?.[1], { key: 'reviewer', managed: false, off: [], version: 'a' }, 'an Off agent’s version changes too; it stays off');
   // Once later changes came, an older entry's action says what it does: it doesn't roll back everything after it.
-  assert.deepEqual(offered(edit, item({ hash: 'x' })), ['Make the version before this current', { ...asIs, version: 'a' }]);
+  assert.deepEqual(offered(edit, item({ hash: 'x' })), ['Go back before this', { ...asIs, version: 'a' }]);
   const current = entry({ kind: 'current', version: 'a', previous: 'b', losers: [{ tool: 'claude-cli', hash: 'b' }] });
   assert.match(agentSentence(current, tools, item({ hash: 'a' }))!.text, /^The version found in Claude Code \(.*\) was made current, in Claude Code\.$/);
   assert.deepEqual(offered(current, item({ hash: 'a' }))?.[1], { ...asIs, version: 'b' });

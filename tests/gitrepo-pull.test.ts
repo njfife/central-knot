@@ -140,7 +140,7 @@ test('A skill of the repo’s name that this computer never Managed: the row say
   } finally { await box.cleanup(); }
 });
 
-test('Pull brings an agent into Central Knot as a version pulled from the Git repo; a different agent of that name found here is a version first', async () => {
+test('Pull brings an agent into Central Knot as a version pulled from the Git repo; a different agent of that name found here is kept first, as a copy that gave way to it', async () => {
   const box = await world();
   try {
     const first = await box.home('first');
@@ -154,7 +154,7 @@ test('Pull brings an agent into Central Knot as a version pulled from the Git re
     await connectRepo(second, box.remote, '');
     await pullRepo(second);
     const planner = (await agentsView(second, tools)).library!.planner;
-    assert.deepEqual([planner.on, planner.versions.map(version => version.from.how)], [true, ['pulled', 'found']]);
+    assert.deepEqual([planner.on, planner.versions.map(version => version.from.how), planner.versions[1].from.replacedBy], [true, ['pulled', 'was-in'], planner.hash]);
     for (const file of ['.claude/agents/planner.md', '.copilot/agents/planner.agent.md']) assert.match(await readFile(join(second.home, file), 'utf8'), /Plan carefully/);
     // The planner found here is still there to go back to.
     const { agentVersion } = await import('../src/agents.ts');

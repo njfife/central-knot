@@ -138,7 +138,7 @@ export function agentAction(event: HistoryEvent, item: LibraryItem | undefined, 
   if (event.kind === 'added' || !isVersion(item, event.previous)) return undefined;
   // Undo while what this entry made is still current; once later changes came, it says what it does instead.
   const latest = (event.version ?? event.winner?.hash) === item.hash;
-  return { label: latest ? 'Undo' : 'Make the version before this current', help: `Make the version from before this change current again${everywhere}`, change: { ...now, version: event.previous } };
+  return { label: latest ? 'Undo' : 'Go back before this', help: `Make the version from before this change current again${everywhere}`, change: { ...now, version: event.previous } };
 }
 
 /** An Off entry's Turn on (`turnOn`), or an On entry's Turn off: for the whole agent, or (`only`) for one harness of an agent that is On. */

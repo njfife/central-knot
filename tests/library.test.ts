@@ -75,7 +75,7 @@ test('A copy edited before the current version was made loses to it: kept as a v
 test('A harness managed again holds another copy: it is kept ("was in Codex"), then the current version is written', () => {
   const again = item({ applied: { 'claude-cli': 'a' } });
   assert.deepEqual(plan(again, { 'claude-cli': has('a'), 'codex-cli': has('x', time(9)) }),
-    { ...quiet, keep: [{ harness: 'codex-cli', from: { how: 'was-in', harness: 'codex-cli' } }], write: ['codex-cli'], current: ['claude-cli'] });
+    { ...quiet, keep: [{ harness: 'codex-cli', from: { how: 'was-in', harness: 'codex-cli', replacedBy: 'a' } }], write: ['codex-cli'], current: ['claude-cli'] });
 });
 
 test('A copy deleted by hand turns the item Off: the other copies are removed', () => {
@@ -182,14 +182,16 @@ test('keepVersion keeps a content without making it current, once, as the newest
   assert.deepEqual(calls, ['store b=text of b', 'save current=c versions=b,c,a', 'store b=text of b', 'save current=c versions=b,c,a']);
 });
 
-test('Versions are listed in the order they were taken, whatever their files’ times say; the current one first', async () => {
+test('Versions are listed in the order they were taken, whatever their files’ times say; the current one first, each content once', async () => {
   // An edit whose file carries an old time (copied with its time kept) becomes current: it is still listed first.
   const agent = item();
   await setCurrent(shelf(agent).made, agent, { hash: 'b', at: '2020-01-01T00:00:00.000Z', from: { how: 'edited', harness: 'codex-cli' } }, 'text of b');
   // A file with a time ahead of the clock, then a Make current after it: the Make current is first.
   await setCurrent(shelf(agent).made, agent, { hash: 'c', at: '2099-01-01T00:00:00.000Z', from: { how: 'edited', harness: 'claude-cli' } }, 'text of c');
   await setCurrent(shelf(agent).made, agent, { hash: 'b', at: day(9), from: { how: 'made-current' } }, 'text of b');
-  assert.deepEqual(listed(agent).map(version => [version.hash, version.from.how]), [['b', 'made-current'], ['c', 'edited'], ['b', 'edited'], ['a', 'found']]);
+  // b's edit is folded into its Make current, the newer entry with that content; the record keeps both.
+  assert.deepEqual(listed(agent).map(version => [version.hash, version.from.how]), [['b', 'made-current'], ['c', 'edited'], ['a', 'found']]);
+  assert.equal(agent.versions.length, 4);
 });
 
 test('A record’s value is an item only with every field in its shape', () => {

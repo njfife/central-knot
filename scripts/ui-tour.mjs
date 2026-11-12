@@ -474,7 +474,7 @@ if (wanted('agents')) {
   await a.click('#delete-confirm-changelog'); await a.settle();
   await shot(a, 'agents-deleted', 'Clicked "Delete it now": changelog left every tool and this page; the result offers Undo.');
   await a.click('#nav-history'); await a.settle();
-  await sizes('agents-history', 'History: each click and each edit taken in, in the library’s words, with its action: Restore on the deletion, Undo on the latest change, "Make the version before this current" on older ones, Turn off or Turn on on a switch', true);
+  await sizes('agents-history', 'History: each click and each edit taken in, in the library’s words, with its action: Restore on the deletion, Undo on the latest change, "Go back before this" on older ones (the full sentence its tooltip), Turn off or Turn on on a switch', true);
   await a.run(`[...document.querySelectorAll('.history-row[data-kind="deleted"]')].find(row => row.textContent.includes('changelog'))?.querySelector('.history-actions button')?.click()`);
   await waitFor(a, `/Restored/.test(document.querySelector('#history-scroll')?.textContent ?? '')`, 15000);
   await sizes('agents-history-restored', 'Clicked Restore on the deletion: changelog is back in Central Knot and in every tool; the deletion’s row reads Restored');

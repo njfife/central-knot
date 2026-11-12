@@ -67,9 +67,10 @@ export type ItemKind = 'skill' | 'agent' | 'mcp';
 /**
  * Where a version came from: taken in from a harness that had it (`found`, or `chosen` among copies that differed), edited
  * by hand in a harness (`edited`), a harness's copy that gave way to the current version (`was-in`), Pull (`pulled`), an
- * earlier version made current (`made-current`), or the record from before the library (`migrated`).
+ * earlier version made current (`made-current`), or the record from before the library (`migrated`). `replacedBy`: on a
+ * `was-in` copy, the version written over it, which its line on the page is compared with (absent in older records).
  */
-export interface Source { how: 'found' | 'chosen' | 'edited' | 'was-in' | 'pulled' | 'made-current' | 'migrated'; harness?: HarnessId }
+export interface Source { how: 'found' | 'chosen' | 'edited' | 'was-in' | 'pulled' | 'made-current' | 'migrated'; harness?: HarnessId; replacedBy?: string }
 
 /** One content an item has had. `at`: when it was made (a harness file's own time for a copy taken in; else the click's), shown beside it. */
 export interface Version { hash: string; at: string; from: Source }
@@ -88,7 +89,7 @@ export interface LibraryItem {
   on: boolean;
   /** The current version: the content On applies. */
   hash: string;
-  /** Every content it has had, in the order Central Knot took them, newest first (`listed` puts the current one first). */
+  /** Every content it has had, in the order Central Knot took them, newest first (`listed` shows one per content, the current one first). */
   versions: Version[];
   /** The harnesses the person keeps it out of. */
   except: HarnessId[];
@@ -118,12 +119,15 @@ export function isLibraryItem(value: unknown): value is LibraryItem {
 export const currentIndex = (item: Pick<LibraryItem, 'hash' | 'versions'>) => item.versions.findIndex(version => version.hash === item.hash);
 
 /**
- * The versions as a person reads them: the current one first, then the others in the order Central Knot took them, newest
- * first. Not by their times: a file can carry any time, and a copy kept as a version may be taken after the current one.
+ * The versions as a person reads them, one per content: the current one first, then the others in the order Central Knot
+ * took them, newest first, each content at its newest entry (an earlier entry with the same content, such as the one a
+ * Make current went back to, is folded into it). Not by their times: a file can carry any time, and a copy kept as a
+ * version may be taken after the current one. `versions` itself keeps every entry.
  */
 export function listed(item: Pick<LibraryItem, 'hash' | 'versions'>): Version[] {
-  const at = currentIndex(item);
-  return at < 0 ? [...item.versions] : [item.versions[at], ...item.versions.filter((_, index) => index !== at)];
+  const at = currentIndex(item), seen = new Set<string>();
+  const ordered = at < 0 ? item.versions : [item.versions[at], ...item.versions.filter((_, index) => index !== at)];
+  return ordered.filter(version => !seen.has(version.hash) && !!seen.add(version.hash));
 }
 
 /** Whether the item should be in this harness: On, not deleted, and not kept out of it. */
@@ -212,7 +216,7 @@ export function plan(item: LibraryItem, copies: Copies): Plan {
     const lost = does === 'take-in' || does === 'latest-wins';
     // A copy about to be written over or removed is kept first, unless the library has that content already.
     if (copy.is === 'present' && !known.has(copy.hash) && (lost || does === 'keep-then-write')) {
-      made.keep.push({ harness, from: { how: does === 'keep-then-write' ? 'was-in' : 'edited', harness } });
+      made.keep.push({ harness, from: does === 'keep-then-write' ? { how: 'was-in', harness, replacedBy: taken } : { how: 'edited', harness } });
       known.add(copy.hash);
     }
     if (does === 'write' || does === 'keep-then-write' || (lost && wanted)) made.write.push(harness);

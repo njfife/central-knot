@@ -23,7 +23,7 @@ import { agentHash, agentText, agentsFolder, changedFields, fileFor, isAgentTool
 import { agentShelf, fileTextFor, keepOwn, openLibrary, readVersion, saveLibrary, type AgentLibrary, type FolderSeen } from './agentstore.ts';
 import { agentAction } from './historyactions.ts';
 import { carryOut, keepVersion, listed, newItem, plan, setCurrent, wantedIn } from './library.ts';
-import type { Copies, HarnessCopy, LibraryItem, Plan, Shelf, Source } from './library.ts';
+import type { Copies, HarnessCopy, LibraryItem, Plan, Shelf, Source, Version } from './library.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
 import { throughPlugins } from './plugins.ts';
 import type { AgentTool } from './presence.ts';
@@ -475,7 +475,7 @@ async function takeIn(pass: Pass, change: Change, tombstone: LibraryItem | undef
 /**
  * Pull (gitrepo.ts): the repo's content becomes the agent's current version, "pulled from the Git repo", and the pass applies
  * it wherever the agent is On. An agent in the library keeps its On or Off. One new here (never in the library, deleted from
- * it, or only found in a harness) comes in On, each copy found here kept as a version first. The repo's file is Claude
+ * it, or only found in a harness) comes in On, each copy found here kept first as a copy that gave way to it. The repo's file is Claude
  * Code's own part, so a Claude Code with no file gets it as the repo has it. Removed in the repo: deleted from Central Knot.
  * Each is History's entry with `cause: 'pulled'`.
  */
@@ -489,7 +489,8 @@ async function pull(pass: Pass, key: string, brought: Pulled) {
   const item = known ?? newItem('agent', key, agent.name);
   pass.library.items[key] = item;
   if (!live) {
-    for (const copy of foundCopies(pass, key, [])) await keepVersion(pass.shelf, item, { hash: copy.hash, at: iso(copy.at), from: { how: 'found', harness: copy.tool } }, copy.agent);
+    const replacedBy = agentHash(agent);
+    for (const copy of foundCopies(pass, key, [])) await keepVersion(pass.shelf, item, { hash: copy.hash, at: iso(copy.at), from: { how: 'was-in', harness: copy.tool, replacedBy } }, copy.agent);
     Object.assign(item, { on: true, except: [] } satisfies Partial<LibraryItem>);
     delete item.deleted;
   }
@@ -581,13 +582,22 @@ export async function agentsForRepo(context: ShareContext, tools: HarnessId[]): 
 
 // ---------- View ----------
 
-/** For each version as library.ts listed orders them, what it changed from the version Central Knot took before it. */
+/**
+ * Each listed version's note (agentfiles.ts VersionChange). A copy that gave way is compared with the version written over
+ * it. Any other is compared with the version taken before it, passing over copies that gave way, which were never current;
+ * with none, it is the first version, unless copies were taken in with it (the chosen one, or Pull's over copies found here).
+ */
 async function changesOf(context: ShareContext, item: LibraryItem): Promise<VersionChange[]> {
-  return Promise.all(listed(item).map(async version => {
-    const before = item.versions[item.versions.indexOf(version) + 1];
-    if (!before) return 'first' as const;
-    const [was, is] = await Promise.all([readVersion(context, item.key, before.hash), readVersion(context, item.key, version.hash)]);
-    return was && is ? changedFields(was, is) : 'unknown' as const;
+  const compare = async (version: Version, against: string) => {
+    const [was, is] = await Promise.all([readVersion(context, item.key, against), readVersion(context, item.key, version.hash)]);
+    return was && is ? changedFields(was, is) : undefined;
+  };
+  return Promise.all(listed(item).map(async (version): Promise<VersionChange> => {
+    if (version.from.replacedBy) { const fields = await compare(version, version.from.replacedBy); return fields ? { differs: fields } : 'unknown'; }
+    const before = item.versions.slice(item.versions.indexOf(version) + 1).find(older => older.from.how !== 'was-in');
+    if (before) { const fields = await compare(version, before.hash); return fields ? { changed: fields } : 'unknown'; }
+    const takenWith = version.from.how === 'chosen' || item.versions.some(other => other.from.replacedBy === version.hash);
+    return takenWith ? 'none' : 'first';
   }));
 }
 

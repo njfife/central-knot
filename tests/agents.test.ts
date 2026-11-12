@@ -206,9 +206,11 @@ inBox('An edit in a harness becomes the current version, from that harness, and 
   assert.deepEqual(actions.map(action => `${action.event.kind}: ${action.label}`), ['on: Turn off', 'edit: Undo']);
   await actions[1].run();
   assert.match((await readOf(box, 'codex-cli'))!, /Be brief\./);
-  assert.deepEqual(await versions(box), ['Be brief. (made current again) *', 'Be exact. (edited in Codex)', 'Be brief. (found in Claude Code)']);
-  // Each says what it changed from the one taken before it.
-  assert.deepEqual((await seen(box)).fact?.versionChanges, [['prompt'], ['prompt'], 'first']);
+  // The list has each content once: the found entry is folded into the one made current again, which names it ("back to:").
+  assert.deepEqual(await versions(box), ['Be brief. (made current again) *', 'Be exact. (edited in Codex)']);
+  assert.equal((await itemOf(box))!.versions.length, 3);
+  // Each says what it changed from the version current before it.
+  assert.deepEqual((await seen(box)).fact?.versionChanges, [{ changed: ['prompt'] }, { changed: ['prompt'] }]);
   // A write keeps what it wrote as that tool's own part: the next pass changes nothing, not even the record.
   const record = () => readFile(join(box.home, '.central-knot/agents.json'), 'utf8');
   const was = await record();
@@ -459,6 +461,8 @@ inBox('Found copies that differ: the switch asks; the chosen copy is taken in, a
   await choose(box, 'codex-cli');
   assert.match((await readOf(box, 'claude-cli'))!, /Be quick\./);
   assert.deepEqual(await versions(box), ['Be quick. (chosen from Codex) *', 'Be brief. (was in Claude Code)']);
+  // Taken in together: the chosen copy is no "first version", and the other says what it differs in from the chosen one.
+  assert.deepEqual((await seen(box)).fact?.versionChanges, ['none', { differs: ['prompt'] }]);
   // A library item never waits for a choice, and History can make the other copy's version current.
   const actions = await historyActions(box);
   assert.deepEqual(actions.map(action => `${action.event.kind}: ${action.label}`), ['chosen: Use claude-cli’s']);
@@ -479,7 +483,8 @@ inBox('Make current on an earlier version is a new version, applied like any oth
   const made = await makeCurrent(box, first);
   assert.equal(made.writes, 3);
   assert.match((await readOf(box, 'codex-cli'))!, /Be brief\./);
-  assert.equal((await versions(box)).length, 5);
+  // Five entries, four contents: the list folds the found one into the one made current again.
+  assert.deepEqual([(await itemOf(box))!.versions.length, (await versions(box)).length], [5, 4]);
   assert.deepEqual((await versions(box))[0], 'Be brief. (made current again) *');
   assert.match((await makeCurrent(box, first)).results[0].message, /at that version already/);
   // Its Undo, from the result or from History, makes the one before current again.

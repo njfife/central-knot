@@ -1,5 +1,5 @@
 // History: what sync did on its own, newest first, with Undo or Restore where the kept content allows it (CON-02, DEL-03).
-import { clockTime, DAY_MS } from './model.ts';
+import { DAY_MS, timesApart } from './model.ts';
 import { noTools, restoreEvent, showPage, shownPath, state, touchedToolsPhrase, unwriteClaudeNow } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
@@ -117,8 +117,7 @@ function choices(event: HistoryEvent) {
   return event.losers.filter(loser => loser.hash && loser.hash !== event.previous && loser.hash !== event.winner?.hash && !seen.has(loser.hash) && seen.add(loser.hash));
 }
 
-/** Rows are grouped by day; each row shows its time, or "Just now". */
-const time = (iso: string) => (Date.now() - Date.parse(iso) < 60_000 ? 'just now' : clockTime(iso));
+/** Rows are grouped by day (day headings); each row shows its time, every row in one form (model.ts timesApart). */
 const day = (iso: string) => {
   const date = new Date(iso);
   if (date.toDateString() === new Date().toDateString()) return 'Today';
@@ -199,7 +198,7 @@ export function historyPage() {
   if (!events) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.history.state === 'failed' ? 'History could not be read.' : 'Reading History…')));
   if (!events.length && noTools()) return h('div.page', {}, noToolsState('history-choose-home'));
   if (!events.length) return h('div.page', {}, state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null, emptyState('history', 'No changes yet', 'When sync copies an edit, or turning something on adds or replaces a copy, it shows up here with Undo. Turn a skill on to begin.', button({ variant: 'outline', label: 'Start in Skills', id: 'history-go-skills', onclick: () => showPage('skills') })));
-  const ordered = [...events].reverse();
+  const ordered = [...events].reverse(), times = timesApart(ordered.map(event => event.at));
   const reread = rereadBand(state.history);
   // A refused Undo made here is a warning band, as on the other pages; other results here are in the status bar.
   const refused = state.outcome?.page === 'history' && state.outcome.warn ? outcomeBand(false) : null;
@@ -209,7 +208,7 @@ export function historyPage() {
     // The newest row, made by a click just now, gets the same brief highlight the tables use.
     const fresh = index === 0 && Date.now() - Date.parse(event.at) < 8000;
     return [heading, h(`li.history-row${event.undoneBy ? '.history-undone' : ''}${fresh ? '.row-flash' : ''}`, { 'data-kind': event.kind },
-      h('span.history-when', { title: new Date(event.at).toLocaleString() }, time(event.at)),
+      h('span.history-when', { title: new Date(event.at).toLocaleString() }, times[index]),
       // What changed, then what happened in the flexible column (its text capped at the reading measure); the actions keep a
       // steady column at the right, the same on every row. Narrow, what happened takes a line of its own beneath (style.css).
       h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event)), h('strong', { title: event.item }, event.item)),
