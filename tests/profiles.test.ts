@@ -268,7 +268,7 @@ test('A settings file that can’t be written fails only its own flips, and an U
   } finally { for (const folder of folders) await chmod(folder, 0o755); await box.cleanup(); }
 });
 
-test('A profile switch and back keeps a Claude Code override other than off, as a Skills page Enable does', async () => {
+test('A profile switch and back keeps a Claude Code override other than off', async () => {
   const box = await sandbox();
   try {
     const settings = join(box.home, '.claude/settings.json');

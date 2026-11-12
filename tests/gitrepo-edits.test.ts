@@ -114,7 +114,7 @@ test('Only the layout is Central Knot’s: other files stay, a file the repo ign
     const here = await box.home('here');
     await skill(here, '.claude/skills', 'mine');
     await writeFile(join(here.home, '.claude/skills/mine/debug.log'), 'part of the skill\n');
-    // A Managed skill of the same name as the repo's held one, with a file the repo's doesn't have: it never leaks into the repo's.
+    // A skill in Central Knot of the same name as the repo's held one, with a file the repo's doesn't have: it never leaks into the repo's.
     await skill(here, '.claude/skills', 'linked');
     await writeFile(join(here.home, '.claude/skills/linked/extra.md'), 'only here\n');
     await applySkillsIn(here, [{ key: 'mine', managed: true, off: [] }, { key: 'linked', managed: true, off: [] }]);

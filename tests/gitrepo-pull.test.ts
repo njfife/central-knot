@@ -63,7 +63,7 @@ test('Where only Claude Code takes MCP servers, the repo’s server waits, said 
   } finally { await box.cleanup(); }
 });
 
-test('A skill only one tool has: Pull replaces that copy, and Undo in History puts it back; a SKILL.md that stops parsing is held, never a removal', async () => {
+test('A skill only one tool has: Pull replaces that copy, and Undo in History puts it back; a SKILL.md that stops parsing can’t be read for sure, so it is never a removal', async () => {
   const box = await world();
   try {
     const { first, author, commit } = await oneSkillAndAnAuthor(box, { off: ['copilot-cli'] });
@@ -106,7 +106,7 @@ test('A commit outside the layout still has to be pulled before a push; the bran
   } finally { await box.cleanup(); }
 });
 
-test('Pull counts and says only its own items: another Managed skill held for its own reason doesn’t make a pulled one look stuck', async () => {
+test('Pull counts and says only its own items: another skill in Central Knot held for its own reason doesn’t make a pulled one look stuck', async () => {
   const box = await world();
   try {
     const { first, author, commit } = await oneSkillAndAnAuthor(box);
@@ -122,7 +122,7 @@ test('Pull counts and says only its own items: another Managed skill held for it
   } finally { await box.cleanup(); }
 });
 
-test('A skill of the repo’s name that this computer never Managed: the row says so, and Undo of the Pull brings that skill back', async () => {
+test('A skill of the repo’s name that is only found here: the row says so, Pull takes the repo’s in and keeps this one as a version, which can be made current again', async () => {
   const box = await world();
   try {
     const first = await box.home('first');

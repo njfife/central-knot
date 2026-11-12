@@ -1413,3 +1413,85 @@ The current map lived in the library steps' LEDGER sections, covered the library
 **Found in the code, not changed.** `toolchoice.ts chooseTools` has no caller in the app (no page changes which tools are managed; tests call it). History's file is kept for every kind by `manage.ts`, a skills module. Names declared in two modules with two meanings: `ItemKind`, `Outcome`, `standing`, `toggle`, `updateButton`, `Waiting`, `CHECK_EVERY_MS`, `PassOptions`, `pluginTools`; and `fileName` is one function written twice (`model.ts`, `words.ts`). The map says each. `share.ts`, `discovery.ts`, `harnesses.ts`, `platform.ts`, `model.ts`, `types.ts`, `main.ts`, `app.ts`, `preload.ts`, `renderer.ts`, `pages.ts` and `dom.ts` have no header; their entry in the map is their one-line description.
 
 **Validation.** `npm test`: 772 tests (769 and the map's 3). With `versionlist.ts`'s entry taken out of the map, 771 pass and the map's first test fails, naming `src/versionlist.ts` and what to add. Each rule failed on a map broken for it: an entry removed; a file added and another renamed; a stale `file.ts name` pair and a stale name in an entry; a file with two entries. The Mac run is named in the pull request.
+
+## Items live in Central Knot, step 2c: skills on the library, November 12, 2026
+
+Skills are the second kind on the library, by implementing `librarypass.ts Kind` and nothing beside it. A skill lives in Central Knot with its versions (its whole folder), as an agent does; the Skills page uses the same rows as Agents. The skills engine (`manage.ts`) is gone. `MAP.md` is the current map: its first area, "The library: skills and agents on it", names every file below.
+
+**What a person sees change.**
+- A skill a tool has that Central Knot doesn't is **Found**; its switch, halfway, takes it in and puts it in every tool (a copy question where copies differ; the others become versions). **Off** takes the folder out of every tool and Central Knot keeps it; **On** puts the same folder back, byte for byte. **Delete from Central Knot…** is the one delete; History restores it.
+- A tool's own switch for a skill is read, never written by Off or On: the folder stays, the mark is off, the row says "switched off in Codex", the status line too, and **Clear the switch** on that tool's line clears it (a History `switched` entry, which a profile's Undo reads).
+- **Has it another way** (a plugin, a link, a copy in `~/.agents/skills`, a reader of another managed tool's folder): nothing of Central Knot's goes there, its line says why, and the status line names those tools. **Take over…** is the one action that writes such a place: a link is replaced at once; the shared copy is removed once confirmed, kept as a version first, and each tool that read it gets Central Knot's copy. A found skill is taken in first (no Take over is offered for it).
+- **Partial**: kept out of a tool in the opened row, the closed row says "in 2 of 3 tools · not in Codex" and the switch is drawn striped; the main switch stays all or nothing.
+- A found skill whose only copy can't be copied as it is (a link inside, an unreadable file) is a row that says why; its switch waits and it has no Files and contents.
+- Removed: per-tool **Remove**, **Delete everywhere**, **Replace with managed copies**, the per-tool Disable on the Skills page (a skill's switch in the opened row now keeps it out of that tool: its folder goes).
+
+**Map of this step** (the current map is `MAP.md`).
+- **The kind:** `src/skills.ts` (`skillKind`; the ways a tool has a skill that aren't Central Knot's, `anotherWay`, and what it can't take, `cannotTake`; `applySkills`, `restoreSkill`, `skillsView` and its `rowFacts`; the kind's own two actions `clearSwitch` and `takeOver`; `skillsOn`, `skillsForRepo` for plugin parts and the Git repo). Header: what it owns and the order it reads a disk.
+- **A skill's folder on disk:** `src/skillfiles.ts` (each tool's skills folder read as copies, links and unseen ones; a folder's time; checked swap, place and remove, each parked beside the skills folder with a note so a crash is put back by `recoverFolders`).
+- **The store and record:** `src/skillstore.ts` (`skills.json`, versions under `items/skills/<folder>/versions/<hash>/`, the migration's steps, pruning a deleted skill's versions after History's days, `converted.json`).
+- **The migration:** `src/skillmigrate.ts` (the table of every old state and where it lands, in its header; `migrateItem` per skill).
+- **History's file:** `src/history.ts` (out of `manage.ts`; kept for every kind).
+- **The model** gained one row (`library.ts wantedHere`): a copy of its own in a tool that also has the item another way is "not wanted there": Central Knot's own copy is removed (never loaded twice) and one it didn't put is left alone. **The pass** asks `Disk.held` for a present copy too, tells it `applied` (`Wanted`), and finds a found item's copies outside a tool's own folder (`Disk.outside`).
+- **The page:** skills' words in `libraryrow.ts libraryWords.skills` and its entry in `librarypages.ts libraryPages` (Files view, Clear the switch, Take over…); `matrix.ts` draws skills as library rows. `RowWords.body` is now only for a kind whose copies are compared side by side (agents); skills' question quotes each copy's first line of text and Read both copies opens the Files view, as on `next`.
+- **Worked examples:** `tests/skills.test.ts` (real folders), `tests/skillmigrate.test.ts`, `tests/skillsafety.test.ts` (the safety gates carried over), `tests/librarywalk.test.ts` (the seeded walk, a skill and an agent in one home), `tests/skillclicks.ts` (the clicks the page and History send, a folder-aware `trial`).
+
+**Migration, state by state** (`skillmigrate.ts`'s header; `tests/skillmigrate.test.ts` holds one fixture home with every state: after migration and one pass every folder is byte-identical, every content is a version, a second pass writes nothing, and a crash at each step leaves the old files as they were).
+
+| On the old record | In the library |
+| --- | --- |
+| synced | On at its synced content; applied where it was synced |
+| a tool left out (`off`) | kept out there, nothing applied; a copy there stays |
+| a differing copy never synced (`keptOwn`, a collision waiting for a choice) | kept out there, nothing applied; its content a version |
+| a choice not carried out (`use`) | On at the chosen content; every tool holding another copy kept out, so nothing is written over |
+| a tool that has it another way (reader, `~/.agents/skills`, a link, a plugin) | nothing applied there; its own copy stays, its line says both ways |
+| an edit not spread yet, or a copy behind | applied at what was last synced there: the first pass takes the edit in or catches up |
+| a copy on record gone from its folder | applied: the first pass reads it as deleted by hand (Off), unless the folder was made again |
+| deleted everywhere | a tombstone at its content; History's Restore puts it back |
+| `separate`, never synced, or turned off since | not in the library: found, every folder as it is |
+| `displaced` content and every revision kept | a version of its skill |
+| a switch in any tool, a profile's hold | left exactly as it is: read at each look |
+
+`sync.json` keeps who syncs the home, its generation and its tools (format 2, no `items`); `sync.v1.json` is the record as it was. The old store folders `items/<folder>/<hash>/` stay where they are.
+
+**Sequences that behave differently from `next` on purpose.**
+- Off removes a skill's folder from every tool (on `next` it flipped each tool's own switch and the copies stayed). A tool's switch set before this step is left as it is and shown.
+- A skill switched off in every tool by a profile stays under On (Central Knot still has it in every tool), its marks off and its row "switched off in all 3 tools" (on `next` it moved under Off).
+- Keeping a skill out of one tool removes its folder there (on `next` the opened row's Disable flipped that tool's switch, and Remove took the copy out).
+- A link in a tool's folder and a copy in `~/.agents/skills` are never written or removed but by Take over… (on `next` turning the skill on took them over, and Delete everywhere removed them). A link to a copy the tool also reads in `~/.agents/skills` is said and taken over as that copy.
+- A copy deleted by hand turns the skill Off everywhere, kept in Central Knot (on `next` the deletion spread and History's Restore put it back).
+- Two edits: the latest wins by the folder's time, any file inside counting (on `next`, `SKILL.md`'s time, or the fixed tool order when the order couldn't be proved).
+- OpenCode, reading Claude Code's folder: it has the skill another way while the skill is in Claude Code; kept out of OpenCode, Claude Code's folder stays and OpenCode's line says it still has it (on `next` its own deny rule was written).
+- Git repo: Pull makes the repo's content the current version and leaves On or Off alone; Push sends every skill in the library, On or Off (on `next`, managed skills). An Undo of a Pull is Make current of the version before.
+- Profiles: unchanged (each tool's own switch), reading skills through `profileplan.ts profileSkills`.
+- A found skill whose only copy can't be copied as it is is a row (on `next` too, as "Can’t sync"), but one whose SKILL.md can't be parsed or that has none is no row, as on `next`.
+
+**Decisions made in this step, beyond the brief.**
+- *Found rows with nothing to take in* show (`canTakeIn`), their switch waiting, so a skill the person has is never invisible; one with no SKILL.md or an unparsable one stays no row, as on `next`.
+- *A tool kept out that still reads another tool's copy* says so ("Kept out of this tool, but it still has it another way") rather than writing that tool's own switch, which this step never writes.
+- *The shared copy is the way, over a link to it*: Take over of the link alone would give the tool a copy that is one too many while it still reads the shared copy, and the pass would remove it again.
+- *Take over is offered only for a skill in Central Knot*; the brief says a found skill is taken in first.
+- *A version named in a sentence* is "the version that was in Codex" (`library.ts theVersion`), for agents too.
+- *Paths in sentences* are said as the page shows them (from `~`, or "…" inside another home).
+
+**Deleted.** `src/manage.ts`, `src/outsidewords.ts`; `tests/manage.test.ts`, `tests/outsidewords.test.ts`, `tests/sharedcopies.test.ts`, `tests/twoway-recovery.test.ts` (their cases carried to `skills.test.ts`, `skillsafety.test.ts` and `skillmigrate.test.ts` where the library keeps them); the IPC `manage:apply` and `manage:delete-everywhere` and `preload.ts` `apply`, `deleteEverywhere`; `types.ts Change`'s `remove`, `everywhere` and `takeOver`; `words.ts REPLACE_ACTION`; `skillswitch.ts unverifiedBuild`; `matrix.ts`'s skills-engine branches (Remove, Delete everywhere, Sync here for skills, the outside-copies note and its take-over, `confirmTakeOver`); the tour's `disable` section; `sync.json`'s skills (`items`, `roots`, carried only until the migration runs).
+
+**States the brief did not explain** (each takes the choice that keeps every content and writes nothing else).
+- A copy recorded as `removing` (a deletion still owed a removal) is left as it is: found.
+- A found skill's old History entries offer no action on their own contents beyond what the library can say; their contents are versions.
+
+**Validation.**
+- `npm test`: 673 tests, about 45 s (the new walk's four seeds are most of the growth; more seeds run with `CK_WALKS`). The profile and Git repo tests were run against the new engine before they were changed; the sequences that changed on purpose are above.
+- The walk (`tests/librarywalk.test.ts`, a skill and an agent in one home, 16 steps): seeds 10000–10099 found two things, both fixed: Take over was offered on a found skill, and a tool holding its own copy beside the shared one (both ways) was not expected by the walk. Then three fresh ranges, each as two halves of 50 seeds: 20000–20099 (its first run found that the walk's "does nothing" check didn't count a tool's switch file, which Clear the switch changes; fixed in the walk), 30000–30099 and 40000–40099, all clean.
+- Each new rule switched off: 31 in all. 23 failed a named test at once; the 8 that survived got a worked example each, and each now fails: a reader of a copy that isn't Central Knot's, a tool whose skills folder is a link, a name a tool reserves, a file edited inside a folder making its time, a deleted skill's versions going when History is saved, a migrated tool left out with no copy, a kept own copy that is also a kept revision, a found row marking a tool that can't take it.
+- End to end (`scripts/e2e.mjs`, the dev build on Linux): 679 passed, 1 failed: "Show log file opens the log’s folder", a Linux-only check in Settings this step doesn't touch (the file manager stand-in isn't called on this machine).
+- Pictures: `node scripts/ui-tour.mjs <out> --electron --no-sandbox --only skills`, 96 pictures, every state of a skill's row at 860×560, 1280×800, 1728×1117 and 2560×1440 and in light, each looked at.
+- One check loosened, said here: the safety test of a repeat pass runs one settling pass first, since the first pass after a take-in notes the skills folders' identity once.
+- The Mac run is named in the pull request.
+
+**Follow-ups.**
+- The armed Take over… says what it does in its tooltip only; a visible note like Delete's would be better.
+- A tool kept out while it still reads another tool's copy can't be made not to load it from the Skills page (only its own switch could, which only profiles write now).
+- The old store folders `items/<folder>/<hash>/` stay after migration; a clean-up once no build reads them.
+- History's sentence for a take-over says "and that one is kept as a version" also when the library already had that content.
+- The Linux-only end-to-end check "Show log file opens the log’s folder" fails on this machine (its file manager stand-in isn't called); macOS is the platform checked.
