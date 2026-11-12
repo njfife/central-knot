@@ -334,10 +334,13 @@ if (wanted('mcp')) {
 if (wanted('agents')) {
   begin('agents');
   const SIZES = [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]];
-  /** One state at every size (and, `light`, once in the light appearance), then back to 1280×800. */
-  const sizes = async (name, caption, light = false) => {
-    for (const [width, height] of SIZES) { await a.size(width, height); await shot(a, `${name}-${width}`, `${caption} (${width}×${height})`); }
+  /** Scrolls what a picture is about into view. */
+  const show = selector => a.run(`document.querySelector('${selector}')?.scrollIntoView({ block: 'center' })`);
+  /** One state at every size (and, `light`, once in the light appearance), then back to 1280×800. `at`: what to scroll into view at each size. */
+  const sizes = async (name, caption, light = false, at = undefined) => {
+    for (const [width, height] of SIZES) { await a.size(width, height); if (at) await show(at); await shot(a, `${name}-${width}`, `${caption} (${width}×${height})`); }
     await a.size(1280, 800);
+    if (at) await show(at);
     if (light) { await a.theme('light'); await shot(a, `${name}-light`, `${caption} (light appearance)`); await a.theme('dark'); }
   };
   const refresh = async () => { await a.click('#header-refresh'); await a.settle(); };
@@ -376,9 +379,7 @@ if (wanted('agents')) {
   await a.click('#versions-all-code-reviewer'); await a.settle();
   await sizes('agents-versions-all', 'Clicked "Show 2 earlier versions": every version, newest first, the current one marked', true);
   await a.click('#version-read-code-reviewer-2'); await waitFor(a, `/careful code reviewer/.test(document.querySelector('.version-text')?.textContent ?? '')`, 15000);
-  const show = selector => a.run(`document.querySelector('${selector}')?.scrollIntoView({ block: 'center' })`);
-  await show('.version-text');
-  await sizes('agents-version-read', 'Clicked Read on an earlier version: its description and prompt open under its line');
+  await sizes('agents-version-read', 'Clicked Read on an earlier version: its description and prompt open under its line', false, '.version-text');
   await a.click('#version-read-code-reviewer-2'); await a.settle();
   await a.click('#version-current-code-reviewer-5'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
   await sizes('agents-made-current', 'Clicked Make current on the first version: it is a new version at the top, written to all 3 tools; the result names it and offers Undo');
@@ -415,8 +416,7 @@ if (wanted('agents')) {
 
   // Delete from Central Knot, and History's Restore.
   await a.click('#delete-changelog'); await a.settle();
-  await show('#delete-note-changelog');
-  await sizes('agents-delete-armed', 'Clicked "Delete from Central Knot…": it asks once more, with Cancel beside it and what will happen under them');
+  await sizes('agents-delete-armed', 'Clicked "Delete from Central Knot…": it asks once more, with Cancel beside it and what will happen under them', false, '#delete-note-changelog');
   await a.click('#delete-confirm-changelog'); await a.settle();
   await shot(a, 'agents-deleted', 'Clicked "Delete it now": changelog left every harness and this page; the result offers Undo.');
   await a.click('#nav-history'); await a.settle();
