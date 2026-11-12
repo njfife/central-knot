@@ -256,8 +256,9 @@ test('A copy in ~/.agents/skills is not Central Knot’s: the tools that read it
     const all = await everywhere(box);
     assert.deepEqual([!!all['claude-cli'], all['copilot-cli'], all['codex-cli']], [true, undefined, undefined]);
     assert.equal(await readFile(join(shared, 'SKILL.md'), 'utf8'), skillText('In the shared folder.'), 'the shared folder is never written');
-    const { fact } = await seen(box);
+    const { fact, item, row } = await seen(box);
     assert.deepEqual(fact!.takeOver?.['codex-cli'], { kind: 'shared', path: shared });
+    assert.equal(statusLine(row, item, tools), 'On in Claude Code · Copilot CLI and Codex have it another way');
     // Off: Claude Code's copy goes; the shared one stays, and the row says the tools that read it still have it.
     await turnOff(box);
     const off = await seen(box);
@@ -336,6 +337,7 @@ test('A switch set in a tool is left exactly as it is: the folder stays and the 
     assert.deepEqual(facts.switched, { 'codex-cli': 'switched off in Codex’s own settings' });
     assert.match(say.harnessLine({ ...row, switched: facts.switched }, item, 'codex-cli', 'Codex'), /It is switched off in Codex’s own settings: Codex doesn’t load it/);
     assert.equal(say.placeTag({ ...row, switched: facts.switched }, item, tools)?.text, 'switched off in Codex');
+    assert.equal(statusLine({ ...row, switched: facts.switched }, item, tools), 'On in all 3 tools · switched off in Codex');
     // Switched off in every tool: never plain on.
     for (const tool of ['claude-cli', 'copilot-cli'] as Tool[]) await setDisabled(box.context, tool, { ...target, skillFile: join(folderOf(box, tool), 'SKILL.md') }, true);
     const everyTool = Object.fromEntries(tools.map(tool => [tool, 'off']));

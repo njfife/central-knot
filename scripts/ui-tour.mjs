@@ -5,7 +5,7 @@
 //   in well under a minute. It fails if a page doesn't open or throws. This is the run for every change.
 // - `--only a,b` runs the named feature sections: the ones a change touched.
 // - `--full` runs every feature section, hundreds of pictures over about ten minutes. For a new release only.
-// Features, in the order they run: shell, skills, disable, sync, mcp, agents, plugins, profiles, plugin-skills, plugin-updates,
+// Features, in the order they run: shell, skills, sync, mcp, agents, plugins, profiles, plugin-skills, plugin-updates,
 // plugin-versions, parts, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
 // Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses and repo.
@@ -141,6 +141,30 @@ async function fresh(more = {}, keepData = false) {
   practice = await a.run(`document.querySelector('.status-home').title`);
 }
 
+// ---------- The library pages' pictures (Skills, Agents) ----------
+/** The four window sizes every state of a library page is pictured at. */
+const SIZES = [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]];
+/** Scrolls what a picture is about into view. */
+const show = selector => a.run(`document.querySelector('${selector}')?.scrollIntoView({ block: 'center' })`);
+/** One state at every size (and, `light`, once in the light appearance), then back to 1280×800. `at`: what to scroll into view at each size. */
+async function atEverySize(name, caption, light = false, at = undefined) {
+  for (const [width, height] of SIZES) { await a.size(width, height); if (at) await show(at); await shot(a, `${name}-${width}`, `${caption} (${width}×${height})`); }
+  await a.size(1280, 800);
+  if (at) await show(at);
+  if (light) { await a.theme('light'); await shot(a, `${name}-light`, `${caption} (light appearance)`); await a.theme('dark'); }
+}
+/** Where the pointer rests to hover an element, at its middle. */
+const middleOf = selector => a.run(`(() => { const box = document.querySelector('${selector}').getBoundingClientRect(); return { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) }; })()`);
+/** Keyboard focus on an element, with its focus ring (as a Tab press gives it). */
+const focusOn = selector => a.run(`document.querySelector('${selector}')?.focus({ focusVisible: true })`);
+const refresh = async () => { await a.click('#header-refresh'); await a.settle(); };
+/** A row's details, opened or closed whichever way they are now. */
+const isOpen = key => a.has(`.ov-row[data-key="${key}"][aria-expanded="true"]`);
+const openRow = async key => { if (!(await isOpen(key))) { await a.click(`#open-${key}`); await a.settle(); } };
+const closeRow = async key => { if (await isOpen(key)) { await a.click(`#open-${key}`); await a.settle(); } };
+/** Waits until the row's switch is on. */
+const switchOn = key => waitFor(a, `document.querySelector('#switch-${key}')?.getAttribute('aria-checked') === 'true'`, 15000);
+
 // ---------- The light tour: the app opens, and so does each page ----------
 if (only ? only.includes('light') : !full) {
   begin('light');
@@ -171,106 +195,106 @@ if (wanted('shell')) {
   await a.click('#home-fixture'); await a.click('#nav-overview'); await shot(a, 'back-to-practice', 'Clicked "Practice copy" to go back, then "Overview".');
 }
 
-// ---------- Skills: one switch per skill, differing copies ----------
+// ---------- Skills ----------
+// Skills are on Central Knot's library, as agents are (src/library.ts, src/skills.ts): every state of a skill's row, at four sizes.
 if (wanted('skills')) {
   begin('skills');
+  const folderIn = (tool, key) => join(practice, { claude: '.claude/skills', copilot: '.copilot/skills', codex: '.codex/skills' }[tool], key);
+  const putSkill = (tool, key, body) => { mkdirSync(folderIn(tool, key), { recursive: true }); writeFileSync(join(folderIn(tool, key), 'SKILL.md'), `---\nname: ${key}\ndescription: ${body}\n---\n\n${body}\n`); };
   await a.click('#nav-skills');
-  await shot(a, 'skills-start', 'Clicked "Skills" in the sidebar. Nothing is synced yet: each switch, at the start of its row, sits halfway (not synced); the marks at the right end show which tools have each skill (hover one for its tool and what it has). A first-use tip sits above the table.');
-  // The tour's clicks come from a script, so the pointer is put over the list (or moved off it) as a person's would be, and a
-  // picture of a row that stays put is taken with the pointer still there.
-  const pointerOver = async selector => {
-    const at = await a.run(`(() => { const box = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect(); return box ? { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) } : null; })()`);
-    if (at) await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...at });
-    return at ?? undefined;
-  };
-  const overNotes = await pointerOver('.ov-row[data-key="notes"]');
-  await a.click('#switch-notes');
-  await shot(a, 'turned-on', 'With the pointer over notes’s row, clicked its switch (halfway: not synced): notes is copied to every tool at once and its switch is on. The row stays where it is while the pointer is over the list; the strip at the top says what happened, with Undo. The first-use tip is gone: it goes after the first click, on purpose.', overNotes);
-  await pointerOver('.toolbar'); await a.settle();
-  await shot(a, 'turned-on-left', 'Moved the pointer off the list (to the toolbar): the rows regroup at once, notes under On, and the headings count again.');
-  await a.click('#outcome-undo');
-  await shot(a, 'turned-on-undone', 'Clicked "Undo" in that strip: Codex’s new copy is gone again and notes is not synced, as before. The strip says so for a few seconds, then goes.');
-  for (const key of ['notes', 'release-notes', 'standup']) await a.click(`#switch-${key}`);
-  await shot(a, 'on', 'Clicked the switches of notes, release-notes and standup (one click each, the pointer off the list): the three are under On at once.');
-  await a.click('#switch-review');
-  await shot(a, 'review-copies-differ', 'Clicked review’s switch: its copies differ, so its row opens only the question of which copy every tool uses, with the copies. Nothing is written yet.');
-  await a.size(1728, 1117);
-  await shot(a, 'review-copies-differ-1728', 'The same at 1728×1117: the question opens under its row there too, where the switch was clicked, not in the side panel.');
-  await a.click('#switch-review');
-  await shot(a, 'review-question-closed', 'Clicked review’s switch again: the question closes, and nothing was written.');
-  await a.click('#switch-review');
-  await a.size(1280, 800);
-  await a.click('#use-review-claude-cli');
-  await shot(a, 'review-chosen', 'Clicked "Claude Code’s copy": every tool uses it at once, and review is on. Its details stay open, now with each tool’s own controls.');
-  await a.click('#outcome-undo'); await waitFor(a, `/as before/.test(document.querySelector('.band-done')?.textContent ?? '')`, 15000);
-  await shot(a, 'review-chosen-undone', 'Clicked "Undo" in the strip: each copy is back in its own tool and Codex’s new copy is gone; review is not synced and its copies differ again, as before the choice (“Undone: review is as before.”).');
-  if (!(await a.has('#use-review-claude-cli'))) await a.click('#switch-review');
-  await a.click('#use-review-claude-cli');
-  await a.click('#open-review');
-  const overStandup = await pointerOver('.ov-row[data-key="standup"]');
-  await a.click('#switch-standup');
-  await shot(a, 'standup-off', 'Clicked review’s chevron to close its details, then, with the pointer over standup’s row, its switch: each tool’s own switch turns it off there and the copies stay. Its marks are grey and struck through, and the row stays where it was while the pointer is there.', overStandup);
-  await pointerOver('.toolbar'); await a.settle();
-  await shot(a, 'standup-off-regrouped', 'Moved the pointer off the list: standup moves to Off, last, whose heading says no tool loads these.');
-  await a.theme('light'); await shot(a, 'standup-off-light', 'The same, in the light appearance.');
-  for (const [width, height] of [[860, 560], [1728, 1117]]) {
-    await a.size(width, height);
-    await a.theme('dark'); await shot(a, `standup-off-${width}-dark`, `The same at ${width}×${height}, dark.`);
-    await a.theme('light'); await shot(a, `standup-off-${width}-light`, `The same at ${width}×${height}, light.`);
-  }
-  await a.size(1280, 800); await a.theme('dark');
-  await a.click('#open-standup');
-  await shot(a, 'details-off', 'Back at 1280×800, dark: clicked standup’s chevron at the right end of its row. Each tool’s row has its own switch and Remove (each says what it does on hover); "Delete everywhere…" is last.');
-  await a.size(1728, 1117);
-  await shot(a, 'details-off-1728', 'The same at 1728×1117: the details sit beside the table.');
-  await a.size(1280, 800);
-  await a.click('#files-standup');
-  await shot(a, 'files-view', 'Clicked "Files and contents" in standup’s details: the list of skills, with the same marks, beside standup’s switch, files and details.');
+  await atEverySize('found', 'Clicked "Skills". Every skill is found: a tool has it and Central Knot doesn’t yet, so each switch sits halfway; review’s copies differ', true);
+  await shot(a, 'found-hover', 'The pointer on notes’s halfway switch: its tooltip says a click takes it into Central Knot and puts it in every tool.', await middleOf('#switch-notes'));
+  await openRow('notes');
+  await atEverySize('found-open', 'Opened notes while it is found: its status, what every tool shares of a skill (its whole folder), each tool’s line, and Files and contents', true, '.details');
+  await closeRow('notes');
+  // Taken in: written to every tool, its whole folder.
+  await a.click('#switch-notes'); await switchOn('notes');
+  await atEverySize('taken-in', 'Clicked notes’s switch: it is in Central Knot now, and on in all 3 tools; the strip at the top says so', false, '.bands');
+  // Off: out of every tool, kept in Central Knot.
+  await a.click('#switch-notes'); await a.settle();
+  await atEverySize('off', 'Turned notes off: its folder left every tool; its row stays under Off, "in Central Knot only"; the result offers Undo', true);
+  await openRow('notes');
+  await atEverySize('off-open', 'Opened the Off row: its status, each tool with no copy while it is off, its versions, and Delete from Central Knot with how it differs from Off', true, '.details');
+  await a.click('#switch-notes'); await switchOn('notes');
+  await closeRow('notes');
+  // The copy question: review's copies differ.
+  await a.click('#switch-review'); await a.settle();
+  await atEverySize('copy-question', 'Clicked review’s switch: its copies differ, so the row asks which copy every tool uses, quoting each copy’s first line and saying what choosing it does. Nothing is written yet', true, '.details-differs');
+  await a.click('#use-review-copilot-cli'); await switchOn('review');
+  await openRow('review');
+  await atEverySize('chosen-versions', 'Clicked "Use this copy" on Copilot CLI’s: review is in Central Knot, on in all 3 tools; opened, its versions list Copilot CLI’s copy (current) and Claude Code’s, kept as a version', true, '.version-row');
+  await a.click('#version-read-review-1');
+  await waitFor(a, `!!document.querySelector('.version-read')`);
+  await atEverySize('version-read', 'Clicked Read on Claude Code’s version: its SKILL.md, what differs from the current version marked', false, '.version-read');
+  await a.click('#version-read-review-1');
+  await closeRow('review');
+  // Partial: kept out of one tool by its switch in the opened row.
+  for (const key of ['release-notes', 'standup']) { await a.click(`#switch-${key}`); await switchOn(key); }
+  await openRow('standup');
+  await a.click('#enable-standup-codex-cli'); await a.settle();
+  await atEverySize('partial', 'Turned release-notes and standup on, then opened standup and turned it off in Codex alone: its folder left Codex; the row says "in 2 of 3 tools · not in Codex" and its switch is drawn partial', true, '.ov-row[data-key="standup"]');
+  await a.click('#enable-standup-codex-cli'); await a.settle();
+  await closeRow('standup');
+  // A tool's own switch, set in its settings: read, never undone; the opened row can clear it.
+  const claudeSettings = join(practice, '.claude/settings.json');
+  const settingsBefore = existsSync(claudeSettings) ? readFileSync(claudeSettings, 'utf8') : '{}';
+  writeFileSync(claudeSettings, JSON.stringify({ ...JSON.parse(settingsBefore), skillOverrides: { 'release-notes': 'off' } }, null, 2));
+  await refresh();
+  await openRow('release-notes');
+  await atEverySize('switched-off', 'Outside the app, Claude Code’s settings turned release-notes off, then Refresh: its folder stays; its mark in Claude Code is off, the row says "switched off in Claude Code", and Claude Code’s line offers Clear the switch', true, '.details');
+  await a.click('#clear-switch-release-notes-claude-cli'); await a.settle();
+  await shot(a, 'switch-cleared', 'Clicked "Clear the switch": Claude Code loads it again, and the result says so.');
+  await closeRow('release-notes');
+  // An edit made in a tool becomes the current version and reaches the others; its notice offers Undo.
+  writeFileSync(join(folderIn('codex', 'standup'), 'SKILL.md'), `${readFileSync(join(folderIn('codex', 'standup'), 'SKILL.md'), 'utf8')}\nEdited in Codex.\n`);
+  await refresh();
+  await atEverySize('edit-notice', 'Outside the app, standup’s SKILL.md was edited in Codex, then Refresh: the edit is the current version now, in Claude Code and Copilot CLI too; the notice offers Undo', false, '.sync-notices');
+  // A folder deleted by hand turns the skill off everywhere; Central Knot keeps it, and the notice offers Turn on.
+  rmSync(folderIn('copilot', 'release-notes'), { recursive: true, force: true });
+  await refresh(); await wait(2300); await refresh();
+  await atEverySize('deleted-by-hand', 'Outside the app, release-notes’s folder was deleted in Copilot CLI, then Refresh (twice, past the settle window): it is off everywhere, kept in Central Knot; the notice offers Turn on', true, '.sync-notices');
+  await a.click('#switch-release-notes'); await switchOn('release-notes');
+  // Found skills that can't go everywhere: a folder that can't be copied as it is, and a name Copilot CLI won't load.
+  putSkill('claude', 'has-link', 'A skill with a link inside.');
+  symlinkSync('SKILL.md', join(folderIn('claude', 'has-link'), 'alias'));
+  mkdirSync(folderIn('claude', 'plain-notes'), { recursive: true }); writeFileSync(join(folderIn('claude', 'plain-notes'), 'SKILL.md'), 'Notes with no frontmatter, which Copilot CLI and Codex won’t load.\n');
+  await refresh();
+  await openRow('has-link');
+  await atEverySize('cannot-copy', 'A skill in Claude Code with a link inside its folder: its row says its copy can’t be read for sure, its switch waits, and Claude Code’s line says why', true, '.details');
+  await closeRow('has-link');
+  await openRow('plain-notes');
+  await atEverySize('cannot-take', 'A skill with no frontmatter in Claude Code, found: Copilot CLI’s and Codex’s marks and lines say they can’t take it, and why', false, '.details');
+  await closeRow('plain-notes');
+  rmSync(folderIn('claude', 'has-link'), { recursive: true, force: true }); rmSync(folderIn('claude', 'plain-notes'), { recursive: true, force: true });
+  await refresh();
+  // Another way: a copy in ~/.agents/skills, which Copilot CLI and Codex read; Claude Code gets Central Knot's copy.
+  mkdirSync(join(practice, '.agents/skills/shared-notes'), { recursive: true });
+  writeFileSync(join(practice, '.agents/skills/shared-notes/SKILL.md'), '---\nname: shared-notes\ndescription: Kept in the shared folder.\n---\n\nKept in the shared folder.\n');
+  await refresh();
+  await a.click('#switch-shared-notes'); await switchOn('shared-notes');
+  await openRow('shared-notes');
+  await atEverySize('another-way', 'A skill in ~/.agents/skills, taken in: Claude Code has Central Knot’s copy; Copilot CLI and Codex read the shared copy, so nothing of Central Knot’s goes there, and each line offers Take over…', true, '.details');
+  await a.click('#take-over-shared-notes-copilot-cli');
+  await atEverySize('take-over-armed', 'Clicked "Take over…" on Copilot CLI’s line: it asks once more, saying other apps that read that folder won’t find it there', false, '.details');
+  await a.click('#take-over-confirm-shared-notes-copilot-cli'); await a.settle();
+  await atEverySize('taken-over', 'Clicked "Take over now": the shared copy is gone, and Copilot CLI and Codex have Central Knot’s copy', false, '.details');
+  await closeRow('shared-notes');
+  // Delete from Central Knot, armed, then done.
+  await openRow('shared-notes');
+  await a.click('#delete-shared-notes');
+  await atEverySize('delete-armed', 'Clicked "Delete from Central Knot…": it says what happens, and for how long History can restore it', false, '#delete-note-shared-notes');
+  await a.click('#delete-confirm-shared-notes'); await a.settle();
+  await shot(a, 'deleted', 'Clicked "Delete it now": shared-notes is out of every tool and off the page; History can restore it.');
+  // The Files view.
+  await openRow('standup');
+  await a.click('#files-standup'); await a.settle();
+  await atEverySize('files-view', 'Clicked "Files and contents" in standup’s details: the list of skills beside standup’s switch, its SKILL.md and where each copy is', true);
   await a.click('#skills-table');
-}
-
-// ---------- Off and Remove in one tool ----------
-if (wanted('disable')) {
-  begin('disable');
+  // History.
+  await a.click('#nav-history'); await a.settle();
+  await atEverySize('history', 'Clicked "History": each skill’s entries in words, each with its own Undo, Turn on or Restore where one can still be done', true);
   await a.click('#nav-skills');
-  await a.click('#open-notes'); await shot(a, 'not-synced-details', 'Opened notes, not synced, in Claude Code and Copilot CLI: each tool\'s row has its own switch and Remove.');
-  await a.click('#switch-notes'); if (!(await a.has('#enable-notes-codex-cli'))) await a.click('#open-notes');
-  await a.click('#enable-notes-codex-cli');
-  const toml = readFileSync(join(practice, '.codex/config.toml'), 'utf8');
-  await shot(a, 'codex-off', `Turned notes on, then off in Codex alone, each at once. Codex keeps its copy and has it off; its config.toml now ends with:\n\n\`\`\`toml\n${toml.slice(toml.lastIndexOf('[[skills.config]]'))}\`\`\`\n`);
-  if (!(await a.has('#remove-standup-copilot-cli'))) await a.click('#open-standup');
-  await a.click('#remove-standup-copilot-cli'); await shot(a, 'removed', 'Opened standup (not synced, only in Copilot CLI) and clicked Remove in its Copilot CLI row: the copy is gone at once and kept in History. With no copy left, standup stays under Off.');
-  if (!(await a.has('#enable-release-notes-claude-cli'))) await a.click('#open-release-notes');
-  await a.click('#enable-release-notes-claude-cli');
-  await shot(a, 'not-synced-off', 'Opened release-notes (not synced, only in Claude Code) and turned it off in Claude Code: it is off everywhere now.');
-  await a.click('#delete-release-notes');
-  await shot(a, 'delete-everywhere-confirm', 'Clicked "Delete everywhere…" for release-notes: it asks once more.');
-  await a.click('#delete-confirm-release-notes'); await shot(a, 'delete-everywhere-done', 'Clicked "Delete release-notes from every tool".');
-  await a.click('#nav-history'); await shot(a, 'history', 'Clicked "History": each switch and removal, each with its own Undo or Restore.');
-  await a.click('#nav-skills');
-  if (await a.has('#switch-standup')) { await a.click('#switch-standup'); await shot(a, 'put-back', 'Turned standup on again from Off: History put its copy back.'); }
-  await a.click('#open-review'); await shot(a, 'differing-details', 'Opened review, whose copies differ: the choice first, then each tool\'s switch and Remove.');
-  await a.click('#open-review');
-  writeFileSync(join(practice, '.copilot/settings.json'), '{ not json');
-  await a.click('#header-refresh'); if (!(await a.has('#enable-notes-claude-cli'))) await a.click('#open-notes');
-  await shot(a, 'switch-unavailable', 'Outside the app, Copilot\'s settings.json was broken, then Refresh: its row says it can\'t switch there, with the reason as the row\'s text.');
-  rmSync(join(practice, '.copilot/settings.json'));
-  await a.click('#header-refresh');
-  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
-    await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: width > 1300 ? 1 : 2, mobile: false });
-    for (const theme of ['dark', 'light']) {
-      await a.theme(theme);
-      if (!(await a.has('.details'))) await a.click('#open-notes');
-      await shot(a, `size-${width}-${theme}`, `notes' details (on, off in Codex) at ${width}×${height}, ${theme}.`);
-    }
-  }
-  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false });
-  await a.theme('dark');
-  if (!(await a.has('.details'))) await a.click('#open-notes');
-  await a.click('#files-notes'); await shot(a, 'files-view-860-dark', 'At 860×560: clicked "Files and contents" for notes. The details pane is narrow here, so each tool\'s switch and Remove share the tool\'s line.');
-  await a.click('#skills-table');
-  await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
-  await a.theme('dark');
+  if (existsSync(claudeSettings)) writeFileSync(claudeSettings, settingsBefore);
 }
 
 // ---------- Sync, notices and History ----------
@@ -334,54 +358,35 @@ if (wanted('mcp')) {
 // Central Knot holds each agent itself, with its versions (src/library.ts). Every state of an agent's row, at four sizes.
 if (wanted('agents')) {
   begin('agents');
-  const SIZES = [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]];
-  /** Scrolls what a picture is about into view. */
-  const show = selector => a.run(`document.querySelector('${selector}')?.scrollIntoView({ block: 'center' })`);
-  /** One state at every size (and, `light`, once in the light appearance), then back to 1280×800. `at`: what to scroll into view at each size. */
-  const sizes = async (name, caption, light = false, at = undefined) => {
-    for (const [width, height] of SIZES) { await a.size(width, height); if (at) await show(at); await shot(a, `${name}-${width}`, `${caption} (${width}×${height})`); }
-    await a.size(1280, 800);
-    if (at) await show(at);
-    if (light) { await a.theme('light'); await shot(a, `${name}-light`, `${caption} (light appearance)`); await a.theme('dark'); }
-  };
-  /** Where the pointer rests to hover an element, at its middle. */
-  const middleOf = selector => a.run(`(() => { const box = document.querySelector('${selector}').getBoundingClientRect(); return { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) }; })()`);
-  /** Keyboard focus on an element, with its focus ring (as a Tab press gives it). */
-  const focusOn = selector => a.run(`document.querySelector('${selector}')?.focus({ focusVisible: true })`);
-  const refresh = async () => { await a.click('#header-refresh'); await a.settle(); };
   const agentsFolder = { claude: '.claude/agents', copilot: '.copilot/agents', codex: '.codex/agents' };
   const reviewer = tool => join(practice, { claude: '.claude/agents/code-reviewer.md', copilot: '.copilot/agents/code-reviewer.agent.md', codex: '.codex/agents/code-reviewer.toml' }[tool]);
   const claudeFile = (name, description, prompt) => writeFileSync(join(practice, agentsFolder.claude, `${name}.md`), `---\nname: ${name}\ndescription: ${description}\n---\n\n${prompt}`);
   /** Marks a file as saved `seconds` from now, so "latest" can tell edits made in the same second apart. */
   const savedIn = (path, seconds) => { const when = new Date(Date.now() + seconds * 1000); utimesSync(path, when, when); };
-  const isOpen = key => a.has(`.ov-row[data-key="${key}"][aria-expanded="true"]`);
-  const openRow = async key => { if (!(await isOpen(key))) { await a.click(`#open-${key}`); await a.settle(); } };
-  const closeRow = async key => { if (await isOpen(key)) { await a.click(`#open-${key}`); await a.settle(); } };
-  const switchOn = key => waitFor(a, `document.querySelector('#switch-${key}')?.getAttribute('aria-checked') === 'true'`, 15000);
 
   await a.click('#nav-agents');
-  await sizes('agents-found', 'Clicked "Agents". Both agents are found: a tool has them and Central Knot doesn’t yet, so each switch sits halfway; the section line says what turning one on does');
+  await atEverySize('agents-found', 'Clicked "Agents". Both agents are found: a tool has them and Central Knot doesn’t yet, so each switch sits halfway; the section line says what turning one on does');
   await shot(a, 'agents-found-hover', 'The pointer on code-reviewer’s halfway switch: the row lights up; the switch’s tooltip says a click takes it into Central Knot and puts it in every tool.', await middleOf('#switch-code-reviewer'));
   await focusOn('#switch-code-reviewer');
   await shot(a, 'agents-found-focus', 'Keyboard focus on code-reviewer’s halfway switch: its focus ring.');
   await a.run('document.activeElement?.blur()');
   await openRow('code-reviewer');
-  await sizes('agents-found-open', 'Opened code-reviewer while it is found: its status says where it is and what its switch does; its whole description shows; each tool says what it has', true);
+  await atEverySize('agents-found-open', 'Opened code-reviewer while it is found: its status says where it is and what its switch does; its whole description shows; each tool says what it has', true);
   await closeRow('code-reviewer');
   for (const key of ['code-reviewer', 'release-notes']) { await a.click(`#switch-${key}`); await switchOn(key); }
   await shot(a, 'agents-on', 'Clicked both switches: each agent is taken into Central Knot and on in all 3 tools. The result says so.');
 
   // Off: out of every harness, kept in Central Knot. On puts each file back.
   await a.click('#switch-code-reviewer'); await a.settle();
-  await sizes('agents-off', 'Turned code-reviewer off: it left every tool, and its row stays under Off, "in Central Knot only", with its description; the result offers Undo', true);
+  await atEverySize('agents-off', 'Turned code-reviewer off: it left every tool, and its row stays under Off, "in Central Knot only", with its description; the result offers Undo', true);
   await openRow('code-reviewer');
-  await sizes('agents-off-open', 'Opened the Off row: its status, its whole description, each tool with no copy while it is off, its versions, and Delete from Central Knot as a quiet button with how it differs from Off', true);
+  await atEverySize('agents-off-open', 'Opened the Off row: its status, its whole description, each tool with no copy while it is off, its versions, and Delete from Central Knot as a quiet button with how it differs from Off', true);
   await a.click('#switch-code-reviewer'); await switchOn('code-reviewer');
   await shot(a, 'agents-on-again', 'Clicked its switch again: on in all 3 tools, each file as it was.');
 
   // The opened row of an agent that is On: each harness's line and switch, what stays its own, and one version.
   await openRow('code-reviewer');
-  await sizes('agents-open', 'Opened code-reviewer, on: its whole description at the top; each tool has the current version and its own switch; Claude Code’s line names the settings that stay in its file; one version, its first');
+  await atEverySize('agents-open', 'Opened code-reviewer, on: its whole description at the top; each tool has the current version and its own switch; Claude Code’s line names the settings that stay in its file; one version, its first');
 
   // Edits made in a harness: each becomes the current version. Several make the versions list long enough to fold.
   edit(reviewer('codex'), text => text.replace('description = "', 'description = "Checks tests too. '));
@@ -393,22 +398,22 @@ if (wanted('agents')) {
     await refresh(); await wait(1100);
   }
   await openRow('code-reviewer');
-  await sizes('agents-versions-folded', 'Four more edits, in Claude Code, Copilot CLI and Codex: the versions list shows its newest four, the current one first, each with its time (every row in one form), where it was edited and what changed, and one line for the earlier ones');
+  await atEverySize('agents-versions-folded', 'Four more edits, in Claude Code, Copilot CLI and Codex: the versions list shows its newest four, the current one first, each with its time (every row in one form), where it was edited and what changed, and one line for the earlier ones');
   await a.click('#versions-all-code-reviewer'); await a.settle();
-  await sizes('agents-versions-all', 'Clicked "Show 2 earlier versions": every version, the current one first, then in the order Central Knot took them', true);
+  await atEverySize('agents-versions-all', 'Clicked "Show 2 earlier versions": every version, the current one first, then in the order Central Knot took them', true);
   await shot(a, 'agents-version-hover', 'The pointer on the second version’s Make current: a quiet outlined button, apart from Read.', await middleOf('#version-current-code-reviewer-1'));
   await focusOn('#version-current-code-reviewer-1');
   await shot(a, 'agents-version-focus', 'Keyboard focus on that Make current: its focus ring.');
   await a.run('document.activeElement?.blur()');
   await a.click('#version-read-code-reviewer-2'); await waitFor(a, `/careful code reviewer/.test(document.querySelector('.version-read')?.textContent ?? '')`, 15000);
-  await sizes('agents-version-read', 'Clicked Read on an earlier version: its description and prompt open under its line, upright, headed by what differs from the current version ("Differs from current in: …"), each difference marked', false, '.version-read');
+  await atEverySize('agents-version-read', 'Clicked Read on an earlier version: its description and prompt open under its line, upright, headed by what differs from the current version ("Differs from current in: …"), each difference marked', false, '.version-read');
   await a.click('#version-read-code-reviewer-2'); await a.settle();
   await a.click('#version-current-code-reviewer-5'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
-  await sizes('agents-made-current', 'Clicked Make current on the first version: it is the new current version, first, "back to:" the version it went back to (folded into its row), written to all 3 tools; the result names it and offers Undo');
+  await atEverySize('agents-made-current', 'Clicked Make current on the first version: it is the new current version, first, "back to:" the version it went back to (folded into its row), written to all 3 tools; the result names it and offers Undo');
 
   // One harness kept out: the closed row says so too.
   await a.click('#enable-code-reviewer-codex-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
-  await sizes('agents-kept-out', 'Turned Codex’s own switch off: code-reviewer is kept out of Codex (its copy there is gone, its mark struck through, "not in Codex" beside its name) and stays on in the others', true);
+  await atEverySize('agents-kept-out', 'Turned Codex’s own switch off: code-reviewer is kept out of Codex (its copy there is gone, its mark struck through, "not in Codex" beside its name) and stays on in the others', true);
   await a.click('#version-current-code-reviewer-1'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
   await shot(a, 'agents-made-current-kept-out', 'With Codex kept out, clicked Make current on an earlier version: written to Claude Code and Copilot CLI; Codex stays out, and the result names only those two.');
   // Off while kept out of one tool, then On: Codex stays out.
@@ -427,14 +432,14 @@ if (wanted('agents')) {
   edit(reviewer('copilot'), text => text.replace('description: ', 'description: Edited while sync is off. '));
   await refresh();
   await openRow('code-reviewer');
-  await sizes('agents-edit-waits', 'Turned Automatic sync off, edited code-reviewer in Copilot CLI, clicked Refresh: Copilot CLI’s mark and line say its edit becomes the current version when sync runs; the toolbar counts it');
+  await atEverySize('agents-edit-waits', 'Turned Automatic sync off, edited code-reviewer in Copilot CLI, clicked Refresh: Copilot CLI’s mark and line say its edit becomes the current version when sync runs; the toolbar counts it');
   await a.click('#sync-switch'); await a.settle(); await refresh();
 
   // Many versions, unfolded.
   for (let count = 1; count <= 7; count++) { edit(reviewer(['claude', 'copilot', 'codex'][count % 3]), text => text.replace('Keep it short.', `Keep it short (${count}).`).replace(/Keep it short \(\d+\)\./, `Keep it short (${count}).`)); await refresh(); await wait(1100); }
   await openRow('code-reviewer');
   if (await a.has('#versions-all-code-reviewer')) { await a.click('#versions-all-code-reviewer'); await a.settle(); }
-  await sizes('agents-versions-many', 'Seven more edits: every version unfolded, each on one line where there is room, the times reading apart', false, '.versions');
+  await atEverySize('agents-versions-many', 'Seven more edits: every version unfolded, each on one line where there is room, the times reading apart', false, '.versions');
   await closeRow('code-reviewer');
 
   // A harness that can't hold it: a name it can't store.
@@ -442,7 +447,7 @@ if (wanted('agents')) {
   await refresh();
   await a.click('#switch-réviseur'); await a.settle();
   await openRow('réviseur');
-  await sizes('agents-cannot', 'An agent in Claude Code whose name Copilot CLI and Codex can’t store, turned on: its status says "On in Claude Code only", and each other tool’s line names the character and what to do');
+  await atEverySize('agents-cannot', 'An agent in Claude Code whose name Copilot CLI and Codex can’t store, turned on: its status says "On in Claude Code only", and each other tool’s line names the character and what to do');
   await closeRow('réviseur');
 
   // A long name and a long prompt.
@@ -451,10 +456,10 @@ if (wanted('agents')) {
     Array.from({ length: 40 }, (_, line) => `${line + 1}. Check the migration’s step ${line + 1}: what it changes, what it locks, how long it runs on the largest table, and how it is rolled back.`).join('\n') + '\n');
   await refresh();
   await a.click(`#switch-${long}`); await switchOn(long);
-  await sizes('agents-long-name', 'An agent with a long name and description, on: the row shortens the description first, and the name at a word', false, `.ov-row[data-key="${long}"]`);
+  await atEverySize('agents-long-name', 'An agent with a long name and description, on: the row shortens the description first, and the name at a word', false, `.ov-row[data-key="${long}"]`);
   await openRow(long);
   await a.click(`#version-read-${long}-0`); await waitFor(a, `!!document.querySelector('.version-read pre')`, 15000);
-  await sizes('agents-long-read', 'Opened it and clicked "Read current": a 40-line prompt reads in its box, which scrolls, upright', false, '.version-read');
+  await atEverySize('agents-long-read', 'Opened it and clicked "Read current": a 40-line prompt reads in its box, which scrolls, upright', false, '.version-read');
   await closeRow(long);
 
   // Found copies that differ, in three tools: the copy question, each copy's edit time, the newest marked; the others become versions.
@@ -464,21 +469,21 @@ if (wanted('agents')) {
   savedIn(join(practice, '.claude/agents/changelog.md'), -600); savedIn(join(practice, '.copilot/agents/changelog.agent.md'), -120);
   await refresh();
   await a.click('#switch-changelog'); await a.settle();
-  await sizes('agents-choice', 'A found agent whose copies differ in all three tools, its switch clicked: it asks which copy every tool uses; each copy says when it was edited, the newest is marked and its button is the main one', true);
+  await atEverySize('agents-choice', 'A found agent whose copies differ in all three tools, its switch clicked: it asks which copy every tool uses; each copy says when it was edited, the newest is marked and its button is the main one', true);
   await a.click('#use-changelog-codex-cli'); await switchOn('changelog');
   await openRow('changelog');
-  await sizes('agents-choice-made', 'Chose Codex’s copy: changelog is in Central Knot with it, on in all 3 tools; the current version is listed first, the other copies after it, each with Make current');
+  await atEverySize('agents-choice-made', 'Chose Codex’s copy: changelog is in Central Knot with it, on in all 3 tools; the current version is listed first, the other copies after it, each with Make current');
 
   // Delete from Central Knot, and History's Restore.
   await a.click('#delete-changelog'); await a.settle();
-  await sizes('agents-delete-armed', 'Clicked "Delete from Central Knot…": it asks once more, with Cancel beside it, and says History keeps it, with its versions, for 30 days', true, '#delete-note-changelog');
+  await atEverySize('agents-delete-armed', 'Clicked "Delete from Central Knot…": it asks once more, with Cancel beside it, and says History keeps it, with its versions, for 30 days', true, '#delete-note-changelog');
   await a.click('#delete-confirm-changelog'); await a.settle();
   await shot(a, 'agents-deleted', 'Clicked "Delete it now": changelog left every tool and this page; the result offers Undo.');
   await a.click('#nav-history'); await a.settle();
-  await sizes('agents-history', 'History: each click and each edit taken in, in the library’s words, with its action: Restore on the deletion, Undo on the latest change, "Go back before this" on older ones (the full sentence its tooltip), Turn off or Turn on on a switch', true);
+  await atEverySize('agents-history', 'History: each click and each edit taken in, in the library’s words, with its action: Restore on the deletion, Undo on the latest change, "Go back before this" on older ones (the full sentence its tooltip), Turn off or Turn on on a switch', true);
   await a.run(`[...document.querySelectorAll('.history-row[data-kind="deleted"]')].find(row => row.textContent.includes('changelog'))?.querySelector('.history-actions button')?.click()`);
   await waitFor(a, `/Restored/.test(document.querySelector('#history-scroll')?.textContent ?? '')`, 15000);
-  await sizes('agents-history-restored', 'Clicked Restore on the deletion: changelog is back in Central Knot and in every tool; the deletion’s row reads Restored');
+  await atEverySize('agents-history-restored', 'Clicked Restore on the deletion: changelog is back in Central Knot and in every tool; the deletion’s row reads Restored');
 
   // Many agents: On, Off and Found together.
   for (let count = 1; count <= 14; count++) claudeFile(`helper-${String(count).padStart(2, '0')}`, `Helps with task ${count}. Reads the request, plans it, and reports what changed.`, `Do task ${count} carefully.\n`);
@@ -486,14 +491,14 @@ if (wanted('agents')) {
   await waitFor(a, `!!document.querySelector('#switch-helper-14')`, 20000);
   for (let count = 1; count <= 8; count++) { await a.click(`#switch-helper-${String(count).padStart(2, '0')}`); await switchOn(`helper-${String(count).padStart(2, '0')}`); }
   for (const count of [2, 5, 7]) { await a.click(`#switch-helper-0${count}`); await a.settle(); }
-  await sizes('agents-many', 'Fourteen more agents: some on, three off, six found; the three sections, each with its count and line');
+  await atEverySize('agents-many', 'Fourteen more agents: some on, three off, six found; the three sections, each with its count and line');
   await a.run(`document.querySelector('.legend')?.scrollIntoView({ block: 'end' })`);
   await shot(a, 'agents-legend', 'The key at the end of the list: "Kept out", "Off: in Central Knot only", "Can’t take it" among the marks this page uses.');
 
   // States added in round 3, after the earlier pictures so their numbers stay. The long name heads its opened panel.
   await openRow(long);
   if (await a.has('.version-read')) { await a.click(`#version-read-${long}-0`); await a.settle(); }
-  await sizes('agents-long-name-open', 'Opened the agent with the long name: the panel’s header holds it, and the list beside it cuts it before any description goes', false, '.details');
+  await atEverySize('agents-long-name-open', 'Opened the agent with the long name: the panel’s header holds it, and the list beside it cuts it before any description goes', false, '.details');
   await closeRow(long);
 
   // Two copies that differ: the copy question marks the newer one "Newer".
@@ -515,11 +520,11 @@ if (wanted('agents')) {
   await openRow('standup');
   await shot(a, 'agents-versions-thirty-folded', 'Twenty-nine edits in Claude Code, each adding a line: thirty versions, the newest four shown and one line for the other twenty-six.');
   await a.click('#versions-all-standup'); await a.settle();
-  await sizes('agents-versions-thirty', 'Clicked "Show 26 earlier versions": all thirty, one line each, every time in one form', false, '.versions');
+  await atEverySize('agents-versions-thirty', 'Clicked "Show 26 earlier versions": all thirty, one line each, every time in one form', false, '.versions');
   // Read on a version that has words the current one lacks: they are tinted.
   await a.click('#version-current-standup-25'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
   await a.click('#version-read-standup-1'); await waitFor(a, `!!document.querySelector('.version-read .change-added')`, 15000);
-  await sizes('agents-version-read-adds', 'Made the fifth version current, then clicked Read on the one that was current before: the lines it has and the current one lacks are tinted; the header says what differs', false, '.version-read');
+  await atEverySize('agents-version-read-adds', 'Made the fifth version current, then clicked Read on the one that was current before: the lines it has and the current one lacks are tinted; the header says what differs', false, '.version-read');
   await a.click('#version-read-standup-1'); await a.settle();
 
   // Undo of a Make current while the agent is kept out of a tool: that tool stays out.
@@ -533,7 +538,7 @@ if (wanted('agents')) {
   chmodSync(join(practice, agentsFolder.codex), 0o555);
   claudeFile('standup', 'Writes the daily standup.', steps(31));
   await refresh(); await openRow('standup');
-  await sizes('agents-folder-locked', 'Codex’s agents folder made read-only, then standup edited in Claude Code: Copilot CLI gets the edit; Codex’s line says Central Knot can’t write in its agents folder', false, '.details-tool-line');
+  await atEverySize('agents-folder-locked', 'Codex’s agents folder made read-only, then standup edited in Claude Code: Copilot CLI gets the edit; Codex’s line says Central Knot can’t write in its agents folder', false, '.details-tool-line');
   chmodSync(join(practice, agentsFolder.codex), 0o755);
   await refresh();
   await closeRow('standup');
@@ -556,7 +561,7 @@ if (wanted('agents')) {
   await waitFor(a, `document.body.dataset.busy !== 'true' && !/Checking/.test(document.querySelector('#repo-state')?.textContent ?? '')`, 30000); await a.settle();
   await a.click('#nav-agents'); await a.settle();
   await openRow('retro');
-  await sizes('agents-pulled', 'Connected a Git repo with a retro agent, while Claude Code had a different retro of its own, and clicked Pull: retro is on, pulled from the Git repo; Claude Code’s copy is kept as a version, noted against the pulled one', false, '.versions');
+  await atEverySize('agents-pulled', 'Connected a Git repo with a retro agent, while Claude Code had a different retro of its own, and clicked Pull: retro is on, pulled from the Git repo; Claude Code’s copy is kept as a version, noted against the pulled one', false, '.versions');
   await closeRow('retro');
 
   // Restore when an agent of that name exists again.
@@ -578,7 +583,7 @@ if (wanted('agents')) {
   if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
   for (const folder of Object.values(agentsFolder)) rmSync(join(practice, folder), { recursive: true, force: true });
   await a.click('#nav-agents'); await refresh();
-  await sizes('agents-none', 'A Practice copy whose tools have no agents: the Agents page says so and what to do');
+  await atEverySize('agents-none', 'A Practice copy whose tools have no agents: the Agents page says so and what to do');
 }
 
 // ---------- Plugins ----------

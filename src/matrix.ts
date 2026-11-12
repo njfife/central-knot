@@ -1715,7 +1715,8 @@ function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
   const close = placement === 'row' ? h('button.details-close', { type: 'button', id: `close-${skill.key}`, 'aria-label': `Close details for ${skill.key}`, title: 'Close', onclick: () => { view.comparing = undefined; rerender(); } }, icon('x', 14)) : null;
   const box = (...children: (Child | Child[])[]) => h(`div.compare.details${placement === 'row' ? '' : '.details-bare'}${differs ? '.details-differs' : ''}${kind === 'mcp' ? '.details-mcp' : '.details-grid'}`, { role: 'region', 'aria-label': `Details for ${skill.key}` }, ...children);
   if (differs) return box(close, compareChoices(skill, inFiles));
-  const files = lib?.files && !inFiles ? smallAction('Files and contents', `files-${skill.key}`, () => openFiles(skill.key)) : null;
+  // A found row none of whose copies can be read has no files to show.
+  const files = lib?.files && !inFiles && (inLibrary(itemOf(skill)) || canTakeIn(skill)) ? smallAction('Files and contents', `files-${skill.key}`, () => openFiles(skill.key)) : null;
   const remove = lib && !inFiles ? libraryDelete(lib, skill) : null;
   return box(
     h('div.details-head', {},

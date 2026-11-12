@@ -17,7 +17,9 @@ const who = (tool?: string) => (tool ? toolName(tool) : 'Central Knot');
 /** The skill or agent an entry is about, as Central Knot's library holds it now (deleted or not). */
 const itemOf = (event: HistoryEvent) => { const entry = libraryEntry(event); return entry && state.home?.[entry.kind].library?.[entry.key]; };
 /** A skill's or agent's entry in its kind's words (historyactions.ts librarySentence). */
-const said = (event: HistoryEvent) => { const entry = libraryEntry(event); return entry && librarySentence(event, libraryWords[entry.kind], state.home?.[entry.kind].tools ?? [], itemOf(event), undid(event)); };
+/** A take-over's entry names the copy's path as the page shows paths (from ~, or "…" inside another home). */
+const pathsShown = (event: HistoryEvent): HistoryEvent => (event.kind === 'took-over' ? { ...event, losers: event.losers.map(copy => (copy.path ? { ...copy, path: shownPath(copy.path) } : copy)) } : event);
+const said = (event: HistoryEvent) => { const entry = libraryEntry(event); return entry && librarySentence(pathsShown(event), libraryWords[entry.kind], state.home?.[entry.kind].tools ?? [], itemOf(event), undid(event)); };
 /** Whether the entry is another's Undo: that one's `undoneBy` names it. */
 const undid = (event: HistoryEvent) => !!state.history.data?.some(other => other.undoneBy === event.id);
 

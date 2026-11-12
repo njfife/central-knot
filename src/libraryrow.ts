@@ -220,13 +220,18 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
   // A harness holding the current version that only waits for an edit made elsewhere has it on.
   const waitsForEdit = (tool: string) => row.hashes?.[tool] === item!.hash;
   const gets = where('gets-it').filter(tool => !waitsForEdit(tool)), out = where('kept-out', 'leaving'), cannot = where('cannot');
+  const switched = tools.filter(tool => row.switched?.[tool] && !out.includes(tool));
+  const another = where('another-way').filter(tool => wantedIn(item!, tool as HarnessId));
   const onIn = tools.filter(tool => ['current', 'edited'].includes(harnessIs(row, item, tool)) || (harnessIs(row, item, tool) === 'gets-it' && waitsForEdit(tool)));
   const edit = row.plan?.takeIn;
   const parts = [`On in ${named(onIn, tools)}${cannot.length ? ' only' : ''}`,
     edit ? `${toolName(edit)}’s edit becomes the current version when sync runs` : '',
     gets.length ? `${named(gets, tools)} ${gets.length === 1 ? 'gets' : 'get'} it when sync runs` : '',
     cannot.length ? `${andList(cannot.map(toolName))} can’t take it (see below)` : '',
-    out.length ? `kept out of ${named(out, tools)}` : ''];
+    another.length ? `${andList(another.map(toolName))} ${another.length === 1 ? 'has' : 'have'} it another way` : '',
+    out.length ? `kept out of ${named(out, tools)}` : '',
+    // A harness's own switch that turns it off there (skills, or a profile's): it has the item and doesn't load it, as the tag says.
+    switched.length ? `switched off in ${andList(switched.map(toolName))}` : ''];
   return `${parts.filter(Boolean).join(' · ')}${ownSaid ? `.${ownSaid}` : ''}`;
 }
 
@@ -313,7 +318,7 @@ export function sentences(words: RowWords) {
         if (!inLib) return 'Has it.';
         return `Has a copy Central Knot didn’t put there. It is left alone while ${inLib.on ? 'this tool is kept out' : `the ${noun} is off`}; ${KEPT_FIRST}.`;
       case 'kept-out': return `Kept out of this tool. Central Knot keeps its ${copy} for when you turn it on here.`;
-      case 'none': return inLib ? 'No copy while it is off.' : 'No copy. Turning it on adds it here.';
+      case 'none': return inLib ? 'No copy while it is off.' : canTakeIn(row) ? 'No copy. Turning it on adds it here.' : 'No copy.';
       case 'cannot': return row.cannot![tool]!;
       case 'unseen': return row.unseen![tool]!;
     }

@@ -331,8 +331,8 @@ export async function takeOver(context: ShareContext, tools: HarnessId[], key: s
   const result = await runTakeOver(context, item, keep, way);
   if (result) return stop(result);
   const done = await applySkills(context, tools, [], { only: new Set([key]) });
-  const said = way.take === 'link' ? `Replaced the link in ${toolName(tool)}’s skills folder with Central Knot’s copy.` : `Removed the copy at ${way.path}; other apps that read that folder won’t find it there.`;
-  return { ...done, results: [{ item: item.name, harness: tool, outcome: 'written', message: `${said} It is kept as a version.` }, ...done.results], made: [event.id] };
+  const said = way.take === 'link' ? `Replaced the link in ${toolName(tool)}’s skills folder with Central Knot’s copy.` : `Removed the copy at ${pathWords(context, way.path)}; other apps that read that folder won’t find it there.`;
+  return { ...done, results: [{ item: item.name, harness: tool, outcome: 'written', message: `${said}${keep ? ' It is kept as a version.' : ''}` }, ...done.results], made: [event.id] };
 }
 
 /** Takes over one copy (takeOver): the version first, then only the link (as a link) or the shared copy goes. Why not, if it couldn't. */

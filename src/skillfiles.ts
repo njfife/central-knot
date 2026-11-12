@@ -106,7 +106,7 @@ export async function readCopy(tool: HarnessId, directory: string, rootLabel: st
     try { parsed = parseSkill(content, name); }
     catch (error) { return { unseen: `${where}’s SKILL.md can’t be read as a skill (${error instanceof Error ? error.message : 'its frontmatter'}). Nothing changes there until it can.` }; }
     const tree = await readTree(directory);
-    if (tree.held) return { unseen: `${where} can’t be copied as it is: ${tree.held}`, isSkill: true };
+    if (tree.held) return { unseen: `${where} can’t be copied as it is: ${tree.held.replace(/^It\b/, 'it')}`, isSkill: true };
     const real = await realpath(directory);
     const skill: Skill = { folder: name, ...parsed, path: file, directory, realDirectory: real, rootLabel, content, status: '', ...loadProblems(content, name) };
     return { tool, name, key: itemKey(name), hash: tree.hash, at: await folderTime(directory), directory, skill };
