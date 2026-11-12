@@ -154,9 +154,12 @@ export const unseenIn = (disk: Disk<Seen>, tool: HarnessId, key: string) => disk
 
 /**
  * "H unknown is never H gone" for a whole folder, and a harness managed again, run on `items` as a pass's clicks left them.
- * - A folder the record doesn't hold (the harness is managed again after it was uninstalled or left out by the tool choice,
- *   which let its identity go: keepFolders) is the model's harness managed again, settled for every item in the record at
- *   once (cameBack), whichever pass sees it first. One that isn't there is noted as away, as below.
+ * - A folder the record doesn't hold is the model's harness managed again, settled for every item in the record at once
+ *   (cameBack), whichever pass sees it first. Its identity was let go when the harness stopped being managed (the tool choice,
+ *   or a pass without it: keepFolders), so the absence is recorded when that happens. A harness seen for the first time has
+ *   no identity either, and takes the same step: it changes only items that had something applied there, which a harness
+ *   never managed has not. A folder that isn't there is noted as away, as below, so a folder the first write makes is not
+ *   taken for a harness managed again at the next pass.
  * - A folder somewhere else than at the last full pass (its config root moved) has what was applied there forgotten for the
  *   pass's items; one made again since (a reset or reinstall, or back after being away) for those with no copy there. A
  *   click's pass leaves the identity for the next full pass, which forgets it for the others.
