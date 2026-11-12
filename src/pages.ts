@@ -53,7 +53,7 @@ function addHint(holders: HarnessId[], noun: string) {
 }
 /** What each kind's page says when no tool in this home has one: also used on a harness's page for that kind. */
 export function kindEmpty(kind: PageKind): { glyph: Parameters<typeof emptyState>[0]; title: string; body: string } {
-  const holders = kind === 'skills' ? homeTools() : state.home?.[kind].tools ?? [];
+  const holders = state.home?.[kind].tools ?? [];
   return { glyph: ({ skills: 'wand-sparkles', mcp: 'plug', agents: 'bot' } as const)[kind], title: `No ${kindNouns[kind].many} here yet`, body: `None of your tools has ${kindNouns[kind].a} in this home. ${addHint(holders, kindNouns[kind].many)}` };
 }
 const emptyKindPage = (kind: PageKind, id: string) => { const empty = kindEmpty(kind); return nothingHere(empty.glyph, empty.title, empty.body, id); };

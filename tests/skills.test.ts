@@ -366,6 +366,18 @@ test('Found copies that differ ask which one; the others become versions as they
   } finally { await box.cleanup(); }
 });
 
+test('A found copy another tool wouldn’t load is no choice for that tool: the question names the tool and why', async () => {
+  const box = await sandbox();
+  try {
+    await put(box, 'claude-cli', { 'SKILL.md': 'Just text.\n' });
+    await put(box, 'codex-cli');
+    const { fact } = await seen(box);
+    assert.deepEqual(fact!.choiceBlocks!['codex-cli'], [], 'Claude Code loads Codex’s copy');
+    assert.deepEqual(fact!.choiceBlocks!['claude-cli']!.map(block => block.tool), ['codex-cli']);
+    assert.match(fact!.choiceBlocks!['claude-cli']![0]!.reason, /^Codex will not load it/);
+  } finally { await box.cleanup(); }
+});
+
 test('The tool choice lets go of a tool’s folder: a tool left out and back gets the library’s version, its own edit kept as a version', async () => {
   const box = await sandbox();
   const context: ShareContext = { ...box.context };

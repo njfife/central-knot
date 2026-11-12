@@ -268,7 +268,8 @@ const CLAUDE_ONLY = 'A tool besides Claude Code is needed to bring it in: Claude
 const CLAUDE_ONLY_REMOVAL = 'Remove it in Claude Code’s settings, or use Write to Claude Code on MCP servers.';
 /**
  * With Sync off, an MCP server's or agent's deletion can't spread past the one tool Pull would remove it from (sync spreads
- * deletions; skills have Delete everywhere), so Pull leaves every copy as it is and tries again once Sync can carry it.
+ * deletions), so Pull leaves every copy as it is and tries again once Sync can carry it. (A skill's deletion is Delete from
+ * Central Knot, which needs no Sync: it never waits.)
  */
 const DELETION_WAITS = 'Its deletion from the repo waits for Automatic sync: turn it on, then Pull again.';
 /** Said of a row the last Pull left while it was held, once what held it has gone (it reads again, a tool now takes it, the repo's file is fixed). */

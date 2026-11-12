@@ -114,7 +114,7 @@ export function profileSkills(view: Pick<LibraryView, 'items'>): SkillFacts[] {
       const at = loads[tool]!;
       return [tool, { hash: '', directory: at.skillFile.replace(/[\\/]SKILL\.md$/, ''), rootLabel: '', lines: 0, modified: '', summary: '', writable: true, folder: at.folder, name: at.name } satisfies ToolCopy];
     }));
-    return { key: row.key, name: row.name, description: row.description, copies, extra: [], managed: row.on, off: row.except, cannot: {}, choiceBlocks: {},
+    return { key: row.key, name: row.name, description: row.description, copies, managed: row.on, off: row.except, cannot: {}, choiceBlocks: {},
       disabled: tools.filter(tool => loads[tool]!.off), ...(row.switchProblem ? { switchProblem: row.switchProblem } : {}) };
   });
 }

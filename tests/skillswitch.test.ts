@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { readHistory } from '../src/history.ts';
 import { applySkills, clearSwitch, skillsView } from '../src/skills.ts';
-import { isDisabled, readSwitchFile, setDisabled, switchPath, unverifiedBuild } from '../src/skillswitch.ts';
+import { isDisabled, readSwitchFile, setDisabled, switchPath } from '../src/skillswitch.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
 
@@ -77,8 +77,6 @@ test('Each tool’s switch: Disable writes its own form, Enable takes it out, an
     await writeFile(claude, '\uFEFF{ "model": "opus" }\n');
     await setDisabled(box.context, 'claude-cli', target, true);
     assert.ok((await readFile(claude, 'utf8')).startsWith('\uFEFF{'));
-    // Below the build where each switch was seen working, or with no build read, a note says so; nothing more.
-    assert.deepEqual(['2.1.300', '2.1.311', '2.2.0', undefined].map(version => !!unverifiedBuild('claude-cli', version)), [true, false, false, true]);
   } finally { await box.cleanup(); }
 });
 

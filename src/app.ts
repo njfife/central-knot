@@ -346,8 +346,8 @@ export const applyClick = (click: Click) => busy(click.putBack ? 'Putting it bac
   kindPages[click.kind].keep(ours.filter(entry => entry !== refusal), result?.notices);
   if (result?.stopped) { tell({ page: state.page, items: click.items, warn: true, band: true, text: result.stopped }); return; }
   if (!click.undoing) retireTip(click.kind);
-  // An MCP server or agent put back from a deletion is undone as that deletion again (its 'restored' entry), with the rest.
-  const made = [...(click.kind === 'skills' ? [] : back?.made ?? []), ...(result?.made ?? [])];
+  // An MCP server put back from a deletion is undone as that deletion again (its 'restored' entry), with the rest.
+  const made = [...(back?.made ?? []), ...(result?.made ?? [])];
   // A put-back's Undo is the removal or deletion again, which leaves the record as it was before it: no record change of its own.
   // A click refused before anything was done changed nothing: a record unlike the page's was changed elsewhere (the page was
   // read before it), never by this click. A hold that came after the record was changed (an edit waiting for sync) is no such refusal.

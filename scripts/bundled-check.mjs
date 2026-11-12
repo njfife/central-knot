@@ -16,8 +16,8 @@ import { stage } from './custom-build.mjs';
 import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
-import { applyChanges } from '../src/manage.ts';
-import { syncGate } from '../src/share.ts';
+import { applySkills } from '../src/skills.ts';
+import { managedNow, syncGate } from '../src/share.ts';
 
 const args = process.argv.slice(2);
 const flag = name => args.includes(name);
@@ -283,10 +283,10 @@ await wait(500);
 const standard = { home: HOME, mode: 'custom', read: () => Promise.all(harnessIds.map(harness => discover({ home: HOME, mode: 'custom', harness }))), build: 'com.centralknot.firstlook', buildName: 'Central Knot', settingsPath: join(scratch, 'standard-settings.json'), realHome: join(scratch, 'elsewhere') };
 mkdirSync(join(HOME, '.claude/skills/notes'), { recursive: true });
 writeFileSync(join(HOME, '.claude/skills/notes/SKILL.md'), '---\nname: notes\ndescription: Takes notes.\n---\n\nTake notes.\n');
-const managed = await applyChanges(standard, [{ key: 'notes', managed: true, off: [] }], false);
+const managed = await applySkills(standard, await managedNow(standard, await standard.read()), [{ key: 'notes', managed: true, off: [] }]);
 const recordPath = join(HOME, '.central-knot/sync.json');
 const record = () => JSON.parse(readFileSync(recordPath, 'utf8'));
-check('the standard app syncs this home first', !managed.stopped && record().owner === 'com.centralknot.firstlook' && record().ownerName === 'Central Knot' && !!record().items.notes, managed.stopped ?? record());
+check('the standard app syncs this home first', !managed.stopped && record().owner === 'com.centralknot.firstlook' && record().ownerName === 'Central Knot' && !!JSON.parse(readFileSync(join(HOME, '.central-knot/skills.json'), 'utf8')).items.notes, managed.stopped ?? record());
 
 // Between the two opens the person takes the marketplace out of Claude Code, in Claude Code.
 if (writes) rmSync(join(HOME, '.claude/plugins/known_marketplaces.json'));
@@ -336,7 +336,7 @@ if (writes) {
   await b.click('#take-over-sync');
   check('Take over syncing: this build syncs the home now, and says so', await b.until(`!document.querySelector('#other-owner')`) && await b.run(`document.querySelector('#announcement').textContent`).then(text => text === `${NAME} now syncs this home. To go back, take over in Central Knot.`), await b.run(`document.querySelector('#announcement').textContent`));
   const taken = record();
-  check('the record is the same one, under the new owner, with what was managed', taken.owner === `com.centralknot.custom.${ID}` && taken.ownerName === NAME && !!taken.items.notes, taken);
+  check('the record is the same one, under the new owner, with what was managed', taken.owner === `com.centralknot.custom.${ID}` && taken.ownerName === NAME && !!JSON.parse(readFileSync(join(HOME, '.central-knot/skills.json'), 'utf8')).items.notes, taken);
   const other = await syncGate(standard);
   check('the standard app then finds this build syncs it, by name', other.state === 'stopped' && other.owner?.name === NAME, other);
   check('the sync switch is this build’s again', await b.run(`document.querySelector('#sync-switch .sync-state').textContent`).then(text => text.startsWith('On')), await b.run(`document.querySelector('#sync-switch').textContent`));

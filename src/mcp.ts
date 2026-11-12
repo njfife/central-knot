@@ -389,7 +389,7 @@ function goneFacts(events: HistoryEvent[], here: Set<string>, keyOf: (event: His
       for (const loser of older.losers) covered.add(loser.tool);
       if (more && !older.undoneBy) also.push(older.id);
     }
-    return { key, name: latest.item, description: '', copies: {}, extra: [], managed: false, off: [], cannot: {}, choiceBlocks: {},
+    return { key, name: latest.item, description: '', copies: {}, managed: false, off: [], cannot: {}, choiceBlocks: {},
       gone: { history: latest.id, at: latest.at, kind: latest.kind as 'deleted' | 'removed', ...(also.length ? { also } : {}) } };
   });
 }
@@ -429,7 +429,7 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
     if (claudeWaits(item, slot, present)) claudePending.push(name);
     // Edits waiting to spread, as skills and agents mark them: a recorded copy now holding other content.
     const edited = item?.state === 'shared' ? item.copies.filter(copy => !copy.status && slot[copy.tool] && slot[copy.tool]!.hash !== copy.hash).map(copy => copy.tool) : [];
-    servers.push({ key: name, name, description: summary(sample), copies, extra: [], managed: item?.state === 'shared', off: item?.off ?? [], cannot, ...(Object.keys(plugin).length ? { plugin } : {}), held, separate: item?.separate, choiceBlocks: {},
+    servers.push({ key: name, name, description: summary(sample), copies, managed: item?.state === 'shared', off: item?.off ?? [], cannot, ...(Object.keys(plugin).length ? { plugin } : {}), held, separate: item?.separate, choiceBlocks: {},
       edited: edited.length ? edited : undefined, ...mcpSwitchFacts(name, entries.map(entry => entry.tool), switches) });
   }
   const gone = goneFacts(await readHistory(context), new Set(byName.keys()), event => (event.key.startsWith('mcp:') ? event.key.slice('mcp:'.length) : undefined));
@@ -749,7 +749,7 @@ async function flipMcpSwitches(context: ShareContext, name: string, present: Har
 
 /**
  * Undo of a server's Disable or Enable: each switch the event changed goes back. A tool already back as it was needs nothing. A
- * new 'switched' event records what was flipped, and its own Undo flips it again (as for a skill's, manage.ts undoSwitched).
+ * new 'switched' event records what was flipped, and its own Undo flips it again.
  */
 async function undoSwitchedMcp(context: ShareContext, history: HistoryEvent[], past: HistoryEvent): Promise<McpResult> {
   if (past.undoneBy) return { stopped: 'That change was already undone.', results: [], writes: 0 };

@@ -16,8 +16,8 @@ import { connect, debugPorts } from './cdp.mjs';
 import { serveReleases } from './update-fixture.mjs';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
-import { applyChanges } from '../src/manage.ts';
-import { readRecord } from '../src/share.ts';
+import { applySkills } from '../src/skills.ts';
+import { managedNow, readRecord } from '../src/share.ts';
 import { ALPHA_BUILD, lineApp, macDownload } from '../src/updates.ts';
 import { STANDARD_BUILD } from '../src/values.ts';
 
@@ -97,7 +97,7 @@ chmodSync(join(HOME, '.local/bin/claude'), 0o755);
 const standardSettings = join(appData, 'central-knot', 'sharing-settings.json');
 mkdirSync(join(appData, 'central-knot'), { recursive: true });
 const standard = { home: HOME, mode: 'custom', read: () => Promise.all(harnessIds.map(harness => discover({ home: HOME, mode: 'custom', harness }))), build: STANDARD_BUILD, buildName: STANDARD, settingsPath: standardSettings, realHome: join(scratch, 'elsewhere') };
-const managed = await applyChanges(standard, [{ key: 'notes', managed: true, off: [] }], false);
+const managed = await applySkills(standard, await managedNow(standard, await standard.read()), [{ key: 'notes', managed: true, off: [] }]);
 check('the standard app syncs the home first', !managed.stopped && (await readRecord(HOME)).record?.owner === STANDARD_BUILD, managed.stopped);
 
 // Each app's releases hold a newer release of the other line, which it must pass over.

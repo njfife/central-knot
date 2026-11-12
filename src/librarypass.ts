@@ -164,7 +164,7 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
  * What a person asked of one item: On or Off (`on`), the harnesses it is kept out of (`except`), a version to make current,
  * Delete from Central Knot (`deleted`: true) or its Restore (false), and, for a found item whose copies differ, the copy
  * every harness takes (`use`, as seen: `useHash`). `seenOn`: whether the page showed it On; a click made from an older read
- * is refused if that no longer holds. `use: 'separate'` is the skills engine's "keep both", no choice here: a click carrying
+ * is refused if that no longer holds. `use: 'separate'` is the MCP engine's "keep both", no choice here: a click carrying
  * it is refused (click, takeIn), so the pass does only what it is asked.
  */
 export interface ItemClick {

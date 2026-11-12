@@ -3,7 +3,7 @@
 // library kind's (skills, agents) follow Central Knot's library and are in libraryrow.ts.
 import { comparedTools, copiesDiffer } from './syncrules.ts';
 import type { LibraryItem, Plan, VersionChange } from './library.ts';
-import type { GoneItem, HarnessId, HomeView, LibraryFacts, LibraryView, Outside, ProfilesView, SkillFacts, SwitchProblem, ThroughPlugin } from './types.ts';
+import type { GoneItem, HarnessId, HomeView, LibraryFacts, LibraryView, ProfilesView, SkillFacts, SwitchProblem, ThroughPlugin } from './types.ts';
 import { toolName } from './words.ts';
 export { comparedTools, copiesDiffer };
 
@@ -17,8 +17,6 @@ export interface ItemRow {
   converted?: { agent: string; origin: string; losses: string[] };
   /** Shown name, with its case. */
   name?: string;
-  /** Other copies a tool also reads, for the details. */
-  extra?: { tool: Tool; directory: string; summary: string; writable: boolean; same: boolean; outside?: Outside }[];
   description: string;
   copies: Partial<Record<Tool, string>>;
   managed: boolean;
@@ -56,18 +54,6 @@ export interface ItemRow {
   disabled?: Tool[];
   /** Skills: why a tool's switch can't be used at all (its settings file, named in `file`). */
   switchProblem?: Partial<Record<Tool, SwitchProblem>>;
-  /** Skills: a quiet note that Disable isn't verified on a tool's build (older, or unreadable); the switch is offered anyway. */
-  disableNote?: Partial<Record<Tool, string>>;
-  /** Skills: whether Central Knot may change each tool's copy (not a link or a shared folder), so Remove can be offered. */
-  writable?: Partial<Record<Tool, boolean>>;
-  /** Skills: a tool whose copy is another tool's, read in that tool's own folder (OpenCode reads Claude Code's), and whose. */
-  reads?: Partial<Record<Tool, Tool>>;
-  /** Skills: a tool's copy that is a link in its own folder, or the shared folder's copy: taken over when the person asks. */
-  outside?: Partial<Record<Tool, Outside>>;
-  /** Skills: a broken link by this name in a tool's own folder, and where it led: a copy written there replaces it. */
-  brokenLink?: Partial<Record<Tool, string>>;
-  /** Skills, synced: its links or shared copy are back since a take-over removed them. */
-  outsideBack?: boolean;
   /** No tool has a copy any more; History can put it back. */
   gone?: GoneItem;
   /** A library kind: how a tool has it another way, which copies Take over can make Central Knot's, and (skills) a tool whose own switch has it off, in words. */
@@ -109,7 +95,7 @@ export interface KindSource { tools: HarnessId[]; facts: SkillFacts[]; waiting: 
  * no agents), the MCP servers whose Claude Code entries wait for Write now (their cells say so instead of reading as
  * differing copies), and the items History can put back. The one place a library kind's view (types.ts LibraryView) meets
  * the rows the MCP engine still gives (SkillFacts): there, On is `managed` and the harnesses it is kept out of are `off`,
- * and it has no copies read elsewhere (`extra`) and no choice blocks.
+ * and it has no choice blocks.
  */
 export function kindSource(home: Pick<HomeView, 'skills' | 'mcp' | 'agents'> & { profiles?: HomeView['profiles'] }, which: 'skills' | 'mcp' | 'agents'): KindSource {
   const view = libraryView(home, which);
@@ -134,7 +120,7 @@ function libraryRows(view: LibraryView, profiles?: ProfilesView): SkillFacts[] {
     [tool, profiles?.offByProfile[`skill:${key}`]?.includes(tool as HarnessId) ? `switched off in ${toolName(tool)} by ${active ? `the profile ${active}` : 'a profile'}` : `switched off in ${toolName(tool)}’s own settings`]));
   const made = rowsOf.get(view) ?? view.items.map(({ on, except, loads, ...facts }): SkillFacts => {
     const switched = switchedOff(facts.key, loads);
-    return { ...facts, managed: on, off: except, extra: [], choiceBlocks: {}, ...(Object.keys(switched).length ? { switched } : {}) };
+    return { ...facts, managed: on, off: except, choiceBlocks: facts.choiceBlocks ?? {}, ...(Object.keys(switched).length ? { switched } : {}) };
   });
   rowsOf.set(view, made);
   return made;

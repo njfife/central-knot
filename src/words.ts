@@ -79,5 +79,3 @@ export const kindNames = Object.fromEntries(Object.entries(kindNouns).map(([kind
 export const throughPlugin = (tool: HarnessId, given: { plugin: string; version?: string; off?: true }, item = 'skill') =>
   `${toolNames[tool]} has this ${item} through the plugin ${given.plugin}${given.version ? ` (version ${given.version})` : ''}${given.off ? ', turned off there' : ''}, so no separate copy is placed there.`;
 
-/** The skill page's action that takes over copies outside Central Knot's own (links in tools' folders, the shared ~/.agents/skills copy). */
-export const REPLACE_ACTION = 'Replace with managed copies';

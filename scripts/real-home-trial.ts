@@ -1,14 +1,16 @@
 // Real-home two-way trial, for a machine the owner has opened for testing (Nathan's Mac). Run from the checkout:
 //   node scripts/real-home-trial.ts
-// It backs up the skills folders, runs the engine with the app's own identity on a disposable skill (ck-trial), checks every
-// other skill, link and the .agents folder stay byte-identical, asks real Codex and Copilot what they list, then cleans up.
+// It backs up the skills folders, runs the skills kind (src/skills.ts) with the app's own identity on a disposable skill
+// (ck-trial), checks every other skill, link and the .agents folder stay byte-identical, asks real Codex and Copilot what they
+// list, then deletes the skill from Central Knot.
 import { createHash } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { lstat, mkdir, readFile, readdir, readlink, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { discover } from '../src/discovery.ts';
-import { applyChanges, deleteEverywhere, restoreFromHistory } from '../src/manage.ts';
+import { applySkills, restoreSkill } from '../src/skills.ts';
+import type { Change } from '../src/types.ts';
 import type { HarnessId } from '../src/types.ts';
 
 const home = homedir();
@@ -45,8 +47,9 @@ const body = (text: string) => `---\nname: ck-trial\ndescription: Central Knot r
 const at = (root: string) => join(home, root, 'ck-trial/SKILL.md');
 const line = async (root: string) => readFile(at(root), 'utf8').then(text => text.split('\n').at(-2), () => '(none)');
 const state = async () => `claude=${await line('.claude/skills')} | copilot=${await line('.copilot/skills')} | codex=${await line('.codex/skills')}`;
-const say = (step: string, result: { harnessWrites?: number; notices?: { kind: string; winner: string; losers: string[]; orderProved: boolean }[]; stopped?: string }) =>
-  console.log(`${step}: writes=${result.harnessWrites ?? 0}${result.stopped ? ` STOPPED ${result.stopped}` : ''} ${JSON.stringify((result.notices ?? []).map(notice => `${notice.kind}:${notice.winner}>${notice.losers.join('+')}${notice.orderProved ? '' : '(unproved)'}`))}`);
+const say = (step: string, result: { writes?: number; notices?: { kind: string; winner: string; losers: string[] }[]; stopped?: string }) =>
+  console.log(`${step}: writes=${result.writes ?? 0}${result.stopped ? ` STOPPED ${result.stopped}` : ''} ${JSON.stringify((result.notices ?? []).map(notice => `${notice.kind}:${notice.winner}>${notice.losers.join('+')}`))}`);
+const pass = (changes: Change[] = []) => applySkills(context, tools, changes);
 const wait = (ms: number) => new Promise(done => setTimeout(done, ms));
 async function codexLists(): Promise<string> {
   return new Promise(done => {
@@ -59,30 +62,30 @@ async function codexLists(): Promise<string> {
 }
 
 const before = await fingerprint();
-say('0 catch-up', await applyChanges(context, []));
+say('0 catch-up', await pass());
 await mkdir(join(home, '.claude/skills/ck-trial'), { recursive: true });
 await writeFile(at('.claude/skills'), body('Version 1, made in Claude Code.'));
-say('1 manage', await applyChanges(context, [{ key: 'ck-trial', managed: true, off: [] }]));
+say('1 take in, On', await pass([{ key: 'ck-trial', managed: true, off: [] }]));
 console.log('   ', await state());
 console.log(`   Codex lists: ${await codexLists()}; Copilot lists: ${execFileSync('copilot', ['skill', 'list'], { encoding: 'utf8', timeout: 30000 }).split('\n').filter(text => text.includes('ck-trial')).join(' ').trim() || '(none)'}`);
 await writeFile(at('.copilot/skills'), body('Version 2, edited in Copilot.'));
-say('2 edit in Copilot', await applyChanges(context, []));
+say('2 edit in Copilot', await pass());
 console.log('   ', await state());
 await writeFile(at('.claude/skills'), body('Version 3a, Claude.'));
 await writeFile(at('.codex/skills'), body('Version 3b, Codex.'));
-say('3 competing edits', await applyChanges(context, []));
+say('3 competing edits', await pass());
 console.log('   ', await state());
 await rm(join(home, '.codex/skills/ck-trial'), { recursive: true });
-say('4a deleted in Codex', await applyChanges(context, []));
+say('4a deleted in Codex', await pass());
 await wait(2300);
-const deleted = await applyChanges(context, []);
-say('4b after settling', deleted);
+const deleted = await pass();
+say('4b after settling: Off everywhere', deleted);
 console.log('   ', await state());
 const event = deleted.notices?.find(notice => notice.kind === 'deleted') as { history: string } | undefined;
-if (event) { say('5 Restore', await restoreFromHistory(context, event.history)); console.log('   ', await state()); }
-say('6 Delete everywhere', await deleteEverywhere(context, 'ck-trial'));
+if (event) { say('5 Turn on, from History', await restoreSkill(context, tools, event.history)); console.log('   ', await state()); }
+say('6 Delete from Central Knot', await pass([{ key: 'ck-trial', managed: true, off: [], deleted: true }]));
 console.log('   ', await state());
-say('7 quiet pass', await applyChanges(context, []));
+say('7 quiet pass', await pass());
 const after = await fingerprint();
 const changed = Object.keys({ ...before, ...after }).filter(path => before[path] !== after[path]);
 console.log(`everything else unchanged: ${changed.length === 0} (${Object.keys(before).length} entries)${changed.length ? ` CHANGED ${changed.slice(0, 8).join(', ')}` : ''}`);

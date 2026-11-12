@@ -107,7 +107,7 @@ function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; ac
 
 /** Skills, MCP servers, agents and profile switches share History; each row says which it is. */
 const kindOf = (event: HistoryEvent) => (event.kind === 'profile' ? 'Profile' : event.base ? 'Instructions' : event.key.startsWith('mcp:') ? 'MCP server' : event.key.startsWith('agent:') ? 'Agent' : 'Skill');
-/** The overwritten edits a skill conflict or kept edit can put back, one per content (mirrors restorableChoices in manage.ts). */
+/** The overwritten edits an MCP server's conflict or kept edit can put back, one per content (as mcp.ts restoreMcp offers them). */
 function choices(event: HistoryEvent) {
   if (event.key.startsWith('mcp:') || (event.kind !== 'conflict' && event.kind !== 'kept-edit')) return [];
   const seen = new Set<string>();
@@ -170,7 +170,7 @@ function actions(event: HistoryEvent, action?: string) {
   }
   if (!action) return h('span');
   // The scope is the tools the event touched, as the notices say it.
-  // Undo and Restore write the earlier version to every tool the item syncs to (restoreFromHistory), so they say "in all tools".
+  // Undo and Restore write the earlier version to every tool the server syncs to (mcp.ts restoreMcp), so they say "in all tools".
   // Only an 'added' undo is narrower: it removes the copies a switch (or Pull) added, in those tools alone.
   const touched = event.base ? event.base.list.tools : event.kind === 'added' || event.kind === 'removed' ? [...new Set(event.losers.map(loser => loser.tool))] : event.kind === 'switched' ? (event.switched ?? []).map(entry => entry.tool) : [];
   // A base no tool gets is undone in Central Knot alone, so its Undo names no tools.

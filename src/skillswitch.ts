@@ -1,5 +1,7 @@
-// Disabling a standalone skill in one tool with that tool's own switch (capability data, Appendix B; ENB-01, ENB-02).
-// The copy stays where it is and keeps receiving updates; the tool just doesn't load it. Each tool keeps its switch in its own
+// A tool's own switch for one skill (capability data, Appendix B; ENB-01, ENB-02): the copy stays where it is and keeps receiving
+// updates; the tool just doesn't load it. Central Knot's Off never writes it (Off takes the folder out: library.ts). It is read
+// for the mark on that tool's line (skills.ts rowFacts), cleared by the one action that writes it for a skill (skills.ts
+// clearSwitch), and flipped by profiles (profiles.ts) and for a plugin's skill (plugins.ts). Each tool keeps its switch in its own
 // user-wide settings file, which is edited in place: only the switch changes. Every other byte stays, apart from these: the JSON
 // list holding Copilot's or Pi's switches is written back as a list (same entries, JSON layout); a list or map Enable leaves empty
 // goes with its last entry (and a JSON settings file that wasn't there is left as `{}`); a config.toml without a final newline
@@ -17,30 +19,15 @@ import { isAbsolute, join, relative, sep } from 'node:path';
 import { openCodeSettings, toolConfigRoot } from './harnesses.ts';
 import { errorCode, plainError, storeDirectory, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { editTomlArray, readJsonc, readTomlTables, setJsonMember, tomlValue, type TomlTable, type TomlValue } from './textedit.ts';
-import { SKILL_SWITCH_TESTED_FROM } from './pluginstatus.ts';
 import type { HarnessId, SwitchProblem, SwitchTarget } from './types.ts';
 export type { SwitchTarget };
 import { problemText, toolName } from './words.ts';
-import { compareVersions, record, withoutBom } from './values.ts';
+import { record, withoutBom } from './values.ts';
 
 
 
 /** One tool's switch file, read and parsed once: its text ('' when there is none yet), or why it can't be used. */
 export interface SwitchFile { tool: HarnessId; path: string; text: string; exists: boolean; problem?: SwitchProblem; parsed?: ParsedSwitches }
-
-/** The lowest build of each tool where its switch was seen working (Appendix B, V-20). */
-const VERIFIED_FROM: Partial<Record<HarnessId, string>> = { 'claude-cli': '2.1.311', 'pi-cli': '1.5.0', 'opencode-cli': '1.19.5', ...SKILL_SWITCH_TESTED_FROM };
-
-/**
- * A quiet note beside a tool's switch when its build is older than VERIFIED_FROM or can't be read (no CLI found, say only a
- * desktop app). Information only: Disable is best effort, offered on any build; the file written is the tool's documented one.
- */
-export function unverifiedBuild(tool: HarnessId, version: string | undefined): string | undefined {
-  const from = VERIFIED_FROM[tool];
-  if (!from) return undefined;
-  if (!version) return `${toolName(tool)}’s version couldn’t be read; Disable may not take effect.`;
-  return compareVersions(version, from) < 0 ? `Not checked on this version of ${toolName(tool)} (${version}); Disable may not take effect.` : undefined;
-}
 
 /** The file that holds a tool's skill switches. */
 export const switchPath = (context: ShareContext, tool: HarnessId) =>

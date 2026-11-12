@@ -473,10 +473,13 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
   const description = disk.shapes.get(key)?.description ?? first?.skill.description ?? '';
   const edited = made ? [made.takeIn, ...made.keep.filter(kept => kept.from.how === 'edited').map(kept => kept.harness)].filter(tool => tool !== undefined) : [];
   const converted = disk.converted.get(key);
+  // Found, its copies differing: a copy another tool holding a different one wouldn't load is no choice for every tool.
+  const choiceBlocks = Object.fromEntries(entries.map(chosen => [chosen.tool, entries.filter(other => other.hash !== chosen.hash)
+    .flatMap(other => { const reason = targetFor(other.tool, other.directory, chosen.skill).skipped; return reason ? [{ tool: other.tool, reason }] : []; })]));
   return {
     key, name, description, copies, on: !!item?.on, except: item?.except ?? [], cannot, edited,
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
-      : { differs: differ(foundCopies(look, key, [])) }),
+      : { differs: differ(foundCopies(look, key, [])), choiceBlocks }),
     ...(Object.keys(plugin).length ? { plugin } : {}), ...(Object.keys(unseen).length ? { unseen } : {}),
     ...(Object.keys(other).length ? { anotherWay: other } : {}), ...(Object.keys(takeOver).length ? { takeOver } : {}),
     ...(Object.keys(loads).length ? { loads } : {}), ...(Object.keys(switchProblem).length ? { switchProblem } : {}),

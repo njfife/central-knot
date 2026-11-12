@@ -216,17 +216,6 @@ export interface PluginActionResult { stopped?: string; reports: ActionReport[] 
 
 // ---------- Managing skills across tools ----------
 
-/** Where a copy outside Central Knot's own copies sits, so the page can say it and an explicit action can take it over. */
-export interface Outside {
-  /** 'link': a link in the tool's own skills folder. 'shared': a copy (folder or link) in ~/.agents/skills, which other apps read too. */
-  kind: 'link' | 'shared';
-  /** The link's own text, when this entry is a link. Removing it removes only the link. */
-  linkTo?: string;
-  /** 'shared': why Manage can't give each tool its own copy instead: a tool's own skills folder is this folder. Delete still removes it. */
-  pinned?: string;
-  /** With `pinned`: the tool whose skills folder is a link to the shared folder. */
-  pinnedBy?: HarnessId;
-}
 
 export interface ToolCopy {
   hash: string;
@@ -244,18 +233,8 @@ export interface ToolCopy {
    * (libraryrow.ts RowWords body: an agent's prompt).
    */
   body?: string;
-  /** False for a copy reached through a link or in a folder other tools share: background sync never writes there. */
+  /** Whether Central Knot may write over this copy (an MCP entry's file). */
   writable: boolean;
-  /**
-   * A copy that is not writable but that Central Knot takes over when the person asks (Manage, Delete everywhere, Remove,
-   * Replace with managed copies): a link in the tool's own skills folder, or a copy in the shared ~/.agents/skills folder.
-   */
-  outside?: Outside;
-  /**
-   * The tool here whose own skills folder this copy is in, when it is another tool's: OpenCode reads Claude Code's folder, so a
-   * skill there is Claude Code's copy, which OpenCode reads. It is no second copy: sync neither follows it nor writes beside it.
-   */
-  readsFrom?: HarnessId;
   /** Folder name as found, with its case. */
   folder: string;
   /** Skills: the name this tool reads for this copy (its frontmatter name), which Copilot's switch goes by. */
@@ -275,8 +254,6 @@ export interface SkillFacts {
   name: string;
   description: string;
   copies: Partial<Record<HarnessId, ToolCopy>>;
-  /** Further copies a tool also reads, such as Copilot's in ~/.agents/skills. */
-  extra: (ToolCopy & { tool: HarnessId })[];
   managed: boolean;
   off: HarnessId[];
   /** Why a tool that lacks the skill could not load a copy. */
@@ -307,12 +284,6 @@ export interface SkillFacts {
   disabled?: HarnessId[];
   /** Skills and MCP servers: why a tool's switch can't be used at all: its settings file can't be read or is in a form Central Knot doesn't edit. */
   switchProblem?: Partial<Record<HarnessId, SwitchProblem>>;
-  /** Skills: a quiet note that Disable isn't verified on a tool's build (older than verified, or unreadable). Disable is still offered. */
-  disableNote?: Partial<Record<HarnessId, string>>;
-  /** Skills: tools whose own skills folder has a broken link by this name, with where it led: a copy written there replaces it. */
-  brokenLink?: Partial<Record<HarnessId, string>>;
-  /** Skills, managed: its links or shared copy are back since a take-over (Manage, Replace with managed copies) removed them. */
-  outsideBack?: true;
   /** No tool has a copy any more: it was deleted or removed, and History can put it back (this event) while it keeps it. */
   gone?: GoneItem;
   /** A library kind's row (LibraryFacts, as itemrow.ts kindSource gives the page): how a tool has it another way, and which copies Take over can make Central Knot's. */
@@ -767,6 +738,11 @@ export interface LibraryFacts {
    * as its line says it, On or Off (skills.ts anotherWay). Nothing of Central Knot's goes there while it does.
    */
   anotherWay?: Partial<Record<HarnessId, string>>;
+  /**
+   * Skills, found with copies that differ: what stops one tool's copy being the one every tool takes (the copy question): a
+   * tool holding another copy that wouldn't load this one, with why (copywords.ts cantUse leads it in).
+   */
+  choiceBlocks?: Partial<Record<HarnessId, { tool: HarnessId; reason: string }[]>>;
   /** Skills: a copy outside Central Knot's own that Take over can make Central Knot's, by tool: a link in its folder, or a copy in ~/.agents/skills. */
   takeOver?: Partial<Record<HarnessId, { kind: 'link' | 'shared'; path: string }>>;
   /**
@@ -784,7 +760,7 @@ export interface LibraryFacts {
 export interface McpView {
   tools: HarnessId[];
   servers: SkillFacts[];
-  /** Ones no tool has any more that History can put back (manage.ts goneFacts): shown Off. */
+  /** Ones no tool has any more that History can put back (mcp.ts goneFacts): shown Off. */
   gone?: SkillFacts[];
   /** Claude Code entries are written only by Write now with Claude closed, until a background write is proved safe (V-09). */
   claudePending: string[];
