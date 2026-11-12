@@ -63,7 +63,13 @@ export function harnessLine(row: AgentRow, item: LibraryItem | undefined, tool: 
   const held = inLibrary(item), has = row.hashes?.[tool] !== undefined;
   switch (harnessIs(row, item, tool)) {
     case 'current': return 'Has the current version.';
-    case 'gets-it': return has ? `Has another copy. It gets the current version when sync runs; ${KEPT_FIRST}.` : 'Gets it when sync runs next.';
+    case 'gets-it': {
+      if (!has) return 'Gets it when sync runs next.';
+      // While an edit waits elsewhere, a harness with the current version gets that edit; a copy the library lacks is kept first.
+      const edit = row.plan?.takeIn, kept = row.plan?.keep.some(entry => entry.harness === tool);
+      const now = row.hashes?.[tool] === held?.hash ? 'Has the current version' : 'Has another copy';
+      return `${now}. It gets ${edit ? `${toolName(edit)}’s edit` : 'the current version'} when sync runs${kept ? `; ${KEPT_FIRST}` : ''}.`;
+    }
     case 'edited': {
       if (wantedIn(held!, tool as HarnessId)) return `Edited in ${where}. It becomes the current version when sync runs, and reaches the other tools.`;
       const reaches = held!.on ? ' and reaches the other tools' : '';
@@ -180,8 +186,13 @@ export function statusLine(row: AgentRow, item: LibraryItem | undefined, tools: 
   }
   const ownSaid = own.length ? ` ${sentence(named(own, tools))} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there.` : '';
   if (place === 'off') return `Off · in Central Knot only. Turn it on to put it in every tool.${ownSaid}`;
-  const gets = where('gets-it'), out = where('kept-out', 'leaving'), cannot = where('cannot');
-  const parts = [`On in ${named(where('current', 'edited'), tools)}${cannot.length ? ' only' : ''}`,
+  // A harness holding the current version that only waits for an edit made elsewhere has it on.
+  const waitsForEdit = (tool: string) => row.hashes?.[tool] === item!.hash;
+  const gets = where('gets-it').filter(tool => !waitsForEdit(tool)), out = where('kept-out', 'leaving'), cannot = where('cannot');
+  const onIn = tools.filter(tool => ['current', 'edited'].includes(harnessIs(row, item, tool)) || (harnessIs(row, item, tool) === 'gets-it' && waitsForEdit(tool)));
+  const edit = row.plan?.takeIn;
+  const parts = [`On in ${named(onIn, tools)}${cannot.length ? ' only' : ''}`,
+    edit ? `${toolName(edit)}’s edit becomes the current version when sync runs` : '',
     gets.length ? `${named(gets, tools)} ${gets.length === 1 ? 'gets' : 'get'} it when sync runs` : '',
     cannot.length ? `${andList(cannot.map(toolName))} can’t take it (see below)` : '',
     out.length ? `kept out of ${named(out, tools)}` : ''];

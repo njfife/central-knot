@@ -92,6 +92,14 @@ test('Each control sends the agent as it is with one thing changed', () => {
   assert.deepEqual(agentClicks.on(row({ 'claude-cli': 'a', 'codex-cli': 'x' }), undefined, 'codex-cli'), { key: 'reviewer', managed: true, off: [], seenManaged: false, use: 'codex-cli', useHash: 'x' });
 });
 
+test('While an edit waits in one tool, the others have the current version and get that edit; the status says so', () => {
+  const waiting = { 'claude-cli': 'b', 'copilot-cli': 'c', 'codex-cli': 'b' };
+  assert.equal(statusLine(...withItem(waiting, item()), tools), 'On in all 3 tools · Copilot CLI’s edit becomes the current version when sync runs');
+  assert.equal(lineIn(waiting, item(), 'claude-cli', 'Claude Code'), 'Has the current version. It gets Copilot CLI’s edit when sync runs.');
+  // A copy the library doesn't have yet is kept as a version before it is written over.
+  assert.match(lineIn({ 'claude-cli': 'b', 'codex-cli': 'x' }, item({ applied: { 'claude-cli': 'b' } }), 'codex-cli', 'Codex'), /^Has another copy\. It gets the current version when sync runs; before it is written over, a copy Central Knot doesn’t have yet is kept as a version\.$/);
+});
+
 test('A tool that can’t take the agent is said in the status: on in the others only', () => {
   const why = { cannot: { 'copilot-cli': 'Copilot CLI can’t store this name (é). Rename the agent to use it there.', 'codex-cli': 'Codex can’t store this name (é). Rename the agent to use it there.' } };
   const agent = item({ applied: { 'claude-cli': 'b' } });
