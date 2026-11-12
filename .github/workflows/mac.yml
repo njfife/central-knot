@@ -36,3 +36,5 @@ jobs:
       - run: npm run e2e
       # A bundled build: the documented build command on a fixture marketplace, then the packaged build opened with the source gone.
       - run: node scripts/bundled-check.mjs
+      # The alpha: packaged from a test alpha tag beside the standard app, then both opened on one throwaway home.
+      - run: node scripts/alpha-check.mjs

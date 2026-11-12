@@ -93,6 +93,7 @@ test('updates stay inside a line: from previews, alphas and finals, each line is
   // zip is the alpha's under a preview tag) is passed over, so neither app ever installs the other.
   assert.equal(newerRelease([release('v0.7.0-alpha.3', { assets: [zip('v0.7.0-alpha.3')] })], 'v0.6.0-alpha.1'), undefined, 'an alpha passes over the standard app’s zip');
   assert.equal(newerRelease([release('v0.6.0-preview.4', { assets: [zip('v0.6.0-preview.4', 'Central-Knot-Alpha')] })], 'v0.5.0-preview.9'), undefined, 'a preview passes over the alpha’s zip');
+  assert.equal(newerRelease([release('v0.8.0-preview.1', { assets: [zip('v0.8.0-preview.1', 'Central-Knot-Alpha')] })], 'v0.6.0-alpha.1'), undefined, 'an alpha passes over a preview tag, whatever its zip');
   // A release carrying both zips gives each line its own.
   const both = release('v0.7.0-alpha.4', { assets: [zip('v0.7.0-alpha.4'), { ...zip('v0.7.0-alpha.4', 'Central-Knot-Alpha'), browser_download_url: 'https://github.com/njfife/central-knot/releases/download/v0.7.0-alpha.4/alpha-zip' }] });
   assert.equal(newerRelease([both], 'v0.6.0-alpha.1')?.zip, 'https://github.com/njfife/central-knot/releases/download/v0.7.0-alpha.4/alpha-zip');
