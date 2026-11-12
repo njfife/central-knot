@@ -1152,7 +1152,7 @@ Nathan, November 11: items are installed into Central Knot itself and the harnes
 
 This is the first step of that change: the model, and agents moved onto it end to end as its proof. Skills and MCP servers keep their engines until their own steps; for agents the Git repo reads and writes the library's current version (below), and the plan's step 7 does the rest.
 
-**Map of the code (start here).**
+**Map of the code as this step left it** (the next section, step 2a, moved the pass out of `agents.ts` into `librarypass.ts`; its map is the current one).
 - **The model:** `src/library.ts`. Its header is the whole model: item, harness, apply, version, found; the one rule as a table (`decide`, one line per row; `plan`, the table over every managed harness of one item); the order a plan is carried out in (`carryOut`, which every kind's adapter calls with its `Hands`); and the two promises (a copy that can't be seen is never a copy that is gone; a content is a version before any file changes: `keepVersion`, `setCurrent`). Pure, written for all three kinds; what is still shaped for agents is said at the end of its header.
 - **Agents, the adapter:** `src/agents.ts`. One pass in order: `lookAt` (`readDisk`), `deletionsTold`, `pull` and `click`, then the guards on the items as the clicks left them (`guardFolders`), `syncItem` (`copiesOf`, `plan`, `carryOut`, which tells History first through `logItem`), `keepFolders`. It decides what can be seen of an agent in each tool (H, `copiesOf`: the one place, read by a pass and by the page), which copy a found agent is taken in from (`foundCopies`), and what Pull brings (`pull`); the rule for an item in the library is the library's.
 - **Where agents are kept:** `src/agentstore.ts` (its header lists every file under `.central-knot/`), and the migration from the earlier record, `src/agentmigrate.ts` (its header has the rule for each earlier state).
@@ -1222,7 +1222,7 @@ This is the first step of that change: the model, and agents moved onto it end t
 - History at 860: a name takes the line it is on, and an agent entry's links sit side by side; they read "Use Claude Code's copy". At wider sizes an entry with copies to choose from has those links on a line of their own under its sentence, so the longer labels never widen the actions column every row shares (which wrapped every sentence at 1280); a name's room there starts at 150px.
 - Checks: `npm test`, 727 tests. End to end (`scripts/e2e.mjs`, the dev build on Linux): 696 passed, 0 failed. Pictures of the changed states only: `tour-l1-r4/agents/` (History at 860 to 2560, a folder that can't be written, Restore over a newer agent, Make current's result, Undo while kept out), each looked at.
 
-**Not this round** (for the start of the skills step, which lifts the pass out of `agents.ts`):
+**Not this round** (for the start of the skills step, which lifts the pass out of `agents.ts`; the next section says which were done):
 - Lifting `logItem` and the clicks (`click`, `turn`, `takeIn`, `makeCurrent`) out of `agents.ts` the way `carryOut` was, with the pass skeleton and the guards.
 - "Has it another way" as a second reason a tool is held; a time for kinds whose copies have none.
 - One durable rule for a tool managed again, kept with the record rather than worked out from which pass sees the folder first (the fix above covers the sequence found; the rule should not depend on it).
@@ -1241,3 +1241,61 @@ This is the first step of that change: the model, and agents moved onto it end t
 - A deletion pulled from the Git repo still waits while Automatic sync is off, as before, though Delete from Central Knot no longer needs sync.
 - Claude Code's own settings from the repo, where it has the agent and only they differ, are still written by Pull into Claude Code's file outside a pass (with their own Undo): no version tells them apart. The plan's step 7 decides how a repo's harness settings travel.
 - The copy question's note for other kinds still says "Replaced copies are kept in History"; for agents it says they become versions.
+
+## Items live in Central Knot, step 2a: the pass belongs to the library, November 12, 2026
+
+The first half of the plan's step 2: what was not about agents leaves `src/agents.ts`, so the next kind (skills) is written against a contract that is complete. Nothing a person sees changes, except one rule settled on purpose: a tool managed again (below).
+
+**Map of the code (start here).**
+- **The model:** `src/library.ts`. Its header is the whole model: item, harness, apply, version, found; the one rule as a table (`decide`, one line per row, now with `forget` and both reasons a harness is held); copies with no time of their own; a harness managed again, as a second table (`managedAgain`); and the two promises (`keepVersion`, `setCurrent`). `carryOut` carries one item's plan out in the model's order; `Hands` is what it is given, built by the pass, never by a kind.
+- **The pass:** `src/librarypass.ts`, the same for every kind. Its header lists a pass in the order it runs: `lookAt` (through the kind's `read`), `deletionsTold`, `pull` and `click` (`turn`, `takeIn`, `makeCurrent`), `guardFolders` (with `cameBack`, a harness managed again), `syncItem` (`copiesOf`, `plan`, `carryOut`; History first through `logItem`; `writeCopy` and `removeCopy` through the kind), `keepFolders`. Also there: `lookFor`, the page's and Push's reading (the guards applied in memory, nothing saved); `restore`, a History entry's action, which is always one of the clicks; `forgetFolders`, for the tool choice; the settle window (`stillSettling`, `seenAgain`).
+- **What a kind implements:** `librarypass.ts Kind`, one interface: its words and History prefix, which tools hold it, a harness's folder and one copy's path, its record (`open`, `save`), its versions (`store`, `readVersion`, `hashOf`), `recover` (a write a crash interrupted), `read` (a `Disk`: each harness's copies by key, what can't be seen, folders that can't be written, and `held`, why a harness with no copy can't be given one or has it another way), a copy's content and own part (`contentOf`, `ownOf`, `keepOwn`), `write`, `remove`, and `historyAction`. To add a kind: one object like `agents.ts agentKind`, and its callers use `runPass`, `restore` and `lookFor`; the compiler names a member left out.
+- **Agents, the adapter:** `src/agents.ts`. `agentKind` (one file per agent in each harness's agents folder; `readDisk`; `cannotTake`, the one place that says why a harness can't take an agent; `writeAgent`); around the pass, `applyAgents` (Pull's repo file becomes Claude Code's own part), `restoreAgent`, `agentsView` and `rowFacts` (the page), `changesOf` (each version's note), `agentsForRepo` (Push), `agentsOn`, `forgetAgentFolders`.
+- Unchanged and as described in the section above: `agentstore.ts` (now `saveLibrary` writes the format version itself, and `keepOwn` answers whether the part changed), `agentmigrate.ts`, `agentfiles.ts`, `agentskill.ts`, `agentrow.ts`, `versionlist.ts`, `historyactions.ts`, `matrix.ts`.
+- **A click from the page to the engine:** `agentrow.ts agentClicks` builds a `Change`; `main.ts` copies each field through its `changes` sanitizer; `librarypass.ts click` records it.
+- **Worked examples:** `tests/library.test.ts` (the table row by row, now with a harness that has the item another way, copies with no time of their own, and a harness managed again), `tests/agents.test.ts` (on real files), `tests/agentswalk.test.ts` (the seeded walk; `CK_WALKS=<n> CK_SEED=<n>` runs more).
+
+**A tool managed again: one rule** (the plan's: the library wins; a copy Central Knot doesn't hold is kept as a version before it is written over or removed; nothing turns Off because a tool was away). In `library.ts`'s header as its second table:
+
+| item there | the copy went meanwhile | edited meanwhile, or another item of that name |
+|---|---|---|
+| On | the current version is written | kept as a version ("was in Codex"), then the current version is written |
+| Off, or kept out (deleted too) | nothing | kept as a version, then removed |
+
+It is one step before the table: for every item that had something applied there, A becomes what the harness holds now (no copy: nothing), its content kept as a version first (`managedAgain`); the table then does the rest, and later edits and deletions there count as any other. The pass takes the step for every item in the record at once, deleted ones too, the first time any pass sees the harness back (`guardFolders` finds no folder identity for it, which the tool choice and every pass without it let go: `keepFolders`), so it no longer depends on which pass comes first. A missing copy is read without the settle window there: it went while the harness was away.
+
+This replaces step 1's rule (a harness managed again forgot what was applied there for the agents wanted there, in `guardFolders`; fix round 2 and the last pass above), and changes two sequences on purpose:
+- an Off agent whose copy went while its tool was away, with a click's pass on another agent first (Sync off), then turned On: it stayed On only until that pass, which read the copy as deleted by hand and turned it Off everywhere again. Now it stays On, and the tool gets it.
+- an Off, kept-out or deleted agent whose tool comes back with another file of its name: that file became the current version (an edit taken in) and was removed. Now it is kept as a version ("was in Codex") and removed; the current version stays.
+
+**Has it another way, and copies with no time of their own** (rows of the model, with tests in `tests/library.test.ts`; agents use neither yet).
+- A held copy has a second reason, `anotherWay`: the harness has the item through a plugin, or (for skills) OpenCode reading Claude Code's folder, a link, a copy in `~/.agents/skills` that Central Knot doesn't own. Nothing of Central Knot's goes there, as for one that can't be given the item, and what was applied there is let go (`forget`), so when the other way ends the item is written there afresh instead of being read as deleted by hand. A harness that can't be given the item keeps what was applied there.
+- A copy with no time of its own (`at` absent: an MCP entry, whose time is its whole file's): an edit on one counts only when made on the current version, and of several such the first harness wins, as equal times do; one made where the current version had moved on as well loses to it and is kept as a version. A version taken from such a copy is dated when it is taken (`versionAt`).
+- Agents' "a plugin brings it" is "has it another way" in the model's terms, but agents still hold it as can't-take (`agents.ts cannotTake` says so), as the brief asked: moving it changes one sequence (a Claude Code copy deleted by hand while a plugin brings the agent, then the plugin uninstalled: today the agent turns Off everywhere; with the new reason it would be written afresh).
+
+**Decisions made in this step, beyond the brief.**
+- *Pull and Restore moved too.* Pull is a step of the pass, the same for every kind; the agents' Claude Code file is `Pulled.own`, one harness's own part (`agents.ts applyAgents` maps the Git repo's shape, `PulledAgent`, onto it). Restore runs the kind's `historyAction` and is the same for every kind. Checked by the Git repo's Pull tests and History's Restore tests, as before.
+- *`Disk.held` is the kind's answer, worked out at each look* (a function over what the kind read), so the pass never knows about plugins or names. Agents keep `cannotTake` as the one place for their reasons; the page reads it for a harness that has a copy too.
+- *`Kind.keepOwn` answers whether the own part changed* (Pull's entry for Claude Code's settings alone reads it), and the pass calls it for every copy present; the store keeps each part once, so a part already kept costs one look.
+- *A kind's fault points stay in its own write and remove* (`before-rename`, `before-remove`): they are where its files change.
+- *`writeCopy` no longer restarts the settle clock itself*: switched off, it failed no test, since a pass only writes a copy its reading (`copyIn`) has just found absent with nothing owed there, which clears that clock. A test holds `copyIn`'s clearing now.
+- *A folder that isn't there when its tool comes back* is noted as away, as before. A brand-new tool's folder is made by the first write; treating that as a tool managed again wrote over the first edit there (the OpenCode test found it on the way).
+
+**States the brief did not explain** (each keeps every content as a version and writes nothing else):
+- *A tool managed again whose agents folder isn't there yet.* Noted as away, as before: when the folder appears, it is a folder made again, not a tool managed again, so an Off agent's copy there that differs is taken in as an edit and removed (kept as the current version, not as a copy that gave way).
+- *A copy that can't be read when its tool comes back* keeps what was applied there; once it reads, the table goes on from that (an edit made while the tool was away is then taken in).
+
+**Validation.**
+- `npm test`: see the pull request (each new rule and each moved rule switched off below).
+- Each rule this step added, and a sample of the moved ones (to prove the wiring through `Kind` still reaches them), switched off: 35 in all. 30 failed a named test at once. One was no rule (a line set twice). Of the 4 that survived, one was a redundant line, now deleted (`writeCopy`'s settle clock), and three got tests that fail without them (a removal that finds the copy changed is held, not failed; held only where the agent is wanted; Pi has no agents).
+- The walk, the end-to-end checks and the Mac run: in the pull request.
+
+**Follow-ups** (from step 1's list; done here: lifting `logItem` and the clicks with the pass skeleton and the guards; "has it another way" and a time for kinds whose copies have none; one durable rule for a tool managed again; an Off agent whose tool comes back with a different hand-made file of its name).
+- A crash right after History is told and before the record is saved leaves the entry, and the retried pass writes it again: two identical entries with two Undos.
+- A Restore's own Undo ("Delete again" on the newest Restore).
+- Thirty versions made within one second still read alike; the tooltip has the full time.
+- A switch action (Turn on, Turn off) offered only on an agent's newest switch entry.
+- A History action's result reads "reviewer: undone: the version from …" (the entry's sentence after the agent's name).
+- With Automatic sync off, a deletion stranded by a crash gets its entry only at the next pass that runs (any click's).
+- Agents' plugin case as "has it another way" (above), and the two states above.
+- For when all three kinds are on the library: the names borrowed at the boundary (`McpView.servers` are `SkillFacts`; `Change.managed` is On), and `matrix.ts`'s `kind === 'agents'` branches.
