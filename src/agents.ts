@@ -92,7 +92,7 @@ function cannotHold(through: ThroughPlugins, item: Pick<LibraryItem, 'key' | 'na
 
 // ---------- A pass ----------
 
-/** A click's History entry, begun when the click is recorded and finished once its files are written (`fill`: which of them it names). */
+/** A click's History entry, begun when the click is recorded and finished with the harnesses its plan writes or removes (`fill`: which of them it names). */
 type ClickEntry = Pick<HistoryEvent, 'kind' | 'winner' | 'only' | 'version' | 'previous'> & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed' };
 interface Pass {
   context: ShareContext; managed: AgentTool[]; library: AgentLibrary; disk: Disk; through: ThroughPlugins;
@@ -106,7 +106,7 @@ interface Pass {
   foldersNow: AgentLibrary['folders'];
   /** The click on each agent this pass, as the History entry it becomes. */
   clicked: Map<string, ClickEntry>;
-  results: DestinationResult[]; events: HistoryEvent[]; notices: SyncNotice[]; writes: number; made: string[]; settling: boolean;
+  results: DestinationResult[]; notices: SyncNotice[]; writes: number; made: string[]; settling: boolean;
 }
 /** What may be asked of a pass besides its clicks. */
 export interface PassOptions {
@@ -136,7 +136,7 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
     context, managed, library, disk: await readDisk(context, managed), through: await agentsThroughPlugins(context, managed),
     shelf: agentShelf(context, () => saveIfChanged(pass)), saved: JSON.stringify(library),
     clock: options.now ?? Date.now(), settleMs: options.settleMs ?? context.settleMs ?? 2000, pulled: options.pulled ?? new Set(),
-    foldersNow: {}, clicked: new Map(), results: [], events: [], notices: [], writes: 0, made: [], settling: false,
+    foldersNow: {}, clicked: new Map(), results: [], notices: [], writes: 0, made: [], settling: false,
   };
   const inScope = (key: string) => !options.only || options.only.has(key) || changes.some(change => change.key === key);
   await guardFolders(pass, Object.values(library.items).filter(item => inScope(item.key)));
@@ -145,7 +145,6 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
   // Folder identities are kept only by a full pass: a click with Sync off skips other agents, so they must still see a reset.
   if (!options.only) library.folders = { ...library.folders, ...pass.foldersNow };
   await saveIfChanged(pass);
-  await appendHistory(context, pass.events);
   return { results: pass.results, writes: pass.writes, notices: pass.notices, settling: pass.settling, made: pass.made };
 }
 
@@ -238,18 +237,18 @@ async function syncItem(pass: Pass, item: LibraryItem) {
   for (const harness of made.current) item.applied[harness] = item.hash;
   for (const harness of made.forget) delete item.applied[harness];
   await saveIfChanged(pass);
+  // History's entries go with the record, before any file changes: after a crash from here on, History still has the click.
+  await appendHistory(pass.context, logItem(pass, item, made, hashBefore, slot));
   // Disk second.
-  const written: HarnessId[] = [], removed: HarnessId[] = [];
-  for (const harness of made.write) if (await writeCopy(pass, item, harness as AgentTool, slot[harness as AgentTool])) written.push(harness);
-  for (const harness of made.remove) if (await removeCopy(pass, item, fileIn(harness))) removed.push(harness);
-  logItem(pass, item, made, hashBefore, slot, { written, removed });
+  for (const harness of made.write) await writeCopy(pass, item, harness as AgentTool, slot[harness as AgentTool]);
+  for (const harness of made.remove) await removeCopy(pass, item, fileIn(harness));
 }
 
-/** Writes the current version into one harness. True when it is there. What stops it is said, not stored: the next pass tries again. */
-async function writeCopy(pass: Pass, item: LibraryItem, tool: AgentTool, here: AgentEntry | undefined): Promise<boolean> {
-  const held = (message: string) => { pass.results.push({ item: item.name, harness: tool, outcome: 'held', message }); return false; };
+/** Writes the current version into one harness. What stops it is said, not stored: the next pass tries again. */
+async function writeCopy(pass: Pass, item: LibraryItem, tool: AgentTool, here: AgentEntry | undefined) {
+  const held = (message: string) => { pass.results.push({ item: item.name, harness: tool, outcome: 'held', message }); };
   // A harness that can't be given a copy is passed over without a word: its mark on the page says why, at every look.
-  if (!here && cannotHold(pass.through, item, tool)) return false;
+  if (!here && cannotHold(pass.through, item, tool)) return;
   const agent = await readVersion(pass.context, item.key, item.hash);
   if (!agent) return held('This version is no longer in Central Knot’s store, so it can’t be written.');
   let text: string;
@@ -265,11 +264,10 @@ async function writeCopy(pass: Pass, item: LibraryItem, tool: AgentTool, here: A
   firstSeenMissingAt.delete(path);
   const message = `${here ? 'Now has the current version' : 'Added'}. Start a new session to use it.`;
   pass.results.push({ item: item.name, harness: tool, outcome: 'written', replaced: here ? true : undefined, message });
-  return true;
 }
 
 /** Removes one harness's copy, only while it still holds what was read (its content and its own part are kept already). */
-async function removeCopy(pass: Pass, item: LibraryItem, here: AgentEntry): Promise<boolean> {
+async function removeCopy(pass: Pass, item: LibraryItem, here: AgentEntry) {
   pass.context.fault?.('before-remove');
   try { await removeFileChecked(here.file, here.text); }
   catch (error) {
@@ -277,23 +275,24 @@ async function removeCopy(pass: Pass, item: LibraryItem, here: AgentEntry): Prom
     const changed = errorCode(error) === 'CK_CHANGED', where = nameOf(here.tool);
     const message = changed ? `${where}’s copy changed just now, so it stays until the next look.` : `Could not remove ${where}’s copy yet. Central Knot will try again.`;
     pass.results.push({ item: item.name, harness: here.tool, outcome: changed ? 'held' : 'failed', message });
-    return false;
+    return;
   }
   delete item.applied[here.tool];
   pass.writes++;
   pass.results.push({ item: item.name, harness: here.tool, outcome: 'removed', message: 'Removed. Central Knot keeps it.' });
-  return true;
 }
 
 /**
- * History's entries for one agent's pass: the click's own (finished with the harnesses it wrote or removed), an edit taken
- * in, and a copy deleted by hand that turned it Off. The last two are also notices, since no one asked for them.
+ * History's entries for one agent's pass: the click's own (with the harnesses its plan writes or removes), an edit taken in,
+ * and a copy deleted by hand that turned it Off. The last two are also notices, since no one asked for them. A harness whose
+ * file can't be changed this time is said in the pass's results, and the next pass finishes it.
  */
-function logItem(pass: Pass, item: LibraryItem, made: Plan, hashBefore: string, slot: Slot, did: { written: HarnessId[]; removed: HarnessId[] }) {
-  const key = `agent:${item.key}`;
+function logItem(pass: Pass, item: LibraryItem, made: Plan, hashBefore: string, slot: Slot): HistoryEvent[] {
+  const key = `agent:${item.key}`, events: HistoryEvent[] = [];
+  const did = { written: made.write, removed: made.remove };
   const log = (fields: Omit<HistoryEvent, 'id' | 'at' | 'key' | 'item' | 'orderProved'>) => {
     const event: HistoryEvent = { id: randomUUID(), at: now(), key, item: item.name, orderProved: true, ...fields };
-    pass.events.push(event);
+    events.push(event);
     return event.id;
   };
   const notice = (kind: SyncNotice['kind'], winner: HarnessId, losers: HarnessId[], history: string) =>
@@ -320,6 +319,7 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, hashBefore: string, 
     const id = log({ kind: 'off', winner: { tool: made.turnedOffBy, hash: item.hash }, losers: held(did.removed) });
     notice('deleted', made.turnedOffBy, did.removed, id);
   }
+  return events;
 }
 
 // ---------- Clicks ----------

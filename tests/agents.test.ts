@@ -440,6 +440,26 @@ inBox('A crash before a write during On, and while an edit is taken in: after re
   assert.deepEqual([...await lastLines(box)].sort(), ['Be brief.', 'Edit one.']);
 });
 
+inBox('A crash after the record is saved leaves the click in History: a Delete can still be restored, an Off turned on, an edit undone', async box => {
+  await write(box, 'codex-cli', codexAgent());
+  await on(box, claudeAgent(undefined, claudeOwn));
+  const before = await filesOf(box);
+  const offered = async () => (await historyActions(box)).map(action => `${action.event.kind}: ${action.label}`);
+  await assert.rejects(deleteIt(box, crashAt(box, 'before-remove')), /crash at before-remove/);
+  await pass(box);
+  assert.deepEqual([await filesOf(box), (await seen(box)).fact], [{ 'claude-cli': undefined, 'copilot-cli': undefined, 'codex-cli': undefined }, undefined]);
+  assert.deepEqual(await offered(), ['deleted: Restore']);
+  await (await historyActions(box))[0].run();
+  assert.deepEqual(await filesOf(box), before, 'Restore puts every file back');
+  await assert.rejects(turnOff(box, crashAt(box, 'before-remove')), /crash at before-remove/);
+  assert.equal((await offered()).at(-1), 'off: Turn on');
+  await pass(box);
+  await (await historyActions(box)).find(action => action.label === 'Turn on')!.run();
+  await edit(box, 'codex-cli', 'Edit one.');
+  await assert.rejects(pass(box, crashAt(box, 'before-rename')), /crash at before-rename/);
+  assert.equal((await offered()).at(-1), 'edit: Undo');
+});
+
 // ---------- The record, and the things around it ----------
 
 inBox('A damaged, unreadable or newer agents record stops every write and is never rewritten; a missing one is a first run', async box => {
