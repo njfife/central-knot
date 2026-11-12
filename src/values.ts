@@ -4,8 +4,10 @@
 
 /**
  * The product's own name, for what is written outside the app and must read the same from every build: the markers in a
- * tool's instruction file, a commit's author and message. A custom build is renamed by replacing the name's plain spelling
- * in the built code (scripts/build.mjs), so it is put together here and that renaming leaves it as it is.
+ * tool's instruction file, a commit's author and message. It is also the standard app's name as an alpha shows it (the
+ * owner of a home the standard app syncs, updates.ts lineApp), and the start of the alpha's own name. A custom build or an
+ * alpha is renamed by replacing the name's plain spelling in the built code (scripts/build.mjs), so it is put together here
+ * and that renaming leaves it as it is.
  */
 export const PRODUCT = ['Central', 'Knot'].join(' ');
 

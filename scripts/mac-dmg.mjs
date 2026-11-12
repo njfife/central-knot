@@ -1,12 +1,11 @@
-// The Mac download people open by hand: a disk image whose window shows Central Knot beside a shortcut to the Applications
-// folder, to drag one onto the other. (The zip beside it stays: scripts and updates take the app from there.)
+// The Mac download people open by hand: a disk image whose window shows the app (Central Knot, or Central Knot Alpha) beside
+// a shortcut to the Applications folder, to drag one onto the other. (The zip beside it stays: scripts and updates take the
+// app from there.)
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, lstatSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, symlinkSync } from 'node:fs';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-
-const volumeName = 'Central Knot';
-const appName = 'Central Knot.app';
+import { downloadName } from '../src/updates.ts';
 // A folder's Finder flags with "has a custom icon" set, so the mounted disk shows the app's icon (.VolumeIcon.icns).
 const customIconFlag = '0000000000000000040000000000000000000000000000000000000000000000';
 
@@ -21,10 +20,14 @@ const attach = (image, mount, ...flags) => {
 // A disk that Spotlight or Finder has just looked at can refuse to eject once.
 const detach = mount => { try { run('/usr/bin/hdiutil', ['detach', mount]); } catch { run('/usr/bin/hdiutil', ['detach', mount, '-force']); } };
 
-// The window (its size, icon places and background picture) is assets/dmg/DS_Store, the file Finder keeps a folder's view in.
-// It names its contents by volume name and file name, so those stay fixed here: "Central Knot", "Central Knot.app",
-// "Applications" and ".background.tiff". scripts/mac-dmg-layout.sh makes that file again when the layout changes.
-export function buildDmg({ bundle, dmg, identity, notaryProfile }) {
+// Each app's window is its own folder, assets/dmg/<its download name>/ (Central-Knot, Central-Knot-Alpha): the picture,
+// background.svg, kept as PNGs at both sizes (it says the app's name), and DS_Store, the file Finder keeps a folder's view
+// in (the window's size and icon places). DS_Store names the disk's contents by volume name and file name, so those are the
+// app's: "<name>" for the volume, "<name>.app", "Applications" and ".background.tiff". scripts/mac-dmg-layout.sh "<name>"
+// makes it again when the layout changes. `name`: the app's name, as packaged.
+export function buildDmg({ bundle, dmg, name, identity, notaryProfile }) {
+  const volumeName = name, appName = `${name}.app`, look = join('assets/dmg', downloadName(name));
+  if (!existsSync(join(look, 'DS_Store'))) throw new Error(`No disk image window for ${name} in ${look}: make it with scripts/mac-dmg-layout.sh "${name}".`);
   const work = mkdtempSync(join(tmpdir(), 'ck-dmg-'));
   try {
     const stage = join(work, 'stage');
@@ -32,8 +35,8 @@ export function buildDmg({ bundle, dmg, identity, notaryProfile }) {
     run('/usr/bin/ditto', [bundle, join(stage, appName)]);
     symlinkSync('/Applications', join(stage, 'Applications'));
     // One TIFF holding the picture at both sizes, so the window is sharp on a Retina display.
-    run('/usr/bin/tiffutil', ['-cathidpicheck', 'assets/dmg/background.png', 'assets/dmg/background@2x.png', '-out', join(stage, '.background.tiff')]);
-    copyFileSync('assets/dmg/DS_Store', join(stage, '.DS_Store'));
+    run('/usr/bin/tiffutil', ['-cathidpicheck', join(look, 'background.png'), join(look, 'background@2x.png'), '-out', join(stage, '.background.tiff')]);
+    copyFileSync(join(look, 'DS_Store'), join(stage, '.DS_Store'));
     copyFileSync('assets/icon.icns', join(stage, '.VolumeIcon.icns'));
 
     // Built writable first: the disk's own icon flag can only be set on the mounted volume.

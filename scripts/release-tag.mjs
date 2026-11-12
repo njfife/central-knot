@@ -2,6 +2,7 @@
 // (src/updates.ts). A build that names a tag behaves as that release for every copy that updates to it, so it must be that
 // release's code: a checkout with changes of its own never takes its commit's tag.
 import { execFileSync } from 'node:child_process';
+import { whyNoLine } from '../src/updates.ts';
 
 export const versionTag = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
@@ -12,12 +13,16 @@ export const versionTag = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
  * - `changes`: what differs from that commit (`git status --porcelain`, one entry a line; ignored files such as the build's
  *   own output aren't listed). With any, the commit's tag isn't taken, and a release is refused.
  * - `release`: a release must have a tag and a checkout without changes.
+ * A tag whose pre-release part names no release line (`v0.6.0-alpha1`) stops packaging, said in plain words: built, it would
+ * be the standard app, offered to every installed preview (src/updates.ts whyNoLine).
  */
 export function releaseTag({ release = false, named, tags = [], changes = [] }) {
   if (named !== undefined && named !== '' && !versionTag.test(named)) throw new Error(`CK_RELEASE_TAG ${named} isn’t a version tag like v0.5.0-preview.5.`);
   if (release && changes.length) throw new Error(`A release is built from a clean checkout of its tag, and this one has changes of its own:\n${changes.slice(0, 20).join('\n')}`);
   const tag = named ?? (changes.length ? '' : tags.find(name => versionTag.test(name)) ?? '');
   if (release && !tag) throw new Error('A release is built from its tag: tag the commit (or set CK_RELEASE_TAG), so the app can tell a newer release.');
+  const noLine = tag && whyNoLine(tag);
+  if (noLine) throw new Error(noLine);
   return tag;
 }
 
