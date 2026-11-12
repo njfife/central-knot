@@ -137,7 +137,7 @@ async function writeAgent(context: ShareContext, item: LibraryItem, harness: Har
   try { await writeFileChecked(path, text, here?.text); }
   catch (error) { return { stopped: errorCode(error).startsWith('CK_') ? (error as Error).message : `Could not write ${nameOf(tool)}’s copy.` }; }
   await keepOwn(context, item, tool, text);
-  return { wrote: path };
+  return undefined;
 }
 
 // ---------- The pass, for agents ----------

@@ -107,9 +107,9 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
   /**
    * Writes a version into one harness in its format: over its copy (`here`, only while it is as read), every byte of its own
    * part kept; else as the copy the harness last had (its kept own part), or a new one. Keeps what it wrote as that harness's
-   * own part. Answers the path written, or why it could not be (the next pass tries again).
+   * own part. Answers why it could not be written, if it couldn't (the next pass tries again).
    */
-  write(context: ShareContext, item: LibraryItem, harness: HarnessId, here: Entry | undefined, content: Content): Promise<{ wrote: string } | { stopped: string }>;
+  write(context: ShareContext, item: LibraryItem, harness: HarnessId, here: Entry | undefined, content: Content): Promise<{ stopped: string } | undefined>;
   /** Removes one harness's copy, only while it is as read: `changed` when a save landed meanwhile. */
   remove(context: ShareContext, item: LibraryItem, here: Entry): Promise<'removed' | 'changed' | 'failed'>;
   /** A History entry's action as the click it is, from the entry and the item now; undefined when it has nothing left to do. */
@@ -382,10 +382,9 @@ async function writeCopy(pass: Pass, item: LibraryItem, tool: HarnessId, here: S
   const stopped = (message: string) => { pass.results.push({ item: item.name, harness: tool, outcome: 'held', message }); return false; };
   const content = await pass.kind.readVersion(pass.context, item.key, item.hash);
   if (!content) return stopped('This version is no longer in Central Knot’s store, so it can’t be written.');
-  const done = await pass.kind.write(pass.context, item, tool, here, content);
-  if ('stopped' in done) return stopped(done.stopped);
+  const refused = await pass.kind.write(pass.context, item, tool, here, content);
+  if (refused) return stopped(refused.stopped);
   pass.writes++;
-  firstSeenMissingAt.delete(done.wrote);
   const message = `${here ? 'Now has the current version' : 'Added'}. Start a new session to use it.`;
   pass.results.push({ item: item.name, harness: tool, outcome: 'written', replaced: here ? true : undefined, message });
   return true;

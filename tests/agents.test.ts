@@ -357,6 +357,23 @@ inBox('A copy put back inside the settle window was a save, not a deletion', asy
   assert.equal((await itemOf(box))!.on, true);
 });
 
+inBox('A copy Central Knot has just written, deleted by hand at once, still gets the whole settle window before the agent turns Off', async box => {
+  await on(box);
+  const waiting = { ...box.context, settleMs: 2000 };
+  // Codex's copy goes missing (the window starts for it), then its folder is made again: the next pass writes the copy afresh.
+  await rm(fileOf(box, 'codex-cli'));
+  await applyAgents(waiting, tools, [], { now: 1000 });
+  await rm(join(box.home, '.codex/agents'), { recursive: true });
+  await mkdir(join(box.home, '.codex/agents'));
+  assert.equal((await applyAgents(waiting, tools, [], { now: 1500 })).writes, 1);
+  // Deleted by hand right after: the window starts again from now, not from when the copy first went missing.
+  await rm(fileOf(box, 'codex-cli'));
+  const inside = await applyAgents(waiting, tools, [], { now: 3100 });
+  assert.deepEqual([inside.settling, (await itemOf(box))!.on], [true, true]);
+  await applyAgents(waiting, tools, [], { now: 5200 });
+  assert.equal((await itemOf(box))!.on, false);
+});
+
 inBox('An edit in one harness and a deletion in another: the edit is the current version, and the agent turns Off', async box => {
   await on(box);
   await edit(box, 'claude-cli', 'Be exact.');
@@ -660,6 +677,13 @@ inBox('An edit saved between the read and the removal stays where it is, and bec
   assert.match((await readOf(box, 'claude-cli'))!, /Edit late\./, 'the save is not lost');
   await pass(box);
   assert.deepEqual([await readOf(box, 'claude-cli'), await versions(box)], [undefined, ['Edit late. (edited in Claude Code) *', 'Be brief. (found in Claude Code)']]);
+});
+
+inBox('A removal that finds the copy changed since it was read waits for the next look: its result is held, not failed', async box => {
+  await on(box);
+  const racing: ShareContext = { ...box.context, fault: step => { if (step === 'before-remove') writeFileSync(fileOf(box, 'codex-cli'), codexAgent('You review code.\nEdit late.\n')); } };
+  const off = await turnOff(box, racing);
+  assert.deepEqual(off.results.filter(entry => entry.harness === 'codex-cli').map(entry => entry.outcome), ['held']);
 });
 
 // ---------- A crash in the middle ----------
