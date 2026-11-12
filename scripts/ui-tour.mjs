@@ -509,7 +509,8 @@ if (wanted('agents')) {
   claudeFile('standup', 'Writes the daily standup.', steps(1));
   await refresh();
   await a.click('#switch-standup'); await switchOn('standup');
-  for (let count = 2; count <= 30; count++) { claudeFile('standup', 'Writes the daily standup.', steps(count)); await refresh(); }
+  // A second apart, as a person's edits are, so no two read the same time.
+  for (let count = 2; count <= 30; count++) { claudeFile('standup', 'Writes the daily standup.', steps(count)); await refresh(); await wait(1000); }
   await openRow('standup');
   await shot(a, 'agents-versions-thirty-folded', 'Twenty-nine edits in Claude Code, each adding a line: thirty versions, the newest four shown and one line for the other twenty-six.');
   await a.click('#versions-all-standup'); await a.settle();

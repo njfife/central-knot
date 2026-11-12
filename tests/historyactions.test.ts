@@ -56,6 +56,11 @@ test('One harness’s switch: its entry turns that harness on or off again, whil
 test('A content change offers Undo: the version from before it made current, unless it is current already or no longer a version', () => {
   const edit = entry({ kind: 'edit', winner: { tool: 'codex-cli', hash: 'b' }, previous: 'a', losers: [{ tool: 'claude-cli', hash: 'a' }] });
   assert.equal(agentSentence(edit, tools)?.text, 'Edited in Codex; that became the current version, in Claude Code too.');
+  // What made it is the entry's cause alone: Pull's own entries say so, with or without a new version.
+  const pulled = entry({ kind: 'edit', cause: 'pulled', previous: 'a', version: 'b', losers: [{ tool: 'claude-cli', hash: 'a' }] });
+  assert.equal(agentSentence(pulled, tools)?.text, 'Pulled from the Git repo; that became the current version, in Claude Code.');
+  assert.match(agentSentence({ ...pulled, previous: undefined, losers: [] }, tools)!.text, /^Pulled from the Git repo: Claude Code’s own settings for it/);
+  assert.equal(agentSentence(entry({ kind: 'deleted', cause: 'pulled', losers: [] }), tools)?.text, 'Removed in the Git repo, so Pull deleted it from Central Knot. History keeps it.');
   assert.deepEqual(offered(edit, item()), ['Undo', { ...asIs, version: 'a' }]);
   assert.equal(offered(edit, item({ hash: 'a' })), undefined, 'the earlier version is current already');
   assert.equal(offered({ ...edit, previous: 'gone' }, item()), undefined, 'not a version of this agent');
