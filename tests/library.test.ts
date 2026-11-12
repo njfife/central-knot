@@ -200,6 +200,16 @@ test('Managed again, Off: a copy that went meanwhile leaves nothing applied ther
   assert.deepEqual(plan({ ...off, on: true }, { 'claude-cli': has('a'), 'copilot-cli': has('a'), 'codex-cli': none }).write, ['codex-cli']);
 });
 
+test('Managed again, deleted: a copy whose content is one of its versions is still Central Knot’s to remove; any other is a found copy, left alone', () => {
+  const ownCopy = item({ deleted: { at: day(5) } });
+  assert.equal(managedAgain(ownCopy, 'codex-cli', has('a')), undefined);
+  assert.deepEqual(plan(ownCopy, { 'codex-cli': has('a') }).remove, ['codex-cli']);
+  const another = item({ deleted: { at: day(5) } });
+  assert.equal(managedAgain(another, 'codex-cli', has('x', time(6))), undefined, 'nothing is kept: the content was never the item’s');
+  assert.equal(another.applied['codex-cli'], undefined);
+  assert.deepEqual(plan(another, { 'codex-cli': has('x', time(6)) }), { ...quiet, found: ['codex-cli'], current: [] });
+});
+
 test('Managed again changes nothing where nothing was applied, or where the copy can’t be seen; a harness with no copy of its own has nothing applied', () => {
   const never = item({ applied: { 'claude-cli': 'a' } });
   assert.equal(managedAgain(never, 'codex-cli', has('x')), undefined);

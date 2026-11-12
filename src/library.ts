@@ -56,12 +56,15 @@
 //   item there          the copy went meanwhile                    the copy was edited meanwhile, or is another item of that name
 //   On                  L is written                               kept as a version ("was in Codex"), then L is written
 //   Off, or kept out    nothing                                    kept as a version, then removed
+//   deleted             nothing                                    a found copy: left alone
 //
-// Nothing turns Off because a tool was away, and a copy as Central Knot left it is written over or removed as any other. This
-// is one step before the table (`managedAgain`): for every item, deleted ones too, that had something applied there, A
-// becomes what the harness holds now (no copy: nothing), its content kept as a version first. The table then does the rest,
-// and later edits and deletions there count as any other. The pass takes that step once, for every item at once, the first
-// time it sees the harness back (librarypass.ts guardFolders), so it holds whichever pass comes first.
+// Nothing turns Off because a tool was away, and a copy as Central Knot left it (a content the item holds) is written over
+// or removed as any other, a deleted item's too. This is one step before the table (`managedAgain`): for every item that had
+// something applied there, A becomes what the harness holds now (no copy: nothing), its content kept as a version first;
+// a deleted item keeps no new content, so a copy it never had is left with nothing applied, which the table calls found.
+// The table then does the rest, and later edits and deletions there count as any other. The pass takes that step once, for
+// every item at once, the first time it sees the harness back with its folder there (librarypass.ts guardFolders), so it
+// holds whichever pass comes first.
 //
 // Two promises hold the model together:
 // - H unknown is never H gone. A copy the adapter can't see for sure (unreadable, half saved, inside the settle window,
@@ -269,14 +272,15 @@ function latestEdit(item: LibraryItem, copies: Copies, verdicts: Map<HarnessId, 
  * A harness managed again (the header's second table), for one item: the step before the table. Where something was applied,
  * A becomes what the harness holds now: its copy's content, or nothing where it has no copy of its own. Returns the version
  * to keep first when that content is not one of the item's ("was in Codex", given way to the current version); the caller
- * keeps it (keepVersion) before any harness file changes. A copy that can't be seen leaves A as it is.
+ * keeps it (keepVersion) before any harness file changes. A deleted item keeps no new content: a copy it never had is left
+ * with nothing applied (a found copy). A copy that can't be seen leaves A as it is.
  */
 export function managedAgain(item: LibraryItem, harness: HarnessId, copy: HarnessCopy): Version | undefined {
   if (item.applied[harness] === undefined || copy.is === 'unknown') return undefined;
-  if (copy.is !== 'present') { delete item.applied[harness]; return undefined; }
+  const holds = copy.is === 'present' && item.versions.some(version => version.hash === copy.hash);
+  if (copy.is !== 'present' || (item.deleted && !holds)) { delete item.applied[harness]; return undefined; }
   item.applied[harness] = copy.hash;
-  if (item.versions.some(version => version.hash === copy.hash)) return undefined;
-  return { hash: copy.hash, at: versionAt(copy.at), from: { how: 'was-in', harness, replacedBy: item.hash } };
+  return holds ? undefined : { hash: copy.hash, at: versionAt(copy.at), from: { how: 'was-in', harness, replacedBy: item.hash } };
 }
 
 /** A version's time for a copy taken in: the copy's own time, or the time it is taken where it has none (an MCP entry). */
