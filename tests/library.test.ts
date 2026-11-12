@@ -3,7 +3,7 @@
 // applied there last. Contents are single letters: 'a' is older than 'b', and so on.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decide, isLibraryItem, keepVersion, listed, newItem, plan, setCurrent, sourceWords, type HarnessCopy, type LibraryItem, type Shelf } from '../src/library.ts';
+import { carryOut, decide, isLibraryItem, keepVersion, listed, newItem, plan, setCurrent, sourceWords, type HarnessCopy, type LibraryItem, type Shelf } from '../src/library.ts';
 
 const has = (hash: string, at = 0): HarnessCopy => ({ is: 'present', hash, at });
 const none: HarnessCopy = { is: 'absent' }, unknown: HarnessCopy = { is: 'unknown', why: 'it can’t be read' }, held: HarnessCopy = { is: 'held', why: 'it can’t hold this name' };
@@ -138,6 +138,22 @@ function shelf(agent: LibraryItem) {
   const made: Shelf<string> = { store: async (_item, hash, content) => { calls.push(`store ${hash}=${content}`); }, save: async () => { calls.push(`save current=${agent.hash} versions=${agent.versions.map(version => version.hash).join()}`); } };
   return { calls, made };
 }
+
+test('carryOut tells History first, then keeps versions and saves, then writes, then removes, saving after each removal', async () => {
+  // An edit in Codex taken in; Copilot CLI gets it; the item is kept out of Claude Code, whose copy goes.
+  const agent = item({ except: ['claude-cli'] });
+  const made = plan(agent, { 'claude-cli': has('a'), 'copilot-cli': has('a'), 'codex-cli': has('b', time(2)) });
+  const calls: string[] = [];
+  await carryOut(agent, made, {
+    store: async (_item, hash) => { calls.push(`store ${hash}`); }, save: async () => { calls.push(`save applied=${Object.keys(agent.applied).join()}`); },
+    copy: () => ({ hash: 'b', at: time(2), content: 'text of b' }), keepOwn: async () => { calls.push('own'); }, log: async () => { calls.push('log'); },
+    write: async harness => { calls.push(`write ${harness}`); return true; }, remove: async harness => { calls.push(`remove ${harness}`); return true; },
+  });
+  assert.deepEqual(calls, ['log', 'store b', 'save applied=claude-cli,copilot-cli,codex-cli', 'own', 'save applied=claude-cli,copilot-cli,codex-cli',
+    'write copilot-cli', 'remove claude-cli', 'save applied=copilot-cli,codex-cli']);
+  // What is applied is carryOut's own note, from what write and remove answer.
+  assert.deepEqual(agent.applied, { 'copilot-cli': 'b', 'codex-cli': 'b' });
+});
 
 test('setCurrent stores the content, then records the version as current, then saves: all before it returns', async () => {
   const agent = item();

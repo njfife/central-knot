@@ -206,7 +206,7 @@ export function plan(item: LibraryItem, copies: Copies): Plan {
   const taken = takeIn ? (copies[takeIn] as { hash: string }).hash : item.hash;
   const after: LibraryItem = { ...item, on: item.on && !turnedOffBy, hash: taken };
   const made: Plan = { takeIn, turnedOffBy, keep: [], write: [], remove: [], forget: [], current: [], found: [] };
-  const known = new Set([taken, ...item.versions.map(version => version.hash)]);
+  const known = new Set(item.versions.map(version => version.hash));
   for (const harness of harnesses) {
     const copy = copies[harness]!, does = verdict(after, harness), wanted = wantedIn(after, harness);
     const lost = does === 'take-in' || does === 'latest-wins';
@@ -270,26 +270,38 @@ export async function setCurrent<Content>(shelf: Shelf<Content>, item: LibraryIt
 
 // ---------- Carrying a plan out ----------
 
-/** What a kind's adapter does for carryOut, besides keeping contents (Shelf). */
+/**
+ * What a kind's adapter does for carryOut, besides keeping contents (Shelf). It only acts and answers: what is applied in each
+ * harness (`applied`) is noted by carryOut alone, from what `write` and `remove` answer.
+ */
 export interface Hands<Content> extends Shelf<Content> {
   /** A copy `plan` saw present in a harness: its content, by hash, and when its file was last changed (ms). */
   copy(harness: HarnessId): { hash: string; at: number; content: Content };
   /** Keeps each harness's own part as it is now (`own`), before anything is written or removed. */
   keepOwn(): Promise<void>;
-  /** Tells History what is being done, once the record is saved and before any harness file changes. */
+  /** Tells History what is about to be done, before anything is saved (carryOut says why). */
   log(): Promise<void>;
-  write(harness: HarnessId): Promise<void>;
-  remove(harness: HarnessId): Promise<void>;
+  /** Writes the current version into one harness (its own part kept as written). True when the harness has it now. */
+  write(harness: HarnessId): Promise<boolean>;
+  /** Removes one harness's copy. True when it is gone. */
+  remove(harness: HarnessId): Promise<boolean>;
 }
 
 /**
- * Carries out one item's plan in the model's order. Version first: each content about to give way is kept, the edit taken in
- * is made current, the item turns Off where a copy was deleted by hand, each harness's own part is kept, what each harness
- * holds is noted, the record is saved, and History is told. Disk second: the writes, then the removals. Every kind's adapter
- * calls this; none orders these steps itself.
+ * Carries out one item's plan in the model's order; every kind's adapter calls this, and none orders these steps itself.
+ * - History first: an entry whose change never lands offers nothing (every action is worked out from the item as it is),
+ *   while a change on record with no entry could leave a deleted item with no Restore.
+ * - Version second: each content about to give way is kept, the edit taken in is made current, the item turns Off where a
+ *   copy was deleted by hand, each harness's own part is kept, what each harness holds is noted, and the record is saved.
+ * - Disk last: the writes, then the removals (a crash in between leaves the item in a harness too many, never too few). Each
+ *   removal is saved at once: one not on record would read, after a crash, as a copy deleted by hand.
  */
 export async function carryOut<Content>(item: LibraryItem, made: Plan, hands: Hands<Content>) {
-  const versionOf = (harness: HarnessId, from: Source) => { const copy = hands.copy(harness); return [{ hash: copy.hash, at: new Date(copy.at).toISOString(), from }, copy.content] as const; };
+  const versionOf = (harness: HarnessId, from: Source) => {
+    const copy = hands.copy(harness);
+    return [{ hash: copy.hash, at: new Date(copy.at).toISOString(), from }, copy.content] as const;
+  };
+  await hands.log();
   for (const { harness, from } of made.keep) await keepVersion(hands, item, ...versionOf(harness, from));
   if (made.takeIn) await setCurrent(hands, item, ...versionOf(made.takeIn, { how: 'edited', harness: made.takeIn }));
   if (made.turnedOffBy) item.on = false;
@@ -297,7 +309,10 @@ export async function carryOut<Content>(item: LibraryItem, made: Plan, hands: Ha
   for (const harness of made.current) item.applied[harness] = item.hash;
   for (const harness of made.forget) delete item.applied[harness];
   await hands.save();
-  await hands.log();
-  for (const harness of made.write) await hands.write(harness);
-  for (const harness of made.remove) await hands.remove(harness);
+  for (const harness of made.write) if (await hands.write(harness)) item.applied[harness] = item.hash;
+  for (const harness of made.remove) {
+    if (!(await hands.remove(harness))) continue;
+    delete item.applied[harness];
+    await hands.save();
+  }
 }

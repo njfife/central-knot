@@ -186,6 +186,9 @@ export function statusLine(row: AgentRow, item: LibraryItem | undefined, tools: 
   }
   const ownSaid = own.length ? ` ${sentence(named(own, tools))} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there.` : '';
   if (place === 'off') return `Off · in Central Knot only. Turn it on to put it in every tool.${ownSaid}`;
+  // A copy deleted by hand turns the agent Off at the next pass: that is what it is about to be.
+  const deletedIn = row.plan?.turnedOffBy;
+  if (deletedIn) return `On · its copy was deleted in ${toolName(deletedIn)}, so it turns off everywhere when sync runs. Central Knot keeps it.`;
   // A harness holding the current version that only waits for an edit made elsewhere has it on.
   const waitsForEdit = (tool: string) => row.hashes?.[tool] === item!.hash;
   const gets = where('gets-it').filter(tool => !waitsForEdit(tool)), out = where('kept-out', 'leaving'), cannot = where('cannot');

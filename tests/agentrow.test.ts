@@ -100,6 +100,11 @@ test('While an edit waits in one tool, the others have the current version and g
   assert.match(lineIn({ 'claude-cli': 'b', 'codex-cli': 'x' }, item({ applied: { 'claude-cli': 'b' } }), 'codex-cli', 'Codex'), /^Has another copy\. It gets the current version when sync runs; before it is written over, a copy Central Knot doesn’t have yet is kept as a version\.$/);
 });
 
+test('While a copy deleted by hand waits for sync, the status says the agent is about to turn off, not that a tool keeps it out', () => {
+  assert.equal(statusLine(...withItem({ 'copilot-cli': 'b', 'codex-cli': 'b' }, item()), tools),
+    'On · its copy was deleted in Claude Code, so it turns off everywhere when sync runs. Central Knot keeps it.');
+});
+
 test('A tool that can’t take the agent is said in the status: on in the others only', () => {
   const why = { cannot: { 'copilot-cli': 'Copilot CLI can’t store this name (é). Rename the agent to use it there.', 'codex-cli': 'Codex can’t store this name (é). Rename the agent to use it there.' } };
   const agent = item({ applied: { 'claude-cli': 'b' } });

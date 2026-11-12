@@ -22,6 +22,7 @@ import { agentHash, agentText, fromMarkdown, keyOf, readAgents, safeName, type A
 import { agentsForRepo, agentsView, applyAgents } from './agents.ts';
 import { parseSkill } from './discovery.ts';
 import { harnesses } from './harnesses.ts';
+import { wantedIn } from './library.ts';
 import { appendHistory, applyChanges, deleteEverywhere, displace, manageView, readHistory, replaceCopy, replaceHistory } from './manage.ts';
 import { applyMcp, cannotHold, editEntry, fromJson, jsonEntry, keep, mcpView, readMcpRecord, readTool, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { gitEnv, gitFailure, runGit, whyGitFailed, whyPushFailed } from './plugins.ts';
@@ -387,7 +388,8 @@ async function writeServers(context: ShareContext, dir: string, tools: HarnessId
 }
 
 /**
- * Writes every agent in Central Knot's library, On or Off here, under agents/ in Claude Code's format: its current version,
+ * Writes every agent in Central Knot's library, On or Off here, under agents/ in Claude Code's format: its current version (or
+ * an edit made in a tool and not taken in yet, as a click's own pass would take it in: agents.ts agentsForRepo),
  * with Claude Code's own settings (tools, model) from Claude Code's file for it (agents.ts agentsForRepo), else as the repo's
  * own file has them (all read in one go). Being Off here never takes an agent out of the repo: only Delete from Central Knot
  * does. An agent a tool has that isn't in Central Knot is not sent, and not removed from the repo either.
@@ -395,7 +397,7 @@ async function writeServers(context: ShareContext, dir: string, tools: HarnessId
 async function writeAgents(context: ShareContext, dir: string, tools: HarnessId[], baseId: string | undefined): Promise<Written> {
   await clearLayout(dir, 'agents', entry => entry.isFile() && entry.name.endsWith('.md'));
   const written: Written = { unsent: new Map(), unmanaged: new Set() };
-  const library = await agentsForRepo(context, tools);
+  const library = await agentsForRepo(context, tools), view = await agentsView(context, tools);
   const pathOf = (name: string) => `agents/${toFile(name)}.md`;
   const plain = library.filter(entry => entry.agent && entry.claudeFile === undefined);
   const inRepo = baseId ? await readBlobs(dir, plain.map(entry => `${baseId}:${pathOf(entry.item.name)}`)) : new Map<string, Buffer>();
@@ -404,7 +406,7 @@ async function writeAgents(context: ShareContext, dir: string, tools: HarnessId[
     await writeScratch(join(dir, pathOf(item.name)), claudeFile ?? agentText('claude-cli', agent, inRepo.get(`${baseId}:${pathOf(item.name)}`)?.toString('utf8')));
   }
   const inLibrary = new Set(library.map(entry => entry.item.key));
-  for (const found of (await agentsView(context, tools)).servers) if (!inLibrary.has(found.key)) written.unmanaged.add(agentKey(found.name));
+  for (const found of view.servers) if (!inLibrary.has(found.key)) written.unmanaged.add(agentKey(found.name));
   return written;
 }
 
@@ -784,23 +786,22 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
   const only = new Set([key]);
   const ours = (result: DestinationResult) => keyOf(result.item) === key;
   const outcome = (done: { stopped?: string; results: DestinationResult[] }) => (done.stopped ? [notIn(change.name, done.stopped)] : done.results.filter(ours));
-  if (!item) {
-    const here = (await agentsView(context, tools)).library?.[key];
-    if (!here || here.deleted) return [];
-    return outcome(await applyAgents(context, tools, [{ key, managed: here.on, off: here.except, deleted: true }], { only }));
-  }
+  if (!item) return outcome(await applyAgents(context, tools, [], { only, pulled: new Map([[key, { removed: true }]]) }));
   const text = await readFile(join(dir, item.paths[0]), 'utf8');
   const agent = fromMarkdown(change.name, text);
   if (!agent) return [notIn(change.name, item.problem ?? 'It could not be read.')];
   const done = await applyAgents(context, tools, [], { only, pulled: new Map([[key, { agent, claudeFile: text }]]) });
-  if (done.stopped || !tools.includes('claude-cli')) return outcome(done);
+  const here = (await agentsView(context, tools)).library?.[key];
+  // Only where Claude Code has the agent (it is On and not kept out there): a copy it holds otherwise is not Central Knot's.
+  if (done.stopped || !tools.includes('claude-cli') || !here || !wantedIn(here, 'claude-cli')) return outcome(done);
   return [...outcome(done), ...await pullClaudeSettings(context, change, agentHash(agent), text, wrote)];
 }
 
 /**
  * Claude Code's own settings for an agent (model, tools) as the repo has them: where Claude Code has the agent at the version
- * pulled and only those settings differ, the repo's file is written as it is. No version tells such a change apart, so it has
- * its own History entry and Undo (undoSettingsChange).
+ * pulled and only those settings differ, the repo's file is written as it is (a copy holding another version, an edit made
+ * there that won, is left as it is). No version tells such a change apart, so it has its own History entry and Undo
+ * (undoSettingsChange).
  */
 async function pullClaudeSettings(context: ShareContext, change: RepoChange, hash: string, text: string, wrote: Wrote): Promise<DestinationResult[]> {
   const existing = (await readAgents(context, 'claude-cli')).entries.find(entry => entry.key === keyOf(change.name));
@@ -1015,7 +1016,11 @@ export function pullRepo(context: ShareContext, options: RepoOptions = {}): Prom
             : change.kind === 'mcp' ? await pullServer(context, dir, change, item, wrote)
             : change.kind === 'agent' ? await pullAgent(context, dir, change, item, wrote)
             : await pullBase(context, dir, change, item, options.base);
-        } catch (error) { outcome = [notIn(change.name, `It could not finish. ${plainError(error)}`)]; }
+        } catch (error) {
+          // plainError says "It could not finish." itself when it knows no more.
+          const why = plainError(error);
+          outcome = [notIn(change.name, why === 'It could not finish.' ? why : `It could not finish. ${why}`)];
+        }
         // This item's own events: a full sync pass may also record another item's edit, which stays said as sync.
         for (const event of await readHistory(context)) if (!before.has(event.id) && event.key === change.key) made.add(event.id);
         // Claude Code's MCP settings are written only by Write to Claude Code (MCP-02): that wait is said apart, not as a failure.

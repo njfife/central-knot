@@ -20,7 +20,9 @@
 //     current, and any entry from before     changes came, "Make    current one
 //     the library that names `previous`      the version before
 //                                            this current"
-//   conflict, chosen: copies that gave way   Use <harness>’s        that copy's version is not the current one
+//   conflict, chosen, kept-edit (an edit     Use <harness>’s        that copy's version is not the current one
+//     not taken in that was written over):
+//     copies that gave way
 //
 // One entry is not here: a Pull that changed only Claude Code's own settings of an agent (`settingsFile`) keeps its own Undo
 // (gitrepo.ts undoSettingsChange), since no version tells such a change apart.
@@ -46,13 +48,18 @@ export function agentSentence(event: HistoryEvent, homeTools: string[], item?: L
   /** " and removed from Codex", or nothing when no harness was touched. */
   const also = (words: string) => (tools ? `${words} ${tools}` : '');
   const where = event.only ? toolName(event.only) : '', from = event.winner ? toolName(event.winner.tool) : '';
-  const pulled = event.via === 'repo', keeps = 'Central Knot keeps it.';
+  // What made it happen is the entry's `cause` alone (types.ts HistoryEvent); none is the person's own switch or click.
+  const pulled = event.cause === 'pulled', keeps = 'Central Knot keeps it.';
   switch (event.kind) {
-    case 'on':
+    case 'on': {
       if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}: its file there is back.` };
-      if (event.cause === 'pulled') return { glyph: 'git-branch', text: `Pulled from the Git repo into Central Knot${also('; put in')}.` };
-      if (event.cause === 'found') return { glyph: 'plus', text: `Found in ${from} and taken into Central Knot${also('; put in')}.` };
-      return { glyph: 'circle-check', text: `Turned on${also(': put in')}.` };
+      const said = {
+        switch: { glyph: 'circle-check', text: `Turned on${also(': put in')}.` },
+        found: { glyph: 'plus', text: `Found in ${from} and taken into Central Knot${also('; put in')}.` },
+        pulled: { glyph: 'git-branch', text: `Pulled from the Git repo into Central Knot${also('; put in')}.` },
+      } as const;
+      return said[event.cause === 'found' || event.cause === 'pulled' ? event.cause : 'switch'];
+    }
     case 'off':
       if (event.only) return { glyph: 'circle-off', text: `Kept out of ${where}: its copy there was removed. ${keeps}` };
       if (event.cause === 'deleted-by-hand') return { glyph: 'trash-2', text: `Its copy was deleted in ${from}, so it was turned off${also(' and removed from')}. ${keeps}` };
@@ -73,9 +80,16 @@ export function agentSentence(event: HistoryEvent, homeTools: string[], item?: L
       // Likewise: an Undo or Restore from before the library names a tool or an earlier version.
       return event.winner || event.previous ? undefined : { glyph: 'undo-2', text: `Restored to Central Knot${also(' and put back in')}.` };
     case 'edit':
-      // Pull's own entry names no harness: the repo's content became the current version (an edit taken in names where).
-      if (pulled && !event.winner) return { glyph: 'git-branch', text: `Pulled from the Git repo; that became the current version${tools ? `, in ${tools}` : ''}.` };
+      // Pull's own entry names no harness. With no version before it, only Claude Code's own settings came, for later.
+      if (pulled && !event.previous) return { glyph: 'git-branch', text: 'Pulled from the Git repo: Claude Code’s own settings for it, which Claude Code gets when it has the agent.' };
+      if (pulled) return { glyph: 'git-branch', text: `Pulled from the Git repo; that became the current version${tools ? `, in ${tools}` : ''}.` };
       return { glyph: 'pencil-line', text: `Edited in ${from}; that became the current version${tools ? `, in ${tools} too` : ''}.` };
+    case 'kept-edit': {
+      // One with a `winner` is from before the library (an edit kept over a deletion): the general sentence says it.
+      if (event.winner) return undefined;
+      const where = andList([...new Set(event.losers.map(loser => toolName(loser.tool)))]);
+      return { glyph: 'diff', text: `Edited in ${where}, not taken in yet, and written over by the current version: the edit is kept as a version.` };
+    }
     case 'conflict': {
       const gaveWay = event.losers.filter(loser => loser.hash !== event.previous && loser.hash !== event.winner?.hash);
       const others = andList([...new Set(gaveWay.map(loser => toolName(loser.tool)))]);

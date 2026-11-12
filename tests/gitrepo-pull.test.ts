@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { connectRepo, pullRepo, pushRepo, repoView } from '../src/gitrepo.ts';
 import { applyChanges, readHistory, restoreFromHistory } from '../src/manage.ts';
@@ -40,6 +40,7 @@ test('Deletions of an MCP server and an agent wait while Automatic sync is off, 
     assert.deepEqual([view.incoming, view.outgoing], [[], []]);
     assert.deepEqual([(await mcpView(second, tools)).servers.length, (await agentsView(second, tools)).servers.length], [0, 0]);
     const deleted = (await readHistory(second)).filter(event => event.key === 'agent:planner' && event.kind === 'deleted').at(-1)!;
+    assert.equal(deleted.cause, 'pulled', 'Pull did it, said by the entry itself');
     assert.equal((await restoreAgent(second, tools, deleted.id)).stopped, undefined);
     assert.match(await readFile(secondPlanner, 'utf8'), /model: sonnet/);
   } finally { await box.cleanup(); }
@@ -200,7 +201,7 @@ test('Pull into an agent that is Off here: the repo’s version becomes its curr
     // History's entry makes the version from before the pull current again; On puts the pulled one in every tool, Claude Code's
     // file with its own settings as the repo has them.
     const entry = (await readHistory(second)).filter(event => event.key === 'agent:planner').at(-1)!;
-    assert.deepEqual([entry.kind, entry.via], ['edit', 'repo']);
+    assert.deepEqual([entry.kind, entry.cause], ['edit', 'pulled']);
     await applyAgents(second, tools, [{ key: 'planner', managed: true, off: [], seenManaged: false }]);
     assert.match(await readFile(secondPlanner, 'utf8'), /^---\nname: planner\ndescription: Plans work\.\nmodel: sonnet\n---\n\nPlan in small steps\.\n$/);
     assert.match(await readFile(join(second.home, '.copilot/agents/planner.agent.md'), 'utf8'), /Plan in small steps/);
@@ -223,5 +224,75 @@ test('An agent turned Off here stays in the repo at the next Push: the other com
     await pushRepo(second);
     await pullRepo(first);
     assert.equal((await agentsView(first, tools)).library!.planner.deleted !== undefined, true);
+  } finally { await box.cleanup(); }
+});
+
+test('Pull of only Claude Code’s settings for an agent that is Off here has its History line; Claude Code gets them when it is turned on', async () => {
+  const box = await world();
+  try {
+    const { first, second, firstPlanner, secondPlanner } = await serverAndAgentOnTwo(box);
+    await applyAgents(second, tools, [{ key: 'planner', managed: false, off: [] }]);
+    await edit(firstPlanner, 'model: opus', 'model: haiku');
+    await applyAgents(first, tools, []);
+    await pushRepo(first);
+    const versions = (await agentsView(second, tools)).library!.planner.versions.length;
+    assert.equal((await pullRepo(second)).pulled, 1);
+    const entry = (await readHistory(second)).filter(event => event.key === 'agent:planner').at(-1)!;
+    assert.deepEqual([entry.kind, entry.cause, entry.previous], ['edit', 'pulled', undefined]);
+    assert.equal((await agentsView(second, tools)).library!.planner.versions.length, versions, 'the same version is not listed again');
+    await applyAgents(second, tools, [{ key: 'planner', managed: true, off: [], seenManaged: false }]);
+    assert.match(await readFile(secondPlanner, 'utf8'), /model: haiku/);
+  } finally { await box.cleanup(); }
+});
+
+test('Pull leaves a Claude Code copy Central Knot doesn’t own as it is, and one holding an edit that won', async () => {
+  const box = await world();
+  try {
+    const { first, second, firstPlanner, secondPlanner } = await serverAndAgentOnTwo(box);
+    // Off here, with a copy made by hand in Claude Code: the repo's settings are not written into it.
+    await applyAgents(second, tools, [{ key: 'planner', managed: false, off: [] }]);
+    const handMade = '---\nname: planner\ndescription: Plans work.\n---\n\nPlan carefully.\n';
+    await writeFile(secondPlanner, handMade);
+    await edit(firstPlanner, 'model: opus', 'model: sonnet');
+    await applyAgents(first, tools, []);
+    await pushRepo(first);
+    await pullRepo(second);
+    assert.equal(await readFile(secondPlanner, 'utf8'), handMade);
+    // On here, with an edit in Claude Code newer than what Pull brings: the edit wins, and Pull doesn't write over it.
+    await rm(secondPlanner);
+    await applyAgents(second, tools, [{ key: 'planner', managed: true, off: [], seenManaged: false }]);
+    await edit(firstPlanner, 'Plan carefully.', 'Plan from the repo.');
+    await applyAgents(first, tools, []);
+    await pushRepo(first);
+    await edit(secondPlanner, 'Plan carefully.', 'Plan here.');
+    const later = new Date(Date.now() + 60_000);
+    await utimes(secondPlanner, later, later);
+    await pullRepo(second, { syncOn: false });
+    assert.match(await readFile(secondPlanner, 'utf8'), /Plan here\./);
+  } finally { await box.cleanup(); }
+});
+
+test('Push sends an edit made in a tool that no pass has taken in, as a click would take it in; another computer’s Pull gets it', async () => {
+  const box = await world();
+  try {
+    const { first, second, firstPlanner, secondPlanner } = await serverAndAgentOnTwo(box);
+    // Automatic sync off: no pass runs after the edit.
+    await edit(firstPlanner, 'Plan carefully.', 'Plan in small steps.');
+    assert.deepEqual(rows(live(await repoView(first, { check: true, syncOn: false })).outgoing), ['planner:changed']);
+    assert.equal((await pushRepo(first, { syncOn: false })).stopped, undefined);
+    await pullRepo(second);
+    assert.match(await readFile(secondPlanner, 'utf8'), /Plan in small steps\./);
+  } finally { await box.cleanup(); }
+});
+
+test('Push of an agent that is Off here sends Claude Code’s own settings as Central Knot last saw them', async () => {
+  const box = await world();
+  try {
+    const { first, firstPlanner } = await serverAndAgentOnTwo(box);
+    await edit(firstPlanner, 'model: opus', 'model: sonnet');
+    await applyAgents(first, tools, []);
+    await applyAgents(first, tools, [{ key: 'planner', managed: false, off: [] }]);
+    await pushRepo(first);
+    assert.match(git(box.remote, 'show', 'main:agents/planner.md'), /model: sonnet/);
   } finally { await box.cleanup(); }
 });

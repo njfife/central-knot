@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { agentText, readAgents } from '../src/agentfiles.ts';
 import { agentVersion, agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
 import { convertAgentToSkill } from '../src/agentskill.ts';
-import { harnessIs, harnessLine, placeOf } from '../src/agentrow.ts';
+import { agentClicks, harnessIs, harnessLine, placeOf } from '../src/agentrow.ts';
 import { listed, sourceWords } from '../src/library.ts';
 import { readHistory } from '../src/manage.ts';
 import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
@@ -154,6 +154,34 @@ inBox('A harness managed again: the library wins, and the copy it held is a vers
   assert.deepEqual(await versions(box), ['Be brief. (found in Claude Code) *', 'Edit away. (was in Codex)']);
 });
 
+inBox('An Off agent is in no tool, also after a tool comes back: turned off while one was uninstalled or left out, its copy there goes once it is back', async box => {
+  for (const leftOut of [false, true]) {
+    await on(box);
+    const without: HarnessId[] = ['claude-cli', 'copilot-cli'];
+    if (leftOut) await chooseTools(box.context, without); else await applyAgents(box.context, without, []);
+    const { row, item } = await seen({ ...box, tools: without });
+    await applyAgents(box.context, without, [agentClicks.off(row, item)]);
+    assert.ok(await readOf(box, 'codex-cli'), 'a tool not managed is not touched');
+    if (leftOut) await chooseTools(box.context, tools);
+    await pass(box);
+    assert.deepEqual(await filesOf(box), { 'claude-cli': undefined, 'copilot-cli': undefined, 'codex-cli': undefined }, leftOut ? 'left out' : 'uninstalled');
+    assert.equal((await marks(box))['codex-cli'], 'none');
+    await turnOn(box);
+  }
+});
+
+inBox('Off clicked while a tool’s agents folder has been gone past the settle window: its copy goes when the folder comes back', async box => {
+  await on(box);
+  await rename(join(box.home, '.codex/agents'), join(box.home, '.codex/agents-away'));
+  const waiting = { ...box.context, settleMs: 2000 }, far = Date.now() + 1e9;
+  await applyAgents(waiting, tools, [], { now: far });
+  const { row, item } = await seen(box);
+  await applyAgents(waiting, tools, [agentClicks.off(row, item)], { now: far + 5000 });
+  await rename(join(box.home, '.codex/agents-away'), join(box.home, '.codex/agents'));
+  await pass(box);
+  assert.deepEqual(await filesOf(box), { 'claude-cli': undefined, 'copilot-cli': undefined, 'codex-cli': undefined });
+});
+
 inBox('A harness uninstalled changes nothing: its copy deleted meanwhile, installed again, it gets the agent back and nothing turns Off', async box => {
   await on(box);
   const without: HarnessId[] = ['claude-cli', 'copilot-cli'];
@@ -208,6 +236,7 @@ inBox('A copy deleted by hand turns the agent Off everywhere, once it has stayed
   assert.deepEqual([first.writes, first.settling, (await itemOf(box))!.on], [0, true, true], 'inside the window nothing happens');
   const second = await applyAgents(waiting, tools, [], { now: 3500 });
   assert.deepEqual(second.notices?.map(notice => [notice.kind, notice.winner, notice.losers]), [['deleted', 'copilot-cli', ['claude-cli', 'codex-cli']]]);
+  assert.deepEqual((await historyOf(box)).map(event => event.cause).at(-1), 'deleted-by-hand');
   assert.deepEqual(await filesOf(box), { 'claude-cli': undefined, 'copilot-cli': undefined, 'codex-cli': undefined });
   assert.equal(placeOf(await itemOf(box)), 'off');
   // Central Knot keeps it: History's entry turns it on again, every file as it was.
@@ -449,6 +478,24 @@ inBox('Make current on an earlier version is a new version, applied like any oth
   assert.equal((await pass(box)).writes, 0);
 });
 
+inBox('An edit no pass took in, written over by Make current, has its History line, and History can make it current', async box => {
+  await on(box);
+  await edit(box, 'claude-cli', 'Edit one.');
+  await pass(box);
+  // Automatic sync off: an edit in Codex no pass sees, then Make current of the first version on the page.
+  await edit(box, 'codex-cli', 'Edit unseen.');
+  const first = (await itemOf(box))!.versions.at(-1)!.hash;
+  const { row, item } = await seen(box);
+  await applyAgents(box.context, tools, [agentClicks.makeCurrent(row, item, first)], { only: new Set(['reviewer']) });
+  assert.match((await readOf(box, 'codex-cli'))!, /Be brief\./);
+  const kept = (await historyOf(box)).at(-1)!;
+  assert.deepEqual([kept.kind, kept.losers.map(loser => loser.tool)], ['kept-edit', ['codex-cli']]);
+  const use = (await historyActions(box)).find(action => action.event.id === kept.id)!;
+  assert.equal(use.label, 'Use codex-cli’s');
+  await use.run();
+  assert.match((await readOf(box, 'claude-cli'))!, /Edit unseen\./);
+});
+
 // ---------- Delete from Central Knot ----------
 
 inBox('Delete removes the agent from every harness and leaves a tombstone: a stale copy is found, never taken in by itself; History restores it', async box => {
@@ -554,7 +601,7 @@ inBox('A crash before a write during On, and while an edit is taken in: after re
   assert.deepEqual([...await lastLines(box)].sort(), ['Be brief.', 'Edit one.']);
 });
 
-inBox('A crash after the record is saved leaves the click in History: a Delete can still be restored, an Off turned on, an edit undone', async box => {
+inBox('A crash before a file changes leaves the click in History (it is told before the record is saved): a Delete can still be restored, an Off turned on, an edit undone', async box => {
   await write(box, 'codex-cli', codexAgent());
   await on(box, claudeAgent(undefined, claudeOwn));
   const before = await filesOf(box);
@@ -580,6 +627,23 @@ inBox('A file a crash left moved aside, mid-removal, is put back before the pass
   await rename(fileOf(box, 'codex-cli'), parked);
   const done = await pass(box);
   assert.deepEqual([done.notices, (await itemOf(box))!.on, await readOf(box, 'codex-cli') !== undefined], [[], true, true]);
+});
+
+inBox('A removal Central Knot carried out is on record at once: after a crash, Turn on (or Restore) writes every copy back and nothing reads as deleted by hand', async box => {
+  await on(box, claudeAgent(undefined, claudeOwn));
+  const before = await filesOf(box);
+  // Off stops after its first removal; with Automatic sync off, On is the next pass, inside a settle window.
+  await assert.rejects(turnOff(box, crashAt(box, 'before-remove', 2)), /crash at before-remove/);
+  const waiting = { ...box.context, settleMs: 2000 };
+  const { row, item } = await seen(box, waiting);
+  await applyAgents(waiting, tools, [agentClicks.on(row, item)], { only: new Set(['reviewer']) });
+  await applyAgents(waiting, tools, [], { now: Date.now() + 5000 });
+  assert.deepEqual([await filesOf(box), (await itemOf(box))!.on], [before, true]);
+  // The same after Delete, with Restore at once.
+  await assert.rejects(deleteIt(box, crashAt(box, 'before-remove', 2)), /crash at before-remove/);
+  await (await historyActions(box)).find(action => action.label === 'Restore')!.run();
+  await applyAgents(waiting, tools, [], { now: Date.now() + 5000 });
+  assert.deepEqual([await filesOf(box), (await itemOf(box))!.on], [before, true]);
 });
 
 // ---------- The record, and the things around it ----------
