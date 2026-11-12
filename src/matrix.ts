@@ -1,6 +1,7 @@
 // The item pages (Skills, MCP servers, Agents, and a harness's tabs for them): one On/Off switch per item, applied at once
 // in every tool Central Knot manages. A row's marks only say what each tool has; each tool's own controls are in the item's
-// details, and every click's result comes with an Undo of the whole click.
+// details, and every click's result comes with an Undo of the whole click. A kind on Central Knot's library (agents) has a
+// library row (`library()`): librarykinds.ts says which kinds and what each supplies, libraryrow.ts what such a row says.
 import { itemId } from './profileplan.ts';
 import { brandMark } from './brand.ts';
 import { caughtUpNames, DAY_MS, defaultHistoryDays, groupBy } from './model.ts';
@@ -18,7 +19,7 @@ import { harnessIs, inLibrary, madeFrom, needsChoice as libraryNeedsChoice, plac
 import { libraryKinds, type LibraryKind } from './librarykinds.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
-import type { Change, DestinationResult, ManageView, Outside, PassResult, SkillFacts, SyncNotice, HarnessId, PartsInstall, ThroughPlugin } from './types.ts';
+import type { Change, DestinationResult, ManageView, Outside, SkillFacts, SyncNotice, HarnessId, PartsInstall, ThroughPlugin } from './types.ts';
 import { market } from './pluginstate.ts';
 import { pluginKey, type PluginDraft } from './pluginplan.ts';
 import { alongWords, cantSwitch, click as clickPluginItem, clickWords, itemSaid, onNow as itemOn, switchWords, turnEvery, type PluginItemAt } from './pluginswitch.ts';

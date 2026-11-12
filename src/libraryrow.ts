@@ -2,7 +2,7 @@
 // mark says, the clicks its controls send, and every sentence the page says about it (its status, its switch, a click's
 // result, a notice). The same for every kind on the library: a kind supplies only its words (RowWords; each kind's are in
 // libraryWords), and the sentences that name the item or its copies are made in them (sentences). matrix.ts draws these, with
-// what else a kind's opened row shows of its own (matrix.ts libraryKinds); the tests click them exactly as the page does
+// what else a kind's opened row shows of its own (librarykinds.ts); the tests click them exactly as the page does
 // (tests/agentclicks.ts).
 //
 // An item stands in one of three places (library.ts has the model):
@@ -33,7 +33,7 @@ export interface RowWords {
   body: string;
 }
 
-/** Each kind on the library, in its words. A kind put on the library adds its words here (and its entry in matrix.ts libraryKinds). */
+/** Each kind on the library, in its words. A kind put on the library adds its words here (and its entry in librarykinds.ts libraryKinds). */
 export const libraryWords = {
   agents: {
     item: kindNouns.agents.one, an: kindNouns.agents.a, copy: 'file', body: 'Prompt',

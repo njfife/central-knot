@@ -778,7 +778,11 @@ export interface McpView {
  * asked changes made, for their one Undo (ApplyResult.made). `outcome: 'held'` on a result is an action not done this time
  * (DestinationResult), not a held copy.
  */
-export interface PassResult { stopped?: string; results: DestinationResult[]; writes: number; made?: string[]; notices?: SyncNotice[]; /** A deletion is inside its settle window: look again shortly. */ settling?: boolean }
+export interface PassResult {
+  stopped?: string; results: DestinationResult[]; writes: number; made?: string[]; notices?: SyncNotice[];
+  /** A deletion is inside its settle window: look again shortly. */
+  settling?: boolean;
+}
 export interface McpResult extends PassResult {
   /** What Write to Claude Code wrote, for its Undo: each entry's hash before (null when it was new) and after. */
   claudeWritten?: ClaudeWrite[] }

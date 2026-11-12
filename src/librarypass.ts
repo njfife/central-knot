@@ -37,11 +37,11 @@
 //   its page, and forgetFolders from toolchoice.ts chooseTools.
 // Outside the contract, one place each:
 // - its page's rows: what each says and the clicks it sends (agents.ts agentsView gives a LibraryView; its words in
-//   libraryrow.ts libraryWords and its entry in matrix.ts libraryKinds; libraryrow.ts and matrix.ts draw them);
+//   libraryrow.ts libraryWords and its entry in librarykinds.ts libraryKinds; matrix.ts draws them);
 // - History's sentences and actions for its entries (historyactions.ts for agents; historypage.ts asks it);
 // - the app's wiring: main.ts (its passes, in the background and on a click through the `changes` sanitizer; its view; a
-//   History action sent on by its key's prefix), preload.ts (the page's calls), types.ts HomeView (its view in the home's),
-//   app.ts (its page: the facts it reads and the call it sends).
+//   History action sent on by its key's prefix), preload.ts (the page's calls), types.ts HomeView (its LibraryView in the
+//   home's), itemrow.ts kindSource (where every page reads it), app.ts (its page: the call it sends, where its result is kept).
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { carryOut, keepVersion, managedAgain, newItem, plan, setCurrent, versionAt, wantedIn } from './library.ts';

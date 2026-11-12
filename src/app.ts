@@ -305,13 +305,13 @@ export interface Click {
   next?: Outcome['next'];
 }
 
-/** Each item page's own: its items as the open home shows them, how its changes are sent, and where its last result is kept. */
-const kindPages: Record<Kind, { facts: (home: HomeView) => SkillFacts[]; send: (changes: Change[], resume: boolean, home: string) => Promise<ApplyResult | McpResult>; keep: (results: DestinationResult[], notices?: SyncNotice[]) => void }> = {
-  skills: { facts: home => home.manage.skills, send: (...args) => api().apply(...args), keep: (results, notices) => { state.applied = { results, harnessWrites: 0, notices }; } },
-  mcp: { facts: home => home.mcp.servers, send: (...args) => api().applyMcp(...args), keep: (results, notices) => { state.mcpResult = { results, writes: 0, notices }; } },
-  agents: { facts: home => kindSource(home, 'agents').facts, send: (...args) => api().applyAgents(...args), keep: (results, notices) => { state.agentsResult = { results, writes: 0, notices }; } },
+/** Each item page's own: how its changes are sent, and where its last result is kept. Its items are itemrow.ts kindSource's. */
+const kindPages: Record<Kind, { send: (changes: Change[], resume: boolean, home: string) => Promise<ApplyResult | McpResult | PassResult>; keep: (results: DestinationResult[], notices?: SyncNotice[]) => void }> = {
+  skills: { send: (...args) => api().apply(...args), keep: (results, notices) => { state.applied = { results, harnessWrites: 0, notices }; } },
+  mcp: { send: (...args) => api().applyMcp(...args), keep: (results, notices) => { state.mcpResult = { results, writes: 0, notices }; } },
+  agents: { send: (...args) => api().applyAgents(...args), keep: (results, notices) => { state.agentsResult = { results, writes: 0, notices }; } },
 };
-const factsOf = (kind: Kind) => (state.home ? kindPages[kind].facts(state.home) : []);
+const factsOf = (kind: Kind) => (state.home ? kindSource(state.home, kind).facts : []);
 
 /** The records of these items of a kind, as the open home shows them. */
 const standings = (kind: Kind, keys: string[]): Map<string, Standing> =>

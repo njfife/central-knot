@@ -3,7 +3,7 @@
 // read each, which marks what differs from the current version; and Make current on every other. Central Knot keeps every
 // version (library.ts), so a long list folds to its newest few with one line that shows the rest. Its words are libraryrow.ts's.
 // It draws what it is given and calls back on a click: matrix.ts keeps which list is unfolded and which version is being
-// read, gets a version's text as the kind gives it (matrix.ts libraryKinds), and sends Make current as the item's click.
+// read, gets a version's text as the kind gives it (librarykinds.ts), and sends Make current as the item's click.
 import { foldVersions, madeFrom, versionChange, versionChangeHelp, versionSource } from './libraryrow.ts';
 import { wordDiff, type Line } from './diff.ts';
 import { button, h, icon, type Child } from './dom.ts';
