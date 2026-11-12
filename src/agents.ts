@@ -6,24 +6,27 @@
 // cannotTake for the page).
 // Writes and removals are checked (share.ts), so a save that lands meanwhile is never lost.
 //
-// Around the pass: applyAgents and restoreAgent run it for agents; agentsView is the Agents page's reading (lookFor, copiesOf,
-// plan), so a mark says what a pass will do; agentsForRepo is what the Git repo's Push sends. Elsewhere: where each thing is
-// kept on disk, agentstore.ts; the harnesses' file formats, agentfiles.ts; an agent's row and the clicks its controls send,
-// agentrow.ts; History's sentences and actions for agents, historyactions.ts; Convert to skill, agentskill.ts; the Git
-// repo's Push and Pull, gitrepo.ts (agentsForRepo, and Pull through applyAgents).
+// Around the pass: applyAgents and restoreAgent run it for agents (the page's clicks through librarypass.ts itemClick);
+// agentsView is the Agents page's reading (types.ts LibraryView: lookFor, copiesOf, plan), so a mark says what a pass will
+// do; agentsForRepo is what the Git repo's Push sends. Elsewhere: where each thing is kept on disk, agentstore.ts; the
+// harnesses' file formats, agentfiles.ts; an agent's row, the clicks its controls send and its words, libraryrow.ts (the
+// same row for every kind on the library) with librarypages.ts; History's sentences and actions for agents,
+// historyactions.ts; Convert to skill, agentskill.ts; the Git repo's Push and Pull, gitrepo.ts (agentsForRepo, and Pull
+// through applyAgents).
 import { constants } from 'node:fs';
 import { access } from 'node:fs/promises';
-import { agentHash, agentText, agentsFolder, changedFields, fileFor, isAgentTool, keyOf, nameProblem, readAgents, type AgentEntry, type SharedAgent, type VersionChange } from './agentfiles.ts';
+import { agentHash, agentText, agentsFolder, changedFields, fileFor, isAgentTool, keyOf, nameProblem, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
 import { fileTextFor, keepOwn, openLibrary, readVersion, saveLibrary, storeVersion } from './agentstore.ts';
 import { agentAction } from './historyactions.ts';
 import { listed, plan } from './library.ts';
-import type { LibraryItem, Version } from './library.ts';
-import { copiesOf, differ, forgetFolders, foundCopies, lookFor, restore, runPass, unseenIn, type Disk, type Kind, type Look, type PassOptions } from './librarypass.ts';
+import { libraryWords } from './libraryrow.ts';
+import type { LibraryItem, Version, VersionChange } from './library.ts';
+import { copiesOf, differ, forgetFolders, foundCopies, itemClick, lookFor, restore, runPass, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { throughPlugins } from './plugins.ts';
 import type { AgentTool } from './presence.ts';
 import { errorCode, exists, recoverParked, removeFileChecked, syncGate, writeAccess, writeFileChecked } from './share.ts';
 import type { ShareContext } from './share.ts';
-import type { Change, HarnessId, McpResult, McpView, SkillFacts, SyncNotice, ThroughPlugin, ToolCopy } from './types.ts';
+import type { Change, HarnessId, LibraryFacts, LibraryView, PassResult, SyncNotice, ThroughPlugin, ToolCopy } from './types.ts';
 import { throughPlugin, toolName } from './words.ts';
 
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -82,7 +85,7 @@ async function agentsThroughPlugins(context: ShareContext, tools: HarnessId[]): 
  * there, or its name can't be stored there. Worked out at each look and never stored. A plugin that brings the agent is "has
  * it another way" in the model's terms (library.ts); agents still hold it as can't-take, so nothing they do changes.
  */
-function agentHeld(disk: AgentDisk, managed: HarnessId[], item: Pick<LibraryItem, 'key' | 'name'>, tool: HarnessId): string | undefined {
+function agentHeld(disk: AgentDisk, managed: HarnessId[], item: Wanted, tool: HarnessId): string | undefined {
   const given = disk.through.get(tool)?.get(item.key);
   if (given) return throughPlugin(tool, given, 'agent');
   const why = nameProblem(item.name);
@@ -95,7 +98,7 @@ function agentHeld(disk: AgentDisk, managed: HarnessId[], item: Pick<LibraryItem
  * folder can't be written. A pass reads the same: Disk.held, and the folder's lock, which it adds itself (librarypass.ts
  * copyIn). An edit in a folder that can't be written is still read and taken in; only the writes and removals there wait.
  */
-function cannotTake(disk: AgentDisk, managed: HarnessId[], item: Pick<LibraryItem, 'key' | 'name'>, tool: HarnessId, hasCopy: boolean): string | undefined {
+function cannotTake(disk: AgentDisk, managed: HarnessId[], item: Wanted, tool: HarnessId, hasCopy: boolean): string | undefined {
   return (hasCopy ? undefined : agentHeld(disk, managed, item, tool)) ?? disk.locked.get(tool);
 }
 
@@ -104,7 +107,8 @@ function cannotTake(disk: AgentDisk, managed: HarnessId[], item: Pick<LibraryIte
 /** Agents as a kind of item (librarypass.ts Kind): one file per agent in each harness's agents folder. */
 export const agentKind: Kind<SharedAgent, AgentEntry, AgentDisk> = {
   kind: 'agent',
-  words: { item: 'agent', copy: 'file', folder: 'agents folder' },
+  // The item and its copy as the page names them (libraryrow.ts libraryWords); a harness's folder of them only the pass says.
+  words: { item: libraryWords.agents.item, copy: libraryWords.agents.copy, folder: 'agents folder' },
   historyPrefix: 'agent:',
   harnesses: tools => tools.filter(isAgentTool),
   folder: agentsFolder,
@@ -152,13 +156,13 @@ async function writeAgent(context: ShareContext, item: LibraryItem, harness: Har
 export type PulledAgent = { agent: SharedAgent; claudeFile: string } | { removed: true };
 type AgentPassOptions = Omit<PassOptions<SharedAgent>, 'pulled'> & { pulled?: Map<string, PulledAgent> };
 
-/** One pass over the agents (librarypass.ts runPass): the clicks in `changes`, then every agent brought into line. */
-export function applyAgents(context: ShareContext, tools: HarnessId[], changes: Change[], options: AgentPassOptions = {}): Promise<McpResult> {
+/** One pass over the agents (librarypass.ts runPass): the page's clicks in `changes` (itemClick), then every agent brought into line. */
+export function applyAgents(context: ShareContext, tools: HarnessId[], changes: Change[], options: AgentPassOptions = {}): Promise<PassResult> {
   // The repo's file is Claude Code's own part of the agent.
   const own = (claudeFile: string) => ({ harness: 'claude-cli' as const, text: claudeFile });
   const pulled = options.pulled && new Map([...options.pulled].map(([key, brought]) =>
     [key, 'removed' in brought ? brought : { name: brought.agent.name, content: brought.agent, own: own(brought.claudeFile) }] as const));
-  return runPass(agentKind, context, tools, changes, { ...options, pulled });
+  return runPass(agentKind, context, tools, changes.map(itemClick), { ...options, pulled });
 }
 
 /** A History entry's action on an agent (librarypass.ts restore; historyactions.ts says which click it is). */
@@ -202,7 +206,7 @@ export async function agentsForRepo(context: ShareContext, tools: HarnessId[]): 
 // ---------- View ----------
 
 /**
- * Each listed version's note (agentfiles.ts VersionChange). A copy that gave way is compared with the version written over
+ * Each listed version's note (library.ts VersionChange). A copy that gave way is compared with the version written over
  * it. Any other is compared with the version taken before it, passing over copies that gave way, which were never current;
  * with none, it is the first version, unless copies were taken in with it (the chosen one, or Pull's over copies found here).
  */
@@ -222,19 +226,18 @@ async function changesOf(context: ShareContext, item: LibraryItem): Promise<Vers
 
 /**
  * The Agents page's rows: every agent in the library (On, or Off: in Central Knot only) and every found one (in a managed
- * harness, not in the library). `managed` on a row is On; `off` the harnesses it is kept out of. `library` gives the page and
- * History each item as the library holds it, deleted ones too.
+ * harness, not in the library). `library` gives the page and History each item as the library holds it, deleted ones too.
  */
-export async function agentsView(context: ShareContext, tools: HarnessId[], notices: SyncNotice[] = []): Promise<McpView> {
+export async function agentsView(context: ShareContext, tools: HarnessId[], notices: SyncNotice[] = []): Promise<LibraryView> {
   // The page's look applies the guards in memory, as a pass would; it never saves.
   const { look, live, problem } = await lookFor(agentKind, context, tools);
   const { library, managed } = look;
   const keys = [...new Set([...look.disk.byKey.keys(), ...live.map(item => item.key)])].sort((first, second) => first.localeCompare(second));
-  const agents: SkillFacts[] = [];
-  for (const key of keys) agents.push(await rowFacts(look, key, live.find(item => item.key === key)));
+  const items: LibraryFacts[] = [];
+  for (const key of keys) items.push(await rowFacts(look, key, live.find(item => item.key === key)));
   const gate = problem ? { state: 'stopped' as const, reason: problem } : await syncGate(context);
   const problems = problem ? [problem, ...look.disk.problems] : look.disk.problems;
-  return { tools: managed, servers: agents, library: library.items, claudePending: [], access: await writeAccess(context), gate, problems, notices };
+  return { tools: managed, items, library: library.items, access: await writeAccess(context), gate, problems, notices };
 }
 
 /**
@@ -242,18 +245,19 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
  * (`plan`, from the same reading a pass makes: copiesOf) and why nothing can happen in one (`unseen`, `cannot`). A found
  * agent's row says whether its copies differ, so its switch asks which one to take in.
  */
-async function rowFacts(look: AgentLook, key: string, item: LibraryItem | undefined): Promise<SkillFacts> {
+async function rowFacts(look: AgentLook, key: string, item: LibraryItem | undefined): Promise<LibraryFacts> {
   const slot = look.disk.byKey.get(key) ?? {};
   const entries = look.managed.flatMap(tool => (slot[tool] ? [slot[tool]!] : []));
   const name = item?.name ?? entries[0].name;
   const current = item ? await readVersion(look.context, key, item.hash) : entries[0].agent;
   const copies: Partial<Record<HarnessId, ToolCopy>> = {};
   for (const { tool, hash, file, agent, at, name: folder } of entries) {
-    const lines = agent.prompt.split('\n').length, ownFields = Object.keys(agent.fields);
-    const { description: summary, prompt } = agent;
-    copies[tool] = { hash, directory: file, rootLabel: nameOf(tool), lines, modified: iso(at), summary, prompt, writable: true, folder, ownFields };
+    const lines = agent.prompt.split('\n').length, ownPart = Object.keys(agent.fields);
+    // What a copy question compares is the prompt (libraryrow.ts libraryWords: its `body`).
+    const { description: summary, prompt: body } = agent;
+    copies[tool] = { hash, directory: file, rootLabel: nameOf(tool), lines, modified: iso(at), summary, body, writable: true, folder, ownPart };
   }
-  const cannot: SkillFacts['cannot'] = {}, plugin: NonNullable<SkillFacts['plugin']> = {}, unseen: NonNullable<SkillFacts['unseen']> = {};
+  const cannot: LibraryFacts['cannot'] = {}, plugin: NonNullable<LibraryFacts['plugin']> = {}, unseen: NonNullable<LibraryFacts['unseen']> = {};
   for (const tool of look.managed) { const given = look.disk.through.get(tool)?.get(key); if (given && !slot[tool]) plugin[tool] = given; }
   const copiesNow = item ? copiesOf(look, item) : undefined, made = item && copiesNow ? plan(item, copiesNow) : undefined;
   const tombstone = item ? undefined : look.library.items[key];
@@ -262,7 +266,8 @@ async function rowFacts(look: AgentLook, key: string, item: LibraryItem | undefi
     if (copy?.is === 'unseen') unseen[tool] = copy.why;
     // Why it can't take the agent (cannotTake): a held copy says it; so does a copy the plan writes over or removes, and a
     // harness a found agent would go to once taken in.
-    const why = copy?.is === 'held' ? copy.why : cannotTake(look.disk, look.managed, { key, name }, tool, !!slot[tool]);
+    // A found agent is asked about as taking it in would leave it: On everywhere.
+    const why = copy?.is === 'held' ? copy.why : cannotTake(look.disk, look.managed, item ?? { key, name, on: true, except: [] }, tool, !!slot[tool]);
     if (why && (copy?.is === 'held' || touched || (!copiesNow && !slot[tool]))) cannot[tool] = why;
     if (copiesNow) continue;
     // A found agent: what can't be seen there. One deleted from Central Knot whose copy there is still owed a removal says so.
@@ -274,7 +279,7 @@ async function rowFacts(look: AgentLook, key: string, item: LibraryItem | undefi
   // The edits the next pass handles: the one that becomes the current version, and any that give way to it.
   const edited = made ? [made.takeIn, ...made.keep.filter(kept => kept.from.how === 'edited').map(kept => kept.harness)].filter(tool => tool !== undefined) : [];
   return {
-    key, name, description: current?.description ?? '', copies, extra: [], managed: !!item?.on, off: item?.except ?? [], cannot, choiceBlocks: {}, edited,
+    key, name, description: current?.description ?? '', copies, on: !!item?.on, except: item?.except ?? [], cannot, edited,
     // The copies a harness managed again gives way with are kept before the plan, by the pass (librarypass.ts cameBack): said with it.
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
       : { differs: differ(foundCopies(look, key, [])) }),

@@ -21,21 +21,31 @@
 // Words: a `Kind` is what one kind implements (below); its `Disk` is what it read of the managed harnesses now; a `Look` is
 // one pass's or one page's reading (the Disk with the record, the folders and the settle clock); a `Shelf` (library.ts)
 // stores a version's content and saves the record; `Hands` (library.ts) is what carryOut is given to act with, which
-// syncItem builds from the Kind. A copy that can't be seen for sure is `unseen` (Disk.unseen says why); a `held` copy is
-// one nothing of Central Knot's goes to (Disk.held, and a folder that can't be written: Disk.locked). A pass's result with
-// `outcome: 'held'` (types.ts DestinationResult, the app's word for an action not done this time) is not a held copy.
+// syncItem builds from the Kind. An `ItemClick` is what a person asked of one item (On, kept out, a version, Delete). A copy
+// that can't be seen for sure is `unseen` (Disk.unseen says why); a `held` copy is one nothing of Central Knot's goes to
+// (Disk.held, and a folder that can't be written: Disk.locked). A pass answers with a types.ts PassResult; a result in it
+// with `outcome: 'held'` (types.ts DestinationResult, the app's word for an action not done this time) is not a held copy.
 //
-// To put another kind on the library (agents are the worked example; the compiler names a member `Kind` lacks):
-// - its name in library.ts ItemKind, and one object implementing `Kind`, like agents.ts agentKind. A kind with no part of
-//   its own per tool has `ownOf` answer undefined and `keepOwn` false;
-// - its callers: runPass for its passes (a click is a plain types.ts Change: `key`, `managed` for On, `off` the tools it is
-//   kept out of), restore for History's actions, lookFor for its page, and forgetFolders from toolchoice.ts chooseTools.
-// Outside the contract, one place each:
-// - its page's rows: what each says and the clicks it sends (agents.ts agentsView and agentrow.ts; matrix.ts draws them);
-// - History's sentences and actions for its entries (historyactions.ts for agents; historypage.ts asks it);
-// - the app's wiring: main.ts (its passes, in the background and on a click through the `changes` sanitizer; its view; a
-//   History action sent on by its key's prefix), preload.ts (the page's calls), types.ts HomeView (its view in the home's),
-//   app.ts (its page: the facts it reads and the call it sends).
+// Where the library meets the app's types, which the skills and MCP engines share and name for themselves: a click comes
+// as a types.ts Change (a row's, or a History entry's action) and itemClick makes it an ItemClick (`managed` is On); a
+// kind's page view is a types.ts LibraryView, which the pages read through itemrow.ts kindSource.
+//
+// To put another kind on the library, every place it is wired in (this is the one list; librarypages.ts and LEDGER point
+// here, and the compiler names a member `Kind` lacks):
+// - the contract: its name in library.ts ItemKind, and one object implementing `Kind`, like agents.ts agentKind (a kind with
+//   no part of its own per tool has `ownOf` answer undefined and `keepOwn` false);
+// - its callers: runPass for its passes (the app's clicks through itemClick), restore for History's actions, lookFor for its
+//   page's view, and forgetFolders from toolchoice.ts chooseTools;
+// - its view: a types.ts LibraryView (as agents.ts agentsView gives), kept in types.ts HomeView under the page's name for the
+//   kind (app.ts PageKind), and found there by itemrow.ts libraryView, which kindSource and the page's bands and notices
+//   (matrix.ts listView) read with no edit of their own;
+// - its page: its words in libraryrow.ts libraryWords (agents.ts takes its Kind's from there), and its entry in
+//   librarypages.ts libraryPages (how Read gets a version, what its opened row shows of its own); matrix.ts then draws its
+//   rows as library rows, with no edit;
+// - the app's wiring: app.ts kindPages (how its clicks are sent; where its last result is kept, which lastResult reads),
+//   main.ts (its passes, in the background and on a click through the `changes` sanitizer; its view; a History action
+//   sent on by its key's prefix), preload.ts (the page's calls);
+// - History's sentences and actions for its entries (historyactions.ts for agents; historypage.ts asks it).
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { carryOut, keepVersion, managedAgain, newItem, plan, setCurrent, versionAt, wantedIn } from './library.ts';
@@ -43,7 +53,7 @@ import type { Copies, HarnessCopy, ItemKind, LibraryItem, Plan, Shelf, Source, V
 import { appendHistory, historyCutoff, readHistory, replaceHistory } from './manage.ts';
 import { newRecord, readRecord, remember, saveRecord, syncGate, writeAccess } from './share.ts';
 import type { ShareContext } from './share.ts';
-import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, SyncNotice } from './types.ts';
+import type { Change, DestinationResult, HarnessId, HistoryEvent, PassResult, SyncNotice } from './types.ts';
 import { toolName } from './words.ts';
 
 const now = () => new Date().toISOString();
@@ -72,12 +82,16 @@ export interface Disk<Entry extends Seen> {
   /** What could not be read, in words for the page. */
   problems: string[];
   /**
-   * Why a harness with no copy of the item is held (library.ts HarnessCopy), for the kind's own reasons: it can't be given
-   * one (a name it can't store), or it has it another way (`anotherWay`: through a plugin, …). Undefined when it can be given
-   * it. A folder that can't be written is `locked`, which the pass adds itself. Worked out at each look, never stored.
+   * Why a harness the item is wanted in, with no copy of its own, is held (library.ts HarnessCopy), for the kind's own
+   * reasons: it can't be given one (a name it can't store), or it has it another way (`anotherWay`: through a plugin, or a
+   * tool that reads another's folder while the item is in that one). Undefined when it can be given it. `item` is as this
+   * pass's clicks left it, so library.ts wantedIn says where else it is wanted; what the other harnesses hold is this Disk's
+   * (byKey, unseen). A folder that can't be written is `locked`, which the pass adds itself. Worked out at each look, never stored.
    */
-  held(item: Pick<LibraryItem, 'key' | 'name'>, harness: HarnessId): { why: string; anotherWay?: true } | undefined;
+  held(item: Wanted, harness: HarnessId): { why: string; anotherWay?: true } | undefined;
 }
+/** An item as Disk.held is told of it: its name, and where it is wanted (library.ts wantedIn). */
+export type Wanted = Pick<LibraryItem, 'key' | 'name' | 'on' | 'except' | 'deleted'>;
 
 /** One kind's part of the library as its record holds it: its items, and each harness's folder as a pass last saw it. */
 export interface KindLibrary { items: Record<string, LibraryItem>; folders: Partial<Record<HarnessId, FolderSeen>> }
@@ -131,8 +145,33 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
   write(context: ShareContext, item: LibraryItem, harness: HarnessId, here: Entry | undefined, content: Content): Promise<{ stopped: string } | undefined>;
   /** Removes one harness's copy, only while it is as read: `changed` when a save landed meanwhile. */
   remove(context: ShareContext, item: LibraryItem, here: Entry): Promise<'removed' | 'changed' | 'failed'>;
-  /** A History entry's action as the click it is, from the entry and the item now; undefined when it has nothing left to do. */
+  /**
+   * A History entry's action as the click it is (the app's, as the page would send it: restore makes it the library's with
+   * itemClick), from the entry and the item now; undefined when it has nothing left to do.
+   */
   historyAction(entry: HistoryEvent, item: LibraryItem | undefined, version?: string): { change: Change } | undefined;
+}
+
+/**
+ * What a person asked of one item: On or Off (`on`), the harnesses it is kept out of (`except`), a version to make current,
+ * Delete from Central Knot (`deleted`: true) or its Restore (false), and, for a found item whose copies differ, the copy
+ * every harness takes (`use`, as seen: `useHash`). `seenOn`: whether the page showed it On; a click made from an older read
+ * is refused if that no longer holds. `use: 'separate'` is the skills engine's "keep both", no choice here: a click carrying
+ * it is refused (click, takeIn), so the pass does only what it is asked.
+ */
+export interface ItemClick {
+  key: string; on: boolean; except: HarnessId[]; seenOn?: boolean;
+  use?: HarnessId | 'separate'; useHash?: string; version?: string; deleted?: boolean;
+}
+
+/**
+ * The app's click (types.ts Change, which the skills and MCP engines share; the page's and History's) as the library's: the
+ * one place the two meet. `managed` is On, `off` the harnesses it is kept out of; a Change's fields for the other engines
+ * (disable, enable, remove, everywhere, takeOver) are left behind.
+ */
+export function itemClick(change: Change): ItemClick {
+  const { key, managed: on, off, seenManaged: seenOn, use, useHash, version, deleted } = change;
+  return { key, on, except: [...off], seenOn, use, useHash, version, deleted };
 }
 
 // ---------- What the harnesses hold ----------
@@ -320,11 +359,11 @@ export interface PassOptions<Content> {
   settleMs?: number; now?: number;
 }
 
-/** One pass of a kind: the clicks in `changes`, then every item in its library brought into line with its harnesses (library.ts plan). */
+/** One pass of a kind: the `clicks`, then every item in its library brought into line with its harnesses (library.ts plan). */
 export async function runPass<C, E extends Seen, D extends Disk<E>>(
-  kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[], changes: Change[], options: PassOptions<C> = {},
-): Promise<McpResult> {
-  const refused = await refusal(context, changes.length > 0 || !!options.pulled?.size, options.resume);
+  kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[], clicks: ItemClick[], options: PassOptions<C> = {},
+): Promise<PassResult> {
+  const refused = await refusal(context, clicks.length > 0 || !!options.pulled?.size, options.resume);
   if (refused) return refused;
   const { library, problem } = await kind.open(context, true);
   if (problem) return { stopped: problem, results: [], writes: 0 };
@@ -332,14 +371,14 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   // A write or removal a crash interrupted is finished first, so a copy moved aside is never read as deleted.
   for (const tool of managed) await kind.recover(context, tool);
   const saved = JSON.stringify(library);
-  const inScope = (key: string) => !options.only || options.only.has(key) || changes.some(change => change.key === key);
+  const inScope = (key: string) => !options.only || options.only.has(key) || clicks.some(asked => asked.key === key);
   const settle = { clock: options.now ?? Date.now(), ms: options.settleMs ?? context.settleMs ?? 2000, settling: false };
   const look: AnyLook = await lookAt(kind, context, managed, library, settle);
   const store = (item: LibraryItem, hash: string, content: unknown) => kind.store(context, item, hash, content as C);
   const pass: Pass = { ...look, shelf: { store, save: () => saveIfChanged(pass) }, saved, asked: new Map(), results: [], notices: [], writes: 0, made: [] };
   await deletionsTold(pass);
   for (const [key, brought] of options.pulled ?? []) await pull(pass, key, brought);
-  for (const change of changes) await click(pass, change);
+  for (const asked of clicks) await click(pass, asked);
   const items = Object.values(library.items).filter(item => inScope(item.key));
   await guardFolders(pass, items, pass.shelf);
   for (const item of items) await syncItem(pass, item);
@@ -382,7 +421,7 @@ async function saveIfChanged(pass: Pass) {
  * Why nothing may be written right now, if so: a preview-only home, another build's record, or one that needs Resume. A home
  * with no sync record yet gets one when something is asked of the pass (`asked`: a click, or what Pull brings); else it has nothing to do.
  */
-async function refusal(context: ShareContext, asked: boolean, resume = false): Promise<McpResult | undefined> {
+async function refusal(context: ShareContext, asked: boolean, resume = false): Promise<PassResult | undefined> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   const gate = await syncGate(context);
@@ -516,14 +555,14 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
  */
 export async function restore<C, E extends Seen, D extends Disk<E>>(
   kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[], eventId: string, version?: string,
-): Promise<McpResult> {
+): Promise<PassResult> {
   const past = (await readHistory(context)).find(entry => entry.id === eventId);
   const key = past?.key.slice(kind.historyPrefix.length) ?? '';
   const { library, problem } = await kind.open(context);
   if (problem) return { stopped: problem, results: [], writes: 0 };
   const action = past && kind.historyAction(past, library.items[key], version);
   if (!action) return { stopped: `That change has nothing left to undo: the ${kind.words.item} is as that would leave it.`, results: [], writes: 0 };
-  const done = await runPass(kind, context, tools, [action.change], { only: new Set([key]) });
+  const done = await runPass(kind, context, tools, [itemClick(action.change)], { only: new Set([key]) });
   // One of an entry's version choices ("Use Codex’s") leaves the entry open: its other choices still stand.
   if (!done.made?.length || version) return done;
   const history = await readHistory(context);
@@ -537,35 +576,35 @@ export async function restore<C, E extends Seen, D extends Disk<E>>(
 type Refuse = (message: string, more?: Partial<DestinationResult>) => void;
 
 /**
- * One click on an item, recorded on it (types.ts Change: `managed` is On, `off` the harnesses it is kept out of); the same
- * pass then applies it. A click that can't be taken is said in the results (`unchanged`) and changes nothing.
+ * One click on an item, recorded on it; the same pass then applies it. A click that can't be taken is said in the results
+ * (`unchanged`) and changes nothing.
  */
-async function click(pass: Pass, change: Change) {
-  const known = pass.library.items[change.key];
+async function click(pass: Pass, asked: ItemClick) {
+  const known = pass.library.items[asked.key];
   const item = known && !known.deleted ? known : undefined;
-  const name = known?.name ?? change.key;
+  const name = known?.name ?? asked.key;
   const refuse: Refuse = (message, more = {}) => { pass.results.push({ item: name, outcome: 'held', unchanged: true, message, ...more }); };
-  const stale = change.seenManaged !== undefined && !!item?.on !== change.seenManaged;
+  const stale = asked.seenOn !== undefined && !!item?.on !== asked.seenOn;
   if (stale) return refuse(`${name} changed since the page was read. Nothing was changed; read again.`);
-  if (change.deleted === false) {
+  if (asked.deleted === false) {
     if (!known?.deleted) return;
     delete known.deleted;
     pass.asked.set(known.key, { kind: 'restored', fill: 'written' });
   } else if (!item) {
-    if (change.managed) await takeIn(pass, change, known, refuse);
-  } else if (change.deleted) {
+    if (asked.on) await takeIn(pass, asked, known, refuse);
+  } else if (asked.deleted) {
     item.deleted = { at: now() };
     pass.asked.set(item.key, { kind: 'deleted', fill: 'removed' });
-  } else if (change.version) await makeCurrent(pass, item, change.version, refuse);
+  } else if (asked.version) await makeCurrent(pass, item, asked.version, refuse);
   // A copy is chosen only when a found item is taken in: one in the library is at its current version in every harness.
-  else if (change.use) refuse(`${name} is in Central Knot already, so there is no copy to choose. Make one of its versions current instead.`);
-  else turn(pass, item, change);
+  else if (asked.use) refuse(`${name} is in Central Knot already, so there is no copy to choose. Make one of its versions current instead.`);
+  else turn(pass, item, asked);
 }
 
 /** The switches: the item On or Off, or one harness kept out or let in. */
-function turn(pass: Pass, item: LibraryItem, change: Change) {
+function turn(pass: Pass, item: LibraryItem, asked: ItemClick) {
   const was = { on: item.on, except: item.except };
-  Object.assign(item, { on: change.managed, except: [...change.off] } satisfies Partial<LibraryItem>);
+  Object.assign(item, { on: asked.on, except: [...asked.except] } satisfies Partial<LibraryItem>);
   const out = item.except.find(tool => !was.except.includes(tool)), back = was.except.find(tool => !item.except.includes(tool));
   if (was.on !== item.on) pass.asked.set(item.key, item.on ? { kind: 'on', cause: 'switch', fill: 'written' } : { kind: 'off', cause: 'switch', fill: 'removed' });
   else if (out) pass.asked.set(item.key, { kind: 'off', cause: 'switch', only: out, fill: 'removed' });
@@ -577,11 +616,11 @@ function turn(pass: Pass, item: LibraryItem, change: Change) {
  * one the person chose (`use`); with no choice made yet, it waits for one. The other copies become versions as the pass
  * writes over them. An item deleted from Central Knot before is the same item again, its earlier versions with it.
  */
-async function takeIn(pass: Pass, change: Change, tombstone: LibraryItem | undefined, refuse: Refuse) {
-  const found = foundCopies(pass, change.key, change.off);
+async function takeIn(pass: Pass, asked: ItemClick, tombstone: LibraryItem | undefined, refuse: Refuse) {
+  const found = foundCopies(pass, asked.key, asked.except);
   if (!found.length) return refuse('No tool has a copy of it to take in any more.');
-  const chosen = change.use && change.use !== 'separate' ? found.find(entry => entry.tool === change.use) : undefined;
-  const changedSince = change.use && (!chosen || (change.useHash && chosen.hash !== change.useHash));
+  const chosen = asked.use && asked.use !== 'separate' ? found.find(entry => entry.tool === asked.use) : undefined;
+  const changedSince = asked.use && (!chosen || (asked.useHash && chosen.hash !== asked.useHash));
   if (changedSince) return refuse('The copy you chose changed since you chose it. Nothing was changed; choose again.', { chooseAgain: true });
   const differs = differ(found);
   if (differs && !chosen) {
@@ -589,8 +628,8 @@ async function takeIn(pass: Pass, change: Change, tombstone: LibraryItem | undef
     return;
   }
   const source = chosen ?? found[0];
-  const item = tombstone ?? newItem(pass.kind.kind, change.key, source.name);
-  Object.assign(item, { on: true, except: [...change.off], name: source.name } satisfies Partial<LibraryItem>);
+  const item = tombstone ?? newItem(pass.kind.kind, asked.key, source.name);
+  Object.assign(item, { on: true, except: [...asked.except], name: source.name } satisfies Partial<LibraryItem>);
   delete item.deleted;
   pass.library.items[item.key] = item;
   const from: Source = { how: differs ? 'chosen' : 'found', harness: source.tool };

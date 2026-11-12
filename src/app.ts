@@ -2,7 +2,8 @@ import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
-import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, McpResult, ClaudeWrite, SkillFacts, SyncNotice } from './types.ts';
+import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, McpResult, PassResult, ClaudeWrite, SkillFacts, SyncNotice } from './types.ts';
+import { anyManaged, kindSource } from './itemrow.ts';
 import { caughtUpNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
@@ -32,11 +33,11 @@ export const machine = machineNames(pagePlatform(navigator.userAgent));
 export const { home: realHomeName, machine: thisMachine, tray: trayPlace } = machine;
 
 /** The kinds of item the tables manage. */
-export type Kind = 'skills' | 'mcp' | 'agents';
-export const KINDS: Kind[] = ['skills', 'mcp', 'agents'];
-export const isKind = (tab: string | undefined): tab is Kind => (KINDS as (string | undefined)[]).includes(tab);
+export type PageKind = 'skills' | 'mcp' | 'agents';
+export const KINDS: PageKind[] = ['skills', 'mcp', 'agents'];
+export const isKind = (tab: string | undefined): tab is PageKind => (KINDS as (string | undefined)[]).includes(tab);
 /** What a harness's page shows: one kind of item, its instruction file, its plugins, or where its files are. */
-export type HarnessTab = Kind | 'instructions' | 'plugins' | 'about';
+export type HarnessTab = PageKind | 'instructions' | 'plugins' | 'about';
 /** Found: Central Knot reads and writes this harness in this home, so it has a page. */
 export const harnessFound = (home: HomeView, tool: HarnessId) => home.manage.tools.includes(tool);
 /** A harness's page whose tool a new read no longer finds closes, so it doesn't reopen by itself if a later read finds it again. */
@@ -44,7 +45,7 @@ function forgetLostHarness() { if (state.harness && state.home && !harnessFound(
 /** The tab of the harness page on screen, if one is: Harnesses with a harness open that this home still finds. */
 export const harnessTabShown = (): HarnessTab | undefined => (state.page === 'harnesses' && state.harness && state.home && harnessFound(state.home, state.harness) ? state.harnessTab : undefined);
 /** The kind whose table is on screen on a harness's page, if one is. */
-export const harnessKindShown = (): Kind | undefined => { const tab = harnessTabShown(); return isKind(tab) ? tab : undefined; };
+export const harnessKindShown = (): PageKind | undefined => { const tab = harnessTabShown(); return isKind(tab) ? tab : undefined; };
 export interface BaseEdit {
   text: string; hash: string; tools: HarnessId[]; stage: 'edit' | 'review';
   /** Where the draft came from: a tool's own instructions (they move into the base), a tool's edited copy (to use as the base),
@@ -78,7 +79,7 @@ export const state = {
   busy: undefined as string | undefined,
   /** What the last click on MCP servers, or Write to Claude Code, did. */
   mcpResult: undefined as McpResult | undefined,
-  agentsResult: undefined as McpResult | undefined,
+  agentsResult: undefined as PassResult | undefined,
   /** What sync and actions did, newest last: read when the History page opens or the home changes (pagedata.ts). */
   history: pageData<HistoryEvent[]>(),
   /** How long History keeps things, for History's intro; read with History's events. */
@@ -270,13 +271,13 @@ export const flashRequests = new Set<string>();
 const flashRow = (item: string) => { if (item) flashRequests.add(item.toLowerCase()); };
 
 /** After the first click on a page (any click that applies something, or says it changed nothing), its tip has done its job. */
-export const retireTip = (kind: Kind) => writeFlag(`ck-help-dismissed-${kind}`);
+export const retireTip = (kind: PageKind) => writeFlag(`ck-help-dismissed-${kind}`);
 
 // ---------- One switch per item ----------
 
 /** One click on an item page: the changes it makes, the item names it concerns, and what the result says it did. */
 export interface Click {
-  kind: Kind;
+  kind: PageKind;
   changes: Change[];
   items: string[];
   /**
@@ -304,20 +305,22 @@ export interface Click {
   next?: Outcome['next'];
 }
 
-/** Each item page's own: its items as the open home shows them, how its changes are sent, and where its last result is kept. */
-const kindPages: Record<Kind, { facts: (home: HomeView) => SkillFacts[]; send: (changes: Change[], resume: boolean, home: string) => Promise<ApplyResult | McpResult>; keep: (results: DestinationResult[], notices?: SyncNotice[]) => void }> = {
-  skills: { facts: home => home.manage.skills, send: (...args) => api().apply(...args), keep: (results, notices) => { state.applied = { results, harnessWrites: 0, notices }; } },
-  mcp: { facts: home => home.mcp.servers, send: (...args) => api().applyMcp(...args), keep: (results, notices) => { state.mcpResult = { results, writes: 0, notices }; } },
-  agents: { facts: home => home.agents.servers, send: (...args) => api().applyAgents(...args), keep: (results, notices) => { state.agentsResult = { results, writes: 0, notices }; } },
+/** Each item page's own: how its changes are sent, and where its last result is kept. Its items are itemrow.ts kindSource's. */
+const kindPages: Record<PageKind, { send: (changes: Change[], resume: boolean, home: string) => Promise<ApplyResult | McpResult | PassResult>; keep: (results: DestinationResult[], notices?: SyncNotice[]) => void }> = {
+  skills: { send: (...args) => api().apply(...args), keep: (results, notices) => { state.applied = { results, harnessWrites: 0, notices }; } },
+  mcp: { send: (...args) => api().applyMcp(...args), keep: (results, notices) => { state.mcpResult = { results, writes: 0, notices }; } },
+  agents: { send: (...args) => api().applyAgents(...args), keep: (results, notices) => { state.agentsResult = { results, writes: 0, notices }; } },
 };
-const factsOf = (kind: Kind) => (state.home ? kindPages[kind].facts(state.home) : []);
+/** Each item page's last click's result, as kindPages keeps it: what the page's bands and notices read. */
+export const lastResult = (kind: PageKind): ApplyResult | PassResult | undefined => ({ skills: state.applied, mcp: state.mcpResult, agents: state.agentsResult })[kind];
+const factsOf = (kind: PageKind) => (state.home ? kindSource(state.home, kind).facts : []);
 
 /** The records of these items of a kind, as the open home shows them. */
-const standings = (kind: Kind, keys: string[]): Map<string, Standing> =>
+const standings = (kind: PageKind, keys: string[]): Map<string, Standing> =>
   new Map(factsOf(kind).filter(fact => keys.includes(fact.key)).map(fact => [fact.key, { managed: fact.managed, off: fact.off }]));
 
 /** Sends one kind's changes for the open home. */
-const send = (kind: Kind, changes: Change[]) => kindPages[kind].send(changes, state.home!.manage.gate.state === 'needs-resume', state.home!.home);
+const send = (kind: PageKind, changes: Change[]) => kindPages[kind].send(changes, state.home!.manage.gate.state === 'needs-resume', state.home!.home);
 
 /**
  * One click, applied at once: an item's switch, or one tool's control in its details. The result says what was done, or why
@@ -509,7 +512,7 @@ const switchPlugins = (ops: PluginOp[], draft: Map<string, PluginOp>, { said, un
 function readFound(view: HomeView, from?: string): string {
   if (!view.manage.tools.length) return noToolsSentence;
   // A plugin's items count as the pages list them.
-  const found = { skills: view.manage.skills.length + pluginItemCount(view, 'skills'), mcp: view.mcp.servers.length + pluginItemCount(view, 'mcp'), agents: view.agents.servers.length + pluginItemCount(view, 'agents') };
+  const found = { skills: view.manage.skills.length + pluginItemCount(view, 'skills'), mcp: view.mcp.servers.length + pluginItemCount(view, 'mcp'), agents: view.agents.items.length + pluginItemCount(view, 'agents') };
   const counts = heldKinds(view).map(kind => plural(found[kind], kindNouns[kind].one, kindNouns[kind].many));
   // A catch-up that copied something has its own Caught up band (tables and the Harnesses list), so it is not "Nothing changed".
   const caught = caughtUpNames(view.manage, new Set(view.manage.notices.map(notice => notice.item))).length > 0;
@@ -517,7 +520,7 @@ function readFound(view: HomeView, from?: string): string {
 }
 
 /** A home just opened, as its band says it: an empty one (no tools, or nothing in them) says only that it opened; the page says the rest. */
-const openedText = (view: HomeView) => (!view.manage.skills.length && !view.mcp.servers.length && !view.agents.servers.length ? `Opened ${view.label}.` : `Opened ${view.label}. ${readFound(view)}`);
+const openedText = (view: HomeView) => (!view.manage.skills.length && !view.mcp.servers.length && !view.agents.items.length ? `Opened ${view.label}.` : `Opened ${view.label}. ${readFound(view)}`);
 
 /** A read said in the status bar: what it found, and in which home. */
 const readSummary = (view: HomeView) => readFound(view, view.label);
@@ -548,7 +551,7 @@ const openHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mod
   const view = await api().selectHome(mode);
   if (view && view.home !== previous?.home) forgetRepoPrompts(true);
   // Sync follows the open home: leaving one with managed items stops its syncing, so the band says so and offers the way back.
-  const left = previous && view && previous.home !== view.home && [...previous.manage.skills, ...previous.mcp.servers, ...previous.agents.servers].some(fact => fact.managed) ? previous : undefined;
+  const left = previous && view && previous.home !== view.home && anyManaged(previous) ? previous : undefined;
   const leftText = left ? ` ${left.label} is not syncing while another home is open.` : '';
   if (!view) { announce(''); return; }
   accept(view);

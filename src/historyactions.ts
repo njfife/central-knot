@@ -31,7 +31,7 @@
 // agentAction, the entry librarypass.ts logItem makes for it, and its case in historypage.ts describe.
 import type { IconName } from './icons.ts';
 import { sourceWords, type LibraryItem } from './library.ts';
-import { versionClock } from './agentrow.ts';
+import { asItIs, versionClock } from './libraryrow.ts';
 import type { Change, HarnessId, HistoryEvent } from './types.ts';
 import { andList, toolName, toolsPhrase } from './words.ts';
 
@@ -122,9 +122,6 @@ export function doneWords(event: HistoryEvent): string {
 
 /** An entry's action: the button's words, what it does (said before the click), and the click it sends. */
 export interface EntryAction { label: string; help: string; change: Change }
-
-/** The agent as it is, as a click that changes nothing: each action changes one thing of it. */
-const asItIs = (item: LibraryItem): Change => ({ key: item.key, managed: item.on, off: [...item.except] });
 /** Whether a content is a version of the agent that could be made current: one it has, other than the current one. */
 const isVersion = (item: LibraryItem, hash: string | undefined): hash is string =>
   !!hash && hash !== item.hash && item.versions.some(version => version.hash === hash);
@@ -135,7 +132,7 @@ const isVersion = (item: LibraryItem, hash: string | undefined): hash is string 
  */
 export function agentAction(event: HistoryEvent, item: LibraryItem | undefined, version?: string): EntryAction | undefined {
   if (!item || event.undoneBy) return undefined;
-  const name = item.name, now = asItIs(item), everywhere = item.on ? ', in every tool it is on in' : '';
+  const name = item.name, now = asItIs(item.key, item), everywhere = item.on ? ', in every tool it is on in' : '';
   if (event.kind === 'deleted') {
     const help = `Put ${name} back in Central Knot as it was${item.on ? ', and in every tool it was on in' : ''}`;
     return item.deleted ? { label: 'Restore', help, change: { ...now, deleted: false } } : undefined;
@@ -155,7 +152,7 @@ export function agentAction(event: HistoryEvent, item: LibraryItem | undefined, 
 
 /** An Off entry's Turn on (`turnOn`), or an On entry's Turn off: for the whole agent, or (`only`) for one harness of an agent that is On. */
 function switchAction(turnOn: boolean, only: HarnessId | undefined, item: LibraryItem): EntryAction | undefined {
-  const name = item.name, now = asItIs(item);
+  const name = item.name, now = asItIs(item.key, item);
   if (!only) {
     if (item.on === turnOn) return undefined;
     return turnOn ? { label: 'Turn on', help: `Put ${name} back in every tool it is not kept out of, each file as it was`, change: { ...now, managed: true } }

@@ -1,10 +1,14 @@
-// An agent's row on the Agents page as worked examples on plain values (src/agentrow.ts): where it stands, what each
-// harness's mark says, when its switch asks which copy, and the click each control sends.
+// A library item's row as worked examples on plain values (src/libraryrow.ts), an agent's on the Agents page: where it
+// stands, what each harness's mark says, when its switch asks which copy, and the click each control sends.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FOLDED_VERSIONS, agentClicks, foldVersions, harnessIs, harnessLine, madeFrom, needsChoice, noticeWords, placeOf, placeTag, said, statusLine, switchLabel, versionChange, versionSource, type AgentRow } from '../src/agentrow.ts';
+import { FOLDED_VERSIONS, rowClicks, foldVersions, harnessIs, madeFrom, needsChoice, placeOf, libraryWords, sentences, statusLine, switchLabel, versionChange, versionSource, type LibraryRow } from '../src/libraryrow.ts';
 import { wordDiff } from '../src/diff.ts';
 import { newItem, plan, type Copies, type LibraryItem } from '../src/library.ts';
+import { anyManaged, kindSource } from '../src/itemrow.ts';
+import type { HomeView, LibraryFacts } from '../src/types.ts';
+
+const { harnessLine, noticeWords, placeTag, said } = sentences(libraryWords.agents);
 
 const tools = ['claude-cli', 'copilot-cli', 'codex-cli'];
 /** "reviewer" On at version 'b', applied to all three harnesses. */
@@ -14,17 +18,17 @@ const item = (changes: Partial<LibraryItem> = {}): LibraryItem => ({ ...newItem(
  * The row agents.ts gives the page for `agent` when the harnesses hold `hashes`: for an agent in the library, its plan from
  * those copies (a harness in `cannot` is held, one in `unseen` unknown, as librarypass.ts copiesOf reads them).
  */
-function row(hashes: AgentRow['hashes'], more: Partial<AgentRow> = {}, agent?: LibraryItem): AgentRow {
+function row(hashes: LibraryRow['hashes'], more: Partial<LibraryRow> = {}, agent?: LibraryItem): LibraryRow {
   const copyOf = (tool: string): Copies[keyof Copies] => (more.unseen?.[tool] ? { is: 'unseen', why: more.unseen[tool]! } : more.cannot?.[tool] ? { is: 'held', why: more.cannot[tool]! }
     : hashes?.[tool] !== undefined ? { is: 'present', hash: hashes[tool]!, at: 0 } : { is: 'absent' });
   const copies: Copies = Object.fromEntries(tools.map(tool => [tool, copyOf(tool)]));
   return { key: 'reviewer', name: 'reviewer', hashes, ...more, ...(agent && !agent.deleted ? { plan: plan(agent, copies) } : {}) };
 }
-const marks = (hashes: AgentRow['hashes'], agent: LibraryItem | undefined, more: Partial<AgentRow> = {}) => tools.map(tool => harnessIs(row(hashes, more, agent), agent, tool));
+const marks = (hashes: LibraryRow['hashes'], agent: LibraryItem | undefined, more: Partial<LibraryRow> = {}) => tools.map(tool => harnessIs(row(hashes, more, agent), agent, tool));
 /** A row and its item, for the functions that take both. */
-const withItem = (hashes: AgentRow['hashes'], agent: LibraryItem) => [row(hashes, {}, agent), agent] as const;
-const markIn = (hashes: AgentRow['hashes'], agent: LibraryItem, tool: string) => harnessIs(row(hashes, {}, agent), agent, tool);
-const lineIn = (hashes: AgentRow['hashes'], agent: LibraryItem | undefined, tool: string, where: string, more: Partial<AgentRow> = {}) => harnessLine(row(hashes, more, agent), agent, tool, where);
+const withItem = (hashes: LibraryRow['hashes'], agent: LibraryItem) => [row(hashes, {}, agent), agent] as const;
+const markIn = (hashes: LibraryRow['hashes'], agent: LibraryItem, tool: string) => harnessIs(row(hashes, {}, agent), agent, tool);
+const lineIn = (hashes: LibraryRow['hashes'], agent: LibraryItem | undefined, tool: string, where: string, more: Partial<LibraryRow> = {}) => harnessLine(row(hashes, more, agent), agent, tool, where);
 
 test('An agent stands in one of three places: on, off (in Central Knot only), or found; a deleted one is found again', () => {
   assert.deepEqual([placeOf(item()), placeOf(item({ on: false })), placeOf(undefined), placeOf(item({ deleted: { at: 'then' } }))], ['on', 'off', 'found', 'found']);
@@ -82,14 +86,14 @@ test('Only a found agent whose copies differ asks which copy; an agent in the li
 test('Each control sends the agent as it is with one thing changed', () => {
   const here = row({ 'claude-cli': 'b' }), agent = item({ except: ['copilot-cli'] });
   const asIs = { key: 'reviewer', managed: true, off: ['copilot-cli'], seenManaged: true };
-  assert.deepEqual(agentClicks.off(here, agent), { ...asIs, managed: false });
-  assert.deepEqual(agentClicks.on(here, item({ on: false, except: ['copilot-cli'] })), { ...asIs, seenManaged: false });
-  assert.deepEqual(agentClicks.inHarness(here, agent, 'codex-cli', true), { ...asIs, off: ['copilot-cli', 'codex-cli'] });
-  assert.deepEqual(agentClicks.inHarness(here, agent, 'copilot-cli', false), { ...asIs, off: [] });
-  assert.deepEqual(agentClicks.makeCurrent(here, agent, 'a'), { ...asIs, version: 'a' });
-  assert.deepEqual(agentClicks.remove(here, agent), { ...asIs, deleted: true });
+  assert.deepEqual(rowClicks.off(here, agent), { ...asIs, managed: false });
+  assert.deepEqual(rowClicks.on(here, item({ on: false, except: ['copilot-cli'] })), { ...asIs, seenManaged: false });
+  assert.deepEqual(rowClicks.inHarness(here, agent, 'codex-cli', true), { ...asIs, off: ['copilot-cli', 'codex-cli'] });
+  assert.deepEqual(rowClicks.inHarness(here, agent, 'copilot-cli', false), { ...asIs, off: [] });
+  assert.deepEqual(rowClicks.makeCurrent(here, agent, 'a'), { ...asIs, version: 'a' });
+  assert.deepEqual(rowClicks.remove(here, agent), { ...asIs, deleted: true });
   // A found agent: taken in, with the copy chosen where they differ, as it was seen.
-  assert.deepEqual(agentClicks.on(row({ 'claude-cli': 'a', 'codex-cli': 'x' }), undefined, 'codex-cli'), { key: 'reviewer', managed: true, off: [], seenManaged: false, use: 'codex-cli', useHash: 'x' });
+  assert.deepEqual(rowClicks.on(row({ 'claude-cli': 'a', 'codex-cli': 'x' }), undefined, 'codex-cli'), { key: 'reviewer', managed: true, off: [], seenManaged: false, use: 'codex-cli', useHash: 'x' });
 });
 
 test('While an edit waits in one tool, the others have the current version and get that edit; the status says so', () => {
@@ -180,4 +184,49 @@ test('A long versions list folds to its newest four, and says how many more ther
   const versions = (count: number) => Array.from({ length: count }, (_, index) => ({ hash: String(index), at: '2026-11-08T09:20:00.000Z', from: { how: 'edited' as const } }));
   assert.deepEqual([foldVersions(versions(4), false).rest, foldVersions(versions(5), false).rest, foldVersions(versions(5), false).shown.length], [0, 1, FOLDED_VERSIONS]);
   assert.deepEqual([foldVersions(versions(9), true).rest, foldVersions(versions(9), true).shown.length, foldVersions([], false).rest], [0, 9, 0]);
+});
+
+test('A library kind’s rows reach the item pages through itemrow.ts kindSource: On is `managed`, kept out is `off`, once per read', () => {
+  const facts = (key: string, on: boolean, except: LibraryFacts['except'] = []): LibraryFacts => ({ key, name: key, description: '', copies: {}, on, except, cannot: {}, edited: [] });
+  const home = (items: LibraryFacts[]) => ({ manage: { tools, skills: [] }, mcp: { tools, servers: [], claudePending: [] },
+    agents: { tools, items, library: { reviewer: item() } } }) as unknown as HomeView;
+  const read = home([facts('reviewer', true, ['codex-cli']), facts('writer', false)]);
+  const source = kindSource(read, 'agents');
+  assert.deepEqual(source.facts.map(fact => [fact.key, fact.managed, fact.off]), [['reviewer', true, ['codex-cli']], ['writer', false, []]]);
+  assert.deepEqual([source.library?.reviewer.on, source.gone, source.waiting], [true, [], []]);
+  assert.equal(kindSource(read, 'agents').facts, source.facts, 'the same rows for the same read, so a page that caches by them keeps them');
+  assert.deepEqual([anyManaged(read), anyManaged(home([facts('writer', false)]))], [true, false], 'an item On in the library is something the home manages; one Off is not');
+});
+
+test('The sentences that name the item or its copies are in the kind’s words: an agent, and its file', () => {
+  const out = item({ except: ['codex-cli'], applied: { 'claude-cli': 'b', 'copilot-cli': 'b' } });
+  assert.equal(lineIn({ 'claude-cli': 'b', 'copilot-cli': 'b' }, out, 'codex-cli', 'Codex'), 'Kept out of this tool. Central Knot keeps its file for when you turn it on here.');
+  assert.equal(lineIn({ 'claude-cli': 'b', 'copilot-cli': 'b' }, item(), 'codex-cli', 'Codex'), 'Its copy was deleted in Codex. When sync runs, the agent turns off everywhere; Central Knot keeps it.');
+  assert.deepEqual([placeTag(row({}), item({ on: false }), tools)?.title, placeTag(row({ 'codex-cli': 'x' }), undefined, tools)?.title],
+    ['Central Knot keeps this agent and its versions. No tool has it until you turn it on.', 'A tool has this agent; Central Knot doesn’t yet. Turn it on to take it in and put it in every tool.']);
+  assert.equal(noticeWords({ kind: 'deleted', item: 'reviewer', winner: 'codex-cli', losers: [] }).help, 'Put reviewer back in every tool, each file as it was');
+});
+
+test('The same sentences in another kind’s words name that kind and its copies, never an agent or a file', () => {
+  const notes = sentences({ item: 'note', an: 'a note', copy: 'page', shared: '', own: () => '', body: 'Text' });
+  const out = item({ except: ['codex-cli'], applied: { 'claude-cli': 'b', 'copilot-cli': 'b' } });
+  const said = [
+    notes.harnessLine(row({ 'claude-cli': 'b', 'copilot-cli': 'b' }, {}, out), out, 'codex-cli', 'Codex'),
+    notes.harnessLine(row({ 'claude-cli': 'b', 'copilot-cli': 'b' }, {}, item()), item(), 'codex-cli', 'Codex'),
+    notes.harnessLine(row({ 'copilot-cli': 'c' }, {}, item({ on: false })), item({ on: false }), 'copilot-cli', 'Copilot CLI'),
+    notes.placeTag(row({}), item({ on: false }), tools)?.title, notes.placeTag(row({ 'codex-cli': 'x' }), undefined, tools)?.title,
+    notes.said.off('plan', [], tools), notes.said.inHarness('plan', 'codex-cli', true, false),
+    notes.noticeWords({ kind: 'deleted', item: 'plan', winner: 'codex-cli', losers: [] }).help,
+  ];
+  assert.deepEqual(said, [
+    'Kept out of this tool. Central Knot keeps its page for when you turn it on here.',
+    'Its copy was deleted in Codex. When sync runs, the note turns off everywhere; Central Knot keeps it.',
+    'Edited in Copilot CLI. When sync runs it becomes the current version, then its copy here is removed: the note is off.',
+    'Central Knot keeps this note and its versions. No tool has it until you turn it on.',
+    'A tool has this note; Central Knot doesn’t yet. Turn it on to take it in and put it in every tool.',
+    'plan is off: no tool has it. Central Knot keeps it, and turning it on puts each page back as it was.',
+    'plan is kept out of Codex. Central Knot keeps its page for when you turn it on there.',
+    'Put plan back in every tool, each page as it was',
+  ]);
+  assert.ok(said.every(line => !/\bagent|\bfile\b/.test(line ?? '')), 'no word of the agents’ own');
 });

@@ -18,14 +18,7 @@ export const isAgentTool = (tool: HarnessId): tool is AgentTool => agentTools.so
 /** The shared part of an agent: what every harness holds, and what a version in Central Knot's library is. */
 export interface SharedAgent { name: string; description: string; prompt: string }
 export type SharedField = keyof SharedAgent;
-/**
- * A listed version's note (agents.ts changesOf). `changed`: its fields that differ from the version current before it.
- * `differs`: a copy that gave way (`was-in`), its fields that differ from the version written over it. `first`: the first
- * version, taken alone. `none`: nothing to note (the copy chosen among several: its words say so). `unknown`: a content no
- * longer kept.
- */
-export type VersionChange = { changed: SharedField[] } | { differs: SharedField[] } | 'first' | 'none' | 'unknown';
-/** Which of the shared part's fields differ between two versions. */
+/** Which of the shared part's fields differ between two versions: a version's note (library.ts VersionChange) names them. */
 export const changedFields = (before: SharedAgent, after: SharedAgent): SharedField[] =>
   (['name', 'description', 'prompt'] as const).filter(field => before[field].replace(/\s+$/, '') !== after[field].replace(/\s+$/, ''));
 /** One agent as read from a harness's file: its shared part, and `fields`, the own part's settings by name. */

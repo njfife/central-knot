@@ -1,4 +1,4 @@
-import { absentKinds, announce, noTools, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type Kind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, otherOwnerSaid, takeOverSync, takeOverTitle, type Page } from './app.ts';
+import { absentKinds, announce, noTools, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type PageKind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, otherOwnerSaid, takeOverSync, takeOverTitle, type Page } from './app.ts';
 import { afterLayout, button, cardGrid, emptyState, fileBlocks, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
@@ -6,7 +6,8 @@ import { absentTools, heldKinds, isPresent } from './presence.ts';
 import { brandMark, itemsTable, outcomeBand, showFiltered, skillsBrowser, wrappingPath } from './matrix.ts';
 import { andList, kindNames, kindNouns, noToolsSentence, orList } from './words.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
-import { needsChoice } from './agentrow.ts';
+import { needsChoice } from './libraryrow.ts';
+import { anyManaged, kindSource } from './itemrow.ts';
 
 // ---------- Overview ----------
 
@@ -51,11 +52,11 @@ function addHint(holders: HarnessId[], noun: string) {
   return `${andList(homeToolNames())} can’t hold ${noun}.`;
 }
 /** What each kind's page says when no tool in this home has one: also used on a harness's page for that kind. */
-export function kindEmpty(kind: Kind): { glyph: Parameters<typeof emptyState>[0]; title: string; body: string } {
+export function kindEmpty(kind: PageKind): { glyph: Parameters<typeof emptyState>[0]; title: string; body: string } {
   const holders = kind === 'skills' ? homeTools() : state.home?.[kind].tools ?? [];
   return { glyph: ({ skills: 'wand-sparkles', mcp: 'plug', agents: 'bot' } as const)[kind], title: `No ${kindNouns[kind].many} here yet`, body: `None of your tools has ${kindNouns[kind].a} in this home. ${addHint(holders, kindNouns[kind].many)}` };
 }
-const emptyKindPage = (kind: Kind, id: string) => { const empty = kindEmpty(kind); return nothingHere(empty.glyph, empty.title, empty.body, id); };
+const emptyKindPage = (kind: PageKind, id: string) => { const empty = kindEmpty(kind); return nothingHere(empty.glyph, empty.title, empty.body, id); };
 const noSkills = (id: string) => emptyKindPage('skills', id);
 
 /**
@@ -174,7 +175,7 @@ afterLayout(settleToolCounts);
  */
 function nextStep(home: HomeView, nothingManaged: boolean): string {
   if (noTools()) return '';
-  if (!home.manage.skills.length && !home.mcp.servers.length && !home.agents.servers.length) return ' Nothing found in this home yet.';
+  if (!home.manage.skills.length && !home.mcp.servers.length && !home.agents.items.length) return ' Nothing found in this home yet.';
   if (homeTools().length === 1) return ' When a second tool is installed, or its folder appears here, Central Knot finds it on its own; then manage what you want the same in both.';
   return nothingManaged && home.manage.access.allowed ? ' Open one below and turn on what you want the same in every tool.' : '';
 }
@@ -184,13 +185,14 @@ export function overviewPage() {
   if (!home) return notRead();
   const differs = (fact: { managed: boolean; copies: Record<string, unknown>; separate?: boolean; off: string[] }) => !fact.separate && new Set(Object.entries(fact.copies).filter(([tool]) => !fact.off.includes(tool)).map(([, copy]) => (copy as { hash: string }).hash)).size > 1;
   const pick = (list: typeof home.manage.skills): KindFact[] => list.map(fact => ({ managed: fact.managed, edited: fact.edited, differs: !fact.managed && differs(fact), copies: fact.copies }));
-  // An agent's copies need a choice only while it is found: one in Central Knot's library never asks (agentrow.ts needsChoice).
-  const agents: KindFact[] = home.agents.servers.map(fact => ({ managed: fact.managed, edited: fact.edited, copies: fact.copies,
-    differs: needsChoice(fact, home.agents.library?.[fact.key]) }));
+  // An agent's copies need a choice only while it is found: one in Central Knot's library never asks (libraryrow.ts needsChoice).
+  const agentSource = kindSource(home, 'agents');
+  const agents: KindFact[] = agentSource.facts.map(fact => ({ managed: fact.managed, edited: fact.edited, copies: fact.copies,
+    differs: needsChoice(fact, agentSource.library?.[fact.key]) }));
   // Kinds no tool here can hold have no card (app.ts absentKinds); they are named once, below.
   const absent = absentKinds();
   const empty = noTools();
-  const nothingManaged = ![...home.manage.skills, ...home.mcp.servers, ...home.agents.servers].some(fact => fact.managed);
+  const nothingManaged = !anyManaged(home);
   const done = outcomeBand();
   return h('div.page', {},
     done ? h('div.bands', {}, done) : null,

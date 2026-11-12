@@ -406,7 +406,7 @@ async function writeAgents(context: ShareContext, dir: string, tools: HarnessId[
     await writeScratch(join(dir, pathOf(item.name)), claudeFile ?? agentText('claude-cli', agent, inRepo.get(`${baseId}:${pathOf(item.name)}`)?.toString('utf8')));
   }
   const inLibrary = new Set(library.map(entry => entry.item.key));
-  for (const found of view.servers) if (!inLibrary.has(found.key)) written.unmanaged.add(agentKey(found.name));
+  for (const found of view.items) if (!inLibrary.has(found.key)) written.unmanaged.add(agentKey(found.name));
   return written;
 }
 
@@ -791,7 +791,7 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
   const agent = fromMarkdown(change.name, text);
   if (!agent) return [notIn(change.name, item.problem ?? 'It could not be read.')];
   const done = await applyAgents(context, tools, [], { only, pulled: new Map([[key, { agent, claudeFile: text }]]) });
-  const here = (await agentsView(context, tools)).library?.[key];
+  const here = (await agentsView(context, tools)).library[key];
   // Only where Claude Code has the agent (it is On and not kept out there): a copy it holds otherwise is not Central Knot's.
   if (done.stopped || !tools.includes('claude-cli') || !here || !wantedIn(here, 'claude-cli')) return outcome(done);
   return [...outcome(done), ...await pullClaudeSettings(context, change, agentHash(agent), text, wrote)];

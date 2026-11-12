@@ -48,8 +48,9 @@
 //
 // "Held" has two reasons, both worked out at each look and never stored: it can't be given the item (a name it can't store, a
 // folder it can't write), or it has the item another way (`anotherWay`: through a plugin; for skills, OpenCode reading Claude
-// Code's folder, a link, or a copy in ~/.agents/skills that Central Knot doesn't own). Only the second lets A go, since
-// Central Knot's copy is not what the harness has.
+// Code's folder while the item is wanted there, a link, or a copy in ~/.agents/skills that Central Knot doesn't own). Only the
+// second lets A go, since Central Knot's copy is not what the harness has. The kind answers (librarypass.ts Disk.held, told
+// where the item is wanted); tests/librarypass.test.ts has a reader on a toy kind.
 //
 // A HARNESS MANAGED AGAIN (left out by the tool choice, or uninstalled, then back): the library wins there.
 //
@@ -97,6 +98,15 @@ export interface Source { how: 'found' | 'chosen' | 'edited' | 'was-in' | 'pulle
 
 /** One content an item has had. `at`: when it was made (a harness file's own time for a copy taken in; else the click's), shown beside it. */
 export interface Version { hash: string; at: string; from: Source }
+
+/**
+ * A listed version's note, as the kind works it out (agents.ts changesOf) and its row says it (libraryrow.ts versionChange):
+ * `changed`, the parts of it that differ from the version current before it; `differs`, for a copy that gave way (`was-in`),
+ * the parts that differ from the version written over it. Each part by the kind's word for it ("prompt"). `first`: the first
+ * version, taken alone. `none`: nothing to note (the copy chosen among several: its words say so). `unknown`: a content no
+ * longer kept.
+ */
+export type VersionChange = { changed: string[] } | { differs: string[] } | 'first' | 'none' | 'unknown';
 
 /** One item as Central Knot holds it. The same shape for every kind. */
 export interface LibraryItem {

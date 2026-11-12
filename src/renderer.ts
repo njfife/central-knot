@@ -14,6 +14,7 @@ import { instructionsPage } from './instructionspage.ts';
 import { repo, repoPage, waitingCounts, waitingWords } from './repopage.ts';
 import { profilesPage, profileStatus } from './profilespage.ts';
 import type { HomeMode, HomeView, ManageView } from './types.ts';
+import { anyManaged } from './itemrow.ts';
 import { followUpdates, sidebarEnd, statusEnd } from './updateview.ts';
 import { followPluginUpdates } from './pluginupdateview.ts';
 
@@ -50,7 +51,7 @@ function navRow(page: Page, label: string, glyph: IconName, count?: number | str
     !current && unseen(page) ? h('span.nav-unseen', { title: unseenText(page) }) : null);
 }
 
-const anyManaged = () => !!state.home && [...state.home.manage.skills, ...state.home.mcp.servers, ...(state.home.agents.servers)].some(fact => fact.managed);
+const homeManages = () => !!state.home && anyManaged(state.home);
 const noticesFor = (page: Page) => !state.home ? [] : page === 'skills' ? state.home.manage.notices : page === 'mcp' ? state.home.mcp.notices : page === 'agents' ? state.home.agents.notices : [];
 const unseen = (page: Page) => noticesFor(page).filter(notice => !state.dismissed.has(notice.history || notice.item) && !state.seenNotices.has(notice.history || notice.item)).length;
 const unseenText = (page: Page) => { const list = noticesFor(page).filter(notice => !state.dismissed.has(notice.history || notice.item)); return `${list.length} automatic ${list.length === 1 ? 'change' : 'changes'}: ${list.slice(0, 3).map(notice => notice.item).join(', ')}`; };
@@ -99,7 +100,7 @@ function renderSidebar() {
     // Each page's rows, a plugin's items included.
     row('skills', 'wand-sparkles', home && home.manage.skills.length + pluginItemCount(home, 'skills')),
     row('mcp', 'plug', home && home.mcp.servers.length + pluginItemCount(home, 'mcp')),
-    row('agents', 'bot', home && home.agents.servers.length + pluginItemCount(home, 'agents')),
+    row('agents', 'bot', home && home.agents.items.length + pluginItemCount(home, 'agents')),
     row('instructions', 'pencil-line'),
     row('plugins', 'puzzle'),
     // Profiles switch skills and MCP servers, so like the kinds' rows it needs a tool to switch them in.
@@ -172,7 +173,7 @@ function syncSwitch(home: HomeView) {
     return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: `${home.manage.gate.owner.name} syncs this home. Take over syncing, on Skills, MCP servers or Agents, to have Central Knot sync it instead.` },
       label, h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, home.manage.gate.owner.running === false ? `${home.manage.gate.owner.name}’s, not open` : `By ${home.manage.gate.owner.name}`));
   }
-  const idle = home.syncOn && !anyManaged();
+  const idle = home.syncOn && !homeManages();
   const title = idle ? 'Automatic sync is on: it starts once you turn something on. Click to turn it off.'
     : home.syncOn ? 'Automatic sync is on: an edit to a managed item spreads to the other tools on its own, even with this window closed. Click to turn it off.'
     : 'Automatic sync is off: edits wait until you turn it on or use Sync once. Click to turn it on.';

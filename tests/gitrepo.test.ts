@@ -47,7 +47,7 @@ test('Push puts the Managed set in the repo’s layout; another computer pulls i
     assert.ok((await manageView(second)).skills.find(item => item.key === 'review')!.managed);
     const docs = (await mcpView(second, tools)).servers.find(server => server.key === 'docs')!;
     assert.ok(docs.managed && docs.copies['copilot-cli']);
-    assert.ok((await agentsView(second, tools)).servers.find(agent => agent.key === 'planner')!.managed);
+    assert.ok((await agentsView(second, tools)).items.find(agent => agent.key === 'planner')!.on);
     assert.deepEqual((await agentsView(second, tools)).library!.planner.versions.map(version => version.from), [{ how: 'pulled' }], 'its version says where it came from');
     assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: opus/);
     view = live(pulled.view);
@@ -63,7 +63,7 @@ test('Push puts the Managed set in the repo’s layout; another computer pulls i
     assert.deepEqual([takenIn.via, takenIn.cause], ['repo', 'pulled']);
     assert.equal((await restoreAgent(second, tools, takenIn.id)).stopped, undefined);
     assert.deepEqual([(await manageView(second)).skills, (await mcpView(second, tools)).servers].map(list => list.length), [0, 0]);
-    assert.deepEqual((await agentsView(second, tools)).servers.map(agent => [agent.key, agent.managed, Object.keys(agent.copies)]), [['planner', false, []]]);
+    assert.deepEqual((await agentsView(second, tools)).items.map(agent => [agent.key, agent.on, Object.keys(agent.copies)]), [['planner', false, []]]);
   } finally { await box.cleanup(); }
 });
 

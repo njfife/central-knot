@@ -1,23 +1,27 @@
 // The versions of one item, in its opened row: the current one first, then the others in the order Central Knot took them,
 // one row per content (library.ts listed), each with when it was made, where it came from and what it changed; a way to
 // read each, which marks what differs from the current version; and Make current on every other. Central Knot keeps every
-// version (library.ts), so a long list folds to its newest few with one line that shows the rest. Its words are agentrow.ts's.
+// version (library.ts), so a long list folds to its newest few with one line that shows the rest. Its words are libraryrow.ts's.
 // It draws what it is given and calls back on a click: matrix.ts keeps which list is unfolded and which version is being
-// read, and sends Make current as the item's click.
-import type { VersionChange } from './agentfiles.ts';
-import { foldVersions, madeFrom, versionChange, versionChangeHelp, versionSource } from './agentrow.ts';
+// read, gets a version's text as the kind gives it (librarypages.ts), and sends Make current as the item's click.
+import { foldVersions, madeFrom, versionChange, versionChangeHelp, versionSource } from './libraryrow.ts';
 import { wordDiff, type Line } from './diff.ts';
 import { button, h, icon, type Child } from './dom.ts';
-import { listed, sourceWords, type LibraryItem, type Version } from './library.ts';
+import { listed, sourceWords, type LibraryItem, type Version, type VersionChange } from './library.ts';
 import { dayAndTime, timesApart } from './model.ts';
 
-/** A version's content as read from the library: its text, `'reading'` while it is fetched, or null when it is no longer kept. */
-export type VersionText = { description: string; prompt: string } | 'reading' | null;
+/**
+ * One part of a version's content as Read shows it, in the kind's order: a line (left out when empty) or, `block`, a block of
+ * text. `name`: the kind's word for it ("prompt"), as "Differs from current in: …" says it.
+ */
+export interface VersionPart { name: string; text: string; block?: true }
+/** A version's content as read from the library: its parts, `'reading'` while it is fetched, or null when it is no longer kept. */
+export type VersionText = VersionPart[] | 'reading' | null;
 
 export interface VersionListView {
   item: LibraryItem;
   canWrite: boolean;
-  /** Whether the whole list shows (else its newest few: agentrow.ts foldVersions). */
+  /** Whether the whole list shows (else its newest few: libraryrow.ts foldVersions). */
   unfolded: boolean;
   /** Each listed version's note (types.ts SkillFacts versionChanges). */
   changes?: VersionChange[];
@@ -71,21 +75,21 @@ function againstCurrent(current: string, text: string): Child[] {
 }
 
 /**
- * A version being read: its description and prompt, headed by the parts that differ from the current version and with
- * those differences marked; or what stands in for them.
+ * A version being read: its parts, headed by those that differ from the current version and with those differences marked;
+ * or what stands in for them.
  */
 function versionText(read: VersionText, current: VersionText | undefined) {
   if (read === 'reading') return 'Reading…';
   if (read === null) return 'This version is no longer in Central Knot’s store.';
   const against = current && current !== 'reading' ? current : undefined;
-  const words = (field: 'description' | 'prompt') => (against ? againstCurrent(against[field], read[field]) : [read[field]]);
-  // As agentfiles.ts changedFields compares them (the name is the row's, so it is not read here).
-  const differ = against ? (['description', 'prompt'] as const).filter(field => against[field].trimEnd() !== read[field].trimEnd()) : [];
+  const theirs = (part: VersionPart) => against?.find(other => other.name === part.name)?.text ?? '';
+  const words = (part: VersionPart) => (against ? againstCurrent(theirs(part), part.text) : [part.text]);
+  // Trailing white space aside, as the kind's note compares them (agents.ts changesOf).
+  const differ = against ? read.filter(part => theirs(part).trimEnd() !== part.text.trimEnd()).map(part => part.name) : [];
   return [
     against ? h('p.version-read-legend', {}, h('strong', {}, differ.length ? `Differs from current in: ${differ.join(', ')}` : 'Same as current'),
       differ.length ? ' · tinted: only in this one; struck through: only in the current one' : '') : null,
-    read.description ? h('p.version-read-about', {}, ...words('description')) : null,
-    h('pre.version-read-prompt', {}, ...words('prompt'))];
+    ...read.map(part => (part.block ? h('pre.version-read-block', {}, ...words(part)) : part.text ? h('p.version-read-line', {}, ...words(part)) : null))];
 }
 
 export function versionList(view: VersionListView): HTMLElement {

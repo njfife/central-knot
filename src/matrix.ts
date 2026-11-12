@@ -1,6 +1,7 @@
 // The item pages (Skills, MCP servers, Agents, and a harness's tabs for them): one On/Off switch per item, applied at once
 // in every tool Central Knot manages. A row's marks only say what each tool has; each tool's own controls are in the item's
-// details, and every click's result comes with an Undo of the whole click.
+// details, and every click's result comes with an Undo of the whole click. A kind on Central Knot's library (agents) has a
+// library row (`library()`): librarypages.ts says which kinds and what each supplies, libraryrow.ts what such a row says.
 import { itemId } from './profileplan.ts';
 import { brandMark } from './brand.ts';
 import { caughtUpNames, DAY_MS, defaultHistoryDays, groupBy } from './model.ts';
@@ -8,17 +9,17 @@ import { deletedText, deleteNote, linkTarget, managedSentence, manageSentence, p
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
 import { REPLACE_ACTION, andList, byToolOrder, capitalToolsPhrase, kindNouns, problemText, toolName, toolNames, toolsPhrase } from './words.ts';
 import { readFlag, writeFlag } from './flags.ts';
-import { whyReadOnly, otherOwnerSaid, saidInStatusBar, takeOverSync, takeOverTitle, tell, type Click, type Outcome, type Kind, harnessKindShown, convertAgent, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, deleteEverywhereKey, rerender, retireTip, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
+import { whyReadOnly, otherOwnerSaid, saidInStatusBar, takeOverSync, takeOverTitle, tell, type Click, type Outcome, type PageKind, harnessKindShown, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, deleteEverywhereKey, rerender, retireTip, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import { getsCopy as getsCopyNext, offPlan, stillOn } from './clickplan.ts';
 import type { IconName } from './icons.ts';
 import { byKey, loadedIn, standing } from './roworder.ts';
-import { cellOf, comparedTools, needsCopyChoice, type ItemRow, type Tool } from './itemrow.ts';
-import { agentClicks, harnessIs, harnessLine as agentLine, inLibrary, madeFrom, needsChoice as agentNeedsChoice, versionClock } from './agentrow.ts';
-import { noticeWords, placeOf as agentPlace, placeTag, said as agentSaid, statusLine, switchLabel, type HarnessIs } from './agentrow.ts';
+import { cellOf, comparedTools, kindSource, libraryView, needsCopyChoice, type ItemRow, type KindSource, type Tool } from './itemrow.ts';
+import { harnessIs, inLibrary, madeFrom, needsChoice as libraryNeedsChoice, placeOf as libraryPlace, rowClicks, statusLine, switchLabel, versionClock, type HarnessIs } from './libraryrow.ts';
+import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
-import type { Change, DestinationResult, HomeView, ManageView, Outside, SkillFacts, SyncNotice, HarnessId, PartsInstall, ThroughPlugin } from './types.ts';
+import type { Change, DestinationResult, ManageView, Outside, SkillFacts, SyncNotice, HarnessId, PartsInstall, ThroughPlugin } from './types.ts';
 import { market } from './pluginstate.ts';
 import { pluginKey, type PluginDraft } from './pluginplan.ts';
 import { alongWords, cantSwitch, click as clickPluginItem, clickWords, itemSaid, onNow as itemOn, switchWords, turnEvery, type PluginItemAt } from './pluginswitch.ts';
@@ -32,7 +33,7 @@ const names = toolNames as Record<Tool, string>;
  * The plugins this item came from as a part (parts.ts): each plugin once, with the tools it went into as a separate item
  * because they can't take the plugin. Empty for an ordinary item.
  */
-function fromPlugins(skill: ItemRow, page: Kind): { install: PartsInstall; tools: HarnessId[] }[] {
+function fromPlugins(skill: ItemRow, page: PageKind): { install: PartsInstall; tools: HarnessId[] }[] {
   const partKind = partOfPage[page];
   const named = [skill.key, skill.name].filter((name): name is string => !!name).map(name => ({ kind: partKind, name }) as const);
   const found = new Map<string, { install: PartsInstall; tools: HarnessId[] }>();
@@ -250,39 +251,36 @@ const fromFacts = (facts: SkillFacts): ItemRow => ({
   extra: facts.extra.map(extra => ({ tool: extra.tool, directory: extra.directory, summary: extra.summary, writable: extra.writable, same: extra.hash === facts.copies[extra.tool]?.hash, ...(extra.outside ? { outside: extra.outside } : {}) })),
   paths: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.directory])),
   // An MCP entry has no lines or edit date of its own: its details name the file it lives in.
-  versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.lines ? { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), at: copy!.modified, text: copy!.summary || facts.description, ...(copy!.prompt !== undefined ? { prompt: copy!.prompt } : {}) } : { lines: copy!.directory.split('/').pop() ?? '', changed: 'MCP entry', text: copy!.summary }])),
+  versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.lines ? { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), at: copy!.modified, text: copy!.summary || facts.description, ...(copy!.body !== undefined ? { body: copy!.body } : {}) } : { lines: copy!.directory.split('/').pop() ?? '', changed: 'MCP entry', text: copy!.summary }])),
   disabled: facts.disabled, switchProblem: facts.switchProblem, disableNote: facts.disableNote, writable: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.writable])),
   reads: Object.fromEntries(Object.entries(facts.copies).flatMap(([tool, copy]) => (copy!.readsFrom ? [[tool, copy!.readsFrom]] : []))),
   outside: Object.fromEntries(Object.entries(facts.copies).flatMap(([tool, copy]) => (copy!.outside ? [[tool, copy!.outside]] : []))),
   brokenLink: facts.brokenLink,
-  ownFields: Object.fromEntries(Object.entries(facts.copies).flatMap(([tool, copy]) => (copy!.ownFields?.length ? [[tool, copy!.ownFields]] : []))),
+  ownPart: Object.fromEntries(Object.entries(facts.copies).flatMap(([tool, copy]) => (copy!.ownPart?.length ? [[tool, copy!.ownPart]] : []))),
   ...(facts.outsideBack ? { outsideBack: true } : {}),
 });
 
 /** One item as a table row. `waiting`: MCP servers whose Claude Code entry waits for Write to Claude Code, which their cell says. */
 const rowOf = (fact: SkillFacts, waiting: Set<string>): ItemRow => ({ ...fromFacts(fact), waits: waiting.has(fact.key) ? ['claude-cli'] : undefined });
 
-/** The MCP or agents view behind this table; skills have their own. */
-const listView = () => (kind === 'mcp' ? state.home?.mcp : kind === 'agents' ? state.home?.agents : undefined);
-/** The kind's column header ("Server") and its title ("MCP servers"), from words.ts kindNouns. */
-const nouns = Object.fromEntries((['skills', 'mcp', 'agents'] as const).map(each => [each, [kindNouns[each].short[0].replace(/^./, first => first.toUpperCase()), kindNouns[each].title]])) as Record<Kind, [string, string]>;
-/** What this table shows: skills, MCP servers or agents. The same marks mean the same things on each. */
-let kind: Kind = 'skills';
-/** Whether a profile switch turned this item off in this tool, not a switch turned by hand. */
-const turnedOffByProfile = (key: string, tool: Tool) => kind !== 'agents' && !!state.home?.profiles.offByProfile[itemId(kind === 'mcp' ? 'mcp' : 'skill', key)]?.includes(tool as HarnessId);
-const factsCache: Partial<Record<Kind, { from: unknown; gone: unknown; list: ItemRow[] }>> = {};
-/** What kindSource reads of one kind. `library`: agents only, each one as Central Knot's library holds it. */
-interface KindSource { tools: Tool[]; facts: SkillFacts[]; waiting: string[]; gone: SkillFacts[]; library?: HomeView['agents']['library'] }
-
 /**
- * One kind in a home: its facts, the tools that can hold it (Pi has no agents), and the MCP servers whose Claude Code entries
- * wait for Write now (their cells say so instead of reading as differing copies). The tables and Harnesses both read it.
+ * The view behind a table whose bands are listNotices': a library kind's (itemrow.ts libraryView), or MCP's. Undefined for
+ * the skills engine's table, whose bands are notices()' own and whose view is `manage`.
  */
-export function kindSource(home: HomeView, which: Kind): KindSource {
-  if (which === 'skills') return { tools: home.manage.tools, facts: home.manage.skills, waiting: [], gone: home.manage.gone ?? [] };
-  const list = which === 'mcp' ? home.mcp : home.agents;
-  return { tools: list.tools, facts: list.servers, waiting: which === 'mcp' ? list.claudePending : [], gone: list.gone ?? [], library: list.library };
-}
+const listView = () => (state.home && (libraryView(state.home, kind) ?? (kind === 'mcp' ? state.home.mcp : undefined)));
+/** The kind's column header ("Server") and its title ("MCP servers"), from words.ts kindNouns. */
+const nouns = Object.fromEntries((['skills', 'mcp', 'agents'] as const).map(each => [each, [kindNouns[each].short[0].replace(/^./, first => first.toUpperCase()), kindNouns[each].title]])) as Record<PageKind, [string, string]>;
+/** What this table shows: skills, MCP servers or agents. The same marks mean the same things on each. */
+let kind: PageKind = 'skills';
+/** The kinds profiles switch (profileplan.ts), by their profile name. */
+const profiled = { skills: 'skill', mcp: 'mcp' } as const;
+/** Whether a profile switch turned this item off in this tool, not a switch turned by hand. */
+const turnedOffByProfile = (key: string, tool: Tool) => kind in profiled && !!state.home?.profiles.offByProfile[itemId(profiled[kind as keyof typeof profiled], key)]?.includes(tool as HarnessId);
+const factsCache: Partial<Record<PageKind, { from: unknown; gone: unknown; list: ItemRow[] }>> = {};
+
+/** This table's kind as the library carries it (librarypages.ts), when it is on the library. */
+const library = () => libraryPages[kind];
+
 function committedList(): ItemRow[] {
   if (!state.home) return [];
   // Items with no copy left are rows too, switched off, while History can put them back.
@@ -293,7 +291,7 @@ function committedList(): ItemRow[] {
 /** The harness a Harnesses page shows: its column comes first, and the rows it has come before the others. */
 let focus: Tool | undefined;
 const toolList = (): Tool[] => {
-  const list = state.home ? kindSource(state.home, kind).tools : [];
+  const list: Tool[] = state.home ? kindSource(state.home, kind).tools : [];
   return focus && list.includes(focus) ? [focus, ...list.filter(tool => tool !== focus)] : list;
 };
 /** Whether the focused harness has its own copy; with no focus, every item counts. */
@@ -305,18 +303,18 @@ const pluginOnIn = (skill: ItemRow) => toolList().filter(tool => { const given =
 const placed = (skill: ItemRow) => ({ ...skill, pluginOn: pluginOnIn(skill) });
 /** The tools that use it (roworder.ts loadedIn): its row's place, its switch and its status line all go by these. */
 const onIn = (skill: ItemRow) => loadedIn(placed(skill), toolList());
-/** An agent as Central Knot's library holds it (library.ts); none for another kind, or for an agent only found in a harness. */
-const itemOf = (skill: ItemRow) => (kind === 'agents' ? state.home?.agents.library?.[skill.key] : undefined);
-/** Where a row stands: 0 on, 1 in between (not synced; an agent: found, not in Central Knot), 2 off. An agent's place is its library item's (agentrow.ts). */
-const standingOf = (skill: ItemRow): 0 | 1 | 2 => (kind === 'agents' ? ({ on: 0, found: 1, off: 2 } as const)[agentPlace(itemOf(skill))] : standing(placed(skill), toolList()));
+/** An item as Central Knot's library holds it (library.ts); none for a kind not on the library, or for an item only found in a harness. */
+const itemOf = (skill: ItemRow) => (state.home ? kindSource(state.home, kind).library?.[skill.key] : undefined);
+/** Where a row stands: 0 on, 1 in between (not synced; a library item: found, not in Central Knot), 2 off. A library item's place is its item's (libraryrow.ts). */
+const standingOf = (skill: ItemRow): 0 | 1 | 2 => (library() ? ({ on: 0, found: 1, off: 2 } as const)[libraryPlace(itemOf(skill))] : standing(placed(skill), toolList()));
 /** The visit, read and home a table's rows were last placed in (view.pinned): any of them changing regroups the rows. */
 const pinKey = () => `${state.visit}:${state.reads}:${state.home?.home ?? ''}`;
 /** A row's group: where it stood when a click on this visit first changed something (pinRows), else where it stands now. */
 const placeOf = (skill: ItemRow) => (view.pinned?.at === pinKey() ? view.pinned.places.get(skill.key) : undefined) ?? standingOf(skill);
 /** The headings, by place. */
 const placeNames = ['On', 'Not synced', 'Off'] as const;
-/** Whether its copies differ so that its switch must ask which copy every tool uses. An agent in the library never asks. */
-const differs = (skill: ItemRow, tools: Tool[] = toolList()) => (kind === 'agents' ? agentNeedsChoice(skill, itemOf(skill)) : needsCopyChoice(skill, tools));
+/** Whether its copies differ so that its switch must ask which copy every tool uses. An item in the library never asks. */
+const differs = (skill: ItemRow, tools: Tool[] = toolList()) => (library() ? libraryNeedsChoice(skill, itemOf(skill)) : needsCopyChoice(skill, tools));
 /** Copies differ and need a choice, among the items this page is about: on a harness's page, the ones it has. */
 const needsChoice = (skill: ItemRow) => inFocus(skill) && differs(skill);
 
@@ -324,9 +322,9 @@ const needsChoice = (skill: ItemRow) => inFocus(skill) && differs(skill);
  * How many items one tool has whose copies differ and need a choice: what the "Copies differ" chip counts on that tool's
  * Harnesses page, read from the facts the same way the table reads them. `waiting`: MCP servers waiting for Claude Code.
  */
-export function differingIn({ facts, tools, waiting, library }: ReturnType<typeof kindSource>, tool: Tool) {
+export function differingIn({ facts, tools, waiting, library: items }: KindSource, tool: Tool) {
   const waits = new Set(waiting);
-  const asks = (row: ItemRow) => (library ? agentNeedsChoice(row, library[row.key]) : needsCopyChoice(row, tools));
+  const asks = (row: ItemRow) => (items ? libraryNeedsChoice(row, items[row.key]) : needsCopyChoice(row, tools));
   return facts.filter(fact => fact.copies[tool as HarnessId] !== undefined && asks(rowOf(fact, waits))).length;
 }
 type Filter = 'all' | 'attention' | 'plugins';
@@ -335,11 +333,11 @@ const newView = () => ({
   find: '',
   /** The skill whose details are open under its row. */
   comparing: undefined as string | undefined,
-  /** Agents: the item whose copy question shows every copy's prompt side by side. */
+  /** A library kind: the item whose copy question shows every copy's body side by side (RowWords body). */
   reading: undefined as string | undefined,
-  /** Agents: the item whose versions list shows every version, not only its newest few. */
+  /** A library kind: the item whose versions list shows every version, not only its newest few. */
   versionsUnfolded: undefined as string | undefined,
-  /** Agents: the version being read in an opened row (its item, and its place in the list). */
+  /** A library kind: the version being read in an opened row (its item, and its place in the list). */
   readingVersion: undefined as { key: string; index: number } | undefined,
   /** The harness whose page this view was last drawn on (undefined: the kind's own page). */
   shownFor: undefined as Tool | undefined,
@@ -358,19 +356,19 @@ const newView = () => ({
   /** Each row's group when a click on this visit first changed something (pinRows), and when that was (pinKey). */
   pinned: undefined as { at: string; places: Map<string, 0 | 1 | 2>; key?: string } | undefined,
 });
-const views: Record<Kind, ReturnType<typeof newView>> = { skills: newView(), mcp: newView(), agents: newView() };
+const views: Record<PageKind, ReturnType<typeof newView>> = { skills: newView(), mcp: newView(), agents: newView() };
 /**
  * Opens a page already narrowed, for links that point at a problem (the Overview's or a harness card's "different copies").
  * `harness`: the harness page it opens on (none: the kind's own page), so the first draw there keeps this filter.
  */
-export const showFiltered = (which: Kind, filter: Filter, harness?: Tool) => { startFresh(views[which], harness); views[which].filter = filter; };
+export const showFiltered = (which: PageKind, filter: Filter, harness?: Tool) => { startFresh(views[which], harness); views[which].filter = filter; };
 /** A table drawn for another page (a harness's, or the kind's own) starts with no filter, Find text, open row or menu from the last one. */
 function startFresh(table: ReturnType<typeof newView>, harness: Tool | undefined) {
   Object.assign(table, { filter: 'all', find: '', comparing: undefined, confirmDelete: undefined, confirmTakeOver: undefined, shownFor: harness });
 }
 /** Opens an item's details on its own page (Skills, MCP servers or Agents), found by name, and scrolls it into view. */
-export function openItem(which: Kind, name: string) {
-  const facts = which === 'skills' ? state.home?.manage.skills : which === 'mcp' ? state.home?.mcp.servers : state.home?.agents.servers;
+export function openItem(which: PageKind, name: string) {
+  const facts = state.home && kindSource(state.home, which).facts;
   const partKind = partOfPage[which];
   const key = facts?.find(item => samePart({ kind: partKind, name: item.key }, { kind: partKind, name }) || samePart({ kind: partKind, name: item.name }, { kind: partKind, name }))?.key;
   // Drawn for the kind's own page (startFresh), so its first draw there keeps this row open.
@@ -642,16 +640,6 @@ function outsideNote(skill: ItemRow) {
 }
 
 
-/** Pi has no native agents (CD §5): an agent can reach it only as a skill, by an explicit, one-time Convert to skill (AGT-02). */
-function convertBlock(skill: ItemRow) {
-  if (skill.gone || !state.home?.manage.tools.includes('pi-cli')) return null;
-  const done = state.home.manage.skills.find(entry => entry.converted?.agent.toLowerCase() === skill.key.toLowerCase());
-  if (done) return h('p.details-limits.details-note', {}, icon('check', 12, 'tone-muted'), `Converted to a Pi skill, “${done.name}”: see it on the Skills page.`);
-  return h('div.convert-block', {},
-    h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), `Pi has no agents. You can convert this one to a skill for Pi: a one-time copy of its name, description and prompt. A skill has no ${andList(['own isolated context', 'tool restrictions', 'model selection'])}, and it is invoked as a skill, not picked as an agent. The agent stays as it is.`),
-    smallAction('Convert to a Pi skill', `convert-${skill.key}`, () => void convertAgent(skill.key, skill.name ?? skill.key)));
-}
-
 /** Where each copy lives, folded away: paths matter less than what each tool has. `extra` folds in more about them (Files view). */
 function wherePaths(skill: ItemRow, entries: Node[] = [], inFiles = false) {
   // The Files view names each copy once, with all it knows about it (pages.ts copyEntry); elsewhere a line per tool.
@@ -756,8 +744,9 @@ function entryWords(summary: string, others: string[]): Child[] {
  * What a row of the copy question quotes from one copy, to tell it from the others. How much of it is copywords.ts shortQuote's
  * to decide; cutMarked only carries an agent line's marks across that cut.
  *  - an MCP server: its command or address (entryWords);
- *  - an agent: the first prompt line only this copy has, the words only it has marked against the others' line most like it
- *    (or, with no such line, a line the others have that it lacks); with the same prompt, its description;
+ *  - a library item: the first line of its body (an agent's prompt) only this copy has, the words only it has marked against
+ *    the others' line most like it (or, with no such line, a line the others have that it lacks); with the same body, its
+ *    summary (an agent's description);
  *  - a skill: the first line of its body.
  */
 function copyQuote(skill: ItemRow, tool: Tool, others: Tool[]): Child[] | undefined {
@@ -766,11 +755,11 @@ function copyQuote(skill: ItemRow, tool: Tool, others: Tool[]): Child[] | undefi
   // A command or address is quoted whole: its row is the only place the question shows it.
   if (kind === 'mcp') return text ? entryWords(text, others.map(other => versions[other]?.text ?? '')) : undefined;
   const inMarks = (said: string) => { const { lead, words, tail } = shortQuote(kind, said); return `“${lead}${words}${tail}”`; };
-  const prompt = versions[tool]?.prompt;
-  if (prompt !== undefined) {
+  const body = versions[tool]?.body;
+  if (body !== undefined) {
     const lines = (from?: string) => (from ?? '').split('\n').map(line => line.trim()).filter(Boolean);
-    const theirs = others.map(other => lines(versions[other]?.prompt));
-    const [line, ...further] = lines(prompt).filter(mine => theirs.some(other => !other.includes(mine)));
+    const theirs = others.map(other => lines(versions[other]?.body));
+    const [line, ...further] = lines(body).filter(mine => theirs.some(other => !other.includes(mine)));
     if (line !== undefined) {
       const nearest = nearestLine(line, theirs.flat());
       const marked = nearest === undefined ? [line] : markedWords(nearest, line, 'added');
@@ -781,7 +770,7 @@ function copyQuote(skill: ItemRow, tool: Tool, others: Tool[]): Child[] | undefi
       const { lead, words, tail, start } = shortQuote(kind, line, differsAt);
       return [`“${lead}`, ...cutMarked(marked, start, words.length), `${tail}”${further.length ? ` and ${further.length} more ${further.length === 1 ? 'line' : 'lines'}` : ''}`];
     }
-    const missing = theirs.flat().find(other => !lines(prompt).includes(other));
+    const missing = theirs.flat().find(other => !lines(body).includes(other));
     if (missing) return [`Without ${inMarks(missing)}`];
   }
   return text ? [inMarks(text)] : undefined;
@@ -811,9 +800,10 @@ function compareChoices(skill: ItemRow, inFiles = false) {
   const sizesDiffer = new Set(groups.map(([tool]) => versions[tool]?.lines)).size > 1;
   const factsOf = (tool: Tool, at: number) => [sizesDiffer ? versions[tool]!.lines : '', Number.isFinite(at) ? `edited ${sinceThen(at)}` : versions[tool]!.changed];
   const facts = groups.map(([tool], index) => (versions[tool] ? factsOf(tool, editedAt[index]).filter(Boolean).join(' · ') : ''));
-  // An agent's copies always say when each was edited, and the newer one is marked: latest wins everywhere else for agents.
-  const factsDiffer = kind === 'agents' || !!latest || new Set(facts).size > 1;
-  const newest = kind === 'agents' ? (groups.length > 2 ? 'Newest' : 'Newer') : 'most recent';
+  // A library item's copies always say when each was edited, and the newer one is marked: latest wins everywhere else in the library.
+  const lib = library();
+  const factsDiffer = !!lib || !!latest || new Set(facts).size > 1;
+  const newest = lib ? (groups.length > 2 ? 'Newest' : 'Newer') : 'most recent';
   const about = (group: Tool[]) => {
     const said = facts[groups.indexOf(group)];
     if (!factsDiffer || !said) return null;
@@ -836,22 +826,22 @@ function compareChoices(skill: ItemRow, inFiles = false) {
       h('span.version-says', {},
         said ? h('span.version-text', {}, ...said) : null,
         h('span.version-effect', {}, choiceEffect(others.map(entry => names[entry]), receiving.map(entry => names[entry])))),
-      h(`span.version-cta${kind === 'agents' && group === latest ? '.version-cta-main' : ''}`, { 'aria-hidden': 'true' }, 'Use this copy'));
+      h(`span.version-cta${lib && group === latest ? '.version-cta-main' : ''}`, { 'aria-hidden': 'true' }, 'Use this copy'));
   };
   // Comparing comes before choosing: the full copies side by side, a click from the choices (the Files view shows them already).
   const every = compared.length > 2 ? 'Read every copy' : 'Read both copies';
   const read = inFiles || kind === 'mcp' ? null : kind === 'skills' ? smallAction(every, `diff-${skill.key}`, () => openFiles(skill.key), '.compare-read')
     : smallAction(view.reading === skill.key ? 'Hide the copies' : every, `diff-${skill.key}`, () => { view.reading = view.reading === skill.key ? undefined : skill.key; rerender(); }, '.compare-read');
-  const prompts = kind === 'agents' && view.reading === skill.key
-    ? h('div.compare-copies', {}, fileBlocks(`prompt-${skill.key}`, 'Prompt', compared.map(tool => ({ tool, text: versions[tool]?.prompt ?? '' })), holders => `Prompt · ${andList(holders.map(holder => names[holder.tool]))}`, { named: true }))
+  const bodies = lib && view.reading === skill.key
+    ? h('div.compare-copies', {}, fileBlocks(`body-${skill.key}`, lib.words.body, compared.map(tool => ({ tool, text: versions[tool]?.body ?? '' })), holders => `${lib.words.body} · ${andList(holders.map(holder => names[holder.tool]))}`, { named: true }))
     : null;
   return h('div.compare-block', {},
-    h('p.compare-title', {}, icon(kind === 'agents' ? 'circle-question-mark' : 'diff', 14, 'tone-warning'), h('span', {}, 'Which copy of ', h('strong.item-name', {}, skill.name ?? skill.key), ` should ${compared.length + receiving.length > 2 ? 'every tool' : 'both tools'} use?`)),
-    // An agent's choice takes it into Central Knot: the copies not chosen become its versions, each of which can be made current later.
-    h('p.compare-note', {}, kind === 'agents' ? 'Choosing applies at once: the agent is taken into Central Knot with that copy, and turned on everywhere. The other copies are kept as its versions.'
+    h('p.compare-title', {}, icon(lib ? 'circle-question-mark' : 'diff', 14, 'tone-warning'), h('span', {}, 'Which copy of ', h('strong.item-name', {}, skill.name ?? skill.key), ` should ${compared.length + receiving.length > 2 ? 'every tool' : 'both tools'} use?`)),
+    // A library item's choice takes it into Central Knot: the copies not chosen become its versions, each of which can be made current later.
+    h('p.compare-note', {}, lib ? `Choosing applies at once: the ${lib.words.item} is taken into Central Knot with that copy, and turned on everywhere. The other copies are kept as its versions.`
       : `Choosing applies at once, with Undo, and turns it on everywhere. Replaced copies are kept in History.${kind === 'mcp' && receiving.includes('claude-cli') ? ` ${CLAUDE_LATER}` : ''}`),
     h('div.compare-choices', {}, groups.map(choice)),
-    read, prompts);
+    read, bodies);
 }
 
 /** Whether an open row's details dock beside the table: the content is wide enough (renderer.ts sets state.wide). */
@@ -901,9 +891,9 @@ function openRow(key: string) {
   });
 }
 
-/** An agent's tag after its name, when it isn't plainly on everywhere (agentrow.ts placeTag). */
-function agentTag(skill: ItemRow) {
-  const tag = kind === 'agents' ? placeTag(skill, itemOf(skill), toolList()) : undefined;
+/** A library item's tag after its name, when it isn't plainly on everywhere (libraryrow.ts placeTag). */
+function libraryTag(skill: ItemRow) {
+  const tag = library()?.say.placeTag(skill, itemOf(skill), toolList());
   return tag ? h('span.row-tag', { title: tag.title }, tag.text) : null;
 }
 
@@ -920,7 +910,7 @@ function nameCell(skill: ItemRow, attention: boolean) {
       h('span.ov-name-text', {}, name),
       skill.held ? h('span.held-pill', { title: skill.held }, 'Can’t sync') : null,
       attention ? h('span.row-tag.row-tag-differs', { id: `decide-${skill.key}` }, 'Copies differ') : null),
-    agentTag(skill),
+    libraryTag(skill),
     partTags(skill),
     skill.gone ? h('span.row-tag', { title: 'No tool has a copy now. Turn it on to put it back from History.' }, 'no copy left') : null,
     skill.description ? h('span.ov-name-about', { title: skill.description }, skill.description) : null);
@@ -1008,11 +998,11 @@ function helpBand(): HTMLElement | null {
   // Shown until dismissed, so it does not come and go as rows change.
   const key = `ck-help-dismissed-${kind}`;
   if (!list.length || readFlag(key) || state.skillsView === 'files') return null;
-  const one = kindNouns[kind].a;
-  const first = kind === 'agents'
-    ? 'Turn an agent on and every tool has it, kept the same. Turn it off and no tool has it: Central Knot keeps it, with its versions, and puts each file back when you turn it on.'
+  const one = kindNouns[kind].a, words = library()?.words;
+  const first = words
+    ? `Turn ${words.an} on and every tool has it, kept the same. Turn it off and no tool has it: Central Knot keeps it, with its versions, and puts each ${words.copy} back when you turn it on.`
     : `Turn ${one} on and every tool has it, kept the same; turn it off and no tool ${kind === 'mcp' ? 'starts' : 'loads'} it. Each click applies at once, with Undo.`;
-  const second = kind === 'agents' ? 'A switch halfway is an agent a tool has that Central Knot doesn’t yet: turning it on takes it in. Open an agent for each tool’s own switch and its versions.'
+  const second = words ? `A switch halfway is ${words.an} a tool has that Central Knot doesn’t yet: turning it on takes it in. Open ${words.an} for each tool’s own switch and its versions.`
     : `A switch halfway means not synced yet: each tool keeps its own copy. Open ${one} for each tool’s own switch.`;
   return h('div.band.band-help', { role: 'note' }, icon('info', 14, 'tone-muted'),
     h('span.band-text.band-lines', {}, h('span', {}, first), h('span.tone-muted', {}, second)),
@@ -1065,7 +1055,8 @@ function otherOwnerBand(): HTMLElement | null {
   return h('div.band', { role: 'status', id: 'other-owner' }, icon('circle-alert', 14, 'tone-warning'), h('span.band-text', {}, otherOwnerSaid(gate.owner)), take);
 }
 
-function mcpNotices() {
+/** The bands of a page whose items aren't skills: MCP servers, or a library kind's. */
+function listNotices() {
   const mcp = listView()!;
   const bands: HTMLElement[] = [];
   for (const band of [syncOffBand(), outcomeBand()]) if (band) bands.push(band);
@@ -1077,10 +1068,10 @@ function mcpNotices() {
   for (const problem of mcp.problems) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), h('span.band-text', {}, problem)));
   const unread = unreadBand();
   if (unread) bands.push(unread);
-  const result = kind === 'agents' ? state.agentsResult : state.mcpResult;
+  const result = lastResult(kind);
   const told = toldNotices();
   const shownNotices = told.filter(notice => !state.dismissed.has(notice.history || notice.item));
-  const pendingClaude = kind === 'mcp' ? mcp.claudePending : [];
+  const pendingClaude = 'claudePending' in mcp ? mcp.claudePending : [];
   // An earlier result's Undo that stepped aside for this notice: one faint closing line inside the notice, not a band of its own.
   const moved = state.undoMoved?.page === state.page && !state.outcome && shownNotices.some(notice => state.undoMoved!.notices.includes(notice.history || notice.item))
     ? h('span.notice-tail.tone-faint', { id: 'undo-moved' }, ...movedUndoText(state.undoMoved!.label, state.undoMoved!.items), h('button.inline-link', { type: 'button', id: 'notice-undo-moved', onclick: () => showPage('history') }, 'History'), '.') : null;
@@ -1095,8 +1086,8 @@ function mcpNotices() {
   }
   // Claude Code rewrites ~/.claude.json while it runs, so its entries wait for an explicit write with Claude closed (MCP-02).
   const toldHere = new Set(shownNotices.map(notice => notice.item));
-  const rest = mcp.claudePending.filter(name => !toldHere.has(name));
-  if (rest.length) bands.push(writeStepBand(rest, mcp.claudePending));
+  const rest = pendingClaude.filter(name => !toldHere.has(name));
+  if (rest.length) bands.push(writeStepBand(rest, pendingClaude));
   if (result?.stopped) bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, result.stopped)));
   // A click's refusal is its result, said once, in the result's band (app.ts applyClick leaves it out of these).
   const problems = (result?.results ?? []).filter(result => result.outcome === 'failed' || (result.outcome === 'held' && !result.differs && !result.waits));
@@ -1116,7 +1107,7 @@ function resumeBand(): HTMLElement | null {
 
 function notices() {
   if (!state.home) return null;
-  if (kind !== 'skills') return mcpNotices();
+  if (listView()) return listNotices();
   const manage = state.home.manage;
   const bands: HTMLElement[] = [];
   for (const band of [syncOffBand(), outcomeBand()]) if (band) bands.push(band);
@@ -1148,7 +1139,7 @@ function notices() {
 }
 
 /** What a table keeps belongs to one home: opening another starts with no open row and none of the last home's notices. */
-const tableHomes: Partial<Record<Kind, string>> = {};
+const tableHomes: Partial<Record<PageKind, string>> = {};
 function forgetOtherHomes() {
   if (state.home?.home === tableHomes[kind]) return;
   view.comparing = undefined;
@@ -1191,13 +1182,14 @@ export function changePanel(eventId: string) {
 /** Notices stay until read: each read brings only what is new, so the page keeps earlier ones until × or Undo, or another home. */
 /** A notice as told: `once`, said while sync was off; `seq`, when it was first said (state.said.seq). */
 type Told = SyncNotice & { once?: boolean; seq: number };
-const keptNotices = new Map<Kind, Map<string, Told>>();
+const keptNotices = new Map<PageKind, Map<string, Told>>();
 /** Notices folded into History by a newer one: never shown again, though the read still lists them. */
-const foldedNotices = new Map<Kind, Set<string>>();
-const keptSync = new Map<Kind, boolean>();
+const foldedNotices = new Map<PageKind, Set<string>>();
+const keptSync = new Map<PageKind, boolean>();
 function toldNotices(): Told[] {
   if (!state.home) return [];
-  const fresh = kind === 'skills' ? [...state.home.manage.notices, ...(state.applied?.notices ?? [])] : [...(listView()?.notices ?? []), ...((kind === 'agents' ? state.agentsResult : state.mcpResult)?.notices ?? [])];
+  // What the table's view says sync did (the skills engine's is `manage`), and what its last click's result does.
+  const fresh = [...(listView() ?? state.home.manage).notices, ...(lastResult(kind)?.notices ?? [])];
   let kept = keptNotices.get(kind);
   if (!kept) keptNotices.set(kind, kept = new Map());
   let folded = foldedNotices.get(kind);
@@ -1244,9 +1236,9 @@ const age = (key: string) => {
 type NoticeLook = [IconName, string, string, HTMLElement | null];
 type NoticeLooks = Record<SyncNotice['kind'], NoticeLook>;
 
-/** An agent's notice (agentrow.ts noticeWords), with its button: Undo, or Turn on after a copy deleted by hand turned it off. */
-function agentNotice(notice: Told, undo: (title: string) => HTMLElement): NoticeLook {
-  const { text, action, help } = noticeWords(notice);
+/** A library item's notice (libraryrow.ts noticeWords), with its button: Undo, or Turn on after a copy deleted by hand turned it off. */
+function libraryNotice(lib: LibraryPage, notice: Told, undo: (title: string) => HTMLElement): NoticeLook {
+  const { text, action, help } = lib.say.noticeWords(notice);
   if (action === 'undo') return [notice.kind === 'conflict' ? 'diff' : 'check', notice.kind === 'conflict' ? 'tone-warning' : 'tone-success', text, undo(help)];
   const on = button({ variant: 'outline', size: 'small', label: 'Turn on', id: `notice-restore-${notice.history}`, onclick: () => void restoreEvent(notice.history) });
   on.title = help;
@@ -1262,7 +1254,8 @@ function syncNotice(notice: Told, writeClaude?: () => void) {
   // Undo is the one action here that writes files: a small outlined button, apart from the quieter links.
   const undo = (title: string) => { const action = button({ variant: 'outline', size: 'small', label: `Undo ${writeClaude || notice.kind === 'edit' ? 'edit ' : ''}${scope}`, id: `notice-undo-${notice.history}`, onclick: () => void restoreEvent(notice.history) }); action.title = title; action.setAttribute('aria-label', `Undo: ${title}`); return action; };
   const offNow = notice.once ?? (!!state.home && !state.home.syncOn);
-  const [glyph, tone, text, action] = kind === 'agents' ? agentNotice(notice, undo) : ({
+  const lib = library();
+  const [glyph, tone, text, action] = lib ? libraryNotice(lib, notice, undo) : ({
     edit: ['check', 'tone-success', offNow ? `${notice.item} copied from ${who(notice.winner)} to ${list(notice.losers)}.` : `${notice.item} was edited in ${who(notice.winner)} and copied to ${list(notice.losers)}.`, undo(`Put ${notice.item} back as it was before ${who(notice.winner)}’s edit, in every tool it syncs to (${who(notice.winner)} too)`)],
     conflict: ['diff', 'tone-warning', `${notice.item}: ${who(notice.winner)}’s edit won over ${list(notice.losers)}’s.${order}`, undo(`Use ${list(notice.losers)}’s version of ${notice.item} instead, in every tool it syncs to`)],
     deleted: ['trash-2', 'tone-muted', `${notice.item} was deleted in ${who(notice.winner)}, so it was removed from ${list(notice.losers) || 'nowhere else'} too.`, button({ variant: 'outline', size: 'small', label: `Restore ${scope}`, id: `notice-restore-${notice.history}`, onclick: () => void restoreEvent(notice.history) })],
@@ -1314,7 +1307,7 @@ function syncNotice(notice: Told, writeClaude?: () => void) {
  * servers and Agents pages), then drops what belonged to another home. A Copies differ filter whose chip is not drawn
  * (this harness has nothing that differs) goes back to All, so the table is never empty with no chip pressed.
  */
-function useTable(which: Kind, harness?: Tool) {
+function useTable(which: PageKind, harness?: Tool) {
   // An armed Delete everywhere belongs to the visit it was clicked on: another page disarms it.
   if (state.visit !== tablesVisit) { for (const each of Object.values(views)) each.confirmDelete = undefined; tablesVisit = state.visit; }
   kind = which;
@@ -1343,7 +1336,7 @@ function openFiles(key: string) {
 }
 
 /** A kind with nothing in any tool, on a harness's page: the empty state under the same bands (problems, access, results) as its table. */
-export function emptyKind(which: Kind, harness: Tool, empty: HTMLElement) {
+export function emptyKind(which: PageKind, harness: Tool, empty: HTMLElement) {
   useTable(which, harness);
   return h('div.page', {}, notices(), empty);
 }
@@ -1352,7 +1345,7 @@ export function emptyKind(which: Kind, harness: Tool, empty: HTMLElement) {
  * One kind's page: its toolbar, bands and table. `harness`: the Harnesses page's view of one tool: its column first, and the
  * rows it doesn't have under their own heading.
  */
-export function itemsTable(which: Kind, harness?: Tool) {
+export function itemsTable(which: PageKind, harness?: Tool) {
   useTable(which, harness);
   const all = rows();
   const needle = view.find.trim().toLowerCase();
@@ -1382,8 +1375,8 @@ export function itemsTable(which: Kind, harness?: Tool) {
       withToolCount(h('div.ov.ov-switched', { role: 'table', 'aria-label': `${nouns[kind][1]} and where they are on` }, sections), toolList().length),
       markLegend(all, plugins))];
   if (openRow) return h('div.page.ov-page.docked', {}, h('div.dock-main', {}, table), pluginDock(openRow));
-  // An agent's details hold its versions: its dock takes a share of the width that grows with the window (style.css .dock-wide).
-  return open ? h(`div.page.ov-page.docked${kind === 'agents' ? '.dock-wide' : ''}`, {}, h('div.dock-main', {}, table), itemDock(open))
+  // A library item's details hold its versions: its dock takes a share of the width that grows with the window (style.css .dock-wide).
+  return open ? h(`div.page.ov-page.docked${library() ? '.dock-wide' : ''}`, {}, h('div.dock-main', {}, table), itemDock(open))
     : h('div.page.ov-page', {}, table);
 }
 
@@ -1445,18 +1438,18 @@ const click = (what: Click) => { pinRows(what.changes[0]?.key); void applyClick(
 
 /**
  * Turns it off in every tool it is on in, each with its own switch: the copies stay (a synced one keeps syncing), and no tool
- * uses it. A tool whose switch can't be used is left on, and the result says why. An agent has no such switch: it leaves
- * every harness, and Central Knot keeps it (library.ts).
+ * uses it. A tool whose switch can't be used is left on, and the result says why. A library item has no such switch: it
+ * leaves every harness, and Central Knot keeps it (library.ts).
  */
 function turnOff(skill: ItemRow) {
-  const name = nameOf(skill);
+  const name = nameOf(skill), lib = library();
   const plugins = turnEvery(throughItems(skill), false);
   pinRows(skill.key);
   // Where its plugin's item turned off too, said from what happened.
   const pluginsOff = (notIn: HarnessId[]) => plugins.turned.map(item => item.tool).filter(tool => !notIn.includes(tool));
-  if (kind === 'agents') {
+  if (lib) {
     const pluginSaid = (notIn: HarnessId[]) => { const off = pluginsOff(notIn); return off.length ? ` Its plugin’s copy is off in ${toolsPhrase(off, toolList())}.` : ''; };
-    mainClick(name, false, [agentClicks.off(skill, itemOf(skill))], plugins, notIn => `${agentSaid.off(name, notIn, toolList())}${pluginSaid(notIn)}`, plugins.left);
+    mainClick(name, false, [rowClicks.off(skill, itemOf(skill))], plugins, notIn => `${lib.say.said.off(name, notIn, toolList())}${pluginSaid(notIn)}`, plugins.left);
     return;
   }
   const { disable, held } = offPlan(skill, toolList());
@@ -1473,10 +1466,10 @@ function turnOff(skill: ItemRow) {
 /**
  * The change that turns it on everywhere: synced to every tool Central Knot manages, none left out, and on in each. `use`: the
  * copy every tool takes where copies differ. A skill with a link or shared copy is taken over as it is turned on (OWN-02).
- * An agent: its library's On (agentrow.ts), which takes a found one in.
+ * A library item: its library's On (libraryrow.ts), which takes a found one in.
  */
 function onChange(skill: ItemRow, use?: Tool): Change {
-  if (kind === 'agents') return agentClicks.on(skill, itemOf(skill), use);
+  if (library()) return rowClicks.on(skill, itemOf(skill), use);
   const enable = toolList().filter(tool => skill.disabled?.includes(tool) && !skill.switchProblem?.[tool]);
   return { key: skill.key, managed: true, off: [], seenManaged: skill.managed, ...(enable.length ? { enable: enable as HarnessId[] } : {}), ...(use ? { use: use as HarnessId, useHash: skill.hashes?.[use] } : {}),
     ...(kind === 'skills' && takesOver(skill, !!use) ? { takeOver: true } : {}) };
@@ -1498,12 +1491,12 @@ function turnOn(skill: ItemRow, use?: Tool) {
   const plugins = turnEvery(throughItems(skill), true);
   pinRows(skill.key);
   // Said from what happened: a tool whose copy couldn't be written is not called on, nor Claude Code while it waits for Write.
-  // An agent a harness has that Central Knot doesn't yet is taken in by this click.
-  const found = kind === 'agents' && !inLibrary(itemOf(skill));
+  // An item a harness has that Central Knot's library doesn't yet is taken in by this click.
+  const lib = library(), found = !!lib && !inLibrary(itemOf(skill));
   const said = (notIn: HarnessId[]) => {
-    const left = [...plugins.leftIn, ...notIn, ...(later ? ['claude-cli'] : []), ...(kind === 'agents' ? skill.off : [])];
+    const left = [...plugins.leftIn, ...notIn, ...(later ? ['claude-cli'] : []), ...(lib ? skill.off : [])];
     const using = canHave(skill).filter(tool => !left.includes(tool));
-    if (found) return agentSaid.takenIn(name, using, toolList(), use);
+    if (lib && found) return lib.say.said.takenIn(name, using, toolList(), use);
     return use && using.length ? `${capitalToolsPhrase(using, toolList())} now ${using.length === 1 ? 'uses' : 'use'} ${names[use]}’s copy of ${name}. Replaced copies are kept in History.` : `${name} is on in ${onPhrase(skill, left)}.`;
   };
   mainClick(name, true, [onChange(skill, use)], plugins, said, plugins.left, later ? CLAUDE_LATER : undefined);
@@ -1620,7 +1613,7 @@ const notSyncedIn = (skill: ItemRow) => {
  * (no tool uses it). Clicking an in-between switch turns it on everywhere.
  */
 function itemSwitch(skill: ItemRow, id = `switch-${skill.key}`) {
-  if (kind === 'agents') return agentSwitch(skill, id);
+  if (library()) return librarySwitch(skill, id);
   const place = standingOf(skill);
   const name = nameOf(skill);
   const now = place === 0 ? 'on' : place === 1 ? notSyncedIn(skill) : skill.gone ? 'off, with no copy left' : 'off';
@@ -1632,15 +1625,15 @@ function itemSwitch(skill: ItemRow, id = `switch-${skill.key}`) {
 }
 
 /**
- * An agent's one switch: on (in Central Knot, applied to every harness), halfway (found: a harness has it and Central Knot
- * doesn't yet; a click takes it in, or asks which copy where they differ), or off (in Central Knot only).
+ * A library item's one switch: on (in Central Knot, applied to every harness), halfway (found: a harness has it and Central
+ * Knot doesn't yet; a click takes it in, or asks which copy where they differ), or off (in Central Knot only).
  */
-function agentSwitch(skill: ItemRow, id: string) {
-  const item = itemOf(skill), place = agentPlace(item);
+function librarySwitch(skill: ItemRow, id: string) {
+  const item = itemOf(skill), place = libraryPlace(item);
   const question = isDiffering(skill) ? (view.comparing === skill.key ? 'open' : 'closed') : undefined;
   const label = switchLabel(skill, item, toolList(), question);
   const knob = toggle({ on: place === 'on', mixed: place === 'found', label, onchange: next => flip(skill, next), disabled: !canWrite(), id });
-  // The halfway switch says on hover what a click does: it isn't blocked, it takes the agent in.
+  // The halfway switch says on hover what a click does: it isn't blocked, it takes the item in.
   if (place === 'found') knob.title = question ? 'Its copies differ: click to choose which one Central Knot takes in' : 'Click to take it into Central Knot and put it in every tool';
   return knob;
 }
@@ -1652,14 +1645,14 @@ type MarkLook = 'on' | 'off' | 'none' | 'differs' | 'waits';
 const keyWords = {
   on: 'On there', off: 'Off, copy kept', 'plugin-off': 'Off there', profile: 'Off by a profile (see Profiles)', none: 'No copy', differs: 'Copies differ', edited: 'Edited, waiting to spread',
   waiting: 'Gets the edit when sync runs', 'will-sync': NEXT_SYNC, 'write-now': 'Waits for Write to Claude Code',
-  // Agents (agentrow.ts HarnessIs).
+  // A library item's (libraryrow.ts HarnessIs).
   taken: 'Edited, becomes the current version', deleted: 'Deleted there; turns off when sync runs', leaving: 'Removed when sync runs', own: 'Its own copy, not from Central Knot',
   'kept-out': 'Kept out', 'off-in-ck': 'Off: in Central Knot only', unseen: 'Can’t be read', 'cannot-take': 'Can’t take it',
 } as const;
 
 /**
  * One tool's mark on a row: its look, what it says, and a glyph in place of the tool's own mark where something waits
- * or differs. `state`: what the tool has, as a word (the table's Cell, "plugin", or an agent's HarnessIs), for the page's
+ * or differs. `state`: what the tool has, as a word (the table's Cell, "plugin", or a library item's HarnessIs), for the page's
  * checks; `key`: its entry in the key.
  */
 function markOf(skill: ItemRow, tool: Tool): { look: MarkLook; words: string; glyph?: IconName; state: string; key: keyof typeof keyWords } {
@@ -1668,7 +1661,8 @@ function markOf(skill: ItemRow, tool: Tool): { look: MarkLook; words: string; gl
     const on = pluginOnIn(skill).includes(tool);
     return { look: on ? 'on' : 'off', state: on ? 'plugin' : 'plugin-off', key: on ? 'on' : 'plugin-off', words: `${skill.cannot?.[tool] ?? `${names[tool]} has it through the plugin ${given.plugin}.`}${on ? '' : ' It is turned off there.'}` };
   }
-  if (kind === 'agents') return agentMark(skill, tool);
+  const lib = library();
+  if (lib) return libraryMark(lib, skill, tool);
   const drawn = cellOf(skill, tool);
   const reads = skill.copies[tool] !== undefined ? skill.reads?.[tool] : undefined;
   const reading = reads ? `; reads ${names[reads]}’s copy` : '';
@@ -1692,8 +1686,8 @@ function markOf(skill: ItemRow, tool: Tool): { look: MarkLook; words: string; gl
   return mark(off ? 'off' : 'on', byProfile ? 'profile' : off ? 'off' : 'on', `${off ? '' : 'on, '}${own}${offWords}${reading}`);
 }
 
-/** An agent's mark for one harness: what the library's rule says of it (agentrow.ts harnessIs), drawn with the page's looks. */
-const agentMarks: Record<HarnessIs, { look: MarkLook; key: keyof typeof keyWords; glyph?: IconName }> = {
+/** A library item's mark for one harness: what the library's rule says of it (libraryrow.ts harnessIs), drawn with the page's looks. */
+const libraryMarks: Record<HarnessIs, { look: MarkLook; key: keyof typeof keyWords; glyph?: IconName }> = {
   current: { look: 'on', key: 'on' },
   'own-copy': { look: 'on', key: 'own' },
   'kept-out': { look: 'off', key: 'kept-out' },
@@ -1705,11 +1699,11 @@ const agentMarks: Record<HarnessIs, { look: MarkLook; key: keyof typeof keyWords
   leaving: { look: 'waits', key: 'leaving', glyph: 'clock' },
   unseen: { look: 'differs', key: 'unseen', glyph: 'circle-alert' },
 };
-function agentMark(skill: ItemRow, tool: Tool): ReturnType<typeof markOf> {
+function libraryMark(lib: LibraryPage, skill: ItemRow, tool: Tool): ReturnType<typeof markOf> {
   const item = itemOf(skill), is = harnessIs(skill, item, tool);
-  const words = `${names[tool]}: ${agentLine(skill, item, tool, names[tool]).replace(/^./, first => first.toLowerCase())}`;
-  // Off, or found: a harness with no copy while Central Knot keeps the agent is off there; a found agent's own copy is simply on.
-  const drawn = is === 'none' && inLibrary(item) ? { look: 'off' as const, key: 'off-in-ck' as const } : is === 'own-copy' && !inLibrary(item) ? agentMarks.current : agentMarks[is];
+  const words = `${names[tool]}: ${lib.say.harnessLine(skill, item, tool, names[tool]).replace(/^./, first => first.toLowerCase())}`;
+  // Off, or found: a harness with no copy while Central Knot keeps the item is off there; a found item's own copy is simply on.
+  const drawn = is === 'none' && inLibrary(item) ? { look: 'off' as const, key: 'off-in-ck' as const } : is === 'own-copy' && !inLibrary(item) ? libraryMarks.current : libraryMarks[is];
   return { ...drawn, state: is, words };
 }
 
@@ -1762,10 +1756,10 @@ function row(skill: ItemRow) {
 /** Rows under one heading: On, Not synced, Off, or (on a harness's page) the ones only other tools have. */
 function section(role: 'on' | 'not-synced' | 'off' | 'away', list: ItemRow[]) {
   if (!list.length) return null;
-  const label = role === 'away' ? `Not in ${names[focus!]}` : kind === 'agents' && role === 'not-synced' ? 'Found' : placeNames[role === 'on' ? 0 : role === 'not-synced' ? 1 : 2];
-  const agents = kind === 'agents';
-  const note = role === 'not-synced' ? (agents ? 'in a tool, not in Central Knot yet. Turn one on to take it in and put it in every tool.' : 'each tool keeps its own copy')
-    : role === 'off' ? (agents ? 'in Central Knot only; no tool has these' : `no tool ${uses()}s these`) : role === 'away' ? 'only other tools have these' : null;
+  const onLibrary = !!library();
+  const label = role === 'away' ? `Not in ${names[focus!]}` : onLibrary && role === 'not-synced' ? 'Found' : placeNames[role === 'on' ? 0 : role === 'not-synced' ? 1 : 2];
+  const note = role === 'not-synced' ? (onLibrary ? 'in a tool, not in Central Knot yet. Turn one on to take it in and put it in every tool.' : 'each tool keeps its own copy')
+    : role === 'off' ? (onLibrary ? 'in Central Knot only; no tool has these' : `no tool ${uses()}s these`) : role === 'away' ? 'only other tools have these' : null;
   return h('div', { role: 'rowgroup' },
     h(`div.ov-section${role === 'off' || role === 'away' ? '.ov-section-away' : ''}`, { role: 'row', 'data-section': role },
       h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(list.length)), note ? sectionNote(note) : null)),
@@ -1774,7 +1768,7 @@ function section(role: 'on' | 'not-synced' | 'off' | 'away', list: ItemRow[]) {
 
 /** What the item is now, in one line: on and where, not synced and where its copies are, or off. */
 function switchStatus(skill: ItemRow): string {
-  if (kind === 'agents') return statusLine(skill, itemOf(skill), toolList());
+  if (library()) return statusLine(skill, itemOf(skill), toolList());
   if (skill.gone) return `Off · no copy left: ${skill.gone.kind === 'deleted' ? 'deleted' : 'removed'} ${daysAgo(skill.gone.at)}. Turn it on to put it back from History.`;
   if (skill.held) return `Can’t be synced: ${skill.held}`;
   const on = onIn(skill);
@@ -1798,9 +1792,10 @@ function harnessLine(skill: ItemRow, tool: Tool): string {
   // Through a plugin: where it comes from, then why its switch can't be used here, or that it is the whole plugin's.
   const through = itemThrough(skill, tool);
   if (through) return [skill.cannot?.[tool], cantSwitch(through) ?? switchWords(through)].filter(Boolean).join(' ');
-  if (kind === 'agents') {
-    const own = skill.ownFields?.[tool];
-    return [agentLine(skill, itemOf(skill), tool, names[tool]), own?.length ? `Its own settings stay in its file: ${andList(own)}.` : ''].filter(Boolean).join(' ');
+  const lib = library();
+  if (lib) {
+    const own = skill.ownPart?.[tool];
+    return [lib.say.harnessLine(skill, itemOf(skill), tool, names[tool]), own?.length ? lib.words.own(own) : ''].filter(Boolean).join(' ');
   }
   if (skill.cannot?.[tool]) return skill.cannot[tool]!;
   const has = skill.copies[tool] !== undefined;
@@ -1839,56 +1834,56 @@ function waitsLine(skill: ItemRow, tool: Tool): string {
 }
 
 /**
- * One harness's own switch for an agent that is On: off keeps the agent out of that harness (its copy there goes, and Central
- * Knot keeps its file for later), on lets it in again. An agent that is Off or only found has one switch: its row's.
+ * One harness's own switch for a library item that is On: off keeps the item out of that harness (its copy there goes, and
+ * Central Knot keeps it for later), on lets it in again. An item that is Off or only found has one switch: its row's.
  */
-function agentHarnessSwitch(skill: ItemRow, tool: Tool) {
+function libraryHarnessSwitch(lib: LibraryPage, skill: ItemRow, tool: Tool) {
   const item = inLibrary(itemOf(skill));
   if (!item?.on || harnessIs(skill, item, tool) === 'cannot') return null;
   const name = nameOf(skill), where = names[tool], out = item.except.includes(tool as HarnessId);
-  const said = (notIn: HarnessId[]) => agentSaid.inHarness(name, tool, !out, notIn.includes(tool as HarnessId));
-  const does = out ? `Click to put it in ${where} again, its file as it was.` : `Click to keep it out of ${where}: its copy there goes, and Central Knot keeps it.`;
-  const flipHere = (on: boolean) => click({ kind, items: [name], changes: [agentClicks.inHarness(skill, item, tool, !on)], said });
+  const said = (notIn: HarnessId[]) => lib.say.said.inHarness(name, tool, !out, notIn.includes(tool as HarnessId));
+  const does = out ? `Click to put it in ${where} again, its ${lib.words.copy} as it was.` : `Click to keep it out of ${where}: its copy there goes, and Central Knot keeps it.`;
+  const flipHere = (on: boolean) => click({ kind, items: [name], changes: [rowClicks.inHarness(skill, item, tool, !on)], said });
   return h('span.details-tool-actions', {}, h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, out ? 'Off' : 'On'),
     toggle({ on: !out, disabled: !canWrite(), id: `enable-${skill.key}-${tool}`, label: `${name} in ${where}: ${out ? 'kept out' : 'on'}. ${does}`, onchange: flipHere })));
 }
 
 /**
- * Delete from Central Knot, the one real delete of an agent: quiet until armed, then it runs at once. The agent leaves every
- * harness and its page; the library keeps it, deleted, and History's Restore (or this click's Undo) puts it back.
+ * Delete from Central Knot, the one real delete of a library item: quiet until armed, then it runs at once. The item leaves
+ * every harness and its page; the library keeps it, deleted, and History's Restore (or this click's Undo) puts it back.
  */
-function agentDelete(skill: ItemRow) {
+function libraryDelete(lib: LibraryPage, skill: ItemRow) {
   const item = inLibrary(itemOf(skill));
   if (!item) return null;
   const name = nameOf(skill), disarm = () => { view.confirmDelete = undefined; rerender(); };
   if (view.confirmDelete !== skill.key) {
     const arm = button({ variant: 'outline', size: 'micro', label: 'Delete from Central Knot…', id: `delete-${skill.key}`, disabled: !canWrite(), onclick: () => { view.confirmDelete = skill.key; rerender(); } });
     arm.classList.add('delete-quiet');
-    return h('span.delete-offer', {}, arm, h('span.delete-offer-note', {}, agentSaid.deleteOffer));
+    return h('span.delete-offer', {}, arm, h('span.delete-offer-note', {}, lib.say.said.deleteOffer));
   }
-  const said = agentSaid.deleted(name, item.on);
-  const run = () => { view.confirmDelete = undefined; click({ kind, items: [name], changes: [agentClicks.remove(skill, item)], said }); };
+  const said = lib.say.said.deleted(name, item.on);
+  const run = () => { view.confirmDelete = undefined; click({ kind, items: [name], changes: [rowClicks.remove(skill, item)], said }); };
   // Armed, it is still a button (outlined in red); Cancel beside it is a link.
   const now = button({ variant: 'outline', size: 'micro', label: 'Delete it now', id: `delete-confirm-${skill.key}`, disabled: !canWrite(), onclick: run });
   now.classList.add('delete-now');
   now.title = `Delete ${name} from Central Knot now. History can restore it.`;
   return h('span.delete-armed', {}, smallAction('Cancel', `delete-cancel-${skill.key}`, disarm), now,
-    h('span.delete-armed-note', { id: `delete-note-${skill.key}` }, agentSaid.deleteArmed(state.historyDays ?? defaultHistoryDays)));
+    h('span.delete-armed-note', { id: `delete-note-${skill.key}` }, lib.say.said.deleteArmed(state.historyDays ?? defaultHistoryDays)));
 }
 
-/** Versions read in an opened row, by home, agent and version, so a version read once shows at once the next time. */
+/** Versions read in an opened row, by home, kind, item and version, so a version read once shows at once the next time. */
 const versionTexts = new Map<string, VersionText>();
 
-/** An agent's versions in its opened row (versionlist.ts): the list, Read, and Make current as the agent's click. */
-function agentVersions(skill: ItemRow) {
+/** A library item's versions in its opened row (versionlist.ts): the list, Read (as its kind gives it), and Make current as the item's click. */
+function libraryVersions(lib: LibraryPage, skill: ItemRow) {
   const item = inLibrary(itemOf(skill));
   if (!item) return null;
-  const name = nameOf(skill), textKey = (hash: string) => `${state.home?.home}:${item.key}:${hash}`;
+  const name = nameOf(skill), textKey = (hash: string) => `${state.home?.home}:${kind}:${item.key}:${hash}`;
   const at = view.readingVersion?.key === item.key ? view.readingVersion.index : undefined;
   const fetch = (hash: string) => {
     if (versionTexts.has(textKey(hash))) return;
     versionTexts.set(textKey(hash), 'reading');
-    void window.centralKnot.agentVersion(item.key, hash).then(text => { versionTexts.set(textKey(hash), text); rerender(); });
+    void lib.version(item.key, hash).then(text => { versionTexts.set(textKey(hash), text); rerender(); });
   };
   // Reading a version reads the current one too, so what differs from it can be marked.
   const read = (index: number) => {
@@ -1898,10 +1893,10 @@ function agentVersions(skill: ItemRow) {
   };
   const textOf = (hash: string) => versionTexts.get(textKey(hash)) ?? 'reading';
   const on = (notIn: HarnessId[]) => (item.on ? canHave(skill).filter(tool => !notIn.includes(tool as HarnessId) && !skill.off.includes(tool)) : undefined);
-  const makeCurrent = (version: Version) => click({ kind, items: [name], changes: [agentClicks.makeCurrent(skill, item, version.hash)],
+  const makeCurrent = (version: Version) => click({ kind, items: [name], changes: [rowClicks.makeCurrent(skill, item, version.hash)],
     // A version that was itself made current again is named by the one it came from.
     said: notIn => { const source = (version.from.how === 'made-current' && madeFrom(item, version)) || version;
-      return agentSaid.madeCurrent(name, source, versionClock(item, source), on(notIn), toolList()); } });
+      return lib.say.said.madeCurrent(name, source, versionClock(item, source), on(notIn), toolList()); } });
   const reading = at === undefined || !listed(item)[at] ? undefined : { index: at, text: textOf(listed(item)[at].hash), current: textOf(item.hash) };
   return versionList({ item, canWrite: canWrite(), unfolded: view.versionsUnfolded === item.key, onUnfold: () => { view.versionsUnfolded = item.key; rerender(); },
     changes: skill.versionChanges, reading, now: Date.now(), onRead: read, onMakeCurrent: makeCurrent });
@@ -1909,7 +1904,7 @@ function agentVersions(skill: ItemRow) {
 
 /**
  * One tool's own controls in an item's details, each applied at once: its switch and (skills) Remove; Sync here for a tool a
- * synced item leaves out; an agent's switch for that harness (agentHarnessSwitch); Claude Code's Write step; the plugin's
+ * synced item leaves out; a library item's switch for that harness (libraryHarnessSwitch); Claude Code's Write step; the plugin's
  * page, for a tool that has it through one. Each says what it does on hover.
  */
 function harnessControls(skill: ItemRow, tool: Tool) {
@@ -1918,7 +1913,8 @@ function harnessControls(skill: ItemRow, tool: Tool) {
   const through = itemThrough(skill, tool);
   if (through) return pluginItemControls(through, `enable-${skill.key}-${tool}`, () => openPlugin(given!));
   if (given) return h('span.details-tool-actions', {}, smallAction('Plugin’s page', `plugin-${skill.key}-${tool}`, () => openPlugin(given)));
-  if (kind === 'agents') return agentHarnessSwitch(skill, tool);
+  const lib = library();
+  if (lib) return libraryHarnessSwitch(lib, skill, tool);
   if (skill.gone || skill.cannot?.[tool]) return null;
   const name = nameOf(skill), where = names[tool];
   const now = asItIs(skill);
@@ -1951,12 +1947,12 @@ function harnessControls(skill: ItemRow, tool: Tool) {
 }
 
 /**
- * An item's details: its status, each tool with its own controls, an agent's versions, where each copy is, and its delete
- * last (a skill's Delete everywhere, an agent's Delete from Central Knot).
+ * An item's details: its status, each tool with its own controls, a library item's versions, where each copy is, and its
+ * delete last (a skill's Delete everywhere, a library item's Delete from Central Knot).
  * While its copies differ, only the question of which copy every tool uses, and the copies.
  */
 function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
-  const inFiles = placement === 'files';
+  const inFiles = placement === 'files', lib = library();
   const differs = isDiffering(skill);
   // MCP: each tool's row has its settings file and Show in folder, where a server is changed.
   const settingsFile = (tool: Tool) => (kind === 'mcp' && skill.paths?.[tool] ? [wrappingPath(skill.paths[tool]!), showInFolder(skill.paths[tool]!)] : []);
@@ -1970,27 +1966,27 @@ function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
   const box = (...children: (Child | Child[])[]) => h(`div.compare.details${placement === 'row' ? '' : '.details-bare'}${differs ? '.details-differs' : ''}${kind === 'mcp' ? '.details-mcp' : '.details-grid'}`, { role: 'region', 'aria-label': `Details for ${skill.key}` }, ...children);
   if (differs) return box(close, compareChoices(skill, inFiles));
   const files = kind === 'skills' && !inFiles && !skill.gone ? smallAction('Files and contents', `files-${skill.key}`, () => openFiles(skill.key)) : null;
-  const remove = kind === 'agents' ? agentDelete(skill) : kind === 'skills' && !inFiles && !skill.gone ? deleteAction(skill) : null;
+  const remove = lib ? libraryDelete(lib, skill) : kind === 'skills' && !inFiles && !skill.gone ? deleteAction(skill) : null;
   return box(
     h('div.details-head', {},
       // The Files view's pane says it under the skill's name; the row already shows the description.
       inFiles ? null : h('p.details-status', {}, switchStatus(skill)),
-      // An agent's description whole: the closed row cuts it.
-      kind === 'agents' && skill.description ? h('p.details-description.details-description-whole', {}, skill.description) : null,
+      // A library item's description whole: the closed row cuts it.
+      lib && skill.description ? h('p.details-description.details-description-whole', {}, skill.description) : null,
       kind === 'mcp' && skill.description ? definition(skill.description, skill.managed) : null,
       partNote(skill),
       kind === 'skills' && !skill.gone ? outsideNote(skill) : null,
       files ? h('div.details-actions', {}, files) : null),
-    // Agents: what is kept the same, and what stays each harness's own (AGT-01).
-    kind === 'agents' && toolList().length > 1 ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), 'Name, description and prompt are the same in every tool; other settings stay in each tool’s file.') : null,
+    // A library item: what is kept the same, and what stays each harness's own (for agents, AGT-01).
+    lib && toolList().length > 1 ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), lib.words.shared) : null,
     // A copy outside Central Knot's own (a link, the shared copy) is said in the note above, and its path under Where each copy is.
     (skill.extra ?? []).some(extra => !extra.outside) ? h('div.details-extra', {}, (skill.extra ?? []).filter(extra => !extra.outside).map(extra => h('p.details-extra-line', {}, icon(extra.same ? 'check' : 'diff', 12, extra.same ? 'tone-muted' : 'tone-warning'),
       `${names[extra.tool]} also reads ${extra.same ? 'the same copy' : 'a different copy'} at `, h('span.details-path', { title: extra.directory }, shownPath(extra.directory)),
       extra.writable ? '' : '. Central Knot does not change it: it is inside a skills folder that is a link or another tool’s.'))) : null,
     skill.gone ? null : h('div.details-tools', {}, toolList().map(toolRow)),
-    kind === 'agents' ? agentVersions(skill) : null,
+    lib ? libraryVersions(lib, skill) : null,
     inFiles || kind === 'mcp' ? null : wherePaths(skill),
-    kind === 'agents' ? convertBlock(skill) : null,
+    lib?.own?.(skill) ?? null,
     skill.converted ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), `Converted from ${names[skill.converted.origin] ?? skill.converted.origin}’s agent “${skill.converted.agent}”, as a one-time copy; ${names[skill.converted.origin] ?? skill.converted.origin} keeps the agent, and edits here never change it. As a skill it has no ${andList(skill.converted.losses)}.`) : null,
     remove ? h('div.details-actions.details-danger', {}, remove) : null);
 }

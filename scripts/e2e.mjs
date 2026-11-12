@@ -1048,11 +1048,11 @@ async function practiceFlow() {
   // click's `version` through).
   await a.click('#version-read-code-reviewer-1');
   for (let tries = 0; tries < 30 && !/You are a careful code reviewer/.test(await a.text('.version-read') ?? ''); tries++) await wait(100);
-  check('Read shows the earlier version’s description and prompt under its line', /Reviews a change/.test(await a.text('.version-read-about') ?? '') && /You are a careful code reviewer/.test(await a.text('.version-read') ?? ''), await a.text('.version-read'));
+  check('Read shows the earlier version’s description and prompt under its line', /Reviews a change/.test(await a.text('.version-read-line') ?? '') && /You are a careful code reviewer/.test(await a.text('.version-read') ?? ''), await a.text('.version-read'));
   for (let tries = 0; tries < 30 && !(await a.exists('.version-read .change-gone')); tries++) await wait(100);
   same('and marks what differs from the current version: the words only the current one has are struck through', await a.all('.version-read .change-gone', 'e.textContent'), ['Edited in Codex.']);
   same('Read is headed by what differs from the current version', await a.text('.version-read-legend strong'), 'Differs from current in: description');
-  check('the prompt reads upright', await a.run(`getComputedStyle(document.querySelector('.version-read-prompt')).fontStyle`) === 'normal');
+  check('the prompt reads upright', await a.run(`getComputedStyle(document.querySelector('.version-read-block')).fontStyle`) === 'normal');
   for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
     await sizeTo(a, width, height);
     same(`nothing is cut off at ${width}×${height} with an agent’s row open on its versions, one being read`, await a.run(CUT_OFF), []);
@@ -2465,7 +2465,7 @@ async function openCodeFlow() {
   await pictures(a, 'opencode-skill-open');
   const view = await a.run('window.centralKnot.refresh()');
   same('its MCP server is read from its settings, off as its settings say', view.mcp.servers.map(server => [server.key, server.disabled]), [['oc-docs', ['opencode-cli']]]);
-  same('its agent is read from its agents folder', view.agents.servers.map(server => [server.key, Object.keys(server.copies)]), [['helper', ['opencode-cli']]]);
+  same('its agent is read from its agents folder', view.agents.items.map(item => [item.key, Object.keys(item.copies)]), [['helper', ['opencode-cli']]]);
   await a.click('#nav-mcp'); await a.click('#open-oc-docs'); await pictures(a, 'opencode-mcp-open');
   await a.click('#nav-agents'); await pictures(a, 'opencode-agents');
   await a.click('#nav-instructions'); await pictures(a, 'opencode-instructions');
