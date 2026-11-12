@@ -6,15 +6,16 @@ import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { harnessIds } from './harnesses.ts';
-import { appendHistory, clock, manageView, readHistory, replaceHistory } from './manage.ts';
+import { appendHistory, clock, readHistory, replaceHistory } from './history.ts';
 import { mcpView } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from './mcpswitch.ts';
-import { changedSince, choseProfileInUse, driftOf, itemId, itemKeyOf, itemKind, NO_PROFILE, planSwitch, releaseHolds, offAfterFlips, offAfterFailures, holdsOnWhatIsHere, switchItems, type SwitchItem } from './profileplan.ts';
-import { errorCode, itemKey, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { changedSince, choseProfileInUse, driftOf, itemId, itemKeyOf, itemKind, NO_PROFILE, planSwitch, profileSkills, releaseHolds, offAfterFlips, offAfterFailures, holdsOnWhatIsHere, switchItems, type SwitchItem } from './profileplan.ts';
+import { errorCode, itemKey, managedNow, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { skillsView } from './skills.ts';
 import { keepOverrides, readKeptOverrides, switchedText, switchPath, switchState, type SwitchTarget } from './skillswitch.ts';
 import { onlyAllowed, record, strings } from './values.ts';
 import { toolName } from './words.ts';
-import type { DestinationResult, HarnessId, HistoryEvent, Profile, ProfileEdit, ProfileFlip, ProfileSwitchResult, ProfilesView } from './types.ts';
+import type { DestinationResult, HarnessId, HistoryEvent, Profile, ProfileEdit, ProfileFlip, ProfileSwitchResult, ProfilesView, SkillFacts } from './types.ts';
 
 // ---------- The profiles file ----------
 
@@ -103,9 +104,9 @@ export async function deleteProfile(context: ShareContext, id: string): Promise<
 }
 
 /**
- * The switches an explicit Disable, Enable or their Undo flipped (outcome 'switched' in `results`, for one of `changes`' items),
- * as profile items: profiles stop holding these, since the person set them by hand. A skill's result names it by its folder
- * (manage.ts), whose itemKey is the change's key; an MCP server's names the server, which is its key.
+ * The switches set by hand (outcome 'switched' in `results`, for one of `changes`' items: an MCP server's Disable, Enable or
+ * their Undo, or a skill's switch cleared), as profile items: profiles stop holding these. A skill's result names it by its
+ * folder (skills.ts clearSwitch), whose itemKey is its key; an MCP server's names the server, which is its key.
  */
 export function switchedByHand(changes: { key: string }[], results: DestinationResult[], kind: 'skill' | 'mcp' = 'skill'): { item: string; tool: HarnessId }[] {
   const keyOf = (result: DestinationResult) => (kind === 'mcp' ? result.item : itemKey(result.item));
@@ -125,17 +126,18 @@ export async function releaseProfileHolds(context: ShareContext, released: { ite
 // ---------- Flipping switches ----------
 
 /** How each tool's skill switch names its copy of a skill: the folder, the name the tool reads, and the copy's SKILL.md. */
-function skillTarget(manage: Awaited<ReturnType<typeof manageView>>, key: string, tool: HarnessId): SwitchTarget | undefined {
-  const copy = manage.skills.find(skill => skill.key === key)?.copies[tool];
+function skillTarget(skills: SkillFacts[], key: string, tool: HarnessId): SwitchTarget | undefined {
+  const copy = skills.find(skill => skill.key === key)?.copies[tool];
   return copy && { folder: copy.folder, name: copy.name ?? copy.folder, skillFile: join(copy.directory, 'SKILL.md') };
 }
 
 /** What a switch reads once: each skill's copies (to name one for its switch), and every item with its switches now. */
-interface HomeRead { manage: Awaited<ReturnType<typeof manageView>>; items: SwitchItem[] }
+interface HomeRead { skills: SkillFacts[]; items: SwitchItem[] }
 async function readHome(context: ShareContext): Promise<HomeRead> {
-  const manage = await manageView(context);
-  const mcp = await mcpView(context, manage.tools);
-  return { manage, items: switchItems(manage, mcp) };
+  const tools = await managedNow(context, await context.read());
+  const skills = profileSkills(await skillsView(context, tools));
+  const mcp = await mcpView(context, tools);
+  return { skills, items: switchItems(skills, mcp) };
 }
 
 /** Every tool's switch files' modification times, as one string: when it is unchanged, no switch was turned in a tool's settings. */
@@ -161,7 +163,7 @@ interface Switch { file: string; isOff(text: string): boolean; set(text: string)
 function switchOf(context: ShareContext, home: HomeRead, flip: ProfileFlip, kept: Record<string, string>, overrides: Map<ProfileFlip, [string, string | undefined]>): Switch {
   const key = itemKeyOf(flip.item);
   if (itemKind(flip.item) === 'mcp') return { file: mcpSwitchPath(context, flip.tool), isOff: text => mcpDisabled(flip.tool, text, key), set: text => withMcpSwitch(flip.tool, text, key, flip.disabled) };
-  const target = skillTarget(home.manage, key, flip.tool);
+  const target = skillTarget(home.skills, key, flip.tool);
   // A tool with no copy now fails this one flip when it is made (editText reports it), not here: throwing here would stop flipAll
   // before the other flips.
   const missing = () => { throw new Error(`${toolName(flip.tool)} has no copy of it now.`); };

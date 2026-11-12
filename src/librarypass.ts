@@ -50,7 +50,7 @@ import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { carryOut, keepVersion, managedAgain, newItem, plan, setCurrent, versionAt, wantedIn } from './library.ts';
 import type { Copies, HarnessCopy, ItemKind, LibraryItem, Plan, Shelf, Source, Version } from './library.ts';
-import { appendHistory, historyCutoff, readHistory, replaceHistory } from './manage.ts';
+import { appendHistory, historyCutoff, readHistory, replaceHistory } from './history.ts';
 import { newRecord, readRecord, remember, saveRecord, syncGate, writeAccess } from './share.ts';
 import type { ShareContext } from './share.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, PassResult, SyncNotice } from './types.ts';
@@ -82,16 +82,24 @@ export interface Disk<Entry extends Seen> {
   /** What could not be read, in words for the page. */
   problems: string[];
   /**
-   * Why a harness the item is wanted in, with no copy of its own, is held (library.ts HarnessCopy), for the kind's own
-   * reasons: it can't be given one (a name it can't store), or it has it another way (`anotherWay`: through a plugin, or a
-   * tool that reads another's folder while the item is in that one). Undefined when it can be given it. `item` is as this
-   * pass's clicks left it, so library.ts wantedIn says where else it is wanted; what the other harnesses hold is this Disk's
-   * (byKey, unseen). A folder that can't be written is `locked`, which the pass adds itself. Worked out at each look, never stored.
+   * Why a harness the item is wanted in is held (library.ts HarnessCopy), for the kind's own reasons: it can't be given a
+   * copy (a name it can't store), or it has it another way (`anotherWay`: through a plugin, a tool that reads another's folder
+   * while the item is in that one, a link or a folder Central Knot doesn't own). Undefined when it can be given it. Asked
+   * also where the harness has a copy of its own: there only `anotherWay` counts (library.ts, the table's last row). `item` is
+   * as this pass's clicks left it, so library.ts wantedIn says where else it is wanted and `applied` whether a copy elsewhere
+   * is Central Knot's; what the other harnesses hold is this Disk's (byKey, unseen). A folder that can't be written is
+   * `locked`, which the pass adds itself. Worked out at each look, never stored.
    */
   held(item: Wanted, harness: HarnessId): { why: string; anotherWay?: true } | undefined;
+  /**
+   * Copies a harness has another way, read but never written or removed by Central Knot (a link in its folder, a copy in a
+   * folder it doesn't own), by key, then harness: a found item can be taken in from one (foundCopies). A kind with none leaves
+   * it out.
+   */
+  outside?: Map<string, Partial<Record<HarnessId, Entry>>>;
 }
-/** An item as Disk.held is told of it: its name, and where it is wanted (library.ts wantedIn). */
-export type Wanted = Pick<LibraryItem, 'key' | 'name' | 'on' | 'except' | 'deleted'>;
+/** An item as Disk.held is told of it: its name, where it is wanted (library.ts wantedIn) and what was applied where. */
+export type Wanted = Pick<LibraryItem, 'key' | 'name' | 'on' | 'except' | 'deleted' | 'applied'>;
 
 /** One kind's part of the library as its record holds it: its items, and each harness's folder as a pass last saw it. */
 export interface KindLibrary { items: Record<string, LibraryItem>; folders: Partial<Record<HarnessId, FolderSeen>> }
@@ -292,9 +300,14 @@ function copyIn(look: AnyLook, item: LibraryItem, tool: HarnessId, here: Seen | 
   const unseen = unseenIn(look.disk, tool, item.key);
   if (unseen) return { is: 'unseen', why: unseen };
   const path = look.kind.pathOf(look.context, tool, here?.name ?? item.name);
-  if (here) { seenAgain(look, path); return { is: 'present', hash: here.hash, at: here.at }; }
-  const wanted = wantedIn(item, tool), locked = look.disk.locked.get(tool);
-  const held = wanted ? look.disk.held(item, tool) ?? (locked ? { why: locked } : undefined) : undefined;
+  const wanted = wantedIn(item, tool), kindHeld = wanted ? look.disk.held(item, tool) : undefined;
+  if (here) {
+    seenAgain(look, path);
+    // A copy of its own where the harness has the item another way too: the table's last row (library.ts wantedHere).
+    return { is: 'present', hash: here.hash, at: here.at, ...(kindHeld?.anotherWay ? { anotherWay: kindHeld.why } : {}) };
+  }
+  const locked = look.disk.locked.get(tool);
+  const held = kindHeld ?? (wanted && locked ? { why: locked } : undefined);
   if (held) return { is: 'held', ...held };
   const { copy, item: noun } = look.kind.words;
   const missing = `${toolName(tool)}’s ${copy} for it is missing just now. If it stays missing, the ${noun} turns off everywhere.`;
@@ -318,12 +331,16 @@ function stillSettling(look: AnyLook, path: string): boolean {
 const seenAgain = (look: AnyLook, path: string) => { if (look.settle) firstSeenMissingAt.delete(path); };
 
 /**
- * The copies a found item is taken in from: one per managed harness that has it, can be read and isn't kept out (`off`).
- * Where they differ, the person chooses which one every harness takes (the copy question): the switch asks, and takeIn waits.
+ * The copies a found item is taken in from: one per managed harness that has it, can be read and isn't kept out (`off`): its
+ * own copy, else one it has another way (Disk.outside). Where they differ, the person chooses which one every harness takes
+ * (the copy question): the switch asks, and takeIn waits.
  */
 export function foundCopies<E extends Seen>(look: Look<unknown, E, Disk<E>>, key: string, off: readonly HarnessId[]): E[] {
-  const slot = look.disk.byKey.get(key) ?? {};
-  return look.managed.flatMap(tool => (slot[tool] && !off.includes(tool) && !unseenIn(look.disk, tool, key) ? [slot[tool]!] : []));
+  const slot = look.disk.byKey.get(key) ?? {}, outside = look.disk.outside?.get(key) ?? {};
+  return look.managed.flatMap(tool => {
+    const copy = slot[tool] ?? outside[tool];
+    return copy && !off.includes(tool) && !unseenIn(look.disk, tool, key) ? [copy] : [];
+  });
 }
 export const differ = (copies: Seen[]) => new Set(copies.map(entry => entry.hash)).size > 1;
 

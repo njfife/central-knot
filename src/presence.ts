@@ -66,18 +66,18 @@ export const takesPlugins = (tool: unknown): tool is PluginTool => pluginTools.s
 export type HomeKind = 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins';
 
 /** What a home's view says about its tools: all of them, and those that hold MCP servers and agents. */
-interface ToolsHeld { manage: { tools: HarnessId[] }; mcp: { tools: HarnessId[] }; agents: { tools: HarnessId[] } }
+interface ToolsHeld { skills: { tools: HarnessId[] }; mcp: { tools: HarnessId[] }; agents: { tools: HarnessId[] } }
 
 /**
  * The kinds no tool in this home can hold: pages and wording leave them out, since what doesn't exist here shouldn't show
  * as an option. A home with no tools at all holds none of them.
  */
 export function absentKindsIn(view: ToolsHeld): HomeKind[] {
-  if (!view.manage.tools.length) return ['skills', 'mcp', 'agents', 'instructions', 'plugins'];
+  if (!view.skills.tools.length) return ['skills', 'mcp', 'agents', 'instructions', 'plugins'];
   const absent: HomeKind[] = [];
   if (!view.mcp.tools.length) absent.push('mcp');
   if (!view.agents.tools.length) absent.push('agents');
-  if (!view.manage.tools.some(takesPlugins)) absent.push('plugins');
+  if (!view.skills.tools.some(takesPlugins)) absent.push('plugins');
   return absent;
 }
 

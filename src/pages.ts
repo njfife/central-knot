@@ -18,7 +18,7 @@ export const previewReason = (reason?: string) => (reason ?? 'nothing is written
 /** Bands an empty page still needs: what the last action did, and why nothing can be written here. */
 const emptyBands = () => {
   const done = outcomeBand();
-  const access = state.home?.manage.access;
+  const access = state.home?.sync.access;
   const preview = access && !access.allowed ? h('div.band', { role: 'status' }, icon('lock', 14, 'tone-warning'), h('span.band-text', {}, `Preview only: ${previewReason(access.reason)}. You can look around; nothing is written.`)) : null;
   return done || preview ? h('div.bands', {}, done, preview) : null;
 };
@@ -119,7 +119,7 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof ic
     : edits ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${edits} waiting`, title: `${plural(edits, 'change')} waiting to sync` }
       : waitsForClaude ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${waitsForClaude} for Claude Code`, title: `${waitsForClaude} ${waitsForClaude === 1 ? 'waits' : 'wait'} for Write to Claude Code` }
         // Not said of a home another build syncs: whether it is in sync is that build's to say.
-        : managed && !(home?.manage.gate.state === 'stopped' && home.manage.gate.owner) ? { tone: 'tone-success', glyph: 'check' as const, text: 'All in sync', title: 'Every synced one is the same in every tool it syncs to' }
+        : managed && !(home?.sync.gate.state === 'stopped' && home.sync.gate.owner) ? { tone: 'tone-success', glyph: 'check' as const, text: 'All in sync', title: 'Every synced one is the same in every tool it syncs to' }
           : undefined;
   const status = !attention ? null : differs
     ? h(`button.kind-card-state.kind-card-link.${attention.tone}`, { type: 'button', id: `overview-${page}-differ`, title: attention.title, onclick: () => { showFiltered(page, 'attention'); showPage(page); } }, icon(attention.glyph, 13), attention.text)
@@ -175,20 +175,21 @@ afterLayout(settleToolCounts);
  */
 function nextStep(home: HomeView, nothingManaged: boolean): string {
   if (noTools()) return '';
-  if (!home.manage.skills.length && !home.mcp.servers.length && !home.agents.items.length) return ' Nothing found in this home yet.';
+  if (!home.skills.items.length && !home.mcp.servers.length && !home.agents.items.length) return ' Nothing found in this home yet.';
   if (homeTools().length === 1) return ' When a second tool is installed, or its folder appears here, Central Knot finds it on its own; then manage what you want the same in both.';
-  return nothingManaged && home.manage.access.allowed ? ' Open one below and turn on what you want the same in every tool.' : '';
+  return nothingManaged && home.sync.access.allowed ? ' Open one below and turn on what you want the same in every tool.' : '';
 }
 
 export function overviewPage() {
   const home = state.home;
   if (!home) return notRead();
   const differs = (fact: { managed: boolean; copies: Record<string, unknown>; separate?: boolean; off: string[] }) => !fact.separate && new Set(Object.entries(fact.copies).filter(([tool]) => !fact.off.includes(tool)).map(([, copy]) => (copy as { hash: string }).hash)).size > 1;
-  const pick = (list: typeof home.manage.skills): KindFact[] => list.map(fact => ({ managed: fact.managed, edited: fact.edited, differs: !fact.managed && differs(fact), copies: fact.copies }));
-  // An agent's copies need a choice only while it is found: one in Central Knot's library never asks (libraryrow.ts needsChoice).
-  const agentSource = kindSource(home, 'agents');
-  const agents: KindFact[] = agentSource.facts.map(fact => ({ managed: fact.managed, edited: fact.edited, copies: fact.copies,
-    differs: needsChoice(fact, agentSource.library?.[fact.key]) }));
+  const pick = (list: typeof home.mcp.servers): KindFact[] => list.map(fact => ({ managed: fact.managed, edited: fact.edited, differs: !fact.managed && differs(fact), copies: fact.copies }));
+  // A library item's copies need a choice only while it is found: one in Central Knot's library never asks (libraryrow.ts needsChoice).
+  const libraryFacts = (which: 'skills' | 'agents'): KindFact[] => {
+    const source = kindSource(home, which);
+    return source.facts.map(fact => ({ managed: fact.managed, edited: fact.edited, copies: fact.copies, differs: needsChoice(fact, source.library?.[fact.key]) }));
+  };
   // Kinds no tool here can hold have no card (app.ts absentKinds); they are named once, below.
   const absent = absentKinds();
   const empty = noTools();
@@ -203,15 +204,15 @@ export function overviewPage() {
         // The next step only where it can be taken: something to manage, and a home that can be written.
         nextStep(home, nothingManaged)),
       empty ? null : h('div.kind-cards', { 'data-count': String(heldKinds(home).length) },
-        kindCard('skills', 'wand-sparkles', pick(home.manage.skills), homeTools()),
+        kindCard('skills', 'wand-sparkles', libraryFacts('skills'), homeTools()),
         absent.includes('mcp') ? null : kindCard('mcp', 'plug', pick(home.mcp.servers), home.mcp.tools, home.mcp.claudePending.length),
-        absent.includes('agents') ? null : kindCard('agents', 'bot', agents, home.agents.tools)),
+        absent.includes('agents') ? null : kindCard('agents', 'bot', libraryFacts('agents'), home.agents.tools)),
       h('div.overview-more', {},
         absent.length && !empty ? h('p.overview-line', { id: 'overview-absent' }, icon('info', 14, 'tone-muted'), `No tool here holds ${orList(absent.map(kind => kindNames[kind]))}.`) : null,
-        !home.manage.access.allowed ? h('p.overview-line', {}, icon('lock', 14, 'tone-warning'), `Automatic sync is paused. Preview only: ${previewReason(home.manage.access.reason)}.`)
+        !home.sync.access.allowed ? h('p.overview-line', {}, icon('lock', 14, 'tone-warning'), `Automatic sync is paused. Preview only: ${previewReason(home.sync.access.reason)}.`)
         // Another build syncs this home: said here, with the way to take over.
-        : home.manage.gate.state === 'stopped' && home.manage.gate.owner ? h('p.overview-line', { id: 'overview-other-owner' }, icon('circle-alert', 14, 'tone-warning'), `${otherOwnerSaid(home.manage.gate.owner)} `,
-          button({ variant: 'link', size: 'micro', label: 'Take over syncing', id: 'overview-take-over', disabled: !!state.busy, attrs: { title: takeOverTitle(home.manage.gate.owner) }, onclick: () => void takeOverSync() }))
+        : home.sync.gate.state === 'stopped' && home.sync.gate.owner ? h('p.overview-line', { id: 'overview-other-owner' }, icon('circle-alert', 14, 'tone-warning'), `${otherOwnerSaid(home.sync.gate.owner)} `,
+          button({ variant: 'link', size: 'micro', label: 'Take over syncing', id: 'overview-take-over', disabled: !!state.busy, attrs: { title: takeOverTitle(home.sync.gate.owner) }, onclick: () => void takeOverSync() }))
         // Green only once something syncs; before that, sync is on and waiting, in the status bar's grey.
         : home.syncOn && nothingManaged ? null : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingManaged ? 'tone-muted' : 'tone-success') : 'tone-warning'),
           ...(home.syncOn ? [nothingManaged ? 'Automatic sync is on. Once something is on, edits spread between tools in seconds, with Undo.' : 'Automatic sync is on: edits spread between tools in seconds, with a notice and Undo.']

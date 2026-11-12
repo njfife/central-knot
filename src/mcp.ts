@@ -11,7 +11,7 @@ import { configRoot, harnesses, openCodeSettings } from './harnesses.ts';
 import { mcpTools } from './presence.ts';
 import { FORMAT_VERSION, newRecord, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readJsonc, readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
-import { appendHistory, goneFacts, readHistory, replaceHistory } from './manage.ts';
+import { appendHistory, readHistory, replaceHistory } from './history.ts';
 import { undoChoice } from './choiceundo.ts';
 import { mcpSwitchFacts, readMcpSwitches, setMcpDisabled } from './mcpswitch.ts';
 import { throughPlugins } from './plugins.ts';
@@ -364,6 +364,34 @@ function claudeWaits(item: McpRecordItem | undefined, slot: Partial<Record<Harne
   if (!here) return true;
   // Behind (not edited there): it holds what was recorded, but not the synced content.
   return here.hash !== item.hash && copy?.hash === here.hash;
+}
+
+/**
+ * MCP servers no tool has a copy of any more that History can still put back: for each, its latest deletion or removal, while
+ * that is not undone. They show switched Off until History lets them go. `keyOf` reads an event's server name (undefined:
+ * another kind's event); `here` are the names some tool has now.
+ */
+function goneFacts(events: HistoryEvent[], here: Set<string>, keyOf: (event: HistoryEvent) => string | undefined): SkillFacts[] {
+  const removals = new Map<string, HistoryEvent[]>();
+  for (const event of events) {
+    const key = keyOf(event);
+    if (key !== undefined && !here.has(key) && (event.kind === 'deleted' || event.kind === 'removed')) removals.set(key, [...(removals.get(key) ?? []), event]);
+  }
+  return [...removals].filter(([, list]) => !list.at(-1)!.undoneBy).map(([key, list]) => {
+    const latest = list.at(-1)!;
+    // A deletion puts it back in every tool it synced to. A removal puts it back where it took it from; each other tool's own
+    // latest removal, still open, puts that tool's copy back too.
+    const covered = new Set(latest.losers.map(loser => loser.tool));
+    const also: string[] = [];
+    if (latest.kind === 'removed') for (const older of list.slice(0, -1).reverse()) {
+      if (older.kind !== 'removed') break;
+      const more = older.losers.some(loser => !covered.has(loser.tool));
+      for (const loser of older.losers) covered.add(loser.tool);
+      if (more && !older.undoneBy) also.push(older.id);
+    }
+    return { key, name: latest.item, description: '', copies: {}, extra: [], managed: false, off: [], cannot: {}, choiceBlocks: {},
+      gone: { history: latest.id, at: latest.at, kind: latest.kind as 'deleted' | 'removed', ...(also.length ? { also } : {}) } };
+  });
 }
 
 /**

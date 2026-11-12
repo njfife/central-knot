@@ -8,7 +8,7 @@
 // - No profile turns back on everything profiles turned off, and holds nothing.
 import { plural } from './model.ts';
 import { andList, problemText, toolName } from './words.ts';
-import type { HarnessId, HistoryEvent, ManageView, McpView, Profile, ProfileFlip, ProfilesView, SkillFacts } from './types.ts';
+import type { HarnessId, HistoryEvent, LibraryView, McpView, Profile, ProfileFlip, ProfilesView, SkillFacts, ToolCopy } from './types.ts';
 
 /** What every screen calls having no profile in use. */
 export const NO_PROFILE = 'No profile';
@@ -101,9 +101,30 @@ function toItem(kind: ItemKind, facts: SkillFacts): SwitchItem {
   return { id: itemId(kind, facts.key), kind, key: facts.key, name: facts.name, description: facts.description, tools, blocked, blockedFile };
 }
 
-/** Every standalone skill and MCP server the home has. A server that belongs to an app (ChatGPT desktop's own) is left out. */
-export function switchItems(manage: Pick<ManageView, 'skills'>, mcp: Pick<McpView, 'servers'>): SwitchItem[] {
-  return [...manage.skills.map(facts => toItem('skill', facts)), ...mcp.servers.filter(facts => !facts.held).map(facts => toItem('mcp', facts))];
+/**
+ * What profiles read of skills, from the Skills page's view (skills.ts skillsView): each skill, in Central Knot or found, with
+ * the tools that load it from a folder (its own copy, or one it has another way: types.ts LibraryFacts `loads`) and how each
+ * tool's switch names that copy, in the shape profiles were written for (types.ts SkillFacts). A tool that has it through a
+ * plugin is the plugin's, and a skill that is Off is in no tool, so neither has a switch here.
+ */
+export function profileSkills(view: Pick<LibraryView, 'items'>): SkillFacts[] {
+  return view.items.map(row => {
+    const loads = row.loads ?? {}, tools = Object.keys(loads) as HarnessId[];
+    const copies = Object.fromEntries(tools.map(tool => {
+      const at = loads[tool]!;
+      return [tool, { hash: '', directory: at.skillFile.replace(/[\\/]SKILL\.md$/, ''), rootLabel: '', lines: 0, modified: '', summary: '', writable: true, folder: at.folder, name: at.name } satisfies ToolCopy];
+    }));
+    return { key: row.key, name: row.name, description: row.description, copies, extra: [], managed: row.on, off: row.except, cannot: {}, choiceBlocks: {},
+      disabled: tools.filter(tool => loads[tool]!.off), ...(row.switchProblem ? { switchProblem: row.switchProblem } : {}) };
+  });
+}
+
+/**
+ * Every standalone skill and MCP server the home has (`skills`: profileSkills). A server that belongs to an app (ChatGPT
+ * desktop's own) is left out.
+ */
+export function switchItems(skills: SkillFacts[], mcp: Pick<McpView, 'servers'>): SwitchItem[] {
+  return [...skills.map(facts => toItem('skill', facts)), ...mcp.servers.filter(facts => !facts.held).map(facts => toItem('mcp', facts))];
 }
 
 /** A profile's items that the home has now (it may name skills or servers since removed): what it would keep on. */

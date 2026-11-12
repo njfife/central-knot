@@ -11,9 +11,9 @@ import { agentText, readAgents } from '../src/agentfiles.ts';
 import { agentVersion, agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
 import { convertAgentToSkill } from '../src/agentskill.ts';
 import { rowClicks, harnessIs, placeOf, libraryWords, sentences } from '../src/libraryrow.ts';
-import { agentSentence } from '../src/historyactions.ts';
+import { librarySentence } from '../src/historyactions.ts';
 import { listed, sourceWords } from '../src/library.ts';
-import { readHistory } from '../src/manage.ts';
+import { readHistory } from '../src/history.ts';
 import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
 import { readTomlTables } from '../src/textedit.ts';
 import { chooseTools } from '../src/toolchoice.ts';
@@ -310,7 +310,7 @@ for (const state of ['On', 'Off', 'On, with a click on another agent first'] as 
     assert.equal(await readOf(box, 'codex-cli'), state === 'Off' ? undefined : codexBefore);
     const kept = (await historyOf(box)).filter(event => event.kind === 'kept-edit');
     assert.deepEqual(kept.map(event => [event.cause, event.losers.map(loser => loser.tool)]), [['tool-back', ['codex-cli']]]);
-    assert.equal(agentSentence(kept[0], tools)?.text, 'Codex’s copy changed while Central Knot didn’t manage Codex; it gave way to the current version and is kept as a version.');
+    assert.equal(librarySentence(kept[0], libraryWords.agents, tools)?.text, 'Codex’s copy changed while Central Knot didn’t manage Codex; it gave way to the current version and is kept as a version.');
     const use = (await historyActions(box)).find(action => action.event.id === kept[0].id && action.label === 'Use codex-cli’s');
     assert.ok(use, 'History offers that copy back');
     await use.run();
@@ -731,7 +731,7 @@ inBox('Delete removes the agent from every harness and leaves a tombstone: a sta
   await deleteIt(box);
   await write(box, 'claude-cli', claudeAgent('You review code.\nA new reviewer.\n'));
   await (await historyActions(box)).find(action => action.label === 'Restore')!.run();
-  assert.equal(agentSentence((await historyOf(box)).at(-1)!, tools)?.text,
+  assert.equal(librarySentence((await historyOf(box)).at(-1)!, libraryWords.agents, tools)?.text,
     'Restored to Central Knot and put back in all 3 tools. Your newer reviewer from Claude Code is kept as a version.');
   assert.ok((await versions(box)).includes('A new reviewer. (was in Claude Code)'));
 });
@@ -985,7 +985,7 @@ inBox('Every click is one History entry, and its Undo is that entry’s own acti
 test('Convert to skill: an agent becomes a Pi skill once, with where it came from recorded; it is never placed back in the agent’s tool', async () => {
   const box = await sandbox();
   try {
-    const { manageView, applyChanges } = await import('../src/manage.ts');
+    const { skillsView, applySkills } = await import('../src/skills.ts');
     const { discover } = await import('../src/discovery.ts');
     await mkdir(join(box.home, '.pi/agent'), { recursive: true });
     await write(box, 'claude-cli', claudeAgent('You review code.\n', 'model: opus\n'));
@@ -994,8 +994,8 @@ test('Convert to skill: an agent becomes a Pi skill once, with where it came fro
     assert.equal((await convertAgentToSkill(context, withPi, 'reviewer')).stopped, undefined);
     assert.match(await readFile(join(box.home, '.pi/agent/skills/reviewer/SKILL.md'), 'utf8'), /^---\nname: "reviewer"\ndescription: "Reviews code"\n---\n\nYou review code\.\n$/);
     assert.match((await convertAgentToSkill(context, withPi, 'reviewer')).stopped ?? '', /already has a skill/);
-    await applyChanges({ ...context, settleMs: 0 }, [{ key: 'reviewer', managed: true, off: [] }]);
-    const facts = (await manageView(context)).skills.find(item => item.key === 'reviewer')!;
+    await applySkills({ ...context, settleMs: 0 }, withPi, [{ key: 'reviewer', managed: true, off: [] }]);
+    const facts = (await skillsView(context, withPi)).items.find(item => item.key === 'reviewer')!;
     assert.match(facts.cannot['claude-cli'] ?? '', /Converted from Claude Code’s agent/);
     assert.ok(facts.converted?.losses.some(loss => /model/.test(loss)));
     assert.equal(await readOf(box, 'claude-cli'), claudeAgent('You review code.\n', 'model: opus\n'), 'the agent is unchanged');

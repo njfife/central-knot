@@ -515,6 +515,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .switch[aria-checked="mixed"] { background: var(--switch-mixed); }
 .switch[aria-checked="mixed"] .switch-knob { transform: translateX(7px); }
 .switch[aria-checked="mixed"] .switch-knob::after { content: ""; position: absolute; left: 3px; right: 3px; top: calc(50% - 1px); height: 2px; border-radius: 1px; background: #8b8b95; }
+/* On in some tools only (kept out of others by the person): on, its track striped, so it never reads as on everywhere nor as halfway. */
+.switch.switch-partial[aria-checked="true"] { background: repeating-linear-gradient(135deg, var(--switch-on) 0 4px, color-mix(in oklab, var(--switch-on) 52%, var(--switch-off)) 4px 7px); }
 
 /* A cell says what that tool has: green synced, blue pending (dashed), amber differing or waiting, striped can't. */
 .cell-button, .legend-cell { position: relative; display: grid; place-items: center; width: 30px; height: 26px; border-radius: 7px; border: 1px solid var(--cell-line); background: transparent; color: var(--ink-faint); }

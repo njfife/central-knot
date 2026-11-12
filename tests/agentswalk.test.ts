@@ -27,7 +27,7 @@ import { join } from 'node:path';
 import { agentHash, agentText, parseAgent } from '../src/agentfiles.ts';
 import { rowClicks, harnessIs, needsChoice, placeOf } from '../src/libraryrow.ts';
 import { applyAgents } from '../src/agents.ts';
-import { pruneHistory, readHistory } from '../src/manage.ts';
+import { pruneHistory, readHistory } from '../src/history.ts';
 import { wantedIn } from '../src/library.ts';
 import { DAY_MS } from '../src/model.ts';
 import type { ShareContext } from '../src/share.ts';

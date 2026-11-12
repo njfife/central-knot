@@ -11,7 +11,7 @@ import { agentHash, parseAgent } from '../src/agentfiles.ts';
 import { agentVersion, agentsView } from '../src/agents.ts';
 import { placeOf } from '../src/libraryrow.ts';
 import { sourceWords } from '../src/library.ts';
-import { readHistory } from '../src/manage.ts';
+import { readHistory } from '../src/history.ts';
 import { sha256, type ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
 import { claudeAgent, claudeOwn, codexAgent, fileOf, filesOf, historyActions, itemOf, pass, readOf, sandbox, tools, turnOn, type Box, type Tool } from './agentclicks.ts';

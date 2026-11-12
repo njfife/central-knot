@@ -6,9 +6,9 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { rowClicks, needsChoice, type LibraryRow } from '../src/libraryrow.ts';
 import { agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
-import { agentAction, versionChoices } from '../src/historyactions.ts';
+import { libraryAction, versionChoices } from '../src/historyactions.ts';
 import type { LibraryItem } from '../src/library.ts';
-import { readHistory } from '../src/manage.ts';
+import { readHistory } from '../src/history.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { Change, HarnessId, LibraryFacts, PassResult } from '../src/types.ts';
 
@@ -66,7 +66,7 @@ export const deleteIt = async (box: Box, context = box.context) => { const { row
 export async function historyActions(box: Box, context = box.context) {
   const { item } = await seen(box, context);
   return (await historyOf(box, context)).flatMap(event => {
-    const main = agentAction(event, item);
+    const main = libraryAction(event, item);
     const run = (version?: string) => () => restoreAgent(context, box.tools, event.id, version);
     return [...(main ? [{ event, label: main.label, run: run() }] : []), ...versionChoices(event, item).map(choice => ({ event, label: `Use ${choice.tool}’s`, run: run(choice.hash) }))];
   });

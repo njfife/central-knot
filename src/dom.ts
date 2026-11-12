@@ -88,8 +88,8 @@ export const lockAttrs = (why: string | undefined) => (why ? { title: why, 'aria
  * An on/off switch; its label is also its tooltip. `mixed`: neither, drawn in between (its knob in the middle); a click turns
  * it on. `attrs` adds to or replaces its attributes (Settings ties it to its row's hint).
  */
-export function toggle({ on, mixed = false, label, onchange, disabled = false, id, attrs = {} }: { on: boolean; mixed?: boolean; label: string; onchange: (on: boolean) => void; disabled?: boolean; id?: string; attrs?: Props }) {
-  return h('button.switch', { type: 'button', id, role: 'switch', 'aria-checked': mixed ? 'mixed' : String(on), 'aria-label': label, title: label, disabled, ...attrs, onclick: (event: Event) => { event.stopPropagation(); onchange(mixed || !on); } },
+export function toggle({ on, mixed = false, partial = false, label, onchange, disabled = false, id, attrs = {} }: { on: boolean; mixed?: boolean; partial?: boolean; label: string; onchange: (on: boolean) => void; disabled?: boolean; id?: string; attrs?: Props }) {
+  return h(`button.switch${partial ? '.switch-partial' : ''}`, { type: 'button', id, role: 'switch', 'aria-checked': mixed ? 'mixed' : String(on), 'aria-label': label, title: label, disabled, ...attrs, onclick: (event: Event) => { event.stopPropagation(); onchange(mixed || !on); } },
     h('span.switch-knob'));
 }
 

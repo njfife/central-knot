@@ -1,4 +1,4 @@
-import type { HarnessId, HistoryDays, HomeView, ManageView, Snapshot } from './types.ts';
+import type { HarnessId, HistoryDays, HomeView, Snapshot, SyncView } from './types.ts';
 
 const monograms: Record<HarnessId, string> = { 'claude-cli': 'Cc', 'copilot-cli': 'Cp', 'codex-cli': 'Cx', 'pi-cli': 'Pi', 'opencode-cli': 'Oc' };
 export { toolName } from './words.ts';
@@ -8,9 +8,9 @@ export const fullToolName = (snapshot: Snapshot) => `${snapshot.harnessName} ${s
 export const clockTime = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 /** A path's last part: the file's own name. */
 export const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
-/** Skills a catch-up copied where they were missing, leaving out those a sync notice already tells (`told`: their names). */
-export const caughtUpNames = (manage: ManageView, told: Set<string>) =>
-  [...new Set(manage.caughtUp.filter(result => result.outcome === 'written' && !told.has(result.item)).map(result => result.item))];
+/** Items the background passes wrote where they were missing, leaving out those a sync notice already tells (`told`: their names). */
+export const caughtUpNames = (sync: SyncView, told: Set<string>) =>
+  [...new Set(sync.caughtUp.filter(result => result.outcome === 'written' && !told.has(result.item)).map(result => result.item))];
 /**
  * A view the page set aside (it arrived while an action ran) gave main's pending notices and caught-up results to the page,
  * so they go into the next view taken of the same home rather than being lost. Each is told once.
@@ -20,7 +20,8 @@ export function withSetAside(aside: HomeView | undefined, view: HomeView): HomeV
   const once = <T>(earlier: T[], later: T[]) => [...new Map([...earlier, ...later].map(entry => [JSON.stringify(entry), entry])).values()];
   return {
     ...view,
-    manage: { ...view.manage, notices: once(aside.manage.notices, view.manage.notices), caughtUp: once(aside.manage.caughtUp, view.manage.caughtUp) },
+    sync: { ...view.sync, caughtUp: once(aside.sync.caughtUp, view.sync.caughtUp) },
+    skills: { ...view.skills, notices: once(aside.skills.notices, view.skills.notices) },
     mcp: { ...view.mcp, notices: once(aside.mcp.notices, view.mcp.notices) },
     agents: { ...view.agents, notices: once(aside.agents.notices, view.agents.notices) },
   };

@@ -17,7 +17,7 @@ import { constants } from 'node:fs';
 import { access } from 'node:fs/promises';
 import { agentHash, agentText, agentsFolder, changedFields, fileFor, isAgentTool, keyOf, nameProblem, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
 import { fileTextFor, keepOwn, openLibrary, readVersion, saveLibrary, storeVersion } from './agentstore.ts';
-import { agentAction } from './historyactions.ts';
+import { libraryAction } from './historyactions.ts';
 import { listed, plan } from './library.ts';
 import { libraryWords } from './libraryrow.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
@@ -130,7 +130,7 @@ export const agentKind: Kind<SharedAgent, AgentEntry, AgentDisk> = {
     try { await removeFileChecked(here.file, here.text); return 'removed'; }
     catch (error) { return errorCode(error) === 'CK_CHANGED' ? 'changed' : 'failed'; }
   },
-  historyAction: agentAction,
+  historyAction: libraryAction,
 };
 
 /**
@@ -267,7 +267,7 @@ async function rowFacts(look: AgentLook, key: string, item: LibraryItem | undefi
     // Why it can't take the agent (cannotTake): a held copy says it; so does a copy the plan writes over or removes, and a
     // harness a found agent would go to once taken in.
     // A found agent is asked about as taking it in would leave it: On everywhere.
-    const why = copy?.is === 'held' ? copy.why : cannotTake(look.disk, look.managed, item ?? { key, name, on: true, except: [] }, tool, !!slot[tool]);
+    const why = copy?.is === 'held' ? copy.why : cannotTake(look.disk, look.managed, item ?? { key, name, on: true, except: [], applied: {} }, tool, !!slot[tool]);
     if (why && (copy?.is === 'held' || touched || (!copiesNow && !slot[tool]))) cannot[tool] = why;
     if (copiesNow) continue;
     // A found agent: what can't be seen there. One deleted from Central Knot whose copy there is still owed a removal says so.

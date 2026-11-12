@@ -77,12 +77,18 @@ export type SyncGate =
 
 export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** A refusal made before anything was changed, the record included: the click did nothing. */ unchanged?: true; /** A take-over step: a link replaced by a real copy, a tool given its own copy, or the shared copy removed (or, in its Undo, each put back). */ tookOver?: 'link' | 'placed' | 'shared'; /** With `tookOver` 'shared': the folder the copy was removed from. */ folder?: string; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true; /** `held`: waits for Write to Claude Code (MCP-02), as it should (not a failure). */ waits?: true; }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; /** The home as a whole: its tools, access, owner and what the background did. */ sync: SyncView; /** Skills: those in Central Knot's library (library.ts) and those found in a tool. */ skills: LibraryView; /** MCP servers across tools. */ mcp: McpView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
   refresh(): Promise<HomeView | null>;
-  apply(changes: Change[], resume: boolean, home: string): Promise<ApplyResult>;
+  applySkills(changes: Change[], resume: boolean, home: string): Promise<PassResult>;
+  /** Clears a tool's own switch that turns a skill off there (skills.ts clearSwitch). */
+  clearSkillSwitch(key: string, tool: HarnessId, home: string): Promise<PassResult>;
+  /** Makes a copy outside Central Knot's own (a link, a copy in ~/.agents/skills) Central Knot's (skills.ts takeOver). */
+  takeOverSkill(key: string, tool: HarnessId, home: string): Promise<PassResult>;
+  /** One version of a skill: its SKILL.md and the names of its other files (skills.ts skillVersion). */
+  skillVersion(key: string, hash: string): Promise<{ skill: string; files: string[] } | null>;
   history(): Promise<HistoryList>;
   applyMcp(changes: Change[], resume: boolean, home: string): Promise<McpResult>;
   writeClaude(names: string[], home: string): Promise<McpResult>;
@@ -136,7 +142,6 @@ export interface DesktopApi {
   onUpdatesChanged(callback: (view: UpdateView) => void): void;
   /** `choice`: which overwritten edit to put back, for an event with several. */
   restore(eventId: string, resume: boolean, home: string, choice?: string): Promise<ApplyResult>;
-  deleteEverywhere(key: string, resume: boolean, home: string): Promise<ApplyResult>;
   /** Each tool's own instruction file (INS-01). */
   instructions(readId?: number): Promise<InstructionFile[] | null>;
   /** One version of an agent as Central Knot's library holds it: its name, description and prompt; null when it is no longer kept. */
@@ -310,6 +315,11 @@ export interface SkillFacts {
   outsideBack?: true;
   /** No tool has a copy any more: it was deleted or removed, and History can put it back (this event) while it keeps it. */
   gone?: GoneItem;
+  /** A library kind's row (LibraryFacts, as itemrow.ts kindSource gives the page): how a tool has it another way, and which copies Take over can make Central Knot's. */
+  anotherWay?: LibraryFacts['anotherWay'];
+  takeOver?: LibraryFacts['takeOver'];
+  /** Skills: a tool whose own switch turns it off there, said as its mark says it ("switched off in Codex’s own settings"); itemrow.ts kindSource words it. */
+  switched?: Partial<Record<HarnessId, string>>;
 }
 
 /** An item with no copy left, from the History event that took the last one: when, and the event that puts it back. */
@@ -327,18 +337,17 @@ export interface SwitchTarget { folder: string; name: string; /** Absolute path 
  */
 export interface SwitchRecord { tool: HarnessId; disabled: boolean; target?: SwitchTarget; before?: string }
 
-export interface ManageView {
+/**
+ * What is true of the open home as a whole, which every page reads: the tools Central Knot manages, where each keeps its
+ * skills, whether Central Knot may write here and who syncs it, and what the background passes did since the page last read.
+ */
+export interface SyncView {
   tools: HarnessId[];
-  /** Where each tool's new copies go, and which other tools read that folder too. */
-  writes: Partial<Record<HarnessId, { to: string; alsoReadBy: string[]; /** Why Central Knot does not write there, if it does not. */ blocked?: string }>>;
-  skills: SkillFacts[];
-  /** Skills no tool has any more that History can put back (manage.ts goneFacts): shown Off. */
-  gone?: SkillFacts[];
-  /** What sync did on its own during the read that produced this view. */
-  notices: SyncNotice[];
+  /** Where each tool's skills folder is, which other apps read it too, and why Central Knot does not write there, if it does not. */
+  writes: Partial<Record<HarnessId, { to: string; alsoReadBy: string[]; blocked?: string }>>;
   access: WriteAccess;
   gate: SyncGate;
-  /** What the automatic catch-up just did, if anything. */
+  /** What the background passes did since the page last read: copies written or removed, and what failed. */
   caughtUp: DestinationResult[];
 }
 
@@ -758,6 +767,22 @@ export interface LibraryFacts {
   versionChanges?: VersionChange[];
   /** Found, not in the library: its copies differ, so the switch asks which one every harness takes. */
   differs?: boolean;
+  /**
+   * Skills: how a tool has it another way (a link, a folder Central Knot doesn't own, another tool's folder it reads, a plugin),
+   * as its line says it, On or Off (skills.ts anotherWay). Nothing of Central Knot's goes there while it does.
+   */
+  anotherWay?: Partial<Record<HarnessId, string>>;
+  /** Skills: a copy outside Central Knot's own that Take over can make Central Knot's, by tool: a link in its folder, or a copy in ~/.agents/skills. */
+  takeOver?: Partial<Record<HarnessId, { kind: 'link' | 'shared'; path: string }>>;
+  /**
+   * Skills: the copy each tool loads (its own, or one it has another way; not a plugin's), as its own switch names it, and
+   * whether that switch turns it off there (`off`): the copy stays, and the tool doesn't load it. Read at each look.
+   */
+  loads?: Partial<Record<HarnessId, SwitchTarget & { off: boolean }>>;
+  /** Skills: why a tool's switch can't be read (its settings file), for the tools in `loads`. */
+  switchProblem?: Partial<Record<HarnessId, SwitchProblem>>;
+  /** Skills: made by Convert to skill from an agent: which, from which tool's, and what an agent had that a skill doesn't. */
+  converted?: { agent: string; origin: HarnessId; losses: string[] };
 }
 
 // ---------- MCP servers ----------

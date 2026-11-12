@@ -23,12 +23,13 @@ import { agentsForRepo, agentsView, applyAgents } from './agents.ts';
 import { parseSkill } from './discovery.ts';
 import { harnesses } from './harnesses.ts';
 import { wantedIn } from './library.ts';
-import { appendHistory, applyChanges, deleteEverywhere, displace, manageView, readHistory, replaceCopy, replaceHistory } from './manage.ts';
+import { appendHistory, readHistory, replaceHistory } from './history.ts';
+import { applySkills, skillsForRepo, skillsView } from './skills.ts';
 import { applyMcp, cannotHold, editEntry, fromJson, jsonEntry, keep, mcpView, readMcpRecord, readTool, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { gitEnv, gitFailure, runGit, whyGitFailed, whyPushFailed } from './plugins.ts';
 import { PRODUCT } from './values.ts';
 import { mcpTools } from './presence.ts';
-import { copyTree, errorCode, exists, gateRefusal, itemKey, managedNow, notCopied, sha256 as sha, syncGate, placeCopy, plainError, readRecord, readTree, removeTree, saveRecord, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { copyTree, errorCode, exists, gateRefusal, itemKey, managedNow, notCopied, sha256 as sha, syncGate, plainError, readTree, removeTree, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext, type Tree } from './share.ts';
 import { undoBase } from './instructions.ts';
 import type { BaseUndo, Change, DestinationResult, HarnessId, HistoryEvent, McpResult, RepoChange, RepoCommit, RepoKind, RepoResult, RepoView, SkillFacts, Snapshot } from './types.ts';
 
@@ -313,34 +314,39 @@ async function clearLayout(dir: string, folder: string, isLayout: (entry: Dirent
 const writtenPath = (dir: string) => join(dir, '.git', 'ck-written-skills.json');
 const forgetWritten = (dir: string) => rm(writtenPath(dir), { force: true });
 
-/** Writes each Managed skill's standing copy under skills/ (unchanged folders left as written); returns the ones that can't go. */
-async function writeSkills(dir: string, skills: SkillFacts[]): Promise<Unsent> {
-  const unsent: Unsent = new Map();
+/**
+ * Writes every skill in Central Knot's library, On or Off here, under skills/ (unchanged folders left as written): its current
+ * version's folder, or an edit made in a tool and not taken in yet, as a click's own pass would take it in (skills.ts
+ * skillsForRepo). Being Off here never takes a skill out of the repo: only Delete from Central Knot does. A skill a tool has
+ * that isn't in Central Knot is not sent, and not removed from the repo either.
+ */
+async function writeSkills(context: ShareContext, dir: string, tools: HarnessId[]): Promise<Written> {
+  const written: Written = { unsent: new Map(), unmanaged: new Set() };
   // Missing or damaged, it only means every skill is written again.
   const before: Record<string, string> = await readFile(writtenPath(dir), 'utf8').then(JSON.parse).catch(() => ({}));
-  const sources = new Map<string, { directory: string; hash: string }>();
-  for (const facts of skills.filter(skill => skill.managed)) {
-    const source = sourceTool(facts);
-    if ('why' in source) { if (source.why === UNSETTLED) markUnsendable(unsent, facts.key, 'skill', facts.name, UNSETTLED); continue; }
-    const copy = facts.copies[source.tool];
-    if (!copy) continue;
-    if (facts.held) { markUnsendable(unsent, facts.key, 'skill', copy.folder, facts.held); continue; }
-    sources.set(copy.folder, { directory: copy.directory, hash: copy.hash });
+  const sources = new Map<string, string>();
+  for (const { item, folder } of await skillsForRepo(context, tools)) {
+    if (folder) sources.set(item.name, folder);
+    else markUnsendable(written.unsent, item.key, 'skill', item.name, 'Its current version is no longer in Central Knot’s store.');
   }
-  const unchanged = new Set([...sources].filter(([folder, { hash }]) => before[folder] === hash).map(([folder]) => folder));
+  const trees = new Map<string, Tree>();
+  for (const [name, folder] of sources) trees.set(name, await readTree(folder));
+  const unchanged = new Set([...sources.keys()].filter(name => before[name] === trees.get(name)!.hash));
   await clearLayout(dir, 'skills', entry => entry.isDirectory(), unchanged);
   const after: Record<string, string> = {};
-  for (const [folder, { directory, hash }] of sources) {
-    if (unchanged.has(folder) && await exists(join(dir, 'skills', folder))) { after[folder] = hash; continue; }
-    const tree = await readTree(directory);
-    if (tree.held) { markUnsendable(unsent, itemKey(folder), 'skill', folder, tree.held); continue; }
-    await removeTree(join(dir, 'skills', folder));
+  for (const [name, folder] of sources) {
+    const tree = trees.get(name)!;
+    if (unchanged.has(name) && await exists(join(dir, 'skills', name))) { after[name] = tree.hash; continue; }
+    if (tree.held) { markUnsendable(written.unsent, itemKey(name), 'skill', name, tree.held); continue; }
+    await removeTree(join(dir, 'skills', name));
     await mkdir(join(dir, 'skills'), { recursive: true });
-    await copyTree(directory, join(dir, 'skills', folder), tree);
-    after[folder] = tree.hash;
+    await copyTree(folder, join(dir, 'skills', name), tree);
+    after[name] = tree.hash;
   }
   await writeDurably(writtenPath(dir), JSON.stringify(after));
-  return unsent;
+  const inLibrary = new Set((await skillsForRepo(context, tools)).map(entry => entry.item.key));
+  for (const found of (await skillsView(context, tools)).items) if (!inLibrary.has(found.key)) written.unmanaged.add(found.key);
+  return written;
 }
 
 /** What a writer reports: the Managed items here that can't go in the repo, and the keys of items here that aren't Managed. */
@@ -412,18 +418,13 @@ async function writeAgents(context: ShareContext, dir: string, tools: HarnessId[
 
 
 /**
- * Skills and MCP servers sync still records as Managed that weren't written: not found by discovery (a SKILL.md that won't parse,
- * a folder away) or with no copy that could be read. Never offered as removed: absence is only a deletion once sync has recorded
- * one. (Agents are written from Central Knot's library, which holds every one of them: writeAgents.)
+ * MCP servers sync still records as Managed that weren't written: not found (a folder away) or with no copy that could be read.
+ * Never offered as removed: absence is only a deletion once sync has recorded one. (Skills and agents are written from Central
+ * Knot's library, which holds every one of them: writeSkills, writeAgents.)
  */
 async function holdUnseen(context: ShareContext, dir: string, known: Unsent): Promise<Unsent> {
   const unsent: Unsent = new Map();
   const written = (path: string) => exists(join(dir, path));
-  // Skill folders by key: the folder's case is the source tool's, which may differ from the record's copies.
-  const skillKeys = new Set((await readdir(join(dir, 'skills')).catch(() => [] as string[])).map(itemKey));
-  for (const [key, item] of Object.entries((await readRecord(context.home)).record?.items ?? {})) {
-    if (item.state === 'shared' && !item.deleted && !known.has(key) && !skillKeys.has(key)) markUnsendable(unsent, key, 'skill', item.name, UNSEEN);
-  }
   for (const [name, item] of Object.entries((await readMcpRecord(context.home)).items)) {
     if (item.state === 'shared' && !item.deleted && !known.has(serverKey(name)) && !(await written(`mcp/${toFile(name)}.json`))) markUnsendable(unsent, serverKey(name), 'mcp', name, UNSEEN);
   }
@@ -435,18 +436,19 @@ async function holdUnseen(context: ShareContext, dir: string, known: Unsent): Pr
  * holds there, and returns what can't go and what isn't Managed (as each writer does), and the tools here.
  */
 async function writeManaged(context: ShareContext, dir: string, baseId: string | undefined, base?: BaseInstructions): Promise<Written & { tools: HarnessId[] }> {
-  const view = await manageView(context);
-  const servers = await writeServers(context, dir, view.tools, baseId);
-  const agents = await writeAgents(context, dir, view.tools, baseId);
-  const unsent: Unsent = new Map([...await writeSkills(dir, view.skills), ...servers.unsent, ...agents.unsent]);
+  const tools = await managedNow(context, await context.read());
+  const skills = await writeSkills(context, dir, tools);
+  const servers = await writeServers(context, dir, tools, baseId);
+  const agents = await writeAgents(context, dir, tools, baseId);
+  const unsent: Unsent = new Map([...skills.unsent, ...servers.unsent, ...agents.unsent]);
   for (const [key, held] of await holdUnseen(context, dir, unsent)) unsent.set(key, held);
-  const unmanaged = new Set([...view.skills.filter(skill => !skill.managed).map(skill => skill.key), ...servers.unmanaged, ...agents.unmanaged]);
+  const unmanaged = new Set([...skills.unmanaged, ...servers.unmanaged, ...agents.unmanaged]);
   if (base) {
     await rm(join(dir, 'instructions', 'base.md'), { force: true });
     const text = await base.read();
     if (text?.trim()) await writeScratch(join(dir, 'instructions', 'base.md'), text);
   }
-  return { unsent, unmanaged, tools: view.tools };
+  return { unsent, unmanaged, tools };
 }
 
 /** Stages the working tree as it is and returns its tree. Everything is taken, even what the repo's .gitignore names: content moves as-is. */
@@ -713,40 +715,20 @@ const pullEdit = (change: RepoChange, tool: HarnessId, before: string, after: st
   ({ id: randomUUID(), at: new Date().toISOString(), key: change.key, item: change.name, kind: 'edit', winner: { tool, hash: after }, losers: [], previous: before, orderProved: true, via: 'repo', settingsFile });
 
 /**
- * Puts the repo's version of one skill into one tool, then makes that copy the one every tool uses, as choosing a copy does: History
- * keeps each copy it replaced, and Undo puts them back. Removed in the repo: deleted everywhere it synced, with Restore in History.
+ * Skills: the repo's folder becomes the skill's current version in Central Knot's library, "pulled from the Git repo", and a
+ * pass applies it wherever the skill is On here (librarypass.ts pull); being On or Off here doesn't change. Removed in the
+ * repo: deleted from Central Knot, with Restore in History.
  */
-async function pullSkill(context: ShareContext, dir: string, change: RepoChange, item: SideItem | undefined, wrote: Wrote): Promise<DestinationResult[]> {
-  const view = await manageView(context);
-  const facts = view.skills.find(skill => skill.key === change.key);
-  if (!item) {
-    if (!facts?.managed) return [];
-    const done = await deleteEverywhere(context, change.key);
-    return done.stopped ? [notIn(change.name, done.stopped)] : done.results;
-  }
-  const source = join(dir, 'skills', item.folder!);
-  const tree = await readTree(source);
+async function pullSkill(context: ShareContext, dir: string, change: RepoChange, item: SideItem | undefined): Promise<DestinationResult[]> {
+  const tools = await managedNow(context, await context.read());
+  const only = new Set([change.key]);
+  const ours = (result: DestinationResult) => itemKey(result.item) === change.key;
+  const outcome = (done: { stopped?: string; results: DestinationResult[] }) => (done.stopped ? [notIn(change.name, done.stopped)] : done.results.filter(ours));
+  if (!item) return outcome(await applySkills(context, tools, [], { only, pulled: new Map([[change.key, { removed: true }]]) }));
+  const folder = join(dir, 'skills', item.folder!);
+  const tree = await readTree(folder);
   if (tree.held) return [notIn(change.name, tree.held)];
-  const writer = [...view.tools].sort(byPreference).find(tool => !facts?.off.includes(tool) && !view.writes[tool]?.blocked && (!facts?.copies[tool] || facts.copies[tool]!.writable));
-  if (!writer) return [notIn(change.name, 'No tool here can take it: each is turned off for it or can’t be written.')];
-  const copy = facts?.copies[writer];
-  try {
-    if (copy && copy.hash !== tree.hash) {
-      // On sync's record before the copy is replaced, as sync does itself: the next pass names it in History, and nothing prunes it.
-      const { record } = await readRecord(context.home);
-      const recorded = record?.items[change.key];
-      if (record && recorded) { displace(recorded, writer, copy.hash); await saveRecord(context.home, record); }
-      await replaceCopy(context, change.key, source, copy.directory, copy.hash);
-      // A skill sync never managed has no record to name it, so the pull's own event does, before the pass could prune it.
-      if (!recorded) await appendHistory(context, [pullEdit(change, writer, copy.hash, tree.hash)]);
-    } else if (!copy) await placeCopy(context, source, { harness: writer, directory: join(view.writes[writer]!.to, item.folder!), limits: [] }, tree);
-    // History accounts for this write when sync can't: a skill no tool had (no facts), or this tool's own copy replaced (copy).
-    if (!facts || copy) wrote({ tool: writer, before: copy?.hash, after: tree.hash, pending: facts?.edited?.includes(writer) });
-  } catch (error) {
-    return [writeProblem(change, writer, 'copy', error)];
-  }
-  const done = await applyChanges(context, [{ key: change.key, managed: true, off: facts?.off ?? [], use: writer, useHash: tree.hash }], false, { only: new Set([change.key]) });
-  return passOutcome(done, change, () => true, writer, async () => (await manageView(context)).skills.some(skill => skill.key === change.key && skill.managed));
+  return outcome(await applySkills(context, tools, [], { only, pulled: new Map([[change.key, { name: item.folder!, folder, hash: tree.hash }]]) }));
 }
 
 /** MCP servers: written to one tool other than Claude Code (which waits for Write now, MCP-02), then spread by sync. */
@@ -904,22 +886,17 @@ async function tellHistory(context: ShareContext, made: Set<string>, firstWrites
   const history = (await readHistory(context)).map(event => (made.has(event.id) ? { ...event, via: 'repo' as const } : event));
   for (const write of firstWrites) {
     const mine = history.filter(event => made.has(event.id) && event.key === write.change.key);
-    if (write.before === undefined) await accountForNewItem(context, history, mine, write);
+    if (write.before === undefined) accountForNewItem(history, mine, write);
     else if (write.before !== write.after || write.settingsOnly) accountForReplacedCopy(history, mine, write as FirstWrite & { before: string });
   }
   await replaceHistory(context, history);
 }
 
-/** An item no tool here had: Pull's first copy joins its 'added' event (made if sync added no other copy), and a skill's record says Central Knot made it. */
-async function accountForNewItem(context: ShareContext, history: HistoryEvent[], mine: HistoryEvent[], { change, tool, after }: FirstWrite) {
+/** An MCP server no tool here had: Pull's first copy joins its 'added' event (made if sync added no other copy). */
+function accountForNewItem(history: HistoryEvent[], mine: HistoryEvent[], { change, tool, after }: FirstWrite) {
   const added = mine.find(event => event.kind === 'added');
   if (added) added.losers.unshift({ tool, hash: after });
   else history.push({ id: randomUUID(), at: new Date().toISOString(), key: change.key, item: change.name, kind: 'added', losers: [{ tool, hash: after }], orderProved: true, via: 'repo' });
-  // A skill's Undo add removes only copies its record says Central Knot made; this one was.
-  if (change.kind !== 'skill') return;
-  const { record } = await readRecord(context.home);
-  const copy = record?.items[change.key]?.copies.find(entry => entry.harness === tool);
-  if (record && copy) { copy.created = true; await saveRecord(context.home, record); }
 }
 
 /**
@@ -1012,7 +989,7 @@ export function pullRepo(context: ShareContext, options: RepoOptions = {}): Prom
         try {
           // A deletion that waits for Automatic sync (classify says which) leaves every copy, and the row says why.
           outcome = change.pull === 'waits' ? [notIn(change.name, DELETION_WAITS)]
-            : change.kind === 'skill' ? await pullSkill(context, dir, change, item, wrote)
+            : change.kind === 'skill' ? await pullSkill(context, dir, change, item)
             : change.kind === 'mcp' ? await pullServer(context, dir, change, item, wrote)
             : change.kind === 'agent' ? await pullAgent(context, dir, change, item, wrote)
             : await pullBase(context, dir, change, item, options.base);

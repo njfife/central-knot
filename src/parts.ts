@@ -15,11 +15,12 @@ import { agentsOn } from './agents.ts';
 import { PLUGIN_ONLY, type PluginFiles } from './catalogdetail.ts';
 import { loadProblems, parseSkill } from './discovery.ts';
 import { configRoot, harnesses, writeRoot } from './harnesses.ts';
-import { removeChecked, replaceCopy, rootProblem } from './manage.ts';
+import { removeFolder, rootProblem, swapFolder } from './skillfiles.ts';
+import { skillsOn } from './skills.ts';
 import { canonical, cannotHold, editEntry, fromJson, keep as keepServer, kept as keptServer, readMcpRecord, readTool, serverHash, type NeutralServer } from './mcp.ts';
 import { partsSummary, partsTools, partWords, samePart } from './pluginstatus.ts';
 import {
-  changedWhileSyncing, errorCode, exists, importRevision, sha256, itemKey, partsRecordPath, placeCopy, readParts, readRecord, readTree, removeFileChecked, storeDirectory, storedRevision, targetFor, writeAccess, writeDurably, writeFileChecked, type ShareContext,
+  changedWhileSyncing, errorCode, exists, importRevision, sha256, itemKey, partsRecordPath, placeCopy, readParts, readTree, removeFileChecked, storeDirectory, storedRevision, targetFor, writeAccess, writeDurably, writeFileChecked, type ShareContext,
 } from './share.ts';
 import type { ActionReport, HarnessId, PartItem, PartKind, PartPlan, PartRef, PartsInstall, PartsPick } from './types.ts';
 import { sameSource } from './plugins.ts';
@@ -269,7 +270,7 @@ async function namesInUse(context: ShareContext, tool: HarnessId) {
       if (!entry.isSymbolicLink() || !(await leadsNowhere(join(root, entry.name)))) skillNames.add(entry.name.toLowerCase());
     }
   }
-  const sync = (await readRecord(context.home)).record;
+  const skills = await skillsOn(context);
   const mcpRecord = await readMcpRecord(context.home);
   const agents = await agentsOn(context);
   return {
@@ -277,7 +278,7 @@ async function namesInUse(context: ShareContext, tool: HarnessId) {
     skillRootProblem: await rootProblem(context, tool),
     skillNamed: (name: string) => skillNames.has(name.toLowerCase()),
     managed(item: Pick<PartItem, 'kind' | 'name'>): boolean {
-      if (item.kind === 'skill') return sync?.items[itemKey(item.name)]?.state === 'shared';
+      if (item.kind === 'skill') return skills.has(itemKey(item.name));
       if (item.kind === 'mcp') return mcpRecord.items[item.name]?.state === 'shared';
       return agents.has(keyOf(item.name));
     },
@@ -322,7 +323,12 @@ async function put(context: ShareContext, tool: HarnessId, item: PartItem, repla
     const source = storedRevision(context, itemKey(item.name), item.hash);
     if (!(await exists(source))) throw new Error('its kept copy is no longer in Central Knot’s store');
     const target = skillDir(context, tool, item.name);
-    if (replacing) { await replaceCopy(context, itemKey(item.name), source, target, replacing.seen); return; }
+    if (replacing) {
+      // What is there is kept in this store first, for the parts' Undo, then replaced while it is still as read.
+      await importRevision(context, itemKey(item.name), target, await readTree(target));
+      await swapFolder(context, source, target, replacing.seen);
+      return;
+    }
     await mkdir(join(target, '..'), { recursive: true });
     await placeCopy(context, source, { harness: tool, directory: target, limits: [] }, await readTree(source));
     return;
@@ -344,7 +350,7 @@ async function put(context: ShareContext, tool: HarnessId, item: PartItem, repla
 
 /** Takes one part out, only while it still is what these parts put there (`was`, as onDisk read it). */
 async function take(context: ShareContext, tool: HarnessId, item: PartItem, was: There) {
-  if (item.kind === 'skill') { await removeChecked(context, skillDir(context, tool, item.name), was.seen); return; }
+  if (item.kind === 'skill') { await removeFolder(context, skillDir(context, tool, item.name), was.seen); return; }
   if (item.kind === 'mcp') { const problem = await editEntry(context, tool, item.name, was.neutralHash, undefined); if (problem) throw new Error(problem); return; }
   const file = agentFile(context, tool, item.name);
   const text = await readFile(file, 'utf8');

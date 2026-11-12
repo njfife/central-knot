@@ -1,22 +1,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { whyPushFailed } from '../src/plugins.ts';
 import { classify, connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, sourceTool, undoPulledBase, type BaseInstructions, type SideItem } from '../src/gitrepo.ts';
-import { applyChanges, manageView, readHistory, restoreFromHistory } from '../src/manage.ts';
+import { readHistory } from '../src/history.ts';
 import { applyMcp } from '../src/mcp.ts';
 import { applyBase, baseView, instructionsView, repoBase } from '../src/instructions.ts';
 import type { ShareContext } from '../src/share.ts';
-import { tools, skillText, git, world, skill, live, rows, edit } from './gitrepo-world.ts';
+import { tools, skillText, git, world, skill, live, rows, edit, applySkillsIn, skillRows, restoreIn } from './gitrepo-world.ts';
 
 test('Edits cross both ways; when both sides changed, the repo’s edit wins on Pull and Undo in History brings this computer’s back', async () => {
   const box = await world();
   try {
     const first = await box.home('first');
     await skill(first, '.claude/skills', 'review');
-    await applyChanges(first, [{ key: 'review', managed: true, off: [] }]);
+    await applySkillsIn(first, [{ key: 'review', managed: true, off: [] }]);
     await connectRepo(first, box.remote, '');
     await pushRepo(first);
     const second = await box.home('second');
@@ -24,7 +24,7 @@ test('Edits cross both ways; when both sides changed, the repo’s edit wins on 
     await pullRepo(second);
 
     await writeFile(join(second.home, '.claude/skills/review/SKILL.md'), skillText('review', 'From the second computer.'));
-    await applyChanges(second, []);
+    await applySkillsIn(second, []);
     assert.deepEqual(rows(live(await repoView(second)).outgoing), ['review:changed']);
     assert.equal((await pushRepo(second)).stopped, undefined);
 
@@ -37,16 +37,20 @@ test('Edits cross both ways; when both sides changed, the repo’s edit wins on 
 
     assert.equal((await pullRepo(first, { syncOn: false })).stopped, undefined);
     for (const root of ['.claude/skills', '.copilot/skills']) assert.match(await readFile(join(first.home, root, 'review/SKILL.md'), 'utf8'), /From the second computer/);
-    const pulls = (await readHistory(first)).filter(event => event.via === 'repo' && event.key === 'review' && Date.parse(event.at) > Date.now() - 60_000);
-    assert.equal(pulls.length, 1, 'one pull, one History row');
-    const pulled = pulls[0];
-    assert.equal((await restoreFromHistory(first, pulled.id)).stopped, undefined);
+    // The pull's own entry, and the edit here that no pass had taken in: a version first, which its entry makes current again.
+    const recent = (await readHistory(first)).filter(event => event.key === 'review' && Date.parse(event.at) > Date.now() - 60_000);
+    assert.deepEqual(recent.slice(-2).map(event => [event.kind, event.cause]), [['edit', 'pulled'], ['kept-edit', undefined]]);
+    const kept = recent.at(-1)!;
+    assert.equal((await restoreIn(first, kept.id, kept.losers[0].hash)).stopped, undefined);
     for (const root of ['.claude/skills', '.copilot/skills']) assert.match(await readFile(join(first.home, root, 'review/SKILL.md'), 'utf8'), /From the first computer/);
-    assert.deepEqual(rows(live(await repoView(first)).outgoing), ['review:changed'], 'the undone pull is a change here, ready to push');
-    // With Sync off, two tools edited differently: which is the skill isn't settled, so it neither goes out nor counts as removed.
+    assert.deepEqual(rows(live(await repoView(first)).outgoing), ['review:changed'], 'the edit made current again is a change here, ready to push');
+    // With Sync off, two tools edited differently: Push sends what a click's pass would take in, the latest edit.
     await writeFile(join(first.home, '.claude/skills/review/SKILL.md'), skillText('review', 'One way.'));
+    for (const path of ['', '/SKILL.md']) await utimes(join(first.home, '.claude/skills/review') + path, new Date(), new Date(Date.now() - 60_000));
     await writeFile(join(first.home, '.copilot/skills/review/SKILL.md'), skillText('review', 'Another way.'));
-    assert.deepEqual(live(await repoView(first)).outgoing.map(row => [row.name, row.held]), [['review', 'Its copies here differ and haven’t synced yet. Turn on Automatic sync, or use Sync once on its page, then click Refresh.']]);
+    assert.deepEqual(live(await repoView(first)).outgoing.map(row => [row.name, row.held]), [['review', undefined]]);
+    await pushRepo(first);
+    assert.match(git(box.remote, 'show', 'main:skills/review/SKILL.md'), /Another way\./);
   } finally { await box.cleanup(); }
 });
 
@@ -55,29 +59,34 @@ test('A deletion in the repo deletes the skill here, with Restore; an edit here 
   try {
     const first = await box.home('first');
     for (const name of ['gone', 'edited']) await skill(first, '.claude/skills', name);
-    await applyChanges(first, ['gone', 'edited'].map(key => ({ key, managed: true, off: [] })));
+    await applySkillsIn(first, ['gone', 'edited'].map(key => ({ key, managed: true, off: [] })));
     await connectRepo(first, box.remote, '');
     await pushRepo(first);
     const second = await box.home('second');
     await connectRepo(second, box.remote, '');
     await pullRepo(second);
-    for (const name of ['gone', 'edited']) await rm(join(second.home, '.claude/skills', name), { recursive: true });
-    await applyChanges({ ...second, settleMs: 0 }, []);
+    // A folder deleted by hand turns the skill Off here, and Central Knot keeps it: the repo keeps it too.
+    await rm(join(second.home, '.claude/skills', 'gone'), { recursive: true });
+    await applySkillsIn({ ...second, settleMs: 0 });
+    assert.equal((await skillRows(second)).find(item => item.key === 'gone')?.on, false);
+    assert.deepEqual(rows(live(await repoView(second)).outgoing), []);
+    // Only Delete from Central Knot takes a skill out of the repo.
+    await applySkillsIn(second, ['gone', 'edited'].map(key => ({ key, managed: key === 'edited', off: [], deleted: true })));
     assert.deepEqual(rows(live(await repoView(second)).outgoing), ['edited:removed', 'gone:removed']);
     await pushRepo(second);
 
     await writeFile(join(first.home, '.claude/skills/edited/SKILL.md'), skillText('edited', 'Still wanted.'));
-    await applyChanges(first, []);
+    await applySkillsIn(first, []);
     const view = live(await repoView(first, { check: true }));
     assert.deepEqual(rows(view.incoming), ['gone:removed']);
     assert.deepEqual(view.outgoing.map(row => [row.name, row.keptHere]), [['edited', true]]);
     await pullRepo(first);
-    const skills = (await manageView(first)).skills;
+    const skills = (await skillRows(first));
     assert.deepEqual(skills.map(item => item.key), ['edited']);
     const deleted = (await readHistory(first)).find(event => event.key === 'gone' && event.kind === 'deleted')!;
     assert.equal(deleted.via, 'repo');
-    assert.equal((await restoreFromHistory(first, deleted.id)).stopped, undefined);
-    assert.ok((await manageView(first)).skills.some(item => item.key === 'gone'));
+    assert.equal((await restoreIn(first, deleted.id)).stopped, undefined);
+    assert.ok((await skillRows(first)).some(item => item.key === 'gone'));
   } finally { await box.cleanup(); }
 });
 
@@ -108,7 +117,7 @@ test('Only the layout is Central Knot’s: other files stay, a file the repo ign
     // A Managed skill of the same name as the repo's held one, with a file the repo's doesn't have: it never leaks into the repo's.
     await skill(here, '.claude/skills', 'linked');
     await writeFile(join(here.home, '.claude/skills/linked/extra.md'), 'only here\n');
-    await applyChanges(here, [{ key: 'mine', managed: true, off: [] }, { key: 'linked', managed: true, off: [] }]);
+    await applySkillsIn(here, [{ key: 'mine', managed: true, off: [] }, { key: 'linked', managed: true, off: [] }]);
     let view = live((await connectRepo(here, box.remote, 'main')).view);
     assert.deepEqual(view.incoming.map(row => [row.name, !!row.held]), [['notes', false], ['linked', true], ['tidy', false], ['vendored', true]]);
     await pullRepo(here);
@@ -200,7 +209,7 @@ test('Over HTTP: a read-only repo connects and pulls, and refuses a push in plai
     const url = await new Promise<string>(resolve => server.stdout.on('data', chunk => resolve(String(chunk).trim().split('\n')[0])));
     const first = await box.home('first');
     await skill(first, '.claude/skills', 'review');
-    await applyChanges(first, [{ key: 'review', managed: true, off: [] }]);
+    await applySkillsIn(first, [{ key: 'review', managed: true, off: [] }]);
     await connectRepo(first, box.remote, '');
     await pushRepo(first);
 
@@ -211,7 +220,7 @@ test('Over HTTP: a read-only repo connects and pulls, and refuses a push in plai
     assert.equal((await connectRepo(reader, `${url}/config.git`, 'main')).stopped, undefined);
     await pullRepo(reader);
     await writeFile(join(reader.home, '.claude/skills/review/SKILL.md'), skillText('review', 'Local only.'));
-    await applyChanges(reader, []);
+    await applySkillsIn(reader, []);
     assert.match((await pushRepo(reader)).stopped ?? '', /read|protected/);
     assert.deepEqual(rows(live(await repoView(reader)).outgoing), ['review:changed'], 'a refused push changes nothing here');
     const gone = await disconnectRepo(reader);

@@ -1,21 +1,24 @@
-// History's entries about agents, in one place: what each says (agentSentence), what it still offers (agentAction,
-// versionChoices), and what its row shows once its action was used (doneWords). Read by History's page (the row and its
-// buttons), by app.ts (what is said after a click), by librarypass.ts restore (the click an action runs, through agents.ts restoreAgent) and by the tests.
-// Pure: no files, no DOM. The entries of skills and MCP servers are still historypage.ts's own.
+// History's entries about items in Central Knot's library (agents and skills), in one place: whose they are (libraryEntry),
+// what each says (librarySentence), what it still offers (libraryAction, versionChoices), and what its row shows once its
+// action was used (doneWords). Read by History's page (the row and its buttons), by app.ts (what is said after a click), by
+// librarypass.ts restore (the click an action runs, through each kind's Kind.historyAction) and by the tests. Pure: no
+// files, no DOM. The entries of MCP servers, profiles and instructions are still historypage.ts's own.
 //
-// Every action is a click the Agents page could send as well (types.ts Change), decided from the entry and the agent as the
+// Every action is a click the item's page could send as well (types.ts Change), decided from the entry and the item as the
 // library holds it now (library.ts LibraryItem). So an action is offered exactly while it would change something, and it is
-// always safe to click: nothing has to be worked out about what happened since the entry was made.
+// always safe to click: nothing has to be worked out about what happened since the entry was made. An entry from before an
+// item was on the library (a skill's Remove, Disable or take-over by the earlier engine) offers only what can still be said
+// as one of these clicks; otherwise it shows as past, with no action.
 //
 //   entry (HistoryEvent.kind, `cause`)       action                 offered while
-//   off: the switch, or a copy deleted       Turn on                the agent is Off
+//   off: the switch, or a copy deleted       Turn on                the item is Off
 //     by hand (`winner`: where)
-//   off in one harness (`only`)              Turn on in <harness>   the agent is On and kept out of that harness
-//   on: the switch, a found agent taken      Turn off               the agent is On
+//   off in one harness (`only`)              Turn on in <harness>   the item is On and kept out of that harness
+//   on: the switch, a found item taken       Turn off               the item is On
 //     in (`winner`: where found), or an
-//     agent Pull brought
-//   on in one harness (`only`)               Turn off in <harness>  the agent is On and in that harness
-//   deleted                                  Restore                the agent is deleted
+//     item Pull brought
+//   on in one harness (`only`)               Turn off in <harness>  the item is On and in that harness
+//   deleted                                  Restore                the item is deleted
 //   a content change: edit, conflict,        Undo; once later       the version from before it (`previous`) is not the
 //     current, and any entry from before     changes came, "Make    current one
 //     the library that names `previous`      the version before
@@ -25,19 +28,27 @@
 //     or a copy a tool managed again held):
 //     copies that gave way
 //
-// One entry is not here: a Pull that changed only Claude Code's own settings of an agent (`settingsFile`) keeps its own Undo
-// (gitrepo.ts undoSettingsChange), since no version tells such a change apart.
-// To add an entry or an action: its kind (or its `cause`) in types.ts HistoryEvent, its sentence in agentSentence, its row in
-// agentAction, the entry librarypass.ts logItem makes for it, and its case in historypage.ts describe.
+// Two entries are not here: a Pull that changed only Claude Code's own settings of an agent (`settingsFile`) keeps its own Undo
+// (gitrepo.ts undoSettingsChange), since no version tells such a change apart; and a skill's tool switch cleared, or a copy
+// taken over (skills.ts clearSwitch, takeOver: `switched`, `took-over`), which have none.
+// To add an entry or an action: its kind (or its `cause`) in types.ts HistoryEvent, its sentence in librarySentence, its row
+// in libraryAction, the entry librarypass.ts logItem makes for it, and its case in historypage.ts describe.
 import type { IconName } from './icons.ts';
 import { sourceWords, type LibraryItem } from './library.ts';
-import { asItIs, versionClock } from './libraryrow.ts';
+import { asItIs, versionClock, type RowWords } from './libraryrow.ts';
 import type { Change, HarnessId, HistoryEvent } from './types.ts';
 import { andList, toolName, toolsPhrase } from './words.ts';
 
-/** Whether an entry is one of these: about an agent, and not a Pull's change to Claude Code's own settings alone. */
-export const isAgentEntry = (event: HistoryEvent) => event.key.startsWith('agent:') && !event.settingsFile;
-export const agentKeyOf = (event: HistoryEvent) => event.key.slice('agent:'.length);
+/**
+ * Whose a History entry is among the library's kinds, by the page's name for the kind (app.ts PageKind), with the item's key:
+ * an agent's is keyed `agent:<key>` (not a Pull's change to Claude Code's own settings alone, which is gitrepo.ts's); a skill's
+ * by its key alone, as before the library (no other kind's key is without a `kind:` prefix). Undefined for any other entry.
+ */
+export function libraryEntry(event: HistoryEvent): { kind: 'agents' | 'skills'; key: string } | undefined {
+  if (event.key.startsWith('agent:')) return event.settingsFile ? undefined : { kind: 'agents', key: event.key.slice('agent:'.length) };
+  if (!event.key || event.key.includes(':') || event.base || event.kind === 'profile') return undefined;
+  return { kind: 'skills', key: event.key };
+}
 
 /** Restore over an agent of the same name made since: what becomes of it, for Restore's result and its tooltip. */
 export function keptOver(name: string, tools: readonly string[]): string {
@@ -46,11 +57,12 @@ export function keptOver(name: string, tools: readonly string[]): string {
 }
 
 /**
- * What an agent's entry says happened, or undefined for a kind from before the library whose general sentence still holds
- * (historypage.ts describe). `homeTools`: the home's harnesses, so "all 3 tools" can be said. `item`: the agent now, to name
- * a version. `undid`: the entry is another's Undo (that one's `undoneBy` names it), so it reads as one.
+ * What a library item's entry says happened, in its kind's words (libraryrow.ts RowWords), or undefined for a kind from before
+ * the library whose general sentence still holds (historypage.ts describe). `homeTools`: the home's harnesses, so "all 3
+ * tools" can be said. `item`: the item now, to name a version. `undid`: the entry is another's Undo (that one's `undoneBy`
+ * names it), so it reads as one.
  */
-export function agentSentence(event: HistoryEvent, homeTools: string[], item?: LibraryItem, undid = false): { glyph: IconName; text: string } | undefined {
+export function librarySentence(event: HistoryEvent, words: RowWords, homeTools: string[], item?: LibraryItem, undid = false): { glyph: IconName; text: string } | undefined {
   const tools = toolsPhrase(event.losers.map(loser => loser.tool), homeTools);
   /** " and removed from Codex", or nothing when no harness was touched. */
   const also = (words: string) => (tools ? `${words} ${tools}` : '');
@@ -59,7 +71,7 @@ export function agentSentence(event: HistoryEvent, homeTools: string[], item?: L
   const pulled = event.cause === 'pulled', keeps = 'Central Knot keeps it.';
   switch (event.kind) {
     case 'on': {
-      if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}: its file there is back.` };
+      if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}: its ${words.copy} there is back.` };
       const said = {
         switch: { glyph: 'circle-check', text: `Turned on${also(': put in')}.` },
         found: { glyph: 'plus', text: `Found in ${from} and taken into Central Knot${also('; put in')}.` },
@@ -95,6 +107,20 @@ export function agentSentence(event: HistoryEvent, homeTools: string[], item?: L
       if (pulled && !event.previous) return { glyph: 'git-branch', text: 'Pulled from the Git repo: Claude Code’s own settings for it, which Claude Code gets when it has the agent.' };
       if (pulled) return { glyph: 'git-branch', text: `Pulled from the Git repo; that became the current version${tools ? `, in ${tools}` : ''}.` };
       return { glyph: 'pencil-line', text: `Edited in ${from}; that became the current version${tools ? `, in ${tools} too` : ''}.` };
+    case 'switched': {
+      // One that turned a tool's switch off is from before the library (Disable): the general sentence says it.
+      const cleared = event.switched?.filter(entry => !entry.disabled).map(entry => toolName(entry.tool)) ?? [];
+      if (event.switched?.some(entry => entry.disabled) || !cleared.length) return undefined;
+      return { glyph: 'circle-check', text: `${andList(cleared)}’s own switch for it was cleared: ${cleared.length > 1 ? 'they load' : `${cleared[0]} loads`} it again.` };
+    }
+    case 'took-over': {
+      // One with `tookOver` is from before the library (Replace with managed copies): the general sentence says it.
+      if (event.tookOver) return undefined;
+      const [copy] = event.losers;
+      if (!copy) return undefined;
+      const what = copy.linkTo !== undefined ? `the link in ${toolName(copy.tool)}’s skills folder (to ${copy.linkTo})` : `the copy at ${copy.path}`;
+      return { glyph: 'arrow-right-left', text: `Took over ${what}: ${toolName(copy.tool)} has Central Knot’s copy now, and that one is kept as a version.` };
+    }
     case 'kept-edit': {
       // One with a `winner` is from before the library (an edit kept over a deletion): the general sentence says it.
       if (event.winner) return undefined;
@@ -122,15 +148,15 @@ export function doneWords(event: HistoryEvent): string {
 
 /** An entry's action: the button's words, what it does (said before the click), and the click it sends. */
 export interface EntryAction { label: string; help: string; change: Change }
-/** Whether a content is a version of the agent that could be made current: one it has, other than the current one. */
+/** Whether a content is a version of the item that could be made current: one it has, other than the current one. */
 const isVersion = (item: LibraryItem, hash: string | undefined): hash is string =>
   !!hash && hash !== item.hash && item.versions.some(version => version.hash === hash);
 
 /**
- * The action `event` offers for the agent `item` now, if any (the table at the top). `version`: one of versionChoices
+ * The action `event` offers for the item `item` now, if any (the table at the top). `version`: one of versionChoices
  * instead of the entry's own action ("Use Codex’s").
  */
-export function agentAction(event: HistoryEvent, item: LibraryItem | undefined, version?: string): EntryAction | undefined {
+export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined, version?: string): EntryAction | undefined {
   if (!item || event.undoneBy) return undefined;
   const name = item.name, now = asItIs(item.key, item), everywhere = item.on ? ', in every tool it is on in' : '';
   if (event.kind === 'deleted') {
@@ -143,14 +169,14 @@ export function agentAction(event: HistoryEvent, item: LibraryItem | undefined, 
     return offered ? { label: 'Use it', help: `Make that copy’s version of ${name} the current one${everywhere}`, change: { ...now, version } } : undefined;
   }
   if (event.kind === 'off' || event.kind === 'on') return switchAction(event.kind === 'off', event.only, item);
-  // Copies an earlier engine added: there is no earlier version to go back to.
-  if (event.kind === 'added' || !isVersion(item, event.previous)) return undefined;
+  // Copies an earlier engine added, removed, switched or took over: there is no earlier version to go back to.
+  if (['added', 'removed', 'switched', 'took-over'].includes(event.kind) || !isVersion(item, event.previous)) return undefined;
   // Undo while what this entry made is still current; once later changes came, it says what it does instead.
   const latest = (event.version ?? event.winner?.hash) === item.hash;
   return { label: latest ? 'Undo' : 'Go back before this', help: `Make the version from before this change current again${everywhere}`, change: { ...now, version: event.previous } };
 }
 
-/** An Off entry's Turn on (`turnOn`), or an On entry's Turn off: for the whole agent, or (`only`) for one harness of an agent that is On. */
+/** An Off entry's Turn on (`turnOn`), or an On entry's Turn off: for the whole item, or (`only`) for one harness of an item that is On. */
 function switchAction(turnOn: boolean, only: HarnessId | undefined, item: LibraryItem): EntryAction | undefined {
   const name = item.name, now = asItIs(item.key, item);
   if (!only) {

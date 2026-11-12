@@ -1,6 +1,6 @@
-// Central Knot's library: the model every kind of item follows. Pure: no files, no DOM. Agents use it today (agents.ts);
-// skills and MCP servers still follow their own engines until they are moved onto it. A kind is carried by the pass in
-// librarypass.ts, whose `Kind` is the contract a kind implements; this file is only the model.
+// Central Knot's library: the model every kind of item follows. Pure: no files, no DOM. Agents (agents.ts) and skills
+// (skills.ts) use it today; MCP servers still follow their own engine until they are moved onto it. A kind is carried by the
+// pass in librarypass.ts, whose `Kind` is the contract a kind implements; this file is only the model.
 //
 // Central Knot holds each item itself, with its versions. A harness (Claude Code, Codex, …) is not where an item lives: it is
 // somewhere an item is applied. Five ideas, and nothing else, describe an item:
@@ -38,6 +38,9 @@
 //   either              held: it can't be given the item           nothing (its mark says why)
 //   either              held: it has the item another way          nothing of Central Knot's goes there, and A is let go: when
 //                                                                  the other way ends, L is written, never read as a deletion
+//   either              a copy of its own, and it has the item     as Off there: Central Knot's copy (A) is removed, so the
+//                       another way too                            item is never loaded twice (an edit in it taken in first);
+//                                                                  a copy with no A is left alone, and its line says both ways
 //
 // "H changed" is an edit made in that harness: it flows back into Central Knot whether the item is On or Off there. Of two
 // edits the latest wins: an edit made on the current version (L = A) always counts, one made where L had moved on as well
@@ -50,7 +53,12 @@
 // folder it can't write), or it has the item another way (`anotherWay`: through a plugin; for skills, OpenCode reading Claude
 // Code's folder while the item is wanted there, a link, or a copy in ~/.agents/skills that Central Knot doesn't own). Only the
 // second lets A go, since Central Knot's copy is not what the harness has. The kind answers (librarypass.ts Disk.held, told
-// where the item is wanted); tests/librarypass.test.ts has a reader on a toy kind.
+// where the item is wanted); tests/librarypass.test.ts has a reader on a toy kind. A harness can have the item another way
+// and hold a copy of its own as well (a copy in ~/.agents/skills beside one in its own folder): that copy is `present` with
+// `anotherWay` (the table's last row), and the harness is decided as one the item isn't wanted in (wantedHere).
+//
+// Other marks a harness's line can carry are a kind's own, worked out at each look from what it read and never stored, and
+// they change nothing a pass does: for skills, a tool's own switch that turns the skill off there (skills.ts switchMarks).
 //
 // A HARNESS MANAGED AGAIN (left out by the tool choice, or uninstalled, then back): the library wins there.
 //
@@ -182,8 +190,14 @@ export function sourceWords({ how, harness }: Source): string {
  * happens in a harness whose copy is `unseen` (it can't be seen for sure) or `held` (it can't be given the item; with
  * `anotherWay`, it has the item another way: the header says which is which), and `why` says it on the page.
  */
-export type HarnessCopy = { is: 'present'; hash: string; at?: number } | { is: 'absent' } | { is: 'unseen'; why: string }
+export type HarnessCopy = { is: 'present'; hash: string; at?: number; anotherWay?: string } | { is: 'absent' } | { is: 'unseen'; why: string }
   | { is: 'held'; why: string; anotherWay?: true };
+
+/**
+ * Whether the item should be in this harness's own folder: wanted there (wantedIn), and the harness doesn't have it another
+ * way as well as its own copy (`anotherWay` on a present copy: the table's last row), where its own copy is one too many.
+ */
+export const wantedHere = (wanted: boolean, copy: HarnessCopy) => wanted && !(copy.is === 'present' && copy.anotherWay);
 
 /**
  * The table's results, one per row. `forget`: nothing of Central Knot's is there any more (a removal owed where the copy is
@@ -199,7 +213,7 @@ export type Verdict = 'nothing' | 'write' | 'take-in' | 'latest-wins' | 'keep-th
 export function decide(wanted: boolean, current: string, copy: HarnessCopy, applied: string | undefined): Verdict {
   if (copy.is === 'held' && copy.anotherWay) return applied === undefined ? 'nothing' : 'forget';
   if (copy.is === 'unseen' || copy.is === 'held') return 'nothing';
-  if (!wanted) {
+  if (!wantedHere(wanted, copy)) {
     if (copy.is === 'absent') return applied === undefined ? 'nothing' : 'forget';
     if (applied === undefined) return 'found';
     if (copy.hash === applied || copy.hash === current) return 'remove';
@@ -250,7 +264,7 @@ export function plan(item: LibraryItem, copies: Copies): Plan {
   const made: Plan = { takeIn, turnedOffBy, keep: [], write: [], remove: [], forget: [], current: [], found: [] };
   const known = new Set(item.versions.map(version => version.hash));
   for (const harness of harnesses) {
-    const copy = copies[harness]!, does = verdict(after, harness), wanted = wantedIn(after, harness);
+    const copy = copies[harness]!, does = verdict(after, harness), wanted = wantedHere(wantedIn(after, harness), copy);
     const lost = does === 'take-in' || does === 'latest-wins';
     // A copy about to be written over or removed is kept first, unless the library has that content already.
     if (copy.is === 'present' && !known.has(copy.hash) && (lost || does === 'keep-then-write')) {
