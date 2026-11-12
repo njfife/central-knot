@@ -93,6 +93,9 @@ export function isLibraryItem(value: unknown): value is LibraryItem {
     && Array.isArray(item.except) && texts(item.applied) && texts(item.own) && (item.deleted === undefined || typeof item.deleted?.at === 'string');
 }
 
+/** Where the current version is in `versions`: the newest entry that holds the current content (an earlier entry may hold it too). */
+export const currentIndex = (item: Pick<LibraryItem, 'hash' | 'versions'>) => item.versions.findIndex(version => version.hash === item.hash);
+
 /** Whether the item should be in this harness: On, not deleted, and not kept out of it. */
 export const wantedIn = (item: Pick<LibraryItem, 'on' | 'deleted' | 'except'>, harness: HarnessId) => item.on && !item.deleted && !item.except.includes(harness);
 
@@ -188,7 +191,7 @@ export function plan(item: LibraryItem, copies: Copies): Plan {
  */
 function latestEdit(item: LibraryItem, copies: Copies, edited: HarnessId[]): HarnessId | undefined {
   const at = (harness: HarnessId) => (copies[harness] as { at: number }).at;
-  const currentSince = Date.parse(item.versions.find(version => version.hash === item.hash)?.at ?? '') || 0;
+  const currentSince = Date.parse(item.versions[currentIndex(item)]?.at ?? '') || 0;
   const candidates = edited.filter(harness => item.applied[harness] === item.hash || at(harness) > currentSince);
   return candidates.sort((first, second) => at(second) - at(first))[0];
 }

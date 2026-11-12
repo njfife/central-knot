@@ -36,12 +36,10 @@ export interface ItemRow {
   paths?: Partial<Record<Tool, string>>;
   /** For the compare view: one line per copy that differs. */
   versions?: Partial<Record<Tool, { lines: string; changed: string; text: string; /** When it was last changed. */ at?: string; /** Agents: the prompt. */ prompt?: string }>>;
-  /** Agents: the With limits label for each tool that lacks some of the origin's fields. */
-  limits?: Partial<Record<Tool, string>>;
-  oneWay?: { from: Tool; lost: string[] };
-  kept?: string[];
-  /** Agents: one-way tools edited or deleted there, no longer updated. */
-  stopped?: Tool[];
+  /** Agents: harnesses whose copy can't be seen for sure right now, and why. */
+  unseen?: Partial<Record<Tool, string>>;
+  /** Agents: each harness's own settings in its file, by name (its own part). */
+  ownFields?: Partial<Record<Tool, string[]>>;
   /** MCP: tools whose copy waits for an explicit write (Claude Code, Write now). */
   waits?: Tool[];
   /** Skills: tools whose copy is disabled with the tool's own switch (it stays there; the tool doesn't load it). */

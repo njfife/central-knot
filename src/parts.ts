@@ -10,7 +10,8 @@ import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, readlink, rm, stat, unlink } from 'node:fs/promises';
 import type { Stats } from 'node:fs';
 import { isAbsolute, join, sep } from 'node:path';
-import { agentText, fileFor, fromMarkdown, isAgentTool, keyOf, readAgentRecord, safeName } from './agents.ts';
+import { agentText, fileFor, fromMarkdown, isAgentTool, keyOf, safeName } from './agentfiles.ts';
+import { agentsOn } from './agents.ts';
 import { PLUGIN_ONLY, type PluginFiles } from './catalogdetail.ts';
 import { loadProblems, parseSkill } from './discovery.ts';
 import { configRoot, harnesses, writeRoot } from './harnesses.ts';
@@ -270,7 +271,7 @@ async function namesInUse(context: ShareContext, tool: HarnessId) {
   }
   const sync = (await readRecord(context.home)).record;
   const mcpRecord = await readMcpRecord(context.home);
-  const agentRecord = await readAgentRecord(context.home);
+  const agents = await agentsOn(context);
   return {
     /** Why this tool's own skills folder can't be written, if it can't (the Skills page's own rule). */
     skillRootProblem: await rootProblem(context, tool),
@@ -278,7 +279,7 @@ async function namesInUse(context: ShareContext, tool: HarnessId) {
     managed(item: Pick<PartItem, 'kind' | 'name'>): boolean {
       if (item.kind === 'skill') return sync?.items[itemKey(item.name)]?.state === 'shared';
       if (item.kind === 'mcp') return mcpRecord.items[item.name]?.state === 'shared';
-      return agentRecord.items[keyOf(item.name)]?.state === 'shared';
+      return agents.has(keyOf(item.name));
     },
   };
 }

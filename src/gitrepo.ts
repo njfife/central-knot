@@ -18,7 +18,8 @@ import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/p
 import type { Dirent } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
-import { agentHash, agentText, agentsView, applyAgents, fileFor, fromMarkdown, keepAgentVersion, keyOf, readAgentRecord, readAgents, safeName, type AgentEntry, type NeutralAgent } from './agents.ts';
+import { agentHash, agentText, fileFor, fromMarkdown, keyOf, readAgents, safeName, type AgentEntry, type NeutralAgent } from './agentfiles.ts';
+import { agentsOn, agentsView, applyAgents, keepAgentCopy } from './agents.ts';
 import { parseSkill } from './discovery.ts';
 import { harnesses } from './harnesses.ts';
 import { appendHistory, applyChanges, deleteEverywhere, displace, manageView, readHistory, replaceCopy, replaceHistory } from './manage.ts';
@@ -255,8 +256,8 @@ async function readSideOnce(dir: string, treeish: string, withBase: boolean): Pr
 
 /** Said when copies here differ and sync hasn't settled which is the item yet (Sync off, say): it waits rather than guess. */
 const UNSETTLED = 'Its copies here differ and haven’t synced yet. Turn on Automatic sync, or use Sync once on its page, then click Refresh.';
-/** Said of a Managed item none of whose copies here can stand for it: each is turned off for it, unreadable just now, or (an agent) one a tool gets one-way and was edited there. */
-const NO_STANDING_COPY = 'No copy here can stand for it just now: each is turned off for it, can’t be read, or was edited in a tool that gets it one-way.';
+/** Said of a Managed item none of whose copies here can stand for it: each is turned off for it, or unreadable just now. */
+const NO_STANDING_COPY = 'No copy here can stand for it just now: each is turned off for it or can’t be read.';
 /** Said of an item sync still manages but no tool here shows right now (unreadable, or its folder away). */
 const UNSEEN = 'No tool here shows it right now (unreadable, or its folder is away). If it was deleted, Push sends that once sync has recorded it.';
 /** Said of an MCP server only Claude Code could take here (its settings are written only with Write to Claude Code). */
@@ -280,14 +281,12 @@ const byPreference = (first: HarnessId, second: HarnessId) => mcpTools.indexOf(f
 
 /**
  * Which tool's copy stands for a Managed item here, among the tools it syncs to, or why none does: an edit waiting to spread when
- * there is exactly one (that is the newest content here), else the synced content. Preferred: a full copy over an agent's one-way
- * one (`limits`), then tool preference, then a tool not in `preferNot` (for an MCP server, Claude Code, whose entry may still be
- * waiting for Write now). Never an agent's one-way copy edited there (`stopped`: it no longer is the item). Edits waiting to spread
- * that disagree: `UNSETTLED`; no copy left to choose: `NO_STANDING_COPY`.
+ * there is exactly one (that is the newest content here), else the synced content. Preferred: by tool preference, then a tool not
+ * in `preferNot` (for an MCP server, Claude Code, whose entry may still be waiting for Write now). Edits waiting to spread that
+ * disagree: `UNSETTLED`; no copy left to choose: `NO_STANDING_COPY`.
  */
 export function sourceTool(facts: SkillFacts, preferNot: HarnessId[] = []): { tool: HarnessId } | { why: string } {
-  const tools = (Object.keys(facts.copies) as HarnessId[]).filter(tool => !facts.off.includes(tool) && !facts.stopped?.includes(tool))
-    .sort((first, second) => Number(!!facts.limits?.[first]) - Number(!!facts.limits?.[second]) || byPreference(first, second));
+  const tools = (Object.keys(facts.copies) as HarnessId[]).filter(tool => !facts.off.includes(tool)).sort(byPreference);
   const edited = tools.filter(tool => facts.edited?.includes(tool));
   if (new Set(edited.map(tool => facts.copies[tool]!.hash)).size > 1) return { why: UNSETTLED };
   const tool = edited[0] ?? tools.find(candidate => !preferNot.includes(candidate)) ?? tools[0];
@@ -426,8 +425,8 @@ async function holdUnseen(context: ShareContext, dir: string, known: Unsent): Pr
   }
   // Agent files by key too: the file name is the source tool's spelling, which may differ in case from the record's.
   const agentKeys = new Set((await readdir(join(dir, 'agents')).catch(() => [] as string[])).filter(file => file.endsWith('.md')).map(file => agentKey(fromFile(file.slice(0, -'.md'.length)))));
-  for (const [key, item] of Object.entries((await readAgentRecord(context.home)).items)) {
-    if (item.state === 'shared' && !item.deleted && !known.has(agentKey(item.name)) && !agentKeys.has(agentKey(item.name))) markUnsendable(unsent, agentKey(item.name), 'agent', item.name, UNSEEN);
+  for (const item of (await agentsOn(context)).values()) {
+    if (!known.has(agentKey(item.name)) && !agentKeys.has(agentKey(item.name))) markUnsendable(unsent, agentKey(item.name), 'agent', item.name, UNSEEN);
   }
   return unsent;
 }
@@ -776,49 +775,51 @@ async function pullServer(context: ShareContext, dir: string, change: RepoChange
     server ? async () => (await mcpView(context, tools)).servers.some(entry => entry.key === change.name && entry.managed) : undefined);
 }
 
-/** Agents: the repo holds Claude Code's format, so Claude Code takes it as written (with its own settings); others get it one-way. */
+/**
+ * Agents: the repo holds Claude Code's format. Its version is written into one harness here (Claude Code takes it as written,
+ * with its own settings), and the pass then takes it in as the agent's current version, "pulled from the Git repo", and applies
+ * it everywhere. Removed in the repo: deleted from Central Knot, with Restore in History.
+ */
 async function pullAgent(context: ShareContext, dir: string, change: RepoChange, item: SideItem | undefined, wrote: Wrote): Promise<DestinationResult[]> {
   const tools = await managedNow(context, await context.read());
-  const view = await agentsView(context, tools);
   const key = keyOf(change.name);
-  const facts = view.servers.find(agent => agent.key === key);
-  if (!item && !facts?.managed) return [];
-  // A deletion starts from a two-way copy: one a tool gets one-way (`limits`), or edited there (`stopped`), doesn't spread its deletion.
-  const deletesFrom = (tool: HarnessId) => !!facts?.copies[tool] && !facts.limits?.[tool] && !facts.stopped?.includes(tool);
-  const writer = agentTools.filter(tool => view.tools.includes(tool)).sort(byPreference).find(tool => !facts?.off.includes(tool) && (item ? true : deletesFrom(tool)));
-  if (!writer) return [notIn(change.name, item ? 'No tool here takes agents.' : 'No copy here can carry its deletion to the others: each is turned off for it, or is one a tool gets one-way. Delete it in each tool.')];
+  const only = new Set([key]);
+  const ours = (result: DestinationResult) => keyOf(result.item) === key;
+  let facts = (await agentsView(context, tools)).servers.find(agent => agent.key === key);
+  if (!item) {
+    if (!facts?.managed) return [];
+    return passOutcome(await applyAgents(context, tools, [{ key, managed: true, off: facts.off, deleted: true }], { only }), change, ours, tools[0]);
+  }
+  const writer = agentTools.filter(tool => tools.includes(tool)).sort(byPreference).find(tool => !facts?.off.includes(tool));
+  if (!writer) return [notIn(change.name, 'No tool here takes agents.')];
+  const text = await readFile(join(dir, item.paths[0]), 'utf8');
+  const agent = fromMarkdown(change.name, text);
+  if (!agent) return [notIn(change.name, item.problem ?? 'It could not be read.')];
+  // An agent a harness here has that isn't in Central Knot yet is taken in first, as it is, so what Pull replaces is a version.
+  if (facts && !facts.managed && Object.keys(facts.copies).length) {
+    const use = facts.copies[writer] ? writer : Object.keys(facts.copies)[0] as HarnessId;
+    const taken = await applyAgents(context, tools, [{ key, managed: true, off: facts.off, use, useHash: facts.copies[use]!.hash }], { only });
+    if (taken.stopped) return [notIn(change.name, taken.stopped)];
+    facts = (await agentsView(context, tools)).servers.find(entry => entry.key === key);
+  }
   const existing = (await readAgents(context, writer)).entries.find(entry => entry.key === key);
-  const text = item && await readFile(join(dir, item.paths[0]), 'utf8');
-  const agent = text === undefined ? undefined : fromMarkdown(change.name, text);
-  if (item && !agent) return [notIn(change.name, item.problem ?? 'It could not be read.')];
   try {
-    // Kept first, as sync keeps every file it removes, so Restore puts this tool's own file back (with its own settings).
-    if (!agent) { if (existing) { await keepAgentVersion(context, existing); await removeFileChecked(existing.file, existing.text); } }
-    else {
-      const next = writer === 'claude-cli' ? text! : agentText(writer, agent, existing?.text);
-      const file = existing?.file ?? fileFor(context, writer, change.name);
-      if (existing?.text !== next) {
-        // What this tool had is kept first, so Undo can put it back.
-        if (existing) await keepAgentVersion(context, existing);
-        await mkdir(dirname(file), { recursive: true });
-        await writeFileChecked(file, next, existing?.text);
-        // History accounts for this write when sync can't. An agent no tool had: Undo add matches the file's bytes. This tool's own
-        // agent replaced: Undo restores the kept version by the agent's identity, which is what its store is keyed by.
-        if (!facts) wrote({ tool: writer, after: sha(next) });
-        else if (existing) {
-          const settingsOnly = existing.hash === agentHash(agent) ? await keepSettingsFile(context, existing, next) : undefined;
-          wrote({ tool: writer, before: existing.hash, after: agentHash(agent), pending: facts.edited?.includes(writer), settingsOnly });
-        }
-      }
+    const next = writer === 'claude-cli' ? text : agentText(writer, agent, existing?.text);
+    const file = existing?.file ?? fileFor(context, writer, change.name);
+    if (existing?.text !== next) {
+      // What this harness had is a version first, so History can make it current again.
+      if (existing) await keepAgentCopy(context, existing);
+      await mkdir(dirname(file), { recursive: true });
+      await writeFileChecked(file, next, existing?.text);
+      // Only Claude Code's own settings changed: no version tells that apart, so this pull has its own entry, with its own Undo.
+      if (existing?.hash === agentHash(agent)) wrote({ tool: writer, before: existing.hash, after: existing.hash, settingsOnly: await keepSettingsFile(context, existing, next) });
     }
   } catch (error) {
     return [writeProblem(change, writer, 'file', error)];
   }
-  const changes: Change[] = agent ? [{ key, managed: true, off: facts?.off ?? [], use: writer, useHash: agentHash(agent) }] : [];
-  const done = await applyAgents(context, tools, changes, { only: agent ? new Set([key]) : undefined, decideNow: new Set([key]) });
+  const done = await applyAgents(context, tools, [{ key, managed: true, off: facts?.off ?? [], use: writer, useHash: agentHash(agent) }], { only, pulled: only });
   // By key: a tool may spell the agent's name with other capitals.
-  return passOutcome(done, change, result => keyOf(result.item) === key, writer,
-    agent ? async () => (await agentsView(context, tools)).servers.some(entry => entry.key === key && entry.managed) : undefined);
+  return passOutcome(done, change, ours, writer, async () => (await agentsView(context, tools)).servers.some(entry => entry.key === key && entry.managed));
 }
 
 /** Keeps a file whole in Central Knot's store under its own bytes, where nothing writes over it, and returns where. */

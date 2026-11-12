@@ -6,13 +6,20 @@ import { andList, toolName } from './words.ts';
 import { tookOverHistory } from './outsidewords.ts';
 import { changedProfile, flipSummary, NO_PROFILE, redoneSwitch } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
+import { agentAction, agentKeyOf, agentSentence, doneWords, isAgentEntry, versionChoices } from './historyactions.ts';
 import { button, emptyState, h, icon, rereadBand } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HistoryEvent } from './types.ts';
 
 const who = (tool?: string) => (tool ? toolName(tool) : 'Central Knot');
 
+/** The agent an entry is about, as Central Knot's library holds it now (deleted or not). */
+const agentOf = (event: HistoryEvent) => state.home?.agents.library?.[agentKeyOf(event)];
+
 function describe(event: HistoryEvent): { glyph: IconName; text: string; action?: string } {
+  // An agent's entry says it in the library's words (historyactions.ts); an older kind keeps the general sentence below.
+  const agent = isAgentEntry(event) ? agentSentence(event, state.home?.agents.tools ?? [], agentOf(event)) : undefined;
+  if (agent) return agent;
   const order = event.orderProved ? '' : ' Order not proved; the fixed tool order decided.';
   // A Pull's edit or deletion of the base instructions: said as the pull, undone or not.
   if (event.base) return pulledBase(event, event.base.list.tools.length ? touchedToolsPhrase(event.base.list.tools) : '');
@@ -41,6 +48,8 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
       return { glyph: 'circle-off', text: `${text.charAt(0).toUpperCase()}${text.slice(1)}, using ${one ? `${one}’s` : 'each tool’s'} own switch.`, action: 'Undo' };
     }
     case 'profile': return profileSwitch(event);
+    // Only an agent's entries have these kinds, and each was said above.
+    case 'on': case 'off': case 'current': return { glyph: 'check', text: '' };
     case 'removed': return { glyph: 'circle-minus', text: `Removed from ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}; Central Knot kept the ${event.losers.length === 1 ? 'copy' : 'copies'}.`, action: 'Restore' };
     case 'took-over': return { glyph: 'arrow-down-to-line', text: tookOverText(event, !!event.undoneBy), action: 'Undo' };
     case 'written': return { glyph: 'pencil-line', text: 'Write to Claude Code replaced Claude Code’s own entry with the synced one; Central Knot kept it.', action: 'Undo write' };
@@ -52,7 +61,8 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
     case 'restored': {
       // Name the change this undid, so Redo says what comes back.
       const undone = state.history.data?.find(other => other.undoneBy === event.id);
-      const named = (past: HistoryEvent) => ({ edit: `${who(past.winner?.tool)}’s edit`, conflict: `${who(past.winner?.tool)}’s winning edit`, deleted: 'the deletion', 'kept-edit': 'the kept edit', chosen: `your choice of ${who(past.winner?.tool)}’s copy`, restored: 'an undo', added: 'the copies it added', switched: 'the switch', removed: 'the removal' , profile: 'the profile switch', 'took-over': 'the take-over', written: 'the write' } as const)[past.kind];
+      const named = (past: HistoryEvent) => ({ edit: `${who(past.winner?.tool)}’s edit`, conflict: `${who(past.winner?.tool)}’s winning edit`, deleted: 'the deletion', 'kept-edit': 'the kept edit', chosen: `your choice of ${who(past.winner?.tool)}’s copy`, restored: 'an undo', added: 'the copies it added', switched: 'the switch', removed: 'the removal' , profile: 'the profile switch', 'took-over': 'the take-over', written: 'the write',
+        on: 'turning it on', off: 'turning it off', current: 'the version made current' } as const)[past.kind];
       const where = event.losers.length ? ` in ${touchedToolsPhrase([...event.losers.map(loser => loser.tool), ...(event.winner ? [event.winner.tool] : [])])}` : '';
       // Undoing an undo is a redo: say what came back, and offer to take it away again.
       if (undone?.kind === 'restored') {
@@ -141,6 +151,18 @@ const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'pro
   : action === 'Redo edit' || action === 'Delete again' ? 'Undo the undo: put back the version that was replaced'
     : `Put ${event.item} back as it was before this change, in every tool it syncs to (including where it was edited)`);
 
+/** An agent entry's buttons (historyactions.ts): its own action, and one "Use <harness>’s" for each copy that gave way. */
+function agentButtons(event: HistoryEvent) {
+  const item = agentOf(event), own = agentAction(event, item);
+  const link = (label: string, help: string, id: string, version?: string) => {
+    const control = button({ variant: 'link', size: 'small', label, name: `${label} (${event.item}): ${help}`, id, disabled: !!state.busy, onclick: () => void restoreEvent(event.id, version) });
+    control.title = help;
+    return control;
+  };
+  return [own ? link(own.label, own.help, `history-${event.id}`) : null,
+    ...versionChoices(event, item).map(choice => link(`Use ${who(choice.tool)}’s`, `Make ${who(choice.tool)}’s version of ${event.item} the current one`, `history-${event.id}-${choice.tool}`, choice.hash))];
+}
+
 /** Undo or Restore; with several overwritten edits, one button per edit, so each can be put back. */
 function actions(event: HistoryEvent, action?: string) {
   const options = choices(event);
@@ -192,8 +214,8 @@ export function historyPage() {
       // steady column at the right, the same on every row. Narrow, what happened takes a line of its own beneath (style.css).
       h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event)), h('strong', { title: event.item }, event.item)),
       h('span.history-about', {}, about.text),
-      event.undoneBy ? h('span.history-actions', {}, h('span.history-done', {}, event.kind === 'removed' ? 'Restored' : 'Undone'))
-        : h('span.history-actions', {}, !event.base && (event.kind === 'edit' || event.kind === 'conflict') ? seeChangeLink(event.id, event.key, true) : null, actions(event, about.action)),
+      event.undoneBy ? h('span.history-actions', {}, h('span.history-done', {}, isAgentEntry(event) ? doneWords(event) : event.kind === 'removed' ? 'Restored' : 'Undone'))
+        : h('span.history-actions', {}, !event.base && (event.kind === 'edit' || event.kind === 'conflict') ? seeChangeLink(event.id, event.key, true) : null, isAgentEntry(event) ? agentButtons(event) : actions(event, about.action)),
       changePanel(event.id))];
   }))));
 }

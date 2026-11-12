@@ -17,7 +17,7 @@ export async function chooseTools(context: ShareContext, tools: HarnessId[]): Pr
   if (refused) return { stopped: refused };
   // The MCP and agent records forget first: if a write here fails, the list is unchanged and nothing is half left out.
   await forgetMcpCopies(context.home, tools);
-  await forgetAgentCopies(context.home, tools);
+  await forgetAgentCopies(context, tools);
   const record = (await readRecord(context.home)).record ?? newRecord(context);
   record.tools = [...tools];
   for (const item of Object.values(record.items)) item.copies = item.copies.filter(copy => tools.includes(copy.harness));
