@@ -87,6 +87,8 @@ test('N11 interrupted agents conflict must recover loser through History on rest
   await fs.writeFile(b.paths[0],md('BASE'));await applyAgents(b.context,tools,managed('reviewer'));
   await fs.writeFile(b.paths[0],md('CLAUDE LOSER'));
   await fs.writeFile(b.paths[1],md('COPILOT WINNER'));
+  // The later edit wins: Copilot CLI's file is saved after Claude Code's.
+  await fs.utimes(b.paths[1],new Date(),new Date(Date.now()+5000));
   const original=fs.rename;
   fs.rename=async(from,to)=>{
     if(String(to)===join(b.home,'.central-knot','agents.json'))throw new Error('injected crash before record commit');

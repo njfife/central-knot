@@ -63,7 +63,10 @@ test('S4 process death during agent Restore must not delete it everywhere',()=>b
  assert.equal(child.status,73,child.stderr);
  await applyAgents(b.context,tools,[],{now:1000});
  await applyAgents(b.context,tools,[],{now:4000});
- assert.equal((await readAgents(b.context,'copilot-cli')).entries[0]?.agent.prompt.trim(),'EDIT');
+ // The Undo was recorded (the earlier version made current) before any file changed, so the next pass finishes it: every
+ // harness still has the agent, at the earlier version.
+ assert.equal((await readAgents(b.context,'copilot-cli')).entries[0]?.agent.prompt.trim(),'BASE');
+ assert.equal((await readAgents(b.context,'claude-cli')).entries[0]?.agent.prompt.trim(),'BASE');
 }));
 
 test('S6 Restore must not adopt an MCP edit saved after its write as baseline',()=>box(async b=>{
