@@ -27,7 +27,7 @@ import { applyMcp, cannotHold, editEntry, fromJson, jsonEntry, keep, mcpView, re
 import { gitEnv, gitFailure, runGit, whyGitFailed, whyPushFailed } from './plugins.ts';
 import { PRODUCT } from './values.ts';
 import { agentTools, mcpTools } from './presence.ts';
-import { copyTree, errorCode, exists, gateRefusal, itemKey, managedNow, notCopied, sha256 as sha, syncGate, placeCopy, plainError, readRecord, readTree, removeFileChecked, removeTree, saveRecord, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { copyTree, errorCode, exists, gateRefusal, itemKey, managedNow, notCopied, sha256 as sha, syncGate, placeCopy, plainError, readRecord, readTree, removeTree, saveRecord, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { undoBase } from './instructions.ts';
 import type { BaseUndo, Change, DestinationResult, HarnessId, HistoryEvent, McpResult, RepoChange, RepoCommit, RepoKind, RepoResult, RepoView, SkillFacts, Snapshot } from './types.ts';
 

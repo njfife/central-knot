@@ -3,10 +3,10 @@
 // details, and every click's result comes with an Undo of the whole click.
 import { itemId } from './profileplan.ts';
 import { brandMark } from './brand.ts';
-import { caughtUpNames, DAY_MS, dayAndTime, groupBy } from './model.ts';
+import { caughtUpNames, DAY_MS, groupBy } from './model.ts';
 import { deletedText, deleteNote, linkTarget, managedSentence, manageSentence, pinnedSentence, readsOutside, replaceSentence, rowWords, whereSentence, type Shape } from './outsidewords.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
-import { REPLACE_ACTION, andList, byToolOrder, capitalToolsPhrase, kindNouns, orList, problemText, toolName, toolNames, toolsPhrase } from './words.ts';
+import { REPLACE_ACTION, andList, byToolOrder, capitalToolsPhrase, kindNouns, problemText, toolName, toolNames, toolsPhrase } from './words.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { whyReadOnly, otherOwnerSaid, saidInStatusBar, takeOverSync, takeOverTitle, tell, type Click, type Outcome, type Kind, harnessKindShown, convertAgent, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, deleteEverywhereKey, rerender, retireTip, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
@@ -14,9 +14,9 @@ import { getsCopy as getsCopyNext, offPlan, stillOn } from './clickplan.ts';
 import type { IconName } from './icons.ts';
 import { byKey, loadedIn, standing } from './roworder.ts';
 import { cellOf, comparedTools, needsCopyChoice, type ItemRow, type Tool } from './itemrow.ts';
-import { agentClicks, harnessIs, harnessLine as agentLine, inLibrary, needsChoice as agentNeedsChoice, placeOf as agentPlace, type HarnessIs } from './agentrow.ts';
+import { agentClicks, harnessIs, harnessLine as agentLine, inLibrary, needsChoice as agentNeedsChoice, noticeWords, placeOf as agentPlace, placeTag, said as agentSaid, statusLine, switchLabel, type HarnessIs } from './agentrow.ts';
 import { versionList, type VersionText } from './versionlist.ts';
-import { sourceWords, type Version } from './library.ts';
+import type { Version } from './library.ts';
 import type { Change, DestinationResult, HomeView, ManageView, Outside, SkillFacts, SyncNotice, HarnessId, PartsInstall, ThroughPlugin } from './types.ts';
 import { market } from './pluginstate.ts';
 import { pluginKey, type PluginDraft } from './pluginplan.ts';
@@ -893,12 +893,10 @@ function openRow(key: string) {
   });
 }
 
-/** An agent's tag after its name: where it stands when that isn't plainly on (in Central Knot only, or not in Central Knot yet). */
+/** An agent's tag after its name, when it isn't plainly on (agentrow.ts placeTag). */
 function agentTag(skill: ItemRow) {
-  if (kind !== 'agents') return null;
-  const place = agentPlace(itemOf(skill));
-  if (place === 'off') return h('span.row-tag', { title: 'Central Knot keeps this agent and its versions. No harness has it until you turn it on.' }, 'in Central Knot only');
-  return place === 'found' ? h('span.row-tag', { title: 'A harness has this agent; Central Knot doesn’t yet. Turn it on to take it in and apply it to every harness.' }, 'not in Central Knot') : null;
+  const tag = kind === 'agents' ? placeTag(itemOf(skill)) : undefined;
+  return tag ? h('span.row-tag', { title: tag.title }, tag.text) : null;
 }
 
 /**
@@ -1238,20 +1236,13 @@ const age = (key: string) => {
 type NoticeLook = [IconName, string, string, HTMLElement | null];
 type NoticeLooks = Record<SyncNotice['kind'], NoticeLook>;
 
-/**
- * What sync did to an agent on its own, in the library's words: an edit taken in as the current version, the latest of two
- * edits, or a copy deleted by hand that turned the agent off. Each has its History entry's own action (historyactions.ts).
- */
+/** An agent's notice (agentrow.ts noticeWords), with its button: Undo, or Turn on after a copy deleted by hand turned it off. */
 function agentNotice(notice: Told, undo: (title: string) => HTMLElement): NoticeLook {
-  const who = toolName, others = andList(notice.losers.map(toolName));
-  const earlier = `Make the version from before ${who(notice.winner)}’s edit current again, in every harness ${notice.item} is on in`;
-  if (notice.kind === 'conflict') return ['diff', 'tone-warning', `${notice.item}: ${who(notice.winner)}’s edit is the latest, so it is the current version. ${others}’s is kept as a version.`, undo(earlier)];
-  if (notice.kind === 'deleted') {
-    const on = button({ variant: 'outline', size: 'small', label: 'Turn on', id: `notice-restore-${notice.history}`, onclick: () => void restoreEvent(notice.history) });
-    on.title = `Put ${notice.item} back in every harness, each file as it was`;
-    return ['trash-2', 'tone-muted', `${notice.item} was deleted in ${who(notice.winner)}, so it is off everywhere. Central Knot keeps it.`, on];
-  }
-  return ['check', 'tone-success', `${notice.item} was edited in ${who(notice.winner)}; that is its current version now${others ? `, in ${others} too` : ''}.`, undo(earlier)];
+  const { text, action, help } = noticeWords(notice);
+  if (action === 'undo') return [notice.kind === 'conflict' ? 'diff' : 'check', notice.kind === 'conflict' ? 'tone-warning' : 'tone-success', text, undo(help)];
+  const on = button({ variant: 'outline', size: 'small', label: 'Turn on', id: `notice-restore-${notice.history}`, onclick: () => void restoreEvent(notice.history) });
+  on.title = help;
+  return ['trash-2', 'tone-muted', text, on];
 }
 
 function syncNotice(notice: Told, writeClaude?: () => void) {
@@ -1455,11 +1446,8 @@ function turnOff(skill: ItemRow) {
   // Where its plugin's item turned off too, said from what happened.
   const pluginsOff = (notIn: HarnessId[]) => plugins.turned.map(item => item.tool).filter(tool => !notIn.includes(tool));
   if (kind === 'agents') {
-    const said = (notIn: HarnessId[]) => {
-      const off = pluginsOff(notIn), left = notIn.length ? `, but still in ${toolsPhrase(notIn, toolList())}` : ': no harness has it';
-      return `${name} is off${left}. Central Knot keeps it, and turning it on puts each file back as it was.${off.length ? ` Its plugin’s copy is off in ${toolsPhrase(off, toolList())}.` : ''}`;
-    };
-    mainClick(name, false, [agentClicks.off(skill, itemOf(skill))], plugins, said, plugins.left);
+    const pluginSaid = (notIn: HarnessId[]) => { const off = pluginsOff(notIn); return off.length ? ` Its plugin’s copy is off in ${toolsPhrase(off, toolList())}.` : ''; };
+    mainClick(name, false, [agentClicks.off(skill, itemOf(skill))], plugins, notIn => `${agentSaid.off(name, notIn, toolList())}${pluginSaid(notIn)}`, plugins.left);
     return;
   }
   const { disable, held } = offPlan(skill, toolList());
@@ -1506,7 +1494,7 @@ function turnOn(skill: ItemRow, use?: Tool) {
   const said = (notIn: HarnessId[]) => {
     const left = [...plugins.leftIn, ...notIn, ...(later ? ['claude-cli'] : []), ...(kind === 'agents' ? skill.off : [])];
     const using = canHave(skill).filter(tool => !left.includes(tool));
-    if (found) return `${name} is in Central Knot now${use ? `, with ${names[use]}’s copy` : ''}, and on in ${onPhrase(skill, left)}.${use ? ' The other copies are kept as its versions.' : ''}`;
+    if (found) return agentSaid.takenIn(name, using, toolList(), use);
     return use && using.length ? `${capitalToolsPhrase(using, toolList())} now ${using.length === 1 ? 'uses' : 'use'} ${names[use]}’s copy of ${name}. Replaced copies are kept in History.` : `${name} is on in ${onPhrase(skill, left)}.`;
   };
   mainClick(name, true, [onChange(skill, use)], plugins, said, plugins.left, later ? CLAUDE_LATER : undefined);
@@ -1639,14 +1627,9 @@ function itemSwitch(skill: ItemRow, id = `switch-${skill.key}`) {
  * doesn't yet; a click takes it in, or asks which copy where they differ), or off (in Central Knot only).
  */
 function agentSwitch(skill: ItemRow, id: string) {
-  const name = nameOf(skill), item = itemOf(skill), place = agentPlace(item);
-  const own = toolList().filter(tool => harnessIs(skill, item, tool) === 'own-copy');
-  const ownSaid = own.length ? `; ${toolsPhrase(own, toolList())} ${own.length === 1 ? 'has a copy of its own, which is' : 'have copies of their own, which are'} kept as versions first` : '';
-  const ask = view.comparing === skill.key ? 'close the question' : 'choose which copy every harness uses';
-  const label = place === 'on' ? `${name}: on. Click to take it out of every harness; Central Knot keeps it.`
-    : place === 'off' ? `${name}: off, in Central Knot only. Click to put it in every harness${ownSaid}.`
-      : isDiffering(skill) ? `${name}: not in Central Knot, and its copies differ. Click to ${ask}.`
-        : `${name}: in ${toolsPhrase(holders(skill), toolList())}, not in Central Knot. Click to take it in and put it in every harness.`;
+  const item = itemOf(skill), place = agentPlace(item);
+  const question = isDiffering(skill) ? (view.comparing === skill.key ? 'open' : 'closed') : undefined;
+  const label = switchLabel(skill, item, toolList(), question);
   return toggle({ on: place === 'on', mixed: place === 'found', label, onchange: next => flip(skill, next), disabled: !canWrite(), id });
 }
 
@@ -1680,7 +1663,6 @@ function markOf(skill: ItemRow, tool: Tool): { look: MarkLook; words: string; gl
   const off = shownDisabled(skill, tool);
   const byProfile = off && turnedOffByProfile(skill.key, tool);
   const offWords = off ? `, off there${byProfile ? ' by a profile (see Profiles)' : ''} (copy kept)` : '';
-  const on = skill.managed && !skill.off.includes(tool);
   const mark = (look: MarkLook, key: keyof typeof keyWords, words: string, glyph?: IconName) => ({ look, key, words: `${names[tool]}: ${words}`, glyph, state: drawn });
   if (drawn === 'cannot') return { ...mark('none', 'none', ''), words: skill.cannot?.[tool] ?? `${names[tool]} can’t ${uses()} it` };
   if (drawn === 'absent') return mark('none', 'none', `no copy${skill.managed && skill.off.includes(tool) ? ', not synced there' : ''}`);
@@ -1700,9 +1682,16 @@ function markOf(skill: ItemRow, tool: Tool): { look: MarkLook; words: string; gl
 
 /** An agent's mark for one harness: what the library's rule says of it (agentrow.ts harnessIs), drawn with the page's looks. */
 const agentMarks: Record<HarnessIs, { look: MarkLook; key: keyof typeof keyWords; glyph?: IconName }> = {
-  current: { look: 'on', key: 'on' }, 'own-copy': { look: 'on', key: 'own' }, 'kept-out': { look: 'off', key: 'kept-in-ck' }, none: { look: 'none', key: 'none' }, cannot: { look: 'none', key: 'none' },
-  'gets-it': { look: 'waits', key: 'will-sync', glyph: 'clock' }, edited: { look: 'waits', key: 'taken', glyph: 'pencil-line' }, deleted: { look: 'waits', key: 'deleted', glyph: 'trash-2' },
-  leaving: { look: 'waits', key: 'leaving', glyph: 'clock' }, unseen: { look: 'differs', key: 'unseen', glyph: 'circle-alert' },
+  current: { look: 'on', key: 'on' },
+  'own-copy': { look: 'on', key: 'own' },
+  'kept-out': { look: 'off', key: 'kept-in-ck' },
+  none: { look: 'none', key: 'none' },
+  cannot: { look: 'none', key: 'none' },
+  'gets-it': { look: 'waits', key: 'will-sync', glyph: 'clock' },
+  edited: { look: 'waits', key: 'taken', glyph: 'pencil-line' },
+  deleted: { look: 'waits', key: 'deleted', glyph: 'trash-2' },
+  leaving: { look: 'waits', key: 'leaving', glyph: 'clock' },
+  unseen: { look: 'differs', key: 'unseen', glyph: 'circle-alert' },
 };
 function agentMark(skill: ItemRow, tool: Tool): ReturnType<typeof markOf> {
   const item = itemOf(skill), is = harnessIs(skill, item, tool);
@@ -1771,22 +1760,9 @@ function section(role: 'on' | 'not-synced' | 'off' | 'away', list: ItemRow[]) {
     [...list].sort(byKey).flatMap(row));
 }
 
-/** An agent's status in one line: on and where, in Central Knot only, or found in a harness and not in Central Knot yet. */
-function agentStatus(skill: ItemRow): string {
-  const item = itemOf(skill), place = agentPlace(item), all = toolList();
-  const where = (...states: HarnessIs[]) => all.filter(tool => states.includes(harnessIs(skill, item, tool)));
-  const own = where('own-copy');
-  const ownSaid = own.length ? ` ${capitalToolsPhrase(own, all)} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there.` : '';
-  if (place === 'found') return `Not in Central Knot · in ${toolsPhrase(own, all)}${isDiffering(skill) ? ', with different copies' : ''}. Turn it on to take it in and put it in every harness.`;
-  if (place === 'off') return `Off · in Central Knot only. Turn it on to put it in every harness.${ownSaid}`;
-  const parts = [`On in ${toolsPhrase(where('current', 'edited'), all)}`, where('gets-it').length ? `${toolsPhrase(where('gets-it'), all)} ${where('gets-it').length === 1 ? 'gets' : 'get'} it when sync runs` : '',
-    where('kept-out', 'leaving').length ? `kept out of ${toolsPhrase(where('kept-out', 'leaving'), all)}` : ''];
-  return `${parts.filter(Boolean).join(' · ')}${ownSaid ? `.${ownSaid}` : ''}`;
-}
-
 /** What the item is now, in one line: on and where, not synced and where its copies are, or off. */
 function switchStatus(skill: ItemRow): string {
-  if (kind === 'agents') return agentStatus(skill);
+  if (kind === 'agents') return statusLine(skill, itemOf(skill), toolList());
   if (skill.gone) return `Off · no copy left: ${skill.gone.kind === 'deleted' ? 'deleted' : 'removed'} ${daysAgo(skill.gone.at)}. Turn it on to put it back from History.`;
   if (skill.held) return `Can’t be synced: ${skill.held}`;
   const on = onIn(skill);
@@ -1858,11 +1834,7 @@ function agentHarnessSwitch(skill: ItemRow, tool: Tool) {
   const item = inLibrary(itemOf(skill));
   if (!item?.on || harnessIs(skill, item, tool) === 'cannot') return null;
   const name = nameOf(skill), where = names[tool], out = item.except.includes(tool as HarnessId);
-  const said = (notIn: HarnessId[]) => {
-    const failed = notIn.includes(tool as HarnessId);
-    if (out) return failed ? `${name} couldn’t be put in ${where}.` : `${name} is on in ${where} again.`;
-    return failed ? `${name} couldn’t be taken out of ${where} yet.` : `${name} is kept out of ${where}. Central Knot keeps its file for when you turn it on there.`;
-  };
+  const said = (notIn: HarnessId[]) => agentSaid.inHarness(name, tool, !out, notIn.includes(tool as HarnessId));
   const does = out ? `Click to put it in ${where} again, its file as it was.` : `Click to keep it out of ${where}: its copy there goes, and Central Knot keeps it.`;
   const flipHere = (on: boolean) => click({ kind, items: [name], changes: [agentClicks.inHarness(skill, item, tool, !on)], said });
   return h('span.details-tool-actions', {}, h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, out ? 'Off' : 'On'),
@@ -1878,7 +1850,7 @@ function agentDelete(skill: ItemRow) {
   if (!item) return null;
   const name = nameOf(skill), disarm = () => { view.confirmDelete = undefined; rerender(); };
   if (view.confirmDelete !== skill.key) return smallAction('Delete from Central Knot…', `delete-${skill.key}`, () => { view.confirmDelete = skill.key; rerender(); }, '.text-danger-quiet', !canWrite());
-  const said = `${name} is deleted from Central Knot${item.on ? ', and out of every harness' : ''}. History can restore it.`;
+  const said = agentSaid.deleted(name, item.on);
   const run = () => { view.confirmDelete = undefined; click({ kind, items: [name], changes: [agentClicks.remove(skill, item)], said }); };
   const now = smallAction('Delete it now', `delete-confirm-${skill.key}`, run, '.text-danger', !canWrite());
   now.title = `Delete ${name} from Central Knot now. History can restore it.`;
@@ -1904,8 +1876,9 @@ function agentVersions(skill: ItemRow) {
     }
     rerender();
   };
+  const on = (notIn: HarnessId[]) => (item.on ? canHave(skill).filter(tool => !notIn.includes(tool as HarnessId) && !skill.off.includes(tool)) : undefined);
   const makeCurrent = (version: Version) => click({ kind, items: [name], changes: [agentClicks.makeCurrent(skill, item, version.hash)],
-    said: notIn => `${name}: the version ${sourceWords(version.from)}, ${dayAndTime(version.at)}, is current again${item.on ? `, in ${onPhrase(skill, [...notIn, ...skill.off])}` : ''}.` });
+    said: notIn => agentSaid.madeCurrent(name, version, on(notIn), toolList()) });
   return versionList({ item, canWrite: canWrite(), unfolded: view.versionsUnfolded === item.key, onUnfold: () => { view.versionsUnfolded = item.key; rerender(); },
     reading: at === undefined || !item.versions[at] ? undefined : { index: at, text: versionTexts.get(textKey(item.versions[at].hash)) ?? 'reading' }, onRead: read, onMakeCurrent: makeCurrent });
 }

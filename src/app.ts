@@ -801,9 +801,9 @@ function sayAgentAction(past: HistoryEvent, result: ApplyResult) {
   const item = library?.[agentKeyOf(past)];
   const said = made && agentSentence(made, tools, item)?.text;
   const back = made && agentAction(made, item);
-  const leftAsIs = result.results.filter(keptBack).map(entry => entry.message);
-  tell({ page: state.page, item: past.item, warn: leftAsIs.length > 0, text: [`${past.item}: ${said ? said.replace(/^./, first => first.toLowerCase()) : 'done.'}`, ...leftAsIs].join(' '),
-    undo: back && made ? { id: made.id, label: back.label } : undefined });
+  const notDone = result.results.filter(keptBack).map(entry => entry.message);
+  const text = [`${past.item}: ${said ? said.replace(/^./, first => first.toLowerCase()) : 'done.'}`, ...notDone].join(' ');
+  tell({ page: state.page, item: past.item, warn: notDone.length > 0, text, undo: back && made ? { id: made.id, label: back.label } : undefined });
   flashRow(past.item);
 }
 
