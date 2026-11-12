@@ -300,7 +300,7 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   const saved = JSON.stringify(library);
   const inScope = (key: string) => !options.only || options.only.has(key) || changes.some(change => change.key === key);
   const settle = { clock: options.now ?? Date.now(), ms: options.settleMs ?? context.settleMs ?? 2000, settling: false };
-  const look = (await lookAt(kind, context, managed, library, settle)) as unknown as AnyLook;
+  const look: AnyLook = await lookAt(kind, context, managed, library, settle);
   const store = (item: LibraryItem, hash: string, content: unknown) => kind.store(context, item, hash, content as C);
   const pass: Pass = { ...look, shelf: { store, save: () => saveIfChanged(pass) }, saved, asked: new Map(), results: [], notices: [], writes: 0, made: [] };
   await deletionsTold(pass);
