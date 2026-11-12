@@ -8,7 +8,6 @@ import { caughtUpNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
-import { backText, deletedText, leftAsIs, tookOverSaid, undoneText } from './outsidewords.ts';
 import { clickResults, inverseChanges, keptBack, recordChanged, undoOrder, type Standing } from './clickplan.ts';
 import { libraryAction, libraryEntry, librarySentence } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
@@ -363,14 +362,11 @@ export const applyClick = (click: Click) => busy(click.putBack ? 'Putting it bac
   const wrote = [...new Set(ours.filter(entry => entry.outcome === 'written' && entry.harness).map(entry => entry.harness!))];
   const said = changes === 'choose' ? `${click.items[0]} is back.` : typeof click.said === 'string' ? click.said : click.said([...notIn, ...(plugged?.failedIn ?? [])], wrote);
   const choose = differs || changes === 'choose' ? ' Its copies differ: choose which copy every tool uses.' : '';
-  // A skill taken over (its links and shared copy, when it was turned on): what that did to them.
-  const outside = sent.some(change => change.takeOver) ? tookOverSentence(ours) : '';
   const plugText = !plugged ? '' : plugged.failed.length || plugged.stopped ? switchProblems(plugged) : click.plugins?.said ?? '';
   // A hold that came after the change is said beside what was done, not dropped.
-  const text = done || !refusal ? [said, plugText, outside, click.also, click.note, refusal?.message].filter(Boolean).join(' ') + choose : refusal.message;
+  const text = done || !refusal ? [said, plugText, click.also, click.note, refusal?.message].filter(Boolean).join(' ') + choose : refusal.message;
   const switchedBack = plugged?.back ?? [];
-  // A skill put back is taken out again with Remove, its copies kept in History.
-  const undo = click.undoing || !done ? undefined : back && click.kind === 'skills' ? () => takeOutAgain(click)
+  const undo = click.undoing || !done ? undefined
     : made.length || changed.length || switchedBack.length ? () => void undoClick(click, made, before, changed, switchedBack) : undefined;
   const warned = failed || !!plugged?.failed.length || !!plugged?.stopped;
   tell({ page: state.page, items: click.items, warn: warned || !!click.also || !!refusal, band: true, fade: click.undoing && !warned, next: done || !refusal ? click.next : undefined,
@@ -393,20 +389,6 @@ async function restoreAll(ids: string[]): Promise<{ results: DestinationResult[]
   return { results, made };
 }
 
-/** Undo of a put-back: every copy it has now is taken out again, kept in History, so it is off with no copy left as before. */
-function takeOutAgain(click: Click) {
-  const key = click.putBack?.key ?? '';
-  const fact = factsOf(click.kind).find(item => item.key === key);
-  const holders = (Object.entries(fact?.copies ?? {}) as [HarnessId, { writable: boolean; readsFrom?: HarnessId }][]).filter(([, copy]) => copy.writable && !copy.readsFrom).map(([tool]) => tool);
-  if (!fact || !holders.length) return;
-  void applyClick({ kind: click.kind, items: click.items, undoing: true, said: `Undone: ${click.items[0]} has no copy left again. History keeps it.`,
-    changes: [{ key, managed: fact.managed, off: fact.off, seenManaged: fact.managed, remove: holders }] });
-}
-
-/** After a click that took a skill over: what it did to its links and the shared copy, from the click's own results. */
-const tookOverSentence = (ours: DestinationResult[]) => tookOverSaid(
-  ours.filter(entry => entry.tookOver === 'link' && entry.outcome === 'written').map(entry => ({ tool: toolName(entry.harness ?? ''), item: entry.item })),
-  ours.filter(entry => entry.tookOver === 'shared' && entry.outcome === 'removed').map(entry => ({ folder: shownPath(entry.folder ?? ''), item: entry.item })));
 
 /**
  * Undo of one click: each History entry it made goes back (clickplan.ts undoOrder), then an item whose record is still not
@@ -448,14 +430,11 @@ const undoClick = (click: Click, made: string[], before: Map<string, Standing>, 
   // Waiting for a choice of copy again is how a choice's Undo leaves it, as before the choice: no failure.
   const failed = [...results.filter(keptBack).map(entry => entry.message), ...(unswitched ? [switchProblems(unswitched)].filter(Boolean) : [])];
   const what = click.items.length === 1 ? click.items[0] : andList(click.items);
-  // A take-over undone with it: the links and the shared copy it put back.
-  const back = backText(results.filter(entry => entry.tookOver === 'link' && entry.outcome === 'written').map(entry => ({ tool: toolName(entry.harness ?? ''), item: entry.item })),
-    results.filter(entry => entry.tookOver === 'shared' && entry.outcome === 'written').map(entry => ({ item: entry.item })));
   const lead = failed.length ? `Not all of ${what} could be put back.` : `Undone: ${what} ${click.items.length === 1 ? 'is' : 'are'} as before.`;
   // A choice whose Undo stopped part-way keeps what it put back on its History entry, whose Undo finishes it.
   const finish = state.history.data?.some(event => made.includes(event.id) && event.kind === 'chosen' && !event.undoneBy) ? 'History’s Undo of the choice finishes it.' : '';
   tell({ page: state.page, items: click.items, warn: !!stopped || failed.length > 0, band: true, fade: !stopped && !failed.length,
-    text: stopped ? `Not all of it could be undone: ${stopped}` : [lead, back, ...failed, finish].filter(Boolean).join(' ') });
+    text: stopped ? `Not all of it could be undone: ${stopped}` : [lead, ...failed, finish].filter(Boolean).join(' ') });
   for (const item of click.items) flashRow(item);
 });
 
@@ -756,7 +735,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
     return;
   }
   // A deletion's Restore also says what it did, or left, outside the tools' own folders (the shared copy, the links).
-  const outsideSaid = result.results.filter(entry => !entry.harness && (entry.outcome === 'written' || entry.outcome === 'stayed')).map(entry => (entry.folder ? entry.message.split(entry.folder).join(shownPath(entry.folder)) : entry.message));
+  const outsideSaid = result.results.filter(entry => !entry.harness && (entry.outcome === 'written' || entry.outcome === 'stayed')).map(entry => entry.message);
   const text = past?.kind === 'deleted' ? [`${item} is back in ${everywhere}.`, ...outsideSaid].join(' ')
     : past?.kind === 'restored' ? `Redone: ${item} is as it was before the undo, in ${everywhere}.`
       : `Undid ${past?.winner ? `${toolName(past.winner.tool) ?? past.winner.tool}’s ${past.kind === 'chosen' ? 'chosen copy' : 'edit'}` : 'the change'} to ${item}. The earlier version is back in ${everywhere}.`;

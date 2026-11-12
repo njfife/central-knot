@@ -75,7 +75,7 @@ export type SyncGate =
   | { state: 'needs-resume'; reason: string }
   | { state: 'stopped'; reason: string; /** Set when another build syncs this home: its identity, its name, and whether it is open now (where that can be told). */ owner?: { build: string; name: string; running?: boolean } };
 
-export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** A refusal made before anything was changed, the record included: the click did nothing. */ unchanged?: true; /** A take-over step: a link replaced by a real copy, a tool given its own copy, or the shared copy removed (or, in its Undo, each put back). */ tookOver?: 'link' | 'placed' | 'shared'; /** With `tookOver` 'shared': the folder the copy was removed from. */ folder?: string; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true; /** `held`: waits for Write to Claude Code (MCP-02), as it should (not a failure). */ waits?: true; }
+export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** A refusal made before anything was changed, the record included: the click did nothing. */ unchanged?: true; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true; /** `held`: waits for Write to Claude Code (MCP-02), as it should (not a failure). */ waits?: true; }
 
 export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; /** The home as a whole: its tools, access, owner and what the background did. */ sync: SyncView; /** Skills: those in Central Knot's library (library.ts) and those found in a tool. */ skills: LibraryView; /** MCP servers across tools. */ mcp: McpView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
 
@@ -368,23 +368,14 @@ export interface Change {
   useHash?: string;
   /** Whether the page showed it managed: a change made from an older read is refused if that no longer holds. */
   seenManaged?: boolean;
-  /** Skills and MCP servers: tools to disable it in with each tool's own switch. Tools named in neither list keep their switch as it is. */
+  /** MCP servers: tools to disable it in with each tool's own switch. Tools named in neither list keep their switch as it is. */
   disable?: HarnessId[];
-  /** Skills and MCP servers: tools to enable it in again. */
+  /** MCP servers: tools to enable it in again. */
   enable?: HarnessId[];
-  /** Skills: tools whose copy is removed, kept in History for Restore. A managed skill also stops syncing there. */
-  remove?: HarnessId[];
   /** A library item: the version to make current (its hash), in every harness the item is on in. */
   version?: string;
   /** A library item: true deletes it from Central Knot (out of every harness; History can restore it); false restores a deleted one. */
   deleted?: boolean;
-  /** Skills: Delete everywhere for an unmanaged skill: the removed tools' other copies (in ~/.agents/skills) go too. */
-  everywhere?: boolean;
-  /**
-   * Skills: the person asked for the skill's copies outside Central Knot (links in tools' folders, the copy in ~/.agents/skills)
-   * to be taken over: each link becomes a real copy and the shared copy is removed, kept first so Undo can put them back.
-   */
-  takeOver?: boolean;
 }
 
 export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch: the switches it flipped. */ flips?: ProfileFlip[]; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
@@ -405,7 +396,11 @@ export interface SyncNotice {
 }
 
 /** One entry in History: what changed, which content won, and what is kept to Undo or Restore it. */
-/** A take-over, for its Undo: links replaced by real copies, shared copies removed, and copies made for tools that read the shared one. */
+/**
+ * A skill's take-over from before the library (Replace with managed copies), as its History entry recorded it: links replaced
+ * by real copies, shared copies removed, copies made for tools that read the shared one. Only read to tell such an entry
+ * apart (historyactions.ts librarySentence): it shows as past, with no action.
+ */
 export interface TookOver {
   /** Each link and its text. `placed`: the content put in its place (none: a link left leading nowhere, removed). */
   links: { tool: HarnessId; path: string; linkTo: string; hash: string; placed?: string }[];

@@ -6,22 +6,24 @@ Read this first. Each area says what it is for, its files (one entry each: what 
 
 **Two ideas to hold.**
 1. *Items live in Central Knot's library and are applied to the managed tools.* A tool is where an item is applied, not where it lives, and every content is kept before anything is written over. The model is `library.ts`'s header.
-2. *Only agents are on the library today.* Skills (`manage.ts`) and MCP servers (`mcp.ts`) are still on their own older engines, where the tools' files are the truth and Central Knot records what it syncs. The item pages read all three through one shape (`itemrow.ts kindSource`). Moving a kind onto the library is the recipe in `librarypass.ts`'s header.
+2. *Skills and agents are on the library today.* MCP servers (`mcp.ts`) are still on their own older engine, where the tools' files are the truth and Central Knot records what it syncs. The item pages read all three through one shape (`itemrow.ts kindSource`). Moving a kind onto the library is the recipe in `librarypass.ts`'s header.
 
-## The library, and agents on it
+## The library: skills and agents on it
 An item Central Knot holds with its versions, On or Off, applied to every managed tool it is not kept out of.
 - `library.ts` the model and its one rule, pure; `carryOut`, the order one item's plan is carried out in · `librarypass.ts` the pass on real files, the same for every kind; `Kind`, what a kind implements
+- `skills.ts` skills' `Kind` (`skillKind`), the ways a tool has a skill that aren't Central Knot's (`anotherWay`), their clicks (`applySkills`), page view (`skillsView`), `clearSwitch` and `takeOver` · `skillfiles.ts` a skill's folder in a tool, read, written and removed, checked
+- `skillstore.ts` where skills are kept in `.central-knot/` (skills.json, and versions under items/skills/) · `skillmigrate.ts` the skills sync.json held before the library, made items once
 - `agents.ts` agents' `Kind` (`agentKind`), their clicks (`applyAgents`) and page view (`agentsView`) · `agentfiles.ts` each tool's agent file, read and written
 - `agentstore.ts` where agents are kept in `.central-knot/` · `agentmigrate.ts` the record from before the library, made items once · `agentskill.ts` Convert to a Pi skill (a copy, not sync)
 - `libraryrow.ts` a library item's row without the DOM: marks, clicks, sentences in the kind's words · `librarypages.ts` what else a kind gives its page · `versionlist.ts` an opened row's versions
-- **Start:** `library.ts`'s header, then `librarypass.ts`'s. **Examples:** `tests/library.test.ts` (one per row of the rule), `tests/librarypass.test.ts` (a toy kind), `tests/agents.test.ts` (real files), `tests/libraryrow.test.ts`, `tests/agentmigrate.test.ts`, `tests/agentswalk.test.ts` (the seeded walk, clicking through `tests/agentclicks.ts`).
+- `skillswitch.ts` a tool's own switch for a skill: read for its mark, cleared by `skills.ts clearSwitch`, flipped by profiles (`profiles.ts`) and for a plugin's skill (`plugins.ts`)
+- **Start:** `library.ts`'s header, then `librarypass.ts`'s. **Examples:** `tests/library.test.ts` (one per row of the rule), `tests/librarypass.test.ts` (a toy kind), `tests/skills.test.ts` and `tests/agents.test.ts` (real files), `tests/skillmigrate.test.ts` and `tests/agentmigrate.test.ts`, `tests/skillsafety.test.ts`, `tests/libraryrow.test.ts`, `tests/agentswalk.test.ts` (the seeded walk, clicking through `tests/agentclicks.ts`; skills' clicks are `tests/skillclicks.ts`).
 
-## Skills and MCP servers, on their own engines
-The two kinds not on the library yet: each tool's own files are the truth; Central Knot records what it syncs, spreads edits and deletions, and keeps what it replaces.
-- `manage.ts` skills: what each tool has (`manageView`), a click and a pass (`applyChanges`), Restore, Delete everywhere; and History's file, for every kind (`appendHistory`)
-- `skillswitch.ts` a skill off in one tool, by that tool's own switch · `outsidewords.ts` words for a skill's links and shared copy · `choiceundo.ts` a copy choice's Undo, both engines
+## MCP servers, on their own engine
+The kind not on the library yet: each tool's own files are the truth; Central Knot records what it syncs, spreads edits and deletions, and keeps what it replaces.
 - `mcp.ts` MCP servers: each tool's entries in one shape (`NeutralServer`, read from a tool's file by `fromJson`; a tool's own fields ride along as extras), sync (`applyMcp`), Restore, Write to Claude Code · `mcpswitch.ts` a server off in one tool, by its own switch
-- **Start:** `manage.ts applyChanges`, `mcp.ts applyMcp`. **Examples:** `tests/manage.test.ts`, `tests/twoway-recovery.test.ts`, `tests/sharedcopies.test.ts`, `tests/skillswitch.test.ts`, `tests/mcp.test.ts`, `tests/opencode.test.ts`; the `tests/*-check-*.test.ts` files are regressions from earlier review rounds.
+- `choiceundo.ts` a copy choice's Undo, for MCP servers
+- **Start:** `mcp.ts applyMcp`. **Examples:** `tests/mcp.test.ts`, `tests/opencode.test.ts`, `tests/skillswitch.test.ts`; the `tests/*-check-*.test.ts` files are regressions from earlier review rounds.
 
 ## The tools in a home
 Which tools a home has, where each keeps its files, and which of them Central Knot manages.
@@ -39,9 +41,9 @@ One row per item with one On/Off switch, applied in every managed tool; each cli
 
 ## History
 What Central Knot did, on its own or on a click, newest first, with Undo or Restore while the kept content allows it.
-- `historypage.ts` the page, and what the entries of skills, MCP servers, profiles and instructions say (`describe`) · `historyactions.ts` agents' entries: sentence, action, done words
-- An entry is a `types.ts HistoryEvent`, kept for every kind by `manage.ts appendHistory` and pruned by `manage.ts pruneHistory` (Settings sets the days); its action is `app.ts restoreEvent` (paths below).
-- **Start:** `historypage.ts describe`. **Examples:** `tests/historyactions.test.ts`; each kind's Restore in `tests/manage.test.ts`, `tests/mcp.test.ts` and `tests/agents.test.ts`.
+- `historypage.ts` the page, and what the entries of MCP servers, profiles and instructions say (`describe`) · `historyactions.ts` skills' and agents' entries: whose (`libraryEntry`), sentence, action, done words
+- `history.ts` the file, kept for every kind (`appendHistory`, `readHistory`) and pruned by History's days (`pruneHistory`; Settings sets the days); an entry is a `types.ts HistoryEvent`, its action `app.ts restoreEvent` (paths below).
+- **Start:** `historypage.ts describe`. **Examples:** `tests/historyactions.test.ts`; each kind's Restore in `tests/skills.test.ts`, `tests/mcp.test.ts` and `tests/agents.test.ts`.
 
 ## Plugins and marketplaces
 Marketplaces browsed, plugins chosen per tool and applied through each tool's own CLI; what installed plugins bring shows on the item pages.
@@ -92,9 +94,9 @@ The main process, the window's frame, Settings, and what every page shares.
 
 ## The store and safe writes
 What every engine stands on: `.central-knot/`, which build syncs a home, and writes that never lose a save made meanwhile.
-- `share.ts` the store: the skills record (`readRecord`), which build syncs here (`syncGate`), checked writes (`writeFileChecked`), a skill's folder copied (`placeCopy`)
+- `share.ts` the store: the home's record of who syncs it and its tools (`readRecord`), which build syncs here (`syncGate`), checked writes (`writeFileChecked`), a skill's folder copied (`placeCopy`)
 - `textedit.ts` one entry of a JSON or TOML file changed, every other byte kept · `values.ts` untrusted values checked, with safe defaults
-- **Start:** `share.ts`'s exports, by their comments; a differing skill copy is replaced by `manage.ts replaceCopy`. **Examples:** `tests/share-recovery.test.ts`, `tests/textedit.test.ts`.
+- **Start:** `share.ts`'s exports, by their comments; a skill's copy is written over by `skillfiles.ts swapFolder`. **Examples:** `tests/share-recovery.test.ts`, `tests/textedit.test.ts`, `tests/skillsafety.test.ts`.
 
 ## Test and tour scripts
 How each is run: `AGENTS.md` ("Checking a change") and README ("For developers"); the Mac run is `.github/workflows/mac.yml`. Unit tests are `tests/*.test.ts`.
@@ -104,16 +106,16 @@ How each is run: `AGENTS.md` ("Checking a change") and README ("For developers")
 - `scripts/real-home-trial.ts` the two-way trial on a real home its owner opened for it
 
 ## Paths that cross areas
-- **A click on an item page:** a row's switch in `matrix.ts` → `app.ts applyClick`, sent by `app.ts kindPages` through `preload.ts` → `main.ts changes` (the sanitizer) → `manage.ts applyChanges`, `mcp.ts applyMcp` or `agents.ts applyAgents` (→ `librarypass.ts runPass`) → the result kept for `app.ts lastResult`, drawn by `matrix.ts outcomeBand`.
-- **A background pass:** a folder watch or the poll (`main.ts startWatching`) → `main.ts backgroundPass` → `main.ts pass` (skills; with Sync on, MCP servers and agents too) → `sync:changed` → `app.ts backgroundRefresh` → `main.ts syncThenView`, which builds the `types.ts HomeView` every page reads.
-- **A History action:** a button in `historypage.ts` → `app.ts restoreEvent` → `main.ts`'s `history:restore`, sent on by the entry → `manage.ts restoreFromHistory`, `mcp.ts restoreMcp`, `agents.ts restoreAgent` (→ `librarypass.ts restore`), `profiles.ts undoProfileSwitch` or `gitrepo.ts undoPulledBase`.
+- **A click on an item page:** a row's switch in `matrix.ts` → `app.ts applyClick`, sent by `app.ts kindPages` through `preload.ts` → `main.ts changes` (the sanitizer) → `skills.ts applySkills` or `agents.ts applyAgents` (→ `librarypass.ts runPass`), or `mcp.ts applyMcp` → the result kept for `app.ts lastResult`, drawn by `matrix.ts outcomeBand`.
+- **A background pass:** a folder watch or the poll (`main.ts startWatching`) → `main.ts backgroundPass` → `main.ts pass` (with Sync on: skills, MCP servers and agents) → `sync:changed` → `app.ts backgroundRefresh` → `main.ts syncThenView`, which builds the `types.ts HomeView` every page reads.
+- **A History action:** a button in `historypage.ts` → `app.ts restoreEvent` → `main.ts`'s `history:restore`, sent on by the entry → `skills.ts restoreSkill` or `agents.ts restoreAgent` (→ `librarypass.ts restore`), `mcp.ts restoreMcp`, `profiles.ts undoProfileSwitch` or `gitrepo.ts undoPulledBase`.
 - **An update check:** the timer in `updateflow.ts updateFlow` (started by `updater.ts startUpdater`) or Check now (`updateview.ts checkNow`) → GitHub's releases → `updates.ts newerRelease` → `updates:changed` → `updateview.ts followUpdates` redraws the control.
 - **A plugin's Apply all:** boxes on `pluginspage.ts` or `pluginpage.ts` fill the plan → `pluginstate.ts applyPluginOps` → `pluginplan.ts runPlan` → the handlers in `marketplaces.ts registerMarketplaces` → `plugins.ts install`, `plugins.ts update`, `plugins.ts uninstall` or `parts.ts installParts`.
 
 ## Names that mean two things
 - **A kind:** `app.ts PageKind` is a page's name for it (agents), `library.ts ItemKind` the library's (agent), `profileplan.ts ItemKind` a profile's (skill or mcp), `presence.ts HomeKind` every kind with a page of its own (instructions and plugins too); `librarypass.ts Kind` is what a kind implements.
 - **A switch:** `skillswitch.ts` and `mcpswitch.ts` are a tool's own off-switch for a skill or a server; `partswitch.ts` the same for one part of a plugin; `pluginswitch.ts` the item pages' switch for an item a plugin brings; `plugins.ts setSkill` one skill of a plugin.
-- **History:** stored for every kind by `manage.ts` (a skills module); worded by `historypage.ts`, except agents' entries, which `historyactions.ts` words.
+- **History:** stored for every kind by `history.ts`; worded by `historypage.ts`, except skills' and agents' entries, which `historyactions.ts` words.
 - **One name, two things:** `Outcome` (`app.ts Outcome` a result the page tells; `types.ts Outcome` a plugin component in a tool), `standing`, `toggle`, `updateButton`, `Waiting`, `CHECK_EVERY_MS` (`updateflow.ts`: the app's own updates; `pluginupdates.ts`: plugins'), `PassOptions`, `pluginTools`: read each with its file. `model.ts fileName` and `words.ts fileName` are one function written twice.
 
 ## To add or change
