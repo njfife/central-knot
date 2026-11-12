@@ -257,10 +257,7 @@ const fromFacts = (facts: SkillFacts): ItemRow => ({
 /** One item as a table row. `waiting`: MCP servers whose Claude Code entry waits for Write to Claude Code, which their cell says. */
 const rowOf = (fact: SkillFacts, waiting: Set<string>): ItemRow => ({ ...fromFacts(fact), waits: waiting.has(fact.key) ? ['claude-cli'] : undefined });
 
-/**
- * The view behind a table whose bands are listNotices': a library kind's (itemrow.ts libraryView), or MCP's. Undefined for
- * the skills engine's table, whose bands are notices()' own and whose view is `manage`.
- */
+/** The view behind the table, whose bands are listNotices': a library kind's (itemrow.ts libraryView), or MCP's. */
 const listView = () => (state.home && (libraryView(state.home, kind) ?? (kind === 'mcp' ? state.home.mcp : undefined)));
 /** The kind's column header ("Server") and its title ("MCP servers"), from words.ts kindNouns. */
 const nouns = Object.fromEntries((['skills', 'mcp', 'agents'] as const).map(each => [each, [kindNouns[each].short[0].replace(/^./, first => first.toUpperCase()), kindNouns[each].title]])) as Record<PageKind, [string, string]>;
@@ -339,8 +336,6 @@ const newView = () => ({
   listFind: '',
   /** The item whose Delete from Central Knot is waiting for its confirming click. */
   confirmDelete: undefined as string | undefined,
-  /** The synced skill whose Replace with managed copies is waiting for its confirming click. */
-  confirmTakeOver: undefined as string | undefined,
   /** The visit on which a row was last opened or closed (state.visit): a copy question doesn't outlive it. */
   openedOn: 0,
   /** When a row was last opened (state.said.seq): its copy question hides only results said before it. */
@@ -358,7 +353,7 @@ const views: Record<PageKind, ReturnType<typeof newView>> = { skills: newView(),
 export const showFiltered = (which: PageKind, filter: Filter, harness?: Tool) => { startFresh(views[which], harness); views[which].filter = filter; };
 /** A table drawn for another page (a harness's, or the kind's own) starts with no filter, Find text, open row or menu from the last one. */
 function startFresh(table: ReturnType<typeof newView>, harness: Tool | undefined) {
-  Object.assign(table, { filter: 'all', find: '', comparing: undefined, confirmDelete: undefined, confirmTakeOver: undefined, shownFor: harness });
+  Object.assign(table, { filter: 'all', find: '', comparing: undefined, confirmDelete: undefined, shownFor: harness });
 }
 /** Opens an item's details on its own page (Skills, MCP servers or Agents), found by name, and scrolls it into view. */
 export function openItem(which: PageKind, name: string) {

@@ -93,7 +93,9 @@ async function walk(seed: number): Promise<Finding[]> {
     if (!item) return !first.writes && unchanged;
     for (const tool of tools) {
       const is = harnessIs(row, item, tool), wanted = wantedIn(item, tool);
-      if (wanted && !['current', 'cannot', 'another-way'].includes(is)) fail(`(b) after quiet passes an On skill is “${is}” in ${tool}`);
+      // A copy of its own beside another way it has it (the shared folder) is left alone: it has it both ways.
+      const bothWays = is === 'own-copy' && !!row.anotherWay?.[tool];
+      if (wanted && !bothWays && !['current', 'cannot', 'another-way'].includes(is)) fail(`(b) after quiet passes an On skill is “${is}” in ${tool}`);
       if (item.on && !item.deleted && !wanted && !['kept-out', 'own-copy', 'another-way'].includes(is)) fail(`(b) after quiet passes a skill kept out of ${tool} is “${is}” there`);
       if ((!item.on || item.deleted) && item.applied[tool] !== undefined) fail(`(b) after quiet passes an Off skill still has a copy applied in ${tool}`);
     }
@@ -239,11 +241,13 @@ async function walk(seed: number): Promise<Finding[]> {
       if (live) page('Delete', rowClicks.remove(now.row, live));
       if (live?.on) for (const tool of tools) page(`switch in ${tool}`, rowClicks.inHarness(now.row, live, tool, !live.except.includes(tool)));
       for (const [index, version] of (live?.versions ?? []).entries()) if (version.hash !== live!.hash) page(`Make current #${index}`, rowClicks.makeCurrent(now.row, live, version.hash));
+      for (const tool of Object.keys(now.fact?.takeOver ?? {})) offered.push({ name: `the page’s Take over in ${tool}`, run: () => takeOver(context(), tools, 'notes', tool as HarnessId) });
+      for (const [tool, load] of Object.entries(now.fact?.loads ?? {})) if (load?.off) offered.push({ name: `the page’s Clear the switch in ${tool}`, run: () => clearSwitch(context(), tools, 'notes', tool as HarnessId) });
       for (const action of offered) await trial(box, async () => {
-        const record = await recordText(), answers = [await action.run()].flat();
+        const record = await recordText(), switches = await switchesNow(), answers = [await action.run()].flat();
         const refusal = answers.map(answer => answer.stopped ?? answer.results.find(entry => entry.unchanged)?.message).find(Boolean);
         if (refusal && STALE.test(refusal)) fail(`(c) ${action.name}: “${refusal.slice(0, 100)}”`);
-        else if (!refusal && same(after, await folders()) && record === await recordText()) fail(`(c) ${action.name} does nothing`);
+        else if (!refusal && same(after, await folders()) && record === await recordText() && same(switches, await switchesNow())) fail(`(c) ${action.name} does nothing`);
       });
       // (d) Off then On, from a settled home: every folder byte for byte.
       if (settled && live?.on) await trial(box, async () => {

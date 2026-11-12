@@ -251,6 +251,7 @@ test('A copy in ~/.agents/skills is not Central Knot’s: the tools that read it
     const shared = join(box.home, '.agents/skills/notes');
     await mkdir(shared, { recursive: true });
     await writeFile(join(shared, 'SKILL.md'), skillText('In the shared folder.'));
+    assert.equal((await seen(box)).fact!.takeOver, undefined, 'a found skill is taken in before anything is taken over');
     // Found only in the shared folder: taken in from it; Claude Code, which doesn't read it, gets a copy; the others have it there.
     assert.notEqual(await turnOn(box), 'choose');
     const all = await everywhere(box);

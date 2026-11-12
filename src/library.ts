@@ -86,10 +86,11 @@
 // `held` copy, worked out at each look with its reason and shown as that harness's mark. A library item never waits for a
 // choice: the copy question exists only when a found item whose copies differ is taken in.
 //
-// Still shaped for agents, to settle when skills and MCP servers come: `own` holds a harness's whole file by its hash, where
-// an MCP entry's own part is a fragment of a shared file; `key` compares names as macOS compares file names.
+// Agents and skills are on it. Still to settle when MCP servers come: `own` holds a harness's whole file by its hash (a
+// skill has no own part: its whole folder is shared), where an MCP entry's own part is a fragment of a shared file; `key`
+// compares names as macOS compares file names.
 //
-// Worked examples, one per row of the table: tests/library.test.ts. The same on real files: tests/agents.test.ts.
+// Worked examples, one per row of the table: tests/library.test.ts. The same on real files: tests/agents.test.ts and tests/skills.test.ts.
 import type { HarnessId } from './types.ts';
 import { toolName } from './words.ts';
 

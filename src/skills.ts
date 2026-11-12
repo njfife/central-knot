@@ -474,7 +474,8 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
     if (way) other[tool] = way;
     else if (why && (copy?.is === 'held' || touched || (!copiesNow && !slot[tool]))) cannot[tool] = why;
     const outsideWay = disk.ways.get(key)?.[tool];
-    if (outsideWay?.take && outside[tool]) takeOver[tool] = { kind: outsideWay.take, path: outsideWay.path };
+    // Take over is for a skill in Central Knot: a found one is taken in first.
+    if (item && !item.deleted && outsideWay?.take && outside[tool]) takeOver[tool] = { kind: outsideWay.take, path: outsideWay.path };
     const target = given && !slot[tool] ? undefined : loadTarget(look, key, name, tool);
     if (target) loads[tool] = { ...target, off: isDisabled(look.context, disk.switches.get(tool)!, target) };
   }

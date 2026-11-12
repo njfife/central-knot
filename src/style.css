@@ -323,7 +323,7 @@ ul { list-style: none; }
 .text-action:hover { background: var(--hover); }
 .text-action.decide { flex: none; white-space: nowrap; color: var(--warning); border: 1px solid color-mix(in oklab, var(--warning) 45%, transparent); padding: 1px 7px; border-radius: 999px; font-size: 11.5px; }
 .text-action.text-danger { color: var(--danger); }
-/* A destructive action kept quiet until the pointer or focus is on it (Delete everywhere, last in an item's details). */
+/* A destructive action kept quiet until the pointer or focus is on it (Delete from Central Knot, last in an item's details). */
 .text-action.text-danger-quiet { color: var(--ink-soft); }
 .text-action.text-danger-quiet:hover, .text-action.text-danger-quiet:focus-visible { color: var(--danger); }
 .text-action:disabled { color: var(--ink-faint); cursor: default; background: none; }
@@ -750,12 +750,12 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .detail-scroll p { overflow-wrap: anywhere; }
 .detail-scroll pre { overflow-wrap: anywhere; white-space: pre-wrap; }
 .detail-files { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
-/* The Files view's details (matrix.ts filesLayout): its status and choices, where each copy is, then Delete everywhere. */
+/* The Files view's details (matrix.ts filesLayout): its status and choices, where each copy is, then Delete from Central Knot. */
 .files-details, .files-tail { display: flex; flex-direction: column; gap: 12px; }
 .files-details > .details-actions, .files-tail > .details-actions { margin-top: 0; }
 /*
  * A wide pane has two tracks: the file, and a column at the right edge that holds the details, then where each copy is
- * and Delete everywhere, one under the other. The file takes 64% of the pane less the gap, until that is more than a
+ * and Delete from Central Knot, one under the other. The file takes 64% of the pane less the gap, until that is more than a
  * file's box can use (--file-box: .content's max-width, 120 characters of 12px monospace; scripts/e2e.mjs
  * FILE_COLUMN_BLANK fails if the two drift apart); from there the details take the rest, so no width is left blank
  * beside them. The script decides it from the pane's width (matrix.ts settleFilesColumns, data-columns); below that
