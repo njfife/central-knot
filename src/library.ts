@@ -82,22 +82,26 @@ export interface LibraryItem {
   deleted?: { at: string };
 }
 
-export const newItem = (kind: ItemKind, key: string, name: string): LibraryItem => ({ kind, key, name, on: false, hash: '', versions: [], except: [], applied: {}, own: {} });
+export const newItem = (kind: ItemKind, key: string, name: string): LibraryItem =>
+  ({ kind, key, name, on: false, hash: '', versions: [], except: [], applied: {}, own: {} });
 
 /** Whether a record's value has an item's shape (a record is read from disk, so nothing about it is taken on trust). */
 export function isLibraryItem(value: unknown): value is LibraryItem {
   const item = value as Partial<LibraryItem> | null;
-  const texts = (map: unknown) => !!map && typeof map === 'object' && !Array.isArray(map) && Object.values(map).every(entry => typeof entry === 'string');
-  return !!item && typeof item === 'object' && typeof item.key === 'string' && typeof item.name === 'string' && typeof item.on === 'boolean' && typeof item.hash === 'string'
-    && Array.isArray(item.versions) && item.versions.every(version => typeof version?.hash === 'string' && typeof version.at === 'string' && typeof version.from?.how === 'string')
-    && Array.isArray(item.except) && texts(item.applied) && texts(item.own) && (item.deleted === undefined || typeof item.deleted?.at === 'string');
+  const text = (entry: unknown) => typeof entry === 'string';
+  const texts = (map: unknown) => !!map && typeof map === 'object' && !Array.isArray(map) && Object.values(map).every(text);
+  const version = (entry: Partial<Version> | null) => text(entry?.hash) && text(entry?.at) && text(entry?.from?.how);
+  return !!item && typeof item === 'object' && text(item.key) && text(item.name) && typeof item.on === 'boolean' && text(item.hash)
+    && Array.isArray(item.versions) && item.versions.every(version) && Array.isArray(item.except) && texts(item.applied) && texts(item.own)
+    && (item.deleted === undefined || text(item.deleted?.at));
 }
 
 /** Where the current version is in `versions`: the newest entry that holds the current content (an earlier entry may hold it too). */
 export const currentIndex = (item: Pick<LibraryItem, 'hash' | 'versions'>) => item.versions.findIndex(version => version.hash === item.hash);
 
 /** Whether the item should be in this harness: On, not deleted, and not kept out of it. */
-export const wantedIn = (item: Pick<LibraryItem, 'on' | 'deleted' | 'except'>, harness: HarnessId) => item.on && !item.deleted && !item.except.includes(harness);
+export const wantedIn = (item: Pick<LibraryItem, 'on' | 'deleted' | 'except'>, harness: HarnessId) =>
+  item.on && !item.deleted && !item.except.includes(harness);
 
 /** A version in words: "edited in Codex", "was in Copilot CLI", "made current again". */
 export function sourceWords({ how, harness }: Source): string {
@@ -112,7 +116,8 @@ export function sourceWords({ how, harness }: Source): string {
 export type HarnessCopy = { is: 'present'; hash: string; at: number } | { is: 'absent' } | { is: 'unknown' };
 
 /** The table's results, one per row, and two with nothing left to do: `forget` (a removal that is already done). */
-export type Verdict = 'nothing' | 'write' | 'take-in' | 'latest-wins' | 'keep-then-write' | 'turn-off' | 'remove' | 'keep-then-remove' | 'found' | 'forget';
+export type Verdict = 'nothing' | 'write' | 'take-in' | 'latest-wins' | 'keep-then-write' | 'turn-off'
+  | 'remove' | 'keep-then-remove' | 'found' | 'forget';
 
 /**
  * The rule for one harness (the table above). `wanted`: the item is On and this harness is not excepted (wantedIn).
@@ -166,7 +171,8 @@ export function plan(item: LibraryItem, copies: Copies): Plan {
   const takeIn = latestEdit(item, copies, harnesses.filter(harness => ['take-in', 'latest-wins'].includes(verdict(item, harness))));
   const turnedOffBy = harnesses.find(harness => verdict(item, harness) === 'turn-off');
   const taken = takeIn ? (copies[takeIn] as { hash: string }).hash : item.hash;
-  const after: LibraryItem = { ...item, on: item.on && !turnedOffBy, hash: taken, applied: takeIn ? { ...item.applied, [takeIn]: taken } : item.applied };
+  const applied = takeIn ? { ...item.applied, [takeIn]: taken } : item.applied;
+  const after: LibraryItem = { ...item, on: item.on && !turnedOffBy, hash: taken, applied };
   const made: Plan = { takeIn, turnedOffBy, keep: [], write: [], remove: [], forget: [], current: [], found: [] };
   const known = new Set([taken, ...item.versions.map(version => version.hash)]);
   for (const harness of harnesses) {
@@ -206,7 +212,9 @@ export interface Shelf<Content> {
   save(): Promise<void>;
 }
 
-const withVersion = (item: LibraryItem, version: Version) => [version, ...item.versions].sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
+/** The versions with one more, newest first (by when each was made; the new one first among equals). */
+const withVersion = (item: LibraryItem, version: Version) =>
+  [version, ...item.versions].sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
 
 /**
  * Keeps a content as a version of the item without making it current (a copy that gave way). Stored, recorded and saved

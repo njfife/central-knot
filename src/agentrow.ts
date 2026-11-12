@@ -11,7 +11,13 @@ import { decide, wantedIn, type LibraryItem } from './library.ts';
 import type { Change, HarnessId } from './types.ts';
 
 /** What the page knows of an agent besides its library item: each harness's copy by content, and why a harness can't hold or show it. */
-export interface AgentRow { key: string; name?: string; hashes?: Partial<Record<string, string>>; cannot?: Partial<Record<string, string>>; unseen?: Partial<Record<string, string>> }
+export interface AgentRow {
+  key: string; name?: string;
+  /** Each harness's copy, by its content. */
+  hashes?: Partial<Record<string, string>>;
+  cannot?: Partial<Record<string, string>>;
+  unseen?: Partial<Record<string, string>>;
+}
 
 export type Place = 'on' | 'off' | 'found';
 /** The item when the agent is in the library (a deleted one is not: what a harness holds of it is found). */
@@ -45,16 +51,20 @@ export function harnessIs(row: AgentRow, item: LibraryItem | undefined, tool: st
   }
 }
 
+const KEPT_FIRST = 'before it is written over, a copy Central Knot doesn’t have yet is kept as a version';
+
 /** A harness's line in the opened row: what it has, in a sentence. `where` is the harness's name. */
 export function harnessLine(row: AgentRow, item: LibraryItem | undefined, tool: string, where: string): string {
   const held = inLibrary(item), has = row.hashes?.[tool] !== undefined;
   switch (harnessIs(row, item, tool)) {
     case 'current': return 'Has the current version.';
-    case 'gets-it': return has ? 'Has an earlier copy. It gets the current version when sync runs; a copy Central Knot doesn’t have yet is kept as a version first.' : 'Gets it when sync runs next.';
+    case 'gets-it': return has ? `Has another copy. It gets the current version when sync runs; ${KEPT_FIRST}.` : 'Gets it when sync runs next.';
     case 'edited': return `Edited in ${where}. It becomes the current version when sync runs, and reaches the other harnesses.`;
     case 'deleted': return `Its copy was deleted in ${where}. When sync runs, the agent turns off everywhere; Central Knot keeps it.`;
     case 'leaving': return 'Its copy is removed when sync runs. Central Knot keeps it.';
-    case 'own-copy': return !held ? 'Has it.' : `Has a copy Central Knot didn’t put there. It is left alone${held.on ? ' while this harness is kept out' : ' while the agent is off'}; turning it on here keeps that copy as a version first.`;
+    case 'own-copy':
+      if (!held) return 'Has it.';
+      return `Has a copy Central Knot didn’t put there. It is left alone while ${held.on ? 'this harness is kept out' : 'the agent is off'}; ${KEPT_FIRST}.`;
     case 'kept-out': return 'Kept out of this harness. Central Knot keeps its file for when you turn it on here.';
     case 'none': return held ? 'No copy while it is off.' : 'No copy. Turning it on adds it here.';
     case 'cannot': return row.cannot![tool]!;

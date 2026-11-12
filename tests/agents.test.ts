@@ -8,7 +8,8 @@ import { chmod, mkdir, readFile, readdir, rename, rm, utimes, writeFile } from '
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { agentText, readAgents } from '../src/agentfiles.ts';
-import { agentVersion, agentsView, applyAgents, convertAgentToSkill, restoreAgent } from '../src/agents.ts';
+import { agentVersion, agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
+import { convertAgentToSkill } from '../src/agentskill.ts';
 import { harnessIs, placeOf } from '../src/agentrow.ts';
 import { currentIndex, sourceWords } from '../src/library.ts';
 import { readHistory } from '../src/manage.ts';

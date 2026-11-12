@@ -21,15 +21,23 @@ import { agentTools } from './presence.ts';
 import { sha256, storeDirectory, type ShareContext } from './share.ts';
 import type { HarnessId } from './types.ts';
 
-/** A copy on the old record: `stopped`, no longer updated after an edit there; `oneWay`, receive-only; `removing`, a removal a deletion still owed. */
+/**
+ * A copy on the old record: `stopped`, no longer updated after an edit there; `oneWay`, receive-only; `removing`, a removal a
+ * deletion still owed.
+ */
 interface OldCopy { tool: HarnessId; hash: string; oneWay?: boolean; stopped?: boolean; status?: 'removing' }
 /** An agent on the old record: synced (`shared`) or not, the harnesses left out (`off`), the content last synced, and a deletion that spread. */
-interface OldItem { name: string; state: 'shared' | 'dont-share'; off: HarnessId[]; hash: string; copies: OldCopy[]; deleted?: { at: string; hash: string } }
+interface OldItem {
+  name: string; state: 'shared' | 'dont-share'; off: HarnessId[]; hash: string; copies: OldCopy[];
+  deleted?: { at: string; hash: string };
+}
 export interface OldAgentRecord { formatVersion: number; items: Record<string, OldItem> }
 
 export function isOldRecord(record: unknown): record is OldAgentRecord {
   const items = (record as Partial<OldAgentRecord> | null)?.items;
-  return !!items && Object.values(items).every(item => !!item && typeof item === 'object' && typeof item.state === 'string' && Array.isArray(item.off) && Array.isArray(item.copies));
+  const isItem = (item: Partial<OldItem> | null) =>
+    !!item && typeof item === 'object' && typeof item.state === 'string' && Array.isArray(item.off) && Array.isArray(item.copies);
+  return !!items && Object.values(items).every(isItem);
 }
 
 /** One content kept before the library: its shared part, when it was kept, and each harness's whole file of it. */
@@ -50,8 +58,10 @@ export function migrateItem(key: string, old: OldItem, kept: KeptContent[], onDi
   const lastSynced = deleted?.hash ?? old.hash;
   const current = contents.has(lastSynced) ? lastSynced : synced || deleted ? undefined : latest;
   if (current === undefined) return undefined;
-  const item: LibraryItem = { ...newItem('agent', key, old.name), on: synced || !!deleted, hash: current, ...(deleted ? { deleted: { at: deleted.at } } : {}) };
-  item.versions = [...contents].map(([hash, { at, from }]) => ({ hash, at: iso(at), from })).sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
+  const item: LibraryItem = { ...newItem('agent', key, old.name), on: synced || !!deleted, hash: current };
+  if (deleted) item.deleted = { at: deleted.at };
+  item.versions = [...contents].map(([hash, { at, from }]) => ({ hash, at: iso(at), from }))
+    .sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
   const leftAlone = new Set(old.off);
   for (const copy of old.copies) {
     const here = onDisk.find(entry => entry.tool === copy.tool);
@@ -75,17 +85,28 @@ async function readKept(context: ShareContext, key: string): Promise<KeptContent
     const meta = join(base, hash, 'agent.json');
     let agent: SharedAgent;
     try { agent = JSON.parse(await readFile(meta, 'utf8')).agent; } catch { continue; }
-    if (typeof agent?.name !== 'string' || typeof agent.description !== 'string' || typeof agent.prompt !== 'string' || agentHash(agent) !== hash) continue;
+    const whole = typeof agent?.name === 'string' && typeof agent.description === 'string' && typeof agent.prompt === 'string';
+    if (!whole || agentHash(agent) !== hash) continue;
     const files: KeptContent['files'] = {};
-    for (const tool of agentTools) { const text = await readFile(join(base, hash, `${tool}.txt`), 'utf8').catch(() => undefined); if (text !== undefined) files[tool] = text; }
+    for (const tool of agentTools) {
+      const text = await readFile(join(base, hash, `${tool}.txt`), 'utf8').catch(() => undefined);
+      if (text !== undefined) files[tool] = text;
+    }
     found.push({ hash, agent, at: await stat(meta).then(info => info.mtimeMs, () => 0), files });
   }
   return found;
 }
 
-/** The whole old record as library items, with the contents the new store needs for them: each version, and each harness's own file. */
-export async function migrateAgents(context: ShareContext, old: OldAgentRecord): Promise<{ items: Record<string, LibraryItem>; versions: { key: string; hash: string; agent: SharedAgent }[]; own: { key: string; text: string }[] }> {
-  const items: Record<string, LibraryItem> = {}, versions: { key: string; hash: string; agent: SharedAgent }[] = [], own: { key: string; text: string }[] = [];
+/** A migrated record: its items, and the contents the new store needs for them (each version, and each harness's own file). */
+export interface Migrated {
+  items: Record<string, LibraryItem>;
+  versions: { key: string; hash: string; agent: SharedAgent }[];
+  own: { key: string; text: string }[];
+}
+
+/** The whole old record as library items. Reads the old store and the harnesses; writes nothing. */
+export async function migrateAgents(context: ShareContext, old: OldAgentRecord): Promise<Migrated> {
+  const { items, versions, own }: Migrated = { items: {}, versions: [], own: [] };
   // Format 1 is from before agents were rewritten: nothing in it is carried over.
   if (old.formatVersion < 2) return { items, versions, own };
   // Every harness's folder in this home is looked at, managed or not: a copy is left alone wherever it is.

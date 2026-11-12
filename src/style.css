@@ -489,7 +489,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .row-tag ~ .ov-name-about::before { content: "·"; margin-right: 8px; }
 /*
  * A row's name cell gives way in order. The description shortens (and, table-wide, steps aside; see above); the
- * one-way tag wraps onto a line below its 40px, out of sight, whole. The name and its state pills (.ov-name-main) are
+ * tag after the name wraps onto a line below its 40px, out of sight, whole. The name and its state pills (.ov-name-main) are
  * the first line, so only when they alone are too wide does the name shorten; the pills never do.
  */
 .ov-name-fit { flex-wrap: wrap; align-content: flex-start; height: 40px; padding-left: 36px; position: relative; }

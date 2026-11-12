@@ -14,7 +14,8 @@ import { agentTools, mcpTools, noteTools, pluginTools, presentTools } from './pr
 import { installedPlugins } from './plugins.ts';
 import { checkFeed, type FeedCheck } from './bundlefeed.ts';
 import { applyMcp, mcpFile, mcpView, restoreMcp, undoClaudeWrite } from './mcp.ts';
-import { agentVersion, agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
+import { agentVersion, agentsView, applyAgents, restoreAgent } from './agents.ts';
+import { convertAgentToSkill } from './agentskill.ts';
 import { applyBase, baseView, instructionsView, instructionVersion, repoBase, saveInstruction, undoBase } from './instructions.ts';
 import { clearDraftFolders, draftSources, draftTools, writeDraft } from './draftbase.ts';
 import { registerMarketplaces } from './marketplaces.ts';

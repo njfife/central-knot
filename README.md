@@ -24,10 +24,10 @@ One card per tool found on this computer, with its skills, MCP servers, agents, 
 
 Each of these pages lists one row per item, with one switch at its start. Every click applies at once; the strip at the top says what it did, with **Undo**.
 
-- **On** syncs the item to every tool Central Knot manages: a tool without it gets a copy, and it is on in each. **Off** turns it off everywhere: skills and MCP servers with each tool's own switch (the copies stay), agents by no longer syncing (each tool keeps its copy). Halfway is **Not synced**: each tool keeps its own copy.
-- **Marks** at the row's end say what each tool has: on, off, no copy, copies differ, a copy that stopped updating, or through a plugin. They are status only.
+- **On** syncs the item to every tool Central Knot manages: a tool without it gets a copy, and it is on in each. **Off** turns it off everywhere: skills and MCP servers with each tool's own switch (the copies stay); an agent leaves every tool, and Central Knot keeps it (see Agents below). Halfway is **Not synced**: each tool keeps its own copy (an agent: **Found**, in a tool and not in Central Knot yet).
+- **Marks** at the row's end say what each tool has: on, off, no copy, copies differ, something waiting for sync, or through a plugin. They are status only.
 - **Copies differ**: the switch asks which copy every tool uses, quoting what each copy has that the others don't. Choosing applies at once; its Undo puts each copy back in its own tool, as before the choice.
-- **The opened row** (its chevron) has each tool's own controls: its switch, **Sync here** for a tool left out, **Remove** (skills), **Stop syncing this agent**, **Write to Claude Code** (MCP servers), and **Delete everywhere…** last.
+- **The opened row** (its chevron) has each tool's own controls: its switch, **Sync here** for a tool left out, **Remove** (skills), **Write to Claude Code** (MCP servers), an agent's versions, and last **Delete everywhere…** (skills) or **Delete from Central Knot…** (agents).
 - **Catch-up**: opening a home or **Refresh** copies a synced item back into a tool that lacks it.
 
 A tool's own switch for a skill: Claude Code `skillOverrides`, Copilot `disabledSkills`, Codex `[[skills.config]]` by path, Pi's `settings.json` filter, OpenCode a `deny` rule for the skill's name in its settings file. It is best effort: offered whatever the tool's version, written and then read back. On a build older than the one it was checked on, a short note says it may not take effect. **Remove** takes that tool's copy out, and History keeps it for Restore.
@@ -36,7 +36,16 @@ OpenCode loads Claude Code's skills folder and `~/.agents/skills` as well as its
 
 MCP servers: each tool's user-wide file (Claude Code `~/.claude.json`, Copilot `mcp-config.json`, Codex `config.toml`, Pi `mcp.json`, OpenCode `opencode.json`, or `opencode.jsonc` when there is one). Writes edit only that server's entry. Claude Code's file is written only by **Write to Claude Code**, which waits while Claude Code, Claude desktop or its Code tab is open. Codex servers written inline or with dotted keys are left alone. OpenCode's servers are read from both places its settings keep them (`mcp` and `mcp.servers`); an entry is changed where it is, a new one goes under `mcp`, and comments in the file stay. Open a server to turn it off or on in one tool, with that tool's own switch (the table under Profiles); its entry stays.
 
-Agents: Claude Code `~/.claude/agents`, Copilot `~/.copilot/agents`, Codex `~/.codex/agents`, OpenCode `~/.config/opencode/agents`. Name, description and prompt sync. A tool that lacks the origin's other fields gets the agent **With limits**, one way: changes there stay there. An agent new to OpenCode is written with `mode: all`, so both of OpenCode's lines offer it to choose and to hand work to. Pi has no agents; **Convert to skill** writes one as a Pi skill, once.
+Agents: Claude Code `~/.claude/agents`, Copilot `~/.copilot/agents`, Codex `~/.codex/agents`, OpenCode `~/.config/opencode/agents`. An agent new to OpenCode is written with `mode: all`, so both of OpenCode's lines offer it to choose and to hand work to. Pi has no agents; **Convert to skill** writes one as a Pi skill, once.
+
+**Agents live in Central Knot.** Central Knot holds each agent itself, with its versions; a tool is somewhere an agent is applied. (Skills and MCP servers still work as described above; they move to the same model next.)
+
+- **Found**: an agent a tool has that Central Knot doesn't. Nothing is done with it until its switch is turned on, which takes it in and puts it in every tool Central Knot manages. Where the tools' copies differ, the switch asks which one to take in; the others are kept as versions.
+- **On**: every managed tool has the current version. The agent's name, description and prompt are kept the same everywhere, both ways: an edit made in any tool becomes the current version and reaches the others. When two tools were edited, the latest edit wins and the other is kept as a version. Each tool's other settings (Claude Code's `tools` and `model`, Codex's keys and tables, comments) stay in that tool's own file and are never copied elsewhere.
+- **Off**: the agent leaves every tool. It stays in Central Knot, with a row under Off, and turning it on writes each tool's file back exactly as it was. A copy deleted by hand in a tool turns the agent Off everywhere; Central Knot keeps it. A copy that can't be read, a half-finished save, or a folder that was moved or made again is never taken for a deletion.
+- **One tool's switch**, in the opened row, keeps the agent out of that tool alone.
+- **Versions**, in the opened row: every version the agent has had, newest first, with when it was made and where it came from. **Read** shows one; **Make current** puts an earlier one in every tool the agent is on in. Every version is kept until the agent is deleted.
+- **Delete from Central Knot…** takes the agent out of every tool and off the page. History keeps it, and **Restore** there puts it back as it was.
 
 Copies are written only into each tool's own folder, byte-exact with file modes, without nested `.git` or `.DS_Store`. Central Knot never writes through a link or into a folder other tools share, such as `~/.agents/skills`.
 
@@ -92,15 +101,15 @@ A profile is a named set of skills and MCP servers to have on, such as *Incident
 - A switch is one History row, and **Undo switch** puts back what it changed.
 - A skill or server you disabled by hand stays off; profiles only turn back on what a profile turned off.
 - A synced item a profile turned off still receives edits. Profiles never change what is synced.
-- Agents have no off switch in any tool, so they are not in profiles. Profiles are kept in `.central-knot/profiles.json`. A switch takes effect from each tool's next session.
+- Agents are not in profiles yet: an agent's On and Off are its own, on the Agents page. Profiles are kept in `.central-knot/profiles.json`. A switch takes effect from each tool's next session.
 
 ### History
 
-Lists what Central Knot and sync did, with **Undo** or **Restore**. Every replaced or removed version is kept first in `.central-knot/` (skills, agent files and each tool's own MCP settings). Undo says what it could not put back. History keeps things for 30 days by default; Settings offers 7, 30 or 90.
+Lists what Central Knot and sync did, with **Undo** or **Restore**. Every replaced or removed version is kept first in `.central-knot/` (skills and each tool's own MCP settings; an agent's versions are the agent's own, kept whatever History's days). Undo says what it could not put back. An agent's entries offer what would still change something: **Undo** makes the version from before an edit current again, **Turn on** or **Turn off** is its switch, **Restore** brings back a deleted agent. History keeps things for 30 days by default; Settings offers 7, 30 or 90.
 
 ### Git repo
 
-Keeps the Managed set (skills, MCP servers, agents and base instructions) in a git repo on GitHub, GitLab or any git remote. Connect with a repo address and an optional branch; Central Knot uses this computer's own git sign-in. Nothing moves until you click **Pull** or **Push**. Pull brings the repo's changes into your tools through the normal sync, so each one is in History with Undo. Push makes one commit of the Managed set. The page lists what would come in and what would go out, and the sidebar shows the counts. The repo layout is `skills/<folder>/`, `mcp/<name>.json`, `agents/<name>.md` and `instructions/base.md`; other files in the repo are left alone.
+Keeps the Managed set (skills, MCP servers, agents and base instructions) in a git repo on GitHub, GitLab or any git remote. Connect with a repo address and an optional branch; Central Knot uses this computer's own git sign-in. Nothing moves until you click **Pull** or **Push**. Pull brings the repo's changes into your tools through the normal sync, so each one is in History with Undo. An agent Pull brings in is taken into Central Knot, its version marked as pulled from the Git repo; one removed in the repo is deleted from Central Knot, with Restore in History. Push makes one commit of the Managed set. The page lists what would come in and what would go out, and the sidebar shows the counts. The repo layout is `skills/<folder>/`, `mcp/<name>.json`, `agents/<name>.md` and `instructions/base.md`; other files in the repo are left alone.
 
 ### Settings
 
@@ -133,7 +142,7 @@ Not there yet: a custom build's own updates (it says so in Settings).
 
 ## State
 
-Central Knot's state lives in one folder, `.central-knot/` inside the selected home: `sync.json`, kept revisions under `items/`, profiles and base instructions. There is no second copy. A damaged, missing, newer, replaced or differently owned record stops writes and deletes nothing. App settings (home, appearance, history length) and the log are in the normal Electron app data folder (`~/Library/Application Support/central-knot/` on a Mac).
+Central Knot's state lives in one folder, `.central-knot/` inside the selected home: `sync.json` (skills), `mcp.json`, `agents.json`, kept contents under `items/`, History, profiles and base instructions. For skills and MCP servers the tools' own folders are the truth, and `.central-knot/` records what is synced and keeps what was replaced. For agents Central Knot is the truth: `agents.json` holds each agent (On or Off, its current version, its versions, the tools it is kept out of and what was applied where), `items/agents/<name>/versions/` holds each version's name, description and prompt, and `items/agents/<name>/own/` each tool's whole file from when Central Knot took it out. A home last used by a version from before this model is migrated the first time it is opened: no tool's file changes, and the earlier record stays beside the new one as `agents.v2.json`. A damaged, missing, newer, replaced or differently owned record stops writes and deletes nothing. App settings (home, appearance, history length) and the log are in the normal Electron app data folder (`~/Library/Application Support/central-knot/` on a Mac).
 
 ## Not here yet
 
@@ -149,6 +158,7 @@ npm start            # dev build, opens the Practice copy
 npm test             # TypeScript check and unit tests (tests/*.test.ts)
 ```
 
+- **Where things are:** `LEDGER.md` keeps each feature's decisions, newest at the end. The model items follow is the header of `src/library.ts`; agents are the first kind on it, and the map of their code is LEDGER's last section.
 - **End to end:** `npm run e2e` (`scripts/e2e.mjs`) drives the app over its debug port in a throwaway HOME. `--electron` runs the dev build instead of the packaged app; on Linux add `--no-sandbox` and run it under `xvfb-run`. `--flows openCodeFlow,…` runs only the named flows while working on one.
 - **UI tour:** `node scripts/ui-tour.mjs <outDir> [--electron]` is the light tour: the app opens on the Practice copy and each page is opened once, one picture each, in a few seconds. `--only shell,skills,…` takes the pictures of the named features; `--full` takes every feature at 860×560 up to 2560×1440, dark and light (about ten minutes, for a new release).
 - **Harness tests:** `npm run test:harness` installs, updates and uninstalls a marker plugin with the real `claude`, `copilot` and `codex` CLIs in disposable homes (a missing one is skipped), checks that a plugin turned off stays off through an update and that one its marketplace dropped keeps its copy, and takes a bundled build's marketplace through being packed, unpacked, added to each tool's own list, installed and uninstalled. `CK_HARNESS_APPS=1` runs the same tests through the copy each desktop app carries.

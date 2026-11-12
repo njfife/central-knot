@@ -36,10 +36,12 @@ async function inspect(home: string): Promise<Inspected> {
   try {
     const record = JSON.parse(text) as Partial<AgentLibrary> | null;
     const version = record?.formatVersion;
-    if (!Number.isInteger(version) || version! < 1 || !record!.items || typeof record!.items !== 'object' || Array.isArray(record!.items)) return damaged;
+    const items = record?.items;
+    if (!Number.isInteger(version) || version! < 1 || !items || typeof items !== 'object' || Array.isArray(items)) return damaged;
     if (version! > FORMAT_VERSION) return { problem: `The agents record was written by a newer Central Knot. ${NOTHING_CHANGED}` };
     if (version! < FORMAT_VERSION) return isOldRecord(record) ? { older: record, text } : damaged;
-    return Object.values(record!.items).every(isLibraryItem) ? { library: { formatVersion: FORMAT_VERSION, items: record!.items, folders: record!.folders ?? {} } } : damaged;
+    if (!Object.values(items).every(isLibraryItem)) return damaged;
+    return { library: { formatVersion: FORMAT_VERSION, items, folders: record!.folders ?? {} } };
   } catch { return damaged; }
 }
 
@@ -89,7 +91,8 @@ export async function readVersion(context: ShareContext, key: string, hash: stri
 }
 
 /** The library's shelf for agents (library.ts Shelf): where a version's content goes, and the caller's save of the record. */
-export const agentShelf = (context: ShareContext, save: () => Promise<void>): Shelf<SharedAgent> => ({ store: (item, hash, agent) => storeVersion(context, item.key, hash, agent), save });
+export const agentShelf = (context: ShareContext, save: () => Promise<void>): Shelf<SharedAgent> =>
+  ({ store: (item, hash, agent) => storeVersion(context, item.key, hash, agent), save });
 
 /** Keeps a harness's whole file as that harness's own part of the item, before the file is removed. The caller saves the record. */
 export async function keepOwn(context: ShareContext, item: LibraryItem, entry: AgentEntry) {
