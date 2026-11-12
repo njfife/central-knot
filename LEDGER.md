@@ -1182,7 +1182,7 @@ This is the first step of that change: the model, and agents moved onto it end t
 **States the model's table did not explain, and what was done** (each keeps every content as a version and writes nothing else):
 - *An edit in one harness and a deletion in another, in the same pass.* The edit becomes the current version, and the agent turns Off. Proposed row: "On · H changed in one harness, gone in another · the edit is the current version; the item turns Off everywhere".
 - *Off, or a harness kept out, while its copy holds an edit no pass has taken in* (Automatic sync off, or inside the settle window). The owner's rule (fix round 1): the edit wins. These are now the table's Off rows: "Off, or kept out · H changed, L = A · H becomes the current version, then it is removed" and "Off, or kept out · H changed and L moved on · the latest wins, the other is kept as a version; then removed".
-- *On, clicked where a tool had a copy the agent never had* (a hand-made copy while it was Off). On keeps that copy as a version and writes the current one over it; the click's Undo is Turn off, which removes it. The copy is one Make current away, not put back as the file: there is no put-back (plan, section 4). The walk's Undo check leaves such clicks out.
+- *On, clicked where a tool had a copy the agent never had* (a hand-made copy while it was Off). On keeps that copy as a version and writes the current one over it. Since step 2c's fix round 1 the click's Undo gives that copy back as the tool's own file, unapplied (the one give-back rule for skills and agents; that round's section below); the walk's Undo check covers such clicks.
 - *An Off item, or a harness kept out, with a copy Central Knot never applied.* It is a found copy and left alone; turning the agent on there keeps it as a version, then writes the current one (the On row for "a copy, no A").
 - *A found agent that had been deleted from Central Knot.* Taking it in lifts the tombstone on the same item, its earlier versions with it.
 - *Migration: an agent not synced that never had a synced content* (copies kept separate). It becomes an Off item whose current version is its latest copy; every copy stays as a found copy.
@@ -1420,9 +1420,9 @@ Skills are the second kind on the library, by implementing `librarypass.ts Kind`
 
 **What a person sees change.**
 - A skill a tool has that Central Knot doesn't is **Found**; its switch, halfway, takes it in and puts it in every tool (a copy question where copies differ; the others become versions). **Off** takes the folder out of every tool and Central Knot keeps it; **On** puts the same folder back, byte for byte. **Delete from Central Knot…** is the one delete; History restores it.
-- A tool's own switch for a skill is read, never written by Off or On: the folder stays, the mark is off, the row says "switched off in Codex", the status line too, and **Clear the switch** on that tool's line clears it (a History `switched` entry, which a profile's Undo reads).
+- A tool's own switch for a skill is read, never written by Off or On: the folder stays, the mark is off, the row says "switched off in Codex", the status line too, and **Clear the switch** on that tool's line clears it (a History `switched` entry, which a profile's Undo reads). Fix round 1 renamed it "Let Codex load it" and gave it an Undo.
 - **Has it another way** (a plugin, a link, a copy in `~/.agents/skills`, a reader of another managed tool's folder): nothing of Central Knot's goes there, its line says why, and the status line names those tools. **Take over…** is the one action that writes such a place: a link is replaced at once; the shared copy is removed once confirmed, kept as a version first, and each tool that read it gets Central Knot's copy. A found skill is taken in first (no Take over is offered for it).
-- **Partial**: kept out of a tool in the opened row, the closed row says "in 2 of 3 tools · not in Codex" and the switch is drawn striped; the main switch stays all or nothing.
+- **Partial**: kept out of a tool in the opened row, the closed row says "in 2 of 3 tools · not in Codex" ("kept out of Codex" since fix round 1) and the switch is drawn striped; the main switch stays all or nothing.
 - A found skill whose only copy can't be copied as it is (a link inside, an unreadable file) is a row that says why; its switch waits and it has no Files and contents.
 - Removed: per-tool **Remove**, **Delete everywhere**, **Replace with managed copies**, the per-tool Disable on the Skills page (a skill's switch in the opened row now keeps it out of that tool: its folder goes).
 
@@ -1492,8 +1492,49 @@ Skills are the second kind on the library, by implementing `librarypass.ts Kind`
 - The first Mac run (43305709354) failed two Mac-only end-to-end checks, both fixed: a damaged `sync.json` had no band (above), and the crash flow assumed every choice of a bulk take-in was on record before copying (above); a check of the damaged record's band now runs in the practice flow on Linux too. The Mac run on the head is named in the pull request.
 
 **Follow-ups.**
-- The armed Take over… says what it does in its tooltip only; a visible note like Delete's would be better.
 - A tool kept out while it still reads another tool's copy can't be made not to load it from the Skills page (only its own switch could, which only profiles write now).
 - The old store folders `items/<folder>/<hash>/` stay after migration; a clean-up once no build reads them.
-- History's sentence for a take-over says "and that one is kept as a version" also when the library already had that content.
 - The Linux-only end-to-end check "Show log file opens the log’s folder" fails on this machine (its file manager stand-in isn't called); macOS is the platform checked.
+
+### Step 2c, fix round 1
+
+What the first review round found (two page reviewers, two code reviewers, a break-it pass, a small model's cold read and a fresh agent's small change, and the orchestrator's migration on a copy of the owner's Mac home), and what was done. Each behaviour item was a failing test first; the test named is the one that fails with the fix switched off.
+
+**One rule for an Undo: every folder as it was before the click.** A click's History entry records the copies it took over from a tool (`HistoryEvent.tookFrom`: a tool's own copy it wrote over, or one it counted as the item's because it was the same). Its Undo carries them (`Change.giveBack`, copied by `main.ts`'s sanitizer), and the pass gives each back as that tool's own, unapplied (`librarypass.ts giveBackCopy`), instead of removing what is there; the entry records which (`gaveBack`). This is one rule for skills and agents, so it changes an agents rule on purpose: turning an agent on over a hand-made file used to have an Undo that removed it (the file one Make current away); now the Undo gives that file back (the agents line above says so). Both walks now check every click's Undo, these included.
+- 15a. *Undo right after taking a found skill in* removed every folder, the original included. Its Undo is now Delete plus give-back: the copies Central Knot made go, each tool it was found in keeps its folder, and the skill is found again; History says "Undone: taken out of Central Knot again …; Claude Code keeps its own copy, as before." `app.ts` asks `itemrow.ts onLibrary(kind)` where it asked `kind === 'agents'`, so a library kind's strip Undo is its entries' own actions alone. Tests: `tests/undo.test.ts` "Undo right after taking in a found skill …" and "… whose copies differed …".
+- 23. *Undo of letting a skill into a tool that held its own copy* left the folder gone. The copy is back as it was and the tool kept out again. Test: "Undo of letting a skill into a tool that held its own copy …".
+- 24. *Undo of keeping a skill out of Claude Code where OpenCode has it both ways* removed OpenCode's own folder. Same cause, same fix. Test: "Undo of keeping a skill out of Claude Code, where OpenCode has it both ways …".
+
+**A version a tool won't load is never written there** (16). `Disk.refuses` (skills: `cannotTake`) holds the write where the tool has a copy too, not only for a fresh take-in: its copy stays as it was and its line says why, in the fresh take-in's sentence. The pass holds it (the brief's first choice), not only the row. Test: `skills.test.ts` "An edit Codex won't load is never written over Codex's copy …".
+
+**History.**
+- 17. Take over's `took-over` entry is appended once the take-over happened. Test: "A take-over that couldn't happen leaves no History entry saying it did".
+- 18. Turning on over a different hand-made copy says so ("Codex's own copy was written over and kept as a version.") and offers it ("Use Codex's copy", as other entries with a kept version do). Test: "Turned on over a different copy made by hand in one tool …".
+- 1. Clear the switch (now "Let Codex load it") has a real Undo: History's entry and the strip offer it, and it sets that tool's own switch again (`skills.ts restoreSkill`, `switchBack`). It is offered only while some tool still loads the skill: once the person switched it off again by hand there is nothing to undo (walk seeds 60074 and 60077 found the Undo offered then). Take over says "This has no Undo." on its armed line, in the strip and in History. Test: "A switch set in a tool is left exactly as it is …".
+
+**What the page says.**
+- 2. Take over's armed line says which folder is removed, which tools get Central Knot's copy, that other apps reading that folder won't find it, and that it has no Undo.
+- 3. A tool switched off in its own settings is not counted as on: the closed row's switch is partial and its status says "switched off in Claude Code"; the tool's line has its own word ("Switched off") and mark; the action is "Let Claude Code load it". Test: the same switch test (the partial row).
+- 4. A found row says "every tool" only when true: the tools it goes to and those that can't take it; one that can't be taken in yet (a link inside) has a switch that looks unavailable, "can't be taken in yet", and its line gives the next step (replace the link with the file, then Refresh); a skill some tools have another way says "Another way" on their lines with no switch, and the strip names them. Test: "A found row says "every tool" only when it is true …".
+- 5. One mark per meaning: kept out (circle-minus), can't take it (circle-slash), switched off in the tool's own settings or by a profile (circle-off); the legend uses the lines' words.
+- 6. Read shows a line that mostly changed whole, the current one struck and then this one (`diff.ts readAgainst`). Test: `libraryrow.test.ts` "Read marks the words a line changed a little …".
+- 7. The status bar says "Nothing changed" only when nothing did (the end-to-end status-bar check).
+- 8. At 860×560 the opened row stays at the top of the table while its lines and Delete are used (`style.css .ov-switched .ov-row.open`); the Files view shows the file first.
+- 9. "kept out of Codex" everywhere; the legend's words; "← Skills"; one sentence for one frontmatter reason.
+- 10. The folder note is shown only where it is true, as "Every tool it is on in gets the same folder: every file as it is, and its scripts still runnable."; version times are "just now", then minutes; History's "Use Claude Code's copy" sits with the actions; the deleted-by-hand strip keeps its full stop; a library page's strip offers "Undo" or says it has none.
+- 11. A found skill only Codex has: OpenCode's line says "OpenCode reads Claude Code's skills folder, so it gets the skill from there once it is on in Claude Code." Test: "A found skill only Codex has: OpenCode's line says what is true before it is turned on …".
+- 18a. A copy in `~/.agents/skills` edited after it was taken in: the lines of the tools that read it add "That copy differs from the current version, and isn't one of its versions." beside Take over…. Test: "A copy in ~/.agents/skills edited after it was taken in …".
+- 25. Take over carries a tool's own switch (a profile's hold or the person's) to Central Knot's new copy. Test: "Take over carries a tool's own switch …".
+
+**Easier to find your way** (12–15, 19–21): every `file.ts name` in a comment now names something that exists (checked by a script over every source file); `harnesses.ts HarnessDefinition.reservedSkills` and `share.ts ShareContext settleMs` say who reads them; `MAP.md` has the reserved-name row, says a row's sentences are in `libraryrow.ts`, and that History's actions are `historyactions.ts` for every library kind; `librarypass.ts`'s header names agents.ts and skills.ts; `skills.ts readDisk` and `rowFacts` are in named parts; `tests/skillclicks.ts roots` knows Pi.
+
+**Not done.**
+- 22. `main.ts pass` still reports skills apart from `mcpAndAgents`. Folding them changes what the Caught up band shows (today it lists skills' catch-ups only), which is more than a small change; left.
+- 26. Two folders with one `name:` can't be switched separately in Copilot CLI: for the record, not from this change.
+
+**Validation.**
+- `npm test`: 686 tests, about 52 s.
+- Each new rule switched off: 13, every one failing a named test (give-back, the copies a click took over, a version a tool won't load, take over told once it happened, take over carrying a switch, History's written-over sentence, an outside copy that moved on, the take-in's Undo, Clear's Undo only while a tool loads it, Read's whole lines, a switched tool making the row partial, a found row naming the tools that can't take it, a reader of a tool with no copy yet).
+- The walk on 60000–60099 in two halves: 60000–60049 clean; 60050–60099 found two things, both fixed and then clean: the walk's own rule that no History action writes a tool's switch (Clear's Undo now does, on purpose), and Clear's Undo offered when it would change nothing.
+- End to end (`scripts/e2e.mjs`, the dev build on Linux): 683 passed, 1 failed: "Show log file opens the log's folder", the Linux-only check this step doesn't touch.
+- Pictures: `tour-l2c-r2/` (the skills section at four sizes and light, and the agents section for the rows they share), each looked at.
