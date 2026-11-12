@@ -1098,6 +1098,28 @@ async function practiceFlow() {
   same('Restore puts it back in every harness, each file as it was', notesFiles.map(file => (existsSync(file) ? readFileSync(file, 'utf8') : null)), notesBefore);
   await a.click('#nav-agents');
   same('and it is on its page again, on', [(await rowKeys(a)).includes('release-notes'), await switchOn(a, 'release-notes')], [true, true]);
+  // A tool uninstalled and back (its folder taken away, then put back) is a tool managed again: Central Knot's version wins
+  // there. Turned off while Codex was away, code-reviewer keeps its Codex copy there; edited meanwhile, that copy is kept as a
+  // version ("was in Codex") and removed once Codex is back, and the current version stays.
+  const openReviewer = async () => { if (await a.run(`document.querySelector('#open-code-reviewer')?.getAttribute('aria-expanded')`) !== 'true') await a.click('#open-code-reviewer'); };
+  await openReviewer();
+  const reviewerHere = reviewerNow(), currentHere = (await versionsShown())[0];
+  renameSync(join(practice, '.codex'), join(practice, '.codex-away'));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 30 && await cellState(a, 'code-reviewer', 'codex-cli') !== null; tries++) await wait(100);
+  await a.click('#switch-code-reviewer');
+  for (let tries = 0; tries < 30 && existsSync(claudeAgent); tries++) await wait(100);
+  const awayCopy = join(practice, '.codex-away/agents/code-reviewer.toml');
+  writeFileSync(awayCopy, readFileSync(awayCopy, 'utf8').replace('description = "', 'description = "Edited while away. '));
+  renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 30 && existsSync(codexAgent); tries++) await wait(100);
+  await openReviewer();
+  same('a tool managed again: the Off agent’s copy edited there meanwhile is removed and kept as a version, and the current version stays',
+    [reviewerNow(), await switchState('code-reviewer'), (await versionsShown())[0], (await versionsShown()).some(line => /^was in Codex/.test(line))], [[null, null, null], 'false', currentHere, true]);
+  await a.click('#switch-code-reviewer');
+  for (let tries = 0; tries < 30 && !reviewerNow().every(text => text !== null); tries++) await wait(100);
+  same('turned on again, every tool has its file back as it was', reviewerNow(), reviewerHere);
   await fitsAtMinimum(a, 'Agents');
   await a.click('#nav-skills');
 

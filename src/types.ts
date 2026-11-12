@@ -293,7 +293,7 @@ export interface SkillFacts {
   choiceBlocks: Partial<Record<HarnessId, { tool: HarnessId; reason: string }[]>>;
   /** Agents: harnesses whose copy can't be seen for sure right now, and why. Nothing changes there until it can. */
   unseen?: Partial<Record<HarnessId, string>>;
-  /** Agents in the library: what the next pass does in each harness (library.ts plan, from agents.ts copiesOf), which the marks say. */
+  /** Agents in the library: what the next pass does in each harness (library.ts plan, from librarypass.ts copiesOf), which the marks say. */
   plan?: Plan;
   /** Agents found in a harness, not in the library: their copies differ, so the switch asks which one every harness takes. */
   differs?: boolean;
@@ -346,7 +346,7 @@ export interface ManageView {
 /**
  * One skill's change for applyChanges. `managed` and `off` always say how it should be managed afterwards: a caller changing only
  * switches or removals passes the skill's current ones (from its SkillFacts), with `seenManaged`, or it changes those too.
- * For an agent (agents.ts click): `managed` is On in Central Knot's library, `off` the harnesses it is kept out of. A field
+ * For an agent (librarypass.ts click): `managed` is On in Central Knot's library, `off` the harnesses it is kept out of. A field
  * added here reaches an engine only once main.ts's `changes` sanitizer copies it.
  */
 export interface Change {
@@ -433,7 +433,8 @@ export interface HistoryEvent {
    *   written or removed.
    * 'current': an earlier version (`version`) was made current; `previous` is the one before.
    * 'edit' / 'conflict': an edit taken in (`winner`), or Pull's (`cause`); `losers` are the harnesses written, each with what it
-   *   held before, and on a 'conflict' the edits that gave way. 'kept-edit': edits not taken in that were written over (`losers`).
+   *   held before, and on a 'conflict' the edits that gave way. 'kept-edit': edits not taken in that were written over (`losers`),
+   *   or (`cause: 'tool-back'`) a copy a tool managed again held, which gave way to the current version.
    * 'deleted': it was deleted from Central Knot. 'chosen': it was taken in with the `winner`'s copy, where the found copies differed. */
   kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed' | 'profile' | 'took-over' | 'written' | 'on' | 'off' | 'current';
   /** 'on' / 'off': the one harness it was turned on or off in. */
@@ -441,9 +442,10 @@ export interface HistoryEvent {
   /**
    * Agents: what made it happen, read by historyactions.ts alone. `switch`: the person's switch ('on' / 'off'). `found`: a found
    * agent taken in ('on'; `winner`: where it was found). `pulled`: Pull did it ('on' for an agent new here, 'edit', 'deleted').
-   * `deleted-by-hand`: its copy was deleted by hand ('off'; `winner`: where).
+   * `deleted-by-hand`: its copy was deleted by hand ('off'; `winner`: where). `tool-back`: a tool managed again held a copy
+   * the agent didn't have ('kept-edit'; `losers`: that copy), which gave way to the current version (library.ts managedAgain).
    */
-  cause?: 'switch' | 'found' | 'pulled' | 'deleted-by-hand';
+  cause?: 'switch' | 'found' | 'pulled' | 'deleted-by-hand' | 'tool-back';
   /** 'current': the version made current; an agent's 'edit' Pull made: the version pulled. */
   version?: string;
   /** 'took-over': what was replaced, removed and placed, so Undo can put it back exactly. */

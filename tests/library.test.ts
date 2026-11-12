@@ -3,10 +3,13 @@
 // applied there last. Contents are single letters: 'a' is older than 'b', and so on.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { carryOut, decide, isLibraryItem, keepVersion, listed, newItem, plan, setCurrent, sourceWords, type HarnessCopy, type LibraryItem, type Shelf } from '../src/library.ts';
+import { carryOut, decide, isLibraryItem, keepVersion, listed, managedAgain, newItem, plan, setCurrent, sourceWords, type HarnessCopy, type LibraryItem, type Shelf } from '../src/library.ts';
 
 const has = (hash: string, at = 0): HarnessCopy => ({ is: 'present', hash, at });
-const none: HarnessCopy = { is: 'absent' }, unknown: HarnessCopy = { is: 'unknown', why: 'it can’t be read' }, held: HarnessCopy = { is: 'held', why: 'it can’t hold this name' };
+/** A copy with no time of its own (an MCP entry: its time is its whole file's). */
+const untimed = (hash: string): HarnessCopy => ({ is: 'present', hash });
+const none: HarnessCopy = { is: 'absent' }, unseen: HarnessCopy = { is: 'unseen', why: 'it can’t be read' }, held: HarnessCopy = { is: 'held', why: 'it can’t hold this name' };
+const anotherWay: HarnessCopy = { is: 'held', why: 'a plugin brings it', anotherWay: true };
 const ON = true, OFF = false;
 
 // ---------- decide: the table, row by row ----------
@@ -24,11 +27,17 @@ test('Off or kept out, H changed while L = A: H becomes the current version, the
 test('Off or kept out, H changed and L moved on too: the latest wins, then it is removed', () => assert.equal(decide(OFF, 'c', has('b'), 'a'), 'latest-wins'));
 test('Off or kept out, a copy where nothing was applied: a found copy, left alone', () => assert.equal(decide(OFF, 'b', has('x'), undefined), 'found'));
 
-test('H unknown is never H gone: nothing happens there, On or Off, whatever was applied', () => {
-  for (const wanted of [ON, OFF]) for (const applied of ['b', 'a', undefined]) assert.equal(decide(wanted, 'b', unknown, applied), 'nothing');
+test('H unseen is never H gone: nothing happens there, On or Off, whatever was applied', () => {
+  for (const wanted of [ON, OFF]) for (const applied of ['b', 'a', undefined]) assert.equal(decide(wanted, 'b', unseen, applied), 'nothing');
 });
 test('A harness that can’t be given the item (held) is passed over: nothing happens there', () => {
   for (const wanted of [ON, OFF]) for (const applied of ['b', undefined]) assert.equal(decide(wanted, 'b', held, applied), 'nothing');
+});
+test('A harness that has the item another way: nothing of Central Knot’s goes there, and what was applied there is let go', () => {
+  for (const wanted of [ON, OFF]) {
+    assert.equal(decide(wanted, 'b', anotherWay, 'b'), 'forget');
+    assert.equal(decide(wanted, 'b', anotherWay, undefined), 'nothing');
+  }
 });
 test('Off, and the copy a removal was owed for is gone already: only forgotten', () => {
   assert.equal(decide(OFF, 'b', none, 'b'), 'forget');
@@ -116,8 +125,103 @@ test('A harness the person keeps it out of loses its copy; the others stay', () 
 });
 
 test('A copy that can’t be seen changes nothing: no Off, no removal, no write there', () => {
-  assert.deepEqual(plan(item(), { 'claude-cli': has('a'), 'copilot-cli': unknown, 'codex-cli': has('a') }), { ...quiet, current: ['claude-cli', 'codex-cli'] });
-  assert.deepEqual(plan(item({ on: false }), { 'claude-cli': unknown, 'copilot-cli': unknown, 'codex-cli': unknown }), { ...quiet, current: [] });
+  assert.deepEqual(plan(item(), { 'claude-cli': has('a'), 'copilot-cli': unseen, 'codex-cli': has('a') }), { ...quiet, current: ['claude-cli', 'codex-cli'] });
+  assert.deepEqual(plan(item({ on: false }), { 'claude-cli': unseen, 'copilot-cli': unseen, 'codex-cli': unseen }), { ...quiet, current: [] });
+});
+
+test('A harness that has the item another way never turns it Off; once the other way ends, the item is written there afresh', () => {
+  const agent = item();
+  const made = plan(agent, { 'claude-cli': anotherWay, 'copilot-cli': has('a'), 'codex-cli': has('a') });
+  assert.deepEqual(made, { ...quiet, forget: ['claude-cli'], current: ['copilot-cli', 'codex-cli'] });
+  // carryOut lets A go there (made.forget); then the plugin is gone and Claude Code has no copy.
+  delete agent.applied['claude-cli'];
+  assert.deepEqual(plan(agent, { 'claude-cli': none, 'copilot-cli': has('a'), 'codex-cli': has('a') }).write, ['claude-cli']);
+  // A harness that can't be given the item keeps what was applied there: once it can, a copy gone by then was deleted by hand.
+  assert.deepEqual(plan(item(), { 'claude-cli': held, 'copilot-cli': has('a'), 'codex-cli': has('a') }), { ...quiet, current: ['copilot-cli', 'codex-cli'] });
+});
+
+// ---------- Copies with no time of their own ----------
+
+test('An edit with no time of its own, made on the current version, is taken in', () => {
+  assert.equal(plan(item(), { 'claude-cli': has('a'), 'copilot-cli': has('a'), 'codex-cli': untimed('b') }).takeIn, 'codex-cli');
+});
+
+test('Two edits with no time of their own: which came last can’t be told, so the first harness wins and the other is kept as a version', () => {
+  assert.deepEqual(plan(item(), { 'claude-cli': untimed('c'), 'copilot-cli': has('a'), 'codex-cli': untimed('b') }),
+    { ...quiet, takeIn: 'claude-cli', keep: [{ harness: 'codex-cli', from: { how: 'edited', harness: 'codex-cli' } }], write: ['copilot-cli', 'codex-cli'], current: ['claude-cli'] });
+});
+
+test('An edit with no time of its own, where the current version had moved on as well: the current version stays; the edit is kept and written over', () => {
+  const moved = item({ hash: 'b', versions: [{ hash: 'b', at: day(3), from: { how: 'edited', harness: 'claude-cli' } }, ...item().versions], applied: { 'claude-cli': 'b', 'codex-cli': 'a' } });
+  assert.deepEqual(plan(moved, { 'claude-cli': has('b'), 'codex-cli': untimed('x') }),
+    { ...quiet, keep: [{ harness: 'codex-cli', from: { how: 'edited', harness: 'codex-cli' } }], write: ['codex-cli'], current: ['claude-cli'] });
+});
+
+test('A version taken in from a copy with no time of its own is dated when it is taken', async () => {
+  const agent = item(), before = Date.now();
+  const made = plan(agent, { 'claude-cli': has('a'), 'codex-cli': untimed('b') });
+  await carryOut(agent, made, { ...shelf(agent).made, copy: () => ({ hash: 'b', content: 'text of b' }), keepOwn: async () => {}, log: async () => {},
+    write: async () => true, remove: async () => true });
+  assert.equal(agent.hash, 'b');
+  assert.ok(Date.parse(agent.versions[0].at) >= before, agent.versions[0].at);
+});
+
+// ---------- A harness managed again ----------
+
+test('Managed again, On: a copy that went while the harness was away is written afresh, never read as deleted by hand', () => {
+  const agent = item();
+  assert.equal(managedAgain(agent, 'codex-cli', none), undefined);
+  assert.equal(agent.applied['codex-cli'], undefined);
+  assert.deepEqual(plan(agent, { 'claude-cli': has('a'), 'copilot-cli': has('a'), 'codex-cli': none }), { ...quiet, write: ['codex-cli'], current: ['claude-cli', 'copilot-cli'] });
+});
+
+test('Managed again, On: a copy edited meanwhile, or another item of that name, is kept as a version ("was in Codex"), then L is written over it', () => {
+  const agent = item();
+  assert.deepEqual(managedAgain(agent, 'codex-cli', has('x', time(4))), { hash: 'x', at: day(4), from: { how: 'was-in', harness: 'codex-cli', replacedBy: 'a' } });
+  assert.equal(agent.applied['codex-cli'], 'x');
+  // The library wins: no edit is taken in, and the current version is written there.
+  assert.deepEqual(plan(agent, { 'claude-cli': has('a'), 'copilot-cli': has('a'), 'codex-cli': has('x', time(4)) }), { ...quiet, write: ['codex-cli'], current: ['claude-cli', 'copilot-cli'] });
+});
+
+test('Managed again, Off or kept out: a copy as left is removed; one edited meanwhile is kept as a version, then removed, and the current version stays', () => {
+  for (const changes of [{ on: false }, { except: ['codex-cli' as const] }]) {
+    const left = item(changes);
+    assert.equal(managedAgain(left, 'codex-cli', has('a')), undefined, 'its content is a version already');
+    assert.deepEqual(plan(left, { 'codex-cli': has('a') }).remove, ['codex-cli']);
+    const edited = item(changes);
+    assert.equal(managedAgain(edited, 'codex-cli', has('x', time(4)))?.from.how, 'was-in');
+    assert.deepEqual(plan(edited, { 'codex-cli': has('x', time(4)) }), { ...quiet, remove: ['codex-cli'], current: [] });
+  }
+});
+
+test('Managed again, Off: a copy that went meanwhile leaves nothing applied there, so a later On writes it, never turns it Off', () => {
+  const off = item({ on: false });
+  managedAgain(off, 'codex-cli', none);
+  assert.deepEqual(plan({ ...off, on: true }, { 'claude-cli': has('a'), 'copilot-cli': has('a'), 'codex-cli': none }).write, ['codex-cli']);
+});
+
+test('Managed again, deleted: a copy whose content is one of its versions is still Central Knot’s to remove; any other is a found copy, left alone', () => {
+  const ownCopy = item({ deleted: { at: day(5) } });
+  assert.equal(managedAgain(ownCopy, 'codex-cli', has('a')), undefined);
+  assert.deepEqual(plan(ownCopy, { 'codex-cli': has('a') }).remove, ['codex-cli']);
+  const another = item({ deleted: { at: day(5) } });
+  assert.equal(managedAgain(another, 'codex-cli', has('x', time(6))), undefined, 'nothing is kept: the content was never the item’s');
+  assert.equal(another.applied['codex-cli'], undefined);
+  assert.deepEqual(plan(another, { 'codex-cli': has('x', time(6)) }), { ...quiet, found: ['codex-cli'], current: [] });
+});
+
+test('Managed again changes nothing where nothing was applied, or where the copy can’t be seen; a harness with no copy of its own has nothing applied', () => {
+  const never = item({ applied: { 'claude-cli': 'a' } });
+  assert.equal(managedAgain(never, 'codex-cli', has('x')), undefined);
+  assert.deepEqual(never.applied, { 'claude-cli': 'a' });
+  const unread = item();
+  assert.equal(managedAgain(unread, 'codex-cli', unseen), undefined);
+  assert.equal(unread.applied['codex-cli'], 'a');
+  for (const copy of [held, anotherWay]) {
+    const without = item();
+    managedAgain(without, 'codex-cli', copy);
+    assert.equal(without.applied['codex-cli'], undefined);
+  }
 });
 
 test('A copy whose content is a version already is written over without being kept again', () => {

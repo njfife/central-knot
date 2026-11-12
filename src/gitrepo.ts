@@ -776,7 +776,7 @@ async function pullServer(context: ShareContext, dir: string, change: RepoChange
 
 /**
  * Agents: the repo's content becomes the agent's current version in Central Knot's library, "pulled from the Git repo", and a pass
- * applies it wherever the agent is On here (agents.ts pull); being On or Off here doesn't change. Claude Code then takes the repo's
+ * applies it wherever the agent is On here (librarypass.ts pull); being On or Off here doesn't change. Claude Code then takes the repo's
  * file as written, its own settings included, where it has the agent. Removed in the repo: deleted from Central Knot, with
  * Restore in History.
  */

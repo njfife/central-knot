@@ -1,6 +1,6 @@
 // History's entries about agents, in one place: what each says (agentSentence), what it still offers (agentAction,
 // versionChoices), and what its row shows once its action was used (doneWords). Read by History's page (the row and its
-// buttons), by app.ts (what is said after a click), by agents.ts restoreAgent (the click an action runs) and by the tests.
+// buttons), by app.ts (what is said after a click), by librarypass.ts restore (the click an action runs, through agents.ts restoreAgent) and by the tests.
 // Pure: no files, no DOM. The entries of skills and MCP servers are still historypage.ts's own.
 //
 // Every action is a click the Agents page could send as well (types.ts Change), decided from the entry and the agent as the
@@ -21,13 +21,14 @@
 //     the library that names `previous`      the version before
 //                                            this current"
 //   conflict, chosen, kept-edit (an edit     Use <harness>’s        that copy's version is not the current one
-//     not taken in that was written over):
+//     not taken in that was written over,
+//     or a copy a tool managed again held):
 //     copies that gave way
 //
 // One entry is not here: a Pull that changed only Claude Code's own settings of an agent (`settingsFile`) keeps its own Undo
 // (gitrepo.ts undoSettingsChange), since no version tells such a change apart.
 // To add an entry or an action: its kind (or its `cause`) in types.ts HistoryEvent, its sentence in agentSentence, its row in
-// agentAction, the entry agents.ts logItem makes for it, and its case in historypage.ts describe.
+// agentAction, the entry librarypass.ts logItem makes for it, and its case in historypage.ts describe.
 import type { IconName } from './icons.ts';
 import { sourceWords, type LibraryItem } from './library.ts';
 import { versionClock } from './agentrow.ts';
@@ -98,6 +99,7 @@ export function agentSentence(event: HistoryEvent, homeTools: string[], item?: L
       // One with a `winner` is from before the library (an edit kept over a deletion): the general sentence says it.
       if (event.winner) return undefined;
       const where = andList([...new Set(event.losers.map(loser => toolName(loser.tool)))]);
+      if (event.cause === 'tool-back') return { glyph: 'diff', text: `${where}’s copy changed while Central Knot didn’t manage ${where}; it gave way to the current version and is kept as a version.` };
       return { glyph: 'diff', text: `Edited in ${where}, not taken in yet, and written over by the current version: the edit is kept as a version.` };
     }
     case 'conflict': {

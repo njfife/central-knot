@@ -76,7 +76,10 @@ export function harnessLine(row: AgentRow, item: LibraryItem | undefined, tool: 
       return `Edited in ${where}. When sync runs it becomes the current version${reaches}, then its copy here is removed: ${inLib!.on ? 'the agent is kept out of this tool' : 'the agent is off'}.`;
     }
     case 'deleted': return `Its copy was deleted in ${where}. When sync runs, the agent turns off everywhere; Central Knot keeps it.`;
-    case 'leaving': return 'Its copy is removed when sync runs. Central Knot keeps it.';
+    case 'leaving': {
+      const kept = row.plan?.keep.some(entry => entry.harness === tool);
+      return kept ? 'Has a copy Central Knot doesn’t have yet. When sync runs it is kept as a version, then removed.' : 'Its copy is removed when sync runs. Central Knot keeps it.';
+    }
     case 'own-copy':
       if (!inLib) return 'Has it.';
       return `Has a copy Central Knot didn’t put there. It is left alone while ${inLib.on ? 'this tool is kept out' : 'the agent is off'}; ${KEPT_FIRST}.`;
@@ -87,7 +90,7 @@ export function harnessLine(row: AgentRow, item: LibraryItem | undefined, tool: 
   }
 }
 
-/** Whether the switch must ask which copy to take in: a found agent whose copies differ (agents.ts foundCopies). A library item never asks. */
+/** Whether the switch must ask which copy to take in: a found agent whose copies differ (librarypass.ts foundCopies). A library item never asks. */
 export const needsChoice = (row: AgentRow, item: LibraryItem | undefined) => !inLibrary(item) && !!row.differs;
 
 /** The agent as it is, as a click that changes nothing: each click below changes one thing of it. */
@@ -96,7 +99,7 @@ function asItIs(row: AgentRow, item: LibraryItem | undefined): Change {
   return { key: row.key, managed: !!inLib?.on, off: inLib ? [...inLib.except] : [], seenManaged: !!inLib?.on };
 }
 
-/** The clicks an agent's controls send. Each is a types.ts Change, which main.ts's `changes` sanitizer passes on field by field to agents.ts click. */
+/** The clicks an agent's controls send. Each is a types.ts Change, which main.ts's `changes` sanitizer passes on field by field to librarypass.ts click. */
 export const agentClicks = {
   /** The row's switch, On: a found agent is taken in (`use`: the copy every harness takes, where they differ); one in the library is applied. */
   on: (row: AgentRow, item: LibraryItem | undefined, use?: string): Change =>
