@@ -198,7 +198,13 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
       try { done = await act.run(crash ? { fault: at => { if (at === crash) throw new Error('crash'); } } : {}); }
       catch (error) { if ((error as Error).message === 'crash') crashed = true; else { fail(`threw: ${(error as Error).message.slice(0, 140)}`); break; } }
       finally { if (blocked) await readOnly(blocked, false); }
-      if (act.name.startsWith('hand') && syncOn && next() < 0.7) { trace.push('background pass'); await pass(box, context()); }
+      if (act.name.startsWith('hand') && syncOn && next() < 0.7) {
+        trace.push('background pass');
+        await pass(box, context());
+        // That pass saw each managed harness's file: its own part is what Central Knot keeps now.
+        const seenNow = await filesOf(box);
+        for (const tool of tools as Tool[]) { const own = ownOf(tool, seenNow[tool]); if (own !== undefined) lastOwn[tool] = own; }
+      }
       last = act.click && !crashed ? done as McpResult : act.app ? undefined : last;
       const after = await filesOf(box), versions = await versionsNow();
       if (process.env.CK_TRACE) {
@@ -225,9 +231,10 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
         if (expected !== undefined && ownOf(tool, now) !== expected) fail(`(g) ${act.name} wrote ${tool}’s file without its own part as last seen`);
       }
       if (act.app) for (const tool of managedBefore.filter(tool => tools.includes(tool)) as Tool[]) { const own = ownOf(tool, after[tool]); if (own !== undefined) lastOwn[tool] = own; }
-      // (f) From a settled home, a click's Undo puts every file back as it was, where the click changed only copies the agent
-      // had: a copy it never had, written over, is kept as a version, and its Undo (a switch) doesn't put that file back.
-      const onlyItsOwn = allTools.every(tool => before[tool as Tool] === after[tool as Tool] || before[tool as Tool] === undefined || contentOf(tool as Tool, before[tool as Tool]) === held?.applied[tool]);
+      // (f) From a settled home, a click's Undo puts every file back as it was, where every copy in a managed harness was one
+      // the agent had: a copy it never had, which the click adopts or writes over (kept as a version), is not put back by an
+      // Undo that is a switch.
+      const onlyItsOwn = (managedBefore as Tool[]).every(tool => before[tool] === undefined || contentOf(tool, before[tool]) === held?.applied[tool]);
       if (act.click && settledBefore && !crashed && !blocked && onlyItsOwn && last?.made?.length) {
         const click = last;
         await trial(box, async () => {
