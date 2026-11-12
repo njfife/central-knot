@@ -1867,6 +1867,8 @@ button.harness-card-main:focus-visible { outline: 0; }
 .ov-marks, .ov-open { display: flex; align-items: center; }
 .ov-open .row-open { width: 24px; height: 24px; margin: 0; }
 .switch-slot { display: block; width: 32px; }
+/* A found item's Add, in the switch's place and as wide, so its name starts where an On row's does (matrix.ts addButton). */
+.btn.small.add-item { width: 32px; height: 22px; padding: 0; font-size: 12px; }
 /* A tool's mark: its own mark, plainly, where it is on; grey and struck through where it is off (the copy kept); faint where
    it has no copy; an amber glyph where copies differ or something waits. Only says: never a button. */
 .tool-marks { display: inline-flex; align-items: center; gap: 2px; }

@@ -14,7 +14,7 @@ import { getsCopy as getsCopyNext, offPlan, stillOn } from './clickplan.ts';
 import type { IconName } from './icons.ts';
 import { byKey, loadedIn, standing } from './roworder.ts';
 import { cellOf, comparedTools, kindSource, libraryView, needsCopyChoice, type ItemRow, type KindSource, type Tool } from './itemrow.ts';
-import { canTakeIn, harnessIs, inLibrary, takeInWhere, madeFrom, needsChoice as libraryNeedsChoice, placeOf as libraryPlace, rowClicks, statusLine, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
+import { addLabel, canTakeIn, harnessIs, inLibrary, madeFrom, needsChoice as libraryNeedsChoice, placeOf as libraryPlace, rowClicks, statusLine, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
@@ -786,7 +786,7 @@ function helpBand(): HTMLElement | null {
   const first = words
     ? `Turn ${words.an} on and every tool has it, kept the same. Turn it off and no tool has it: Central Knot keeps it, with its versions, and puts each ${words.copy} back when you turn it on.`
     : `Turn ${one} on and every tool has it, kept the same; turn it off and no tool ${kind === 'mcp' ? 'starts' : 'loads'} it. Each click applies at once, with Undo.`;
-  const second = words ? `A switch halfway is ${words.an} a tool has that Central Knot doesn’t yet: turning it on takes it in. Open ${words.an} for its versions.`
+  const second = words ? `Open ${words.an} for its versions.`
     : `A switch halfway means not synced yet: each tool keeps its own copy. Open ${one} for each tool’s own switch.`;
   return h('div.band.band-help', { role: 'note' }, icon('info', 14, 'tone-muted'),
     h('span.band-text.band-lines', {}, h('span', {}, first), h('span.tone-muted', {}, second)),
@@ -1371,10 +1371,12 @@ const notSyncedIn = (skill: ItemRow) => {
 
 /**
  * An item's one switch: on (synced, some tool uses it), in between (not synced: some tools have their own copies), or off
- * (no tool uses it). Clicking an in-between switch turns it on everywhere.
+ * (no tool uses it). Clicking an in-between switch turns it on everywhere. A library item's: librarySwitch, or Add while it is
+ * found. `prefix` keeps a second one apart (the Files view's header): ids `<prefix>switch-<key>`, `<prefix>add-<key>`.
  */
-function itemSwitch(skill: ItemRow, id = `switch-${skill.key}`) {
-  if (library()) return librarySwitch(skill, id);
+function itemSwitch(skill: ItemRow, prefix = '') {
+  const id = `${prefix}switch-${skill.key}`;
+  if (library()) return libraryPlace(itemOf(skill)) === 'found' ? addButton(skill, `${prefix}add-${skill.key}`) : librarySwitch(skill, id);
   const place = standingOf(skill);
   const name = nameOf(skill);
   const now = place === 0 ? 'on' : place === 1 ? notSyncedIn(skill) : skill.gone ? 'off, with no copy left' : 'off';
@@ -1386,20 +1388,25 @@ function itemSwitch(skill: ItemRow, id = `switch-${skill.key}`) {
 }
 
 /**
- * A library item's one switch: on (in Central Knot, applied to every harness), halfway (found: a harness has it and Central
- * Knot doesn't yet; a click takes it in, or asks which copy where they differ), or off (in Central Knot only).
+ * The switch of an item in Central Knot: on (applied to every harness it isn't kept out of; partial, drawn striped, where it
+ * is kept out of some or switched off in a tool's own settings: style.css .switch-partial), or off (in Central Knot only).
  */
 function librarySwitch(skill: ItemRow, id: string) {
-  const item = itemOf(skill), place = libraryPlace(item);
+  const item = itemOf(skill);
+  const label = switchLabel(skill, item, toolList());
+  return toggle({ on: libraryPlace(item) === 'on', partial: isPartial(item, toolList(), skill), label, onchange: next => flip(skill, next), disabled: !canWrite(), id });
+}
+
+/**
+ * A found item's Add, in the switch's place: a click takes it into Central Knot and turns it on, or (its copies differ) opens
+ * the question of which copy, and a second click closes it (flip). As wide as the switch (style.css .add-item), so the name
+ * starts where an On row's does. A found item none of whose copies can be read for sure has nothing to add: it waits.
+ */
+function addButton(skill: ItemRow, id: string) {
   const question = isDiffering(skill) ? (view.comparing === skill.key ? 'open' : 'closed') : undefined;
-  const label = switchLabel(skill, item, toolList(), question);
-  // Partial (kept out of some tools in the opened row): on, drawn apart from on everywhere (style.css .switch-partial).
-  // A found item none of whose copies can be read for sure has nothing to take in: its switch waits, saying why.
-  const nothingToTake = place === 'found' && !canTakeIn(skill);
-  const knob = toggle({ on: place === 'on', mixed: place === 'found', partial: isPartial(item, toolList(), skill), label, onchange: next => flip(skill, next), disabled: !canWrite() || nothingToTake, id });
-  // The halfway switch says on hover what a click does: it isn't blocked, it takes the item in.
-  if (place === 'found' && !nothingToTake) knob.title = question ? 'Its copies differ: click to choose which one Central Knot takes in' : `Click to ${takeInWhere(skill, item, toolList()).replace(/^take it in/, 'take it into Central Knot')}`;
-  return knob;
+  const label = addLabel(skill, itemOf(skill), toolList(), question);
+  return h('button.btn.outline.small.add-item', { type: 'button', id, title: label, 'aria-label': label, disabled: !canWrite() || !canTakeIn(skill),
+    onclick: (event: Event) => { event.stopPropagation(); flip(skill, true); } }, 'Add');
 }
 
 /**
@@ -1522,7 +1529,7 @@ function section(role: 'on' | 'not-synced' | 'off' | 'away', list: ItemRow[]) {
   if (!list.length) return null;
   const onLibrary = !!library();
   const label = role === 'away' ? `Not in ${names[focus!]}` : onLibrary && role === 'not-synced' ? 'Found' : placeNames[role === 'on' ? 0 : role === 'not-synced' ? 1 : 2];
-  const note = role === 'not-synced' ? (onLibrary ? 'in a tool, not in Central Knot yet. Turn one on to take it in; its row says where it goes.' : 'each tool keeps its own copy')
+  const note = role === 'not-synced' ? (onLibrary ? 'in a tool, not in Central Knot yet. Add one to keep it in Central Knot; its row says where it goes.' : 'each tool keeps its own copy')
     : role === 'off' ? (onLibrary ? 'in Central Knot only; no tool has these' : `no tool ${uses()}s these`) : role === 'away' ? 'only other tools have these' : null;
   return h('div', { role: 'rowgroup' },
     h(`div.ov-section${role === 'off' || role === 'away' ? '.ov-section-away' : ''}`, { role: 'row', 'data-section': role },
@@ -1878,7 +1885,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
     h('section.detail-column', { id: 'skill-detail', 'aria-label': 'Skill details' },
       // The skill's own switch comes first, before its name, as on its row.
       h('div.pane-header.pane-header-switched', {},
-        h('div.detail-switch', {}, itemSwitch(skill, `detail-switch-${skill.key}`)),
+        h('div.detail-switch', {}, itemSwitch(skill, 'detail-')),
         h('div.pane-title', {}, h('h2', {}, middle(skill.name ?? skill.key)), h('p', { title: paneStatus }, paneStatus))),
       // A wide pane puts the skill's details beside its files, as a plugin's page puts its README beside what it holds.
       h('div.scroll.detail-scroll', { id: 'detail-scroll' },

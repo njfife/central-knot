@@ -2,7 +2,7 @@
 // stands, what each harness's mark says, when its switch asks which copy, and the click each control sends.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FOLDED_VERSIONS, rowClicks, foldVersions, harnessIs, madeFrom, needsChoice, placeOf, libraryWords, sentences, statusLine, switchLabel, versionChange, versionSource, type LibraryRow } from '../src/libraryrow.ts';
+import { FOLDED_VERSIONS, addLabel, rowClicks, foldVersions, harnessIs, madeFrom, needsChoice, placeOf, libraryWords, sentences, statusLine, switchLabel, versionChange, versionSource, type LibraryRow } from '../src/libraryrow.ts';
 import { readAgainst, wordDiff } from '../src/diff.ts';
 import { newItem, plan, type Copies, type LibraryItem } from '../src/library.ts';
 import { anyManaged, kindSource } from '../src/itemrow.ts';
@@ -145,14 +145,14 @@ test('The status line says where the agent stands, and in which harnesses', () =
   assert.equal(statusLine(...withItem({ 'claude-cli': 'b', 'copilot-cli': 'b' }, item({ except: ['codex-cli'], applied: { 'claude-cli': 'b', 'copilot-cli': 'b' } })), tools), 'On in Claude Code and Copilot CLI · kept out of Codex');
   assert.equal(statusLine(...withItem({ 'claude-cli': 'b' }, item({ applied: { 'claude-cli': 'b' } })), tools), 'On in Claude Code · Copilot CLI and Codex get it when sync runs');
   assert.equal(statusLine(...withItem({ 'codex-cli': 'x' }, item({ on: false, applied: {} })), tools), 'Off · in Central Knot only. Turn it on to put it in every tool. Codex has a copy Central Knot didn’t put there.');
-  assert.equal(statusLine(row({ 'claude-cli': 'a', 'codex-cli': 'x' }, { differs: true }), undefined, tools), 'Not in Central Knot · in Claude Code and Codex, with different copies. Turn it on to take it in and put it in every tool.');
+  assert.equal(statusLine(row({ 'claude-cli': 'a', 'codex-cli': 'x' }, { differs: true }), undefined, tools), 'Not in Central Knot · in Claude Code and Codex, with different copies. Add it to keep it in Central Knot and put it in every tool.');
 });
 
-test('The switch says what a click does: off everywhere, on everywhere, take a found agent in, or ask which copy', () => {
+test('The switch says what a click does: off everywhere, or on everywhere; a found agent’s Add says it takes it in, or asks which copy', () => {
   assert.equal(switchLabel(...withItem({ 'claude-cli': 'b' }, item()), tools), 'reviewer: on. Click to take it out of every tool; Central Knot keeps it.');
   assert.equal(switchLabel(...withItem({ 'codex-cli': 'x' }, item({ on: false, applied: {} })), tools), 'reviewer: off, in Central Knot only. Click to put it in every tool; Codex has a copy of its own, which is kept as versions first.');
-  assert.equal(switchLabel(row({ 'claude-cli': 'a' }), undefined, tools), 'reviewer: in Claude Code, not in Central Knot. Click to take it in and put it in every tool.');
-  assert.match(switchLabel(row({ 'claude-cli': 'a', 'codex-cli': 'x' }), undefined, tools, 'closed'), /its copies differ\. Click to choose which copy every tool uses\.$/);
+  assert.equal(addLabel(row({ 'claude-cli': 'a' }), undefined, tools), 'Add reviewer to Central Knot and put it in every tool');
+  assert.equal(addLabel(row({ 'claude-cli': 'a', 'codex-cli': 'x' }), undefined, tools, 'closed'), 'Add reviewer: its copies differ. Click to choose which one Central Knot takes in.');
   const all = row({ 'claude-cli': 'b' });
   assert.deepEqual([placeTag(all, item(), tools)?.text, placeTag(all, item({ on: false }), tools)?.text, placeTag(all, undefined, tools)?.text], [undefined, 'in Central Knot only', 'not in Central Knot']);
   // Kept out of a tool (partial) shows on the closed row too: where it is, so it never reads as on everywhere.
@@ -213,7 +213,7 @@ test('The sentences that name the item or its copies are in the kind’s words: 
   assert.equal(lineIn({ 'claude-cli': 'b', 'copilot-cli': 'b' }, out, 'codex-cli', 'Codex'), 'Kept out of this tool. Central Knot keeps its file for when you turn it on here.');
   assert.equal(lineIn({ 'claude-cli': 'b', 'copilot-cli': 'b' }, item(), 'codex-cli', 'Codex'), 'Its copy was deleted in Codex. When sync runs, the agent turns off everywhere; Central Knot keeps it.');
   assert.deepEqual([placeTag(row({}), item({ on: false }), tools)?.title, placeTag(row({ 'codex-cli': 'x' }), undefined, tools)?.title],
-    ['Central Knot keeps this agent and its versions. No tool has it until you turn it on.', 'A tool has this agent; Central Knot doesn’t yet. Turn it on to take it in and put it in every tool.']);
+    ['Central Knot keeps this agent and its versions. No tool has it until you turn it on.', 'A tool has this agent; Central Knot doesn’t yet. Add it to keep it in Central Knot and put it in every tool.']);
   assert.equal(noticeWords({ kind: 'deleted', item: 'reviewer', winner: 'codex-cli', losers: [] }).help, 'Put reviewer back in every tool, each file as it was');
 });
 
@@ -233,7 +233,7 @@ test('The same sentences in another kind’s words name that kind and its copies
     'Its copy was deleted in Codex. When sync runs, the note turns off everywhere; Central Knot keeps it.',
     'Edited in Copilot CLI. When sync runs it becomes the current version, then its copy here is removed: the note is off.',
     'Central Knot keeps this note and its versions. No tool has it until you turn it on.',
-    'A tool has this note; Central Knot doesn’t yet. Turn it on to take it in and put it in every tool.',
+    'A tool has this note; Central Knot doesn’t yet. Add it to keep it in Central Knot and put it in every tool.',
     'plan is off: no tool has it. Central Knot keeps it, and turning it on puts each page back as it was.',
     'plan is kept out of Codex. Central Knot keeps its page for when you turn it on there.',
     'Put plan back in every tool, each page as it was',

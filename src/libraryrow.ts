@@ -215,7 +215,7 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
     const differ = needsChoice(row, item) ? ', with different copies' : '';
     if (!canTakeIn(row)) return 'Not in Central Knot · its copy can’t be read for sure (see below), so it can’t be taken in until it can.';
     const below = where('cannot').length ? ' (see below)' : '';
-    return `Not in Central Knot · ${foundWhere(row, item, tools)}${differ}. Turn it on to ${takeInWhere(row, item, tools)}${below}.`;
+    return `Not in Central Knot · ${foundWhere(row, item, tools)}${differ}. Add it to keep it in Central Knot${whereAdded(row, item, tools)}${below}.`;
   }
   const ownSaid = own.length ? ` ${sentence(named(own, tools))} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there.` : '';
   if (place === 'off') return `Off · in Central Knot only. Turn it on to put it in every tool.${ownSaid}`;
@@ -241,37 +241,40 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
   return `${parts.filter(Boolean).join(' · ')}${ownSaid ? `.${ownSaid}` : ''}`;
 }
 
-/**
- * What the row's switch says: where the item stands, and what a click does. `question`: a found item whose copies differ
- * asks which copy every harness uses, and the click opens or closes that question.
- */
-export function switchLabel(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], question?: 'open' | 'closed'): string {
-  const name = row.name ?? row.key, place = placeOf(item);
-  if (place === 'on') {
+/** What the switch of an item in Central Knot says: where it stands, and what a click does. (A found item has Add instead: addLabel.) */
+export function switchLabel(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]): string {
+  const name = row.name ?? row.key;
+  if (placeOf(item) === 'on') {
     const out = notOnIn(row, item, tools).length;
     return `${name}: on${out ? ` in ${tools.length - out} of ${tools.length} tools` : ''}. Click to take it out of every tool; Central Knot keeps it.`;
   }
   const own = harnessesWhere(row, item, tools, 'own-copy');
-  if (place === 'off') {
-    const kept = own.length === 1 ? 'has a copy of its own, which is' : 'have copies of their own, which are';
-    return `${name}: off, in Central Knot only. Click to put it in every tool${own.length ? `; ${named(own, tools)} ${kept} kept as versions first` : ''}.`;
-  }
-  const ask = question === 'open' ? 'close the question' : 'choose which copy every tool uses';
-  if (question) return `${name}: not in Central Knot, and its copies differ. Click to ${ask}.`;
-  if (!canTakeIn(row)) return `${name}: not in Central Knot, and its copy can’t be read for sure, so it can’t be taken in yet.`;
-  return `${name}: ${foundWhere(row, item, tools)}, not in Central Knot. Click to ${takeInWhere(row, item, tools)}.`;
+  const kept = own.length === 1 ? 'has a copy of its own, which is' : 'have copies of their own, which are';
+  return `${name}: off, in Central Knot only. Click to put it in every tool${own.length ? `; ${named(own, tools)} ${kept} kept as versions first` : ''}.`;
 }
 
 /**
- * What taking a found item in does, said only as far as it is true: "take it in and put it in every tool", else the tools it
- * goes to, and those that can't take it (each line says why). A tool that has it another way gets nothing (foundWhere says so).
+ * What a found item's Add says (its tooltip and accessible name): Add takes it into Central Knot and turns it on. `question`:
+ * its copies differ, and the click opens or closes the question of which copy Central Knot takes in.
  */
-export function takeInWhere(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]) {
+export function addLabel(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], question?: 'open' | 'closed'): string {
+  const name = row.name ?? row.key;
+  if (question) return `Add ${name}: its copies differ. Click to ${question === 'open' ? 'close the question' : 'choose which one Central Knot takes in'}.`;
+  if (!canTakeIn(row)) return `Add ${name}: it can’t be added yet, as its copy can’t be read for sure.`;
+  return `Add ${name} to Central Knot${whereAdded(row, item, tools)}`;
+}
+
+/**
+ * Where Add puts a found item, said only as far as it is true, as the rest of "Add it to keep it in Central Knot…": " and put it
+ * in every tool", else the tools it goes to, and those that can't take it (each line says why). A tool that has it another way
+ * gets nothing (foundWhere says so).
+ */
+export function whereAdded(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]) {
   const own = harnessesWhere(row, item, tools, 'own-copy'), cannot = harnessesWhere(row, item, tools, 'cannot'), another = harnessesWhere(row, item, tools, 'another-way');
-  if (!cannot.length && !another.length) return 'take it in and put it in every tool';
+  if (!cannot.length && !another.length) return ' and put it in every tool';
   const goes = tools.filter(tool => ![...own, ...cannot, ...another].includes(tool));
   const can = cannot.length ? `; ${andList(cannot.map(toolName))} can’t take it` : '';
-  return `take it in${goes.length ? ` and put it in ${named(goes, tools)}` : ''}${can}`;
+  return `${goes.length ? ` and put it in ${named(goes, tools)}` : ''}${can}`;
 }
 
 /** The home's harnesses an item that is On doesn't load in: kept out of, or switched off in that harness's own settings. */
@@ -340,7 +343,7 @@ export function sentences(words: RowWords) {
         if (!inLib) return 'Has it.';
         return `Has a copy Central Knot didn’t put there. It is left alone while ${inLib.on ? 'this tool is kept out' : `the ${noun} is off`}; ${KEPT_FIRST}.`;
       case 'kept-out': return `Kept out of this tool. Central Knot keeps its ${copy} for when you turn it on here.`;
-      case 'none': return inLib ? 'No copy while it is off.' : canTakeIn(row) ? 'No copy. Turning it on adds it here.' : 'No copy.';
+      case 'none': return inLib ? 'No copy while it is off.' : canTakeIn(row) ? 'No copy. Adding it puts it here.' : 'No copy.';
       case 'cannot': return row.cannot![tool]!;
       case 'unseen': return row.unseen![tool]!;
     }
@@ -353,7 +356,7 @@ export function sentences(words: RowWords) {
   function placeTag(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]): { text: string; title: string } | undefined {
     const place = placeOf(item);
     if (place === 'off') return { text: 'in Central Knot only', title: `Central Knot keeps this ${noun} and its versions. No tool has it until you turn it on.` };
-    const found = `A tool has this ${noun}; Central Knot doesn’t yet. Turn it on to take it in and put it in every tool.`;
+    const found = `A tool has this ${noun}; Central Knot doesn’t yet. Add it to keep it in Central Knot${whereAdded(row, item, tools)}.`;
     if (place === 'found' && !canTakeIn(row)) return { text: 'can’t be taken in yet', title: `Its ${copy} can’t be read for sure; its line in the opened row says why and what to do.` };
     if (place === 'found') return { text: 'not in Central Knot', title: found };
     const out = item!.except.filter(tool => tools.includes(tool)), keptOut = `Kept out of ${andList(out.map(toolName))}. Its switch there, in the opened row, puts it back.`;

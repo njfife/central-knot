@@ -239,8 +239,8 @@ async function harnessFlow() {
   same('a harness’s skills put its own mark first on each row, and have no column heads', [await firstMark(), await a.exists('.ov-head')], ['copilot-cli', false]);
   const away = await a.run(`[...document.querySelectorAll('[role="rowgroup"]')].find(group => group.querySelector('.ov-section-label strong')?.textContent === 'Not in Copilot CLI')?.querySelector('[data-key="release-notes"]') ? true : false`);
   check('a skill only other tools have is under "Not in Copilot CLI"', away);
-  check('a harness’s page has no menus or Add from… to bring items in: the switch does', !(await a.exists('.tool-menu, #harness-add-from, .tool-head-button')));
-  await a.click('#switch-release-notes');
+  check('a harness’s page has no menus or Add from… to bring items in: a found row’s Add does', !(await a.exists('.tool-menu, #harness-add-from, .tool-head-button')));
+  await a.click('#add-release-notes');
   await a.shot('harness-switched');
   check('turning it on from a harness’s page copies it to every tool at once', existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')) && existsSync(join(practice, '.codex/skills/release-notes/SKILL.md')));
   check('and says so there', await a.exists('.harness-page .band-done'), await a.text('.harness-page'));
@@ -449,7 +449,7 @@ async function agentCopiesUnderTheList(a, practice) {
     const edited = new Date(Date.now() - daysAgo * 86_400_000); utimesSync(join(practice, file), edited, edited);
   }
   await a.click('#header-refresh');
-  await a.click('#switch-changelog');
+  await a.click('#add-changelog');
   same('an agent’s rows quote one stretch of a long line, each copy’s own words tinted, with when it was edited under its name (all are 3 lines, so no size)', await copyQuestionWords(a), [
     { quote: '“…change what someone sees. One line each.”', tinted: [], does: 'Replaces Copilot CLI’s copy and Codex’s copy.', under: 'edited 9 days ago' },
     { quote: '“…change what someone sees. One line each. Say who asked.”', tinted: ['Say who asked.'], does: 'Replaces Claude Code’s copy and Codex’s copy.', under: 'edited 5 days ago' },
@@ -480,7 +480,7 @@ async function blockedCopyKeepsItsRow(a, practice) {
     '.codex/skills': text('loose', 'Codex’s loose notes run on well past what a row has room to quote: every open question, each decision and who made it, and what is still to do before the next release.') };
   for (const [root, content] of Object.entries(folders)) { mkdirSync(join(practice, root, 'loose'), { recursive: true }); writeFileSync(join(practice, root, 'loose/SKILL.md'), content); }
   await a.click('#header-refresh');
-  await a.click('#switch-loose');
+  await a.click('#add-loose');
   same('a copy another tool will not load keeps its row, disabled, with no Use this copy; the other two have theirs',
     await a.run(`[...document.querySelectorAll('.details-differs .version')].map(row => [row.id, row.disabled, !!row.querySelector('.version-cta')])`),
     [['use-loose-claude-cli', true, false], ['use-loose-copilot-cli', false, true], ['use-loose-codex-cli', false, true]]);
@@ -512,14 +512,15 @@ async function practiceFlow() {
   await a.click('#nav-overview');
   await a.click('#overview-skills');
   // Skills are on the library: Central Knot holds each skill itself, its whole folder, with its versions; a tool is where a
-  // skill is applied. A skill a tool has that Central Knot doesn't yet is found: its switch, halfway, takes it in.
+  // skill is applied. A skill a tool has that Central Knot doesn't yet is found: its row has Add, not a switch, which takes it in.
   same('rows', (await rowKeys(a)).sort(), ['notes', 'release-notes', 'review', 'standup']);
   same('nothing is on at first', await Promise.all(['notes', 'release-notes', 'review', 'standup'].map(key => switchOn(a, key))), [false, false, false, false]);
-  same('every skill is found: under Found, its switch halfway (neither on nor off), saying where it is and what a click does', [await sectionsNow(a), await a.all('.ov-row[data-key] .switch', 'e.getAttribute("aria-checked")'), await a.run(`document.querySelector('#switch-notes').title`)],
-    [[['not-synced', ['notes', 'release-notes', 'review', 'standup']]], ['mixed', 'mixed', 'mixed', 'mixed'], 'Click to take it into Central Knot and put it in every tool']);
+  same('every skill is found: under Found, with Add where a switch would be, saying what a click does', [await sectionsNow(a), await a.all('.ov-row[data-key] .add-item', 'e.textContent'), await a.exists('.ov-row[data-key] .switch'), await a.run(`document.querySelector('#add-notes').title`)],
+    [[['not-synced', ['notes', 'release-notes', 'review', 'standup']]], ['Add', 'Add', 'Add', 'Add'], false, 'Add notes to Central Knot and put it in every tool']);
+  same('a found row’s name starts where an On row’s does: Add is as wide as the switch', await a.run(`document.querySelector('#add-notes').getBoundingClientRect().width`), 32);
   same('no column heads, and no filter chips while All would be alone with Copies differ', [await a.exists('.ov-head'), await a.all('.chip', 'e.dataset.tip')], [false, ['All', 'Copies differ']]);
   same('marks say what each tool has', [await cellState(a, 'release-notes', 'claude-cli'), await cellState(a, 'release-notes', 'copilot-cli'), await cellState(a, 'review', 'copilot-cli')], ['own-copy', 'none', 'own-copy']);
-  same('a row’s only controls are its switch and its chevron: marks and Copies differ are only said', await a.all('.ov-row[data-key="review"] button', 'e.id'), ['switch-review', 'open-review']);
+  same('a found row’s only controls are its Add and its chevron: marks and Copies differ are only said', await a.all('.ov-row[data-key="review"] button', 'e.id'), ['add-review', 'open-review']);
   check('copies differ is flagged', await a.exists('#decide-review'));
   await a.shot('practice-overview');
   const practice = await a.run(`document.querySelector('.status-home').title`);
@@ -554,12 +555,12 @@ async function practiceFlow() {
   // The strip's Undo of taking it in leaves every folder as it was before the click: the copies it made go, the tools it was
   // found in keep theirs, and notes is found again. Then it is taken in again for the checks below.
   const notesFound = folders('notes');
-  await a.click('#switch-notes');
+  await a.click('#add-notes');
   await a.click('#outcome-undo');
-  same('Undo of taking a found skill in leaves every folder as before, and it is found again', [folders('notes'), await a.run(`document.querySelector('#switch-notes').getAttribute('aria-checked')`), /^Undone: notes is as before\./.test(await a.text('.band-done') ?? '')], [notesFound, 'mixed', true]);
+  same('Undo of taking a found skill in leaves every folder as before, and it is found again', [folders('notes'), await a.exists('#add-notes'), /^Undone: notes is as before\./.test(await a.text('.band-done') ?? '')], [notesFound, true, true]);
   await pointerOver('.ov-row[data-key="notes"]');
-  await a.click('#switch-notes');
-  same('turning a found skill on takes it in and writes it to every tool at once, byte for byte', [await switchOn(a, 'notes'), folders('notes')[2], folders('notes')[1]], [true, folders('notes')[0], folders('notes')[0]]);
+  await a.click('#add-notes');
+  same('adding a found skill takes it in and writes it to every tool at once, byte for byte', [await switchOn(a, 'notes'), folders('notes')[2], folders('notes')[1]], [true, folders('notes')[0], folders('notes')[0]]);
   const statusBarShows = () => a.run(`(() => { const region = document.querySelector('#announcement'); return region.classList.contains('visually-hidden') ? '' : region.dataset.text; })()`);
   check('the result says where it is now, in the strip at the top only', (await a.text('.band-done') ?? '').includes('notes is in Central Knot now, and on in all 3 tools.') && !(await statusBarShows()), [await a.text('.bands'), await statusBarShows()]);
   same('and its row stays where it was while the pointer is over the list', (await sectionsNow(a))[0], ['not-synced', ['notes', 'release-notes', 'review', 'standup']]);
@@ -585,13 +586,13 @@ async function practiceFlow() {
   await a.click('#header-refresh');
   const sameStats = () => sameDirs.map(dir => (existsSync(join(dir, 'SKILL.md')) ? statSync(join(dir, 'SKILL.md')).ino : null));
   const sameBefore = sameStats();
-  await a.click('#switch-same-everywhere');
+  await a.click('#add-same-everywhere');
   same('a skill already the same everywhere is taken in with nothing written', [await switchOn(a, 'same-everywhere'), sameStats()], [true, sameBefore]);
   await opened('same-everywhere');
   await a.click('#delete-same-everywhere');
   await a.click('#delete-confirm-same-everywhere');
   same('Delete from Central Knot takes it out of every tool and off the page', [sameStats(), (await rowKeys(a)).includes('same-everywhere')], [[null, null, null], false]);
-  for (const key of ['release-notes', 'standup']) await a.click(`#switch-${key}`);
+  for (const key of ['release-notes', 'standup']) await a.click(`#add-${key}`);
   await a.click('#header-refresh');
   same('Refresh regroups the rows: the three are On', (await sectionsNow(a))[0], ['on', ['notes', 'release-notes', 'standup']]);
   same('copies written every way', [existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')), existsSync(join(practice, '.claude/skills/standup/SKILL.md')), existsSync(join(practice, '.codex/skills/standup/SKILL.md'))], [true, true, true]);
@@ -599,10 +600,10 @@ async function practiceFlow() {
   check('Codex’s own .system skills stay untouched and unlisted', existsSync(join(practice, '.codex/skills/.system/openai-docs/SKILL.md')) && !(await rowKeys(a)).includes('openai-docs'));
 
   await blockedCopyKeepsItsRow(a, practice);
-  // Copies differ: the switch opens the question and writes nothing; a choice takes the skill in with that copy, and the
-  // copy it replaced is kept as a version.
-  await a.click('#switch-review');
-  check('the switch on a differing row opens the choice instead of turning on', await a.exists('#use-review-copilot-cli') && !(await switchOn(a, 'review')) && readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8') === reviewClaude);
+  // Copies differ: Add opens the question and writes nothing; a choice takes the skill in with that copy, and the copy it
+  // replaced is kept as a version.
+  await a.click('#add-review');
+  check('Add on a differing row opens the choice instead of taking it in', await a.exists('#use-review-copilot-cli') && !(await switchOn(a, 'review')) && readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8') === reviewClaude);
   await a.shot('practice-compare');
   await fitsAtMinimum(a, 'a copy choice open');
   await copyQuestionFits(a, 'review', [
@@ -749,7 +750,7 @@ async function practiceFlow() {
   const syncRecord = join(practice, '.central-knot/sync.json'), goodRecord = readFileSync(syncRecord, 'utf8');
   writeFileSync(syncRecord, '{ damaged');
   await a.click('#header-refresh');
-  same('a damaged record is said in the bands, and every switch is off', [/The sync record is damaged/.test(await a.text('.bands') ?? ''), await a.run(`[...document.querySelectorAll('.ov-row[data-key] .switch')].every(item => item.disabled)`)], [true, true]);
+  same('a damaged record is said in the bands, and every switch is off', [/The sync record is damaged/.test(await a.text('.bands') ?? ''), await a.run(`[...document.querySelectorAll('.ov-row[data-key] :is(.switch, .add-item)')].every(item => item.disabled)`)], [true, true]);
   writeFileSync(syncRecord, goodRecord);
   await a.click('#header-refresh');
   check('put back, the switches work again', !(await a.run(`document.querySelector('#switch-notes').disabled`)), await a.text('.bands'));
@@ -1015,16 +1016,16 @@ async function practiceFlow() {
   await fitsAtMinimum(a, 'MCP servers with the edit’s notice and its actions');
 
   // Agents: Central Knot holds each agent itself, with its versions (its library), and a harness is where an agent is applied.
-  // An agent a harness has that Central Knot doesn't yet is found: its switch, halfway, takes it in and applies it everywhere.
+  // An agent a harness has that Central Knot doesn't yet is found: its row's Add takes it in and applies it everywhere.
   await a.click('#nav-agents');
   same('agents from every tool', (await rowKeys(a)).sort(), ['code-reviewer', 'release-notes']);
   const switchState = key => a.run(`document.querySelector('#switch-${key}').getAttribute('aria-checked')`);
   const agentRow = key => a.text(`.ov-row[data-key="${key}"]`);
-  same('an agent only a harness has is found: under Found, its switch halfway, said not to be in Central Knot, and the section says what turning one on does',
-    [await switchState('code-reviewer'), /^Found\s*2/.test((await a.text('[data-section="not-synced"]') ?? '').trim()), /not in Central Knot/.test(await agentRow('code-reviewer') ?? ''),
-      /Turn one on to take it in; its row says where it goes\./.test(await a.text('[data-section="not-synced"]') ?? '')], ['mixed', true, true, true]);
-  await a.click('#switch-code-reviewer');
-  await a.click('#switch-release-notes');
+  same('an agent only a harness has is found: under Found, with Add, said not to be in Central Knot, and the section says what Add does',
+    [await a.text('#add-code-reviewer'), /^Found\s*2/.test((await a.text('[data-section="not-synced"]') ?? '').trim()), /not in Central Knot/.test(await agentRow('code-reviewer') ?? ''),
+      /Add one to keep it in Central Knot; its row says where it goes\./.test(await a.text('[data-section="not-synced"]') ?? '')], ['Add', true, true, true]);
+  await a.click('#add-code-reviewer');
+  await a.click('#add-release-notes');
   const reviewerFiles = ['.claude/agents/code-reviewer.md', '.copilot/agents/code-reviewer.agent.md', '.codex/agents/code-reviewer.toml'].map(file => join(practice, file));
   const [claudeAgent, , codexAgent] = reviewerFiles;
   const reviewerNow = () => reviewerFiles.map(file => (existsSync(file) ? readFileSync(file, 'utf8') : null));
@@ -1486,8 +1487,8 @@ async function practiceFlow() {
   writeFileSync(codexToml, `${codexTomlBefore ?? ''}\n[plugins."issue-tracker@ck-test-market"]\nenabled = true\n`);
   await a.click('#header-refresh');
   for (let tries = 0; tries < 40 && await cellState(a, 'triage', 'codex-cli') !== 'plugin'; tries++) await wait(100);
-  // Pi's copy, found, is taken into Central Knot first, so the click is the row's Off.
-  if (!(await switchOn(a, 'triage'))) { await a.click('.ov-row[data-key="triage"] .switch'); for (let tries = 0; tries < 60 && !(await switchOn(a, 'triage')); tries++) await wait(100); }
+  // Pi's copy, found, is added to Central Knot first, so the click is the row's Off.
+  if (await a.exists('#add-triage')) { await a.click('#add-triage'); for (let tries = 0; tries < 60 && !(await switchOn(a, 'triage')); tries++) await wait(100); }
   const piTriage = join(practice, '.pi/agent/skills/triage/SKILL.md');
   await a.click('.ov-row[data-key="triage"] .switch');
   for (let tries = 0; tries < 60 && !(await a.exists('#outcome-undo')); tries++) await wait(100);
@@ -2510,11 +2511,11 @@ async function openCodeFlow() {
   await p.click('#nav-skills');
   check('an OpenCode folder gives OpenCode a mark on each row', await p.exists('.tool-mark[data-tool="opencode-cli"]'));
   same('a Claude Code skill is one OpenCode already reads', await cellState(p, 'notes', 'opencode-cli'), 'another-way');
-  await p.click('.ov-row[data-key="oc-only"] .switch');
-  check('turning OpenCode’s own skill on copies it to the other tools', readNow(join(practice, '.claude/skills/oc-only/SKILL.md')) === text('oc-only') && readNow(join(practice, '.copilot/skills/oc-only/SKILL.md')) === text('oc-only'), await p.text('.bands'));
+  await p.click('#add-oc-only');
+  check('adding OpenCode’s own skill copies it to the other tools', readNow(join(practice, '.claude/skills/oc-only/SKILL.md')) === text('oc-only') && readNow(join(practice, '.copilot/skills/oc-only/SKILL.md')) === text('oc-only'), await p.text('.bands'));
   // Taken in, notes goes to every tool but OpenCode, which reads Claude Code's copy: OpenCode's line says so, with no switch
   // of Central Knot's (nothing of it goes there), and its settings are untouched.
-  await p.click('.ov-row[data-key="notes"] .switch');
+  await p.click('#add-notes');
   same('a skill OpenCode reads in Claude Code’s folder gets no second copy in OpenCode', [existsSync(join(mine, 'skills/notes')), await cellState(p, 'notes', 'opencode-cli')], [false, 'another-way']);
   if (await p.run(`document.querySelector('#open-notes')?.getAttribute('aria-expanded')`) !== 'true') await p.click('#open-notes');
   same('OpenCode’s line says it reads Claude Code’s copy, has no switch there, and its settings are untouched',
@@ -2675,7 +2676,7 @@ async function realHomeFlow() {
   check('malformed skill is no row', !rows.includes('bad-yaml'));
   same('the linked skill is the shared copy, which Claude Code has through its link and Copilot CLI reads: neither is Central Knot’s', [await cellState(a, 'linked', 'claude-cli'), await cellState(a, 'linked', 'copilot-cli')], ['another-way', 'another-way']);
   same('refused names and dot folders cannot go to Copilot', [await cellState(a, '名前-skill', 'copilot-cli'), await cellState(a, '.dot-skill', 'copilot-cli'), await cellState(a, 'plain', 'copilot-cli')], ['cannot', 'cannot', 'cannot']);
-  same('a skill with a link inside can’t be copied as it is: its mark says so, and its switch waits', [await cellState(a, 'has-link', 'claude-cli'), await a.run(`document.querySelector('#switch-has-link')?.disabled`)], ['unseen', true]);
+  same('a skill with a link inside can’t be copied as it is: its mark says so, and its Add waits', [await cellState(a, 'has-link', 'claude-cli'), await a.run(`document.querySelector('#add-has-link')?.disabled`)], ['unseen', true]);
   await fitsAtMinimum(a, 'Skills in a real home');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 640, deviceScaleFactor: 1, mobile: false });
   await a.click(`[id="open-very-long-${'n'.repeat(150)}"]`);
@@ -2685,7 +2686,7 @@ async function realHomeFlow() {
   await a.click(`[id="open-very-long-${'n'.repeat(150)}"]`);
   await a.shot('real-overview');
   if (!canWriteRealHome) {
-    same('the switches are off here', await a.run(`[...document.querySelectorAll('.ov-row[data-key] .switch')].every(item => item.disabled)`), true);
+    same('the switches and Add are off here', await a.run(`[...document.querySelectorAll('.ov-row[data-key] :is(.switch, .add-item)')].every(item => item.disabled)`), true);
     const refused = await a.run(`window.centralKnot.applySkills([{ key: 'rich', managed: true, off: [] }], false, document.querySelector('.status-home').title)`);
     same('main process refuses too', refused.writes, 0);
     check('with a reason', /Preview only/.test(refused.stopped ?? ''), refused);
@@ -2713,8 +2714,8 @@ async function realHomeFlow() {
   const wrongHome = await a.run(`window.centralKnot.applySkills([{ key: 'rich', managed: true, off: [] }], false, '/somewhere/else')`);
   check('an apply for another home is refused', wrongHome.writes === 0 && /not the one open/.test(wrongHome.stopped ?? ''), wrongHome);
   // Every skill turned on, one switch at a time, but private-one and those whose copies differ (each needs its own choice).
-  const turnOn = await a.run(`[...document.querySelectorAll('.ov-row[data-key]')].filter(row => row.querySelector('.switch:not([aria-checked="true"]):not([disabled])') && !row.querySelector('[id^="decide-"]') && row.dataset.key !== 'private-one').map(row => row.dataset.key)`);
-  for (const key of turnOn) await a.click(`.ov-row[data-key=${JSON.stringify(key)}] .switch`);
+  const turnOn = await a.run(`[...document.querySelectorAll('.ov-row[data-key]')].filter(row => row.querySelector(':is(.add-item, .switch:not([aria-checked="true"])):not([disabled])') && !row.querySelector('[id^="decide-"]') && row.dataset.key !== 'private-one').map(row => row.dataset.key)`);
+  for (const key of turnOn) await a.click(`.ov-row[data-key=${JSON.stringify(key)}] :is(.add-item, .switch)`);
   same('bytes and modes copied, .git left out', tree(join(COPILOT, 'rich')), before.rich);
   same('exec bit kept', statSync(join(COPILOT, 'rich/scripts/run.sh')).mode & 0o777, 0o755);
   same('Codex gets the same bytes in its own folder', tree(join(CODEX, 'rich')), before.rich);
@@ -2748,15 +2749,15 @@ async function realHomeFlow() {
   await b.click('#home-actual');
   await b.click('#nav-skills');
   check('damaged record is shown', (await b.text('.bands') ?? '').includes('damaged'), await b.text('.bands'));
-  same('damaged record keeps every switch off', await b.run(`document.querySelector('.ov-row[data-key="private-one"] .switch').disabled`), true);
+  same('damaged record keeps every switch and Add off', await b.run(`document.querySelector('#add-private-one').disabled`), true);
   await b.quit();
   writeFileSync(record, good);
   b = await launch(join(scratch, 'other-data'));
   await b.click('#home-actual');
   await b.click('#nav-skills');
   check('lost settings ask to resume', await b.exists('#resume'), await b.text('.bands'));
-  await b.click(`.ov-row[data-key="private-one"] .switch`);
-  same('a switch resumes, keeping the record', JSON.parse(readFileSync(record, 'utf8')).generation, JSON.parse(good).generation);
+  await b.click('#add-private-one');
+  same('Add resumes, keeping the record', JSON.parse(readFileSync(record, 'utf8')).generation, JSON.parse(good).generation);
   check('and applies', existsSync(join(COPILOT, 'private-one/SKILL.md')));
   same('no page errors, stops', b.pageErrors, []);
   await b.quit();
@@ -2795,8 +2796,8 @@ async function sharedCopiesFlow() {
   same('each tool’s row says how it has the skill, and that it isn’t Central Knot’s', [await rowLineOf('Pi'), await rowLineOf('Copilot CLI')],
     ['Not in Central Knot · Pi also reads a copy at …/.agents/skills, which is not Central Knot’s.', 'Not in Central Knot · Copilot CLI also reads a copy at …/.agents/skills, which is not Central Knot’s.']);
   await a.shot('shared-unmanaged');
-  // Turning it on takes it in: Claude Code gets a copy; the link and the shared copy stay as they are.
-  await a.click(`${row} .switch`);
+  // Add takes it in: Claude Code gets a copy; the link and the shared copy stay as they are.
+  await a.click(`${row} .add-item`);
   for (let tries = 0; tries < 40 && !(await switchOn(a, name)); tries++) await wait(100);
   same('turning it on takes it in, gives Claude Code a copy, and leaves the link and the shared copy alone', onDisk(), [`link:${link}`, true, false, true]);
   check('the result says where it is on, and which tools have it another way', /opus-sol-loop is in Central Knot now, and on in Claude Code; Copilot CLI and Pi have it another way\./.test(await a.text('.bands') ?? ''), await a.text('.bands'));
@@ -2859,7 +2860,7 @@ async function crashFlow() {
     // (opening catches their copies up) and the rest still found: those are taken in again, in one request (no bulk switch on
     // the page), not waited for, so the kill lands while it copies.
     const record = join(HOME, '.central-knot/skills.json');
-    await a.run(`(() => { const found = [...document.querySelectorAll('.ov-row[data-key^="bulk-"]')].filter(row => row.querySelector('.switch')?.getAttribute('aria-checked') === 'mixed').map(row => ({ key: row.dataset.key, managed: true, off: [] }));
+    await a.run(`(() => { const found = [...document.querySelectorAll('.ov-row[data-key^="bulk-"]')].filter(row => row.querySelector('.add-item')).map(row => ({ key: row.dataset.key, managed: true, off: [] }));
       if (found.length) window.centralKnot.applySkills(found, false, document.querySelector('.status-home').title); else document.querySelector('#header-refresh').click(); return true; })()`);
     await wait(30 + Math.round(round * 700 / Math.max(1, crashRounds - 1)) + randomInt(40));
     await a.crash();
@@ -2875,7 +2876,7 @@ async function crashFlow() {
   await a.click('#home-actual');
   await a.click('#nav-skills');
   // Opening catches up every skill on record; the ones a kill left found are turned on, each.
-  for (const key of await rowKeys(a)) if (key.startsWith('bulk-') && !(await switchOn(a, key))) await a.click(`#switch-${key}`);
+  for (const key of await rowKeys(a)) if (key.startsWith('bulk-') && await a.exists(`#add-${key}`)) await a.click(`#add-${key}`);
   console.log(`crash finish: ${onRecord} of 40 on record before opening, caught up on open; the rest turned on again`);
   same('after crashes, opening again completes every copy', readdirSync(COPILOT).filter(name => name.startsWith('bulk-')).length, 40);
   for (const name of Object.keys(expected)) same(`final ${name} bytes`, tree(join(COPILOT, name)), expected[name]);

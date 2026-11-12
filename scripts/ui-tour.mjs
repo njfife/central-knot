@@ -164,6 +164,8 @@ const openRow = async key => { if (!(await isOpen(key))) { await a.click(`#open-
 const closeRow = async key => { if (await isOpen(key)) { await a.click(`#open-${key}`); await a.settle(); } };
 /** Waits until the row's switch is on. */
 const switchOn = key => waitFor(a, `document.querySelector('#switch-${key}')?.getAttribute('aria-checked') === 'true'`, 15000);
+/** Turns a row on: Add where it is found, its switch where it is off (in Central Knot only); nothing where it is on. */
+const turnOnRow = async key => { if (await a.has(`#add-${key}, #switch-${key}:not([aria-checked="true"])`)) await a.click(`#add-${key}, #switch-${key}`); };
 
 // ---------- The light tour: the app opens, and so does each page ----------
 if (only ? only.includes('light') : !full) {
@@ -202,17 +204,17 @@ if (wanted('skills')) {
   const folderIn = (tool, key) => join(practice, { claude: '.claude/skills', copilot: '.copilot/skills', codex: '.codex/skills' }[tool], key);
   const putSkill = (tool, key, body) => { mkdirSync(folderIn(tool, key), { recursive: true }); writeFileSync(join(folderIn(tool, key), 'SKILL.md'), `---\nname: ${key}\ndescription: ${body}\n---\n\n${body}\n`); };
   await a.click('#nav-skills');
-  await atEverySize('found', 'Clicked "Skills". Every skill is found: a tool has it and Central Knot doesn’t yet, so each switch sits halfway; review’s copies differ', true);
-  await shot(a, 'found-hover', 'The pointer on notes’s halfway switch: its tooltip says a click takes it into Central Knot and puts it in every tool.', await middleOf('#switch-notes'));
+  await atEverySize('found', 'Clicked "Skills". Every skill is found: a tool has it and Central Knot doesn’t yet, so each row has Add where an On row has its switch; review’s copies differ', true);
+  await shot(a, 'found-hover', 'The pointer on notes’s Add: its tooltip says a click adds it to Central Knot and puts it in every tool.', await middleOf('#add-notes'));
   await openRow('notes');
   await atEverySize('found-open', 'Opened notes while it is found: its status, what every tool it is on in gets of a skill (its whole folder), each tool’s line, and Files and contents', true, '.details');
   await closeRow('notes');
   // Taken in: written to every tool, its whole folder. Its Undo takes it out again: found once more, the tools it was found in keeping theirs.
-  await a.click('#switch-notes'); await switchOn('notes');
-  await atEverySize('taken-in', 'Clicked notes’s switch: it is in Central Knot now, and on in all 3 tools; the strip at the top says so, with Undo', false, '.bands');
+  await a.click('#add-notes'); await switchOn('notes');
+  await atEverySize('taken-in', 'Clicked notes’s Add: it is in Central Knot now, and on in all 3 tools; the strip at the top says so, with Undo', false, '.bands');
   await a.click('#outcome-undo'); await a.settle();
   await atEverySize('taken-in-undone', 'Clicked Undo in that strip: the copy Codex got is gone, Claude Code and Copilot CLI keep theirs, and notes is found again', false, '.bands');
-  await a.click('#switch-notes'); await switchOn('notes');
+  await a.click('#add-notes'); await switchOn('notes');
   // Off: out of every tool, kept in Central Knot.
   await a.click('#switch-notes'); await a.settle();
   await atEverySize('off', 'Turned notes off: its folder left every tool; its row stays under Off, "in Central Knot only"; the result offers Undo', true);
@@ -221,8 +223,8 @@ if (wanted('skills')) {
   await a.click('#switch-notes'); await switchOn('notes');
   await closeRow('notes');
   // The copy question: review's copies differ.
-  await a.click('#switch-review'); await a.settle();
-  await atEverySize('copy-question', 'Clicked review’s switch: its copies differ, so the row asks which copy every tool uses, quoting each copy’s first line and saying what choosing it does. Nothing is written yet', true, '.details-differs');
+  await a.click('#add-review'); await a.settle();
+  await atEverySize('copy-question', 'Clicked review’s Add: its copies differ, so the row asks which copy every tool uses, quoting each copy’s first line and saying what choosing it does. Nothing is written yet', true, '.details-differs');
   await a.click('#use-review-copilot-cli'); await switchOn('review');
   await openRow('review');
   await atEverySize('chosen-versions', 'Clicked "Use this copy" on Copilot CLI’s: review is in Central Knot, on in all 3 tools; opened, its versions list Copilot CLI’s copy (current) and Claude Code’s, kept as a version', true, '.version-row');
@@ -232,7 +234,7 @@ if (wanted('skills')) {
   await a.click('#version-read-review-1');
   await closeRow('review');
   // Partial: kept out of one tool by its switch in the opened row.
-  for (const key of ['release-notes', 'standup']) { await a.click(`#switch-${key}`); await switchOn(key); }
+  for (const key of ['release-notes', 'standup']) { await a.click(`#add-${key}`); await switchOn(key); }
   await openRow('standup');
   await a.click('#enable-standup-codex-cli'); await a.settle();
   await atEverySize('partial', 'Turned release-notes and standup on, then opened standup and turned it off in Codex alone: its folder left Codex; the row says "in 2 of 3 tools · kept out of Codex" and its switch is drawn partial', true, '.ov-row[data-key="standup"]');
@@ -274,7 +276,7 @@ if (wanted('skills')) {
   mkdirSync(join(practice, '.agents/skills/shared-notes'), { recursive: true });
   writeFileSync(join(practice, '.agents/skills/shared-notes/SKILL.md'), '---\nname: shared-notes\ndescription: Kept in the shared folder.\n---\n\nKept in the shared folder.\n');
   await refresh();
-  await a.click('#switch-shared-notes'); await switchOn('shared-notes');
+  await a.click('#add-shared-notes'); await switchOn('shared-notes');
   await openRow('shared-notes');
   await atEverySize('another-way', 'A skill in ~/.agents/skills, taken in: the strip says it is on in Claude Code and that Copilot CLI and Codex have it another way; their lines say "Another way" (no switch: nothing of Central Knot’s goes there) and offer Take over…', true, '.details');
   await a.click('#take-over-shared-notes-copilot-cli');
@@ -304,7 +306,7 @@ if (wanted('skills')) {
 if (wanted('sync')) {
   begin('sync');
   await a.click('#nav-skills');
-  if (!(await a.run(`!!document.querySelector('.ov-row[data-key="standup"] .switch[aria-checked="true"]')`))) await a.click('#switch-standup');
+  await turnOnRow('standup');
   edit(join(practice, '.codex/skills/standup/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Codex.\n'));
   await waitFor(a, `document.body.innerText.includes('Codex')&&!!document.querySelector('.sync-notice')`);
   await shot(a, 'edit-spread-notice', 'Outside the app, a line was added to standup\'s SKILL.md in Codex. A few seconds later, without clicking anything: the notice.');
@@ -368,16 +370,16 @@ if (wanted('agents')) {
   const savedIn = (path, seconds) => { const when = new Date(Date.now() + seconds * 1000); utimesSync(path, when, when); };
 
   await a.click('#nav-agents');
-  await atEverySize('agents-found', 'Clicked "Agents". Both agents are found: a tool has them and Central Knot doesn’t yet, so each switch sits halfway; the section line says what turning one on does');
-  await shot(a, 'agents-found-hover', 'The pointer on code-reviewer’s halfway switch: the row lights up; the switch’s tooltip says a click takes it into Central Knot and puts it in every tool.', await middleOf('#switch-code-reviewer'));
-  await focusOn('#switch-code-reviewer');
-  await shot(a, 'agents-found-focus', 'Keyboard focus on code-reviewer’s halfway switch: its focus ring.');
+  await atEverySize('agents-found', 'Clicked "Agents". Both agents are found: a tool has them and Central Knot doesn’t yet, so each row has Add where an On row has its switch; the section line says what Add does');
+  await shot(a, 'agents-found-hover', 'The pointer on code-reviewer’s Add: the row lights up; Add’s tooltip says a click adds it to Central Knot and puts it in every tool.', await middleOf('#add-code-reviewer'));
+  await focusOn('#add-code-reviewer');
+  await shot(a, 'agents-found-focus', 'Keyboard focus on code-reviewer’s Add: its focus ring.');
   await a.run('document.activeElement?.blur()');
   await openRow('code-reviewer');
-  await atEverySize('agents-found-open', 'Opened code-reviewer while it is found: its status says where it is and what its switch does; its whole description shows; each tool says what it has', true);
+  await atEverySize('agents-found-open', 'Opened code-reviewer while it is found: its status says where it is and what Add does; its whole description shows; each tool says what it has', true);
   await closeRow('code-reviewer');
-  for (const key of ['code-reviewer', 'release-notes']) { await a.click(`#switch-${key}`); await switchOn(key); }
-  await shot(a, 'agents-on', 'Clicked both switches: each agent is taken into Central Knot and on in all 3 tools. The result says so.');
+  for (const key of ['code-reviewer', 'release-notes']) { await a.click(`#add-${key}`); await switchOn(key); }
+  await shot(a, 'agents-on', 'Clicked both Adds: each agent is taken into Central Knot and on in all 3 tools. The result says so.');
 
   // Off: out of every harness, kept in Central Knot. On puts each file back.
   await a.click('#switch-code-reviewer'); await a.settle();
@@ -448,7 +450,7 @@ if (wanted('agents')) {
   // A harness that can't hold it: a name it can't store.
   writeFileSync(join(practice, '.claude/agents/réviseur.md'), '---\nname: réviseur\ndescription: Relit un changement avant sa fusion.\n---\n\nRelis le changement.\n');
   await refresh();
-  await a.click('#switch-réviseur'); await a.settle();
+  await a.click('#add-réviseur'); await a.settle();
   await openRow('réviseur');
   await atEverySize('agents-cannot', 'An agent in Claude Code whose name Copilot CLI and Codex can’t store, turned on: its status says "On in Claude Code only", and each other tool’s line names the character and what to do');
   await closeRow('réviseur');
@@ -458,7 +460,7 @@ if (wanted('agents')) {
   claudeFile(long, 'Reads every migration in a change, checks that each one can be rolled back, that it locks no large table for long, and that the code shipped with it works before and after it runs.',
     Array.from({ length: 40 }, (_, line) => `${line + 1}. Check the migration’s step ${line + 1}: what it changes, what it locks, how long it runs on the largest table, and how it is rolled back.`).join('\n') + '\n');
   await refresh();
-  await a.click(`#switch-${long}`); await switchOn(long);
+  await a.click(`#add-${long}`); await switchOn(long);
   await atEverySize('agents-long-name', 'An agent with a long name and description, on: the row shortens the description first, and the name at a word', false, `.ov-row[data-key="${long}"]`);
   await openRow(long);
   await a.click(`#version-read-${long}-0`); await waitFor(a, `!!document.querySelector('.version-read pre')`, 15000);
@@ -471,8 +473,8 @@ if (wanted('agents')) {
   writeFileSync(join(practice, '.codex/agents/changelog.toml'), 'name = "changelog"\ndescription = "Keeps the changelog."\ndeveloper_instructions = """\nKeep the changelog short.\nOne line each. Link the pull request.\n"""\n');
   savedIn(join(practice, '.claude/agents/changelog.md'), -600); savedIn(join(practice, '.copilot/agents/changelog.agent.md'), -120);
   await refresh();
-  await a.click('#switch-changelog'); await a.settle();
-  await atEverySize('agents-choice', 'A found agent whose copies differ in all three tools, its switch clicked: it asks which copy every tool uses; each copy says when it was edited, the newest is marked and its button is the main one', true);
+  await a.click('#add-changelog'); await a.settle();
+  await atEverySize('agents-choice', 'A found agent whose copies differ in all three tools, its Add clicked: it asks which copy every tool uses; each copy says when it was edited, the newest is marked and its button is the main one', true);
   await a.click('#use-changelog-codex-cli'); await switchOn('changelog');
   await openRow('changelog');
   await atEverySize('agents-choice-made', 'Chose Codex’s copy: changelog is in Central Knot with it, on in all 3 tools; the current version is listed first, the other copies after it, each with Make current');
@@ -491,8 +493,8 @@ if (wanted('agents')) {
   // Many agents: On, Off and Found together.
   for (let count = 1; count <= 14; count++) claudeFile(`helper-${String(count).padStart(2, '0')}`, `Helps with task ${count}. Reads the request, plans it, and reports what changed.`, `Do task ${count} carefully.\n`);
   await a.click('#nav-agents'); await refresh();
-  await waitFor(a, `!!document.querySelector('#switch-helper-14')`, 20000);
-  for (let count = 1; count <= 8; count++) { await a.click(`#switch-helper-${String(count).padStart(2, '0')}`); await switchOn(`helper-${String(count).padStart(2, '0')}`); }
+  await waitFor(a, `!!document.querySelector('#add-helper-14')`, 20000);
+  for (let count = 1; count <= 8; count++) { await a.click(`#add-helper-${String(count).padStart(2, '0')}`); await switchOn(`helper-${String(count).padStart(2, '0')}`); }
   for (const count of [2, 5, 7]) { await a.click(`#switch-helper-0${count}`); await a.settle(); }
   await atEverySize('agents-many', 'Fourteen more agents: some on, three off, six found; the three sections, each with its count and line');
   await a.run(`document.querySelector('.legend')?.scrollIntoView({ block: 'end' })`);
@@ -509,15 +511,15 @@ if (wanted('agents')) {
   writeFileSync(join(practice, '.copilot/agents/triage.agent.md'), '---\nname: triage\ndescription: Sorts new issues.\n---\n\nLabel each issue. Close duplicates.\n');
   savedIn(join(practice, '.claude/agents/triage.md'), -300);
   await refresh();
-  await a.click('#switch-triage'); await a.settle(); await show('#use-triage-claude-cli');
-  await shot(a, 'agents-choice-two', 'A found agent whose copies differ in two tools, its switch clicked: the newer copy is marked "Newer" and its button is the main one.');
+  await a.click('#add-triage'); await a.settle(); await show('#use-triage-claude-cli');
+  await shot(a, 'agents-choice-two', 'A found agent whose copies differ in two tools, its Add clicked: the newer copy is marked "Newer" and its button is the main one.');
   await a.click('#use-triage-copilot-cli'); await switchOn('triage');
 
   // Thirty versions: each edit adds a line.
   const steps = count => Array.from({ length: count }, (_, step) => `Step ${step + 1}: say what changed since yesterday.`).join('\n') + '\n';
   claudeFile('standup', 'Writes the daily standup.', steps(1));
   await refresh();
-  await a.click('#switch-standup'); await switchOn('standup');
+  await a.click('#add-standup'); await switchOn('standup');
   // A second apart, as a person's edits are, so no two read the same time.
   for (let count = 2; count <= 30; count++) { claudeFile('standup', 'Writes the daily standup.', steps(count)); await refresh(); await wait(1000); }
   await openRow('standup');
@@ -1191,9 +1193,9 @@ async function everyPage(tag) {
     if (await a.has('.ov-row.open')) await a.click(`#${first}`);
   }
   // draft's copies differ: its switch opens the copy question under its row, and a second click closes it.
-  if (await a.has('#switch-draft')) {
-    await a.click('#switch-draft'); await shot(a, `${tag}-skills-choice`, `Clicked draft's switch: its copies differ, so the copy question opens under its row ${at}.`);
-    if (await a.has('#use-draft-copilot-cli')) await a.click('#switch-draft');
+  if (await a.has('#add-draft')) {
+    await a.click('#add-draft'); await shot(a, `${tag}-skills-choice`, `Clicked draft's Add: its copies differ, so the copy question opens under its row ${at}.`);
+    if (await a.has('#use-draft-copilot-cli')) await a.click('#add-draft');
   }
   const on = await a.run(`document.querySelector('.ov-row[data-key] .switch[aria-checked="true"]:not([disabled])')?.id ?? ''`);
   if (on) { await a.click(`#${on}`); await shot(a, `${tag}-skills-switched-off`, `Turned one skill off: its result and Undo ${at}.`); if (await a.has('#outcome-undo')) await a.click('#outcome-undo'); }
@@ -1381,7 +1383,7 @@ if (wanted('shared-copies')) {
   const open = async () => { if (!(await a.has(`#outside-${name}, #delete-${name}`))) await a.click(`#open-${name}`); };
   await open();
   await everySize('unmanaged', `Opened ${name}: the real folder is in ~/.agents/skills, Copilot CLI's skills folder has a link to it, Pi reads the shared folder. The details say where the copies are and what turning it on and Delete everywhere do; the rows say how each tool gets it.`, `#outside-${name}`, true);
-  const turnOn = async () => { await a.click(`.ov-row[data-key="${name}"] .switch`); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000); };
+  const turnOn = async () => { await turnOnRow(name); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000); };
   await turnOn();
   await everySize('turned-on', 'Clicked its switch: it is on in every tool at once; the band says what was done to the link and the shared copy, with Undo; the skill is an ordinary synced one.', '.bands', true);
   await a.click('#outcome-undo'); await a.settle();
@@ -1447,7 +1449,7 @@ if (wanted('shared-copies')) {
   await a.click('#delete-gamma');
   await everySize('linked-skills-folder-delete-armed', 'Clicked "Delete everywhere…" there: it says what it removes.', '#delete-note-gamma', false, 'gamma');
   await a.click('#delete-cancel-gamma');
-  await a.click('.ov-row[data-key="gamma"] .switch'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  await turnOnRow('gamma'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
   if (!(await a.has('#outside-gamma'))) await a.click('#open-gamma');
   await everySize('linked-skills-folder-managed', 'Turned gamma on there: Claude Code has its own copy, Copilot CLI and Pi keep the shared copy, and the details say edits made in Claude Code don’t reach them.', '#outside-gamma', true, 'gamma');
   await a.click('#delete-gamma');
@@ -1654,7 +1656,7 @@ if (wanted('settings')) {
   await keepFor(a, 30);
   // From here the home syncs (everything managed, as in the sync tour), so shortening removes older History at once.
   await a.click('#nav-skills');
-  if (!(await a.run(`!!document.querySelector('.ov-row[data-key="standup"] .switch[aria-checked="true"]')`))) await a.click('#switch-standup');
+  await turnOnRow('standup');
   await a.click('#nav-settings');
   mkdirSync(join(practice, '.central-knot'), { recursive: true });
   writeFileSync(join(practice, '.central-knot/history.json'), JSON.stringify({ events: [
@@ -1909,7 +1911,7 @@ if (wanted('harnesses')) {
   if (await a.has('[id^="harness-claude-cli-differ-"]')) { await a.click('[id^="harness-claude-cli-differ-"]'); await shot(a, 'claude-differ-link', 'Clicked "1 skill with different copies" on the Claude Code card: its page, showing only those.'); await a.run(`[...document.querySelectorAll('.chip')].find(chip => chip.textContent.trim() === 'All')?.click()`); await a.settle(); await a.click('#harness-back'); }
   await a.click('#harness-claude-cli'); await shot(a, 'claude-skills', 'Clicked the Claude Code card: its page, on the Skills tab. Its column comes first; skills only other tools have are under "Not in Claude Code".');
   await sizes('claude-skills', 'Claude Code’s Skills tab.');
-  if (await a.has('#switch-standup:not([aria-checked="true"])')) { await a.click('#switch-standup'); await shot(a, 'claude-switched', 'Turned standup on from Claude Code’s page: it is copied to every tool at once.'); }
+  if (await a.has('#add-standup, #switch-standup:not([aria-checked="true"])')) { await turnOnRow('standup'); await shot(a, 'claude-switched', 'Turned standup on from Claude Code’s page: it is copied to every tool at once.'); }
   await a.click('#open-release-notes'); await shot(a, 'claude-details', 'Opened release-notes’ details from its row.');
   await a.click('#harness-tab-mcp'); await shot(a, 'claude-mcp', 'Clicked the "MCP servers" tab.');
   await a.click('#harness-tab-agents'); await shot(a, 'claude-agents', 'Clicked the "Agents" tab.');
@@ -1985,7 +1987,7 @@ if (wanted('repo')) {
   run(author, 'add', '-A'); run(author, 'commit', '--quiet', '-m', 'Incident kit'); run(author, 'push', '--quiet', 'origin', 'HEAD:main');
 
   await a.click('#nav-skills');
-  for (const key of await a.run(`[...document.querySelectorAll('.ov-row[data-key]')].filter(row => row.querySelector('.switch:not([aria-checked="true"]):not([disabled])') && !row.querySelector('[id^="decide-"]')).map(row => row.dataset.key)`)) await a.click(`#switch-${key}`);
+  for (const key of await a.run(`[...document.querySelectorAll('.ov-row[data-key]')].filter(row => row.querySelector(':is(.add-item, .switch:not([aria-checked="true"])):not([disabled])') && !row.querySelector('[id^="decide-"]')).map(row => row.dataset.key)`)) await turnOnRow(key);
   await a.click('#nav-repo');
   await shot(a, 'repo-start-dark', 'Clicked "Git repo" in the sidebar: nothing connected yet. The page says what goes where and that nothing changes until Pull or Push.');
   await a.theme('light'); await shot(a, 'repo-start-light', 'The same, light.'); await a.theme('dark');

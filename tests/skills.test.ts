@@ -8,7 +8,7 @@ import { chmod, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 
 import { join } from 'node:path';
 import { readHistory } from '../src/history.ts';
 import { librarySentence } from '../src/historyactions.ts';
-import { canTakeIn, harnessIs, isPartial, libraryWords, placeOf, sentences, statusLine, switchLabel } from '../src/libraryrow.ts';
+import { addLabel, canTakeIn, harnessIs, isPartial, libraryWords, placeOf, sentences, statusLine, switchLabel } from '../src/libraryrow.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
 import { clearSwitch, skillChange, skillsView, takeOver } from '../src/skills.ts';
 import { pruneDeleted } from '../src/skillstore.ts';
@@ -207,7 +207,7 @@ test('A found skill whose only copy can’t be copied as it is (a link inside) i
     await mkdir(join(box.home, '.agents/skills/notes'), { recursive: true });
     await writeFile(join(box.home, '.agents/skills/notes/SKILL.md'), skillText());
     const shared = await seen(box);
-    assert.deepEqual([canTakeIn(shared.row), statusLine(shared.row, shared.item, tools)], [true, 'Not in Central Knot · Copilot CLI and Codex have it another way. Turn it on to take it in and put it in Claude Code.']);
+    assert.deepEqual([canTakeIn(shared.row), statusLine(shared.row, shared.item, tools)], [true, 'Not in Central Knot · Copilot CLI and Codex have it another way. Add it to keep it in Central Knot and put it in Claude Code.']);
   } finally { await box.cleanup(); }
 });
 
@@ -666,14 +666,14 @@ test('A found row says “every tool” only when it is true: the tools it will 
   try {
     await put(box, 'claude-cli', { 'SKILL.md': 'Just text.\n' });
     const plain = await seen(box);
-    assert.equal(statusLine(plain.row, plain.item, tools), 'Not in Central Knot · in Claude Code. Turn it on to take it in; Copilot CLI and Codex can’t take it (see below).');
-    assert.match(switchLabel(plain.row, plain.item, tools), /Click to take it in; Copilot CLI and Codex can’t take it\.$/);
+    assert.equal(statusLine(plain.row, plain.item, tools), 'Not in Central Knot · in Claude Code. Add it to keep it in Central Knot; Copilot CLI and Codex can’t take it (see below).');
+    assert.equal(addLabel(plain.row, plain.item, tools), 'Add notes to Central Knot; Copilot CLI and Codex can’t take it');
     await rm(folderOf(box, 'claude-cli'), { recursive: true });
     const shared = join(box.home, '.agents/skills/notes');
     await mkdir(shared, { recursive: true });
     await writeFile(join(shared, 'SKILL.md'), skillText());
     const found = await seen(box);
-    assert.equal(statusLine(found.row, found.item, tools), 'Not in Central Knot · Copilot CLI and Codex have it another way. Turn it on to take it in and put it in Claude Code.');
+    assert.equal(statusLine(found.row, found.item, tools), 'Not in Central Knot · Copilot CLI and Codex have it another way. Add it to keep it in Central Knot and put it in Claude Code.');
     // Taken in, its result names where it is on and who has it another way, and those tools' lines have no switch of Central Knot's.
     assert.equal(say.said.takenIn('notes', ['claude-cli'], tools, undefined, ['copilot-cli', 'codex-cli']), 'notes is in Central Knot now, and on in Claude Code; Copilot CLI and Codex have it another way.');
     await rm(shared, { recursive: true });
