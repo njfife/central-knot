@@ -7,18 +7,19 @@
 //   items/agents/<key>/<hash>/…               files kept before the library; read once by the migration, never deleted
 //
 // Every file under items/ is named by what it holds, so a second file never replaces a first, and nothing here is pruned.
-// agents.ts is the only caller that changes an item; this module only reads and writes what it is given.
+// The pass (librarypass.ts, through agents.ts agentKind) is the only caller that changes an item; this module only reads and
+// writes what it is given.
 import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { agentHash, agentText, parseAgent, type AgentEntry, type SharedAgent } from './agentfiles.ts';
 import { isOldRecord, migrateAgents, type OldAgentRecord } from './agentmigrate.ts';
-import { isLibraryItem, type LibraryItem, type Shelf } from './library.ts';
+import { isLibraryItem, type LibraryItem } from './library.ts';
+import type { KindLibrary } from './librarypass.ts';
 import { NOTHING_CHANGED, errorCode, exists, sha256, storeDirectory, writeDurably, type ShareContext } from './share.ts';
 import type { HarnessId } from './types.ts';
 
-/** A harness's agents folder as a full pass last saw it: where it is, and its identity on disk (`away`: it wasn't there). */
-export type FolderSeen = { path: string } & ({ away: true } | { ino: number; birth: number });
-export interface AgentLibrary { formatVersion: number; items: Record<string, LibraryItem>; folders: Partial<Record<HarnessId, FolderSeen>> }
+/** The record: the agents' part of the library (librarypass.ts KindLibrary: the items, and each agents folder as last seen). */
+export interface AgentLibrary extends KindLibrary { formatVersion: number }
 
 /** Format 3 is the library's. Format 2 (agentmigrate.ts) and 1 (before agents were rewritten: nothing to carry over) are migrated. */
 const FORMAT_VERSION = 3;
@@ -70,7 +71,8 @@ export async function openLibrary(context: ShareContext, persist = false): Promi
   return { library };
 }
 
-export const saveLibrary = (home: string, library: AgentLibrary) => writeDurably(recordPath(home), `${JSON.stringify(library, null, 2)}\n`);
+export const saveLibrary = (home: string, { items, folders }: KindLibrary) =>
+  writeDurably(recordPath(home), `${JSON.stringify({ formatVersion: FORMAT_VERSION, items, folders } satisfies AgentLibrary, null, 2)}\n`);
 
 // ---------- Contents ----------
 
@@ -83,7 +85,8 @@ async function storeOnce(path: string, text: string) {
   await mkdir(dirname(path), { recursive: true });
   await writeDurably(path, text);
 }
-const storeVersion = (context: ShareContext, key: string, hash: string, { name, description, prompt }: SharedAgent) =>
+/** Stores one version's content (its shared part) under the agent, once. */
+export const storeVersion = (context: ShareContext, key: string, hash: string, { name, description, prompt }: SharedAgent) =>
   storeOnce(versionPath(context, key, hash), `${JSON.stringify({ name, description, prompt }, null, 2)}\n`);
 const storeOwn = (context: ShareContext, key: string, text: string) => storeOnce(ownPath(context, key, sha256(text)), text);
 
@@ -98,14 +101,12 @@ export async function readVersion(context: ShareContext, key: string, hash: stri
   try { const agent = JSON.parse(await readFile(path, 'utf8')) as SharedAgent; readBefore.set(path, agent); return agent; } catch { return notStoredYet.get(path); }
 }
 
-/** The library's shelf for agents (library.ts Shelf): where a version's content goes, and the caller's save of the record. */
-export const agentShelf = (context: ShareContext, save: () => Promise<void>): Shelf<SharedAgent> =>
-  ({ store: (item, hash, agent) => storeVersion(context, item.key, hash, agent), save });
-
-/** Keeps a harness's whole file as that harness's own part of the item. The caller saves the record. */
-export async function keepOwn(context: ShareContext, item: LibraryItem, tool: HarnessId, text: string) {
+/** Keeps a harness's whole file as that harness's own part of the item; true when it differs from the one kept. The caller saves the record. */
+export async function keepOwn(context: ShareContext, item: LibraryItem, tool: HarnessId, text: string): Promise<boolean> {
   await storeOwn(context, item.key, text);
+  const was = item.own[tool];
   item.own[tool] = sha256(text);
+  return was !== item.own[tool];
 }
 
 /**
