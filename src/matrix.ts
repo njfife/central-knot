@@ -14,7 +14,8 @@ import { getsCopy as getsCopyNext, offPlan, stillOn } from './clickplan.ts';
 import type { IconName } from './icons.ts';
 import { byKey, loadedIn, standing } from './roworder.ts';
 import { cellOf, comparedTools, needsCopyChoice, type ItemRow, type Tool } from './itemrow.ts';
-import { agentClicks, harnessIs, harnessLine as agentLine, inLibrary, needsChoice as agentNeedsChoice, noticeWords, placeOf as agentPlace, placeTag, said as agentSaid, statusLine, switchLabel, type HarnessIs } from './agentrow.ts';
+import { agentClicks, harnessIs, harnessLine as agentLine, inLibrary, needsChoice as agentNeedsChoice } from './agentrow.ts';
+import { noticeWords, placeOf as agentPlace, placeTag, said as agentSaid, statusLine, switchLabel, type HarnessIs } from './agentrow.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import type { Version } from './library.ts';
 import type { Change, DestinationResult, HomeView, ManageView, Outside, SkillFacts, SyncNotice, HarnessId, PartsInstall, ThroughPlugin } from './types.ts';
@@ -270,11 +271,14 @@ let kind: Kind = 'skills';
 /** Whether a profile switch turned this item off in this tool, not a switch turned by hand. */
 const turnedOffByProfile = (key: string, tool: Tool) => kind !== 'agents' && !!state.home?.profiles.offByProfile[itemId(kind === 'mcp' ? 'mcp' : 'skill', key)]?.includes(tool as HarnessId);
 const factsCache: Partial<Record<Kind, { from: unknown; gone: unknown; list: ItemRow[] }>> = {};
+/** What kindSource reads of one kind. `library`: agents only, each one as Central Knot's library holds it. */
+interface KindSource { tools: Tool[]; facts: SkillFacts[]; waiting: string[]; gone: SkillFacts[]; library?: HomeView['agents']['library'] }
+
 /**
  * One kind in a home: its facts, the tools that can hold it (Pi has no agents), and the MCP servers whose Claude Code entries
  * wait for Write now (their cells say so instead of reading as differing copies). The tables and Harnesses both read it.
  */
-export function kindSource(home: HomeView, which: Kind): { tools: Tool[]; facts: SkillFacts[]; waiting: string[]; gone: SkillFacts[]; /** Agents: each one as Central Knot's library holds it. */ library?: HomeView['agents']['library'] } {
+export function kindSource(home: HomeView, which: Kind): KindSource {
   if (which === 'skills') return { tools: home.manage.tools, facts: home.manage.skills, waiting: [], gone: home.manage.gone ?? [] };
   const list = which === 'mcp' ? home.mcp : home.agents;
   return { tools: list.tools, facts: list.servers, waiting: which === 'mcp' ? list.claudePending : [], gone: list.gone ?? [], library: list.library };

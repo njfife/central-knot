@@ -85,7 +85,7 @@ function asItIs(row: AgentRow, item: LibraryItem | undefined): Change {
   return { key: row.key, managed: !!held?.on, off: held ? [...held.except] : [], seenManaged: !!held?.on };
 }
 
-/** The clicks an agent's controls send (agents.ts click takes each). */
+/** The clicks an agent's controls send. Each is a types.ts Change, which main.ts's `changes` sanitizer passes on field by field to agents.ts click. */
 export const agentClicks = {
   /** The row's switch, On: a found agent is taken in (`use`: the copy every harness takes, where they differ); one in the library is applied. */
   on: (row: AgentRow, item: LibraryItem | undefined, use?: string): Change =>
