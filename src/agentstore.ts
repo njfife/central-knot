@@ -25,7 +25,8 @@ export interface AgentLibrary extends KindLibrary { formatVersion: number }
 const FORMAT_VERSION = 3;
 const recordPath = (home: string) => join(storeDirectory(home), 'agents.json');
 const backupPath = (home: string, version: number) => join(storeDirectory(home), `agents.v${version}.json`);
-const emptyLibrary = (): AgentLibrary => ({ formatVersion: FORMAT_VERSION, items: {}, folders: {} });
+/** No prototype on `items`: an agent may be called constructor or __proto__. */
+const emptyLibrary = (): AgentLibrary => ({ formatVersion: FORMAT_VERSION, items: Object.create(null), folders: {} });
 
 type Inspected = { library: AgentLibrary } | { older: OldAgentRecord; text: string } | { problem: string } | Record<string, never>;
 /** Reads the record as it is. Unreadable, damaged or newer is a `problem` that stops every write; the file is never touched. */

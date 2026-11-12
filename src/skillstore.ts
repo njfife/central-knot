@@ -28,7 +28,8 @@ export interface SkillContent { directory: string; hash: string }
 
 const FORMAT_VERSION = 1;
 const recordPath = (home: string) => join(storeDirectory(home), 'skills.json');
-const emptyLibrary = (): SkillLibrary => ({ formatVersion: FORMAT_VERSION, items: {}, folders: {} });
+/** No prototype on `items`: a skill may be called constructor or __proto__. */
+const emptyLibrary = (): SkillLibrary => ({ formatVersion: FORMAT_VERSION, items: Object.create(null), folders: {} });
 
 type Inspected = { library: SkillLibrary } | { problem: string } | Record<string, never>;
 /** Reads the record as it is. Unreadable, damaged or newer is a `problem` that stops every write; the file is never touched. */

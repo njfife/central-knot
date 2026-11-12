@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
 import { agentsView, applyAgents } from '../src/agents.ts';
-import { applyChanges, manageView } from '../src/manage.ts';
+import { managedNow } from '../src/share.ts';
+import { applySkills, skillsView } from '../src/skills.ts';
 import { applyMcp, mcpView } from '../src/mcp.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
@@ -15,7 +16,7 @@ const text = (name: string) => `---\nname: ${name}\ndescription: The ${name} ski
 const exists = (path: string) => lstat(path).then(() => true, () => false);
 const put = async (path: string, content: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, content); };
 
-test('a tool that has a skill through an installed plugin is shown as that, and gets no separate copy', async () => {
+test('a tool that has a skill through an installed plugin has it another way, and gets no separate copy', async () => {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-plugin-skills-')));
   const home = join(base, 'home');
   try {
@@ -36,26 +37,31 @@ test('a tool that has a skill through an installed plugin is shown as that, and 
     const read = () => Promise.all(harnessIds.map(harness => discover({ home, mode: 'custom', harness })));
     const context: ShareContext = { home, mode: 'custom', read, build: 'test', settingsPath: join(base, 'settings.json'), realHome: join(base, 'real') };
 
-    const facts = (await manageView(context)).skills;
+    const tools = await managedNow(context, await read());
+    const facts = (await skillsView(context, tools)).items;
     const triage = facts.find(skill => skill.key === 'triage')!;
     assert.deepEqual(triage.plugin, { 'claude-cli': { plugin: 'issue-tracker', marketplace: 'team', version: '1.2.0', name: 'triage' } });
-    assert.match(triage.cannot['claude-cli'] ?? '', /^Claude Code has this skill through the plugin issue-tracker \(version 1\.2\.0\), so no separate copy is placed there\.$/);
-    // A copy of its own is an ordinary copy, whatever a plugin also holds.
+    assert.match(triage.anotherWay?.['claude-cli'] ?? '', /^Claude Code has this skill through the plugin issue-tracker \(version 1\.2\.0\), so no separate copy is placed there\.$/);
+    // A copy of its own is the tool's copy, whatever a plugin also holds: no plugin row for it there.
     assert.equal(facts.find(skill => skill.key === 'notes')!.plugin, undefined);
     // A name alone doesn't make two skills one: Pi's own standup stays an ordinary skill Claude Code has no copy of.
     const standup = facts.find(skill => skill.key === 'standup')!;
-    assert.deepEqual([standup.plugin, standup.cannot['claude-cli']], [undefined, undefined]);
+    assert.deepEqual([standup.plugin, standup.anotherWay?.['claude-cli']], [undefined, undefined]);
 
-    // Managed: the tool without it gets a copy; the tool with the plugin gets none beside it.
-    const result = await applyChanges(context, [{ key: 'triage', managed: true, off: [] }]);
+    // Taken in: the tool without it gets a copy; the tool with the plugin gets none beside it.
+    const result = await applySkills(context, tools, [{ key: 'triage', managed: true, off: [] }]);
     assert.equal(result.stopped, undefined);
     assert.deepEqual([await exists(join(home, '.copilot/skills/triage/SKILL.md')), await exists(join(home, '.claude/skills/triage'))], [true, false]);
+    assert.equal((await applySkills({ ...context, settleMs: 0 }, tools, [])).writes, 0, 'and it stays so');
+    // Taken in where a tool has it through the plugin and a copy of its own: that copy, never Central Knot's, stays (both ways).
+    await applySkills(context, tools, [{ key: 'notes', managed: true, off: [] }]);
+    assert.equal(await readFile(join(home, '.claude/skills/notes/SKILL.md'), 'utf8'), text('notes'));
 
     // The plugin turned off in Claude Code still holds the skill there: said so, and still no separate copy.
     await put(join(home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'issue-tracker@team': false } }));
-    const off = (await manageView(context)).skills.find(skill => skill.key === 'triage')!;
+    const off = (await skillsView(context, tools)).items.find(skill => skill.key === 'triage')!;
     assert.equal(off.plugin?.['claude-cli']?.off, true);
-    assert.match(off.cannot['claude-cli'] ?? '', /turned off there/);
+    assert.match(off.anotherWay?.['claude-cli'] ?? '', /turned off there/);
   } finally { await rm(base, { recursive: true, force: true }); }
 });
 

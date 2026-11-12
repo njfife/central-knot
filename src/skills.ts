@@ -31,7 +31,7 @@ import { alsoReads, lockedRoot, placeFolder, readCopy, readSkillsFolder, recover
 import { openLibrary, readConverted, readVersion, recordedSkills, saveLibrary, storeVersion, type ConvertedFrom, type SkillContent } from './skillstore.ts';
 import { isDisabled, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, type SwitchFile } from './skillswitch.ts';
 import { harnesses } from './harnesses.ts';
-import type { Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, Skill, SwitchTarget, SyncNotice, SyncView, ToolCopy } from './types.ts';
+import type { Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, Skill, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy } from './types.ts';
 import { throughPlugin, toolName } from './words.ts';
 
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -145,9 +145,8 @@ export async function readDisk(context: ShareContext, managed: HarnessId[]): Pro
  * tool the skill is kept out of, whose copy there is Central Knot's and leaves this pass, has it no other way.
  */
 function anotherWay(disk: SkillDisk, managed: HarnessId[], item: Wanted, tool: HarnessId, depth = 0): string | undefined {
-  const given = disk.through.get(tool)?.get(item.key);
-  const shape = disk.shapes.get(item.key);
-  if (given && (given.asParts || (given.text !== undefined && shape && comparableText(given.text) === comparableText(shape.content)))) return throughPlugin(tool, given);
+  const given = pluginFor(disk, item.key, tool);
+  if (given) return throughPlugin(tool, given);
   const way = disk.ways.get(item.key)?.[tool];
   if (way) return way.why;
   const source = disk.readsFrom[tool];
@@ -157,6 +156,17 @@ function anotherWay(disk: SkillDisk, managed: HarnessId[], item: Wanted, tool: H
   const left = !!disk.byKey.get(item.key)?.[source] && item.applied[source] === undefined;
   if (!wantedIn(item, source) && (left || unseenIn(disk, source, item.key))) return `${nameOf(tool)} reads a copy in ${there}’s skills folder, which is not Central Knot’s.`;
   return undefined;
+}
+
+/**
+ * The plugin a tool has this skill through, if it does: a plugin skill of that name is this one when Central Knot installed it
+ * elsewhere as that plugin's part, or when its SKILL.md is the skill's; another one that only shares the name is not.
+ */
+function pluginFor(disk: SkillDisk, key: string, tool: HarnessId): ThroughPlugin | undefined {
+  const given = disk.through.get(tool)?.get(key), shape = disk.shapes.get(key);
+  if (!given || !(given.asParts || (given.text !== undefined && shape && comparableText(given.text) === comparableText(shape.content)))) return undefined;
+  const { asParts: _asParts, text: _text, ...plugin } = given;
+  return plugin;
 }
 
 /** Why a tool can't be given a skill (librarypass.ts Disk.held, without `anotherWay`): its name, its shape, or where it came from. */
@@ -262,13 +272,30 @@ export async function clearSwitch(context: ShareContext, tools: HarnessId[], key
   const name = live.find(entry => entry.key === key)?.name ?? foundCopies(look, key, [])[0]?.name ?? key;
   const target = loadTarget(look, key, name, tool);
   if (!target || !isDisabled(context, look.disk.switches.get(tool)!, target)) return stop(`${toolName(tool)}’s own switch doesn’t turn ${name} off any more. Nothing was changed.`);
-  try { await setDisabled(context, tool, target, false, (await readKeptOverrides(context))[target.folder]); }
+  try { await setDisabled(context, tool, target, false, await overrideBefore(context, key, tool, target)); }
   catch (error) { return stop(`Could not clear ${toolName(tool)}’s switch: ${switchFailure(error)}`); }
   const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key, item: name, kind: 'switched', switched: [{ tool, disabled: false, target }], losers: [], orderProved: true };
   await appendHistory(context, [event]);
   const done = await applySkills(context, tools, [], { only: new Set([key]) });
   const cleared: DestinationResult = { item: name, harness: tool, outcome: 'switched', disabled: false, message: `${toolName(tool)} loads it again from its next session.` };
   return { ...done, results: [cleared, ...done.results] };
+}
+
+/**
+ * What Claude Code's override for a skill held before its switch was set (say "name-only"), which clearing it puts back: as
+ * skillswitch.ts keeps it, else as a Disable from 0.4.0-preview.1 recorded it only in its History entry (a profile's switch
+ * that came after it replaced nothing).
+ */
+async function overrideBefore(context: ShareContext, key: string, tool: HarnessId, target: SwitchTarget): Promise<string | undefined> {
+  const kept = (await readKeptOverrides(context))[target.folder];
+  if (tool !== 'claude-cli' || kept !== undefined) return kept;
+  let before: string | undefined;
+  for (const event of await readHistory(context)) {
+    if (event.kind === 'profile' && event.profile?.flips.some(flip => flip.tool === tool && flip.disabled && flip.item === `skill:${key}`)) before = undefined;
+    if (event.kind !== 'switched' || event.key !== key) continue;
+    for (const entry of event.switched ?? []) if (entry.tool === tool && entry.disabled && entry.target?.folder === target.folder) before = entry.before;
+  }
+  return before;
 }
 
 /**
@@ -426,7 +453,7 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
   const other: NonNullable<LibraryFacts['anotherWay']> = {}, takeOver: NonNullable<LibraryFacts['takeOver']> = {}, loads: NonNullable<LibraryFacts['loads']> = {};
   const copiesNow = item ? copiesOf(look, item) : undefined, made = item && copiesNow ? plan(item, copiesNow) : undefined;
   for (const tool of look.managed) {
-    const given = disk.through.get(tool)?.get(key);
+    const given = pluginFor(disk, key, tool);
     if (given && !slot[tool]) plugin[tool] = given;
     const copy = copiesNow?.[tool];
     if (copy?.is === 'unseen') unseen[tool] = copy.why;

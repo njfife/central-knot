@@ -148,12 +148,15 @@ test('The switch says what a click does: off everywhere, on everywhere, take a f
   assert.match(switchLabel(row({ 'claude-cli': 'a', 'codex-cli': 'x' }), undefined, tools, 'closed'), /its copies differ\. Click to choose which copy every tool uses\.$/);
   const all = row({ 'claude-cli': 'b' });
   assert.deepEqual([placeTag(all, item(), tools)?.text, placeTag(all, item({ on: false }), tools)?.text, placeTag(all, undefined, tools)?.text], [undefined, 'in Central Knot only', 'not in Central Knot']);
-  // Kept out of a tool shows on the closed row too, in the words used everywhere else.
-  assert.deepEqual(placeTag(all, item({ except: ['codex-cli'] }), tools), { text: 'not in Codex', title: 'Kept out of Codex. Its switch there, in the opened row, puts it back.' });
+  // Kept out of a tool (partial) shows on the closed row too: where it is, so it never reads as on everywhere.
+  assert.deepEqual(placeTag(all, item({ except: ['codex-cli'] }), tools), { text: 'in 2 of 3 tools · not in Codex', title: 'Kept out of Codex. Its switch there, in the opened row, puts it back.' });
+  assert.equal(switchLabel(all, item({ except: ['codex-cli'] }), tools), 'reviewer: on in 2 of 3 tools. Click to take it out of every tool; Central Knot keeps it.');
   // So does a tool that can't take it: the tag says where it can be, its tooltip why.
   const why = 'Codex can’t store this name (é). Rename it in Claude Code to use it there.';
+  const cannotOnly = row({ 'claude-cli': 'b' }, { cannot: { 'codex-cli': why } }, item());
+  assert.deepEqual(placeTag(cannotOnly, item(), tools), { text: 'Claude Code and Copilot CLI only', title: why });
   const keptOut = item({ except: ['copilot-cli'] }), cannot = row({ 'claude-cli': 'b' }, { cannot: { 'codex-cli': why } }, keptOut);
-  assert.deepEqual(placeTag(cannot, keptOut, tools), { text: 'Claude Code only', title: `${why} Kept out of Copilot CLI. Its switch there, in the opened row, puts it back.` });
+  assert.deepEqual(placeTag(cannot, keptOut, tools), { text: 'in 1 of 3 tools · not in Copilot CLI', title: `${why} Kept out of Copilot CLI. Its switch there, in the opened row, puts it back.` });
   // A tool that still holds an older copy (its folder can't be written) has it, so the tag doesn't say "only".
   const locked = row({ 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'a' }, { cannot: { 'codex-cli': 'Codex’s agents folder can’t be written.' } }, item());
   assert.equal(placeTag(locked, item(), tools), undefined);
