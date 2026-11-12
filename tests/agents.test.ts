@@ -256,6 +256,29 @@ inBox('A tool managed again with another file of the name of an agent deleted fr
   assert.equal(await readOf(box, 'codex-cli'), undefined);
 });
 
+for (const state of ['Off', 'On, with a click on another agent first'] as const) {
+  inBox(`A tool managed again before its agents folder is there (${state}): the folder that appears later with another file of the agent’s name is the tool coming back`, async box => {
+    await writeFile(join(box.home, '.claude/agents/helper.md'), claudeAgent('You help.\n').replace('name: reviewer', 'name: helper'));
+    await on(box);
+    const without: HarnessId[] = ['claude-cli', 'copilot-cli'];
+    await chooseTools(box.context, without);
+    const away = await seen({ ...box, tools: without });
+    if (state === 'Off') await applyAgents(box.context, without, [agentClicks.off(away.row, away.item)]);
+    await rm(join(box.home, '.codex/agents'), { recursive: true });
+    await chooseTools(box.context, tools);
+    // The first pass after Codex is back, with no agents folder there: a plain one, or (Sync off) a click on helper alone.
+    if (state === 'Off') await pass(box);
+    else await applyAgents(box.context, tools, [{ key: 'helper', managed: true, off: ['codex-cli'] }], { only: new Set(['helper']) });
+    await mkdir(join(box.home, '.codex/agents'));
+    await write(box, 'codex-cli', codexAgent('Someone else entirely.\n'));
+    assert.deepEqual((await pass(box)).notices, []);
+    assert.deepEqual(await versions(box), ['Be brief. (found in Claude Code) *', 'Someone else entirely. (was in Codex)']);
+    assert.equal(await readOf(box, 'codex-cli'), state === 'Off' ? undefined : codexAgent());
+    assert.match((await readOf(box, 'claude-cli')) ?? 'Be brief.', /Be brief\./, 'the hand-made file reached no other tool');
+    assert.ok(!(await historyOf(box)).some(event => event.kind === 'edit'), 'no edit was taken in');
+  });
+}
+
 inBox('A tool managed again with a copy gone meanwhile turns nothing Off, whatever the settle window', async box => {
   await on(box);
   await chooseTools(box.context, ['claude-cli', 'copilot-cli']);

@@ -153,19 +153,17 @@ export async function lookFor<C, E extends Seen, D extends Disk<E>>(kind: Kind<C
 export const unseenIn = (disk: Disk<Seen>, tool: HarnessId, key: string) => disk.unseen.get(`${tool}:${key}`) ?? disk.unseen.get(`${tool}:*`);
 
 /**
- * "H unknown is never H gone" for a whole folder, and a harness managed again, run on `items` as a pass's clicks left them.
- * - A folder the record doesn't hold is the model's harness managed again, settled for every item in the record at once
- *   (cameBack), whichever pass sees it first. Its identity was let go when the harness stopped being managed (the tool choice,
- *   or a pass without it: keepFolders), so the absence is recorded when that happens. A harness seen for the first time has
- *   no identity either, and takes the same step: it changes only items that had something applied there, which a harness
- *   never managed has not. A folder that isn't there is noted as away, as below, so a folder the first write makes is not
- *   taken for a harness managed again at the next pass.
- * - A folder somewhere else than at the last full pass (its config root moved) has what was applied there forgotten for the
- *   pass's items; one made again since (a reset or reinstall, or back after being away) for those with no copy there. A
- *   click's pass leaves the identity for the next full pass, which forgets it for the others.
- * - A folder that is gone is unseen inside the settle window; afterwards what was applied there is forgotten for the items
- *   wanted there (written afresh), and stays unseen for an item whose removal it owes, which waits for the folder.
- * `shelf`: a pass keeps the versions a harness managed again gives way with; the page's look has none and keeps nothing.
+ * "H unknown is never H gone" for a whole folder, and a harness managed again, on `items` as a pass's clicks left them. A
+ * harness's identity is let go when it stops being managed (keepFolders), so "no identity on record" is a harness managed
+ * again, or one seen for the first time. One line per branch, in the order the code takes them:
+ * - Not there, and managed again with something applied there: nothing noted, so the folder's arrival runs cameBack.
+ * - Not there (any other harness is noted as away), inside the settle window: unseen, so nothing happens there.
+ * - Not there, past the window: items wanted there are written afresh; a removal owed there waits for the folder (unseen).
+ * - There, no identity on record: cameBack settles every item in the record that had something applied there.
+ * - There, but elsewhere than at the last full pass (its config root moved): what was applied is forgotten for `items`.
+ * - There, but made again since (reset, reinstalled, or back after being away): the same, for `items` with no copy there.
+ * A click's pass moves no known identity on, so the next full pass still sees the change for the others (keepFolders).
+ * `shelf`: a pass keeps the versions a harness managed again gives way with; the page's look keeps nothing.
  */
 export async function guardFolders(look: AnyLook, items: LibraryItem[], shelf?: Shelf<unknown>) {
   for (const tool of look.managed) {
@@ -173,8 +171,9 @@ export async function guardFolders(look: AnyLook, items: LibraryItem[], shelf?: 
     const info = await stat(path).catch(() => undefined);
     const here: FolderSeen = info?.isDirectory() ? { path, ino: info.ino, birth: Math.round(info.birthtimeMs) } : { path, away: true };
     const forget = (which: LibraryItem[]) => { for (const item of which) delete item.applied[tool]; };
-    look.foldersNow[tool] = here;
     if ('away' in here) {
+      const backWithoutFolder = !was && Object.values(look.library.items).some(item => item.applied[tool] !== undefined);
+      if (!backWithoutFolder) look.foldersNow[tool] = here;
       const applied = items.filter(item => item.applied[tool] !== undefined);
       if (!applied.length) continue;
       const where = `${toolName(tool)}’s ${look.kind.words.folder}`;
@@ -184,6 +183,7 @@ export async function guardFolders(look: AnyLook, items: LibraryItem[], shelf?: 
       for (const item of applied.filter(item => !wantedIn(item, tool))) look.disk.unseen.set(`${tool}:${item.key}`, owed);
       continue;
     }
+    look.foldersNow[tool] = here;
     seenAgain(look, path);
     if (!was) await cameBack(look, tool, shelf);
     else if (was.path !== path) forget(items);
