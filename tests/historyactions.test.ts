@@ -17,26 +17,28 @@ const offered = (event: HistoryEvent, agent: LibraryItem | undefined) => { const
 const asIs = { key: 'reviewer', managed: true, off: [] };
 
 test('An Off entry offers Turn on while the agent is Off, and nothing once it is On again', () => {
-  const off = entry({ kind: 'off', losers: [{ tool: 'claude-cli', hash: 'b' }, { tool: 'codex-cli', hash: 'b' }] });
+  const off = entry({ kind: 'off', cause: 'switch', losers: [{ tool: 'claude-cli', hash: 'b' }, { tool: 'codex-cli', hash: 'b' }] });
   assert.equal(agentSentence(off, tools)?.text, 'Turned off: removed from Claude Code and Codex. Central Knot keeps it.');
   assert.deepEqual(offered(off, item({ on: false })), ['Turn on', { ...asIs, managed: true }]);
   assert.equal(offered(off, item()), undefined);
 });
 
 test('A copy deleted by hand says where, and its entry turns the agent on again', () => {
-  const byHand = entry({ kind: 'off', winner: { tool: 'copilot-cli', hash: 'b' }, losers: [{ tool: 'claude-cli', hash: 'b' }] });
+  const byHand = entry({ kind: 'off', cause: 'deleted-by-hand', winner: { tool: 'copilot-cli', hash: 'b' }, losers: [{ tool: 'claude-cli', hash: 'b' }] });
   assert.equal(agentSentence(byHand, tools)?.text, 'Its copy was deleted in Copilot CLI, so it was turned off and removed from Claude Code. Central Knot keeps it.');
   assert.deepEqual(offered(byHand, item({ on: false }))?.[0], 'Turn on');
 });
 
-test('An On entry offers Turn off while the agent is On; a found agent taken in says where it was found', () => {
-  const on = entry({ kind: 'on', losers: tools.map(tool => ({ tool: tool as 'claude-cli', hash: 'b' })) });
+test('An On entry offers Turn off while the agent is On; a found agent taken in says where it was found, and one Pull brought says so', () => {
+  const on = entry({ kind: 'on', cause: 'switch', losers: tools.map(tool => ({ tool: tool as 'claude-cli', hash: 'b' })) });
   assert.equal(agentSentence(on, tools)?.text, 'Turned on: put in all 3 tools.');
   assert.deepEqual(offered(on, item()), ['Turn off', { ...asIs, managed: false }]);
   assert.equal(offered(on, item({ on: false })), undefined);
-  const takenIn = entry({ kind: 'on', winner: { tool: 'claude-cli', hash: 'a' }, losers: [{ tool: 'codex-cli', hash: '' }] });
+  const takenIn = entry({ kind: 'on', cause: 'found', winner: { tool: 'claude-cli', hash: 'a' }, losers: [{ tool: 'codex-cli', hash: '' }] });
   assert.equal(agentSentence(takenIn, tools)?.text, 'Found in Claude Code and taken into Central Knot; put in Codex.');
-  assert.equal(agentSentence({ ...takenIn, via: 'repo' }, tools)?.text, 'Pulled from the Git repo into Claude Code and taken into Central Knot; put in Codex.');
+  const pulled = entry({ kind: 'on', cause: 'pulled', via: 'repo', losers: tools.map(tool => ({ tool: tool as 'claude-cli', hash: '' })) });
+  assert.equal(agentSentence(pulled, tools)?.text, 'Pulled from the Git repo into Central Knot; put in all 3 tools.');
+  assert.deepEqual(offered(pulled, item())?.[0], 'Turn off');
 });
 
 test('One harness’s switch: its entry turns that harness on or off again, while that would change something', () => {

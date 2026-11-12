@@ -48,8 +48,8 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
       return { glyph: 'circle-off', text: `${text.charAt(0).toUpperCase()}${text.slice(1)}, using ${one ? `${one}’s` : 'each tool’s'} own switch.`, action: 'Undo' };
     }
     case 'profile': return profileSwitch(event);
-    // Only an agent's entries have these kinds, and each was said above.
-    case 'on': case 'off': case 'current': return { glyph: 'check', text: '' };
+    // An agent's own kinds: agentSentence says every one of them, so they are answered before this switch.
+    case 'on': case 'off': case 'current': return agentSentence(event, state.home?.agents.tools ?? [], agentOf(event))!;
     case 'removed': return { glyph: 'circle-minus', text: `Removed from ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}; Central Knot kept the ${event.losers.length === 1 ? 'copy' : 'copies'}.`, action: 'Restore' };
     case 'took-over': return { glyph: 'arrow-down-to-line', text: tookOverText(event, !!event.undoneBy), action: 'Undo' };
     case 'written': return { glyph: 'pencil-line', text: 'Write to Claude Code replaced Claude Code’s own entry with the synced one; Central Knot kept it.', action: 'Undo write' };

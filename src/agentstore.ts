@@ -94,10 +94,10 @@ export async function readVersion(context: ShareContext, key: string, hash: stri
 export const agentShelf = (context: ShareContext, save: () => Promise<void>): Shelf<SharedAgent> =>
   ({ store: (item, hash, agent) => storeVersion(context, item.key, hash, agent), save });
 
-/** Keeps a harness's whole file as that harness's own part of the item, before the file is removed. The caller saves the record. */
-export async function keepOwn(context: ShareContext, item: LibraryItem, entry: AgentEntry) {
-  await storeOwn(context, item.key, entry.text);
-  item.own[entry.tool] = entry.bytes;
+/** Keeps a harness's whole file as that harness's own part of the item. The caller saves the record. */
+export async function keepOwn(context: ShareContext, item: LibraryItem, tool: HarnessId, text: string) {
+  await storeOwn(context, item.key, text);
+  item.own[tool] = sha256(text);
 }
 
 /**

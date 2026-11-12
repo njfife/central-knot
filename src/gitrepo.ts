@@ -18,15 +18,15 @@ import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/p
 import type { Dirent } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
-import { agentHash, agentText, fileFor, fromMarkdown, keyOf, readAgents, safeName, type AgentEntry, type NeutralAgent } from './agentfiles.ts';
-import { agentsOn, agentsView, applyAgents, keepAgentCopy } from './agents.ts';
+import { agentHash, agentText, fromMarkdown, keyOf, readAgents, safeName, type AgentEntry, type NeutralAgent } from './agentfiles.ts';
+import { agentsForRepo, agentsView, applyAgents } from './agents.ts';
 import { parseSkill } from './discovery.ts';
 import { harnesses } from './harnesses.ts';
 import { appendHistory, applyChanges, deleteEverywhere, displace, manageView, readHistory, replaceCopy, replaceHistory } from './manage.ts';
 import { applyMcp, cannotHold, editEntry, fromJson, jsonEntry, keep, mcpView, readMcpRecord, readTool, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { gitEnv, gitFailure, runGit, whyGitFailed, whyPushFailed } from './plugins.ts';
 import { PRODUCT } from './values.ts';
-import { agentTools, mcpTools } from './presence.ts';
+import { mcpTools } from './presence.ts';
 import { copyTree, errorCode, exists, gateRefusal, itemKey, managedNow, notCopied, sha256 as sha, syncGate, placeCopy, plainError, readRecord, readTree, removeTree, saveRecord, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { undoBase } from './instructions.ts';
 import type { BaseUndo, Change, DestinationResult, HarnessId, HistoryEvent, McpResult, RepoChange, RepoCommit, RepoKind, RepoResult, RepoView, SkillFacts, Snapshot } from './types.ts';
@@ -346,10 +346,10 @@ async function writeSkills(dir: string, skills: SkillFacts[]): Promise<Unsent> {
 interface Written { unsent: Unsent; unmanaged: Set<string> }
 
 /**
- * For MCP servers or agents: the tool entry that stands for each Managed item here (see sourceTool), the items that can't go with
- * why, and the keys of the items that aren't Managed. Each writer then only puts the entries in the repo's format.
+ * For MCP servers: the tool entry that stands for each Managed item here (see sourceTool), the items that can't go with why, and
+ * the keys of the items that aren't Managed. writeServers then only puts the entries in the repo's format.
  */
-function standingEntries<Entry extends { tool: HarnessId }>(kind: 'mcp' | 'agent', all: SkillFacts[], entries: Entry[], entryKey: (entry: Entry) => string,
+function standingEntries<Entry extends { tool: HarnessId }>(kind: 'mcp', all: SkillFacts[], entries: Entry[], entryKey: (entry: Entry) => string,
   rowKey: (name: string) => string, preferNot: HarnessId[] = []): Written & { sources: Entry[] } {
   const byTool = new Map(entries.map(entry => [`${entry.tool}\0${entryKey(entry)}`, entry]));
   const result: Written & { sources: Entry[] } = { unsent: new Map(), unmanaged: new Set(), sources: [] };
@@ -387,30 +387,32 @@ async function writeServers(context: ShareContext, dir: string, tools: HarnessId
 }
 
 /**
- * Writes each Managed agent under agents/ in Claude Code's format. Claude Code's own file goes as written, with its own settings
- * (tools, model); another tool's is put in Claude Code's format over the repo's file (all read in one go), so the settings only
- * Claude Code has stay as the repo has them.
+ * Writes every agent in Central Knot's library, On or Off here, under agents/ in Claude Code's format: its current version,
+ * with Claude Code's own settings (tools, model) from Claude Code's file for it (agents.ts agentsForRepo), else as the repo's
+ * own file has them (all read in one go). Being Off here never takes an agent out of the repo: only Delete from Central Knot
+ * does. An agent a tool has that isn't in Central Knot is not sent, and not removed from the repo either.
  */
 async function writeAgents(context: ShareContext, dir: string, tools: HarnessId[], baseId: string | undefined): Promise<Written> {
   await clearLayout(dir, 'agents', entry => entry.isFile() && entry.name.endsWith('.md'));
-  const view = await agentsView(context, tools);
-  const entries: AgentEntry[] = [];
-  for (const tool of agentTools.filter(tool => view.tools.includes(tool))) entries.push(...(await readAgents(context, tool)).entries);
-  const { sources, ...written } = standingEntries('agent', view.servers, entries, entry => entry.key, agentKey);
-  const pathOf = (entry: AgentEntry) => `agents/${toFile(entry.name)}.md`;
-  const translated = sources.filter(entry => entry.tool !== 'claude-cli');
-  const inRepo = baseId ? await readBlobs(dir, translated.map(entry => `${baseId}:${pathOf(entry)}`)) : new Map<string, Buffer>();
-  for (const entry of sources) {
-    const text = entry.tool === 'claude-cli' ? entry.text : agentText('claude-cli', entry.agent, inRepo.get(`${baseId}:${pathOf(entry)}`)?.toString('utf8'));
-    await writeScratch(join(dir, pathOf(entry)), text);
+  const written: Written = { unsent: new Map(), unmanaged: new Set() };
+  const library = await agentsForRepo(context, tools);
+  const pathOf = (name: string) => `agents/${toFile(name)}.md`;
+  const plain = library.filter(entry => entry.agent && entry.claudeFile === undefined);
+  const inRepo = baseId ? await readBlobs(dir, plain.map(entry => `${baseId}:${pathOf(entry.item.name)}`)) : new Map<string, Buffer>();
+  for (const { item, agent, claudeFile } of library) {
+    if (!agent) { markUnsendable(written.unsent, agentKey(item.name), 'agent', item.name, 'Its current version is no longer in Central Knot’s store.'); continue; }
+    await writeScratch(join(dir, pathOf(item.name)), claudeFile ?? agentText('claude-cli', agent, inRepo.get(`${baseId}:${pathOf(item.name)}`)?.toString('utf8')));
   }
+  const inLibrary = new Set(library.map(entry => entry.item.key));
+  for (const found of (await agentsView(context, tools)).servers) if (!inLibrary.has(found.key)) written.unmanaged.add(agentKey(found.name));
   return written;
 }
 
 
 /**
- * Items sync still records as Managed that weren't written: not found by discovery (a SKILL.md that won't parse, a folder away) or
- * with no copy that could be read. Never offered as removed: absence is only a deletion once sync has recorded one.
+ * Skills and MCP servers sync still records as Managed that weren't written: not found by discovery (a SKILL.md that won't parse,
+ * a folder away) or with no copy that could be read. Never offered as removed: absence is only a deletion once sync has recorded
+ * one. (Agents are written from Central Knot's library, which holds every one of them: writeAgents.)
  */
 async function holdUnseen(context: ShareContext, dir: string, known: Unsent): Promise<Unsent> {
   const unsent: Unsent = new Map();
@@ -422,11 +424,6 @@ async function holdUnseen(context: ShareContext, dir: string, known: Unsent): Pr
   }
   for (const [name, item] of Object.entries((await readMcpRecord(context.home)).items)) {
     if (item.state === 'shared' && !item.deleted && !known.has(serverKey(name)) && !(await written(`mcp/${toFile(name)}.json`))) markUnsendable(unsent, serverKey(name), 'mcp', name, UNSEEN);
-  }
-  // Agent files by key too: the file name is the source tool's spelling, which may differ in case from the record's.
-  const agentKeys = new Set((await readdir(join(dir, 'agents')).catch(() => [] as string[])).filter(file => file.endsWith('.md')).map(file => agentKey(fromFile(file.slice(0, -'.md'.length)))));
-  for (const item of (await agentsOn(context)).values()) {
-    if (!known.has(agentKey(item.name)) && !agentKeys.has(agentKey(item.name))) markUnsendable(unsent, agentKey(item.name), 'agent', item.name, UNSEEN);
   }
   return unsent;
 }
@@ -776,50 +773,41 @@ async function pullServer(context: ShareContext, dir: string, change: RepoChange
 }
 
 /**
- * Agents: the repo holds Claude Code's format. Its version is written into one harness here (Claude Code takes it as written,
- * with its own settings), and the pass then takes it in as the agent's current version, "pulled from the Git repo", and applies
- * it everywhere. Removed in the repo: deleted from Central Knot, with Restore in History.
+ * Agents: the repo's content becomes the agent's current version in Central Knot's library, "pulled from the Git repo", and a pass
+ * applies it wherever the agent is On here (agents.ts pull); being On or Off here doesn't change. Claude Code then takes the repo's
+ * file as written, its own settings included, where it has the agent. Removed in the repo: deleted from Central Knot, with
+ * Restore in History.
  */
 async function pullAgent(context: ShareContext, dir: string, change: RepoChange, item: SideItem | undefined, wrote: Wrote): Promise<DestinationResult[]> {
   const tools = await managedNow(context, await context.read());
   const key = keyOf(change.name);
   const only = new Set([key]);
   const ours = (result: DestinationResult) => keyOf(result.item) === key;
-  let facts = (await agentsView(context, tools)).servers.find(agent => agent.key === key);
+  const outcome = (done: { stopped?: string; results: DestinationResult[] }) => (done.stopped ? [notIn(change.name, done.stopped)] : done.results.filter(ours));
   if (!item) {
-    if (!facts?.managed) return [];
-    return passOutcome(await applyAgents(context, tools, [{ key, managed: true, off: facts.off, deleted: true }], { only }), change, ours, tools[0]);
+    const here = (await agentsView(context, tools)).library?.[key];
+    if (!here || here.deleted) return [];
+    return outcome(await applyAgents(context, tools, [{ key, managed: here.on, off: here.except, deleted: true }], { only }));
   }
-  const writer = agentTools.filter(tool => tools.includes(tool)).sort(byPreference).find(tool => !facts?.off.includes(tool));
-  if (!writer) return [notIn(change.name, 'No tool here takes agents.')];
   const text = await readFile(join(dir, item.paths[0]), 'utf8');
   const agent = fromMarkdown(change.name, text);
   if (!agent) return [notIn(change.name, item.problem ?? 'It could not be read.')];
-  // An agent a harness here has that isn't in Central Knot yet is taken in first, as it is, so what Pull replaces is a version.
-  if (facts && !facts.managed && Object.keys(facts.copies).length) {
-    const use = facts.copies[writer] ? writer : Object.keys(facts.copies)[0] as HarnessId;
-    const taken = await applyAgents(context, tools, [{ key, managed: true, off: facts.off, use, useHash: facts.copies[use]!.hash }], { only });
-    if (taken.stopped) return [notIn(change.name, taken.stopped)];
-    facts = (await agentsView(context, tools)).servers.find(entry => entry.key === key);
-  }
-  const existing = (await readAgents(context, writer)).entries.find(entry => entry.key === key);
-  try {
-    const next = writer === 'claude-cli' ? text : agentText(writer, agent, existing?.text);
-    const file = existing?.file ?? fileFor(context, writer, change.name);
-    if (existing?.text !== next) {
-      // What this harness had is a version first, so History can make it current again.
-      if (existing) await keepAgentCopy(context, existing);
-      await mkdir(dirname(file), { recursive: true });
-      await writeFileChecked(file, next, existing?.text);
-      // Only Claude Code's own settings changed: no version tells that apart, so this pull has its own entry, with its own Undo.
-      if (existing?.hash === agentHash(agent)) wrote({ tool: writer, before: existing.hash, after: existing.hash, settingsOnly: await keepSettingsFile(context, existing, next) });
-    }
-  } catch (error) {
-    return [writeProblem(change, writer, 'file', error)];
-  }
-  const done = await applyAgents(context, tools, [{ key, managed: true, off: facts?.off ?? [], use: writer, useHash: agentHash(agent) }], { only, pulled: only });
-  // By key: a tool may spell the agent's name with other capitals.
-  return passOutcome(done, change, ours, writer, async () => (await agentsView(context, tools)).servers.some(entry => entry.key === key && entry.managed));
+  const done = await applyAgents(context, tools, [], { only, pulled: new Map([[key, { agent, claudeFile: text }]]) });
+  if (done.stopped || !tools.includes('claude-cli')) return outcome(done);
+  return [...outcome(done), ...await pullClaudeSettings(context, change, agentHash(agent), text, wrote)];
+}
+
+/**
+ * Claude Code's own settings for an agent (model, tools) as the repo has them: where Claude Code has the agent at the version
+ * pulled and only those settings differ, the repo's file is written as it is. No version tells such a change apart, so it has
+ * its own History entry and Undo (undoSettingsChange).
+ */
+async function pullClaudeSettings(context: ShareContext, change: RepoChange, hash: string, text: string, wrote: Wrote): Promise<DestinationResult[]> {
+  const existing = (await readAgents(context, 'claude-cli')).entries.find(entry => entry.key === keyOf(change.name));
+  if (!existing || existing.hash !== hash || existing.text === text) return [];
+  try { await writeFileChecked(existing.file, text, existing.text); } catch (error) { return [writeProblem(change, 'claude-cli', 'file', error)]; }
+  wrote({ tool: 'claude-cli', before: existing.hash, after: existing.hash, settingsOnly: await keepSettingsFile(context, existing, text) });
+  return [];
 }
 
 /** Keeps a file whole in Central Knot's store under its own bytes, where nothing writes over it, and returns where. */

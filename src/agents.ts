@@ -15,7 +15,7 @@
 // formats, agentfiles.ts; an agent's row and the clicks its controls send, agentrow.ts; Convert to skill, agentskill.ts.
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-import { agentText, agentsFolder, fileFor, isAgentTool, keyOf, nameProblem, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
+import { agentHash, agentText, agentsFolder, fileFor, isAgentTool, keyOf, nameProblem, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
 import { agentShelf, fileTextFor, keepOwn, openLibrary, readVersion, saveLibrary, type AgentLibrary, type FolderSeen } from './agentstore.ts';
 import { agentAction } from './historyactions.ts';
 import { keepVersion, newItem, plan, setCurrent, wantedIn } from './library.ts';
@@ -188,13 +188,13 @@ const differ = (copies: AgentEntry[]) => new Set(copies.map(entry => entry.hash)
 // ---------- A pass ----------
 
 /** A click's History entry, begun when the click is recorded and finished with the harnesses its plan writes or removes (`fill`: which of them it names). */
-type ClickEntry = Pick<HistoryEvent, 'kind' | 'winner' | 'only' | 'version' | 'previous'> & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed' };
+type ClickEntry = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'version' | 'previous'> & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed' };
+/** What Pull brings for one agent (gitrepo.ts): its shared part, and the repo's whole file, which is Claude Code's own part. */
+export interface Pulled { agent: SharedAgent; claudeFile: string }
 interface Pass extends Look {
   shelf: Shelf<SharedAgent>;
   /** The record as last saved, to save it again only when it changed. */
   saved: string;
-  /** Agents whose new content Pull wrote into one harness: the version taken in says "pulled". */
-  pulled: Set<string>;
   /** The click on each agent this pass, as the History entry it becomes. */
   clicked: Map<string, ClickEntry>;
   results: DestinationResult[]; notices: SyncNotice[]; writes: number; made: string[];
@@ -205,15 +205,15 @@ export interface PassOptions {
   only?: Set<string>;
   /** An explicit Resume, for a record this app has no memory of. */
   resume?: boolean;
-  /** Agents whose new content Pull just wrote into one harness (gitrepo.ts). */
-  pulled?: Set<string>;
+  /** What Pull brings, by agent (gitrepo.ts): each becomes that agent's current version before the pass (pull). */
+  pulled?: Map<string, Pulled>;
   /** The settle window and its clock; tests pass their own. */
   settleMs?: number; now?: number;
 }
 
 /** One pass: the clicks in `changes`, then every agent in the library brought into line with its harnesses (library.ts plan). */
 export async function applyAgents(context: ShareContext, tools: HarnessId[], changes: Change[], options: PassOptions = {}): Promise<McpResult> {
-  const refused = await refusal(context, changes.length > 0, options.resume);
+  const refused = await refusal(context, changes.length > 0 || !!options.pulled?.size, options.resume);
   if (refused) return refused;
   const { library, problem } = await openLibrary(context, true);
   if (problem) return { stopped: problem, results: [], writes: 0 };
@@ -225,9 +225,9 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
   const settle = { clock: options.now ?? Date.now(), ms: options.settleMs ?? context.settleMs ?? 2000, settling: false };
   const look = await lookAt(context, managed, library, Object.values(library.items).filter(item => inScope(item.key)), settle);
   const pass: Pass = {
-    ...look, shelf: agentShelf(context, () => saveIfChanged(pass)), saved, pulled: options.pulled ?? new Set(),
-    clicked: new Map(), results: [], notices: [], writes: 0, made: [],
+    ...look, shelf: agentShelf(context, () => saveIfChanged(pass)), saved, clicked: new Map(), results: [], notices: [], writes: 0, made: [],
   };
+  for (const [key, brought] of options.pulled ?? []) await pull(pass, key, brought);
   for (const change of changes) await click(pass, change);
   for (const item of Object.values(library.items)) if (inScope(item.key)) await syncItem(pass, item);
   // Folder identities are kept only by a full pass: a click with Sync off skips other agents, so they must still see a reset.
@@ -244,14 +244,17 @@ async function saveIfChanged(pass: Pass) {
   pass.saved = text;
 }
 
-/** Why nothing may be written right now, if so: a preview-only home, another build's record, or one that needs Resume. */
-async function refusal(context: ShareContext, hasChanges: boolean, resume = false): Promise<McpResult | undefined> {
+/**
+ * Why nothing may be written right now, if so: a preview-only home, another build's record, or one that needs Resume. A home
+ * with no sync record yet gets one when something is asked of the pass (`asked`: a click, or what Pull brings); else it has nothing to do.
+ */
+async function refusal(context: ShareContext, asked: boolean, resume = false): Promise<McpResult | undefined> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   const gate = await syncGate(context);
   if (gate.state === 'stopped' || (gate.state === 'needs-resume' && !resume)) return { stopped: gate.reason, results: [], writes: 0 };
   let { record: syncRecord } = await readRecord(context.home);
-  if (!syncRecord && !hasChanges) return { results: [], writes: 0 };
+  if (!syncRecord && !asked) return { results: [], writes: 0 };
   if (!syncRecord) { syncRecord = newRecord(context); await saveRecord(context.home, syncRecord); }
   if (gate.state !== 'ready') await remember(context, syncRecord.generation);
   return undefined;
@@ -271,11 +274,10 @@ async function syncItem(pass: Pass, item: LibraryItem) {
   }
   if (made.takeIn) {
     const edit = fileIn(made.takeIn);
-    const from: Source = pass.pulled.has(item.key) ? { how: 'pulled' } : { how: 'edited', harness: edit.tool };
-    await setCurrent(pass.shelf, item, { hash: edit.hash, at: iso(edit.at), from }, edit.agent);
+    await setCurrent(pass.shelf, item, { hash: edit.hash, at: iso(edit.at), from: { how: 'edited', harness: edit.tool } }, edit.agent);
   }
   if (made.turnedOffBy) item.on = false;
-  for (const harness of made.remove) await keepOwn(pass.context, item, fileIn(harness));
+  for (const harness of made.remove) await keepOwn(pass.context, item, harness, fileIn(harness).text);
   for (const harness of made.current) item.applied[harness] = item.hash;
   for (const harness of made.forget) delete item.applied[harness];
   await saveIfChanged(pass);
@@ -344,7 +346,8 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, hashBefore: string, 
     const { fill, ...entry } = asked;
     const id = log({ ...entry, losers: entry.losers ?? (fill ? held(did[fill]) : []) });
     // A found agent taken in has no click that puts things back as they were, so it is not offered as the click's Undo.
-    if (!entry.winner) pass.made.push(id);
+    const tookIn = entry.kind === 'chosen' || entry.cause === 'found';
+    if (!tookIn) pass.made.push(id);
     pass.clicked.delete(item.key);
   }
   if (made.takeIn) {
@@ -356,7 +359,7 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, hashBefore: string, 
     notice(kind, made.takeIn, others.length ? others : did.written, id);
   }
   if (made.turnedOffBy) {
-    const id = log({ kind: 'off', winner: { tool: made.turnedOffBy, hash: item.hash }, losers: held(did.removed) });
+    const id = log({ kind: 'off', cause: 'deleted-by-hand', winner: { tool: made.turnedOffBy, hash: item.hash }, losers: held(did.removed) });
     notice('deleted', made.turnedOffBy, did.removed, id);
   }
   return events;
@@ -395,9 +398,9 @@ function turn(pass: Pass, item: LibraryItem, change: Change) {
   const was = { on: item.on, except: item.except };
   Object.assign(item, { on: change.managed, except: [...change.off] } satisfies Partial<LibraryItem>);
   const out = item.except.find(tool => !was.except.includes(tool)), back = was.except.find(tool => !item.except.includes(tool));
-  if (was.on !== item.on) pass.clicked.set(item.key, item.on ? { kind: 'on', fill: 'written' } : { kind: 'off', fill: 'removed' });
-  else if (out) pass.clicked.set(item.key, { kind: 'off', only: out, fill: 'removed' });
-  else if (back) pass.clicked.set(item.key, { kind: 'on', only: back, fill: 'written' });
+  if (was.on !== item.on) pass.clicked.set(item.key, item.on ? { kind: 'on', cause: 'switch', fill: 'written' } : { kind: 'off', cause: 'switch', fill: 'removed' });
+  else if (out) pass.clicked.set(item.key, { kind: 'off', cause: 'switch', only: out, fill: 'removed' });
+  else if (back) pass.clicked.set(item.key, { kind: 'on', cause: 'switch', only: back, fill: 'written' });
 }
 
 /**
@@ -421,11 +424,33 @@ async function takeIn(pass: Pass, change: Change, tombstone: LibraryItem | undef
   Object.assign(item, { on: true, except: [...change.off], name: source.name } satisfies Partial<LibraryItem>);
   delete item.deleted;
   pass.library.items[item.key] = item;
-  const from: Source = pass.pulled.has(item.key) ? { how: 'pulled' } : { how: differs ? 'chosen' : 'found', harness: source.tool };
+  const from: Source = { how: differs ? 'chosen' : 'found', harness: source.tool };
   await setCurrent(pass.shelf, item, { hash: source.hash, at: iso(source.at), from }, source.agent);
   const winner = { tool: source.tool, hash: source.hash };
   const gaveWay = found.filter(entry => entry.hash !== source.hash).map(entry => ({ tool: entry.tool, hash: entry.hash }));
-  pass.clicked.set(item.key, differs ? { kind: 'chosen', winner, losers: gaveWay } : { kind: 'on', winner, fill: 'written' });
+  pass.clicked.set(item.key, differs ? { kind: 'chosen', winner, losers: gaveWay } : { kind: 'on', cause: 'found', winner, fill: 'written' });
+}
+
+/**
+ * Pull (gitrepo.ts): the repo's content becomes the agent's current version, "pulled from the Git repo", and the pass applies
+ * it wherever the agent is On. An agent in the library keeps its On or Off. One new here (never in the library, deleted from
+ * it, or only found in a harness) comes in On, each copy found here kept as a version first. The repo's file is Claude
+ * Code's own part, so a Claude Code with no file gets it as the repo has it.
+ */
+async function pull(pass: Pass, key: string, { agent, claudeFile }: Pulled) {
+  const item = pass.library.items[key] ?? newItem('agent', key, agent.name), known = !!item.hash && !item.deleted;
+  pass.library.items[key] = item;
+  if (!known) {
+    for (const copy of foundCopies(pass, key, [])) await keepVersion(pass.shelf, item, { hash: copy.hash, at: iso(copy.at), from: { how: 'found', harness: copy.tool } }, copy.agent);
+    Object.assign(item, { on: true, except: [] } satisfies Partial<LibraryItem>);
+    delete item.deleted;
+  }
+  await keepOwn(pass.context, item, 'claude-cli', claudeFile);
+  const hash = agentHash(agent), previous = item.hash;
+  if (hash !== item.hash) await setCurrent(pass.shelf, item, { hash, at: now(), from: { how: 'pulled' } }, agent);
+  if (!known) pass.clicked.set(key, { kind: 'on', cause: 'pulled', fill: 'written' });
+  else if (hash !== previous) pass.clicked.set(key, { kind: 'edit', previous, fill: 'written' });
+  await saveIfChanged(pass);
 }
 
 /** Makes an earlier version current: a new version (library.ts setCurrent), which the pass then applies like any other. */
@@ -461,19 +486,6 @@ export async function restoreAgent(context: ShareContext, tools: HarnessId[], ev
 
 // ---------- For the callers around a pass ----------
 
-/**
- * Keeps one harness's file as a version of its agent, and as that harness's own part, before something other than a pass
- * writes over it (Pull, gitrepo.ts). An agent that is not in the library has nothing to be kept under.
- */
-export async function keepAgentCopy(context: ShareContext, entry: AgentEntry) {
-  const { library } = await openLibrary(context, true);
-  const item = library.items[entry.key];
-  if (!item) return;
-  await keepOwn(context, item, entry);
-  const shelf = agentShelf(context, () => saveLibrary(context.home, library));
-  await keepVersion(shelf, item, { hash: entry.hash, at: iso(entry.at), from: { how: 'was-in', harness: entry.tool } }, entry.agent);
-}
-
 /** One version's content, for the Agents page to show: undefined when the store no longer has it. */
 export const agentVersion = (context: ShareContext, key: string, hash: string) => readVersion(context, key, hash);
 
@@ -490,10 +502,26 @@ export async function forgetAgentCopies(context: ShareContext, managed: readonly
   await saveLibrary(context.home, library);
 }
 
-/** The agents that are On in the library, by key (the Git repo and plugin parts ask which agents Central Knot keeps in step). */
+/** The agents that are On in the library, by key (plugin parts ask which agents Central Knot keeps in step: parts.ts). */
 export async function agentsOn(context: ShareContext): Promise<Map<string, LibraryItem>> {
   const { library } = await openLibrary(context);
   return new Map(Object.values(library.items).filter(item => item.on && !item.deleted).map(item => [item.key, item]));
+}
+
+/**
+ * What the Git repo holds for each agent in the library, On or Off (gitrepo.ts Push): its current version (none when the store
+ * no longer has it) and, where Central Knot has one, Claude Code's file for it: Claude Code's own file when it holds the current
+ * version, else the file the library kept for Claude Code with that version written into it.
+ */
+export async function agentsForRepo(context: ShareContext, tools: HarnessId[]): Promise<{ item: LibraryItem; agent?: SharedAgent; claudeFile?: string }[]> {
+  const { library } = await openLibrary(context);
+  const claude = tools.includes('claude-cli') ? (await readAgents(context, 'claude-cli')).entries : [];
+  return Promise.all(Object.values(library.items).filter(item => !item.deleted).map(async item => {
+    const agent = await readVersion(context, item.key, item.hash);
+    const here = claude.find(entry => entry.key === item.key && entry.hash === item.hash);
+    const claudeFile = here?.text ?? (agent && item.own['claude-cli'] ? await fileTextFor(context, item, 'claude-cli', agent) : undefined);
+    return { item, agent, claudeFile };
+  }));
 }
 
 // ---------- View ----------

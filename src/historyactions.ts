@@ -7,12 +7,13 @@
 // library holds it now (library.ts LibraryItem). So an action is offered exactly while it would change something, and it is
 // always safe to click: nothing has to be worked out about what happened since the entry was made.
 //
-//   entry (HistoryEvent.kind)                action                 offered while
+//   entry (HistoryEvent.kind, `cause`)       action                 offered while
 //   off: the switch, or a copy deleted       Turn on                the agent is Off
 //     by hand (`winner`: where)
 //   off in one harness (`only`)              Turn on in <harness>   the agent is On and kept out of that harness
-//   on: the switch, or a found agent         Turn off               the agent is On
-//     taken in (`winner`: where found)
+//   on: the switch, a found agent taken      Turn off               the agent is On
+//     in (`winner`: where found), or an
+//     agent Pull brought
 //   on in one harness (`only`)               Turn off in <harness>  the agent is On and in that harness
 //   deleted                                  Restore                the agent is deleted
 //   a content change: edit, conflict,        Undo                   the version from before it (`previous`) is not the
@@ -22,7 +23,8 @@
 //
 // One entry is not here: a Pull that changed only Claude Code's own settings of an agent (`settingsFile`) keeps its own Undo
 // (gitrepo.ts undoSettingsChange), since no version tells such a change apart.
-// To add an entry or an action: its kind in types.ts HistoryEvent, its sentence in agentSentence, its row in agentAction.
+// To add an entry or an action: its kind (or its `cause`) in types.ts HistoryEvent, its sentence in agentSentence, its row in
+// agentAction, the entry agents.ts logItem makes for it, and its case in historypage.ts describe.
 import type { IconName } from './icons.ts';
 import { sourceWords, type LibraryItem } from './library.ts';
 import { dayAndTime } from './model.ts';
@@ -47,13 +49,13 @@ export function agentSentence(event: HistoryEvent, homeTools: string[], item?: L
   switch (event.kind) {
     case 'on':
       if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}: its file there is back.` };
-      if (!event.winner) return { glyph: 'circle-check', text: `Turned on${also(': put in')}.` };
-      return pulled ? { glyph: 'git-branch', text: `Pulled from the Git repo into ${from} and taken into Central Knot${also('; put in')}.` }
-        : { glyph: 'plus', text: `Found in ${from} and taken into Central Knot${also('; put in')}.` };
+      if (event.cause === 'pulled') return { glyph: 'git-branch', text: `Pulled from the Git repo into Central Knot${also('; put in')}.` };
+      if (event.cause === 'found') return { glyph: 'plus', text: `Found in ${from} and taken into Central Knot${also('; put in')}.` };
+      return { glyph: 'circle-check', text: `Turned on${also(': put in')}.` };
     case 'off':
       if (event.only) return { glyph: 'circle-off', text: `Kept out of ${where}: its copy there was removed. ${keeps}` };
-      if (!event.winner) return { glyph: 'circle-off', text: `Turned off${also(': removed from')}. ${keeps}` };
-      return { glyph: 'trash-2', text: `Its copy was deleted in ${from}, so it was turned off${also(' and removed from')}. ${keeps}` };
+      if (event.cause === 'deleted-by-hand') return { glyph: 'trash-2', text: `Its copy was deleted in ${from}, so it was turned off${also(' and removed from')}. ${keeps}` };
+      return { glyph: 'circle-off', text: `Turned off${also(': removed from')}. ${keeps}` };
     case 'current': {
       // The version as it was first kept says where the content came from; the entry that made it current again doesn't.
       const made = item?.versions.findLast(version => version.hash === event.version);
@@ -69,10 +71,10 @@ export function agentSentence(event: HistoryEvent, homeTools: string[], item?: L
     case 'restored':
       // Likewise: an Undo or Restore from before the library names a tool or an earlier version.
       return event.winner || event.previous ? undefined : { glyph: 'undo-2', text: `Restored to Central Knot${also(' and put back in')}.` };
-    case 'edit': {
-      const how = pulled ? `Pulled from the Git repo into ${from}` : `Edited in ${from}`;
-      return { glyph: pulled ? 'git-branch' : 'pencil-line', text: `${how}; that became the current version${tools ? `, in ${tools} too` : ''}.` };
-    }
+    case 'edit':
+      // Pull's own entry names no harness: the repo's content became the current version (an edit taken in names where).
+      if (pulled && !event.winner) return { glyph: 'git-branch', text: `Pulled from the Git repo; that became the current version${tools ? `, in ${tools}` : ''}.` };
+      return { glyph: 'pencil-line', text: `Edited in ${from}; that became the current version${tools ? `, in ${tools} too` : ''}.` };
     case 'conflict': {
       const gaveWay = event.losers.filter(loser => loser.hash !== event.previous && loser.hash !== event.winner?.hash);
       const others = andList([...new Set(gaveWay.map(loser => toolName(loser.tool)))]);

@@ -28,15 +28,12 @@ test('Push puts the Managed set in the repo’s layout; another computer pulls i
     assert.deepEqual(git(box.remote, 'ls-tree', '-r', '--name-only', 'main').split('\n'), ['agents/planner.md', 'mcp/docs.json', 'skills/review/SKILL.md', 'skills/review/notes.log']);
     assert.deepEqual(JSON.parse(git(box.remote, 'show', 'main:mcp/docs.json')), { type: 'stdio', command: 'docs-server', args: ['--port', '7'], env: { TOKEN: 'abc' } });
     assert.match(git(box.remote, 'show', 'main:agents/planner.md'), /model: opus/, 'Claude Code’s own agent file goes as written');
-    // A Managed agent no tool can read just now is never offered as removed (Push would delete it from the repo).
+    // The repo is sent each agent's current version from Central Knot's library, so copies no tool can read just now change nothing.
     const planners = [join(first.home, '.copilot/agents/planner.agent.md'), join(first.home, '.claude/agents/planner.md')];
     const kept = await Promise.all(planners.map(file => readFile(file, 'utf8')));
     for (const file of planners) await writeFile(file, 'half saved');
-    assert.deepEqual(live(await repoView(first)).outgoing.map(row => [row.name, !!row.held]), [['planner', true]]);
-    // With one copy readable again, that copy stands for it, and nothing is waiting to go.
-    await writeFile(planners[1], kept[1]);
     assert.deepEqual(live(await repoView(first)).outgoing, []);
-    await writeFile(planners[0], kept[0]);
+    for (const [index, file] of planners.entries()) await writeFile(file, kept[index]);
 
     const second = await box.home('second');
     view = live((await connectRepo(second, box.remote, '')).view);
@@ -63,7 +60,7 @@ test('Push puts the Managed set in the repo’s layout; another computer pulls i
     assert.equal((await restoreFromHistory(second, review.id)).stopped, undefined);
     assert.equal((await restoreMcp(second, tools, (await addedBy('mcp:docs')).id)).stopped, undefined);
     const takenIn = await addedBy('agent:planner', 'on');
-    assert.deepEqual([takenIn.via, takenIn.winner?.tool], ['repo', 'claude-cli']);
+    assert.deepEqual([takenIn.via, takenIn.cause], ['repo', 'pulled']);
     assert.equal((await restoreAgent(second, tools, takenIn.id)).stopped, undefined);
     assert.deepEqual([(await manageView(second)).skills, (await mcpView(second, tools)).servers].map(list => list.length), [0, 0]);
     assert.deepEqual((await agentsView(second, tools)).servers.map(agent => [agent.key, agent.managed, Object.keys(agent.copies)]), [['planner', false, []]]);

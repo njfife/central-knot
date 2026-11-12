@@ -426,14 +426,18 @@ export interface HistoryEvent {
    * 'took-over': copies outside Central Knot were taken over (`tookOver`); Undo puts the links and the shared copy back.
    * 'written': Write to Claude Code replaced an MCP entry there that History didn't hold (`previous`); Undo is Undo write.
    * Agents (historyactions.ts has each one's action):
-   * 'on' / 'off': it was turned On or Off, in every harness or (`only`) in one; `losers` are the harnesses written or removed.
-   *   An 'off' with a `winner`: its copy in that harness was deleted by hand, which turned it Off. An 'on' with a `winner`: it
-   *   was found in that harness and taken into Central Knot.
+   * 'on' / 'off': it was turned On or Off (`cause` says why), in every harness or (`only`) in one; `losers` are the harnesses
+   *   written or removed.
    * 'current': an earlier version (`version`) was made current; `previous` is the one before.
    * 'deleted': it was deleted from Central Knot. 'chosen': it was taken in with the `winner`'s copy, where the found copies differed. */
   kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed' | 'profile' | 'took-over' | 'written' | 'on' | 'off' | 'current';
   /** 'on' / 'off': the one harness it was turned on or off in. */
   only?: HarnessId;
+  /**
+   * Agents, 'on' / 'off': what made it happen. `switch`: the person's switch. `found`: a found agent taken in (`winner`: where it
+   * was found). `pulled`: Pull brought an agent new here. `deleted-by-hand`: its copy was deleted by hand (`winner`: where).
+   */
+  cause?: 'switch' | 'found' | 'pulled' | 'deleted-by-hand';
   /** 'current': the version made current. */
   version?: string;
   /** 'took-over': what was replaced, removed and placed, so Undo can put it back exactly. */
