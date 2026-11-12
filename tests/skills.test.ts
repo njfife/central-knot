@@ -8,7 +8,7 @@ import { chmod, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 
 import { join } from 'node:path';
 import { readHistory } from '../src/history.ts';
 import { librarySentence } from '../src/historyactions.ts';
-import { canTakeIn, harnessIs, libraryWords, placeOf, sentences, statusLine } from '../src/libraryrow.ts';
+import { canTakeIn, harnessIs, isPartial, libraryWords, placeOf, sentences, statusLine, switchLabel } from '../src/libraryrow.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
 import { clearSwitch, skillChange, skillsView, takeOver } from '../src/skills.ts';
 import { pruneDeleted } from '../src/skillstore.ts';
@@ -207,7 +207,7 @@ test('A found skill whose only copy can’t be copied as it is (a link inside) i
     await mkdir(join(box.home, '.agents/skills/notes'), { recursive: true });
     await writeFile(join(box.home, '.agents/skills/notes/SKILL.md'), skillText());
     const shared = await seen(box);
-    assert.deepEqual([canTakeIn(shared.row), statusLine(shared.row, shared.item, tools)], [true, 'Not in Central Knot · Copilot CLI and Codex have it another way. Turn it on to take it in and put it in every tool.']);
+    assert.deepEqual([canTakeIn(shared.row), statusLine(shared.row, shared.item, tools)], [true, 'Not in Central Knot · Copilot CLI and Codex have it another way. Turn it on to take it in and put it in Claude Code.']);
   } finally { await box.cleanup(); }
 });
 
@@ -480,7 +480,10 @@ test('A switch set in a tool is left exactly as it is: the folder stays and the 
     assert.deepEqual(facts.switched, { 'codex-cli': 'switched off in Codex’s own settings' });
     assert.match(say.harnessLine({ ...row, switched: facts.switched }, item, 'codex-cli', 'Codex'), /It is switched off in Codex’s own settings: Codex doesn’t load it/);
     assert.equal(say.placeTag({ ...row, switched: facts.switched }, item, tools)?.text, 'switched off in Codex');
-    assert.equal(statusLine({ ...row, switched: facts.switched }, item, tools), 'On in all 3 tools · switched off in Codex');
+    // Never on and off at once: Codex is not counted as on, and the switch is drawn partial with what it says.
+    assert.equal(statusLine({ ...row, switched: facts.switched }, item, tools), 'On in Claude Code and Copilot CLI · switched off in Codex');
+    assert.equal(isPartial(item, tools, { ...row, switched: facts.switched }), true);
+    assert.match(switchLabel({ ...row, switched: facts.switched }, item, tools), /^notes: on in 2 of 3 tools\./);
     // Switched off in every tool: never plain on.
     for (const tool of ['claude-cli', 'copilot-cli'] as Tool[]) await setDisabled(box.context, tool, { ...target, skillFile: join(folderOf(box, tool), 'SKILL.md') }, true);
     const everyTool = Object.fromEntries(tools.map(tool => [tool, 'off']));
@@ -489,6 +492,13 @@ test('A switch set in a tool is left exactly as it is: the folder stays and the 
     assert.equal(cleared.stopped, undefined);
     assert.equal(isDisabled(box.context, await readSwitchFile(box.context, 'codex-cli'), target), false);
     assert.deepEqual((await historyOf(box)).at(-1)?.switched, [{ tool: 'codex-cli', disabled: false, target }]);
+    // Its History entry has a real Undo: Codex's own switch has it off again, as it was.
+    const undoIt = (await historyActions(box)).find(action => action.event.kind === 'switched' && action.label === 'Undo');
+    assert.ok(undoIt, 'History offers Undo on Clear the switch');
+    await undoIt!.run();
+    assert.equal(isDisabled(box.context, await readSwitchFile(box.context, 'codex-cli'), target), true);
+    assert.equal(librarySentence((await historyOf(box)).at(-1)!, libraryWords.skills, tools)?.text, 'Undone: Codex’s own switch has it off again.');
+    assert.equal((await historyActions(box)).some(action => action.event.kind === 'switched'), false, 'and that entry is done');
   } finally { await box.cleanup(); }
 });
 
@@ -568,7 +578,7 @@ test('A found copy another tool wouldn’t load is no choice for that tool: the 
     const { fact } = await seen(box);
     assert.deepEqual(fact!.choiceBlocks!['codex-cli'], [], 'Claude Code loads Codex’s copy');
     assert.deepEqual(fact!.choiceBlocks!['claude-cli']!.map(block => block.tool), ['codex-cli']);
-    assert.match(fact!.choiceBlocks!['claude-cli']![0]!.reason, /^Codex will not load it/);
+    assert.match(fact!.choiceBlocks!['claude-cli']![0]!.reason, /^Codex will not load a skill with no YAML frontmatter\./);
   } finally { await box.cleanup(); }
 });
 
@@ -620,7 +630,7 @@ test('A tool that won’t load a skill of that shape can’t be given it, and it
     assert.deepEqual([await bytes(folderOf(box, 'copilot-cli')), await bytes(folderOf(box, 'codex-cli'))], [undefined, undefined]);
     const { item, row, fact } = await seen(box);
     assert.match(fact!.cannot['copilot-cli'] ?? '', /Copilot CLI will not load a skill with no YAML frontmatter/);
-    assert.match(fact!.cannot['codex-cli'] ?? '', /^Codex will not load it/);
+    assert.match(fact!.cannot['codex-cli'] ?? '', /^Codex will not load a skill with no YAML frontmatter\./);
     assert.equal(say.placeTag({ ...row, cannot: fact!.cannot }, item, tools)?.text, 'Claude Code only');
   } finally { await box.cleanup(); }
 });
@@ -639,9 +649,33 @@ test('An edit Codex won’t load is never written over Codex’s copy, which sta
     await pass(box);
     const { fact, item, row } = await seen(box);
     assert.equal(harnessIs(row, item, 'codex-cli'), 'cannot');
-    assert.match(fact!.cannot['codex-cli'] ?? '', /^Codex will not load it/);
+    assert.match(fact!.cannot['codex-cli'] ?? '', /^Codex will not load it: /);
     assert.equal(await readFile(join(folderOf(box, 'copilot-cli'), 'SKILL.md'), 'utf8'), '---\nname: notes\n---\n\nTake notes.\n', 'the others get the edit');
     assert.equal((await pass(box)).writes, 0, 'and later passes write nothing');
+  } finally { await box.cleanup(); }
+});
+
+test('A found row says “every tool” only when it is true: the tools it will go to, those that can’t take it, those that have it another way, and what to do when it can’t be taken in yet', async () => {
+  const box = await sandbox();
+  try {
+    await put(box, 'claude-cli', { 'SKILL.md': 'Just text.\n' });
+    const plain = await seen(box);
+    assert.equal(statusLine(plain.row, plain.item, tools), 'Not in Central Knot · in Claude Code. Turn it on to take it in; Copilot CLI and Codex can’t take it (see below).');
+    assert.match(switchLabel(plain.row, plain.item, tools), /Click to take it in; Copilot CLI and Codex can’t take it\.$/);
+    await rm(folderOf(box, 'claude-cli'), { recursive: true });
+    const shared = join(box.home, '.agents/skills/notes');
+    await mkdir(shared, { recursive: true });
+    await writeFile(join(shared, 'SKILL.md'), skillText());
+    const found = await seen(box);
+    assert.equal(statusLine(found.row, found.item, tools), 'Not in Central Knot · Copilot CLI and Codex have it another way. Turn it on to take it in and put it in Claude Code.');
+    // Taken in, its result names where it is on and who has it another way, and those tools' lines have no switch of Central Knot's.
+    assert.equal(say.said.takenIn('notes', ['claude-cli'], tools, undefined, ['copilot-cli', 'codex-cli']), 'notes is in Central Knot now, and on in Claude Code; Copilot CLI and Codex have it another way.');
+    await rm(shared, { recursive: true });
+    await put(box, 'claude-cli');
+    await symlink('SKILL.md', join(folderOf(box, 'claude-cli'), 'alias'));
+    const linked = await seen(box);
+    assert.equal(say.placeTag(linked.row, linked.item, tools)?.text, 'can’t be taken in yet');
+    assert.match(linked.fact!.unseen?.['claude-cli'] ?? '', /Replace the link with the file it leads to, then Refresh\.$/);
   } finally { await box.cleanup(); }
 });
 
@@ -652,7 +686,7 @@ test('A partial skill (kept out of a tool by its switch in the opened row) says 
     await turnOn(box);
     await inTool(box, 'codex-cli', true);
     const { item, row } = await seen(box);
-    assert.equal(say.placeTag(row, item, tools)?.text, 'in 2 of 3 tools · not in Codex');
+    assert.equal(say.placeTag(row, item, tools)?.text, 'in 2 of 3 tools · kept out of Codex');
     // Off takes it out of every tool; On puts it back where it was on, Codex still kept out.
     await turnOff(box);
     assert.deepEqual(Object.values(await everywhere(box)).filter(Boolean), []);

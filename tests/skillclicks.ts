@@ -13,7 +13,7 @@ import { applySkills, restoreSkill, skillsView } from '../src/skills.ts';
 import type { Change, HarnessId, LibraryFacts, PassResult } from '../src/types.ts';
 
 /** The tools of a test home, and each one's own skills folder. Which of them Central Knot manages is the home's own `tools`. */
-export const roots = { 'claude-cli': '.claude/skills', 'copilot-cli': '.copilot/skills', 'codex-cli': '.codex/skills', 'opencode-cli': '.config/opencode/skills' } as const;
+export const roots = { 'claude-cli': '.claude/skills', 'copilot-cli': '.copilot/skills', 'codex-cli': '.codex/skills', 'opencode-cli': '.config/opencode/skills', 'pi-cli': '.pi/agent/skills' } as const;
 export type Tool = keyof typeof roots;
 export const tools: Tool[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
 

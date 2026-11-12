@@ -58,7 +58,7 @@
 // `anotherWay` (the table's last row), and the harness is decided as one the item isn't wanted in (wantedHere).
 //
 // Other marks a harness's line can carry are a kind's own, worked out at each look from what it read and never stored, and
-// they change nothing a pass does: for skills, a tool's own switch that turns the skill off there (skills.ts switchMarks).
+// they change nothing a pass does: for skills, a tool's own switch that turns the skill off there (skills.ts toolFacts, `loads`).
 //
 // A HARNESS MANAGED AGAIN (left out by the tool choice, or uninstalled, then back): the library wins there.
 //

@@ -13,7 +13,11 @@ export interface HarnessDefinition {
   /** The tool's folder inside the one `configEnv` names (OpenCode's `opencode` inside XDG_CONFIG_HOME); without it, `configEnv` names the folder itself. */
   configUnder?: string;
   defaultConfig: string;
-  /** Claude Code keeps this skills folder for itself. */
+  /**
+   * Skill folder names this tool keeps for itself (Claude Code's `synced`): never read as a skill and never given one. Read in
+   * three places: discovery.ts (what a tool has), skillfiles.ts readSkillsFolder (what a pass reads) and skills.ts cannotTake
+   * (why a skill of that name can't go there). Tests: skills.test.ts (a name a tool keeps for itself), discovery.test.ts.
+   */
   reservedSkills: string[];
   /** Observed: Claude Code 2.1.309 lists dot-folders as skills; Copilot CLI 1.0.107 and Codex 0.142.3 skip them. */
   loadsDotFolders: boolean;

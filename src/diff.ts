@@ -42,3 +42,53 @@ export function wordDiff(before: string, after: string): Line[] {
   const tokens = (text: string) => text.split(/(\s+)/).filter(Boolean).map(token => token.replace(/\n/g, '\u0000')).join('\n');
   return lineDiff(tokens(before), tokens(after)).map(part => ({ ...part, text: part.text.replace(/\u0000/g, '\n') }));
 }
+
+/**
+ * What Read shows of a version against the current one (versionlist.ts), line by line: where a line changed a little, its
+ * own words tinted (added) and the current one's it lacks struck (removed), neighbouring marks as one; where a line changed
+ * mostly (fewer than half its words kept), the current one's line whole, struck, then this one's whole, tinted.
+ */
+export function readAgainst(current: string, text: string): Line[] {
+  const out: Line[] = [];
+  const push = (kind: Line['kind'], piece: string) => { const last = out.at(-1); if (last?.kind === kind) last.text += piece; else if (piece) out.push({ kind, text: piece }); };
+  const lines = lineDiff(current, text);
+  for (let index = 0; index < lines.length;) {
+    if (lines[index].kind === 'same') { push('same', `${lines[index++].text}\n`); continue; }
+    const gone: string[] = [], came: string[] = [];
+    for (; index < lines.length && lines[index].kind !== 'same'; index++) (lines[index].kind === 'removed' ? gone : came).push(lines[index].text);
+    const before = gone.join('\n'), after = came.join('\n');
+    if (!gone.length || !came.length || mostlyChanged(before, after)) {
+      if (gone.length) push('removed', `${before}\n`);
+      if (came.length) push('added', `${after}\n`);
+    } else {
+      for (const run of wordRuns(before, after)) push(run.kind, run.text);
+      push('same', '\n');
+    }
+  }
+  // As this version ends: with a line break, or without one.
+  const last = out.at(-1);
+  if (last && !text.endsWith('\n') && last.text.endsWith('\n')) last.text = last.text.slice(0, -1);
+  return out.filter(run => run.text);
+}
+
+/** Whether fewer than half the words of the longer of two lines are kept in the other. */
+function mostlyChanged(before: string, after: string) {
+  const words = wordDiff(before, after).filter(part => part.text.trim()), count = (kind: Line['kind']) => words.filter(part => part.kind === kind).length;
+  const kept = count('same');
+  return kept * 2 < Math.max(kept + count('removed'), kept + count('added'));
+}
+
+/** A line's word marks: a space joins the mark on both its sides, any other space reads plain once; a line break only the current one has is left out. */
+function wordRuns(before: string, after: string): Line[] {
+  const parts = wordDiff(before, after).filter(part => !(part.kind === 'removed' && part.text.includes('\n') && !part.text.trim()));
+  const runs: Line[] = [];
+  parts.forEach((part, index) => {
+    const previous = parts[index - 1]?.kind, next = parts[index + 1]?.kind;
+    const kind = part.text.trim() ? part.kind : previous === next && previous !== 'same' ? previous! : 'same';
+    if (runs.at(-1)?.kind === 'removed' && kind === 'added') runs.push({ kind: 'same', text: ' ' });
+    if (runs.at(-1)?.kind === kind) runs.at(-1)!.text += part.text;
+    else runs.push({ kind, text: kind === 'same' && !part.text.trim() && part.kind === 'removed' ? ' ' : part.text });
+  });
+  return runs;
+}
+

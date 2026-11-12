@@ -11,7 +11,7 @@ Read this first. Each area says what it is for, its files (one entry each: what 
 ## The library: skills and agents on it
 An item Central Knot holds with its versions, On or Off, applied to every managed tool it is not kept out of.
 - `library.ts` the model and its one rule, pure; `carryOut`, the order one item's plan is carried out in · `librarypass.ts` the pass on real files, the same for every kind; `Kind`, what a kind implements
-- `skills.ts` skills' `Kind` (`skillKind`), the ways a tool has a skill that aren't Central Knot's (`anotherWay`), their clicks (`applySkills`), page view (`skillsView`), `clearSwitch` and `takeOver` · `skillfiles.ts` a skill's folder in a tool, read, written and removed, checked
+- `skills.ts` skills' `Kind` (`skillKind`), the ways a tool has a skill that aren't Central Knot's (`anotherWay`), their clicks (`applySkills`), page view (`skillsView`; a row's sentences: `libraryrow.ts sentences`), `clearSwitch` and `takeOver` · `skillfiles.ts` a skill's folder in a tool, read, written and removed, checked
 - `skillstore.ts` where skills are kept in `.central-knot/` (skills.json, and versions under items/skills/) · `skillmigrate.ts` the skills sync.json held before the library, made items once
 - `agents.ts` agents' `Kind` (`agentKind`), their clicks (`applyAgents`) and page view (`agentsView`) · `agentfiles.ts` each tool's agent file, read and written
 - `agentstore.ts` where agents are kept in `.central-knot/` · `agentmigrate.ts` the record from before the library, made items once · `agentskill.ts` Convert to a Pi skill (a copy, not sync)
@@ -122,7 +122,8 @@ How each is run: `AGENTS.md` ("Checking a change") and README ("For developers")
 - **A kind of item onto the library:** every place it is wired in is the recipe in `librarypass.ts`'s header.
 - **A tool:** its definition in `harnesses.ts`, its id in `types.ts HarnessId`, its name in `words.ts toolNames`, and each kind's reader and writer for it (`agentfiles.ts`, `mcp.ts`, `skillswitch.ts`, `discovery.ts`).
 - **A field on a click (`types.ts Change`):** `main.ts changes` must copy it too, or the packaged app drops it while the unit tests pass.
-- **A History entry or action:** for agents, the recipe at the end of `historyactions.ts`'s header; for the other kinds, a case in `historypage.ts describe`.
+- **A History entry or action:** for skills and agents (the library's kinds), the recipe at the end of `historyactions.ts`'s header; for MCP servers, profiles and instructions, a case in `historypage.ts describe`.
+- **A skill folder name a tool keeps for itself:** `harnesses.ts HarnessDefinition.reservedSkills` (that tool's definition); its three readers are `discovery.ts`, `skillfiles.ts readSkillsFolder` and `skills.ts cannotTake`; tests in `tests/skills.test.ts` (a name a tool keeps for itself) and `tests/discovery.test.ts`.
 - **A call from the page to main:** `types.ts DesktopApi`, `preload.ts`, and its handler in `main.ts`.
 - **A page:** `app.ts pages` and `renderer.ts renderPage`. **A Settings row:** a section or row in `settingspage.ts settingsPage`; its value saved by `main.ts saveAppSettings` (`main.ts AppSettings`) and sent to the page as `types.ts AppPreferences`.
 - **A file added, renamed or removed:** its entry here; `tests/map.test.ts` names what to change.

@@ -7,7 +7,7 @@
 //   (OpenCode reads Claude Code's) while the skill is really there, or a plugin;
 // - why a tool can't be given a skill (cannotTake): a name it reserves, a shape it won't load (share.ts targetFor), or a
 //   skill converted from one of its agents;
-// - a tool's own switch for a skill (switchMarks): read at each look and never written by a pass. A switch set in a tool,
+// - a tool's own switch for a skill (toolFacts, `loads`): read at each look and never written by a pass. A switch set in a tool,
 //   by a person, a profile or Central Knot before the library, is left as it is and shown as a mark on that tool's line;
 //   clearSwitch is the one action that writes it, and takeOver the one that makes a copy outside Central Knot's its own.
 // Around the pass: applySkills and restoreSkill run it for skills (the page's clicks through librarypass.ts itemClick);
@@ -18,7 +18,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFile, unlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { appendHistory, readHistory } from './history.ts';
+import { appendHistory, readHistory, replaceHistory } from './history.ts';
 import { libraryAction, libraryEntry } from './historyactions.ts';
 import { listed, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
@@ -284,8 +284,32 @@ export async function applySkills(context: ShareContext, tools: HarnessId[], cha
   }
 }
 
-/** A History entry's action on a skill (librarypass.ts restore; historyactions.ts says which click it is). */
-export const restoreSkill = (context: ShareContext, tools: HarnessId[], eventId: string, version?: string) => restore(skillKind, context, tools, eventId, version);
+/**
+ * A History entry's action on a skill (librarypass.ts restore; historyactions.ts says which click it is). Clear the switch's
+ * Undo is no click on the item: it sets that tool's own switch again (switchBack).
+ */
+export async function restoreSkill(context: ShareContext, tools: HarnessId[], eventId: string, version?: string): Promise<PassResult> {
+  const past = (await readHistory(context)).find(event => event.id === eventId);
+  if (past?.kind === 'switched' && past.cause !== 'switch' && !past.undoneBy && past.switched?.every(entry => !entry.disabled)) return switchBack(context, past);
+  return restore(skillKind, context, tools, eventId, version);
+}
+
+/** Clear the switch's Undo: each tool's own switch has the skill off again, as before, with an entry of its own. */
+async function switchBack(context: ShareContext, past: HistoryEvent): Promise<PassResult> {
+  const access = await writeAccess(context);
+  if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
+  const entries = past.switched!.filter(entry => entry.target);
+  for (const { tool, target } of entries) {
+    try { await setDisabled(context, tool, target!, true); }
+    catch (error) { return { stopped: `Could not set ${toolName(tool)}’s switch: ${switchFailure(error)}`, results: [], writes: 0 }; }
+  }
+  const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key: past.key, item: past.item, kind: 'switched', cause: 'switch', switched: entries.map(entry => ({ ...entry, disabled: true })), losers: [], orderProved: true };
+  const history = await readHistory(context);
+  for (const entry of history) if (entry.id === past.id) entry.undoneBy = event.id;
+  await replaceHistory(context, [...history, event]);
+  const results = entries.map(({ tool }): DestinationResult => ({ item: past.item, harness: tool, outcome: 'switched', disabled: true, message: `${toolName(tool)}’s own switch has it off again.` }));
+  return { results, writes: entries.length, made: [event.id] };
+}
 
 /**
  * The tool choice (toolchoice.ts) lets go of the skills folders of the tools it leaves out at once (librarypass.ts
@@ -317,7 +341,7 @@ export async function clearSwitch(context: ShareContext, tools: HarnessId[], key
   await appendHistory(context, [event]);
   const done = await applySkills(context, tools, [], { only: new Set([key]) });
   const cleared: DestinationResult = { item: name, harness: tool, outcome: 'switched', disabled: false, message: `${toolName(tool)} loads it again from its next session.` };
-  return { ...done, results: [cleared, ...done.results] };
+  return { ...done, results: [cleared, ...done.results], made: [event.id] };
 }
 
 /**

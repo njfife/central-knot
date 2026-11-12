@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { FOLDED_VERSIONS, rowClicks, foldVersions, harnessIs, madeFrom, needsChoice, placeOf, libraryWords, sentences, statusLine, switchLabel, versionChange, versionSource, type LibraryRow } from '../src/libraryrow.ts';
-import { wordDiff } from '../src/diff.ts';
+import { readAgainst, wordDiff } from '../src/diff.ts';
 import { newItem, plan, type Copies, type LibraryItem } from '../src/library.ts';
 import { anyManaged, kindSource } from '../src/itemrow.ts';
 import type { HomeView, LibraryFacts } from '../src/types.ts';
@@ -121,6 +121,13 @@ test('Reading a version against the current one compares word by word and keeps 
   assert.equal(wordDiff('a\nb', 'a\nb').map(part => part.text).join(''), 'a\nb');
 });
 
+test('Read marks the words a line changed a little; a line that changed mostly is shown whole, the current one’s struck, then this one’s', () => {
+  const marks = (current: string, text: string) => readAgainst(current, text).map(run => `${run.kind}:${run.text}`);
+  assert.deepEqual(marks('Reviews a change before it is merged.\n', 'Edited. Reviews a change before it is merged.\n'), ['added:Edited.', 'same: Reviews a change before it is merged.\n']);
+  assert.deepEqual(marks('description: Review a pull request for correctness.\nKeep it short.\n', 'description: Read a small diff and summarize it.\nKeep it short.\n'),
+    ['removed:description: Review a pull request for correctness.\n', 'added:description: Read a small diff and summarize it.\n', 'same:Keep it short.\n']);
+});
+
 test('A version’s note says what it changed, or what a copy that gave way differs in; one made current again says what it went back to', () => {
   assert.deepEqual([versionChange('first'), versionChange({ changed: ['prompt'] }), versionChange({ changed: ['name', 'description'] }), versionChange({ differs: ['prompt'] }), versionChange({ differs: ['description', 'prompt'] }), versionChange('none'), versionChange('unknown')],
     ['first version', 'prompt changed', 'name and description changed', 'prompt differs', 'description and prompt differ', '', '']);
@@ -149,14 +156,14 @@ test('The switch says what a click does: off everywhere, on everywhere, take a f
   const all = row({ 'claude-cli': 'b' });
   assert.deepEqual([placeTag(all, item(), tools)?.text, placeTag(all, item({ on: false }), tools)?.text, placeTag(all, undefined, tools)?.text], [undefined, 'in Central Knot only', 'not in Central Knot']);
   // Kept out of a tool (partial) shows on the closed row too: where it is, so it never reads as on everywhere.
-  assert.deepEqual(placeTag(all, item({ except: ['codex-cli'] }), tools), { text: 'in 2 of 3 tools · not in Codex', title: 'Kept out of Codex. Its switch there, in the opened row, puts it back.' });
+  assert.deepEqual(placeTag(all, item({ except: ['codex-cli'] }), tools), { text: 'in 2 of 3 tools · kept out of Codex', title: 'Kept out of Codex. Its switch there, in the opened row, puts it back.' });
   assert.equal(switchLabel(all, item({ except: ['codex-cli'] }), tools), 'reviewer: on in 2 of 3 tools. Click to take it out of every tool; Central Knot keeps it.');
   // So does a tool that can't take it: the tag says where it can be, its tooltip why.
   const why = 'Codex can’t store this name (é). Rename it in Claude Code to use it there.';
   const cannotOnly = row({ 'claude-cli': 'b' }, { cannot: { 'codex-cli': why } }, item());
   assert.deepEqual(placeTag(cannotOnly, item(), tools), { text: 'Claude Code and Copilot CLI only', title: why });
   const keptOut = item({ except: ['copilot-cli'] }), cannot = row({ 'claude-cli': 'b' }, { cannot: { 'codex-cli': why } }, keptOut);
-  assert.deepEqual(placeTag(cannot, keptOut, tools), { text: 'in 1 of 3 tools · not in Copilot CLI', title: `${why} Kept out of Copilot CLI. Its switch there, in the opened row, puts it back.` });
+  assert.deepEqual(placeTag(cannot, keptOut, tools), { text: 'in 1 of 3 tools · kept out of Copilot CLI', title: `${why} Kept out of Copilot CLI. Its switch there, in the opened row, puts it back.` });
   // A tool that still holds an older copy (its folder can't be written) has it, so the tag doesn't say "only".
   const locked = row({ 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'a' }, { cannot: { 'codex-cli': 'Codex’s agents folder can’t be written.' } }, item());
   assert.equal(placeTag(locked, item(), tools), undefined);

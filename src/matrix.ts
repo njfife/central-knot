@@ -14,7 +14,7 @@ import { getsCopy as getsCopyNext, offPlan, stillOn } from './clickplan.ts';
 import type { IconName } from './icons.ts';
 import { byKey, loadedIn, standing } from './roworder.ts';
 import { cellOf, comparedTools, kindSource, libraryView, needsCopyChoice, type ItemRow, type KindSource, type Tool } from './itemrow.ts';
-import { canTakeIn, harnessIs, inLibrary, madeFrom, needsChoice as libraryNeedsChoice, placeOf as libraryPlace, rowClicks, statusLine, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
+import { canTakeIn, harnessIs, inLibrary, takeInWhere, madeFrom, needsChoice as libraryNeedsChoice, placeOf as libraryPlace, rowClicks, statusLine, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
@@ -416,8 +416,8 @@ const isDiffering = (skill: ItemRow) => differs(skill);
 
 /**
  * The Files view's parts for one skill, in the order they read: its details (status, versions), then where each copy is and
- * Delete from Central Knot. Stacked, the details sit above the file and the rest below it, so nothing to delete sits above the
- * file; a wide pane (style.css data-columns) puts both in its column beside the file, one under the other.
+ * Delete from Central Knot. Stacked, the file comes first and all of them below it; a wide pane (style.css data-columns)
+ * puts them in its column beside the file, one under the other.
  */
 function filesLayout(skill: ItemRow, where: Node[]): { head: Node | null; tail: Node[] } {
   const lib = library(), remove = lib ? libraryDelete(lib, skill) : null;
@@ -1010,7 +1010,9 @@ function syncNotice(notice: Told, writeClaude?: () => void) {
   const involved = [...new Set([notice.winner, ...notice.losers].filter(Boolean))] as string[];
   const scope = `in ${toolsPhrase(involved, toolList())}`;
   // Undo is the one action here that writes files: a small outlined button, apart from the quieter links.
-  const undo = (title: string) => { const action = button({ variant: 'outline', size: 'small', label: `Undo ${writeClaude || notice.kind === 'edit' ? 'edit ' : ''}${scope}`, id: `notice-undo-${notice.history}`, onclick: () => void restoreEvent(notice.history) }); action.title = title; action.setAttribute('aria-label', `Undo: ${title}`); return action; };
+  // A library item's notice says "Undo", as every strip's result does; its tooltip says where. MCP servers' name their scope.
+  const undoLabel = library() ? 'Undo' : `Undo ${writeClaude || notice.kind === 'edit' ? 'edit ' : ''}${scope}`;
+  const undo = (title: string) => { const action = button({ variant: 'outline', size: 'small', label: undoLabel, id: `notice-undo-${notice.history}`, onclick: () => void restoreEvent(notice.history) }); action.title = title; action.setAttribute('aria-label', `Undo: ${title}`); return action; };
   const offNow = notice.once ?? (!!state.home && !state.home.syncOn);
   const lib = library();
   const [glyph, tone, text, action] = lib ? libraryNotice(lib, notice, undo) : ({
@@ -1037,7 +1039,7 @@ function syncNotice(notice: Told, writeClaude?: () => void) {
   const quiet = off;
   // Waiting for Claude Code: the sentence takes the full width, and the actions sit on their own line, Write first.
   return h(`p.sync-notice${writeClaude ? '.notice-stacked' : ''}`, { 'data-kind': notice.kind }, icon(writeClaude ? 'clock' : glyph, 14, writeClaude ? 'tone-warning' : tone),
-    h('span.notice-text', {}, offNow && notice.kind !== 'deleted' && notice.kind !== 'reset' ? 'Synced once: ' : '', ...said.map(part => typeof part === 'string' ? part.replace(/\.$/, '') : part), '', h('span.notice-age', {}, ` · ${age(notice.history || `${notice.kind}:${notice.item}`)}`)),
+    h('span.notice-text', {}, offNow && notice.kind !== 'deleted' && notice.kind !== 'reset' ? 'Synced once: ' : '', ...said.map(part => typeof part === 'string' && !/\.\s/.test(part) ? part.replace(/\.$/, '') : part), '', h('span.notice-age', {}, ` · ${age(notice.history || `${notice.kind}:${notice.item}`)}`)),
     writeClaude ? (() => {
       const row = committedList().find(skill => skill.name === notice.item || skill.key === notice.item);
       const before = row?.versions?.['claude-cli']?.text, after = row?.versions?.[notice.winner as Tool]?.text;
@@ -1253,7 +1255,9 @@ function turnOn(skill: ItemRow, use?: Tool) {
   const said = (notIn: HarnessId[]) => {
     const left = [...plugins.leftIn, ...notIn, ...(later ? ['claude-cli'] : []), ...(lib ? skill.off : [])];
     const using = canHave(skill).filter(tool => !left.includes(tool));
-    if (lib && found) return lib.say.said.takenIn(name, using, toolList(), use);
+    // A tool that has it another way gets nothing of Central Knot's: said apart, never as on (a plugin's item is on through it).
+    const another = using.filter(tool => skill.anotherWay?.[tool] && skill.copies[tool] === undefined && !throughPluginHere(skill, tool));
+    if (lib && found) return lib.say.said.takenIn(name, using.filter(tool => !another.includes(tool)), toolList(), use, another);
     return use && using.length ? `${capitalToolsPhrase(using, toolList())} now ${using.length === 1 ? 'uses' : 'use'} ${names[use]}’s copy of ${name}. Replaced copies are kept in History.` : `${name} is on in ${onPhrase(skill, left)}.`;
   };
   mainClick(name, true, [onChange(skill, use)], plugins, said, plugins.left, later ? CLAUDE_LATER : undefined);
@@ -1392,14 +1396,17 @@ function librarySwitch(skill: ItemRow, id: string) {
   // Partial (kept out of some tools in the opened row): on, drawn apart from on everywhere (style.css .switch-partial).
   // A found item none of whose copies can be read for sure has nothing to take in: its switch waits, saying why.
   const nothingToTake = place === 'found' && !canTakeIn(skill);
-  const knob = toggle({ on: place === 'on', mixed: place === 'found', partial: isPartial(item, toolList()), label, onchange: next => flip(skill, next), disabled: !canWrite() || nothingToTake, id });
+  const knob = toggle({ on: place === 'on', mixed: place === 'found', partial: isPartial(item, toolList(), skill), label, onchange: next => flip(skill, next), disabled: !canWrite() || nothingToTake, id });
   // The halfway switch says on hover what a click does: it isn't blocked, it takes the item in.
-  if (place === 'found' && !nothingToTake) knob.title = question ? 'Its copies differ: click to choose which one Central Knot takes in' : 'Click to take it into Central Knot and put it in every tool';
+  if (place === 'found' && !nothingToTake) knob.title = question ? 'Its copies differ: click to choose which one Central Knot takes in' : `Click to ${takeInWhere(skill, item, toolList()).replace(/^take it in/, 'take it into Central Knot')}`;
   return knob;
 }
 
-/** How a tool's mark looks: on there, off there (copy kept), no copy, copies differ, or something waits. */
-type MarkLook = 'on' | 'off' | 'none' | 'differs' | 'waits';
+/**
+ * How a tool's mark looks: on there, off there (copy kept), no copy, copies differ, something waits, or (`held`, a library
+ * item's) a state of that tool's own drawn with its glyph: kept out, switched off in its own settings, can't take it.
+ */
+type MarkLook = 'on' | 'off' | 'none' | 'differs' | 'waits' | 'held';
 
 /** What a mark says in the key, by what it is. */
 const keyWords = {
@@ -1407,8 +1414,8 @@ const keyWords = {
   waiting: 'Gets the edit when sync runs', 'will-sync': NEXT_SYNC, 'write-now': 'Waits for Write to Claude Code',
   // A library item's (libraryrow.ts HarnessIs).
   taken: 'Edited, becomes the current version', deleted: 'Deleted there; turns off when sync runs', leaving: 'Removed when sync runs', own: 'Its own copy, not from Central Knot',
-  'kept-out': 'Kept out', 'off-in-ck': 'Off: in Central Knot only', unseen: 'Can’t be read', 'cannot-take': 'Can’t take it',
-  'another-way': 'Has it another way, not from Central Knot', switched: 'Switched off by its own settings',
+  current: 'Has the current version', has: 'Has it', 'kept-out': 'Kept out', 'off-in-ck': 'Off: in Central Knot only', unseen: 'Can’t be read', 'cannot-take': 'Can’t take it',
+  'another-way': 'Has it another way, not from Central Knot', switched: 'Switched off in its own settings',
 } as const;
 
 /**
@@ -1442,11 +1449,11 @@ function markOf(skill: ItemRow, tool: Tool): { look: MarkLook; words: string; gl
 
 /** A library item's mark for one harness: what the library's rule says of it (libraryrow.ts harnessIs), drawn with the page's looks. */
 const libraryMarks: Record<HarnessIs, { look: MarkLook; key: keyof typeof keyWords; glyph?: IconName }> = {
-  current: { look: 'on', key: 'on' },
+  current: { look: 'on', key: 'current' },
   'own-copy': { look: 'on', key: 'own' },
-  'kept-out': { look: 'off', key: 'kept-out' },
+  'kept-out': { look: 'held', key: 'kept-out', glyph: 'circle-minus' },
   none: { look: 'none', key: 'none' },
-  cannot: { look: 'none', key: 'cannot-take' },
+  cannot: { look: 'held', key: 'cannot-take', glyph: 'circle-slash-2' },
   'gets-it': { look: 'waits', key: 'will-sync', glyph: 'clock' },
   edited: { look: 'waits', key: 'taken', glyph: 'pencil-line' },
   deleted: { look: 'waits', key: 'deleted', glyph: 'trash-2' },
@@ -1458,9 +1465,9 @@ function libraryMark(lib: LibraryPage, skill: ItemRow, tool: Tool): ReturnType<t
   const item = itemOf(skill), is = harnessIs(skill, item, tool);
   const words = `${names[tool]}: ${lib.say.harnessLine(skill, item, tool, names[tool]).replace(/^./, first => first.toLowerCase())}`;
   // Off, or found: a harness with no copy while Central Knot keeps the item is off there; a found item's own copy is simply on.
-  const drawn = is === 'none' && inLibrary(item) ? { look: 'off' as const, key: 'off-in-ck' as const } : is === 'own-copy' && !inLibrary(item) ? libraryMarks.current : libraryMarks[is];
-  // Loaded there, but that tool's own switch turns it off: off there, whoever set the switch (libraryrow.ts `switched`).
-  const switched = skill.switched?.[tool] && drawn.look === 'on' ? { look: 'off' as const, key: (turnedOffByProfile(skill.key, tool) ? 'profile' : 'switched') as keyof typeof keyWords, glyph: undefined } : undefined;
+  const drawn = is === 'none' && inLibrary(item) ? { look: 'off' as const, key: 'off-in-ck' as const } : is === 'own-copy' && !inLibrary(item) ? { look: 'on' as const, key: 'has' as const } : libraryMarks[is];
+  // Loaded there, but that tool's own switch turns it off: a mark of its own, whoever set the switch (libraryrow.ts `switched`).
+  const switched = skill.switched?.[tool] && drawn.look === 'on' ? { look: 'held' as const, key: (turnedOffByProfile(skill.key, tool) ? 'profile' : 'switched') as keyof typeof keyWords, glyph: 'circle-off' as IconName } : undefined;
   return { ...(switched ?? drawn), state: is, words };
 }
 
@@ -1469,7 +1476,7 @@ function libraryMark(lib: LibraryPage, skill: ItemRow, tool: Tool): ReturnType<t
  * button. With no tool, a neutral sample for the key.
  */
 function toolMark(look: MarkLook, tool: Tool | undefined, glyph?: IconName, size = 14) {
-  return h(`span.tool-mark.mark-${look}`, { 'aria-hidden': 'true' }, glyph ? icon(glyph, size, look === 'differs' || look === 'waits' ? 'tone-warning' : '') : tool ? brandMark(tool, size) : icon('blocks', size));
+  return h(`span.tool-mark.mark-${look}`, { 'aria-hidden': 'true' }, glyph ? icon(glyph, size, look === 'differs' || look === 'waits' ? 'tone-warning' : look === 'held' ? 'tone-faint' : '') : tool ? brandMark(tool, size) : icon('blocks', size));
 }
 
 /** A row's marks: one per tool, quiet and small, each naming its tool and what it has in its tooltip. `table`: the table's own (with ids). */
@@ -1592,6 +1599,10 @@ function libraryHarnessSwitch(lib: LibraryPage, skill: ItemRow, tool: Tool) {
   // Off, found, or a harness that can't take it: no switch there, only what the kind offers on its line.
   if (!item?.on || harnessIs(skill, item, tool) === 'cannot') return own && h('span.details-tool-actions', {}, own);
   const name = nameOf(skill), where = names[tool], out = item.except.includes(tool as HarnessId);
+  // A state of the tool's own, said in its own word in place of Central Knot's switch: its own switch has it off (the kind's
+  // action there lets it load it again), or it has it another way, where nothing of Central Knot's goes.
+  const ownState = out ? undefined : skill.switched?.[tool] ? 'Switched off' : harnessIs(skill, item, tool) === 'another-way' ? 'Another way' : undefined;
+  if (ownState) return h('span.details-tool-actions', {}, own, h('span.tool-switch', {}, h('span.tool-switch-word.tool-switch-word-own', {}, ownState)));
   const said = (notIn: HarnessId[]) => lib.say.said.inHarness(name, tool, !out, notIn.includes(tool as HarnessId));
   const does = out ? `Click to put it in ${where} again, its ${lib.words.copy} as it was.` : `Click to keep it out of ${where}: its copy there goes, and Central Knot keeps it.`;
   const flipHere = (on: boolean) => click({ kind, items: [name], changes: [rowClicks.inHarness(skill, item, tool, !on)], said });
@@ -1708,7 +1719,8 @@ function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
       h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
       ...settingsFile(tool),
       h('span.details-tool-line', {}, harnessLine(skill, tool)),
-      harnessControls(skill, tool)));
+      harnessControls(skill, tool)),
+    lib?.toolNote?.(skill, tool as HarnessId));
   const close = placement === 'row' ? h('button.details-close', { type: 'button', id: `close-${skill.key}`, 'aria-label': `Close details for ${skill.key}`, title: 'Close', onclick: () => { view.comparing = undefined; rerender(); } }, icon('x', 14)) : null;
   const box = (...children: (Child | Child[])[]) => h(`div.compare.details${placement === 'row' ? '' : '.details-bare'}${differs ? '.details-differs' : ''}${kind === 'mcp' ? '.details-mcp' : '.details-grid'}`, { role: 'region', 'aria-label': `Details for ${skill.key}` }, ...children);
   if (differs) return box(close, compareChoices(skill, inFiles));
@@ -1725,7 +1737,8 @@ function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
       partNote(skill),
       files ? h('div.details-actions', {}, files) : null),
     // A library item: what is kept the same, and what stays each harness's own (for agents, AGT-01).
-    lib && toolList().length > 1 ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), lib.words.shared) : null,
+    // What every tool shares of it, said where it is true: an item in Central Knot, or a found one that can be taken in.
+    lib && toolList().length > 1 && (inLibrary(itemOf(skill)) || canTakeIn(skill)) ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), lib.words.shared) : null,
     skill.gone ? null : h('div.details-tools', {}, toolList().map(toolRow)),
     lib ? libraryVersions(lib, skill) : null,
     inFiles || kind === 'mcp' ? null : wherePaths(skill),
@@ -1857,7 +1870,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
   // The result and its Undo in the strip at the top, as on every other page; the list and the skill's pane below it.
   return h('div.page', {}, notices(), h('div.split', {},
     h('div.list-column', {},
-      h('div.toolbar.list-toolbar.fit-bar', {}, button({ variant: 'ghost', size: 'small', icon: 'arrow-left', label: 'Table', name: 'Back to the skills table', id: 'skills-table', collapse: true, onclick: showSkillsTable }), h('div.find', {}, icon('search', 16, 'find-glyph'), find)),
+      h('div.toolbar.list-toolbar.fit-bar', {}, button({ variant: 'ghost', size: 'small', icon: 'arrow-left', label: 'Skills', name: 'Back to Skills', id: 'skills-table', collapse: true, onclick: showSkillsTable }), h('div.find', {}, icon('search', 16, 'find-glyph'), find)),
       // The header rides inside the list's scroll area, so it has the rows' exact width, gutter and columns.
       h('div.scroll.list-scroll', { id: 'skills-list' },
         h('div.list-head', { 'aria-hidden': 'true' }, h('span', {}, 'Skill')),
@@ -1869,8 +1882,8 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
         h('div.pane-title', {}, h('h2', {}, middle(skill.name ?? skill.key)), h('p', { title: paneStatus }, paneStatus))),
       // A wide pane puts the skill's details beside its files, as a plugin's page puts its README beside what it holds.
       h('div.scroll.detail-scroll', { id: 'detail-scroll' },
-        layout.head ? h('div.files-details', {}, layout.head) : null,
         h('div.detail-files', {}, ...contents),
+        layout.head ? h('div.files-details', {}, layout.head) : null,
         layout.tail.length ? h('div.files-tail', {}, layout.tail) : null))));
 }
 

@@ -43,7 +43,10 @@ export interface ShareContext {
   now?: () => number;
   /** How many days History keeps events, and deleted items' content (STO-04); the default unless Settings says otherwise. */
   historyDays?: HistoryDays;
-  /** How long a copy must stay missing before it counts as deleted, so an atomic save is not a deletion (SYN-04). Default 2 s. */
+  /**
+   * How long a copy must stay missing before it counts as deleted, so an atomic save is not a deletion (SYN-04). Unset, a
+   * library pass waits 2 s (librarypass.ts runPass) and the MCP engine the same (mcp.ts applyMcp); tests pass 0.
+   */
   settleMs?: number;
 }
 
@@ -108,10 +111,10 @@ export async function readTree(directory: string, options: { includeGit?: boolea
       if ((entry.name === '.git' && !options.includeGit) || notCopied(entry.name, entry.isFile())) continue;
       const path = join(current, entry.name);
       const relativePath = relative(directory, path).split(sep).join('/');
-      if (entry.isSymbolicLink()) { held ??= `It contains a link (${relativePath}), and Central Knot creates and follows no links here.`; files.set(relativePath, { sha256: 'link', mode: 0 }); }
+      if (entry.isSymbolicLink()) { held ??= `It contains a link (${relativePath}), and Central Knot creates and follows no links here. Replace the link with the file it leads to, then Refresh.`; files.set(relativePath, { sha256: 'link', mode: 0 }); }
       else if (entry.isDirectory()) { directories.push(relativePath); await visit(path); }
       else if (entry.isFile()) files.set(relativePath, { sha256: await hashFile(path), mode: (await stat(path)).mode & 0o777 });
-      else { held ??= `It contains a special file (${relativePath}).`; files.set(relativePath, { sha256: 'special', mode: 0 }); }
+      else { held ??= `It contains a special file (${relativePath}). Move it out of the folder, then Refresh.`; files.set(relativePath, { sha256: 'special', mode: 0 }); }
     }
   }
   await visit(directory);
@@ -159,6 +162,7 @@ const copilotLosses: Record<string, string> = {
   'disable-model-invocation: true': 'Copilot CLI hides it from the model, and `/name` failed in print mode.',
 };
 
+/** Whether `harness` loads a skill of this shape, and why not (`skipped`, worded the same way for every tool where the reason is the same). */
 export function targetFor(harness: HarnessId, directory: string, source: Skill): PlanTarget {
   switch (harness) {
     case 'copilot-cli':
@@ -168,14 +172,17 @@ export function targetFor(harness: HarnessId, directory: string, source: Skill):
       return { harness, directory, limits: source.metadataKeys.map(key => copilotLosses[key]) };
     case 'codex-cli':
       if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Codex does not load a skill in a folder starting with a dot.' };
+      if (!source.hasFrontmatter) return { harness, directory, limits: [], skipped: 'Codex will not load a skill with no YAML frontmatter.' };
       if (source.codexProblem) return { harness, directory, limits: [], skipped: `Codex will not load it: ${source.codexProblem}.` };
       return { harness, directory, limits: [] };
     case 'pi-cli':
       if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Pi does not load a skill in a folder starting with a dot.' };
+      if (!source.hasFrontmatter) return { harness, directory, limits: [], skipped: 'Pi will not load a skill with no YAML frontmatter.' };
       if (source.piProblem) return { harness, directory, limits: [], skipped: `Pi will not load it: ${source.piProblem}.` };
       return { harness, directory, limits: [] };
     case 'opencode-cli':
       if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'OpenCode does not load a skill in a folder starting with a dot.' };
+      if (!source.hasFrontmatter) return { harness, directory, limits: [], skipped: 'OpenCode 1.x will not load a skill with no YAML frontmatter.' };
       if (source.opencodeProblem) return { harness, directory, limits: [], skipped: `OpenCode 1.x will not load it: ${source.opencodeProblem}.` };
       return { harness, directory, limits: [] };
     case 'claude-cli':

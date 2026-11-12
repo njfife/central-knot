@@ -116,7 +116,10 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       if (pulled) return { glyph: 'git-branch', text: `Pulled from the Git repo; that became the current version${tools ? `, in ${tools}` : ''}.` };
       return { glyph: 'pencil-line', text: `Edited in ${from}; that became the current version${tools ? `, in ${tools} too` : ''}.` };
     case 'switched': {
-      // One that turned a tool's switch off is from before the library (Disable): the general sentence says it.
+      // Clear the switch's Undo turns the tool's switch off again (`cause` 'switch'); any other that turned a switch off is
+      // from before the library (Disable): the general sentence says it.
+      const again = event.cause === 'switch' && event.switched?.every(entry => entry.disabled) ? event.switched.map(entry => toolName(entry.tool)) : [];
+      if (again.length) return { glyph: 'undo-2', text: `Undone: ${andList(again)}’s own switch has it off again.` };
       const cleared = event.switched?.filter(entry => !entry.disabled).map(entry => toolName(entry.tool)) ?? [];
       if (event.switched?.some(entry => entry.disabled) || !cleared.length) return undefined;
       return { glyph: 'circle-check', text: `${andList(cleared)}’s own switch for it was cleared: ${cleared.length > 1 ? 'they load' : `${cleared[0]} loads`} it again.` };
@@ -176,6 +179,9 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
     const offered = versionChoices(event, item).some(choice => choice.hash === version);
     return offered ? { label: 'Use it', help: `Make that copy’s version of ${name} the current one${everywhere}`, change: { ...now, version } } : undefined;
   }
+  // Clear the switch (a skill's): its Undo turns that tool's own switch off again (skills.ts restoreSkill does it, not a Change).
+  const cleared = event.kind === 'switched' && event.cause !== 'switch' && !!event.switched?.length && event.switched.every(entry => !entry.disabled);
+  if (cleared) return { label: 'Undo', help: `Turn ${name} off again in ${andList(event.switched!.map(entry => toolName(entry.tool)))}’s own settings`, change: now };
   // A found item taken in, while it is still as that click left it: its Undo takes it out again (found once more), each tool
   // it was found in keeping its own copy.
   const tookIn = event.kind === 'chosen' || (event.kind === 'on' && event.cause === 'found');

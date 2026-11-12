@@ -5,7 +5,7 @@
 // It draws what it is given and calls back on a click: matrix.ts keeps which list is unfolded and which version is being
 // read, gets a version's text as the kind gives it (librarypages.ts), and sends Make current as the item's click.
 import { foldVersions, madeFrom, versionChange, versionChangeHelp, versionSource } from './libraryrow.ts';
-import { wordDiff, type Line } from './diff.ts';
+import { readAgainst } from './diff.ts';
 import { button, h, icon, type Child } from './dom.ts';
 import { listed, theVersion, type LibraryItem, type Version, type VersionChange } from './library.ts';
 import { dayAndTime, timesApart } from './model.ts';
@@ -55,24 +55,9 @@ function versionRow(view: VersionListView, version: Version, index: number, when
     read ? h('div.version-read', { id: `version-read-text-${id}` }, versionText(read.text, current ? undefined : read.current)) : null);
 }
 
-/**
- * `text` against `current`: its own words tinted as the copy question tints them, the current one's it lacks struck through.
- * Neighbouring marked words are one mark; a line break only the current version has is left out, so the lines are this one's.
- */
-function againstCurrent(current: string, text: string): Child[] {
-  const parts = wordDiff(current, text).filter(part => !(part.kind === 'removed' && part.text.includes('\n') && !part.text.trim()));
-  const runs: Line[] = [];
-  parts.forEach((part, index) => {
-    const before = parts[index - 1]?.kind, after = parts[index + 1]?.kind;
-    // A space joins the mark on both its sides; any other space reads plain, once.
-    const kind = part.text.trim() ? part.kind : before === after && before !== 'same' ? before! : 'same';
-    const last = runs.at(-1);
-    if (last?.kind === 'removed' && kind === 'added') runs.push({ kind: 'same', text: ' ' });
-    if (runs.at(-1)?.kind === kind) runs.at(-1)!.text += part.text;
-    else runs.push({ kind, text: kind === 'same' && !part.text.trim() && part.kind === 'removed' ? ' ' : part.text });
-  });
-  return runs.map(run => (run.kind === 'same' ? run.text : h(run.kind === 'added' ? 'span.change-added' : 'span.change-gone', {}, run.text)));
-}
+/** `text` against `current`, as diff.ts readAgainst marks it: tinted only in this one, struck only in the current one. */
+const againstCurrent = (current: string, text: string): Child[] =>
+  readAgainst(current, text).map(run => (run.kind === 'same' ? run.text : h(run.kind === 'added' ? 'span.change-added' : 'span.change-gone', {}, run.text)));
 
 /**
  * A version being read: its parts, headed by those that differ from the current version and with those differences marked;
@@ -97,7 +82,8 @@ export function versionList(view: VersionListView): HTMLElement {
   const { shown, rest } = foldVersions(all, view.unfolded);
   // One form for every time the list says: each row's, and the one a version made current again went back to.
   const sources = shown.flatMap(version => (version.from.how === 'made-current' ? madeFrom(item, version) ?? [] : []));
-  const said = timesApart([...shown, ...sources].map(version => version.at), view.now, true);
+  // Minutes are enough for a version: two made in the same minute read alike, the tooltip has the full time.
+  const said = timesApart([...shown, ...sources].map(version => version.at), view.now, true, false);
   const times = said.slice(0, shown.length), sourceWhen = (source: Version) => said[shown.length + sources.indexOf(source)];
   const more = `Show ${rest} earlier ${rest === 1 ? 'version' : 'versions'}`;
   const unfold = rest > 0 ? button({ variant: 'link', size: 'small', label: more, id: `versions-all-${item.key}`, onclick: view.onUnfold }) : null;

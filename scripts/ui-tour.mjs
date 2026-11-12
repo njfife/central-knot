@@ -232,7 +232,7 @@ if (wanted('skills')) {
   for (const key of ['release-notes', 'standup']) { await a.click(`#switch-${key}`); await switchOn(key); }
   await openRow('standup');
   await a.click('#enable-standup-codex-cli'); await a.settle();
-  await atEverySize('partial', 'Turned release-notes and standup on, then opened standup and turned it off in Codex alone: its folder left Codex; the row says "in 2 of 3 tools · not in Codex" and its switch is drawn partial', true, '.ov-row[data-key="standup"]');
+  await atEverySize('partial', 'Turned release-notes and standup on, then opened standup and turned it off in Codex alone: its folder left Codex; the row says "in 2 of 3 tools · kept out of Codex" and its switch is drawn partial', true, '.ov-row[data-key="standup"]');
   await a.click('#enable-standup-codex-cli'); await a.settle();
   await closeRow('standup');
   // A tool's own switch, set in its settings: read, never undone; the opened row can clear it.

@@ -46,24 +46,24 @@ export const dayAndTime = (iso: string) => `${dayWords(iso)} at ${clockTime(iso)
 /**
  * When each row of one list happened, every row in the same form so they read alike (History, an agent's versions): how
  * long ago ("just now", "3 min ago", "2 h ago") when every row is today and no two would read the same; else the clock
- * time, to the second when two rows would read the same. `withDay`: a row before today says its day too ("yesterday at
- * 9:20 AM"); History, under day headings, says the time alone.
+ * time, to the second when two rows would read the same (`seconds`: false, as a version list says them, keeps minutes).
+ * `withDay`: a row before today says its day too ("yesterday at 9:20 AM"); History, under day headings, says the time alone.
  */
-export function timesApart(isos: readonly string[], now = Date.now(), withDay = false): string[] {
+export function timesApart(isos: readonly string[], now = Date.now(), withDay = false, seconds = true): string[] {
   const ago = isos.map(iso => {
     const minutes = Math.floor((now - Date.parse(iso)) / 60_000);
     return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ago`;
   });
   const today = new Date(now).toDateString();
-  return isos.every(iso => new Date(iso).toDateString() === today) && apart(ago) ? ago : clockTimesApart(isos, now, withDay);
+  return isos.every(iso => new Date(iso).toDateString() === today) && apart(ago) ? ago : clockTimesApart(isos, now, withDay, seconds);
 }
 const apart = (said: readonly string[]) => new Set(said).size === said.length;
 /** timesApart's clock form alone, for a time named in a sentence (History's, a result's), which "3 min ago" would leave behind. */
-export function clockTimesApart(isos: readonly string[], now = Date.now(), withDay = false): string[] {
+export function clockTimesApart(isos: readonly string[], now = Date.now(), withDay = false, seconds = true): string[] {
   const days = isos.map(iso => new Date(iso).toDateString()), today = new Date(now).toDateString();
   const clock = (seconds: boolean) => isos.map(iso => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', ...(seconds ? { second: '2-digit' } : {}) }));
   const minutes = clock(false);
-  const times = apart(minutes.map((time, index) => `${days[index]} ${time}`)) ? minutes : clock(true);
+  const times = !seconds || apart(minutes.map((time, index) => `${days[index]} ${time}`)) ? minutes : clock(true);
   return times.map((time, index) => (withDay && days[index] !== today ? `${dayWords(isos[index])} at ${time}` : time));
 }
 export const plural = (count: number, word: string, many = `${word}s`) => `${count} ${count === 1 ? word : many}`;

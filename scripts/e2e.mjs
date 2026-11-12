@@ -212,8 +212,8 @@ async function mainHelpers(port) {
 const rowKeys = a => a.all('.ov-row[data-key]', 'e.dataset.key');
 // A tool's mark on an item's row (a box on a page that still has one per tool): what that tool has.
 const cellState = (a, key, tool) => a.run(`document.getElementById(${JSON.stringify(`cell-${key}-${tool}`)})?.dataset.state ?? null`);
-/** The tools whose mark on an item's row is drawn off (the copy kept). */
-const offMarks = (a, key) => a.all(`.ov-row[data-key=${JSON.stringify(key)}] .tool-mark[data-look="off"]`, 'e.dataset.tool');
+/** The tools whose mark on an item's row is drawn off: off with the copy kept, or (a library item) a state of that tool's own (held). */
+const offMarks = (a, key) => a.all(`.ov-row[data-key=${JSON.stringify(key)}] .tool-mark:is([data-look="off"], [data-look="held"])`, 'e.dataset.tool');
 const switchOn = (a, key) => a.run(`document.querySelector('.ov-row[data-key=${JSON.stringify(key)}] .switch')?.getAttribute('aria-checked') === 'true'`);
 /** Each section on an item page, in order, with the keys of its rows. */
 const sectionsNow = a => a.run(`[...document.querySelectorAll('.ov-section[data-section]')].map(head => [head.dataset.section, [...head.parentElement.querySelectorAll('.ov-row[data-key]')].map(row => row.dataset.key)])`);
@@ -652,7 +652,7 @@ async function practiceFlow() {
   await opened('standup');
   await a.click('#enable-standup-codex-cli');
   same('Codex’s switch takes Codex’s folder out, leaves the others, and marks Codex as kept out', [folders('standup').map(Boolean), await cellState(a, 'standup', 'codex-cli')], [[true, true, false], 'kept-out']);
-  same('the row says where it is, and its switch shows it partial', [/in 2 of 3 tools · not in Codex/.test(await a.text('.ov-row[data-key="standup"]') ?? ''), await a.exists('#switch-standup.switch-partial'), await a.run(`document.querySelector('#switch-standup').title`)],
+  same('the row says where it is, and its switch shows it partial', [/in 2 of 3 tools · kept out of Codex/.test(await a.text('.ov-row[data-key="standup"]') ?? ''), await a.exists('#switch-standup.switch-partial'), await a.run(`document.querySelector('#switch-standup').title`)],
     [true, true, 'standup: on in 2 of 3 tools. Click to take it out of every tool; Central Knot keeps it.']);
   await a.click('#outcome-undo');
   same('its Undo puts Codex’s folder back as it was', folders('standup'), standupOn);
@@ -718,6 +718,7 @@ async function practiceFlow() {
   same('an edit spreads to every tool on the next read', [readFileSync(standupPath('copilot'), 'utf8'), readFileSync(standupPath('codex'), 'utf8')].map(text => text.includes('Edited in Claude Code.')), [true, true]);
   check('and says it is the current version now, with Undo', (await a.text('.sync-notices') ?? '').includes('standup was edited in Claude Code; that is its current version now') && await a.exists('[id^="notice-undo-"]'), await a.text('.bands'));
   check('without also calling it a catch-up', !(await a.text('.bands') ?? '').includes('Caught up'), await a.text('.bands'));
+  check('and the status bar doesn’t say nothing changed beside it', !/Nothing changed/.test(await a.run(`document.querySelector('#announcement').dataset.text ?? ''`) ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`));
   await a.shot('practice-edit-spread');
   await a.run(`document.querySelector('.sync-notice[data-kind="edit"] [id^="notice-undo-"]').click()`);
   await a.settle();
@@ -873,7 +874,7 @@ async function practiceFlow() {
   check('the details show the skill', (await a.text('.pane-title')).includes('standup') && (await a.exists('#detail-scroll .details-paths')), await a.text('.pane-title'));
   check('its folders and contents are shown', (await a.text('#detail-scroll .details-paths')).includes('/.copilot/skills/standup') && (await a.text('#detail-scroll pre.content')).includes('name:'), await a.text('#detail-scroll'));
   // Stacked (this window), the file comes before where each copy is, and nothing to delete sits above the file.
-  same('stacked, the file comes first, then where each copy is', await a.run(`(() => { const order = [...document.querySelectorAll('#detail-scroll pre.content, #detail-scroll .details-paths, #detail-scroll [id^="delete-"]')].map(e => e.matches('pre') ? 'file' : e.matches('.details-paths') ? 'where' : 'delete'); return order.filter((entry, index) => order.indexOf(entry) === index); })()`), ['file', 'where', 'delete']);
+  same('stacked, the file comes first, then each tool’s line, where each copy is and Delete', await a.run(`(() => { const order = [...document.querySelectorAll('#detail-scroll pre.content, #detail-scroll .details-tool, #detail-scroll .details-paths, #detail-scroll [id^="delete-"]')].map(e => e.matches('pre') ? 'file' : e.matches('.details-tool') ? 'lines' : e.matches('.details-paths') ? 'where' : 'delete'); return order.filter((entry, index) => order.indexOf(entry) === index); })()`), ['file', 'lines', 'where', 'delete']);
   // A wide pane (here at 1728) puts the details in a column at the right: where each copy is open from the start, the
   // file's box spanning to meet it.
   await sizeTo(a, 1728, 1117);
@@ -1078,7 +1079,7 @@ async function practiceFlow() {
   // A harness's own switch keeps the agent out of that harness alone; its Undo puts the same file back.
   await a.click('#enable-code-reviewer-codex-cli');
   same('Codex’s own switch takes Codex’s copy out, leaves the others, and marks Codex as kept out, on the closed row too',
-    [reviewerNow().map(text => text !== null), await cellState(a, 'code-reviewer', 'codex-cli'), /not in Codex/.test(await agentRow('code-reviewer') ?? '')], [[true, true, false], 'kept-out', true]);
+    [reviewerNow().map(text => text !== null), await cellState(a, 'code-reviewer', 'codex-cli'), /kept out of Codex/.test(await agentRow('code-reviewer') ?? '')], [[true, true, false], 'kept-out', true]);
   await a.click('#outcome-undo');
   same('its Undo puts Codex’s file back as it was', reviewerNow(), taken);
   // Delete from Central Knot is the one real delete (main.ts passes the click's `deleted` through): out of every harness and

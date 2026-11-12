@@ -494,9 +494,11 @@ function readFound(view: HomeView, from?: string): string {
   // A plugin's items count as the pages list them.
   const found = { skills: view.skills.items.length + pluginItemCount(view, 'skills'), mcp: view.mcp.servers.length + pluginItemCount(view, 'mcp'), agents: view.agents.items.length + pluginItemCount(view, 'agents') };
   const counts = heldKinds(view).map(kind => plural(found[kind], kindNouns[kind].one, kindNouns[kind].many));
-  // A catch-up that copied something has its own Caught up band (tables and the Harnesses list), so it is not "Nothing changed".
+  // A catch-up that copied something has its own Caught up band, and what sync did on its own (an edit spread, a deletion)
+  // its notice: either is a change, so neither read says "Nothing changed".
   const caught = caughtUpNames(view.sync, new Set(view.skills.notices.map(notice => notice.item))).length > 0;
-  return `Read ${andList(counts)}${from ? ` from ${from}` : ''}.${caught ? '' : ' Nothing changed.'}`;
+  const told = [view.skills.notices, view.mcp.notices, view.agents.notices].some(notices => notices.length > 0);
+  return `Read ${andList(counts)}${from ? ` from ${from}` : ''}.${caught || told ? '' : ' Nothing changed.'}`;
 }
 
 /** A home just opened, as its band says it: an empty one (no tools, or nothing in them) says only that it opened; the page says the rest. */
@@ -776,7 +778,11 @@ export const skillAction = (action: 'clear-switch' | 'take-over', key: string, t
     setHome(await api().refresh());
     kindPages.skills.keep(result.results, result.notices);
     if (result.stopped) { tell({ page: state.page, item: name, text: result.stopped, warn: true, band: true }); return; }
-    tell({ page: state.page, item: name, band: true, history: true, text: `${name}: ${result.results[0]?.message ?? 'done.'}` });
+    // Letting a tool load it again has an Undo (its History entry's: the switch set again); a take-over has none, and says so.
+    const said = `${name}: ${result.results[0]?.message ?? 'done.'}${action === 'take-over' ? ' This has no Undo.' : ''}`;
+    const entry = action === 'clear-switch' ? result.made?.[0] : undefined;
+    tell({ page: state.page, item: name, band: true, text: said,
+      act: entry ? { label: 'Undo', id: 'outcome-undo', title: `Turn ${name} off again in ${toolName(tool)}’s own settings`, run: () => void restoreEvent(entry) } : undefined });
     flashRow(name);
   });
 

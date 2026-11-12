@@ -1,5 +1,5 @@
 // The pass: the library's model (library.ts) carried out on real files, the same for every kind of item. A kind (agents.ts
-// today) implements `Kind`, below, and nothing else: where a harness keeps it, how a copy is read, written and removed in
+// and skills.ts) implements `Kind`, below, and nothing else: where a harness keeps it, how a copy is read, written and removed in
 // that harness's format, a harness's own part, and its record and store. Everything here is the same for every kind:
 //
 //   lookAt         each managed harness's copies, read once through the kind (Disk); a copy that can't be read for sure is
@@ -15,8 +15,9 @@
 //
 // Also here: the page's look (lookFor: the same reading, guards applied in memory, nothing saved), so a mark says what a pass
 // will do; a History entry's action (restore), which is always one of the clicks above; and the tool choice letting folders
-// go (forgetFolders). What a kind's page shows, and how the Git repo reads it, stay with the kind (agents.ts agentsView,
-// agentsForRepo). History's sentences and actions for a kind's entries are its own (historyactions.ts for agents).
+// go (forgetFolders). What a kind's page shows, and how the Git repo reads it, stay with the kind (agents.ts agentsView and
+// agentsForRepo, skills.ts skillsView and skillsForRepo). History's sentences and actions for the library's entries are
+// historyactions.ts's, for every kind.
 //
 // Words: a `Kind` is what one kind implements (below); its `Disk` is what it read of the managed harnesses now; a `Look` is
 // one pass's or one page's reading (the Disk with the record, the folders and the settle clock); a `Shelf` (library.ts)
@@ -45,7 +46,7 @@
 // - the app's wiring: app.ts kindPages (how its clicks are sent; where its last result is kept, which lastResult reads),
 //   main.ts (its passes, in the background and on a click through the `changes` sanitizer; its view; a History action
 //   sent on by its key's prefix), preload.ts (the page's calls);
-// - History's sentences and actions for its entries (historyactions.ts for agents; historypage.ts asks it).
+// - History's sentences and actions for its entries: historyactions.ts, in the kind's words (historypage.ts asks it).
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { carryOut, keepVersion, managedAgain, newItem, plan, setCurrent, versionAt, wantedIn } from './library.ts';

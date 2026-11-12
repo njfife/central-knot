@@ -51,7 +51,7 @@ export const libraryWords = {
   },
   skills: {
     item: kindNouns.skills.one, an: kindNouns.skills.a, copy: 'folder',
-    shared: 'Its whole folder is the same in every tool: every file, and which can run.',
+    shared: 'Every tool it is on in gets the same folder: every file as it is, and its scripts still runnable.',
     // A skill's folder is the same in every tool: no part of it stays one tool's own.
     own: () => '',
   },
@@ -81,8 +81,12 @@ export type Place = 'on' | 'off' | 'found';
 /** The item when it is in the library (a deleted one is not: what a harness holds of it is found). */
 export const inLibrary = (item: LibraryItem | undefined) => (item && !item.deleted ? item : undefined);
 export const placeOf = (item: LibraryItem | undefined): Place => { const inLib = inLibrary(item); return !inLib ? 'found' : inLib.on ? 'on' : 'off'; };
-/** On, and kept out of some of the home's harnesses by the person (`tools`): partial, which the row and its switch say. */
-export const isPartial = (item: LibraryItem | undefined, tools: readonly string[]) => placeOf(item) === 'on' && item!.except.some(tool => tools.includes(tool));
+/**
+ * On, and kept out of some of the home's harnesses by the person (`tools`), or (`row` given) switched off in some of them by
+ * their own settings: partial, which the row and its switch say.
+ */
+export const isPartial = (item: LibraryItem | undefined, tools: readonly string[], row?: LibraryRow) =>
+  placeOf(item) === 'on' && (item!.except.some(tool => tools.includes(tool)) || (!!row && tools.some(tool => row.switched?.[tool])));
 
 /**
  * What one harness has of an item, as its mark and its line say it, from the plan:
@@ -210,7 +214,8 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
   if (place === 'found') {
     const differ = needsChoice(row, item) ? ', with different copies' : '';
     if (!canTakeIn(row)) return 'Not in Central Knot · its copy can’t be read for sure (see below), so it can’t be taken in until it can.';
-    return `Not in Central Knot · ${foundWhere(row, item, tools)}${differ}. Turn it on to take it in and put it in every tool.`;
+    const below = where('cannot').length ? ' (see below)' : '';
+    return `Not in Central Knot · ${foundWhere(row, item, tools)}${differ}. Turn it on to ${takeInWhere(row, item, tools)}${below}.`;
   }
   const ownSaid = own.length ? ` ${sentence(named(own, tools))} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there.` : '';
   if (place === 'off') return `Off · in Central Knot only. Turn it on to put it in every tool.${ownSaid}`;
@@ -222,7 +227,8 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
   const gets = where('gets-it').filter(tool => !waitsForEdit(tool)), out = where('kept-out', 'leaving'), cannot = where('cannot');
   const switched = tools.filter(tool => row.switched?.[tool] && !out.includes(tool));
   const another = where('another-way').filter(tool => wantedIn(item!, tool as HarnessId));
-  const onIn = tools.filter(tool => ['current', 'edited'].includes(harnessIs(row, item, tool)) || (harnessIs(row, item, tool) === 'gets-it' && waitsForEdit(tool)));
+  // A tool whose own switch has it off doesn't load it: it is no tool it is on in (the parts below say it).
+  const onIn = tools.filter(tool => !row.switched?.[tool] && (['current', 'edited'].includes(harnessIs(row, item, tool)) || (harnessIs(row, item, tool) === 'gets-it' && waitsForEdit(tool))));
   const edit = row.plan?.takeIn;
   const parts = [`On in ${named(onIn, tools)}${cannot.length ? ' only' : ''}`,
     edit ? `${toolName(edit)}’s edit becomes the current version when sync runs` : '',
@@ -242,7 +248,7 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
 export function switchLabel(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], question?: 'open' | 'closed'): string {
   const name = row.name ?? row.key, place = placeOf(item);
   if (place === 'on') {
-    const out = item!.except.filter(tool => tools.includes(tool)).length;
+    const out = notOnIn(row, item, tools).length;
     return `${name}: on${out ? ` in ${tools.length - out} of ${tools.length} tools` : ''}. Click to take it out of every tool; Central Knot keeps it.`;
   }
   const own = harnessesWhere(row, item, tools, 'own-copy');
@@ -253,8 +259,24 @@ export function switchLabel(row: LibraryRow, item: LibraryItem | undefined, tool
   const ask = question === 'open' ? 'close the question' : 'choose which copy every tool uses';
   if (question) return `${name}: not in Central Knot, and its copies differ. Click to ${ask}.`;
   if (!canTakeIn(row)) return `${name}: not in Central Knot, and its copy can’t be read for sure, so it can’t be taken in yet.`;
-  return `${name}: ${foundWhere(row, item, tools)}, not in Central Knot. Click to take it in and put it in every tool.`;
+  return `${name}: ${foundWhere(row, item, tools)}, not in Central Knot. Click to ${takeInWhere(row, item, tools)}.`;
 }
+
+/**
+ * What taking a found item in does, said only as far as it is true: "take it in and put it in every tool", else the tools it
+ * goes to, and those that can't take it (each line says why). A tool that has it another way gets nothing (foundWhere says so).
+ */
+export function takeInWhere(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]) {
+  const own = harnessesWhere(row, item, tools, 'own-copy'), cannot = harnessesWhere(row, item, tools, 'cannot'), another = harnessesWhere(row, item, tools, 'another-way');
+  if (!cannot.length && !another.length) return 'take it in and put it in every tool';
+  const goes = tools.filter(tool => ![...own, ...cannot, ...another].includes(tool));
+  const can = cannot.length ? `; ${andList(cannot.map(toolName))} can’t take it` : '';
+  return `take it in${goes.length ? ` and put it in ${named(goes, tools)}` : ''}${can}`;
+}
+
+/** The home's harnesses an item that is On doesn't load in: kept out of, or switched off in that harness's own settings. */
+export const notOnIn = (row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]) =>
+  tools.filter(tool => item?.except.includes(tool as HarnessId) || !!row.switched?.[tool]);
 
 /** Whether a found item has a copy to take in: one of a harness's own, or one a harness has another way (a skill's shared copy). */
 export const canTakeIn = (row: LibraryRow) => Object.keys(row.hashes ?? {}).length > 0 || Object.keys(row.anotherWay ?? {}).length > 0;
@@ -332,6 +354,7 @@ export function sentences(words: RowWords) {
     const place = placeOf(item);
     if (place === 'off') return { text: 'in Central Knot only', title: `Central Knot keeps this ${noun} and its versions. No tool has it until you turn it on.` };
     const found = `A tool has this ${noun}; Central Knot doesn’t yet. Turn it on to take it in and put it in every tool.`;
+    if (place === 'found' && !canTakeIn(row)) return { text: 'can’t be taken in yet', title: `Its ${copy} can’t be read for sure; its line in the opened row says why and what to do.` };
     if (place === 'found') return { text: 'not in Central Knot', title: found };
     const out = item!.except.filter(tool => tools.includes(tool)), keptOut = `Kept out of ${andList(out.map(toolName))}. Its switch there, in the opened row, puts it back.`;
     // A tool that can't take it (the kind's view says why: row.cannot) and has no copy is as lasting as one it is kept out
@@ -339,7 +362,7 @@ export function sentences(words: RowWords) {
     const cannot = tools.filter(tool => harnessIs(row, item, tool) === 'cannot' && row.hashes?.[tool] === undefined);
     const can = tools.filter(tool => !cannot.includes(tool) && !out.includes(tool as HarnessId));
     // Partial: on in some of the tools, by the person's choice, and said as such, never as On everywhere.
-    const where = out.length ? `in ${can.length} of ${tools.length} tools · not in ${andList(out.map(toolName))}`
+    const where = out.length ? `in ${can.length} of ${tools.length} tools · kept out of ${andList(out.map(toolName))}`
       : cannot.length ? (can.length ? `${andList(can.map(toolName))} only` : 'in no tool') : '';
     const whereTitle = [...cannot.map(tool => row.cannot![tool]!), out.length ? keptOut : ''].filter(Boolean).join(' ');
     // A tool's own switch that turns it off: said too, so an item switched off everywhere never reads as plainly on.
@@ -358,9 +381,10 @@ export function sentences(words: RowWords) {
       return `${name} is off${left}. Central Knot keeps it, and turning it on puts each ${copy} back as it was.`;
     },
     /** A found item taken in; `use`: the harness whose copy was chosen where they differed. */
-    takenIn(name: string, on: readonly string[], tools: readonly string[], use?: string): string {
+    takenIn(name: string, on: readonly string[], tools: readonly string[], use?: string, another: readonly string[] = []): string {
       const chosen = use ? `, with ${toolName(use)}’s copy` : '', others = use ? ' The other copies are kept as its versions.' : '';
-      return `${name} is in Central Knot now${chosen}, and on in ${named(on, tools)}.${others}`;
+      const way = another.length ? `; ${andList(another.map(toolName))} ${another.length === 1 ? 'has' : 'have'} it another way` : '';
+      return `${name} is in Central Knot now${chosen}, and on in ${named(on, tools)}${way}.${others}`;
     },
     /** One harness's switch: kept out (`out`), or let in again. */
     inHarness(name: string, tool: string, out: boolean, failed: boolean): string {

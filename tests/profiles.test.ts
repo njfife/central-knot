@@ -211,10 +211,9 @@ test('A switch set by hand afterwards is the person’s: profiles let go of it',
     const dev = (await saveProfile(box.context, { name: 'Development', items: ['skill:dev'] })).id!;
     const all = (await saveProfile(box.context, { name: 'Everything', items: ['skill:dev', 'skill:pager', 'mcp:sentry'] })).id!;
     await switchProfile(box.context, dev);
-    // On the Skills page: pager's switch in Claude Code cleared by hand (as main.ts does after it). Clearing has no Undo.
+    // On the Skills page: pager's switch in Claude Code cleared by hand (as main.ts does after it). It is the person's choice
+    // (its Undo, in History, sets the switch again: skills.test.ts), so profiles let go of it.
     await releaseProfileHolds(box.context, switchedByHand([{ key: 'pager' }], (await clearSwitch(box.context, box.tools, 'pager', 'claude-cli')).results));
-    const cleared = (await readHistory(box.context)).filter(event => event.kind === 'switched').at(-1)!;
-    assert.match((await restoreSkill(box.context, box.tools, cleared.id)).stopped ?? '', /nothing left to undo/);
     assert.equal((await readProfiles(box.home)).offByProfile['skill:pager'], undefined);
     // Undo of the switch leaves pager as set by hand, too: a switch cleared on the Skills page is a choice made by hand.
     const switched = (await readHistory(box.context)).find(event => event.kind === 'profile')!;
