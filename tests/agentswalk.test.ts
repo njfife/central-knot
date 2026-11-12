@@ -203,10 +203,11 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
       finally { if (blocked) await readOnly(blocked, false); }
       if (act.name.startsWith('hand') && syncOn && next() < 0.7) {
         trace.push('background pass');
+        // That pass reads each managed harness's file first, then may write or remove it: both are what Central Knot keeps now.
+        const noteOwn = (texts: Record<Tool, string | undefined>) => { for (const tool of tools as Tool[]) { const own = ownOf(tool, texts[tool]); if (own !== undefined) lastOwn[tool] = own; } };
+        noteOwn(await filesOf(box));
         await pass(box, context());
-        // That pass saw each managed harness's file: its own part is what Central Knot keeps now.
-        const seenNow = await filesOf(box);
-        for (const tool of tools as Tool[]) { const own = ownOf(tool, seenNow[tool]); if (own !== undefined) lastOwn[tool] = own; }
+        noteOwn(await filesOf(box));
       }
       last = act.click && !crashed ? done as McpResult : act.app ? undefined : last;
       const after = await filesOf(box), versions = await versionsNow();
