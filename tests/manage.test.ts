@@ -44,7 +44,11 @@ test('The view reports each tool’s copy; neither it nor a catch-up pass with n
     await skill(box.home, CLAUDE, 'twin'); await skill(box.home, COPILOT, 'twin');
     await skill(box.home, CLAUDE, 'plain', 'No frontmatter.\n');
     await skill(box.home, COPILOT, 'cafe', text('café'));
+    const longLine = `A first line ${'that runs on '.repeat(20)}to its end.`;
+    await skill(box.home, CLAUDE, 'wordy', text('wordy', longLine));
     const view = await manageView(ctx(box));
+    // A copy's first line is sent whole: the page decides how much of it a row quotes, and says so when it cuts (copywords.ts shortQuote).
+    assert.equal(view.skills.find(item => item.key === 'wordy')!.copies['claude-cli']!.summary, longLine);
     assert.deepEqual(view.tools, both);
     const only = view.skills.find(item => item.key === 'only-claude')!;
     assert.ok(only.copies['claude-cli'] && !only.copies['copilot-cli']);
@@ -516,10 +520,11 @@ test('A copy another tool could not load is not offered, and choosing it anyway 
     await skill(box.home, CLAUDE, 'loose', 'No frontmatter here.\n');
     await skill(box.home, COPILOT, 'loose', text('loose'));
     const view = await facts(box, 'loose');
-    assert.match(view.choiceBlocks['claude-cli']?.[0]?.reason ?? '', /could not load/);
+    assert.deepEqual(view.choiceBlocks['claude-cli'], [{ tool: 'copilot-cli', reason: 'Copilot CLI will not load a skill with no YAML frontmatter.' }], 'the cause alone, once, the tool named as the page names it');
     assert.deepEqual(view.choiceBlocks['copilot-cli'], []);
     const result = await applyChanges(ctx(box), [{ key: 'loose', managed: true, off: [], use: 'claude-cli' }]);
     assert.equal(result.harnessWrites, 0);
+    assert.equal(result.results[0]?.message, 'Claude Code’s copy can’t be used: Copilot CLI will not load a skill with no YAML frontmatter. Nothing was changed.');
     assert.equal(await readFile(join(box.home, COPILOT, 'loose/SKILL.md'), 'utf8'), text('loose'), 'Copilot keeps the copy it can load');
     assert.equal((await facts(box, 'loose')).managed, false);
   } finally { await box.cleanup(); }

@@ -27,6 +27,7 @@
  *   - cards: two (four 2×2) from 960px, three across from 992px, four across from 2000px;
  *   - an instruction card narrower than 420px gives its path a line of its own;
  *   - a tool card narrower than 440px leaves its folder out of its header, and from 704px puts its facts in two columns;
+ *   - a copy question narrower than 560px puts what each choice says under its name, and from 1280px sits beside its choices;
  *   - the status bar narrower than 1000px uses short facts; its message under 160px becomes a mark.
  * Toolbars have no breakpoint: dom.ts fitBars adapts a .fit-bar only when it overflows (.bar-short, .bar-icons, .bar-wrap).
  */
@@ -563,13 +564,16 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .dock .details-tool-head:not(.details-mcp *) { grid-template-columns: minmax(0, 1fr); gap: 2px; }
 
 /* ---------- A row's details, opened under it ---------- */
-.details { position: relative; display: flex; flex-direction: column; gap: 12px; margin: 0 0 1px; padding: 12px 16px 8px; background: var(--chrome); box-shadow: inset 3px 0 0 var(--control-line), inset 0 -1px 0 var(--line); }
+/* --close-room: what shares the close button's line ends this far short of the details' right edge (the button reaches
+   16px into it, then a gap). */
+.details { --close-room: 28px; position: relative; display: flex; flex-direction: column; gap: 12px; margin: 0 0 1px; padding: 12px 16px 8px; background: var(--chrome); box-shadow: inset 3px 0 0 var(--control-line), inset 0 -1px 0 var(--line); }
 .details-differs { box-shadow: inset 3px 0 0 var(--warning), inset 0 -1px 0 var(--line); }
-/* In the dock and the Files view the details are the panel's whole content: no band of their own (matrix.ts details). */
-.details-bare { margin: 0; padding: 0; background: none; box-shadow: none; }
+/* In the dock and the Files view the details are the panel's whole content: no band of their own and no close button, so
+   no room is kept for one (matrix.ts details). */
+.details-bare { --close-room: 0px; margin: 0; padding: 0; background: none; box-shadow: none; }
 .details-close { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-faint); cursor: pointer; }
 .details-close:hover { background: var(--hover); color: var(--ink); }
-.details-head { display: flex; flex-direction: column; gap: 2px; padding-right: 28px; }
+.details-head { display: flex; flex-direction: column; gap: 2px; padding-right: var(--close-room); }
 .details-head:empty { display: none; }
 .details-status { font-size: 12px; font-weight: 500; color: var(--ink); }
 .details-description { max-width: var(--measure); font-size: 12px; color: var(--ink-soft); }
@@ -618,25 +622,92 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .details-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 6px; }
 .details-actions > .text-action { padding-left: 0; padding-right: 0; }
 
-/* Differing copies: the question, then one card per copy, each saying what choosing it does. */
-.compare-title { display: flex; align-items: center; gap: 8px; margin: 2px 0 10px; font-size: 12.5px; }
+/* ---------- The copy question (matrix.ts compareChoices) ---------- */
+/*
+ * What an item's details hold while its copies differ: the question and its note, the copies as the rows of one list,
+ * then Read both copies and, for an agent, the copies in full. Each row is one button, in three columns every row shares:
+ * whose copy it is | its quote, with what choosing it does under it | Use this copy.
+ * Three layouts, by the width of the question's own box (.details-differs: under a table row, or in the Files view's pane):
+ *   - a box under 560px, as the Files view's pane is on most windows: a row puts whose copy and Use this copy on one line,
+ *     and what it says under both;
+ *   - 560px to 1279px: the question, its note, the list, Read both copies, the copies in full, one under the other;
+ *   - from 1280px (under a table row, that is a window of about 1530px with the sidebar open): the question, its note and
+ *     Read both copies in a column beside the list, whose first row is level with the question; the copies in full open
+ *     under the list.
+ * The list spans the width it is given at every size, and so do the copies in full; only the words keep to a column.
+ */
+/* The question's own box: the width the three layouts go by. */
+.details-differs { container: compare / inline-size; }
+/* --row-top: how far under the list's top edge its first row's words start (the list's border, then the row's padding). */
+.compare-block { --row-top: 10px; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: "title" "note" "choices" "read" "copies"; }
+.compare-title { grid-area: title; display: flex; align-items: center; gap: 8px; margin: 2px 0 10px; padding-right: var(--close-room); font-size: 12.5px; }
 .compare-title > span { flex: 1 1 auto; }
-.details-differs .compare-title { padding-right: 28px; }
-.compare-note { margin: -4px 0 8px; font-size: 12px; color: var(--ink-soft); }
-.compare-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px; }
-/* Read both copies sits with the copies, under them. */
-.text-action.compare-read { align-self: flex-start; margin: 8px 0 0 -6px; font-size: 12.5px; }
-.version { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px; padding: 10px 12px; text-align: left; border-radius: 8px; border: 1px solid var(--control-line); background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; }
-.version:hover { border-color: var(--accent); }
-.version-head { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.compare-note { grid-area: note; margin: -4px 0 8px; font-size: 12px; color: var(--ink-soft); text-wrap: pretty; }
+/* The name column is as wide as its longest name, up to two fifths of the list, so the quote keeps the larger part. */
+.compare-choices { grid-area: choices; display: grid; grid-template-columns: [who] fit-content(40%) [says] minmax(0, 1fr) [use] max-content; column-gap: 20px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.text-action.compare-read { grid-area: read; justify-self: start; margin: 8px 0 0 -6px; font-size: 12.5px; }
+/*
+ * An agent's copies in full, as wide as the list, in equal shares: all side by side where every one gets --copy-least
+ * (about 63 characters a line) or more, otherwise all one under the other, each as wide as the list; never some beside
+ * each other and one under. A box wider than a file's reading measure (.content's 120ch) keeps its lines to that measure:
+ * its right padding takes the rest.
+ */
+.compare-copies { --copy-least: 480px; --copy-gap: 12px; grid-area: copies; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px var(--copy-gap); margin: 8px 0 0; max-height: 40vh; overflow: auto; overscroll-behavior: contain; }
+/* A copy's basis is nothing when all of them fit on one line, which they then share, and far wider than the line when
+   they don't, so each takes a line of its own. */
+.compare-copies > .content-block { flex: 1 1 calc((sibling-count() * (var(--copy-least) + var(--copy-gap)) - var(--copy-gap) - 100%) * 999); min-width: 0; }
+/* The gap spaces them, side by side or stacked, in place of the margin stacked files have between them (.content-block). */
+.compare-copies > .content-block + .content-block { margin-top: 0; }
+.compare-copies .content { max-width: none; padding-right: max(12px, 100% - 120ch + 12px); }
+/*
+ * A row. The pointer over it lights Use this copy and nothing else, so it reads as that button, not as a table row that
+ * opens; keyboard focus rings that same button, once. A row that can't be clicked (a home that can't be written) lights nothing.
+ */
+.version { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start; padding: calc(var(--row-top) - 1px) 12px; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.version:first-child { border-radius: 7px 7px 0 0; }
+.version:last-child { border-bottom: 0; border-radius: 0 0 7px 7px; }
+.version:not(:disabled):hover .version-cta { border-color: var(--accent); color: var(--accent); }
+.version:focus-visible { outline: none; }
+.version:focus-visible .version-cta { outline: 2px solid var(--focus); outline-offset: 1px; }
+.version:disabled { cursor: default; }
+.version-who { grid-column: who; }
+.version-says { grid-column: says; }
+.version-who, .version-says { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+/* A mark before words is a line high, so it stays on the first line when the words wrap (a joint name, a long reason). */
+.version-head, .version-why { display: flex; align-items: flex-start; gap: 6px; }
+.version-head > .brand-mark, .version-why > .icon { height: 1lh; }
+.version-head { font-size: 12.5px; text-wrap: balance; }
+/* Under a name, one line in one style; the copy edited most recently (.version-latest) is its one emphasis. */
 .version-meta, .version-effect { font-size: 11.5px; color: var(--ink-soft); }
-.version-text { font-size: 12px; color: var(--ink); font-style: italic; }
 .version-latest { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); }
-.compare-copies { margin: 8px 0 0; max-height: 40vh; overflow: auto; overscroll-behavior: contain; }
-.version-cta { display: inline-flex; align-self: flex-start; margin-top: auto; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--control-line); background: var(--surface); font-size: 12px; font-weight: 600; color: var(--ink); }
-.version:hover .version-cta, .version:focus-visible .version-cta { border-color: var(--accent); color: var(--accent); }
-.version-blocked { opacity: 0.75; cursor: not-allowed; }
-.version-why { display: flex; gap: 6px; align-items: flex-start; color: var(--ink-soft); }
+.version-text { font-size: 12px; font-style: italic; overflow-wrap: anywhere; }
+/* Where a quote or what choosing does wraps, its last line is not one word alone. */
+.version-text, .version-effect { text-wrap: pretty; }
+/* An MCP entry is not a quote: its kind in plain words, then its command or address upright, in the font of commands. */
+.details-mcp .version-text { font-style: normal; }
+.version-entry-kind { color: var(--ink-soft); }
+.version-command { font-family: var(--mono); font-size: 11.5px; }
+.version-cta { grid-column: use; align-self: center; padding: 3px 10px; border: 1px solid var(--control-line); border-radius: 6px; background: var(--surface); font-size: 12px; font-weight: 600; white-space: nowrap; }
+/* A copy that can't be chosen: why (.version-why) where its quote would be, and no Use this copy. */
+.version.version-blocked { opacity: 0.75; cursor: not-allowed; }
+/* Narrow: two columns, whose copy and Use this copy; what it says takes a second line across both. */
+@container compare (width < 560px) {
+  .compare-choices { grid-template-columns: [who] minmax(0, 1fr) [use] max-content; }
+  .version { row-gap: 4px; }
+  .version-says { grid-column: 1 / -1; grid-row: 2; }
+}
+/* Wide: the words in a column that grows with the window, the list (three times as wide) beside them. */
+@container compare (width >= 1280px) {
+  /* The fourth row takes whatever height the list has over the words, so the words stay together at the top. */
+  .compare-block { grid-template-columns: minmax(300px, 1fr) minmax(0, 3fr); grid-template-rows: auto auto auto 1fr; column-gap: 32px;
+    grid-template-areas: "title choices" "note choices" "read choices" ". choices" ". copies"; }
+  /* The question starts level with the first row's words; the list and the copies under it, not the question, now end
+     short of the close button. */
+  .compare-title { margin-top: var(--row-top); padding-right: 0; }
+  .compare-choices, .compare-copies { margin-right: var(--close-room); }
+  /* Read both copies follows the note directly, where the list did. */
+  .compare-note { margin-bottom: 0; }
+}
 
 /* ---------- Skills: Files and contents (a list beside one skill's detail) ---------- */
 /* The page holds the result strip, then the list beside one skill's pane (.split), which takes the rest of the height. */
@@ -673,12 +744,14 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .files-details, .files-tail { display: flex; flex-direction: column; gap: 12px; }
 .files-details > .details-actions, .files-tail > .details-actions { margin-top: 0; }
 /*
- * A wide pane has two tracks: the file takes the free width, up to a column at the right edge (about a third of the
- * pane) that holds the details, then where each copy is and Delete everywhere, one under the other. The script
- * decides it from the pane's width (matrix.ts settleFilesColumns, data-columns); below that the details sit above the
- * file and the rest below it.
+ * A wide pane has two tracks: the file, and a column at the right edge that holds the details, then where each copy is
+ * and Delete everywhere, one under the other. The file takes 64% of the pane less the gap, until that is more than a
+ * file's box can use (--file-box: .content's max-width, 120 characters of 12px monospace; scripts/e2e.mjs
+ * FILE_COLUMN_BLANK fails if the two drift apart); from there the details take the rest, so no width is left blank
+ * beside them. The script decides it from the pane's width (matrix.ts settleFilesColumns, data-columns); below that
+ * the details sit above the file and the rest below it.
  */
-.detail-column[data-columns="2"] .detail-scroll { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 36%); grid-template-rows: auto 1fr; align-items: start; gap: 12px 32px; }
+.detail-column[data-columns="2"] .detail-scroll { --file-box: 864px; display: grid; grid-template-columns: minmax(0, min(64% - 32px, var(--file-box))) minmax(320px, 1fr); grid-template-rows: auto 1fr; align-items: start; gap: 12px 32px; }
 .detail-column[data-columns="2"] .detail-files { grid-column: 1; grid-row: 1 / span 2; }
 .detail-column[data-columns="2"] .files-details { grid-column: 2; grid-row: 1; }
 .detail-column[data-columns="2"] .files-tail { grid-column: 2; grid-row: 1 / span 2; }

@@ -139,7 +139,7 @@ export const finishCopy = async (source: string, target: string) => chmod(target
 
 /** A file's last-modified time, as the pages show it (ToolCopy.modified); none when it can't be read. */
 export const fileTime = (path: string) => stat(path).then(info => info.mtime.toISOString(), () => undefined);
-/** Gives a file put back by an Undo the edit time it had: it back-dates the real file's modification time, so "Edited most recently" points where it did. A failure is let go. */
+/** Gives a file put back by an Undo the edit time it had: it back-dates the real file's modification time, so the copy question's "most recent" mark points where it did. A failure is let go. */
 export const giveFileTime = async (path: string, at: string | undefined) => { if (at) await utimes(path, new Date(), new Date(at)).catch(() => undefined); };
 
 /** Removes a folder CK owns, even one with read-only folders inside. */

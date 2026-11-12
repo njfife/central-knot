@@ -225,7 +225,10 @@ export interface ToolCopy {
   rootLabel: string;
   lines: number;
   modified: string;
-  /** First line of the skill's body, to tell differing copies apart. */
+  /**
+   * What a copy question quotes to tell differing copies apart (copywords.ts shortQuote shortens it): a skill's first body
+   * line, whole; an agent's description; an MCP entry's "Command · …" or "HTTP · …".
+   */
   summary: string;
   /** Agents: the prompt, so a copy question can say what differs and show the copies side by side. */
   prompt?: string;
@@ -276,8 +279,9 @@ export interface SkillFacts {
   /** Tools whose copy of this managed skill was edited since the last sync and has not spread yet. */
   edited?: HarnessId[];
   /**
-   * For each tool's copy, what stops Apply all from making every tool use it: a differing copy Central Knot does not change,
-   * or a tool that cannot load it. Each names the tool it concerns, so a tool turned off no longer counts.
+   * For each tool's copy, what stops every tool from using it: a differing copy Central Knot does not change, or a tool that
+   * cannot load it. Each has the tool it concerns, so a tool turned off no longer counts, and `reason`: the cause alone, a
+   * sentence naming that tool as the page does (copywords.ts cantUse makes it a row's or a result's sentence).
    */
   choiceBlocks: Partial<Record<HarnessId, { tool: HarnessId; reason: string }[]>>;
   /** Agents: for each tool that cannot hold every field, the With limits label naming what it lacks (TRN-01). */
