@@ -108,8 +108,11 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
       const { row, item, fact } = await seen(box, context());
       const place = placeOf(item), held = item && !item.deleted ? item : undefined;
       const present = (allTools as Tool[]).filter(tool => fact?.copies[tool] !== undefined);
-      /** `app`: Central Knot acts (a click, a pass, a History action), so (a) and (e) are checked. `click`: its result has an Undo. */
-      type Act = { name: string; run: (more?: Partial<ShareContext>) => Promise<unknown>; app?: boolean; click?: boolean };
+      /**
+       * `app`: Central Knot acts (a click, a pass, a History action), so (a) and (e) are checked. `click`: its result has an Undo.
+       * `byHand`: the step changes files by hand itself as well, so no folder is made read-only and no crash comes with it.
+       */
+      type Act = { name: string; run: (more?: Partial<ShareContext>) => Promise<unknown>; app?: boolean; click?: boolean; byHand?: boolean };
       const acts: Act[] = [];
       const add = (weight: number, act: Act) => { for (let count = 0; count < weight; count++) acts.push(act); };
       const clicks = (weight: number, name: string, change: Change) => add(weight, { name, app: true, click: true, run: more => send(change, more) });
@@ -150,7 +153,7 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
       const hidden = pick(tools as Tool[]);
       if (settled && place === 'on' && held && !held.except.includes(hidden) && fact?.copies[hidden]) {
         const folder = join(box.home, files[hidden], '..'), text = (await filesOf(box))[hidden]!;
-        const unseen = (name: string, hide: () => Promise<unknown>, show: () => Promise<unknown>) => add(1, { name: `unseeable: ${name} in ${hidden}`, app: true, run: async () => {
+        const unseen = (name: string, hide: () => Promise<unknown>, show: () => Promise<unknown>) => add(1, { name: `unseeable: ${name} in ${hidden}`, app: true, byHand: true, run: async () => {
           await hide();
           try {
             const done = await pass(box, context()), now = (await seen(box, context())).item;
@@ -165,7 +168,7 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
         unseen('its folder made again', async () => { await rm(folder, { recursive: true }); await mkdir(folder); }, async () => undefined);
         // With a settle window of 2 s: a copy deleted by hand changes nothing inside it.
         const waiting = (now: number) => applyAgents({ ...context(), settleMs: 2000 }, tools, [], { now });
-        add(1, { name: `deleted by hand in ${hidden}, passes inside the settle window`, app: true, run: async () => {
+        add(1, { name: `deleted by hand in ${hidden}, passes inside the settle window`, app: true, byHand: true, run: async () => {
           await rm(fileOf(box, hidden));
           clock += 1e6;
           for (const now of [clock, clock + 1000]) {
@@ -174,7 +177,7 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
           }
         } });
         // Its folder away across three passes: nothing inside the window, then written afresh; the folder that comes back takes its place.
-        add(1, { name: `${hidden}'s folder away across passes`, app: true, run: async () => {
+        add(1, { name: `${hidden}'s folder away across passes`, app: true, byHand: true, run: async () => {
           await rename(folder, `${folder}-away`);
           try {
             clock += 1e6;
@@ -187,8 +190,8 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
       }
 
       const act = pick(acts);
-      const blocked = act.app && !act.name.startsWith('unseeable') && process.getuid?.() !== 0 && next() < 0.12 ? pick(tools as Tool[]) : undefined;
-      const crash = act.app && !blocked && next() < 0.1 ? pick(['before-remove', 'before-rename'] as const) : undefined;
+      const blocked = act.app && !act.byHand && process.getuid?.() !== 0 && next() < 0.12 ? pick(tools as Tool[]) : undefined;
+      const crash = act.app && !act.byHand && !blocked && next() < 0.1 ? pick(['before-remove', 'before-rename'] as const) : undefined;
       trace.push(`${act.name}${blocked ? ` [${blocked} read-only]` : ''}${crash ? ` [crash ${crash}]` : ''}`);
       const before = await filesOf(box), managedBefore = [...tools], entriesBefore = await historyCount(), settledBefore = settled;
       // What the pass of an acting step reads first: each managed harness's own part as it is now.
