@@ -17,7 +17,7 @@
 // libraryrow.ts with librarypages.ts; History's sentences and actions, historyactions.ts.
 import { randomUUID } from 'node:crypto';
 import { readFile, unlink } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { appendHistory, readHistory } from './history.ts';
 import { libraryAction, libraryEntry } from './historyactions.ts';
 import { listed, plan, wantedIn } from './library.ts';
@@ -36,6 +36,9 @@ import { throughPlugin, toolName } from './words.ts';
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const nameOf = (tool: HarnessId) => toolName(tool);
+/** A path as a sentence says it, as the page shows paths (app.ts shownPath): inside the real home from ~, inside another home from "…". */
+const pathWords = (context: ShareContext, path: string) =>
+  (path.startsWith(`${context.home}/`) ? `${context.mode === 'actual' ? '~' : '…'}${path.slice(context.home.length)}` : path);
 /** A skill's first line of body text, which the copy question quotes to tell copies apart. */
 const bodyLine = (content: string) => content.replace(/^﻿?---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/, '').split(/\r?\n/).map(line => line.trim()).find(line => line && !line.startsWith('#')) ?? '';
 
@@ -51,6 +54,8 @@ export interface SkillDisk extends Disk<SkillCopy> {
   ways: Map<string, Partial<Record<HarnessId, Way>>>;
   /** A tool that reads another managed tool's own skills folder (OpenCode reads Claude Code's), and whose. */
   readsFrom: Partial<Record<HarnessId, HarnessId>>;
+  /** Skills whose folder in some tool can't be copied as it is (skillfiles.ts FolderRead uncopied), by key: each a row. */
+  uncopied: Set<string>;
   /** What each tool's plugins bring, by key. */
   through: Map<HarnessId, Map<string, GivenByPlugin>>;
   /** Each skill's SKILL.md as a tool would load it: the current version's, else a copy's (whether a tool would load it). */
@@ -72,7 +77,7 @@ const ownLabel = (tool: HarnessId) => harnesses[tool].skillRoots('', '')[0].labe
 /** Reads each managed tool's skills: its own folder, the folders it also reads, its plugins and its switches. */
 export async function readDisk(context: ShareContext, managed: HarnessId[]): Promise<SkillDisk> {
   const disk: SkillDisk = {
-    byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], outside: new Map(), ways: new Map(), readsFrom: {},
+    byKey: new Map(), unseen: new Map(), uncopied: new Set(), locked: new Map(), problems: [], outside: new Map(), ways: new Map(), readsFrom: {},
     through: await throughPlugins(context, managed, 'skill', itemKey), shapes: new Map(), switches: new Map(), converted: new Map(),
     anotherWay: (item, tool) => anotherWay(disk, managed, item, tool),
     cannotTake: (item, tool) => cannotTake(context, disk, item, tool),
@@ -89,6 +94,7 @@ export async function readDisk(context: ShareContext, managed: HarnessId[]): Pro
     const root = rootOf(context, tool), read = await readSkillsFolder(tool, root, ownLabel(tool));
     const pinned = await rootProblem(context, tool);
     for (const [key, why] of read.unseen) disk.unseen.set(`${tool}:${key}`, why);
+    for (const key of read.uncopied) disk.uncopied.add(key);
     if (pinned) {
       // Its own folder is a link, or another's: every skill in it is one the tool has another way, and nothing is written there.
       disk.locked.set(tool, pinned);
@@ -103,7 +109,7 @@ export async function readDisk(context: ShareContext, managed: HarnessId[]): Pro
     if (locked) disk.locked.set(tool, locked);
     for (const copy of read.copies) add(disk.byKey, copy.key, tool, copy);
     for (const link of read.links) {
-      add(disk.ways, link.key, tool, { why: `${nameOf(tool)} has it through a link in its skills folder (to ${link.linkTo}), which is not Central Knot’s copy.`, path: link.path, take: 'link', linkTo: link.linkTo });
+      add(disk.ways, link.key, tool, { why: `${nameOf(tool)} has it through a link in its skills folder (to ${pathWords(context, resolve(dirname(link.path), link.linkTo))}), which is not Central Knot’s copy.`, path: link.path, take: 'link', linkTo: link.linkTo });
       if (link.copy) add(disk.outside, link.key, tool, link.copy);
     }
   }
@@ -121,7 +127,10 @@ export async function readDisk(context: ShareContext, managed: HarnessId[]): Pro
       const read = await readSkillsFolder(tool, path, label);
       for (const copy of [...read.copies, ...read.links.flatMap(link => (link.copy ? [link.copy] : []))]) {
         const take = landing === shared && sharedTakeable ? 'shared' as const : undefined;
-        add(disk.ways, copy.key, tool, { why: `${nameOf(tool)} also reads a copy at ${path}, which is not Central Knot’s.`, path: copy.directory, take });
+        // This copy, not a link in the tool's own folder, is the way said and taken over: Central Knot's copy in place of
+        // the link would be one too many while the tool still reads this one (library.ts), and go again.
+        if (disk.ways.get(copy.key)?.[tool]?.take === 'link') { delete disk.ways.get(copy.key)![tool]; delete disk.outside.get(copy.key)![tool]; }
+        add(disk.ways, copy.key, tool, { why: `${nameOf(tool)} also reads a copy at ${pathWords(context, path)}, which is not Central Knot’s.`, path: copy.directory, take });
         add(disk.outside, copy.key, tool, copy);
       }
     }
@@ -420,7 +429,8 @@ export function changedFiles(was: Tree, is: Tree): string[] {
 export async function skillsView(context: ShareContext, tools: HarnessId[], notices: SyncNotice[] = []): Promise<LibraryView> {
   const { look, live, problem } = await lookFor(skillKind, context, tools);
   const { library, managed } = look;
-  const keys = [...new Set([...look.disk.byKey.keys(), ...look.disk.outside.keys(), ...live.map(item => item.key)])].sort((first, second) => first.localeCompare(second));
+  // A skill whose folder can't be copied as it is (a link inside, a file it can't read) is a row too, which says why.
+  const keys = [...new Set([...look.disk.byKey.keys(), ...look.disk.outside.keys(), ...look.disk.uncopied, ...live.map(item => item.key)])].sort((first, second) => first.localeCompare(second));
   const items: LibraryFacts[] = [];
   for (const key of keys) items.push(await rowFacts(look, key, live.find(item => item.key === key)));
   const gate = problem ? { state: 'stopped' as const, reason: problem } : await syncGate(context);
@@ -428,10 +438,10 @@ export async function skillsView(context: ShareContext, tools: HarnessId[], noti
   return { tools: managed, items, library: library.items, access: await writeAccess(context), gate, problems, notices };
 }
 
-/** One copy as the page shows it (types.ts ToolCopy): the copy question compares its SKILL.md (its `body`). */
+/** One copy as the page shows it (types.ts ToolCopy): the copy question quotes its first line of body text; Read both copies opens the Files view. */
 const toolCopy = (copy: SkillCopy): ToolCopy => ({
   hash: copy.hash, directory: copy.directory, rootLabel: copy.skill.rootLabel, lines: copy.skill.content.split(/\r?\n/).length, modified: iso(copy.at),
-  summary: bodyLine(copy.skill.content), body: copy.skill.content, writable: true, folder: copy.name, name: copy.skill.name,
+  summary: bodyLine(copy.skill.content), writable: true, folder: copy.name, name: copy.skill.name,
 });
 
 /**
@@ -442,9 +452,9 @@ const toolCopy = (copy: SkillCopy): ToolCopy => ({
 async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefined): Promise<LibraryFacts> {
   const disk = look.disk, slot = disk.byKey.get(key) ?? {}, outside = disk.outside.get(key) ?? {};
   const entries = look.managed.flatMap(tool => (slot[tool] ? [slot[tool]!] : []));
-  // A found skill has a copy somewhere: its own folder's, else one a tool has another way.
+  // A found skill has a copy somewhere: its own folder's, else one a tool has another way, else one that can't be read for sure.
   const first: SkillCopy | undefined = entries[0] ?? Object.values(outside).find(Boolean);
-  const name = item?.name ?? first!.name;
+  const name = item?.name ?? first?.name ?? key;
   const copies: Partial<Record<HarnessId, ToolCopy>> = {};
   for (const copy of entries) copies[copy.tool] = toolCopy(copy);
   // A found skill is asked about as taking it in would leave it: On everywhere, nothing applied yet.

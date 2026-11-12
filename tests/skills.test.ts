@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { chmod, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readHistory } from '../src/history.ts';
-import { harnessIs, placeOf, sentences, libraryWords } from '../src/libraryrow.ts';
+import { canTakeIn, harnessIs, libraryWords, placeOf, sentences, statusLine } from '../src/libraryrow.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
 import { clearSwitch, skillChange, skillsView, takeOver } from '../src/skills.ts';
 import { pruneDeleted } from '../src/skillstore.ts';
@@ -174,6 +174,25 @@ test('A removal never takes content the library hasn’t: an edit made with Auto
   } finally { await box.cleanup(); }
 });
 
+test('A found skill whose only copy can’t be copied as it is (a link inside) is a row that says why, with nothing to take in; a folder with no SKILL.md is no row', async () => {
+  const box = await sandbox();
+  try {
+    await put(box, 'claude-cli');
+    await symlink('SKILL.md', join(folderOf(box, 'claude-cli'), 'alias'));
+    await mkdir(join(box.home, roots['codex-cli'], 'not-a-skill'), { recursive: true });
+    const { fact, item, row } = await seen(box);
+    assert.match(fact!.unseen?.['claude-cli'] ?? '', /can’t be copied as it is/);
+    assert.deepEqual([canTakeIn(row), statusLine(row, item, tools)], [false, 'Not in Central Knot · its copy can’t be read for sure (see below), so it can’t be taken in until it can.']);
+    assert.equal((await seen(box, box.context, 'not-a-skill')).fact, undefined);
+    // Found only where a tool has it another way (the shared folder), it says so, and can be taken in.
+    await rm(folderOf(box, 'claude-cli'), { recursive: true });
+    await mkdir(join(box.home, '.agents/skills/notes'), { recursive: true });
+    await writeFile(join(box.home, '.agents/skills/notes/SKILL.md'), skillText());
+    const shared = await seen(box);
+    assert.deepEqual([canTakeIn(shared.row), statusLine(shared.row, shared.item, tools)], [true, 'Not in Central Knot · Copilot CLI and Codex have it another way. Turn it on to take it in and put it in every tool.']);
+  } finally { await box.cleanup(); }
+});
+
 test('A crash between the steps of a write or a removal leaves no folder read as deleted: the next pass puts it back and finishes', async () => {
   for (const [step, click] of [['before-rename', 'on'], ['mid-replace', 'edit'], ['before-remove', 'off']] as const) {
     const box = await sandbox();
@@ -217,6 +236,12 @@ test('A tool that reads Claude Code’s folder has the skill one way: from Claud
     assert.equal(await readFile(join(folderOf(box, 'opencode-cli'), 'SKILL.md'), 'utf8'), skillText('My own.'));
     const both = await seen(box);
     assert.match(say.harnessLine(both.row, both.item, 'opencode-cli', 'OpenCode'), /has it both ways/);
+    // Kept out of OpenCode, which still reads Claude Code's copy: Claude Code's folder stays, and OpenCode's line says so.
+    await rm(folderOf(box, 'opencode-cli'), { recursive: true });
+    await inTool(box, 'opencode-cli', true);
+    const out = await seen(box);
+    assert.ok(await bytes(folderOf(box, 'claude-cli')));
+    assert.match(say.harnessLine(out.row, out.item, 'opencode-cli', 'OpenCode'), /^Kept out of this tool, but it still has it another way\. OpenCode reads Claude Code’s copy/);
   } finally { await box.cleanup(); }
 });
 
@@ -247,6 +272,25 @@ test('A copy in ~/.agents/skills is not Central Knot’s: the tools that read it
     const versions = (await itemOf(box))!.versions;
     assert.ok(versions.some(version => version.from.how === 'found'), 'what the shared copy held is a version');
     assert.equal((await historyOf(box)).at(-1)?.kind, 'took-over');
+  } finally { await box.cleanup(); }
+});
+
+test('A link to a copy the tool also reads in ~/.agents/skills (as the skills installer leaves them) is said and taken over as that copy: the link goes with it', async () => {
+  const box = await sandbox();
+  try {
+    const shared = join(box.home, '.agents/skills/notes');
+    await mkdir(shared, { recursive: true });
+    await writeFile(join(shared, 'SKILL.md'), skillText('From the installer.'));
+    await symlink('../../.agents/skills/notes', folderOf(box, 'copilot-cli'));
+    await turnOn(box);
+    const { fact } = await seen(box);
+    assert.match(fact!.anotherWay?.['copilot-cli'] ?? '', /^Copilot CLI also reads a copy at .*\.agents\/skills/);
+    assert.deepEqual(fact!.takeOver?.['copilot-cli'], { kind: 'shared', path: shared });
+    assert.equal((await takeOver(box.context, box.tools, 'notes', 'copilot-cli')).stopped, undefined);
+    // The shared copy is gone, so the link led nowhere: Central Knot's copy is in its place, in every tool.
+    assert.equal(await bytes(shared), undefined);
+    for (const tool of tools) assert.equal(await readFile(join(folderOf(box, tool), 'SKILL.md'), 'utf8'), skillText('From the installer.'), tool);
+    assert.equal((await bytes(folderOf(box, 'copilot-cli')))?.[''], undefined, 'a folder, not a link');
   } finally { await box.cleanup(); }
 });
 

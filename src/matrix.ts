@@ -14,7 +14,7 @@ import { getsCopy as getsCopyNext, offPlan, stillOn } from './clickplan.ts';
 import type { IconName } from './icons.ts';
 import { byKey, loadedIn, standing } from './roworder.ts';
 import { cellOf, comparedTools, kindSource, libraryView, needsCopyChoice, type ItemRow, type KindSource, type Tool } from './itemrow.ts';
-import { harnessIs, inLibrary, madeFrom, needsChoice as libraryNeedsChoice, placeOf as libraryPlace, rowClicks, statusLine, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
+import { canTakeIn, harnessIs, inLibrary, madeFrom, needsChoice as libraryNeedsChoice, placeOf as libraryPlace, rowClicks, statusLine, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
@@ -617,10 +617,11 @@ function compareChoices(skill: ItemRow, inFiles = false) {
         h('span.version-effect', {}, choiceEffect(others.map(entry => names[entry]), receiving.map(entry => names[entry])))),
       h(`span.version-cta${lib && group === latest ? '.version-cta-main' : ''}`, { 'aria-hidden': 'true' }, 'Use this copy'));
   };
-  // Comparing comes before choosing: the full copies side by side, a click from the choices (the Files view shows them already).
+  // Comparing comes before choosing: the full copies side by side, a click from the choices (the Files view shows them already;
+  // a kind with one, skills, opens it there).
   const every = compared.length > 2 ? 'Read every copy' : 'Read both copies';
-  const read = inFiles || kind === 'mcp' ? null : smallAction(view.reading === skill.key ? 'Hide the copies' : every, `diff-${skill.key}`, () => { view.reading = view.reading === skill.key ? undefined : skill.key; rerender(); }, '.compare-read');
-  const bodies = lib && view.reading === skill.key
+  const read = inFiles || kind === 'mcp' ? null : lib?.files ? smallAction(every, `diff-${skill.key}`, () => openFiles(skill.key), '.compare-read') : smallAction(view.reading === skill.key ? 'Hide the copies' : every, `diff-${skill.key}`, () => { view.reading = view.reading === skill.key ? undefined : skill.key; rerender(); }, '.compare-read');
+  const bodies = lib?.words.body && view.reading === skill.key
     ? h('div.compare-copies', {}, fileBlocks(`body-${skill.key}`, lib.words.body, compared.map(tool => ({ tool, text: versions[tool]?.body ?? '' })), holders => `${lib.words.body} · ${andList(holders.map(holder => names[holder.tool]))}`, { named: true }))
     : null;
   return h('div.compare-block', {},
@@ -1392,9 +1393,11 @@ function librarySwitch(skill: ItemRow, id: string) {
   const question = isDiffering(skill) ? (view.comparing === skill.key ? 'open' : 'closed') : undefined;
   const label = switchLabel(skill, item, toolList(), question);
   // Partial (kept out of some tools in the opened row): on, drawn apart from on everywhere (style.css .switch-partial).
-  const knob = toggle({ on: place === 'on', mixed: place === 'found', partial: isPartial(item, toolList()), label, onchange: next => flip(skill, next), disabled: !canWrite(), id });
+  // A found item none of whose copies can be read for sure has nothing to take in: its switch waits, saying why.
+  const nothingToTake = place === 'found' && !canTakeIn(skill);
+  const knob = toggle({ on: place === 'on', mixed: place === 'found', partial: isPartial(item, toolList()), label, onchange: next => flip(skill, next), disabled: !canWrite() || nothingToTake, id });
   // The halfway switch says on hover what a click does: it isn't blocked, it takes the item in.
-  if (place === 'found') knob.title = question ? 'Its copies differ: click to choose which one Central Knot takes in' : 'Click to take it into Central Knot and put it in every tool';
+  if (place === 'found' && !nothingToTake) knob.title = question ? 'Its copies differ: click to choose which one Central Knot takes in' : 'Click to take it into Central Knot and put it in every tool';
   return knob;
 }
 
@@ -1420,7 +1423,7 @@ function markOf(skill: ItemRow, tool: Tool): { look: MarkLook; words: string; gl
   const given = throughPluginHere(skill, tool);
   if (given) {
     const on = pluginOnIn(skill).includes(tool);
-    return { look: on ? 'on' : 'off', state: on ? 'plugin' : 'plugin-off', key: on ? 'on' : 'plugin-off', words: `${skill.cannot?.[tool] ?? `${names[tool]} has it through the plugin ${given.plugin}.`}${on ? '' : ' It is turned off there.'}` };
+    return { look: on ? 'on' : 'off', state: on ? 'plugin' : 'plugin-off', key: on ? 'on' : 'plugin-off', words: `${skill.anotherWay?.[tool] ?? skill.cannot?.[tool] ?? `${names[tool]} has it through the plugin ${given.plugin}.`}${on ? '' : ' It is turned off there.'}` };
   }
   const lib = library();
   if (lib) return libraryMark(lib, skill, tool);

@@ -181,6 +181,8 @@ export function sourceWords({ how, harness }: Source): string {
   return { found: `found in ${where}`, chosen: `chosen from ${where}`, edited: `edited in ${where}`, 'was-in': `was in ${where}`,
     pulled: 'pulled from the Git repo', 'made-current': 'made current again', migrated: 'from before Central Knot kept versions' }[how];
 }
+/** A version named in a sentence: "the version edited in Codex", "the version that was in Copilot CLI". */
+export const theVersion = (from: Source) => `the version ${from.how === 'was-in' ? 'that ' : ''}${sourceWords(from)}`;
 
 // ---------- The rule ----------
 

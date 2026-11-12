@@ -7,7 +7,7 @@
 import { foldVersions, madeFrom, versionChange, versionChangeHelp, versionSource } from './libraryrow.ts';
 import { wordDiff, type Line } from './diff.ts';
 import { button, h, icon, type Child } from './dom.ts';
-import { listed, sourceWords, type LibraryItem, type Version, type VersionChange } from './library.ts';
+import { listed, theVersion, type LibraryItem, type Version, type VersionChange } from './library.ts';
 import { dayAndTime, timesApart } from './model.ts';
 
 /**
@@ -38,7 +38,7 @@ function versionRow(view: VersionListView, version: Version, index: number, when
   // The list starts with the current version (library.ts listed), and has each content once.
   const current = index === 0 && version.hash === item.hash;
   const read = view.reading?.index === index ? view.reading : undefined;
-  const which = `the version ${sourceWords(version.from)}, ${dayAndTime(version.at)}`;
+  const which = `${theVersion(version.from)}, ${dayAndTime(version.at)}`;
   const readLabel = read ? 'Hide' : current ? 'Read current' : 'Read';
   const readIt = button({ variant: 'link', size: 'small', label: readLabel, id: `version-read-${id}`, name: `${read ? 'Hide' : 'Read'} ${which}`, onclick: () => view.onRead(index) });
   const makeCurrent = current ? null

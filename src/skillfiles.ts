@@ -79,6 +79,8 @@ export interface FolderRead {
   broken: Map<string, string>;
   /** Why a folder by that key can't be read as a copy for sure, by key; `*`: the whole skills folder. */
   unseen: Map<string, string>;
+  /** Of those, the ones with a skill's SKILL.md that can't be copied as they are (a link inside, a file it can't read): rows of their own. */
+  uncopied: Set<string>;
 }
 
 /** The latest change time (ms) among a folder and everything in it, Finder's and editors' leftovers and a nested .git left out. */
@@ -93,7 +95,7 @@ export async function folderTime(directory: string): Promise<number> {
 }
 
 /** Reads one folder as a copy, or why it can't be one for sure. `rootLabel` names the folder it is in, as the page shows it. */
-export async function readCopy(tool: HarnessId, directory: string, rootLabel: string): Promise<SkillCopy | { unseen: string }> {
+export async function readCopy(tool: HarnessId, directory: string, rootLabel: string): Promise<SkillCopy | { unseen: string; isSkill?: true }> {
   const name = directory.split(sep).at(-1)!, where = `${toolName(tool)}’s copy`;
   try {
     const file = join(directory, 'SKILL.md'), info = await lstat(file).catch(() => undefined);
@@ -104,7 +106,7 @@ export async function readCopy(tool: HarnessId, directory: string, rootLabel: st
     try { parsed = parseSkill(content, name); }
     catch (error) { return { unseen: `${where}’s SKILL.md can’t be read as a skill (${error instanceof Error ? error.message : 'its frontmatter'}). Nothing changes there until it can.` }; }
     const tree = await readTree(directory);
-    if (tree.held) return { unseen: `${where} can’t be copied as it is: ${tree.held}` };
+    if (tree.held) return { unseen: `${where} can’t be copied as it is: ${tree.held}`, isSkill: true };
     const real = await realpath(directory);
     const skill: Skill = { folder: name, ...parsed, path: file, directory, realDirectory: real, rootLabel, content, status: '', ...loadProblems(content, name) };
     return { tool, name, key: itemKey(name), hash: tree.hash, at: await folderTime(directory), directory, skill };
@@ -118,7 +120,7 @@ export async function readCopy(tool: HarnessId, directory: string, rootLabel: st
  * reserves). Two entries whose names differ only by case (a case-sensitive disk) can't be told apart, so both are unseen.
  */
 export async function readSkillsFolder(tool: HarnessId, folder: string, rootLabel: string): Promise<FolderRead> {
-  const read: FolderRead = { copies: [], links: [], broken: new Map(), unseen: new Map() };
+  const read: FolderRead = { copies: [], links: [], broken: new Map(), unseen: new Map(), uncopied: new Set() };
   let entries;
   try { entries = await readdir(folder, { withFileTypes: true }); }
   catch (error) {
@@ -142,7 +144,7 @@ export async function readSkillsFolder(tool: HarnessId, folder: string, rootLabe
       continue;
     }
     const copy = await readCopy(tool, path, rootLabel);
-    if ('unseen' in copy) read.unseen.set(key, copy.unseen); else read.copies.push(copy);
+    if ('unseen' in copy) { read.unseen.set(key, copy.unseen); if (copy.isSkill) read.uncopied.add(key); } else read.copies.push(copy);
   }
   return read;
 }

@@ -34,7 +34,7 @@
 // To add an entry or an action: its kind (or its `cause`) in types.ts HistoryEvent, its sentence in librarySentence, its row
 // in libraryAction, the entry librarypass.ts logItem makes for it, and its case in historypage.ts describe.
 import type { IconName } from './icons.ts';
-import { sourceWords, type LibraryItem } from './library.ts';
+import { theVersion, type LibraryItem } from './library.ts';
 import { asItIs, versionClock, type RowWords } from './libraryrow.ts';
 import type { Change, HarnessId, HistoryEvent } from './types.ts';
 import { andList, toolName, toolsPhrase } from './words.ts';
@@ -87,7 +87,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       // The version as it was first kept says where the content came from; the entry that made it current again doesn't.
       const made = item?.versions.findLast(version => version.hash === event.version), when = made && item && versionClock(item, made);
       if (undid) return { glyph: 'undo-2', text: `Undone: ${when ? `the version from ${when}` : 'the version before'} is current again${also(', in')}.` };
-      return { glyph: 'undo-2', text: `${made ? `The version ${sourceWords(made.from)} (${when})` : 'An earlier version'} was made current${also(', in')}.` };
+      return { glyph: 'undo-2', text: `${made ? `T${theVersion(made.from).slice(1)} (${when})` : 'An earlier version'} was made current${also(', in')}.` };
     }
     case 'deleted': {
       // One with a `winner` is from before the library (a deletion sync spread from a tool): the general sentence says it.

@@ -96,7 +96,7 @@ test('A skill with an internal link can’t be seen for sure: it is not taken in
     const directory = await skill(box.home, CLAUDE, 'has-link');
     await writeFile(join(box.base, 'outside.txt'), 'outside');
     await symlink(join(box.base, 'outside.txt'), join(directory, 'asset'));
-    assert.equal(await facts(box, 'has-link'), undefined, 'a copy that can’t be seen is no row of its own');
+    assert.match((await facts(box, 'has-link'))?.unseen?.['claude-cli'] ?? '', /can’t be copied as it is/, 'its row says why');
     assert.match((await apply(ctx(box), [manage('has-link')])).results[0]?.message ?? '', /No tool has a copy of it to take in/);
     const result = await apply(ctx(box), [manage('has-link')]);
     assert.equal(result.writes, 0);
