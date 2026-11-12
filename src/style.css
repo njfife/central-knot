@@ -1854,6 +1854,33 @@ button.harness-card-main:focus-visible { outline: 0; }
 }
 .tool-mark.mark-off::after { content: ""; position: absolute; left: 3px; right: 3px; top: calc(50% - 0.75px); height: 1.5px; border-radius: 1px; background: var(--ink-soft); transform: rotate(-40deg); }
 .tool-mark.mark-differs, .tool-mark.mark-waits { color: var(--warning); }
-.tool-mark.mark-kept { color: var(--ink-soft); }
 .row-tag.row-tag-differs { color: var(--warning); }
 .details-actions.details-danger { margin-top: 0; }
+
+/* An agent's versions in its opened row (versionlist.ts): one line each, newest first, in the look of the tools' rows above
+   them. Three columns line up down the list: when, where it came from, its actions. Read opens the text under its line. */
+.versions { display: flex; flex-direction: column; gap: 6px; container-type: inline-size; }
+.versions-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin: 0; font-size: 12.5px; }
+.versions-count { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.versions-note { font-size: 12px; color: var(--ink-soft); }
+.version-rows { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr) auto; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.version-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: baseline; column-gap: 16px; row-gap: 6px; padding: 7px 12px; border-bottom: 1px solid var(--line); background: var(--surface); font-size: 12.5px; }
+.version-row:last-child { border-bottom: 0; }
+.version-when { font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.version-from { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; color: var(--ink-soft); }
+.version-row-current .version-from { color: var(--ink); }
+.version-current { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; color: var(--success); }
+.version-same { font-size: 12px; color: var(--ink-faint); }
+.version-actions { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px 14px; }
+.version-actions .btn.link { height: auto; padding: 0; }
+.version-text { grid-column: 1 / -1; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--app); color: var(--ink-soft); font-size: 12px; }
+.version-text-about { margin: 0 0 6px; }
+.version-text-prompt { margin: 0; max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); font-size: 12px; line-height: 18px; color: var(--ink); }
+.versions > .btn.link { align-self: flex-start; height: auto; padding: 0; }
+/* In a narrow pane (the dock) a version's actions keep the first line's end, and where it came from goes under its time. */
+@container (max-width: 520px) {
+  .version-rows { grid-template-columns: minmax(0, 1fr) auto; }
+  .version-row > .version-from { grid-column: 1; grid-row: 2; }
+  .version-row > .version-actions { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+  .version-row > .version-text { grid-row: 3; }
+}

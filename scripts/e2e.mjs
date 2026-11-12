@@ -999,62 +999,84 @@ async function practiceFlow() {
   for (let tries = 0; tries < 20 && !(await a.exists('.sync-notice[data-kind="edit"]')); tries++) await wait(250);
   await fitsAtMinimum(a, 'MCP servers with the edit’s notice and its actions');
 
-  // Agents: each tool's agents on one page. A plain agent is two-way; one with Claude-only fields reaches the others With limits.
+  // Agents: Central Knot holds each agent itself, with its versions (its library), and a harness is where an agent is applied.
+  // An agent a harness has that Central Knot doesn't yet is found: its switch, halfway, takes it in and applies it everywhere.
   await a.click('#nav-agents');
   same('agents from every tool', (await rowKeys(a)).sort(), ['code-reviewer', 'release-notes']);
+  const switchState = key => a.run(`document.querySelector('#switch-${key}').getAttribute('aria-checked')`);
+  const agentRow = key => a.text(`.ov-row[data-key="${key}"]`);
+  same('an agent only a harness has is found: under Found, its switch halfway, said not to be in Central Knot',
+    [await switchState('code-reviewer'), /^Found\s*2/.test((await a.text('[data-section="not-synced"]') ?? '').trim()), /not in Central Knot/.test(await agentRow('code-reviewer') ?? '')], ['mixed', true, true]);
   await a.click('#switch-code-reviewer');
   await a.click('#switch-release-notes');
-  const copilotAgent = readFileSync(join(practice, '.copilot/agents/code-reviewer.agent.md'), 'utf8');
-  check('code-reviewer reached Copilot with name, description and prompt, without Claude-only fields', copilotAgent.includes('description: Reviews a change') && copilotAgent.includes('You are a careful code reviewer.') && !copilotAgent.includes('tools:') && !copilotAgent.includes('model:'), copilotAgent);
+  const reviewerFiles = ['.claude/agents/code-reviewer.md', '.copilot/agents/code-reviewer.agent.md', '.codex/agents/code-reviewer.toml'].map(file => join(practice, file));
+  const [claudeAgent, , codexAgent] = reviewerFiles;
+  const reviewerNow = () => reviewerFiles.map(file => (existsSync(file) ? readFileSync(file, 'utf8') : null));
+  const taken = reviewerNow();
+  check('code-reviewer reached Copilot with name, description and prompt, without Claude Code’s own fields', taken[1].includes('description: Reviews a change') && taken[1].includes('You are a careful code reviewer.') && !taken[1].includes('tools:') && !taken[1].includes('model:'), taken[1]);
   check('release-notes reached Claude Code from Codex', readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Group them as Added, Changed and Fixed.'));
-  check('code-reviewer reached Codex as TOML', readFileSync(join(practice, '.codex/agents/code-reviewer.toml'), 'utf8').includes('developer_instructions = """'));
-  // An agent has no switch of its own in each tool: turning it off stops syncing it and leaves its copies; Undo syncs it again.
-  await a.click('#switch-release-notes');
-  same('turning an agent off stops syncing it; its copies stay, and its switch is halfway (not synced)', [await a.run(`document.querySelector('#switch-release-notes').getAttribute('aria-checked')`), existsSync(join(practice, '.claude/agents/release-notes.md'))], ['mixed', true]);
+  check('code-reviewer reached Codex as TOML', taken[2].includes('developer_instructions = """'));
+  same('taken in, they are On, and the result says where', [await switchOn(a, 'code-reviewer'), /release-notes is in Central Knot now, and on in all 3 tools/.test(await a.text('main') ?? '')], [true, true]);
+  // Off takes the agent out of every harness. Central Knot keeps it: its row stays, off, with its description; On (here the
+  // result's Undo) writes every harness's file back byte for byte, Claude Code's own fields included.
+  await a.click('#switch-code-reviewer');
+  same('Off takes the agent out of every harness; its row stays, off, in Central Knot only, with its description',
+    [reviewerNow(), await switchState('code-reviewer'), /in Central Knot only/.test(await agentRow('code-reviewer') ?? ''), /Reviews a change/.test(await agentRow('code-reviewer') ?? '')], [[null, null, null], 'false', true, true]);
+  check('the result says Central Knot keeps it', /code-reviewer is off: no harness has it\. Central Knot keeps it/.test(await a.text('main') ?? ''), (await a.text('main') ?? '').slice(0, 300));
   await a.click('#outcome-undo');
-  same('and Undo syncs it again', await switchOn(a, 'release-notes'), true);
+  same('Undo turns it on again: every harness’s file is back byte for byte', reviewerNow(), taken);
   await agentCopiesUnderTheList(a, practice);
+  // The opened row: each harness's line with what stays its own, and the agent's versions.
   await a.click('#open-code-reviewer');
-  check('the details name the limits', /can’t hold its tools \(.*model \(.*edits only flow out/.test(await a.text('.details') ?? ''), await a.text('.details'));
+  const versionsShown = () => a.all('.version-row', `e.querySelector('.version-from').textContent`);
+  check('the opened row says which settings stay Claude Code’s own', /Its own settings stay in its file: tools and model/.test(await a.text('.details') ?? ''), await a.text('.details'));
+  same('and lists its versions, the current one marked', await versionsShown(), ['found in Claude CodeCurrent']);
   await a.shot('practice-agents');
-  // One-way edge: an edit in a receiving tool stays there and stops updating (amber), and its row can take the source's copy again.
-  const codexAgent = join(practice, '.codex/agents/code-reviewer.toml');
-  const codexAgentBefore = readFileSync(codexAgent, 'utf8');
-  writeFileSync(codexAgent, codexAgentBefore.replace('description = "', 'description = "Edited in Codex. '));
+  // An edit made in a harness becomes the current version and reaches the others: an agent syncs both ways, whatever fields
+  // its harnesses keep of their own.
+  writeFileSync(codexAgent, taken[2].replace('description = "', 'description = "Edited in Codex. '));
   await a.click('#header-refresh');
-  check('the edited one-way copy stays and shows amber', readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]'));
-  check('Claude Code’s copy was not touched', !readFileSync(join(practice, '.claude/agents/code-reviewer.md'), 'utf8').includes('Edited in Codex.'));
-  // Keep my edit settles it: the mark turns quiet and the warning count goes away; its row can still bring the source back.
-  check('the stopped copy has its own notice with both choices', await a.exists('#stopped-keep-code-reviewer-codex-cli') && await a.exists('#stopped-use-code-reviewer-codex-cli'));
-  check('while its notice shows, the toolbar doesn’t say it again', !(await a.text('.toolbar') ?? '').includes('stopped updating') && !(await a.exists('#go-stopped')), await a.text('.toolbar'));
-  check('the status line leads with the copy that stopped, then where it is on, and no more', /^Codex’s copy stopped updating · on in all 3 tools$/.test((await a.text('.details-status') ?? '').trim()), await a.text('.details-status'));
-  await a.click('#stopped-dismiss-code-reviewer-codex-cli');
-  check('deciding later keeps both choices in the Codex row: Keep its edit, and its Stopped switch for Claude Code’s copy', await a.exists('#stopped-keep-code-reviewer-codex-cli-details') && await a.exists('#sync-code-reviewer-codex-cli') && !(await a.exists('#stopped-use-code-reviewer-codex-cli-details')) && await a.exists('#go-stopped'));
-  await a.click('#stopped-keep-code-reviewer-codex-cli-details');
-  check('keeping the edit is said with an Undo, and the toolbar counts it', /Codex keeps its own edit of code-reviewer/.test(await a.text('main') ?? '') && await a.exists('#outcome-undo-keep') && /Synced · 1 kept edit/.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
-  check('Keep my edit clears the warning and leaves the edit', await a.exists('#cell-code-reviewer-codex-cli[data-state="kept"]') && !(await a.text('.toolbar') ?? '').includes('stopped updating') && readFileSync(codexAgent, 'utf8').includes('Edited in Codex.'));
-  // A second copy stops too (Copilot CLI's): Codex's switch is for Codex alone (main.ts passes resumeIn through).
-  const copilotAgentFile = join(practice, '.copilot/agents/code-reviewer.agent.md');
-  writeFileSync(copilotAgentFile, readFileSync(copilotAgentFile, 'utf8').replace('description: ', 'description: Edited in Copilot. '));
-  await a.click('#header-refresh');
-  for (let tries = 0; tries < 30 && !(await a.exists('#cell-code-reviewer-copilot-cli[data-state="stopped"]')); tries++) await wait(100);
-  check('the second edited copy stops too', await a.exists('#cell-code-reviewer-copilot-cli[data-state="stopped"]'), JSON.stringify(await a.all('[id^=cell-code-reviewer]', 'e.id + "=" + e.dataset.state')));
-  await a.click('#sync-code-reviewer-codex-cli');
-  check('the result says Codex resumed, not that an agent was newly synced', /Codex has Claude Code’s copy of code-reviewer again/.test(await a.text('main') ?? ''), (await a.text('main') ?? '').slice(0, 300));
-  check('it puts Claude Code’s copy back in Codex, at once', !readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && !(await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]')), readFileSync(codexAgent, 'utf8'));
-  check('Codex’s switch leaves Copilot CLI’s stopped copy with its edit', readFileSync(copilotAgentFile, 'utf8').includes('Edited in Copilot.') && await a.exists('#cell-code-reviewer-copilot-cli[data-state="stopped"]'), readFileSync(copilotAgentFile, 'utf8'));
-  check('the result offers Undo, which restores Codex’s edit', await a.exists('#outcome-undo'));
-  await a.click('#outcome-undo');
-  check('Undo puts the edit back with the mark the click cleared: it keeps its edit again', readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && await a.exists('#cell-code-reviewer-codex-cli[data-state="kept"]'), JSON.stringify(await a.all('[id^=cell-code-reviewer]', 'e.id + "=" + e.dataset.state')) + ' ' + (await a.text('main'))?.slice(0, 400));
-  // History's Undo of the same switch puts the mark back too: it is for Codex's copy as it was kept.
-  await a.click('#sync-code-reviewer-codex-cli');
+  for (let tries = 0; tries < 30 && !readFileSync(claudeAgent, 'utf8').includes('Edited in Codex.'); tries++) await wait(100);
+  check('an edit in Codex reaches Claude Code and Copilot CLI, and Claude Code keeps its own fields', reviewerNow().every(text => text.includes('Edited in Codex.')) && readFileSync(claudeAgent, 'utf8').includes('tools:'), readFileSync(claudeAgent, 'utf8'));
+  check('its notice says the edit is the current version now, with Undo', /code-reviewer was edited in Codex; that is its current version now/.test(await a.text('main') ?? '') && await a.exists('[id^="notice-undo-"]'), (await a.text('main') ?? '').slice(0, 300));
+  same('the versions list has both, newest first, the edit current', await versionsShown(), ['edited in CodexCurrent', 'found in Claude Code']);
+  // Read shows a version; Make current applies an earlier one everywhere (main.ts passes the click's `version` through).
+  await a.click('#version-read-code-reviewer-1');
+  for (let tries = 0; tries < 30 && !/You are a careful code reviewer/.test(await a.text('.version-text') ?? ''); tries++) await wait(100);
+  check('Read shows the earlier version’s description and prompt under its line', /^Reviews a change/.test((await a.text('.version-text') ?? '').trim()) && /You are a careful code reviewer/.test(await a.text('.version-text') ?? ''), await a.text('.version-text'));
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await sizeTo(a, width, height);
+    same(`nothing is cut off at ${width}×${height} with an agent’s row open on its versions, one being read`, await a.run(CUT_OFF), []);
+  }
+  await fullSize(a);
+  await a.click('#version-current-code-reviewer-1');
   for (let tries = 0; tries < 30 && readFileSync(codexAgent, 'utf8').includes('Edited in Codex.'); tries++) await wait(100);
+  same('Make current writes the earlier version to every harness, each file as it was', reviewerNow(), taken);
+  same('it is a new version, and every earlier one is kept', (await versionsShown()).length, 3);
+  check('the result names the version and offers Undo', /code-reviewer: the version found in Claude Code, .* is current again, in all 3 tools/.test(await a.text('main') ?? '') && await a.exists('#outcome-undo'), (await a.text('main') ?? '').slice(0, 300));
+  // A harness's own switch keeps the agent out of that harness alone; its Undo puts the same file back.
+  await a.click('#enable-code-reviewer-codex-cli');
+  same('Codex’s own switch takes Codex’s copy out, leaves the others, and marks Codex as kept out', [reviewerNow().map(text => text !== null), await cellState(a, 'code-reviewer', 'codex-cli')], [[true, true, false], 'kept-out']);
+  await a.click('#outcome-undo');
+  same('its Undo puts Codex’s file back as it was', reviewerNow(), taken);
+  // Delete from Central Knot is the one real delete (main.ts passes the click's `deleted` through): out of every harness and
+  // off the page. History restores it, every file as it was.
+  const notesFiles = ['.claude/agents/release-notes.md', '.copilot/agents/release-notes.agent.md', '.codex/agents/release-notes.toml'].map(file => join(practice, file));
+  const notesBefore = notesFiles.map(file => readFileSync(file, 'utf8'));
+  await a.click('#open-release-notes');
+  await a.click('#delete-release-notes');
+  await a.click('#delete-confirm-release-notes');
+  same('Delete from Central Knot takes the agent out of every harness and off the page', [notesFiles.map(file => existsSync(file)), (await rowKeys(a)).includes('release-notes')], [[false, false, false], false]);
   await a.click('#nav-history');
-  const resumeRow = `[...document.querySelectorAll('.history-row[data-kind="chosen"]')].find(row => row.textContent.includes('code-reviewer') && row.querySelector('.history-actions button'))`;
-  await a.run(`${resumeRow}.querySelector('.history-actions button').click()`);
-  for (let tries = 0; tries < 30 && !readFileSync(codexAgent, 'utf8').includes('Edited in Codex.'); tries++) await wait(100);
+  const deletedRow = `[...document.querySelectorAll('.history-row[data-kind="deleted"]')].find(row => row.textContent.includes('release-notes'))`;
+  same('History says it was deleted from Central Knot, and offers Restore', await a.run(`[${deletedRow}.querySelector('.history-about').textContent, ${deletedRow}.querySelector('.history-actions button').textContent]`),
+    ['Deleted from Central Knot and removed from all 3 tools. History keeps it.', 'Restore']);
+  await a.run(`${deletedRow}.querySelector('.history-actions button').click()`);
+  for (let tries = 0; tries < 30 && !notesFiles.every(file => existsSync(file)); tries++) await wait(100);
+  same('Restore puts it back in every harness, each file as it was', notesFiles.map(file => (existsSync(file) ? readFileSync(file, 'utf8') : null)), notesBefore);
   await a.click('#nav-agents');
-  check('History’s Undo of the switch puts the edit back, and it keeps its edit again', readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && await a.exists('#cell-code-reviewer-codex-cli[data-state="kept"]'), JSON.stringify(await a.all('[id^=cell-code-reviewer]', 'e.id + "=" + e.dataset.state')));
+  same('and it is on its page again, on', [(await rowKeys(a)).includes('release-notes'), await switchOn(a, 'release-notes')], [true, true]);
+  await fitsAtMinimum(a, 'Agents');
   await a.click('#nav-skills');
 
   // What a plugin installed whole brings shows on Skills and MCP servers with the plugin's mark, before Plugins was ever
