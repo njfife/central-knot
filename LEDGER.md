@@ -1286,9 +1286,11 @@ This replaces step 1's rule (a harness managed again forgot what was applied the
 - *A copy that can't be read when its tool comes back* keeps what was applied there; once it reads, the table goes on from that (an edit made while the tool was away is then taken in).
 
 **Validation.**
-- `npm test`: see the pull request (each new rule and each moved rule switched off below).
+- `npm test`: 747 tests, about 32 s. The tests that were there pass as they were; the new ones are the model's rows (`tests/library.test.ts`) and, on real files, a tool managed again in each state, a removal held when the copy changed, a copy just written getting the whole settle window, an Off agent's lines, and Pi.
+- The walk on three fresh ranges (`CK_SEED` 210000, 220000 and 230000, each as two halves of 150 seeds: 1,848 walks with the suite's own), clean.
 - Each rule this step added, and a sample of the moved ones (to prove the wiring through `Kind` still reaches them), switched off: 35 in all. 30 failed a named test at once. One was no rule (a line set twice). Of the 4 that survived, one was a redundant line, now deleted (`writeCopy`'s settle clock), and three got tests that fail without them (a removal that finds the copy changed is held, not failed; held only where the agent is wanted; Pi has no agents).
-- The walk, the end-to-end checks and the Mac run: in the pull request.
+- End to end (`scripts/e2e.mjs`, the dev build on Linux): 698 passed, 0 failed. New: a tool uninstalled and back (its folder taken away and put back) with an Off agent edited there meanwhile, read on the Agents page; with step 1's rule in its place it fails (the edit became the current version, and On spread it).
+- The Mac run is named in the pull request.
 
 **Follow-ups** (from step 1's list; done here: lifting `logItem` and the clicks with the pass skeleton and the guards; "has it another way" and a time for kinds whose copies have none; one durable rule for a tool managed again; an Off agent whose tool comes back with a different hand-made file of its name).
 - A crash right after History is told and before the record is saved leaves the entry, and the retried pass writes it again: two identical entries with two Undos.
