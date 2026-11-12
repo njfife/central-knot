@@ -488,6 +488,94 @@ if (wanted('agents')) {
   await sizes('agents-many', 'Fourteen more agents: some on, three off, six found; the three sections, each with its count and line');
   await a.run(`document.querySelector('.legend')?.scrollIntoView({ block: 'end' })`);
   await shot(a, 'agents-legend', 'The key at the end of the list: "Kept out", "Off: in Central Knot only", "Can’t take it" among the marks this page uses.');
+
+  // States added in round 3, after the earlier pictures so their numbers stay. The long name heads its opened panel.
+  await openRow(long);
+  await sizes('agents-long-name-open', 'Opened the agent with the long name: the panel’s header holds it, and the list beside it cuts it before any description goes', false, '.details');
+  await closeRow(long);
+
+  // Two copies that differ: the copy question marks the newer one "Newer".
+  writeFileSync(join(practice, '.claude/agents/triage.md'), '---\nname: triage\ndescription: Sorts new issues.\n---\n\nLabel each issue.\n');
+  writeFileSync(join(practice, '.copilot/agents/triage.agent.md'), '---\nname: triage\ndescription: Sorts new issues.\n---\n\nLabel each issue. Close duplicates.\n');
+  savedIn(join(practice, '.claude/agents/triage.md'), -300);
+  await refresh();
+  await a.click('#switch-triage'); await a.settle(); await show('#use-triage-claude-cli');
+  await shot(a, 'agents-choice-two', 'A found agent whose copies differ in two tools, its switch clicked: the newer copy is marked "Newer" and its button is the main one.');
+  await a.click('#use-triage-copilot-cli'); await switchOn('triage');
+
+  // Thirty versions: each edit adds a line.
+  const steps = count => Array.from({ length: count }, (_, step) => `Step ${step + 1}: say what changed since yesterday.`).join('\n') + '\n';
+  claudeFile('standup', 'Writes the daily standup.', steps(1));
+  await refresh();
+  await a.click('#switch-standup'); await switchOn('standup');
+  for (let count = 2; count <= 30; count++) { claudeFile('standup', 'Writes the daily standup.', steps(count)); await refresh(); }
+  await openRow('standup');
+  await shot(a, 'agents-versions-thirty-folded', 'Twenty-nine edits in Claude Code, each adding a line: thirty versions, the newest four shown and one line for the other twenty-six.');
+  await a.click('#versions-all-standup'); await a.settle();
+  await sizes('agents-versions-thirty', 'Clicked "Show 26 earlier versions": all thirty, one line each, every time in one form', false, '.versions');
+  // Read on a version that has words the current one lacks: they are tinted.
+  await a.click('#version-current-standup-25'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  await a.click('#version-read-standup-1'); await waitFor(a, `!!document.querySelector('.version-read .change-added')`, 15000);
+  await sizes('agents-version-read-adds', 'Made the fifth version current, then clicked Read on the one that was current before: the lines it has and the current one lacks are tinted; the header says what differs', false, '.version-read');
+  await a.click('#version-read-standup-1'); await a.settle();
+
+  // Undo of a Make current while the agent is kept out of a tool: that tool stays out.
+  await a.click('#enable-standup-codex-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  await a.click('#version-current-standup-2'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+  await a.click('#outcome-undo'); await a.settle();
+  await shot(a, 'agents-made-current-kept-out-undone', 'Kept standup out of Codex, clicked Make current on an earlier version, then Undo: the version before is current again in Claude Code and Copilot CLI; Codex stays out.');
+  await a.click('#enable-standup-codex-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
+
+  // A tool whose agents folder can't be written: its line says so, and the next pass writes it once it can.
+  chmodSync(join(practice, agentsFolder.codex), 0o555);
+  claudeFile('standup', 'Writes the daily standup.', steps(31));
+  await refresh(); await openRow('standup'); await show('.details');
+  await sizes('agents-folder-locked', 'Codex’s agents folder made read-only, then standup edited in Claude Code: Copilot CLI gets the edit; Codex’s line says Central Knot can’t write in its agents folder', false, '.details');
+  chmodSync(join(practice, agentsFolder.codex), 0o755);
+  await refresh();
+  await closeRow('standup');
+
+  // A version pulled from the Git repo, over a copy found here that differs.
+  const remote = join(scratch, 'agents-remote.git'), author = join(scratch, 'agents-author');
+  const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, '-c', 'user.name=Sam', '-c', 'user.email=sam@example.com', ...args], { stdio: 'ignore' });
+  mkdirSync(remote, { recursive: true });
+  execFileSync('git', ['init', '--quiet', '--bare', '--initial-branch=main', remote]);
+  execFileSync('git', ['clone', '--quiet', remote, author], { stdio: 'ignore' });
+  mkdirSync(join(author, 'agents'), { recursive: true });
+  writeFileSync(join(author, 'agents/retro.md'), '---\nname: retro\ndescription: Runs the team retro.\n---\n\nAsk what went well, what didn’t, and what to try next.\n');
+  git(author, 'add', '-A'); git(author, 'commit', '--quiet', '-m', 'Retro agent'); git(author, 'push', '--quiet', 'origin', 'HEAD:main');
+  claudeFile('retro', 'Runs the team retro.', 'Ask what went well.\n');
+  await a.click('#nav-repo'); await a.settle();
+  await a.run(`(() => { const input = document.querySelector('#repo-url'); input.value = ${JSON.stringify(remote)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#repo-connect');
+  await waitFor(a, `!!document.querySelector('#repo-state') && !/Checking/.test(document.querySelector('#repo-state').textContent)`, 20000); await a.settle();
+  await a.click('#repo-pull');
+  await waitFor(a, `document.body.dataset.busy !== 'true' && !/Checking/.test(document.querySelector('#repo-state')?.textContent ?? '')`, 30000); await a.settle();
+  await a.click('#nav-agents'); await a.settle();
+  await openRow('retro');
+  await sizes('agents-pulled', 'Connected a Git repo with a retro agent, while Claude Code had a different retro of its own, and clicked Pull: retro is on, pulled from the Git repo; Claude Code’s copy is kept as a version, noted against the pulled one', false, '.versions');
+  await closeRow('retro');
+
+  // Restore when an agent of that name exists again.
+  await openRow('triage');
+  await a.click('#delete-triage'); await a.settle();
+  await a.click('#delete-confirm-triage'); await a.settle();
+  writeFileSync(join(practice, '.claude/agents/triage.md'), '---\nname: triage\ndescription: Sorts new issues by hand.\n---\n\nA new triage, made after the old one was deleted.\n');
+  await refresh();
+  await a.click('#nav-history'); await a.settle();
+  await shot(a, 'agents-restore-name-taken-history', 'Deleted triage from Central Knot, then a new triage was made in Claude Code: History still offers Restore on the deletion.');
+  await a.run(`[...document.querySelectorAll('.history-row[data-kind="deleted"]')].find(row => row.textContent.includes('triage'))?.querySelector('.history-actions button')?.click()`);
+  await a.settle();
+  await shot(a, 'agents-restore-name-taken', 'Clicked Restore: the old triage is back in Central Knot and every tool; the new copy found in Claude Code is kept as a version first.');
+  await a.click('#nav-agents'); await a.settle(); await openRow('triage');
+  await shot(a, 'agents-restore-name-taken-open', 'Opened triage after Restore: its versions, the new copy from Claude Code among them, each with Make current.');
+
+  // No agents at all: a fresh Practice copy with its agents' files removed.
+  await fresh();
+  if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
+  for (const folder of Object.values(agentsFolder)) rmSync(join(practice, folder), { recursive: true, force: true });
+  await a.click('#nav-agents'); await refresh();
+  await sizes('agents-none', 'A Practice copy whose tools have no agents: the Agents page says so and what to do');
 }
 
 // ---------- Plugins ----------

@@ -142,9 +142,14 @@ test('The switch says what a click does: off everywhere, on everywhere, take a f
   assert.equal(switchLabel(...withItem({ 'codex-cli': 'x' }, item({ on: false, applied: {} })), tools), 'reviewer: off, in Central Knot only. Click to put it in every tool; Codex has a copy of its own, which is kept as versions first.');
   assert.equal(switchLabel(row({ 'claude-cli': 'a' }), undefined, tools), 'reviewer: in Claude Code, not in Central Knot. Click to take it in and put it in every tool.');
   assert.match(switchLabel(row({ 'claude-cli': 'a', 'codex-cli': 'x' }), undefined, tools, 'closed'), /its copies differ\. Click to choose which copy every tool uses\.$/);
-  assert.deepEqual([placeTag(item(), tools)?.text, placeTag(item({ on: false }), tools)?.text, placeTag(undefined, tools)?.text], [undefined, 'in Central Knot only', 'not in Central Knot']);
+  const all = row({ 'claude-cli': 'b' });
+  assert.deepEqual([placeTag(all, item(), tools)?.text, placeTag(all, item({ on: false }), tools)?.text, placeTag(all, undefined, tools)?.text], [undefined, 'in Central Knot only', 'not in Central Knot']);
   // Kept out of a tool shows on the closed row too, in the words used everywhere else.
-  assert.deepEqual(placeTag(item({ except: ['codex-cli'] }), tools), { text: 'not in Codex', title: 'Kept out of Codex. Its switch there, in the opened row, puts it back.' });
+  assert.deepEqual(placeTag(all, item({ except: ['codex-cli'] }), tools), { text: 'not in Codex', title: 'Kept out of Codex. Its switch there, in the opened row, puts it back.' });
+  // So does a tool that can't take it: the tag says where it can be, its tooltip why.
+  const why = 'Codex can’t store this name (é). Rename it in Claude Code to use it there.';
+  const keptOut = item({ except: ['copilot-cli'] }), cannot = row({ 'claude-cli': 'b' }, { cannot: { 'codex-cli': why } }, keptOut);
+  assert.deepEqual(placeTag(cannot, keptOut, tools), { text: 'Claude Code only', title: `${why} Kept out of Copilot CLI. Its switch there, in the opened row, puts it back.` });
 });
 
 test('A click’s result says what happened, and never claims a harness where it didn’t', () => {

@@ -162,15 +162,19 @@ const harnessesWhere = (row: AgentRow, item: LibraryItem | undefined, tools: rea
  * The tag after an agent's name when it isn't plainly on everywhere: where it stands, or the tools it is kept out of, and (its
  * tooltip) what that means. `tools`: the home's harnesses.
  */
-export function placeTag(item: LibraryItem | undefined, tools: readonly string[]): { text: string; title: string } | undefined {
+export function placeTag(row: AgentRow, item: LibraryItem | undefined, tools: readonly string[]): { text: string; title: string } | undefined {
   const place = placeOf(item);
   if (place === 'off') return { text: 'in Central Knot only', title: 'Central Knot keeps this agent and its versions. No tool has it until you turn it on.' };
   const found = 'A tool has this agent; Central Knot doesn’t yet. Turn it on to take it in and put it in every tool.';
   if (place === 'found') return { text: 'not in Central Knot', title: found };
-  const out = item!.except.filter(tool => tools.includes(tool));
-  if (!out.length) return undefined;
-  const where = andList(out.map(toolName));
-  return { text: `not in ${where}`, title: `Kept out of ${where}. Its switch there, in the opened row, puts it back.` };
+  const out = item!.except.filter(tool => tools.includes(tool)), keptOut = `Kept out of ${andList(out.map(toolName))}. Its switch there, in the opened row, puts it back.`;
+  // A tool that can't take it (agents.ts cannotTake) is as lasting as one it is kept out of: the tag names where it can be.
+  const cannot = tools.filter(tool => harnessIs(row, item, tool) === 'cannot');
+  if (cannot.length) {
+    const can = tools.filter(tool => !cannot.includes(tool) && !out.includes(tool as HarnessId));
+    return { text: can.length ? `${andList(can.map(toolName))} only` : 'in no tool', title: [...cannot.map(tool => row.cannot![tool]!), out.length ? keptOut : ''].filter(Boolean).join(' ') };
+  }
+  return out.length ? { text: `not in ${andList(out.map(toolName))}`, title: keptOut } : undefined;
 }
 
 /** An agent's status in one line: on and where, in Central Knot only, or found in a harness and not in Central Knot yet. */

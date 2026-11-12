@@ -805,17 +805,18 @@ function compareChoices(skill: ItemRow, inFiles = false) {
   const editedAt = groups.map(group => Math.min(...group.map(tool => Date.parse(versions[tool]?.at ?? ''))));
   const last = Math.max(...editedAt);
   const latest = groups.length > 1 && kind !== 'mcp' && editedAt.every(Number.isFinite) && editedAt.filter(at => at === last).length === 1 ? groups[editedAt.indexOf(last)] : undefined;
-  // The line under each name, in one form: the copy's size and when it was edited ("7 lines · edited 2 days ago"), or an MCP
-  // entry's file. It shows on every row or on none: only where it tells the copies apart. The copy edited most recently has the
-  // line's one emphasis.
-  const facts = groups.map(([tool], index) => (versions[tool] ? `${versions[tool]!.lines} · ${Number.isFinite(editedAt[index]) ? `edited ${sinceThen(editedAt[index])}` : versions[tool]!.changed}` : ''));
+  // The line under each name, in one form: the copy's size (where the sizes differ) and when it was edited ("7 lines · edited
+  // 2 days ago"), or an MCP entry's file. It shows on every row or on none: only where it tells the copies apart. The copy
+  // edited most recently has the line's one emphasis.
+  const sizesDiffer = new Set(groups.map(([tool]) => versions[tool]?.lines)).size > 1;
+  const facts = groups.map(([tool], index) => (versions[tool] ? [sizesDiffer ? versions[tool]!.lines : '', Number.isFinite(editedAt[index]) ? `edited ${sinceThen(editedAt[index])}` : versions[tool]!.changed].filter(Boolean).join(' · ') : ''));
   // An agent's copies always say when each was edited, and the newer one is marked: latest wins everywhere else for agents.
   const factsDiffer = kind === 'agents' || !!latest || new Set(facts).size > 1;
   const newest = kind === 'agents' ? (groups.length > 2 ? 'Newest' : 'Newer') : 'most recent';
   const about = (group: Tool[]) => {
     const said = facts[groups.indexOf(group)];
     if (!factsDiffer || !said) return null;
-    return group === latest ? h('span.version-meta.version-latest', {}, icon('pencil-line', 12), `${said} · ${newest}`) : h('span.version-meta', {}, said);
+    return group === latest ? h('span.version-meta.version-latest', {}, `${said} · ${newest}`) : h('span.version-meta', {}, said);
   };
   const choice = (group: Tool[]) => {
     const [tool] = group;
@@ -899,16 +900,16 @@ function openRow(key: string) {
   });
 }
 
-/** An agent's tag after its name, when it isn't plainly on (agentrow.ts placeTag). */
+/** An agent's tag after its name, when it isn't plainly on everywhere (agentrow.ts placeTag). */
 function agentTag(skill: ItemRow) {
-  const tag = kind === 'agents' ? placeTag(itemOf(skill), toolList()) : undefined;
+  const tag = kind === 'agents' ? placeTag(skill, itemOf(skill), toolList()) : undefined;
   return tag ? h('span.row-tag', { title: tag.title }, tag.text) : null;
 }
 
 /**
- * An item's name cell. The name never gives way first: as the column narrows, the description shortens (and in every row
- * at once steps aside, settleDescriptions), a tag after the name wraps out of sight, and only then does the name shorten
- * (style.css .ov-name-fit). Its full text is always in the tooltip. Nothing in it is a control: the row's switch and chevron
+ * An item's name cell. The name gives way last: as the column narrows, the description shortens (and in every row at
+ * once steps aside, settleDescriptions, after any name longer than half its row is cut), a tag after the name wraps out
+ * of sight, and only then does the name shorten (style.css .ov-name-fit). Its full text is always in the tooltip. Nothing in it is a control: the row's switch and chevron
  * are its only ones, so Copies differ is said here, not clicked.
  */
 function nameCell(skill: ItemRow, attention: boolean) {
@@ -1866,7 +1867,9 @@ function agentDelete(skill: ItemRow) {
   }
   const said = agentSaid.deleted(name, item.on);
   const run = () => { view.confirmDelete = undefined; click({ kind, items: [name], changes: [agentClicks.remove(skill, item)], said }); };
-  const now = smallAction('Delete it now', `delete-confirm-${skill.key}`, run, '.text-danger', !canWrite());
+  // Armed, it is still a button (outlined in red); Cancel beside it is a link.
+  const now = button({ variant: 'outline', size: 'micro', label: 'Delete it now', id: `delete-confirm-${skill.key}`, disabled: !canWrite(), onclick: run });
+  now.classList.add('delete-now');
   now.title = `Delete ${name} from Central Knot now. History can restore it.`;
   return h('span.delete-armed', {}, smallAction('Cancel', `delete-cancel-${skill.key}`, disarm), now,
     h('span.delete-armed-note', { id: `delete-note-${skill.key}` }, agentSaid.deleteArmed(state.historyDays ?? defaultHistoryDays)));
@@ -2036,14 +2039,20 @@ const ABOUT_MIN = 90;
 /**
  * A table's descriptions are all shown or all left out, so rows never differ: when the narrowest one has room for fewer
  * than about twelve characters, every row leaves its description out (.no-about); its name's tooltip still has it.
- * A description pushed onto the cell's hidden second line, after a tag or pill that took the room, has none.
+ * A description pushed onto the cell's hidden second line, after a tag or pill that took the room, has none. A name that
+ * takes more than half its row is cut first (.name-cut), so one long name doesn't take every description away.
  * Run after layout (dom.ts afterLayout).
  */
 function settleDescriptions(): void {
+  const short = (about: HTMLElement) => about.offsetTop >= about.offsetHeight || about.clientWidth < ABOUT_MIN;
   for (const table of document.querySelectorAll<HTMLElement>('.ov')) {
     table.classList.remove('no-about');
-    const widths = [...table.querySelectorAll<HTMLElement>('.ov-name-about')].map(about => (about.offsetTop >= about.offsetHeight ? 0 : about.clientWidth));
-    table.classList.toggle('no-about', widths.length > 0 && Math.min(...widths) < ABOUT_MIN);
+    for (const cut of table.querySelectorAll('.name-cut')) cut.classList.remove('name-cut');
+    const abouts = [...table.querySelectorAll<HTMLElement>('.ov-name-about')];
+    for (const cell of abouts.filter(short).map(about => about.parentElement!)) {
+      if (cell.querySelector<HTMLElement>('.ov-name-main')!.offsetWidth > cell.clientWidth / 2) cell.classList.add('name-cut');
+    }
+    table.classList.toggle('no-about', abouts.some(short));
   }
 }
 afterLayout(settleDescriptions);

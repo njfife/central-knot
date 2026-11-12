@@ -450,10 +450,10 @@ async function agentCopiesUnderTheList(a, practice) {
   }
   await a.click('#header-refresh');
   await a.click('#switch-changelog');
-  same('an agent’s rows quote one stretch of a long line, each copy’s own words tinted, with its size and when it was edited under its name', await copyQuestionWords(a), [
-    { quote: '“…change what someone sees. One line each.”', tinted: [], does: 'Replaces Copilot CLI’s copy and Codex’s copy.', under: '3 lines · edited 9 days ago' },
-    { quote: '“…change what someone sees. One line each. Say who asked.”', tinted: ['Say who asked.'], does: 'Replaces Claude Code’s copy and Codex’s copy.', under: '3 lines · edited 5 days ago' },
-    { quote: '“…change what someone sees. One line each. Link the pull request.”', tinted: ['Link the pull request.'], does: 'Replaces Claude Code’s copy and Copilot CLI’s copy.', under: '3 lines · edited 2 days ago · Newest' },
+  same('an agent’s rows quote one stretch of a long line, each copy’s own words tinted, with when it was edited under its name (all are 3 lines, so no size)', await copyQuestionWords(a), [
+    { quote: '“…change what someone sees. One line each.”', tinted: [], does: 'Replaces Copilot CLI’s copy and Codex’s copy.', under: 'edited 9 days ago' },
+    { quote: '“…change what someone sees. One line each. Say who asked.”', tinted: ['Say who asked.'], does: 'Replaces Claude Code’s copy and Codex’s copy.', under: 'edited 5 days ago' },
+    { quote: '“…change what someone sees. One line each. Link the pull request.”', tinted: ['Link the pull request.'], does: 'Replaces Claude Code’s copy and Copilot CLI’s copy.', under: 'edited 2 days ago · Newest' },
   ]);
   await a.click('#diff-changelog');
   check('Read every copy opens each of the three prompts in full', (await a.all('.compare-copies .content', 'e.textContent')).length === 3, await a.text('.details-differs'));
@@ -1051,6 +1051,7 @@ async function practiceFlow() {
   check('Read shows the earlier version’s description and prompt under its line', /Reviews a change/.test(await a.text('.version-read-about') ?? '') && /You are a careful code reviewer/.test(await a.text('.version-read') ?? ''), await a.text('.version-read'));
   for (let tries = 0; tries < 30 && !(await a.exists('.version-read .change-gone')); tries++) await wait(100);
   same('and marks what differs from the current version: the words only the current one has are struck through', await a.all('.version-read .change-gone', 'e.textContent'), ['Edited in Codex.']);
+  same('Read is headed by what differs from the current version', await a.text('.version-read-legend strong'), 'Differs from current in: description');
   check('the prompt reads upright', await a.run(`getComputedStyle(document.querySelector('.version-read-prompt')).fontStyle`) === 'normal');
   for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
     await sizeTo(a, width, height);
@@ -1060,7 +1061,7 @@ async function practiceFlow() {
   await a.click('#version-current-code-reviewer-1');
   for (let tries = 0; tries < 30 && readFileSync(codexAgent, 'utf8').includes('Edited in Codex.'); tries++) await wait(100);
   same('Make current writes the earlier version to every harness, each file as it was', reviewerNow(), taken);
-  same('it is a new version, first, naming the one it was made from; every earlier one is kept', [(await versionsShown()).length, /^made current again · from found in Claude Code/.test((await versionsShown())[0])], [3, true]);
+  same('it is the current version, first, naming the one it went back to, into which that one is folded (one row per content)', [(await versionsShown()).length, /^back to: found in Claude Code, .*Current$/.test((await versionsShown())[0])], [2, true]);
   check('the result names the version and offers Undo', /code-reviewer: the version found in Claude Code, .* is current again, in all 3 tools/.test(await a.text('main') ?? '') && await a.exists('#outcome-undo'), (await a.text('main') ?? '').slice(0, 300));
   // A harness's own switch keeps the agent out of that harness alone; its Undo puts the same file back.
   await a.click('#enable-code-reviewer-codex-cli');
@@ -1081,6 +1082,11 @@ async function practiceFlow() {
   const deletedRow = `[...document.querySelectorAll('.history-row[data-kind="deleted"]')].find(row => row.textContent.includes('release-notes'))`;
   same('History says it was deleted from Central Knot, and offers Restore', await a.run(`[${deletedRow}.querySelector('.history-about').textContent, ${deletedRow}.querySelector('.history-actions button').textContent]`),
     ['Deleted from Central Knot and removed from all 3 tools. History keeps it.', 'Restore']);
+  const editRow = `[...document.querySelectorAll('.history-row[data-kind="edit"]')].find(row => row.textContent.includes('code-reviewer'))`;
+  same('an older edit offers the short "Go back before this", the full sentence its tooltip', await a.run(`[${editRow}.querySelector('.history-actions button').textContent, ${editRow}.querySelector('.history-actions button').title]`),
+    ['Go back before this', 'Make the version from before this change current again, in every tool it is on in']);
+  const whens = await a.all('.history-when', 'e.textContent');
+  check('every History row says its time in one form', whens.every(when => /\d:\d\d/.test(when)) || whens.every(when => /ago$|^just now$/.test(when)), whens);
   await a.run(`${deletedRow}.querySelector('.history-actions button').click()`);
   for (let tries = 0; tries < 30 && !notesFiles.every(file => existsSync(file)); tries++) await wait(100);
   same('Restore puts it back in every harness, each file as it was', notesFiles.map(file => (existsSync(file) ? readFileSync(file, 'utf8') : null)), notesBefore);

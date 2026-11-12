@@ -483,7 +483,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ov-name-text { flex: 0 1 auto; min-width: 3em; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .unmanaged .ov-name-text { font-weight: 400; }
 /* A description shortens beside its name, whole in its tooltip; a table whose narrowest row has room for only a few
-   characters leaves every description out (matrix.ts settleDescriptions), so rows never differ. The name never shortens for it. */
+   characters leaves every description out (matrix.ts settleDescriptions), so rows never differ. A name shortens for it only
+   when it takes more than half its row (.name-cut, below). */
 .ov-name-about { flex: 1 1 0; min-width: 0; color: var(--ink-soft); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .no-about .ov-name-about { display: none; }
 .row-tag ~ .ov-name-about::before { content: "·"; margin-right: 8px; }
@@ -495,6 +496,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ov-name-fit { flex-wrap: wrap; align-content: flex-start; height: 40px; padding-left: 36px; position: relative; }
 .ov-name-fit .row-open { position: absolute; left: 10px; margin: 0; top: 11px; }
 .ov-name-main { flex: 0 1 auto; min-width: 0; height: 40px; display: flex; align-items: center; gap: 8px; }
+/* A name longer than half its row is cut there, before every row's description steps aside (matrix.ts settleDescriptions). */
+.ov-name-fit.name-cut > .ov-name-main { max-width: 50%; }
 .ov-name-fit > .row-tag, .ov-name-fit > .ov-name-about { line-height: 40px; }
 .row-open { display: grid; place-items: center; width: 18px; height: 18px; margin-left: -6px; flex: none; border: 0; background: none; border-radius: 4px; cursor: pointer; color: inherit; }
 .row-open:hover { background: var(--press); }
@@ -1460,6 +1463,8 @@ span.ins-confirm { margin-top: 0; }
 .btn.delete-quiet { color: var(--ink-soft); box-shadow: none; }
 .btn.delete-quiet:hover:not(:disabled), .btn.delete-quiet:focus-visible { color: var(--danger); border-color: color-mix(in oklab, var(--danger) 55%, transparent); }
 .delete-offer-note { min-width: 0; font-size: 12px; color: var(--ink-faint); }
+.btn.delete-now { color: var(--danger); border-color: color-mix(in oklab, var(--danger) 55%, transparent); }
+.btn.delete-now:hover:not(:disabled) { background: color-mix(in oklab, var(--danger) 10%, var(--surface)); }
 .details-outside { display: flex; flex-direction: column; gap: 2px; }
 .details-outside .details-note { overflow-wrap: anywhere; }
 .details-outside > .details-actions { margin-top: 0; }
