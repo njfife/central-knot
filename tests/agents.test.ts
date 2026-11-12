@@ -609,6 +609,12 @@ inBox('With an intact record this app has no memory of, a click stops until an e
   assert.equal((await syncGate(box.context)).state, 'ready');
 });
 
+inBox('A choice of copy sent for an agent already in Central Knot is refused in words, and nothing changes', async box => {
+  await on(box);
+  const done = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: true, use: 'codex-cli', useHash: 'x' }]);
+  assert.deepEqual([done.writes, done.results.map(entry => /in Central Knot already, so there is no copy to choose/.test(entry.message))], [0, [true]]);
+});
+
 inBox('A page read before the agent changed is refused, and nothing is written', async box => {
   await on(box);
   const stale = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], seenManaged: false }]);

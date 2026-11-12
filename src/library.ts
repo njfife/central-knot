@@ -46,12 +46,17 @@
 //   file is written over or removed. A crash in between leaves a version too many, never a content too few, and the next
 //   pass finds H = A and finishes the write or the removal.
 //
-// To put another kind on the library, follow agents.ts: read H for each managed harness (unknown when in doubt), give the
-// library a Shelf for the kind's contents, and carry out `plan` in its order: keep, take in, save; then write and remove.
+// To put another kind on the library, follow agents.ts: read H for each managed harness (`unknown` when in doubt, `held` where
+// it can't be given the item, each with why), and call carryOut with the kind's Hands (its Shelf, its copies, its own parts,
+// History, write and remove). The page reads the same H and the same plan, so its marks never say something of their own.
 //
-// Nothing else is stored. Whether a harness is waiting, can't hold the item or has it another way is worked out at each
-// pass and shown as that harness's mark. A library item never waits for a choice: the copy question exists only when a
-// found item whose copies differ is taken in.
+// Nothing else is stored. Whether a harness can't hold the item (and, for skills and MCP servers, waits or has it another
+// way) is a `held` copy, worked out at each look with its reason and shown as that harness's mark. A library item never
+// waits for a choice: the copy question exists only when a found item whose copies differ is taken in.
+//
+// Still shaped for agents, to settle when skills and MCP servers come: a copy's time (`HarnessCopy.at`, which "latest"
+// compares) is one file's time, and an MCP entry has none of its own; `own` holds a harness's whole file by its hash, where
+// an MCP entry's own part is a fragment of a shared file; `key` compares names as macOS compares file names.
 //
 // Worked examples, one per row of the table: tests/library.test.ts. The same on real files: tests/agents.test.ts.
 import type { HarnessId } from './types.ts';
@@ -76,7 +81,10 @@ export interface LibraryItem {
   key: string;
   /** Its name as written, which its files in the harnesses take. */
   name: string;
-  /** The only item state: On (applied to every managed harness but `except`) or Off (in none). */
+  /**
+   * The only item state a person sets: On (applied to every managed harness but `except`) or Off (in none). A deleted item
+   * keeps it as it was, so Restore only lifts the tombstone (`deleted` comes first: wantedIn).
+   */
   on: boolean;
   /** The current version: the content On applies. */
   hash: string;
@@ -258,4 +266,38 @@ export async function setCurrent<Content>(shelf: Shelf<Content>, item: LibraryIt
   item.versions = [version, ...item.versions];
   item.hash = version.hash;
   await shelf.save();
+}
+
+// ---------- Carrying a plan out ----------
+
+/** What a kind's adapter does for carryOut, besides keeping contents (Shelf). */
+export interface Hands<Content> extends Shelf<Content> {
+  /** A copy `plan` saw present in a harness: its content, by hash, and when its file was last changed (ms). */
+  copy(harness: HarnessId): { hash: string; at: number; content: Content };
+  /** Keeps each harness's own part as it is now (`own`), before anything is written or removed. */
+  keepOwn(): Promise<void>;
+  /** Tells History what is being done, once the record is saved and before any harness file changes. */
+  log(): Promise<void>;
+  write(harness: HarnessId): Promise<void>;
+  remove(harness: HarnessId): Promise<void>;
+}
+
+/**
+ * Carries out one item's plan in the model's order. Version first: each content about to give way is kept, the edit taken in
+ * is made current, the item turns Off where a copy was deleted by hand, each harness's own part is kept, what each harness
+ * holds is noted, the record is saved, and History is told. Disk second: the writes, then the removals. Every kind's adapter
+ * calls this; none orders these steps itself.
+ */
+export async function carryOut<Content>(item: LibraryItem, made: Plan, hands: Hands<Content>) {
+  const versionOf = (harness: HarnessId, from: Source) => { const copy = hands.copy(harness); return [{ hash: copy.hash, at: new Date(copy.at).toISOString(), from }, copy.content] as const; };
+  for (const { harness, from } of made.keep) await keepVersion(hands, item, ...versionOf(harness, from));
+  if (made.takeIn) await setCurrent(hands, item, ...versionOf(made.takeIn, { how: 'edited', harness: made.takeIn }));
+  if (made.turnedOffBy) item.on = false;
+  await hands.keepOwn();
+  for (const harness of made.current) item.applied[harness] = item.hash;
+  for (const harness of made.forget) delete item.applied[harness];
+  await hands.save();
+  await hands.log();
+  for (const harness of made.write) await hands.write(harness);
+  for (const harness of made.remove) await hands.remove(harness);
 }

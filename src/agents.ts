@@ -1,25 +1,27 @@
-// Agents on Central Knot's library: the adapter for one kind. Read library.ts first: it holds the model and the one rule.
-// This module reads what each managed harness holds of an agent (H), asks the library what to do (plan), and carries the
-// answer out. It decides nothing itself. In the order a pass runs (applyAgents):
+// Agents on Central Knot's library: the adapter for one kind. Read library.ts first: it holds the model, the one rule for an
+// item in the library (decide, plan) and the order a plan is carried out in (carryOut). This module decides what can be seen
+// of an agent in each managed harness (H: copiesOf, with the guards), which copy a found agent is taken in from (takeIn,
+// foundCopies) and what Pull brings (pull); it carries the library's answer out by checked writes and removals (share.ts),
+// so a save that lands meanwhile is never lost. In the order a pass runs (applyAgents):
 //
-//   readDisk       each managed harness's agent files; a file that can't be read for sure is `unseen`, never missing
-//   guardFolders   a folder that moved or was made again: what was applied there is forgotten, so nothing reads as deleted
-//   click          what the person asked (On, Off, a harness kept out, a version made current, Delete, Restore, a found
-//                  agent taken in), recorded on the item
-//   syncItem       the library's plan for the item, carried out: versions first, then each harness's file, by checked
-//                  writes and removals (share.ts), so a save that lands meanwhile is never lost
-//   logItem        History's entries for what was done
+//   lookAt         each managed harness's agent files (readDisk; a file that can't be read for sure is unseen, never missing),
+//                  then the guards: a harness not managed, a folder moved, made again or gone (forgetUnmanaged, guardFolders)
+//   pull, click    what Pull brings, and what the person asked (On, Off, a harness kept out, a version made current, Delete,
+//                  Restore, a found agent taken in), recorded on the item
+//   syncItem       the library's plan for the item (from copiesOf), carried out by carryOut
+//   logItem        History's entries for it, written with the record, before any file changes
 //
-// agentsView is the same reading for the Agents page; restoreAgent runs a History entry's action, which is always one of
-// the clicks above (historyactions.ts). Elsewhere: where each thing is kept on disk, agentstore.ts; the harnesses' file
-// formats, agentfiles.ts; an agent's row and the clicks its controls send, agentrow.ts; Convert to skill, agentskill.ts.
+// agentsView is the same reading (lookAt, copiesOf, plan) for the Agents page, so a mark says what a pass will do;
+// restoreAgent runs a History entry's action, which is always one of the clicks above (historyactions.ts). Elsewhere: where
+// each thing is kept on disk, agentstore.ts; the harnesses' file formats, agentfiles.ts; an agent's row and the clicks its
+// controls send, agentrow.ts; Convert to skill, agentskill.ts; the Git repo's Push and Pull, gitrepo.ts (agentsForRepo, pull).
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
 import { agentHash, agentText, agentsFolder, fileFor, isAgentTool, keyOf, nameProblem, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
 import { agentShelf, fileTextFor, keepOwn, openLibrary, readVersion, saveLibrary, type AgentLibrary, type FolderSeen } from './agentstore.ts';
 import { agentAction } from './historyactions.ts';
-import { keepVersion, newItem, plan, setCurrent, wantedIn } from './library.ts';
+import { carryOut, keepVersion, newItem, plan, setCurrent, wantedIn } from './library.ts';
 import type { Copies, HarnessCopy, LibraryItem, Plan, Shelf, Source } from './library.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
 import { throughPlugins } from './plugins.ts';
@@ -275,35 +277,25 @@ async function refusal(context: ShareContext, asked: boolean, resume = false): P
   return undefined;
 }
 
-/** Brings one agent into line with its harnesses: the library's plan, carried out versions first, files second. */
+/** Brings one agent into line with its harnesses: the library's plan, carried out in the library's order (carryOut). */
 async function syncItem(pass: Pass, item: LibraryItem) {
   const slot = pass.disk.byKey.get(item.key) ?? {};
   const fileIn = (harness: HarnessId) => slot[harness as AgentTool]!;
-  const hashBefore = item.hash;
-  const copies = copiesOf(pass, item), made = plan(item, copies);
-  // Version first: each content about to give way is kept, the edit taken in is current, and each harness's file as seen now is
-  // its own part. The item is saved as it will be (the click on it included) before any file changes.
-  for (const { harness, from } of made.keep) {
-    const here = fileIn(harness);
-    await keepVersion(pass.shelf, item, { hash: here.hash, at: iso(here.at), from }, here.agent);
-  }
-  if (made.takeIn) {
-    const edit = fileIn(made.takeIn);
-    await setCurrent(pass.shelf, item, { hash: edit.hash, at: iso(edit.at), from: { how: 'edited', harness: edit.tool } }, edit.agent);
-  }
-  if (made.turnedOffBy) item.on = false;
-  for (const harness of pass.managed) {
-    const here = slot[harness];
-    if (here && copies[harness]?.is === 'present' && item.own[harness] !== here.bytes) await keepOwn(pass.context, item, harness, here.text);
-  }
-  for (const harness of made.current) item.applied[harness] = item.hash;
-  for (const harness of made.forget) delete item.applied[harness];
-  await saveIfChanged(pass);
-  // History's entries go with the record, before any file changes: after a crash from here on, History still has the click.
-  await appendHistory(pass.context, logItem(pass, item, made, hashBefore, slot));
-  // Disk second.
-  for (const harness of made.write) await writeCopy(pass, item, harness as AgentTool, slot[harness as AgentTool]);
-  for (const harness of made.remove) await removeCopy(pass, item, fileIn(harness));
+  const hashBefore = item.hash, copies = copiesOf(pass, item), made = plan(item, copies);
+  await carryOut(item, made, {
+    ...pass.shelf,
+    copy: harness => { const here = fileIn(harness); return { hash: here.hash, at: here.at, content: here.agent }; },
+    // Each harness's file as seen now is its own part (the click on the item is recorded already).
+    keepOwn: async () => {
+      for (const harness of pass.managed) {
+        const here = slot[harness];
+        if (here && copies[harness]?.is === 'present' && item.own[harness] !== here.bytes) await keepOwn(pass.context, item, harness, here.text);
+      }
+    },
+    log: () => appendHistory(pass.context, logItem(pass, item, made, hashBefore, slot)),
+    write: harness => writeCopy(pass, item, harness as AgentTool, slot[harness as AgentTool]),
+    remove: harness => removeCopy(pass, item, fileIn(harness)),
+  });
 }
 
 /** Writes the current version into one harness. What stops it is said, not stored: the next pass tries again. */
@@ -409,6 +401,8 @@ async function click(pass: Pass, change: Change) {
     item.deleted = { at: now() };
     pass.clicked.set(item.key, { kind: 'deleted', fill: 'removed' });
   } else if (change.version) await makeCurrent(pass, item, change.version, refuse);
+  // A copy is chosen only when a found agent is taken in: one in the library is at its current version in every harness.
+  else if (change.use) refuse(`${name} is in Central Knot already, so there is no copy to choose. Make one of its versions current instead.`);
   else turn(pass, item, change);
 }
 
