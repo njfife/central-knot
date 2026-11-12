@@ -9,7 +9,7 @@ import type { HarnessId } from './types.ts';
  * managed again later starts as one with copies of its own: an edit or a deletion made there meanwhile is never spread, whether
  * or not a pass ran while it was out. Run between passes, like any other write to the records.
  * (For agents: its folder is let go, so when the tool is managed again the library wins there, a copy that differs is kept
- * as a version first, and a copy of an agent that is Off is removed: agents.ts guardFolders.)
+ * as a version first, and a copy of an agent that is Off is removed: librarypass.ts guardFolders and library.ts managedAgain.)
  */
 export async function chooseTools(context: ShareContext, tools: HarnessId[]): Promise<{ stopped?: string }> {
   const access = await writeAccess(context);

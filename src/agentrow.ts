@@ -87,7 +87,7 @@ export function harnessLine(row: AgentRow, item: LibraryItem | undefined, tool: 
   }
 }
 
-/** Whether the switch must ask which copy to take in: a found agent whose copies differ (agents.ts foundCopies). A library item never asks. */
+/** Whether the switch must ask which copy to take in: a found agent whose copies differ (librarypass.ts foundCopies). A library item never asks. */
 export const needsChoice = (row: AgentRow, item: LibraryItem | undefined) => !inLibrary(item) && !!row.differs;
 
 /** The agent as it is, as a click that changes nothing: each click below changes one thing of it. */
@@ -96,7 +96,7 @@ function asItIs(row: AgentRow, item: LibraryItem | undefined): Change {
   return { key: row.key, managed: !!inLib?.on, off: inLib ? [...inLib.except] : [], seenManaged: !!inLib?.on };
 }
 
-/** The clicks an agent's controls send. Each is a types.ts Change, which main.ts's `changes` sanitizer passes on field by field to agents.ts click. */
+/** The clicks an agent's controls send. Each is a types.ts Change, which main.ts's `changes` sanitizer passes on field by field to librarypass.ts click. */
 export const agentClicks = {
   /** The row's switch, On: a found agent is taken in (`use`: the copy every harness takes, where they differ); one in the library is applied. */
   on: (row: AgentRow, item: LibraryItem | undefined, use?: string): Change =>

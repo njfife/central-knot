@@ -212,22 +212,36 @@ inBox('A tool managed again, with a click on another agent first: an Off agent w
   }
 });
 
-for (const kept of ['Off', 'kept out of it'] as const) {
+for (const kept of ['Off', 'kept out of it', 'deleted'] as const) {
   inBox(`A tool managed again with another file of the name of an agent that is ${kept}: it is kept as a version, the current one stays, and the file goes`, async box => {
     await on(box);
     const without: HarnessId[] = ['claude-cli', 'copilot-cli'];
     await chooseTools(box.context, without);
     const { row, item } = await seen({ ...box, tools: without });
-    await applyAgents(box.context, without, [kept === 'Off' ? agentClicks.off(row, item) : agentClicks.inHarness(row, item!, 'codex-cli', true)]);
+    const click = { Off: agentClicks.off(row, item), 'kept out of it': agentClicks.inHarness(row, item!, 'codex-cli', true), deleted: agentClicks.remove(row, item) }[kept];
+    await applyAgents(box.context, without, [click]);
     // Codex, out of Central Knot's hands meanwhile, gets a hand-made agent of the same name.
     await write(box, 'codex-cli', codexAgent('Someone else entirely.\n'));
     await chooseTools(box.context, tools);
     assert.deepEqual((await pass(box)).notices, []);
     assert.equal(await readOf(box, 'codex-cli'), undefined);
-    assert.deepEqual(await versions(box), ['Be brief. (found in Claude Code) *', 'Someone else entirely. (was in Codex)']);
+    const record = (await agentsView(box.context, tools)).library!.reviewer;
+    assert.deepEqual([!!record.deleted, record.versions.map(version => [sourceWords(version.from), version.hash === record.hash])],
+      [kept === 'deleted', [['was in Codex', false], ['found in Claude Code', true]]]);
     assert.ok(!(await historyOf(box)).some(event => event.kind === 'edit'), 'no edit was taken in');
   });
 }
+
+inBox('A tool managed again with a copy gone meanwhile turns nothing Off, whatever the settle window', async box => {
+  await on(box);
+  await chooseTools(box.context, ['claude-cli', 'copilot-cli']);
+  await rm(fileOf(box, 'codex-cli'));
+  await chooseTools(box.context, tools);
+  const waiting = { ...box.context, settleMs: 2000 };
+  for (const now of [1000, 9000]) assert.deepEqual((await applyAgents(waiting, tools, [], { now })).notices, []);
+  assert.equal((await itemOf(box))!.on, true);
+  assert.match((await readOf(box, 'codex-cli'))!, /Be brief/);
+});
 
 inBox('Off clicked while a tool’s agents folder has been gone past the settle window: its copy goes when the folder comes back', async box => {
   await on(box);

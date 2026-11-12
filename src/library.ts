@@ -261,8 +261,8 @@ function latestEdit(item: LibraryItem, copies: Copies, verdicts: Map<HarnessId, 
   const at = (harness: HarnessId) => (copies[harness] as { at?: number }).at ?? -Infinity;
   const currentSince = Date.parse(item.versions[currentIndex(item)]?.at ?? '') || 0;
   const counts = [...verdicts].filter(([harness, does]) => does === 'take-in' || (does === 'latest-wins' && at(harness) > currentSince));
-  // Two copies with no time are equal (their difference is NaN): the sort keeps them in the harnesses' order.
-  return counts.map(([harness]) => harness).sort((first, second) => (at(second) - at(first)) || 0)[0];
+  // Two copies with no time compare as NaN, which a sort takes as equal: they stay in the harnesses' order.
+  return counts.map(([harness]) => harness).sort((first, second) => at(second) - at(first))[0];
 }
 
 /**

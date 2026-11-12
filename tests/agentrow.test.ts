@@ -12,7 +12,7 @@ const item = (changes: Partial<LibraryItem> = {}): LibraryItem => ({ ...newItem(
   versions: [{ hash: 'b', at: '2026-11-08T09:20:00.000Z', from: { how: 'found', harness: 'claude-cli' } }], applied: { 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'b' }, ...changes });
 /**
  * The row agents.ts gives the page for `agent` when the harnesses hold `hashes`: for an agent in the library, its plan from
- * those copies (a harness in `cannot` is held, one in `unseen` unknown, as agents.ts copiesOf reads them).
+ * those copies (a harness in `cannot` is held, one in `unseen` unknown, as librarypass.ts copiesOf reads them).
  */
 function row(hashes: AgentRow['hashes'], more: Partial<AgentRow> = {}, agent?: LibraryItem): AgentRow {
   const copyOf = (tool: string): Copies[keyof Copies] => (more.unseen?.[tool] ? { is: 'unknown', why: more.unseen[tool]! } : more.cannot?.[tool] ? { is: 'held', why: more.cannot[tool]! }
@@ -73,7 +73,7 @@ test('A harness that can’t be given a copy, or whose copy can’t be read, say
 });
 
 test('Only a found agent whose copies differ asks which copy; an agent in the library never does', () => {
-  // Whether the found copies differ is agents.ts foundCopies' answer (tests/agents.test.ts has it on real files).
+  // Whether the found copies differ is librarypass.ts foundCopies' answer (tests/agents.test.ts has it on real files).
   const differing = row({ 'claude-cli': 'a', 'codex-cli': 'x' }, { differs: true });
   assert.deepEqual([needsChoice(differing, undefined), needsChoice(differing, item({ on: false })), needsChoice(differing, item({ deleted: { at: 'then' } }))], [true, false, true]);
   assert.equal(needsChoice(row({ 'claude-cli': 'a', 'codex-cli': 'a' }, { differs: false }), undefined), false);

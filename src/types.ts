@@ -293,7 +293,7 @@ export interface SkillFacts {
   choiceBlocks: Partial<Record<HarnessId, { tool: HarnessId; reason: string }[]>>;
   /** Agents: harnesses whose copy can't be seen for sure right now, and why. Nothing changes there until it can. */
   unseen?: Partial<Record<HarnessId, string>>;
-  /** Agents in the library: what the next pass does in each harness (library.ts plan, from agents.ts copiesOf), which the marks say. */
+  /** Agents in the library: what the next pass does in each harness (library.ts plan, from librarypass.ts copiesOf), which the marks say. */
   plan?: Plan;
   /** Agents found in a harness, not in the library: their copies differ, so the switch asks which one every harness takes. */
   differs?: boolean;
@@ -346,7 +346,7 @@ export interface ManageView {
 /**
  * One skill's change for applyChanges. `managed` and `off` always say how it should be managed afterwards: a caller changing only
  * switches or removals passes the skill's current ones (from its SkillFacts), with `seenManaged`, or it changes those too.
- * For an agent (agents.ts click): `managed` is On in Central Knot's library, `off` the harnesses it is kept out of. A field
+ * For an agent (librarypass.ts click): `managed` is On in Central Knot's library, `off` the harnesses it is kept out of. A field
  * added here reaches an engine only once main.ts's `changes` sanitizer copies it.
  */
 export interface Change {

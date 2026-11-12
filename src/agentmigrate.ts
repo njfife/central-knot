@@ -13,7 +13,7 @@
 // - Every content kept under `items/agents/<key>/<hash>/` is a version, and each harness's kept file of the current content is
 //   that harness's own part, so On or Restore writes that very file back.
 // - The record's folder identities (`roots`) and its copies' `away` marks become the library's `folders`, so the first pass's
-//   guards (agents.ts guardFolders) still see a folder that was reset or away before the library: a copy missing from it is
+//   guards (librarypass.ts guardFolders) still see a folder that was reset or away before the library: a copy missing from it is
 //   written again, never read as deleted by hand, and a receive-only copy missing from it is not one deleted in its harness.
 // An agent of which no content is left anywhere gets no item: what its harnesses hold is found, as for one never recorded.
 import { readFile, readdir, stat } from 'node:fs/promises';
