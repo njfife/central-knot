@@ -8,7 +8,7 @@ import { carryOut, decide, isLibraryItem, keepVersion, listed, managedAgain, new
 const has = (hash: string, at = 0): HarnessCopy => ({ is: 'present', hash, at });
 /** A copy with no time of its own (an MCP entry: its time is its whole file's). */
 const untimed = (hash: string): HarnessCopy => ({ is: 'present', hash });
-const none: HarnessCopy = { is: 'absent' }, unknown: HarnessCopy = { is: 'unknown', why: 'it can’t be read' }, held: HarnessCopy = { is: 'held', why: 'it can’t hold this name' };
+const none: HarnessCopy = { is: 'absent' }, unseen: HarnessCopy = { is: 'unseen', why: 'it can’t be read' }, held: HarnessCopy = { is: 'held', why: 'it can’t hold this name' };
 const anotherWay: HarnessCopy = { is: 'held', why: 'a plugin brings it', anotherWay: true };
 const ON = true, OFF = false;
 
@@ -27,8 +27,8 @@ test('Off or kept out, H changed while L = A: H becomes the current version, the
 test('Off or kept out, H changed and L moved on too: the latest wins, then it is removed', () => assert.equal(decide(OFF, 'c', has('b'), 'a'), 'latest-wins'));
 test('Off or kept out, a copy where nothing was applied: a found copy, left alone', () => assert.equal(decide(OFF, 'b', has('x'), undefined), 'found'));
 
-test('H unknown is never H gone: nothing happens there, On or Off, whatever was applied', () => {
-  for (const wanted of [ON, OFF]) for (const applied of ['b', 'a', undefined]) assert.equal(decide(wanted, 'b', unknown, applied), 'nothing');
+test('H unseen is never H gone: nothing happens there, On or Off, whatever was applied', () => {
+  for (const wanted of [ON, OFF]) for (const applied of ['b', 'a', undefined]) assert.equal(decide(wanted, 'b', unseen, applied), 'nothing');
 });
 test('A harness that can’t be given the item (held) is passed over: nothing happens there', () => {
   for (const wanted of [ON, OFF]) for (const applied of ['b', undefined]) assert.equal(decide(wanted, 'b', held, applied), 'nothing');
@@ -125,8 +125,8 @@ test('A harness the person keeps it out of loses its copy; the others stay', () 
 });
 
 test('A copy that can’t be seen changes nothing: no Off, no removal, no write there', () => {
-  assert.deepEqual(plan(item(), { 'claude-cli': has('a'), 'copilot-cli': unknown, 'codex-cli': has('a') }), { ...quiet, current: ['claude-cli', 'codex-cli'] });
-  assert.deepEqual(plan(item({ on: false }), { 'claude-cli': unknown, 'copilot-cli': unknown, 'codex-cli': unknown }), { ...quiet, current: [] });
+  assert.deepEqual(plan(item(), { 'claude-cli': has('a'), 'copilot-cli': unseen, 'codex-cli': has('a') }), { ...quiet, current: ['claude-cli', 'codex-cli'] });
+  assert.deepEqual(plan(item({ on: false }), { 'claude-cli': unseen, 'copilot-cli': unseen, 'codex-cli': unseen }), { ...quiet, current: [] });
 });
 
 test('A harness that has the item another way never turns it Off; once the other way ends, the item is written there afresh', () => {
@@ -215,7 +215,7 @@ test('Managed again changes nothing where nothing was applied, or where the copy
   assert.equal(managedAgain(never, 'codex-cli', has('x')), undefined);
   assert.deepEqual(never.applied, { 'claude-cli': 'a' });
   const unread = item();
-  assert.equal(managedAgain(unread, 'codex-cli', unknown), undefined);
+  assert.equal(managedAgain(unread, 'codex-cli', unseen), undefined);
   assert.equal(unread.applied['codex-cli'], 'a');
   for (const copy of [held, anotherWay]) {
     const without = item();

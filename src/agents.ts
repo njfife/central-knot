@@ -2,7 +2,8 @@
 // in the library), then librarypass.ts (the pass, the same for every kind, and `Kind`, the contract a kind implements).
 // This module is the agents' `Kind` (agentKind) and nothing the pass does itself: where each harness keeps its agents (one
 // file per agent in its agents folder), how a file is read and written in each harness's format (agentfiles.ts), a
-// harness's own part (the rest of its file: agentstore.ts keepOwn), and why a harness can't take an agent (cannotTake).
+// harness's own part (the rest of its file: agentstore.ts keepOwn), and why a harness can't take an agent (agentHeld, and
+// cannotTake for the page).
 // Writes and removals are checked (share.ts), so a save that lands meanwhile is never lost.
 //
 // Around the pass: applyAgents and restoreAgent run it for agents; agentsView is the Agents page's reading (lookFor, copiesOf,
@@ -39,7 +40,7 @@ type AgentLook = Look<SharedAgent, AgentEntry, AgentDisk>;
 async function readDisk(context: ShareContext, managed: HarnessId[]): Promise<AgentDisk> {
   const disk: AgentDisk = {
     byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], through: await agentsThroughPlugins(context, managed),
-    held: (item, tool) => { const why = cannotTake(disk, managed, item, tool, false); return why ? { why } : undefined; },
+    held: (item, tool) => { const why = agentHeld(disk, managed, item, tool); return why ? { why } : undefined; },
   };
   for (const tool of managed as AgentTool[]) {
     const read = await readAgents(context, tool), folder = agentsFolder(context, tool);
@@ -77,21 +78,25 @@ async function agentsThroughPlugins(context: ShareContext, tools: HarnessId[]): 
 }
 
 /**
- * Why a harness can't take the agent, if it can't: the one place that decides it, worked out at each look and never stored.
- * Where it has no copy: a plugin brings the agent there, or its name can't be stored there. Where it has one, or none: its
- * agents folder can't be written. Read by a pass (Disk.held: a held copy where it has none) and by the page (rowFacts: also
- * where the plan writes over or removes its copy). An edit in a folder that can't be written is still read and taken in;
- * only the writes and removals there wait, and the pass's results say so when they fail. A plugin that brings the agent is
- * "has it another way" in the model's terms (library.ts); agents still hold it as can't-take, so nothing they do changes.
+ * Why a harness with no copy can't be given the agent, for an agent's own reasons (Disk.held): a plugin brings the agent
+ * there, or its name can't be stored there. Worked out at each look and never stored. A plugin that brings the agent is "has
+ * it another way" in the model's terms (library.ts); agents still hold it as can't-take, so nothing they do changes.
  */
-function cannotTake(disk: AgentDisk, managed: HarnessId[], item: Pick<LibraryItem, 'key' | 'name'>, tool: HarnessId, hasCopy: boolean): string | undefined {
-  const given = hasCopy ? undefined : disk.through.get(tool)?.get(item.key);
+function agentHeld(disk: AgentDisk, managed: HarnessId[], item: Pick<LibraryItem, 'key' | 'name'>, tool: HarnessId): string | undefined {
+  const given = disk.through.get(tool)?.get(item.key);
   if (given) return throughPlugin(tool, given, 'agent');
-  const why = hasCopy ? undefined : nameProblem(item.name);
+  const why = nameProblem(item.name);
   // Where to rename it: a tool that has it.
   const holder = managed.find(other => disk.byKey.get(item.key)?.[other]);
-  if (why) return `${nameOf(tool)} can’t store this name (${why}). Rename it ${holder ? `in ${nameOf(holder)} ` : ''}to use it there.`;
-  return disk.locked.get(tool);
+  return why && `${nameOf(tool)} can’t store this name (${why}). Rename it ${holder ? `in ${nameOf(holder)} ` : ''}to use it there.`;
+}
+/**
+ * Why a harness can't take the agent, as the page says it (rowFacts): agentHeld where it has no copy, else (or then) its agents
+ * folder can't be written. A pass reads the same: Disk.held, and the folder's lock, which it adds itself (librarypass.ts
+ * copyIn). An edit in a folder that can't be written is still read and taken in; only the writes and removals there wait.
+ */
+function cannotTake(disk: AgentDisk, managed: HarnessId[], item: Pick<LibraryItem, 'key' | 'name'>, tool: HarnessId, hasCopy: boolean): string | undefined {
+  return (hasCopy ? undefined : agentHeld(disk, managed, item, tool)) ?? disk.locked.get(tool);
 }
 
 // ---------- The agents' Kind ----------
@@ -254,7 +259,7 @@ async function rowFacts(look: AgentLook, key: string, item: LibraryItem | undefi
   const tombstone = item ? undefined : look.library.items[key];
   for (const tool of look.managed) {
     const copy = copiesNow?.[tool], touched = made?.write.includes(tool) || made?.remove.includes(tool);
-    if (copy?.is === 'unknown') unseen[tool] = copy.why;
+    if (copy?.is === 'unseen') unseen[tool] = copy.why;
     // Why it can't take the agent (cannotTake): a held copy says it; so does a copy the plan writes over or removes, and a
     // harness a found agent would go to once taken in.
     const why = copy?.is === 'held' ? copy.why : cannotTake(look.disk, look.managed, { key, name }, tool, !!slot[tool]);

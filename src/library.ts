@@ -67,8 +67,8 @@
 // holds whichever pass comes first.
 //
 // Two promises hold the model together:
-// - H unknown is never H gone. A copy the adapter can't see for sure (unreadable, half saved, inside the settle window,
-//   its folder away) is `unknown`, and nothing happens in that harness. Only a copy that is really gone turns an item Off.
+// - H unseen is never H gone. A copy the adapter can't see for sure (unreadable, half saved, inside the settle window,
+//   its folder away) is `unseen`, and nothing happens in that harness. Only a copy that is really gone turns an item Off.
 // - Version first, disk second. A content is stored and recorded as a version (keepVersion, setCurrent) before any harness
 //   file is written over or removed. A crash in between leaves a version too many, never a content too few, and the next
 //   pass finds H = A and finishes the write or the removal.
@@ -84,6 +84,7 @@
 import type { HarnessId } from './types.ts';
 import { toolName } from './words.ts';
 
+/** Every kind of item on the library. A new kind adds its name here first (librarypass.ts's header has the rest of the recipe). */
 export type ItemKind = 'skill' | 'agent' | 'mcp';
 
 /**
@@ -168,10 +169,10 @@ export function sourceWords({ how, harness }: Source): string {
 /**
  * H: what a harness holds of an item now. `at`: when its copy was last changed (ms); absent for a copy with no time of its
  * own (an MCP entry, whose time is its whole file's), which "latest" can't order (latestEdit). Nothing of Central Knot's
- * happens in a harness whose copy is `unknown` (it can't be seen for sure) or `held` (it can't be given the item; with
+ * happens in a harness whose copy is `unseen` (it can't be seen for sure) or `held` (it can't be given the item; with
  * `anotherWay`, it has the item another way: the header says which is which), and `why` says it on the page.
  */
-export type HarnessCopy = { is: 'present'; hash: string; at?: number } | { is: 'absent' } | { is: 'unknown'; why: string }
+export type HarnessCopy = { is: 'present'; hash: string; at?: number } | { is: 'absent' } | { is: 'unseen'; why: string }
   | { is: 'held'; why: string; anotherWay?: true };
 
 /**
@@ -187,7 +188,7 @@ export type Verdict = 'nothing' | 'write' | 'take-in' | 'latest-wins' | 'keep-th
  */
 export function decide(wanted: boolean, current: string, copy: HarnessCopy, applied: string | undefined): Verdict {
   if (copy.is === 'held' && copy.anotherWay) return applied === undefined ? 'nothing' : 'forget';
-  if (copy.is === 'unknown' || copy.is === 'held') return 'nothing';
+  if (copy.is === 'unseen' || copy.is === 'held') return 'nothing';
   if (!wanted) {
     if (copy.is === 'absent') return applied === undefined ? 'nothing' : 'forget';
     if (applied === undefined) return 'found';
@@ -276,7 +277,7 @@ function latestEdit(item: LibraryItem, copies: Copies, verdicts: Map<HarnessId, 
  * with nothing applied (a found copy). A copy that can't be seen leaves A as it is.
  */
 export function managedAgain(item: LibraryItem, harness: HarnessId, copy: HarnessCopy): Version | undefined {
-  if (item.applied[harness] === undefined || copy.is === 'unknown') return undefined;
+  if (item.applied[harness] === undefined || copy.is === 'unseen') return undefined;
   const holds = copy.is === 'present' && item.versions.some(version => version.hash === copy.hash);
   if (copy.is !== 'present' || (item.deleted && !holds)) { delete item.applied[harness]; return undefined; }
   item.applied[harness] = copy.hash;

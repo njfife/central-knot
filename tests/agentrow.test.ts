@@ -15,7 +15,7 @@ const item = (changes: Partial<LibraryItem> = {}): LibraryItem => ({ ...newItem(
  * those copies (a harness in `cannot` is held, one in `unseen` unknown, as librarypass.ts copiesOf reads them).
  */
 function row(hashes: AgentRow['hashes'], more: Partial<AgentRow> = {}, agent?: LibraryItem): AgentRow {
-  const copyOf = (tool: string): Copies[keyof Copies] => (more.unseen?.[tool] ? { is: 'unknown', why: more.unseen[tool]! } : more.cannot?.[tool] ? { is: 'held', why: more.cannot[tool]! }
+  const copyOf = (tool: string): Copies[keyof Copies] => (more.unseen?.[tool] ? { is: 'unseen', why: more.unseen[tool]! } : more.cannot?.[tool] ? { is: 'held', why: more.cannot[tool]! }
     : hashes?.[tool] !== undefined ? { is: 'present', hash: hashes[tool]!, at: 0 } : { is: 'absent' });
   const copies: Copies = Object.fromEntries(tools.map(tool => [tool, copyOf(tool)]));
   return { key: 'reviewer', name: 'reviewer', hashes, ...more, ...(agent && !agent.deleted ? { plan: plan(agent, copies) } : {}) };

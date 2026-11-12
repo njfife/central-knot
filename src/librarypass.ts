@@ -18,8 +18,24 @@
 // go (forgetFolders). What a kind's page shows, and how the Git repo reads it, stay with the kind (agents.ts agentsView,
 // agentsForRepo). History's sentences and actions for a kind's entries are its own (historyactions.ts for agents).
 //
-// To put another kind on the library: implement `Kind` (one object, like agents.ts agentKind), and give its callers its
-// pass (runPass), its Restore (restore) and its page's look (lookFor). The compiler names a member a kind leaves out.
+// Words: a `Kind` is what one kind implements (below); its `Disk` is what it read of the managed harnesses now; a `Look` is
+// one pass's or one page's reading (the Disk with the record, the folders and the settle clock); a `Shelf` (library.ts)
+// stores a version's content and saves the record; `Hands` (library.ts) is what carryOut is given to act with, which
+// syncItem builds from the Kind. A copy that can't be seen for sure is `unseen` (Disk.unseen says why); a `held` copy is
+// one nothing of Central Knot's goes to (Disk.held, and a folder that can't be written: Disk.locked). A pass's result with
+// `outcome: 'held'` (types.ts DestinationResult, the app's word for an action not done this time) is not a held copy.
+//
+// To put another kind on the library (agents are the worked example; the compiler names a member `Kind` lacks):
+// - its name in library.ts ItemKind, and one object implementing `Kind`, like agents.ts agentKind. A kind with no part of
+//   its own per tool has `ownOf` answer undefined and `keepOwn` false;
+// - its callers: runPass for its passes (a click is a plain types.ts Change: `key`, `managed` for On, `off` the tools it is
+//   kept out of), restore for History's actions, lookFor for its page, and forgetFolders from toolchoice.ts chooseTools.
+// Outside the contract, one place each:
+// - its page's rows: what each says and the clicks it sends (agents.ts agentsView and agentrow.ts; matrix.ts draws them);
+// - History's sentences and actions for its entries (historyactions.ts for agents; historypage.ts asks it);
+// - the app's wiring: main.ts (its passes, in the background and on a click through the `changes` sanitizer; its view; a
+//   History action sent on by its key's prefix), preload.ts (the page's calls), types.ts HomeView (its view in the home's),
+//   app.ts (its page: the facts it reads and the call it sends).
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { carryOut, keepVersion, managedAgain, newItem, plan, setCurrent, versionAt, wantedIn } from './library.ts';
@@ -49,16 +65,16 @@ export interface Seen {
 export interface Disk<Entry extends Seen> {
   /** Each item's copies, by key, then harness. */
   byKey: Map<string, Partial<Record<HarnessId, Entry>>>;
-  /** Why a copy can't be seen for sure, by `harness:key` (`harness:*`: the whole folder). Nothing happens there. */
+  /** Why a copy can't be seen for sure, by `harness:key` (`harness:*`: the whole folder): it is `unseen`, and nothing happens there. */
   unseen: Map<string, string>;
   /** Why a harness's folder can't be written now: no copy there can be written or removed (its copies are still read). */
   locked: Map<HarnessId, string>;
   /** What could not be read, in words for the page. */
   problems: string[];
   /**
-   * Why a harness with no copy of the item is held (library.ts HarnessCopy): it can't be given one (a name it can't store, a
-   * folder it can't write), or it has it another way (`anotherWay`: through a plugin, …). Undefined when it can be given it.
-   * Worked out at each look, never stored.
+   * Why a harness with no copy of the item is held (library.ts HarnessCopy), for the kind's own reasons: it can't be given
+   * one (a name it can't store), or it has it another way (`anotherWay`: through a plugin, …). Undefined when it can be given
+   * it. A folder that can't be written is `locked`, which the pass adds itself. Worked out at each look, never stored.
    */
   held(item: Pick<LibraryItem, 'key' | 'name'>, harness: HarnessId): { why: string; anotherWay?: true } | undefined;
 }
@@ -84,7 +100,10 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
   /** A harness's folder for this kind, which the pass guards (gone, moved, made again), and the path of one item's copy in it. */
   folder(context: ShareContext, harness: HarnessId): string;
   pathOf(context: ShareContext, harness: HarnessId, name: string): string;
-  /** Its record: opened (an older one migrated; `persist`: the caller may write it) and saved. A `problem` stops every write. */
+  /**
+   * Its record: opened (an older one migrated; `persist`: the caller may write it; nothing recorded yet: an empty one) and
+   * saved. A `problem` stops every write.
+   */
   open(context: ShareContext, persist?: boolean): Promise<{ library: KindLibrary; problem?: string }>;
   save(home: string, library: KindLibrary): Promise<void>;
   /** A version's content: stored under the item by its hash (storing it again changes nothing), read back, and hashed. */
@@ -98,9 +117,9 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
   /** A copy's content, as a version holds it. */
   contentOf(entry: Entry): Content;
   /**
-   * A harness's own part (library.ts: the part of its copy a version doesn't hold): its text in a copy (undefined for a kind
-   * with none), and keeping that text as the item's own part there (`own`), true when it differs from what was kept. The
-   * caller saves the record.
+   * A harness's own part (library.ts: the part of its copy a version doesn't hold): its text in a copy, and keeping that text
+   * as the item's own part there (`own`), true when it differs from what was kept. The caller saves the record. A kind with
+   * no own part answers undefined, and its keepOwn is never called (`async () => false`).
    */
   ownOf(entry: Entry): string | undefined;
   keepOwn(context: ShareContext, item: LibraryItem, harness: HarnessId, text: string): Promise<boolean>;
@@ -155,7 +174,7 @@ export async function lookFor<C, E extends Seen, D extends Disk<E>>(kind: Kind<C
 export const unseenIn = (disk: Disk<Seen>, tool: HarnessId, key: string) => disk.unseen.get(`${tool}:${key}`) ?? disk.unseen.get(`${tool}:*`);
 
 /**
- * "H unknown is never H gone" for a whole folder, and a harness managed again, on `items` as a pass's clicks left them. A
+ * "H unseen is never H gone" for a whole folder, and a harness managed again, on `items` as a pass's clicks left them. A
  * harness's identity is let go when it stops being managed (keepFolders), so "no identity on record" is a harness managed
  * again, or one seen for the first time. One line per branch, in the order the code takes them:
  * - Not there, and managed again with something applied there: nothing noted, so the folder's arrival runs cameBack.
@@ -206,7 +225,7 @@ async function cameBack(look: AnyLook, tool: HarnessId, shelf?: Shelf<unknown>) 
   const givingWay: { item: LibraryItem; version: Version; content: unknown }[] = [];
   for (const item of Object.values(look.library.items)) {
     const here = look.disk.byKey.get(item.key)?.[tool], unseen = unseenIn(look.disk, tool, item.key);
-    const copy: HarnessCopy = unseen ? { is: 'unknown', why: unseen } : here ? { is: 'present', hash: here.hash, at: here.at } : { is: 'absent' };
+    const copy: HarnessCopy = unseen ? { is: 'unseen', why: unseen } : here ? { is: 'present', hash: here.hash, at: here.at } : { is: 'absent' };
     const version = managedAgain(item, tool, copy);
     if (!version || !here) continue;
     givingWay.push({ item, version, content: look.kind.contentOf(here) });
@@ -221,9 +240,10 @@ async function cameBack(look: AnyLook, tool: HarnessId, shelf?: Shelf<unknown>) 
 
 /**
  * H for each managed harness (library.ts HarnessCopy): the one place that says what a harness holds of an item, read by a
- * pass and by the page. `unknown`, so that nothing happens there: a copy that can't be read for sure, a folder away inside
+ * pass and by the page. `unseen`, so that nothing happens there: a copy that can't be read for sure, a folder away inside
  * the settle window, and a copy missing for less than the settle window (an editor's save moves the file away for a moment).
- * `held`: a harness the item should be in that can't be given a copy, or has it another way (Disk.held).
+ * `held`: a harness the item should be in that can't be given a copy (Disk.held, or its folder is locked), or has it another
+ * way (Disk.held).
  */
 export function copiesOf(look: AnyLook, item: LibraryItem): Copies {
   const slot = look.disk.byKey.get(item.key) ?? {};
@@ -231,14 +251,15 @@ export function copiesOf(look: AnyLook, item: LibraryItem): Copies {
 }
 function copyIn(look: AnyLook, item: LibraryItem, tool: HarnessId, here: Seen | undefined): HarnessCopy {
   const unseen = unseenIn(look.disk, tool, item.key);
-  if (unseen) return { is: 'unknown', why: unseen };
+  if (unseen) return { is: 'unseen', why: unseen };
   const path = look.kind.pathOf(look.context, tool, here?.name ?? item.name);
   if (here) { seenAgain(look, path); return { is: 'present', hash: here.hash, at: here.at }; }
-  const wanted = wantedIn(item, tool), held = wanted ? look.disk.held(item, tool) : undefined;
+  const wanted = wantedIn(item, tool), locked = look.disk.locked.get(tool);
+  const held = wanted ? look.disk.held(item, tool) ?? (locked ? { why: locked } : undefined) : undefined;
   if (held) return { is: 'held', ...held };
   const { copy, item: noun } = look.kind.words;
   const missing = `${toolName(tool)}’s ${copy} for it is missing just now. If it stays missing, the ${noun} turns off everywhere.`;
-  if (wanted && item.applied[tool] !== undefined && stillSettling(look, path)) return { is: 'unknown', why: missing };
+  if (wanted && item.applied[tool] !== undefined && stillSettling(look, path)) return { is: 'unseen', why: missing };
   seenAgain(look, path);
   return { is: 'absent' };
 }
