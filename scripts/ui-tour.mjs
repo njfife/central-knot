@@ -392,7 +392,7 @@ if (wanted('agents')) {
     await refresh(); await wait(1100);
   }
   await openRow('code-reviewer');
-  await sizes('agents-versions-folded', 'Four more edits, in Claude Code, Copilot CLI and Codex: the versions list shows its newest four, the current one first, each with how long ago, where it was edited and what changed, and one line for the earlier ones');
+  await sizes('agents-versions-folded', 'Four more edits, in Claude Code, Copilot CLI and Codex: the versions list shows its newest four, the current one first, each with its time (every row in one form), where it was edited and what changed, and one line for the earlier ones');
   await a.click('#versions-all-code-reviewer'); await a.settle();
   await sizes('agents-versions-all', 'Clicked "Show 2 earlier versions": every version, the current one first, then in the order Central Knot took them', true);
   await shot(a, 'agents-version-hover', 'The pointer on the second version’s Make current: a quiet outlined button, apart from Read.', await middleOf('#version-current-code-reviewer-1'));
@@ -400,10 +400,10 @@ if (wanted('agents')) {
   await shot(a, 'agents-version-focus', 'Keyboard focus on that Make current: its focus ring.');
   await a.run('document.activeElement?.blur()');
   await a.click('#version-read-code-reviewer-2'); await waitFor(a, `/careful code reviewer/.test(document.querySelector('.version-read')?.textContent ?? '')`, 15000);
-  await sizes('agents-version-read', 'Clicked Read on an earlier version: its description and prompt open under its line, upright, with what differs from the current version marked', false, '.version-read');
+  await sizes('agents-version-read', 'Clicked Read on an earlier version: its description and prompt open under its line, upright, headed by what differs from the current version ("Differs from current in: …"), each difference marked', false, '.version-read');
   await a.click('#version-read-code-reviewer-2'); await a.settle();
   await a.click('#version-current-code-reviewer-5'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
-  await sizes('agents-made-current', 'Clicked Make current on the first version: it is the new current version, first, "made current again · from" the version it came from, written to all 3 tools; the result names it and offers Undo');
+  await sizes('agents-made-current', 'Clicked Make current on the first version: it is the new current version, first, "back to:" the version it went back to (folded into its row), written to all 3 tools; the result names it and offers Undo');
 
   // One harness kept out: the closed row says so too.
   await a.click('#enable-code-reviewer-codex-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);

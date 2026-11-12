@@ -809,7 +809,8 @@ function compareChoices(skill: ItemRow, inFiles = false) {
   // 2 days ago"), or an MCP entry's file. It shows on every row or on none: only where it tells the copies apart. The copy
   // edited most recently has the line's one emphasis.
   const sizesDiffer = new Set(groups.map(([tool]) => versions[tool]?.lines)).size > 1;
-  const facts = groups.map(([tool], index) => (versions[tool] ? [sizesDiffer ? versions[tool]!.lines : '', Number.isFinite(editedAt[index]) ? `edited ${sinceThen(editedAt[index])}` : versions[tool]!.changed].filter(Boolean).join(' · ') : ''));
+  const factsOf = (tool: Tool, at: number) => [sizesDiffer ? versions[tool]!.lines : '', Number.isFinite(at) ? `edited ${sinceThen(at)}` : versions[tool]!.changed];
+  const facts = groups.map(([tool], index) => (versions[tool] ? factsOf(tool, editedAt[index]).filter(Boolean).join(' · ') : ''));
   // An agent's copies always say when each was edited, and the newer one is marked: latest wins everywhere else for agents.
   const factsDiffer = kind === 'agents' || !!latest || new Set(facts).size > 1;
   const newest = kind === 'agents' ? (groups.length > 2 ? 'Newest' : 'Newer') : 'most recent';

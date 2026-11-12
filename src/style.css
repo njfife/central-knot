@@ -1899,7 +1899,8 @@ button.harness-card-main:focus-visible { outline: 0; }
 .version-read-legend { margin: 0 0 6px; font-size: 11.5px; color: var(--ink-faint); }
 .version-read-legend > strong { font-weight: 600; color: var(--ink-soft); }
 /* Words only the current version has: struck through in red over a faint red, still easy to read. */
-.version-read .change-gone { text-decoration: line-through; text-decoration-color: var(--danger); color: var(--ink-soft); border-radius: 2px; background: color-mix(in oklab, var(--danger) 14%, transparent); }
+.version-read .change-gone { text-decoration: line-through; text-decoration-color: var(--danger); color: var(--ink-soft);
+  border-radius: 2px; background: color-mix(in oklab, var(--danger) 14%, transparent); }
 .version-read-about { margin: 0 0 6px; color: var(--ink); }
 /* A long prompt takes most of the window's height before it scrolls, so the panel's free height is used. */
 .version-read-prompt { margin: 0; max-height: 60vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); font-size: 12px; line-height: 18px; color: var(--ink); }
