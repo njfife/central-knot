@@ -6,7 +6,9 @@
 //   node scripts/update-proof.mjs <older.zip> <older tag> <newer.zip> <newer tag> <ad hoc.zip> <ad hoc tag>
 //
 // Older and newer: Developer ID signed (CK_NOTARIZE=0 is enough), made with CK_RELEASE_TAG set to their tags. The ad hoc one
-// (CK_SIGN=0) has the newest tag. The older one is installed in <root>/home/Applications, standing in for /Applications. Then:
+// (CK_SIGN=0) has the newest tag. All three of one release line, so one app: three previews (Central Knot) or three alphas
+// (v0.6.0-alpha.98…; Central Knot Alpha), the app's name read from the older zip. The older one is installed in
+// <root>/home/Applications, standing in for /Applications. Then:
 // an interrupted download and the ad hoc zip are both refused with the installed app unchanged; the newer one installs with one
 // click, the app restarts by itself into it, and its settings and data folder are still there.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
@@ -16,6 +18,7 @@ import { join, relative } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { connect } from './cdp.mjs';
 import { serveReleases } from './update-fixture.mjs';
+import { macDownload } from '../src/updates.ts';
 
 const root = process.env.CK_PROOF_ROOT || '/private/tmp/ck-update-proof';
 const FIXTURE_PORT = 9471, DEBUG_PORT = 9472;
@@ -25,8 +28,12 @@ const [olderZip, olderTag, newerZip, newerTag, adhocZip, adhocTag] = process.arg
 if (!adhocTag) throw new Error('Usage: node scripts/update-proof.mjs <older.zip> <older tag> <newer.zip> <newer tag> <ad hoc.zip> <ad hoc tag>');
 
 const home = environment.CK_TEST_HOME;
-const app = join(home, 'Applications/Central Knot.app');
-const exe = join(app, 'Contents/MacOS/Central Knot');
+/** The app the zips hold, by its name: "Central Knot", or "Central Knot Alpha" for an alpha's. */
+const appName = execFileSync('/usr/bin/zipinfo', ['-1', olderZip], { encoding: 'utf8' }).split('\n')[0].replace(/\.app\/.*$/, '');
+const app = join(home, `Applications/${appName}.app`);
+const exe = join(app, `Contents/MacOS/${appName}`);
+/** The zip's name in the releases list: the one this app's updater looks for (an alpha's is Central-Knot-Alpha-…). */
+const asset = macDownload(appName, '0.5.0', 'zip');
 let failures = 0;
 const check = (name, ok, detail) => { console.log(`${ok ? 'pass' : 'FAIL'} ${name}${ok || detail === undefined ? '' : `: ${JSON.stringify(detail)}`}`); if (!ok) failures++; };
 
@@ -73,9 +80,9 @@ execFileSync('/usr/bin/ditto', ['-x', '-k', olderZip, join(home, 'Applications')
 const installed = tree(app);
 /** The Developer ID team a bundle is signed by, as codesign says it ("not set" when ad hoc). */
 const codesignTeam = bundle => /TeamIdentifier=(.*)/.exec(spawnSync('/usr/bin/codesign', ['-dv', bundle], { encoding: 'utf8' }).stderr)?.[1];
-const team = zip => { const at = join(root, 'look'); execFileSync('/usr/bin/ditto', ['-x', '-k', zip, at]); try { return codesignTeam(join(at, 'Central Knot.app')); } finally { rmSync(at, { recursive: true, force: true }); } };
+const team = zip => { const at = join(root, 'look'); execFileSync('/usr/bin/ditto', ['-x', '-k', zip, at]); try { return codesignTeam(join(at, `${appName}.app`)); } finally { rmSync(at, { recursive: true, force: true }); } };
 const installedTeam = codesignTeam(app);
-console.log(`installed ${olderTag} (team ${installedTeam ?? '?'}); newer ${newerTag}; ad hoc ${adhocTag} (team ${team(adhocZip) ?? 'none'})`);
+console.log(`${appName}: installed ${olderTag} (team ${installedTeam ?? '?'}); newer ${newerTag}; ad hoc ${adhocTag} (team ${team(adhocZip) ?? 'none'})`);
 
 const releases = [];
 // The fixture answers on the port the test builds were packaged with.
@@ -85,7 +92,7 @@ const words = tag => tag.replace(/^v/, '').replace('-', ' ').replace(/(?<= .*)\.
 
 try {
   // 1. An interrupted download: refused, nothing installed.
-  releases.splice(0, releases.length, { tag: newerTag, zip: newerZip, cut: 0.4 });
+  releases.splice(0, releases.length, { tag: newerTag, zip: newerZip, cut: 0.4, asset });
   let page = await launch();
   check('the installed app reports its own tag', (await updatesOf(page)).tag === olderTag, await updatesOf(page));
   await page.run(`window.centralKnot.checkForUpdates()`);
@@ -99,7 +106,7 @@ try {
   check('after the interrupted download the installed app is unchanged', tree(app) === installed);
 
   // 1b. A download that goes quiet with the connection left open: the app ends it itself after a minute, and offers it again.
-  releases.splice(0, releases.length, { tag: newerTag, zip: newerZip, stall: 0.3 });
+  releases.splice(0, releases.length, { tag: newerTag, zip: newerZip, stall: 0.3, asset });
   page = await launch();
   await page.run(`window.centralKnot.checkForUpdates()`);
   await until(page, `document.querySelector('#update-control[data-look="available"]')`, 30_000);
@@ -112,7 +119,7 @@ try {
   check('after the quiet download the installed app is unchanged', tree(app) === installed);
 
   // 2. A newer zip signed by another identity (ad hoc): Squirrel refuses it.
-  releases.splice(0, releases.length, { tag: adhocTag, zip: adhocZip });
+  releases.splice(0, releases.length, { tag: adhocTag, zip: adhocZip, asset });
   page = await launch();
   await page.run(`window.centralKnot.checkForUpdates()`);
   await until(page, `document.querySelector('#update-control[data-look="available"]')`, 30_000);
@@ -124,7 +131,7 @@ try {
 
   // 3. The real update: the newer release shows by itself, with no check asked for; one click downloads it and the app restarts
   // by itself into the newer build; settings and data stay.
-  releases.splice(0, releases.length, { tag: newerTag, zip: newerZip, bytesPerSecond: 40_000_000 });
+  releases.splice(0, releases.length, { tag: newerTag, zip: newerZip, bytesPerSecond: 40_000_000, asset });
   const opened = Date.now();
   page = await launch();
   await page.run(`window.centralKnot.setAppearance('dark')`);

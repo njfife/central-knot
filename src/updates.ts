@@ -1,7 +1,8 @@
-// Updates (PLT-02): which GitHub release this build would update to, whether this copy can replace itself, and what the
-// sidebar's update control and Settings say about it. No Node imports: the main process (updater.ts, updateflow.ts) checks and
-// installs, the page (updateview.ts) shows these words.
-import { compareVersions, isHttps, record, text } from './values.ts';
+// Updates (PLT-02): the release lines (alpha, preview, final) and the app each line's builds are, which GitHub release this
+// build would update to, whether this copy can replace itself, and what the sidebar's update control and Settings say about
+// it. No Node imports: the main process (updater.ts, updateflow.ts) checks and installs, the page (updateview.ts) shows these
+// words, and packaging (scripts/package-mac.mjs, scripts/mac-dmg.mjs) names the app and its downloads from the same rules.
+import { PRODUCT, STANDARD_BUILD, compareVersions, isHttps, record, text } from './values.ts';
 import type { UpdateReason, UpdateRelease, UpdateView } from './types.ts';
 
 /** Where releases come from: the project's GitHub repository. An organisation build will point elsewhere (ORG-06). */
@@ -21,26 +22,66 @@ export function tagWords(tag: string): string {
   return pre.length ? `${core} ${pre.join('-').split(/[.-]/).join(' ')}` : core!;
 }
 
-/** The Mac download each release carries. */
-const MAC_ZIP = /^Central-Knot-\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?-mac-arm64\.zip$/;
+/**
+ * The release line a tag is in, named by the tag's pre-release part: `v0.6.0-alpha.1` is an alpha (the part's first word is
+ * "alpha"), `v0.5.0-preview.9` a preview (so is any other pre-release, `v1.0.0-rc.1` too), and `v0.5.0` a final release.
+ * Undefined for no tag, or one that isn't a version. Everything that differs between the lines reads it from here: the app a
+ * build is (lineApp), the releases it is offered (newerRelease), and what packaging names the app and its downloads.
+ */
+export type ReleaseLine = 'alpha' | 'preview' | 'final';
+export function releaseLine(tag: string | undefined): ReleaseLine | undefined {
+  const version = tag === undefined ? undefined : tagVersion(tag);
+  if (!version) return undefined;
+  const pre = version.split('-').slice(1).join('-');
+  if (!pre) return 'final';
+  return pre.split(/[.-]/)[0] === 'alpha' ? 'alpha' : 'preview';
+}
 
+/** The lines a build of each line is offered: an alpha only newer alphas, a preview newer previews and finals, a final only finals. */
+const OFFERED: Record<ReleaseLine, readonly ReleaseLine[]> = { alpha: ['alpha'], preview: ['preview', 'final'], final: ['final'] };
+
+/** The alpha's bundle id: the system's name for it, its settings folder's name, and its name as a home's sync owner. */
+export const ALPHA_BUILD = 'com.centralknot.alpha';
 
 /**
- * The newest release newer than the tag this build was made from that has the Mac zip, from GitHub's list of releases.
- * Tags compare as versions, pre-releases by semver's rules. A build made from a preview (a tag with a pre-release part) is
- * offered newer previews and finals; one made from a final release, finals only. Drafts and anything malformed are passed over.
+ * The app a line's builds are: its name, wherever the app shows it, and its bundle id. An alpha is its own app, "Central Knot
+ * Alpha", installed beside the standard app with its own settings folder, log and downloads; previews and finals (and a build
+ * with no tag) are the standard app. A custom build has a name and id of its own instead (bundle.ts custom-build.json).
+ * The alpha's name is put together from PRODUCT, so the build's renaming of the plain name (scripts/build.mjs) leaves it whole.
+ */
+export interface BuildApp { name: string; bundleId: string }
+export const lineApp = (line: ReleaseLine | undefined): BuildApp =>
+  (line === 'alpha' ? { name: `${PRODUCT} Alpha`, bundleId: ALPHA_BUILD } : { name: PRODUCT, bundleId: STANDARD_BUILD });
+
+/** An app's name in a download's file name: "Central Knot Alpha" is "Central-Knot-Alpha". */
+export const downloadName = (name: string) => name.trim().replace(/\s+/g, '-');
+/**
+ * An app's Mac download for one version: "Central-Knot-0.5.0-mac-arm64.zip", "Central-Knot-Alpha-0.6.0-mac-arm64.dmg". The zip
+ * is the one the app's own updater downloads; the disk image is for people.
+ */
+export const macDownload = (appName: string, version: string, kind: 'zip' | 'dmg') => `${downloadName(appName)}-${version}-mac-arm64.${kind}`;
+/** Whether a release's file is the named app's Mac zip, of any version: another app's download (the alpha's, for the standard app) is not. */
+function isMacZip(file: string, appName: string): boolean {
+  const before = `${downloadName(appName)}-`, after = '-mac-arm64.zip';
+  return file.startsWith(before) && file.endsWith(after) && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(file.slice(before.length, -after.length));
+}
+
+/**
+ * The newest release newer than the tag this build was made from, in a line this build's line is offered (OFFERED), that has
+ * this build's own Mac zip (lineApp's name), from GitHub's list of releases. Tags compare as versions, pre-releases by semver's
+ * rules. A final build also passes over anything GitHub marks as a pre-release. Drafts and anything malformed are passed over.
  */
 export function newerRelease(list: unknown, current: string): UpdateRelease | undefined {
-  const mine = tagVersion(current);
-  if (!mine || !Array.isArray(list)) return undefined;
-  const takesPreviews = mine.includes('-');
+  const mine = tagVersion(current), line = releaseLine(current);
+  if (!mine || !line || !Array.isArray(list)) return undefined;
+  const app = lineApp(line);
   let best: UpdateRelease | undefined;
   for (const entry of list.map(record)) {
     const tag = text(entry?.tag_name), version = tagVersion(tag), page = text(entry?.html_url);
     if (!entry || !version || entry.draft === true || !isHttps(page)) continue;
-    if (!takesPreviews && (version.includes('-') || entry.prerelease === true)) continue;
+    if (!OFFERED[line].includes(releaseLine(tag)!) || (line === 'final' && entry.prerelease === true)) continue;
     if (compareVersions(version, mine) <= 0 || (best && compareVersions(version, tagVersion(best.tag)!) <= 0)) continue;
-    const zip = (Array.isArray(entry.assets) ? entry.assets : []).map(record).find(asset => MAC_ZIP.test(text(asset?.name)));
+    const zip = (Array.isArray(entry.assets) ? entry.assets : []).map(record).find(asset => isMacZip(text(asset?.name), app.name));
     const url = text(zip?.browser_download_url), size = zip?.size;
     if (!/^https?:\/\/\S+$/.test(url) || typeof size !== 'number' || size <= 0) continue;
     best = { tag, zip: url, size, page };

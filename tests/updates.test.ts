@@ -1,12 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildWords, checkFailure, newerRelease, tagVersion, tagWords, updateButton, updateFailure, updateIndicator, updatesShown, updateStatus, whyNoUpdate, type UpdateFacts } from '../src/updates.ts';
+import { ALPHA_BUILD, buildWords, checkFailure, lineApp, macDownload, newerRelease, releaseLine, tagVersion, tagWords, updateButton, updateFailure, updateIndicator, updatesShown, updateStatus, whyNoUpdate, type UpdateFacts } from '../src/updates.ts';
+import { STANDARD_BUILD } from '../src/values.ts';
 import type { UpdateReason, UpdateView } from '../src/types.ts';
 
-/** A release as GitHub's API lists it, with the Mac zip unless `assets` says otherwise. */
+/** A Mac zip as a release lists it: `app` names whose download it is (the standard app's unless given). */
+const zip = (tag: string, app = 'Central-Knot') => ({ name: `${app}-${tag.replace(/^v|-.*$/g, '')}-mac-arm64.zip`, browser_download_url: `https://github.com/njfife/central-knot/releases/download/${tag}/zip`, size: 1000 });
+/** A release as GitHub's API lists it, with its line's Mac zip (an alpha's is Central Knot Alpha's) unless `assets` says otherwise. */
 const release = (tag: string, extra: Record<string, unknown> = {}) => ({
   tag_name: tag, draft: false, prerelease: tag.includes('-'), html_url: `https://github.com/njfife/central-knot/releases/tag/${tag}`,
-  assets: [{ name: `Central-Knot-${tag.replace(/^v|-.*$/g, '')}-mac-arm64.zip`, browser_download_url: `https://github.com/njfife/central-knot/releases/download/${tag}/zip`, size: 1000 }],
+  assets: [zip(tag, tag.includes('-alpha') ? 'Central-Knot-Alpha' : 'Central-Knot')],
   ...extra,
 });
 
@@ -43,6 +46,57 @@ test('drafts, releases without the Mac zip and malformed entries are passed over
   assert.equal(newerRelease([release('nightly'), null, 'text', { tag_name: 5 }], current), undefined);
   assert.equal(newerRelease({ message: 'API rate limit exceeded' }, current), undefined);
   assert.equal(newerRelease([release('v0.5.0-preview.5')], 'not-a-tag'), undefined, 'a build with no version tag is never offered one');
+});
+
+test('a tag’s pre-release part names its release line', () => {
+  assert.equal(releaseLine('v0.6.0-alpha.1'), 'alpha');
+  assert.equal(releaseLine('v0.6.0-alpha'), 'alpha');
+  assert.equal(releaseLine('v0.6.0-alpha-2'), 'alpha', 'the part’s first word, as tagWords reads it');
+  assert.equal(releaseLine('0.6.0-alpha.1'), 'alpha', 'with or without the v');
+  assert.equal(releaseLine('v0.5.0-preview.9'), 'preview');
+  assert.equal(releaseLine('v1.0.0-rc.1'), 'preview', 'any other pre-release is a preview, as before there were alphas');
+  assert.equal(releaseLine('v0.6.0-alphabet.1'), 'preview', 'only the word alpha itself');
+  assert.equal(releaseLine('v0.6.0-Alpha.1'), 'preview', 'written in lower case, as every tag is');
+  assert.equal(releaseLine('v0.5.0'), 'final');
+  assert.equal(releaseLine('checkpoint-ui-2026-11-09'), undefined);
+  assert.equal(releaseLine(undefined), undefined, 'a build with no tag');
+});
+
+test('an alpha is its own app, with its own name, bundle id and downloads; it reads its version like a preview', () => {
+  const alpha = lineApp(releaseLine('v0.6.0-alpha.1'));
+  assert.deepEqual(alpha, { name: 'Central Knot Alpha', bundleId: 'com.centralknot.alpha' });
+  assert.equal(alpha.bundleId, ALPHA_BUILD);
+  assert.equal(macDownload(alpha.name, '0.6.0', 'dmg'), 'Central-Knot-Alpha-0.6.0-mac-arm64.dmg');
+  assert.equal(macDownload(alpha.name, '0.6.0', 'zip'), 'Central-Knot-Alpha-0.6.0-mac-arm64.zip');
+  assert.equal(tagWords('v0.6.0-alpha.1'), '0.6.0 alpha 1');
+  assert.equal(buildWords({ tag: 'v0.6.0-alpha.1', version: '0.6.0' }), '0.6.0 alpha 1');
+});
+
+test('a preview, a final and an untagged build are the standard app, under the names they always had', () => {
+  for (const tag of ['v0.5.0-preview.9', 'v0.5.0', undefined]) assert.deepEqual(lineApp(releaseLine(tag)), { name: 'Central Knot', bundleId: STANDARD_BUILD }, String(tag));
+  assert.equal(macDownload(lineApp('preview').name, '0.5.0', 'dmg'), 'Central-Knot-0.5.0-mac-arm64.dmg');
+  assert.equal(macDownload(lineApp('preview').name, '0.5.0', 'zip'), 'Central-Knot-0.5.0-mac-arm64.zip', 'preview 9’s own zip name');
+  assert.equal(tagWords('v0.5.0-preview.9'), '0.5.0 preview 9');
+});
+
+test('updates stay inside a line: from previews, alphas and finals, each line is offered only what it takes', () => {
+  // Every line's newest is newer than every other line's current build: only the line rule keeps them apart.
+  const list = [release('v0.7.0-alpha.2'), release('v0.7.0-alpha.1'), release('v0.6.0-preview.3'), release('v0.5.1'), release('v0.5.0-preview.9'), release('v0.5.0')];
+  assert.equal(newerRelease(list, 'v0.6.0-alpha.1')?.tag, 'v0.7.0-alpha.2', 'an alpha: the newest alpha');
+  assert.equal(newerRelease(list, 'v0.7.0-alpha.1')?.tag, 'v0.7.0-alpha.2', 'an alpha just behind');
+  assert.equal(newerRelease(list, 'v0.7.0-alpha.2'), undefined, 'the newest alpha: nothing, never the previews or finals');
+  assert.equal(newerRelease(list, 'v0.5.0-preview.9')?.tag, 'v0.6.0-preview.3', 'a preview: newer previews and finals, never the newer alphas');
+  assert.equal(newerRelease([release('v0.7.0-alpha.2'), release('v0.6.0')], 'v0.5.0-preview.9')?.tag, 'v0.6.0', 'and a final, as before');
+  assert.equal(newerRelease(list, 'v0.6.0-preview.3'), undefined, 'the newest preview: no alpha, however new');
+  assert.equal(newerRelease(list, 'v0.5.0')?.tag, 'v0.5.1', 'a final: finals only');
+  // Each line takes only its own app's zip: an alpha release that carried the standard app's zip (or a release whose only
+  // zip is the alpha's under a preview tag) is passed over, so neither app ever installs the other.
+  assert.equal(newerRelease([release('v0.7.0-alpha.3', { assets: [zip('v0.7.0-alpha.3')] })], 'v0.6.0-alpha.1'), undefined, 'an alpha passes over the standard app’s zip');
+  assert.equal(newerRelease([release('v0.6.0-preview.4', { assets: [zip('v0.6.0-preview.4', 'Central-Knot-Alpha')] })], 'v0.5.0-preview.9'), undefined, 'a preview passes over the alpha’s zip');
+  // A release carrying both zips gives each line its own.
+  const both = release('v0.7.0-alpha.4', { assets: [zip('v0.7.0-alpha.4'), { ...zip('v0.7.0-alpha.4', 'Central-Knot-Alpha'), browser_download_url: 'https://github.com/njfife/central-knot/releases/download/v0.7.0-alpha.4/alpha-zip' }] });
+  assert.equal(newerRelease([both], 'v0.6.0-alpha.1')?.zip, 'https://github.com/njfife/central-knot/releases/download/v0.7.0-alpha.4/alpha-zip');
+  assert.equal(newerRelease([both], 'v0.5.0-preview.9'), undefined, 'and a preview still passes over the alpha tag');
 });
 
 test('why a copy can’t update itself, in the order that decides it', () => {

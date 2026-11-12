@@ -3,8 +3,8 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { STANDARD_BUILD } from '../src/bundle.ts';
-import { STANDARD_NAME, buildInputs, downloadName, isCustom } from '../src/bundlepack.ts';
+import { STANDARD_NAME, buildInputs, isCustom } from '../src/bundlepack.ts';
+import { downloadName, lineApp, macDownload, releaseLine } from '../src/updates.ts';
 import { stage } from './custom-build.mjs';
 import { buildDmg } from './mac-dmg.mjs';
 import { releaseTagHere } from './release-tag.mjs';
@@ -41,7 +41,18 @@ const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
 // A custom build is staged first (its identity file, the marketplace it carries, its pictures and its report), then the
 // app's code is built again around it: it calls itself by its own name and carries the staged files (scripts/build.mjs).
 const custom = isCustom(inputs) ? await stage(inputs).catch(error => { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); }) : undefined;
-const appName = custom?.build.name ?? STANDARD_NAME;
+
+// The release tag this build is made from, recorded inside the app so it can tell a newer release (updates.ts): CK_RELEASE_TAG,
+// or the highest version tag on the commit being built. A checkout with changes of its own doesn't take the commit's tag, and
+// can't be a release (release-tag.mjs). A build with no tag never offers updates. A custom build records none: the standard
+// app's releases are not its own, and it never updates from them (ORG-07).
+const tag = custom ? '' : releaseTagHere(release);
+// The app this package is: a custom build's own, or the one the tag's release line is (src/updates.ts lineApp). An alpha tag
+// (v0.6.0-alpha.1) makes "Central Knot Alpha", with its own bundle id and downloads; any other tag, or none, the standard app.
+const own = custom?.build ?? lineApp(releaseLine(tag));
+const appName = own.name;
+/** An alpha: the standard app's code under the alpha's name (scripts/build.mjs CK_APP_NAME). */
+const renamed = !custom && appName !== STANDARD_NAME;
 let icon = 'assets/icon.icns';
 if (custom) {
   const given = custom.icon && join(custom.out, custom.icon);
@@ -61,14 +72,12 @@ if (custom) {
   }
   execFileSync(process.execPath, ['scripts/build.mjs'], { stdio: 'inherit', env: { ...process.env, CK_CUSTOM_BUILD: custom.out, ...(given?.endsWith('.icns') ? { CK_CUSTOM_LOGO: join(custom.out, 'app-logo.png') } : {}) } });
 }
-// A standard package is never a custom build by accident: one left in dist/ (CK_CUSTOM_BUILD set for the build step) is built again without it.
-if (!custom && existsSync('dist/custom-build.json')) execFileSync(process.execPath, ['scripts/build.mjs'], { stdio: 'inherit', env: { ...process.env, CK_CUSTOM_BUILD: '' } });
-
-// The release tag this build is made from, recorded inside the app so it can tell a newer release (updates.ts): CK_RELEASE_TAG,
-// or the highest version tag on the commit being built. A checkout with changes of its own doesn't take the commit's tag, and
-// can't be a release (release-tag.mjs). A build with no tag never offers updates. A custom build records none: the standard
-// app's releases are not its own, and it never updates from them (ORG-07).
-const tag = custom ? '' : releaseTagHere(release);
+/** dist/ as the plain standard app: no custom build's files, the standard name. */
+const plainBuild = () => execFileSync(process.execPath, ['scripts/build.mjs'], { stdio: 'inherit', env: { ...process.env, CK_CUSTOM_BUILD: '', CK_APP_NAME: '' } });
+if (renamed) execFileSync(process.execPath, ['scripts/build.mjs'], { stdio: 'inherit', env: { ...process.env, CK_CUSTOM_BUILD: '', CK_APP_NAME: appName } });
+// A standard package is never a custom build or an alpha by accident: dist/ left as one (CK_CUSTOM_BUILD or CK_APP_NAME set
+// for the build step) is built again without it.
+else if (!custom && (existsSync('dist/custom-build.json') || process.env.CK_APP_NAME)) plainBuild();
 // Written for this package only, then removed, so a dev run or a later untagged build never claims the tag.
 await rm('dist/build-info.json', { force: true });
 if (tag) await writeFile('dist/build-info.json', `${JSON.stringify({ tag })}\n`);
@@ -76,8 +85,8 @@ if (tag) await writeFile('dist/build-info.json', `${JSON.stringify({ tag })}\n`)
 await mkdir('release', { recursive: true });
 const packages = await packager({
   dir: '.', out: 'release', name: appName, executableName: appName,
-  // A custom build's own bundle id is what lets it sit beside the standard app, with its own settings and login item.
-  appBundleId: custom?.build.bundleId ?? STANDARD_BUILD, appVersion: version, platform: 'darwin', arch: 'arm64',
+  // Its own bundle id (an alpha's, a custom build's) is what lets it sit beside the standard app, with its own settings and login item.
+  appBundleId: own.bundleId, appVersion: version, platform: 'darwin', arch: 'arm64',
   asar: true, overwrite: true, prune: true,
   // The default app icon, or the one a custom build was given (--app-icon).
   icon,
@@ -93,8 +102,8 @@ const packages = await packager({
   ignore: [/^\/src(?:\/|$)/, /^\/tests(?:\/|$)/, /^\/scripts(?:\/|$)/, /^\/.github(?:\/|$)/, /^\/release(?:\/|$)/, /^\/build(?:\/|$)/, /^\/docs(?:\/|$)/, /^\/LEDGER\.md$/, /^\/README\.md$/],
 }).finally(async () => {
   await rm('dist/build-info.json', { force: true });
-  // dist/ goes back to the standard app, so a later run or package of this checkout is never the custom build by accident.
-  if (custom) execFileSync(process.execPath, ['scripts/build.mjs'], { stdio: 'inherit', env: { ...process.env, CK_CUSTOM_BUILD: '' } });
+  // dist/ goes back to the standard app, so a later run or package of this checkout is never the custom build or the alpha by accident.
+  if (custom || renamed) plainBuild();
 });
 const bundle = `${packages[0]}/${appName}.app`;
 // Unsigned builds: packager leaves Electron's stock signature, whose seal no longer matches the renamed bundle.
@@ -105,7 +114,7 @@ if (notarize) {
   execFileSync('/usr/sbin/spctl', ['--assess', '--type', 'execute', '--verbose', bundle], { stdio: 'inherit' });
 }
 const signed = identity ? `${identity}${notarize ? ', notarized and stapled' : ', not notarized'}` : 'signed ad hoc';
-const archive = `release/${downloadName(appName)}-${version}-mac-arm64.zip`;
+const archive = `release/${macDownload(appName, version, 'zip')}`;
 execFileSync('/usr/bin/ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', bundle, archive]);
 if (custom) {
   // A custom build's download is its zip, with its report beside it. (The disk image's window is laid out for the standard
@@ -115,8 +124,8 @@ if (custom) {
   console.log(`\n${custom.report}\nPackage: ${archive} (${signed}), report in ${report}`);
 } else {
   // The download for people: a disk image to drag the app out of into Applications. The zip stays: it is what the app's
-  // own updater downloads (src/updates.ts looks for it by this name).
-  const dmg = `release/Central-Knot-${version}-mac-arm64.dmg`;
-  buildDmg({ bundle, dmg, identity, notaryProfile: notarize ? notaryProfile : undefined });
-  console.log(`Package: ${archive} and ${dmg}, ${tag ? `release ${tag}` : 'no release tag'} (${signed})`);
+  // own updater downloads (src/updates.ts looks for it by this name, its own app's: an alpha never takes the standard app's).
+  const dmg = `release/${macDownload(appName, version, 'dmg')}`;
+  buildDmg({ bundle, dmg, name: appName, identity, notaryProfile: notarize ? notaryProfile : undefined });
+  console.log(`Package: ${archive} and ${dmg}: ${appName} (${own.bundleId}), ${tag ? `release ${tag}` : 'no release tag'} (${signed})`);
 }
