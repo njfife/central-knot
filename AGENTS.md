@@ -29,6 +29,7 @@ Keep the loop short. These are the checks; nothing else is required.
 - The full tour (`--full`, hundreds of pictures, about ten minutes) runs for a new release only. Do not run it, repair it or extend it for an ordinary change; a section outside your feature is not yours to fix.
 - The end-to-end checks already open every page, fail on a page error and check that nothing is cut off at each window size. Add a check there, not a tour section, when behaviour needs covering.
 - No Linux or Windows run is required (see Platform focus).
+- A change that adds, renames or removes a file under `src/` or `scripts/` changes its entry in `MAP.md`; `tests/map.test.ts` (in `npm test`) fails until it does and says what to change.
 
 ## Mandatory subagent briefing
 

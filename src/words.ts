@@ -1,4 +1,5 @@
-// Words shared by pages: each tool's display name, and "a, b and c" lists.
+// Words shared by the pages and by what the engines say: each tool's display name (toolNames), each kind's (kindNouns), and
+// "a, b and c" lists.
 import type { HomeKind } from './presence.ts';
 import type { HarnessId, SwitchProblem } from './types.ts';
 

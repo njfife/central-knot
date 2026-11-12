@@ -5,9 +5,10 @@
 //   in well under a minute. It fails if a page doesn't open or throws. This is the run for every change.
 // - `--only a,b` runs the named feature sections: the ones a change touched.
 // - `--full` runs every feature section, hundreds of pictures over about ten minutes. For a new release only.
-// Features: shell, skills, sync, mcp, agents, plugins, plugin-updates, plugin-items, instructions, updates, sizes (four tools; every page at 860×560 with the
-// sidebar as a rail and open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light) and missing
-// (a folder home with only Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options).
+// Features, in the order they run: shell, skills, disable, sync, mcp, agents, plugins, profiles, plugin-skills, plugin-updates,
+// plugin-versions, parts, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
+// open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
+// Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses and repo.
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
