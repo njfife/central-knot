@@ -1,14 +1,14 @@
 // Checks the alpha (src/updates.ts lineApp) as packaged, beside the standard app the Mac run packaged just before it. The
 // documented command packages it from an alpha tag. It must be its own app: its name on the bundle, the window and the disk
-// image, its own bundle id, downloads and settings folder. Opened side by side with the standard app on one throwaway home,
-// it must be offered only a newer alpha while the standard app is offered only a newer preview, and the two must name each
-// other through Take over syncing, both ways. Nothing is published and the standard app's downloads stay as they were. Both
-// apps run in the throwaway home: HOME, and CFFIXED_USER_HOME so that their settings folders are inside it too.
+// image, its own bundle id, downloads and settings folder, and release/ must then hold its two downloads and no other. Opened
+// side by side with the standard app on one throwaway home, it must be offered only a newer alpha while the standard app is
+// offered only a newer preview, and the two must name each other through Take over syncing, both ways. Nothing is
+// published. Both apps run in the throwaway home: HOME, and CFFIXED_USER_HOME so that their settings folders are inside it too.
 // Usage (a Mac, after `npm run package:mac`): node scripts/alpha-check.mjs
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { extractFile } from '@electron/asar';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -47,11 +47,16 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => p
 
 // ---------- The package ----------
 const hash = path => createHash('sha256').update(readFileSync(path)).digest('hex');
-const standardDownloads = ['zip', 'dmg'].map(kind => join('release', macDownload(STANDARD, version, kind)));
-for (const file of standardDownloads) if (!existsSync(file)) throw new Error(`No ${file}: package the standard app first (npm run package:mac).`);
-const standardBefore = standardDownloads.map(hash);
+const standardApp = join('release', `${STANDARD}-darwin-arm64`, `${STANDARD}.app`);
+const standardDownloads = ['zip', 'dmg'].map(kind => macDownload(STANDARD, version, kind));
+if (!existsSync(standardApp) || !standardDownloads.every(file => existsSync(join('release', file)))) throw new Error('Package the standard app first (npm run package:mac).');
+// A mistyped alpha tag is refused in plain words before anything is built, never packaged as the standard app.
+const mistyped = spawnSync(process.execPath, ['scripts/package-mac.mjs'], { encoding: 'utf8', env: { ...process.env, CK_RELEASE_TAG: 'v0.6.0-alpha1', CK_SIGN: '0' } });
+check('a mistyped alpha tag stops packaging, saying so', mistyped.status === 2 && mistyped.stderr.trim() === 'v0.6.0-alpha1 names no release line. A pre-release is tagged v<version>-alpha.<n> (an alpha) or v<version>-preview.<n> (a preview), as v0.6.0-alpha.1 or v0.6.0-preview.1.', [mistyped.status, mistyped.stderr]);
+check('and leaves the standard downloads where they were', standardDownloads.every(file => existsSync(join('release', file))));
 const began = Date.now();
-execFileSync(process.execPath, ['scripts/package-mac.mjs'], { stdio: 'inherit', env: { ...process.env, CK_RELEASE_TAG: TAG, CK_SIGN: '0' } });
+const said = execFileSync(process.execPath, ['scripts/package-mac.mjs'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, CK_RELEASE_TAG: TAG, CK_SIGN: '0' } });
+process.stdout.write(said);
 console.log(`The alpha was packaged in ${Math.round((Date.now() - began) / 1000)} s.`);
 
 const bundle = join('release', `${ALPHA}-darwin-arm64`, `${ALPHA}.app`);
@@ -67,7 +72,11 @@ check('the release tag is recorded in it', JSON.parse(packed('dist/build-info.js
 const zip = join('release', `Central-Knot-Alpha-${version}-mac-arm64.zip`), dmg = join('release', `Central-Knot-Alpha-${version}-mac-arm64.dmg`);
 check('its downloads are named for it', existsSync(zip) && existsSync(dmg), [zip, dmg]);
 check('its zip holds the alpha app', execFileSync('/usr/bin/zipinfo', ['-1', zip], { encoding: 'utf8' }).split('\n')[0] === 'Central Knot Alpha.app/');
-check('the standard app’s downloads are as they were', standardDownloads.map(hash).join() === standardBefore.join());
+// What its release carries: release/ holds the alpha's two downloads and no other (the standard app's are removed, and named).
+const left = readdirSync('release').filter(file => /-mac-arm64\.(?:zip|dmg)$/.test(file)).sort();
+check('release/ then holds the alpha’s two downloads and no other', left.join() === `Central-Knot-Alpha-${version}-mac-arm64.dmg,Central-Knot-Alpha-${version}-mac-arm64.zip`, left);
+const removedLine = said.split('\n').find(line => line.startsWith('Removed from release/, as not this package\'s: ')) ?? '';
+check('and packaging names the standard downloads it removed, and what to upload', standardDownloads.every(file => removedLine.includes(file)) && said.includes(`Upload exactly these: ${dmg} ${zip}`), said.split('\n').filter(line => /Removed|Upload/.test(line)));
 const mount = join(scratch, 'volume');
 execFileSync('/usr/bin/hdiutil', ['attach', dmg, '-readonly', '-nobrowse', '-noautoopen', '-mountpoint', mount], { stdio: 'ignore' });
 try {
@@ -93,8 +102,9 @@ check('the standard app syncs the home first', !managed.stopped && (await readRe
 
 // Each app's releases hold a newer release of the other line, which it must pass over.
 const alphaAsset = macDownload(ALPHA, version, 'zip');
-const forAlpha = await serveReleases([{ tag: 'v0.7.0-preview.1', zip: standardDownloads[0] }, { tag: 'v0.6.0-alpha.99', zip, asset: alphaAsset }, { tag: 'v0.6.0-alpha.97', zip, asset: alphaAsset }]);
-const forStandard = await serveReleases([{ tag: 'v0.6.0-alpha.99', zip, asset: alphaAsset }, { tag: 'v0.5.0-preview.99', zip: standardDownloads[0] }]);
+// Each listed under its own app's zip name; only names and sizes are read (nothing is downloaded), so one file serves for all.
+const forAlpha = await serveReleases([{ tag: 'v0.7.0-preview.1', zip }, { tag: 'v0.6.0-alpha.99', zip, asset: alphaAsset }, { tag: 'v0.6.0-alpha.97', zip, asset: alphaAsset }]);
+const forStandard = await serveReleases([{ tag: 'v0.6.0-alpha.99', zip, asset: alphaAsset }, { tag: 'v0.5.0-preview.99', zip }]);
 
 async function launch(name, env) {
   const exe = join('release', `${name}-darwin-arm64`, `${name}.app`, 'Contents/MacOS', name);

@@ -8,8 +8,12 @@ import type { UpdateReason, UpdateRelease, UpdateView } from './types.ts';
 /** Where releases come from: the project's GitHub repository. An organisation build will point elsewhere (ORG-06). */
 export const RELEASE_REPO = 'njfife/central-knot';
 export const releasesPage = `https://github.com/${RELEASE_REPO}/releases`;
-/** GitHub's public list of the repository's releases, newest first: asked with no token and nothing about the person. */
-export const releasesApi = `https://api.github.com/repos/${RELEASE_REPO}/releases?per_page=30`;
+/**
+ * GitHub's public list of the repository's releases, newest first: asked with no token and nothing about the person. One
+ * page of 100 (GitHub's most), read once: alphas and previews share the list, so a newer preview stays in sight behind
+ * many alphas, and the other way round.
+ */
+export const releasesApi = `https://api.github.com/repos/${RELEASE_REPO}/releases?per_page=100`;
 
 /** A release tag's version: "v0.5.0-preview.5" is "0.5.0-preview.5". Undefined for a tag that isn't a version. */
 export const tagVersion = (tag: string): string | undefined => /^v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/.exec(tag)?.[1];
@@ -22,19 +26,38 @@ export function tagWords(tag: string): string {
   return pre.length ? `${core} ${pre.join('-').split(/[.-]/).join(' ')}` : core!;
 }
 
+/** A tag's pre-release part, as each line writes it exactly: `alpha.<n>` for an alpha, `preview.<n>` for a preview. A final has none. */
+const LINE_PART = /^(alpha|preview)\.\d+$/;
+/** A version's pre-release part: "alpha.1" in "0.6.0-alpha.1"; '' for a final. */
+const preRelease = (version: string) => version.split('-').slice(1).join('-');
+
 /**
- * The release line a tag is in, named by the tag's pre-release part: `v0.6.0-alpha.1` is an alpha (the part's first word is
- * "alpha"), `v0.5.0-preview.9` a preview (so is any other pre-release, `v1.0.0-rc.1` too), and `v0.5.0` a final release.
- * Undefined for no tag, or one that isn't a version. Everything that differs between the lines reads it from here: the app a
- * build is (lineApp), the releases it is offered (newerRelease), and what packaging names the app and its downloads.
+ * The release line a tag is in, named by its pre-release part exactly (LINE_PART): `v0.6.0-alpha.1` is an alpha,
+ * `v0.5.0-preview.9` a preview, and `v0.5.0` a final release. Undefined for no tag, or one that isn't a version. Everything
+ * that differs between the lines reads it from here: the app a build is (lineApp), the releases it is offered (newerRelease),
+ * and what packaging names the app and its downloads.
+ * Any other pre-release word (`alpha1`, `Alpha.1`, `a.1`, `rc.1`) is not a line: packaging refuses such a tag (whyNoLine,
+ * scripts/release-tag.mjs), so no build is made from one. The app, reading one in a release list, takes it as a preview, as
+ * it took every pre-release before there were alphas.
  */
 export type ReleaseLine = 'alpha' | 'preview' | 'final';
 export function releaseLine(tag: string | undefined): ReleaseLine | undefined {
   const version = tag === undefined ? undefined : tagVersion(tag);
   if (!version) return undefined;
-  const pre = version.split('-').slice(1).join('-');
+  const pre = preRelease(version);
   if (!pre) return 'final';
-  return pre.split(/[.-]/)[0] === 'alpha' ? 'alpha' : 'preview';
+  return LINE_PART.exec(pre)?.[1] === 'alpha' ? 'alpha' : 'preview';
+}
+
+/**
+ * Why packaging refuses a version tag (scripts/release-tag.mjs), or nothing: a pre-release part that names no line, which
+ * would otherwise be packaged as the standard app and offered to every installed preview. Said with the two forms it takes.
+ */
+export function whyNoLine(tag: string): string | undefined {
+  const version = tagVersion(tag);
+  if (!version || !preRelease(version) || LINE_PART.test(preRelease(version))) return undefined;
+  const core = version.split('-')[0];
+  return `${tag} names no release line. A pre-release is tagged v<version>-alpha.<n> (an alpha) or v<version>-preview.<n> (a preview), as v${core}-alpha.1 or v${core}-preview.1.`;
 }
 
 /** The lines a build of each line is offered: an alpha only newer alphas, a preview newer previews and finals, a final only finals. */
@@ -60,10 +83,17 @@ export const downloadName = (name: string) => name.trim().replace(/\s+/g, '-');
  * is the one the app's own updater downloads; the disk image is for people.
  */
 export const macDownload = (appName: string, version: string, kind: 'zip' | 'dmg') => `${downloadName(appName)}-${version}-mac-arm64.${kind}`;
+/**
+ * The Mac downloads among `files` (the names in packaging's release folder) other than `keep`, the two being written:
+ * packaging removes them first (scripts/package-mac.mjs), so the folder holds exactly the files a release carries. An alpha's
+ * release that also carried the standard app's zip would be offered to every installed preview.
+ */
+export const otherDownloads = (files: string[], keep: string[]) => files.filter(file => /-mac-arm64\.(?:zip|dmg)$/.test(file) && !keep.includes(file));
 /** Whether a release's file is the named app's Mac zip, of any version: another app's download (the alpha's, for the standard app) is not. */
 function isMacZip(file: string, appName: string): boolean {
   const before = `${downloadName(appName)}-`, after = '-mac-arm64.zip';
-  return file.startsWith(before) && file.endsWith(after) && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(file.slice(before.length, -after.length));
+  const version = file.slice(before.length, -after.length);
+  return file.startsWith(before) && file.endsWith(after) && tagVersion(version) === version;
 }
 
 /**

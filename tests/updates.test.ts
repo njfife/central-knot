@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ALPHA_BUILD, buildWords, checkFailure, lineApp, macDownload, newerRelease, releaseLine, tagVersion, tagWords, updateButton, updateFailure, updateIndicator, updatesShown, updateStatus, whyNoUpdate, type UpdateFacts } from '../src/updates.ts';
+import { ALPHA_BUILD, buildWords, checkFailure, lineApp, macDownload, newerRelease, otherDownloads, releasesApi, releaseLine, tagVersion, tagWords, updateButton, updateFailure, updateIndicator, updatesShown, updateStatus, whyNoUpdate, type UpdateFacts } from '../src/updates.ts';
 import { STANDARD_BUILD } from '../src/values.ts';
 import type { UpdateReason, UpdateView } from '../src/types.ts';
 
@@ -50,13 +50,11 @@ test('drafts, releases without the Mac zip and malformed entries are passed over
 
 test('a tag’s pre-release part names its release line', () => {
   assert.equal(releaseLine('v0.6.0-alpha.1'), 'alpha');
-  assert.equal(releaseLine('v0.6.0-alpha'), 'alpha');
-  assert.equal(releaseLine('v0.6.0-alpha-2'), 'alpha', 'the part’s first word, as tagWords reads it');
   assert.equal(releaseLine('0.6.0-alpha.1'), 'alpha', 'with or without the v');
   assert.equal(releaseLine('v0.5.0-preview.9'), 'preview');
-  assert.equal(releaseLine('v1.0.0-rc.1'), 'preview', 'any other pre-release is a preview, as before there were alphas');
-  assert.equal(releaseLine('v0.6.0-alphabet.1'), 'preview', 'only the word alpha itself');
-  assert.equal(releaseLine('v0.6.0-Alpha.1'), 'preview', 'written in lower case, as every tag is');
+  // Any other pre-release part names no line, and packaging refuses it (tests/releasetag.test.ts). Met in a release list,
+  // the app reads it as a preview, as every pre-release was before there were alphas.
+  for (const tag of ['v0.6.0-alpha', 'v0.6.0-alpha-2', 'v0.6.0-alpha1', 'v0.6.0-Alpha.1', 'v0.6.0-alphabet.1', 'v1.0.0-rc.1']) assert.equal(releaseLine(tag), 'preview', tag);
   assert.equal(releaseLine('v0.5.0'), 'final');
   assert.equal(releaseLine('checkpoint-ui-2026-11-09'), undefined);
   assert.equal(releaseLine(undefined), undefined, 'a build with no tag');
@@ -77,6 +75,26 @@ test('a preview, a final and an untagged build are the standard app, under the n
   assert.equal(macDownload(lineApp('preview').name, '0.5.0', 'dmg'), 'Central-Knot-0.5.0-mac-arm64.dmg');
   assert.equal(macDownload(lineApp('preview').name, '0.5.0', 'zip'), 'Central-Knot-0.5.0-mac-arm64.zip', 'preview 9’s own zip name');
   assert.equal(tagWords('v0.5.0-preview.9'), '0.5.0 preview 9');
+});
+
+test('installed previews are kept off an alpha by its download’s name alone', () => {
+  // The pattern preview 9 and every build before it look for their update with (src/updates.ts at v0.5.0-preview.9). Builds
+  // already installed run it and can't be changed, so the alpha's download must never match it.
+  const installedPreviews = /^Central-Knot-\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?-mac-arm64\.zip$/;
+  assert.equal(installedPreviews.test(macDownload(lineApp('alpha').name, '0.6.0', 'zip')), false);
+  assert.equal(installedPreviews.test(macDownload(lineApp('preview').name, '0.6.0', 'zip')), true, 'while the standard app’s own zip still matches');
+});
+
+test('packaging leaves the release folder holding only its own two downloads', () => {
+  const folder = ['Central Knot-darwin-arm64', 'Central-Knot-0.5.0-mac-arm64.dmg', 'Central-Knot-0.5.0-mac-arm64.zip', 'Central-Knot-Alpha-0.6.0-mac-arm64.dmg', 'Central-Knot-Alpha-0.6.0-mac-arm64.zip', 'Acme-Knot-0.5.0-mac-arm64.zip', 'Acme-Knot-build-report.txt'];
+  const own = (name: string, version: string) => [macDownload(name, version, 'zip'), macDownload(name, version, 'dmg')];
+  assert.deepEqual(otherDownloads(folder, own('Central Knot Alpha', '0.6.0')), ['Central-Knot-0.5.0-mac-arm64.dmg', 'Central-Knot-0.5.0-mac-arm64.zip', 'Acme-Knot-0.5.0-mac-arm64.zip'], 'an alpha: every other download goes');
+  assert.deepEqual(otherDownloads(folder, own('Central Knot', '0.5.0')), ['Central-Knot-Alpha-0.6.0-mac-arm64.dmg', 'Central-Knot-Alpha-0.6.0-mac-arm64.zip', 'Acme-Knot-0.5.0-mac-arm64.zip'], 'the standard app: no alpha file stays');
+  assert.deepEqual(otherDownloads(folder, own('Central Knot', '0.6.0')), folder.filter(file => file.endsWith('.zip') || file.endsWith('.dmg')), 'an earlier version of its own goes too');
+});
+
+test('the releases are read as one page of 100, so alphas don’t push a newer preview out of sight', () => {
+  assert.equal(releasesApi, 'https://api.github.com/repos/njfife/central-knot/releases?per_page=100');
 });
 
 test('updates stay inside a line: from previews, alphas and finals, each line is offered only what it takes', () => {

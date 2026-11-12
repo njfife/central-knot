@@ -25,3 +25,12 @@ test('a release needs a tag and a checkout without changes', () => {
   assert.throws(() => releaseTag({ release: true, tags, changes: [' M src/updater.ts'] }), /changes of its own:\n M src\/updater\.ts/);
   assert.throws(() => releaseTag({ release: true, named: 'v0.5.0-preview.10', tags, changes: ['?? notes.txt'] }), /changes of its own/);
 });
+
+test('a pre-release tag names its line exactly, or packaging stops: a mistyped alpha is never packaged as a preview', () => {
+  assert.throws(() => releaseTag({ named: 'v0.6.0-alpha1' }), { message: 'v0.6.0-alpha1 names no release line. A pre-release is tagged v<version>-alpha.<n> (an alpha) or v<version>-preview.<n> (a preview), as v0.6.0-alpha.1 or v0.6.0-preview.1.' });
+  for (const tag of ['v0.6.0-Alpha.1', 'v0.6.0-a.1', 'v0.6.0-alpha', 'v0.6.0-alpha-2', 'v1.0.0-rc.1']) {
+    assert.throws(() => releaseTag({ named: tag }), { message: new RegExp(`^${tag.replace(/\./g, '\\.')} names no release line\\.`) }, tag);
+    assert.throws(() => releaseTag({ tags: [tag] }), /names no release line/, `${tag} as the commit’s own tag`);
+  }
+  for (const tag of ['v0.6.0-alpha.1', 'v0.5.0-preview.9', 'v0.5.0']) assert.equal(releaseTag({ named: tag }), tag);
+});

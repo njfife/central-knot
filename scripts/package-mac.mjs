@@ -1,10 +1,11 @@
 import { packager } from '@electron/packager';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { STANDARD_NAME, buildInputs, isCustom } from '../src/bundlepack.ts';
-import { downloadName, lineApp, macDownload, releaseLine } from '../src/updates.ts';
+import { buildInputs, isCustom } from '../src/bundlepack.ts';
+import { downloadName, lineApp, macDownload, otherDownloads, releaseLine } from '../src/updates.ts';
+import { STANDARD_BUILD } from '../src/values.ts';
 import { stage } from './custom-build.mjs';
 import { buildDmg } from './mac-dmg.mjs';
 import { releaseTagHere } from './release-tag.mjs';
@@ -44,15 +45,17 @@ const custom = isCustom(inputs) ? await stage(inputs).catch(error => { console.e
 
 // The release tag this build is made from, recorded inside the app so it can tell a newer release (updates.ts): CK_RELEASE_TAG,
 // or the highest version tag on the commit being built. A checkout with changes of its own doesn't take the commit's tag, and
-// can't be a release (release-tag.mjs). A build with no tag never offers updates. A custom build records none: the standard
-// app's releases are not its own, and it never updates from them (ORG-07).
-const tag = custom ? '' : releaseTagHere(release);
+// can't be a release (release-tag.mjs), nor can a tag whose pre-release part names no line (v0.6.0-alpha1: said plainly, and
+// nothing is built). A build with no tag never offers updates. A custom build records none: the standard app's releases are
+// not its own, and it never updates from them (ORG-07).
+const tagHere = () => { try { return releaseTagHere(release); } catch (error) { return plainly(error.message); } };
+const tag = custom ? '' : tagHere();
 // The app this package is: a custom build's own, or the one the tag's release line is (src/updates.ts lineApp). An alpha tag
 // (v0.6.0-alpha.1) makes "Central Knot Alpha", with its own bundle id and downloads; any other tag, or none, the standard app.
 const own = custom?.build ?? lineApp(releaseLine(tag));
 const appName = own.name;
 /** An alpha: the standard app's code under the alpha's name (scripts/build.mjs CK_APP_NAME). */
-const renamed = !custom && appName !== STANDARD_NAME;
+const renamed = !custom && own.bundleId !== STANDARD_BUILD;
 let icon = 'assets/icon.icns';
 if (custom) {
   const given = custom.icon && join(custom.out, custom.icon);
@@ -83,6 +86,14 @@ await rm('dist/build-info.json', { force: true });
 if (tag) await writeFile('dist/build-info.json', `${JSON.stringify({ tag })}\n`);
 
 await mkdir('release', { recursive: true });
+// The two downloads a release line's package writes. Every other Mac download in release/ (the other line's, an earlier
+// version's, a custom build's) is removed first and named, so release/ holds exactly the files its release carries: an alpha's
+// release that also carried the standard app's zip would be offered to every installed preview (src/updates.ts otherDownloads).
+// A custom build's package removes nothing.
+const downloads = [macDownload(appName, version, 'zip'), macDownload(appName, version, 'dmg')];
+const removed = custom ? [] : otherDownloads(await readdir('release'), downloads);
+for (const file of removed) await rm(join('release', file), { force: true });
+if (removed.length) console.log(`Removed from release/, as not this package's: ${removed.join(', ')}`);
 const packages = await packager({
   dir: '.', out: 'release', name: appName, executableName: appName,
   // Its own bundle id (an alpha's, a custom build's) is what lets it sit beside the standard app, with its own settings and login item.
@@ -114,18 +125,18 @@ if (notarize) {
   execFileSync('/usr/sbin/spctl', ['--assess', '--type', 'execute', '--verbose', bundle], { stdio: 'inherit' });
 }
 const signed = identity ? `${identity}${notarize ? ', notarized and stapled' : ', not notarized'}` : 'signed ad hoc';
-const archive = `release/${macDownload(appName, version, 'zip')}`;
+const archive = `release/${downloads[0]}`;
 execFileSync('/usr/bin/ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', bundle, archive]);
 if (custom) {
-  // A custom build's download is its zip, with its report beside it. (The disk image's window is laid out for the standard
-  // app's name, so a custom build has none yet.)
+  // A custom build's download is its zip, with its report beside it. (It has no disk image yet: a disk image's window is a
+  // folder of the app's own in assets/dmg/, scripts/mac-dmg.mjs, and a custom build has none.)
   const report = `release/${downloadName(appName)}-build-report.txt`;
   await copyFile(join(custom.out, 'build-report.txt'), report);
   console.log(`\n${custom.report}\nPackage: ${archive} (${signed}), report in ${report}`);
 } else {
   // The download for people: a disk image to drag the app out of into Applications. The zip stays: it is what the app's
   // own updater downloads (src/updates.ts looks for it by this name, its own app's: an alpha never takes the standard app's).
-  const dmg = `release/${macDownload(appName, version, 'dmg')}`;
+  const dmg = `release/${downloads[1]}`;
   buildDmg({ bundle, dmg, name: appName, identity, notaryProfile: notarize ? notaryProfile : undefined });
-  console.log(`Package: ${archive} and ${dmg}: ${appName} (${own.bundleId}), ${tag ? `release ${tag}` : 'no release tag'} (${signed})`);
+  console.log(`Package: ${appName} (${own.bundleId}), ${tag ? `release ${tag}` : 'no release tag'} (${signed}). Upload exactly these: ${dmg} ${archive}`);
 }

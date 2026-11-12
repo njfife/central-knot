@@ -30,7 +30,7 @@ import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, PartRef, PartsPick, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
 import { toolList } from './words.ts';
-import { recordedTag, startUpdater, type PendingUpdate } from './updater.ts';
+import { buildTag, startUpdater, type PendingUpdate } from './updater.ts';
 import { lineApp, releaseLine } from './updates.ts';
 import { autoUpdates, CHECK_EVERY_MS, PLUGIN_UPDATES_DEFAULT, type UpdatesRecord } from './pluginupdates.ts';
 import { CARRIED_FOLDER, STANDARD_BUILD, aboutBuild, openBundle, readCustomBuildSync, releaseDate, releaseLabel, type ActiveBundle } from './bundle.ts';
@@ -57,7 +57,7 @@ const custom = readCustomBuildSync(__dirname);
  * folder of its own, so it runs beside the standard app and never reads or writes that app's settings (ORG-07). A data
  * folder named on the command line (tests) still wins.
  */
-const own = custom ?? lineApp(releaseLine(recordedTag()));
+const own = custom ?? lineApp(releaseLine(buildTag()));
 if (own.bundleId !== STANDARD_BUILD) {
   app.setName(own.name);
   // Named by its bundle id, which no other app's folder is (a build named after a company could otherwise land in that company's own app's folder).
