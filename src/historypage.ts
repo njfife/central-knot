@@ -1,4 +1,5 @@
-// History: what sync did on its own, newest first, with Undo or Restore where the kept content allows it (CON-02, DEL-03).
+// History: what Central Knot did, by itself (sync) or on a click (a switch, a profile switch, a Pull, …), newest first, with
+// Undo or Restore where the kept content allows it (CON-02, DEL-03). Agents' entries are worded by historyactions.ts.
 import { DAY_MS, timesApart } from './model.ts';
 import { noTools, restoreEvent, showPage, shownPath, state, touchedToolsPhrase, unwriteClaudeNow } from './app.ts';
 import { noToolsState } from './pages.ts';
