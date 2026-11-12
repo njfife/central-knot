@@ -150,6 +150,9 @@ test('The switch says what a click does: off everywhere, on everywhere, take a f
   const why = 'Codex can’t store this name (é). Rename it in Claude Code to use it there.';
   const keptOut = item({ except: ['copilot-cli'] }), cannot = row({ 'claude-cli': 'b' }, { cannot: { 'codex-cli': why } }, keptOut);
   assert.deepEqual(placeTag(cannot, keptOut, tools), { text: 'Claude Code only', title: `${why} Kept out of Copilot CLI. Its switch there, in the opened row, puts it back.` });
+  // A tool that still holds an older copy (its folder can't be written) has it, so the tag doesn't say "only".
+  const locked = row({ 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'a' }, { cannot: { 'codex-cli': 'Codex’s agents folder can’t be written.' } }, item());
+  assert.equal(placeTag(locked, item(), tools), undefined);
 });
 
 test('A click’s result says what happened, and never claims a harness where it didn’t', () => {

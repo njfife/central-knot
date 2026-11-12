@@ -5,7 +5,7 @@
 // It draws what it is given and calls back on a click: matrix.ts keeps which list is unfolded and which version is being
 // read, and sends Make current as the item's click.
 import type { VersionChange } from './agentfiles.ts';
-import { foldVersions, versionChange, versionChangeHelp, versionSource } from './agentrow.ts';
+import { foldVersions, madeFrom, versionChange, versionChangeHelp, versionSource } from './agentrow.ts';
 import { wordDiff, type Line } from './diff.ts';
 import { button, h, icon, type Child } from './dom.ts';
 import { listed, sourceWords, type LibraryItem, type Version } from './library.ts';
@@ -29,7 +29,7 @@ export interface VersionListView {
   onMakeCurrent(version: Version): void;
 }
 
-function versionRow(view: VersionListView, version: Version, index: number, when: string) {
+function versionRow(view: VersionListView, version: Version, index: number, when: string, sourceWhen: (source: Version) => string) {
   const { item } = view, id = `${item.key}-${index}`;
   // The list starts with the current version (library.ts listed), and has each content once.
   const current = index === 0 && version.hash === item.hash;
@@ -45,7 +45,7 @@ function versionRow(view: VersionListView, version: Version, index: number, when
   const change = view.changes?.[index], note = versionChange(change);
   return h(`li.version-row${current ? '.version-row-current' : ''}`, { 'data-version': version.hash },
     h('span.version-when', { title: new Date(version.at).toLocaleString() }, when),
-    h('span.version-from', {}, h('span', {}, versionSource(item, version)),
+    h('span.version-from', {}, h('span', {}, versionSource(item, version, sourceWhen)),
       note ? h('span.version-note', { title: versionChangeHelp(change) }, note) : null, current ? h('span.version-current', {}, icon('check', 12), 'Current') : null),
     h('span.version-actions', {}, readIt, makeCurrent),
     read ? h('div.version-read', { id: `version-read-text-${id}` }, versionText(read.text, current ? undefined : read.current)) : null);
@@ -91,12 +91,15 @@ function versionText(read: VersionText, current: VersionText | undefined) {
 export function versionList(view: VersionListView): HTMLElement {
   const { item } = view, all = listed(item);
   const { shown, rest } = foldVersions(all, view.unfolded);
-  const times = timesApart(shown.map(version => version.at), view.now, true);
+  // One form for every time the list says: each row's, and the one a version made current again went back to.
+  const sources = shown.flatMap(version => (version.from.how === 'made-current' ? madeFrom(item, version) ?? [] : []));
+  const said = timesApart([...shown, ...sources].map(version => version.at), view.now, true);
+  const times = said.slice(0, shown.length), sourceWhen = (source: Version) => said[shown.length + sources.indexOf(source)];
   const more = `Show ${rest} earlier ${rest === 1 ? 'version' : 'versions'}`;
   const unfold = rest > 0 ? button({ variant: 'link', size: 'small', label: more, id: `versions-all-${item.key}`, onclick: view.onUnfold }) : null;
   return h('div.versions', { role: 'group', 'aria-label': `Versions of ${item.name}` },
     h('p.versions-title', {}, h('strong', {}, 'Versions'), h('span.versions-count', {}, String(all.length)),
       h('span.versions-note', {}, 'Central Knot keeps every version.')),
-    h('ul.version-rows', {}, shown.map((version, index) => versionRow(view, version, index, times[index]))),
+    h('ul.version-rows', {}, shown.map((version, index) => versionRow(view, version, index, times[index], sourceWhen))),
     unfold);
 }

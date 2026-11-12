@@ -137,10 +137,13 @@ export const madeAt = (version: Version) => dayAndTime(version.at).replace(/^tod
 export function madeFrom(item: Pick<LibraryItem, 'versions'>, version: Version): Version | undefined {
   return item.versions.slice(item.versions.indexOf(version) + 1).find(older => older.hash === version.hash && older.from.how !== 'made-current');
 }
-/** Where a listed version came from, as its row says it: a version made current again names the one it went back to. */
-export function versionSource(item: Pick<LibraryItem, 'versions'>, version: Version): string {
+/**
+ * Where a listed version came from, as its row says it: a version made current again names the one it went back to, with
+ * that one's time as `when` says it (the list's own form; madeAt by default).
+ */
+export function versionSource(item: Pick<LibraryItem, 'versions'>, version: Version, when: (source: Version) => string = madeAt): string {
   const source = version.from.how === 'made-current' ? madeFrom(item, version) : undefined;
-  return source ? `back to: ${sourceWords(source.from)}, ${madeAt(source)}` : sourceWords(version.from);
+  return source ? `back to: ${sourceWords(source.from)}, ${when(source)}` : sourceWords(version.from);
 }
 
 /** How many versions a folded list shows. */
@@ -168,8 +171,9 @@ export function placeTag(row: AgentRow, item: LibraryItem | undefined, tools: re
   const found = 'A tool has this agent; Central Knot doesn’t yet. Turn it on to take it in and put it in every tool.';
   if (place === 'found') return { text: 'not in Central Knot', title: found };
   const out = item!.except.filter(tool => tools.includes(tool)), keptOut = `Kept out of ${andList(out.map(toolName))}. Its switch there, in the opened row, puts it back.`;
-  // A tool that can't take it (agents.ts cannotTake) is as lasting as one it is kept out of: the tag names where it can be.
-  const cannot = tools.filter(tool => harnessIs(row, item, tool) === 'cannot');
+  // A tool that can't take it (agents.ts cannotTake) and has no copy is as lasting as one it is kept out of: the tag names
+  // where it is. (A tool that holds an older copy, its folder locked, is told by its mark and line alone.)
+  const cannot = tools.filter(tool => harnessIs(row, item, tool) === 'cannot' && row.hashes?.[tool] === undefined);
   if (cannot.length) {
     const can = tools.filter(tool => !cannot.includes(tool) && !out.includes(tool as HarnessId));
     return { text: can.length ? `${andList(can.map(toolName))} only` : 'in no tool', title: [...cannot.map(tool => row.cannot![tool]!), out.length ? keptOut : ''].filter(Boolean).join(' ') };

@@ -491,6 +491,7 @@ if (wanted('agents')) {
 
   // States added in round 3, after the earlier pictures so their numbers stay. The long name heads its opened panel.
   await openRow(long);
+  if (await a.has('.version-read')) { await a.click(`#version-read-${long}-0`); await a.settle(); }
   await sizes('agents-long-name-open', 'Opened the agent with the long name: the panel’s header holds it, and the list beside it cuts it before any description goes', false, '.details');
   await closeRow(long);
 
@@ -522,15 +523,15 @@ if (wanted('agents')) {
   // Undo of a Make current while the agent is kept out of a tool: that tool stays out.
   await a.click('#enable-standup-codex-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
   await a.click('#version-current-standup-2'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
-  await a.click('#outcome-undo'); await a.settle();
+  await a.click('#outcome-undo'); await a.settle(); await show('.details-tool-line');
   await shot(a, 'agents-made-current-kept-out-undone', 'Kept standup out of Codex, clicked Make current on an earlier version, then Undo: the version before is current again in Claude Code and Copilot CLI; Codex stays out.');
   await a.click('#enable-standup-codex-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
 
   // A tool whose agents folder can't be written: its line says so, and the next pass writes it once it can.
   chmodSync(join(practice, agentsFolder.codex), 0o555);
   claudeFile('standup', 'Writes the daily standup.', steps(31));
-  await refresh(); await openRow('standup'); await show('.details');
-  await sizes('agents-folder-locked', 'Codex’s agents folder made read-only, then standup edited in Claude Code: Copilot CLI gets the edit; Codex’s line says Central Knot can’t write in its agents folder', false, '.details');
+  await refresh(); await openRow('standup');
+  await sizes('agents-folder-locked', 'Codex’s agents folder made read-only, then standup edited in Claude Code: Copilot CLI gets the edit; Codex’s line says Central Knot can’t write in its agents folder', false, '.details-tool-line');
   chmodSync(join(practice, agentsFolder.codex), 0o755);
   await refresh();
   await closeRow('standup');
@@ -567,7 +568,7 @@ if (wanted('agents')) {
   await a.run(`[...document.querySelectorAll('.history-row[data-kind="deleted"]')].find(row => row.textContent.includes('triage'))?.querySelector('.history-actions button')?.click()`);
   await a.settle();
   await shot(a, 'agents-restore-name-taken', 'Clicked Restore: the old triage is back in Central Knot and every tool; the new copy found in Claude Code is kept as a version first.');
-  await a.click('#nav-agents'); await a.settle(); await openRow('triage');
+  await a.click('#nav-agents'); await a.settle(); await openRow('triage'); await show('.versions');
   await shot(a, 'agents-restore-name-taken-open', 'Opened triage after Restore: its versions, the new copy from Claude Code among them, each with Make current.');
 
   // No agents at all: a fresh Practice copy with its agents' files removed.
