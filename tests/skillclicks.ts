@@ -1,10 +1,11 @@
 // One skill ("notes") in a temp home, and the clicks the Skills page and History send for it, built by the page's own code
 // (src/libraryrow.ts rowClicks, src/historyactions.ts). Shared by the tests that replay clicks on real folders:
 // skills.test.ts, skillmigrate.test.ts and the seeded walk (librarywalk.test.ts).
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readHistory } from '../src/history.ts';
+import { libraryAction, versionChoices } from '../src/historyactions.ts';
 import type { LibraryItem } from '../src/library.ts';
 import { needsChoice, rowClicks, type LibraryRow } from '../src/libraryrow.ts';
 import type { ShareContext } from '../src/share.ts';
@@ -90,3 +91,59 @@ export const makeCurrent = async (box: Box, hash: string, context = box.context)
 export const remove = async (box: Box, context = box.context) => { const { row, item } = await seen(box, context); return send(box, rowClicks.remove(row, item), context); };
 /** A History entry's action (its version choice with `version`), as History's button sends it. */
 export const restore = (box: Box, eventId: string, version?: string, context = box.context) => restoreSkill(context, box.tools, eventId, version);
+
+/** Every action History offers on the skill's entries (its main one, and each copy choice), as History's buttons send them. */
+export async function historyActions(box: Box, context = box.context, key = 'notes') {
+  const { item } = await seen(box, context, key);
+  return (await historyOf(box, context, key)).flatMap(event => {
+    const main = libraryAction(event, item);
+    const run = (version?: string) => () => restoreSkill(context, box.tools, event.id, version);
+    return [...(main ? [{ event, label: main.label, run: run() }] : []), ...versionChoices(event, item).map(choice => ({ event, label: `Use ${choice.tool}’s`, run: run(choice.hash) }))];
+  });
+}
+/** A click's Undo (app.ts undoClick): the History action of each entry the click made. */
+export async function undo(box: Box, click: PassResult, context = box.context) {
+  const done: PassResult[] = [];
+  for (const id of click.made ?? []) done.push(await restoreSkill(context, box.tools, id));
+  return done;
+}
+
+type Entry = { is: 'dir'; mode: number; at: Date } | { is: 'file'; text: Buffer; mode: number; at: Date } | { is: 'link'; to: string };
+/** Every entry under a folder as it is: folders (empty ones too), files with their bytes, links where they lead; with modes and times. */
+async function entriesUnder(root: string, found = new Map<string, Entry>()) {
+  for (const entry of await readdir(root, { withFileTypes: true }).catch(() => [])) {
+    const path = join(root, entry.name), info = await lstat(path);
+    if (info.isSymbolicLink()) found.set(path, { is: 'link', to: await readlink(path) });
+    else if (info.isDirectory()) { found.set(path, { is: 'dir', mode: info.mode & 0o777, at: info.mtime }); await entriesUnder(path, found); }
+    else found.set(path, { is: 'file', text: await readFile(path).catch(() => Buffer.alloc(0)), mode: info.mode & 0o777, at: info.mtime });
+  }
+  return found;
+}
+/**
+ * Runs `body` on the home as it is, then puts every entry back as it was, folder times too (a skill's time is its latest
+ * one): what is new goes, what went comes back. A folder that stayed is never made again, so a tool's skills folder keeps
+ * the identity Central Knot noted.
+ */
+export async function trial<T>(box: Box, body: () => Promise<T>): Promise<T> {
+  const before = await entriesUnder(box.base);
+  try { return await body(); }
+  finally {
+    const after = await entriesUnder(box.base);
+    const deepestFirst = (paths: string[]) => paths.sort((first, second) => second.split('/').length - first.split('/').length);
+    for (const path of deepestFirst([...after.keys()])) {
+      const was = before.get(path), now = after.get(path)!;
+      if (!was || was.is !== now.is || (was.is === 'link' && now.is === 'link' && was.to !== now.to)) await rm(path, { recursive: true, force: true });
+    }
+    for (const [path, was] of [...before].sort(([first], [second]) => first.split('/').length - second.split('/').length)) {
+      const now = await lstat(path).catch(() => undefined);
+      if (was.is === 'dir') { if (!now) await mkdir(path); await chmod(path, 0o755); }
+      else if (was.is === 'link') { if (!now) await symlink(was.to, path); }
+      else if (!now || !(await readFile(path)).equals(was.text) || (now.mode & 0o777) !== was.mode || now.mtime.getTime() !== was.at.getTime()) {
+        if (now) await chmod(path, 0o644);
+        await writeFile(path, was.text); await chmod(path, was.mode); await utimes(path, was.at, was.at);
+      }
+    }
+    for (const path of deepestFirst([...before.keys()])) { const was = before.get(path)!; if (was.is === 'dir') { await chmod(path, was.mode); await utimes(path, was.at, was.at); } }
+  }
+}
+
