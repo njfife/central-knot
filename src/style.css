@@ -1331,6 +1331,8 @@ span.ins-confirm { margin-top: 0; }
 .setting-message { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 6px; margin: -8px 0 0; }
 /* What Synchronize everything just took in, a line per kind: spaced as the row's own lines are (each takes back 8px of 12). */
 .setting-added { grid-column: 1 / -1; display: grid; row-gap: 12px; }
+/* A section's own line, in a row of its own (what the last click on another build came to: settingspage.ts otherBuildsSection). */
+.setting-said > .setting-message { margin: 0; }
 .setting-message .icon { flex: none; margin-top: 1px; }
 .setting-message-body { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 4px; min-width: 0; }
 .setting-failure { color: var(--danger); }

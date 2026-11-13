@@ -25,7 +25,7 @@ An item Central Knot holds with its versions, On or Off, applied to every manage
 ## The tools in a home
 Which tools a home has, where each keeps its files, and which of them Central Knot manages: every installed tool but the ones whose Manage switch is off (kept in the home's record as the tools left out: `share.ts SyncRecord leftOut`). A tool left out has its card and switch on Harnesses and shows on no other page; nothing of Central Knot's is written there.
 - `harnesses.ts` each tool's definition: config folder, skill roots, binary · `discovery.ts` one tool in a home read (`discover`): its skills, CLI version, desktop apps
-- `platform.ts` where CLIs and apps are looked for · `presence.ts` the tools present (`presentTools`) and managed (`managedTools`), and what each can hold
+- `platform.ts` where CLIs and apps are looked for, and this Mac's Applications folders, running apps and Trash, which a test stands in for (`macPlaces`) · `presence.ts` the tools present (`presentTools`) and managed (`managedTools`), and what each can hold
 - `toolchoice.ts` a tool's Manage switch: the one place the managed tools change (`chooseTools`), and what turning one on would do there (`whatJoiningDoes`, from `librarypass.ts joinCounts`) · `managecard.ts` the switch on a Harnesses card, the line beside it and the band after it
 - **Start:** `presence.ts`, then `toolchoice.ts`. **Examples:** `tests/managetool.test.ts` (the switch on real files, each way it can go wrong), `tests/discovery.test.ts`, `tests/presence.test.ts`, `tests/cowork.test.ts`; on screen, `scripts/e2e.mjs manageFlow`.
 
@@ -77,9 +77,10 @@ The app updating itself from GitHub releases, its Mac packages, and custom build
 - `updates.ts` release lines, which release is newer, and the words (no Node) · `updateflow.ts` an update's steps in main · `updater.ts` Electron's parts: the build's tag, Squirrel
 - `updateview.ts` the sidebar's update control and Settings' Updates row · `bundle.ts` a custom build and the marketplace it carries · `bundlefeed.ts` a bundled build's feed
 - `bundlepack.ts` a custom build's inputs, packed and staged · `scripts/build.mjs` builds `dist/` · `scripts/package-mac.mjs` the Mac app and its two downloads, signed
+- `otherbuilds.ts` another build of Central Knot on this Mac (the preview beside the alpha): found at each look, removed or quit on a click, in main · `otherbuildview.ts` the same on the page: the Overview's band, the two take-over choices, Settings' rows' words and the clicks
 - `scripts/mac-dmg.mjs` the disk image · `scripts/mac-dmg-layout.sh` its window's layout · `scripts/release-tag.mjs` the tag a build records · `scripts/release-tag.d.mts` its types
 - `scripts/custom-build.mjs` stages a custom build · `scripts/publish-bundle.mjs` a marketplace release onto a feed
-- **Start:** `updates.ts`'s header; README's "Packaging and release". **Examples:** `tests/updates.test.ts`, `tests/updateflow.test.ts`, `tests/releasetag.test.ts`, `tests/bundle.test.ts`, `tests/bundlefeed.test.ts`.
+- **Start:** `updates.ts`'s header; README's "Packaging and release"; for another build on this Mac, `otherbuilds.ts`'s header. **Examples:** `tests/updates.test.ts`, `tests/updateflow.test.ts`, `tests/releasetag.test.ts`, `tests/bundle.test.ts`, `tests/bundlefeed.test.ts`, `tests/otherbuilds.test.ts` (made-up bundles and running apps, from `tests/macstandins.ts`).
 
 ## The app's shell and Settings
 The main process, the window's frame, Settings, and what every page shares.
@@ -99,7 +100,7 @@ What every engine stands on: `.central-knot/`, which build syncs a home, and wri
 - **Start:** `share.ts`'s exports, by their comments; a skill's copy is written over by `skillfiles.ts swapFolder`. **Examples:** `tests/share-recovery.test.ts`, `tests/textedit.test.ts`, `tests/skillsafety.test.ts`.
 
 ## Test and tour scripts
-How each is run: `AGENTS.md` ("Checking a change") and README ("For developers"); the Mac run is `.github/workflows/mac.yml`. Unit tests are `tests/*.test.ts`.
+How each is run: `AGENTS.md` ("Checking a change") and README ("For developers"); the Mac run is `.github/workflows/mac.yml`. Unit tests are `tests/*.test.ts`. Every script that opens the app names a stand-in for /Applications, the running apps and the Trash (`tests/macstandins.ts`, set as CK_TEST_APPS: `platform.ts macPlaces`), so none looks at or removes the real ones.
 - `scripts/e2e.mjs` the end-to-end checks on the real app in a throwaway home · `scripts/ui-tour.mjs` the screenshot tour · `scripts/cdp.mjs` the DevTools client the scripts drive the app with
 - `scripts/fixture-market.mjs` a realistic marketplace · `scripts/git-http-fixture.mjs` Git repos served here · `scripts/update-fixture.mjs` a stand-in for GitHub's releases
 - `scripts/update-proof.mjs` a real signed update, on a Mac · `scripts/alpha-check.mjs` the alpha beside the standard app · `scripts/bundled-check.mjs` a bundled build end to end
@@ -113,6 +114,7 @@ How each is run: `AGENTS.md` ("Checking a change") and README ("For developers")
 - **A profile switch:** the page's Switch or the status bar's menu (`profilespage.ts`) → `main.ts`'s `profiles:switch`, or the menu bar's (`main.ts profileMenu` → `main.ts switchFromMenu`) → `profiles.ts switchProfile` (`profileplan.ts switchPlan`; the entry first, then `skills.ts applySkills`, `servers.ts applyServers` and `agents.ts applyAgents` with the clicks) → `app.ts switchToProfile`'s band, with Write to Claude Code when a server waits.
 - **A sync notice:** made by a pass (`librarypass.ts logItem`, `takenInNotice`), sent once with main's next view (`main.ts syncThenView`), carried across reads until its page shows it (`app.ts keepUnshown`), then kept or folded on that page (`matrix.ts toldNotices`).
 - **An update check:** the timer in `updateflow.ts updateFlow` (started by `updater.ts startUpdater`) or Check now (`updateview.ts checkNow`) → GitHub's releases → `updates.ts newerRelease` → `updates:changed` → `updateview.ts followUpdates` redraws the control.
+- **Removing another build of Central Knot:** the Overview's band (`otherbuildview.ts otherBuildBands`), Settings' row (`settingspage.ts otherBuildsSection`) or Take over and remove (`otherbuildview.ts takeOverChoices`) → `otherbuildview.ts removeOtherBuild` → `preload.ts` → `main.ts`'s `builds:remove` → `otherbuilds.ts removeClick` (syncing taken over first where asked: `share.ts takeOverSync`; then `otherbuilds.ts removeBuild`) → the view read again (`main.ts syncThenView`, whose look no longer finds it).
 - **A plugin's Apply all:** boxes on `pluginspage.ts` or `pluginpage.ts` fill the plan → `pluginstate.ts applyPluginOps` → `pluginplan.ts runPlan` → the handlers in `marketplaces.ts registerMarketplaces` → `plugins.ts install`, `plugins.ts update`, `plugins.ts uninstall` or `parts.ts installParts`.
 
 ## Names that mean two things

@@ -25,6 +25,20 @@ export interface DesktopApp {
 /** An app found on this computer that runs the tools or reads their files without being a tool Central Knot manages (T3 Code, VS Code). */
 export interface OtherApp { name: string; version?: string; says: string }
 
+/**
+ * Another build of Central Knot on this Mac, as the last look found it (otherbuilds.ts lookForBuilds; never stored): one of its
+ * bundles in an Applications folder (`installed`: Remove takes it), or, for a build with none there, the build running from
+ * somewhere else (no `installed`: Quit). `running`: where each running copy of that build runs from (otherbuilds.ts
+ * runningCopies, every copy by its bundle id); empty when none runs, unset when that can't be told.
+ */
+export interface OtherBuild { build: string; name: string; installed?: string; running?: string[] }
+
+/**
+ * What a click on another build came to (otherbuilds.ts removeClick and quitBuild): its words, whether it did what was asked
+ * (the bundle is in the Trash, or the build has quit), and the bundle to show in Finder where macOS refused to move it.
+ */
+export interface BuildOutcome { said: string; done: boolean; show?: string }
+
 export interface Skill {
   /** Folder name: what the harness root holds and what a copy is called. */
   folder: string;
@@ -78,7 +92,7 @@ export type SyncGate =
 
 export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** A refusal made before anything was changed, the record included: the click did nothing. */ unchanged?: true; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true; /** `held`: waits for Write to Claude Code (MCP-02), as it should (not a failure). */ waits?: true; }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; /** The home as a whole: its tools, access, owner and what the background did. */ sync: SyncView; /** Skills: those in Central Knot's library (library.ts) and those found in a tool. */ skills: LibraryView; /** MCP servers: those in Central Knot's library (library.ts) and those found in a tool. */ mcp: LibraryView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of library items to have On (profileplan.ts). */ profiles: ProfilesView }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; /** The home as a whole: its tools, access, owner and what the background did. */ sync: SyncView; /** Skills: those in Central Knot's library (library.ts) and those found in a tool. */ skills: LibraryView; /** MCP servers: those in Central Knot's library (library.ts) and those found in a tool. */ mcp: LibraryView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Another build of Central Knot on this Mac (otherbuilds.ts): unset where it isn't looked for (main.ts buildsContext: only an installed app on a Mac, or a test with its stand-ins) and where an Applications folder can't be read. */ otherBuilds?: OtherBuild[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of library items to have On (profileplan.ts). */ profiles: ProfilesView }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
@@ -111,6 +125,13 @@ export interface DesktopApi {
   manageTool(tool: HarnessId, on: boolean, resume: boolean, home: string): Promise<{ stopped?: string; view: HomeView | null; did: DestinationResult[] }>;
   /** Makes this build the home's sync owner, in place of the build that syncs it now; every managed item and choice stays. */
   takeOverSync(home: string): Promise<{ stopped?: string; from?: string; view: HomeView | null }>;
+  /**
+   * Removes another build of Central Knot (otherbuilds.ts removeClick): its bundle at `path`, offered as `build`, quit and moved to
+   * the Trash; with `takeOver`, syncing the home is taken over from it first.
+   */
+  removeOtherBuild(home: string, path: string, build: string, takeOver: boolean): Promise<BuildOutcome & { view: HomeView | null }>;
+  /** Asks every running copy of another build of Central Knot to quit (otherbuilds.ts quitBuild). */
+  quitOtherBuild(build: string): Promise<BuildOutcome & { view: HomeView | null }>;
   onSyncChanged(callback: () => void): void;
   /** Main did something on the person's behalf outside any request (a bundled build added its marketplace to their tools): words for the status bar. */
   onSaid(callback: (text: string) => void): void;

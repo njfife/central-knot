@@ -7,7 +7,8 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, watch, wri
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover, findOtherApps } from './discovery.ts';
 import { configRoot, envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
-import { CLAUDE_PROCESS, appCandidates, executableCandidates, searchPath } from './platform.ts';
+import { CLAUDE_PROCESS, appCandidates, executableCandidates, macPlaces, searchPath } from './platform.ts';
+import { intoFolder, isRunning, knownBuilds, lookForBuilds, quitBuild, removeClick, type BuildsContext } from './otherbuilds.ts';
 import { leftOutNow, managedNow, readRecord, setSyncEverything, syncGate, takeOverSync, writeAccess, type ShareContext } from './share.ts';
 import { chooseTools, whatJoiningDoes } from './toolchoice.ts';
 import { pruneHistory, readHistory } from './history.ts';
@@ -30,7 +31,7 @@ import { trayIconPng } from './trayicon.ts';
 import { homePass } from './homepass.ts';
 import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from './profiles.ts';
 import { homeItems, inUse, inUseName, switchable, type LiveItem } from './profileplan.ts';
-import { defaultHistoryDays, historyDayChoices } from './model.ts';
+import { defaultHistoryDays, historyDayChoices, syncOwner } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, PartRef, PartsPick, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
@@ -75,6 +76,9 @@ if (smoke) app.setPath('userData', mkdtempSync(join(tmpdir(), 'central-knot-smok
 if (process.env.CK_TEST_HOME) process.env.HOME = process.env.CK_TEST_HOME;
 if (process.env.CK_TEST_USER_DATA) app.setPath('userData', process.env.CK_TEST_USER_DATA);
 if (process.env.CK_TEST_DEBUG_PORT) app.commandLine.appendSwitch('remote-debugging-port', process.env.CK_TEST_DEBUG_PORT);
+// Test-only too: CK_TEST_APPS names a folder that stands in for /Applications, the running apps and the Trash (platform.ts
+// macPlaces), so a test never looks at or removes the real ones; with it, another build is looked for in a development run too.
+const testApps = !!process.env.CK_TEST_APPS;
 // Asked now, while the window is being made, so the first read of this computer's tools doesn't wait on a shell's startup.
 void searchPath();
 /** This build's name in a home's sync record: its app's bundle id (the standard app's, the alpha's or a custom build's own). */
@@ -544,8 +548,12 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passed: 
   // What plugins installed whole bring, read with the home so the Skills, MCP servers and Agents pages show it without Plugins.
   // With the view's own reads, so each tool's installed plugins are read once for these rows and the pages' Through a plugin boxes.
   made.pluginItems = await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), managed);
-  // Another build syncs this home: whether it is open now decides what the page says about it.
-  if (made.sync.gate.state === 'stopped' && made.sync.gate.owner) made.sync.gate.owner.running = await buildRunning(made.sync.gate.owner.build);
+  // Another build of Central Knot on this Mac, and whether the one that syncs this home is open now (what the page says of it).
+  const builds = buildsContext(), owner = syncOwner(made.sync.gate);
+  if (builds) {
+    made.otherBuilds = await lookForBuilds(builds);
+    if (owner) owner.running = await isRunning(builds, owner.build);
+  }
   followProfiles(made.profiles, homeItems(made));
   // Only once the view is built is anything kept about this home, so a switch that fails leaves nothing behind.
   handoff = { id: readId, home: current!.home, snapshots };
@@ -608,12 +616,18 @@ function lookAtFeed(): Promise<void> {
 }
 
 /**
- * Whether the build with this identity is open now, as macOS has it (an installed app, by its bundle id); undefined
- * where that can't be told (other systems, or a build run from its source).
+ * What a look at another build of Central Knot, or a click on one, goes by (otherbuilds.ts BuildsContext); the one guard on all
+ * of it: undefined, so nothing is looked for, quit or removed, but on a Mac in an installed app (where macOS can say which apps
+ * run), or where a test named its stand-ins (CK_TEST_APPS); never in a smoke run.
  */
-function buildRunning(build: string): Promise<boolean | undefined> {
-  if (process.platform !== 'darwin' || !app.isPackaged) return Promise.resolve(undefined);
-  return new Promise(done => execFile('/usr/bin/lsappinfo', ['info', '-only', 'pid', '-app', build], { timeout: 5_000 }, (error, out) => done(error ? undefined : /"pid"\s*=\s*\d+/.test(String(out)))));
+function buildsContext(): BuildsContext | undefined {
+  if (smoke || !((process.platform === 'darwin' && app.isPackaged) || testApps)) return undefined;
+  const places = macPlaces(homedir());
+  return {
+    own: BUILD, known: knownBuilds(), places, home: homedir(),
+    ...(app.isPackaged ? { ownBundle: process.execPath.replace(/\/Contents\/MacOS\/[^/]+$/, '') } : {}),
+    trash: places.trash ? intoFolder(places.trash) : bundle => shell.trashItem(bundle),
+  };
 }
 
 /** The marketplace feature's own work at open (marketplaces.ts); set once its requests are registered. */
@@ -1245,6 +1259,25 @@ app.whenReady().then(async () => {
     return { ...set, view: await syncThenView() };
   });
   handle('sync:now', async home => (home === current?.home ? syncThenView(true) : null));
+  // Another build of Central Knot: removed (taken over from first, where asked) or quit, on a click alone. One log line each.
+  const notHere = { said: 'Another build is removed or quit only by the installed app on a Mac.', done: false, view: null };
+  handle('builds:remove', async (home, path, build, takeOver) => {
+    if (home !== current?.home || typeof path !== 'string' || typeof build !== 'string') return { said: elsewhere, done: false, view: null };
+    const builds = buildsContext();
+    if (!builds) return notHere;
+    const removal = await removeClick(context(), builds, path, build, takeOver === true);
+    if (removal.took) log(`sync: took over syncing ${home} from ${removal.took}`);
+    log(`other build: ${removal.done ? `moved ${path} to the Trash` : `${path} not removed: ${removal.said}`}`);
+    return { said: removal.said, done: removal.done, ...(removal.show ? { show: removal.show } : {}), view: await syncThenView() };
+  });
+  handle('builds:quit', async build => {
+    if (typeof build !== 'string' || !current) return { said: elsewhere, done: false, view: null };
+    const builds = buildsContext();
+    if (!builds) return notHere;
+    const quit = await quitBuild(builds, build);
+    log(`other build: asked ${build} to quit: ${quit.said}`);
+    return { ...quit, view: await syncThenView() };
+  });
   // A tool's Manage switch (toolchoice.ts chooseTools), then the home read again: with Automatic sync on, that pass brings a tool
   // turned on into line, and what it did there (`did`) is what the page's band says. A tool turned off is forgotten by the plugin
   // updates, so it is new to them when it is managed again.
