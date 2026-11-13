@@ -2879,23 +2879,35 @@ async function syncEverythingFlow() {
     [await ruleOn(), await ruleSays()], ['false', 'Turning it on adds the 2 items found in your tools now. 1 found item has copies that differ and waits for your choice of copy.']);
   await fitsAtMinimum(a, 'Settings with Synchronize everything off');
   await a.shot('everything-off');
+  // Saved just now, as a tool writes a new skill: the pass right after the switch leaves it inside the settle window, and the
+  // pass soon after takes it in by itself, whose read keeps the notices no page has shown yet.
+  skill(claude, 'fresh', text('fresh', 'Just saved.'));
   await a.click('#sync-everything-on');
   for (let tries = 0; tries < 40 && await ruleOn() !== 'true'; tries++) await wait(100);
   const record = JSON.parse(readFileSync(join(home, '.central-knot/sync.json'), 'utf8'));
   same('turned on, it is kept in the home’s sync record, and the row says what still waits for a choice', [await ruleOn(), record.syncEverything, await ruleSays()], ['true', true, '1 found item has copies that differ and waits for your choice of copy.']);
   same('the pass right after took in what was found: notes is in Codex now, byte for byte', readNow(join(codex, 'notes/SKILL.md')), text('notes', 'Take notes.'));
+  for (let tries = 0; tries < 80 && !readNow(join(codex, 'fresh/SKILL.md')); tries++) await wait(100);
+  same('a skill saved just before is taken in soon after, with no click, once it has settled', readNow(join(codex, 'fresh/SKILL.md')), text('fresh', 'Just saved.'));
+  // The read after that pass reaches the page: the sidebar's dot names both skills' notices, neither shown yet.
+  const unseenOnSkills = () => a.run(`document.querySelector('#nav-skills .nav-unseen')?.title ?? ''`);
+  for (let tries = 0; tries < 40 && !/fresh/.test(await unseenOnSkills()); tries++) await wait(100);
+  same('a notice no page has shown stays until shown: the sidebar names both passes’ notices for Skills', await unseenOnSkills(), '2 automatic changes: notes, fresh');
   await a.shot('everything-on');
+  await a.click('#nav-overview');
+  check('Overview’s sync line says the rule in force', /edits spread between tools in seconds, and what turns up in a tool is taken in by Synchronize everything/.test(await a.text('.overview-more') ?? ''), await a.text('.overview-more'));
   await a.click('#nav-skills');
-  same('on the Skills page notes is On and review stays found', await sectionsNow(a), [['on', ['notes']], ['found', ['review']]]);
+  same('on the Skills page notes and fresh are On and review stays found', await sectionsNow(a), [['on', ['fresh', 'notes']], ['found', ['review']]]);
   check('the Found heading says the rule in force: Synchronize everything leaves these, and how many wait for a choice', /Synchronize everything leaves these, and each row says why\. 1 waits for your choice of copy/.test(await foundNote() ?? ''), await foundNote());
   const notice = '.sync-notice[data-kind="taken-in"] .notice-text';
-  check('one notice says how many it took in, where they were found, and their names', /^Synchronize everything took in 1 skill, found in Claude Code: notes\. History can undo it\. · just now$/.test(await a.text(notice) ?? ''), await a.text('.bands'));
+  same('one notice per pass says how many it took in, where they were found, and their names', await a.all(notice, 'e.textContent.replace(/ · .*$/, "")'),
+    ['Synchronize everything took in 1 skill, found in Claude Code: fresh. History can undo it.', 'Synchronize everything took in 1 skill, found in Claude Code: notes. History can undo it.']);
   same('review’s row says why the rule leaves it: its copies differ, and opening it asks which', [await a.text('#decide-review'), await (async () => { await a.click('#open-review'); return a.exists('.details-differs'); })()], ['Copies differ', true]);
   await fitsAtMinimum(a, 'Skills with Synchronize everything on');
   await a.shot('everything-skills');
   await a.click('#nav-mcp');
   same('on the MCP servers page files, found in Codex, is On; Claude Code’s part waits for Write to Claude Code', [await sectionsNow(a), await a.exists('#mcp-write-claude')], [[['on', ['files']]], true]);
-  check('and its notice names it and Codex', /^Synchronize everything took in 1 MCP server, found in Codex: files\./.test(await a.text(notice) ?? ''), await a.text('.bands'));
+  check('and its notice, from the pass before the one that took fresh in, is still there to name it and Codex', /^Synchronize everything took in 1 MCP server, found in Codex: files\./.test(await a.text(notice) ?? ''), await a.text('.bands'));
   await a.click('#nav-history');
   for (let tries = 0; tries < 30 && !(await a.exists('.history-row')); tries++) await wait(100);
   // The skill notes's own row, by its name and kind (release-notes, an agent, has one too).
@@ -2910,7 +2922,7 @@ async function syncEverythingFlow() {
   await a.click('#nav-skills');
   await a.click('#header-refresh');
   await a.click('#header-refresh');
-  same('and no pass takes it back: it is found, for good', [await sectionsNow(a), existsSync(join(codex, 'notes'))], [[['found', ['notes', 'review']]], false]);
+  same('and no pass takes it back: it is found, for good', [await sectionsNow(a), existsSync(join(codex, 'notes'))], [[['on', ['fresh']], ['found', ['notes', 'review']]], false]);
   await a.click('#open-notes');
   check('its line says why: deleted, so only Add brings it back', /Synchronize everything leaves it: it was deleted from Central Knot, so only Add brings it back\./.test(await a.text('.details-status') ?? ''), await a.text('.details-status'));
   for (const page of ['overview', 'skills', 'mcp', 'harnesses']) await noAddAll(page);
@@ -2918,6 +2930,13 @@ async function syncEverythingFlow() {
   await a.click('#sync-everything-on');
   for (let tries = 0; tries < 40 && await ruleOn() !== 'false'; tries++) await wait(100);
   same('turned off, it says what it would add now: nothing, since what was undone stays out', [await ruleOn(), await ruleSays()], ['false', 'Nothing found in your tools now would be added. 1 found item has copies that differ and waits for your choice of copy.']);
+  // Saved just before it is switched on again, with nothing else for that pass to write: the pass leaves it inside the settle
+  // window, and nothing but the look again soon after (no watch event follows) takes it in before the 20 s poll.
+  skill(claude, 'later', text('later', 'Saved just before.'));
+  await wait(1700);
+  await a.click('#sync-everything-on');
+  for (let tries = 0; tries < 60 && !readNow(join(codex, 'later/SKILL.md')); tries++) await wait(100);
+  same('a copy the pass left inside the settle window is taken in a moment later, by itself', readNow(join(codex, 'later/SKILL.md')), text('later', 'Saved just before.'));
   same('no page errors, Synchronize everything', a.pageErrors, []);
   await a.quit();
 }

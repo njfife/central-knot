@@ -87,6 +87,7 @@ test('Switched on in a home with found items: each it may take is taken in and O
   const box = await sandbox();
   try {
     await putSkill(box, 'claude-cli', 'notes');
+    await putSkill(box, 'claude-cli', 'tidy');
     // Copies that differ: left found, with the row's question.
     await putSkill(box, 'claude-cli', 'review', 'Review gently.');
     await putSkill(box, 'codex-cli', 'review', 'Review hard.');
@@ -101,7 +102,7 @@ test('Switched on in a home with found items: each it may take is taken in and O
     await putServers(box, 'codex-cli', { files: { command: 'files-mcp' } });
     const claudeBefore = await readFile(join(box.home, mcpFile['claude-cli']), 'utf8');
     const before = await views(box);
-    assert.deepEqual([before.skills, before.mcp, before.agents].flatMap(view => view.items.filter(item => item.takeInAnswers && 'take' in item.takeInAnswers.rule).map(item => item.key)), ['notes', 'docs', 'files', 'helper'], 'what Settings counts while it is off');
+    assert.deepEqual([before.skills, before.mcp, before.agents].flatMap(view => view.items.filter(item => item.takeInAnswers && 'take' in item.takeInAnswers.rule).map(item => item.key)), ['notes', 'tidy', 'docs', 'files', 'helper'], 'what Settings counts while it is off');
     await turnOn(box);
     assert.equal((await readRecord(box.home)).record?.syncEverything, true);
     const done = await background(box);
@@ -127,7 +128,7 @@ test('Switched on in a home with found items: each it may take is taken in and O
     const docs = (await entriesOf(box, 'mcp:docs')).at(-1)!, files = (await entriesOf(box, 'mcp:files')).at(-1)!;
     assert.deepEqual([docs.cause, libraryAction(docs, after.mcp.library.docs), libraryAction(files, after.mcp.library.files)?.label], ['sync-everything', undefined, 'Undo']);
     // One notice per pass of a kind: how many, by name, and where they were found. None for a key it left.
-    assert.deepEqual(noticesOf(done).map(notice => notice.kind === 'taken-in' ? [notice.items, notice.from] : notice.kind), [[['notes'], ['claude-cli']], [['docs', 'files'], ['claude-cli', 'codex-cli']], [['helper'], ['copilot-cli']]]);
+    assert.deepEqual(noticesOf(done).map(notice => notice.kind === 'taken-in' ? [notice.items, notice.from] : notice.kind), [[['notes', 'tidy'], ['claude-cli']], [['docs', 'files'], ['claude-cli', 'codex-cli']], [['helper'], ['copilot-cli']]], 'each tool named once');
     // A click's Undo never undoes what the rule took in: none of it is a click's.
     assert.deepEqual(Object.values(done).flatMap(pass => pass.made ?? []), []);
     // The next pass writes nothing and says nothing.
@@ -143,6 +144,8 @@ test('Switching it on in a home with no sync record makes the record, as the fir
     await turnOn(box);
     assert.deepEqual([(await readRecord(box.home)).record?.syncEverything, (await syncGate(box.context)).state], [true, 'ready']);
     const record = (await readRecord(box.home)).record!;
+    await writeFile(join(box.home, '.central-knot/sync.json'), JSON.stringify({ ...record, syncEverything: 'yes' }));
+    assert.equal((await readRecord(box.home)).problem, 'The sync record is damaged.', 'the setting is true or false, nothing else');
     await saveRecord(box.home, { ...record, owner: 'another-build', ownerName: 'Central Knot Alpha' }, true);
     const refused = await setSyncEverything(box.context, false);
     assert.match(refused.stopped ?? '', /Central Knot Alpha syncs this home/);
@@ -230,14 +233,18 @@ test('A copy that can’t be read, and an MCP entry in a form Central Knot doesn
 test('A plugin’s parts are left found, each row keeping its Add; Add on one takes in that part alone', async () => {
   const box = await sandbox();
   try {
-    for (const name of ['alpha', 'beta']) await putSkill(box, 'codex-cli', name);
+    for (const name of ['alpha', 'beta', 'taken-out', 'own']) await putSkill(box, 'codex-cli', name);
     await putAgent(box, 'codex-cli', 'kit-agent');
-    const items = [{ kind: 'skill', name: 'alpha', hash: '' }, { kind: 'skill', name: 'beta', hash: '' }, { kind: 'agent', name: 'kit-agent', hash: '' }];
+    // A part the person took out of Codex since (`removed`), whose name a skill of their own has now; and an agent part whose
+    // name a skill of the person's own shares: neither skill is the plugin's.
+    const items = [{ kind: 'skill', name: 'alpha', hash: '' }, { kind: 'skill', name: 'beta', hash: '' }, { kind: 'agent', name: 'kit-agent', hash: '' },
+      { kind: 'skill', name: 'taken-out', hash: '', removed: true }, { kind: 'agent', name: 'own', hash: '' }];
     await mkdir(join(box.home, '.central-knot'), { recursive: true });
     await writeFile(partsRecordPath(box.home), JSON.stringify({ installs: [{ source: 'example/market', marketName: 'market', plugin: 'kit', tool: 'codex-cli', at: '2026-11-13T09:00:00Z', digest: 'd', items }] }));
     await turnOn(box);
-    assert.equal(wrote(await background(box)), 0);
+    await background(box);
     let view = await views(box);
+    assert.deepEqual([placeIn(view.skills, 'taken-out'), placeIn(view.skills, 'own')], ['on', 'on'], 'a part taken out, and another kind’s part, are no skill’s part');
     assert.deepEqual([rowOf(view.skills, 'alpha')?.takeInAnswers?.rule, rowOf(view.agents, 'kit-agent')?.takeInAnswers?.rule, 'take' in rowOf(view.skills, 'alpha')!.takeInAnswers!.click], [{ leave: 'part' }, { leave: 'part' }, true]);
     await applySkills(box.context, tools, [add(view.skills, 'alpha')]);
     await background(box);
