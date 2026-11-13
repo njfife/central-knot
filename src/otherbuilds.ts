@@ -102,13 +102,17 @@ const output = (program: string, args: string[]) =>
 /**
  * Every running copy of a build, by its bundle id, with its process and the bundle it runs from, as macOS lists running apps
  * (places.lsappinfo: `find` gives each copy, `info` its pid and bundle). Undefined when that can't be told: the list can't be
- * read, or a copy it lists can't be asked about (one that quit between the two asks is asked about again at the next look).
+ * read, it says something no copy can be read from, or a copy it lists can't be asked about (one that quit between the two asks
+ * is asked about again at the next look).
  */
 export async function runningCopies(lsappinfo: string, build: string): Promise<{ pid: number; bundle: string }[] | undefined> {
   const found = await output(lsappinfo, ['find', `bundleid=${build}`]);
   if (found === undefined) return undefined;
+  const listed = found.match(/ASN:0x[0-9a-f]+-0x[0-9a-f]+/gi) ?? [];
+  // Something was said and no copy could be read from it: that is not "nothing runs".
+  if (!listed.length && found.trim()) return undefined;
   const copies: { pid: number; bundle: string }[] = [];
-  for (const asn of found.match(/ASN:0x[0-9a-f]+-0x[0-9a-f]+/gi) ?? []) {
+  for (const asn of listed) {
     const info = await output(lsappinfo, ['info', '-only', 'pid', '-only', 'bundlepath', asn]) ?? '';
     const pid = Number(/"pid"\s*=\s*(\d+)/.exec(info)?.[1]), bundle = /"LSBundlePath"\s*=\s*"([^"]*)"/.exec(info)?.[1];
     if (!pid || !bundle) return undefined;
@@ -188,7 +192,7 @@ export async function removeBuild(context: BuildsContext, path: string, build: s
     return { said: `${refused}, so it is still in ${shown(context, dirname(bundle))}. Nothing else was tried: move it to the Trash in Finder, or ask whoever manages this Mac.`, done: false, show: bundle };
   }
   return {
-    said: `${name} is in the Trash, where it stays until you empty the Trash. Your skills, MCP servers and agents, and ${PRODUCT}’s record of them, stay where they are: they’re kept in the home, not in the app. ${name}’s own settings folder stays too. ${signInWords(name)}`,
+    said: `${name} is in the Trash, where it stays until you empty the Trash. Your skills, MCP servers and agents, and the record of them, stay where they are: they’re kept in the home, not in an app. ${name}’s own settings folder stays too. ${signInWords(name)}`,
     done: true,
   };
 }

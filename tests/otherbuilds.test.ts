@@ -15,7 +15,7 @@ import { STANDARD_BUILD } from '../src/values.ts';
 import { standInApp, standInMac } from './macstandins.ts';
 
 const ALPHA = 'Central Knot Alpha', STANDARD = 'Central Knot';
-const TRASH_WORDS = `${ALPHA} is in the Trash, where it stays until you empty the Trash. Your skills, MCP servers and agents, and Central Knot’s record of them, stay where they are: they’re kept in the home, not in the app. ${ALPHA}’s own settings folder stays too. If ${ALPHA} still starts at sign-in, turn it off in System Settings › General › Login Items.`;
+const TRASH_WORDS = `${ALPHA} is in the Trash, where it stays until you empty the Trash. Your skills, MCP servers and agents, and the record of them, stay where they are: they’re kept in the home, not in an app. ${ALPHA}’s own settings folder stays too. If ${ALPHA} still starts at sign-in, turn it off in System Settings › General › Login Items.`;
 
 /**
  * A Mac made up in a temp folder: the standard app runs (unless `own` says another build), the stand-ins hold the apps, and
@@ -185,6 +185,17 @@ test('A copy listed as running that can’t be asked about means whether it runs
   const halted = { ...context, places: { ...context.places, lsappinfo: halting } };
   assert.deepEqual(await removeBuild(halted, alpha, ALPHA_BUILD), { said: `Central Knot couldn’t tell whether ${ALPHA} is running, so nothing was removed. Quit ${ALPHA}, then try again.`, done: false });
   assert.deepEqual(await lookForBuilds(halted), [{ build: ALPHA_BUILD, name: ALPHA, installed: alpha }], 'the look says nothing of it running');
+  assert.ok(alive(app) && existsSync(alpha));
+}));
+
+test('A list of running apps that says something Central Knot can’t read means whether it runs isn’t known: nothing is quit or removed', () => aMac(async ({ stand, context, runs }) => {
+  const alpha = stand.bundle(stand.applications, ALPHA, ALPHA_BUILD);
+  const [app] = await runs([{ bundleId: ALPHA_BUILD, path: alpha, quits: true }]);
+  // macOS answers with a line in a form this code doesn't know: not "nothing is running".
+  const odd = join(stand.root, 'lsappinfo-odd');
+  writeFileSync(odd, `#!${process.execPath}\nif (process.argv[2] === 'find') console.log('"Central Knot Alpha" (a form not known here)'); else process.exit(1);\n`, { mode: 0o755 });
+  const unclear = { ...context, places: { ...context.places, lsappinfo: odd } };
+  assert.deepEqual(await removeBuild(unclear, alpha, ALPHA_BUILD), { said: `Central Knot couldn’t tell whether ${ALPHA} is running, so nothing was removed. Quit ${ALPHA}, then try again.`, done: false });
   assert.ok(alive(app) && existsSync(alpha));
 }));
 

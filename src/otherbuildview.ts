@@ -26,7 +26,9 @@ const whereWords = (found: OtherBuild) => (found.installed ? `in ${folderOf(foun
   : `running from ${(found.running ?? []).map(shownPath).join(' and ')}`);
 
 /** What stays when a build is removed: said before the click, as the result says it after. */
-const staysWords = (name: string) => `Your skills, MCP servers and agents, ${PRODUCT}’s record of them and History stay, and so does ${name}’s own settings folder.`;
+// "Central Knot itself" is this app: written plainly, so an alpha or a custom build says its own name there (scripts/build.mjs),
+// apart from the other build's, which is `name`.
+const staysWords = (name: string) => `Your skills, MCP servers and agents, the record of them and History stay: they’re kept in this home, not in an app. ${name}’s own settings folder stays too, and Central Knot itself is not touched.`;
 
 /**
  * What Remove does, said before the click: which bundle goes to the Trash and that every running copy quits first, which other
