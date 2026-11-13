@@ -8,7 +8,7 @@ import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover, findOtherApps } from './discovery.ts';
 import { configRoot, envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { CLAUDE_PROCESS, appCandidates, executableCandidates, searchPath } from './platform.ts';
-import { managedNow, syncGate, syncsHere, takeOverSync, writeAccess, type ShareContext } from './share.ts';
+import { managedNow, readRecord, setSyncEverything, syncGate, syncsHere, takeOverSync, writeAccess, type ShareContext } from './share.ts';
 import { pruneHistory, readHistory } from './history.ts';
 import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skillVersion, skillsView, takeOver } from './skills.ts';
 import { agentTools, mcpTools, noteTools, pluginTools, presentTools } from './presence.ts';
@@ -471,7 +471,8 @@ let pendingResults: DestinationResult[] = [], pendingNotices: SyncNotice[] = [];
 let pendingServerNotices: SyncNotice[] = [], pendingAgentNotices: SyncNotice[] = [];
 let lastStopped: string | undefined;
 
-interface ServersAndAgentsResult { failures: DestinationResult[]; stopped: DestinationResult[]; serverNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean }
+interface ServersAndAgentsResult { failures: DestinationResult[]; stopped: DestinationResult[]; serverNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean;
+  /** The servers' and agents' found keys the pass left found (librarypass.ts PassResult found), each with its kind's prefix. */ found: string[] }
 interface BackgroundPass { skills?: LibraryPass; serversAndAgents?: ServersAndAgentsResult }
 
 /**
@@ -489,13 +490,16 @@ async function pass(snapshots: Snapshot[], explicit = false): Promise<Background
   const crashes: DestinationResult[] = [];
   const crashed = (item: string) => (error: unknown) => { crashes.push({ item, outcome: 'failed', message: `${item} could not finish: ${error instanceof Error ? error.message : String(error)}` }); return undefined; };
   // Skills, MCP servers and agents are Central Knot's library (library.ts); Claude Code's MCP settings wait for Write to Claude Code.
-  const skills = await applySkills(shared, managed, []).catch(crashed('Skills sync'));
-  const servers = await applyServers(shared, managed, []).catch(crashed('MCP sync'));
-  const agents = await applyAgents(shared, managed, []).catch(crashed('Agents sync'));
+  // The pass of the whole home: the home's standing rule, Synchronize everything, takes found items in here and nowhere else.
+  const whole = { background: true } as const;
+  const skills = await applySkills(shared, managed, [], whole).catch(crashed('Skills sync'));
+  const servers = await applyServers(shared, managed, [], whole).catch(crashed('MCP sync'));
+  const agents = await applyAgents(shared, managed, [], whole).catch(crashed('Agents sync'));
   return { skills: skills ?? { results: [], writes: 0 }, serversAndAgents: {
     failures: [...crashes, ...[...(servers?.results ?? []), ...(agents?.results ?? [])].filter(entry => entry.outcome === 'failed')],
     stopped: ([['MCP sync', servers?.stopped], ['Agents sync', agents?.stopped]] as const).filter(([, why]) => why).map(([item, why]) => ({ item, outcome: 'failed' as const, message: why! })),
     serverNotices: servers?.notices ?? [], agentNotices: agents?.notices ?? [], settling: !!(servers?.settling || agents?.settling),
+    found: [...(servers?.found ?? []).map(key => `mcp:${key}`), ...(agents?.found ?? []).map(key => `agent:${key}`)],
     changed: !!(servers?.writes || servers?.notices?.length || agents?.writes || agents?.notices?.length) } };
 }
 
@@ -511,8 +515,10 @@ function keepServersAndAgents(outcome: ServersAndAgentsResult | undefined) {
 async function syncThenView(explicit = false): Promise<HomeView> {
   const shared: ShareContext = { ...context(), reads: new Map() };
   const before = await read();
-  const { skills, serversAndAgents } = await pass(before, explicit);
+  const passed = await pass(before, explicit), { skills, serversAndAgents } = passed;
   keepServersAndAgents(serversAndAgents);
+  lookAgainSoon(passed);
+  foundGained(passed);
   // A pass that could not finish says so on the page instead of failing quietly.
   const caughtUp = [...pendingResults.splice(0), ...(skills?.results ?? []), ...(skills?.stopped ? [{ item: 'Sync', outcome: 'failed' as const, message: skills.stopped }] : [])];
   const notices = [...pendingNotices.splice(0), ...(skills?.notices ?? [])];
@@ -528,7 +534,8 @@ async function syncThenView(explicit = false): Promise<HomeView> {
     // Apps that run the tools or read their files are looked for only on this computer, like the tools' own apps.
     ...(current!.mode === 'actual' ? { otherApps: await findOtherApps(current!.home) } : {}),
     sync: { tools: managed, writes: await skillFolders(shared, managed), access: await writeAccess(shared), gate: await syncGate(shared),
-      caughtUp: caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain) },
+      caughtUp: caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain),
+      syncEverything: (await readRecord(current!.home)).record?.syncEverything === true },
     skills: await skillsView(shared, managed, notices),
     mcp: await serversView(shared, managed, pendingServerNotices.splice(0)),
     agents: await agentsView(shared, managed, pendingAgentNotices.splice(0)),
@@ -629,6 +636,26 @@ let watchers: FSWatcher[] = [];
 let poller: NodeJS.Timeout | undefined;
 let soon: NodeJS.Timeout | undefined;
 let followUp: NodeJS.Timeout | undefined;
+/**
+ * The found items the last pass of the whole home left found, all kinds. One that is new there is news for an open page though
+ * nothing was written (copies that differ, which the rule leaves). One that left by a click or by the rule's writes came with a read
+ * of its own, so it tells the page nothing: a read per click would slow every Add. One whose copies were all deleted by hand
+ * stays on an open page until its next read; its Add then says no tool has a copy.
+ */
+let lastFound = new Set<string>();
+function foundGained({ skills, serversAndAgents }: BackgroundPass): boolean {
+  if (!skills) return false;
+  const found = new Set([...(skills.found ?? []), ...(serversAndAgents?.found ?? [])]), gained = [...found].some(key => !lastFound.has(key));
+  lastFound = found;
+  return gained;
+}
+/**
+ * Something a pass left inside its settle window (a copy missing just now, or a new one Synchronize everything waits to take
+ * in while it is still being saved): look again just after it, so it finishes without a click. Otherwise an event or the poll.
+ */
+function lookAgainSoon({ skills, serversAndAgents }: BackgroundPass) {
+  if (skills?.settling || serversAndAgents?.settling) { clearTimeout(followUp); followUp = setTimeout(queueBackgroundPass, 2_500); }
+}
 
 /** The menus follow the open home's profiles and the library's items, which say which profile is in use. */
 function followProfiles(profiles: ProfilesView, items = lastItems) {
@@ -696,8 +723,9 @@ async function backgroundPass() {
   // The page reads again whether or not the pass wrote: with Sync off an edit or deletion is only noted (it shows as waiting,
   // not as Synced), and a tool's own switch turned in its settings changes no content, only that tool's mark.
   if ((fromEvent && !syncOn) || fromSettings) changed = true;
-  // A deletion waits out its settle window: look again just after it, so it finishes without a click. Otherwise wait for an event or the poll.
-  if (skills?.settling || serversAndAgents?.settling) { clearTimeout(followUp); followUp = setTimeout(queueBackgroundPass, 2_500); }
+  // A new found item left as it is (copies that differ, say) writes nothing: the page hears of it all the same.
+  if (foundGained({ skills, serversAndAgents })) changed = true;
+  lookAgainSoon({ skills, serversAndAgents });
   if (skills?.stopped && skills.stopped !== lastStopped) {
     pendingResults.push({ item: 'Sync', outcome: 'failed', message: skills.stopped });
     changed = true;
@@ -1190,6 +1218,14 @@ app.whenReady().then(async () => {
     return { ...result, view: await syncThenView() };
   });
   handle('sync:set', async on => { await saveSyncSetting(on === true); return current ? syncThenView() : null; });
+  // Synchronize everything, the open home's standing rule (share.ts setSyncEverything): turned on, the pass right after takes in
+  // what is found now, with Automatic sync on (with it off, at Sync once).
+  handle('sync:everything', async (on, home) => {
+    if (home !== current?.home) return { stopped: elsewhere, view: null };
+    const set = await setSyncEverything(context(), on === true);
+    if (!set.stopped) log(`sync: Synchronize everything ${on === true ? 'on' : 'off'} in ${home}`);
+    return { ...set, view: await syncThenView() };
+  });
   handle('sync:now', async home => (home === current?.home ? syncThenView(true) : null));
   // Take over syncing (ORG-08): this build becomes the home's sync owner, then reads and syncs it as its owner.
   handle('sync:take-over', async home => {

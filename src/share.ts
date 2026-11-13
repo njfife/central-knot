@@ -5,9 +5,10 @@ import { access, chmod, constants, copyFile, link, lstat, mkdir, open, readFile,
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
 import { configRoot, harnessIds, harnesses, writeRoot } from './harnesses.ts';
 import { instructionFiles } from './instructions.ts';
+import { itemKey as itemKeyOf } from './library.ts';
 import { mcpFile } from './mcp.ts';
 import { managedTools } from './presence.ts';
-import type { HarnessId, HistoryDays, HomeMode, PartsInstall, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
+import type { HarnessId, HistoryDays, HomeMode, PartKind, PartsInstall, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
 
 /** sync.json's format (SyncRecord); format 1 is read until the skills migration (skillstore.ts) writes format 2. */
 export const FORMAT_VERSION = 2;
@@ -51,13 +52,19 @@ export interface ShareContext {
 }
 
 /**
- * The home's sync record (sync.json): which build syncs this home (`owner`, ORG-08), the generation it remembers, and the tools
- * Central Knot manages here (presence.ts managedTools; unset: every tool present). Format 2. Format 1 also held the skills,
- * with `items`, `roots` and more: skillstore.ts moves them into the library and writes format 2 (sync.v1.json keeps the
- * earlier file); until it has, those fields are carried through every save as they are.
+ * The home's sync record (sync.json): which build syncs this home (`owner`, ORG-08), the generation it remembers, the tools
+ * Central Knot manages here (presence.ts managedTools; unset: every tool present), and whether its standing rule is on
+ * (`syncEverything`). Format 2. Format 1 also held the skills, with `items`, `roots` and more: skillstore.ts moves them into
+ * the library and writes format 2 (sync.v1.json keeps the earlier file); until it has, those fields are carried through every
+ * save as they are.
  */
 export interface SyncRecord { formatVersion: number; generation: string; owner: string; /** The owner's own name, as people know it (a record made before there were custom builds has none). */ ownerName?: string;
-  tools?: HarnessId[] }
+  tools?: HarnessId[];
+  /**
+   * Synchronize everything: a skill, MCP server or agent found in a managed tool is taken in and turned On by itself (library.ts
+   * FOUND; librarypass.ts takeInByRule). Off where it was never chosen; set by setSyncEverything alone.
+   */
+  syncEverything?: boolean }
 
 export function storeDirectory(home: string): string { return join(home, '.central-knot'); }
 /** Where the plugins' parts are recorded (parts.ts writes it): which plugin's parts went into which tool as separate items. */
@@ -72,6 +79,20 @@ export async function readParts(home: string): Promise<PartsInstall[]> {
 const recordPath = (home: string) => join(storeDirectory(home), 'sync.json');
 
 export { itemKey } from './library.ts';
+
+/**
+ * The managed tools each item of one kind went into as a plugin's part, by the item's key (readParts; a part the person took
+ * out since is left out). What a skill's or an agent's read gives the pass as librarypass.ts Disk.parts.
+ */
+export async function partsIn(home: string, kind: PartKind): Promise<Map<string, HarnessId[]>> {
+  const found = new Map<string, HarnessId[]>();
+  for (const install of await readParts(home)) for (const part of install.items) {
+    if (part.kind !== kind || part.removed) continue;
+    const key = itemKeyOf(part.name);
+    found.set(key, [...(found.get(key) ?? []), install.tool]);
+  }
+  return found;
+}
 
 export const errorCode = (error: unknown) => (typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '');
 
@@ -222,7 +243,8 @@ export async function readRecord(home: string): Promise<{ record?: SyncRecord; p
     if (!Number.isInteger(record?.formatVersion) || record.formatVersion < 1) return { problem: 'The sync record is damaged.' };
     if (record.formatVersion > FORMAT_VERSION) return { problem: 'The sync record was written by a newer Central Knot.' };
     if (typeof record.generation !== 'string' || typeof record.owner !== 'string'
-      || (record.tools !== undefined && !(Array.isArray(record.tools) && record.tools.every(knownTool)))) return { problem: 'The sync record is damaged.' };
+      || (record.tools !== undefined && !(Array.isArray(record.tools) && record.tools.every(knownTool)))
+      || (record.syncEverything !== undefined && typeof record.syncEverything !== 'boolean')) return { problem: 'The sync record is damaged.' };
     return { record };
   } catch { return { problem: 'The sync record is damaged.' }; }
 }
@@ -415,6 +437,24 @@ export async function takeOverSync(context: ShareContext): Promise<{ stopped?: s
   await saveRecord(context.home, { ...record, owner: context.build, ownerName: context.buildName }, true);
   await remember(context, record.generation);
   return { from: ownerName(record) };
+}
+
+/**
+ * Turns the home's standing rule, Synchronize everything, on or off (SyncRecord syncEverything). Nothing is taken in here: the
+ * next pass of the whole home (the background pass, or Sync once) takes in what it finds then. A home with no sync record gets
+ * one, as the first click makes it. Refused, in plain words, where a pass may not write.
+ */
+export async function setSyncEverything(context: ShareContext, on: boolean): Promise<{ stopped?: string }> {
+  const access = await writeAccess(context);
+  if (!access.allowed) return { stopped: access.reason };
+  const gate = await syncGate(context);
+  const refused = gateRefusal(gate);
+  if (refused) return { stopped: refused };
+  const record = (await readRecord(context.home)).record ?? newRecord(context);
+  record.syncEverything = on;
+  await saveRecord(context.home, record);
+  if (gate.state === 'first-setup') await remember(context, record.generation);
+  return {};
 }
 
 /** Whether this build syncs this home and may write it: History is kept tidy, and passes run, only where both hold. */

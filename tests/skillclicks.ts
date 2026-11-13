@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { readHistory } from '../src/history.ts';
 import { libraryAction, versionChoices } from '../src/historyactions.ts';
 import type { LibraryItem } from '../src/library.ts';
-import { needsChoice, rowClicks, type LibraryRow } from '../src/libraryrow.ts';
+import { asksWhichCopy, rowClicks, type LibraryRow } from '../src/libraryrow.ts';
 import type { ShareContext } from '../src/share.ts';
 import { applySkills, restoreSkill, skillsView } from '../src/skills.ts';
 import type { Change, HarnessId, LibraryFacts, PassResult } from '../src/types.ts';
@@ -66,14 +66,14 @@ export const everywhere = async (box: Box, name = 'notes') =>
   Object.fromEntries(await Promise.all((Object.keys(roots) as Tool[]).map(async tool => [tool, await bytes(folderOf(box, tool, name))] as const)));
 export const historyOf = async (box: Box, context = box.context, key = 'notes') => (await readHistory(context)).filter(event => event.key === key);
 /** A plain pass, as the background runs it. */
-export const pass = (box: Box, context = box.context) => applySkills(context, box.tools, []);
+export const pass = (box: Box, context = box.context) => applySkills(context, box.tools, [], { background: true });
 
 /** The skill as the Skills page reads it: its row's facts, and its item in the library (deleted or not). */
 export async function seen(box: Box, context = box.context, key = 'notes'): Promise<{ fact?: LibraryFacts; item?: LibraryItem; row: LibraryRow }> {
   const view = await skillsView(context, box.tools);
   const fact = view.items.find(entry => entry.key === key);
   const hashes = Object.fromEntries(Object.entries(fact?.copies ?? {}).map(([tool, copy]) => [tool, copy!.hash]));
-  return { fact, item: view.library[key], row: { key, name: fact?.name, hashes, plan: fact?.plan, cannot: fact?.cannot, unseen: fact?.unseen, differs: fact?.differs, anotherWay: fact?.anotherWay } };
+  return { fact, item: view.library[key], row: { key, name: fact?.name, hashes, plan: fact?.plan, cannot: fact?.cannot, unseen: fact?.unseen, takeInAnswers: fact?.takeInAnswers, anotherWay: fact?.anotherWay } };
 }
 export const itemOf = async (box: Box, key = 'notes') => (await seen(box, box.context, key)).item;
 
@@ -81,7 +81,7 @@ export const send = (box: Box, change: Change, context = box.context) => applySk
 /** The row's switch, On. A found skill whose copies differ opens the copy question instead: `choose` answers it. */
 export async function turnOn(box: Box, context = box.context, key = 'notes'): Promise<PassResult | 'choose'> {
   const { row, item } = await seen(box, context, key);
-  return needsChoice(row, item) ? 'choose' : send(box, rowClicks.on(row, item), context);
+  return asksWhichCopy(row) ? 'choose' : send(box, rowClicks.on(row, item), context);
 }
 export const choose = async (box: Box, use: Tool, context = box.context) => { const { row, item } = await seen(box, context); return send(box, rowClicks.on(row, item, use), context); };
 export const turnOff = async (box: Box, context = box.context, key = 'notes') => { const { row, item } = await seen(box, context, key); return send(box, rowClicks.off(row, item), context); };

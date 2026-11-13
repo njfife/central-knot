@@ -1,6 +1,7 @@
 // OpenCode as a tool: what it reads, and what Central Knot writes for it. The forms here are the ones measured on OpenCode
 // 1.19.5 and 2.2.5 in throwaway homes (LEDGER, 2026-11-10).
 import { test } from 'node:test';
+import { itemNotice } from './notices.ts';
 import assert from 'node:assert/strict';
 import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -73,7 +74,7 @@ test('OpenCode reads its own skills, Claude Code’s and the shared folder; a sk
     // An edit in Claude Code's copy is the skill's; OpenCode reads it there.
     await writeFile(join(box.home, '.claude/skills/own/SKILL.md'), text('own', 'Edited in Claude Code.'));
     const edited = await applySkills(box.context, tools, []);
-    assert.deepEqual(edited.notices?.map(notice => notice.winner), ['claude-cli']);
+    assert.deepEqual(edited.notices?.map(itemNotice).map(notice => notice.winner), ['claude-cli']);
   } finally { await box.cleanup(); }
 });
 
@@ -84,7 +85,7 @@ test('Kept out of Claude Code, a skill OpenCode read there becomes a copy of Ope
     // Copies that differ between Claude Code and Copilot CLI: Copilot's is chosen, and OpenCode then reads it in Claude Code's folder.
     await skill(box.home, '.claude/skills', 'review', text('review', 'Claude Code’s.'));
     await skill(box.home, '.copilot/skills', 'review', text('review', 'Copilot’s.'));
-    assert.equal((await skillsView(box.context, three)).items.find(item => item.key === 'review')!.differs, true);
+    assert.deepEqual((await skillsView(box.context, three)).items.find(item => item.key === 'review')!.takeInAnswers?.click, { wait: 'choice' });
     await applySkills(box.context, three, [{ key: 'review', managed: true, off: [], use: 'copilot-cli' }]);
     assert.equal(await readFile(join(box.home, '.claude/skills/review/SKILL.md'), 'utf8'), text('review', 'Copilot’s.'));
     assert.equal(await exists(join(box.home, OPENCODE, 'skills/review')), false, 'no second copy for OpenCode');

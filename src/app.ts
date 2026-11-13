@@ -1,10 +1,12 @@
+// The page's state and most pages' actions (MAP.md: the app's shell). A sync notice lives across reads here, until its page
+// shows it (keepUnshown); on its page, matrix.ts toldNotices keeps or folds it.
 import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
 import type { ApplyResult, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SyncNotice } from './types.ts';
 import { anyManaged, kindSource } from './itemrow.ts';
-import { caughtUpNames, plural, withSetAside } from './model.ts';
+import { caughtUpNames, noticeNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
@@ -195,7 +197,7 @@ const focusById = (id?: string | null) => (id ? document.getElementById(id) : nu
 export function setHome(view: HomeView | null | undefined, { reload = true } = {}): void {
   if (!view) return;
   const before = state.home ? homeTools().join() : undefined;
-  state.home = view;
+  state.home = keepUnshown(state.home, view);
   forgetLostHarness();
   if (before !== undefined && homeTools().join() === before) return;
   leaveAbsentPage();
@@ -439,7 +441,7 @@ function readFound(view: HomeView, from?: string): string {
   const counts = heldKinds(view).map(kind => plural(found[kind], kindNouns[kind].one, kindNouns[kind].many));
   // A catch-up that copied something has its own Caught up band, and what sync did on its own (an edit spread, a deletion)
   // its notice: either is a change, so neither read says "Nothing changed".
-  const caught = caughtUpNames(view.sync, new Set(view.skills.notices.map(notice => notice.item))).length > 0;
+  const caught = caughtUpNames(view.sync, new Set(view.skills.notices.flatMap(noticeNames))).length > 0;
   const told = [view.skills.notices, view.mcp.notices, view.agents.notices].some(notices => notices.length > 0);
   return `Read ${andList(counts)}${from ? ` from ${from}` : ''}.${caught || told ? '' : ' Nothing changed.'}`;
 }
@@ -1107,6 +1109,17 @@ export const setSync = (on: boolean) => busy(on ? 'Turning Sync on…' : 'Turnin
   announce(on ? 'Automatic sync on.' : 'Automatic sync off.', true);
 });
 
+/**
+ * Synchronize everything, the open home's standing rule, on or off (share.ts setSyncEverything). Turned on, main's next pass takes
+ * in what is found now: at once with Automatic sync on, at Sync once with it off. Answers why not, if it couldn't be set.
+ */
+export const setSyncEverything = (on: boolean) => busy(on ? 'Turning on Synchronize everything…' : 'Turning off Synchronize everything…', async () => {
+  const set = await api().setSyncEverything(on, state.home!.home);
+  if (set.view) setHome(set.view);
+  if (set.stopped) { announce(`Synchronize everything was not changed. ${set.stopped}`); return; }
+  announce(!on ? 'Synchronize everything is off: what turns up in a tool waits for Add.' : state.home?.syncOn ? 'Synchronize everything is on.' : 'Synchronize everything is on. It takes items in at Sync once, or when Automatic sync is on.', true);
+});
+
 export const syncNow = () => busy('Syncing…', async () => {
   const view = await api().syncNow(state.home!.home);
   setHome(view);
@@ -1154,6 +1167,21 @@ api().onSaid(text => announce(text));
 const noticesByPage = (view: HomeView): [Page, SyncNotice[]][] => [['skills', view.skills.notices], ['mcp', view.mcp.notices], ['agents', view.agents.notices]];
 
 /**
+ * A sync notice its page hasn't shown yet (state.seenNotices) stays in the next read of the same home until it is shown or
+ * dismissed: main says each notice once, and a pass's own writes (a settings file it wrote) bring a read with none right
+ * after the one that had them, so a page opened a moment later still tells what Synchronize everything, or an edit, did.
+ */
+function keepUnshown(was: HomeView | undefined, view: HomeView): HomeView {
+  if (!was || was.home !== view.home) return view;
+  const kept = (kind: PageKind) => {
+    const now = view[kind].notices, known = new Set(now.map(notice => notice.history));
+    const unshown = was[kind].notices.filter(notice => !known.has(notice.history) && !state.seenNotices.has(notice.history) && !state.dismissed.has(notice.history));
+    return unshown.length ? { ...view[kind], notices: [...unshown, ...now] } : view[kind];
+  };
+  return { ...view, skills: kept('skills'), mcp: kept('mcp'), agents: kept('agents') };
+}
+
+/**
  * A background pass changed something: read again quietly, keeping drafts. In the middle of an action it waits, and runs
  * when the action is done, so a change (a tool appearing, say) is never lost; an action that starts while the read is on
  * its way goes first, and the read runs again after it. What the status bar says stays, unless the view brings a notice
@@ -1175,9 +1203,9 @@ async function backgroundRefresh() {
       // A new sync notice is the news: the earlier result steps aside, and its Undo stays in History. Two Undo buttons for
       // different events, one above the other, is the one thing here that would mislead; the notice says where it went.
       const outcome = state.outcome;
-      if (outcome?.act) state.undoMoved = { page: outcome.page, label: outcome.act.label, items: outcome.items ?? (outcome.item ? [outcome.item] : []), notices: noticesByPage(view).flatMap(([, notices]) => notices.map(notice => notice.history || notice.item)) };
+      if (outcome?.act) state.undoMoved = { page: outcome.page, label: outcome.act.label, items: outcome.items ?? (outcome.item ? [outcome.item] : []), notices: noticesByPage(view).flatMap(([, notices]) => notices.map(notice => notice.history)) };
       state.outcome = undefined;
-      const items = [...new Set(fresh.flatMap(([, notices]) => notices.map(notice => notice.item)))];
+      const items = [...new Set(fresh.flatMap(([, notices]) => notices.flatMap(noticeNames)))];
       // On the page whose notice says it, screen readers hear it; elsewhere the status bar says it, beside the sidebar's dot.
       announce(`Sync changed ${andList(items)}.`, fresh.some(([page]) => page === state.page));
     }

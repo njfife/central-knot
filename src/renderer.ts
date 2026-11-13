@@ -14,6 +14,7 @@ import { instructionsPage } from './instructionspage.ts';
 import { repo, repoPage, waitingCounts, waitingWords } from './repopage.ts';
 import { profilesPage, profileStatus } from './profilespage.ts';
 import type { HomeMode, HomeView, SyncView } from './types.ts';
+import { noticeNames } from './model.ts';
 import { anyManaged } from './itemrow.ts';
 import { followUpdates, sidebarEnd, statusEnd } from './updateview.ts';
 import { followPluginUpdates } from './pluginupdateview.ts';
@@ -53,8 +54,8 @@ function navRow(page: Page, label: string, glyph: IconName, count?: number | str
 
 const homeManages = () => !!state.home && anyManaged(state.home);
 const noticesFor = (page: Page) => !state.home ? [] : page === 'skills' ? state.home.skills.notices : page === 'mcp' ? state.home.mcp.notices : page === 'agents' ? state.home.agents.notices : [];
-const unseen = (page: Page) => noticesFor(page).filter(notice => !state.dismissed.has(notice.history || notice.item) && !state.seenNotices.has(notice.history || notice.item)).length;
-const unseenText = (page: Page) => { const list = noticesFor(page).filter(notice => !state.dismissed.has(notice.history || notice.item)); return `${list.length} automatic ${list.length === 1 ? 'change' : 'changes'}: ${list.slice(0, 3).map(notice => notice.item).join(', ')}`; };
+const unseen = (page: Page) => noticesFor(page).filter(notice => !state.dismissed.has(notice.history) && !state.seenNotices.has(notice.history)).length;
+const unseenText = (page: Page) => { const list = noticesFor(page).filter(notice => !state.dismissed.has(notice.history)); return `${list.length} automatic ${list.length === 1 ? 'change' : 'changes'}: ${list.flatMap(noticeNames).slice(0, 3).join(', ')}`; };
 
 const homeHelp: Record<HomeMode, string> = {
   fixture: 'Practice copy: sample skills, MCP servers and agents in a throwaway folder. Nothing here touches your real tools.',
@@ -174,7 +175,7 @@ function syncSwitch(home: HomeView) {
       label, h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, home.sync.gate.owner.running === false ? `${home.sync.gate.owner.name}’s, not open` : `By ${home.sync.gate.owner.name}`));
   }
   const idle = home.syncOn && !homeManages();
-  const title = idle ? 'Automatic sync is on: it starts once you turn something on. Click to turn it off.'
+  const title = idle ? `Automatic sync is on: it starts once ${home.sync.syncEverything ? 'something turns up in one of your tools (Synchronize everything takes it in)' : 'you turn something on'}. Click to turn it off.`
     : home.syncOn ? 'Automatic sync is on: an edit to a managed item spreads to the other tools on its own, even with this window closed. Click to turn it off.'
     : 'Automatic sync is off: edits wait until you turn it on or use Sync once. Click to turn it on.';
   return h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(home.syncOn), 'aria-label': 'Automatic sync', disabled: !!state.busy, title, onclick: () => void setSync(!home.syncOn) },

@@ -6,7 +6,7 @@ import { absentTools, heldKinds, isPresent } from './presence.ts';
 import { brandMark, itemsTable, outcomeBand, showFiltered, skillsBrowser, wrappingPath } from './matrix.ts';
 import { andList, kindNames, kindNouns, noToolsSentence, orList } from './words.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
-import { needsChoice } from './libraryrow.ts';
+import { asksWhichCopy } from './libraryrow.ts';
 import { anyManaged, kindSource } from './itemrow.ts';
 
 // ---------- Overview ----------
@@ -185,10 +185,10 @@ function nextStep(home: HomeView, nothingManaged: boolean): string {
 export function overviewPage() {
   const home = state.home;
   if (!home) return notRead();
-  // An item's copies need a choice only while it is found: one in Central Knot's library never asks (libraryrow.ts needsChoice).
+  // An item's copies need a choice only while it is found: one in Central Knot's library never asks (libraryrow.ts asksWhichCopy).
   const libraryFacts = (which: 'skills' | 'mcp' | 'agents'): KindFact[] => {
     const source = kindSource(home, which);
-    return source.facts.map(fact => ({ managed: fact.managed, edited: fact.edited, copies: fact.copies, differs: needsChoice(fact, source.library[fact.key]), waits: !!fact.waits?.length }));
+    return source.facts.map(fact => ({ managed: fact.managed, edited: fact.edited, copies: fact.copies, differs: asksWhichCopy(fact), waits: !!fact.waits?.length }));
   };
   // Kinds no tool here can hold have no card (app.ts absentKinds); they are named once, below.
   const absent = absentKinds();
@@ -215,7 +215,8 @@ export function overviewPage() {
           button({ variant: 'link', size: 'micro', label: 'Take over syncing', id: 'overview-take-over', disabled: !!state.busy, attrs: { title: takeOverTitle(home.sync.gate.owner) }, onclick: () => void takeOverSync() }))
         // Green only once something syncs; before that, sync is on and waiting, in the status bar's grey.
         : home.syncOn && nothingManaged ? null : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingManaged ? 'tone-muted' : 'tone-success') : 'tone-warning'),
-          ...(home.syncOn ? [nothingManaged ? 'Automatic sync is on. Once something is on, edits spread between tools in seconds, with Undo.' : 'Automatic sync is on: edits spread between tools in seconds, with a notice and Undo.']
+          ...(home.syncOn ? [nothingManaged ? 'Automatic sync is on. Once something is on, edits spread between tools in seconds, with Undo.'
+            : `Automatic sync is on: edits spread between tools in seconds${home.sync.syncEverything ? ', and what turns up in a tool is taken in by Synchronize everything' : ''}, with a notice and Undo.`]
             : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync once', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
         h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Every change Central Knot makes is kept in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ', with Undo.'),
         // The two pages the cards don't cover, named once so a newcomer knows what they are; Plugins only where a tool here

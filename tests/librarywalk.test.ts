@@ -27,7 +27,7 @@ import { join } from 'node:path';
 import { applyAgents } from '../src/agents.ts';
 import { pruneHistory, readHistory } from '../src/history.ts';
 import { wantedIn } from '../src/library.ts';
-import { harnessIs, needsChoice, placeOf, rowClicks } from '../src/libraryrow.ts';
+import { asksWhichCopy, harnessIs, placeOf, rowClicks } from '../src/libraryrow.ts';
 import { DAY_MS } from '../src/model.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
 import { applySkills, clearSwitch, takeOver } from '../src/skills.ts';
@@ -122,7 +122,7 @@ async function walk(seed: number): Promise<Finding[]> {
       if (place === 'on') clicks(4, 'Off', rowClicks.off(row, item));
       if (place === 'off') clicks(4, 'On', rowClicks.on(row, item));
       if (place === 'found' && (present.length || fact?.anotherWay)) {
-        if (!needsChoice(row, item)) clicks(4, 'On (take in)', rowClicks.on(row, item));
+        if (!asksWhichCopy(row)) clicks(4, 'On (take in)', rowClicks.on(row, item));
         else for (const tool of present.filter(tool => tools.includes(tool))) clicks(2, `choose ${tool}`, rowClicks.on(row, item, tool));
       }
       if (held?.on) for (const tool of tools) clicks(1, `${held.except.includes(tool) ? 'let in' : 'keep out of'} ${tool}`, rowClicks.inHarness(row, item, tool, !held.except.includes(tool)));
