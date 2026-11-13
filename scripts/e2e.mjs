@@ -330,6 +330,28 @@ async function manageFlow() {
   check('turned on again, the band says Central Knot manages Codex now', (await a.text('.band-done .band-text') ?? '').startsWith('Central Knot manages Codex now'), await a.text('.band-done'));
   same('nothing changed meanwhile, so turning it on wrote nothing in Codex', codex(), before);
   check('and its card opens its page again', await a.exists('button#harness-codex-cli'));
+  // Clicked while main is busy (a held queue standing in for a long pass): the flip waits its turn behind it, the page says it
+  // is busy and takes no other switch meanwhile, and the flip lands once the pass is done.
+  if (a.main) {
+    const main = await a.main();
+    const held = await holdQueue(main, a);
+    const leftOut = () => JSON.parse(readFileSync(join(practice, '.central-knot/sync.json'), 'utf8')).leftOut ?? [];
+    // Not a.click: it waits for the page to be idle.
+    await a.run(`document.querySelector('#manage-codex-cli').click()`);
+    await wait(300);
+    const during = [await a.run(`document.body.dataset.busy`), await a.run(`document.querySelector('#manage-claude-cli').disabled`), leftOut()];
+    await held.release();
+    same('a switch clicked while a pass runs waits for it, the other switches wait too, and it lands after', [during, leftOut()], [['true', true, []], ['codex-cli']]);
+    await a.click('#manage-codex-cli');
+    main.close();
+  }
+  // With Automatic sync off, a tool's line says when it is brought into line, and the band after the click says it again.
+  await a.click('#sync-switch');
+  await a.click('#manage-codex-cli');
+  check('with Automatic sync off, the line before turning it on says it happens at Sync once or the next click', (await a.text('#manage-codex-cli-line') ?? '').endsWith('With Automatic sync off, this happens at Sync once or at your next click on any item.'), await a.text('#manage-codex-cli-line'));
+  await a.click('#manage-codex-cli');
+  check('and so does the band after it', (await a.text('.band-done .band-text') ?? '') === 'Central Knot manages Codex now. With Automatic sync off, it is brought into line at Sync once or at your next click on any item.', await a.text('.band-done'));
+  await a.click('#sync-switch');
   // Every tool left out: the pages say so and point to Harnesses, not that no tool was found.
   for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#manage-${tool}`);
   same('with every tool left out, the sidebar holds only the pages that need no tool', await a.all('#nav [id^="nav-"]', 'e.id.slice(4)'), ['overview', 'harnesses', 'history', 'repo', 'settings']);
