@@ -1,0 +1,12 @@
+{
+  "tool": "claude-cli",
+  "name": "planner",
+  "agent": {
+    "name": "planner",
+    "description": "The planner agent.",
+    "prompt": "Plan the change in steps.\n",
+    "fields": {
+      "model": "sonnet"
+    }
+  }
+}

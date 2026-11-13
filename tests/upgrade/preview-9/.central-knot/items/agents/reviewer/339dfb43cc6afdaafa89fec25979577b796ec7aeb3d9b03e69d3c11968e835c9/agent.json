@@ -1,0 +1,10 @@
+{
+  "tool": "claude-cli",
+  "name": "reviewer",
+  "agent": {
+    "name": "reviewer",
+    "description": "The reviewer agent.",
+    "prompt": "Read the diff and list problems.\n",
+    "fields": {}
+  }
+}

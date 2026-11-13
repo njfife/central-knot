@@ -1,0 +1,18 @@
+{
+  "numStartups": 3,
+  "mcpServers": {
+    "search": {
+      "type": "stdio",
+      "command": "search-mcp",
+      "args": []
+    },
+    "docs": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "docs-mcp"
+      ]
+    }
+  }
+}

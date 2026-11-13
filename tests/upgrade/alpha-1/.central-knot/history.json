@@ -1,0 +1,168 @@
+{
+  "events": [
+    {
+      "id": "79ad09a9-143b-422e-b1d1-c8b12cbbbd59",
+      "at": "2026-11-13T15:33:06.671Z",
+      "key": "notes",
+      "item": "notes",
+      "kind": "added",
+      "losers": [
+        {
+          "tool": "copilot-cli",
+          "hash": "695b3b35e631cb3fdf23f100d401055bfccb066cc5d40d3f674ac02988abc25a"
+        },
+        {
+          "tool": "codex-cli",
+          "hash": "695b3b35e631cb3fdf23f100d401055bfccb066cc5d40d3f674ac02988abc25a"
+        }
+      ],
+      "orderProved": true,
+      "previous": "695b3b35e631cb3fdf23f100d401055bfccb066cc5d40d3f674ac02988abc25a"
+    },
+    {
+      "id": "22a0069e-ab8a-482e-b410-023db16747e3",
+      "at": "2026-11-13T15:33:06.671Z",
+      "key": "style",
+      "item": "style",
+      "kind": "added",
+      "losers": [
+        {
+          "tool": "copilot-cli",
+          "hash": "e0937a52307ca6cb4d8ec2ef381ac12a61721ba8ee425b656a4386cca76c8921"
+        }
+      ],
+      "orderProved": true,
+      "previous": "e0937a52307ca6cb4d8ec2ef381ac12a61721ba8ee425b656a4386cca76c8921"
+    },
+    {
+      "id": "ad7310e5-ae25-45cc-b35a-3b82051e82b7",
+      "at": "2026-11-13T15:33:06.687Z",
+      "key": "mcp:docs",
+      "item": "docs",
+      "kind": "added",
+      "losers": [
+        {
+          "tool": "claude-cli",
+          "hash": "38d482fa23bdc68be745bff594c465cf2f2b9a168e63eed22a3978f736a30f92"
+        },
+        {
+          "tool": "codex-cli",
+          "hash": "38d482fa23bdc68be745bff594c465cf2f2b9a168e63eed22a3978f736a30f92"
+        }
+      ],
+      "orderProved": true,
+      "previous": "38d482fa23bdc68be745bff594c465cf2f2b9a168e63eed22a3978f736a30f92"
+    },
+    {
+      "id": "afe3d881-26d1-4890-855c-80c5fff8c5e8",
+      "at": "2026-11-13T15:33:06.702Z",
+      "key": "agent:reviewer",
+      "item": "reviewer",
+      "kind": "added",
+      "losers": [
+        {
+          "tool": "copilot-cli",
+          "hash": "8e0595517b55c531a053cd013c4f64e64ab923edf75fc017e18e68bfd513a54a"
+        },
+        {
+          "tool": "codex-cli",
+          "hash": "b0286952420afe05b0edc36b48a891004a1edebb14d5b2238d148fc8ae1f486c"
+        }
+      ],
+      "orderProved": true,
+      "previous": "339dfb43cc6afdaafa89fec25979577b796ec7aeb3d9b03e69d3c11968e835c9"
+    },
+    {
+      "id": "b320107f-d797-4504-99a9-d46cd9792982",
+      "at": "2026-11-13T15:33:06.703Z",
+      "key": "agent:planner",
+      "item": "planner",
+      "kind": "added",
+      "losers": [
+        {
+          "tool": "copilot-cli",
+          "hash": "363f9becbb18a3f3d4707ae7c72b4404298f63491ef38b8f4dd2d0b1d9a445a2"
+        },
+        {
+          "tool": "codex-cli",
+          "hash": "bb46a2a009b16aa4512e0ca698ce9bb330c843e8a6f819be69a13ae4b9492db9"
+        }
+      ],
+      "orderProved": true,
+      "previous": "0c5eae5dba73f4f8f1e57554725c6f79dda67a7f303602d88264f814892c714d"
+    },
+    {
+      "id": "5248f677-fafd-4798-9fa2-567707ae43f4",
+      "at": "2026-11-13T15:33:06.734Z",
+      "key": "notes",
+      "item": "notes",
+      "kind": "edit",
+      "winner": {
+        "tool": "claude-cli",
+        "hash": "73dd9391c431310711b014d51ab8ab9518b7d7aeb9f3c3021927156c0228bdbc"
+      },
+      "losers": [
+        {
+          "tool": "copilot-cli",
+          "hash": "695b3b35e631cb3fdf23f100d401055bfccb066cc5d40d3f674ac02988abc25a"
+        },
+        {
+          "tool": "codex-cli",
+          "hash": "695b3b35e631cb3fdf23f100d401055bfccb066cc5d40d3f674ac02988abc25a"
+        }
+      ],
+      "orderProved": true,
+      "previous": "695b3b35e631cb3fdf23f100d401055bfccb066cc5d40d3f674ac02988abc25a"
+    },
+    {
+      "id": "67c23072-b3fe-489e-b07b-d80ab2e64bcf",
+      "at": "2026-11-13T15:33:06.788Z",
+      "key": "profiles:switch",
+      "item": "Focus",
+      "kind": "profile",
+      "losers": [],
+      "orderProved": true,
+      "profile": {
+        "to": "7432282f-b279-4679-9070-22f902121224",
+        "toName": "Focus",
+        "flips": [
+          {
+            "item": "skill:drafts",
+            "name": "drafts",
+            "tool": "claude-cli",
+            "disabled": true
+          },
+          {
+            "item": "mcp:search",
+            "name": "search",
+            "tool": "claude-cli",
+            "disabled": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "0aaababe-420e-4ad0-a203-adfbbc70990d",
+      "at": "2026-11-13T15:33:07.072Z",
+      "key": "notes",
+      "item": "notes",
+      "orderProved": true,
+      "kind": "edit",
+      "winner": {
+        "tool": "copilot-cli",
+        "hash": "b943d3987b581c060e49103605f2855ab5ee151bbb6a893c38353f06e7c19a15"
+      },
+      "previous": "73dd9391c431310711b014d51ab8ab9518b7d7aeb9f3c3021927156c0228bdbc",
+      "losers": [
+        {
+          "tool": "claude-cli",
+          "hash": "73dd9391c431310711b014d51ab8ab9518b7d7aeb9f3c3021927156c0228bdbc"
+        },
+        {
+          "tool": "codex-cli",
+          "hash": "73dd9391c431310711b014d51ab8ab9518b7d7aeb9f3c3021927156c0228bdbc"
+        }
+      ]
+    }
+  ]
+}
