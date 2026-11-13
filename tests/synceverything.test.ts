@@ -5,7 +5,7 @@
 // profile in use; and the agent row that offered an Add that did nothing.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { agentsView, applyAgents } from '../src/agents.ts';
@@ -332,11 +332,13 @@ test('A profile in use when the rule takes an item in: its name drops, nothing e
 
 // ---------- The Add that did nothing ----------
 
-test('An agent whose only copy is two files differing by case gets no Add, and the rule leaves it', async () => {
+test('An agent whose only copy is two files differing by case gets no Add, and the rule leaves it', async t => {
   const box = await sandbox();
   try {
     await putAgent(box, 'claude-cli', 'reviewer');
     await writeFile(join(box.home, '.claude/agents/Reviewer.md'), agent('claude-cli', 'Reviewer', 'Other.'));
+    // Only a case-sensitive disk keeps two such files; macOS's usual one keeps one, which is an ordinary copy.
+    if ((await readdir(join(box.home, '.claude/agents'))).length < 2) { t.skip('this disk keeps one file for names that differ only by case'); return; }
     await turnOn(box);
     assert.equal(wrote(await background(box)), 0);
     const view = (await views(box)).agents;
