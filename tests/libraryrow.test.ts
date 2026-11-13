@@ -198,12 +198,12 @@ test('A long versions list folds to its newest four, and says how many more ther
 
 test('A library kind’s rows reach the item pages through itemrow.ts kindSource: On is `managed`, kept out is `off`, once per read', () => {
   const facts = (key: string, on: boolean, except: LibraryFacts['except'] = []): LibraryFacts => ({ key, name: key, description: '', copies: {}, on, except, cannot: {}, edited: [] });
-  const home = (items: LibraryFacts[]) => ({ manage: { tools, skills: [] }, mcp: { tools, servers: [], claudePending: [] },
+  const home = (items: LibraryFacts[]) => ({ skills: { tools, items: [], library: {} }, mcp: { tools, items: [], library: {} },
     agents: { tools, items, library: { reviewer: item() } } }) as unknown as HomeView;
   const read = home([facts('reviewer', true, ['codex-cli']), facts('writer', false)]);
   const source = kindSource(read, 'agents');
   assert.deepEqual(source.facts.map(fact => [fact.key, fact.managed, fact.off]), [['reviewer', true, ['codex-cli']], ['writer', false, []]]);
-  assert.deepEqual([source.library?.reviewer.on, source.gone, source.waiting], [true, [], []]);
+  assert.equal(source.library.reviewer.on, true);
   assert.equal(kindSource(read, 'agents').facts, source.facts, 'the same rows for the same read, so a page that caches by them keeps them');
   assert.deepEqual([anyManaged(read), anyManaged(home([facts('writer', false)]))], [true, false], 'an item On in the library is something the home manages; one Off is not');
 });

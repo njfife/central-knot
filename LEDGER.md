@@ -1546,3 +1546,81 @@ What the first review round found (two page reviewers, two code reviewers, a bre
 - The walk on 60000–60099 in two halves: 60000–60049 clean; 60050–60099 found two things, both fixed and then clean: the walk's own rule that no History action writes a tool's switch (Clear's Undo now does, on purpose), and Clear's Undo offered when it would change nothing.
 - End to end (`scripts/e2e.mjs`, the dev build on Linux): 683 passed, 1 failed: "Show log file opens the log's folder", the Linux-only check this step doesn't touch.
 - Pictures: `tour-l2c-r2/` (the skills section at four sizes and light, and the agents section for the rows they share), each looked at.
+
+## Items live in Central Knot, step 3a: MCP servers on the library, November 13, 2026
+
+MCP servers are the third kind on the library, by implementing `librarypass.ts Kind` (`servers.ts serverKind`), with two members added to the contract for a kind whose copies are entries in one shared file (said in `librarypass.ts`'s header). The MCP engine (`mcp.ts`'s sync, Restore and Undo, `choiceundo.ts`) is gone; `mcp.ts` keeps only each tool's format. Profiles are unchanged: they still flip each tool's own switch for servers (step 3b makes them sets of On items). `MAP.md`'s first area names every file.
+
+**What a person sees change.**
+- A server a tool has that Central Knot doesn't is **Found**, with **Add** (a copy question where copies differ; the others become versions). **Off** takes the entry out of every managed tool's settings file and Central Knot keeps it with each tool's own fields; **On** puts each back: the same values and own fields, every other byte of the file as it was. The opened row keeps a server out of one tool (in place of the per-tool Enabled box). Versions with Read and Make current, Delete from Central Knot and its Restore, as for skills and agents.
+- **Claude Code's file is written only by Write to Claude Code**, with Claude closed, as before. Until then a row whose entry there is behind, still to be added or still to be removed says so (a clock mark, Claude Code's line, the status), and one band above the table offers the write for all of them and writes only what those rows owe (with Automatic sync off too). Off and then Delete before the write: the row is a found one tagged "deleted", "Claude Code still has it until you click Write to Claude Code". Undo write is not carried: its way back is Make current, then Write.
+- **A tool's own switch** (Claude Code's and Copilot's settings list, the `enabled`/`disabled` field in Codex's, Pi's and OpenCode's entries) is read and left as it is; its mark, its line and the row say it. Off then On brings the server back switched off where it was, and the line says so.
+- **Left alone, never taken in**, each said on its tool's line: a server that belongs to an app (ChatGPT desktop's), an entry in a form Central Knot doesn't edit, two names in one file that differ only by case, an entry Central Knot put in as a plugin's part. A tool that can't hold the server (SSE in Codex, Pi, OpenCode) says so; one that has it through a plugin gets no entry, as before.
+- **Hand edits and deletions** follow the model's table. An entry has no time of its own: an edit made on the current version counts; of two, the first tool's (in the page's order) wins and the other is a version. A change to a tool's own fields alone is no edit. An entry deleted by hand, in any format and also when it was the file's last (`codex mcp remove` of the only server), turns the server Off everywhere; Turn on puts each entry back.
+- **A settings file that can't be seen is no set of deletions**: unreadable or unparseable, the whole tool is left alone; missing, it is away, and written afresh once the settle window has passed. Today's "two or more gone at once is a reset" guess is gone: a tool that rewrites its file without its servers turns them Off, nothing is lost, and each is one click back on.
+
+**Map of this step.**
+- **The kind:** `src/servers.ts` (`serverKind`, and `kindFor` for the kind Write to Claude Code runs; `readDisk`: entries, what is never taken in, Claude Code's waiting writes; `applyServers`, `writeToClaude`, `restoreServer`, `serversView` and its `rowFacts`, `serversForRepo`, `serversOn`).
+- **The formats:** `src/mcp.ts` (lines 1–268 of before; `editEntry` now answers `{ stopped, changed }`, a Codex removal takes its blank line with it, and `recoverSettings` is exported). `src/mcpswitch.ts` keeps the reading side and `withMcpSwitch` for profiles and plugin parts; `setMcpDisabled` and `mcpSwitchFacts` went with the per-tool box.
+- **The store and record:** `src/serverstore.ts` (`mcp.json` format 2, `mcp.v1.json` the old record, versions and each tool's own fields under `items/mcp/<key>/`).
+- **The migration:** `src/servermigrate.ts` (the table below, in its header; `migrateItem` per server).
+- **The contract** (`librarypass.ts`): `Kind.folderSeen` answers the guard's look in place of a directory's `stat` (a missing file is away; one that is there keeps one fixed identity; a file the pass itself made is noted as there at its end), and `Disk.locked` carries `waits` (the pass leaves each write and removal there undone, answers it held with `waits`, and plans the harness as any other, so an entry deleted by hand in Claude Code still turns the server Off). Skills and agents leave the first out and never set the second; their walks on 100 fresh seeds each are clean.
+- **The page:** servers' words in `libraryrow.ts libraryWords.mcp` (with `switchedOff`, the line after a tool's own switch), `HarnessIs 'waits'` and its sentences; `librarypages.ts libraryPages.mcp` (Read shows what a version runs, part by part); `matrix.ts` lost every non-library branch (each kind is a library row now) and `writeStepBand` reads the rows' `waits`; `itemrow.ts kindSource` reads every kind's view the same way; `app.ts applyClick` lost its record-change and put-back paths and says a write that waits ("Claude Code waits for Write to Claude Code."), never counting that tool as done.
+- **History:** `historyactions.ts libraryEntry` knows `mcp:` (an entry from before the library names the server as written; `library.ts itemKey` makes its key, and `librarypass.ts restore` reads it the same way). `historypage.ts` keeps profiles' and the base instructions' entries, and the sentences of entries from before the library.
+- **Elsewhere:** `gitrepo.ts` (Push from `serversForRepo`, Pull through `PassOptions.pulled`), `profileplan.ts profileServers`, `parts.ts` (its own store for a server part's content, falling back to the old MCP store for parts put in before; a server On in the library is the person's), `toolchoice.ts` (`forgetServerFolders`), `pluginrows.ts` and `pluginstatus.ts` (a server's part is the row's though it is no copy of it).
+
+**Migration, state by state** (`servermigrate.ts`'s header; `tests/servermigrate.test.ts` holds a settled fixture home with every state: after migration and one pass every settings file is byte-identical, every distinct content is a version, a second pass writes nothing, and a crash at each step of writing the record leaves the old files as they were).
+
+| On the old record | In the library |
+| --- | --- |
+| synced | On at its synced content; each recorded copy applied (an away one too) |
+| a tool left out (`off`) | kept out there, nothing applied; an entry there stays |
+| a differing entry never on record (a collision waiting for a choice) | kept out there, nothing applied; its content a version |
+| Claude Code behind (waiting for Write now) | applied at what was last recorded there: still owed the write |
+| an edit not spread yet | applied at what was last synced: the first pass takes it in, as the earlier engine would have |
+| a copy recorded in a settings file no longer used | nothing applied there |
+| deleted, a removal still owed (`removing`) | a tombstone; the removal applied while the entry is as it was, else left alone |
+| `separate`, never synced, or turned off since | not in the library: found, every entry as it is |
+| every `<hash>.json` kept, `displaced` contents | versions |
+| `<hash>/<tool>.json` for the current content | that tool's own part |
+| `<hash>/<tool>-<ref>.json`, `missingSince` | not carried (the old folder stays as the backup) |
+| each tool's settings file | the library's `folders`: away where it is missing |
+
+**Sequences that behave differently from `next` on purpose.**
+- Off removes the entry from every tool (on `next` it flipped each tool's own switch and the entries stayed). The opened row's per-tool switch keeps a server out of that tool (on `next` it was the tool's own Enabled switch).
+- A server is found until it is added; Add takes it in (on `next` the halfway switch synced it).
+- An entry deleted by hand turns the server Off everywhere, kept in Central Knot (on `next` the deletion spread and History's Restore put it back). A file rewritten without its servers is no "reset" any more: each server turns Off (on `next` two or more gone at once were written back).
+- Two tools edited: the first in the page's order wins (on `next` the fixed order Copilot, Claude Code, Codex, Pi, OpenCode). An edit in Claude Code while it waits for Write loses to the newer current version and is kept as a version (on `next` it was a conflict notice).
+- A copy with no record where a server is turned On is kept as a version, then written over (on `next` Restore of an old deletion refused over a server set up again with other settings).
+- Write to Claude Code has no Undo of its own (on `next` Undo write); its way back is Make current, then Write.
+- A plugin's MCP part is the plugin's: never found or taken in, and a profile no longer flips its switch (on `next` a part could be managed as an ordinary server, and profiles flipped it).
+- Git repo: Pull makes the repo's content the current version through the pass (on `next` it wrote one tool and let sync spread it, and with only Claude Code here it couldn't come in). A server deleted by hand stays in the repo until Delete from Central Knot; Pull's removal deletes it from Central Knot at once, also with Automatic sync off (agents' still waits). Push sends every server in the library, On or Off, with Claude Code's own fields for it where Central Knot has them (on `next`, managed servers, Claude Code's fields only when its entry was the one sent).
+- History: an old entry's own actions (Undo add, Undo write, Finish undo, Undo of a switch) are gone; each offers what the library can still do (a content change: Make current; a deletion: Restore).
+- A tool's own switch set on an Off server's entry inside it (Codex, Pi, OpenCode) comes back with the entry; Claude Code's and Copilot's stay in their settings.
+
+**Decisions made in this step, beyond the brief.**
+- *A waiting harness is planned as any other* (`copyIn` doesn't hold it): only then does an entry deleted by hand in Claude Code turn the server Off, as in every other tool.
+- *The pass notes a file it made as there* (end of `runPass`, for `folderSeen` kinds): otherwise a hand deletion right after Central Knot created a missing settings file (Copilot's, before its first server) read as a file made again and was written back.
+- *Names that differ only by case across tools are one server* (the library's key); each tool's entry keeps its own name when it is written over.
+- *A tool's own fields are kept by the pass before any removal*, not by the write itself (`Kind.write`'s note says so).
+- *An empty JSON object gets one step of the file's own indentation* (`textedit.ts indentOf`), and *a Codex table taken from the file's end takes its blank line* (`mcp.ts writeEntry`), so Off then On is byte for byte for an entry Central Knot wrote itself.
+- *"Can't be read" in the key under the table is now "Left as it is (its line says why)"*, true for every reason a copy is left alone.
+- *The found-row sentence for a row that can't be taken in* is "Not in Central Knot · it can’t be taken in now (see below)." and its tag "can’t be taken in", for skills too (a server that belongs to an app never can).
+- *A server whose entry is still in Claude Code after Delete from Central Knot is a found row tagged "deleted"* whose Add takes it in again (as an agent's in a folder that can't be written).
+
+**Deleted.** `src/mcp.ts` lines 270–1043 (the record, kept versions, view, `applyMcp`, switch flips and their Undo, the six Undo and Restore functions, `goneFacts`, `forgetMcpCopies`, `undoClaudeWrite`), `src/choiceundo.ts`, `src/syncrules.ts`, `src/roworder.ts`; `clickplan.ts`'s off plan, record change, inverse and Undo order; `matrix.ts`'s non-library halves (`cellOf` marks, Not synced, Sync here, the per-tool Enabled box, put-back of a gone item, the MCP definition block and notices with Write inline); `itemrow.ts cellOf`, `needsCopyChoice`, `onLibrary`, `libraryView` and `KindSource`'s `waiting` and `gone`; `app.ts unwriteClaudeNow`, `putBack`, `restoreAll` and the record-change Undo; `historypage.ts`'s MCP actions (Finish undo, Undo add, Undo write, the choices list); the IPC `mcp:apply` and `mcp:unwrite-claude` and preload's `applyMcp` and `unwriteClaude`; `types.ts McpView`, `McpResult`, `ClaudeWrite`, `GoneItem`, `ChoiceBefore`, `ALREADY_AS_IT_WAS`, `Change.disable`/`enable` and `use: 'separate'`, `SkillFacts.held`/`separate`/`gone`, and the History fields only the engine wrote (`restoredTools`, `stoppedSync`, `unmanaged`, `wasSynced`, `addedId`, `before`, losers' `kept`, `folder`, `synced`, `editedAt`); `gitrepo.ts`'s Pull route through one tool, `sourceTool`, `standingEntries`, `holdUnseen`, `noServerTaker` and their words; `mcpswitch.ts setMcpDisabled`, `mcpSwitchFacts`; `profiles.ts switchedByHand`'s MCP arm and the three `releaseProfileHolds` calls for servers; the CSS only those used. Tests: `tests/mcp.test.ts`, `tests/choiceundo.test.ts`, `tests/roworder.test.ts`, three of `clickplan.test.ts`'s four, and the check files' MCP cases that tested the engine's own mechanisms (N5, R5).
+
+**States the brief did not explain** (each takes the choice that keeps every content and writes nothing else).
+- A removal owed in Claude Code for an entry edited since: nothing applied, the entry left alone.
+- Two old record items whose names differ only by case: the first keeps its place, the other's kept contents become its versions.
+
+**Validation.**
+- `npm test`: the type check and 655 tests. The profile, Git repo and plugin tests ran against the new kind before they were changed; the sequences that changed on purpose are above.
+- The walk (`tests/serverswalk.test.ts`, a server with a skill and an agent in one home, 16 steps): seeds 7000–7099 found the walk's own two faults (its "hand edit" renamed Codex's table, and its "settled" ignored the record), both fixed; then 8000–8099 and 7000–7099 again, each as two halves, clean. `tests/librarywalk.test.ts` on 9000–9099 and `tests/agentswalk.test.ts` on 9000–9099, each in halves: clean (the contract's two members change nothing for skills and agents).
+- Each new rule switched off: 37. 32 failed a named test at once; the 5 that survived got a worked example each, and each now fails: the settle clock per entry, a removal owed for an entry changed since, a copy recorded in a settings file no longer used, the migrated folders (an edit not spread yet), Claude Code's own fields in Push.
+- Pictures: `node scripts/ui-tour.mjs <out> --electron --no-sandbox --only mcp` under `xvfb-run`, 88 pictures of every new state of the MCP servers page at 860×560, 1280×800, 1728×1117 and 2560×1440 and in light, each looked at (`/home/picoder/work/ck-one-switch-plan/tour-l3a/`).
+- No Linux end-to-end run (the brief); the end-to-end checks for servers are updated and run on the Mac.
+
+**Follow-ups.**
+- The old store folders `items/mcp/<name>/<hash>…` stay after migration; a clean-up once no build reads them.
+- Profiles (step 3b) still flip each tool's own switch for servers; a server Off in the library is in no tool, so a profile doesn't see it.

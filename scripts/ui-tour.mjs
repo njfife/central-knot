@@ -265,7 +265,7 @@ if (wanted('skills')) {
   mkdirSync(folderIn('claude', 'plain-notes'), { recursive: true }); writeFileSync(join(folderIn('claude', 'plain-notes'), 'SKILL.md'), 'Notes with no frontmatter, which Copilot CLI and Codex won’t load.\n');
   await refresh();
   await openRow('has-link');
-  await atEverySize('cannot-copy', 'A skill in Claude Code with a link inside its folder: its row says it can’t be taken in yet, its switch looks unavailable, and Claude Code’s line says why and what to do (replace the link with the file, then Refresh)', true, '.details');
+  await atEverySize('cannot-copy', 'A skill in Claude Code with a link inside its folder: its row says it can’t be taken in, its Add looks unavailable, and Claude Code’s line says why and what to do (replace the link with the file, then Refresh)', true, '.details');
   await closeRow('has-link');
   await openRow('plain-notes');
   await atEverySize('cannot-take', 'A skill with no frontmatter in Claude Code, found: the status says it goes nowhere else, Copilot CLI and Codex can’t take it; their marks (their own) and lines say why, in the same words', false, '.details');
@@ -327,36 +327,85 @@ if (wanted('sync')) {
 }
 
 // ---------- MCP servers ----------
+// MCP servers are on Central Knot's library, as skills and agents are (src/servers.ts): every new state of a server's row, at
+// four sizes. Claude Code's settings file is written only by Write to Claude Code, one band for every server that owes it.
 if (wanted('mcp')) {
   begin('mcp');
-  await a.click('#nav-mcp'); await shot(a, 'mcp-start', 'Clicked "MCP": each tool\'s user-wide MCP servers.');
-  for (const key of ['docs', 'files']) if (await a.has(`#switch-${key}:not([aria-checked="true"])`)) await a.click(`#switch-${key}`);
-  await shot(a, 'mcp-on', 'Turned docs and files on: the result says where each is on, and that Claude Code gets files when "Write to Claude Code" is clicked (its settings file is written only then, with Claude Code quit); the amber band below carries that one action.');
-  await a.size(860, 560); await shot(a, 'mcp-on-860', 'The same at 860×560: the result and the amber band with its one button.'); await a.size(1280, 800);
-  if (await a.has('#open-files')) { await a.click('#open-files'); await shot(a, 'mcp-waiting-details', 'Opened the files server\'s details while it waits: Claude Code\'s row says what it has and offers Write to Claude Code as its one action.'); await a.click('#open-files'); }
-  if (await a.has('#mcp-write-claude')) { await a.click('#mcp-write-claude'); await shot(a, 'mcp-write-now', 'Clicked "Write to Claude Code".'); }
-  // Off: each tool's own switch turns the server off at once, its entries kept; Undo turns it back on.
-  await a.click('#switch-docs'); await a.settle();
-  await shot(a, 'mcp-off', 'Turned docs off: each tool\'s own switch has it off at once; the result says its entries are kept, and offers Undo.');
-  if (await a.has('#outcome-undo')) { await a.click('#outcome-undo'); await a.settle(); await shot(a, 'mcp-off-undone', 'Clicked Undo: docs is on in every tool again; the confirmation fades by itself.'); }
-  edit(join(practice, '.copilot/mcp-config.json'), text => text.replace('"command": "npx"', '"command": "npx-edited"'));
-  await waitFor(a, `!!document.querySelector('.sync-notice')`);
-  await shot(a, 'mcp-edit-notice', 'Outside the app, the files server\'s command was changed in Copilot\'s settings. A few seconds later.');
-  // notes, when there: a skill whose copies agree, so its details offer Files and contents.
-  const first = await a.run(`(document.querySelector('#open-notes') ?? document.querySelector('.ov-row[data-key] .row-open'))?.id ?? ''`);
-  if (first) { await a.click(`#${first}`); await shot(a, 'mcp-details', 'Opened a server\'s details.'); await a.click(`#${first}`); }
-  // A copy choice and its Undo: a server Copilot CLI and Codex each have with a different command.
-  edit(join(practice, '.copilot/mcp-config.json'), text => { const config = JSON.parse(text); config.mcpServers.search = { type: 'local', command: 'search-mcp', args: ['--index', 'copilot'], tools: ['*'] }; return JSON.stringify(config, null, 2); });
-  edit(join(practice, '.codex/config.toml'), text => `${text}\n[mcp_servers.search]\ncommand = "search-mcp"\nargs = ["--index", "codex", "--fast"]\n`);
-  await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#switch-search')`, 15000);
-  await a.click('#switch-search'); await a.settle();
-  if (await a.has('#use-search-copilot-cli')) {
-    await shot(a, 'mcp-choice', 'A server named search is in Copilot CLI and Codex with different commands; clicked its switch: it asks which entry every tool uses, each row of the list quoting its own command.');
-    await a.click('#use-search-copilot-cli'); await waitFor(a, `!!document.querySelector('#outcome-undo')`, 15000);
-    await shot(a, 'mcp-choice-made', 'Clicked Copilot CLI’s entry: Codex’s is replaced (kept in History). The result says “Copilot CLI and Codex now use Copilot CLI’s copy of search”, and that Claude Code gets it when you click Write to Claude Code; with Undo. The amber band names what Claude Code has of each: an older copy of files, and no search yet.');
-    await a.click('#outcome-undo'); await waitFor(a, `/Undone/.test(document.querySelector('.bands')?.textContent ?? '')`, 15000);
-    await shot(a, 'mcp-choice-undone', 'Clicked Undo: Codex has its own entry back, and search is as before the choice: not synced, its copies differing, so its switch asks again.');
-  }
+  const settings = { claude: join(practice, '.claude.json'), copilot: join(practice, '.copilot/mcp-config.json'), codex: join(practice, '.codex/config.toml'), copilotSwitches: join(practice, '.copilot/settings.json') };
+  // A server that belongs to an app (ChatGPT desktop's own): seen, never taken in.
+  edit(settings.codex, text => `${text}\n[mcp_servers.node_repl]\ncommand = "/Applications/ChatGPT.app/Contents/Resources/node"\nargs = ["repl"]\n`);
+  await a.click('#nav-mcp'); await refresh();
+  await atEverySize('found', 'Clicked "MCP servers". Every server is found: docs in Claude Code, files in Copilot CLI and Codex, each with Add; node_repl belongs to ChatGPT desktop, so its Add is unavailable and its tag says it can’t be taken in', true);
+  await openRow('node_repl');
+  await atEverySize('cannot-take-in', 'Opened node_repl: "Not in Central Knot · it can’t be taken in now (see below)", and Codex’s line says why: ChatGPT desktop keeps this server for itself', false, '.details');
+  await closeRow('node_repl');
+  await openRow('files');
+  await atEverySize('found-open', 'Opened files while found: what every tool shares of a server and what stays each tool’s own, each tool’s line with its settings file, and Add', true, '.details');
+  await closeRow('files');
+  // Taken in: every tool but Claude Code gets it at once; Claude Code waits, said as a plain note, and the band carries the write.
+  await a.click('#add-docs'); await switchOn('docs');
+  await a.click('#add-files'); await switchOn('files');
+  await atEverySize('taken-in-waits', 'Clicked Add on docs, then on files: files is in Central Knot, on in Copilot CLI and Codex; the result says Claude Code waits for Write to Claude Code as a plain note; the amber band says what it adds, with its one button; files’s Claude Code mark is a clock', true);
+  await shot(a, 'waits-hover', 'The pointer on files’s Claude Code mark: its tooltip says it gets the server when Write to Claude Code is clicked.', await middleOf('#cell-files-claude-cli'));
+  await openRow('files');
+  await atEverySize('waits-open', 'Opened files: Claude Code’s line says it gets the MCP server when Write to Claude Code is clicked; the other tools have the current version, Codex’s own setting named after its line', false, '.details');
+  await closeRow('files');
+  await a.click('#mcp-write-claude'); await a.settle();
+  await atEverySize('written', 'Clicked Write to Claude Code (Claude Code quit): files is in Claude Code too, the rest of its settings kept; the band is gone', false, '.bands');
+  // Off: out of every tool; Claude Code's entry goes with Write. Then Delete from Central Knot before that write.
+  await a.click('#switch-files'); await a.settle();
+  await atEverySize('off-waits', 'Turned files off: it left Copilot CLI and Codex at once; the result says it is still in Claude Code; the band now offers to remove it there', true);
+  await openRow('files');
+  await atEverySize('off-waits-open', 'Opened the Off row: "Off · in Central Knot only … Claude Code still has it until you click Write to Claude Code."; Claude Code’s line says its entry is removed then', false, '.details');
+  await a.click('#delete-files'); await a.click('#delete-confirm-files'); await a.settle();
+  await atEverySize('deleted-waits', 'Then Delete from Central Knot, still before the write: files is a row tagged "deleted", "Deleted from Central Knot · Claude Code still has it until you click Write to Claude Code."; the band removes it', true);
+  await a.click('#mcp-write-claude'); await a.settle();
+  // A tool's own switch, set in its settings: read, never written; its line says Central Knot leaves it as it is.
+  const switchesBefore = existsSync(settings.copilotSwitches) ? readFileSync(settings.copilotSwitches, 'utf8') : '{}';
+  writeFileSync(settings.copilotSwitches, JSON.stringify({ ...JSON.parse(switchesBefore), disabledMcpServers: ['docs'] }, null, 2));
+  await refresh();
+  await openRow('docs');
+  await atEverySize('switched-off', 'Outside the app, Copilot CLI’s settings turned docs off, then Refresh: its own mark, a partial switch, "switched off in Copilot CLI"; its line says Central Knot leaves that switch as it is, so it stays off after Off and On; "Switched off" in place of its switch', true, '.details');
+  writeFileSync(settings.copilotSwitches, switchesBefore); await refresh();
+  // Kept out of one tool by its switch in the opened row.
+  await openRow('docs');
+  await a.click('#enable-docs-codex-cli'); await a.settle();
+  await atEverySize('kept-out', 'Turned docs off in Codex alone, in its opened row: its entry left Codex; the row says "in 2 of 3 tools · kept out of Codex" and its switch is drawn partial', true, '.ov-row[data-key="docs"]');
+  await a.click('#enable-docs-codex-cli'); await a.settle();
+  await closeRow('docs');
+  // An edit made in a tool becomes the current version; its versions list says where each came from, and Read shows one.
+  edit(settings.codex, text => text.replace('url = "https://docs.example.test/mcp"', 'url = "https://docs.example.test/mcp/v2"'));
+  await refresh();
+  await atEverySize('edit-notice', 'Outside the app, docs’s URL was edited in Codex, then Refresh: the edit is the current version, in Copilot CLI too, and Claude Code waits for Write; the notice offers Undo', false, '.sync-notices');
+  await openRow('docs');
+  await atEverySize('versions', 'Opened docs: its versions, edited in Codex (current) and found in Claude Code, each with what changed ("URL changed")', true, '.version-row');
+  await a.click('#version-read-docs-1');
+  await waitFor(a, `!!document.querySelector('.version-read')`);
+  await atEverySize('version-read', 'Clicked Read on the version found in Claude Code: what it runs, part by part, what differs from the current version marked', false, '.version-read');
+  await a.click('#version-read-docs-1');
+  await closeRow('docs');
+  if (await a.has('#mcp-write-claude')) { await a.click('#mcp-write-claude'); await a.settle(); }
+  // What `codex mcp remove docs` leaves: docs turns off everywhere; Central Knot keeps it, and the notice offers Turn on.
+  edit(settings.codex, text => text.replace(/\n?\[mcp_servers\.docs\][^[]*/, '\n'));
+  await refresh(); await wait(2300); await refresh();
+  await atEverySize('deleted-by-hand', 'Outside the app, docs was removed from Codex’s settings (as `codex mcp remove docs` does), then Refresh past the settle window: it is off everywhere, kept in Central Knot; the notice offers Turn on', true, '.sync-notices');
+  const restore = await a.run(`document.querySelector('[id^="notice-restore-"]')?.id ?? ''`);
+  if (restore) { await a.click(`#${restore}`); await a.settle(); }
+  // A server a tool can't hold (SSE, in Codex), and a server whose copies differ (the copy question).
+  edit(settings.claude, text => { const config = JSON.parse(text); config.mcpServers.live = { type: 'sse', url: 'https://live.example.test/sse' }; return JSON.stringify(config, null, 2); });
+  edit(settings.copilot, text => { const config = JSON.parse(text); config.mcpServers.search = { type: 'local', command: 'search-mcp', args: ['--index', 'copilot'], tools: ['*'] }; return JSON.stringify(config, null, 2); });
+  edit(settings.codex, text => `${text}\n[mcp_servers.search]\ncommand = "search-mcp"\nargs = ["--index", "codex", "--fast"]\n`);
+  await refresh();
+  await a.click('#add-live'); await switchOn('live');
+  await openRow('live');
+  await atEverySize('cannot-hold', 'Added live, an SSE server from Claude Code: Copilot CLI has it now; Codex can’t take it (its own mark, "Codex has no SSE transport."), and the status says so', false, '.details');
+  await closeRow('live');
+  await a.click('#add-search'); await a.settle();
+  await atEverySize('copy-question', 'Clicked search’s Add: Copilot CLI’s and Codex’s entries differ, so the row asks which one every tool uses, each row quoting its own command with the words only it has marked', true, '.details-differs');
+  await a.click('#use-search-copilot-cli'); await switchOn('search');
+  await atEverySize('chosen', 'Clicked "Use this copy" on Copilot CLI’s: search is in Central Knot, on in Copilot CLI and Codex; Codex’s entry is kept as a version; Claude Code waits for Write', false, '.bands');
+  await a.click('#nav-history');
+  await atEverySize('history', 'History: each server’s entries in the library’s words, with what each still offers (Turn on, Restore, Undo, Use Codex’s copy)', true);
 }
 
 // ---------- Agents ----------
@@ -1233,10 +1282,11 @@ async function everyPage(tag) {
   await a.click('#nav-settings'); await shot(a, `${tag}-settings`, `Settings ${at}.`);
 }
 
-/** An edit to Copilot CLI's MCP settings made outside the app, so the MCP page shows its notice and actions. */
+/** An edit to Copilot CLI's MCP settings made outside the app, files being in Central Knot, so the MCP page shows its notice and actions. */
 async function editMcpOutside() {
-  edit(join(practice, '.copilot/mcp-config.json'), text => (text.includes('"npx-edited"') ? text.replace('"npx-edited"', '"npx"') : text.replace('"command": "npx"', '"command": "npx-edited"')));
   await a.click('#nav-mcp');
+  if (await a.has('#add-files')) { await a.click('#add-files'); await a.settle(); }
+  edit(join(practice, '.copilot/mcp-config.json'), text => (text.includes('"npx-edited"') ? text.replace('"npx-edited"', '"npx"') : text.replace('"command": "npx"', '"command": "npx-edited"')));
   await waitFor(a, `!!document.querySelector('.sync-notice')`, 10000);
 }
 

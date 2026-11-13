@@ -99,14 +99,15 @@ function practiceBanner() {
 }
 
 /** What a kind card needs from one item: whether it is managed, has edits waiting or differs, and which tools hold a copy. */
-interface KindFact { managed: boolean; edited?: unknown[]; differs: boolean; copies: Record<string, unknown>; plugin?: Record<string, unknown> }
+/** `waits`: a write or removal in Claude Code waits for Write to Claude Code (MCP servers). */
+interface KindFact { managed: boolean; edited?: unknown[]; differs: boolean; copies: Record<string, unknown>; plugin?: Record<string, unknown>; waits?: boolean }
 
 /**
  * One kind on the Overview: how many there are and how many are managed, then what needs attention in short words
  * ("1 differs"), on one summary line; under it, each tool here that holds this kind with its count, the entries wrapping
  * whole. The card opens the kind's page; "differs" is its own link, to the page narrowed to those.
  */
-function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof icon>[0], facts: KindFact[], holders: HarnessId[], waitsForClaude = 0) {
+function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof icon>[0], facts: KindFact[], holders: HarnessId[]) {
   const { title, short: noun } = kindNouns[page];
   // A plugin's items count with the rest, said apart: nothing here manages them.
   const home = state.home;
@@ -115,6 +116,7 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof ic
   const managed = facts.filter(fact => fact.managed).length;
   const differs = facts.filter(fact => fact.differs).length;
   const edits = facts.filter(fact => fact.managed && fact.edited?.length).length;
+  const waitsForClaude = facts.filter(fact => fact.waits).length;
   const attention = differs ? { tone: 'tone-warning', glyph: 'diff' as const, text: `${differs} ${differs === 1 ? 'differs' : 'differ'}`, title: `${differs} ${differs === 1 ? 'has' : 'have'} different copies. Show only these.` }
     : edits ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${edits} waiting`, title: `${plural(edits, 'change')} waiting to sync` }
       : waitsForClaude ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${waitsForClaude} for Claude Code`, title: `${waitsForClaude} ${waitsForClaude === 1 ? 'waits' : 'wait'} for Write to Claude Code` }
@@ -175,7 +177,7 @@ afterLayout(settleToolCounts);
  */
 function nextStep(home: HomeView, nothingManaged: boolean): string {
   if (noTools()) return '';
-  if (!home.skills.items.length && !home.mcp.servers.length && !home.agents.items.length) return ' Nothing found in this home yet.';
+  if (!home.skills.items.length && !home.mcp.items.length && !home.agents.items.length) return ' Nothing found in this home yet.';
   if (homeTools().length === 1) return ' When a second tool is installed, or its folder appears here, Central Knot finds it on its own; then manage what you want the same in both.';
   return nothingManaged && home.sync.access.allowed ? ' Open one below and turn on what you want the same in every tool.' : '';
 }
@@ -183,12 +185,10 @@ function nextStep(home: HomeView, nothingManaged: boolean): string {
 export function overviewPage() {
   const home = state.home;
   if (!home) return notRead();
-  const differs = (fact: { managed: boolean; copies: Record<string, unknown>; separate?: boolean; off: string[] }) => !fact.separate && new Set(Object.entries(fact.copies).filter(([tool]) => !fact.off.includes(tool)).map(([, copy]) => (copy as { hash: string }).hash)).size > 1;
-  const pick = (list: typeof home.mcp.servers): KindFact[] => list.map(fact => ({ managed: fact.managed, edited: fact.edited, differs: !fact.managed && differs(fact), copies: fact.copies }));
-  // A library item's copies need a choice only while it is found: one in Central Knot's library never asks (libraryrow.ts needsChoice).
-  const libraryFacts = (which: 'skills' | 'agents'): KindFact[] => {
+  // An item's copies need a choice only while it is found: one in Central Knot's library never asks (libraryrow.ts needsChoice).
+  const libraryFacts = (which: 'skills' | 'mcp' | 'agents'): KindFact[] => {
     const source = kindSource(home, which);
-    return source.facts.map(fact => ({ managed: fact.managed, edited: fact.edited, copies: fact.copies, differs: needsChoice(fact, source.library?.[fact.key]) }));
+    return source.facts.map(fact => ({ managed: fact.managed, edited: fact.edited, copies: fact.copies, differs: needsChoice(fact, source.library[fact.key]), waits: !!fact.waits?.length }));
   };
   // Kinds no tool here can hold have no card (app.ts absentKinds); they are named once, below.
   const absent = absentKinds();
@@ -205,7 +205,7 @@ export function overviewPage() {
         nextStep(home, nothingManaged)),
       empty ? null : h('div.kind-cards', { 'data-count': String(heldKinds(home).length) },
         kindCard('skills', 'wand-sparkles', libraryFacts('skills'), homeTools()),
-        absent.includes('mcp') ? null : kindCard('mcp', 'plug', pick(home.mcp.servers), home.mcp.tools, home.mcp.claudePending.length),
+        absent.includes('mcp') ? null : kindCard('mcp', 'plug', libraryFacts('mcp'), home.mcp.tools),
         absent.includes('agents') ? null : kindCard('agents', 'bot', libraryFacts('agents'), home.agents.tools)),
       h('div.overview-more', {},
         absent.length && !empty ? h('p.overview-line', { id: 'overview-absent' }, icon('info', 14, 'tone-muted'), `No tool here holds ${orList(absent.map(kind => kindNames[kind]))}.`) : null,

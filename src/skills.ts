@@ -122,7 +122,7 @@ async function readOwnFolder(context: ShareContext, disk: SkillDisk, tool: Harne
   for (const key of read.uncopied) disk.uncopied.add(key);
   const pinned = await rootProblem(context, tool);
   if (pinned) {
-    disk.locked.set(tool, pinned);
+    disk.locked.set(tool, { why: pinned });
     for (const copy of copiesIn(read)) {
       add(disk.ways, copy.key, tool, { why: `${nameOf(tool)} reads it in ${root}. ${pinned}`, path: copy.directory });
       add(disk.outside, copy.key, tool, copy);
@@ -130,7 +130,7 @@ async function readOwnFolder(context: ShareContext, disk: SkillDisk, tool: Harne
     return false;
   }
   const locked = await lockedRoot(context, tool);
-  if (locked) disk.locked.set(tool, locked);
+  if (locked) disk.locked.set(tool, { why: locked });
   for (const copy of read.copies) add(disk.byKey, copy.key, tool, copy);
   for (const link of read.links) {
     const to = pathWords(context, resolve(dirname(link.path), link.linkTo));
@@ -550,7 +550,7 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
       : { differs: differ(foundCopies(look, key, [])), choiceBlocks: choiceBlocksOf(entries) }),
     ...some('plugin', facts.plugin), ...some('unseen', facts.unseen), ...some('anotherWay', facts.anotherWay), ...some('takeOver', facts.takeOver),
-    ...some('loads', facts.loads), ...some('switchProblem', switchProblem),
+    ...some('loads', facts.loads), ...some('switchedOff', Object.keys(facts.loads).filter(tool => facts.loads[tool as HarnessId]!.off)), ...some('switchProblem', switchProblem),
     ...(converted ? { converted: { agent: converted.agent, origin: converted.origin, losses: converted.losses } } : {}),
   };
 }
@@ -577,7 +577,7 @@ function toolFacts(look: SkillLook, row: RowOf, tool: HarnessId, facts: ToolFact
   const hidden = copy?.is === 'unseen' ? copy.why : !copiesNow ? unseenIn(disk, tool, key) : undefined;
   if (hidden) facts.unseen[tool] = hidden;
   const way = disk.anotherWay(asIf, tool);
-  const why = copy?.is === 'held' ? copy.why : (here ? undefined : disk.cannotTake(asIf, tool)) ?? disk.locked.get(tool);
+  const why = copy?.is === 'held' ? copy.why : (here ? undefined : disk.cannotTake(asIf, tool)) ?? disk.locked.get(tool)?.why;
   const touched = made?.write.includes(tool) || made?.remove.includes(tool);
   if (way) facts.anotherWay[tool] = `${way}${outsideCopy && movedOn(item, outsideCopy.hash) ? ` ${MOVED_ON}` : ''}`;
   else if (why && (copy?.is === 'held' || touched || (!copiesNow && !here))) facts.cannot[tool] = why;

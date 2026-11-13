@@ -4,9 +4,9 @@ import { execFileSync, spawn } from 'node:child_process';
 import { mkdir, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { whyPushFailed } from '../src/plugins.ts';
-import { classify, connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, sourceTool, undoPulledBase, type BaseInstructions, type SideItem } from '../src/gitrepo.ts';
+import { classify, connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoPulledBase, type BaseInstructions, type SideItem } from '../src/gitrepo.ts';
 import { readHistory } from '../src/history.ts';
-import { applyMcp } from '../src/mcp.ts';
+import { applyServers } from '../src/servers.ts';
 import { applyBase, baseView, instructionsView, repoBase } from '../src/instructions.ts';
 import type { ShareContext } from '../src/share.ts';
 import { tools, skillText, git, world, skill, live, rows, edit, applySkillsIn, skillRows, restoreIn } from './gitrepo-world.ts';
@@ -129,7 +129,7 @@ test('Only the layout is Central Knot’s: other files stay, a file the repo ign
     assert.equal(git(box.remote, 'show', 'main:mcp/notes.json'), '{ "command": "notes-server", "note": "ask Sam before changing" }');
     // Changed here, it goes over the repo's file: the hand-written key stays.
     await writeFile(join(here.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { notes: { type: 'local', command: 'notes-server', args: ['--v2'], tools: ['*'] } } }));
-    await applyMcp(here, tools, [], { settleMs: 0 });
+    await applyServers(here, tools, [], { settleMs: 0 });
     assert.equal((await pushRepo(here)).stopped, undefined);
     assert.deepEqual(JSON.parse(git(box.remote, 'show', 'main:mcp/notes.json')), { type: 'stdio', command: 'notes-server', args: ['--v2'], note: 'ask Sam before changing' });
   } finally { await box.cleanup(); }
@@ -251,16 +251,4 @@ test('classify: an edit in the repo brings back an item removed here; an edit he
   // A repo deletion of an item this computer can't read, kept by the last Pull: still listed as a removal waiting, never lost.
   const unread = { base: new Map(), latest: new Map(), here: new Map(), unsent: new Map([['skill:review', { item: item('x'), reason: 'unreadable' }]]) };
   assert.deepEqual(classify(unread, { 'skill:review': { reason: 'unreadable', heldFor: true } }).incoming.map(row => [row.change, row.pull]), [['removed', 'stuck']]);
-});
-
-test('sourceTool: the copy that stands for an item is the first tool’s it syncs to, a waiting edit before that, and none when the edits disagree', () => {
-  const copy = (hash: string) => ({ hash }) as never;
-  const facts = (more: object) => ({ key: 'planner', name: 'planner', managed: true, off: [], copies: { 'claude-cli': copy('a'), 'copilot-cli': copy('a') }, ...more }) as never;
-  assert.deepEqual(sourceTool(facts({})), { tool: 'claude-cli' });
-  assert.deepEqual(sourceTool(facts({ off: ['claude-cli'] })), { tool: 'copilot-cli' }, 'not a copy in a tool it is kept out of');
-  assert.deepEqual(sourceTool(facts({ copies: { 'claude-cli': copy('a'), 'copilot-cli': copy('b') }, edited: ['copilot-cli'] })), { tool: 'copilot-cli' }, 'the one edit waiting to spread');
-  assert.ok('why' in sourceTool(facts({ off: ['claude-cli', 'copilot-cli'] })), 'no copy left to stand for it');
-  const disagree = facts({ copies: { 'claude-cli': copy('a'), 'copilot-cli': copy('b') }, edited: ['claude-cli', 'copilot-cli'] });
-  const unsettled = sourceTool(disagree);
-  assert.ok('why' in unsettled && /haven’t synced/.test(unsettled.why), 'edits waiting to spread that disagree');
 });

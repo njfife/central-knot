@@ -1,15 +1,15 @@
-// History's entries about items in Central Knot's library (agents and skills), in one place: whose they are (libraryEntry),
+// History's entries about items in Central Knot's library (skills, MCP servers and agents), in one place: whose they are (libraryEntry),
 // what each says (librarySentence), what it still offers (libraryAction, versionChoices), and what its row shows once its
 // action was used (doneWords). Read by History's page (the row and its buttons), by app.ts (what is said after a click), by
 // librarypass.ts restore (the click an action runs, through each kind's Kind.historyAction) and by the tests. Pure: no
-// files, no DOM. The entries of MCP servers, profiles and instructions are still historypage.ts's own.
+// files, no DOM. The entries of profiles and instructions are historypage.ts's own.
 //
 // Every action is decided from the entry and the item as the library holds it now (library.ts LibraryItem), so it is offered
 // exactly while it would change something and is always safe to click. Most are a click the item's page could send as well
 // (types.ts Change). Two are not: an Undo that gives tools their own copies back (Change giveBack, which the page never
 // sends), and a cleared switch's Undo, which sets that tool's own switch again (skills.ts switchBack, not a Change). An entry
-// from before an item was on the library (a skill's Remove, Disable or take-over by the earlier engine) offers only what can
-// still be said as one of these; otherwise it shows as past, with no action.
+// from before an item was on the library (a skill's Remove, Disable or take-over by the earlier engine; an MCP server's Undo
+// write, Undo add or Finish undo) offers only what can still be said as one of these; otherwise it shows as past, with no action.
 //
 //   entry (HistoryEvent.kind, `cause`)       action                 offered while
 //   off: the switch, or a copy deleted       Turn on                the item is Off
@@ -45,18 +45,20 @@
 // To add an entry or an action: its kind (or its `cause`) in types.ts HistoryEvent, its sentence in librarySentence, its row
 // in libraryAction, the entry librarypass.ts logItem makes for it, and its case in historypage.ts describe.
 import type { IconName } from './icons.ts';
-import { theVersion, type LibraryItem } from './library.ts';
+import { itemKey, theVersion, type LibraryItem } from './library.ts';
 import { asItIs, versionClock, type RowWords } from './libraryrow.ts';
 import type { Change, HarnessId, HistoryEvent, LibraryFacts } from './types.ts';
 import { andList, toolName, toolsPhrase } from './words.ts';
 
 /**
  * Whose a History entry is among the library's kinds, by the page's name for the kind (app.ts PageKind), with the item's key:
- * an agent's is keyed `agent:<key>` (not a Pull's change to Claude Code's own settings alone, which is gitrepo.ts's); a skill's
- * by its key alone, as before the library (no other kind's key is without a `kind:` prefix). Undefined for any other entry.
+ * an agent's is keyed `agent:<key>` (not a Pull's change to Claude Code's own settings alone, which is gitrepo.ts's); an MCP
+ * server's `mcp:<key>` (before the library, `mcp:<name>` as written, whose key is share.ts itemKey of it); a skill's by its key
+ * alone, as before the library (no other kind's key is without a `kind:` prefix). Undefined for any other entry.
  */
-export function libraryEntry(event: HistoryEvent): { kind: 'agents' | 'skills'; key: string } | undefined {
+export function libraryEntry(event: HistoryEvent): { kind: 'agents' | 'skills' | 'mcp'; key: string } | undefined {
   if (event.key.startsWith('agent:')) return event.settingsFile ? undefined : { kind: 'agents', key: event.key.slice('agent:'.length) };
+  if (event.key.startsWith('mcp:')) return { kind: 'mcp', key: itemKey(event.key.slice('mcp:'.length)) };
   if (!event.key || event.key.includes(':') || event.base || event.kind === 'profile') return undefined;
   return { kind: 'skills', key: event.key };
 }

@@ -4,41 +4,39 @@ import { mkdir, readFile, rename, rm, symlink, utimes, writeFile } from 'node:fs
 import { join } from 'node:path';
 import { connectRepo, pullRepo, pushRepo, repoView } from '../src/gitrepo.ts';
 import { readHistory } from '../src/history.ts';
-import { applyMcp, mcpView } from '../src/mcp.ts';
+import { applyServers, serversView } from '../src/servers.ts';
 import { agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
 import { tools, skillText, git, world, skill, live, rows, seedServerAndAgent, serverAndAgentOnTwo, edit, oneSkillAndAnAuthor, applySkillsIn, restoreIn, skillsLibrary } from './gitrepo-world.ts';
 
-test('Deletions of an MCP server and an agent wait while Automatic sync is off, come in once it is on, and Restore brings Claude Code’s own file back', async () => {
+test('An MCP server deleted by hand turns Off and stays in the repo; Delete from Central Knot takes it out, and Pull deletes it at once while an agent’s deletion waits for Automatic sync', async () => {
   const box = await world();
   try {
     const { first, second, secondPlanner } = await serverAndAgentOnTwo(box);
     await edit(join(first.home, '.claude/agents/planner.md'), 'model: opus', 'model: sonnet');
     await pushRepo(first);
     await pullRepo(second);
-    // Removed from both tools that have it (Claude Code's settings got it through Write now, or by hand).
+    // Removed by hand from the tools that have it: Off everywhere, and still in Central Knot, so still in the repo.
     await writeFile(join(first.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: {} }));
-    const claudeSettings = join(first.home, '.claude.json');
-    const settings = JSON.parse(await readFile(claudeSettings, 'utf8').catch(() => '{}'));
-    delete settings.mcpServers?.docs;
-    await writeFile(claudeSettings, JSON.stringify(settings));
-    // A server's last copy gone counts as deleted once it has stayed gone a while (it may only be unreadable for a moment).
-    await applyMcp(first, tools, [], { settleMs: 0, now: Date.now() + 86_400_000 });
-    // An agent leaves the repo only by Delete from Central Knot.
+    await applyServers(first, tools, [], { settleMs: 0 });
+    assert.equal((await serversView(first, tools)).items.find(server => server.key === 'docs')!.on, false);
+    assert.deepEqual(rows(live(await repoView(first)).outgoing), [], 'Off here never takes it out of the repo');
+    // Only Delete from Central Knot takes a server or an agent out of the repo.
+    await applyServers(first, tools, [{ key: 'docs', managed: false, off: [], deleted: true }]);
     await applyAgents(first, tools, [{ key: 'planner', managed: true, off: [], deleted: true }]);
     assert.deepEqual(rows(live(await repoView(first)).outgoing), ['docs:removed', 'planner:removed']);
     await pushRepo(first);
 
     const syncState = async (syncOn: boolean) => live(await repoView(second, { check: true, syncOn })).incoming.map(row => [row.name, row.sync, !!row.retry]);
-    assert.deepEqual(await syncState(false), [['planner', 'waits', false], ['docs', 'waits', false]], 'said before Pull, not discovered by it');
+    assert.deepEqual(await syncState(false), [['planner', 'waits', false], ['docs', undefined, false]], 'said before Pull, not discovered by it');
     const waited = await pullRepo(second, { syncOn: false });
-    assert.equal(waited.pulled, 0);
-    assert.equal(Object.keys((await agentsView(second, tools)).items[0].copies).length, 2, 'no copy removed while the deletion waits');
-    assert.ok((await mcpView(second, tools)).servers.some(server => server.key === 'docs'));
-    assert.deepEqual(await syncState(false), [['planner', 'waits', true], ['docs', 'waits', true]]);
-    assert.deepEqual(await syncState(true), [['planner', 'ready', true], ['docs', 'ready', true]]);
+    assert.equal(waited.pulled, 1);
+    assert.equal(Object.keys((await agentsView(second, tools)).items[0].copies).length, 2, 'no agent copy removed while its deletion waits');
+    assert.deepEqual((await serversView(second, tools)).items, [], 'the server is deleted from Central Knot: no tool has it');
+    assert.deepEqual(await syncState(false), [['planner', 'waits', true]]);
+    assert.deepEqual(await syncState(true), [['planner', 'ready', true]]);
     const view = live((await pullRepo(second, { syncOn: true })).view);
     assert.deepEqual([view.incoming, view.outgoing], [[], []]);
-    assert.deepEqual([(await mcpView(second, tools)).servers.length, (await agentsView(second, tools)).items.length], [0, 0]);
+    assert.deepEqual((await agentsView(second, tools)).items.length, 0);
     const deleted = (await readHistory(second)).filter(event => event.key === 'agent:planner' && event.kind === 'deleted').at(-1)!;
     assert.equal(deleted.cause, 'pulled', 'Pull did it, said by the entry itself');
     assert.equal((await restoreAgent(second, tools, deleted.id)).stopped, undefined);
@@ -46,7 +44,7 @@ test('Deletions of an MCP server and an agent wait while Automatic sync is off, 
   } finally { await box.cleanup(); }
 });
 
-test('Where only Claude Code takes MCP servers, the repo’s server waits, said before Pull, and Push never removes it from the repo', async () => {
+test('Where only Claude Code takes MCP servers, Pull takes the repo’s server into Central Knot and Claude Code waits for Write to Claude Code', async () => {
   const box = await world();
   try {
     const first = await box.home('first');
@@ -55,9 +53,12 @@ test('Where only Claude Code takes MCP servers, the repo’s server waits, said 
     await pushRepo(first);
     const claudeOnly = await box.home('claude-only', ['claude-cli']);
     const before = live((await connectRepo(claudeOnly, box.remote, '')).view);
-    assert.deepEqual(before.incoming.filter(row => row.kind === 'mcp').map(row => [row.name, row.pull]), [['docs', 'stuck']]);
-    const after = live((await pullRepo(claudeOnly)).view);
-    assert.deepEqual([after.incoming.filter(row => row.kind === 'mcp').map(row => [row.name, row.pull]), rows(after.outgoing)], [[['docs', 'stuck']], []], 'not read as removed here');
+    assert.deepEqual(before.incoming.filter(row => row.kind === 'mcp').map(row => [row.name, row.held]), [['docs', undefined]]);
+    const pulled = await pullRepo(claudeOnly);
+    assert.deepEqual(pulled.waitsForClaude, ['docs']);
+    const after = live(pulled.view);
+    assert.deepEqual([after.incoming, rows(after.outgoing)], [[], []]);
+    assert.deepEqual((await serversView(claudeOnly, ['claude-cli'])).items.map(server => [server.key, server.on, server.waits]), [['docs', true, ['claude-cli']]]);
     await pushRepo(claudeOnly);
     assert.match(git(box.remote, 'ls-tree', '-r', '--name-only', 'main'), /mcp\/docs\.json/);
   } finally { await box.cleanup(); }

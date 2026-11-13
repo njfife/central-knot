@@ -1,6 +1,5 @@
-// Central Knot's library: the model every kind of item follows. Pure: no files, no DOM. Agents (agents.ts) and skills
-// (skills.ts) use it today; MCP servers still follow their own engine until they are moved onto it. A kind is carried by the
-// pass in librarypass.ts, whose `Kind` is the contract a kind implements; this file is only the model.
+// Central Knot's library: the model every kind of item follows. Pure: no files, no DOM. Skills (skills.ts), MCP servers
+// (servers.ts) and agents (agents.ts) use it. A kind is carried by the pass in librarypass.ts, whose `Kind` is the contract a kind implements; this file is only the model.
 //
 // Central Knot holds each item itself, with its versions. A harness (Claude Code, Codex, …) is not where an item lives: it is
 // somewhere an item is applied. Five ideas, and nothing else, describe an item:
@@ -85,13 +84,16 @@
 //   file is written over or removed. A crash in between leaves a version too many, never a content too few, and the next
 //   pass finds H = A and finishes the write or the removal.
 //
-// Nothing else is stored. Whether a harness can't hold the item, has it another way (and, for MCP servers, waits) is a
-// `held` copy, worked out at each look with its reason and shown as that harness's mark. A library item never waits for a
-// choice: the copy question exists only when a found item whose copies differ is taken in.
+// Nothing else is stored. Whether a harness can't hold the item or has it another way is a `held` copy, worked out at each
+// look with its reason and shown as that harness's mark. Whether its writes wait for a step of the person's own (Claude
+// Code's MCP settings, until Write to Claude Code: librarypass.ts Disk.locked `waits`) is worked out at each look too, and
+// changes no plan: the write or removal is left undone until that step, and A stays, so the next look still owes it. A library
+// item never waits for a choice: the copy question exists only when a found item whose copies differ is taken in.
 //
-// Agents and skills are on it. Still to settle when MCP servers come: `own` holds a harness's whole file by its hash (a
-// skill has no own part: its whole folder is shared), where an MCP entry's own part is a fragment of a shared file; `key`
-// compares names as macOS compares file names.
+// Skills, agents and MCP servers are on it. A harness's own part (`own`) is kept by its text's hash: an agent's whole file, an
+// MCP entry's own fields (a fragment of a settings file the harness shares with other things); a skill has none, its whole
+// folder being shared. `key` compares names as macOS compares file names (itemKey), so two names in one harness that differ
+// only by case can't be told apart: each kind makes both unseen.
 //
 // Worked examples, one per row of the table: tests/library.test.ts. The same on real files: tests/agents.test.ts and tests/skills.test.ts.
 import type { HarnessId } from './types.ts';
@@ -145,6 +147,9 @@ export interface LibraryItem {
   /** Deleted from Central Knot (a tombstone): in no harness, and a copy that turns up is found, never taken in by itself. */
   deleted?: { at: string };
 }
+
+/** An item's key, from its name as a harness writes it: one key across harnesses, compared as macOS compares file names (LibraryItem key). */
+export const itemKey = (name: string) => name.normalize('NFC').toLowerCase();
 
 export const newItem = (kind: ItemKind, key: string, name: string): LibraryItem =>
   ({ kind, key, name, on: false, hash: '', versions: [], except: [], applied: {}, own: {} });

@@ -1,4 +1,5 @@
 import type { LibraryItem, Plan, VersionChange } from './library.ts';
+import type { NeutralServer } from './mcp.ts';
 
 export type HomeMode = 'fixture' | 'custom' | 'actual';
 export type HarnessId = 'claude-cli' | 'copilot-cli' | 'codex-cli' | 'pi-cli' | 'opencode-cli';
@@ -77,7 +78,7 @@ export type SyncGate =
 
 export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** A refusal made before anything was changed, the record included: the click did nothing. */ unchanged?: true; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true; /** `held`: waits for Write to Claude Code (MCP-02), as it should (not a failure). */ waits?: true; }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; /** The home as a whole: its tools, access, owner and what the background did. */ sync: SyncView; /** Skills: those in Central Knot's library (library.ts) and those found in a tool. */ skills: LibraryView; /** MCP servers across tools. */ mcp: McpView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; /** The home as a whole: its tools, access, owner and what the background did. */ sync: SyncView; /** Skills: those in Central Knot's library (library.ts) and those found in a tool. */ skills: LibraryView; /** MCP servers: those in Central Knot's library (library.ts) and those found in a tool. */ mcp: LibraryView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
@@ -90,10 +91,11 @@ export interface DesktopApi {
   /** One version of a skill: its SKILL.md and the names of its other files (skills.ts skillVersion). */
   skillVersion(key: string, hash: string): Promise<{ skill: string; files: string[] } | null>;
   history(): Promise<HistoryList>;
-  applyMcp(changes: Change[], resume: boolean, home: string): Promise<McpResult>;
-  writeClaude(names: string[], home: string): Promise<McpResult>;
-  /** Undo of Write to Claude Code: entries back to what Claude Code held before. Claude Code must be closed. */
-  unwriteClaude(written: ClaudeWrite[], home: string): Promise<McpResult>;
+  applyServers(changes: Change[], resume: boolean, home: string): Promise<PassResult>;
+  /** Write to Claude Code, with Claude closed: what the servers named owe Claude Code's settings file (servers.ts writeToClaude). */
+  writeClaude(keys: string[], home: string): Promise<PassResult>;
+  /** One version of an MCP server: its shared part (servers.ts serverVersion). */
+  serverVersion(key: string, hash: string): Promise<NeutralServer | null>;
   applyAgents(changes: Change[], resume: boolean, home: string): Promise<PassResult>;
   /** The home last opened, else this computer's home (dev builds: the practice copy). */
   startHome(): Promise<HomeView | null>;
@@ -263,10 +265,6 @@ export interface SkillFacts {
    * words: no separate copy is placed beside a plugin's.
    */
   plugin?: Partial<Record<HarnessId, ThroughPlugin>>;
-  /** Why the skill cannot be managed at all, such as a link inside it. */
-  held?: string;
-  /** The person chose to keep differing copies as they are. */
-  separate?: boolean;
   /** Tools whose copy of this managed skill was edited since the last sync and has not spread yet. */
   edited?: HarnessId[];
   /**
@@ -280,21 +278,18 @@ export interface SkillFacts {
   plan?: LibraryFacts['plan'];
   differs?: LibraryFacts['differs'];
   versionChanges?: LibraryFacts['versionChanges'];
-  /** Skills and MCP servers: tools whose copy is turned off with the tool's own switch. The copy stays there and keeps syncing; the tool doesn't load it. */
+  /** Profiles' view of a skill or server (profileplan.ts): tools whose copy is turned off with the tool's own switch. The copy stays there; the tool doesn't load it. */
   disabled?: HarnessId[];
+  /** MCP servers: tools whose write or removal waits for Write to Claude Code (types.ts LibraryFacts waits). */
+  waits?: HarnessId[];
   /** Skills and MCP servers: why a tool's switch can't be used at all: its settings file can't be read or is in a form Central Knot doesn't edit. */
   switchProblem?: Partial<Record<HarnessId, SwitchProblem>>;
-  /** No tool has a copy any more: it was deleted or removed, and History can put it back (this event) while it keeps it. */
-  gone?: GoneItem;
   /** A library kind's row (LibraryFacts, as itemrow.ts kindSource gives the page): how a tool has it another way, and which copies Take over can make Central Knot's. */
   anotherWay?: LibraryFacts['anotherWay'];
   takeOver?: LibraryFacts['takeOver'];
   /** Skills: a tool whose own switch turns it off there, said as its mark says it ("switched off in Codex’s own settings"); itemrow.ts kindSource words it. */
   switched?: Partial<Record<HarnessId, string>>;
 }
-
-/** An item with no copy left, from the History event that took the last one: when, and the event that puts it back. */
-export interface GoneItem { history: string; at: string; kind: 'deleted' | 'removed'; /** Older removals still open in tools the latest one didn't take it from: putting it back restores these too. */ also?: string[] }
 
 /** Why a tool's skill switch can't be used: its settings file, and what is wrong with it ("isn’t valid JSON."). */
 export interface SwitchProblem { file: string; reason: string }
@@ -333,16 +328,12 @@ export interface Change {
   key: string;
   managed: boolean;
   off: HarnessId[];
-  /** For differing copies: the tool whose copy every tool should use, or keep both. */
-  use?: HarnessId | 'separate';
+  /** A found item whose copies differ: the tool whose copy every tool should use. */
+  use?: HarnessId;
   /** The content ID of the chosen copy as the person saw it. A copy changed since is not used. */
   useHash?: string;
   /** Whether the page showed it managed: a change made from an older read is refused if that no longer holds. */
   seenManaged?: boolean;
-  /** MCP servers: tools to disable it in with each tool's own switch. Tools named in neither list keep their switch as it is. */
-  disable?: HarnessId[];
-  /** MCP servers: tools to enable it in again. */
-  enable?: HarnessId[];
   /** A library item: the version to make current (its hash), in every harness the item is on in. */
   version?: string;
   /** A library item: true deletes it from Central Knot (out of every harness; History can restore it); false restores a deleted one. */
@@ -389,27 +380,18 @@ export interface TookOver {
   addedId?: string;
 }
 
-/** What a copy choice changed in the item's record besides the copies it wrote (HistoryEvent.before). */
-export interface ChoiceBefore {
-  /**
-   * An MCP server's: the tools the choice put on record without writing them (Claude Code waiting for Write), each with what was
-   * on record for it before (no hash: nothing).
-   */
-  record?: { tool: HarnessId; hash?: string }[];
-}
-
 export interface HistoryEvent {
   id: string;
   at: string;
   key: string;
   item: string;
-  /** 'added': a change wrote new copies of an item it made synced (or, `rejoined`, synced to more tools); Undo removes them, if unchanged.
-   * 'switched': a change turned it off or on in some tools, with each tool's own switch (`switched`); Undo flips them back.
-   * 'removed': a change removed it from the tools in `losers`, keeping each copy; Restore puts them back there.
-   * 'profile': a profile switch (key 'profiles:switch', item the profile's name); Undo switches back.
-   * 'took-over': copies outside Central Knot were taken over (`tookOver`); Undo puts the links and the shared copy back.
-   * 'written': Write to Claude Code replaced an MCP entry there that History didn't hold (`previous`); Undo is Undo write.
-   * Agents (historyactions.ts has each one's action):
+  /** 'profile': a profile switch (key 'profiles:switch', item the profile's name); Undo switches back.
+   * 'switched': a skill's tool switch cleared, or its Undo (`switched`).
+   * 'took-over': a skill's copy outside Central Knot taken over (`losers`: that copy), which has no Undo.
+   * From before an item was on the library, read only for their sentences (historypage.ts describe): 'added' (copies a change
+   * wrote, `rejoined` where it synced to more tools), 'removed', 'written' (Write to Claude Code over an entry History didn't
+   * hold), 'restored', and 'took-over' with `tookOver`.
+   * Library items (historyactions.ts has each one's action):
    * 'on' / 'off': it was turned On or Off (`cause` says why), in every harness or (`only`) in one; `losers` are the harnesses
    *   written or removed.
    * 'current': an earlier version (`version`) was made current; `previous` is the one before.
@@ -421,47 +403,30 @@ export interface HistoryEvent {
   /** 'on' / 'off': the one harness it was turned on or off in. */
   only?: HarnessId;
   /**
-   * Agents: what made it happen, read by historyactions.ts alone. `switch`: the person's switch ('on' / 'off'). `found`: a found
-   * agent taken in ('on'; `winner`: where it was found). `pulled`: Pull did it ('on' for an agent new here, 'edit', 'deleted').
-   * `deleted-by-hand`: its copy was deleted by hand ('off'; `winner`: where). `tool-back`: a tool managed again held a copy
-   * the agent didn't have ('kept-edit'; `losers`: that copy), which gave way to the current version (library.ts managedAgain).
+   * A library item's: what made it happen, read by historyactions.ts alone. `switch`: the person's switch ('on' / 'off'). `found`:
+   * a found item taken in ('on'; `winner`: where it was found). `pulled`: Pull did it ('on' for an item new here, 'edit',
+   * 'deleted'). `deleted-by-hand`: its copy was deleted by hand ('off'; `winner`: where). `tool-back`: a tool managed again held a
+   * copy the item didn't have ('kept-edit'; `losers`: that copy), which gave way to the current version (library.ts managedAgain).
    */
   cause?: 'switch' | 'found' | 'pulled' | 'deleted-by-hand' | 'tool-back';
   /**
-   * The version current once this entry's change was made: 'current', the version made current; an agent's 'edit' Pull made,
-   * the version pulled; 'on' / 'off' by a switch, the version it was at (historyactions.ts asTheClickLeftIt).
+   * The version current once this entry's change was made: 'current', the version made current; an 'edit' Pull made, the
+   * version pulled; 'on' / 'off' by a switch, the version it was at (historyactions.ts asTheClickLeftIt).
    */
   version?: string;
-  /** 'took-over': what was replaced, removed and placed, so Undo can put it back exactly. */
+  /** 'took-over' from before the library: what was replaced, removed and placed (read only to tell such an entry apart). */
   tookOver?: TookOver;
   /** 'profile': which profile was in use before and after, and every switch it flipped. */
   profile?: { from?: string; fromName?: string; to?: string; toName?: string; flips: ProfileFlip[] };
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false); `before`, a Claude Code override it replaced ("name-only"), for Undo. */
   switched?: SwitchRecord[];
-  /** 'removed': tools whose copy Restore has put back so far; the event is done when all are. 'chosen': the same for its Undo. */
-  restoredTools?: HarnessId[];
-  /** 'removed': tools a managed skill stopped syncing to because its copy there was removed; Restore turns syncing back on. */
-  stoppedSync?: HarnessId[];
-  /** 'removed': the removal took a managed skill's last copies, so it was unmanaged; Restore manages it again. */
-  unmanaged?: boolean;
-  /** 'added': copies for tools a managed skill syncs to again; Undo removes them and stops syncing there, and the skill stays managed. */
+  /** 'added', from before the library: copies for tools a synced item synced to again. */
   rejoined?: boolean;
-  /**
-   * 'chosen': the item was synced already when the copy was chosen (kept with the choice when it was made), so the choice's
-   * own Undo keeps it synced. The one sign of it: no other field is read as "was synced".
-   */
-  wasSynced?: boolean;
-  /** 'chosen': the 'added' entry its own pass wrote (the copies that came with the choice), which its Undo takes out; never another. */
-  addedId?: string;
-  /** 'chosen': what the choice changed in the record besides the copies it wrote, which its Undo puts back. */
-  before?: ChoiceBefore;
   winner?: { tool: HarnessId; hash: string };
   /** Content that gave way, kept in Central Knot's store. */
-  losers: { tool: HarnessId; hash: string; /** MCP: which kept copy of that tool's own settings this replaced, for an exact Restore. */ kept?: string; /** 'removed': the copy's folder name as it was, to put it back under the same name. */ folder?: string;
-    /** 'removed', managed: the content last synced to that copy, so Restore puts its sync record back and an unsynced edit in it spreads. */ synced?: string;
-    /** 'removed': a copy outside the tool's own folder (in ~/.agents/skills), put back at this path. */ path?: string;
-    /** 'removed': the copy was a link with this text; Restore makes the link again. */ linkTo?: string;
-    /** 'chosen', a skill's or an agent's: when the replaced copy was last edited (its file's time), which its Undo gives it again. */ editedAt?: string }[];
+  losers: { tool: HarnessId; hash: string;
+    /** 'took-over': the copy taken over was outside the tool's own folder (in ~/.agents/skills), at this path. */ path?: string;
+    /** 'took-over': the copy was a link with this text. */ linkTo?: string }[];
   /**
    * A library item's click: each harness whose own copy (one Central Knot had not put there) the click took over, by writing
    * over it or by counting it as the item's because it was the same, with that copy's content. Its Undo gives each back.
@@ -472,7 +437,7 @@ export interface HistoryEvent {
   /** The synced content before this event, to put back on Undo. */
   previous?: string;
   orderProved: boolean;
-  /** Set once undone or restored, naming the event that did it; ALREADY_AS_IT_WAS when nothing needed doing (no event made). */
+  /** Set once undone or restored, naming the event that did it (one from before the library may name none: 'already-as-it-was'). */
   undoneBy?: string;
   /** Made by Pull from the git repo. */
   via?: 'repo';
@@ -766,30 +731,21 @@ export interface LibraryFacts {
    * whether that switch turns it off there (`off`): the copy stays, and the tool doesn't load it. Read at each look.
    */
   loads?: Partial<Record<HarnessId, SwitchTarget & { off: boolean }>>;
-  /** Skills: why a tool's switch can't be read (its settings file), for the tools in `loads`. */
+  /** Skills and MCP servers: why a tool's own switch can't be read (its settings file), for the tools that have a copy. */
   switchProblem?: Partial<Record<HarnessId, SwitchProblem>>;
+  /** MCP servers: tools whose own switch turns it off there (mcpswitch.ts), read at each look: the entry stays, and the tool doesn't start it. */
+  switchedOff?: HarnessId[];
+  /**
+   * MCP servers: tools where the next pass's write or removal waits for Write to Claude Code (librarypass.ts Disk.locked
+   * `waits`); a server deleted from Central Knot whose entry there is still to go is one too (its row is a found one).
+   */
+  waits?: HarnessId[];
   /** Skills: made by Convert to skill from an agent: which, from which tool's, and what an agent had that a skill doesn't. */
   converted?: { agent: string; origin: HarnessId; losses: string[] };
 }
 
-// ---------- MCP servers ----------
-export interface McpView {
-  tools: HarnessId[];
-  servers: SkillFacts[];
-  /** Ones no tool has any more that History can put back (mcp.ts goneFacts): shown Off. */
-  gone?: SkillFacts[];
-  /** Claude Code entries are written only by Write now with Claude closed, until a background write is proved safe (V-09). */
-  claudePending: string[];
-  access: WriteAccess;
-  gate: SyncGate;
-  /** Files that could not be read, so their entries are not offered. */
-  problems: string[];
-  /** What MCP sync did on its own since the page last read. */
-  notices: SyncNotice[];
-}
-
 /**
- * What one pass did (librarypass.ts runPass, restore; MCP's engine adds its own: McpResult). `made`: the History entries the
+ * What one pass did (librarypass.ts runPass, restore). `made`: the History entries the
  * asked changes made, for their one Undo (ApplyResult.made). `outcome: 'held'` on a result is an action not done this time
  * (DestinationResult), not a held copy.
  */
@@ -798,10 +754,6 @@ export interface PassResult {
   /** A deletion is inside its settle window: look again shortly. */
   settling?: boolean;
 }
-export interface McpResult extends PassResult {
-  /** What Write to Claude Code wrote, for its Undo: each entry's hash before (null when it was new) and after. */
-  claudeWritten?: ClaudeWrite[] }
-export interface ClaudeWrite { name: string; before: string | null; after: string; /** Its History entry ('written'), undone with it. */ event?: string }
 
 // ---------- Instructions ----------
 
@@ -1027,6 +979,3 @@ export interface ProfileEdit { id?: string; name?: string; items?: string[]; res
 export interface ProfileFlip { item: string; name: string; tool: HarnessId; disabled: boolean }
 
 export interface ProfileSwitchResult { stopped?: string; /** The profile switched to, by name (No profile included). */ name?: string; /** It was already in use: its switches were applied again. */ again?: boolean; results: DestinationResult[]; flips: ProfileFlip[]; /** The History entry, for Undo. */ event?: string; view?: HomeView }
-
-/** HistoryEvent.undoneBy for an Undo or Restore that found everything already as it was, so it wrote nothing and made no event. */
-export const ALREADY_AS_IT_WAS = 'already-as-it-was';

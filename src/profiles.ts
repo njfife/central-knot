@@ -7,9 +7,9 @@ import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { harnessIds } from './harnesses.ts';
 import { appendHistory, clock, readHistory, replaceHistory } from './history.ts';
-import { mcpView } from './mcp.ts';
+import { serversView } from './servers.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from './mcpswitch.ts';
-import { changedSince, choseProfileInUse, driftOf, itemId, itemKeyOf, itemKind, NO_PROFILE, planSwitch, profileSkills, releaseHolds, offAfterFlips, offAfterFailures, holdsOnWhatIsHere, switchItems, type SwitchItem } from './profileplan.ts';
+import { changedSince, choseProfileInUse, driftOf, itemId, itemKeyOf, itemKind, NO_PROFILE, planSwitch, profileServers, profileSkills, releaseHolds, offAfterFlips, offAfterFailures, holdsOnWhatIsHere, switchItems, type SwitchItem } from './profileplan.ts';
 import { errorCode, itemKey, managedNow, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { skillsView } from './skills.ts';
 import { keepOverrides, readKeptOverrides, switchedText, switchPath, switchState, type SwitchTarget } from './skillswitch.ts';
@@ -104,14 +104,13 @@ export async function deleteProfile(context: ShareContext, id: string): Promise<
 }
 
 /**
- * The switches set by hand (outcome 'switched' in `results`, for one of `changes`' items: an MCP server's Disable, Enable or
- * their Undo, or a skill's switch cleared), as profile items: profiles stop holding these. A skill's result names it by its
- * folder (skills.ts clearSwitch), whose itemKey is its key; an MCP server's names the server, which is its key.
+ * The switches set by hand (outcome 'switched' in `results`, for one of `changes`' skills: a tool's own switch cleared), as
+ * profile items: profiles stop holding these. A result names the skill by its folder (skills.ts clearSwitch), whose itemKey is
+ * its key.
  */
-export function switchedByHand(changes: { key: string }[], results: DestinationResult[], kind: 'skill' | 'mcp' = 'skill'): { item: string; tool: HarnessId }[] {
-  const keyOf = (result: DestinationResult) => (kind === 'mcp' ? result.item : itemKey(result.item));
-  return results.filter(result => result.outcome === 'switched' && result.harness && changes.some(change => change.key === keyOf(result)))
-    .map(result => ({ item: itemId(kind, keyOf(result)), tool: result.harness! }));
+export function switchedByHand(changes: { key: string }[], results: DestinationResult[]): { item: string; tool: HarnessId }[] {
+  return results.filter(result => result.outcome === 'switched' && result.harness && changes.some(change => change.key === itemKey(result.item)))
+    .map(result => ({ item: itemId('skill', itemKey(result.item)), tool: result.harness! }));
 }
 
 /** Lets go of profile holds on switches the person has since set by hand. Changes nothing when there are none or profiles can't be read. */
@@ -136,8 +135,7 @@ interface HomeRead { skills: SkillFacts[]; items: SwitchItem[] }
 async function readHome(context: ShareContext): Promise<HomeRead> {
   const tools = await managedNow(context, await context.read());
   const skills = profileSkills(await skillsView(context, tools));
-  const mcp = await mcpView(context, tools);
-  return { skills, items: switchItems(skills, mcp) };
+  return { skills, items: switchItems(skills, profileServers(await serversView(context, tools))) };
 }
 
 /** Every tool's switch files' modification times, as one string: when it is unchanged, no switch was turned in a tool's settings. */

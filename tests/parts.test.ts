@@ -8,10 +8,12 @@ import { discover } from '../src/discovery.ts';
 import { appendHistory } from '../src/history.ts';
 import { applySkills } from '../src/skills.ts';
 import { installParts, partsCurrent, planParts, readParts, removeParts, undoParts } from '../src/parts.ts';
-import { saveProfile, switchProfile } from '../src/profiles.ts';
+import { withMcpSwitch } from '../src/mcpswitch.ts';
 import type { ShareContext } from '../src/share.ts';
 import { readTomlTables } from '../src/textedit.ts';
 
+/** A servers record holding one server On in Central Knot (serverstore.ts), as parts ask of it (servers.ts serversOn). */
+const serversOnRecord = (name: string) => JSON.stringify({ formatVersion: 2, folders: {}, items: { [name]: { kind: 'mcp', key: name, name, on: true, hash: 'h', versions: [], except: [], applied: {}, own: {} } } });
 const SKILL = '---\nname: figma-design\ndescription: Designs from Figma\n---\n\nUse the figma server.\n';
 const AGENT = '---\nname: designer\ndescription: Turns designs into code\ntools: Read\n---\n\nYou design.\n';
 
@@ -98,9 +100,9 @@ test('Parts never replace what was there, removing keeps an edited or managed pa
   try {
     await mkdir(join(box.home, '.pi/agent/skills/figma-design'), { recursive: true });
     await writeFile(join(box.home, '.pi/agent/skills/figma-design/SKILL.md'), '---\ndescription: mine\n---\nMine.\n');
-    // A server of this name is managed (it syncs from another tool): its own page decides where it goes.
+    // A server of this name is On in Central Knot: its own page decides where it goes.
     await mkdir(join(box.home, '.central-knot'), { recursive: true });
-    await writeFile(join(box.home, '.central-knot/mcp.json'), JSON.stringify({ formatVersion: 1, items: { remote: { state: 'shared', off: ['pi-cli'], hash: '', copies: [] } } }));
+    await writeFile(join(box.home, '.central-knot/mcp.json'), serversOnRecord('remote'));
     const pi = await installParts(box.context, { ...target, tool: 'pi-cli' }, await box.files());
     assert.equal(pi.outcome, 'installed');
     assert.match(pi.notes?.join(' ') ?? '', /Pi already has one of that name[\s\S]*“remote”: one of that name is managed/);
@@ -126,8 +128,8 @@ test('Parts never replace what was there, removing keeps an edited or managed pa
     await writeFile(join(box.home, '.codex/skills/figma-design/SKILL.md'), `${SKILL}Edited.\n`);
     // Deleted by hand before the removal below: its Undo must not bring it back.
     await rm(join(box.home, '.codex/agents/designer.toml'));
-    // The MCP server was managed since: removing it would spread a deletion through sync, so it stays.
-    await writeFile(join(box.home, '.central-knot/mcp.json'), JSON.stringify({ formatVersion: 1, items: { figma: { state: 'shared', off: [], hash: '', copies: [] } } }));
+    // The MCP server is On in Central Knot since: it is the person's now, so it stays.
+    await writeFile(join(box.home, '.central-knot/mcp.json'), serversOnRecord('figma'));
     const removed = await removeParts(box.context, { ...target, tool: 'codex-cli' });
     assert.equal(removed.outcome, 'uninstalled', removed.message);
     assert.match(removed.notes?.join(' ') ?? '', /changed after it was installed[\s\S]*managed now/);
@@ -232,21 +234,19 @@ test('A History write keeps the copy that Undo of Remove parts needs: nothing pr
   } finally { await box.cleanup(); }
 });
 
-test('A profile turning a part MCP server off is no edit: Remove parts still takes it out of Codex and Pi', async () => {
+test('A tool’s own switch turning a part MCP server off is no edit: Remove parts still takes it out of Codex and Pi', async () => {
   const box = await sandbox();
   box.context.settleMs = 0;
   try {
     for (const tool of ['codex-cli', 'pi-cli'] as const) {
       box.context.read = async () => [await discover({ home: box.home, mode: 'custom', harness: tool })];
       assert.equal((await installParts(box.context, { ...target, tool }, await box.files())).outcome, 'installed');
-      const profile = (await saveProfile(box.context, { name: `Off ${tool}`, items: [] })).id!;
-      assert.equal((await switchProfile(box.context, profile)).stopped, undefined);
+      // A part's entry is the plugin's, never one of the MCP servers page's (servers.ts), so no profile flips it: the person does.
       const file = join(box.home, tool === 'codex-cli' ? '.codex/config.toml' : '.pi/agent/mcp.json');
-      assert.match(await readFile(file, 'utf8'), /"?enabled"?\s*[=:]\s*false/);
+      await writeFile(file, withMcpSwitch(tool, await readFile(file, 'utf8'), 'figma', true));
       const removed = await removeParts(box.context, { ...target, tool });
       assert.equal(removed.outcome, 'uninstalled', removed.message);
       assert.doesNotMatch(await readFile(file, 'utf8'), /mcp_servers\.figma\b|"figma"/);
-      await switchProfile(box.context, null);
     }
   } finally { await box.cleanup(); }
 });

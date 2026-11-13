@@ -10,7 +10,8 @@ import { discover, findOtherApps } from '../src/discovery.ts';
 import { envOverride, harnesses } from '../src/harnesses.ts';
 import { instructionsView } from '../src/instructions.ts';
 import { applySkills, skillsView } from '../src/skills.ts';
-import { applyMcp, mcpView, readTool } from '../src/mcp.ts';
+import { readTool } from '../src/mcp.ts';
+import { applyServers, serversView } from '../src/servers.ts';
 import { mcpDisabled, withMcpSwitch } from '../src/mcpswitch.ts';
 import { appCandidates, executableCandidates } from '../src/platform.ts';
 import type { ShareContext } from '../src/share.ts';
@@ -210,15 +211,15 @@ test('OpenCode’s servers are read from both places in its settings, written in
 
     // A Claude Code server reaches OpenCode in OpenCode's form, values as they are; the rest of the file stays.
     await writeFile(join(box.home, '.claude.json'), `${JSON.stringify({ mcpServers: { docs: { type: 'stdio', command: 'npx', args: ['-y', 'docs'], env: { DOCS_TOKEN: 'secret-value-123' }, cwd: '/work/docs' }, sse: { type: 'sse', url: 'https://example.com/sse' } } }, null, 2)}\n`);
-    const result = await applyMcp(box.context, tools, [{ key: 'docs', managed: true, off: [] }]);
+    const result = await applyServers(box.context, tools, [{ key: 'docs', managed: true, off: [] }]);
     assert.equal(result.writes, 1, JSON.stringify(result.results));
     const after = await readFile(settings(box.home), 'utf8');
     assert.deepEqual((readJsonc(after) as { mcp: Record<string, unknown> }).mcp.docs, { type: 'local', command: ['npx', '-y', 'docs'], environment: { DOCS_TOKEN: 'secret-value-123' }, cwd: '/work/docs' });
     assert.ok(after.includes('// my settings') && after.includes('"timeout": 5000') && after.includes('"newer": { "type": "local", "command": ["newer"], "disabled": true }'));
-    assert.equal((await applyMcp(box.context, tools, [])).writes, 0, 'a repeat writes nothing');
-    const view = await mcpView(box.context, tools);
-    assert.match(view.servers.find(server => server.key === 'sse')!.cannot['opencode-cli'] ?? '', /no SSE/);
-    assert.deepEqual(view.servers.find(server => server.key === 'web')!.disabled, ['opencode-cli']);
+    assert.equal((await applyServers(box.context, tools, [])).writes, 0, 'a repeat writes nothing');
+    const view = await serversView(box.context, tools);
+    assert.match(view.items.find(server => server.key === 'sse')!.cannot['opencode-cli'] ?? '', /no SSE/);
+    assert.deepEqual(view.items.find(server => server.key === 'web')!.switchedOff, ['opencode-cli']);
     // An entry under mcp.servers is edited where it is, never made again under mcp.
     const edited = (await readTool(box.context, 'opencode-cli')).entries.find(entry => entry.name === 'newer')!;
     assert.equal(edited.file, settings(box.home));

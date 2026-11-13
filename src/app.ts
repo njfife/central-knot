@@ -2,13 +2,13 @@ import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
-import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, McpResult, PassResult, ClaudeWrite, SkillFacts, SyncNotice } from './types.ts';
-import { anyManaged, kindSource, onLibrary } from './itemrow.ts';
+import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SyncNotice } from './types.ts';
+import { anyManaged, kindSource } from './itemrow.ts';
 import { caughtUpNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
-import { clickResults, inverseChanges, keptBack, recordChanged, undoOrder, type Standing } from './clickplan.ts';
+import { clickResults, keptBack } from './clickplan.ts';
 import { libraryAction, libraryEntry, librarySentence } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
 import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, sentence, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
@@ -78,7 +78,7 @@ export const state = {
   item: undefined as string | undefined,
   busy: undefined as string | undefined,
   /** What the last click on MCP servers, or Write to Claude Code, did. */
-  mcpResult: undefined as McpResult | undefined,
+  mcpResult: undefined as PassResult | undefined,
   agentsResult: undefined as PassResult | undefined,
   /** What sync and actions did, newest last: read when the History page opens or the home changes (pagedata.ts). */
   history: pageData<HistoryEvent[]>(),
@@ -292,11 +292,6 @@ export interface Click {
   /** An Undo: its result is said for a few seconds, with no Undo of its own. */
   undoing?: boolean;
   /**
-   * An item with no copy left: the History removals to put back first (`ids`, the latest first). Its changes are then made from
-   * the item as it is back (`then`); 'choose' when its copies came back different, so the copy choice waits.
-   */
-  putBack?: { key: string; ids: string[]; then: () => Change[] | 'choose' };
-  /**
    * Its part in the tools that have the item through a plugin (pluginswitch.ts turnEvery): run once the copies' part went
    * through, never beside a click refused as a whole. `said`: what that part brought with it, said when it all worked.
    */
@@ -306,18 +301,13 @@ export interface Click {
 }
 
 /** Each item page's own: how its changes are sent, and where its last result is kept. Its items are itemrow.ts kindSource's. */
-const kindPages: Record<PageKind, { send: (changes: Change[], resume: boolean, home: string) => Promise<ApplyResult | McpResult | PassResult>; keep: (results: DestinationResult[], notices?: SyncNotice[]) => void }> = {
+const kindPages: Record<PageKind, { send: (changes: Change[], resume: boolean, home: string) => Promise<PassResult>; keep: (results: DestinationResult[], notices?: SyncNotice[]) => void }> = {
   skills: { send: (...args) => api().applySkills(...args), keep: (results, notices) => { state.skillsResult = { results, writes: 0, notices }; } },
-  mcp: { send: (...args) => api().applyMcp(...args), keep: (results, notices) => { state.mcpResult = { results, writes: 0, notices }; } },
+  mcp: { send: (...args) => api().applyServers(...args), keep: (results, notices) => { state.mcpResult = { results, writes: 0, notices }; } },
   agents: { send: (...args) => api().applyAgents(...args), keep: (results, notices) => { state.agentsResult = { results, writes: 0, notices }; } },
 };
 /** Each item page's last click's result, as kindPages keeps it: what the page's bands and notices read. */
 export const lastResult = (kind: PageKind): PassResult | undefined => ({ skills: state.skillsResult, mcp: state.mcpResult, agents: state.agentsResult })[kind];
-const factsOf = (kind: PageKind) => (state.home ? kindSource(state.home, kind).facts : []);
-
-/** The records of these items of a kind, as the open home shows them. */
-const standings = (kind: PageKind, keys: string[]): Map<string, Standing> =>
-  new Map(factsOf(kind).filter(fact => keys.includes(fact.key)).map(fact => [fact.key, { managed: fact.managed, off: fact.off }]));
 
 /** Sends one kind's changes for the open home. */
 const send = (kind: PageKind, changes: Change[]) => kindPages[kind].send(changes, state.home!.sync.gate.state === 'needs-resume', state.home!.home);
@@ -325,116 +315,62 @@ const send = (kind: PageKind, changes: Change[]) => kindPages[kind].send(changes
 /**
  * One click, applied at once: an item's switch, or one tool's control in its details. The result says what was done, or why
  * nothing was, in the band at the top of the page. Its one Undo reverses exactly what the click did: the History entries the
- * click itself made (never what sync did alongside), and a record change no entry covers. A click that put an item back from
- * History first (`putBack`) is undone by taking every copy out again, kept in History, as it was before.
+ * click itself made (never what sync did alongside), each by its own action (historyactions.ts). A write that waits for Write
+ * to Claude Code is not said as done: its tool is among those the click didn't reach, and a note says it waits.
  */
-export const applyClick = (click: Click) => busy(click.putBack ? 'Putting it back…' : 'Applying…', async () => {
-  const names = [...click.items, ...click.changes.map(change => change.key), ...(click.putBack ? [click.putBack.key] : [])];
-  const back = click.putBack ? await restoreAll(click.putBack.ids) : undefined;
-  if (back?.stopped) { setHome(await api().refresh()); tell({ page: state.page, items: click.items, warn: true, band: true, text: back.stopped }); return; }
-  if (back) setHome(await api().refresh());
-  const changes = click.putBack ? click.putBack.then() : click.changes;
-  const sent = changes === 'choose' ? [] : changes;
-  const keys = sent.map(change => change.key);
-  const before = standings(click.kind, keys);
-  // A put-back that left nothing to change sends nothing; any other click is a pass, even with no change (Resume).
-  const result = sent.length || !click.putBack ? await send(click.kind, sent) : undefined;
+export const applyClick = (click: Click) => busy('Applying…', async () => {
+  const names = [...click.items, ...click.changes.map(change => change.key)];
+  // Any click is a pass, even with no change (Resume).
+  const result = await send(click.kind, click.changes);
   setHome(await api().refresh());
-  if (back) await putHistory();
-  const { ours, did, refusal, failed, differs, notIn } = clickResults([...(back?.results ?? []), ...(result?.results ?? [])], names);
+  const { ours, did, refusal, failed, differs, notIn } = clickResults(result.results, names);
   // A refusal is the click's result, said in its own band, not again among the failures.
-  kindPages[click.kind].keep(ours.filter(entry => entry !== refusal), result?.notices);
-  if (result?.stopped) { tell({ page: state.page, items: click.items, warn: true, band: true, text: result.stopped }); return; }
+  kindPages[click.kind].keep(ours.filter(entry => entry !== refusal), result.notices);
+  if (result.stopped) { tell({ page: state.page, items: click.items, warn: true, band: true, text: result.stopped }); return; }
   if (!click.undoing) retireTip(click.kind);
-  // An MCP server put back from a deletion is undone as that deletion again (its 'restored' entry), with the rest.
-  const made = [...(back?.made ?? []), ...(result?.made ?? [])];
-  // A put-back's Undo is the removal or deletion again, which leaves the record as it was before it: no record change of its own.
-  // A click refused before anything was done changed nothing: a record unlike the page's was changed elsewhere (the page was
-  // read before it), never by this click. A hold that came after the record was changed (an edit waiting for sync) is no such refusal.
-  // A library kind's click is undone by its History entries' own actions (historyactions.ts): no record change is undone besides.
-  const changed = back || refusal?.unchanged || onLibrary(click.kind) ? [] : recordChanged(before, standings(click.kind, keys));
-  const copied = !!back || did || made.length > 0 || changed.length > 0;
+  const made = result.made ?? [];
   // The plugins' part, once the copies' part went through (a whole-click refusal leaves it unrun).
-  const plugged = click.plugins?.ops.length && (copied || !refusal) ? await runSwitches(click.plugins.ops, click.plugins.draft) : undefined;
+  const plugged = click.plugins?.ops.length && (did || made.length || !refusal) ? await runSwitches(click.plugins.ops, click.plugins.draft) : undefined;
   if (plugged) setHome(await api().refresh());
-  const done = copied || !!plugged?.done.length;
-  // Said from what happened: a tool whose write failed, copy or plugin switch, is not called on (or off).
+  const done = did || made.length > 0 || !!plugged?.done.length;
+  // Said from what happened: a tool whose write failed, copy or plugin switch, is not called on (or off); nor one whose write waits.
   const wrote = [...new Set(ours.filter(entry => entry.outcome === 'written' && entry.harness).map(entry => entry.harness!))];
-  const said = changes === 'choose' ? `${click.items[0]} is back.` : typeof click.said === 'string' ? click.said : click.said([...notIn, ...(plugged?.failedIn ?? [])], wrote);
-  const choose = differs || changes === 'choose' ? ' Its copies differ: choose which copy every tool uses.' : '';
+  const waited = [...new Set(ours.filter(entry => entry.waits && entry.harness).map(entry => entry.harness!))];
+  const waits = waited.length ? `${andList(waited.map(tool => toolName(tool)))} ${waited.length === 1 ? 'waits' : 'wait'} for Write to Claude Code.` : '';
+  const said = typeof click.said === 'string' ? click.said : click.said([...notIn, ...waited, ...(plugged?.failedIn ?? [])], wrote);
+  const choose = differs ? ' Its copies differ: choose which copy every tool uses.' : '';
   const plugText = !plugged ? '' : plugged.failed.length || plugged.stopped ? switchProblems(plugged) : click.plugins?.said ?? '';
   // A hold that came after the change is said beside what was done, not dropped.
-  const text = done || !refusal ? [said, plugText, click.also, click.note, refusal?.message].filter(Boolean).join(' ') + choose : refusal.message;
+  const text = done || !refusal ? [said, plugText, click.also, [click.note, waits].filter(Boolean).join(' '), refusal?.message].filter(Boolean).join(' ') + choose : refusal.message;
   const switchedBack = plugged?.back ?? [];
-  const undo = click.undoing || !done ? undefined
-    : made.length || changed.length || switchedBack.length ? () => void undoClick(click, made, before, changed, switchedBack) : undefined;
+  const undo = click.undoing || !done ? undefined : made.length || switchedBack.length ? () => void undoClick(click, made, switchedBack) : undefined;
   const warned = failed || !!plugged?.failed.length || !!plugged?.stopped;
   tell({ page: state.page, items: click.items, warn: warned || !!click.also || !!refusal, band: true, fade: click.undoing && !warned, next: done || !refusal ? click.next : undefined,
-    text, act: undo ? { label: 'Undo', id: 'outcome-undo', title: back ? 'Take it out of every tool again; History keeps it' : 'Put back everything this did', run: undo } : undefined });
+    text, act: undo ? { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } : undefined });
   for (const item of click.items) flashRow(item);
 });
 
-/** Puts back an item's removals from History, the latest first. One that can't go back stops it only if it is the first. */
-async function restoreAll(ids: string[]): Promise<{ results: DestinationResult[]; made: string[]; stopped?: string }> {
-  const home = state.home!;
-  const results: DestinationResult[] = [];
-  const made: string[] = [];
-  for (const [index, id] of ids.entries()) {
-    const result = await api().restore(id, home.sync.gate.state === 'needs-resume', home.home);
-    // An older removal that can't go back (that tool has a copy again) leaves the rest as they are.
-    if (result.stopped && !index) return { results, made, stopped: result.stopped };
-    results.push(...result.results);
-    made.push(...(result.made ?? []));
-  }
-  return { results, made };
-}
-
-
-/**
- * Undo of one click: each History entry it made goes back (clickplan.ts undoOrder), then an item whose record is still not
- * as before (a click that only changed the record, or more than its entries cover) gets the change that puts it back.
- */
-const undoClick = (click: Click, made: string[], before: Map<string, Standing>, changed: string[], switchedBack: PluginOp[] = []) => busy('Undoing…', async () => {
+/** Undo of one click: each History entry it made goes back, newest first, by its own action (historyactions.ts). */
+const undoClick = (click: Click, made: string[], switchedBack: PluginOp[] = []) => busy('Undoing…', async () => {
   const home = state.home!;
   // The plugin items' switches go back first: other tools than the copies', so the rest is undone whatever they do.
   const unswitched = switchedBack.length ? await runSwitches(switchedBack, new Map(), true) : undefined;
-  const events = (await api().history()).events.filter(event => made.includes(event.id));
-  // A choice undone in its own tools also takes out the copies its own pass added (the 'added' entry it names).
-  const takenWith = new Set<string>();
+  const events = (await api().history()).events.filter(event => made.includes(event.id)).sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
   const results: DestinationResult[] = [];
-  const notices: SyncNotice[] = [];
   let stopped: string | undefined;
-  for (const event of undoOrder(events)) {
-    if (takenWith.has(event.id)) continue;
-    const narrow = event.kind === 'chosen' && !onLibrary(click.kind);
-    const result = await api().restore(event.id, home.sync.gate.state === 'needs-resume', home.home, narrow ? 'narrow' : undefined);
+  for (const event of events) {
+    const result = await api().restore(event.id, home.sync.gate.state === 'needs-resume', home.home);
     if (result.stopped) { stopped = result.stopped; break; }
-    if (narrow && event.addedId) takenWith.add(event.addedId);
     results.push(...result.results);
-  }
-  // What a History entry couldn't put back stays as it is: the record goes back only once the entries all did.
-  if (!stopped && !results.some(keptBack) && changed.length) {
-    setHome(await api().refresh());
-    const inverse = inverseChanges(changed, before, standings(click.kind, changed));
-    if (inverse.length) {
-      const back = await send(click.kind, inverse);
-      if (back.stopped) stopped = back.stopped;
-      results.push(...clickResults(back.results, [...click.items, ...changed]).ours);
-      // What sync did in that pass (an edit it spread) is told as after any click.
-      notices.push(...(back.notices ?? []));
-    }
   }
   setHome(await api().refresh());
   await putHistory();
-  kindPages[click.kind].keep(results, notices);
-  // Waiting for a choice of copy again is how a choice's Undo leaves it, as before the choice: no failure.
+  kindPages[click.kind].keep(results, []);
   const failed = [...results.filter(keptBack).map(entry => entry.message), ...(unswitched ? [switchProblems(unswitched)].filter(Boolean) : [])];
   const what = click.items.length === 1 ? click.items[0] : andList(click.items);
   const lead = failed.length ? `Not all of ${what} could be put back.` : `Undone: ${what} ${click.items.length === 1 ? 'is' : 'are'} as before.`;
-  // A choice whose Undo stopped part-way keeps what it put back on its History entry, whose Undo finishes it.
-  const finish = state.history.data?.some(event => made.includes(event.id) && event.kind === 'chosen' && !event.undoneBy) ? 'History’s Undo of the choice finishes it.' : '';
   tell({ page: state.page, items: click.items, warn: !!stopped || failed.length > 0, band: true, fade: !stopped && !failed.length,
-    text: stopped ? `Not all of it could be undone: ${stopped}` : [lead, ...failed, finish].filter(Boolean).join(' ') });
+    text: stopped ? `Not all of it could be undone: ${stopped}` : [lead, ...failed].join(' ') });
   for (const item of click.items) flashRow(item);
 });
 
@@ -492,7 +428,7 @@ const switchPlugins = (ops: PluginOp[], draft: Map<string, PluginOp>, { said, un
 function readFound(view: HomeView, from?: string): string {
   if (!view.sync.tools.length) return noToolsSentence;
   // A plugin's items count as the pages list them.
-  const found = { skills: view.skills.items.length + pluginItemCount(view, 'skills'), mcp: view.mcp.servers.length + pluginItemCount(view, 'mcp'), agents: view.agents.items.length + pluginItemCount(view, 'agents') };
+  const found = { skills: view.skills.items.length + pluginItemCount(view, 'skills'), mcp: view.mcp.items.length + pluginItemCount(view, 'mcp'), agents: view.agents.items.length + pluginItemCount(view, 'agents') };
   const counts = heldKinds(view).map(kind => plural(found[kind], kindNouns[kind].one, kindNouns[kind].many));
   // A catch-up that copied something has its own Caught up band, and what sync did on its own (an edit spread, a deletion)
   // its notice: either is a change, so neither read says "Nothing changed".
@@ -502,7 +438,7 @@ function readFound(view: HomeView, from?: string): string {
 }
 
 /** A home just opened, as its band says it: an empty one (no tools, or nothing in them) says only that it opened; the page says the rest. */
-const openedText = (view: HomeView) => (!view.skills.items.length && !view.mcp.servers.length && !view.agents.items.length ? `Opened ${view.label}.` : `Opened ${view.label}. ${readFound(view)}`);
+const openedText = (view: HomeView) => (!view.skills.items.length && !view.mcp.items.length && !view.agents.items.length ? `Opened ${view.label}.` : `Opened ${view.label}. ${readFound(view)}`);
 
 /** A read said in the status bar: what it found, and in which home. */
 const readSummary = (view: HomeView) => readFound(view, view.label);
@@ -704,7 +640,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const past = state.history.data?.find(event => event.id === eventId);
   const undoneBy = past?.undoneBy;
   // An Undo of a profile switch lists what it couldn't change in its own band, so the page's problems band gets only a stop.
-  if (past?.kind !== 'profile' || result.stopped) kindPages[past && libraryEntry(past)?.kind || 'mcp'].keep(result.results, result.notices);
+  if (past?.kind !== 'profile' || result.stopped) kindPages[(past && libraryEntry(past)?.kind) || 'agents'].keep(result.results, result.notices);
   if (past?.kind === 'profile') {
     if (result.stopped) tell(undefined, result.stopped); else undoOutcome(result, undoneBy);
     return;
@@ -716,40 +652,15 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
     return;
   }
   if (past && libraryEntry(past)) { sayLibraryAction(past, result); return; }
+  // A Pull's change to an agent's Claude Code settings alone (gitrepo.ts undoSettingsChange): the one entry with an Undo of its own.
   const item = restored[0]?.item ?? past?.item ?? '';
-  const removedFrom = [...new Set(result.results.filter(entry => entry.outcome === 'removed').map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean);
-  if (past?.kind === 'added') {
-    const stayed = result.results.filter(entry => entry.outcome === 'held');
-    const after = past.rejoined ? ` ${past.item} stays synced and leaves ${andList(past.losers.map(loser => toolName(loser.tool) ?? loser.tool))} out again.` : ` ${past.item} is not synced again.`;
-    tell(result.stopped ? undefined : { page: state.page, item: past.item, text: `Removed the new copies of ${past.item}${removedFrom.length ? ` from ${andList(removedFrom)}` : ''}.${stayed.length ? ` ${stayed.map(entry => entry.message).join(' ')}` : after}` }, result.stopped);
-    if (!result.stopped) flashRow(past.item);
-    return;
-  }
-  if (past?.kind === 'switched' || past?.kind === 'removed') {
-    // Every tool's result is said, including one that was already as wanted ("has it back already") or still waits.
-    const text = past.kind === 'removed'
-      ? [where.length ? `${past.item} is back in ${andList(where.map(tool => toolName(tool)))}.` : '', ...result.results.filter(entry => entry.outcome !== 'written').map(entry => entry.message)].filter(Boolean).join(' ')
-      : result.results.map(entry => `${past.item}: ${entry.message}`).join(' ');
-    // "Undo again" only for a switch Undo that recorded what it flipped.
-    const again = past.kind === 'switched' && undoneBy && state.history.data?.some(event => event.id === undoneBy) ? { id: undoneBy, label: 'Undo again' } : undefined;
-    tell(result.stopped ? undefined : { page: state.page, item: past.item, text, undo: again }, result.stopped);
-    if (!result.stopped) flashRow(past.item);
-    return;
-  }
-  // A deletion's Restore also says what it did, or left, outside the tools' own folders (the shared copy, the links).
-  const outsideSaid = result.results.filter(entry => !entry.harness && (entry.outcome === 'written' || entry.outcome === 'stayed')).map(entry => entry.message);
-  const text = past?.kind === 'deleted' ? [`${item} is back in ${everywhere}.`, ...outsideSaid].join(' ')
-    : past?.kind === 'restored' ? `Redone: ${item} is as it was before the undo, in ${everywhere}.`
-      : `Undid ${past?.winner ? `${toolName(past.winner.tool) ?? past.winner.tool}’s ${past.kind === 'chosen' ? 'chosen copy' : 'edit'}` : 'the change'} to ${item}. The earlier version is back in ${everywhere}.`;
-  const label = past?.kind === 'deleted' ? `Delete again in ${everywhere}` : past?.kind === 'restored' ? 'Undo again' : `Redo edit in ${everywhere}`;
   const done = !result.stopped && restored.length > 0;
-  tell(done ? { page: state.page, item, history: !undoneBy, undo: undoneBy ? { id: undoneBy, label } : undefined, text } : undefined, result.stopped ?? `Restored in ${plural(0, 'tool')}.`);
-  // The restored row flashes like a synced one.
+  tell(done ? { page: state.page, item, history: true, text: `Undid the change to ${item}. The earlier version is back in ${everywhere}.` } : undefined, result.stopped ?? `Restored in ${plural(0, 'tool')}.`);
   if (done) flashRow(item);
 });
 
 /**
- * After a History action on a library item, a skill or an agent (historyactions.ts): what it did, in the words of the entry
+ * After a History action on a library item, a skill, an MCP server or an agent (historyactions.ts): what it did, in the words of the entry
  * it made, with that entry's own action as the way back. A refusal is said on the page, where the action was clicked.
  */
 function sayLibraryAction(past: HistoryEvent, result: ApplyResult) {
@@ -1285,25 +1196,18 @@ function drainOwedRefresh() {
 
 // ---------- MCP servers ----------
 
-/** Write now: Claude Code's entries, once the person has quit Claude Code (MCP-02). */
-export const writeClaudeNow = (names: string[]) => busy('Writing to Claude Code…', async () => {
-  const result = await api().writeClaude(names, state.home!.home);
-  const view = await api().refresh();
-  setHome(view);
+/**
+ * Write to Claude Code, once the person has quit Claude Code: what the servers named owe Claude Code's settings file
+ * (servers.ts writeToClaude). Its way back is the library's: Make current an earlier version, then Write again.
+ */
+export const writeClaudeNow = (keys: string[]) => busy('Writing to Claude Code…', async () => {
+  const result = await api().writeClaude(keys, state.home!.home);
+  setHome(await api().refresh());
   state.mcpResult = result;
-  const written = result.claudeWritten ?? [];
-  tell(result.stopped ? undefined : { page: state.page, item: names.length === 1 ? names[0] : undefined, items: names, text: state.home?.mode === 'fixture' ? `${names.join(', ')} written to the practice copy of Claude Code’s settings.` : `${names.join(', ')} written to Claude Code. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}.`,
-    act: written.length ? { label: 'Undo write', id: 'outcome-undo-write', title: `Puts back what Claude Code had before (${written.map(write => `${write.name}: ${write.before ? 'its earlier entry' : 'removed'}`).join(', ')}). Quit Claude Code first.`, run: () => void unwriteClaudeNow(written) } : undefined }, result.stopped);
-});
-
-/** Undo write, from Write's band or from its History entry ('written'): one Undo, either place. */
-export const unwriteClaudeNow = (written: ClaudeWrite[]) => busy('Undoing the write…', async () => {
-  const result = await api().unwriteClaude(written, state.home!.home);
-  const view = await api().refresh();
-  setHome(view);
-  await putHistory();
-  const names = written.map(write => write.name);
-  tell(result.stopped ? undefined : { page: state.page, items: names, text: `Undone: Claude Code has what it had before. ${names.join(', ')} ${names.length === 1 ? 'waits' : 'wait'} for Write to Claude Code again.` }, result.stopped);
+  const names = [...new Set(result.results.filter(entry => entry.harness === 'claude-cli' && (entry.outcome === 'written' || entry.outcome === 'removed')).map(entry => entry.item))];
+  const text = !names.length ? 'Nothing was written to Claude Code.' : state.home?.mode === 'fixture' ? `${andList(names)} written to the practice copy of Claude Code’s settings.`
+    : `${andList(names)} written to Claude Code. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}.`;
+  tell(result.stopped ? undefined : { page: state.page, items: names, text }, result.stopped);
 });
 
 // ---------- Profiles ----------

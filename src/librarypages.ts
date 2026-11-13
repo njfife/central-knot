@@ -3,11 +3,12 @@
 // a Files view, what else its opened row shows of its own (an agent: Convert to a Pi skill), and what a tool's line adds
 // (a skill: clear that tool's own switch, take over a copy outside Central Knot's). The table is keyed by the page's name
 // for a kind (app.ts PageKind: 'agents'), not the library's (library.ts ItemKind: 'agent'). matrix.ts draws every row of a
-// kind here as a library row (librarySwitch, libraryMark, libraryVersions, libraryDelete, …); MCP servers keep their
-// engine's rows until their step. Every place a kind is wired in is in librarypass.ts's recipe; this is one.
+// kind here as a library row (librarySwitch, libraryMark, libraryVersions, libraryDelete, …). Every place a kind is wired in
+// is in librarypass.ts's recipe; this is one.
 import { convertAgent, rerender, shownPath, skillAction, state, type PageKind } from './app.ts';
 import { h, icon } from './dom.ts';
 import type { ItemRow } from './itemrow.ts';
+import type { NeutralServer } from './mcp.ts';
 import type { HarnessId } from './types.ts';
 import { libraryWords, sentences, type RowWords } from './libraryrow.ts';
 import type { VersionText } from './versionlist.ts';
@@ -29,12 +30,17 @@ export interface LibraryPage {
   files?: true;
 }
 
-export const libraryPages: Partial<Record<PageKind, LibraryPage>> = {
+export const libraryPages: Record<PageKind, LibraryPage> = {
   skills: {
     words: libraryWords.skills, say: sentences(libraryWords.skills), files: true, tool: skillToolActions, toolNote: takeOverNote,
     // Read shows its SKILL.md, and names its other files.
     version: (key, hash) => window.centralKnot.skillVersion(key, hash)
       .then(found => found && [{ name: 'SKILL.md', text: found.skill, block: true as const }, ...(found.files.length ? [{ name: 'other files', text: found.files.join(', ') }] : [])]),
+  },
+  mcp: {
+    words: libraryWords.mcp, say: sentences(libraryWords.mcp),
+    // Read shows what the server runs, part by part, as its shared part holds it.
+    version: (key, hash) => window.centralKnot.serverVersion(key, hash).then(server => server && serverParts(server)),
   },
   agents: {
     words: libraryWords.agents, say: sentences(libraryWords.agents), own: convertBlock,
@@ -43,9 +49,18 @@ export const libraryPages: Partial<Record<PageKind, LibraryPage>> = {
   },
 };
 
+/** An MCP server's version as Read shows it: each part it has, by its word ("command", "environment"), a map one entry a line. */
+function serverParts(server: NeutralServer): { name: string; text: string; block?: true }[] {
+  const lines = (map: Record<string, string>) => Object.entries(map).map(([key, value]) => `${key}=${value}`).join('\n');
+  const parts: [string, string | undefined, boolean?][] = [['transport', server.transport === 'stdio' ? 'command (stdio)' : server.transport.toUpperCase()],
+    ['command', server.command], ['arguments', server.args?.join(' ')], ['environment', server.env && lines(server.env), true], ['working folder', server.cwd],
+    ['URL', server.url], ['headers', server.headers && lines(server.headers), true]];
+  return parts.flatMap(([name, text, block]) => (text ? [{ name, text, ...(block ? { block: true as const } : {}) }] : []));
+}
+
 /** Pi has no native agents (CD §5): an agent can reach it only as a skill, by an explicit, one-time Convert to skill (AGT-02). */
 function convertBlock(agent: ItemRow) {
-  if (agent.gone || !state.home?.sync.tools.includes('pi-cli')) return null;
+  if (!state.home?.sync.tools.includes('pi-cli')) return null;
   const done = state.home.skills.items.find(entry => entry.converted?.agent.toLowerCase() === agent.key.toLowerCase());
   if (done) return h('p.details-limits.details-note', {}, icon('check', 12, 'tone-muted'), `Converted to a Pi skill, “${done.name}”: see it on the Skills page.`);
   const convert = (event: Event) => { event.stopPropagation(); void convertAgent(agent.key, agent.name ?? agent.key); };

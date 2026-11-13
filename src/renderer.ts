@@ -99,7 +99,7 @@ function renderSidebar() {
     navRow('harnesses', titles.harnesses, 'boxes'),
     // Each page's rows, a plugin's items included.
     row('skills', 'wand-sparkles', home && home.skills.items.length + pluginItemCount(home, 'skills')),
-    row('mcp', 'plug', home && home.mcp.servers.length + pluginItemCount(home, 'mcp')),
+    row('mcp', 'plug', home && home.mcp.items.length + pluginItemCount(home, 'mcp')),
     row('agents', 'bot', home && home.agents.items.length + pluginItemCount(home, 'agents')),
     row('instructions', 'pencil-line'),
     row('plugins', 'puzzle'),

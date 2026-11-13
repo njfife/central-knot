@@ -6,24 +6,21 @@ Read this first. Each area says what it is for, its files (one entry each: what 
 
 **Two ideas to hold.**
 1. *Items live in Central Knot's library and are applied to the managed tools.* A tool is where an item is applied, not where it lives, and every content is kept before anything is written over. The model is `library.ts`'s header.
-2. *Skills and agents are on the library today.* MCP servers (`mcp.ts`) are still on their own older engine, where the tools' files are the truth and Central Knot records what it syncs. The item pages read all three through one shape (`itemrow.ts kindSource`). Moving a kind onto the library is the recipe in `librarypass.ts`'s header.
+2. *Skills, MCP servers and agents are all on the library.* The item pages read all three through one shape (`itemrow.ts kindSource`). Putting a kind onto the library is the recipe in `librarypass.ts`'s header.
 
-## The library: skills and agents on it
+## The library: skills, MCP servers and agents on it
 An item Central Knot holds with its versions, On or Off, applied to every managed tool it is not kept out of.
 - `library.ts` the model and its one rule, pure; `carryOut`, the order one item's plan is carried out in · `librarypass.ts` the pass on real files, the same for every kind; `Kind`, what a kind implements
 - `skills.ts` skills' `Kind` (`skillKind`), the ways a tool has a skill that aren't Central Knot's (`anotherWay`), their clicks (`applySkills`), page view (`skillsView`; a row's sentences: `libraryrow.ts sentences`), `clearSwitch` and `takeOver` · `skillfiles.ts` a skill's folder in a tool, read, written and removed, checked
 - `skillstore.ts` where skills are kept in `.central-knot/` (skills.json, and versions under items/skills/) · `skillmigrate.ts` the skills sync.json held before the library, made items once
+- `servers.ts` MCP servers' `Kind` (`serverKind`), their clicks (`applyServers`), Write to Claude Code (`writeToClaude`) and page view (`serversView`) · `mcp.ts` one tool's MCP entries in one shape (`NeutralServer`), and one entry written or removed (`editEntry`)
+- `serverstore.ts` where servers are kept in `.central-knot/` (mcp.json, and versions and each tool's own fields under items/mcp/) · `servermigrate.ts` the MCP record from before the library, made items once
+- `mcpswitch.ts` a tool's own switch for a server: read for its mark, flipped by profiles
 - `agents.ts` agents' `Kind` (`agentKind`), their clicks (`applyAgents`) and page view (`agentsView`) · `agentfiles.ts` each tool's agent file, read and written
 - `agentstore.ts` where agents are kept in `.central-knot/` · `agentmigrate.ts` the record from before the library, made items once · `agentskill.ts` Convert to a Pi skill (a copy, not sync)
 - `libraryrow.ts` a library item's row without the DOM: marks, clicks, sentences in the kind's words · `librarypages.ts` what else a kind gives its page · `versionlist.ts` an opened row's versions
 - `skillswitch.ts` a tool's own switch for a skill: read for its mark, cleared by `skills.ts clearSwitch`, flipped by profiles and for a plugin's skill
-- **Start:** `library.ts`'s header, then `librarypass.ts`'s. **Examples:** `tests/library.test.ts` (one per row of the rule), `tests/librarypass.test.ts` (a toy kind), `tests/skills.test.ts` and `tests/agents.test.ts` (real files), `tests/skillmigrate.test.ts` and `tests/agentmigrate.test.ts`, `tests/skillsafety.test.ts`, `tests/libraryrow.test.ts`, the seeded walks `tests/agentswalk.test.ts` (an agent, clicking through `tests/agentclicks.ts`) and `tests/librarywalk.test.ts` (a skill and an agent in one home, clicking through `tests/skillclicks.ts`).
-
-## MCP servers, on their own engine
-The kind not on the library yet: each tool's own files are the truth; Central Knot records what it syncs, spreads edits and deletions, and keeps what it replaces.
-- `mcp.ts` MCP servers: each tool's entries in one shape (`NeutralServer`, read from a tool's file by `fromJson`; a tool's own fields ride along as extras), sync (`applyMcp`), Restore, Write to Claude Code · `mcpswitch.ts` a server off in one tool, by its own switch
-- `choiceundo.ts` a copy choice's Undo, for MCP servers
-- **Start:** `mcp.ts applyMcp`. **Examples:** `tests/mcp.test.ts`, `tests/opencode.test.ts`, `tests/skillswitch.test.ts`; the `tests/*-check-*.test.ts` files are regressions from earlier review rounds.
+- **Start:** `library.ts`'s header, then `librarypass.ts`'s. **Examples:** `tests/library.test.ts` (one per row of the rule), `tests/librarypass.test.ts` (a toy kind), `tests/skills.test.ts`, `tests/servers.test.ts` and `tests/agents.test.ts` (real files), `tests/skillmigrate.test.ts`, `tests/servermigrate.test.ts` and `tests/agentmigrate.test.ts`, `tests/skillsafety.test.ts`, `tests/libraryrow.test.ts`, the seeded walks `tests/agentswalk.test.ts` (an agent, clicking through `tests/agentclicks.ts`), `tests/librarywalk.test.ts` (a skill and an agent in one home, clicking through `tests/skillclicks.ts`) and `tests/serverswalk.test.ts` (a server with a skill and an agent in one home); the `tests/*-check-*.test.ts` files are regressions from earlier review rounds.
 
 ## The tools in a home
 Which tools a home has, where each keeps its files, and which of them Central Knot manages.
@@ -35,15 +32,15 @@ Which tools a home has, where each keeps its files, and which of them Central Kn
 ## The item pages: Overview, Skills, MCP servers, Agents, Harnesses
 One row per item with one On/Off switch, applied in every managed tool; each click's result comes with one Undo.
 - `pages.ts` Overview, and the Skills, MCP servers and Agents pages around their tables · `matrix.ts` the tables: rows, details, bands, the copy question, library rows (`librarySwitch`)
-- `harnesspage.ts` Harnesses: a page per tool, the same tables with it first · `itemrow.ts` every kind's rows as the pages read them (`kindSource`); skills' and servers' marks (`cellOf`)
-- `clickplan.ts` what one click changes, and what its Undo puts back · `roworder.ts` the order of rows · `syncrules.ts` which copies are compared · `copywords.ts` the copy question's words
-- **Start:** `matrix.ts itemsTable`; a click leaves through `app.ts applyClick`. **Examples:** `tests/clickplan.test.ts`, `tests/roworder.test.ts`, `tests/copywords.test.ts`; on screen, the flows in `scripts/e2e.mjs`.
+- `harnesspage.ts` Harnesses: a page per tool, the same tables with it first · `itemrow.ts` every kind's rows as the pages read them (`kindSource`)
+- `clickplan.ts` which of a pass's results are a click's own (`clickResults`) · `copywords.ts` the copy question's words
+- **Start:** `matrix.ts itemsTable`; a click leaves through `app.ts applyClick`. **Examples:** `tests/clickplan.test.ts`, `tests/copywords.test.ts`; on screen, the flows in `scripts/e2e.mjs`.
 
 ## History
 What Central Knot did, on its own or on a click, newest first, with Undo or Restore while the kept content allows it.
-- `historypage.ts` the page, and what the entries of MCP servers, profiles and instructions say (`describe`) · `historyactions.ts` skills' and agents' entries: whose (`libraryEntry`), sentence, action, done words
+- `historypage.ts` the page, and what the entries of profiles and instructions say (`describe`) · `historyactions.ts` skills', MCP servers' and agents' entries: whose (`libraryEntry`), sentence, action, done words
 - `history.ts` the file, kept for every kind (`appendHistory`, `readHistory`) and pruned by History's days (`pruneHistory`; Settings sets the days); an entry is a `types.ts HistoryEvent`, its action `app.ts restoreEvent` (paths below).
-- **Start:** `historypage.ts describe`. **Examples:** `tests/historyactions.test.ts`; each kind's Restore in `tests/skills.test.ts`, `tests/mcp.test.ts` and `tests/agents.test.ts`.
+- **Start:** `historypage.ts describe`. **Examples:** `tests/historyactions.test.ts`; each kind's Restore in `tests/skills.test.ts`, `tests/servers.test.ts` and `tests/agents.test.ts`.
 
 ## Plugins and marketplaces
 Marketplaces browsed, plugins chosen per tool and applied through each tool's own CLI; what installed plugins bring shows on the item pages.
@@ -106,23 +103,24 @@ How each is run: `AGENTS.md` ("Checking a change") and README ("For developers")
 - `scripts/real-home-trial.ts` the two-way trial on a real home its owner opened for it
 
 ## Paths that cross areas
-- **A click on an item page:** a row's switch in `matrix.ts` → `app.ts applyClick`, sent by `app.ts kindPages` through `preload.ts` → `main.ts changes` (the sanitizer) → `skills.ts applySkills` or `agents.ts applyAgents` (→ `librarypass.ts runPass`), or `mcp.ts applyMcp` → the result kept for `app.ts lastResult`, drawn by `matrix.ts outcomeBand`.
+- **A click on an item page:** a row's switch in `matrix.ts` → `app.ts applyClick`, sent by `app.ts kindPages` through `preload.ts` → `main.ts changes` (the sanitizer) → `skills.ts applySkills`, `servers.ts applyServers` or `agents.ts applyAgents` (→ `librarypass.ts runPass`) → the result kept for `app.ts lastResult`, drawn by `matrix.ts outcomeBand`. Write to Claude Code: the band in `matrix.ts` → `app.ts writeClaudeNow` → `main.ts` (Claude closed) → `servers.ts writeToClaude`.
 - **A background pass:** a folder watch or the poll (`main.ts startWatching`) → `main.ts backgroundPass` → `main.ts pass` (with Sync on: skills, MCP servers and agents) → `sync:changed` → `app.ts backgroundRefresh` → `main.ts syncThenView`, which builds the `types.ts HomeView` every page reads.
-- **A History action:** a button in `historypage.ts` → `app.ts restoreEvent` → `main.ts`'s `history:restore`, sent on by the entry → `skills.ts restoreSkill` or `agents.ts restoreAgent` (→ `librarypass.ts restore`), `mcp.ts restoreMcp`, `profiles.ts undoProfileSwitch` or `gitrepo.ts undoPulledBase`.
+- **A History action:** a button in `historypage.ts` → `app.ts restoreEvent` → `main.ts`'s `history:restore`, sent on by the entry → `skills.ts restoreSkill`, `servers.ts restoreServer` or `agents.ts restoreAgent` (→ `librarypass.ts restore`), `profiles.ts undoProfileSwitch` or `gitrepo.ts undoPulledBase`.
 - **An update check:** the timer in `updateflow.ts updateFlow` (started by `updater.ts startUpdater`) or Check now (`updateview.ts checkNow`) → GitHub's releases → `updates.ts newerRelease` → `updates:changed` → `updateview.ts followUpdates` redraws the control.
 - **A plugin's Apply all:** boxes on `pluginspage.ts` or `pluginpage.ts` fill the plan → `pluginstate.ts applyPluginOps` → `pluginplan.ts runPlan` → the handlers in `marketplaces.ts registerMarketplaces` → `plugins.ts install`, `plugins.ts update`, `plugins.ts uninstall` or `parts.ts installParts`.
 
 ## Names that mean two things
 - **A kind:** `app.ts PageKind` is a page's name for it (agents), `library.ts ItemKind` the library's (agent), `profileplan.ts ItemKind` a profile's (skill or mcp), `presence.ts HomeKind` every kind with a page of its own (instructions and plugins too); `librarypass.ts Kind` is what a kind implements.
-- **A switch:** `skillswitch.ts` and `mcpswitch.ts` are a tool's own off-switch for a skill or a server; `partswitch.ts` the same for one part of a plugin; `pluginswitch.ts` the item pages' switch for an item a plugin brings; `plugins.ts setSkill` one skill of a plugin.
-- **History:** stored for every kind by `history.ts`; worded by `historypage.ts`, except skills' and agents' entries, which `historyactions.ts` words.
+- **An item's key:** `library.ts itemKey` of its name (also exported by `share.ts`); a profile names an MCP server by its name as written (`itemrow.ts profileItemOf`), since a tool's switch goes by that.
+- **A switch:** `skillswitch.ts` and `mcpswitch.ts` are a tool's own off-switch for a skill or a server (never the item's On/Off); `partswitch.ts` the same for one part of a plugin; `pluginswitch.ts` the item pages' switch for an item a plugin brings; `plugins.ts setSkill` one skill of a plugin.
+- **History:** stored for every kind by `history.ts`; worded by `historypage.ts`, except skills', MCP servers' and agents' entries, which `historyactions.ts` words.
 - **One name, two things:** `Outcome` (`app.ts Outcome` a result the page tells; `types.ts Outcome` a plugin component in a tool), `standing`, `toggle`, `updateButton`, `Waiting`, `CHECK_EVERY_MS` (`updateflow.ts`: the app's own updates; `pluginupdates.ts`: plugins'), `PassOptions`, `pluginTools`: read each with its file. `model.ts fileName` and `words.ts fileName` are one function written twice.
 
 ## To add or change
 - **A kind of item onto the library:** every place it is wired in is the recipe in `librarypass.ts`'s header.
-- **A tool:** its definition in `harnesses.ts`, its id in `types.ts HarnessId`, its name in `words.ts toolNames`, and each kind's reader and writer for it (`agentfiles.ts`, `mcp.ts`, `skillswitch.ts`, `discovery.ts`).
+- **A tool:** its definition in `harnesses.ts`, its id in `types.ts HarnessId`, its name in `words.ts toolNames`, and each kind's reader and writer for it (`agentfiles.ts`, `mcp.ts`, `mcpswitch.ts`, `skillswitch.ts`, `discovery.ts`).
 - **A field on a click (`types.ts Change`):** `main.ts changes` must copy it too, or the packaged app drops it while the unit tests pass.
-- **A History entry or action:** for skills and agents (the library's kinds), the recipe at the end of `historyactions.ts`'s header; for MCP servers, profiles and instructions, a case in `historypage.ts describe`.
+- **A History entry or action:** for skills, MCP servers and agents (the library's kinds), the recipe at the end of `historyactions.ts`'s header; for profiles and instructions, a case in `historypage.ts describe`.
 - **A skill folder name a tool keeps for itself:** `harnesses.ts HarnessDefinition.reservedSkills` (that tool's definition); its three readers are `discovery.ts`, `skillfiles.ts readSkillsFolder` and `skills.ts cannotTake`; tests in `tests/skills.test.ts` (a name a tool keeps for itself) and `tests/discovery.test.ts`.
 - **A call from the page to main:** `types.ts DesktopApi`, `preload.ts`, and its handler in `main.ts`.
 - **A page:** `app.ts pages` and `renderer.ts renderPage`. **A Settings row:** a section or row in `settingspage.ts settingsPage`; its value saved by `main.ts saveAppSettings` (`main.ts AppSettings`) and sent to the page as `types.ts AppPreferences`.

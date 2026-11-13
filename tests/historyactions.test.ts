@@ -117,11 +117,12 @@ test('Entries from before the library: one naming an earlier version offers Undo
   assert.equal(offered(entry({ kind: 'off' }), undefined), undefined);
 });
 
-test('Whose an entry is: an agent’s by its prefix, a skill’s by its bare key; a Pull of Claude Code’s own settings, a server, a profile or the base is none of these', () => {
+test('Whose an entry is: an agent’s and a server’s by their prefix (a server named as written before the library), a skill’s by its bare key; a Pull of Claude Code’s own settings, a profile or the base is none of these', () => {
   assert.equal(libraryEntry(entry({ settingsFile: { path: '/x', kept: '/y', wrote: 'z' } })), undefined);
   assert.deepEqual(libraryEntry(entry({})), { kind: 'agents', key: 'reviewer' });
   assert.deepEqual(libraryEntry(entry({ key: 'notes' })), { kind: 'skills', key: 'notes' });
-  for (const other of [entry({ key: 'mcp:docs' }), entry({ key: 'profiles:switch', kind: 'profile' }), entry({ key: 'instructions:base' })]) assert.equal(libraryEntry(other), undefined);
+  assert.deepEqual([libraryEntry(entry({ key: 'mcp:docs' })), libraryEntry(entry({ key: 'mcp:GitHub' }))], [{ kind: 'mcp', key: 'docs' }, { kind: 'mcp', key: 'github' }]);
+  for (const other of [entry({ key: 'profiles:switch', kind: 'profile' }), entry({ key: 'instructions:base' })]) assert.equal(libraryEntry(other), undefined);
 });
 
 test('A skill’s entries from before the library that no click can say again show as past: Remove, Disable, take-over, copies added', () => {

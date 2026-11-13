@@ -4,7 +4,7 @@
 import { deleteProfileDef, NONE, profileState, rerender, saveProfileDef, showPage, shownPath, state, switchToProfile, whyReadOnly } from './app.ts';
 import { brandMark, outcomeBand, problemsBand } from './matrix.ts';
 import { button, checkbox, emptyState, eyebrow, findInput, h, icon } from './dom.ts';
-import { activeProfile, driftOf, flipCounts, flipWords, NO_PROFILE, offByHand, presentItems, profilesInUse, planSwitch, switchItems, type ItemKind, type SwitchItem, type SwitchPlan, profileSkills } from './profileplan.ts';
+import { activeProfile, driftOf, flipCounts, flipWords, NO_PROFILE, offByHand, presentItems, profilesInUse, planSwitch, switchItems, type ItemKind, type SwitchItem, type SwitchPlan, profileServers, profileSkills } from './profileplan.ts';
 import { andList, toolName } from './words.ts';
 import { plural } from './model.ts';
 import type { HarnessId, Profile } from './types.ts';
@@ -15,7 +15,7 @@ let menuOpen = false;
 
 /** A column per tool with skills or MCP servers: a tool that has only MCP servers still has switches to show. */
 const tools = (): HarnessId[] => { const home = state.home!; return [...new Set([...home.sync.tools, ...home.mcp.tools])]; };
-const items = (): SwitchItem[] => switchItems(profileSkills(state.home!.skills), state.home!.mcp);
+const items = (): SwitchItem[] => switchItems(profileSkills(state.home!.skills), profileServers(state.home!.mcp));
 const profiles = () => state.home!.profiles;
 /** Whether profiles can be changed now: nothing busy, the home writable, and its profiles file readable. */
 const canEditProfiles = () => !state.busy && !whyReadOnly(state.home!) && !profiles().problem;

@@ -87,7 +87,7 @@ function members(text: string, at: number): { members: Member[]; close: number }
   }
 }
 
-/** The indentation used for members of an object, guessed from its first member, else two spaces deeper than its opening line. */
+/** The indentation used for members of an object, guessed from its first member, else one step deeper than its opening line. */
 function indentOf(text: string, objectStart: number, list: Member[]): { inner: string; outer: string } {
   const lineStart = (at: number) => text.lastIndexOf('\n', at - 1) + 1;
   const outer = /^[ \t]*/.exec(text.slice(lineStart(objectStart)))![0];
@@ -96,8 +96,9 @@ function indentOf(text: string, objectStart: number, list: Member[]): { inner: s
     const inner = text.slice(lineStart(first), first);
     if (/^[ \t]*$/.test(inner)) return { inner, outer };
   }
+  // An empty object: one step deeper than its own line, by the file's own step (its first indented key is one step in).
   const unit = /\n([ \t]+)"/.exec(text)?.[1] ?? '  ';
-  return { inner: outer + unit.replace(outer, '') || outer + '  ', outer };
+  return { inner: outer + unit, outer };
 }
 
 /**

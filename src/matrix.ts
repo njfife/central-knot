@@ -1,19 +1,16 @@
 // The item pages (Skills, MCP servers, Agents, and a harness's tabs for them): one On/Off switch per item, applied at once
 // in every tool Central Knot manages. A row's marks only say what each tool has; each tool's own controls are in the item's
-// details, and every click's result comes with an Undo of the whole click. A kind on Central Knot's library (agents) has a
-// library row (`library()`): librarypages.ts says which kinds and what each supplies, libraryrow.ts what such a row says.
-import { itemId } from './profileplan.ts';
+// details, and every click's result comes with an Undo of the whole click. Every kind is on Central Knot's library: its row is a
+// library row (`library()`): librarypages.ts says what each kind supplies, libraryrow.ts what such a row says.
 import { brandMark } from './brand.ts';
-import { caughtUpNames, DAY_MS, defaultHistoryDays, groupBy } from './model.ts';
+import { caughtUpNames, defaultHistoryDays, groupBy } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
-import { andList, byToolOrder, capitalToolsPhrase, kindNouns, problemText, toolName, toolNames, toolsPhrase } from './words.ts';
+import { andList, byToolOrder, kindNouns, toolNames, toolsPhrase } from './words.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { whyReadOnly, otherOwnerSaid, saidInStatusBar, takeOverSync, takeOverTitle, tell, type Click, type Outcome, type PageKind, harnessKindShown, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, retireTip, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
-import { getsCopy as getsCopyNext, offPlan, stillOn } from './clickplan.ts';
 import type { IconName } from './icons.ts';
-import { byKey, loadedIn, standing } from './roworder.ts';
-import { cellOf, comparedTools, kindSource, libraryView, needsCopyChoice, type ItemRow, type KindSource, type Tool } from './itemrow.ts';
+import { kindSource, profileItemOf, type ItemRow, type KindSource, type Tool } from './itemrow.ts';
 import { addLabel, canTakeIn, harnessIs, inLibrary, madeFrom, needsChoice as libraryNeedsChoice, placeOf as libraryPlace, rowClicks, statusLine, switchLabel, versionClock, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
@@ -37,8 +34,10 @@ function fromPlugins(skill: ItemRow, page: PageKind): { install: PartsInstall; t
   const named = [skill.key, skill.name].filter((name): name is string => !!name).map(name => ({ kind: partKind, name }) as const);
   const found = new Map<string, { install: PartsInstall; tools: HarnessId[] }>();
   for (const install of state.home?.parts ?? []) {
-    // A copy removed from that tool by hand is no longer a part installed there.
-    if ((toolList().includes(install.tool) && skill.copies[install.tool] === undefined) || !install.items.some(item => !item.removed && named.some(name => samePart(item, name)))) continue;
+    // A copy removed from that tool by hand is no longer a part installed there (an MCP server's part is no copy: its line says
+    // the tool has it as the plugin's, `unseen`).
+    const gone = skill.copies[install.tool] === undefined && skill.unseen?.[install.tool] === undefined;
+    if ((toolList().includes(install.tool) && gone) || !install.items.some(item => !item.removed && named.some(name => samePart(item, name)))) continue;
     const key = pluginKey(install.source, install.plugin);
     const entry = found.get(key) ?? { install, tools: [] };
     entry.tools.push(install.tool);
@@ -243,40 +242,33 @@ const ago = (iso: string) => { const said = sinceThen(Date.parse(iso)); return s
 
 /** The real home's facts in the shape the page works with. */
 const fromFacts = (facts: SkillFacts): ItemRow => ({
-  key: facts.key, name: facts.name, description: facts.description, gone: facts.gone, converted: facts.converted, unseen: facts.unseen, plan: facts.plan, differs: facts.differs, versionChanges: facts.versionChanges, managed: facts.managed, off: facts.off, cannot: facts.cannot, plugin: facts.plugin, held: facts.held, separate: facts.separate, edited: facts.edited,
+  key: facts.key, name: facts.name, description: facts.description, converted: facts.converted, unseen: facts.unseen, plan: facts.plan, differs: facts.differs, versionChanges: facts.versionChanges, managed: facts.managed, off: facts.off, cannot: facts.cannot, plugin: facts.plugin, edited: facts.edited, waits: facts.waits,
   blocks: facts.choiceBlocks, hashes: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   copies: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   paths: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.directory])),
-  // An MCP entry has no lines or edit date of its own: its details name the file it lives in.
-  versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.lines ? { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), at: copy!.modified, text: copy!.summary || facts.description, ...(copy!.body !== undefined ? { body: copy!.body } : {}) } : { lines: copy!.directory.split('/').pop() ?? '', changed: 'MCP entry', text: copy!.summary }])),
-  disabled: facts.disabled, switchProblem: facts.switchProblem,
+  // An MCP entry has no lines or edit time of its own: the copy question quotes its summary alone.
+  versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.lines ? { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), at: copy!.modified, text: copy!.summary || facts.description, ...(copy!.body !== undefined ? { body: copy!.body } : {}) } : { lines: '', changed: '', text: copy!.summary }])),
   ownPart: Object.fromEntries(Object.entries(facts.copies).flatMap(([tool, copy]) => (copy!.ownPart?.length ? [[tool, copy!.ownPart]] : []))),
   anotherWay: facts.anotherWay, takeOver: facts.takeOver, switched: facts.switched,
 });
 
-/** One item as a table row. `waiting`: MCP servers whose Claude Code entry waits for Write to Claude Code, which their cell says. */
-const rowOf = (fact: SkillFacts, waiting: Set<string>): ItemRow => ({ ...fromFacts(fact), waits: waiting.has(fact.key) ? ['claude-cli'] : undefined });
-
-/** The view behind the table, whose bands are listNotices': a library kind's (itemrow.ts libraryView), or MCP's. */
-const listView = () => (state.home && (libraryView(state.home, kind) ?? (kind === 'mcp' ? state.home.mcp : undefined)));
+/** The view behind the table, whose bands are listNotices'. */
+const listView = () => state.home?.[kind];
 /** The kind's column header ("Server") and its title ("MCP servers"), from words.ts kindNouns. */
 const nouns = Object.fromEntries((['skills', 'mcp', 'agents'] as const).map(each => [each, [kindNouns[each].short[0].replace(/^./, first => first.toUpperCase()), kindNouns[each].title]])) as Record<PageKind, [string, string]>;
 /** What this table shows: skills, MCP servers or agents. The same marks mean the same things on each. */
 let kind: PageKind = 'skills';
-/** The kinds profiles switch (profileplan.ts), by their profile name. */
-const profiled = { skills: 'skill', mcp: 'mcp' } as const;
-/** Whether a profile switch turned this item off in this tool, not a switch turned by hand. */
-const turnedOffByProfile = (key: string, tool: Tool) => kind in profiled && !!state.home?.profiles.offByProfile[itemId(profiled[kind as keyof typeof profiled], key)]?.includes(tool as HarnessId);
-const factsCache: Partial<Record<PageKind, { from: unknown; gone: unknown; list: ItemRow[] }>> = {};
+/** Whether a profile switch turned this item off in this tool, not a switch turned by hand (itemrow.ts profileItemOf). */
+const turnedOffByProfile = (skill: ItemRow, tool: Tool) => { const id = profileItemOf(kind, skill); return !!id && !!state.home?.profiles.offByProfile[id]?.includes(tool as HarnessId); };
+const factsCache: Partial<Record<PageKind, { from: unknown; list: ItemRow[] }>> = {};
 
-/** This table's kind as the library carries it (librarypages.ts), when it is on the library. */
+/** This table's kind as the library carries it (librarypages.ts). */
 const library = () => libraryPages[kind];
 
 function committedList(): ItemRow[] {
   if (!state.home) return [];
-  // Items with no copy left are rows too, switched off, while History can put them back.
-  const { facts, waiting, gone } = kindSource(state.home, kind);
-  if (factsCache[kind]?.from !== facts || factsCache[kind]?.gone !== gone) { const waits = new Set(waiting); factsCache[kind] = { from: facts, gone, list: [...facts, ...gone].map(fact => rowOf(fact, waits)) }; }
+  const { facts } = kindSource(state.home, kind);
+  if (factsCache[kind]?.from !== facts) factsCache[kind] = { from: facts, list: facts.map(fromFacts) };
   return factsCache[kind]!.list;
 }
 /** The harness a Harnesses page shows: its column comes first, and the rows it has come before the others. */
@@ -287,36 +279,31 @@ const toolList = (): Tool[] => {
 };
 /** Whether the focused harness has its own copy; with no focus, every item counts. */
 const inFocus = (skill: ItemRow) => !focus || inTool(skill, focus as HarnessId);
-/** Where a row stands now (roworder.ts): 0 on, 1 not synced, 2 off. Its switch shows this. */
 /** The tools that have a person's own item through a plugin and have it on there. */
 const pluginOnIn = (skill: ItemRow) => toolList().filter(tool => { const given = throughPluginHere(skill, tool); if (!given) return false; const item = itemThrough(skill, tool); return item ? itemOn(item) : !given.off; });
-/** An item as roworder.ts places it: with the tools that load it through a plugin. */
-const placed = (skill: ItemRow) => ({ ...skill, pluginOn: pluginOnIn(skill) });
-/** The tools that use it (roworder.ts loadedIn): its row's place, its switch and its status line all go by these. */
-const onIn = (skill: ItemRow) => loadedIn(placed(skill), toolList());
-/** An item as Central Knot's library holds it (library.ts); none for a kind not on the library, or for an item only found in a harness. */
-const itemOf = (skill: ItemRow) => (state.home ? kindSource(state.home, kind).library?.[skill.key] : undefined);
-/** Where a row stands: 0 on, 1 in between (not synced; a library item: found, not in Central Knot), 2 off. A library item's place is its item's (libraryrow.ts). */
-const standingOf = (skill: ItemRow): 0 | 1 | 2 => (library() ? ({ on: 0, found: 1, off: 2 } as const)[libraryPlace(itemOf(skill))] : standing(placed(skill), toolList()));
+/** An item as Central Knot's library holds it (library.ts), deleted or not; none for an item only found in a harness. */
+const itemOf = (skill: ItemRow) => (state.home ? kindSource(state.home, kind).library[skill.key] : undefined);
+/** Where a row stands: 0 on, 1 found (in a tool, not in Central Knot), 2 off: its item's place (libraryrow.ts). */
+const standingOf = (skill: ItemRow): 0 | 1 | 2 => ({ on: 0, found: 1, off: 2 } as const)[libraryPlace(itemOf(skill))];
 /** The visit, read and home a table's rows were last placed in (view.pinned): any of them changing regroups the rows. */
 const pinKey = () => `${state.visit}:${state.reads}:${state.home?.home ?? ''}`;
 /** A row's group: where it stood when a click on this visit first changed something (pinRows), else where it stands now. */
 const placeOf = (skill: ItemRow) => (view.pinned?.at === pinKey() ? view.pinned.places.get(skill.key) : undefined) ?? standingOf(skill);
 /** The headings, by place. */
-const placeNames = ['On', 'Not synced', 'Off'] as const;
-/** Whether its copies differ so that its switch must ask which copy every tool uses. An item in the library never asks. */
-const differs = (skill: ItemRow, tools: Tool[] = toolList()) => (library() ? libraryNeedsChoice(skill, itemOf(skill)) : needsCopyChoice(skill, tools));
+const placeNames = ['On', 'Found', 'Off'] as const;
+/** Rows under a heading go by name, a leading dot aside (".hidden" sorts with the h's). */
+const byKey = (first: { key: string }, second: { key: string }) => first.key.replace(/^\./, '').localeCompare(second.key.replace(/^\./, ''));
+/** Whether its copies differ so that its Add must ask which copy every tool uses: a found item's only (libraryrow.ts needsChoice). */
+const differs = (skill: ItemRow) => libraryNeedsChoice(skill, itemOf(skill));
 /** Copies differ and need a choice, among the items this page is about: on a harness's page, the ones it has. */
 const needsChoice = (skill: ItemRow) => inFocus(skill) && differs(skill);
 
 /**
  * How many items one tool has whose copies differ and need a choice: what the "Copies differ" chip counts on that tool's
- * Harnesses page, read from the facts the same way the table reads them. `waiting`: MCP servers waiting for Claude Code.
+ * Harnesses page, read from the facts the same way the table reads them.
  */
-export function differingIn({ facts, tools, waiting, library: items }: KindSource, tool: Tool) {
-  const waits = new Set(waiting);
-  const asks = (row: ItemRow) => (items ? libraryNeedsChoice(row, items[row.key]) : needsCopyChoice(row, tools));
-  return facts.filter(fact => fact.copies[tool as HarnessId] !== undefined && asks(rowOf(fact, waits))).length;
+export function differingIn({ facts, library: items }: KindSource, tool: Tool) {
+  return facts.filter(fact => fact.copies[tool as HarnessId] !== undefined && libraryNeedsChoice(fromFacts(fact), items[fact.key])).length;
 }
 type Filter = 'all' | 'attention' | 'plugins';
 const newView = () => ({
@@ -372,9 +359,6 @@ let tablesVisit = -1;
 const committedOf = (key: string) => committedList().find(skill => skill.key === key)!;
 const rows = committedList;
 
-/** Whether a tool's mark shows the item off there: its own switch is off, and it has (or gets) a copy. */
-const shownDisabled = (skill: ItemRow, tool: Tool) => !!skill.disabled?.includes(tool) && !['cannot', 'absent'].includes(cellOf(skill, tool));
-
 // ---------- Visual vocabulary ----------
 
 const throughPluginHere = (skill: ItemRow, tool: Tool): ThroughPlugin | undefined => (skill.copies[tool] === undefined ? skill.plugin?.[tool] : undefined);
@@ -420,7 +404,7 @@ const isDiffering = (skill: ItemRow) => differs(skill);
  * puts them in its column beside the file, one under the other.
  */
 function filesLayout(skill: ItemRow, where: Node[]): { head: Node | null; tail: Node[] } {
-  const lib = library(), remove = lib ? libraryDelete(lib, skill) : null;
+  const remove = libraryDelete(library(), skill);
   return { head: details(skill, 'files'), tail: [wherePaths(skill, where, true), remove ? h('div.details-actions', {}, remove) : null].filter((part): part is HTMLElement => !!part) };
 }
 
@@ -453,24 +437,10 @@ function pathLine(tool: Tool, path: string) {
 /** Show in folder: reveals a file in the file manager; nothing is opened or changed. */
 const showInFolder = (path: string) => h('button.inline-link.details-path-show', { type: 'button', title: 'Show this file in the file manager; nothing is opened or changed', onclick: (event: Event) => { event.stopPropagation(); showFile(path); } }, 'Show in folder');
 
-/** MCP: the server's definition as labelled lines ("Type HTTP", "URL …"), read from its one-line summary. */
-function definition(summary: string, managed: boolean) {
-  const [kind, ...rest] = summary.split(' · ');
-  const value = rest.join(' · ');
-  const isCommand = kind === 'Command';
-  return h('dl.details-definition', {},
-    h('dt', {}, 'Type'), h('dd', {}, isCommand ? 'Command (stdio)' : kind),
-    h('dt', {}, isCommand ? 'Command' : 'URL'), h('dd.mono', {}, value),
-    // A server that isn't synced is each tool's own: nothing spreads, so the hint says only where to edit.
-    h('dd.details-definition-hint', {}, !managed ? 'To change it, edit a settings file below; each tool keeps its own copy.' : toolList().includes('claude-cli') && toolList().length > 1
-      ? `To change it, edit any settings file below. ${andList(toolList().filter(tool => tool !== 'claude-cli').map(tool => names[tool]))} sync on their own; Claude Code updates when you click Write to Claude Code.`
-      : 'To change it, edit any settings file below; the change syncs to the others.'));
-}
-
-/** Where an earlier Undo went, said by what it undoes: "The undo for writing files to Claude Code moved to History." */
+/** Where an earlier Undo went, said by what it undoes: "The undo for your change to files moved to History." */
 function movedUndoText(label: string, items: string[]): (string | HTMLElement)[] {
   const named = nameList(items.slice(0, 3));
-  const what = /write/i.test(label) ? ['writing ', ...named, ' to Claude Code'] : label === 'Undo' && items.length ? ['your change to ', ...named] : [label.replace(/^Undo\s*/, '') || 'your last change'];
+  const what = label === 'Undo' && items.length ? ['your change to ', ...named] : [label.replace(/^Undo\s*/, '') || 'your last change'];
   return ['Earlier: the undo for ', ...what, ' is in '];
 }
 
@@ -567,30 +537,29 @@ function copyQuote(skill: ItemRow, tool: Tool, others: Tool[]): Child[] | undefi
  */
 function compareChoices(skill: ItemRow, inFiles = false) {
   const versions = skill.versions ?? {};
-  const compared = toolList().filter(tool => comparedTools(skill).includes(tool));
+  // The copies that count: each tool's own, but where a tool can't take the item (it keeps its own copy).
+  const compared = toolList().filter(tool => skill.copies[tool] !== undefined && !skill.cannot?.[tool]);
   const groups = [...groupBy(compared, tool => skill.hashes?.[tool] ?? tool).values()];
   // A choice turns it on everywhere: every tool that can hold it and has no copy gets the chosen one.
-  const receiving = toolList().filter(tool => !skill.cannot?.[tool] && skill.copies[tool] === undefined && !skill.waits?.includes(tool));
+  const receiving = toolList().filter(tool => !skill.cannot?.[tool] && skill.copies[tool] === undefined);
   // A group's content was made when its earliest copy was: a copy sync wrote is newer than the edit it carries. Marked only when
   // every copy's time is known and one group's is the latest. A copy an Undo of a choice puts back has its earlier time again.
   // Left so: a copy sync wrote into a tool that was behind, alone in its group, carries the time of that write, not of the edit
   // it holds; "most recent" gets its full meaning with first setup (one-switch step 7).
   const editedAt = groups.map(group => Math.min(...group.map(tool => Date.parse(versions[tool]?.at ?? ''))));
   const last = Math.max(...editedAt);
-  const latest = groups.length > 1 && kind !== 'mcp' && editedAt.every(Number.isFinite) && editedAt.filter(at => at === last).length === 1 ? groups[editedAt.indexOf(last)] : undefined;
+  const latest = groups.length > 1 && editedAt.every(Number.isFinite) && editedAt.filter(at => at === last).length === 1 ? groups[editedAt.indexOf(last)] : undefined;
   // The line under each name, in one form: the copy's size (where the sizes differ) and when it was edited ("7 lines · edited
-  // 2 days ago"), or an MCP entry's file. It shows on every row or on none: only where it tells the copies apart. The copy
-  // edited most recently has the line's one emphasis.
+  // 2 days ago"); none for an MCP entry, which has neither. The copy edited most recently has the line's one emphasis.
   const sizesDiffer = new Set(groups.map(([tool]) => versions[tool]?.lines)).size > 1;
   const factsOf = (tool: Tool, at: number) => [sizesDiffer ? versions[tool]!.lines : '', Number.isFinite(at) ? `edited ${sinceThen(at)}` : versions[tool]!.changed];
   const facts = groups.map(([tool], index) => (versions[tool] ? factsOf(tool, editedAt[index]).filter(Boolean).join(' · ') : ''));
-  // A library item's copies always say when each was edited, and the newer one is marked: latest wins everywhere else in the library.
+  // The copies say when each was edited, and the newer one is marked: latest wins everywhere else in the library.
   const lib = library();
-  const factsDiffer = !!lib || !!latest || new Set(facts).size > 1;
-  const newest = lib ? (groups.length > 2 ? 'Newest' : 'Newer') : 'most recent';
+  const newest = groups.length > 2 ? 'Newest' : 'Newer';
   const about = (group: Tool[]) => {
     const said = facts[groups.indexOf(group)];
-    if (!factsDiffer || !said) return null;
+    if (!said) return null;
     return group === latest ? h('span.version-meta.version-latest', {}, `${said} · ${newest}`) : h('span.version-meta', {}, said);
   };
   const choice = (group: Tool[]) => {
@@ -610,20 +579,20 @@ function compareChoices(skill: ItemRow, inFiles = false) {
       h('span.version-says', {},
         said ? h('span.version-text', {}, ...said) : null,
         h('span.version-effect', {}, choiceEffect(others.map(entry => names[entry]), receiving.map(entry => names[entry])))),
-      h(`span.version-cta${lib && group === latest ? '.version-cta-main' : ''}`, { 'aria-hidden': 'true' }, 'Use this copy'));
+      h(`span.version-cta${group === latest ? '.version-cta-main' : ''}`, { 'aria-hidden': 'true' }, 'Use this copy'));
   };
   // Comparing comes before choosing: the full copies side by side, a click from the choices (the Files view shows them already;
-  // a kind with one, skills, opens it there).
+  // a kind with one, skills, opens it there). A kind with neither (MCP servers) quotes each whole in its row.
   const every = compared.length > 2 ? 'Read every copy' : 'Read both copies';
-  const read = inFiles || kind === 'mcp' ? null : lib?.files ? smallAction(every, `diff-${skill.key}`, () => openFiles(skill.key), '.compare-read') : smallAction(view.reading === skill.key ? 'Hide the copies' : every, `diff-${skill.key}`, () => { view.reading = view.reading === skill.key ? undefined : skill.key; rerender(); }, '.compare-read');
-  const bodies = lib?.words.body && view.reading === skill.key
+  const read = inFiles ? null : lib.files ? smallAction(every, `diff-${skill.key}`, () => openFiles(skill.key), '.compare-read')
+    : lib.words.body ? smallAction(view.reading === skill.key ? 'Hide the copies' : every, `diff-${skill.key}`, () => { view.reading = view.reading === skill.key ? undefined : skill.key; rerender(); }, '.compare-read') : null;
+  const bodies = lib.words.body && view.reading === skill.key
     ? h('div.compare-copies', {}, fileBlocks(`body-${skill.key}`, lib.words.body, compared.map(tool => ({ tool, text: versions[tool]?.body ?? '' })), holders => `${lib.words.body} · ${andList(holders.map(holder => names[holder.tool]))}`, { named: true }))
     : null;
   return h('div.compare-block', {},
-    h('p.compare-title', {}, icon(lib ? 'circle-question-mark' : 'diff', 14, 'tone-warning'), h('span', {}, 'Which copy of ', h('strong.item-name', {}, skill.name ?? skill.key), ` should ${compared.length + receiving.length > 2 ? 'every tool' : 'both tools'} use?`)),
-    // A library item's choice takes it into Central Knot: the copies not chosen become its versions, each of which can be made current later.
-    h('p.compare-note', {}, lib ? `Choosing applies at once: the ${lib.words.item} is taken into Central Knot with that copy, and turned on everywhere. The other copies are kept as its versions.`
-      : `Choosing applies at once, with Undo, and turns it on everywhere. Replaced copies are kept in History.${kind === 'mcp' && receiving.includes('claude-cli') ? ` ${CLAUDE_LATER}` : ''}`),
+    h('p.compare-title', {}, icon('circle-question-mark', 14, 'tone-warning'), h('span', {}, 'Which copy of ', h('strong.item-name', {}, skill.name ?? skill.key), ` should ${compared.length + receiving.length > 2 ? 'every tool' : 'both tools'} use?`)),
+    // The choice takes it into Central Knot: the copies not chosen become its versions, each of which can be made current later.
+    h('p.compare-note', {}, `Choosing applies at once: the ${lib.words.item} is taken into Central Knot with that copy, and turned on everywhere. The other copies are kept as its versions.`),
     h('div.compare-choices', {}, groups.map(choice)),
     read, bodies);
 }
@@ -692,11 +661,9 @@ function nameCell(skill: ItemRow, attention: boolean) {
   return h('div.ov-name.ov-name-fit.ov-name-bare', { role: 'cell', title: skill.description ? `${name}: ${skill.description}` : name },
     h('span.ov-name-main', {},
       h('span.ov-name-text', {}, name),
-      skill.held ? h('span.held-pill', { title: skill.held }, 'Can’t sync') : null,
       attention ? h('span.row-tag.row-tag-differs', { id: `decide-${skill.key}` }, 'Copies differ') : null),
     libraryTag(skill),
     partTags(skill),
-    skill.gone ? h('span.row-tag', { title: 'No tool has a copy now. Turn it on to put it back from History.' }, 'no copy left') : null,
     skill.description ? h('span.ov-name-about', { title: skill.description }, skill.description) : null);
 }
 
@@ -725,7 +692,7 @@ function outcomeShown(outcome: Outcome, matrixPage: boolean): boolean {
   if (outcome.page !== state.page) return false;
   const named = [outcome.item, ...(outcome.items ?? [])].filter((name): name is string => !!name);
   // A newer result (an Undo that brings the question back) is still said.
-  const choosing = matrixPage && view.comparing && (outcome.said ?? 0) <= view.openedAt && committedList().some(skill => skill.key === view.comparing && needsCopyChoice(skill, toolList()) && named.some(name => name === skill.name || name.toLowerCase() === skill.key));
+  const choosing = matrixPage && view.comparing && (outcome.said ?? 0) <= view.openedAt && committedList().some(skill => skill.key === view.comparing && differs(skill) && named.some(name => name === skill.name || name.toLowerCase() === skill.key));
   if (choosing) return false;
   return !(state.skillsView === 'files' && state.item && !named.some(name => name.toLowerCase() === state.item));
 }
@@ -782,12 +749,9 @@ function helpBand(): HTMLElement | null {
   // Shown until dismissed, so it does not come and go as rows change.
   const key = `ck-help-dismissed-${kind}`;
   if (!list.length || readFlag(key) || state.skillsView === 'files') return null;
-  const one = kindNouns[kind].a, words = library()?.words;
-  const first = words
-    ? `Turn ${words.an} on and every tool has it, kept the same. Turn it off and no tool has it: Central Knot keeps it, with its versions, and puts each ${words.copy} back when you turn it on.`
-    : `Turn ${one} on and every tool has it, kept the same; turn it off and no tool ${kind === 'mcp' ? 'starts' : 'loads'} it. Each click applies at once, with Undo.`;
-  const second = words ? `Open ${words.an} for its versions.`
-    : `A switch halfway means not synced yet: each tool keeps its own copy. Open ${one} for each tool’s own switch.`;
+  const words = library().words;
+  const first = `Turn ${words.an} on and every tool has it, kept the same. Turn it off and no tool has it: Central Knot keeps it, with its versions, and puts each ${words.copy} back when you turn it on.`;
+  const second = `Open ${words.an} for its versions.`;
   return h('div.band.band-help', { role: 'note' }, icon('info', 14, 'tone-muted'),
     h('span.band-text.band-lines', {}, h('span', {}, first), h('span.tone-muted', {}, second)),
     closeButton(() => { writeFlag(key); rerender(); }, { id: 'help-dismiss', label: 'Hide this tip' }));
@@ -808,22 +772,20 @@ export function caughtUpBand(sync: SyncView, told: SyncNotice[]): HTMLElement | 
 }
 
 /**
- * MCP servers waiting for Claude Code's own Write step, not already told by a notice: the same inset amber notice as a
- * waiting edit, so Write has one look wherever the step waits. `all` is every waiting server, which Write writes.
+ * The rows whose write or removal in Claude Code waits for its own Write step (types.ts LibraryFacts waits): one band for all
+ * of them, offered exactly while Claude Code's file owes something, whose Write writes only what those rows owe.
  */
-function writeStepBand(rest: string[], all: string[]) {
-  const missing = rest.filter(name => committedList().find(skill => skill.key === name)?.copies['claude-cli'] === undefined);
-  const older = rest.filter(name => !missing.includes(name));
-  const servers = (names: string[]) => (names.length === 1 ? 'server' : 'servers');
-  // Each server said as what Claude Code has of it: an older copy, or none yet ("…an older copy of the files server and doesn't have search yet.").
-  const what = !older.length ? ['Claude Code doesn’t have the ', ...nameList(missing), ` ${servers(missing)} yet.`]
-    : [`Claude Code has ${older.length === 1 ? 'an older copy' : 'older copies'} of the `, ...nameList(older), ` ${servers(older)}`, ...(missing.length ? [' and doesn’t have ', ...nameList(missing), ' yet.'] : ['.'])];
+function writeStepBand(waiting: ItemRow[]) {
+  const owes = (skill: ItemRow) => (skill.plan?.write.includes('claude-cli') ? (skill.copies['claude-cli'] === undefined ? 'add' : 'update') : 'remove');
+  const said = (which: 'add' | 'update' | 'remove', words: string) => { const list = waiting.filter(skill => owes(skill) === which).map(nameOf); return list.length ? [words, ...nameList(list)] : []; };
+  const parts = [said('add', 'add '), said('update', 'bring '), said('remove', 'remove ')].filter(part => part.length);
+  const what = parts.flatMap((part, index) => [index ? (index === parts.length - 1 ? ' and ' : ', ') : '', ...part, ...(part[0] === 'bring ' ? [' up to date'] : [])]);
   const quitFirst = state.home?.mode === 'fixture' ? h('span.band-why', {}, ' On your real tools, quit Claude Code first.') : ' Quit Claude Code first; it rewrites its settings file while open.';
-  const write = button({ variant: 'primary', size: 'small', label: 'Write to Claude Code', id: 'mcp-write-claude', onclick: () => void writeClaudeNow(all),
+  const write = button({ variant: 'primary', size: 'small', label: 'Write to Claude Code', id: 'mcp-write-claude', onclick: () => void writeClaudeNow(waiting.map(skill => skill.key)),
     attrs: { title: 'Claude Code rewrites ~/.claude.json while it is open, so Central Knot writes it only when Claude Code is closed.' } });
   return h('div.band.sync-notices.band-write-now', { role: 'status' }, h('div.sync-notice-lines', {},
     h('p.sync-notice.notice-stacked.notice-inline', { 'data-kind': 'write' }, icon('clock', 14, 'tone-warning'),
-      h('span.notice-text', {}, ...what, quitFirst), h('span.notice-actions', {}, write))));
+      h('span.notice-text', {}, 'Claude Code’s settings wait for Write to Claude Code, to ', ...what, '.', quitFirst), h('span.notice-actions', {}, write))));
 }
 
 /**
@@ -838,7 +800,7 @@ function otherOwnerBand(): HTMLElement | null {
   return h('div.band', { role: 'status', id: 'other-owner' }, icon('circle-alert', 14, 'tone-warning'), h('span.band-text', {}, otherOwnerSaid(gate.owner)), take);
 }
 
-/** The bands of a page whose items aren't skills: MCP servers, or a library kind's. */
+/** The bands above a table, from its kind's view (listView). */
 function listNotices() {
   const mcp = listView()!;
   const bands: HTMLElement[] = [];
@@ -859,12 +821,11 @@ function listNotices() {
   if (background.length) bands.push(problemsBand(background));
   const told = toldNotices();
   const shownNotices = told.filter(notice => !state.dismissed.has(notice.history || notice.item));
-  const pendingClaude = 'claudePending' in mcp ? mcp.claudePending : [];
   // An earlier result's Undo that stepped aside for this notice: one faint closing line inside the notice, not a band of its own.
   const moved = state.undoMoved?.page === state.page && !state.outcome && shownNotices.some(notice => state.undoMoved!.notices.includes(notice.history || notice.item))
     ? h('span.notice-tail.tone-faint', { id: 'undo-moved' }, ...movedUndoText(state.undoMoved!.label, state.undoMoved!.items), h('button.inline-link', { type: 'button', id: 'notice-undo-moved', onclick: () => showPage('history') }, 'History'), '.') : null;
   if (shownNotices.length) {
-    const lines = shownNotices.slice(0, 6).map(notice => syncNotice(notice, pendingClaude.includes(notice.item) ? () => void writeClaudeNow(pendingClaude) : undefined));
+    const lines = shownNotices.slice(0, 6).map(syncNotice);
     if (moved) {
       const link = lines.at(-1)!.querySelector<HTMLElement>('[id^="notice-history-"]');
       if (link) link.title = `${moved.textContent?.replace(/^Earlier: the undo/, 'The earlier undo').replace(/ is in History\.$/, ' is here too')}.`;
@@ -872,10 +833,9 @@ function listNotices() {
     }
     bands.push(h('div.band.sync-notices', { role: 'status' }, h('div.sync-notice-lines', {}, lines), dismissNotices(shownNotices)));
   }
-  // Claude Code rewrites ~/.claude.json while it runs, so its entries wait for an explicit write with Claude closed (MCP-02).
-  const toldHere = new Set(shownNotices.map(notice => notice.item));
-  const rest = pendingClaude.filter(name => !toldHere.has(name));
-  if (rest.length) bands.push(writeStepBand(rest, pendingClaude));
+  // Claude Code rewrites ~/.claude.json while it runs, so its entries wait for an explicit write with Claude closed.
+  const waiting = committedList().filter(skill => skill.waits?.length);
+  if (waiting.length) bands.push(writeStepBand(waiting));
   if (result?.stopped) bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, result.stopped)));
   // A click's refusal is its result, said once, in the result's band (app.ts applyClick leaves it out of these).
   const problems = (result?.results ?? []).filter(result => result.outcome === 'failed' || (result.outcome === 'held' && !result.differs && !result.waits));
@@ -893,8 +853,8 @@ function resumeBand(): HTMLElement | null {
     button({ variant: 'outline', size: 'small', label: 'Resume', id: 'resume', disabled: !canWrite(), onclick: () => void applyClick({ kind, changes: [], items: [], said: 'Resumed: sync carries on from the record as it is.' }) }));
 }
 
-/** The bands above a table: every item page reads its kind's view (listView), a library kind's or MCP servers'. */
-const notices = () => (state.home && listView() ? listNotices() : null);
+/** The bands above a table: every item page reads its kind's view (listView). */
+const notices = () => (state.home ? listNotices() : null);
 
 /** What a table keeps belongs to one home: opening another starts with no open row and none of the last home's notices. */
 const tableHomes: Partial<Record<PageKind, string>> = {};
@@ -992,7 +952,6 @@ const age = (key: string) => {
 };
 
 type NoticeLook = [IconName, string, string, HTMLElement | null];
-type NoticeLooks = Record<SyncNotice['kind'], NoticeLook>;
 
 /** A library item's notice (libraryrow.ts noticeWords), with its button: Undo, or Turn on after a copy deleted by hand turned it off. */
 function libraryNotice(lib: LibraryPage, notice: Told, undo: (title: string) => HTMLElement): NoticeLook {
@@ -1003,25 +962,12 @@ function libraryNotice(lib: LibraryPage, notice: Told, undo: (title: string) => 
   return ['trash-2', 'tone-muted', text, on];
 }
 
-function syncNotice(notice: Told, writeClaude?: () => void) {
-  const who = toolName, list = (tools: string[]) => andList(tools.map(toolName));
-  const order = notice.orderProved ? '' : ' The order could not be proved, so the fixed tool order decided.';
-  // The button names the tools it changes: all of them, or only those the event touched.
-  const involved = [...new Set([notice.winner, ...notice.losers].filter(Boolean))] as string[];
-  const scope = `in ${toolsPhrase(involved, toolList())}`;
-  // Undo is the one action here that writes files: a small outlined button, apart from the quieter links.
-  // A library item's notice says "Undo", as every strip's result does; its tooltip says where. MCP servers' name their scope.
-  const undoLabel = library() ? 'Undo' : `Undo ${writeClaude || notice.kind === 'edit' ? 'edit ' : ''}${scope}`;
-  const undo = (title: string) => { const action = button({ variant: 'outline', size: 'small', label: undoLabel, id: `notice-undo-${notice.history}`, onclick: () => void restoreEvent(notice.history) }); action.title = title; action.setAttribute('aria-label', `Undo: ${title}`); return action; };
+function syncNotice(notice: Told) {
+  // Undo is the one action here that writes files: a small outlined button, apart from the quieter links. It says "Undo", as
+  // every strip's result does; its tooltip says where.
+  const undo = (title: string) => { const action = button({ variant: 'outline', size: 'small', label: 'Undo', id: `notice-undo-${notice.history}`, onclick: () => void restoreEvent(notice.history) }); action.title = title; action.setAttribute('aria-label', `Undo: ${title}`); return action; };
   const offNow = notice.once ?? (!!state.home && !state.home.syncOn);
-  const lib = library();
-  const [glyph, tone, text, action] = lib ? libraryNotice(lib, notice, undo) : ({
-    edit: ['check', 'tone-success', offNow ? `${notice.item} copied from ${who(notice.winner)} to ${list(notice.losers)}.` : `${notice.item} was edited in ${who(notice.winner)} and copied to ${list(notice.losers)}.`, undo(`Put ${notice.item} back as it was before ${who(notice.winner)}’s edit, in every tool it syncs to (${who(notice.winner)} too)`)],
-    conflict: ['diff', 'tone-warning', `${notice.item}: ${who(notice.winner)}’s edit won over ${list(notice.losers)}’s.${order}`, undo(`Use ${list(notice.losers)}’s version of ${notice.item} instead, in every tool it syncs to`)],
-    deleted: ['trash-2', 'tone-muted', `${notice.item} was deleted in ${who(notice.winner)}, so it was removed from ${list(notice.losers) || 'nowhere else'} too.`, button({ variant: 'outline', size: 'small', label: `Restore ${scope}`, id: `notice-restore-${notice.history}`, onclick: () => void restoreEvent(notice.history) })],
-    'kept-edit': ['diff', 'tone-warning', `${notice.item}: ${who(notice.winner)}’s edit was kept over its deletion in ${list(notice.losers)}.${order}`, null],
-    reset: ['triangle-alert', 'tone-warning', `${who(notice.winner)}’s settings file lost every managed server at once, so Central Knot put them back instead of deleting them everywhere. To delete one, remove it in one tool while the others still have it.`, null],
-  } as NoticeLooks)[notice.kind];
+  const [glyph, tone, text, action] = libraryNotice(library(), notice, undo);
   // The item's name opens its row here, so "what changed" is one click from the change itself.
   const rowKey = committedList().find(skill => skill.name === notice.item || skill.key === notice.item.toLowerCase())?.key;
   const noticeKey = notice.history || `${notice.kind}:${notice.item}`;
@@ -1033,32 +979,14 @@ function syncNotice(notice: Told, writeClaude?: () => void) {
     : h('strong.item-name', {}, notice.item);
   const said = notice.item && text.startsWith(notice.item) ? [name, text.slice(notice.item.length)] : [text];
   // With sync off, a notice can only come from Sync now: say sync stays off, and offer to turn it on.
-  const off = state.home && !state.home.syncOn && notice.kind !== 'reset';
-  const history = !off && (notice.kind === 'deleted' || notice.kind === 'edit' || notice.kind === 'conflict') ? smallAction('History', `notice-history-${notice.history}`, () => showPage('history')) : null;
-  // MCP: an edit Claude Code still lacks is one band with its write step, in the waiting tone.
-  const quiet = off;
-  // Waiting for Claude Code: the sentence takes the full width, and the actions sit on their own line, Write first.
-  return h(`p.sync-notice${writeClaude ? '.notice-stacked' : ''}`, { 'data-kind': notice.kind }, icon(writeClaude ? 'clock' : glyph, 14, writeClaude ? 'tone-warning' : tone),
-    h('span.notice-text', {}, offNow && notice.kind !== 'deleted' && notice.kind !== 'reset' ? 'Synced once: ' : '', ...said.map(part => typeof part === 'string' && !/\.\s/.test(part) ? part.replace(/\.$/, '') : part), '', h('span.notice-age', {}, ` · ${age(notice.history || `${notice.kind}:${notice.item}`)}`)),
-    writeClaude ? (() => {
-      const row = committedList().find(skill => skill.name === notice.item || skill.key === notice.item);
-      const before = row?.versions?.['claude-cli']?.text, after = row?.versions?.[notice.winner as Tool]?.text;
-      if (!before || !after || before === after) return null;
-      const bare = (summary: string) => summary.replace(/^[^·]+·\s*/, '');
-      const field = /^Command/.test(after) ? 'command' : 'URL';
-      // The field is named once, above the pair; short tool labels keep the old and new values side by side.
-      return h('span.notice-change', {},
-        h('span.notice-change-caption', {}, field === 'URL' ? 'URL' : 'Command'),
-        // Words that differ are marked: struck in Claude Code's entry, tinted in the new one.
-        h('span.tone-faint', {}, 'Claude Code (older)'), h('code', {}, ...markedWords(bare(before), bare(after), 'removed')),
-        h('span.tone-faint', {}, `${[notice.winner, ...notice.losers].map(who).join(', ')} (new)`), h('code.notice-change-new', {}, ...markedWords(bare(before), bare(after), 'added')));
-    })() : null,
+  const off = !!state.home && !state.home.syncOn;
+  const history = !off ? smallAction('History', `notice-history-${notice.history}`, () => showPage('history')) : null;
+  return h('p.sync-notice', { 'data-kind': notice.kind }, icon(glyph, 14, tone),
+    h('span.notice-text', {}, offNow && notice.kind !== 'deleted' ? 'Synced once: ' : '', ...said.map(part => typeof part === 'string' && !/\.\s/.test(part) ? part.replace(/\.$/, '') : part), '', h('span.notice-age', {}, ` · ${age(notice.history || `${notice.kind}:${notice.item}`)}`)),
     h('span.notice-actions', {},
-      writeClaude ? button({ variant: 'primary', size: 'small', label: 'Write to Claude Code', id: 'mcp-write-claude', onclick: writeClaude }) : null,
       notice.kind === 'edit' || notice.kind === 'conflict' ? seeChangeLink(notice.history, notice.key) : null,
-      action, history, quiet ? smallAction('Turn sync on', `notice-sync-on-${notice.history || notice.item}`, () => void setSync(true)) : null,
-      writeClaude ? h('span.band-why.notice-quit', {}, state.home?.mode === 'fixture' ? 'On your real tools, quit Claude Code first.' : 'Quit Claude Code first.') : null),
-    closeButton(event => { event.stopPropagation(); state.dismissed.add(notice.history || notice.item); rerender(); }, { id: `notice-dismiss-${notice.history || notice.item}`, label: `Dismiss this notice about ${notice.item || 'the reset'}`, title: 'Dismiss', look: '.notice-dismiss' }),
+      action, history, off ? smallAction('Turn sync on', `notice-sync-on-${notice.history || notice.item}`, () => void setSync(true)) : null),
+    closeButton(event => { event.stopPropagation(); state.dismissed.add(notice.history || notice.item); rerender(); }, { id: `notice-dismiss-${notice.history || notice.item}`, label: `Dismiss this notice about ${notice.item}`, title: 'Dismiss', look: '.notice-dismiss' }),
     notice.history ? changePanel(notice.history) : null);
 }
 
@@ -1120,10 +1048,10 @@ export function itemsTable(which: PageKind, harness?: Tool) {
   const open = docked() && view.comparing && !underRow(view.comparing) ? all.find(skill => skill.key === view.comparing) : undefined;
   const openRow = docked() && !open ? plugins.find(row => row.key === view.comparing) : undefined;
   // Off goes last, under its own heading. Of the rest, the rows a harness's page is about (it has a copy) split into On and
-  // Not synced; the others, only other tools have.
+  // Found; the others, only other tools have.
   const idle = shown.filter(skill => placeOf(skill) === 2), used = shown.filter(skill => placeOf(skill) !== 2);
   const here = used.filter(inFocus), away = used.filter(skill => !inFocus(skill));
-  const sections = [section('on', here.filter(skill => placeOf(skill) === 0)), section('not-synced', here.filter(skill => placeOf(skill) === 1)), pluginSection(plugins),
+  const sections = [section('on', here.filter(skill => placeOf(skill) === 0)), section('found', here.filter(skill => placeOf(skill) === 1)), pluginSection(plugins),
     focus ? section('away', away) : null, section('off', idle)];
   const table = [
     h('div.toolbar.fit-bar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(), h('div.toolbar-end', {}, toolbarState())),
@@ -1135,8 +1063,8 @@ export function itemsTable(which: PageKind, harness?: Tool) {
       withToolCount(h('div.ov.ov-switched', { role: 'table', 'aria-label': `${nouns[kind][1]} and where they are on` }, sections), toolList().length),
       markLegend(all, plugins))];
   if (openRow) return h('div.page.ov-page.docked', {}, h('div.dock-main', {}, table), pluginDock(openRow));
-  // A library item's details hold its versions: its dock takes a share of the width that grows with the window (style.css .dock-wide).
-  return open ? h(`div.page.ov-page.docked${library() ? '.dock-wide' : ''}`, {}, h('div.dock-main', {}, table), itemDock(open))
+  // An item's details hold its versions: its dock takes a share of the width that grows with the window (style.css .dock-wide).
+  return open ? h('div.page.ov-page.docked.dock-wide', {}, h('div.dock-main', {}, table), itemDock(open))
     : h('div.page.ov-page', {}, table);
 }
 
@@ -1144,20 +1072,7 @@ export function itemsTable(which: PageKind, harness?: Tool) {
 
 // ---------- One switch per item ----------
 
-/** A tool that has no copy yet, and gets one when sync runs next. */
-const NEXT_SYNC = 'Gets a copy when sync runs next';
 const nameOf = (skill: ItemRow) => skill.name ?? skill.key;
-/** The tools with a copy of it: their own, or one they read in another tool's folder. */
-const holders = (skill: ItemRow) => toolList().filter(tool => skill.copies[tool] !== undefined);
-const getsCopy = (skill: ItemRow, tool: Tool) => getsCopyNext(skill, tool, toolList());
-/** What a tool does with an item it has on: loads a skill or an agent, starts an MCP server. */
-const uses = () => (kind === 'mcp' ? 'start' : 'load');
-
-/** "today", "yesterday", "3 days ago": when something happened, for an item's status. */
-const daysAgo = (iso: string) => { const days = Math.floor((Date.now() - Date.parse(iso)) / DAY_MS); return days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`; };
-
-/** The item as it is now, for a change that keeps how it syncs and only flips switches or removes a copy. */
-const asItIs = (skill: ItemRow) => ({ key: skill.key, managed: skill.managed, off: skill.off as HarnessId[], seenManaged: skill.managed });
 
 /**
  * Before a click changes anything, every row's place is kept, so nothing moves under the pointer: rows stay where they are
@@ -1197,70 +1112,44 @@ document.addEventListener('focusin', () => regroupIfLeft(), true);
 const click = (what: Click) => { pinRows(what.changes[0]?.key); void applyClick(what); };
 
 /**
- * Turns it off in every tool it is on in, each with its own switch: the copies stay (a synced one keeps syncing), and no tool
- * uses it. A tool whose switch can't be used is left on, and the result says why. A library item has no such switch: it
- * leaves every harness, and Central Knot keeps it (library.ts).
+ * Off: it leaves every harness, and Central Knot keeps it (library.ts), with its switches in the tools that have it through a
+ * plugin.
  */
 function turnOff(skill: ItemRow) {
   const name = nameOf(skill), lib = library();
   const plugins = turnEvery(throughItems(skill), false);
   pinRows(skill.key);
   // Where its plugin's item turned off too, said from what happened.
-  const pluginsOff = (notIn: HarnessId[]) => plugins.turned.map(item => item.tool).filter(tool => !notIn.includes(tool));
-  if (lib) {
-    const pluginSaid = (notIn: HarnessId[]) => { const off = pluginsOff(notIn); return off.length ? ` Its plugin’s copy is off in ${toolsPhrase(off, toolList())}.` : ''; };
-    mainClick(name, false, [rowClicks.off(skill, itemOf(skill))], plugins, notIn => `${lib.say.said.off(name, notIn, toolList())}${pluginSaid(notIn)}`, plugins.left);
-    return;
-  }
-  const { disable, held } = offPlan(skill, toolList());
-  const also = [stillOn(skill, held, tool => names[tool as Tool], problem => problemText(problem, shownPath)), plugins.left].filter(Boolean).join(' ') || undefined;
-  if (!disable.length && !plugins.ops.length) { nothingChanged(name, plugins, false, also); return; }
-  // Said from what happened: a tool whose switch couldn't be written is not called off.
-  const said = (notIn: HarnessId[]) => {
-    const off = [...disable.filter(tool => !notIn.includes(tool as HarnessId)), ...pluginsOff(notIn)];
-    return off.length ? `${name} is off in ${toolsPhrase(off, toolList())}.${kind === 'mcp' ? ' Its entries are kept.' : ''}` : `${name} couldn’t be turned off.`;
+  const pluginSaid = (notIn: HarnessId[]) => {
+    const off = plugins.turned.map(item => item.tool).filter(tool => !notIn.includes(tool));
+    return off.length ? ` Its plugin’s copy is off in ${toolsPhrase(off, toolList())}.` : '';
   };
-  mainClick(name, false, disable.length ? [{ ...asItIs(skill), disable: disable as HarnessId[] }] : [], plugins, said, also);
+  mainClick(name, false, [rowClicks.off(skill, itemOf(skill))], plugins, notIn => `${lib.say.said.off(name, notIn, toolList())}${pluginSaid(notIn)}`, plugins.left);
 }
-
-/**
- * The change that turns it on everywhere: synced to every tool Central Knot manages, none left out, and on in each. `use`: the
- * copy every tool takes where copies differ. A skill with a link or shared copy is taken over as it is turned on (OWN-02).
- * A library item: its library's On (libraryrow.ts), which takes a found one in.
- */
-function onChange(skill: ItemRow, use?: Tool): Change {
-  if (library()) return rowClicks.on(skill, itemOf(skill), use);
-  const enable = toolList().filter(tool => skill.disabled?.includes(tool) && !skill.switchProblem?.[tool]);
-  return { key: skill.key, managed: true, off: [], seenManaged: skill.managed, ...(enable.length ? { enable: enable as HarnessId[] } : {}), ...(use ? { use: use as HarnessId, useHash: skill.hashes?.[use] } : {}) };
-}
-
-/** MCP: Claude Code's copy waits for its own Write step, as it should: said as a plain note, never as a warning. */
-const CLAUDE_LATER = 'Claude Code gets it when you click Write to Claude Code.';
 
 /** Every tool that can have it: where it is on once it is on everywhere. */
 const canHave = (skill: ItemRow) => toolList().filter(tool => !skill.cannot?.[tool] || throughPluginHere(skill, tool));
 /** Where it is on once it is on everywhere, but `left`: tools it stays off in (a plugin's with no switch for one item, a write that failed). */
 const onPhrase = (skill: ItemRow, left: readonly string[] = []) => toolsPhrase(canHave(skill).filter(tool => !left.includes(tool)), toolList());
 
-/** Turns it on everywhere: synced to every tool Central Knot manages and on in each. `use`: the copy every tool takes where copies differ. */
+/**
+ * On: in every harness it isn't kept out of. A found item is taken in by this click (`use`: the copy every harness takes where
+ * they differ). Said from what happened (`notIn`: the harnesses where the write didn't go through, or waits for Write to
+ * Claude Code: app.ts applyClick).
+ */
 function turnOn(skill: ItemRow, use?: Tool) {
-  const name = nameOf(skill);
-  const to = canHave(skill);
-  const later = kind === 'mcp' && to.includes('claude-cli') && skill.copies['claude-cli'] !== skill.copies[use ?? toolList().find(tool => tool !== 'claude-cli' && skill.copies[tool] !== undefined) ?? 'claude-cli'];
+  const name = nameOf(skill), lib = library(), found = !inLibrary(itemOf(skill));
   const plugins = turnEvery(throughItems(skill), true);
   pinRows(skill.key);
-  // Said from what happened: a tool whose copy couldn't be written is not called on, nor Claude Code while it waits for Write.
-  // An item a harness has that Central Knot's library doesn't yet is taken in by this click.
-  const lib = library(), found = !!lib && !inLibrary(itemOf(skill));
   const said = (notIn: HarnessId[]) => {
-    const left = [...plugins.leftIn, ...notIn, ...(later ? ['claude-cli'] : []), ...(lib ? skill.off : [])];
+    const left = [...plugins.leftIn, ...notIn, ...skill.off];
     const using = canHave(skill).filter(tool => !left.includes(tool));
     // A tool that has it another way gets nothing of Central Knot's: said apart, never as on (a plugin's item is on through it).
     const another = using.filter(tool => skill.anotherWay?.[tool] && skill.copies[tool] === undefined && !throughPluginHere(skill, tool));
-    if (lib && found) return lib.say.said.takenIn(name, using.filter(tool => !another.includes(tool)), toolList(), use, another);
-    return use && using.length ? `${capitalToolsPhrase(using, toolList())} now ${using.length === 1 ? 'uses' : 'use'} ${names[use]}’s copy of ${name}. Replaced copies are kept in History.` : `${name} is on in ${onPhrase(skill, left)}.`;
+    if (found) return lib.say.said.takenIn(name, using.filter(tool => !another.includes(tool)), toolList(), use, another);
+    return `${name} is on in ${onPhrase(skill, left)}.`;
   };
-  mainClick(name, true, [onChange(skill, use)], plugins, said, plugins.left, later ? CLAUDE_LATER : undefined);
+  mainClick(name, true, [rowClicks.on(skill, itemOf(skill), use)], plugins, said, plugins.left);
 }
 
 // ---------- Items tools have through a plugin ----------
@@ -1277,12 +1166,12 @@ const rowItems = (row: PluginRow): PluginItemAt[] => pluginTools(row).flatMap(to
  * the tools with no switch for one item of a plugin (pluginswitch.ts turnEvery), plainly, with the whole plugin's switch there
  * offered beside the Undo.
  */
-function mainClick(name: string, on: boolean, changes: Change[], plugins: ReturnType<typeof turnEvery>, said: (notIn: HarnessId[]) => string, also?: string, note?: string) {
+function mainClick(name: string, on: boolean, changes: Change[], plugins: ReturnType<typeof turnEvery>, said: (notIn: HarnessId[]) => string, also?: string) {
   // Said as "there" when the result is about that one tool, as after a tool's own switch; else by the tool's name.
   const there = !changes.length && new Set(plugins.turned.map(item => item.tool)).size === 1;
   const along = plugins.turned.map(item => alongWords(item, plugins.ops, there)).filter(Boolean).join(' ') || undefined;
   const next = wholePluginAct(name, plugins.whole, on);
-  if (changes.length) { void applyClick({ kind, items: [name], changes, said, also, note: [note, plugins.limit].filter(Boolean).join(' ') || undefined, next, plugins: plugins.ops.length ? { ops: plugins.ops, draft: plugins.draft, said: along } : undefined }); return; }
+  if (changes.length) { void applyClick({ kind, items: [name], changes, said, also, note: plugins.limit, next, plugins: plugins.ops.length ? { ops: plugins.ops, draft: plugins.draft, said: along } : undefined }); return; }
   const where = toolsPhrase(plugins.turned.map(item => item.tool), toolList());
   void applyPluginSwitches(plugins.ops, plugins.draft, { also, note: plugins.limit, next, said: [said([]), along].filter(Boolean).join(' '), undone: undoneWords(name, on, where) });
 }
@@ -1329,29 +1218,9 @@ function pluginRowSwitch(row: PluginRow) {
   } });
 }
 
-/**
- * On for an item with no copy left: every removal of it still open goes back from History, then it is on everywhere like
- * any other, or its copy choice opens when what came back differs.
- */
-function putItBack(skill: ItemRow) {
-  const name = nameOf(skill);
-  pinRows(skill.key);
-  // MCP: Claude Code gets it back with its own Write step.
-  const later = kind === 'mcp' && canHave(skill).includes('claude-cli');
-  void applyClick({ kind, items: [name], changes: [], said: notIn => `${name} is back, and on in ${onPhrase(skill, [...notIn, ...(later ? ['claude-cli'] : [])])}.`, note: later ? CLAUDE_LATER : undefined,
-    putBack: { key: skill.key, ids: [skill.gone!.history, ...(skill.gone!.also ?? [])], then: () => {
-      const back = committedList().find(entry => entry.key === skill.key && !entry.gone);
-      if (!back) return [];
-      if (isDiffering(back)) { view.comparing = back.key; return 'choose'; }
-      const change = onChange(back);
-      return back.managed && !back.off.length && !change.enable ? [] : [change];
-    } } });
-}
-
-/** The switch's click: off everywhere, or on everywhere (put back from History when no copy is left, or after a copy choice). */
+/** The switch's click: off everywhere, or on everywhere (a found item taken in, after a copy choice where its copies differ). */
 function flip(skill: ItemRow, on: boolean) {
   if (!on) { turnOff(skill); return; }
-  if (skill.gone) { putItBack(skill); return; }
   if (isDiffering(skill)) {
     // The question opens under its row; a second click on the switch closes it.
     if (view.comparing === skill.key) { view.comparing = undefined; rerender(); return; }
@@ -1363,28 +1232,12 @@ function flip(skill: ItemRow, on: boolean) {
   turnOn(skill);
 }
 
-/** Where an item that is not synced is on (its own copy, or a plugin's item that is on: onIn), and where a copy of its own is off. */
-const notSyncedIn = (skill: ItemRow) => {
-  const on = onIn(skill), off = holders(skill).filter(tool => !on.includes(tool));
-  return ['Not synced · ', on.length ? `on in ${toolsPhrase(on, toolList())}` : '', on.length && off.length ? '; ' : '', off.length ? `off in ${toolsPhrase(off, toolList())}` : ''].join('');
-};
-
 /**
- * An item's one switch: on (synced, some tool uses it), in between (not synced: some tools have their own copies), or off
- * (no tool uses it). Clicking an in-between switch turns it on everywhere. A library item's: librarySwitch, or Add while it is
- * found. `prefix` keeps a second one apart (the Files view's header): ids `<prefix>switch-<key>`, `<prefix>add-<key>`.
+ * An item's one control: its switch while it is in Central Knot (librarySwitch), or Add while it is found (addButton). `prefix`
+ * keeps a second one apart (the Files view's header): ids `<prefix>switch-<key>`, `<prefix>add-<key>`.
  */
 function itemSwitch(skill: ItemRow, prefix = '') {
-  const id = `${prefix}switch-${skill.key}`;
-  if (library()) return libraryPlace(itemOf(skill)) === 'found' ? addButton(skill, `${prefix}add-${skill.key}`) : librarySwitch(skill, id);
-  const place = standingOf(skill);
-  const name = nameOf(skill);
-  const now = place === 0 ? 'on' : place === 1 ? notSyncedIn(skill) : skill.gone ? 'off, with no copy left' : 'off';
-  const asking = isDiffering(skill) && place !== 0;
-  const what = skill.held ? skill.held : place === 0 ? 'Click to turn it off in every tool.'
-    : skill.gone ? 'Click to put it back in every tool.'
-      : asking ? (view.comparing === skill.key ? 'Its copies differ. Click to close the question.' : 'Its copies differ. Click to choose which copy every tool uses.') : 'Click to turn it on in every tool.';
-  return toggle({ on: place === 0, mixed: place === 1, label: `${name}: ${now}. ${what}`, onchange: next => flip(skill, next), disabled: !canWrite() || (!!skill.held && place !== 0), id });
+  return libraryPlace(itemOf(skill)) === 'found' ? addButton(skill, `${prefix}add-${skill.key}`) : librarySwitch(skill, `${prefix}switch-${skill.key}`);
 }
 
 /**
@@ -1410,25 +1263,24 @@ function addButton(skill: ItemRow, id: string) {
 }
 
 /**
- * How a tool's mark looks: on there, off there (copy kept), no copy, copies differ, something waits, or (`held`, a library
- * item's) a state of that tool's own drawn with its glyph: kept out, switched off in its own settings, can't take it.
+ * How a tool's mark looks: on there, off there, no copy, something waits or can't be read, or (`held`) a state of that tool's
+ * own drawn with its glyph: kept out, switched off in its own settings, can't take it.
  */
 type MarkLook = 'on' | 'off' | 'none' | 'differs' | 'waits' | 'held';
 
-/** What a mark says in the key, by what it is. */
+/** What a mark says in the key, by what it is (libraryrow.ts HarnessIs, and a plugin's item). */
 const keyWords = {
-  on: 'On there', off: 'Off, copy kept', 'plugin-off': 'Off there', profile: 'Off by a profile (see Profiles)', none: 'No copy', differs: 'Copies differ', edited: 'Edited, waiting to spread',
-  waiting: 'Gets the edit when sync runs', 'will-sync': NEXT_SYNC, 'write-now': 'Waits for Write to Claude Code',
-  // A library item's (libraryrow.ts HarnessIs).
+  on: 'On there', 'plugin-off': 'Off there', profile: 'Off by a profile (see Profiles)', none: 'No copy',
+  'will-sync': 'Gets a copy when sync runs next', 'write-now': 'Waits for Write to Claude Code',
   taken: 'Edited, becomes the current version', deleted: 'Deleted there; turns off when sync runs', leaving: 'Removed when sync runs', own: 'Its own copy, not from Central Knot',
-  current: 'Has the current version', has: 'Has it', 'kept-out': 'Kept out', 'off-in-ck': 'Off: in Central Knot only', unseen: 'Can’t be read', 'cannot-take': 'Can’t take it',
+  current: 'Has the current version', has: 'Has it', 'kept-out': 'Kept out', 'off-in-ck': 'Off: in Central Knot only', unseen: 'Left as it is (its line says why)', 'cannot-take': 'Can’t take it',
   'another-way': 'Has it another way, not from Central Knot', switched: 'Switched off in its own settings',
 } as const;
 
 /**
  * One tool's mark on a row: its look, what it says, and a glyph in place of the tool's own mark where something waits
- * or differs. `state`: what the tool has, as a word (the table's Cell, "plugin", or a library item's HarnessIs), for the page's
- * checks; `key`: its entry in the key.
+ * or differs. `state`: what the tool has, as a word ("plugin", or libraryrow.ts HarnessIs), for the page's checks; `key`: its
+ * entry in the key.
  */
 function markOf(skill: ItemRow, tool: Tool): { look: MarkLook; words: string; glyph?: IconName; state: string; key: keyof typeof keyWords } {
   const given = throughPluginHere(skill, tool);
@@ -1436,25 +1288,10 @@ function markOf(skill: ItemRow, tool: Tool): { look: MarkLook; words: string; gl
     const on = pluginOnIn(skill).includes(tool);
     return { look: on ? 'on' : 'off', state: on ? 'plugin' : 'plugin-off', key: on ? 'on' : 'plugin-off', words: `${skill.anotherWay?.[tool] ?? skill.cannot?.[tool] ?? `${names[tool]} has it through the plugin ${given.plugin}.`}${on ? '' : ' It is turned off there.'}` };
   }
-  const lib = library();
-  if (lib) return libraryMark(lib, skill, tool);
-  const drawn = cellOf(skill, tool);
-  const off = shownDisabled(skill, tool);
-  const byProfile = off && turnedOffByProfile(skill.key, tool);
-  const offWords = off ? `, off there${byProfile ? ' by a profile (see Profiles)' : ''} (copy kept)` : '';
-  const mark = (look: MarkLook, key: keyof typeof keyWords, words: string, glyph?: IconName) => ({ look, key, words: `${names[tool]}: ${words}`, glyph, state: drawn });
-  if (drawn === 'cannot') return { ...mark('none', 'none', ''), words: skill.cannot?.[tool] ?? `${names[tool]} can’t ${uses()} it` };
-  if (drawn === 'absent') return mark('none', 'none', `no copy${skill.managed && skill.off.includes(tool) ? ', not synced there' : ''}`);
-  if (drawn === 'differs' || drawn === 'present-differs') return mark('differs', 'differs', `copies differ${offWords}`, 'diff');
-  if (drawn === 'will-sync') return mark('waits', 'will-sync', NEXT_SYNC.toLowerCase(), 'clock');
-  if (drawn === 'edited') return mark('waits', 'edited', `edited here, waiting to spread${offWords}`, 'pencil-line');
-  if (drawn === 'waiting') return mark('waits', 'waiting', `gets the edit when sync runs${offWords}`, 'clock');
-  if (drawn === 'write-now') return mark('waits', 'write-now', 'waits for Write to Claude Code', 'clock');
-  const own = drawn === 'synced' ? 'synced' : skill.managed && skill.off.includes(tool) ? 'its own copy, left out of sync' : 'its own copy, not synced';
-  return mark(off ? 'off' : 'on', byProfile ? 'profile' : off ? 'off' : 'on', `${off ? '' : 'on, '}${own}${offWords}`);
+  return libraryMark(library(), skill, tool);
 }
 
-/** A library item's mark for one harness: what the library's rule says of it (libraryrow.ts harnessIs), drawn with the page's looks. */
+/** An item's mark for one harness: what the library's rule says of it (libraryrow.ts harnessIs), drawn with the page's looks. */
 const libraryMarks: Record<HarnessIs, { look: MarkLook; key: keyof typeof keyWords; glyph?: IconName }> = {
   current: { look: 'on', key: 'current' },
   'own-copy': { look: 'on', key: 'own' },
@@ -1467,6 +1304,7 @@ const libraryMarks: Record<HarnessIs, { look: MarkLook; key: keyof typeof keyWor
   leaving: { look: 'waits', key: 'leaving', glyph: 'clock' },
   unseen: { look: 'differs', key: 'unseen', glyph: 'circle-alert' },
   'another-way': { look: 'on', key: 'another-way', glyph: 'link-2' },
+  waits: { look: 'waits', key: 'write-now', glyph: 'clock' },
 };
 function libraryMark(lib: LibraryPage, skill: ItemRow, tool: Tool): ReturnType<typeof markOf> {
   const item = itemOf(skill), is = harnessIs(skill, item, tool);
@@ -1474,7 +1312,7 @@ function libraryMark(lib: LibraryPage, skill: ItemRow, tool: Tool): ReturnType<t
   // Off, or found: a harness with no copy while Central Knot keeps the item is off there; a found item's own copy is simply on.
   const drawn = is === 'none' && inLibrary(item) ? { look: 'off' as const, key: 'off-in-ck' as const } : is === 'own-copy' && !inLibrary(item) ? { look: 'on' as const, key: 'has' as const } : libraryMarks[is];
   // Loaded there, but that tool's own switch turns it off: a mark of its own, whoever set the switch (libraryrow.ts `switched`).
-  const switched = skill.switched?.[tool] && drawn.look === 'on' ? { look: 'held' as const, key: (turnedOffByProfile(skill.key, tool) ? 'profile' : 'switched') as keyof typeof keyWords, glyph: 'circle-off' as IconName } : undefined;
+  const switched = skill.switched?.[tool] && drawn.look === 'on' ? { look: 'held' as const, key: (turnedOffByProfile(skill, tool) ? 'profile' : 'switched') as keyof typeof keyWords, glyph: 'circle-off' as IconName } : undefined;
   return { ...(switched ?? drawn), state: is, words };
 }
 
@@ -1517,84 +1355,35 @@ function row(skill: ItemRow) {
   return [
     h(`div.ov-row.ov-switch-row${takeFlash(skill.key) ? '.row-flash' : ''}${skill.managed ? '' : '.unmanaged'}${open ? '.open' : ''}`, { role: 'row', 'data-key': skill.key, 'aria-expanded': String(open), onclick: () => openRow(skill.key) },
       h('div.ov-managed', { role: 'cell' }, itemSwitch(skill)),
-      nameCell(skill, needsCopyChoice(skill, toolList())),
+      nameCell(skill, differs(skill)),
       h('div.ov-marks', { role: 'cell' }, rowMarks(skill)),
       h('div.ov-open', { role: 'cell' }, openButton(skill.key, nameOf(skill)))),
     open && underRow(skill.key) ? details(skill) : null,
   ];
 }
 
-/** Rows under one heading: On, Not synced, Off, or (on a harness's page) the ones only other tools have. */
-function section(role: 'on' | 'not-synced' | 'off' | 'away', list: ItemRow[]) {
+/** Rows under one heading: On, Found, Off, or (on a harness's page) the ones only other tools have. */
+function section(role: 'on' | 'found' | 'off' | 'away', list: ItemRow[]) {
   if (!list.length) return null;
-  const onLibrary = !!library();
-  const label = role === 'away' ? `Not in ${names[focus!]}` : onLibrary && role === 'not-synced' ? 'Found' : placeNames[role === 'on' ? 0 : role === 'not-synced' ? 1 : 2];
-  const note = role === 'not-synced' ? (onLibrary ? 'in a tool, not in Central Knot yet. Add one to keep it in Central Knot and turn it on.' : 'each tool keeps its own copy')
-    : role === 'off' ? (onLibrary ? 'in Central Knot only; no tool has these' : `no tool ${uses()}s these`) : role === 'away' ? 'only other tools have these' : null;
+  const label = role === 'away' ? `Not in ${names[focus!]}` : placeNames[role === 'on' ? 0 : role === 'found' ? 1 : 2];
+  const note = role === 'found' ? 'in a tool, not in Central Knot yet. Add one to keep it in Central Knot and turn it on.'
+    : role === 'off' ? 'in Central Knot only; no tool has these' : role === 'away' ? 'only other tools have these' : null;
   return h('div', { role: 'rowgroup' },
     h(`div.ov-section${role === 'off' || role === 'away' ? '.ov-section-away' : ''}`, { role: 'row', 'data-section': role },
       h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(list.length)), note ? sectionNote(note) : null)),
     [...list].sort(byKey).flatMap(row));
 }
 
-/** What the item is now, in one line: on and where, not synced and where its copies are, or off. */
-function switchStatus(skill: ItemRow): string {
-  if (library()) return statusLine(skill, itemOf(skill), toolList());
-  if (skill.gone) return `Off · no copy left: ${skill.gone.kind === 'deleted' ? 'deleted' : 'removed'} ${daysAgo(skill.gone.at)}. Turn it on to put it back from History.`;
-  if (skill.held) return `Can’t be synced: ${skill.held}`;
-  const on = onIn(skill);
-  // Off: its own copies turned off with each tool's switch, and a plugin's item off where a tool has it through the plugin.
-  const off = toolList().filter(tool => !on.includes(tool) && (skill.disabled?.includes(tool) && skill.copies[tool] !== undefined || !!throughPluginHere(skill, tool)));
-  const kept = off.filter(tool => skill.copies[tool] !== undefined).length;
-  const place = standingOf(skill);
-  if (place === 0) {
-    const loaded = on.filter(tool => !(skill.waits?.includes(tool) && skill.copies[tool] === undefined));
-    const waits = kind === 'mcp' && skill.waits?.includes('claude-cli') ? ' · waits for Write to Claude Code' : '';
-    return `On in ${toolsPhrase(loaded, toolList())}${off.length ? ` · off in ${toolsPhrase(off, toolList())}` : ''}${waits}`;
-  }
-  // Not every tool takes a copy: one that has it through a plugin, or can't use it, is not synced to.
-  const every = toolList().some(tool => skill.cannot?.[tool]) ? 'every tool that takes a copy' : 'every tool';
-  if (place === 1) return `${notSyncedIn(skill)}${isDiffering(skill) ? ', with different copies' : ''}. Turn it on to sync it to ${every}.`;
-  return `Off in ${toolsPhrase(off, toolList())}.${kept ? ` The ${kept === 1 ? 'copy is' : 'copies are'} kept.` : ''}`;
-}
+/** What the item is now, in one line (libraryrow.ts statusLine). */
+const switchStatus = (skill: ItemRow) => statusLine(skill, itemOf(skill), toolList());
 
 /** What one tool has, for its row in the item's details: what its copy is, then whether its own switch has it off. */
 function harnessLine(skill: ItemRow, tool: Tool): string {
   // Through a plugin: where it comes from, then why its switch can't be used here, or that it is the whole plugin's.
   const through = itemThrough(skill, tool);
   if (through) return [skill.cannot?.[tool], cantSwitch(through) ?? switchWords(through)].filter(Boolean).join(' ');
-  const lib = library();
-  if (lib) {
-    const own = skill.ownPart?.[tool];
-    return [lib.say.harnessLine(skill, itemOf(skill), tool, names[tool]), own?.length ? lib.words.own(own) : ''].filter(Boolean).join(' ');
-  }
-  if (skill.cannot?.[tool]) return skill.cannot[tool]!;
-  const has = skill.copies[tool] !== undefined;
-  const drawn = cellOf(skill, tool);
-  const version = skill.versions?.[tool];
-  const tells = version && comparedTools(skill).filter(other => other !== tool).some(other => { const them = skill.versions?.[other]; return them && (them.lines !== version.lines || them.changed !== version.changed); });
-  const copy = drawn === 'write-now' ? waitsLine(skill, tool)
-    : !has ? (skill.managed && skill.off.includes(tool) ? 'Not synced here.' : getsCopy(skill, tool) ? `${NEXT_SYNC}.` : skill.gone ? 'No copy.' : 'No copy. Turning it on adds it here.')
-      // Off with its own switch: said once, the entry kept, whatever else it is.
-      : skill.disabled?.includes(tool) ? `Off here${turnedOffByProfile(skill.key, tool) ? ' by a profile' : ''} · entry kept`
-      : drawn === 'edited' ? `Edited in ${names[tool]}. It spreads to the other tools when sync runs.`
-        : drawn === 'waiting' ? `Gets the edit from ${andList((skill.edited ?? []).map(entry => names[entry]))} when sync runs.`
-          : drawn === 'differs' || drawn === 'present-differs' ? `Has a different copy${tells ? ` (${version!.lines}, ${version!.changed})` : ''}.`
-            : skill.managed && skill.off.includes(tool) ? 'Has its own copy, not synced.'
-              // Synced everywhere: the status above says so once, not again on each tool's line.
-              : skill.managed ? (everySynced(skill) ? '' : 'Synced.') : 'Has its own copy.';
-  const problem = has && skill.switchProblem?.[tool] ? `${problemText(skill.switchProblem[tool]!, shownPath)} Fix it, then Refresh.` : '';
-  return [copy, problem].filter(Boolean).join(' ');
-}
-
-/** Whether every tool that can have it holds the synced copy: nothing for a tool's line to add. */
-const everySynced = (skill: ItemRow) => toolList().every(tool => skill.cannot?.[tool] || cellOf(skill, tool) === 'synced');
-
-/** MCP: Claude Code's copy, waiting for its own Write step: missing or older, and what to do first. */
-function waitsLine(skill: ItemRow, tool: Tool): string {
-  const older = skill.versions?.[tool]?.text;
-  const has = skill.copies[tool] === undefined ? 'Doesn’t have it yet.' : `Has an older copy${older ? `: ${older.replace(/^[^·]+·\s*/, '')}` : ''}.`;
-  return `${has}${state.home?.mode === 'fixture' ? '' : ' Quit Claude Code first: it rewrites ~/.claude.json while it runs.'}`;
+  const lib = library(), own = skill.ownPart?.[tool];
+  return [lib.say.harnessLine(skill, itemOf(skill), tool, names[tool]), own?.length ? lib.words.own(own) : ''].filter(Boolean).join(' ');
 }
 
 /**
@@ -1672,9 +1461,8 @@ function libraryVersions(lib: LibraryPage, skill: ItemRow) {
 }
 
 /**
- * One tool's own controls in an item's details, each applied at once: an MCP server's switch there; Sync here for a tool a
- * synced server leaves out; a library item's switch for that harness and what its kind adds there (libraryHarnessSwitch);
- * Claude Code's Write step; the plugin's page, for a tool that has it through one. Each says what it does on hover.
+ * One tool's own controls in an item's details, each applied at once: the item's switch for that harness and what its kind
+ * adds there (libraryHarnessSwitch); the plugin's page, for a tool that has it through one. Each says what it does on hover.
  */
 function harnessControls(skill: ItemRow, tool: Tool) {
   const given = throughPluginHere(skill, tool);
@@ -1682,39 +1470,13 @@ function harnessControls(skill: ItemRow, tool: Tool) {
   const through = itemThrough(skill, tool);
   if (through) return pluginItemControls(through, `enable-${skill.key}-${tool}`, () => openPlugin(given!));
   if (given) return h('span.details-tool-actions', {}, smallAction('Plugin’s page', `plugin-${skill.key}-${tool}`, () => openPlugin(given)));
-  const lib = library();
-  if (lib) return libraryHarnessSwitch(lib, skill, tool);
-  if (skill.gone || skill.cannot?.[tool]) return null;
-  const name = nameOf(skill), where = names[tool];
-  const now = asItIs(skill);
-  const has = skill.copies[tool] !== undefined;
-  // Said from what happened: a tool whose write failed or was held is not said to have it.
-  const failedHere = (notIn: HarnessId[]) => notIn.includes(tool as HarnessId);
-  // Left out of sync, with a copy of its own or none: Sync here takes it back in (a copy that differs then asks which copy).
-  const rejoin = () => click({ kind, items: [name], changes: [{ ...now, off: now.off.filter(other => other !== tool), ...(skill.disabled?.includes(tool) && !skill.switchProblem?.[tool] ? { enable: [tool as HarnessId] } : {}) }],
-    said: notIn => (failedHere(notIn) ? `${name} couldn’t be synced to ${where}.` : `${name} syncs to ${where} again.`) });
-  const syncHere = skill.managed && skill.off.includes(tool) ? smallAction('Sync here', `sync-here-${skill.key}-${tool}`, rejoin, '', !canWrite()) : null;
-  if (syncHere) syncHere.title = `Sync it to ${where} again${has ? '; if its copy there differs, you choose which copy every tool uses' : ''}`;
-  const write = kind === 'mcp' && tool === 'claude-cli' && skill.managed && skill.waits?.includes(tool)
-    ? button({ variant: 'outline', size: 'small', label: 'Write to Claude Code', id: `write-claude-row-${skill.key}`, disabled: !canWrite(), onclick: () => void writeClaudeNow([skill.key]) }) : null;
-  if (!has) return syncHere || write ? h('span.details-tool-actions', {}, write, syncHere) : null;
-  // Claude Code waiting for its Write step: its line says how, and Write is its one action.
-  if (write) return h('span.details-tool-actions', {}, write);
-  const off = !!skill.disabled?.includes(tool);
-  const stays = kind === 'mcp' ? `the server stays in ${where}’s settings` : 'the copy stays';
-  const toggleHere = skill.switchProblem?.[tool] ? h('span.tool-switch-na', {}, icon('circle-alert', 12, 'tone-muted'), 'Can’t switch here')
-    : h('span.tool-switch', {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, off ? 'Off' : 'On'),
-      toggle({ on: !off, disabled: !canWrite(), id: `enable-${skill.key}-${tool}`,
-        label: `${name} in ${where}: ${off ? 'off' : 'on'}. ${off ? 'Click to turn it on there.' : `Click to turn it off there: ${stays}${skill.managed ? ' and keeps syncing' : ''}, and ${where} stops ${kind === 'mcp' ? 'starting' : 'loading'} it from its next session.`}`,
-        onchange: next => click({ kind, items: [name], changes: [{ ...now, ...(next ? { enable: [tool as HarnessId] } : { disable: [tool as HarnessId] }) }],
-          said: notIn => (failedHere(notIn) ? `${name} couldn’t be turned ${next ? 'on' : 'off'} in ${where}.` : `${name} is ${next ? 'on' : 'off'} in ${where}${kind === 'mcp' ? ', from its next session' : ''}.`) }) }));
-  return h('span.details-tool-actions', {}, write, syncHere, toggleHere);
+  return libraryHarnessSwitch(library(), skill, tool);
 }
 
 /**
- * An item's details: its status, each tool with its own controls, a library item's versions, where each copy is, what its
- * kind shows of its own (librarypages.ts), and a library item's Delete from Central Knot last.
- * While its copies differ, only the question of which copy every tool uses, and the copies.
+ * An item's details: its status, each tool with its own controls, its versions, where each copy is, what its kind shows of its
+ * own (librarypages.ts), and its Delete from Central Knot last. While a found item's copies differ, only the question of which
+ * copy every tool uses, and the copies.
  */
 function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
   const inFiles = placement === 'files', lib = library();
@@ -1727,29 +1489,28 @@ function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
       ...settingsFile(tool),
       h('span.details-tool-line', {}, harnessLine(skill, tool)),
       harnessControls(skill, tool)),
-    lib?.toolNote?.(skill, tool as HarnessId));
+    lib.toolNote?.(skill, tool as HarnessId));
   const close = placement === 'row' ? h('button.details-close', { type: 'button', id: `close-${skill.key}`, 'aria-label': `Close details for ${skill.key}`, title: 'Close', onclick: () => { view.comparing = undefined; rerender(); } }, icon('x', 14)) : null;
   const box = (...children: (Child | Child[])[]) => h(`div.compare.details${placement === 'row' ? '' : '.details-bare'}${differs ? '.details-differs' : ''}${kind === 'mcp' ? '.details-mcp' : '.details-grid'}`, { role: 'region', 'aria-label': `Details for ${skill.key}` }, ...children);
   if (differs) return box(close, compareChoices(skill, inFiles));
   // A found row none of whose copies can be read has no files to show.
-  const files = lib?.files && !inFiles && (inLibrary(itemOf(skill)) || canTakeIn(skill)) ? smallAction('Files and contents', `files-${skill.key}`, () => openFiles(skill.key)) : null;
-  const remove = lib && !inFiles ? libraryDelete(lib, skill) : null;
+  const files = lib.files && !inFiles && (inLibrary(itemOf(skill)) || canTakeIn(skill)) ? smallAction('Files and contents', `files-${skill.key}`, () => openFiles(skill.key)) : null;
+  const remove = !inFiles ? libraryDelete(lib, skill) : null;
   return box(
     h('div.details-head', {},
       // The Files view's pane says it under the skill's name; the row already shows the description.
       inFiles ? null : h('p.details-status', {}, switchStatus(skill)),
-      // A library item's description whole: the closed row cuts it.
-      lib && skill.description ? h('p.details-description.details-description-whole', {}, skill.description) : null,
-      kind === 'mcp' && skill.description ? definition(skill.description, skill.managed) : null,
+      // Its description whole: the closed row cuts it.
+      skill.description ? h('p.details-description.details-description-whole', {}, skill.description) : null,
       partNote(skill),
       files ? h('div.details-actions', {}, files) : null),
-    // A library item: what is kept the same, and what stays each harness's own (for agents, AGT-01).
-    // What every tool shares of it, said where it is true: an item in Central Knot, or a found one that can be taken in.
-    lib && toolList().length > 1 && (inLibrary(itemOf(skill)) || canTakeIn(skill)) ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), lib.words.shared) : null,
-    skill.gone ? null : h('div.details-tools', {}, toolList().map(toolRow)),
-    lib ? libraryVersions(lib, skill) : null,
+    // What every tool shares of it, and what stays each harness's own, said where it is true: an item in Central Knot, or a
+    // found one that can be taken in.
+    toolList().length > 1 && (inLibrary(itemOf(skill)) || canTakeIn(skill)) ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), lib.words.shared) : null,
+    h('div.details-tools', {}, toolList().map(toolRow)),
+    libraryVersions(lib, skill),
     inFiles || kind === 'mcp' ? null : wherePaths(skill),
-    lib?.own?.(skill) ?? null,
+    lib.own?.(skill) ?? null,
     skill.converted ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), `Converted from ${names[skill.converted.origin] ?? skill.converted.origin}’s agent “${skill.converted.agent}”, as a one-time copy; ${names[skill.converted.origin] ?? skill.converted.origin} keeps the agent, and edits here never change it. As a skill it has no ${andList(skill.converted.losses)}.`) : null,
     remove ? h('div.details-actions.details-danger', {}, remove) : null);
 }
@@ -1839,12 +1600,11 @@ afterLayout(settleFilesColumns);
 /** A list of every skill beside (or, in narrow content, above) one skill's details: the same switch and controls as the table. `more` adds files and contents. */
 export function skillsBrowser(more: (key: string) => { where: Node[]; contents: (Node | null | false)[] }, select: (key: string | undefined) => void) {
   useTable('skills');
-  // A skill with no copy left has no files to show: it stays on the table, switched off.
-  const all = rows().filter(skill => !skill.gone);
-  // Only skills with no copy left (the last one just deleted): the table, where they are, switched off.
+  const all = rows();
+  // No skill at all (the last one just deleted): the table, which says so.
   if (!all.length) return itemsTable('skills');
   const needle = view.listFind.trim().toLowerCase();
-  // The table's order and headings: on, then not synced, then off.
+  // The table's order and headings: on, then found, then off.
   const place = new Map(all.map(skill => [skill.key, placeOf(skill)]));
   const shown = all.filter(skill => !needle || skill.key.includes(needle) || (skill.name ?? '').toLowerCase().includes(needle) || skill.description.toLowerCase().includes(needle))
     .sort((first, second) => place.get(first.key)! - place.get(second.key)! || byKey(first, second));

@@ -4,7 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { connectRepo, pullRepo, pushRepo, repoView, undoSettingsChange } from '../src/gitrepo.ts';
 import { readHistory } from '../src/history.ts';
-import { applyMcp, mcpView, restoreMcp } from '../src/mcp.ts';
+import { applyServers, restoreServer, serversView } from '../src/servers.ts';
 import { agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
 import { tools, git, world, skill, live, rows, seedServerAndAgent, serverAndAgentOnTwo, edit, applySkillsIn, skillRows, restoreIn } from './gitrepo-world.ts';
 
@@ -45,24 +45,27 @@ test('Push puts the Managed set in the repo’s layout; another computer pulls i
     assert.equal(pulled.pulled, 3);
     for (const root of ['.claude/skills', '.copilot/skills']) assert.equal(await readFile(join(second.home, root, 'review/notes.log'), 'utf8'), 'kept as-is\n');
     assert.ok((await skillRows(second)).find(item => item.key === 'review')!.on);
-    const docs = (await mcpView(second, tools)).servers.find(server => server.key === 'docs')!;
-    assert.ok(docs.managed && docs.copies['copilot-cli']);
+    const docs = (await serversView(second, tools)).items.find(server => server.key === 'docs')!;
+    assert.ok(docs.on && docs.copies['copilot-cli']);
+    assert.deepEqual(docs.waits, ['claude-cli'], 'Claude Code gets it with Write to Claude Code');
     assert.ok((await agentsView(second, tools)).items.find(agent => agent.key === 'planner')!.on);
     assert.deepEqual((await agentsView(second, tools)).library!.planner.versions.map(version => version.from), [{ how: 'pulled' }], 'its version says where it came from');
     assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: opus/);
     view = live(pulled.view);
     assert.deepEqual([view.incoming, view.outgoing, view.base?.id], [[], [], view.latest?.id]);
-    // Undo add after a Pull takes back every copy Pull made of an MCP server. A skill or an agent Pull brought in is in Central
-    // Knot now: its entry turns it off, which takes it out of every tool and keeps it.
+    // A skill, an MCP server or an agent Pull brought in is in Central Knot now: its entry turns it off, which takes it out of
+    // every tool and keeps it.
     const addedBy = (key: string, kind = 'added') => readHistory(second).then(events => events.find(event => event.key === key && event.kind === kind)!);
-    assert.equal((await restoreMcp(second, tools, (await addedBy('mcp:docs')).id)).stopped, undefined);
+    const serverIn = await addedBy('mcp:docs', 'on');
+    assert.deepEqual([serverIn.via, serverIn.cause], ['repo', 'pulled']);
+    assert.equal((await restoreServer(second, tools, serverIn.id)).stopped, undefined);
     const skillIn = await addedBy('review', 'on');
     assert.deepEqual([skillIn.via, skillIn.cause, skillIn.losers.map(loser => loser.tool).sort()], ['repo', 'pulled', tools]);
     assert.equal((await restoreIn(second, skillIn.id)).stopped, undefined);
     const takenIn = await addedBy('agent:planner', 'on');
     assert.deepEqual([takenIn.via, takenIn.cause], ['repo', 'pulled']);
     assert.equal((await restoreAgent(second, tools, takenIn.id)).stopped, undefined);
-    assert.equal((await mcpView(second, tools)).servers.length, 0);
+    assert.deepEqual((await serversView(second, tools)).items.map(server => [server.key, server.on, Object.keys(server.copies)]), [['docs', false, []]]);
     assert.deepEqual((await skillRows(second)).map(item => [item.key, item.on, Object.keys(item.copies)]), [['review', false, []]]);
     assert.deepEqual((await agentsView(second, tools)).items.map(agent => [agent.key, agent.on, Object.keys(agent.copies)]), [['planner', false, []]]);
   } finally { await box.cleanup(); }
@@ -73,7 +76,7 @@ test('An MCP server’s edit and an agent setting only Claude Code has arrive th
   try {
     const { first, second, firstPlanner, secondPlanner } = await serverAndAgentOnTwo(box);
     await writeFile(join(first.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { docs: { type: 'local', command: 'docs-server', args: ['--port', '8'], env: { TOKEN: 'abc' }, tools: ['*'] } } }));
-    await applyMcp(first, tools, [], { settleMs: 0 });
+    await applyServers(first, tools, [], { settleMs: 0 });
     await edit(firstPlanner, 'model: opus', 'model: sonnet');
     assert.deepEqual(rows(live(await repoView(first)).outgoing), ['docs:changed', 'planner:changed']);
     await pushRepo(first);
@@ -110,5 +113,20 @@ test('A repo change to an agent comes in though one tool’s copy can’t be rea
     await writeFile(secondCopilot, readable);
     await applyAgents(second, tools, []);
     assert.match(await readFile(secondCopilot, 'utf8'), /Plan in small steps/);
+  } finally { await box.cleanup(); }
+});
+
+test('Push sends every server in Central Knot, On or Off, with Claude Code’s own fields for it; a server only found is not sent', async () => {
+  const box = await world();
+  try {
+    const first = await box.home('first');
+    await writeFile(join(first.home, '.claude.json'), JSON.stringify({ mcpServers: { docs: { type: 'stdio', command: 'docs-server', timeout: 30 }, found: { type: 'stdio', command: 'found-server' } } }));
+    await writeFile(join(first.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { off: { type: 'local', command: 'off-server', tools: ['*'] } } }));
+    assert.ok(!(await applyServers(first, tools, [{ key: 'docs', managed: true, off: [] }, { key: 'off', managed: true, off: [] }])).stopped);
+    assert.ok(!(await applyServers(first, tools, [{ key: 'off', managed: false, off: [], seenManaged: true }])).stopped);
+    await connectRepo(first, box.remote, '');
+    await pushRepo(first);
+    assert.deepEqual(git(box.remote, 'ls-tree', '-r', '--name-only', 'main').split('\n').filter(path => path.startsWith('mcp/')), ['mcp/docs.json', 'mcp/off.json']);
+    assert.deepEqual(JSON.parse(git(box.remote, 'show', 'main:mcp/docs.json')), { type: 'stdio', command: 'docs-server', timeout: 30 });
   } finally { await box.cleanup(); }
 });

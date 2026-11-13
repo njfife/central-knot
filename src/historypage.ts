@@ -1,7 +1,9 @@
 // History: what Central Knot did, by itself (sync) or on a click (a switch, a profile switch, a Pull, …), newest first, with
-// Undo or Restore where the kept content allows it (CON-02, DEL-03). Agents' entries are worded by historyactions.ts.
+// Undo or Restore where the kept content allows it (CON-02, DEL-03). Skills', MCP servers' and agents' entries are worded, and
+// their actions decided, by historyactions.ts; here are profiles' and the base instructions' entries, and the sentences of
+// entries from before an item was on the library (which offer only what historyactions.ts finds left to do).
 import { DAY_MS, timesApart } from './model.ts';
-import { noTools, restoreEvent, showPage, shownPath, state, touchedToolsPhrase, unwriteClaudeNow } from './app.ts';
+import { noTools, restoreEvent, showPage, shownPath, state, touchedToolsPhrase } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
 import { changedProfile, flipSummary, NO_PROFILE, redoneSwitch } from './profileplan.ts';
@@ -14,73 +16,59 @@ import type { HistoryEvent } from './types.ts';
 
 const who = (tool?: string) => (tool ? toolName(tool) : 'Central Knot');
 
-/** The skill or agent an entry is about, as Central Knot's library holds it now (deleted or not). */
+/** The skill, MCP server or agent an entry is about, as Central Knot's library holds it now (deleted or not). */
 const itemOf = (event: HistoryEvent) => { const entry = libraryEntry(event); return entry && state.home?.[entry.kind].library?.[entry.key]; };
-/** A skill's or agent's entry in its kind's words (historyactions.ts librarySentence). */
 /** A take-over's entry names the copy's path as the page shows paths (from ~, or "…" inside another home). */
 const pathsShown = (event: HistoryEvent): HistoryEvent => (event.kind === 'took-over' ? { ...event, losers: event.losers.map(copy => (copy.path ? { ...copy, path: shownPath(copy.path) } : copy)) } : event);
+/** A library item's entry in its kind's words (historyactions.ts librarySentence). */
 const said = (event: HistoryEvent) => { const entry = libraryEntry(event); return entry && librarySentence(pathsShown(event), libraryWords[entry.kind], state.home?.[entry.kind].tools ?? [], itemOf(event), undid(event)); };
 /** Whether the entry is another's Undo: that one's `undoneBy` names it. */
 const undid = (event: HistoryEvent) => !!state.history.data?.some(other => other.undoneBy === event.id);
 
+/**
+ * What an entry says. A library item's entry says it in the library's words (historyactions.ts); one from before an item was
+ * on the library that the library has no words for keeps a general sentence below. `action`: the button profiles' and the base
+ * instructions' entries offer (a library item's are libraryButtons).
+ */
 function describe(event: HistoryEvent): { glyph: IconName; text: string; action?: string } {
-  // A library item's entry says it in the library's words (historyactions.ts); an older kind keeps the general sentence below.
   const library = said(event);
   if (library) return library;
   const order = event.orderProved ? '' : ' Order not proved; the fixed tool order decided.';
   // A Pull's edit or deletion of the base instructions: said as the pull, undone or not.
   if (event.base) return pulledBase(event, event.base.list.tools.length ? touchedToolsPhrase(event.base.list.tools) : '');
-  // Pull from the git repo: said as a pull, whichever way sync carried it.
+  if (event.kind === 'profile') return profileSwitch(event);
+  // Pull from the git repo, before the library: said as a pull, whichever way sync carried it.
   if (event.via === 'repo' && !event.undoneBy) {
-    if (event.kind === 'deleted') return { glyph: 'git-branch', text: 'Removed in the git repo, so Pull deleted it from the tools it synced to.', action: 'Restore' };
-    if (event.kind === 'chosen') return { glyph: 'git-branch', text: `Pulled from the git repo; it replaced the copy in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}.`, action: 'Undo' };
-    if (event.kind === 'edit') return { glyph: 'git-branch', text: `Pulled from the git repo into ${who(event.winner?.tool)}${event.losers.length ? `, then copied to ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}` : ''}.`, action: 'Undo' };
-    if (event.kind === 'added') return { glyph: 'git-branch', text: `Pulled from the git repo and added to ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}.`, action: 'Undo add' };
+    if (event.kind === 'deleted') return { glyph: 'git-branch', text: 'Removed in the git repo, so Pull deleted it from the tools it synced to.' };
+    if (event.kind === 'chosen') return { glyph: 'git-branch', text: `Pulled from the git repo; it replaced the copy in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}.` };
+    if (event.kind === 'edit') return { glyph: 'git-branch', text: `Pulled from the git repo into ${who(event.winner?.tool)}${event.losers.length ? `, then copied to ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}` : ''}.` };
+    if (event.kind === 'added') return { glyph: 'git-branch', text: `Pulled from the git repo and added to ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}.` };
   }
+  const tools = (list: { tool: string }[]) => touchedToolsPhrase(list.map(entry => entry.tool));
   switch (event.kind) {
-    case 'edit': return { glyph: 'pencil-line', text: `Edited in ${who(event.winner?.tool)}, then copied to ${touchedToolsPhrase(event.losers.map(loser => loser.tool)) || 'the others'}.`, action: 'Undo' };
-    case 'conflict': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit won over ${andList(event.losers.filter(loser => loser.hash !== event.previous).map(loser => who(loser.tool)))}’s.${order}`, action: 'Undo' };
-    case 'deleted': return { glyph: 'trash-2', text: `Deleted${event.winner ? ` in ${who(event.winner.tool)}` : ''}, then removed from the other tools it synced to.`, action: 'Restore' };
-    case 'kept-edit': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit was kept over a deletion in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}.${order}` };
-    case 'chosen': {
-      const text = `You chose ${who(event.winner?.tool)}’s copy; it replaced ${andList(event.losers.map(loser => who(loser.tool)))}’s.`;
-      // Its Undo stopped part-way: what went back, and what is still to go, for its Finish undo.
-      return event.restoredTools ? { glyph: 'check', text: `${text} ${unfinished(event)}`, action: 'Finish undo' } : { glyph: 'check', text, action: 'Undo' };
-    }
+    case 'edit': return { glyph: 'pencil-line', text: `Edited in ${who(event.winner?.tool)}, then copied to ${tools(event.losers) || 'the others'}.` };
+    case 'conflict': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit won over ${andList(event.losers.filter(loser => loser.hash !== event.previous).map(loser => who(loser.tool)))}’s.${order}` };
+    case 'deleted': return { glyph: 'trash-2', text: `Deleted${event.winner ? ` in ${who(event.winner.tool)}` : ''}, then removed from the other tools it synced to.` };
+    case 'kept-edit': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit was kept over a deletion in ${tools(event.losers)}.${order}` };
+    case 'chosen': return { glyph: 'check', text: `You chose ${who(event.winner?.tool)}’s copy; it replaced ${andList(event.losers.map(loser => who(loser.tool)))}’s.` };
     case 'switched': {
       const turned = (disabled: boolean) => touchedToolsPhrase((event.switched ?? []).filter(entry => entry.disabled === disabled).map(entry => entry.tool));
       const switched = event.switched ?? [];
       const text = [switched.some(entry => entry.disabled) && `turned off in ${turned(true)}`, switched.some(entry => !entry.disabled) && `turned on in ${turned(false)}`].filter(Boolean).join('; ');
       const one = switched.length === 1 ? who(switched[0].tool) : undefined;
-      return { glyph: 'circle-off', text: `${text.charAt(0).toUpperCase()}${text.slice(1)}, using ${one ? `${one}’s` : 'each tool’s'} own switch.`, action: 'Undo' };
+      return { glyph: 'circle-off', text: `${text.charAt(0).toUpperCase()}${text.slice(1)}, using ${one ? `${one}’s` : 'each tool’s'} own switch.` };
     }
-    case 'profile': return profileSwitch(event);
-    // A library item's own kinds: librarySentence says every one of them, so they are answered before this switch.
-    case 'on': case 'off': case 'current': return said(event)!;
-    case 'removed': return { glyph: 'circle-minus', text: `Removed from ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}; Central Knot kept the ${event.losers.length === 1 ? 'copy' : 'copies'}.`, action: 'Restore' };
-    // A skill's copies taken over before Central Knot kept versions (Replace with managed copies): past, with no action now.
+    case 'removed': return { glyph: 'circle-minus', text: `Removed from ${tools(event.losers)}; Central Knot kept the ${event.losers.length === 1 ? 'copy' : 'copies'}.` };
+    // A skill's copies taken over before Central Knot kept versions (Replace with managed copies): past.
     case 'took-over': return { glyph: 'arrow-down-to-line', text: `Took over its copies outside Central Knot${event.undoneBy ? '; this was undone, and they were put back as they were' : ''}.` };
-    case 'written': return { glyph: 'pencil-line', text: 'Write to Claude Code replaced Claude Code’s own entry with the synced one; Central Knot kept it.', action: 'Undo write' };
+    case 'written': return { glyph: 'pencil-line', text: 'Write to Claude Code replaced Claude Code’s own entry with the synced one; Central Knot kept it.' };
     case 'added': {
-      const where = touchedToolsPhrase(event.losers.map(loser => loser.tool));
-      const what = event.via === 'repo' ? 'Pull' : event.rejoined ? 'Syncing it there again' : 'Turning it on';
-      return { glyph: 'plus', text: event.undoneBy ? `${what} added copies to ${where}; they were removed again.` : `${what} added ${event.losers.length === 1 ? 'a copy' : 'copies'} to ${where}.`, action: 'Undo add' };
+      const what = event.rejoined ? 'Syncing it there again' : 'Turning it on';
+      return { glyph: 'plus', text: event.undoneBy ? `${what} added copies to ${tools(event.losers)}; they were removed again.` : `${what} added ${event.losers.length === 1 ? 'a copy' : 'copies'} to ${tools(event.losers)}.` };
     }
-    case 'restored': {
-      // Name the change this undid, so Redo says what comes back.
-      const undone = state.history.data?.find(other => other.undoneBy === event.id);
-      const named = (past: HistoryEvent) => ({ edit: `${who(past.winner?.tool)}’s edit`, conflict: `${who(past.winner?.tool)}’s winning edit`, deleted: 'the deletion', 'kept-edit': 'the kept edit', chosen: `your choice of ${who(past.winner?.tool)}’s copy`, restored: 'an undo', added: 'the copies it added', switched: 'the switch', removed: 'the removal' , profile: 'the profile switch', 'took-over': 'the take-over', written: 'the write',
-        on: 'turning it on', off: 'turning it off', current: 'the version made current' } as const)[past.kind];
-      const where = event.losers.length ? ` in ${touchedToolsPhrase([...event.losers.map(loser => loser.tool), ...(event.winner ? [event.winner.tool] : [])])}` : '';
-      // Undoing an undo is a redo: say what came back, and offer to take it away again.
-      if (undone?.kind === 'restored') {
-        const first = state.history.data?.find(other => other.undoneBy === undone.id);
-        return { glyph: 'undo-2', text: `Redid ${first ? named(first) : 'the change'}; it is back${where}.`, action: first?.kind === 'deleted' ? 'Restore' : 'Undo edit' };
-      }
-      if (undone?.kind === 'removed') return { glyph: 'undo-2', text: `Restored${where}.` };
-      if (undone?.kind === 'deleted') return { glyph: 'undo-2', text: `Restored after it was deleted${where}.`, action: 'Delete again' };
-      return { glyph: 'undo-2', text: `Undid ${undone ? named(undone) : 'a change'}; the earlier version is back${where}.`, action: 'Redo edit' };
-    }
+    case 'restored': return { glyph: 'undo-2', text: `Undid an earlier change; the version from before it was back${event.losers.length ? ` in ${tools(event.losers)}` : ''}.` };
+    // Every library item's entry of these kinds has the library's words (historyactions.ts).
+    default: return { glyph: 'circle-check', text: 'Changed.' };
   }
 }
 
@@ -109,13 +97,6 @@ function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; ac
 
 /** Skills, MCP servers, agents and profile switches share History; each row says which it is. */
 const kindOf = (event: HistoryEvent) => (event.kind === 'profile' ? 'Profile' : event.base ? 'Instructions' : event.key.startsWith('mcp:') ? 'MCP server' : event.key.startsWith('agent:') ? 'Agent' : 'Skill');
-/** The overwritten edits an MCP server's conflict or kept edit can put back, one per content (as mcp.ts restoreMcp offers them). */
-function choices(event: HistoryEvent) {
-  if (event.key.startsWith('mcp:') || (event.kind !== 'conflict' && event.kind !== 'kept-edit')) return [];
-  const seen = new Set<string>();
-  return event.losers.filter(loser => loser.hash && loser.hash !== event.previous && loser.hash !== event.winner?.hash && !seen.has(loser.hash) && seen.add(loser.hash));
-}
-
 /** Rows are grouped by day (day headings); each row shows its time, every row in one form (model.ts timesApart). */
 const day = (iso: string) => {
   const date = new Date(iso);
@@ -123,30 +104,9 @@ const day = (iso: string) => {
   if (date.toDateString() === new Date(Date.now() - DAY_MS).toDateString()) return 'Yesterday';
   return date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 };
-/**
- * A choice whose Undo stopped part-way: what went back and what is still to go ("Undone in Copilot CLI; Codex still to go; the
- * new copy in Pi still to remove."), or, for its Finish undo button, what it will do.
- */
-function unfinished(event: HistoryEvent, todo = false): string {
-  const noun = event.key.startsWith('mcp:') ? 'entry' : 'copy';
-  const back = event.restoredTools ?? [];
-  const left = event.losers.map(loser => loser.tool).filter(tool => !back.includes(tool));
-  const added = state.history.data?.find(other => other.id === event.addedId && !other.undoneBy)?.losers.map(loser => loser.tool) ?? [];
-  const said = todo ? [left.length && `put ${left.length === 1 ? 'the' : 'each'} replaced ${noun} back in ${touchedToolsPhrase(left)}`, added.length && `remove the new ${noun} in ${touchedToolsPhrase(added)}`].filter(Boolean).join(', and ')
-    : [back.length && `undone in ${touchedToolsPhrase(back)}`, left.length && `${touchedToolsPhrase(left)} still to go`, added.length && `the new ${noun} in ${touchedToolsPhrase(added)} still to remove`].filter(Boolean).join('; ');
-  return said ? `${said.charAt(0).toUpperCase()}${said.slice(1)}${todo ? '' : '.'}` : todo ? 'Finish the Undo' : '';
-}
-
-/** What an Undo, Redo or Restore button will do, said before the click. */
-const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'profile' ? `Each switch this changed goes back, where it is still as this left it; ${event.profile?.fromName ?? NO_PROFILE} is in use again if this switch is the one that chose the profile in use`
-  : event.base ? 'Put the base instructions back as they were before this Pull, and in the tools that got them (where their file is unchanged since)'
-  : event.kind === 'switched' ? (event.switched ?? []).map(entry => `${entry.disabled ? 'Enable' : 'Disable'} it again in ${who(entry.tool)}`).join('; ')
-  : event.kind === 'removed' ? `Put the removed copy back in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}`
-  : event.kind === 'added' ? `Remove the copies ${event.via === 'repo' ? 'Pull' : 'it'} added (only while unchanged) and stop syncing ${event.item}${event.rejoined ? ' there' : ''}` : action === 'Restore' ? `Put ${event.item} back in every tool it synced to`
-  : action === 'Finish undo' ? `${unfinished(event, true)} (only while unchanged since)`
-  : event.kind === 'written' ? 'Put back what Claude Code had before (quit Claude Code first)'
-  : action === 'Redo edit' || action === 'Delete again' ? 'Undo the undo: put back the version that was replaced'
-    : `Put ${event.item} back as it was before this change, in every tool it syncs to (including where it was edited)`);
+/** What a profile's or the base instructions' Undo will do, said before the click. */
+const actionHelp = (event: HistoryEvent) => (event.kind === 'profile' ? `Each switch this changed goes back, where it is still as this left it; ${event.profile?.fromName ?? NO_PROFILE} is in use again if this switch is the one that chose the profile in use`
+  : 'Put the base instructions back as they were before this Pull, and in the tools that got them (where their file is unchanged since)');
 
 /** A library entry's buttons (historyactions.ts): its own action, and one "Use <harness>’s copy" for each copy that gave way. */
 function libraryButtons(event: HistoryEvent) {
@@ -167,28 +127,14 @@ function libraryButtons(event: HistoryEvent) {
     ...versionChoices(event, item).map(choice => link(`Use ${who(choice.tool)}’s copy`, `Make ${who(choice.tool)}’s version of ${event.item} the current one`, `history-${event.id}-${choice.tool}`, choice.hash))];
 }
 
-/** Undo or Restore; with several overwritten edits, one button per edit, so each can be put back. */
+/** A profile's or the base instructions' Undo (or Redo), naming what it undoes: "Undo switch", or "Undo in Claude Code and Codex". */
 function actions(event: HistoryEvent, action?: string) {
-  const options = choices(event);
-  if (options.length > 1 || (event.kind === 'kept-edit' && options.length)) {
-    return h('span.history-actions', {}, options.map(option => button({ variant: 'outline', size: 'small', label: `Use ${who(option.tool)}’s`, name: `Use ${who(option.tool)}’s edit of ${event.item}`, id: `history-${event.id}-${option.tool}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id, option.hash) })));
-  }
   if (!action) return h('span');
-  // The scope is the tools the event touched, as the notices say it.
-  // Undo and Restore write the earlier version to every tool the server syncs to (mcp.ts restoreMcp), so they say "in all tools".
-  // Only an 'added' undo is narrower: it removes the copies a switch (or Pull) added, in those tools alone.
-  const touched = event.base ? event.base.list.tools : event.kind === 'added' || event.kind === 'removed' ? [...new Set(event.losers.map(loser => loser.tool))] : event.kind === 'switched' ? (event.switched ?? []).map(entry => entry.tool) : [];
   // A base no tool gets is undone in Central Knot alone, so its Undo names no tools.
-  const scope = touched.length ? `in ${touchedToolsPhrase(touched)}` : event.base ? '' : 'in all tools';
-  // A switch's Undo says that it is one, and what it does: enable where it was disabled, disable where it was enabled.
-  const flips = new Set((event.switched ?? []).map(entry => entry.disabled));
-  const verb = action === 'Undo' && event.via === 'repo' ? 'Undo pull' : action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action === 'Undo' && event.kind === 'chosen' ? 'Undo choice'
-    : event.kind === 'switched' && flips.size === 1 ? (flips.has(true) ? 'Undo: enable' : 'Undo: disable') : action;
-  const label = event.kind === 'profile' ? `${action} switch` : ['Undo', 'Undo edit', 'Restore', 'Delete again', 'Redo edit'].includes(action) ? `${verb} ${scope}`.trim() : action;
-  // A choice whose own Undo stopped part-way is finished the same narrow way: each replaced copy back in its own tool.
-  const narrow = action === 'Finish undo' ? 'narrow' : undefined;
-  const control = button({ variant: 'link', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void (event.kind === 'written' ? unwriteClaudeNow([{ name: event.item, before: event.previous!, after: event.winner!.hash, event: event.id }]) : restoreEvent(event.id, narrow)) });
-  control.title = actionHelp(event, action);
+  const scope = event.base?.list.tools.length ? `in ${touchedToolsPhrase(event.base.list.tools)}` : '';
+  const label = event.kind === 'profile' ? `${action} switch` : `${action} ${scope}`.trim();
+  const control = button({ variant: 'link', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) });
+  control.title = actionHelp(event);
   return control;
 }
 
