@@ -50,7 +50,7 @@ function question(home: HomeView) {
   return h('section.setup-question', { id: 'setup-question', 'aria-labelledby': 'setup-question-title' },
     h('h2.setup-title', { id: 'setup-question-title' }, 'Synchronize everything?'),
     // One fact to a line, so the question reads at a glance: what Yes adds, what waits, Claude Code, the way back, Automatic sync.
-    h('div.setup-text', {}, ...[now, choosing, claude, oneUndoCovers(yes.fromClaude), later].map(line => line.trim()).filter(Boolean).map(line => h('p.setup-line', {}, `${line} `))),
+    h('div.setup-text', {}, ...[now, choosing, claude, oneUndoCovers(yes.fromClaude), later].map(line => line.trim()).filter(Boolean).map((line, at, lines) => h('p.setup-line', {}, at < lines.length - 1 ? `${line} ` : line))),
     h('p.setup-text', { id: 'setup-no-says' }, no),
     h('div.setup-actions', {},
       button({ variant: 'primary', label: 'Synchronize everything', id: 'setup-yes', disabled: !!state.busy, onclick: () => void answer(true) }),

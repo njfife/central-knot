@@ -11,7 +11,7 @@ import { h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
 import { clickResults, keptBack } from './clickplan.ts';
-import { entriesNow, everythingDone, libraryAction, libraryEntry, librarySentence } from './historyactions.ts';
+import { entriesNow, everythingDone, libraryAction, libraryEntry, librarySentence, restorePlan } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
 import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
@@ -640,6 +640,10 @@ async function putHistory() {
 /** A History entry's action: Undo, Restore, or one of its choices; what it did is said in the band, with its own way back. */
 export const restoreEvent = (eventId: string, choice?: string) => busy('Restoring…', async () => {
   const home = state.home!;
+  // A Restore of Synchronize everything's Undo: whether it switches the rule on again, as its plan says before the click (the
+  // one place that decides it: historyactions.ts restorePlan), for the words after it.
+  const clicked = state.history.data?.find(event => event.id === eventId);
+  const switchesOn = !!clicked?.everything?.undo && !!state.history.data && restorePlan(clicked, state.history.data, entriesNow(home)).switchOn;
   const result = await api().restore(eventId, home.sync.gate.state === 'needs-resume', home.home, choice);
   // The notice for an undone event has done its job; its result band says what happened.
   if (!result.stopped) state.dismissed.add(eventId);
@@ -664,7 +668,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
     return;
   }
   if (past && libraryEntry(past)) { sayLibraryAction(past, result); return; }
-  if (past?.kind === 'everything') { sayEverything(past, result); return; }
+  if (past?.kind === 'everything') { sayEverything(past, result, switchesOn); return; }
   // A Pull's change to an agent's Claude Code settings alone (gitrepo.ts undoSettingsChange): the one entry with an Undo of its own.
   const item = restored[0]?.item ?? past?.item ?? '';
   const done = !result.stopped && restored.length > 0;
@@ -692,13 +696,12 @@ function sayLibraryAction(past: HistoryEvent, result: ApplyResult) {
 /**
  * After Synchronize everything's one Undo, or that Undo's Restore (everything.ts everythingEntryAction): what it did, in the Undo's
  * entry's words, or what the Restore put back; what it could not do after it, each sentence once. Which it was is the entry clicked:
- * an Undo's entry (`undo`) offers the Restore, a switch-on the Undo.
+ * an Undo's entry (`undo`) offers the Restore, a switch-on the Undo. `switchedOn`: the Restore switched the rule on again
+ * (restoreEvent, from restorePlan before the click); a switch made in Settings since is not its doing.
  */
-function sayEverything(past: HistoryEvent, result: ApplyResult) {
+function sayEverything(past: HistoryEvent, result: ApplyResult, switchedOn: boolean) {
   if (result.stopped) { tell({ page: state.page, item: past.item, text: result.stopped, warn: true, history: true }); return; }
   const made = (result.made ?? []).map(id => state.history.data?.find(event => event.id === id));
-  // Whether the Restore switched the rule on again: its Undo had switched it off, and the home, read after the click, has it on.
-  const switchedOn = !!past.everything?.undo?.switchedOff && state.home?.sync.syncEverything === true;
   const text = everythingDone(past, made, made.filter(event => event?.kind === 'restored').length, switchedOn);
   const notDone = [...new Set(result.results.filter(keptBack).map(entry => entry.message))];
   tell({ page: state.page, item: past.item, warn: notDone.length > 0, history: true, text: [text, ...notDone.slice(0, 3)].join(' ') });
