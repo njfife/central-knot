@@ -1,0 +1,124 @@
+{
+  "formatVersion": 1,
+  "items": {
+    "notes": {
+      "kind": "skill",
+      "key": "notes",
+      "name": "notes",
+      "on": true,
+      "hash": "b943d3987b581c060e49103605f2855ab5ee151bbb6a893c38353f06e7c19a15",
+      "versions": [
+        {
+          "hash": "b943d3987b581c060e49103605f2855ab5ee151bbb6a893c38353f06e7c19a15",
+          "at": "2026-11-13T15:33:06.981Z",
+          "from": {
+            "how": "edited",
+            "harness": "copilot-cli"
+          }
+        },
+        {
+          "hash": "73dd9391c431310711b014d51ab8ab9518b7d7aeb9f3c3021927156c0228bdbc",
+          "at": "2026-11-13T15:33:06.980Z",
+          "from": {
+            "how": "migrated"
+          }
+        },
+        {
+          "hash": "b943d3987b581c060e49103605f2855ab5ee151bbb6a893c38353f06e7c19a15",
+          "at": "2026-11-13T15:33:06.981Z",
+          "from": {
+            "how": "was-in",
+            "harness": "copilot-cli"
+          }
+        },
+        {
+          "hash": "695b3b35e631cb3fdf23f100d401055bfccb066cc5d40d3f674ac02988abc25a",
+          "at": "2026-11-13T15:33:06.980Z",
+          "from": {
+            "how": "migrated"
+          }
+        }
+      ],
+      "except": [],
+      "applied": {
+        "claude-cli": "b943d3987b581c060e49103605f2855ab5ee151bbb6a893c38353f06e7c19a15",
+        "copilot-cli": "b943d3987b581c060e49103605f2855ab5ee151bbb6a893c38353f06e7c19a15",
+        "codex-cli": "b943d3987b581c060e49103605f2855ab5ee151bbb6a893c38353f06e7c19a15"
+      },
+      "own": {}
+    },
+    "style": {
+      "kind": "skill",
+      "key": "style",
+      "name": "style",
+      "on": true,
+      "hash": "e0937a52307ca6cb4d8ec2ef381ac12a61721ba8ee425b656a4386cca76c8921",
+      "versions": [
+        {
+          "hash": "e0937a52307ca6cb4d8ec2ef381ac12a61721ba8ee425b656a4386cca76c8921",
+          "at": "2026-11-13T15:33:06.981Z",
+          "from": {
+            "how": "migrated"
+          }
+        },
+        {
+          "hash": "efe6f547f1ed6a65c65b58261485241b232b13774e21d53a749eb3057094e4b0",
+          "at": "2026-11-13T15:33:06.982Z",
+          "from": {
+            "how": "was-in",
+            "harness": "codex-cli"
+          }
+        }
+      ],
+      "except": [
+        "codex-cli"
+      ],
+      "applied": {
+        "claude-cli": "e0937a52307ca6cb4d8ec2ef381ac12a61721ba8ee425b656a4386cca76c8921",
+        "copilot-cli": "e0937a52307ca6cb4d8ec2ef381ac12a61721ba8ee425b656a4386cca76c8921"
+      },
+      "own": {}
+    },
+    "drafts": {
+      "kind": "skill",
+      "key": "drafts",
+      "name": "drafts",
+      "on": true,
+      "hash": "bdfece224c1554058af200d5e6ee5a13788382f5c66689b6664d2ee3f12e9962",
+      "versions": [
+        {
+          "hash": "bdfece224c1554058af200d5e6ee5a13788382f5c66689b6664d2ee3f12e9962",
+          "at": "2026-11-13T15:33:06.980Z",
+          "from": {
+            "how": "migrated"
+          }
+        }
+      ],
+      "except": [
+        "copilot-cli",
+        "codex-cli"
+      ],
+      "applied": {
+        "claude-cli": "bdfece224c1554058af200d5e6ee5a13788382f5c66689b6664d2ee3f12e9962"
+      },
+      "own": {}
+    }
+  },
+  "folders": {
+    "claude-cli": {
+      "path": "/tmp/ck-upgrade-fixture/home/.claude/skills",
+      "ino": 85644752,
+      "birth": 1794583986982
+    },
+    "copilot-cli": {
+      "path": "/tmp/ck-upgrade-fixture/home/.copilot/skills",
+      "ino": 85644727,
+      "birth": 1794583986981
+    },
+    "codex-cli": {
+      "path": "/tmp/ck-upgrade-fixture/home/.codex/skills",
+      "ino": 85644740,
+      "birth": 1794583986982
+    }
+  }
+}

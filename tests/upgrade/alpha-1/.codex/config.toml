@@ -1,0 +1,8 @@
+model = "o4"
+
+[mcp_servers.local-db]
+command = "local-db-mcp"
+
+[mcp_servers.docs]
+command = "npx"
+args = ["-y", "docs-mcp"]

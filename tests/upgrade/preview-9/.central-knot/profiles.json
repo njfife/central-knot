@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "profiles": [
+    {
+      "id": "7432282f-b279-4679-9070-22f902121224",
+      "name": "Focus",
+      "items": [
+        "skill:notes",
+        "skill:style",
+        "skill:clash",
+        "skill:scratch",
+        "mcp:docs",
+        "mcp:local-db"
+      ]
+    }
+  ],
+  "active": "7432282f-b279-4679-9070-22f902121224",
+  "offByProfile": {
+    "skill:drafts": [
+      "claude-cli"
+    ],
+    "mcp:search": [
+      "claude-cli"
+    ]
+  }
+}

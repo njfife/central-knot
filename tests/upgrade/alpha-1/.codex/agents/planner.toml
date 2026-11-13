@@ -1,0 +1,5 @@
+name = "planner"
+description = "The planner agent."
+developer_instructions = """
+Plan the change in steps.
+"""

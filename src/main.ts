@@ -8,7 +8,7 @@ import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover, findOtherApps } from './discovery.ts';
 import { configRoot, envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { CLAUDE_PROCESS, appCandidates, executableCandidates, searchPath } from './platform.ts';
-import { managedNow, readRecord, setSyncEverything, syncGate, syncsHere, takeOverSync, writeAccess, type ShareContext } from './share.ts';
+import { managedNow, readRecord, setSyncEverything, syncGate, takeOverSync, writeAccess, type ShareContext } from './share.ts';
 import { pruneHistory, readHistory } from './history.ts';
 import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skillVersion, skillsView, takeOver } from './skills.ts';
 import { agentTools, mcpTools, noteTools, pluginTools, presentTools } from './presence.ts';
@@ -26,7 +26,7 @@ import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoPulledBa
 import { readParts } from './parts.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
-import { migrateProfiles } from './profilemigrate.ts';
+import { homePass } from './homepass.ts';
 import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from './profiles.ts';
 import { homeItems, inUse, inUseName, switchable, type LiveItem } from './profileplan.ts';
 import { defaultHistoryDays, historyDayChoices } from './model.ts';
@@ -478,23 +478,16 @@ interface BackgroundPass { skills?: LibraryPass; serversAndAgents?: ServersAndAg
 /**
  * One pass on the open home: writes only with Sync on (or when asked explicitly); with Sync off nothing is done in the
  * background, and an edit or a deletion waits for Sync or a click on its item. `snapshots`: the caller's read of the home,
- * which the pass uses instead of reading it again. A profiles file from before profiles were sets of items is moved before
- * anything else, either way (it does nothing once moved), so no click comes before it.
+ * which the pass uses instead of reading it again. What a pass does, in order, is homepass.ts homePass: a profiles file from
+ * before profiles were sets of items is moved before anything else, either way (it does nothing once moved), so no click
+ * comes before it.
  */
 async function pass(snapshots: Snapshot[], explicit = false): Promise<BackgroundPass> {
   const shared: ShareContext = { ...context(), read: async () => snapshots, reads: new Map() };
-  const managed = await managedNow(shared, snapshots);
-  // Profiles from before they were sets of library items are moved first, with Sync on or off (profilemigrate.ts).
-  await migrateProfiles(shared, managed).catch(error => logFailure('moving profiles', error));
-  if (!(await syncsHere(shared)) || (!syncOn && !explicit)) return {};
-  const crashes: DestinationResult[] = [];
-  const crashed = (item: string) => (error: unknown) => { crashes.push({ item, outcome: 'failed', message: `${item} could not finish: ${error instanceof Error ? error.message : String(error)}` }); return undefined; };
-  // Skills, MCP servers and agents are Central Knot's library (library.ts); Claude Code's MCP settings wait for Write to Claude Code.
-  // The pass of the whole home: the home's standing rule, Synchronize everything, takes found items in here and nowhere else.
-  const whole = { background: true } as const;
-  const skills = await applySkills(shared, managed, [], whole).catch(crashed('Skills sync'));
-  const servers = await applyServers(shared, managed, [], whole).catch(crashed('MCP sync'));
-  const agents = await applyAgents(shared, managed, [], whole).catch(crashed('Agents sync'));
+  const { synced, profilesFailed } = await homePass(shared, await managedNow(shared, snapshots), syncOn || explicit);
+  if (profilesFailed !== undefined) logFailure('moving profiles', profilesFailed);
+  if (!synced) return {};
+  const { skills, servers, agents, crashes } = synced;
   return { skills: skills ?? { results: [], writes: 0 }, serversAndAgents: {
     failures: [...crashes, ...[...(servers?.results ?? []), ...(agents?.results ?? [])].filter(entry => entry.outcome === 'failed')],
     stopped: ([['MCP sync', servers?.stopped], ['Agents sync', agents?.stopped]] as const).filter(([, why]) => why).map(([item, why]) => ({ item, outcome: 'failed' as const, message: why! })),

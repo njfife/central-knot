@@ -1,0 +1,8 @@
+{
+  "transport": "stdio",
+  "command": "npx",
+  "args": [
+    "-y",
+    "docs-mcp"
+  ]
+}

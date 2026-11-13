@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "docs": {
+      "type": "local",
+      "command": "npx",
+      "args": [
+        "-y",
+        "docs-mcp"
+      ],
+      "tools": [
+        "*"
+      ]
+    }
+  }
+}

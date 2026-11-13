@@ -23,7 +23,7 @@
 // released, on record; the switches released, and Claude Code's kept ones listed; a pass on the held items that are Off (what
 // this run or a stopped one turned Off: an item that stays On is left to the ordinary sync rule, with Sync off too); the old
 // file kept as profiles.v1.json; the new one written. Until the last, the file is format 1, and the next pass does what is
-// left. main.ts pass runs it first, where a pass may write.
+// left. homepass.ts homePass, the pass main.ts runs at start and after, runs it first, where a pass may write.
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { agentKind } from './agents.ts';
