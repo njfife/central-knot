@@ -1,9 +1,9 @@
 // History: what Central Knot did, by itself (sync) or on a click (a switch, a profile switch, a Pull, …), newest first, with
 // Undo or Restore where the kept content allows it (CON-02, DEL-03). Skills', MCP servers' and agents' entries are worded, and
-// their actions decided, by historyactions.ts; here are profiles' and the base instructions' entries, and the sentences of
-// entries from before an item was on the library (which offer only what historyactions.ts finds left to do).
+// their actions decided, by historyactions.ts; here are profiles', the base instructions' and tools' Manage switches' entries,
+// and the sentences of entries from before an item was on the library (which offer only what historyactions.ts finds left to do).
 import { DAY_MS, plural, timesApart } from './model.ts';
-import { noTools, restoreEvent, showPage, shownPath, state, touchedToolsPhrase } from './app.ts';
+import { noToolManaged, restoreEvent, showPage, shownPath, state, touchedToolsPhrase } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
 import { changes, homeItems, NO_PROFILE, turnsWords, undoPlan } from './profileplan.ts';
@@ -37,6 +37,7 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
   // A Pull's edit or deletion of the base instructions: said as the pull, undone or not.
   if (event.base) return pulledBase(event, event.base.list.tools.length ? touchedToolsPhrase(event.base.list.tools) : '');
   if (event.kind === 'profile') return profileSwitch(event);
+  if (event.kind === 'managing' && event.managing) return managingWords(event.managing);
   // Pull from the git repo, before the library: said as a pull, whichever way sync carried it.
   if (event.via === 'repo' && !event.undoneBy) {
     if (event.kind === 'deleted') return { glyph: 'git-branch', text: 'Removed in the git repo, so Pull deleted it from the tools it synced to.' };
@@ -94,8 +95,16 @@ function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; ac
   return { glyph, text: `Switched to ${was.toName}: ${turnsWords({ on: was.on ?? [], off: was.off ?? [] }, 'did')}.`, action };
 }
 
-/** Skills, MCP servers, agents and profile switches share History; each row says which it is. */
-const kindOf = (event: HistoryEvent) => (event.kind === 'profile' ? 'Profile' : event.base ? 'Instructions' : event.key.startsWith('mcp:') ? 'MCP server' : event.key.startsWith('agent:') ? 'Agent' : 'Skill');
+/**
+ * A tool's Manage switch turned (toolchoice.ts), said as what holds from then on. It offers nothing: the switch on the tool's
+ * Harnesses card is the way back, and each change a sync made there has its own entry.
+ */
+const managingWords = ({ tool, on }: NonNullable<HistoryEvent['managing']>): { glyph: IconName; text: string } => (on
+  ? { glyph: 'boxes', text: `Central Knot manages ${toolName(tool)} from here on: sync brings it into line, each change with its own entry. No Undo: its switch on Harnesses is the way back.` }
+  : { glyph: 'boxes', text: `Left out from here on: Central Knot writes nothing in ${toolName(tool)}, and its copies there stay as they are. No Undo: its switch on Harnesses is the way back.` });
+
+/** Skills, MCP servers, agents, profile switches and tools' Manage switches share History; each row says which it is. */
+const kindOf = (event: HistoryEvent) => (event.kind === 'profile' ? 'Profile' : event.kind === 'managing' ? 'Tool' : event.base ? 'Instructions' : event.key.startsWith('mcp:') ? 'MCP server' : event.key.startsWith('agent:') ? 'Agent' : 'Skill');
 /** Rows are grouped by day (day headings); each row shows its time, every row in one form (model.ts timesApart). */
 const day = (iso: string) => {
   const date = new Date(iso);
@@ -149,7 +158,7 @@ export function historyPage() {
   // From History's own read (pagedata.ts): what it found, else that it is reading or could not read.
   const events = state.history.data;
   if (!events) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.history.state === 'failed' ? 'History could not be read.' : 'Reading History…')));
-  if (!events.length && noTools()) return h('div.page', {}, noToolsState('history-choose-home'));
+  if (!events.length && noToolManaged()) return h('div.page', {}, noToolsState('history'));
   if (!events.length) return h('div.page', {}, state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null, emptyState('history', 'No changes yet', 'When sync copies an edit, or turning something on adds or replaces a copy, it shows up here with Undo. Turn a skill on to begin.', button({ variant: 'outline', label: 'Start in Skills', id: 'history-go-skills', onclick: () => showPage('skills') })));
   const ordered = [...events].reverse(), times = timesApart(ordered.map(event => event.at));
   const reread = rereadBand(state.history);

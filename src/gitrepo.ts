@@ -29,6 +29,7 @@ import { fromJson, jsonEntry, serverHash, type NeutralServer } from './mcp.ts';
 import { applyServers, serversForRepo, serversView } from './servers.ts';
 import { gitEnv, gitFailure, runGit, whyGitFailed, whyPushFailed } from './plugins.ts';
 import { PRODUCT } from './values.ts';
+import { leftOutSentence } from './words.ts';
 import { copyTree, errorCode, exists, gateRefusal, itemKey, managedNow, notCopied, sha256 as sha, syncGate, plainError, readTree, removeTree, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext, type Tree } from './share.ts';
 import { undoBase } from './instructions.ts';
 import type { BaseUndo, DestinationResult, HarnessId, HistoryEvent, RepoChange, RepoCommit, RepoKind, RepoResult, RepoView, Snapshot } from './types.ts';
@@ -787,7 +788,7 @@ export async function undoPulledBase(context: ShareContext, snapshots: Snapshot[
     // What the Pull replaced is what comes back: the base it emptied, the text before its edit, or no base at all.
     { item: past.item, outcome: 'written', message: past.kind === 'deleted' ? 'The base instructions are back.' : past.base.text.trim() ? 'The base instructions are as they were before that Pull.' : 'The base instructions are empty again, as before that Pull.' },
     ...done.written.map(file => ({ item: past.item, harness: file.tool, outcome: 'written' as const, message: `Back in ${harnesses[file.tool].name}.` })),
-    ...done.left.map(file => ({ item: past.item, harness: file.tool, outcome: 'held' as const, message: file.why === 'edited' ? `${harnesses[file.tool].name}’s file changed since, so it was left as it is.` : `${harnesses[file.tool].name}’s file could not be written.` })),
+    ...done.left.map(file => ({ item: past.item, harness: file.tool, outcome: 'held' as const, message: file.why === 'edited' ? `${harnesses[file.tool].name}’s file changed since, so it was left as it is.` : file.why === 'left-out' ? leftOutSentence(file.tool) : `${harnesses[file.tool].name}’s file could not be written.` })),
     ...(done.problem ? [notIn(past.item, done.problem)] : []),
   ];
   return { results, harnessWrites: done.written.length };

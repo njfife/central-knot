@@ -1,7 +1,9 @@
-// Harnesses: one place per tool. The list sums up what each one has; a harness's own page manages its items with the same
-// tables and switches as the Skills, MCP servers and Agents pages, with that tool first, plus its instruction
-// file and its plugins. Nothing here has its own engine: every change goes through the pages it mirrors.
-import { KINDS, harnessFound as found, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type PageKind } from './app.ts';
+// Harnesses: one place per tool. The list sums up what each one has, with its Manage switch (managecard.ts); a managed
+// harness's own page manages its items with the same tables and switches as the Skills, MCP servers and Agents pages, with
+// that tool first, plus its instruction file and its plugins. A tool left out has its card and switch here and is shown on no
+// other page. Nothing here has its own engine: every change goes through the pages it mirrors, or the switch's toolchoice.ts.
+import { KINDS, harnessManaged as managed, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type PageKind } from './app.ts';
+import { manageLocked, manageRow } from './managecard.ts';
 import { installsIn, type MarketPlugin } from './pluginstatus.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { pluginTitle } from './pluginparts.ts';
@@ -30,7 +32,7 @@ const dirname = (path: string) => path.replace(/^[A-Za-z]:\\/.test(path) ? /[/\\
 const readProblems = (snapshot: Snapshot) => (snapshot.discovery === 'missing' ? [] : snapshot.issues);
 
 /** The harnesses this home shows: this computer's home lists every tool, found or not; a folder only the ones it has. */
-const listed = (home: HomeView) => home.snapshots.filter(snapshot => home.mode === 'actual' || found(home, snapshot.harness));
+const listed = (home: HomeView) => home.snapshots.filter(snapshot => home.mode === 'actual' || home.sync.present.includes(snapshot.harness));
 
 const supports = (home: HomeView, kind: PageKind, tool: HarnessId) => kindSource(home, kind).tools.includes(tool);
 /** Said on the card, the tab's tooltip and the empty tab when a tool can't hold a kind. */
@@ -141,19 +143,22 @@ function attentionLinks(snapshot: Snapshot, kinds: ReturnType<typeof tally>[]) {
 }
 
 /**
- * One harness on the list. A found tool's whole card opens its page and shows its counts; a tool not found has nothing to
- * count, so its card is its name, how to fix that, and its folder, and does not open.
+ * One harness on the list. A managed tool's whole card opens its page and shows its counts, with its Manage switch under them;
+ * a tool left out has its name, how it was found, its switch and its folder, and does not open; a tool not found has nothing
+ * to count, so its card is its name, how to fix that, and its folder, and does not open.
  */
 function summaryCard(snapshot: Snapshot, home: HomeView) {
   const tool = snapshot.harness;
-  const here = found(home, tool);
+  const here = managed(home, tool), installed = home.sync.present.includes(tool);
   const head = h('span.harness-card-head', {}, brandMark(tool, 18), h('strong.harness-card-name', {}, names[tool]), here ? icon('arrow-right', 14, 'tone-faint') : null);
   // On this computer each card says how its tool was found; a sample or chosen folder is said once, in the note above.
-  const status = home.mode === 'actual' ? h(`span.harness-card-status${here ? '' : '.tone-faint'}`, {}, detectionLine(snapshot, home)) : null;
+  const status = home.mode === 'actual' ? h(`span.harness-card-status${installed ? '' : '.tone-faint'}`, {}, detectionLine(snapshot, home)) : null;
   const path = h('span.harness-card-path', { title: snapshot.root }, h('span.mono', {}, shownPath(snapshot.root)));
+  if (installed && !here) return h('div.card.harness-card.harness-card-out', { id: `harness-${tool}`, 'aria-label': `${names[tool]}: not managed` },
+    h('div.harness-card-main', {}, head, status, h('span.harness-card-next', {}, `Left out: Central Knot writes nothing in ${names[tool]}, and shows it on no other page.`)), manageRow(home, tool), path);
   if (!here) return h('div.card.harness-card.harness-card-missing', { id: `harness-${tool}`, 'aria-label': `${names[tool]}: not found` },
     // When no tool at all was found, the note above already says to install one; each card need not repeat it.
-    h('div.harness-card-main', {}, head, status, home.sync.tools.length ? h('span.harness-card-next', {}, `Install ${names[tool]}, then Refresh.`) : null), path);
+    h('div.harness-card-main', {}, head, status, home.sync.present.length ? h('span.harness-card-next', {}, `Install ${names[tool]}, then Refresh.`) : null), path);
   const kinds = KINDS.map(kind => tally(home, kind, tool));
   // Two groups (the three kinds, then its file and plugins), which sit side by side on a wide card.
   const body = [head, status, h('span.harness-counts', {},
@@ -164,7 +169,7 @@ function summaryCard(snapshot: Snapshot, home: HomeView) {
   // While an action runs, its result belongs to the harness it started on: the cards wait.
   return h('div.card.harness-card', {},
     h('button.harness-card-main', { type: 'button', id: `harness-${tool}`, disabled: !!state.busy, 'aria-label': `${names[tool]}: ${detectionLine(snapshot, home)}. Open its page.`, onclick: () => goHarness(tool) }, body),
-    attentionLinks(snapshot, kinds), path);
+    attentionLinks(snapshot, kinds), manageRow(home, tool), path);
 }
 
 /**
@@ -204,15 +209,18 @@ function everyHarness(home: HomeView) {
   // What the read's catch-up copied is news here too, not only on the Skills tables.
   const caught = caughtUpBand(home.sync, home.skills.notices);
   // A home with no tools says so as every page does, with another home to choose; on this computer, which tools were looked for.
-  if (!home.sync.tools.length) {
+  // (A home whose tools are all left out lists them, each with its switch.)
+  if (!home.sync.present.length) {
     const looked = home.mode === 'actual' ? `Not found on ${thisMachine}: ${andList(home.snapshots.map(snapshot => names[snapshot.harness]))}. Central Knot looks for them again each time it reads this home.` : undefined;
-    return h('div.page', {}, done ? h('div.bands', {}, done) : null, noToolsState('harnesses-choose-home', looked));
+    return h('div.page', {}, done ? h('div.bands', {}, done) : null, noToolsState('harnesses', looked));
   }
   return h('div.page', {}, done || caught ? h('div.bands', {}, done, caught) : null,
     h('div.scroll.harness-scroll', { id: 'harnesses-scroll' },
       h('p.tools-note', {}, icon('info', 14, 'tone-muted'),
-        h('span', {}, home.sync.tools.length ? 'Each AI coding tool and what it has. Open one to manage its skills, MCP servers, agents, instructions and plugins.'
-          : 'None of the AI coding tools Central Knot knows was found here. Install one, then Refresh.',
+        h('span', {}, home.sync.managed.length ? 'Each AI coding tool and what it has. Open one to manage its skills, MCP servers, agents, instructions and plugins; its switch says whether Central Knot manages it at all.'
+          : 'Central Knot manages none of your tools here. Turn one on to manage it; its items not in Central Knot yet then show as found, and Add keeps them. What Central Knot keeps already stays kept.',
+          // Where no Manage switch can be turned, said once here (each disabled switch's tooltip says it too).
+          manageLocked(home) ? ` ${manageLocked(home)}` : null,
           home.mode === 'actual' ? null : [home.mode === 'fixture' ? ' Practice copy: installed apps aren’t checked; ' : ' A folder: installed apps aren’t checked; ',
             button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' shows their versions.'],
           // A profile switches items in every tool at once, so the one in use is said once here, as Profiles names it.
@@ -247,9 +255,9 @@ function tabs(home: HomeView, tool: HarnessId) {
     }));
 }
 
-/** Moves between found harnesses without going back to the list. */
+/** Moves between managed harnesses without going back to the list. */
 function switcher(home: HomeView, tool: HarnessId) {
-  const others = home.sync.tools;
+  const others = home.sync.managed;
   if (others.length < 2) return null;
   return h('div.harness-switch', { role: 'group', 'aria-label': 'Other harnesses' }, others.map(other => h(`button.harness-switch-item${other === tool ? '.selected' : ''}`, {
     type: 'button', id: `harness-switch-${other}`, 'aria-pressed': String(other === tool), title: names[other], disabled: !!state.busy && other !== tool,
@@ -358,9 +366,9 @@ function oneHarness(snapshot: Snapshot, home: HomeView) {
   return h('div.page.harness-page', {}, h('div.harness-bar', {}, tabs(home, tool), switcher(home, tool)), body);
 }
 
-/** The harness whose page is open, if it is still in this home and found. */
+/** The harness whose page is open, if it is still in this home and managed. */
 const openSnapshot = (home: HomeView): Snapshot | undefined =>
-  state.harness && found(home, state.harness) ? home.snapshots.find(entry => entry.harness === state.harness) : undefined;
+  state.harness && managed(home, state.harness) ? home.snapshots.find(entry => entry.harness === state.harness) : undefined;
 
 /** The header title on a harness's page: "Harnesses" as the way back, then the harness and how it was found. Undefined on the list. */
 export function harnessTitle(): (Node | null)[] | undefined {
@@ -379,7 +387,7 @@ export function harnessTitle(): (Node | null)[] | undefined {
 export function harnessesPage() {
   const home = state.home;
   if (!home) return notRead();
-  // A harness no longer found (after a Refresh) falls back to the list (harnessTabShown agrees); a home switch already closed any open harness (accept()).
+  // A harness no longer managed (uninstalled, or its switch turned off) falls back to the list (harnessTabShown agrees); a home switch already closed any open harness (accept()).
   const snapshot = openSnapshot(home);
   return snapshot ? oneHarness(snapshot, home) : everyHarness(home);
 }

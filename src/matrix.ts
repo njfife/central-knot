@@ -8,7 +8,7 @@ import { caughtUpNames, defaultHistoryDays, groupBy, noticeNames } from './model
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
 import { andList, byToolOrder, kindNouns, toolNames, toolsPhrase } from './words.ts';
 import { readFlag, writeFlag } from './flags.ts';
-import { whyReadOnly, otherOwnerSaid, saidInStatusBar, takeOverSync, takeOverTitle, tell, type Click, type Outcome, type PageKind, harnessKindShown, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, retireTip, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
+import { leftOutTools, whyReadOnly, otherOwnerSaid, saidInStatusBar, takeOverSync, takeOverTitle, tell, type Click, type Outcome, type PageKind, harnessKindShown, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, retireTip, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { kindSource, type ItemRow, type KindSource, type Tool } from './itemrow.ts';
@@ -539,7 +539,7 @@ function compareChoices(skill: ItemRow, inFiles = false) {
   // A group's content was made when its earliest copy was: a copy sync wrote is newer than the edit it carries. Marked only when
   // every copy's time is known and one group's is the latest. A copy an Undo of a choice puts back has its earlier time again.
   // Left so: a copy sync wrote into a tool that was behind, alone in its group, carries the time of that write, not of the edit
-  // it holds; "most recent" gets its full meaning with first setup (one-switch step 7).
+  // it holds.
   const editedAt = groups.map(group => Math.min(...group.map(tool => Date.parse(versions[tool]?.at ?? ''))));
   const last = Math.max(...editedAt);
   const latest = groups.length > 1 && editedAt.every(Number.isFinite) && editedAt.filter(at => at === last).length === 1 ? groups[editedAt.indexOf(last)] : undefined;
@@ -640,7 +640,7 @@ function openRow(key: string) {
 
 /** A library item's tag after its name, when it isn't plainly on everywhere (libraryrow.ts placeTag). */
 function libraryTag(skill: ItemRow) {
-  const tag = library()?.say.placeTag(skill, itemOf(skill), toolList());
+  const tag = library()?.say.placeTag(skill, itemOf(skill), toolList(), leftOutTools());
   return tag ? h('span.row-tag', { title: tag.title }, tag.text) : null;
 }
 
@@ -744,7 +744,8 @@ function helpBand(): HTMLElement | null {
   const key = `ck-help-dismissed-${kind}`;
   if (!list.length || readFlag(key) || state.skillsView === 'files') return null;
   const words = library().words;
-  const first = `Turn ${words.an} on and every tool has it, kept the same. Turn it off and no tool has it: Central Knot keeps it, with its versions, and puts each ${words.copy} back when you turn it on.`;
+  const none = leftOutTools().length ? 'no tool Central Knot manages has it' : 'no tool has it';
+  const first = `Turn ${words.an} on and every tool has it, kept the same. Turn it off and ${none}: Central Knot keeps it, with its versions, and puts each ${words.copy} back when you turn it on.`;
   const second = `Open ${words.an} for its versions.`;
   return h('div.band.band-help', { role: 'note' }, icon('info', 14, 'tone-muted'),
     h('span.band-text.band-lines', {}, h('span', {}, first), h('span.tone-muted', {}, second)),
@@ -1097,7 +1098,7 @@ function turnOff(skill: ItemRow) {
     const off = plugins.turned.map(item => item.tool).filter(tool => !notIn.includes(tool));
     return off.length ? ` Its plugin’s copy is off in ${toolsPhrase(off, toolList())}.` : '';
   };
-  mainClick(name, false, [rowClicks.off(skill, itemOf(skill))], plugins, notIn => `${lib.say.said.off(name, notIn, toolList())}${pluginSaid(notIn)}`, plugins.left);
+  mainClick(name, false, [rowClicks.off(skill, itemOf(skill))], plugins, notIn => `${lib.say.said.off(name, notIn, toolList(), leftOutTools())}${pluginSaid(notIn)}`, plugins.left);
 }
 
 /** Every tool that can have it: where it is on once it is on everywhere. */
@@ -1244,7 +1245,7 @@ const keyWords = {
   on: 'On there', 'plugin-off': 'Off there', none: 'No copy',
   'will-sync': 'Gets a copy when sync runs next', 'write-now': 'Waits for Write to Claude Code',
   taken: 'Edited, becomes the current version', deleted: 'Deleted there; turns off when sync runs', leaving: 'Removed when sync runs', own: 'Its own copy, not from Central Knot',
-  current: 'Has the current version', has: 'Has it', 'kept-out': 'Kept out', 'off-in-ck': 'Off: in Central Knot only', unseen: 'Left as it is (its line says why)', 'cannot-take': 'Can’t take it',
+  current: 'Has the current version', has: 'Has it', 'kept-out': 'Kept out', 'off-in-ck': 'Off: Central Knot keeps it', unseen: 'Left as it is (its line says why)', 'cannot-take': 'Can’t take it',
   'another-way': 'Has it another way, not from Central Knot', switched: 'Switched off in its own settings',
 } as const;
 
@@ -1357,11 +1358,11 @@ function foundNote(list: ItemRow[]) {
 /** The Off heading's note: no tool has these, or (while a write waits) the tools that still have some until Write to Claude Code. */
 function offNote(list: ItemRow[]) {
   const still = [...new Set(list.flatMap(skill => skill.waits ?? []))];
-  return still.length ? `in Central Knot; still in ${andList(still.map(tool => names[tool]))} until Write` : 'in Central Knot only; no tool has these';
+  return still.length ? `in Central Knot; still in ${andList(still.map(tool => names[tool]))} until Write` : leftOutTools().length ? 'in Central Knot; no tool it manages has these' : 'in Central Knot only; no tool has these';
 }
 
 /** What the item is now, in one line (libraryrow.ts statusLine), and for a found one, what Synchronize everything does with it while it is on. */
-const switchStatus = (skill: ItemRow) => statusLine(skill, itemOf(skill), toolList(), !!state.home?.sync.syncEverything);
+const switchStatus = (skill: ItemRow) => statusLine(skill, itemOf(skill), toolList(), !!state.home?.sync.syncEverything, leftOutTools());
 
 /** What one tool has, for its row in the item's details: what its copy is, then whether its own switch has it off. */
 function harnessLine(skill: ItemRow, tool: Tool): string {

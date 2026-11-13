@@ -6,8 +6,9 @@
 //
 //   item     What Central Knot holds (LibraryItem): one current version, and On or Off. On: applied to every managed
 //            harness. Off: in no harness; the item, its versions and each harness's own part stay in Central Knot.
-//   harness  A tool Central Knot manages in this home (presence.ts managedTools). An item's `except` names the harnesses
-//            the person keeps it out of: the only thing stored per harness that a person chose.
+//   harness  A tool Central Knot manages in this home: an installed tool whose Manage switch is on (presence.ts
+//            managedTools). An item's `except` names the harnesses the person keeps it out of: the only thing stored per
+//            harness that a person chose for one item.
 //   apply    Putting the current version into a harness, or taking its copy out. `applied` remembers which version
 //            Central Knot last put or saw in each harness.
 //   version  One content the item has had, with when it was made and where it came from. Every version is kept until the
@@ -64,7 +65,13 @@
 // Other marks a harness's line can carry are a kind's own, worked out at each look from what it read and never stored, and
 // they change nothing a pass does: for skills, a tool's own switch that turns the skill off there (skills.ts toolFacts, `loads`).
 //
-// A HARNESS MANAGED AGAIN (left out by the tool choice, or uninstalled, then back): the library wins there.
+// A HARNESS THAT LEAVES (its Manage switch turned off: toolchoice.ts chooseTools; or uninstalled): Central Knot stops writing
+// there, and nothing else changes. Its copies stay as they are, every item keeps its On or Off and its `applied` there, and only
+// the harness's folder identity is let go (librarypass.ts forgetFolders), so its return is told apart. An item turned Off, or
+// kept out of it, while it is away stays in that harness until the harness is back, and is removed there then (below: a copy
+// as Central Knot left it). An edit made there meanwhile does not spread; a copy deleted there turns nothing Off.
+//
+// A HARNESS MANAGED AGAIN (its Manage switch turned on again, or uninstalled and back): the library wins there.
 //
 //   item there          the copy went meanwhile                    the copy was edited meanwhile, or is another item of that name
 //   On                  L is written                               kept as a version ("was in Codex"), then L is written
@@ -77,7 +84,8 @@
 // a deleted item keeps no new content, so a copy it never had is left with nothing applied, which the table calls found.
 // The table then does the rest, and later edits and deletions there count as any other. The pass takes that step once, for
 // every item at once, the first time it sees the harness back with its folder there (librarypass.ts guardFolders), so it
-// holds whichever pass comes first.
+// holds whichever pass comes first. History says each content that gave way there, and each copy removed there (librarypass.ts
+// cameBack and logItem); a harness managed for the first time is the table's "a copy, no A" row, told the same way.
 //
 // Two promises hold the model together:
 // - H unseen is never H gone. A copy the adapter can't see for sure (unreadable, half saved, inside the settle window,

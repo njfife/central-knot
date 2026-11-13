@@ -1,6 +1,6 @@
 import { settingsPage } from './settingspage.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { absentKinds, noTools, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
+import { absentKinds, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
 import { button, fitBars, h, icon, runAfterLayout } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HomeKind } from './presence.ts';
@@ -105,8 +105,8 @@ function renderSidebar() {
     row('instructions', 'pencil-line'),
     row('plugins', 'puzzle'),
     // Profiles switch skills and MCP servers, so like the kinds' rows it needs a tool to switch them in.
-    !noTools() ? navRow('profiles', titles.profiles, 'sliders-horizontal') : null,
-    !noTools() ? h('div.nav-divider', { role: 'separator' }) : null,
+    !noToolManaged() ? navRow('profiles', titles.profiles, 'sliders-horizontal') : null,
+    !noToolManaged() ? h('div.nav-divider', { role: 'separator' }) : null,
     navRow('history', titles.history, 'history'),
     repoRow(),
     navRow('settings', titles.settings, 'settings'),
@@ -160,9 +160,9 @@ function writeFact(sync: SyncView): { glyph: IconName; text: string; short?: str
 function syncSwitch(home: HomeView) {
   // A narrow status bar calls it "Sync" (style.css): the switch and its state keep their words, and the tooltip names it whole.
   const label = h('span.sync-label', {}, h('span.fact-long', {}, 'Automatic sync'), h('span.fact-short', {}, 'Sync'));
-  // With no tools there is nothing to sync: the switch is shown, not offered.
-  if (!home.sync.tools.length) {
-    return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: 'No tools were found in this home, so there is nothing to sync.' },
+  // With no tool managed there is nothing to sync: the switch is shown, not offered.
+  if (!home.sync.managed.length) {
+    return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: `${noToolManagedSentence(home)} So there is nothing to sync.` },
       label, h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, 'Nothing to sync'));
   }
   if (!home.sync.access.allowed) {

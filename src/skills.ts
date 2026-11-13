@@ -23,7 +23,7 @@ import { appendHistory, readHistory, replaceHistory } from './history.ts';
 import { isClearedSwitch, libraryAction, libraryEntry } from './historyactions.ts';
 import { listed, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
-import { copiesOf, forgetFolders, foundCopies, itemClick, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
+import { copiesOf, foundCopies, itemClick, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords } from './libraryrow.ts';
 import { comparableText } from './pluginstatus.ts';
 import { throughPlugins, type GivenByPlugin } from './plugins.ts';
@@ -33,7 +33,7 @@ import { openLibrary, readConverted, readVersion, recordedSkills, saveLibrary, s
 import { isDisabled, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, type SwitchFile } from './skillswitch.ts';
 import { harnesses } from './harnesses.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, Skill, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy } from './types.ts';
-import { andList, throughPlugin, toolName } from './words.ts';
+import { andList, notManagedHere, throughPlugin, toolName } from './words.ts';
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const nameOf = (tool: HarnessId) => toolName(tool);
@@ -163,7 +163,12 @@ async function readAlsoRead(context: ShareContext, disk: SkillDisk, managed: Har
       for (const other of sound) if (other !== tool && landing === await landingOf(rootOf(context, other))) owner.push(other);
       if (owner.length) { disk.readsFrom[tool] = owner[0]; continue; }
       const take = landing === shared && sharedTakeable ? 'shared' as const : undefined;
-      const why = `${nameOf(tool)} also reads a copy at ${pathWords(context, path)}, which is not Central Knot’s.`;
+      // Another tool's own folder that Central Knot doesn't manage (that tool left out, or not installed): what is there stays
+      // as it is, an item Off included, and this tool still loads it.
+      let away: HarnessId | undefined;
+      for (const other of Object.keys(harnesses) as HarnessId[]) if (!away && other !== tool && !managed.includes(other) && landing === await landingOf(rootOf(context, other))) away = other;
+      const why = away ? `${nameOf(tool)} loads the copy in ${nameOf(away)}’s skills folder (${pathWords(context, path)}), which Central Knot doesn’t manage here.`
+        : `${nameOf(tool)} also reads a copy at ${pathWords(context, path)}, which is not Central Knot’s.`;
       for (const copy of copiesIn(await readSkillsFolder(tool, path, label))) {
         // This copy, not a link in the tool's own folder, is the way said and taken over: Central Knot's copy in place of
         // the link would be one too many while the tool still reads this one (library.ts), and go again.
@@ -307,15 +312,20 @@ export async function applySkills(context: ShareContext, tools: HarnessId[], cha
  */
 export async function restoreSkill(context: ShareContext, tools: HarnessId[], eventId: string, version?: string): Promise<PassResult> {
   const past = (await readHistory(context)).find(event => event.id === eventId);
-  if (past && !past.undoneBy && isClearedSwitch(past)) return switchBack(context, past);
+  if (past && !past.undoneBy && isClearedSwitch(past)) return switchBack(context, tools, past);
   return restore(skillKind, context, tools, eventId, version);
 }
 
-/** Clear the switch's Undo: each tool's own switch has the skill off again, as before, with an entry of its own. */
-async function switchBack(context: ShareContext, past: HistoryEvent): Promise<PassResult> {
+/**
+ * Clear the switch's Undo: each tool's own switch has the skill off again, as before, with an entry of its own. A tool not
+ * managed now (`tools`) is left as it is, as every Undo leaves one, and said; with no tool left to set, it is refused.
+ */
+async function switchBack(context: ShareContext, tools: HarnessId[], past: HistoryEvent): Promise<PassResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
-  const entries = past.switched!.filter(entry => entry.target);
+  const recorded = past.switched!.filter(entry => entry.target), away = recorded.filter(entry => !tools.includes(entry.tool));
+  const entries = recorded.filter(entry => tools.includes(entry.tool));
+  if (!entries.length) return { stopped: away.map(entry => notManagedHere(entry.tool)).join(' '), results: [], writes: 0 };
   const already = await Promise.all(entries.map(async ({ tool, target }) => isDisabled(context, await readSwitchFile(context, tool), target!)));
   if (already.every(Boolean)) return { stopped: `${andList(entries.map(entry => toolName(entry.tool)))}’s own switch has it off already. Nothing was changed.`, results: [], writes: 0 };
   for (const { tool, target } of entries) {
@@ -327,14 +337,9 @@ async function switchBack(context: ShareContext, past: HistoryEvent): Promise<Pa
   for (const entry of history) if (entry.id === past.id) entry.undoneBy = event.id;
   await replaceHistory(context, [...history, event]);
   const results = entries.map(({ tool }): DestinationResult => ({ item: past.item, harness: tool, outcome: 'switched', disabled: true, message: `${toolName(tool)}’s own switch has it off again.` }));
+  results.push(...away.map(({ tool }): DestinationResult => ({ item: past.item, harness: tool, outcome: 'held', message: notManagedHere(tool) })));
   return { results, writes: entries.length, made: [event.id] };
 }
-
-/**
- * The tool choice (toolchoice.ts) lets go of the skills folders of the tools it leaves out at once (librarypass.ts
- * forgetFolders), so a tool managed again is told apart whether or not a pass runs before it is back.
- */
-export const forgetSkillFolders = (context: ShareContext, managed: readonly HarnessId[]) => forgetFolders(skillKind, context, managed);
 
 // ---------- The two actions a Change can't carry ----------
 
@@ -347,6 +352,7 @@ export async function clearSwitch(context: ShareContext, tools: HarnessId[], key
   const stop = (stopped: string): PassResult => ({ stopped, results: [], writes: 0 });
   const access = await writeAccess(context);
   if (!access.allowed) return stop(access.reason);
+  if (!tools.includes(tool)) return stop(`${toolName(tool)} isn’t managed here now. Nothing was changed.`);
   const { look, live } = await lookFor(skillKind, context, tools);
   // A skill in Central Knot, or one found in a tool: either can have a tool's switch set.
   const name = live.find(entry => entry.key === key)?.name ?? foundCopies(look, key, [])[0]?.name ?? key;
@@ -389,6 +395,7 @@ export async function takeOver(context: ShareContext, tools: HarnessId[], key: s
   if (!access.allowed) return stop(access.reason);
   const gate = await syncGate(context);
   if (gate.state === 'stopped') return stop(gate.reason);
+  if (!tools.includes(tool)) return stop(`${toolName(tool)} isn’t managed here now. Nothing was changed.`);
   const { look, live } = await lookFor(skillKind, context, tools);
   const item = live.find(entry => entry.key === key);
   if (!item) return stop('Turn it on first: Central Knot takes over a copy only of a skill it has.');

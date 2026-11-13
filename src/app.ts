@@ -40,12 +40,12 @@ export const KINDS: PageKind[] = ['skills', 'mcp', 'agents'];
 export const isKind = (tab: string | undefined): tab is PageKind => (KINDS as (string | undefined)[]).includes(tab);
 /** What a harness's page shows: one kind of item, its instruction file, its plugins, or where its files are. */
 export type HarnessTab = PageKind | 'instructions' | 'plugins' | 'about';
-/** Found: Central Knot reads and writes this harness in this home, so it has a page. */
-export const harnessFound = (home: HomeView, tool: HarnessId) => home.sync.tools.includes(tool);
-/** A harness's page whose tool a new read no longer finds closes, so it doesn't reopen by itself if a later read finds it again. */
-function forgetLostHarness() { if (state.harness && state.home && !harnessFound(state.home, state.harness)) state.harness = undefined; }
-/** The tab of the harness page on screen, if one is: Harnesses with a harness open that this home still finds. */
-export const harnessTabShown = (): HarnessTab | undefined => (state.page === 'harnesses' && state.harness && state.home && harnessFound(state.home, state.harness) ? state.harnessTab : undefined);
+/** Managed: Central Knot reads and writes this harness in this home (presence.ts managedTools), so it has a page. */
+export const harnessManaged = (home: HomeView, tool: HarnessId) => home.sync.managed.includes(tool);
+/** A harness's page whose tool is no longer managed (uninstalled, or left out) closes, so it doesn't reopen by itself later. */
+function forgetLostHarness() { if (state.harness && state.home && !harnessManaged(state.home, state.harness)) state.harness = undefined; }
+/** The tab of the harness page on screen, if one is: Harnesses with a harness open that this home still manages. */
+export const harnessTabShown = (): HarnessTab | undefined => (state.page === 'harnesses' && state.harness && state.home && harnessManaged(state.home, state.harness) ? state.harnessTab : undefined);
 /** The kind whose table is on screen on a harness's page, if one is. */
 export const harnessKindShown = (): PageKind | undefined => { const tab = harnessTabShown(); return isKind(tab) ? tab : undefined; };
 export interface BaseEdit {
@@ -435,7 +435,7 @@ const switchPlugins = (ops: PluginOp[], draft: Map<string, PluginOp>, { said, un
  * or that it found no tools at all. `from` names the home, for the status bar. "Nothing changed" means nothing was written.
  */
 function readFound(view: HomeView, from?: string): string {
-  if (!view.sync.tools.length) return noToolsSentence;
+  if (!view.sync.managed.length) return noToolManagedSentence(view);
   // A plugin's items count as the pages list them.
   const found = { skills: view.skills.items.length + pluginItemCount(view, 'skills'), mcp: view.mcp.items.length + pluginItemCount(view, 'mcp'), agents: view.agents.items.length + pluginItemCount(view, 'agents') };
   const counts = heldKinds(view).map(kind => plural(found[kind], kindNouns[kind].one, kindNouns[kind].many));
@@ -454,7 +454,7 @@ const readSummary = (view: HomeView) => readFound(view, view.label);
 
 /**
  * The kinds the open home's tools can hold, as a sentence names them: "skills, MCP servers and agents", or, for `one` of
- * them, "skill, MCP server or agent". Empty in a home with no tools (noTools).
+ * them, "skill, MCP server or agent". Empty in a home with no tool managed (noToolManaged).
  */
 export function heldKindNames(count: 'all' | 'one' = 'all'): string {
   const held = state.home ? heldKinds(state.home) : [];
@@ -500,7 +500,7 @@ export const startHome = () => busy('Reading skills, MCP servers and agents…',
 /** Refresh: reads the home again, then the open page's own data (marketplaces anew), so all it shows is from this read. */
 export async function readAgain() {
   let read = false;
-  await busy(noTools() ? 'Reading…' : `Reading ${heldKindNames()}…`, async () => {
+  await busy(noToolManaged() ? 'Reading…' : `Reading ${heldKindNames()}…`, async () => {
     const view = await api().refresh();
     if (!view) return;
     state.skillsResult = undefined;
@@ -543,14 +543,24 @@ function leaveAbsentPage() {
   announce(`${said ? `${said} ` : ''}No tool here holds ${kindNames[gone]} now.`);
 }
 
-/** The open home's tools, as the main process decided them from the same read (presence.ts): page wording names only these. */
-export const homeTools = (): HarnessId[] => state.home?.sync.tools ?? [];
+/** The tools Central Knot manages in the open home, as the main process decided them from the same read (presence.ts): every page but Harnesses names only these. */
+export const homeTools = (): HarnessId[] => state.home?.sync.managed ?? [];
 
 /** The kinds no tool in the open home can hold (presence.ts absentKindsIn); none before a home is read. */
 export const absentKinds = (): HomeKind[] => (state.home ? absentKindsIn(state.home) : []);
 
-/** The open home has no tools at all: every page says so, and offers another home. False before a home is read. */
-export const noTools = (): boolean => !!state.home && !homeTools().length;
+/**
+ * The open home has no tool Central Knot manages: none is installed, or every one is left out. Every page but Harnesses says
+ * which (noToolManagedSentence) and offers the way on (pages.ts noToolsState). False before a home is read.
+ */
+export const noToolManaged = (): boolean => !!state.home && !homeTools().length;
+
+/** Why a home has no tool managed, in one sentence: none installed, or the ones installed all left out (Harnesses' switches). */
+export const noToolManagedSentence = (view: HomeView): string => (view.sync.present.length
+  ? `Central Knot manages none of the tools here: ${toolList(view.sync.present)} ${view.sync.present.length === 1 ? 'is' : 'are'} left out.` : noToolsSentence);
+
+/** The tools installed in the open home whose Manage switch is off: pages that say where an item is say "no tool Central Knot manages" while there are any. */
+export const leftOutTools = (): HarnessId[] => (state.home ? state.home.sync.present.filter(tool => !state.home!.sync.managed.includes(tool)) : []);
 
 /** The open home's tools by name, for sentences: "Claude Code and Codex". */
 export const homeToolNames = (): string[] => homeTools().map(toolName);
@@ -711,7 +721,7 @@ export const convertAgent = (key: string, name: string) => busy('Converting…',
   const home = state.home!;
   const made = await api().convertAgent(key, home.home);
   if (made.stopped || !made.skill) { announce(made.stopped ?? 'Nothing was converted.'); return; }
-  const others = home.sync.tools.filter(tool => tool !== 'pi-cli');
+  const others = home.sync.managed.filter(tool => tool !== 'pi-cli');
   const applied = await api().applySkills([{ key: made.skill, managed: true, off: others }], home.sync.gate.state === 'needs-resume', home.home);
   const view = await api().refresh();
   setHome(view);
@@ -940,9 +950,11 @@ const fileNames = (tools: HarnessId[]) => {
 function leftText(result: BaseResult, undoing = false) {
   const edited = result.left.filter(entry => entry.why === 'edited').map(entry => entry.tool);
   const failed = result.left.filter(entry => entry.why === 'failed').map(entry => entry.tool);
+  const out = result.left.filter(entry => entry.why === 'left-out').map(entry => entry.tool);
   const one = edited.length === 1;
   return [edited.length ? ` ${fileNames(edited)} ${one ? 'was' : 'were'} left as ${one ? 'it is' : 'they are'}: ${undoing ? 'changed there since the save' : `${one ? 'its' : 'their'} copy of the base was edited there`}.` : '',
     failed.length ? ` ${fileNames(failed)} could not be written; nothing in ${failed.length === 1 ? 'it' : 'them'} changed.` : '',
+    out.length ? ` ${fileNames(out)} ${out.length === 1 ? 'was' : 'were'} left as ${out.length === 1 ? 'it is' : 'they are'}: a tool left out of Central Knot here reads ${out.length === 1 ? 'it' : 'them'}.` : '',
     result.problem ? ` ${result.problem}` : ''].join('');
 }
 

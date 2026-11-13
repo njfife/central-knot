@@ -8,7 +8,8 @@ import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover, findOtherApps } from './discovery.ts';
 import { configRoot, envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { CLAUDE_PROCESS, appCandidates, executableCandidates, searchPath } from './platform.ts';
-import { managedNow, readRecord, setSyncEverything, syncGate, takeOverSync, writeAccess, type ShareContext } from './share.ts';
+import { leftOutNow, managedNow, readRecord, setSyncEverything, syncGate, takeOverSync, writeAccess, type ShareContext } from './share.ts';
+import { chooseTools, whatJoiningDoes } from './toolchoice.ts';
 import { pruneHistory, readHistory } from './history.ts';
 import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skillVersion, skillsView, takeOver } from './skills.ts';
 import { agentTools, mcpTools, noteTools, pluginTools, presentTools } from './presence.ts';
@@ -33,7 +34,7 @@ import { defaultHistoryDays, historyDayChoices } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, PartRef, PartsPick, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
-import { toolList } from './words.ts';
+import { joinedWords, toolList } from './words.ts';
 import { buildTag, startUpdater, type PendingUpdate } from './updater.ts';
 import { lineApp, releaseLine } from './updates.ts';
 import { autoUpdates, CHECK_EVERY_MS, PLUGIN_UPDATES_DEFAULT, type UpdatesRecord } from './pluginupdates.ts';
@@ -473,7 +474,8 @@ let lastStopped: string | undefined;
 
 interface ServersAndAgentsResult { failures: DestinationResult[]; stopped: DestinationResult[]; serverNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean;
   /** The servers' and agents' found keys the pass left found (librarypass.ts PassResult found), each with its kind's prefix. */ found: string[] }
-interface BackgroundPass { skills?: LibraryPass; serversAndAgents?: ServersAndAgentsResult }
+/** `done`: every result of the pass, all three kinds, for a caller that says what it did (a tool's Manage switch). */
+interface BackgroundPass { skills?: LibraryPass; serversAndAgents?: ServersAndAgentsResult; done?: DestinationResult[] }
 
 /**
  * One pass on the open home: writes only with Sync on (or when asked explicitly); with Sync off nothing is done in the
@@ -488,7 +490,7 @@ async function pass(snapshots: Snapshot[], explicit = false): Promise<Background
   if (profilesFailed !== undefined) logFailure('moving profiles', profilesFailed);
   if (!synced) return {};
   const { skills, servers, agents, crashes } = synced;
-  return { skills: skills ?? { results: [], writes: 0 }, serversAndAgents: {
+  return { skills: skills ?? { results: [], writes: 0 }, done: [skills, servers, agents].flatMap(kind => kind?.results ?? []), serversAndAgents: {
     failures: [...crashes, ...[...(servers?.results ?? []), ...(agents?.results ?? [])].filter(entry => entry.outcome === 'failed')],
     stopped: ([['MCP sync', servers?.stopped], ['Agents sync', agents?.stopped]] as const).filter(([, why]) => why).map(([item, why]) => ({ item, outcome: 'failed' as const, message: why! })),
     serverNotices: servers?.notices ?? [], agentNotices: agents?.notices ?? [], settling: !!(servers?.settling || agents?.settling),
@@ -506,6 +508,11 @@ function keepServersAndAgents(outcome: ServersAndAgentsResult | undefined) {
 }
 
 async function syncThenView(explicit = false): Promise<HomeView> {
+  return (await syncAndView(explicit)).view;
+}
+
+/** One pass, then the view built from the home as it left it; `passed`: what the pass did. */
+async function syncAndView(explicit = false): Promise<{ view: HomeView; passed: BackgroundPass }> {
   const shared: ShareContext = { ...context(), reads: new Map() };
   const before = await read();
   const passed = await pass(before, explicit), { skills, serversAndAgents } = passed;
@@ -520,15 +527,16 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   // no writes, yet may have made some. An observe-only pass, or one that couldn't run, wrote nothing.
   const snapshots = skills && (syncOn || explicit) ? await read() : before;
   const writable = (await writeAccess(shared)).allowed;
-  const managed = await managedNow(shared, snapshots);
+  const managed = await managedNow(shared, snapshots), present = presentTools(snapshots);
+  const syncEverything = (await readRecord(current!.home)).record?.syncEverything === true;
   const readId = handoff.id + 1;
   const made: HomeView = {
     mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), readId, profiles, parts: await readParts(current!.home),
     // Apps that run the tools or read their files are looked for only on this computer, like the tools' own apps.
     ...(current!.mode === 'actual' ? { otherApps: await findOtherApps(current!.home) } : {}),
-    sync: { tools: managed, writes: await skillFolders(shared, managed), access: await writeAccess(shared), gate: await syncGate(shared),
+    sync: { managed, present, joining: await joiningCounts(shared, managed, present, syncEverything), writes: await skillFolders(shared, managed), access: await writeAccess(shared), gate: await syncGate(shared),
       caughtUp: caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain),
-      syncEverything: (await readRecord(current!.home)).record?.syncEverything === true },
+      syncEverything },
     skills: await skillsView(shared, managed, notices),
     mcp: await serversView(shared, managed, pendingServerNotices.splice(0)),
     agents: await agentsView(shared, managed, pendingAgentNotices.splice(0)),
@@ -542,11 +550,17 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   // Only once the view is built is anything kept about this home, so a switch that fails leaves nothing behind.
   handoff = { id: readId, home: current!.home, snapshots };
   toolsChangedHere(snapshots);
-  addCarriedSoon(presentTools(snapshots));
+  addCarriedSoon(managed);
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
-  // How many items are managed, so the first-close note says truthfully whether anything syncs.
-  lastManagedCount = [...made.skills.items, ...made.mcp.items, ...made.agents.items].filter(fact => fact.on).length;
-  return made;
+  // How many items are managed, so the first-close note says truthfully whether anything syncs (nothing does with no tool managed).
+  lastManagedCount = managed.length ? [...made.skills.items, ...made.mcp.items, ...made.agents.items].filter(fact => fact.on).length : 0;
+  return { view: made, passed };
+}
+
+/** For each installed tool left out, what turning its Manage switch on would do there now (toolchoice.ts whatJoiningDoes): its card says it. */
+async function joiningCounts(shared: ShareContext, managed: HarnessId[], present: HarnessId[], rule: boolean) {
+  const out = present.filter(tool => !managed.includes(tool));
+  return Object.fromEntries(await Promise.all(out.map(async tool => [tool, await whatJoiningDoes(shared, managed, tool, rule)] as const)));
 }
 
 /**
@@ -690,13 +704,21 @@ async function readFor(readId?: number): Promise<Snapshot[]> {
 /** The tools in the open home as last noted (presence.ts), with the home they were noted in, so a change is acted on once. */
 let lastPresent = { home: '', tools: '' };
 
-/** Notes the open home's tools (noteTools); when they changed, the folders are watched again, so a new tool is watched like the rest. */
+/**
+ * Notes the open home's tools (noteTools); when they changed, the folders are watched again, so a new tool is watched like the
+ * rest, and a tool installed since the last note that Central Knot manages (it isn't left out) is said once in the status bar.
+ */
 function toolsChangedHere(snapshots: Snapshot[]): boolean {
-  const { noted, changed } = noteTools(lastPresent, current?.home ?? '', snapshots);
+  const { noted, changed, joined } = noteTools(lastPresent, current?.home ?? '', snapshots);
   lastPresent = noted;
   if (changed) void startWatching();
-  // A tool that is new here gets the plugins the others have (selections that wait), soon after it is first seen.
-  if (pluginChecksRun) void pluginUpdates?.present(presentTools(snapshots)).catch(error => logFailure('plugin updates', error));
+  const shared = context();
+  void leftOutNow(shared).then(leftOut => {
+    const managing = joined.filter(tool => !leftOut.includes(tool));
+    if (managing.length) send('said', joinedWords(managing));
+    // A managed tool that is new here gets the plugins the others have (selections that wait), soon after it is first seen.
+    if (pluginChecksRun) return pluginUpdates?.present(presentTools(snapshots).filter(tool => !leftOut.includes(tool)));
+  }).catch(error => logFailure('plugin updates', error));
   return changed;
 }
 
@@ -1074,7 +1096,8 @@ app.whenReady().then(async () => {
   // Marketplaces and plugins: their own module, given only what it needs from here.
   const markets = carriedMarket = registerMarketplaces({ handle, handleNow }, {
     home: () => (current ? { home: current.home, overrides: context().overrides, actual: current.mode === 'actual' } : undefined),
-    read: async readId => { const snapshots = await readFor(readId); return { tools: presentTools(snapshots), snapshots }; },
+    read: async readId => { const snapshots = await readFor(readId); return { tools: await managedNow(context(), snapshots), snapshots }; },
+    leftOut: () => leftOutNow(context()),
     writeAccess: () => writeAccess(context()),
     dataDir: app.getPath('userData'),
     pickFolder: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Choose a marketplace folder', properties: ['openDirectory'] }); return choice.canceled ? undefined : choice.filePaths[0]; },
@@ -1181,6 +1204,8 @@ app.whenReady().then(async () => {
     ? await (async () => {
       const past = (await readHistory(context())).find(entry => entry.id === eventId);
       if (past?.kind === 'profile') return undoSwitch(context(), await toolsNow(), eventId);
+      // A tool's Manage switch has no Undo (History offers none): the switch on its card is the way back.
+      if (past?.kind === 'managing') return { stopped: 'Turning a tool’s Manage switch has no Undo: turn it back on the tool’s Harnesses card.', results: [], harnessWrites: 0 };
       const key = past?.key ?? '';
       // A pull that changed only an agent's Claude Code settings has its own Undo (its earlier file, kept whole).
       if (past?.settingsFile) return undoSettingsChange(context(), eventId);
@@ -1220,6 +1245,19 @@ app.whenReady().then(async () => {
     return { ...set, view: await syncThenView() };
   });
   handle('sync:now', async home => (home === current?.home ? syncThenView(true) : null));
+  // A tool's Manage switch (toolchoice.ts chooseTools), then the home read again: with Automatic sync on, that pass brings a tool
+  // turned on into line, and what it did there (`did`) is what the page's band says. A tool turned off is forgotten by the plugin
+  // updates, so it is new to them when it is managed again.
+  handle('tools:manage', async (tool, on, resume, home) => {
+    if (home !== current?.home || !isTool(tool) || typeof on !== 'boolean') return { stopped: elsewhere, view: null, did: [] };
+    const chosen = await chooseTools(context(), tool, on, resume === true);
+    if (!chosen.stopped) {
+      log(`sync: ${tool} ${on ? 'managed' : 'left out'} in ${home}`);
+      if (!on) await pluginUpdates?.forgetTool(tool).catch(error => logFailure('plugin updates', error));
+    }
+    const { view, passed } = await syncAndView();
+    return { ...chosen, view, did: (passed.done ?? []).filter(result => result.harness === tool) };
+  });
   // Take over syncing (ORG-08): this build becomes the home's sync owner, then reads and syncs it as its owner.
   handle('sync:take-over', async home => {
     if (home !== current?.home) return { stopped: elsewhere, view: null };

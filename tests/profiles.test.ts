@@ -123,9 +123,12 @@ test('Switching turns what a profile leaves out Off in one History entry, and sw
     assert.deepEqual((await inUse(await profiles(), await live(box))).map(each => each.name), ['Dev']);
     await writeToClaude(box.context, box.tools, ['sentry']);
     assert.equal((await entries(box, 'sentry'))['claude-cli'].entry, undefined);
+    // What Write to Claude Code took out is said in History too, as every removal no click of its pass asked for.
+    assert.deepEqual((await history(box)).slice(-1).map(entry => [entry.kind, entry.item, entry.cause, entry.losers.map(loser => loser.tool)]), [['off', 'sentry', 'in-line', ['claude-cli']]]);
     // Switching to the profile in use changes nothing, and writes no entry.
+    const count = (await history(box)).length;
     const again = await switchProfile(box.context, box.tools, dev);
-    assert.deepEqual([again.event, (await history(box)).length], [undefined, entriesBefore + 1]);
+    assert.deepEqual([again.event, (await history(box)).length], [undefined, count]);
     // Back: each item On where it was, sentry still kept out of Copilot CLI, every file as before.
     const all = await made('All', ['skill:dev', 'skill:pager', 'mcp:sentry', 'agent:writer']);
     const back = await switchProfile(box.context, box.tools, all);

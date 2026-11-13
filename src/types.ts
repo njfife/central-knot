@@ -103,6 +103,12 @@ export interface DesktopApi {
   syncNow(home: string): Promise<HomeView | null>;
   /** Turns the open home's standing rule, Synchronize everything, on or off (share.ts setSyncEverything), then reads and syncs the home. */
   setSyncEverything(on: boolean, home: string): Promise<{ stopped?: string; view: HomeView | null }>;
+  /**
+   * A tool's Manage switch (toolchoice.ts chooseTools): Central Knot's care of it turned on or off, then the home read and synced.
+   * `resume`: the page showed a home that waits for Resume, which the switch resumes as a click does. `did`: what that pass did in
+   * the tool (its results there), which the band after the click says.
+   */
+  manageTool(tool: HarnessId, on: boolean, resume: boolean, home: string): Promise<{ stopped?: string; view: HomeView | null; did: DestinationResult[] }>;
   /** Makes this build the home's sync owner, in place of the build that syncs it now; every managed item and choice stays. */
   takeOverSync(home: string): Promise<{ stopped?: string; from?: string; view: HomeView | null }>;
   onSyncChanged(callback: () => void): void;
@@ -308,7 +314,12 @@ export interface SwitchRecord { tool: HarnessId; disabled: boolean; target?: Swi
  * skills, whether Central Knot may write here and who syncs it, and what the background passes did since the page last read.
  */
 export interface SyncView {
-  tools: HarnessId[];
+  /** The tools Central Knot manages here (presence.ts managedTools): every page but Harnesses shows only these. */
+  managed: HarnessId[];
+  /** The tools installed here, managed or not (presence.ts presentTools): Harnesses has a card with a Manage switch for each. */
+  present: HarnessId[];
+  /** For each installed tool left out, what turning its Manage switch on would do there now (toolchoice.ts whatJoiningDoes). */
+  joining: Partial<Record<HarnessId, JoinCounts>>;
   /** Where each tool's skills folder is, which other apps read it too, and why Central Knot does not write there, if it does not. */
   writes: Partial<Record<HarnessId, { to: string; alsoReadBy: string[]; blocked?: string }>>;
   access: WriteAccess;
@@ -318,6 +329,14 @@ export interface SyncView {
   /** The home's standing rule, Synchronize everything, is on (share.ts SyncRecord syncEverything): found items are taken in by themselves. */
   syncEverything: boolean;
 }
+
+/**
+ * What managing one more tool would do there now, each kind's added up (librarypass.ts joinCounts, from the same look and plans
+ * the pass then uses, with the tool added): items written there; copies there that differ, kept as versions first; copies of
+ * items that are Off there, removed; writes and removals that wait for Write to Claude Code; and items there Central Knot
+ * doesn't hold, found, or taken in by Synchronize everything where it is on.
+ */
+export interface JoinCounts { written: number; kept: number; removed: number; waits: number; found: number; takenIn: number }
 
 /**
  * One click on an item, as the page sends it to any kind's engine. `managed` and `off` always say how it should be managed
@@ -412,8 +431,12 @@ export interface HistoryEvent {
    * 'edit' / 'conflict': an edit taken in (`winner`), or Pull's (`cause`); `losers` are the harnesses written, each with what it
    *   held before, and on a 'conflict' the edits that gave way. 'kept-edit': edits not taken in that were written over (`losers`),
    *   or (`cause: 'tool-back'`) a copy a tool managed again held, which gave way to the current version.
-   * 'deleted': it was deleted from Central Knot. 'chosen': it was taken in with the `winner`'s copy, where the found copies differed. */
-  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed' | 'profile' | 'took-over' | 'written' | 'on' | 'off' | 'current';
+   * 'deleted': it was deleted from Central Knot; with `cause: 'in-line'`, not a deletion: a copy of an item already deleted was
+   *   removed from a harness (librarypass.ts logItem), so a reader counting deletions leaves that cause out. 'chosen': it was taken in with the `winner`'s copy, where the found copies differed.
+   * 'managing': a tool's Manage switch was turned (`managing`; key `tool:<id>`, item the tool's name), which has no Undo. */
+  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed' | 'profile' | 'took-over' | 'written' | 'on' | 'off' | 'current' | 'managing';
+  /** 'managing': the tool, and whether Central Knot manages it from then on (toolchoice.ts chooseTools). */
+  managing?: { tool: HarnessId; on: boolean };
   /** 'on' / 'off': the one harness it was turned on or off in. */
   only?: HarnessId;
   /**
@@ -422,8 +445,11 @@ export interface HistoryEvent {
    * home's standing rule, Synchronize everything, with no click. `pulled`: Pull did it ('on' for an item new here, 'edit',
    * 'deleted'). `deleted-by-hand`: its copy was deleted by hand ('off'; `winner`: where). `tool-back`: a tool managed again held a
    * copy the item didn't have ('kept-edit'; `losers`: that copy), which gave way to the current version (library.ts managedAgain).
+   * `own-copy`: a harness's own copy, which Central Knot had never put there and no click took over, gave way to the current
+   * version ('kept-edit'; `losers`). `in-line`: a pass no click asked brought harnesses into line with the item: copies written
+   * over ('on'; `losers`, each with what it held), or removed ('off', or 'deleted' for a deleted item) (librarypass.ts logItem).
    */
-  cause?: 'switch' | 'found' | 'sync-everything' | 'pulled' | 'deleted-by-hand' | 'tool-back';
+  cause?: 'switch' | 'found' | 'sync-everything' | 'pulled' | 'deleted-by-hand' | 'tool-back' | 'own-copy' | 'in-line';
   /**
    * The version current once this entry's change was made: 'current', the version made current; an 'edit' Pull made, the
    * version pulled; 'on' / 'off' by a switch, the version it was at (historyactions.ts asTheClickLeftIt).
@@ -839,8 +865,8 @@ export interface BaseDraft { stopped?: string; cancelled?: true;
 /** What an apply or undo did per tool. */
 export interface BaseResult { stopped?: string; /** Stopped because the base or a file changed since the review. */ changed?: boolean;
   written: BaseWritten[];
-  /** Not written: its copy was edited there (for an undo: the file changed since), or the write failed. */
-  left: { tool: HarnessId; why: 'edited' | 'failed' }[];
+  /** Not written: its copy was edited there (for an undo: the file changed since), the write failed, or (an undo) the tool is left out of Central Knot now. */
+  left: { tool: HarnessId; why: 'edited' | 'failed' | 'left-out' }[];
   /** Something after the files were written could not be finished, said with the result. */ problem?: string;
   undo?: BaseUndo }
 /** One file written: where, the text before (null: the write created it) and the hash of the text after. */

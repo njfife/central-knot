@@ -301,7 +301,7 @@ export function autoUpdates(host: AutoUpdateHost) {
   }
 
   /**
-   * The tools plugins go into in the open home, each time it is read. One not seen here before is new: with plugins changing
+   * The tools plugins go into in the open home (the ones Central Knot manages), each time it is read. One not seen here before is new: with plugins changing
    * by themselves a check is made now, not at the schedule's next turn, and it gets what the others have. Otherwise (the
    * switch off, Automatic sync off, or the first time this runs here) it is only noted, so it is never taken for new later.
    */
@@ -316,5 +316,20 @@ export function autoUpdates(host: AutoUpdateHost) {
     await save();
   }
 
-  return { view, check, tick, close, settled, underWay, present };
+  /**
+   * A tool whose Manage switch was turned off in the open home (toolchoice.ts): no longer one plugins go into here, so it is
+   * no longer noted as seen, and what waited to go into it goes. Turned on again, it is new here and gets what the other
+   * tools have, as a tool installed later does (present).
+   */
+  async function forgetTool(tool: HarnessId): Promise<void> {
+    const home = host.home();
+    if (!home) return;
+    const mine = await recordFor(home);
+    if (!mine.seenTools?.includes(tool) && !mine.waiting?.some(wait => wait.tool === tool)) return;
+    if (mine.seenTools) mine.seenTools = mine.seenTools.filter(seen => seen !== tool);
+    if (mine.waiting) mine.waiting = mine.waiting.filter(wait => wait.tool !== tool);
+    await save();
+  }
+
+  return { view, check, tick, close, settled, underWay, present, forgetTool };
 }

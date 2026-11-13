@@ -28,7 +28,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { libraryAction } from './historyactions.ts';
 import { listed, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
-import { copiesOf, forgetFolders, itemClick, leavingIn, lookFor, restore, runPass, sharedFileSeen, takeInAnswers, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
+import { copiesOf, itemClick, leavingIn, lookFor, restore, runPass, sharedFileSeen, takeInAnswers, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords, writesWait } from './libraryrow.ts';
 import { cannotHold, editEntry, mcpFile, ownText, readTool, recoverSettings, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, readMcpSwitches, withMcpSwitch } from './mcpswitch.ts';
@@ -236,12 +236,6 @@ export async function writeToClaude(context: ShareContext, tools: HarnessId[], k
 /** A History entry's action on a server (librarypass.ts restore; historyactions.ts says which click it is). */
 export const restoreServer = async (context: ShareContext, tools: HarnessId[], eventId: string, version?: string) =>
   releaseKeptDenies(context, tools, await restore(serverKind, context, tools, eventId, version));
-
-/**
- * The tool choice (toolchoice.ts) lets go of the settings files of the tools it leaves out at once (librarypass.ts
- * forgetFolders), so a tool managed again is told apart whether or not a pass runs before it is back.
- */
-export const forgetServerFolders = (context: ShareContext, managed: readonly HarnessId[]) => forgetFolders(serverKind, context, managed);
 
 // ---------- For the callers around a pass ----------
 

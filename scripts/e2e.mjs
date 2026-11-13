@@ -290,6 +290,98 @@ async function harnessFlow() {
   await a.quit();
 }
 
+/**
+ * A tool's Manage switch on its Harnesses card (toolchoice.ts), in the Practice copy: Codex left out, then managed again, with
+ * what the line said before each click, the band after it, Codex's files byte for byte, and what the other pages show
+ * meanwhile; then every tool left out; then another build's home, where no switch can be turned.
+ */
+async function manageFlow() {
+  const a = await launch(join(scratch, 'manage-data'), ['--practice-copy']);
+  const practice = await a.run(`document.querySelector('.status-home').title`);
+  const switches = () => a.all('[id^="manage-"][role="switch"]', 'e.id + ":" + e.getAttribute("aria-checked")');
+  // standup on in every tool first, so Codex has a copy of Central Knot's while it is left out.
+  await a.click('#nav-skills');
+  await a.click('#add-standup');
+  await a.click('#nav-harnesses');
+  same('every installed tool’s card has its Manage switch, on', await switches(), ['manage-claude-cli:true', 'manage-copilot-cli:true', 'manage-codex-cli:true']);
+  check('before the click, the line says its copies stay and every item stays as it is', (await a.text('#manage-codex-cli-line')) === 'Off leaves Codex as it is: its copies stay, and every item stays as it is.', await a.text('#manage-codex-cli-line'));
+  const codex = () => tree(join(practice, '.codex'));
+  const before = codex();
+  await a.click('#manage-codex-cli');
+  check('the band says Codex is left out and its copies stay', (await a.text('.band-done .band-text') ?? '').startsWith('Codex is left out: Central Knot writes nothing there now.'), await a.text('.band-done'));
+  same('turning it off wrote nothing in Codex', codex(), before);
+  const card = await a.text('#harness-codex-cli');
+  check('its card says it is left out, with its switch, opens nothing, and never says Not found or Install', card.includes('Not managed') && card.includes('Left out') && !/Not found|Install/.test(card) && !(await a.exists('button#harness-codex-cli')), card);
+  check('its line says what turning it on would do: nothing in Codex would change', (await a.text('#manage-codex-cli-line') ?? '').startsWith('On: nothing in Codex would change'), await a.text('#manage-codex-cli-line'));
+  await fitsAtMinimum(a, 'Harnesses with a tool left out');
+  await a.click('#nav-skills');
+  check('the Skills page has no Codex mark', (await a.exists('.tool-mark')) && !(await a.exists('.tool-mark[data-tool="codex-cli"]')));
+  await a.click('#nav-overview');
+  check('the Overview names the managed tools and says Codex is left out', (await a.text('.overview-lead') ?? '').includes('the same in Claude Code and Copilot CLI. Codex is left out (its switch is on Harnesses).'), await a.text('.overview-lead'));
+  same('Instructions and Plugins read no Codex', [
+    await a.run(`window.centralKnot.instructions().then(files => files.map(file => file.tool))`),
+    await a.run(`window.centralKnot.plugins(false).then(view => view?.tools ?? [])`)], [['claude-cli', 'copilot-cli'], ['claude-cli', 'copilot-cli']]);
+  await a.click('#nav-history');
+  for (let tries = 0; tries < 30 && !(await a.exists('.history-row')); tries++) await wait(100);
+  const newest = `document.querySelector('.history-row')`;
+  same('History has one entry for the flip, naming the tool, with no Undo', [
+    await a.run(`${newest}.querySelector('.history-kind').textContent`), await a.run(`${newest}.querySelector('.history-what strong').textContent`),
+    await a.run(`${newest}.querySelector('.history-about').textContent`), await a.run(`${newest}.querySelectorAll('.history-actions button').length`)],
+  ['Tool', 'Codex', 'Left out from here on: Central Knot writes nothing in Codex, and its copies there stay as they are. No Undo: its switch on Harnesses is the way back.', 0]);
+  await a.click('#nav-harnesses');
+  // A hand edit in Codex while it is left out reads no page again (nothing was written), so its line still says nothing would
+  // change; the band after the click says what the pass did there.
+  const standup = join(practice, '.codex/skills/standup/SKILL.md');
+  writeFileSync(standup, `${readFileSync(standup, 'utf8')}\nEdited in Codex while it was left out.\n`);
+  await wait(2500);
+  await a.click('#manage-codex-cli');
+  same('turned on again, the band says what the pass did there, not what the card said before', await a.text('.band-done .band-text'),
+    'Central Knot manages Codex now: Central Knot’s version written there for 1 item (over its copy there, which a version keeps). Each change there is in History.');
+  same('turning it on put Central Knot’s version back over the hand edit: Codex holds what it held before', codex(), before);
+  check('and its card opens its page again', await a.exists('button#harness-codex-cli'));
+  // Clicked while main is busy (a held queue standing in for a long pass): the flip waits its turn behind it, the page says it
+  // is busy and takes no other switch meanwhile, and the flip lands once the pass is done.
+  if (a.main) {
+    const main = await a.main();
+    const held = await holdQueue(main, a);
+    const leftOut = () => JSON.parse(readFileSync(join(practice, '.central-knot/sync.json'), 'utf8')).leftOut ?? [];
+    // Not a.click: it waits for the page to be idle.
+    await a.run(`document.querySelector('#manage-codex-cli').click()`);
+    await wait(300);
+    const during = [await a.run(`document.body.dataset.busy`), await a.run(`document.querySelector('#manage-claude-cli').disabled`), leftOut()];
+    await held.release();
+    same('a switch clicked while a pass runs waits for it, the other switches wait too, and it lands after', [during, leftOut()], [['true', true, []], ['codex-cli']]);
+    await a.click('#manage-codex-cli');
+    main.close();
+  }
+  // With Automatic sync off, a tool's line says when it is brought into line, and the band after the click says it again.
+  await a.click('#sync-switch');
+  await a.click('#manage-codex-cli');
+  check('with Automatic sync off, the line before turning it on says Sync once brings it into line, and a click its own item', (await a.text('#manage-codex-cli-line') ?? '').endsWith('With Automatic sync off, Sync once brings it into line; a click on an item brings that item.'), await a.text('#manage-codex-cli-line'));
+  await a.click('#manage-codex-cli');
+  check('and so does the band after it', (await a.text('.band-done .band-text') ?? '') === 'Central Knot manages Codex now. With Automatic sync off, Sync once brings it into line; a click on an item brings that item.', await a.text('.band-done'));
+  await a.click('#sync-switch');
+  // Every tool left out: the pages say so and point to Harnesses, not that no tool was found.
+  for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#manage-${tool}`);
+  same('with every tool left out, the sidebar holds only the pages that need no tool', await a.all('#nav [id^="nav-"]', 'e.id.slice(4)'), ['overview', 'harnesses', 'history', 'repo', 'settings']);
+  await a.click('#nav-overview');
+  same('its Overview names the tools left out and opens Harnesses', [await a.text('.overview-lead'), await a.exists('#overview-open-harnesses'), await a.exists('#overview-choose-home')],
+    ['Central Knot manages none of the tools here: Claude Code, Copilot CLI and Codex are left out.', true, false]);
+  same('and the status bar’s switch has nothing to sync', await a.text('#sync-switch .sync-state'), 'Nothing to sync');
+  await fitsAtMinimum(a, 'a home with every tool left out');
+  await a.click('#overview-open-harnesses');
+  for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#manage-${tool}`);
+  same('every tool managed again', await switches(), ['manage-claude-cli:true', 'manage-copilot-cli:true', 'manage-codex-cli:true']);
+  // Another build syncs this home: every switch is disabled, and the list's note says why, once.
+  const record = join(practice, '.central-knot/sync.json');
+  writeFileSync(record, JSON.stringify({ ...JSON.parse(readFileSync(record, 'utf8')), owner: 'another-build', ownerName: 'Central Knot Alpha' }));
+  await a.click('#header-refresh');
+  same('in another build’s home no Manage switch can be turned', await a.all('[id^="manage-"][role="switch"]', 'e.disabled'), [true, true, true]);
+  check('and the note says why, once', ((await a.text('.tools-note')) ?? '').includes('Central Knot Alpha syncs this home, so which tools it manages can’t change from here.') && !(await a.exists('.harness-manage-line')), await a.text('.tools-note'));
+  same('no page errors, manage', a.pageErrors, []);
+  await a.quit();
+}
+
 // ---------- Fit: nothing is cut off ----------
 // In the page, on both axes: each control (button, switch, input, filter chip, tool label) that the window or a clipping
 // ancestor cuts. A control a scroll area can bring into view is reachable there, but that scroll area's own viewport must
@@ -3261,7 +3353,7 @@ const started = Date.now();
 try {
   seedHome();
   // Each flow's time is printed, so a run that grows slow says where.
-  const flows = [harnessFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, suggestedFlow, otherAppsFlow, listDiffersFlow, pluginUpdatesFlow, repoBaseFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
+  const flows = [harnessFlow, manageFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, suggestedFlow, otherAppsFlow, listDiffersFlow, pluginUpdatesFlow, repoBaseFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
   const named = option('--flows')?.split(',');
   for (const flow of flows.filter(each => !named || named.includes(each.name))) {
     const from = Date.now();
