@@ -828,12 +828,12 @@ async function takeInByRule(pass: Pass) {
     const answer = takeInAnswer('rule', foundKey(pass, key), undefined, pass.settle), was = pass.library.items[key];
     if ('leave' in answer && answer.leave === 'settling') pass.settle!.settling = true;
     if (!('take' in answer)) continue;
-    // A copy saved again while it is kept (its store refuses it) is put back as it was and waits for the next pass; the keys
-    // taken in before it stay taken in, each with its entry.
+    // A copy saved again while it is kept (its store refuses it, CK_CHANGED) is put back as it was and waits for the next pass;
+    // the keys taken in before it stay taken in, each with its entry. Any other failure ends the pass, which says so.
     const before = was && structuredClone(was);
     try { await takeIn(pass, key, answer, [], 'rule'); }
     catch (error) {
-      if (!errorCode(error)) throw error;
+      if (errorCode(error) !== 'CK_CHANGED') throw error;
       if (before) pass.library.items[key] = before; else delete pass.library.items[key];
       pass.settle!.settling = true;
     }

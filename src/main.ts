@@ -638,8 +638,9 @@ let soon: NodeJS.Timeout | undefined;
 let followUp: NodeJS.Timeout | undefined;
 /**
  * The found items the last pass of the whole home left found, all kinds. One that is new there is news for an open page though
- * nothing was written (copies that differ, which the rule leaves). One that left came with a read of its own (the click that
- * took it in, or the rule's writes), so it tells the page nothing: a read per click would slow every Add.
+ * nothing was written (copies that differ, which the rule leaves). One that left by a click or by the rule's writes came with a read
+ * of its own, so it tells the page nothing: a read per click would slow every Add. One whose copies were all deleted by hand
+ * stays on an open page until its next read; its Add then says no tool has a copy.
  */
 let lastFound = new Set<string>();
 function foundGained({ skills, serversAndAgents }: BackgroundPass): boolean {

@@ -99,9 +99,9 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
         pulled: { glyph: 'git-branch', text: `Pulled from the Git repo into Central Knot${also('; put in')}.` },
       } as const;
       const { glyph, text } = said[event.cause === 'found' || event.cause === 'sync-everything' || event.cause === 'pulled' ? event.cause : 'switch'];
-      // A take-in whose Undo would hand Claude Code's own MCP entry back while its settings wait for Write (givesBackLater): none.
+      // A take-in whose Undo would hand Claude Code's own MCP entry back, which only Write to Claude Code writes (givesBackLater): none.
       const tookFrom = Object.fromEntries((event.tookFrom ?? []).map(copy => [copy.tool, copy.hash]));
-      const noUndo = tookIn(event) && givesBackLater(event, tookFrom) ? ` It has no Undo: Claude Code’s own entry can’t be handed back while its settings wait for Write to Claude Code. Turn it off instead (Central Knot keeps it), or keep it out of the other tools on its row.` : '';
+      const noUndo = tookIn(event) && givesBackLater(event, tookFrom) ? ` It has no Undo: an Undo would hand Claude Code’s own entry back, and Claude Code’s MCP settings are written only by Write to Claude Code. Turn it off instead (Central Knot keeps it), or keep it out of the other tools on its row.` : '';
       return { glyph, text: `${text}${overSaid}${gaveSaid}${noUndo}` };
     }
     case 'off':

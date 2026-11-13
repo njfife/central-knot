@@ -133,7 +133,7 @@ test('Switched on in a home with found items: each it may take is taken in and O
     const mcpNotice = done.mcp.notices!.find(notice => notice.kind === 'taken-in')!;
     assert.equal(mcpNotice.kind === 'taken-in' && sentences(libraryWords.mcp).takenInWords(mcpNotice, 'mcp'),
       'Synchronize everything took in 2 MCP servers, found in Claude Code and Codex: docs and files. History can undo each, except any found in Claude Code (its entry says why).');
-    assert.match(librarySentence(docs, libraryWords.mcp, tools)?.text ?? '', /It has no Undo: Claude Code’s own entry can’t be handed back while its settings wait for Write to Claude Code\. Turn it off instead/);
+    assert.match(librarySentence(docs, libraryWords.mcp, tools)?.text ?? '', /It has no Undo: an Undo would hand Claude Code’s own entry back, and Claude Code’s MCP settings are written only by Write to Claude Code\. Turn it off instead/);
     assert.doesNotMatch(librarySentence(files, libraryWords.mcp, tools)?.text ?? '', /no Undo/);
     // One notice per pass of a kind: how many, by name, and where they were found. None for a key it left.
     assert.deepEqual(noticesOf(done).map(notice => notice.kind === 'taken-in' ? [notice.items, notice.from] : notice.kind), [[['notes', 'tidy'], ['claude-cli']], [['docs', 'files'], ['claude-cli', 'codex-cli']], [['helper'], ['copilot-cli']]], 'each tool named once');
@@ -408,6 +408,18 @@ test('A skill saved again while the rule keeps another costs that other nothing:
     assert.deepEqual([first.skills.stopped, placeIn((await views(box)).skills, 'alpha'), placeIn((await views(box)).skills, 'beta'), await entries('alpha')], [undefined, 'on', 'found', 1]);
     await background(box);
     assert.deepEqual([placeIn((await views(box)).skills, 'beta'), await entries('beta'), await skillIn(box, 'codex-cli', 'beta')], ['on', 1, skill('beta', 'Saved during the pass.')]);
+  } finally { await box.cleanup(); }
+});
+
+test('A store that fails for another reason while the rule keeps a skill is not waited out: the pass says it could not finish', async () => {
+  const box = await sandbox();
+  try {
+    await putSkill(box, 'claude-cli', 'alpha', 'Original.');
+    await turnOn(box);
+    const store = skillKind.store;
+    skillKind.store = async () => { throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }); };
+    let done: PassResult | undefined; try { done = await applySkills(box.context, tools, [], { background: true }); } finally { skillKind.store = store; }
+    assert.match(done?.stopped ?? '', /could not finish/, 'not left settling, to be tried again every few seconds without a word');
   } finally { await box.cleanup(); }
 });
 
