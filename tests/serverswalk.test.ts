@@ -32,18 +32,18 @@ import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { agentsView, applyAgents } from '../src/agents.ts';
 import { readHistory } from '../src/history.ts';
-import { everythingAction, everythingPlan, libraryAction, libraryEntry, versionChoices } from '../src/historyactions.ts';
+import { entriesNow, everythingAction, everythingPlan, libraryAction, versionChoices } from '../src/historyactions.ts';
 import { wantedIn, type LibraryItem } from '../src/library.ts';
 import { asksWhichCopy, harnessIs, placeOf, rowClicks, type LibraryRow } from '../src/libraryrow.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { changes, switchPlan, undoPlan } from '../src/profileplan.ts';
 import { liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from '../src/profiles.ts';
 import { applyServers, restoreServer, serversView, writeToClaude } from '../src/servers.ts';
-import { everythingUndo, setSyncEverything } from '../src/everything.ts';
+import { everythingEntryAction, setSyncEverything } from '../src/everything.ts';
 import { readRecord, type ShareContext } from '../src/share.ts';
 import { applySkills, skillsView } from '../src/skills.ts';
 import { chooseTools } from '../src/toolchoice.ts';
-import type { Change, DestinationResult, HarnessId, LibraryFacts, PassResult } from '../src/types.ts';
+import type { Change, DestinationResult, HarnessId, HomeView, LibraryFacts, PassResult } from '../src/types.ts';
 import { bytes, folderOf, put, sandbox, trial, tools as allTools, type Tool } from './skillclicks.ts';
 
 const SEEDS = [1, 2, 3, 4];
@@ -98,19 +98,20 @@ async function walk(seed: number): Promise<Finding[]> {
    * Synchronize everything's entries (its switch-on's one Undo, and that Undo's Restore), which reach every kind.
    */
   const historyActions = async () => {
-    const libraries = { skills: (await skillsView(context(), tools)).library, mcp: (await serversView(context(), tools)).library, agents: (await agentsView(context(), tools)).library };
-    const history = await readHistory(context()), itemOf = (event: typeof history[number]) => { const at = libraryEntry(event); return at && libraries[at.kind][at.key]; };
+    // As History's page decides them (historyactions.ts entriesNow): from the three views, with the tools managed now.
+    const views = { skills: await skillsView(context(), tools), mcp: await serversView(context(), tools), agents: await agentsView(context(), tools) };
+    const history = await readHistory(context()), about = entriesNow({ ...views, sync: { managed: [...tools] } } as unknown as HomeView);
     const servers = history.filter(event => event.key.startsWith('mcp:')).flatMap(event => {
-      const item = libraries.mcp[event.key.slice('mcp:'.length)];
-      const main = libraryAction(event, item), run = (version?: string) => () => restoreServer(context(), tools, event.id, version);
+      const { item, now } = about(event);
+      const main = libraryAction(event, item, now), run = (version?: string) => () => restoreServer(context(), tools, event.id, version);
       return [...(main ? [{ event, label: main.label, run: run(), whole: false, weight: 1 }] : []), ...versionChoices(event, item).map(choice => ({ event, label: `Use ${choice.tool}’s`, run: run(choice.hash), whole: false, weight: 1 }))];
     });
     // As a step, the one Undo is taken once it has something to take back, and often, so walks reach it after the rule took items
     // in; one that would only switch the rule off is run in (c)'s trials alone. Its Restore is taken often too.
     const rule = history.flatMap(event => {
-      const action = event.kind === 'everything' ? everythingAction(event, history, itemOf, tools) : undefined;
-      const takes = action?.label === 'Restore' || (action?.label === 'Undo' && everythingPlan(event, history, itemOf, tools).takeBack.length > 0);
-      return action ? [{ event, label: action.label, run: () => everythingUndo(context(), tools, event.id), whole: true, weight: takes ? 6 : 0 }] : [];
+      const action = event.kind === 'everything' ? everythingAction(event, history, about) : undefined;
+      const takes = action?.label === 'Restore' || (action?.label === 'Undo' && everythingPlan(event, history, about).takeBack.length > 0);
+      return action ? [{ event, label: action.label, run: () => everythingEntryAction(context(), tools, event.id), whole: true, weight: takes ? 6 : 0 }] : [];
     });
     return [...servers, ...rule];
   };

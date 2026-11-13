@@ -10,7 +10,7 @@ import { configRoot, envOverride, harnesses, harnessIds, writeRoot } from './har
 import { CLAUDE_PROCESS, appCandidates, executableCandidates, macPlaces, searchPath } from './platform.ts';
 import { intoFolder, isRunning, knownBuilds, lookForBuilds, quitBuild, removeClick, type BuildsContext } from './otherbuilds.ts';
 import { leftOutNow, managedNow, readRecord, syncGate, takeOverSync, writeAccess, type ShareContext } from './share.ts';
-import { everythingUndo, setSyncEverything } from './everything.ts';
+import { everythingEntryAction, setSyncEverything } from './everything.ts';
 import { chooseTools, whatJoiningDoes } from './toolchoice.ts';
 import { pruneHistory, readHistory } from './history.ts';
 import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skillVersion, skillsView, takeOver } from './skills.ts';
@@ -1222,7 +1222,7 @@ app.whenReady().then(async () => {
       // A tool's Manage switch has no Undo (History offers none): the switch on its card is the way back.
       if (past?.kind === 'managing') return { stopped: 'Turning a tool’s Manage switch has no Undo: turn it back on the tool’s Harnesses card.', results: [], harnessWrites: 0 };
       // Synchronize everything switched on: its one Undo; that Undo's entry: its Restore (everything.ts).
-      if (past?.kind === 'everything') return everythingUndo(context(), await toolsNow(), eventId);
+      if (past?.kind === 'everything') return everythingEntryAction(context(), await toolsNow(), eventId);
       const key = past?.key ?? '';
       // A pull that changed only an agent's Claude Code settings has its own Undo (its earlier file, kept whole).
       if (past?.settingsFile) return undoSettingsChange(context(), eventId);

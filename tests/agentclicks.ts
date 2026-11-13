@@ -65,9 +65,9 @@ export const deleteIt = async (box: Box, context = box.context) => { const { row
 
 /** Every action History offers for this agent now, with the click that runs it. */
 export async function historyActions(box: Box, context = box.context) {
-  const { item } = await seen(box, context);
+  const { item, fact } = await seen(box, context);
   return (await historyOf(box, context)).flatMap(event => {
-    const main = libraryAction(event, item);
+    const main = libraryAction(event, item, { managed: box.tools, edited: fact?.edited ?? [] });
     const run = (version?: string) => () => restoreAgent(context, box.tools, event.id, version);
     return [...(main ? [{ event, label: main.label, run: run() }] : []), ...versionChoices(event, item).map(choice => ({ event, label: `Use ${choice.tool}’s`, run: run(choice.hash) }))];
   });

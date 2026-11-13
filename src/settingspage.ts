@@ -1,9 +1,10 @@
 // Settings: Central Knot's own preferences, kept apart from the tools' settings. The main process stores them
 // (app-settings.json) and applies them; this page shows them, one full-width row each, and changes one at a time. One row is
 // the open home's, not the app's: Synchronize everything, kept in the home's sync record (share.ts SyncRecord syncEverything)
-// and switched through app.ts setSyncEverything. One section is this Mac's: another build of Central Knot found here, a row
+// and switched through app.ts switchSyncEverything. One section is this Mac's: another build of Central Knot found here, a row
 // each with its actions (otherBuildsSection; its words and clicks are otherbuildview.ts's).
-import { announce, machine, rerender, setSyncEverything, showPage, state, whyReadOnly } from './app.ts';
+import { announce, machine, rerender, switchSyncEverything, showPage, state, whyReadOnly } from './app.ts';
+import { oneUndoCovers } from './historyactions.ts';
 import { button, h, icon, toggle } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { DAY_MS, defaultHistoryDays, historyDayChoices } from './model.ts';
@@ -369,7 +370,7 @@ function syncEverythingRow(): HTMLElement | null {
   const home = state.home;
   if (!home) return null;
   const on = !!home.sync.syncEverything, cannot = whyReadOnly(home) ?? (home.sync.gate.state === 'needs-resume' ? home.sync.gate.reason : undefined);
-  const hint = cannot ?? 'For this home: a skill, MCP server or agent that turns up in one of your tools is taken into Central Knot and turned on in every tool by itself (an MCP server reaches Claude Code when you click Write to Claude Code). Switching it on is one entry in History, whose Undo takes back everything it took in since, except an MCP server found in Claude Code (whose own entry says why). Off, what turns up waits on its page for Add.';
+  const hint = cannot ?? 'For this home: a skill, MCP server or agent that turns up in one of your tools is taken into Central Knot and turned on in every tool by itself (an MCP server reaches Claude Code when you click Write to Claude Code). Switching it on is one entry in History. ' + oneUndoCovers() + ' Off, what turns up waits on its page for Add.';
   const { takes, choosing } = whatYesDoes(home);
   const waiting = choosing ? `${plural(choosing, 'found item')} ${choosing === 1 ? 'has' : 'have'} copies that differ and ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy.` : '';
   const adds = !on ? (takes ? `Turning it on adds the ${plural(takes, 'item')} found in your tools now.` : 'Nothing found in your tools now would be added.') : '';
@@ -380,7 +381,7 @@ function syncEverythingRow(): HTMLElement | null {
   const added = (['skills', 'mcp', 'agents'] as const).flatMap(kind => home[kind].notices.flatMap(told => (told.kind === 'taken-in' && !state.dismissed.has(told.history)
     ? [messageLine({ text: sentences(libraryWords[kind]).takenInWords(told, kind), tone: 'done', action: { label: 'History', run: () => showPage('history') } }, { id: `setting-sync-everything-added-${kind}` })] : [])));
   return settingRow('sync-everything', 'Synchronize everything', hint,
-    toggle({ on, label: 'Synchronize everything', onchange: chosen => void setSyncEverything(chosen), disabled: !!cannot || !!state.busy, id: 'sync-everything-on',
+    toggle({ on, label: 'Synchronize everything', onchange: chosen => void switchSyncEverything(chosen), disabled: !!cannot || !!state.busy, id: 'sync-everything-on',
       attrs: { 'aria-describedby': notice ? 'setting-sync-everything-hint setting-sync-everything-notice' : 'setting-sync-everything-hint', title: null } }),
     notice, added.length ? h('div.setting-added', {}, added) : undefined);
 }

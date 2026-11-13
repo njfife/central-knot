@@ -10,13 +10,12 @@ import { mkdir, mkdtemp, readdir, readFile, realpath, rm, utimes, writeFile } fr
 import { join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { agentsView, applyAgents } from '../src/agents.ts';
-import { everythingUndo, setSyncEverything } from '../src/everything.ts';
+import { everythingEntryAction, setSyncEverything } from '../src/everything.ts';
 import { readHistory } from '../src/history.ts';
-import { everythingAction, everythingPlan, everythingSentence, libraryAction, libraryEntry } from '../src/historyactions.ts';
-import type { LibraryItem } from '../src/library.ts';
+import { entriesNow, everythingAction, everythingDone, everythingPlan, everythingSentence, libraryAction } from '../src/historyactions.ts';
 import { rowClicks } from '../src/libraryrow.ts';
 import { applyServers, restoreServer, serversView } from '../src/servers.ts';
-import { asksNow, waitingForChoice, whatYesDoes } from '../src/setupcounts.ts';
+import { asksNow, latestDone, waitingForChoice, walkPlace, wayBackIn, whatYesDoes, type Waiting } from '../src/setupcounts.ts';
 import { newRecord, partsRecordPath, readRecord, remember, saveRecord, syncGate, writeAccess, type ShareContext } from '../src/share.ts';
 import { applySkills, restoreSkill, skillsView, takeOver } from '../src/skills.ts';
 import { chooseTools } from '../src/toolchoice.ts';
@@ -77,12 +76,9 @@ async function filesIn(box: Box): Promise<Record<string, string>> {
   return found;
 }
 const history = (box: Box) => readHistory(box.context);
-const switchesOn = async (box: Box) => (await history(box)).filter(event => event.kind === 'everything' && event.everything?.on && !event.everything.undo);
-/** The item a library entry is about, as the libraries hold it now. */
-async function itemsNow(box: Box) {
-  const view = { skills: await skillsView(box.context, tools), mcp: await serversView(box.context, tools), agents: await agentsView(box.context, tools) };
-  return (event: HistoryEvent): LibraryItem | undefined => { const at = libraryEntry(event); return at && view[at.kind].library[at.key]; };
-}
+const switchesOn = async (box: Box) => (await history(box)).filter(event => event.kind === 'everything' && event.everything?.ruleOn && !event.everything.undo);
+/** Each entry's item and what the tools hold of it now, as History's page decides its actions (historyactions.ts entriesNow). */
+const entryItems = async (box: Box, managed = tools) => entriesNow(await homeView(box, managed));
 const rowOf = (view: LibraryView, key: string) => view.items.find(item => item.key === key)!;
 const pageRow = (fact: LibraryFacts) => ({ key: fact.key, name: fact.name, hashes: Object.fromEntries(Object.entries(fact.copies).map(([tool, copy]) => [tool, copy!.hash])), plan: fact.plan, takeInAnswers: fact.takeInAnswers });
 /** The copy question's click for one tool's copy (libraryrow.ts rowClicks.on, `use`), as the row shows it now. */
@@ -212,29 +208,29 @@ test('Yes in a home like the owner’s: only new files are written, nothing ther
 
     // The one Undo: every take-in by its own Undo; each tool file back as it was before Yes, byte for byte; the rule off.
     const [switchOn] = await switchesOn(box);
-    const offered = everythingAction(switchOn, await history(box), await itemsNow(box), tools);
+    const offered = everythingAction(switchOn, await history(box), await entryItems(box, tools));
     assert.deepEqual(offered, { label: 'Undo', help: 'Switch Synchronize everything off and take back the 37 items it took in since, each tool it was found in keeping its own copy' });
-    const undone = await everythingUndo(box.context, tools, switchOn.id);
+    const undone = await everythingEntryAction(box.context, tools, switchOn.id);
     assert.equal(undone.stopped, undefined);
     assert.deepEqual(await filesIn(box), before);
     assert.deepEqual([(await recordOf(box))?.syncEverything, asksNow(await homeView(box))], [false, undefined]);
     const undo = (await history(box)).find(event => event.id === undone.made![0])!;
-    assert.deepEqual([undo.everything?.undo?.tookBack.length, undo.everything?.undo?.left, everythingSentence(undo).text],
+    assert.deepEqual([undo.everything?.undo?.itemUndos.length, undo.everything?.undo?.left, everythingSentence(undo).text],
       [37, [], 'Undone: switched off, and 37 items it took in are out of Central Knot again, each tool it was found in keeping its own copy.']);
     assert.equal((await history(box)).find(event => event.id === switchOn.id)?.undoneBy, undo.id);
     // Each take-in is marked undone by the entry its own Undo made, as History shows it ("Undone"), and those are what it took back.
     const takeIns = (await history(box)).filter(event => event.cause === 'sync-everything');
-    assert.deepEqual([takeIns.length, takeIns.map(event => event.undoneBy).sort()], [37, [...undo.everything!.undo!.tookBack].sort()]);
+    assert.deepEqual([takeIns.length, takeIns.map(event => event.undoneBy).sort()], [37, [...undo.everything!.undo!.itemUndos].sort()]);
     // A pass after it takes nothing back in: each is a tombstone the rule leaves (Add, or Restore, brings it back).
     await background(box);
     assert.deepEqual(await filesIn(box), before);
 
     // Its Restore: the rule on again, and each item back by its own Restore.
-    assert.equal(everythingAction(undo, await history(box), await itemsNow(box), tools)?.label, 'Restore');
-    const restored = await everythingUndo(box.context, tools, undo.id);
+    assert.equal(everythingAction(undo, await history(box), await entryItems(box, tools))?.label, 'Restore');
+    const restored = await everythingEntryAction(box.context, tools, undo.id);
     assert.equal(restored.stopped, undefined);
     assert.deepEqual([await filesIn(box), (await recordOf(box))?.syncEverything], [afterYes, true]);
-    assert.equal(everythingAction(undo, await history(box), await itemsNow(box), tools), undefined, 'used');
+    assert.equal(everythingAction(undo, await history(box), await entryItems(box, tools)), undefined, 'used');
     assert.deepEqual(Object.values((await homeView(box)).skills.library).filter(item => item.on && !item.deleted).length, 37);
   } finally { await box.cleanup(); }
 });
@@ -275,7 +271,7 @@ test('The owner’s seven, choosing the shared copy: Claude Code’s own copy is
     assert.ok(after.library.review.versions.some(version => version.hash === ownHash), `Claude Code’s own (“${own.trim().split('\n').at(-1)}”) is a version`);
     const chosen = (await history(box)).at(-1)!;
     assert.deepEqual([chosen.kind, chosen.losers.map(loser => loser.tool)], ['chosen', ['claude-cli']]);
-    assert.equal(libraryAction(chosen, after.library.review)?.label, 'Undo', 'its own Undo');
+    assert.equal(libraryAction(chosen, after.library.review, { managed: tools, edited: [] })?.label, 'Undo', 'its own Undo');
   } finally { await box.cleanup(); }
 });
 
@@ -366,6 +362,25 @@ test('The walkthrough leaves a plugin’s parts alone: a part whose copies diffe
   } finally { await box.cleanup(); }
 });
 
+test('The Overview’s way back in starts the walkthrough again once every item left was skipped, though they still wait', () => {
+  const review: Waiting = { kind: 'skills', key: 'review', name: 'review' }, docs: Waiting = { kind: 'mcp', key: 'docs', name: 'docs' };
+  assert.deepEqual([walkPlace([review, docs], []).at, walkPlace([review, docs], ['skills:review']).number, walkPlace([review, docs], ['skills:review']).of], [review, 2, 2]);
+  assert.equal(wayBackIn([review, docs], ['skills:review'], true), 'go-on');
+  assert.deepEqual([walkPlace([review, docs], ['skills:review', 'mcp:docs']).at, wayBackIn([review, docs], ['skills:review', 'mcp:docs'], true)], [undefined, 'start']);
+  assert.equal(wayBackIn([review], [], false), 'start');
+});
+
+test('“Use the latest for the rest” says what happened to each: taken in, skipped with no dates, changed meanwhile, or not chosen because its pass stopped', () => {
+  const item = (key: string, kind: Waiting['kind'] = 'skills'): Waiting => ({ kind, key, name: key, latest: { tool: 'codex-cli', hash: key } });
+  const [notes, review, plan] = [item('notes'), item('review'), item('plan', 'agents')], docs: Waiting = { kind: 'mcp', key: 'docs', name: 'docs' };
+  const done = latestDone([notes, review, plan], [docs], [
+    { kind: 'skills', result: { writes: 1, results: [{ item: 'review', outcome: 'held', unchanged: true, chooseAgain: true, message: 'The copy you chose changed since you chose it.' }] } },
+    { kind: 'agents', result: { stopped: 'Central Knot Alpha syncs this home, so nothing was written or deleted.', results: [], writes: 0 } },
+  ], [review, plan, docs]);
+  assert.deepEqual(done, { warn: true, text: 'Used the latest copy for 1 item, each with its own Undo in History. Skipped 1 with no dates to go by (docs): it stays found, and its row asks which copy. '
+    + 'review changed meanwhile, so it is asked again. plan wasn’t chosen: Central Knot Alpha syncs this home, so nothing was written or deleted.' });
+});
+
 // ---------- The one Undo meets later changes ----------
 
 test('The one Undo after later changes: each take-in edited, turned Off, deleted, taken over or found in Claude Code since is left and named, as are two copies chosen; the rest go, and no copy it says it leaves is removed', async () => {
@@ -388,12 +403,12 @@ test('The one Undo after later changes: each take-in edited, turned Off, deleted
     for (const name of ['first', 'second']) await applySkills(box.context, tools, [choose(await skillsView(box.context, tools), name, 'codex-cli')]);
     const before = await filesIn(box);
     const [switchOn] = await switchesOn(box);
-    const plan = everythingPlan(switchOn, await history(box), await itemsNow(box), tools);
+    const plan = everythingPlan(switchOn, await history(box), await entryItems(box));
     assert.deepEqual(plan.takeBack.map(event => event.item).sort(), ['other', 'plain']);
-    const undone = await everythingUndo(box.context, tools, switchOn.id);
+    const undone = await everythingEntryAction(box.context, tools, switchOn.id);
     const undo = (await history(box)).find(event => event.id === undone.made![0])!;
     assert.equal(everythingSentence(undo).text, 'Undone: switched off, and 2 items it took in are out of Central Knot again, each tool it was found in keeping its own copy. Left in: '
-      + 'deleted (deleted from Central Knot since), edited (changed since), offed (turned off since), shared (its shared copy taken over since), docs (found in Claude Code: no Undo) '
+      + 'deleted (deleted from Central Knot since), edited (changed since), offed (turned off since), shared (a copy it was found in taken over since), docs (found in Claude Code: no Undo) '
       + 'and first and second (you chose their copies: each has its own Undo).');
     const after = await filesIn(box);
     for (const [path, bytes] of Object.entries(before)) {
@@ -415,13 +430,137 @@ test('A switch-on’s Undo after Settings switched the rule off and on again tak
     await putSkill(box, skillRoot['claude-cli'], 'second');
     await background(box);
     const [yes, again] = await switchesOn(box);
-    await everythingUndo(box.context, tools, yes.id);
+    await everythingEntryAction(box.context, tools, yes.id);
     const library = (await skillsView(box.context, tools)).library;
     assert.deepEqual([library.first.deleted !== undefined, library.second.on && !library.second.deleted, (await recordOf(box))?.syncEverything], [true, true, true]);
     const undo = (await history(box)).find(event => event.everything?.undo)!;
     assert.deepEqual([undo.everything?.undo?.switchedOff, everythingSentence(undo).text], [false, 'Undone: 1 item it took in is out of Central Knot again, each tool it was found in keeping its own copy.']);
     // The later switch-on still takes back what it took in since, and switches the rule off.
-    assert.equal(everythingAction(again, await history(box), await itemsNow(box), tools)?.help, 'Switch Synchronize everything off and take back the 1 item it took in since, each tool it was found in keeping its own copy');
+    assert.equal(everythingAction(again, await history(box), await entryItems(box, tools))?.help, 'Switch Synchronize everything off and take back the 1 item it took in since, each tool it was found in keeping its own copy');
+  } finally { await box.cleanup(); }
+});
+
+// ---------- The one Undo, and a take-in's own, leave what they promise to leave ----------
+// A take-in is taken back only while every place it was found in still holds the copy it held then, in a tool still managed
+// (historyactions.ts takeInHeld); anything else is left in and named, by the one Undo and by the take-in's own Undo alike.
+
+/** The take-in's own Undo as History offers it now (its button's label), for the item as main reads it. */
+const ownUndo = async (box: Box, key: string, managed = tools) => {
+  const entry = (await history(box)).find(event => event.cause === 'sync-everything' && event.key === key)!;
+  const about = await entryItems(box, managed);
+  return libraryAction(entry, about(entry).item, about(entry).now)?.label;
+};
+
+test('A tool left out since, the only one the item was found in: the take-in is left in and named, so the person’s own copy is still there once the tool is managed again', async () => {
+  const box = await sandbox();
+  try {
+    await putSkill(box, skillRoot['copilot-cli'], 'notes', 'My own notes skill.');
+    const own = await readFile(join(box.home, skillRoot['copilot-cli'], 'notes/SKILL.md'), 'utf8');
+    await setSyncEverything(box.context, true, true);
+    await background(box);
+    await chooseTools(box.context, 'copilot-cli', false);
+    const managed: HarnessId[] = ['claude-cli', 'codex-cli'];
+    assert.notEqual(await ownUndo(box, 'notes', managed), 'Undo', 'its own Undo is not offered while Copilot CLI is left out');
+    const [switchOn] = await switchesOn(box);
+    const undone = await everythingEntryAction(box.context, managed, switchOn.id);
+    const undo = (await history(box)).find(event => event.id === undone.made![0])!;
+    assert.deepEqual(undo.everything?.undo?.left, [{ item: 'notes', why: 'left-out' }]);
+    await chooseTools(box.context, 'copilot-cli', true);
+    await background(box);
+    assert.equal(await readFile(join(box.home, skillRoot['copilot-cli'], 'notes/SKILL.md'), 'utf8'), own);
+  } finally { await box.cleanup(); }
+});
+
+for (const edited of ['claude-cli', 'codex-cli'] as const) test(`A hand edit in ${edited} not taken in yet (Automatic sync off): the take-in is left in as changed, and no file is written over or removed`, async () => {
+  const box = await sandbox();
+  try {
+    await putSkill(box, skillRoot['claude-cli'], 'notes', 'Original.');
+    await setSyncEverything(box.context, true, true);
+    await background(box);
+    await putSkill(box, skillRoot[edited], 'notes', 'My newer edit.');
+    const before = await filesIn(box);
+    assert.notEqual(await ownUndo(box, 'notes'), 'Undo');
+    const [switchOn] = await switchesOn(box);
+    const undone = await everythingEntryAction(box.context, tools, switchOn.id);
+    const undo = (await history(box)).find(event => event.id === undone.made![0])!;
+    assert.deepEqual([undo.everything?.undo?.left, (await skillsView(box.context, tools)).library.notes.deleted, await filesIn(box)], [[{ item: 'notes', why: 'changed' }], undefined, before]);
+  } finally { await box.cleanup(); }
+});
+
+test('Taken over since in a tool that read it from ~/.agents/skills, though another tool’s identical copy was the one taken in: the take-in is left in as taken over, and no tool loses it', async () => {
+  const box = await sandbox();
+  try {
+    await putSkill(box, skillRoot['claude-cli'], 'notes', 'Identical.');
+    await putSkill(box, SHARED, 'notes', 'Identical.');
+    await setSyncEverything(box.context, true, true);
+    await background(box);
+    assert.equal((await takeOver(box.context, tools, 'notes', 'codex-cli')).stopped, undefined);
+    const before = await filesIn(box);
+    assert.notEqual(await ownUndo(box, 'notes'), 'Undo');
+    const [switchOn] = await switchesOn(box);
+    const undone = await everythingEntryAction(box.context, tools, switchOn.id);
+    const undo = (await history(box)).find(event => event.id === undone.made![0])!;
+    assert.deepEqual([undo.everything?.undo?.left, await filesIn(box)], [[{ item: 'notes', why: 'taken-over' }], before]);
+  } finally { await box.cleanup(); }
+});
+
+test('Undo, Restore, then the switch-on’s Undo again: it takes back exactly what the Restore put back, every file as before Yes', async () => {
+  const box = await sandbox();
+  try {
+    await putSkill(box, skillRoot['claude-cli'], 'notes', 'Original.');
+    const before = await filesIn(box);
+    await setSyncEverything(box.context, true, true);
+    await background(box);
+    const [yes] = await switchesOn(box);
+    const undone = await everythingEntryAction(box.context, tools, yes.id);
+    const restored = await everythingEntryAction(box.context, tools, undone.made![0]);
+    assert.equal(restored.stopped, undefined);
+    await background(box);
+    const again = (await switchesOn(box)).filter(event => !event.undoneBy).at(-1)!;
+    assert.equal(everythingAction(again, await history(box), await entryItems(box))?.help, 'Switch Synchronize everything off and take back the 1 item it took in since, each tool it was found in keeping its own copy');
+    await everythingEntryAction(box.context, tools, again.id);
+    assert.deepEqual([await filesIn(box), (await recordOf(box))?.syncEverything], [before, false]);
+  } finally { await box.cleanup(); }
+});
+
+test('The Restore passes over an item added, changed or deleted since the Undo, and names it; the others come back', async () => {
+  const box = await sandbox();
+  try {
+    await putSkill(box, skillRoot['claude-cli'], 'notes', 'Original.');
+    await putSkill(box, skillRoot['claude-cli'], 'tidy');
+    await setSyncEverything(box.context, true, true);
+    await background(box);
+    const [yes] = await switchesOn(box);
+    const undone = await everythingEntryAction(box.context, tools, yes.id);
+    // notes is added again by hand, edited, and deleted from Central Knot.
+    await applySkills(box.context, tools, [{ key: 'notes', managed: true, off: [] }]);
+    await putSkill(box, skillRoot['claude-cli'], 'notes', 'New incarnation.');
+    await background(box);
+    await applySkills(box.context, tools, [{ key: 'notes', managed: true, off: [], deleted: true }]);
+    const undo = (await history(box)).find(event => event.id === undone.made![0])!;
+    assert.match(everythingAction(undo, await history(box), await entryItems(box))?.help ?? '', /put back the 1 item this took out of Central Knot.*; notes was added, changed or deleted since, and stays as it is$/);
+    const restored = await everythingEntryAction(box.context, tools, undo.id);
+    const library = (await skillsView(box.context, tools)).library;
+    assert.deepEqual([library.notes.deleted !== undefined, library.tidy.on && !library.tidy.deleted], [true, true]);
+    assert.deepEqual(restored.results.filter(result => result.outcome === 'held').map(result => result.message), ['notes was added, changed or deleted since the Undo, so it stays as it is.']);
+  } finally { await box.cleanup(); }
+});
+
+test('The band after an Undo’s Restore says what was restored, also where a later switch kept the rule on (the Undo’s entry then reads on)', async () => {
+  const box = await sandbox();
+  try {
+    await putSkill(box, skillRoot['claude-cli'], 'notes');
+    await setSyncEverything(box.context, true, true);
+    await background(box);
+    const [first] = await switchesOn(box);
+    await setSyncEverything(box.context, false);
+    await setSyncEverything(box.context, true);
+    const undone = await everythingEntryAction(box.context, tools, first.id);
+    const undo = (await history(box)).find(event => event.id === undone.made![0])!;
+    assert.equal(undo.everything?.ruleOn, true, 'the rule is on: the later switch-on set it');
+    const restored = await everythingEntryAction(box.context, tools, undo.id);
+    const made = (await history(box)).filter(event => restored.made?.includes(event.id));
+    assert.equal(everythingDone(undo, made, made.filter(event => event.kind === 'restored').length), 'Restored: 1 item is back in Central Knot; the switch-on’s Undo takes it back again.');
   } finally { await box.cleanup(); }
 });
 
@@ -439,7 +578,7 @@ test('Yes with Automatic sync off adds nothing until Sync once; the app quits, S
     await background(box);
     assert.deepEqual(Object.keys((await skillsView(box.context, tools)).library).sort(), ['notes', 'tidy']);
     const [switchOn] = await switchesOn(box);
-    await everythingUndo(box.context, tools, switchOn.id);
+    await everythingEntryAction(box.context, tools, switchOn.id);
     assert.deepEqual([await filesIn(box), (await recordOf(box))?.syncEverything], [before, false]);
   } finally { await box.cleanup(); }
 });
@@ -467,10 +606,10 @@ test('Yes with a profile in use and a tool left out: the profile’s name drops 
     const copilotBefore = (await readdir(join(box.home, skillRoot['copilot-cli']))).sort();
     assert.deepEqual(copilotBefore, ['notes', 'plan', 'tidy']);
     const [switchOn] = await switchesOn(box);
-    assert.match(everythingAction(switchOn, await history(box), await itemsNow(box), ['claude-cli'])?.help ?? '', /Copilot CLI isn’t managed now, so it keeps what it has$/);
-    const undone = await everythingUndo(box.context, tools.filter(tool => tool === 'claude-cli'), switchOn.id);
+    assert.match(everythingAction(switchOn, await history(box), await entryItems(box, ['claude-cli']))?.help ?? '', /Copilot CLI isn’t managed now, so it keeps Central Knot’s copy until it is$/);
+    const undone = await everythingEntryAction(box.context, tools.filter(tool => tool === 'claude-cli'), switchOn.id);
     const undo = (await history(box)).find(event => event.id === undone.made![0])!;
     assert.deepEqual([(await readdir(join(box.home, skillRoot['copilot-cli']))).sort(), undo.everything?.undo?.keptIn], [copilotBefore, ['copilot-cli']]);
-    assert.match(everythingSentence(undo).text, /Copilot CLI isn’t managed now, so it keeps what it has\.$/);
+    assert.match(everythingSentence(undo).text, /Copilot CLI isn’t managed now, so it keeps Central Knot’s copy until it is\.$/);
   } finally { await box.cleanup(); }
 });

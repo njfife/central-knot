@@ -466,12 +466,19 @@ export interface HistoryEvent {
    *   'Synchronize everything'); everything.ts's header says what each offers. */
   kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed' | 'profile' | 'took-over' | 'written' | 'on' | 'off' | 'current' | 'managing' | 'everything';
   /**
-   * 'everything': whether Synchronize everything is on from then on. A switch-on's one Undo is an 'everything' entry too, with
-   * `undo` (the switch-on's `undoneBy` names it): whether it switched the rule off, `tookBack` the entries its items' own Undos
-   * made (each a take-in taken back, which that entry's Restore brings back), `left` each take-in it left in and each copy chosen
-   * meanwhile, by name, with why (historyactions.ts LeftIn), and `keptIn` the tools no longer managed, which kept what they had.
+   * 'everything': `ruleOn`, whether Synchronize everything is on once this entry is made (a switch: which way it was switched). A
+   * switch-on's one Undo is an 'everything' entry too, with `undo` (the switch-on's `undoneBy` names it): whether it switched the
+   * rule off, `itemUndos` the entries its items' own Undos made (one per take-in taken back; each one's Restore brings that item
+   * back), `left` each take-in it left in and each copy chosen meanwhile, by name, with why (historyactions.ts LeftIn), and
+   * `keptIn` the tools no longer managed that keep Central Knot's copy until they are.
    */
-  everything?: { on: boolean; undo?: { switchedOff: boolean; tookBack: string[]; left: LeftIn[]; keptIn: HarnessId[] } };
+  everything?: { ruleOn: boolean; undo?: { switchedOff: boolean; itemUndos: string[]; left: LeftIn[]; keptIn: HarnessId[] } };
+  /**
+   * A found item's take-in (on with cause `found` or `sync-everything`, or `chosen`): the managed harnesses it was found in, with a
+   * copy of their own or one they had another way. Its Undo is offered only while each still holds that and is managed
+   * (historyactions.ts takeInHeld); an entry from before it was recorded counts where it was taken from and its own copies.
+   */
+  foundIn?: HarnessId[];
   /** 'managing': the tool, and whether Central Knot manages it from then on (toolchoice.ts chooseTools). */
   managing?: { tool: HarnessId; on: boolean };
   /** 'on' / 'off': the one harness it was turned on or off in. */

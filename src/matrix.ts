@@ -3,7 +3,7 @@
 // details, and every click's result comes with an Undo of the whole click. Every kind is on Central Knot's library: its row is a
 // library row (`library()`): librarypages.ts says what each kind supplies, libraryrow.ts what such a row says. A sync notice is
 // kept or folded once its page shows it (toldNotices); until then it lives across reads in app.ts keepUnshown. First setup's
-// walkthrough (firstsetup.ts) is a band among a table's bands, holding the copy question of the item it is at (copyQuestion).
+// walkthrough (firstsetup.ts) is a band among a table's bands, given copyQuestion to hold the question of the item it is at.
 import { brandMark } from './brand.ts';
 import { caughtUpNames, defaultHistoryDays, groupBy, noticeNames, syncOwner } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
@@ -793,7 +793,7 @@ function otherOwnerBand(): HTMLElement | null {
 function listNotices() {
   const mcp = listView()!;
   const bands: HTMLElement[] = [];
-  for (const band of [syncOffBand(), outcomeBand(), walkthroughBand(kind)]) if (band) bands.push(band);
+  for (const band of [syncOffBand(), outcomeBand(), walkthroughBand(kind, copyQuestion)]) if (band) bands.push(band);
   if (!mcp.access.allowed) bands.push(h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, mcp.access.reason)));
   const owned = otherOwnerBand();
   if (owned) bands.push(owned);

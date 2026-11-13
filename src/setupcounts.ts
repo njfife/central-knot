@@ -1,9 +1,11 @@
-// First setup's counts and its one decision, pure (no DOM), for the page that asks (firstsetup.ts) and for Settings' row: whether
-// the open home is asked the question (asksNow), what Yes would do now (whatYesDoes) and which found items wait for a choice of
-// copy (waitingForChoice), each read from the take-in table's rule column as each kind's view gives it (library.ts takeInAnswer
-// through librarypass.ts takeInAnswers), the same look the pass then uses. tests/firstsetup.test.ts holds them to what the pass does.
+// First setup's counts and decisions, pure (no DOM), for the page that asks (firstsetup.ts) and for Settings' row: whether the open
+// home is asked the question (asksNow), what Yes would do now (whatYesDoes) and which found items wait for a choice of copy
+// (waitingForChoice), each read from the take-in table's rule column as each kind's view gives it (library.ts takeInAnswer through
+// librarypass.ts takeInAnswers), the same look the pass then uses; and the walkthrough's place (walkPlace, wayBackIn) and what its
+// "Use the latest for the rest" did (latestDone). tests/firstsetup.test.ts holds them to what the pass does.
 import { kindSource } from './itemrow.ts';
-import type { HarnessId, HomeView } from './types.ts';
+import type { HarnessId, HomeView, PassResult } from './types.ts';
+import { andList } from './words.ts';
 
 /** The pages that list items (app.ts PageKind, written here so this module needs no page). */
 type PageKind = 'skills' | 'mcp' | 'agents';
@@ -55,4 +57,39 @@ export function whatYesDoes(home: HomeView) {
   const servers = takes.filter(({ kind }) => kind === 'mcp');
   return { takes: takes.length, to, choosing: waitingForChoice(home).length, waitForClaude: servers.filter(({ fact, tools }) => gets(fact, tools).includes('claude-cli')).length,
     fromClaude: servers.some(({ fact }) => !!fact.copies['claude-cli']) };
+}
+
+// ---------- The walkthrough ----------
+
+/** An item's place in the walkthrough: its kind and key. */
+export const walkId = (item: Waiting) => `${item.kind}:${item.key}`;
+
+/**
+ * Where the walkthrough is among the items that wait (`list`: waitingForChoice), given those it passed in this window (`passed`:
+ * a copy chosen, or skipped): the item it is at (the first that waits and was not passed), the items left, and its place ("2 of 7").
+ */
+export function walkPlace(list: Waiting[], passed: readonly string[]) {
+  const left = list.filter(item => !passed.includes(walkId(item)));
+  return { at: left[0] as Waiting | undefined, left, number: passed.length + 1, of: passed.length + left.length };
+}
+
+/** The Overview's way back in: on to where an open walkthrough is (`go-on`), while it has an item left; else it starts again. */
+export const wayBackIn = (list: Waiting[], passed: readonly string[], open: boolean): 'go-on' | 'start' => (open && walkPlace(list, passed).at ? 'go-on' : 'start');
+
+/**
+ * What "Use the latest for the rest" did, item by item, from each kind's pass (`sent`) and what still waits after (`still`): the items
+ * whose latest copy was taken in; those with no dates to go by, skipped; and each dated one still waiting, by what its pass said.
+ */
+export function latestDone(dated: Waiting[], undated: Waiting[], sent: { kind: PageKind; result: PassResult }[], still: Waiting[]): { text: string; warn: boolean } {
+  const names = (list: Waiting[]) => andList(list.map(item => item.name)), waiting = dated.filter(item => still.some(other => walkId(other) === walkId(item)));
+  const used = dated.length - waiting.length, said = (item: Waiting) => sent.find(each => each.kind === item.kind)?.result;
+  // Why each still waits: its kind's pass stopped, its copy changed since (asked again), or what its pass said of it.
+  const why = (item: Waiting) => { const result = said(item), own = result?.results.find(each => each.item === item.name && (each.unchanged || each.outcome !== 'written'));
+    return result?.stopped ?? (own?.chooseAgain ? 'again' : own?.message ?? 'again'); };
+  const again = waiting.filter(item => why(item) === 'again'), others = waiting.filter(item => why(item) !== 'again');
+  const text = [`Used the latest copy for ${used} ${used === 1 ? 'item' : 'items'}, each with its own Undo in History.`,
+    undated.length ? `Skipped ${undated.length} with no dates to go by (${names(undated)}): ${undated.length === 1 ? 'it stays' : 'they stay'} found, and ${undated.length === 1 ? 'its row asks' : 'each row asks'} which copy.` : '',
+    again.length ? `${names(again)} changed meanwhile, so ${again.length === 1 ? 'it is' : 'they are'} asked again.` : '',
+    ...others.map(item => `${item.name} wasn’t chosen: ${why(item)}`)].filter(Boolean).join(' ');
+  return { text, warn: waiting.length > 0 };
 }

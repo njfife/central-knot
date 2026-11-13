@@ -11,7 +11,7 @@ import { h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
 import { clickResults, keptBack } from './clickplan.ts';
-import { everythingSentence, libraryAction, libraryEntry, librarySentence } from './historyactions.ts';
+import { entriesNow, everythingDone, libraryAction, libraryEntry, librarySentence } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
 import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
@@ -352,7 +352,8 @@ export const applyClick = (click: Click) => busy('Applying…', async () => {
  */
 async function allUndoable(made: string[]) {
   const events = (await api().history()).events.filter(event => made.includes(event.id));
-  return events.every(event => { const entry = libraryEntry(event); return !entry || !!libraryAction(event, state.home?.[entry.kind].library[entry.key]); });
+  const about = entriesNow(state.home!);
+  return events.every(event => !libraryEntry(event) || !!libraryAction(event, about(event).item, about(event).now));
 }
 
 /** Undo of one click: each History entry it made goes back, newest first, by its own action (historyactions.ts). */
@@ -681,7 +682,7 @@ function sayLibraryAction(past: HistoryEvent, result: ApplyResult) {
   const made = state.history.data?.find(event => event.id === past.undoneBy);
   const item = view?.library[entry.key];
   const said = made && librarySentence(made, libraryWords[entry.kind], view?.tools ?? [], item, true)?.text;
-  const back = made && libraryAction(made, item);
+  const back = made && libraryAction(made, item, entriesNow(state.home!)(made).now);
   const notDone = result.results.filter(keptBack).map(entry => entry.message);
   const text = [`${past.item}: ${said ? said.replace(/^./, first => first.toLowerCase()) : 'done.'}`, ...notDone].join(' ');
   tell({ page: state.page, item: past.item, warn: notDone.length > 0, text, undo: back && made ? { id: made.id, label: back.label } : undefined });
@@ -689,15 +690,14 @@ function sayLibraryAction(past: HistoryEvent, result: ApplyResult) {
 }
 
 /**
- * After Synchronize everything's one Undo, or that Undo's Restore (everything.ts): what it did, in the Undo's entry's words, or
- * what the Restore put back; what it could not do after it, each sentence once.
+ * After Synchronize everything's one Undo, or that Undo's Restore (everything.ts everythingEntryAction): what it did, in the Undo's
+ * entry's words, or what the Restore put back; what it could not do after it, each sentence once. Which it was is the entry clicked:
+ * an Undo's entry (`undo`) offers the Restore, a switch-on the Undo.
  */
 function sayEverything(past: HistoryEvent, result: ApplyResult) {
   if (result.stopped) { tell({ page: state.page, item: past.item, text: result.stopped, warn: true, history: true }); return; }
   const made = (result.made ?? []).map(id => state.history.data?.find(event => event.id === id));
-  const restored = made.filter(event => event?.kind === 'restored').length;
-  const text = past.everything?.on ? (made[0] ? everythingSentence(made[0]).text : 'Undone.')
-    : `Restored: ${plural(restored, 'item')} ${restored === 1 ? 'is' : 'are'} back in Central Knot${made.some(event => event?.kind === 'everything') ? ', and Synchronize everything is on again' : ''}.`;
+  const text = everythingDone(past, made, made.filter(event => event?.kind === 'restored').length);
   const notDone = [...new Set(result.results.filter(keptBack).map(entry => entry.message))];
   tell({ page: state.page, item: past.item, warn: notDone.length > 0, history: true, text: [text, ...notDone.slice(0, 3)].join(' ') });
 }
@@ -1135,7 +1135,7 @@ export const setSync = (on: boolean) => busy(on ? 'Turning Sync on…' : 'Turnin
  * question is firstsetup.ts's). Turned on, main's next pass takes in what is found now: at once with Automatic sync on, at Sync
  * once with it off. Answers why not, if it couldn't be set.
  */
-export const setSyncEverything = (on: boolean) => busy(on ? 'Turning on Synchronize everything…' : 'Turning off Synchronize everything…', async () => {
+export const switchSyncEverything = (on: boolean) => busy(on ? 'Turning on Synchronize everything…' : 'Turning off Synchronize everything…', async () => {
   const set = await api().setSyncEverything(on, state.home!.home);
   if (set.view) setHome(set.view);
   if (set.stopped) { announce(`Synchronize everything was not changed. ${set.stopped}`); return; }

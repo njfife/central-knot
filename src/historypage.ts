@@ -9,7 +9,7 @@ import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
 import { changes, homeItems, NO_PROFILE, turnsWords, undoPlan } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
-import { doneWords, everythingAction, everythingSentence, keptOver, libraryAction, libraryEntry, librarySentence, versionChoices } from './historyactions.ts';
+import { doneWords, entriesNow, everythingAction, everythingSentence, keptOver, libraryAction, libraryEntry, librarySentence, versionChoices } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
 import { button, emptyState, h, icon, rereadBand } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -106,7 +106,7 @@ const managingWords = ({ tool, on }: NonNullable<HistoryEvent['managing']>): { g
   : { glyph: 'boxes', text: `Left out from here on: Central Knot writes nothing in ${toolName(tool)}, and its copies there stay as they are. No Undo: its switch on Harnesses is the way back.` });
 
 /** What a Synchronize everything entry offers now (historyactions.ts everythingAction), from History and the libraries as the page read them. */
-const everythingOffer = (event: HistoryEvent) => (state.home && state.history.data ? everythingAction(event, state.history.data, itemOf, state.home.sync.managed) : undefined);
+const everythingOffer = (event: HistoryEvent) => (state.home && state.history.data ? everythingAction(event, state.history.data, entriesNow(state.home)) : undefined);
 
 /** Skills, MCP servers, agents, profile switches, tools' Manage switches and Synchronize everything share History; each row says which it is. */
 const kindOf = (event: HistoryEvent) => (event.kind === 'profile' ? 'Profile' : event.kind === 'managing' ? 'Tool' : event.kind === 'everything' ? 'Setting' : event.base ? 'Instructions'
@@ -129,7 +129,7 @@ function libraryButtons(event: HistoryEvent) {
   const entry = libraryEntry(event)!, item = itemOf(event);
   // A skill's own switches as the page last read them, so an action that would change nothing there is not offered.
   const loads = entry.kind === 'skills' ? state.home?.skills.items.find(row => row.key === entry.key)?.loads : undefined;
-  const own = libraryAction(event, item, undefined, loads);
+  const own = libraryAction(event, item, entriesNow(state.home!)(event).now, undefined, loads);
   const link = (label: string, help: string, id: string, version?: string) => {
     const control = button({ variant: 'link', size: 'small', label, name: `${label} (${event.item}): ${help}`, id, disabled: !!state.busy, onclick: () => void restoreEvent(event.id, version) });
     control.title = help;

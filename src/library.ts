@@ -328,6 +328,9 @@ export function plan(item: LibraryItem, copies: Copies): Plan {
   return made;
 }
 
+/** The harnesses whose copy holds an edit no pass has taken in yet, by a plan: the one it takes in, and those it keeps as versions. */
+export const pendingEdits = (made: Plan): HarnessId[] => [...(made.takeIn ? [made.takeIn] : []), ...made.keep.filter(kept => kept.from.how === 'edited').map(kept => kept.harness)];
+
 /**
  * The edit that becomes the current version, among the harnesses whose copy is one (`verdicts`): the latest. An edit made on
  * the current version (`take-in`) always counts; one made where the current version had moved on as well (`latest-wins`)

@@ -69,6 +69,8 @@ const placeIn = (view: LibraryView, key: string) => { const item = view.library[
 const pageRow = (fact: LibraryFacts) => ({ key: fact.key, name: fact.name, hashes: Object.fromEntries(Object.entries(fact.copies).map(([tool, copy]) => [tool, copy!.hash])), plan: fact.plan, takeInAnswers: fact.takeInAnswers });
 const add = (view: LibraryView, key: string): Change => rowClicks.on(pageRow(rowOf(view, key)!), view.library[key]?.deleted ? view.library[key] : undefined);
 const entriesOf = async (box: Box, key: string) => (await readHistory(box.context)).filter(event => event.key === key);
+/** Nothing waits in the tools: no copy holds an edit not taken in, and the three tools are managed (historyactions.ts ItemNow). */
+const settled = { managed: tools, edited: [] as HarnessId[] };
 const turnOn = async (box: Box) => assert.deepEqual(await setSyncEverything(box.context, true), {});
 
 // ---------- Off, and switched on ----------
@@ -125,11 +127,11 @@ test('Switched on in a home with found items: each it may take is taken in and O
     const notes = (await entriesOf(box, 'notes')).at(-1)!;
     assert.deepEqual([notes.kind, notes.cause, notes.winner?.tool], ['on', 'sync-everything', 'claude-cli']);
     assert.equal(librarySentence(notes, libraryWords.skills, tools)?.text, 'Found in Claude Code and taken into Central Knot by Synchronize everything; put in Copilot CLI and Codex.');
-    assert.equal(libraryAction(notes, after.skills.library.notes)?.label, 'Undo');
+    assert.equal(libraryAction(notes, after.skills.library.notes, settled)?.label, 'Undo');
     // Its existing limits too: docs's Undo would give Claude Code's copy back to its MCP file, which waits for Write, so it is
     // not offered; files's is, since Claude Code had none.
     const docs = (await entriesOf(box, 'mcp:docs')).at(-1)!, files = (await entriesOf(box, 'mcp:files')).at(-1)!;
-    assert.deepEqual([docs.cause, libraryAction(docs, after.mcp.library.docs), libraryAction(files, after.mcp.library.files)?.label], ['sync-everything', undefined, 'Undo']);
+    assert.deepEqual([docs.cause, libraryAction(docs, after.mcp.library.docs, settled), libraryAction(files, after.mcp.library.files, settled)?.label], ['sync-everything', undefined, 'Undo']);
     // And it is said: the notice names the exception, and docs's entry says why it has no Undo and what to do instead.
     const mcpNotice = done.mcp.notices!.find(notice => notice.kind === 'taken-in')!;
     assert.equal(mcpNotice.kind === 'taken-in' && sentences(libraryWords.mcp).takenInWords(mcpNotice, 'mcp'),
@@ -433,9 +435,9 @@ test('A take-in’s Undo is not offered once the place it was found in no longer
     await turnOn(box);
     await background(box);
     const taken = (await entriesOf(box, 'notes')).find(event => event.cause === 'sync-everything')!;
-    assert.equal(libraryAction(taken, (await views(box)).skills.library.notes)?.label, 'Undo', 'while the shared copy is where it was found');
+    assert.equal(libraryAction(taken, (await views(box)).skills.library.notes, settled)?.label, 'Undo', 'while the shared copy is where it was found');
     assert.equal((await takeOver(box.context, tools, 'notes', 'codex-cli')).stopped, undefined);
-    assert.equal(libraryAction(taken, (await views(box)).skills.library.notes)?.label, 'Turn off');
+    assert.equal(libraryAction(taken, (await views(box)).skills.library.notes, settled)?.label, 'Turn off');
   } finally { await box.cleanup(); }
 });
 
