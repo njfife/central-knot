@@ -12,7 +12,8 @@
 //            Central Knot last put or saw in each harness.
 //   version  One content the item has had, with when it was made and where it came from. Every version is kept until the
 //            item is deleted. Only keepVersion and setCurrent add one.
-//   found    Something a managed harness has that the library doesn't. It is no item state: a person takes it in.
+//   found    Something a managed harness has that the library doesn't. It is no item state: a click on Add takes it in, or
+//            the home's standing rule, Synchronize everything (FOUND, below).
 //
 // Content has two parts for agents and MCP servers: the shared part, which a version's hash names (an agent's name,
 // description and prompt), and each harness's own part (the other fields of its file). The library keeps the latest own
@@ -96,7 +97,34 @@
 // folder being shared. `key` compares names as macOS compares file names (itemKey), so two names in one harness that differ
 // only by case can't be told apart: each kind makes both unseen.
 //
-// Worked examples, one per row of the table: tests/library.test.ts. The same on real files: tests/agents.test.ts and tests/skills.test.ts.
+// FOUND, AND WHAT TAKES IT IN. A key a managed harness has, with no live item for it in the library (none, or a tombstone), is
+// found. Two things take it in, each as an Add does (On everywhere, from one copy; librarypass.ts takeIn): a click on its Add,
+// and the home's standing rule, Synchronize everything (share.ts SyncRecord syncEverything), in the background pass and Sync
+// once (librarypass.ts PassOptions background). `takeInAnswer` is this table: each column reads down to its first answer
+// ("on": the next row decides).
+//
+//   what the key has                                 a click on Add                       Synchronize everything
+//   no copy that can be read                         refused: no copy to take in          left found, quietly
+//   a deleted item's copy still to leave a harness   no Add: History can restore it       left found
+//     at a step of the person's own (Write to Claude Code)
+//   the record holds it deleted                      on: its tombstone is lifted          left found, for good
+//   a copy that is a plugin's part                   on                                   left found: its row keeps Add
+//   a skill Convert to skill made from an agent      on                                   left found: its row keeps Add
+//   every copy switched off by its tool's own switch on                                   left found: its row keeps Add
+//   a copy whose own time is inside the settle       on                                   left for the next pass
+//     window of the pass's clock
+//   a copy chosen that is gone or changed since      refused: choose again                (the rule chooses none)
+//   copies that differ, none chosen                  waits: the row asks which            left found, with the row's question
+//   otherwise                                        taken in from the one content, or the copy chosen
+//
+// Not found at all, so in neither column: a copy of an item that is Off, or in a harness the item is kept out of (the table
+// above: "a found copy, left alone"); a copy a harness has that can't be read (unseen); a copy in a harness not managed. A copy
+// a harness has another way (a skill's link or ~/.agents/skills copy) is one it can be taken in from; that place is not
+// written (Take over stays a click). Nothing about found copies is stored: the rule takes in what is found at each pass, so
+// switching it on takes in everything found then. The page reads the same answers (each kind's view, through lookFor), with
+// the settle window passed.
+//
+// Worked examples, one per row of each table: tests/library.test.ts. The same on real files: tests/agents.test.ts and tests/skills.test.ts.
 import type { HarnessId } from './types.ts';
 import { toolName } from './words.ts';
 
@@ -322,6 +350,56 @@ export function managedAgain(item: LibraryItem, harness: HarnessId, copy: Harnes
 
 /** A version's time for a copy taken in: the copy's own time, or the time it is taken where it has none (an MCP entry). */
 export const versionAt = (at: number | undefined) => new Date(at ?? Date.now()).toISOString();
+
+// ---------- Found ----------
+
+/** One copy a found key has in a managed harness, as the take-in table reads it. */
+export interface FoundCopy {
+  harness: HarnessId; hash: string;
+  /** When it was last changed (ms); absent where a copy has no time of its own (an MCP entry). */
+  at?: number;
+  /** A plugin's part (parts.ts): the plugin put it in that harness. */
+  part?: true;
+  /** That harness's own switch turns it off there (skillswitch.ts, mcpswitch.ts). */
+  off?: true;
+}
+/** What the take-in table is told of a found key. */
+export interface FoundKey {
+  /** Its copies that can be read for sure, in the harnesses' order (librarypass.ts foundCopies). */
+  copies: FoundCopy[];
+  /** The record holds it deleted (a tombstone). */
+  deleted: boolean;
+  /** Convert to skill made it from an agent (agentskill.ts): spread, it would reach the tools that hold the agent. */
+  converted: boolean;
+  /** A deleted item's copy still waits to leave a harness, at a step of the person's own (Write to Claude Code). */
+  leaving: boolean;
+}
+/** Who asks to take a found key in: a click on its Add, or Synchronize everything. */
+export type TakenBy = 'click' | 'rule';
+/** Why a found key is left found (the header's FOUND table, one per row). */
+export type LeftFound = 'no-copy' | 'leaving' | 'deleted' | 'part' | 'converted' | 'switched-off' | 'settling' | 'choice-changed';
+/** The table's answer: take it in from this copy (`chosen`: the person chose it among copies that differ), wait for a choice of copy, or leave it found. */
+export type TakeInAnswer = { take: FoundCopy; chosen: boolean } | { wait: 'choice' } | { leave: LeftFound };
+
+/**
+ * The header's FOUND table, for one found key. `chosen`: the copy a click chose where copies differ, as the page saw it.
+ * `settle`: the pass's clock and its settle window; the page's look has none (the window counts as passed).
+ */
+export function takeInAnswer(by: TakenBy, found: FoundKey, chosen?: { harness: HarnessId; hash?: string }, settle?: { clock: number; ms: number }): TakeInAnswer {
+  const rule = by === 'rule', { copies } = found;
+  if (!copies.length) return { leave: 'no-copy' };
+  if (found.leaving) return { leave: 'leaving' };
+  if (rule && found.deleted) return { leave: 'deleted' };
+  if (rule && copies.some(copy => copy.part)) return { leave: 'part' };
+  if (rule && found.converted) return { leave: 'converted' };
+  if (rule && copies.every(copy => copy.off)) return { leave: 'switched-off' };
+  if (rule && settle && copies.some(copy => copy.at !== undefined && Math.abs(settle.clock - copy.at) < settle.ms)) return { leave: 'settling' };
+  const pick = chosen && copies.find(copy => copy.harness === chosen.harness);
+  if (!rule && chosen && (!pick || (chosen.hash !== undefined && pick.hash !== chosen.hash))) return { leave: 'choice-changed' };
+  const differ = new Set(copies.map(copy => copy.hash)).size > 1;
+  if (differ && !pick) return { wait: 'choice' };
+  return { take: pick ?? copies[0], chosen: differ };
+}
 
 // ---------- Versions ----------
 

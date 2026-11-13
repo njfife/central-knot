@@ -28,7 +28,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { libraryAction } from './historyactions.ts';
 import { listed, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
-import { copiesOf, differ, forgetFolders, foundCopies, itemClick, lookFor, restore, runPass, sharedFileSeen, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
+import { copiesOf, forgetFolders, itemClick, leavingIn, lookFor, restore, runPass, sharedFileSeen, takeInAnswers, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords, writesWait } from './libraryrow.ts';
 import { cannotHold, editEntry, mcpFile, ownText, readTool, recoverSettings, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, readMcpSwitches, withMcpSwitch } from './mcpswitch.ts';
@@ -59,6 +59,7 @@ interface ServerDisk extends Disk<McpEntry> {
   through: Map<HarnessId, Map<string, ThroughPlugin>>;
   /** Each tool's own switch file for servers, read once (mcpswitch.ts). */
   switches: Map<HarnessId, SwitchFile>;
+  switchedOff: Map<string, HarnessId[]>;
 }
 type ServerLook = Look<NeutralServer, McpEntry, ServerDisk>;
 
@@ -68,7 +69,7 @@ type ServerLook = Look<NeutralServer, McpEntry, ServerDisk>;
  */
 async function readDisk(context: ShareContext, managed: HarnessId[], writeClaude: boolean): Promise<ServerDisk> {
   const disk: ServerDisk = {
-    byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], shapes: new Map(), unseenNames: new Map(),
+    byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], shapes: new Map(), unseenNames: new Map(), switchedOff: new Map(),
     through: await serversThroughPlugins(context, managed), switches: await readMcpSwitches(context, managed),
     held: (item, tool) => {
       const given = disk.through.get(tool)?.get(item.key);
@@ -106,6 +107,11 @@ async function readDisk(context: ShareContext, managed: HarnessId[], writeClaude
     if (version) disk.shapes.set(hash, version);
   }
   for (const slot of disk.byKey.values()) for (const entry of Object.values(slot)) disk.shapes.set(entry.hash, entry.server);
+  // Each entry its tool's own switch turns off there, read for its mark and for the rule (librarypass.ts Disk.switchedOff).
+  for (const [key, slot] of disk.byKey) {
+    const off = Object.values(slot).filter(entry => { const file = disk.switches.get(entry.tool); return !!file && !file.problem && mcpDisabled(entry.tool, file.text, entry.name); });
+    if (off.length) disk.switchedOff.set(key, off.map(entry => entry.tool));
+  }
   return disk;
 }
 
@@ -318,7 +324,6 @@ async function rowFacts(look: ServerLook, key: string, item: LibraryItem | undef
   const copies = Object.fromEntries(entries.map(entry => [entry.tool, toolCopy(entry)]));
   const copiesNow = item ? copiesOf(look, item) : undefined, made = item && copiesNow ? plan(item, copiesNow) : undefined;
   const tombstone = item ? undefined : look.library.items[key];
-  const owing = made ?? (tombstone ? plan(tombstone, copiesOf(look, tombstone)) : undefined);
   const cannot: LibraryFacts['cannot'] = {}, plugin: NonNullable<LibraryFacts['plugin']> = {}, unseen: NonNullable<LibraryFacts['unseen']> = {};
   // A found server is asked about as taking it in would leave it: On everywhere, nothing applied yet.
   const asIf: Wanted = item ?? { key, name, on: true, except: [], applied: {} };
@@ -331,8 +336,10 @@ async function rowFacts(look: ServerLook, key: string, item: LibraryItem | undef
     const touched = made?.write.includes(tool) || made?.remove.includes(tool);
     if (why && (copy?.is === 'held' || touched || (!copiesNow && !slot[tool]))) cannot[tool] = why;
   }
-  const waits = look.managed.filter(tool => disk.locked.get(tool)?.waits && (owing?.write.includes(tool) || owing?.remove.includes(tool)));
-  const switchedOff = entries.filter(entry => { const file = disk.switches.get(entry.tool); return !!file && !file.problem && mcpDisabled(entry.tool, file.text, entry.name); }).map(entry => entry.tool);
+  // Where a write or removal waits for Write to Claude Code: the plan's, or a deleted server's copy still to leave (leavingIn).
+  const waits = made ? look.managed.filter(tool => disk.locked.get(tool)?.waits && (made.write.includes(tool) || made.remove.includes(tool)))
+    : tombstone ? leavingIn(look, tombstone) : [];
+  const switchedOff = disk.switchedOff.get(key) ?? [];
   const switchProblem = Object.fromEntries(entries.flatMap(entry => { const problem = disk.switches.get(entry.tool)?.problem; return problem ? [[entry.tool, problem]] : []; }));
   const edited = made ? [made.takeIn, ...made.keep.filter(kept => kept.from.how === 'edited').map(kept => kept.harness)].filter(tool => tool !== undefined) : [];
   const shape = item ? await readVersion(look.context, key, item.hash) : entries[0]?.server;
@@ -341,7 +348,7 @@ async function rowFacts(look: ServerLook, key: string, item: LibraryItem | undef
     key, name, description: shape ? summary(shape) : '', copies, on: !!item?.on, except: item?.except ?? [], cannot, edited,
     // The copies a tool managed again gives way with are kept before the plan, by the pass (librarypass.ts cameBack): said with it.
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
-      : { differs: differ(foundCopies(look, key, [])) }),
+      : { takeInAnswers: takeInAnswers(look, key) }),
     ...some('plugin', plugin), ...some('unseen', unseen), ...some('waits', waits), ...some('switchedOff', switchedOff), ...some('switchProblem', switchProblem),
   };
 }

@@ -21,10 +21,10 @@ import { libraryAction } from './historyactions.ts';
 import { listed, plan } from './library.ts';
 import { libraryWords } from './libraryrow.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
-import { copiesOf, differ, forgetFolders, foundCopies, itemClick, lookFor, restore, runPass, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
+import { copiesOf, forgetFolders, itemClick, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { throughPlugins } from './plugins.ts';
 import type { AgentTool } from './presence.ts';
-import { errorCode, exists, recoverParked, removeFileChecked, syncGate, writeAccess, writeFileChecked } from './share.ts';
+import { errorCode, exists, partsIn, recoverParked, removeFileChecked, syncGate, writeAccess, writeFileChecked } from './share.ts';
 import type { ShareContext } from './share.ts';
 import type { Change, HarnessId, LibraryFacts, LibraryView, PassResult, SyncNotice, ThroughPlugin, ToolCopy } from './types.ts';
 import { throughPlugin, toolName } from './words.ts';
@@ -43,6 +43,7 @@ type AgentLook = Look<SharedAgent, AgentEntry, AgentDisk>;
 async function readDisk(context: ShareContext, managed: HarnessId[]): Promise<AgentDisk> {
   const disk: AgentDisk = {
     byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], through: await agentsThroughPlugins(context, managed),
+    parts: await partsIn(context.home, 'agent'),
     held: (item, tool) => { const why = agentHeld(disk, managed, item, tool); return why ? { why } : undefined; },
   };
   for (const tool of managed as AgentTool[]) {
@@ -282,7 +283,7 @@ async function rowFacts(look: AgentLook, key: string, item: LibraryItem | undefi
     key, name, description: current?.description ?? '', copies, on: !!item?.on, except: item?.except ?? [], cannot, edited,
     // The copies a harness managed again gives way with are kept before the plan, by the pass (librarypass.ts cameBack): said with it.
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
-      : { differs: differ(foundCopies(look, key, [])) }),
+      : { takeInAnswers: takeInAnswers(look, key) }),
     ...(Object.keys(plugin).length ? { plugin } : {}), ...(Object.keys(unseen).length ? { unseen } : {}),
   };
 }

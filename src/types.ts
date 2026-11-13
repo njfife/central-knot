@@ -1,4 +1,4 @@
-import type { LibraryItem, Plan, VersionChange } from './library.ts';
+import type { LibraryItem, Plan, TakeInAnswer, VersionChange } from './library.ts';
 import type { NeutralServer } from './mcp.ts';
 
 export type HomeMode = 'fixture' | 'custom' | 'actual';
@@ -101,6 +101,8 @@ export interface DesktopApi {
   startHome(): Promise<HomeView | null>;
   setSync(on: boolean): Promise<HomeView | null>;
   syncNow(home: string): Promise<HomeView | null>;
+  /** Turns the open home's standing rule, Synchronize everything, on or off (share.ts setSyncEverything), then reads and syncs the home. */
+  setSyncEverything(on: boolean, home: string): Promise<{ stopped?: string; view: HomeView | null }>;
   /** Makes this build the home's sync owner, in place of the build that syncs it now; every managed item and choice stays. */
   takeOverSync(home: string): Promise<{ stopped?: string; from?: string; view: HomeView | null }>;
   onSyncChanged(callback: () => void): void;
@@ -273,10 +275,10 @@ export interface SkillFacts {
    * sentence naming that tool as the page does (copywords.ts cantUse makes it a row's or a result's sentence).
    */
   choiceBlocks: Partial<Record<HarnessId, { tool: HarnessId; reason: string }[]>>;
-  /** A library kind's row (LibraryFacts, as itemrow.ts kindSource gives the page): its `unseen`, `plan`, `differs` and `versionChanges`. */
+  /** A library kind's row (LibraryFacts, as itemrow.ts kindSource gives the page): its `unseen`, `plan`, `takeInAnswers` and `versionChanges`. */
   unseen?: LibraryFacts['unseen'];
   plan?: LibraryFacts['plan'];
-  differs?: LibraryFacts['differs'];
+  takeInAnswers?: LibraryFacts['takeInAnswers'];
   versionChanges?: LibraryFacts['versionChanges'];
   /** MCP servers: tools whose write or removal waits for Write to Claude Code (types.ts LibraryFacts waits). */
   waits?: HarnessId[];
@@ -313,6 +315,8 @@ export interface SyncView {
   gate: SyncGate;
   /** What the background passes did since the page last read: copies written or removed, and what failed. */
   caughtUp: DestinationResult[];
+  /** The home's standing rule, Synchronize everything, is on (share.ts SyncRecord syncEverything): found items are taken in by themselves. */
+  syncEverything: boolean;
 }
 
 /**
@@ -346,8 +350,14 @@ export interface Change {
 
 export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, what is not as it asked, and the MCP servers that wait for Write to Claude Code. */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left' | 'waits'>; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
 
-/** What sync did on its own: an edit spread, competing edits resolved, or a copy deleted by hand that turned an item off. */
-export interface SyncNotice {
+/**
+ * What sync did on its own, told once on its kind's page: to one item (ItemNotice), or the found items Synchronize everything
+ * took in, in one pass (TakenInNotice). Both are keyed by `history`.
+ */
+export type SyncNotice = ItemNotice | TakenInNotice;
+
+/** What sync did to one item on its own: an edit spread, competing edits resolved, or a copy deleted by hand that turned it off. */
+export interface ItemNotice {
   key: string;
   item: string;
   kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit';
@@ -360,6 +370,12 @@ export interface SyncNotice {
   /** The History event to Undo or Restore from. */
   history: string;
 }
+
+/**
+ * What Synchronize everything took into Central Knot in one pass of one kind (librarypass.ts takeInByRule): the items, by name,
+ * and the tools they were found in. Each has its own History entry, with an Add's Undo; `history` is the first, which keys the notice.
+ */
+export interface TakenInNotice { kind: 'taken-in'; items: string[]; from: HarnessId[]; history: string }
 
 /** One entry in History: what changed, which content won, and what is kept to Undo or Restore it. */
 /**
@@ -402,11 +418,12 @@ export interface HistoryEvent {
   only?: HarnessId;
   /**
    * A library item's: what made it happen, read by historyactions.ts alone. `switch`: the person's switch ('on' / 'off'). `found`:
-   * a found item taken in ('on'; `winner`: where it was found). `pulled`: Pull did it ('on' for an item new here, 'edit',
+   * a found item taken in by a click on Add ('on'; `winner`: where it was found). `sync-everything`: the same, taken in by the
+   * home's standing rule, Synchronize everything, with no click. `pulled`: Pull did it ('on' for an item new here, 'edit',
    * 'deleted'). `deleted-by-hand`: its copy was deleted by hand ('off'; `winner`: where). `tool-back`: a tool managed again held a
    * copy the item didn't have ('kept-edit'; `losers`: that copy), which gave way to the current version (library.ts managedAgain).
    */
-  cause?: 'switch' | 'found' | 'pulled' | 'deleted-by-hand' | 'tool-back';
+  cause?: 'switch' | 'found' | 'sync-everything' | 'pulled' | 'deleted-by-hand' | 'tool-back';
   /**
    * The version current once this entry's change was made: 'current', the version made current; an 'edit' Pull made, the
    * version pulled; 'on' / 'off' by a switch, the version it was at (historyactions.ts asTheClickLeftIt).
@@ -714,8 +731,11 @@ export interface LibraryFacts {
   plan?: Plan;
   /** In the library: for each version as library.ts listed orders them, what it changed. */
   versionChanges?: VersionChange[];
-  /** Found, not in the library: its copies differ, so the switch asks which one every harness takes. */
-  differs?: boolean;
+  /**
+   * Found, not in the library: what a click on its Add does, and what Synchronize everything does with it (library.ts
+   * takeInAnswer, each kind's view through librarypass.ts takeInAnswers).
+   */
+  takeInAnswers?: { click: TakeInAnswer; rule: TakeInAnswer };
   /**
    * Skills: how a tool has it another way (a link, a folder Central Knot doesn't own, another tool's folder it reads, a plugin),
    * as its line says it, On or Off (skills.ts anotherWay). Nothing of Central Knot's goes there while it does.
@@ -755,6 +775,8 @@ export interface PassResult {
   stopped?: string; results: DestinationResult[]; writes: number; made?: string[]; notices?: SyncNotice[];
   /** A deletion is inside its settle window: look again shortly. */
   settling?: boolean;
+  /** A pass of the whole home (librarypass.ts PassOptions background): the found keys it left found; main.ts tells an open page when one is new (foundGained). */
+  found?: string[];
 }
 
 // ---------- Instructions ----------

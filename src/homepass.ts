@@ -3,6 +3,8 @@
 //   1. a profiles file from before profiles were sets of library items is moved, with Sync on or off (profilemigrate.ts);
 //   2. where this build syncs the home and the pass may write (Sync on, or Sync once), skills, MCP servers and agents are
 //      brought into line, in that order, each on its own: one that crashes is told as a failure and the next still runs.
+//      This is the pass of the whole home, the one in which Synchronize everything takes found items in
+//      (librarypass.ts PassOptions background).
 // The other three one-time migrations run as each library is opened (skillstore.ts, serverstore.ts, agentstore.ts
 // openLibrary): only in memory for a reader such as the pages' views, and written by the first pass that may write.
 import { applyAgents } from './agents.ts';
@@ -33,8 +35,10 @@ export async function homePass(context: ShareContext, managed: HarnessId[], writ
     return undefined;
   };
   // Skills, MCP servers and agents are Central Knot's library (library.ts); Claude Code's MCP settings wait for Write to Claude Code.
-  const skills = await applySkills(context, managed, []).catch(crashed('Skills sync'));
-  const servers = await applyServers(context, managed, []).catch(crashed('MCP sync'));
-  const agents = await applyAgents(context, managed, []).catch(crashed('Agents sync'));
+  // The pass of the whole home: the home's standing rule, Synchronize everything, takes found items in here and nowhere else.
+  const whole = { background: true } as const;
+  const skills = await applySkills(context, managed, [], whole).catch(crashed('Skills sync'));
+  const servers = await applyServers(context, managed, [], whole).catch(crashed('MCP sync'));
+  const agents = await applyAgents(context, managed, [], whole).catch(crashed('Agents sync'));
   return { ...failure, synced: { skills, servers, agents, crashes } };
 }

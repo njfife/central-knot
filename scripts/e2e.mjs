@@ -2837,6 +2837,118 @@ async function sharedCopiesFlow() {
   await a.quit();
 }
 
+/**
+ * Synchronize everything (Settings › This home), on the page: off where it was never chosen, its row saying what it would add
+ * now and what waits for a choice of copy; turned on, the pass right after takes in what it may, says so in one notice per
+ * page and in History with Add's Undo, and leaves the rest found, the Found heading and each opened row saying why; that Undo takes
+ * it out for good. No page offers an Add all.
+ */
+async function syncEverythingFlow() {
+  const home = join(scratch, 'home-everything'), data = join(scratch, 'everything-data');
+  mkdirSync(join(home, '.local/bin'), { recursive: true });
+  for (const [name, output] of [['claude', '2.1.309 (Claude Code)'], ['codex', 'codex-cli 0.142.3']]) {
+    writeFileSync(join(home, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`);
+    chmodSync(join(home, '.local/bin', name), 0o755);
+  }
+  const [claude, codex] = ['.claude/skills', '.codex/skills'].map(path => join(home, path));
+  skill(claude, 'notes', text('notes', 'Take notes.'));
+  skill(claude, 'review', text('review', 'Review gently.'));
+  skill(codex, 'review', text('review', 'Review hard.'));
+  // Saved an hour ago, as copies that have sat in a tool do: none is inside the settle window, so the pass right after takes them.
+  const anHourAgo = new Date(Date.now() - 3_600_000);
+  for (const path of [join(claude, 'notes'), join(claude, 'notes/SKILL.md')]) utimesSync(path, anHourAgo, anHourAgo);
+  writeFileSync(join(home, '.codex/config.toml'), '[mcp_servers.files]\ncommand = "files-mcp"\nargs = []\n');
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  // A folder home outside the HOME the app is given (that one counts as real, which Linux never writes).
+  const real = join(scratch, 'everything-real');
+  mkdirSync(real, { recursive: true });
+  const a = await launch(data, [], real);
+  const foundNote = () => a.text('.ov-section[data-section="found"] .ov-section-after');
+  const ruleSays = () => a.text('#setting-sync-everything-notice .setting-message-text');
+  const ruleOn = () => a.run(`document.querySelector('#sync-everything-on')?.getAttribute('aria-checked')`);
+  const noAddAll = async page => {
+    await a.click(`#nav-${page}`);
+    check(`no Add all on ${page}: switching Synchronize everything on is the one way to add everything`, !(await a.exists('#apply, #manage-all')) && !(await a.all('button', 'e.textContent.trim()')).some(label => /^Add all/i.test(label)));
+  };
+  await a.click('#nav-skills');
+  check('off where it was never chosen: the Found heading says Add takes each in', /Add one to keep it in Central Knot and turn it on\./.test(await foundNote() ?? ''), await foundNote());
+  await a.click('#nav-settings');
+  for (let tries = 0; tries < 30 && !(await a.exists('#setting-sync-everything')); tries++) await wait(100);
+  same('Settings › This home: Synchronize everything is off, and says how many found items it would add now and how many wait for a choice of copy',
+    [await ruleOn(), await ruleSays()], ['false', 'Turning it on adds the 2 items found in your tools now. 1 found item has copies that differ and waits for your choice of copy.']);
+  await fitsAtMinimum(a, 'Settings with Synchronize everything off');
+  await a.shot('everything-off');
+  // Saved just now, as a tool writes a new skill: the pass right after the switch leaves it inside the settle window, and the
+  // pass soon after takes it in by itself, whose read keeps the notices no page has shown yet.
+  skill(claude, 'fresh', text('fresh', 'Just saved.'));
+  await a.click('#sync-everything-on');
+  for (let tries = 0; tries < 40 && await ruleOn() !== 'true'; tries++) await wait(100);
+  const record = JSON.parse(readFileSync(join(home, '.central-knot/sync.json'), 'utf8'));
+  same('turned on, it is kept in the home’s sync record, and the row says what still waits for a choice', [await ruleOn(), record.syncEverything, await ruleSays()], ['true', true, '1 found item has copies that differ and waits for your choice of copy.']);
+  same('the pass right after took in what was found: notes is in Codex now, byte for byte', readNow(join(codex, 'notes/SKILL.md')), text('notes', 'Take notes.'));
+  same('and Settings says what it took in, a line per kind, each with History', await a.all('.setting-added .setting-message', 'e.textContent'),
+    ['Synchronize everything took in 1 skill, found in Claude Code: notes. History can undo it.History', 'Synchronize everything took in 1 MCP server, found in Codex: files. History can undo it.History']);
+  for (let tries = 0; tries < 80 && !readNow(join(codex, 'fresh/SKILL.md')); tries++) await wait(100);
+  same('a skill saved just before is taken in soon after, with no click, once it has settled', readNow(join(codex, 'fresh/SKILL.md')), text('fresh', 'Just saved.'));
+  // The read after that pass reaches the page: the sidebar's dot names both skills' notices, neither shown yet.
+  const unseenOnSkills = () => a.run(`document.querySelector('#nav-skills .nav-unseen')?.title ?? ''`);
+  for (let tries = 0; tries < 40 && !/fresh/.test(await unseenOnSkills()); tries++) await wait(100);
+  same('a notice no page has shown stays until shown: the sidebar names both passes’ notices for Skills', await unseenOnSkills(), '2 automatic changes: notes, fresh');
+  await a.shot('everything-on');
+  await a.click('#nav-overview');
+  check('Overview’s sync line says the rule in force', /edits spread between tools in seconds, and what turns up in a tool is taken in by Synchronize everything/.test(await a.text('.overview-more') ?? ''), await a.text('.overview-more'));
+  await a.click('#nav-skills');
+  same('on the Skills page notes and fresh are On and review stays found', await sectionsNow(a), [['on', ['fresh', 'notes']], ['found', ['review']]]);
+  check('the Found heading says the rule in force: Synchronize everything leaves these, and how many wait for a choice', /Synchronize everything leaves these \(open a row to see why\)\. 1 waits for your choice of copy/.test(await foundNote() ?? ''), await foundNote());
+  const notice = '.sync-notice[data-kind="taken-in"] .notice-text';
+  same('one notice per pass says how many it took in, where they were found, and their names', await a.all(notice, 'e.textContent.replace(/ · .*$/, "")'),
+    ['Synchronize everything took in 1 skill, found in Claude Code: fresh. History can undo it.', 'Synchronize everything took in 1 skill, found in Claude Code: notes. History can undo it.']);
+  same('review’s row says why the rule leaves it: its copies differ, and opening it asks which', [await a.text('#decide-review'), await (async () => { await a.click('#open-review'); return a.exists('.details-differs'); })()], ['Copies differ', true]);
+  await fitsAtMinimum(a, 'Skills with Synchronize everything on');
+  await a.shot('everything-skills');
+  await a.click('#nav-mcp');
+  same('on the MCP servers page files, found in Codex, is On; Claude Code’s part waits for Write to Claude Code', [await sectionsNow(a), await a.exists('#mcp-write-claude')], [[['on', ['files']]], true]);
+  check('and its notice, from the pass before the one that took fresh in, is still there to name it and Codex', /^Synchronize everything took in 1 MCP server, found in Codex: files\./.test(await a.text(notice) ?? ''), await a.text('.bands'));
+  await a.click('#nav-history');
+  for (let tries = 0; tries < 30 && !(await a.exists('.history-row')); tries++) await wait(100);
+  // The skill notes's own row, by its name and kind (release-notes, an agent, has one too).
+  const takenRow = `[...document.querySelectorAll('.history-row[data-kind="on"]')].find(row => row.querySelector('.history-what strong')?.textContent === 'notes' && row.querySelector('.history-kind')?.textContent === 'Skill')`;
+  same('History has Add’s entry for it, saying Synchronize everything took it in and from which tool, with Add’s Undo',
+    await a.run(`[${takenRow}.querySelector('.history-about').textContent, ${takenRow}.querySelector('.history-actions button').textContent]`), ['Found in Claude Code and taken into Central Knot by Synchronize everything; put in Codex.', 'Undo']);
+  await fitsAtMinimum(a, 'History with what Synchronize everything took in');
+  await a.shot('everything-history');
+  await a.run(`${takenRow}.querySelector('.history-actions button').click()`); await a.settle();
+  same('its Undo takes it out again: Codex’s copy goes, Claude Code keeps its own byte for byte, and the entry says Undone', [existsSync(join(codex, 'notes')), readNow(join(claude, 'notes/SKILL.md')), await a.run(`${takenRow}.querySelector('.history-done')?.textContent`)], [false, text('notes', 'Take notes.'), 'Undone']);
+  await a.shot('everything-undone');
+  await a.click('#nav-skills');
+  await a.click('#header-refresh');
+  await a.click('#header-refresh');
+  same('and no pass takes it back: it is found, for good', [await sectionsNow(a), existsSync(join(codex, 'notes'))], [[['on', ['fresh']], ['found', ['notes', 'review']]], false]);
+  await a.click('#open-notes');
+  check('its line says why: deleted, so it is not added by itself again; Add or Restore brings it back', /It was deleted from Central Knot, so it will not be added by itself again\. Add, or Restore in History, brings it back\./.test(await a.text('.details-status') ?? ''), await a.text('.details-status'));
+  // Two tools gain one new name with different content while Skills is open: the rule leaves it for a choice and writes
+  // nothing, and the open page still shows it, with no click.
+  skill(claude, 'split', text('split', 'One way.'));
+  skill(codex, 'split', text('split', 'Another way.'));
+  for (let tries = 0; tries < 80 && !(await rowKeys(a)).includes('split'); tries++) await wait(100);
+  check('a new item the rule leaves waiting reaches the open page by itself', (await rowKeys(a)).includes('split') && await a.exists('#decide-split'), await rowKeys(a));
+  for (const page of ['overview', 'skills', 'mcp', 'harnesses']) await noAddAll(page);
+  await a.click('#nav-settings');
+  await a.click('#sync-everything-on');
+  for (let tries = 0; tries < 40 && await ruleOn() !== 'false'; tries++) await wait(100);
+  same('turned off, it says what it would add now: nothing, since what was undone stays out', [await ruleOn(), await ruleSays()], ['false', 'Nothing found in your tools now would be added. 2 found items have copies that differ and wait for your choice of copy.']);
+  // Saved just before it is switched on again, with nothing else for that pass to write: the pass leaves it inside the settle
+  // window, and nothing but the look again soon after (no watch event follows) takes it in before the 20 s poll.
+  skill(claude, 'later', text('later', 'Saved just before.'));
+  await wait(1700);
+  await a.click('#sync-everything-on');
+  for (let tries = 0; tries < 60 && !readNow(join(codex, 'later/SKILL.md')); tries++) await wait(100);
+  same('a copy the pass left inside the settle window is taken in a moment later, by itself', readNow(join(codex, 'later/SKILL.md')), text('later', 'Saved just before.'));
+  same('no page errors, Synchronize everything', a.pageErrors, []);
+  await a.quit();
+}
+
 /** Force-kills the app part-way through real copies, then checks nothing half-written is visible to a tool. */
 async function crashFlow() {
   execChmod();
@@ -3149,7 +3261,7 @@ const started = Date.now();
 try {
   seedHome();
   // Each flow's time is printed, so a run that grows slow says where.
-  const flows = [harnessFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, suggestedFlow, otherAppsFlow, listDiffersFlow, pluginUpdatesFlow, repoBaseFlow, draftFlow, sharedCopiesFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
+  const flows = [harnessFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, suggestedFlow, otherAppsFlow, listDiffersFlow, pluginUpdatesFlow, repoBaseFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
   const named = option('--flows')?.split(',');
   for (const flow of flows.filter(each => !named || named.includes(each.name))) {
     const from = Date.now();

@@ -108,6 +108,8 @@ test('A deletion offers Restore while the agent is deleted; every other entry of
 test('An entry whose action was used offers nothing, and its row says what became of it', () => {
   assert.equal(offered(entry({ kind: 'off', undoneBy: 'later' }), item({ on: false })), undefined);
   assert.deepEqual(['off', 'on', 'deleted', 'edit'].map(kind => doneWords(entry({ kind: kind as 'off' }))), ['Turned on since', 'Turned off since', 'Restored', 'Undone']);
+  // A found item taken in, by Add or by Synchronize everything: its action is its Undo.
+  assert.deepEqual([doneWords(entry({ kind: 'on', cause: 'found' })), doneWords(entry({ kind: 'on', cause: 'sync-everything' })), doneWords(entry({ kind: 'chosen' }))], ['Undone', 'Undone', 'Undone']);
 });
 
 test('Entries from before the library: one naming an earlier version offers Undo; copies an earlier engine added offer nothing; an unknown agent, nothing', () => {

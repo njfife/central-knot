@@ -3,6 +3,7 @@
 // (tests/agentclicks.ts). In order: the harnesses' formats, Off and On, edits and deletions by hand, copies that can't be
 // seen, found agents, versions, Delete, and what a crash or a damaged record leaves.
 import { test } from 'node:test';
+import { itemNotice } from './notices.ts';
 import assert from 'node:assert/strict';
 import { chmod, mkdir, readFile, readdir, rename, rm, utimes, writeFile } from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
@@ -359,7 +360,7 @@ inBox('An edit in a harness becomes the current version, from that harness, and 
   await on(box);
   await edit(box, 'codex-cli', 'Be exact.');
   const spread = await pass(box);
-  assert.deepEqual(spread.notices?.map(notice => [notice.kind, notice.winner, notice.losers]), [['edit', 'codex-cli', ['claude-cli', 'copilot-cli']]]);
+  assert.deepEqual(spread.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner, notice.losers]), [['edit', 'codex-cli', ['claude-cli', 'copilot-cli']]]);
   assert.deepEqual(await versions(box), ['Be exact. (edited in Codex) *', 'Be brief. (found in Claude Code)']);
   const actions = await historyActions(box);
   assert.deepEqual(actions.map(action => `${action.event.kind}: ${action.label}`), ['on: Turn off', 'edit: Undo']);
@@ -381,7 +382,7 @@ inBox('Two edits: the latest wins, the other is a version, and History can make 
   await edit(box, 'claude-cli', 'Edit one.', 5);
   await edit(box, 'codex-cli', 'Edit two.', 9);
   const settled = await pass(box);
-  assert.deepEqual(settled.notices?.map(notice => [notice.kind, notice.winner, notice.losers]), [['conflict', 'codex-cli', ['claude-cli']]]);
+  assert.deepEqual(settled.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner, notice.losers]), [['conflict', 'codex-cli', ['claude-cli']]]);
   assert.match((await readOf(box, 'claude-cli'))!, /Edit two\./);
   assert.deepEqual(await versions(box), ['Edit two. (edited in Codex) *', 'Edit one. (edited in Claude Code)', 'Be brief. (found in Claude Code)']);
   const use = (await historyActions(box)).find(action => action.label === 'Use claude-cli’s')!;
@@ -396,7 +397,7 @@ inBox('A copy deleted by hand turns the agent Off everywhere, once it has stayed
   const first = await applyAgents(waiting, tools, [], { now: 1000 });
   assert.deepEqual([first.writes, first.settling, (await itemOf(box))!.on], [0, true, true], 'inside the window nothing happens');
   const second = await applyAgents(waiting, tools, [], { now: 3500 });
-  assert.deepEqual(second.notices?.map(notice => [notice.kind, notice.winner, notice.losers]), [['deleted', 'copilot-cli', ['claude-cli', 'codex-cli']]]);
+  assert.deepEqual(second.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner, notice.losers]), [['deleted', 'copilot-cli', ['claude-cli', 'codex-cli']]]);
   assert.deepEqual((await historyOf(box)).map(event => event.cause).at(-1), 'deleted-by-hand');
   assert.deepEqual(await filesOf(box), { 'claude-cli': undefined, 'copilot-cli': undefined, 'codex-cli': undefined });
   assert.equal(placeOf(await itemOf(box)), 'off');
@@ -591,7 +592,7 @@ inBox('A tool whose agents folder can’t be written says why on its line, pass 
   try {
     await edit(box, 'claude-cli', 'Be exact.');
     // The edit's notice and History name only the tool it reached.
-    const told = (await pass(box)).notices![0];
+    const told = itemNotice((await pass(box)).notices![0]);
     assert.equal(noticeWords(told).text, 'reviewer was edited in Claude Code; that is its current version now, in Codex too.');
     assert.deepEqual((await historyOf(box)).at(-1)!.losers.map(loser => loser.tool), ['codex-cli']);
     await pass(box);
