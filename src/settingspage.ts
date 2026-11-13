@@ -1,16 +1,17 @@
 // Settings: Central Knot's own preferences, kept apart from the tools' settings. The main process stores them
 // (app-settings.json) and applies them; this page shows them, one full-width row each, and changes one at a time. One row is
 // the open home's, not the app's: Synchronize everything, kept in the home's sync record (share.ts SyncRecord syncEverything)
-// and switched through app.ts setSyncEverything. One section is this Mac's: another build of Central Knot found here, a row
+// and switched through app.ts switchSyncEverything. One section is this Mac's: another build of Central Knot found here, a row
 // each with its actions (otherBuildsSection; its words and clicks are otherbuildview.ts's).
-import { announce, machine, rerender, setSyncEverything, showPage, state, whyReadOnly } from './app.ts';
+import { announce, machine, rerender, switchSyncEverything, showPage, state, whyReadOnly } from './app.ts';
+import { oneUndoCovers } from './historyactions.ts';
 import { button, h, icon, toggle } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { DAY_MS, defaultHistoryDays, historyDayChoices } from './model.ts';
-import { kindSource } from './itemrow.ts';
+import { openWalkthrough } from './firstsetup.ts';
+import { whatYesDoes } from './setupcounts.ts';
 import { plural } from './model.ts';
-import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, HistoryWindowSaved, HomeView, SignInPlace } from './types.ts';
-import { kindNouns } from './words.ts';
+import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, HistoryWindowSaved, SignInPlace } from './types.ts';
 import { libraryWords, sentences } from './libraryrow.ts';
 import { buildWords, releasesPage, tagWords, updateStatus } from './updates.ts';
 import { checkNow, settingUpdateButton, unsavedWork, updates } from './updateview.ts';
@@ -361,36 +362,26 @@ function buildRow(): HTMLElement | null {
 }
 
 /**
- * The open home's found items, as Synchronize everything answers each (library.ts takeInAnswer, read through each kind's view):
- * those it takes in (`takes`), and those that wait for a choice of copy (`choosing`), with the first page that has one.
- */
-function foundNow(home: HomeView) {
-  const kinds = (['skills', 'mcp', 'agents'] as const).map(kind => ({ kind, facts: kindSource(home, kind).facts.filter(fact => fact.takeInAnswers) }));
-  const count = (answer: 'take' | 'wait') => kinds.reduce((sum, { facts }) => sum + facts.filter(fact => answer in fact.takeInAnswers!.rule).length, 0);
-  const choosingOn = kinds.find(({ facts }) => facts.some(fact => 'wait' in fact.takeInAnswers!.rule))?.kind;
-  return { takes: count('take'), choosing: count('wait'), choosingOn };
-}
-
-/**
  * Synchronize everything, for the open home: what it does, and, while it is off, how many found items it would add now; either
- * way, how many found items wait for a choice of copy, with the page that has the first. Unchangeable where a pass may not write.
+ * way, how many found items wait for a choice of copy, with the way into first setup's walkthrough of them (firstsetup.ts, which
+ * counts both as its question does). Unchangeable where a pass may not write.
  */
 function syncEverythingRow(): HTMLElement | null {
   const home = state.home;
   if (!home) return null;
-  const on = home.sync.syncEverything, cannot = whyReadOnly(home) ?? (home.sync.gate.state === 'needs-resume' ? home.sync.gate.reason : undefined);
-  const hint = cannot ?? 'For this home: a skill, MCP server or agent that turns up in one of your tools is taken into Central Knot and turned on in every tool by itself (an MCP server reaches Claude Code when you click Write to Claude Code). History can undo each, except an MCP server found in Claude Code, whose entry says why. Off, what turns up waits on its page for Add.';
-  const { takes, choosing, choosingOn } = foundNow(home);
+  const on = !!home.sync.syncEverything, cannot = whyReadOnly(home) ?? (home.sync.gate.state === 'needs-resume' ? home.sync.gate.reason : undefined);
+  const hint = cannot ?? 'For this home: a skill, MCP server or agent that turns up in one of your tools is taken into Central Knot and turned on in every tool by itself (an MCP server reaches Claude Code when you click Write to Claude Code). Switching it on is one entry in History: ' + oneUndoCovers().replace(/^One Undo in History/, 'its Undo') + ' Off, what turns up waits on its page for Add.';
+  const { takes, choosing } = whatYesDoes(home);
   const waiting = choosing ? `${plural(choosing, 'found item')} ${choosing === 1 ? 'has' : 'have'} copies that differ and ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy.` : '';
   const adds = !on ? (takes ? `Turning it on adds the ${plural(takes, 'item')} found in your tools now.` : 'Nothing found in your tools now would be added.') : '';
   const later = on && !home.syncOn ? 'Automatic sync is off, so it takes items in at Sync once.' : '';
   const text = [adds, waiting, later].filter(Boolean).join(' ');
-  const notice: RowMessage | undefined = text ? { text, tone: 'info', action: choosingOn ? { label: `See ${kindNouns[choosingOn].title}`, run: () => showPage(choosingOn) } : undefined } : undefined;
+  const notice: RowMessage | undefined = text ? { text, tone: 'info', action: choosing && !cannot ? { label: 'Choose copies', run: openWalkthrough } : undefined } : undefined;
   // What it took in, as each page's notice says it (until shown there), with History: Settings says what the switch did.
   const added = (['skills', 'mcp', 'agents'] as const).flatMap(kind => home[kind].notices.flatMap(told => (told.kind === 'taken-in' && !state.dismissed.has(told.history)
     ? [messageLine({ text: sentences(libraryWords[kind]).takenInWords(told, kind), tone: 'done', action: { label: 'History', run: () => showPage('history') } }, { id: `setting-sync-everything-added-${kind}` })] : [])));
   return settingRow('sync-everything', 'Synchronize everything', hint,
-    toggle({ on, label: 'Synchronize everything', onchange: chosen => void setSyncEverything(chosen), disabled: !!cannot || !!state.busy, id: 'sync-everything-on',
+    toggle({ on, label: 'Synchronize everything', onchange: chosen => void switchSyncEverything(chosen), disabled: !!cannot || !!state.busy, id: 'sync-everything-on',
       attrs: { 'aria-describedby': notice ? 'setting-sync-everything-hint setting-sync-everything-notice' : 'setting-sync-everything-hint', title: null } }),
     notice, added.length ? h('div.setting-added', {}, added) : undefined);
 }

@@ -1,3 +1,4 @@
+import type { LeftIn } from './historyactions.ts';
 import type { LibraryItem, Plan, TakeInAnswer, VersionChange } from './library.ts';
 import type { NeutralServer } from './mcp.ts';
 
@@ -115,8 +116,11 @@ export interface DesktopApi {
   startHome(): Promise<HomeView | null>;
   setSync(on: boolean): Promise<HomeView | null>;
   syncNow(home: string): Promise<HomeView | null>;
-  /** Turns the open home's standing rule, Synchronize everything, on or off (share.ts setSyncEverything), then reads and syncs the home. */
-  setSyncEverything(on: boolean, home: string): Promise<{ stopped?: string; view: HomeView | null }>;
+  /**
+   * Turns the open home's standing rule, Synchronize everything, on or off (everything.ts setSyncEverything), then reads and syncs
+   * the home. `answering`: first setup's question answers it, which is refused once the home has an answer (another window's).
+   */
+  setSyncEverything(on: boolean, home: string, answering?: boolean): Promise<{ stopped?: string; view: HomeView | null }>;
   /**
    * A tool's Manage switch (toolchoice.ts chooseTools): Central Knot's care of it turned on or off, then the home read and synced.
    * `resume`: the page showed a home that waits for Resume, which the switch resumes as a click does. `did`: what that pass did in
@@ -347,8 +351,11 @@ export interface SyncView {
   gate: SyncGate;
   /** What the background passes did since the page last read: copies written or removed, and what failed. */
   caughtUp: DestinationResult[];
-  /** The home's standing rule, Synchronize everything, is on (share.ts SyncRecord syncEverything): found items are taken in by themselves. */
-  syncEverything: boolean;
+  /**
+   * The home's standing rule, Synchronize everything (share.ts SyncRecord syncEverything): on, found items are taken in by
+   * themselves; off, each waits for Add; absent, never answered, so first setup asks it (firstsetup.ts).
+   */
+  syncEverything?: boolean;
 }
 
 /**
@@ -454,8 +461,24 @@ export interface HistoryEvent {
    *   or (`cause: 'tool-back'`) a copy a tool managed again held, which gave way to the current version.
    * 'deleted': it was deleted from Central Knot; with `cause: 'in-line'`, not a deletion: a copy of an item already deleted was
    *   removed from a harness (librarypass.ts logItem), so a reader counting deletions leaves that cause out. 'chosen': it was taken in with the `winner`'s copy, where the found copies differed.
-   * 'managing': a tool's Manage switch was turned (`managing`; key `tool:<id>`, item the tool's name), which has no Undo. */
-  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed' | 'profile' | 'took-over' | 'written' | 'on' | 'off' | 'current' | 'managing';
+   * 'managing': a tool's Manage switch was turned (`managing`; key `tool:<id>`, item the tool's name), which has no Undo.
+   * 'everything': the home's Synchronize everything was switched on or off (`everything`; key `home:everything`, item
+   *   'Synchronize everything'); everything.ts's header says what each offers. */
+  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed' | 'profile' | 'took-over' | 'written' | 'on' | 'off' | 'current' | 'managing' | 'everything';
+  /**
+   * 'everything': `ruleOn`, whether Synchronize everything is on once this entry is made (a switch: which way it was switched). A
+   * switch-on's one Undo is an 'everything' entry too, with `undo` (the switch-on's `undoneBy` names it): whether it switched the
+   * rule off, `itemUndos` the entries its items' own Undos made (one per take-in taken back; each one's Restore brings that item
+   * back), `left` each take-in it left in and each copy chosen meanwhile, by name, with why (historyactions.ts LeftIn), and
+   * `keptIn` the tools no longer managed that keep Central Knot's copy until they are.
+   */
+  everything?: { ruleOn: boolean; undo?: { switchedOff: boolean; itemUndos: string[]; left: LeftIn[]; keptIn: HarnessId[] } };
+  /**
+   * A found item's take-in (on with cause `found` or `sync-everything`, or `chosen`): the managed harnesses it was found in, with a
+   * copy of their own or one they had another way. Its Undo is offered only while each still holds that and is managed
+   * (historyactions.ts takeInHeld); an entry from before it was recorded counts where it was taken from and its own copies.
+   */
+  foundIn?: HarnessId[];
   /** 'managing': the tool, and whether Central Knot manages it from then on (toolchoice.ts chooseTools). */
   managing?: { tool: HarnessId; on: boolean };
   /** 'on' / 'off': the one harness it was turned on or off in. */

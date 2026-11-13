@@ -11,7 +11,7 @@ import { h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
 import { clickResults, keptBack } from './clickplan.ts';
-import { libraryAction, libraryEntry, librarySentence } from './historyactions.ts';
+import { entriesNow, everythingDone, libraryAction, libraryEntry, librarySentence, restorePlan } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
 import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
@@ -270,9 +270,6 @@ function accept(view: HomeView) {
 export const flashRequests = new Set<string>();
 const flashRow = (item: string) => { if (item) flashRequests.add(item.toLowerCase()); };
 
-/** After the first click on a page (any click that applies something, or says it changed nothing), its tip has done its job. */
-export const retireTip = (kind: PageKind) => writeFlag(`ck-help-dismissed-${kind}`);
-
 // ---------- One switch per item ----------
 
 /** One click on an item page: the changes it makes, the item names it concerns, and what the result says it did. */
@@ -327,7 +324,6 @@ export const applyClick = (click: Click) => busy('Applying…', async () => {
   // A refusal is the click's result, said in its own band, not again among the failures.
   kindPages[click.kind].keep(ours.filter(entry => entry !== refusal), result.notices);
   if (result.stopped) { tell({ page: state.page, items: click.items, warn: true, band: true, text: result.stopped }); return; }
-  if (!click.undoing) retireTip(click.kind);
   const made = result.made ?? [];
   // The plugins' part, once the copies' part went through (a whole-click refusal leaves it unrun).
   const plugged = click.plugins?.ops.length && (did || made.length || !refusal) ? await runSwitches(click.plugins.ops, click.plugins.draft) : undefined;
@@ -356,7 +352,8 @@ export const applyClick = (click: Click) => busy('Applying…', async () => {
  */
 async function allUndoable(made: string[]) {
   const events = (await api().history()).events.filter(event => made.includes(event.id));
-  return events.every(event => { const entry = libraryEntry(event); return !entry || !!libraryAction(event, state.home?.[entry.kind].library[entry.key]); });
+  const about = entriesNow(state.home!);
+  return events.every(event => !libraryEntry(event) || !!libraryAction(event, about(event).item, about(event).now));
 }
 
 /** Undo of one click: each History entry it made goes back, newest first, by its own action (historyactions.ts). */
@@ -421,9 +418,6 @@ export const applyPluginSwitches = (ops: PluginOp[], draft: Map<string, PluginOp
 const switchPlugins = (ops: PluginOp[], draft: Map<string, PluginOp>, { said, undone, also, note, next }: SwitchWords, undo: boolean) => busy(undo ? 'Undoing…' : 'Applying…', async () => {
   const ran = await runSwitches(ops, draft, undo);
   setHome(await api().refresh());
-  // The page's tip goes after its first click, as for a copy's.
-  const page = harnessKindShown() ?? (isKind(state.page) ? state.page : undefined);
-  if (page && !undo) retireTip(page);
   const worked = !ran.failed.length && !ran.stopped;
   const text = [worked && said ? said : ran.stopped ?? resultSentence(ran.lines, undo), worked ? '' : switchProblems({ ...ran, stopped: undefined }), also, note].filter(Boolean).join(' ') || 'Nothing changed.';
   const act = ran.back.length ? { label: 'Undo', id: 'outcome-undo-plugin', title: 'Turn them back as they were', run: () => void switchPlugins(ran.back, new Map(), { said: undone }, true) } : undefined;
@@ -646,6 +640,10 @@ async function putHistory() {
 /** A History entry's action: Undo, Restore, or one of its choices; what it did is said in the band, with its own way back. */
 export const restoreEvent = (eventId: string, choice?: string) => busy('Restoring…', async () => {
   const home = state.home!;
+  // A Restore of Synchronize everything's Undo: whether it switches the rule on again, as its plan says before the click (the
+  // one place that decides it: historyactions.ts restorePlan), for the words after it.
+  const clicked = state.history.data?.find(event => event.id === eventId);
+  const switchesOn = !!clicked?.everything?.undo && !!state.history.data && restorePlan(clicked, state.history.data, entriesNow(home)).switchOn;
   const result = await api().restore(eventId, home.sync.gate.state === 'needs-resume', home.home, choice);
   // The notice for an undone event has done its job; its result band says what happened.
   if (!result.stopped) state.dismissed.add(eventId);
@@ -656,7 +654,8 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const where = [...new Set(restored.map(entry => entry.harness ?? ''))].filter(Boolean);
   const past = state.history.data?.find(event => event.id === eventId);
   // An Undo of a profile switch lists what it couldn't change in its own band, so the page's problems band gets only a stop.
-  if (past?.kind !== 'profile' || result.stopped) kindPages[(past && libraryEntry(past)?.kind) || 'agents'].keep(result.results, result.notices);
+  // Synchronize everything's covers every kind: its band says what it couldn't do (sayEverything), no page's problems band.
+  if ((past?.kind !== 'profile' && past?.kind !== 'everything') || result.stopped) kindPages[(past && libraryEntry(past)?.kind) || 'agents'].keep(result.results, result.notices);
   if (past?.kind === 'profile') {
     // Each item it turned back has its own History entry, with its own action: the band offers no Undo of the Undo.
     if (result.stopped || !result.switched) tell(undefined, result.stopped); else turnedOutcome('Undone', result.switched, result.results);
@@ -669,6 +668,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
     return;
   }
   if (past && libraryEntry(past)) { sayLibraryAction(past, result); return; }
+  if (past?.kind === 'everything') { sayEverything(past, result, switchesOn); return; }
   // A Pull's change to an agent's Claude Code settings alone (gitrepo.ts undoSettingsChange): the one entry with an Undo of its own.
   const item = restored[0]?.item ?? past?.item ?? '';
   const done = !result.stopped && restored.length > 0;
@@ -686,11 +686,25 @@ function sayLibraryAction(past: HistoryEvent, result: ApplyResult) {
   const made = state.history.data?.find(event => event.id === past.undoneBy);
   const item = view?.library[entry.key];
   const said = made && librarySentence(made, libraryWords[entry.kind], view?.tools ?? [], item, true)?.text;
-  const back = made && libraryAction(made, item);
+  const back = made && libraryAction(made, item, entriesNow(state.home!)(made).now);
   const notDone = result.results.filter(keptBack).map(entry => entry.message);
   const text = [`${past.item}: ${said ? said.replace(/^./, first => first.toLowerCase()) : 'done.'}`, ...notDone].join(' ');
   tell({ page: state.page, item: past.item, warn: notDone.length > 0, text, undo: back && made ? { id: made.id, label: back.label } : undefined });
   flashRow(past.item);
+}
+
+/**
+ * After Synchronize everything's one Undo, or that Undo's Restore (everything.ts everythingEntryAction): what it did, in the Undo's
+ * entry's words, or what the Restore put back; what it could not do after it, each sentence once. Which it was is the entry clicked:
+ * an Undo's entry (`undo`) offers the Restore, a switch-on the Undo. `switchedOn`: the Restore switched the rule on again
+ * (restoreEvent, from restorePlan before the click); a switch made in Settings since is not its doing.
+ */
+function sayEverything(past: HistoryEvent, result: ApplyResult, switchedOn: boolean) {
+  if (result.stopped) { tell({ page: state.page, item: past.item, text: result.stopped, warn: true, history: true }); return; }
+  const made = (result.made ?? []).map(id => state.history.data?.find(event => event.id === id));
+  const text = everythingDone(past, made, made.filter(event => event?.kind === 'restored').length, switchedOn);
+  const notDone = [...new Set(result.results.filter(keptBack).map(entry => entry.message))];
+  tell({ page: state.page, item: past.item, warn: notDone.length > 0, history: true, text: [text, ...notDone.slice(0, 3)].join(' ') });
 }
 
 // ---------- A skill's own two actions ----------
@@ -1122,10 +1136,11 @@ export const setSync = (on: boolean) => busy(on ? 'Turning Sync on…' : 'Turnin
 });
 
 /**
- * Synchronize everything, the open home's standing rule, on or off (share.ts setSyncEverything). Turned on, main's next pass takes
- * in what is found now: at once with Automatic sync on, at Sync once with it off. Answers why not, if it couldn't be set.
+ * Synchronize everything, the open home's standing rule, on or off from Settings (everything.ts setSyncEverything; first setup's
+ * question is firstsetup.ts's). Turned on, main's next pass takes in what is found now: at once with Automatic sync on, at Sync
+ * once with it off. Answers why not, if it couldn't be set.
  */
-export const setSyncEverything = (on: boolean) => busy(on ? 'Turning on Synchronize everything…' : 'Turning off Synchronize everything…', async () => {
+export const switchSyncEverything = (on: boolean) => busy(on ? 'Turning on Synchronize everything…' : 'Turning off Synchronize everything…', async () => {
   const set = await api().setSyncEverything(on, state.home!.home);
   if (set.view) setHome(set.view);
   if (set.stopped) { announce(`Synchronize everything was not changed. ${set.stopped}`); return; }

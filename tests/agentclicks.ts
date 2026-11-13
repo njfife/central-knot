@@ -1,6 +1,7 @@
 // One agent ("reviewer") in a temp home, and the clicks the Agents page and History send for it, built by the page's own
 // code (src/libraryrow.ts rowClicks, src/historyactions.ts). Shared by the tests that replay clicks on real files:
 // agents.test.ts and agentswalk.test.ts.
+import { pendingChanges } from '../src/library.ts';
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -65,9 +66,9 @@ export const deleteIt = async (box: Box, context = box.context) => { const { row
 
 /** Every action History offers for this agent now, with the click that runs it. */
 export async function historyActions(box: Box, context = box.context) {
-  const { item } = await seen(box, context);
+  const { item, fact } = await seen(box, context);
   return (await historyOf(box, context)).flatMap(event => {
-    const main = libraryAction(event, item);
+    const main = libraryAction(event, item, { managed: box.tools, pending: fact?.plan ? pendingChanges(fact.plan) : [] });
     const run = (version?: string) => () => restoreAgent(context, box.tools, event.id, version);
     return [...(main ? [{ event, label: main.label, run: run() }] : []), ...versionChoices(event, item).map(choice => ({ event, label: `Use ${choice.tool}’s`, run: run(choice.hash) }))];
   });

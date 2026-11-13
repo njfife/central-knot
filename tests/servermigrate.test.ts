@@ -135,11 +135,11 @@ test('History’s MCP entries from before the library stay listed and offer only
     await applyServers(box.context, managed, []);
     const items = (await serversView(box.context, managed)).library, history = await readHistory(box.context);
     // Each entry's item as History's page finds it (historyactions.ts libraryEntry).
-    const offered = Object.fromEntries(history.map(entry => [entry.kind, libraryAction(entry, items[libraryEntry(entry)!.key])?.label]));
+    const offered = Object.fromEntries(history.map(entry => [entry.kind, libraryAction(entry, items[libraryEntry(entry)!.key], { managed, pending: [] })?.label]));
     assert.deepEqual(offered, { written: 'Undo', added: undefined, deleted: 'Restore', edit: 'Undo' });
     assert.equal((await restoreServer(box.context, managed, 'edit')).stopped, undefined, 'an entry naming the server as written runs its action');
     assert.equal((await serversView(box.context, managed)).library.behind.hash, H('OLD'));
-    assert.deepEqual(libraryAction(history.find(entry => entry.kind === 'written')!, items.behind)?.change.version, H('OLD'), 'its Undo makes the entry Claude Code had current again');
+    assert.deepEqual(libraryAction(history.find(entry => entry.kind === 'written')!, items.behind, { managed, pending: [] })?.change.version, H('OLD'), 'its Undo makes the entry Claude Code had current again');
     assert.equal((await readTool(box.context, 'claude-cli')).entries.find(entry => entry.name === 'gone')?.server.command, 'G');
   } finally { await box.cleanup(); }
 });

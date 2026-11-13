@@ -17,8 +17,8 @@
 //   keepFolders    the folder identities the next pass compares with
 //
 // Also here: the page's look (lookFor: the same reading, guards applied in memory, nothing saved), so a mark says what a pass
-// will do, and a found row's answers from the take-in table (takeInAnswers); a History entry's action (restore), which is
-// always one of the clicks above; and for the tool choice (toolchoice.ts), folders let go (forgetFolders) and what managing
+// will do, and a found row's answers from the take-in table (takeInAnswers); History entries' actions (restoreAll; restore for one),
+// decided on the copies as this look reads them now (itemsNow), each always one of the clicks above; and for the tool choice (toolchoice.ts), folders let go (forgetFolders) and what managing
 // a tool would do there, counted from the same look with it added (joinCounts). What a kind's page shows, and how the Git
 // repo reads it, stay with the kind (agents.ts agentsView and agentsForRepo, skills.ts skillsView and skillsForRepo, servers.ts
 // serversView and serversForRepo). History's sentences and actions for the library's entries are historyactions.ts's.
@@ -63,7 +63,8 @@
 // - History's sentences and actions for its entries: historyactions.ts, in the kind's words (historypage.ts asks it).
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-import { carryOut, itemKey, keepVersion, managedAgain, newItem, plan, setCurrent, takeInAnswer, versionAt, wantedIn } from './library.ts';
+import { carryOut, itemKey, keepVersion, managedAgain, newItem, pendingChanges, plan, setCurrent, takeInAnswer, versionAt, wantedIn } from './library.ts';
+import type { ItemNow } from './historyactions.ts';
 import type { Copies, FoundCopy, FoundKey, HarnessCopy, ItemKind, LeftFound, LibraryItem, Plan, Shelf, Source, TakenBy, Version } from './library.ts';
 import { appendHistory, historyCutoff, readHistory, replaceHistory } from './history.ts';
 import { errorCode, newRecord, readRecord, remember, saveRecord, stillOwned, syncGate, writeAccess } from './share.ts';
@@ -213,9 +214,10 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
   remove(context: ShareContext, item: LibraryItem, here: Entry): Promise<'removed' | 'changed' | 'failed'>;
   /**
    * A History entry's action as the click it is (the app's, as the page would send it: restore makes it the library's with
-   * itemClick), from the entry and the item now; undefined when it has nothing left to do.
+   * itemClick), from the entry, the item now and what the managed tools hold of it now (historyactions.ts ItemNow); undefined
+   * when it has nothing left to do.
    */
-  historyAction(entry: HistoryEvent, item: LibraryItem | undefined, version?: string): { change: Change } | undefined;
+  historyAction(entry: HistoryEvent, item: LibraryItem | undefined, now: ItemNow, version?: string): { change: Change } | undefined;
 }
 
 /**
@@ -482,8 +484,7 @@ export const takeInAnswers = (look: AnyLook, key: string) => {
  * What was asked of a pass for one item (a click, or what Pull brings), as the History entry it becomes: begun when it is
  * recorded, finished with the harnesses its plan writes or removes (`fill`: which of them it names).
  */
-type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'version' | 'previous'> & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed';
-  /** A take-in's: the harnesses it was found in, which Synchronize everything's notice names. */ foundIn?: HarnessId[] };
+type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'version' | 'previous' | 'foundIn'> & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed' };
 /**
  * What Pull brings for one item (gitrepo.ts): its name and content, and where the repo holds one harness's own part, that
  * part's text (Claude Code's file, for an agent); or its removal.
@@ -754,12 +755,12 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
   // A profile switch's clicks are told in its own entry (PassOptions told).
   if (asked && pass.told) pass.asked.delete(item.key);
   else if (asked) {
-    const { fill, foundIn, ...entry } = asked;
+    const { fill, ...entry } = asked;
     // A switch's entry says the version it left (`taken`, once this pass is carried out), so its Undo is offered only while it still is.
     const switched = (entry.kind === 'on' || entry.kind === 'off') && !entry.winner ? { version: taken } : {};
     const id = log({ ...entry, ...switched, losers: entry.losers ?? (fill ? before(did[fill]) : []), ...(tookFrom.length ? { tookFrom } : {}), ...(gaveBack.length ? { gaveBack } : {}) });
     // What Synchronize everything took in is no click's: its notice says it, and no click's Undo undoes it.
-    if (entry.cause === 'sync-everything') pass.takenIn.push({ name: item.name, foundIn: foundIn ?? [], history: id });
+    if (entry.cause === 'sync-everything') pass.takenIn.push({ name: item.name, foundIn: entry.foundIn ?? [], history: id });
     else pass.made.push(id);
     pass.asked.delete(item.key);
   }
@@ -794,30 +795,59 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
 }
 
 /**
- * A History entry's action (Kind.historyAction says which click it is, from the entry and the item as it is now); that click
- * runs like any other, and the entry is marked done by the entry the click makes. `version`: one of the entry's version
- * choices instead of its own action.
+ * Each item of a kind as History's actions are decided on it (historyactions.ts EntryItem): its record, and what the managed tools
+ * hold of it now, from the look a pass makes (lookFor): the tools whose copy holds an edit no pass has taken in (library.ts
+ * pendingEdits). A History entry names its item by key (an MCP server's entries from before the library: its name as written).
  */
+export async function itemsNow<C, E extends Seen, D extends Disk<E>>(kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[]) {
+  const { look, problem } = await lookFor(kind, context, tools);
+  const of = (entry: HistoryEvent) => {
+    const item = look.library.items[itemKey(entry.key.slice(kind.historyPrefix.length))];
+    return { item, now: { managed: tools, pending: item && !item.deleted ? pendingChanges(plan(item, copiesOf(look, item))) : [] } };
+  };
+  return { of, problem };
+}
+
+/**
+ * History entries' own actions (Kind.historyAction says which click each is, from the entry and its item now: itemsNow), run as
+ * those clicks in one pass of the kind; each entry is marked done by the entry its click made (`undid`: entry, then that one). An
+ * entry with nothing left to do is passed over. `version`: one of an entry's version choices ("Use Codex’s") instead of its own
+ * action, which leaves the entry open: its other choices still stand. A harness an entry wrote, removed or took a copy from that
+ * isn't managed now is left as it is, and the results say so. History's one button runs restore; Synchronize everything's one
+ * Undo and its Restore run several (everything.ts).
+ */
+export async function restoreAll<C, E extends Seen, D extends Disk<E>>(
+  kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[], eventIds: string[], version?: string,
+): Promise<PassResult & { undid: Map<string, string> }> {
+  const undid = new Map<string, string>(), about = await itemsNow(kind, context, tools);
+  if (about.problem) return { stopped: about.problem, results: [], writes: 0, undid };
+  const asked = (await readHistory(context)).filter(event => eventIds.includes(event.id)).flatMap(past => {
+    const { item, now } = about.of(past), action = kind.historyAction(past, item, now, version);
+    return action ? [{ past, change: action.change }] : [];
+  });
+  if (!asked.length) return { results: [], writes: 0, undid };
+  const done = await runPass(kind, context, tools, asked.map(({ change }) => itemClick(change)), { only: new Set(asked.map(({ change }) => change.key)) });
+  const away = asked.flatMap(({ past }) => [...new Set([...past.losers, ...(past.tookFrom ?? [])].map(copy => copy.tool))]
+    .filter(tool => !kind.harnesses(tools).includes(tool) && kind.harnesses([tool]).length).sort(byToolOrder)
+    .map((tool): DestinationResult => ({ item: past.item, harness: tool, outcome: 'held', message: notManagedHere(tool) })));
+  if (!done.stopped) done.results.push(...away);
+  if (!done.made?.length || version) return { ...done, undid };
+  const history = await readHistory(context), made = history.filter(event => done.made!.includes(event.id));
+  for (const { past, change } of asked) {
+    const by = made.find(event => event.key === `${kind.historyPrefix}${change.key}`);
+    if (by) { history.find(event => event.id === past.id)!.undoneBy = by.id; undid.set(past.id, by.id); }
+  }
+  await replaceHistory(context, history);
+  return { ...done, undid };
+}
+
+/** One History entry's action (restoreAll for one entry), or why it has nothing left to do. */
 export async function restore<C, E extends Seen, D extends Disk<E>>(
   kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[], eventId: string, version?: string,
 ): Promise<PassResult> {
-  const past = (await readHistory(context)).find(entry => entry.id === eventId);
-  // An item's key is its name as library.ts itemKey makes it; an MCP server's entries from before the library name it as written.
-  const key = itemKey(past?.key.slice(kind.historyPrefix.length) ?? '');
-  const { library, problem } = await kind.open(context);
-  if (problem) return { stopped: problem, results: [], writes: 0 };
-  const action = past && kind.historyAction(past, library.items[key], version);
-  if (!action) return { stopped: `That change has nothing left to undo: the ${kind.words.item} is as that would leave it.`, results: [], writes: 0 };
-  const done = await runPass(kind, context, tools, [itemClick(action.change)], { only: new Set([key]) });
-  // A harness the entry wrote, removed or took a copy from that isn't managed now is left as it is: the result says so.
-  const away = new Set([...past.losers, ...(past.tookFrom ?? [])].map(copy => copy.tool).filter(tool => !kind.harnesses(tools).includes(tool) && kind.harnesses([tool]).length));
-  if (!done.stopped) done.results.push(...[...away].sort(byToolOrder).map((tool): DestinationResult => ({ item: past.item, harness: tool, outcome: 'held', message: notManagedHere(tool) })));
-  // One of an entry's version choices ("Use Codex’s") leaves the entry open: its other choices still stand.
-  if (!done.made?.length || version) return done;
-  const history = await readHistory(context);
-  const entry = history.find(event => event.id === eventId);
-  if (entry) { entry.undoneBy = done.made[0]; await replaceHistory(context, history); }
-  return done;
+  const { undid: _undid, ...done } = await restoreAll(kind, context, tools, [eventId], version);
+  if (done.stopped || done.made?.length || done.results.length) return done;
+  return { stopped: `That change has nothing left to undo: the ${kind.words.item} is as that would leave it.`, results: [], writes: 0 };
 }
 
 // ---------- Clicks, and what Pull brings ----------
@@ -912,7 +942,8 @@ const foundKeys = (pass: Pass) => [...new Set([...pass.disk.byKey.keys(), ...(pa
  * Takes a found item into the library, On, from the copy the take-in table answered: the one content every harness holds, or
  * the copy the person chose. The other copies become versions as the pass writes over them. An item deleted from Central Knot
  * before is the same item again, its earlier versions with it (only a click comes here for one). `except`: harnesses a click
- * keeps it out of. History's entry is an Add's; the rule's says so, with the harnesses it was found in (`foundIn`).
+ * keeps it out of. History's entry is an Add's (the rule's says so), with the harnesses it was found in (`foundIn`: its Undo is
+ * offered only while each still holds its copy, historyactions.ts takeInHeld; the rule's notice names them).
  */
 async function takeIn(pass: Pass, key: string, answer: { take: FoundCopy; chosen: boolean }, except: HarnessId[], by: TakenBy) {
   const found = foundCopies(pass, key, except), source = found.find(entry => entry.tool === answer.take.harness)!;
@@ -924,9 +955,9 @@ async function takeIn(pass: Pass, key: string, answer: { take: FoundCopy; chosen
   await setCurrent(pass.shelf, item, { hash: source.hash, at: versionAt(source.at), from }, pass.kind.contentOf(source));
   const winner = { tool: source.tool, hash: source.hash };
   const gaveWay = found.filter(entry => entry.hash !== source.hash).map(entry => ({ tool: entry.tool, hash: entry.hash }));
-  if (answer.chosen) pass.asked.set(key, { kind: 'chosen', winner, losers: gaveWay });
-  else if (by === 'click') pass.asked.set(key, { kind: 'on', cause: 'found', winner, fill: 'written' });
-  else pass.asked.set(key, { kind: 'on', cause: 'sync-everything', winner, fill: 'written', foundIn: found.map(entry => entry.tool) });
+  const foundIn = found.map(entry => entry.tool);
+  if (answer.chosen) pass.asked.set(key, { kind: 'chosen', winner, losers: gaveWay, foundIn });
+  else pass.asked.set(key, { kind: 'on', cause: by === 'click' ? 'found' : 'sync-everything', winner, fill: 'written', foundIn });
 }
 
 /** Synchronize everything's one notice for a pass: how many it took in, by name, and the tools they were found in. */

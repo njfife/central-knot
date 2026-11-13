@@ -1,5 +1,5 @@
-// On/off flags kept per viewer in this window's local storage: a tip hidden, a note dismissed. Storage that
-// can't be used reads as unset and drops writes, so at worst a tip or note shows again.
+// On/off flags kept per viewer in this window's local storage: the practice copy's note dismissed (app.ts). Storage that
+// can't be used reads as unset and drops writes, so at worst the note shows again.
 
 export const readFlag = (key: string): boolean => { try { return localStorage.getItem(key) === '1'; } catch { return false; } };
 

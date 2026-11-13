@@ -26,7 +26,7 @@
 // librarypages.ts; History's sentences and actions, historyactions.ts.
 import { readFile, stat } from 'node:fs/promises';
 import { libraryAction } from './historyactions.ts';
-import { listed, plan, wantedIn } from './library.ts';
+import { listed, pendingEdits, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, itemClick, leavingIn, lookFor, restore, runPass, sharedFileSeen, takeInAnswers, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords, writesWait } from './libraryrow.ts';
@@ -335,7 +335,7 @@ async function rowFacts(look: ServerLook, key: string, item: LibraryItem | undef
     : tombstone ? leavingIn(look, tombstone) : [];
   const switchedOff = disk.switchedOff.get(key) ?? [];
   const switchProblem = Object.fromEntries(entries.flatMap(entry => { const problem = disk.switches.get(entry.tool)?.problem; return problem ? [[entry.tool, problem]] : []; }));
-  const edited = made ? [made.takeIn, ...made.keep.filter(kept => kept.from.how === 'edited').map(kept => kept.harness)].filter(tool => tool !== undefined) : [];
+  const edited = made ? pendingEdits(made) : [];
   const shape = item ? await readVersion(look.context, key, item.hash) : entries[0]?.server;
   const some = (field: string, value: object) => (Object.keys(value).length ? { [field]: value } : {});
   return {

@@ -18,7 +18,7 @@ import { access } from 'node:fs/promises';
 import { agentHash, agentText, agentsFolder, changedFields, fileFor, isAgentTool, keyOf, nameProblem, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
 import { fileTextFor, keepOwn, openLibrary, readVersion, saveLibrary, storeVersion } from './agentstore.ts';
 import { libraryAction } from './historyactions.ts';
-import { listed, plan } from './library.ts';
+import { listed, pendingEdits, plan } from './library.ts';
 import { libraryWords } from './libraryrow.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, itemClick, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
@@ -272,7 +272,7 @@ async function rowFacts(look: AgentLook, key: string, item: LibraryItem | undefi
     if (hidden) unseen[tool] = hidden;
   }
   // The edits the next pass handles: the one that becomes the current version, and any that give way to it.
-  const edited = made ? [made.takeIn, ...made.keep.filter(kept => kept.from.how === 'edited').map(kept => kept.harness)].filter(tool => tool !== undefined) : [];
+  const edited = made ? pendingEdits(made) : [];
   return {
     key, name, description: current?.description ?? '', copies, on: !!item?.on, except: item?.except ?? [], cannot, edited,
     // The copies a harness managed again gives way with are kept before the plan, by the pass (librarypass.ts cameBack): said with it.

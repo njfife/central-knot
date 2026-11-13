@@ -3,10 +3,10 @@
 // click each action runs: tests/agents.test.ts and tests/agentswalk.test.ts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { doneWords, libraryAction, libraryEntry, librarySentence, versionChoices } from '../src/historyactions.ts';
+import { doneWords, everythingAction, everythingPlan, everythingSentence, libraryAction, libraryEntry, librarySentence, restorePlan, versionChoices, type ItemNow } from '../src/historyactions.ts';
 import { libraryWords } from '../src/libraryrow.ts';
 import { newItem, type LibraryItem } from '../src/library.ts';
-import type { HistoryEvent } from '../src/types.ts';
+import type { HarnessId, HistoryEvent } from '../src/types.ts';
 
 const tools = ['claude-cli', 'copilot-cli', 'codex-cli'];
 const at = '2026-11-08T09:20:00.000Z';
@@ -14,7 +14,9 @@ const at = '2026-11-08T09:20:00.000Z';
 const item = (changes: Partial<LibraryItem> = {}): LibraryItem => ({ ...newItem('agent', 'reviewer', 'reviewer'), on: true, hash: 'b', versions: [
   { hash: 'b', at, from: { how: 'edited', harness: 'codex-cli' } }, { hash: 'x', at, from: { how: 'was-in', harness: 'copilot-cli' } }, { hash: 'a', at, from: { how: 'found', harness: 'claude-cli' } }], ...changes });
 const entry = (fields: Partial<HistoryEvent>): HistoryEvent => ({ id: 'e', at, key: 'agent:reviewer', item: 'reviewer', kind: 'edit', losers: [], orderProved: true, ...fields });
-const offered = (event: HistoryEvent, agent: LibraryItem | undefined) => { const action = libraryAction(event, agent); return action && [action.label, action.change]; };
+/** Nothing waits in the tools: no copy holds an edit not taken in, and these three are managed (historyactions.ts ItemNow). */
+const settled: ItemNow = { managed: tools as HarnessId[], pending: [] };
+const offered = (event: HistoryEvent, agent: LibraryItem | undefined) => { const action = libraryAction(event, agent, settled); return action && [action.label, action.change]; };
 const asIs = { key: 'reviewer', managed: true, off: [] };
 
 test('An Off entry offers Turn on while the agent is Off, and nothing once it is On again', () => {
@@ -80,9 +82,9 @@ test('Competing edits and a choice among found copies offer each copy that gave 
   const conflict = entry({ kind: 'conflict', winner: { tool: 'codex-cli', hash: 'b' }, previous: 'a', losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'claude-cli', hash: 'a' }] });
   assert.equal(librarySentence(conflict, libraryWords.agents, tools)?.text, 'Codex’s edit was the latest, so it became the current version. Copilot CLI’s is kept as a version.');
   assert.deepEqual(versionChoices(conflict, item()), [{ tool: 'copilot-cli', hash: 'x' }]);
-  assert.deepEqual(libraryAction(conflict, item(), 'x')?.change, { ...asIs, version: 'x' });
+  assert.deepEqual(libraryAction(conflict, item(), settled, 'x')?.change, { ...asIs, version: 'x' });
   assert.deepEqual(versionChoices(conflict, item({ hash: 'x' })), [], 'that copy’s version is current now');
-  assert.equal(libraryAction(conflict, item(), 'a'), undefined, 'only a copy the entry offers');
+  assert.equal(libraryAction(conflict, item(), settled, 'a'), undefined, 'only a copy the entry offers');
   const chosen = entry({ kind: 'chosen', winner: { tool: 'codex-cli', hash: 'b' }, losers: [{ tool: 'copilot-cli', hash: 'x' }], tookFrom: [{ tool: 'codex-cli', hash: 'b' }, { tool: 'copilot-cli', hash: 'x' }] });
   assert.equal(librarySentence(chosen, libraryWords.agents, tools)?.text, 'You chose Codex’s copy; Copilot CLI’s is kept as a version.');
   assert.deepEqual(versionChoices(chosen, item()), [{ tool: 'copilot-cli', hash: 'x' }]);
@@ -129,7 +131,7 @@ test('Whose an entry is: an agent’s and a server’s by their prefix (a server
 
 test('A skill’s entries from before the library that no click can say again show as past: Remove, Disable, take-over, copies added', () => {
   const skill = { ...item(), kind: 'skill' as const, key: 'notes', name: 'notes' };
-  for (const kind of ['removed', 'switched', 'took-over', 'added'] as const) assert.equal(libraryAction(entry({ key: 'notes', kind, previous: 'a' }), skill), undefined, kind);
+  for (const kind of ['removed', 'switched', 'took-over', 'added'] as const) assert.equal(libraryAction(entry({ key: 'notes', kind, previous: 'a' }), skill, settled), undefined, kind);
   // A skill's copies taken over now, and a tool's switch cleared, are said in the skill's words; neither has an Undo.
   assert.equal(librarySentence(entry({ key: 'notes', kind: 'switched', switched: [{ tool: 'codex-cli', disabled: false }] }), libraryWords.skills, tools)?.text, 'Codex’s own switch for it was cleared: Codex loads it again.');
   assert.equal(librarySentence(entry({ key: 'notes', kind: 'switched', switched: [{ tool: 'codex-cli', disabled: true }] }), libraryWords.skills, tools), undefined, 'a Disable from before the library keeps the general sentence');
@@ -139,4 +141,64 @@ test('A skill’s entries from before the library that no click can say again sh
 test('An action leaves the rest of the agent as it is: one kept out of a tool stays kept out of it', () => {
   const edit = entry({ kind: 'edit', previous: 'a', winner: { tool: 'codex-cli', hash: 'b' } });
   assert.deepEqual(offered(edit, item({ except: ['copilot-cli'] })), ['Undo', { key: 'reviewer', managed: true, off: ['copilot-cli'], version: 'a' }]);
+});
+
+// ---------- Synchronize everything's own entries (src/everything.ts) ----------
+
+const rule = (id: string, on: boolean, more: Partial<HistoryEvent> = {}): HistoryEvent =>
+  ({ id, at, key: 'home:everything', item: 'Synchronize everything', kind: 'everything', everything: { ruleOn: on }, losers: [], orderProved: true, ...more });
+/** reviewer, taken in by the rule from Claude Code at 'b' and put in Codex. */
+const ruleTook = (id: string, more: Partial<HistoryEvent> = {}) => entry({ id, kind: 'on', cause: 'sync-everything', winner: { tool: 'claude-cli', hash: 'b' }, losers: [{ tool: 'codex-cli', hash: '' }], tookFrom: [{ tool: 'claude-cli', hash: 'b' }], ...more });
+
+/** The EntryItem every entry here reads (historyactions.ts): the agent as given, and what the tools hold of it now. */
+const about = (agent: LibraryItem | undefined = item(), now = settled) => () => ({ item: agent, now });
+
+test('A switch-on’s Undo takes back what the rule took in after it, up to the next switch, and switches the rule off only while no switch came after it', () => {
+  const on = rule('on', true), took = ruleTook('took'), off = rule('off', false), later = ruleTook('later');
+  assert.deepEqual(everythingPlan(on, [on, took], about()).takeBack.map(event => event.id), ['took']);
+  assert.deepEqual(everythingAction(on, [on, took], about()), { label: 'Undo', help: 'Switch Synchronize everything off and take back the 1 item it took in since, each tool it was found in keeping its own copy' });
+  // Switched off in Settings since: it takes back what it took in, and leaves the rule as it is; what came after the next switch is another's.
+  assert.deepEqual([everythingPlan(on, [on, took, off, later], about()).takeBack.map(event => event.id), everythingPlan(on, [on, took, off], about()).switchOff], [['took'], false]);
+  assert.equal(everythingAction(on, [on, took, off], about())?.help, 'Take back the 1 item it took in since, each tool it was found in keeping its own copy');
+  // Nothing left to do: none, as for a plain switch-off, and one already undone.
+  assert.equal(everythingAction(on, [on, took, off], about(item({ on: false }))), undefined);
+  assert.deepEqual([everythingAction(off, [on, took, off], about()), everythingAction({ ...on, undoneBy: 'x' }, [on, took], about())], [undefined, undefined]);
+  // With nothing taken in yet it still switches the rule off.
+  assert.equal(everythingAction(on, [on], about())?.help, 'Switch Synchronize everything off');
+});
+
+test('A take-in is taken back only while every place it was found in still holds the copy it held then, in a tool still managed; its own Undo the same', () => {
+  const on = rule('on', true), chosen = entry({ id: 'chosen', item: 'picked', kind: 'chosen', winner: { tool: 'codex-cli', hash: 'b' }, losers: [] });
+  const why = (agent: LibraryItem | undefined, now = settled) => everythingPlan(on, [on, ruleTook('took'), chosen], about(agent, now)).left;
+  assert.deepEqual(why(item({ on: false })), [{ item: 'reviewer', why: 'off' }, { item: 'picked', why: 'off' }], 'a chosen copy is named by why its own Undo is gone');
+  assert.deepEqual(why(item()), [{ item: 'picked', why: 'chosen' }], 'one chosen with its own Undo');
+  assert.deepEqual(why(item({ hash: 'a' }))[0], { item: 'reviewer', why: 'changed' });
+  assert.deepEqual(why(item(), { ...settled, pending: ['codex-cli'] })[0], { item: 'reviewer', why: 'changed' }, 'a copy holds an edit not taken in yet');
+  assert.deepEqual(why(item(), { ...settled, managed: ['copilot-cli', 'codex-cli'] })[0], { item: 'reviewer', why: 'left-out' }, 'the tool it was found in is left out');
+  assert.deepEqual(why(item({ except: ['claude-cli'] }))[0], { item: 'reviewer', why: 'kept-out' });
+  assert.deepEqual(why(item({ deleted: { at } }))[0], { item: 'reviewer', why: 'deleted' });
+  // Found in Copilot CLI another way as well (~/.agents/skills), which holds Central Knot's copy now: taken over.
+  const shared = ruleTook('took', { foundIn: ['claude-cli', 'copilot-cli'] });
+  assert.deepEqual(everythingPlan(on, [on, shared], about(item({ applied: { 'copilot-cli': 'b' } }))).left, [{ item: 'reviewer', why: 'taken-over' }]);
+  assert.equal(libraryAction(shared, item({ applied: { 'copilot-cli': 'b' } }), settled)?.change.deleted, undefined, 'its own Undo (out of Central Knot again) is not offered either');
+  assert.equal(libraryAction(shared, item(), settled)?.change.deleted, true);
+  assert.deepEqual(everythingPlan(on, [on, ruleTook('took', { undoneBy: 'x' })], about()), { takeBack: [], left: [], switchOff: true, keptIn: [] });
+  // A tool a take-in wrote that isn't managed now keeps Central Knot's copy until it is.
+  assert.deepEqual(everythingPlan(on, [on, ruleTook('took')], about(item(), { ...settled, managed: ['claude-cli'] })).keptIn, ['codex-cli']);
+});
+
+test('A switch-on, a switch-off and an Undo say what they did; the Undo’s entry offers Restore while it can put an item back, passing over one touched since', () => {
+  assert.equal(everythingSentence(rule('on', true)).text, 'Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. Its Undo takes back what it takes in; a copy you choose has its own Undo, and an MCP server found in Claude Code has none (its entry says why).');
+  assert.equal(everythingSentence(rule('off', false)).text, 'Switched off: what turns up in a tool waits on its page for Add.');
+  const deleted = entry({ id: 'gone', kind: 'deleted', gaveBack: ['claude-cli'], losers: [{ tool: 'codex-cli', hash: 'b' }] });
+  const undo = rule('undo', false, { everything: { ruleOn: false, undo: { switchedOff: true, itemUndos: ['gone'], left: [{ item: 'docs', why: 'claude-code' }], keptIn: [] } } });
+  assert.equal(everythingSentence(undo).text, 'Undone: switched off, and 1 item it took in is out of Central Knot again, each tool it was found in keeping its own copy. Left in: docs (found in Claude Code: no Undo).');
+  assert.deepEqual(everythingAction(undo, [deleted, undo], about(item({ deleted: { at } }))), { label: 'Restore', help: 'Switch Synchronize everything on again and put back the 1 item this took out of Central Knot, which the switch-on’s Undo then takes back again' });
+  assert.equal(everythingAction(undo, [deleted, undo], about(item())), undefined, 'added again since: nothing to restore');
+  // Added again, edited and deleted since the Undo: its own Restore is offered, but the Undo's Restore passes it over.
+  const touched = [deleted, undo, entry({ id: 'again', kind: 'deleted', losers: [] })];
+  assert.deepEqual([restorePlan(undo, touched, about(item({ deleted: { at } }))).passed, everythingAction(undo, touched, about(item({ deleted: { at } })))], [['reviewer'], undefined]);
+  // A pass that removed its copy from a tool managed again since (`in-line`) changed nothing of the item: it still comes back.
+  assert.deepEqual(restorePlan(undo, [deleted, undo, entry({ id: 'line', kind: 'deleted', cause: 'in-line', losers: [] })], about(item({ deleted: { at } }))).back.map(event => event.id), ['gone']);
+  assert.equal(everythingSentence(rule('undo', false, { everything: { ruleOn: false, undo: { switchedOff: true, itemUndos: [], left: [], keptIn: [] } } })).text, 'Undone: switched off; nothing it took in was taken back.');
 });

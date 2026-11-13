@@ -17,7 +17,8 @@ import { libraryWords, sentences, statusLine } from '../src/libraryrow.ts';
 import { saveProfile, switchProfile } from '../src/profiles.ts';
 import { setDisabled } from '../src/skillswitch.ts';
 import { applyServers, serversView, writeToClaude } from '../src/servers.ts';
-import { managedNow, readRecord, setSyncEverything, syncGate, type ShareContext } from '../src/share.ts';
+import { setSyncEverything } from '../src/everything.ts';
+import { managedNow, readRecord, syncGate, type ShareContext } from '../src/share.ts';
 import { applySkills, clearSwitch, restoreSkill, skillsView, takeOver } from '../src/skills.ts';
 import { chooseTools, whatJoiningDoes } from '../src/toolchoice.ts';
 import type { Change, HarnessId, JoinCounts, PassResult } from '../src/types.ts';
@@ -414,10 +415,10 @@ test('A copy of a deleted item removed from a tool managed again: its entry says
     await turnCodexOn(b);
     const entry = (await b.history()).filter(event => event.key === 'notes').at(-1)!;
     const item = (await b.items()).skills.notes;
-    assert.deepEqual([entry.kind, entry.cause, librarySentence(entry, libraryWords.skills, await b.managed(), item)?.text, libraryAction(entry, item)?.label],
+    assert.deepEqual([entry.kind, entry.cause, librarySentence(entry, libraryWords.skills, await b.managed(), item)?.text, libraryAction(entry, item, { managed: await b.managed(), pending: [] })?.label],
       ['deleted', 'in-line', 'Deleted from Central Knot, so its folder in Codex was removed when sync reached it. History can restore it.', undefined]);
-    const deletions = (await b.history()).filter(event => event.key === 'notes' && event.kind === 'deleted');
-    assert.deepEqual(deletions.map(event => [event.cause, libraryAction(event, item)?.label]), [[undefined, 'Restore'], ['in-line', undefined]]);
+    const deletions = (await b.history()).filter(event => event.key === 'notes' && event.kind === 'deleted'), settled = { managed: await b.managed(), pending: [] };
+    assert.deepEqual(deletions.map(event => [event.cause, libraryAction(event, item, settled)?.label]), [[undefined, 'Restore'], ['in-line', undefined]]);
   } finally { await b.cleanup(); }
 });
 

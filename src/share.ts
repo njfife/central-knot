@@ -66,7 +66,8 @@ export interface SyncRecord { formatVersion: number; generation: string; owner: 
   leftOut?: HarnessId[];
   /**
    * Synchronize everything: a skill, MCP server or agent found in a managed tool is taken in and turned On by itself (library.ts
-   * FOUND; librarypass.ts takeInByRule). Off where it was never chosen; set by setSyncEverything alone.
+   * FOUND; librarypass.ts takeInByRule). Absent until first answered (first setup asks then: firstsetup.ts), which works as off;
+   * set by everything.ts setSyncEverything alone, and by its one Undo.
    */
   syncEverything?: boolean }
 
@@ -443,24 +444,6 @@ export async function takeOverSync(context: ShareContext): Promise<{ stopped?: s
   await saveRecord(context.home, { ...record, owner: context.build, ownerName: context.buildName }, true);
   await remember(context, record.generation);
   return { from: ownerName(record) };
-}
-
-/**
- * Turns the home's standing rule, Synchronize everything, on or off (SyncRecord syncEverything). Nothing is taken in here: the
- * next pass of the whole home (the background pass, or Sync once) takes in what it finds then. A home with no sync record gets
- * one, as the first click makes it. Refused, in plain words, where a pass may not write.
- */
-export async function setSyncEverything(context: ShareContext, on: boolean): Promise<{ stopped?: string }> {
-  const access = await writeAccess(context);
-  if (!access.allowed) return { stopped: access.reason };
-  const gate = await syncGate(context);
-  const refused = gateRefusal(gate);
-  if (refused) return { stopped: refused };
-  const record = (await readRecord(context.home)).record ?? newRecord(context);
-  record.syncEverything = on;
-  await saveRecord(context.home, record);
-  if (gate.state === 'first-setup') await remember(context, record.generation);
-  return {};
 }
 
 /** Whether this build syncs this home and may write it: History is kept tidy, and passes run, only where both hold. */

@@ -21,7 +21,7 @@ import { readFile, unlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { appendHistory, readHistory, replaceHistory } from './history.ts';
 import { isClearedSwitch, libraryAction, libraryEntry } from './historyactions.ts';
-import { listed, plan, wantedIn } from './library.ts';
+import { listed, pendingEdits, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, foundCopies, itemClick, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords } from './libraryrow.ts';
@@ -553,7 +553,7 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
   const switchProblem = Object.fromEntries(Object.keys(facts.loads).flatMap(tool => { const problem = disk.switches.get(tool as HarnessId)?.problem; return problem ? [[tool, problem]] : []; }));
   // Its description is the current version's, else a copy's (readDisk's shapes).
   const description = disk.shapes.get(key)?.description ?? first?.skill.description ?? '';
-  const edited = made ? [made.takeIn, ...made.keep.filter(kept => kept.from.how === 'edited').map(kept => kept.harness)].filter(tool => tool !== undefined) : [];
+  const edited = made ? pendingEdits(made) : [];
   const converted = disk.converted.get(key);
   const some = <T extends object>(field: string, value: T) => (Object.keys(value).length ? { [field]: value } : {});
   return {

@@ -5,7 +5,8 @@
 // unreadable, Automatic sync off and on, a crash at each step of a write or a removal, a tool left out and managed again,
 // profile switches (src/profiles.ts: three profiles naming the server, the skill and the agent in different sets) and their Undo,
 // and new copies turning up in tools (a server, a skill or an agent of a new name; sometimes the same name in two tools, with the
-// same content or not). Synchronize everything is on in the odd seeds (library.ts FOUND). After every step:
+// same content or not). First setup's question is answered Yes in the odd seeds and No in the even ones (everything.ts), and
+// among the steps are Settings' switch for Synchronize everything, the one Undo of its switch-on and that Undo's Restore. After every step:
 //   (a) nothing is lost: each entry Central Knot wrote over or removed held a content that is a version of the server, or is
 //       still in a tool. Checked for the step, and for every such content since the walk began;
 //   (b) in a copy of the home put back after, a plain pass and Write to Claude Code, then two passes: the second writes nothing;
@@ -18,8 +19,8 @@
 //   (h) the skill's folders and the agent's files are as they were in every tool: a server's clicks never touch them (a profile
 //       switch, and its Undo, turn them On and Off too; a pass of the whole home may catch them up);
 //   (i) Synchronize everything never brings back what was deleted: a deleted server (docs, or one that turned up and was taken
-//       in, then undone or deleted) stays deleted through every step but its own Add and History's Restore; with the rule off,
-//       nothing is ever taken in by it;
+//       in, then undone or deleted) stays deleted through every step but its own Add and History's Restores (an item's, and the
+//       one Undo's); while the rule is off, nothing is taken in by it;
 //   (j) with the rule on, after a pass of the whole home no found item is left that the rule would take in.
 // A step that makes the settings file unseeable (unreadable, deleted) is made from a settled home, and asserts that the pass
 // turns nothing Off and removes nothing.
@@ -31,17 +32,18 @@ import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { agentsView, applyAgents } from '../src/agents.ts';
 import { readHistory } from '../src/history.ts';
-import { libraryAction, versionChoices } from '../src/historyactions.ts';
+import { entriesNow, everythingAction, everythingPlan, libraryAction, versionChoices } from '../src/historyactions.ts';
 import { wantedIn, type LibraryItem } from '../src/library.ts';
 import { asksWhichCopy, harnessIs, placeOf, rowClicks, type LibraryRow } from '../src/libraryrow.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { changes, switchPlan, undoPlan } from '../src/profileplan.ts';
 import { liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from '../src/profiles.ts';
 import { applyServers, restoreServer, serversView, writeToClaude } from '../src/servers.ts';
-import { setSyncEverything, type ShareContext } from '../src/share.ts';
+import { everythingEntryAction, setSyncEverything } from '../src/everything.ts';
+import { readRecord, type ShareContext } from '../src/share.ts';
 import { applySkills, skillsView } from '../src/skills.ts';
 import { chooseTools } from '../src/toolchoice.ts';
-import type { Change, DestinationResult, HarnessId, LibraryFacts, PassResult } from '../src/types.ts';
+import type { Change, DestinationResult, HarnessId, HomeView, LibraryFacts, PassResult } from '../src/types.ts';
 import { bytes, folderOf, put, sandbox, trial, tools as allTools, type Tool } from './skillclicks.ts';
 
 const SEEDS = [1, 2, 3, 4];
@@ -76,7 +78,9 @@ async function walk(seed: number): Promise<Finding[]> {
   const pass = (more: Partial<ShareContext> = {}) => applyServers(context(more), tools, [], { background: true });
   /** main.ts's pass of the whole home: every kind. */
   const wholePass = async (more: Partial<ShareContext> = {}) => { await applySkills(context(more), tools, [], { background: true }); await pass(more); await applyAgents(context(more), tools, [], { background: true }); };
-  const rule = seed % 2 === 1;
+  /** First setup's answer: Yes in the odd seeds, No in the even ones; Settings' switch may change it later in the walk. */
+  const yes = seed % 2 === 1;
+  const ruleOn = async () => (await readRecord(box.home)).record?.syncEverything === true;
   const write = (more: Partial<ShareContext> = {}) => writeToClaude(context(more), tools, ['docs']);
   const files = async () => Object.fromEntries(await Promise.all(three.map(async tool => [tool, await readFile(file(tool), 'utf8').catch(() => undefined)] as const)));
   /** Each tool's docs entry as read: its content, and its own fields. */
@@ -89,18 +93,31 @@ async function walk(seed: number): Promise<Finding[]> {
     const hashes = Object.fromEntries(Object.entries(fact?.copies ?? {}).map(([tool, copy]) => [tool, copy!.hash]));
     return { fact, item: view.library.docs, row: { key: 'docs', name: fact?.name, hashes, plan: fact?.plan, cannot: fact?.cannot, unseen: fact?.unseen, takeInAnswers: fact?.takeInAnswers, waits: fact?.waits } };
   };
-  /** History's actions for every server (docs, and any that turned up in a tool), each against the item as it is now. */
+  /**
+   * History's actions for every server (docs, and any that turned up in a tool), each against the item as it is now, and those of
+   * Synchronize everything's entries (its switch-on's one Undo, and that Undo's Restore), which reach every kind.
+   */
   const historyActions = async () => {
-    const { library } = await serversView(context(), tools);
-    return (await readHistory(context())).filter(event => event.key.startsWith('mcp:')).flatMap(event => {
-      const item = library[event.key.slice('mcp:'.length)];
-      const main = libraryAction(event, item), run = (version?: string) => () => restoreServer(context(), tools, event.id, version);
-      return [...(main ? [{ event, label: main.label, run: run() }] : []), ...versionChoices(event, item).map(choice => ({ event, label: `Use ${choice.tool}’s`, run: run(choice.hash) }))];
+    // As History's page decides them (historyactions.ts entriesNow): from the three views, with the tools managed now.
+    const views = { skills: await skillsView(context(), tools), mcp: await serversView(context(), tools), agents: await agentsView(context(), tools) };
+    const history = await readHistory(context()), about = entriesNow({ ...views, sync: { managed: [...tools] } } as unknown as HomeView);
+    const servers = history.filter(event => event.key.startsWith('mcp:')).flatMap(event => {
+      const { item, now } = about(event);
+      const main = libraryAction(event, item, now), run = (version?: string) => () => restoreServer(context(), tools, event.id, version);
+      return [...(main ? [{ event, label: main.label, run: run(), whole: false, weight: 1 }] : []), ...versionChoices(event, item).map(choice => ({ event, label: `Use ${choice.tool}’s`, run: run(choice.hash), whole: false, weight: 1 }))];
     });
+    // As a step, the one Undo is taken once it has something to take back, and often, so walks reach it after the rule took items
+    // in; one that would only switch the rule off is run in (c)'s trials alone. Its Restore is taken often too.
+    const rule = history.flatMap(event => {
+      const action = event.kind === 'everything' ? everythingAction(event, history, about) : undefined;
+      const takes = action?.label === 'Restore' || (action?.label === 'Undo' && everythingPlan(event, history, about).takeBack.length > 0);
+      return action ? [{ event, label: action.label, run: () => everythingEntryAction(context(), tools, event.id), whole: true, weight: takes ? 6 : 0 }] : [];
+    });
+    return [...servers, ...rule];
   };
   const historyCount = async () => (await readHistory(context())).filter(event => event.key === 'mcp:docs').length;
   // Profiles: each switch the page offers (one that would change something), and each switch entry whose Undo History offers.
-  const onNow = async () => JSON.stringify([await liveNow(context()), ...await Promise.all(['skills', 'mcp', 'agents'].map(name => readFile(join(box.home, `.central-knot/${name}.json`), 'utf8').catch(() => '')))]);
+  const onNow = async () => JSON.stringify([await liveNow(context()), ...await Promise.all(['skills', 'mcp', 'agents', 'sync'].map(name => readFile(join(box.home, `.central-knot/${name}.json`), 'utf8').catch(() => '')))]);
   const switches = async () => { const items = await liveNow(context()); return (await readProfiles(box.home)).profiles.filter(profile => changes(switchPlan(profile, items))); };
   const switchUndos = async () => { const items = await liveNow(context()); return (await readHistory(context())).filter(event => event.kind === 'profile' && !event.undoneBy && changes(undoPlan(event, items))); };
   const switchCount = async () => (await readHistory(context())).filter(event => event.kind === 'profile').length;
@@ -134,8 +151,8 @@ async function walk(seed: number): Promise<Finding[]> {
     await writeFile(join(box.home, agentFiles['claude-cli']), '---\nname: writer\ndescription: Writes docs\n---\n\nYou write docs.\n');
     await applyAgents(context(), tools, [{ key: 'writer', managed: true, off: [] }]);
     for (const [name, items] of [['Everything', ['mcp:docs', 'skill:notes', 'agent:writer']], ['No docs', ['skill:notes', 'agent:writer']], ['Docs alone', ['mcp:docs']]] as const) await saveProfile(context(), { name, items: [...items] });
-    if (rule) await setSyncEverything(context(), true);
-    trace.push(rule ? 'Synchronize everything on' : 'Synchronize everything off');
+    await setSyncEverything(context(), yes, true);
+    trace.push(yes ? 'first setup: Yes' : 'first setup: No');
     othersAsWritten = await others();
     for (let step = 0; step < STEPS && !found.length; step++) {
       const { row, item, fact } = await seen();
@@ -159,8 +176,11 @@ async function walk(seed: number): Promise<Finding[]> {
       if (fact?.waits?.length) add(3, { name: 'Write to Claude Code', app: true, claude: true, run: more => write(more) });
       for (const action of await historyActions()) {
         const docs = action.event.key === 'mcp:docs';
-        add(docs ? 2 : 1, { name: `History: ${action.label} (${action.event.kind}${docs ? '' : ` of ${action.event.item}`})`, app: true, brings: action.label === 'Restore' ? action.event.key.slice('mcp:'.length) : undefined, run: () => action.run() });
+        // The one Undo's Restore brings back each item it took back; an item's Restore, that item. Each touches every kind (`whole`).
+        const brings = action.label !== 'Restore' ? undefined : action.whole ? '*' : action.event.key.slice('mcp:'.length);
+        add(docs ? 2 : action.weight, { name: `History: ${action.label} (${action.event.kind}${docs ? '' : ` of ${action.event.item}`})`, app: true, whole: action.whole, brings, run: () => action.run() });
       }
+      add(1, { name: `Settings: Synchronize everything ${await ruleOn() ? 'off' : 'on'}`, app: true, run: async () => setSyncEverything(context(), !(await ruleOn())) });
       for (const profile of await switches()) add(2, { name: `switch to ${profile.name}`, app: true, click: true, profile: true, run: more => switchProfile(context(more), tools, profile.id) });
       for (const event of await switchUndos()) add(2, { name: `History: Undo switch to ${event.item}`, app: true, profile: true, run: more => undoSwitch(context(more), tools, event.id) });
       for (const tool of three) {
@@ -216,6 +236,7 @@ async function walk(seed: number): Promise<Finding[]> {
       trace.push(`${act.name}${crash ? ` [crash ${crash}]` : ''}`);
       const before = await files(), entriesBefore = await entries(), managedBefore = [...tools], countBefore = await historyCount(), switchesBefore = await switchCount();
       const deletedBefore = Object.values((await serversView(context(), tools)).library).filter(each => each.deleted).map(each => each.key);
+      const ruleBefore = await ruleOn(), takenBefore = (await readHistory(context())).filter(event => event.cause === 'sync-everything').length;
       let done: unknown, crashed = false;
       try { done = await act.run(crash ? { fault: at => { if (at === crash) throw new Error('crash'); } } : {}); }
       catch (error) { if ((error as Error).message === 'crash') crashed = true; else { fail(`threw: ${(error as Error).message.slice(0, 140)}`); break; } }
@@ -236,10 +257,10 @@ async function walk(seed: number): Promise<Finding[]> {
       if (!same(await others(), othersAsWritten) && act.app && !act.profile && !act.whole) fail(`(h) ${act.name} touched the skill or the agent`);
       // (i) The rule never lifts a tombstone, and never acts while it is off.
       const libraryNow = (await serversView(context(), tools)).library;
-      for (const key of deletedBefore) if (key !== act.brings && !libraryNow[key]?.deleted) fail(`(i) ${act.name} brought back the deleted server ${key === 'docs' ? key : 'that turned up'}`);
-      if (!rule && (await readHistory(context())).some(event => event.cause === 'sync-everything')) fail(`(i) ${act.name}: Synchronize everything took something in while off`);
+      for (const key of deletedBefore) if (key !== act.brings && act.brings !== '*' && !libraryNow[key]?.deleted) fail(`(i) ${act.name} brought back the deleted server ${key === 'docs' ? key : 'that turned up'}`);
+      if (!ruleBefore && !(await ruleOn()) && (await readHistory(context())).filter(event => event.cause === 'sync-everything').length > takenBefore) fail(`(i) ${act.name}: Synchronize everything took something in while off`);
       // (j) After a pass of the whole home with the rule on, nothing is left found that it would take in.
-      if (rule && act.whole && !crashed) {
+      if (await ruleOn() && act.whole && !crashed && act.name === 'pass of the whole home') {
         const views = [await skillsView(context(), tools), await serversView(context(), tools), await agentsView(context(), tools)];
         const left = views.flatMap(view => view.items.filter(each => each.takeInAnswers && 'take' in each.takeInAnswers.rule).map(each => each.key));
         if (left.length) fail(`(j) after a pass of the whole home the rule left ${left.join(', ')} to take in`);
@@ -256,7 +277,7 @@ async function walk(seed: number): Promise<Finding[]> {
       // `moves`: a profile's action, which does something when it turns an item On or Off, or changes a record (the same pass may
       // turn an item Off again, as a copy deleted by hand while a removal waited, which its record and History say).
       type Offered = { name: string; run: () => Promise<{ stopped?: string; results: DestinationResult[] }>; moves?: boolean };
-      const offered: Offered[] = (await historyActions()).map(action => ({ name: `History’s ${action.label} on ${action.event.kind}`, run: action.run }));
+      const offered: Offered[] = (await historyActions()).map(action => ({ name: `History’s ${action.label} on ${action.event.kind}`, run: action.run, moves: action.whole }));
       for (const profile of await switches()) offered.push({ name: `the Profiles page’s Switch to ${profile.name}`, moves: true, run: () => switchProfile(context(), tools, profile.id) });
       for (const event of await switchUndos()) offered.push({ name: `History’s Undo switch to ${event.item}`, moves: true, run: () => undoSwitch(context(), tools, event.id) });
       const page = (name: string, change: Change) => offered.push({ name: `the page’s ${name}`, run: () => send(change) });
@@ -284,7 +305,7 @@ async function walk(seed: number): Promise<Finding[]> {
         }
       });
     }
-    if (process.env.CK_TALLY) { const all = await readHistory(context()); console.log(`TALLY seed ${seed} rule ${rule} taken ${all.filter(event => event.cause === 'sync-everything').length} new ${trace.filter(step => step.startsWith('new ')).length} undone ${all.filter(event => event.cause === 'sync-everything' && event.undoneBy).length}`); }
+    if (process.env.CK_TALLY) { const all = await readHistory(context()); console.log(`TALLY seed ${seed} yes ${yes} undo ${all.filter(event => event.everything?.undo).length} taken ${all.filter(event => event.cause === 'sync-everything').length} new ${trace.filter(step => step.startsWith('new ')).length} undone ${all.filter(event => event.cause === 'sync-everything' && event.undoneBy).length}`); }
   } finally { for (const tool of three) await chmod(join(file(tool), '..'), 0o755).catch(() => undefined); await box.cleanup(); }
   return found;
 }
@@ -292,7 +313,7 @@ async function walk(seed: number): Promise<Finding[]> {
 const extra = Number(process.env.CK_WALKS ?? 0), from = Number(process.env.CK_SEED ?? 5000);
 const only = process.env.CK_ONLY;
 const walks = only ? [Number(only)] : [...SEEDS, ...Array.from({ length: extra }, (_, index) => from + index)];
-test(`A random walk of ${STEPS} steps over an MCP server with a skill and an agent in one home, profile switches and new copies among them, Synchronize everything on in half, ${walks.length} times: nothing Central Knot removes or writes over is lost, passes settle, every action offered does something, Off then On keeps each entry, Claude Code is written only by Write, only a profile switch touches the skill and agent, nothing deleted comes back by itself, and the rule leaves nothing it would take`, async () => {
+test(`A random walk of ${STEPS} steps over an MCP server with a skill and an agent in one home, profile switches, new copies, Synchronize everything’s switch, its one Undo and that Undo’s Restore among them, first setup answered Yes in half, ${walks.length} times: nothing Central Knot removes or writes over is lost, passes settle, every action offered does something, Off then On keeps each entry, Claude Code is written only by Write, only a profile switch touches the skill and agent, nothing deleted comes back by itself, and the rule leaves nothing it would take`, async () => {
   const findings = new Map<string, { count: number; trace: string }>();
   const waiting = [...walks];
   await Promise.all(Array.from({ length: only ? 1 : 6 }, async () => {

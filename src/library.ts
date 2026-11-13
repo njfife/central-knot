@@ -122,7 +122,8 @@
 //   a copy whose own time is inside the settle       on                                   left for the next pass
 //     window of the pass's clock
 //   a copy chosen that is gone or changed since      refused: choose again                (the rule chooses none)
-//   copies that differ, none chosen                  waits: the row asks which            left found, with the row's question
+//   copies that differ, none chosen                  waits: the row asks which, the       left found, with the row's question
+//                                                    latest preselected (latestCopy)      (first setup walks through these)
 //   otherwise                                        taken in from the one content, or the copy chosen
 //
 // Not found at all, so in neither column: a copy of an item that is Off, or in a harness the item is kept out of (the table
@@ -327,6 +328,11 @@ export function plan(item: LibraryItem, copies: Copies): Plan {
   return made;
 }
 
+/** The harnesses whose copy holds an edit no pass has taken in yet, by a plan: the one it takes in, and those it keeps as versions. */
+export const pendingEdits = (made: Plan): HarnessId[] => [...(made.takeIn ? [made.takeIn] : []), ...made.keep.filter(kept => kept.from.how === 'edited').map(kept => kept.harness)];
+/** The harnesses whose copy holds a change no pass has taken in yet: an edit (pendingEdits), or the copy deleted by hand that turns the item Off. */
+export const pendingChanges = (made: Plan): HarnessId[] => [...pendingEdits(made), ...(made.turnedOffBy ? [made.turnedOffBy] : [])];
+
 /**
  * The edit that becomes the current version, among the harnesses whose copy is one (`verdicts`): the latest. An edit made on
  * the current version (`take-in`) always counts; one made where the current version had moved on as well (`latest-wins`)
@@ -386,8 +392,11 @@ export interface FoundKey {
 export type TakenBy = 'click' | 'rule';
 /** Why a found key is left found (the header's FOUND table, one per row). */
 export type LeftFound = 'no-copy' | 'leaving' | 'deleted' | 'part' | 'converted' | 'switched-off' | 'settling' | 'choice-changed';
-/** The table's answer: take it in from this copy (`chosen`: the person chose it among copies that differ), wait for a choice of copy, or leave it found. */
-export type TakeInAnswer = { take: FoundCopy; chosen: boolean } | { wait: 'choice' } | { leave: LeftFound };
+/**
+ * The table's answer: take it in from this copy (`chosen`: the person chose it among copies that differ), wait for a choice of
+ * copy (`latest`: the content changed last, which the question preselects: latestCopy), or leave it found.
+ */
+export type TakeInAnswer = { take: FoundCopy; chosen: boolean } | { wait: 'choice'; latest?: string } | { leave: LeftFound };
 
 /**
  * The header's FOUND table, for one found key. `chosen`: the copy a click chose where copies differ, as the page saw it.
@@ -405,9 +414,34 @@ export function takeInAnswer(by: TakenBy, found: FoundKey, chosen?: { harness: H
   const pick = chosen && copies.find(copy => copy.harness === chosen.harness);
   if (!rule && chosen && (!pick || (chosen.hash !== undefined && pick.hash !== chosen.hash))) return { leave: 'choice-changed' };
   const differ = new Set(copies.map(copy => copy.hash)).size > 1;
-  if (differ && !pick) return { wait: 'choice' };
+  if (differ && !pick) { const latest = latestCopy(copies); return { wait: 'choice', ...(latest ? { latest } : {}) }; }
   return { take: pick ?? copies[0], chosen: differ };
 }
+
+/**
+ * Of a found key's copies that differ, the content changed last (its hash), which the copy question preselects (its main
+ * button) and first setup's "Use the latest for the rest" takes; none where it can't be told. A content was made when its
+ * earliest copy was changed, so a copy that only carries it (written later) doesn't make it newer. None when a copy has no
+ * time of its own (an MCP entry, whose time is its whole file's: "no dates to go by"), or the last two contents were changed
+ * less than a second apart (a tie: some file systems, and copies made by unpacking or copying, keep a file's time only to
+ * the second).
+ * Known weakness: a copy Central Knot wrote carries the time of that write, not of the edit it holds; one written into a tool
+ * that was behind, alone with its content, reads as changed then.
+ * Not `plan`'s "latest wins", which is for an item already in the library: there two edits made in harnesses are ordered by
+ * their times, a copy with no time counts as earlier than any, and a tie goes to the first harness (latestEdit); here a tie,
+ * or a copy with no time, is no latest, and the person chooses.
+ */
+export function latestCopy(copies: readonly Pick<FoundCopy, 'hash' | 'at'>[]): string | undefined {
+  const made = new Map<string, number>();
+  for (const { hash, at } of copies) {
+    if (at === undefined) return undefined;
+    made.set(hash, Math.min(made.get(hash) ?? Infinity, at));
+  }
+  const [last, before] = [...made].sort(([, first], [, second]) => second - first);
+  return last && before && last[1] - before[1] >= TIE_MS ? last[0] : undefined;
+}
+/** Two contents changed less than this apart are a tie for latestCopy: no latest. */
+const TIE_MS = 1000;
 
 // ---------- Versions ----------
 

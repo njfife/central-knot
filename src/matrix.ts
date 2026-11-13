@@ -2,13 +2,14 @@
 // in every tool Central Knot manages. A row's marks only say what each tool has; each tool's own controls are in the item's
 // details, and every click's result comes with an Undo of the whole click. Every kind is on Central Knot's library: its row is a
 // library row (`library()`): librarypages.ts says what each kind supplies, libraryrow.ts what such a row says. A sync notice is
-// kept or folded once its page shows it (toldNotices); until then it lives across reads in app.ts keepUnshown.
+// kept or folded once its page shows it (toldNotices); until then it lives across reads in app.ts keepUnshown. First setup's
+// walkthrough (firstsetup.ts) is a band among a table's bands, given copyQuestion to hold the question of the item it is at.
 import { brandMark } from './brand.ts';
 import { caughtUpNames, defaultHistoryDays, groupBy, noticeNames, syncOwner } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
 import { andList, byToolOrder, kindNouns, toolNames, toolsPhrase } from './words.ts';
-import { readFlag, writeFlag } from './flags.ts';
-import { leftOutTools, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, retireTip, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
+import { walkthroughBand } from './firstsetup.ts';
+import { leftOutTools, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { kindSource, type ItemRow, type KindSource, type Tool } from './itemrow.ts';
@@ -525,10 +526,11 @@ function copyQuote(skill: ItemRow, tool: Tool, others: Tool[]): Child[] | undefi
 
 /**
  * The copy question, for an item whose copies differ: the question ("Which copy of <name> should every tool use?", or "both
- * tools") and its note, then one row per choice, each saying what it does, and doing it at once. Copies that are the same are
- * one choice. Its layout at each width is style.css "The copy question"; its words' rules are copywords.ts.
+ * tools") and its note, then one row per choice, each saying what it does, and doing it at once; the latest copy's is the main
+ * one. Copies that are the same are one choice. Its layout at each width is style.css "The copy question"; its words' rules are
+ * copywords.ts. `then`: run once a choice's click is done (first setup's walkthrough goes on).
  */
-function compareChoices(skill: ItemRow, inFiles = false) {
+function compareChoices(skill: ItemRow, inFiles = false, then?: () => void) {
   const versions = skill.versions ?? {};
   // The copies that count: each tool's own, but where a tool can't take the item (it keeps its own copy).
   const compared = toolList().filter(tool => skill.copies[tool] !== undefined && !skill.cannot?.[tool]);
@@ -537,19 +539,17 @@ function compareChoices(skill: ItemRow, inFiles = false) {
   const receiving = toolList().filter(tool => !skill.cannot?.[tool] && skill.copies[tool] === undefined);
   // The tools a choice changes only when you click Write to Claude Code (libraryrow.ts writesWait).
   const later = [...compared, ...receiving].filter(tool => writesWait(kind, tool));
-  // A group's content was made when its earliest copy was: a copy sync wrote is newer than the edit it carries. Marked only when
-  // every copy's time is known and one group's is the latest. A copy an Undo of a choice puts back has its earlier time again.
-  // Left so: a copy sync wrote into a tool that was behind, alone in its group, carries the time of that write, not of the edit
-  // it holds.
+  // The copy changed last is the engine's answer (library.ts latestCopy, in the take-in answer); none where no date tells.
+  const asked = skill.takeInAnswers?.click, latestHash = asked && 'wait' in asked ? asked.latest : undefined;
+  const latest = groups.find(([tool]) => skill.hashes?.[tool] === latestHash);
+  // When a group's content was made, for its line: when its earliest copy was changed (as latestCopy reads it).
   const editedAt = groups.map(group => Math.min(...group.map(tool => Date.parse(versions[tool]?.at ?? ''))));
-  const last = Math.max(...editedAt);
-  const latest = groups.length > 1 && editedAt.every(Number.isFinite) && editedAt.filter(at => at === last).length === 1 ? groups[editedAt.indexOf(last)] : undefined;
   // The line under each name, in one form: the copy's size (where the sizes differ) and when it was edited ("7 lines · edited
   // 2 days ago"); none for an MCP entry, which has neither. The copy edited most recently has the line's one emphasis.
   const sizesDiffer = new Set(groups.map(([tool]) => versions[tool]?.lines)).size > 1;
   const factsOf = (tool: Tool, at: number) => [sizesDiffer ? versions[tool]!.lines : '', Number.isFinite(at) ? `edited ${sinceThen(at)}` : versions[tool]!.changed];
   const facts = groups.map(([tool], index) => (versions[tool] ? factsOf(tool, editedAt[index]).filter(Boolean).join(' · ') : ''));
-  // The copies say when each was edited, and the newer one is marked: latest wins everywhere else in the library.
+  // The copies say when each was edited, and the latest one is marked.
   const lib = library();
   const newest = groups.length > 2 ? 'Newest' : 'Newer';
   const about = (group: Tool[]) => {
@@ -568,12 +568,14 @@ function compareChoices(skill: ItemRow, inFiles = false) {
     if (block) return h('button.version.version-blocked', { type: 'button', id: `use-${skill.key}-${tool}`, disabled: true, title: block.reason },
       who, h('span.version-says', {}, h('span.version-effect.version-why', {}, icon('circle-alert', 12, 'tone-warning'), cantUse(block.reason))));
     const others = compared.filter(entry => !group.includes(entry));
+    // A tool whose copy is one it has another way keeps it: Central Knot writes nothing there (library.ts, "held").
+    const replaced = others.filter(entry => !skill.anotherWay?.[entry]), keeping = others.filter(entry => skill.anotherWay?.[entry]);
     const said = copyQuote(skill, tool, others);
-    return h('button.version', { type: 'button', id: `use-${skill.key}-${tool}`, 'aria-label': `Use ${tools}’s copy`, disabled: !canWrite(), onclick: () => turnOn(skill, tool) },
+    return h('button.version', { type: 'button', id: `use-${skill.key}-${tool}`, 'aria-label': `Use ${tools}’s copy`, disabled: !canWrite(), onclick: () => void turnOn(skill, tool).then(then) },
       who,
       h('span.version-says', {},
         said ? h('span.version-text', {}, ...said) : null,
-        h('span.version-effect', {}, choiceEffect(others.map(entry => names[entry]), receiving.map(entry => names[entry]), later.map(entry => names[entry])))),
+        h('span.version-effect', {}, choiceEffect(replaced.map(entry => names[entry]), receiving.map(entry => names[entry]), later.map(entry => names[entry]), keeping.map(entry => names[entry])))),
       h(`span.version-cta${group === latest ? '.version-cta-main' : ''}`, { 'aria-hidden': 'true' }, 'Use this copy'));
   };
   // Comparing comes before choosing: the full copies side by side, a click from the choices (the Files view shows them already;
@@ -590,6 +592,12 @@ function compareChoices(skill: ItemRow, inFiles = false) {
     h('p.compare-note', {}, `Choosing applies at once${later.length ? `, in ${andList(later.map(entry => names[entry]))} when you click Write to Claude Code` : ''}: the ${lib.words.item} is taken into Central Knot with that copy, and turned on everywhere. The other copies are kept as its versions.`),
     h('div.compare-choices', {}, groups.map(choice)),
     read, bodies);
+}
+
+/** The copy question of this table's found item `key`, for first setup's walkthrough (firstsetup.ts): `then` runs once a choice's click is done. */
+export function copyQuestion(key: string, then: () => void): HTMLElement | null {
+  const skill = committedList().find(row => row.key === key);
+  return skill && isDiffering(skill) ? compareChoices(skill, false, then) : null;
 }
 
 /** Whether an open row's details dock beside the table: the content is wide enough (renderer.ts sets state.wide). */
@@ -738,21 +746,6 @@ function syncOffBand(): HTMLElement | null {
     (() => { const on = smallAction('Turn sync on', 'sync-turn-on', () => void setSync(true)); on.title = 'Copy waiting changes now and keep syncing from here on'; return on; })());
 }
 
-/** First use of a page: one line on what the switch does, and where each tool's own controls are. */
-function helpBand(): HTMLElement | null {
-  const list = committedList();
-  // Shown until dismissed, so it does not come and go as rows change.
-  const key = `ck-help-dismissed-${kind}`;
-  if (!list.length || readFlag(key) || state.skillsView === 'files') return null;
-  const words = library().words;
-  const none = leftOutTools().length ? 'no tool Central Knot manages has it' : 'no tool has it';
-  const first = `Turn ${words.an} on and every tool has it, kept the same. Turn it off and ${none}: Central Knot keeps it, with its versions, and puts each ${words.copy} back when you turn it on.`;
-  const second = `Open ${words.an} for its versions.`;
-  return h('div.band.band-help', { role: 'note' }, icon('info', 14, 'tone-muted'),
-    h('span.band-text.band-lines', {}, h('span', {}, first), h('span.tone-muted', {}, second)),
-    closeButton(() => { writeFlag(key); rerender(); }, { id: 'help-dismiss', label: 'Hide this tip' }));
-}
-
 /**
  * What the background passes copied where it was missing, and where: shown on the Harnesses list until dismissed (it comes back
  * only for a different catch-up). `told`: the notices that already say an item's change. Null once dismissed.
@@ -800,7 +793,7 @@ function otherOwnerBand(): HTMLElement | null {
 function listNotices() {
   const mcp = listView()!;
   const bands: HTMLElement[] = [];
-  for (const band of [syncOffBand(), outcomeBand()]) if (band) bands.push(band);
+  for (const band of [syncOffBand(), outcomeBand(), walkthroughBand(kind, copyQuestion)]) if (band) bands.push(band);
   if (!mcp.access.allowed) bands.push(h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, mcp.access.reason)));
   const owned = otherOwnerBand();
   if (owned) bands.push(owned);
@@ -836,8 +829,6 @@ function listNotices() {
   // A click's refusal is its result, said once, in the result's band (app.ts applyClick leaves it out of these).
   const problems = (result?.results ?? []).filter(result => result.outcome === 'failed' || (result.outcome === 'held' && !result.differs && !result.waits));
   if (problems.length) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), h('span.band-text', {}, problems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · '))));
-  const tip = helpBand();
-  if (tip) bands.push(tip);
   return bands.length ? h('div.bands', {}, bands) : null;
 }
 
@@ -1112,7 +1103,7 @@ const onPhrase = (skill: ItemRow, left: readonly string[] = []) => toolsPhrase(c
  * they differ). Said from what happened (`notIn`: the harnesses where the write didn't go through, or waits for Write to
  * Claude Code: app.ts applyClick).
  */
-function turnOn(skill: ItemRow, use?: Tool) {
+function turnOn(skill: ItemRow, use?: Tool): Promise<void> {
   const name = nameOf(skill), lib = library(), found = !inLibrary(itemOf(skill));
   const plugins = turnEvery(throughItems(skill), true);
   const said = (notIn: HarnessId[]) => {
@@ -1123,7 +1114,7 @@ function turnOn(skill: ItemRow, use?: Tool) {
     if (found) return lib.say.said.takenIn(name, using.filter(tool => !another.includes(tool)), toolList(), use, another);
     return `${name} is on in ${onPhrase(skill, left)}.`;
   };
-  mainClick(name, true, [rowClicks.on(skill, itemOf(skill), use)], plugins, said, plugins.left);
+  return mainClick(name, true, [rowClicks.on(skill, itemOf(skill), use)], plugins, said, plugins.left);
 }
 
 // ---------- Items tools have through a plugin ----------
@@ -1140,14 +1131,14 @@ const rowItems = (row: PluginRow): PluginItemAt[] => pluginTools(row).flatMap(to
  * the tools with no switch for one item of a plugin (pluginswitch.ts turnEvery), plainly, with the whole plugin's switch there
  * offered beside the Undo.
  */
-function mainClick(name: string, on: boolean, changes: Change[], plugins: ReturnType<typeof turnEvery>, said: (notIn: HarnessId[]) => string, also?: string) {
+function mainClick(name: string, on: boolean, changes: Change[], plugins: ReturnType<typeof turnEvery>, said: (notIn: HarnessId[]) => string, also?: string): Promise<void> {
   // Said as "there" when the result is about that one tool, as after a tool's own switch; else by the tool's name.
   const there = !changes.length && new Set(plugins.turned.map(item => item.tool)).size === 1;
   const along = plugins.turned.map(item => alongWords(item, plugins.ops, there)).filter(Boolean).join(' ') || undefined;
   const next = wholePluginAct(name, plugins.whole, on);
-  if (changes.length) { void applyClick({ kind, items: [name], changes, said, also, note: plugins.limit, next, plugins: plugins.ops.length ? { ops: plugins.ops, draft: plugins.draft, said: along } : undefined }); return; }
+  if (changes.length) return applyClick({ kind, items: [name], changes, said, also, note: plugins.limit, next, plugins: plugins.ops.length ? { ops: plugins.ops, draft: plugins.draft, said: along } : undefined });
   const where = toolsPhrase(plugins.turned.map(item => item.tool), toolList());
-  void applyPluginSwitches(plugins.ops, plugins.draft, { also, note: plugins.limit, next, said: [said([]), along].filter(Boolean).join(' '), undone: undoneWords(name, on, where) });
+  return applyPluginSwitches(plugins.ops, plugins.draft, { also, note: plugins.limit, next, said: [said([]), along].filter(Boolean).join(' '), undone: undoneWords(name, on, where) });
 }
 
 /** A plugin item's Undo, in one form on every page: what the click did, turned back ("Undone: triage is back on in Codex."). */
@@ -1172,7 +1163,6 @@ function wholePluginAct(name: string, whole: PluginItemAt[], on: boolean) {
  */
 function nothingChanged(name: string, plugins: ReturnType<typeof turnEvery>, on: boolean, also?: string) {
   const left = [also, plugins.limit].filter(Boolean).join(' ');
-  retireTip(kind);
   // A known limit (no switch for one item) is said plainly, as information; a switch that can't be written is a problem.
   tell({ page: state.page, item: name, warn: !!also, info: !also, band: true, text: `${name}: nothing changed.${left ? ` ${left}` : ` It is ${on ? 'on' : 'off'} already.`}`, act: wholePluginAct(name, plugins.whole, on) });
   rerender();

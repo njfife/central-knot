@@ -19,6 +19,8 @@ import { applyServers, restoreServer, serversView, writeToClaude } from '../src/
 import type { ShareContext } from '../src/share.ts';
 import type { Change, HarnessId, HomeView, LibraryFacts } from '../src/types.ts';
 
+/** Nothing waits in the tools: no copy holds an edit not taken in, and these three are managed (historyactions.ts ItemNow). */
+const settled = { managed: ['claude-cli', 'copilot-cli', 'codex-cli'] as HarnessId[], pending: [] as HarnessId[] };
 const all: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
 const FILES: Record<HarnessId, string> = {
   'claude-cli': '.claude.json', 'copilot-cli': '.copilot/mcp-config.json', 'codex-cli': '.codex/config.toml', 'pi-cli': '.pi/agent/mcp.json', 'opencode-cli': '.config/opencode/opencode.json',
@@ -143,7 +145,7 @@ test('Off with Claude Code open, then On again, then Off and Delete from Central
     assert.deepEqual([view.items, await commandIn(box, 'claude-cli')], [[], undefined], 'gone from Claude Code, and from the page');
     // The Delete's entry keeps its Restore; what Write to Claude Code removed is an entry of its own, with nothing to undo.
     const deleted = (await readHistory(box.context)).filter(event => event.kind === 'deleted');
-    assert.deepEqual(deleted.slice(-2).map(event => [event.cause, event.losers.map(loser => loser.tool), libraryAction(event, view.library.docs)?.label]),
+    assert.deepEqual(deleted.slice(-2).map(event => [event.cause, event.losers.map(loser => loser.tool), libraryAction(event, view.library.docs, settled)?.label]),
       [[undefined, [], 'Restore'], ['in-line', ['claude-cli'], undefined]]);
   } finally { await box.cleanup(); }
 });
@@ -163,7 +165,7 @@ test('`codex mcp remove` of Codex’s only server turns it Off everywhere; Centr
     const view = await box.view();
     assert.deepEqual([view.items[0]?.on, view.library.docs.versions.length], [false, 1]);
     const entry = (await readHistory(box.context)).find(event => event.cause === 'deleted-by-hand')!;
-    assert.equal(libraryAction(entry, view.library.docs)?.label, 'Turn on');
+    assert.equal(libraryAction(entry, view.library.docs, settled)?.label, 'Turn on');
     await restoreServer(box.context, all, entry.id);
     assert.deepEqual([await argsIn(box, 'codex-cli'), await argsIn(box, 'copilot-cli')], [['-y', 'docs'], ['-y', 'docs']]);
   } finally { await box.cleanup(); }
@@ -333,7 +335,7 @@ test('Taking in a server Claude Code had offers no Undo: giving Claude Code its 
     await writeFile(box.path('claude-cli'), JSON.stringify({ numStartups: 4, mcpServers: { docs: { type: 'stdio', command: 'npx', args: ['docs'], timeout: 39 } } }));
     await box.send(on('docs'));
     const add = (await readHistory(box.context)).find(event => event.kind === 'on' && event.cause === 'found')!;
-    assert.equal(libraryAction(add, (await box.view()).library.docs), undefined, 'neither the result’s band nor History offers it');
+    assert.equal(libraryAction(add, (await box.view()).library.docs, settled), undefined, 'neither the result’s band nor History offers it');
     assert.match((await restoreServer(box.context, all, add.id)).stopped ?? '', /nothing left to undo/);
     assert.equal((await box.row('docs'))?.waits, undefined, 'so the band never offers to remove the entry from Claude Code');
     // The way out is Off (Central Knot keeps it); Claude Code's entry goes only with that, at Write to Claude Code.
@@ -343,7 +345,7 @@ test('Taking in a server Claude Code had offers no Undo: giving Claude Code its 
     await writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { files: { type: 'local', command: 'files' } } }));
     await box.send(on('files'));
     const files = (await readHistory(box.context)).find(event => event.key === 'mcp:files' && event.kind === 'on')!;
-    assert.equal(libraryAction(files, (await box.view()).library.files)?.label, 'Undo');
+    assert.equal(libraryAction(files, (await box.view()).library.files, settled)?.label, 'Undo');
   } finally { await box.cleanup(); }
 });
 

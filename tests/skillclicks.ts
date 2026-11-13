@@ -1,6 +1,7 @@
 // One skill ("notes") in a temp home, and the clicks the Skills page and History send for it, built by the page's own code
 // (src/libraryrow.ts rowClicks, src/historyactions.ts). Shared by the tests that replay clicks on real folders:
 // skills.test.ts, skillmigrate.test.ts and the seeded walk (librarywalk.test.ts).
+import { pendingChanges } from '../src/library.ts';
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -96,7 +97,7 @@ export const restore = (box: Box, eventId: string, version?: string, context = b
 export async function historyActions(box: Box, context = box.context, key = 'notes') {
   const { item, fact } = await seen(box, context, key);
   return (await historyOf(box, context, key)).flatMap(event => {
-    const main = libraryAction(event, item, undefined, fact?.loads);
+    const main = libraryAction(event, item, { managed: box.tools, pending: fact?.plan ? pendingChanges(fact.plan) : [] }, undefined, fact?.loads);
     const run = (version?: string) => () => restoreSkill(context, box.tools, event.id, version);
     return [...(main ? [{ event, label: main.label, run: run() }] : []), ...versionChoices(event, item).map(choice => ({ event, label: `Use ${choice.tool}’s`, run: run(choice.hash) }))];
   });

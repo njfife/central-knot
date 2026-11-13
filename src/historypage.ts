@@ -1,14 +1,15 @@
 // History: what Central Knot did, by itself (sync) or on a click (a switch, a profile switch, a Pull, …), newest first, with
-// Undo or Restore where the kept content allows it (CON-02, DEL-03). Skills', MCP servers' and agents' entries are worded, and
-// their actions decided, by historyactions.ts; here are profiles', the base instructions' and tools' Manage switches' entries,
-// and the sentences of entries from before an item was on the library (which offer only what historyactions.ts finds left to do).
+// Undo or Restore where the kept content allows it (CON-02, DEL-03). Skills', MCP servers' and agents' entries, and Synchronize
+// everything's (everything.ts), are worded, and their actions decided, by historyactions.ts; here are profiles', the base
+// instructions' and tools' Manage switches' entries, and the sentences of entries from before an item was on the library (which
+// offer only what historyactions.ts finds left to do).
 import { DAY_MS, plural, timesApart } from './model.ts';
 import { noToolManaged, restoreEvent, showPage, shownPath, state, touchedToolsPhrase } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
 import { changes, homeItems, NO_PROFILE, turnsWords, undoPlan } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
-import { doneWords, keptOver, libraryAction, libraryEntry, librarySentence, versionChoices } from './historyactions.ts';
+import { doneWords, entriesNow, everythingAction, everythingSentence, keptOver, libraryAction, libraryEntry, librarySentence, versionChoices } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
 import { button, emptyState, h, icon, rereadBand } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -38,6 +39,7 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
   if (event.base) return pulledBase(event, event.base.list.tools.length ? touchedToolsPhrase(event.base.list.tools) : '');
   if (event.kind === 'profile') return profileSwitch(event);
   if (event.kind === 'managing' && event.managing) return managingWords(event.managing);
+  if (event.kind === 'everything') return { ...everythingSentence(event), action: everythingOffer(event)?.label };
   // Pull from the git repo, before the library: said as a pull, whichever way sync carried it.
   if (event.via === 'repo' && !event.undoneBy) {
     if (event.kind === 'deleted') return { glyph: 'git-branch', text: 'Removed in the git repo, so Pull deleted it from the tools it synced to.' };
@@ -103,8 +105,12 @@ const managingWords = ({ tool, on }: NonNullable<HistoryEvent['managing']>): { g
   ? { glyph: 'boxes', text: `Central Knot manages ${toolName(tool)} from here on: sync brings it into line, each change with its own entry. No Undo: its switch on Harnesses is the way back.` }
   : { glyph: 'boxes', text: `Left out from here on: Central Knot writes nothing in ${toolName(tool)}, and its copies there stay as they are. No Undo: its switch on Harnesses is the way back.` });
 
-/** Skills, MCP servers, agents, profile switches and tools' Manage switches share History; each row says which it is. */
-const kindOf = (event: HistoryEvent) => (event.kind === 'profile' ? 'Profile' : event.kind === 'managing' ? 'Tool' : event.base ? 'Instructions' : event.key.startsWith('mcp:') ? 'MCP server' : event.key.startsWith('agent:') ? 'Agent' : 'Skill');
+/** What a Synchronize everything entry offers now (historyactions.ts everythingAction), from History and the libraries as the page read them. */
+const everythingOffer = (event: HistoryEvent) => (state.home && state.history.data ? everythingAction(event, state.history.data, entriesNow(state.home)) : undefined);
+
+/** Skills, MCP servers, agents, profile switches, tools' Manage switches and Synchronize everything share History; each row says which it is. */
+const kindOf = (event: HistoryEvent) => (event.kind === 'profile' ? 'Profile' : event.kind === 'managing' ? 'Tool' : event.kind === 'everything' ? 'Setting' : event.base ? 'Instructions'
+  : event.key.startsWith('mcp:') ? 'MCP server' : event.key.startsWith('agent:') ? 'Agent' : 'Skill');
 /** Rows are grouped by day (day headings); each row shows its time, every row in one form (model.ts timesApart). */
 const day = (iso: string) => {
   const date = new Date(iso);
@@ -112,17 +118,18 @@ const day = (iso: string) => {
   if (date.toDateString() === new Date(Date.now() - DAY_MS).toDateString()) return 'Yesterday';
   return date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 };
-/** What a profile's or the base instructions' Undo will do, said before the click. */
+/** What a profile's, the base instructions' or Synchronize everything's action will do, said before the click. */
 const actionHelp = (event: HistoryEvent) => (event.kind === 'profile'
   ? `Undo: ${turnsWords(undoPlan(event, homeItems(state.home!)), 'will')}, as each was before this; an item changed since stays as it is`
-  : 'Put the base instructions back as they were before this Pull, and in the tools that got them (where their file is unchanged since)');
+  : event.kind === 'everything' ? everythingOffer(event)?.help ?? ''
+    : 'Put the base instructions back as they were before this Pull, and in the tools that got them (where their file is unchanged since)');
 
 /** A library entry's buttons (historyactions.ts): its own action, and one "Use <harness>’s copy" for each copy that gave way. */
 function libraryButtons(event: HistoryEvent) {
   const entry = libraryEntry(event)!, item = itemOf(event);
   // A skill's own switches as the page last read them, so an action that would change nothing there is not offered.
   const loads = entry.kind === 'skills' ? state.home?.skills.items.find(row => row.key === entry.key)?.loads : undefined;
-  const own = libraryAction(event, item, undefined, loads);
+  const own = libraryAction(event, item, entriesNow(state.home!)(event).now, undefined, loads);
   const link = (label: string, help: string, id: string, version?: string) => {
     const control = button({ variant: 'link', size: 'small', label, name: `${label} (${event.item}): ${help}`, id, disabled: !!state.busy, onclick: () => void restoreEvent(event.id, version) });
     control.title = help;
@@ -175,7 +182,7 @@ export function historyPage() {
       // steady column at the right, the same on every row. Narrow, what happened takes a line of its own beneath (style.css).
       h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event)), h('strong', { title: event.item }, event.item)),
       h('span.history-about', {}, about.text),
-      event.undoneBy ? h('span.history-actions', {}, h('span.history-done', {}, libraryEntry(event) ? doneWords(event) : event.kind === 'removed' ? 'Restored' : 'Undone'))
+      event.undoneBy ? h('span.history-actions', {}, h('span.history-done', {}, libraryEntry(event) ? doneWords(event) : event.kind === 'removed' || event.everything?.undo ? 'Restored' : 'Undone'))
         : h('span.history-actions', {},
           !event.base && (event.kind === 'edit' || event.kind === 'conflict') ? seeChangeLink(event.id, event.key, true) : null,
           libraryEntry(event) ? libraryButtons(event) : actions(event, about.action)),

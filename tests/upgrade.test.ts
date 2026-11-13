@@ -32,9 +32,11 @@ import { itemKey, type ItemKind, type LibraryItem } from '../src/library.ts';
 import { homeItems, inUse } from '../src/profileplan.ts';
 import { readProfiles } from '../src/profiles.ts';
 import { applyServers } from '../src/servers.ts';
-import { managedNow } from '../src/share.ts';
+import { setSyncEverything } from '../src/everything.ts';
+import { managedNow, readRecord, syncGate, writeAccess } from '../src/share.ts';
+import { asksNow } from '../src/setupcounts.ts';
 import { applySkills } from '../src/skills.ts';
-import type { HarnessId, HistoryEvent } from '../src/types.ts';
+import type { HarnessId, HistoryEvent, HomeView } from '../src/types.ts';
 import { appContext, filesIn, type AfterPass, type Files } from './upgrade/start.ts';
 
 const fixtures = fileURLToPath(new URL('upgrade/', import.meta.url));
@@ -236,6 +238,19 @@ for (const old of homes) for (const sync of ['off', 'on'] as const) {
     test('keeps Focus the profile in use', async () => {
       const { profiles } = await readProfiles(box.home);
       assert.deepEqual(inUse(profiles, homeItems(first[0].pages)).map(profile => profile.name), ['Focus']);
+    });
+
+    // First setup's question, after the passes above (it changes the home's record, so these two come last): asked at each start
+    // until it is answered, never again after, and No changes no file in the tools.
+    test('is asked the question once: at every start until it is answered; No changes no file and adds no History entry, and it is not asked again', async () => {
+      const context = appContext(box.home, box.appData), managed = await managedNow(context, await context.read());
+      const asked = async (pages: AfterPass['pages']) => asksNow({ ...pages, sync: { syncEverything: (await readRecord(box.home)).record?.syncEverything, managed, access: await writeAccess(context), gate: await syncGate(context) } } as unknown as HomeView);
+      assert.deepEqual([await asked(first[0].pages), await asked(again[0].pages)], ['question', 'question']);
+      const history = await readJson(join(box.store, 'history.json'));
+      assert.deepEqual(await setSyncEverything(context, false, true), {});
+      const answered = start(box, sync, 2);
+      assert.deepEqual([changedInTools(again[0].files, answered[1].files), await readJson(join(box.store, 'history.json'))], [[], history]);
+      assert.equal(await asked(answered[1].pages), undefined);
     });
 
     // One click past the upgrade, last since it changes the home: Off takes each copy out, and On writes it back from the
