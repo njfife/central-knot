@@ -158,6 +158,12 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
    * own part. Answers why it could not be written, if it couldn't (the next pass tries again).
    */
   write(context: ShareContext, item: LibraryItem, harness: HarnessId, here: Entry | undefined, content: Content): Promise<{ stopped: string } | undefined>;
+  /**
+   * Why a harness won't load this content, asked by writeCopy of the current version just before it writes it there (Disk.refuses
+   * answered for the version the look read; an edit this same pass took in may be one the harness won't load). Not asked by
+   * giveBackCopy, which puts back the harness's own copy as it was. A kind with no such reason leaves it out.
+   */
+  refusesToLoad?(context: ShareContext, item: LibraryItem, harness: HarnessId, content: Content): Promise<string | undefined>;
   /** Removes one harness's copy, only while it is as read: `changed` when a save landed meanwhile. */
   remove(context: ShareContext, item: LibraryItem, here: Entry): Promise<'removed' | 'changed' | 'failed'>;
   /**
@@ -312,7 +318,8 @@ function copyIn(look: AnyLook, item: LibraryItem, tool: HarnessId, here: Seen | 
   const wanted = wantedIn(item, tool), kindHeld = wanted ? look.disk.held(item, tool) : undefined;
   if (here) {
     seenAgain(look, path);
-    // A harness that won't load the current version keeps the copy it has: nothing is written over it.
+    // A harness that won't load the current version keeps the copy it has: nothing is written over it (writeCopy asks the
+    // same of what it writes, through Kind.refusesToLoad).
     const refused = wanted && !kindHeld?.anotherWay ? look.disk.refuses?.(item, tool) : undefined;
     if (refused) return { is: 'held', why: refused };
     // A copy of its own where the harness has the item another way too: the table's last row (library.ts wantedHere).
@@ -490,6 +497,9 @@ async function writeCopy(pass: Pass, item: LibraryItem, tool: HarnessId, here: S
   const stopped = (message: string) => { pass.results.push({ item: item.name, harness: tool, outcome: 'held', message }); return false; };
   const content = await pass.kind.readVersion(pass.context, item.key, item.hash);
   if (!content) return stopped('This version is no longer in Central Knot’s store, so it can’t be written.');
+  // A version this harness won't load is never written there; the copy it has stays (copyIn asks the same of the version it read).
+  const wont = await pass.kind.refusesToLoad?.(pass.context, item, tool, content);
+  if (wont) return stopped(wont);
   const refused = await pass.kind.write(pass.context, item, tool, here, content);
   if (refused) return stopped(refused.stopped);
   pass.writes++;
@@ -576,7 +586,9 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
   const asked = pass.asked.get(item.key);
   if (asked) {
     const { fill, ...entry } = asked;
-    const id = log({ ...entry, losers: entry.losers ?? (fill ? before(did[fill]) : []), ...(tookFrom.length ? { tookFrom } : {}), ...(gaveBack.length ? { gaveBack } : {}) });
+    // A switch's entry says the version it left (`taken`, once this pass is carried out), so its Undo is offered only while it still is.
+    const switched = (entry.kind === 'on' || entry.kind === 'off') && !entry.winner ? { version: taken } : {};
+    const id = log({ ...entry, ...switched, losers: entry.losers ?? (fill ? before(did[fill]) : []), ...(tookFrom.length ? { tookFrom } : {}), ...(gaveBack.length ? { gaveBack } : {}) });
     pass.made.push(id);
     pass.asked.delete(item.key);
   }

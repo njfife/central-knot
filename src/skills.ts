@@ -8,8 +8,9 @@
 // - why a tool can't be given a skill (cannotTake): a name it reserves, a shape it won't load (share.ts targetFor), or a
 //   skill converted from one of its agents;
 // - a tool's own switch for a skill (toolFacts, `loads`): read at each look and never written by a pass. A switch set in a tool,
-//   by a person, a profile or Central Knot before the library, is left as it is and shown as a mark on that tool's line;
-//   clearSwitch is the one action that writes it, and takeOver the one that makes a copy outside Central Knot's its own.
+//   by a person, a profile or Central Knot before the library, is left as it is and shown as a mark on that tool's line.
+//   Three actions write it: clearSwitch, its Undo switchBack, and takeOver, which carries it to the copy it makes (takeOver
+//   is also the one that makes a copy outside Central Knot's its own).
 // Around the pass: applySkills and restoreSkill run it for skills (the page's clicks through librarypass.ts itemClick);
 // skillsView is the Skills page's reading (types.ts LibraryView), which profiles read through profileplan.ts profileSkills;
 // skillsForRepo is what the Git repo's Push sends. Elsewhere: the folders, skillfiles.ts; where things
@@ -19,7 +20,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, unlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { appendHistory, readHistory, replaceHistory } from './history.ts';
-import { libraryAction, libraryEntry } from './historyactions.ts';
+import { isClearedSwitch, libraryAction, libraryEntry } from './historyactions.ts';
 import { listed, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, differ, forgetFolders, foundCopies, itemClick, lookFor, restore, runPass, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
@@ -209,7 +210,17 @@ function cannotTake(context: ShareContext, disk: SkillDisk, item: Wanted, tool: 
   const converted = disk.converted.get(item.key);
   if (converted?.origin === tool) return `Converted from ${nameOf(tool)}’s agent “${converted.agent}”, so it is not placed back there; ${nameOf(tool)} keeps the agent.`;
   const shape = disk.shapes.get(item.key);
-  return shape ? targetFor(tool, join(rootOf(context, tool), item.name), { ...shape, folder: item.name }).skipped : undefined;
+  return shape ? wontLoad(context, tool, item.name, shape) : undefined;
+}
+
+/**
+ * Why a tool won't load a skill of this shape (its SKILL.md's frontmatter), if it won't: the one answer to "will this tool load
+ * this content". The plan asks it of the current version (cannotTake, through Disk.refuses), and the pass asks it of what it
+ * is about to write (skillKind.refusesToLoad, from librarypass.ts writeCopy), which may be an edit this same pass took in. A
+ * give-back (librarypass.ts giveBackCopy) puts a tool's own copy back as it was and doesn't ask.
+ */
+function wontLoad(context: ShareContext, tool: HarnessId, name: string, shape: Skill): string | undefined {
+  return targetFor(tool, join(rootOf(context, tool), name), { ...shape, folder: name }).skipped;
 }
 
 // ---------- The skills' Kind ----------
@@ -236,6 +247,10 @@ export const skillKind: Kind<SkillContent, SkillCopy, SkillDisk> = {
   ownOf: () => undefined,
   keepOwn: async () => false,
   write: writeSkill,
+  refusesToLoad: async (context, item, tool, content) => {
+    const read = await readCopy(tool, content.directory, '');
+    return 'unseen' in read ? undefined : wontLoad(context, tool, item.name, read.skill);
+  },
   remove: async (context, _item, here) => {
     try { await removeFolder(context, here.directory, here.hash); return 'removed'; }
     catch (error) { if (!errorCode(error)) throw error; return errorCode(error) === 'CK_CHANGED' ? 'changed' : 'failed'; }
@@ -249,10 +264,6 @@ export const skillKind: Kind<SkillContent, SkillCopy, SkillDisk> = {
  */
 async function writeSkill(context: ShareContext, item: LibraryItem, tool: HarnessId, here: SkillCopy | undefined, content: SkillContent) {
   const target = here?.directory ?? join(rootOf(context, tool), item.name);
-  // A version this tool won't load (an edit taken in by this same pass) is never written there; the copy it has stays.
-  const read = await readCopy(tool, content.directory, '');
-  const refused = 'unseen' in read ? undefined : targetFor(tool, target, { ...read.skill, folder: item.name }).skipped;
-  if (refused) return { stopped: refused };
   try {
     if (here) await swapFolder(context, content.directory, target, here.hash);
     else await placeFolder(context, tool, content.directory, target, await readTree(content.directory));
@@ -290,7 +301,7 @@ export async function applySkills(context: ShareContext, tools: HarnessId[], cha
  */
 export async function restoreSkill(context: ShareContext, tools: HarnessId[], eventId: string, version?: string): Promise<PassResult> {
   const past = (await readHistory(context)).find(event => event.id === eventId);
-  if (past?.kind === 'switched' && past.cause !== 'switch' && !past.undoneBy && past.switched?.every(entry => !entry.disabled)) return switchBack(context, past);
+  if (past && !past.undoneBy && isClearedSwitch(past)) return switchBack(context, past);
   return restore(skillKind, context, tools, eventId, version);
 }
 

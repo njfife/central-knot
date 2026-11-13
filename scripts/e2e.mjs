@@ -1023,7 +1023,7 @@ async function practiceFlow() {
   const agentRow = key => a.text(`.ov-row[data-key="${key}"]`);
   same('an agent only a harness has is found: under Found, with Add, said not to be in Central Knot, and the section says what Add does',
     [await a.text('#add-code-reviewer'), /^Found\s*2/.test((await a.text('[data-section="not-synced"]') ?? '').trim()), /not in Central Knot/.test(await agentRow('code-reviewer') ?? ''),
-      /Add one to keep it in Central Knot; its row says where it goes\./.test(await a.text('[data-section="not-synced"]') ?? '')], ['Add', true, true, true]);
+      /Add one to keep it in Central Knot and turn it on\./.test(await a.text('[data-section="not-synced"]') ?? '')], ['Add', true, true, true]);
   await a.click('#add-code-reviewer');
   await a.click('#add-release-notes');
   const reviewerFiles = ['.claude/agents/code-reviewer.md', '.copilot/agents/code-reviewer.agent.md', '.codex/agents/code-reviewer.toml'].map(file => join(practice, file));

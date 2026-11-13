@@ -4,10 +4,12 @@
 // the strip's Undo does (the History action of each entry the click made).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { librarySentence } from '../src/historyactions.ts';
 import { libraryWords, rowClicks } from '../src/libraryrow.ts';
 import * as agent from './agentclicks.ts';
-import { bytes, choose, everywhere, folderOf, historyOf, inTool, pass, put, sandbox, seen, send, skillText, turnOn, undo } from './skillclicks.ts';
+import { bytes, choose, everywhere, folderOf, historyActions, historyOf, inTool, pass, put, sandbox, seen, send, skillText, turnOn, undo } from './skillclicks.ts';
 
 test('Undo right after taking in a found skill: the copies it made go, the tool it was found in keeps its folder, and the skill is found again', async () => {
   const box = await sandbox();
@@ -89,5 +91,49 @@ test('Undo of turning an agent on over a different copy made by hand in one tool
     await agent.undo(box, click);
     await agent.pass(box);
     assert.deepEqual(await agent.filesOf(box), before);
+  } finally { await box.cleanup(); }
+});
+
+// Only an Undo gives copies back, and only while the item is as its click left it; any other action leaves every copy Central Knot's.
+test('History’s Turn off on a take-in edited since takes it out of every tool: no copy is given back', async () => {
+  const box = await sandbox();
+  try {
+    await put(box, 'claude-cli');
+    await turnOn(box);
+    await writeFile(join(folderOf(box, 'copilot-cli'), 'SKILL.md'), skillText('Edited later.'));
+    await pass(box);
+    const found = (await historyActions(box)).find(action => action.event.cause === 'found')!;
+    assert.equal(found.label, 'Turn off');
+    await found.run();
+    await pass(box);
+    assert.deepEqual(Object.values(await everywhere(box)).filter(Boolean), [], 'no tool has it');
+    assert.equal((await seen(box)).item!.on, false);
+  } finally { await box.cleanup(); }
+});
+
+test('A take-in’s Undo is not offered once a tool it was found in is kept out: Undo would leave that tool without its copy', async () => {
+  const box = await sandbox();
+  try {
+    await put(box, 'claude-cli');
+    await turnOn(box);
+    await inTool(box, 'claude-cli', true);
+    const found = (await historyActions(box)).find(action => action.event.cause === 'found');
+    assert.equal(found?.label, 'Turn off');
+  } finally { await box.cleanup(); }
+});
+
+test('Undo of letting a skill into Codex, whose own copy Codex itself won’t load: that copy is back as it was', async () => {
+  const box = await sandbox();
+  try {
+    await put(box, 'claude-cli');
+    await turnOn(box);
+    await inTool(box, 'codex-cli', true);
+    await put(box, 'codex-cli', { 'SKILL.md': '---\nname: notes\n---\n\nCodex’s own draft.\n' });
+    await pass(box);
+    const before = await bytes(folderOf(box, 'codex-cli'));
+    const click = await inTool(box, 'codex-cli', false);
+    await undo(box, click);
+    await pass(box);
+    assert.deepEqual(await bytes(folderOf(box, 'codex-cli')), before);
   } finally { await box.cleanup(); }
 });

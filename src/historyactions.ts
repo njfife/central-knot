@@ -4,20 +4,28 @@
 // librarypass.ts restore (the click an action runs, through each kind's Kind.historyAction) and by the tests. Pure: no
 // files, no DOM. The entries of MCP servers, profiles and instructions are still historypage.ts's own.
 //
-// Every action is a click the item's page could send as well (types.ts Change), decided from the entry and the item as the
-// library holds it now (library.ts LibraryItem). So an action is offered exactly while it would change something, and it is
-// always safe to click: nothing has to be worked out about what happened since the entry was made. An entry from before an
-// item was on the library (a skill's Remove, Disable or take-over by the earlier engine) offers only what can still be said
-// as one of these clicks; otherwise it shows as past, with no action.
+// Every action is decided from the entry and the item as the library holds it now (library.ts LibraryItem), so it is offered
+// exactly while it would change something and is always safe to click. Most are a click the item's page could send as well
+// (types.ts Change). Two are not: an Undo that gives tools their own copies back (Change giveBack, which the page never
+// sends), and a cleared switch's Undo, which sets that tool's own switch again (skills.ts switchBack, not a Change). An entry
+// from before an item was on the library (a skill's Remove, Disable or take-over by the earlier engine) offers only what can
+// still be said as one of these; otherwise it shows as past, with no action.
 //
 //   entry (HistoryEvent.kind, `cause`)       action                 offered while
 //   off: the switch, or a copy deleted       Turn on                the item is Off
 //     by hand (`winner`: where)
 //   off in one harness (`only`)              Turn on in <harness>   the item is On and kept out of that harness
-//   on: the switch, a found item taken       Turn off               the item is On
-//     in (`winner`: where found), or an
-//     item Pull brought
+//   on: the switch, or an item Pull          Turn off               the item is On
+//     brought
 //   on in one harness (`only`)               Turn off in <harness>  the item is On and in that harness
+//   on or off whose click took tools' own    Undo: that action,     the item is as the click left it (asTheClickLeftIt);
+//     copies over (`tookFrom`)               each such copy given   after that, the plain action above, which gives
+//                                            back                   nothing back
+//   a found item taken in (on, `found`;      Undo: out of Central   the item is as the click left it; after that, an
+//     chosen)                                Knot again, found      `on` one offers Turn off
+//                                            again, each tool it
+//                                            was found in keeping
+//                                            its own copy
 //   deleted                                  Restore                the item is deleted
 //   a content change: edit, conflict,        Undo; once later       the version from before it (`previous`) is not the
 //     current, and any entry from before     changes came, "Make    current one
@@ -25,12 +33,15 @@
 //                                            this current"
 //   conflict, chosen, kept-edit (an edit     Use <harness>’s        that copy's version is not the current one
 //     not taken in that was written over,
-//     or a copy a tool managed again held):
-//     copies that gave way
+//     or a copy a tool managed again held),
+//     and on (a tool's own copy the click
+//     wrote over): copies that gave way
+//   switched: a skill's tool switch          Undo: sets that        some tool still loads it (`loads`)
+//     cleared (isClearedSwitch)              switch again
 //
-// Two entries are not here: a Pull that changed only Claude Code's own settings of an agent (`settingsFile`) keeps its own Undo
-// (gitrepo.ts undoSettingsChange), since no version tells such a change apart; and a skill's tool switch cleared, or a copy
-// taken over (skills.ts clearSwitch, takeOver: `switched`, `took-over`), which have none.
+// One entry is not here: a Pull that changed only Claude Code's own settings of an agent (`settingsFile`) keeps its own Undo
+// (gitrepo.ts undoSettingsChange), since no version tells such a change apart. A copy taken over (skills.ts takeOver,
+// `took-over`) has no action.
 // To add an entry or an action: its kind (or its `cause`) in types.ts HistoryEvent, its sentence in librarySentence, its row
 // in libraryAction, the entry librarypass.ts logItem makes for it, and its case in historypage.ts describe.
 import type { IconName } from './icons.ts';
@@ -159,6 +170,13 @@ export function doneWords(event: HistoryEvent): string {
   return event.kind === 'off' ? 'Turned on since' : event.kind === 'on' ? 'Turned off since' : event.kind === 'deleted' ? 'Restored' : 'Undone';
 }
 
+/**
+ * Whether an entry is a skill's tool switch cleared by the person (skills.ts clearSwitch), whose Undo sets it again: read here
+ * (libraryAction) and by skills.ts restoreSkill, which runs that Undo. Not its Undo's own entry (`cause` 'switch').
+ */
+export const isClearedSwitch = (event: HistoryEvent) =>
+  event.kind === 'switched' && event.cause !== 'switch' && !!event.switched?.length && event.switched.every(entry => !entry.disabled);
+
 /** An entry's action: the button's words, what it does (said before the click), and the click it sends. */
 export interface EntryAction { label: string; help: string; change: Change }
 /** Whether a content is a version of the item that could be made current: one it has, other than the current one. */
@@ -183,25 +201,38 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
     return offered ? { label: 'Use it', help: `Make that copy’s version of ${name} the current one${everywhere}`, change: { ...now, version } } : undefined;
   }
   // Clear the switch (a skill's): its Undo turns that tool's own switch off again (skills.ts restoreSkill does it, not a Change).
-  const cleared = event.kind === 'switched' && event.cause !== 'switch' && !!event.switched?.length && event.switched.every(entry => !entry.disabled);
   // Offered while one of those tools still loads it (`loads`, the row's: each tool's own switch now; unknown, it is offered).
   const stillCleared = !loads || event.switched?.some(entry => !loads[entry.tool]?.off);
-  if (cleared && stillCleared) return { label: 'Undo', help: `Turn ${name} off again in ${andList(event.switched!.map(entry => toolName(entry.tool)))}’s own settings`, change: now };
+  if (isClearedSwitch(event) && stillCleared) return { label: 'Undo', help: `Turn ${name} off again in ${andList(event.switched!.map(entry => toolName(entry.tool)))}’s own settings`, change: now };
   // A found item taken in, while it is still as that click left it: its Undo takes it out again (found once more), each tool
   // it was found in keeping its own copy.
   const tookIn = event.kind === 'chosen' || (event.kind === 'on' && event.cause === 'found');
-  if (tookIn && item.on && event.winner?.hash === item.hash) {
+  if (tookIn && item.on && asTheClickLeftIt(event, item)) {
     return { label: 'Undo', help: `Take ${name} out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own`, change: { ...now, deleted: true, ...givenBack(event, item) } };
   }
   if (event.kind === 'off' || event.kind === 'on') {
-    const action = switchAction(event.kind === 'off', event.only, item);
-    return action && { ...action, change: { ...action.change, ...givenBack(event, item) } };
+    const action = switchAction(event.kind === 'off', event.only, item), back = givenBack(event, item).giveBack;
+    // Copies go back only with an Undo, while the item is as the click left it; a plain Turn off or Turn on gives none back.
+    if (!action || !back || !asTheClickLeftIt(event, item)) return action;
+    const tools = (Object.keys(back) as HarnessId[]).map(toolName);
+    const own = `${andList(tools)} ${tools.length === 1 ? 'has its own copy' : 'have their own copies'} back, as before`;
+    return { label: 'Undo', help: `${action.help}; ${own}`, change: { ...action.change, giveBack: back } };
   }
   // Copies an earlier engine added, removed, switched or took over: there is no earlier version to go back to.
   if (['added', 'removed', 'switched', 'took-over'].includes(event.kind) || !isVersion(item, event.previous)) return undefined;
   // Undo while what this entry made is still current; once later changes came, it says what it does instead.
   const latest = (event.version ?? event.winner?.hash) === item.hash;
   return { label: latest ? 'Undo' : 'Go back before this', help: `Make the version from before this change current again${everywhere}`, change: { ...now, version: event.previous } };
+}
+
+/**
+ * Whether the item is still as the entry's click left it: at the version it left (types.ts HistoryEvent version, or the
+ * `winner` a take-in took), and no tool it took a copy from kept out since (that tool has no copy to give back). An Undo
+ * that gives copies back is offered only then.
+ */
+function asTheClickLeftIt(event: HistoryEvent, item: LibraryItem): boolean {
+  const left = event.version ?? event.winner?.hash;
+  return !!left && left === item.hash && !(event.tookFrom ?? []).some(copy => item.except.includes(copy.tool));
 }
 
 /** The copies an entry's click took over from tools (`tookFrom`), each a version still, for its Undo to give back (types.ts Change giveBack). */

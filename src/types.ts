@@ -427,7 +427,10 @@ export interface HistoryEvent {
    * the agent didn't have ('kept-edit'; `losers`: that copy), which gave way to the current version (library.ts managedAgain).
    */
   cause?: 'switch' | 'found' | 'pulled' | 'deleted-by-hand' | 'tool-back';
-  /** 'current': the version made current; an agent's 'edit' Pull made: the version pulled. */
+  /**
+   * The version current once this entry's change was made: 'current', the version made current; an agent's 'edit' Pull made,
+   * the version pulled; 'on' / 'off' by a switch, the version it was at (historyactions.ts asTheClickLeftIt).
+   */
   version?: string;
   /** 'took-over': what was replaced, removed and placed, so Undo can put it back exactly. */
   tookOver?: TookOver;

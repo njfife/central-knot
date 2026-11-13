@@ -42,6 +42,9 @@
 //                       another way too                            item is never loaded twice (an edit in it taken in first);
 //                                                                  a copy with no A is left alone, and its line says both ways
 //
+// One exception to "removed", an Undo's: where the click it undoes took a harness's own copy over, that copy is given back as
+// the harness's own instead (no A), as before the click (librarypass.ts giveBackCopy, told by types.ts Change giveBack).
+//
 // "H changed" is an edit made in that harness: it flows back into Central Knot whether the item is On or Off there. Of two
 // edits the latest wins: an edit made on the current version (L = A) always counts, one made where L had moved on as well
 // only when it is later than L. A copy with no time of its own (`at` absent: an MCP entry, whose time is its whole file's)
@@ -363,7 +366,10 @@ export interface Hands<Content> extends Shelf<Content> {
   log(): Promise<void>;
   /** Writes the current version into one harness (its own part kept as written). True when the harness has it now. */
   write(harness: HarnessId): Promise<boolean>;
-  /** Removes one harness's copy. True when it is gone. */
+  /**
+   * Removes one harness's copy. True when it is gone; or, for an Undo that gives the harness its own copy back instead
+   * (librarypass.ts giveBackCopy), true when that copy is there.
+   */
   remove(harness: HarnessId): Promise<boolean>;
 }
 

@@ -1529,7 +1529,7 @@ function section(role: 'on' | 'not-synced' | 'off' | 'away', list: ItemRow[]) {
   if (!list.length) return null;
   const onLibrary = !!library();
   const label = role === 'away' ? `Not in ${names[focus!]}` : onLibrary && role === 'not-synced' ? 'Found' : placeNames[role === 'on' ? 0 : role === 'not-synced' ? 1 : 2];
-  const note = role === 'not-synced' ? (onLibrary ? 'in a tool, not in Central Knot yet. Add one to keep it in Central Knot; its row says where it goes.' : 'each tool keeps its own copy')
+  const note = role === 'not-synced' ? (onLibrary ? 'in a tool, not in Central Knot yet. Add one to keep it in Central Knot and turn it on.' : 'each tool keeps its own copy')
     : role === 'off' ? (onLibrary ? 'in Central Knot only; no tool has these' : `no tool ${uses()}s these`) : role === 'away' ? 'only other tools have these' : null;
   return h('div', { role: 'rowgroup' },
     h(`div.ov-section${role === 'off' || role === 'away' ? '.ov-section-away' : ''}`, { role: 'row', 'data-section': role },
