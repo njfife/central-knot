@@ -10,6 +10,7 @@ import { kindSource } from './itemrow.ts';
 import { plural } from './model.ts';
 import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, HistoryWindowSaved, HomeView, SignInPlace } from './types.ts';
 import { kindNouns } from './words.ts';
+import { libraryWords, sentences } from './libraryrow.ts';
 import { buildWords, releasesPage, tagWords, updateStatus } from './updates.ts';
 import { checkNow, settingUpdateButton, unsavedWork, updates } from './updateview.ts';
 import { checkPluginsNow, checkedWords, pluginUpdates } from './pluginupdateview.ts';
@@ -285,9 +286,10 @@ function messageLine({ text, detail, tone, action }: RowMessage, { id, announce 
 /**
  * One setting: its name and hint at the left, its control at the right (under them on a narrow page), and beneath both, on
  * lines of their own so the control never moves when they come or go: what its last action said, `notice`, what needs the
- * person about its current state, and `question`, one the row is asking before it acts.
+ * person about its current state, and `below`, what else the row shows under them: a question it asks before it acts, or
+ * what its setting just did.
  */
-function settingRow(id: string, title: string, hint: string, control: HTMLElement, notice?: RowMessage, question?: HTMLElement): HTMLElement {
+function settingRow(id: string, title: string, hint: string, control: HTMLElement, notice?: RowMessage, below?: HTMLElement): HTMLElement {
   const message = messages.get(id);
   return h('div.setting-row', { id: `setting-${id}` },
     h('div.setting-text', {},
@@ -296,7 +298,7 @@ function settingRow(id: string, title: string, hint: string, control: HTMLElemen
     h('div.setting-control', {}, control),
     message && messageLine(message, { id: `setting-${id}-message` }),
     notice && messageLine(notice, { id: `setting-${id}-notice`, announce: false }),
-    question);
+    below);
 }
 
 /**
@@ -373,17 +375,20 @@ function syncEverythingRow(): HTMLElement | null {
   const home = state.home;
   if (!home) return null;
   const on = home.sync.syncEverything, cannot = whyReadOnly(home) ?? (home.sync.gate.state === 'needs-resume' ? home.sync.gate.reason : undefined);
-  const hint = cannot ?? `For this home: a skill, MCP server or agent that turns up in one of your tools is taken into Central Knot and turned on in every tool, by itself. History can undo each. Off, what turns up waits on its page for Add.`;
+  const hint = cannot ?? 'For this home: a skill, MCP server or agent that turns up in one of your tools is taken into Central Knot and turned on in every tool by itself (an MCP server reaches Claude Code when you click Write to Claude Code). History can undo each, except an MCP server found in Claude Code, whose entry says why. Off, what turns up waits on its page for Add.';
   const { takes, choosing, choosingOn } = foundNow(home);
   const waiting = choosing ? `${plural(choosing, 'found item')} ${choosing === 1 ? 'has' : 'have'} copies that differ and ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy.` : '';
   const adds = !on ? (takes ? `Turning it on adds the ${plural(takes, 'item')} found in your tools now.` : 'Nothing found in your tools now would be added.') : '';
   const later = on && !home.syncOn ? 'Automatic sync is off, so it takes items in at Sync once.' : '';
   const text = [adds, waiting, later].filter(Boolean).join(' ');
   const notice: RowMessage | undefined = text ? { text, tone: 'info', action: choosingOn ? { label: `See ${kindNouns[choosingOn].title}`, run: () => showPage(choosingOn) } : undefined } : undefined;
+  // What it took in, as each page's notice says it (until shown there), with History: Settings says what the switch did.
+  const added = (['skills', 'mcp', 'agents'] as const).flatMap(kind => home[kind].notices.flatMap(told => (told.kind === 'taken-in' && !state.dismissed.has(told.history)
+    ? [messageLine({ text: sentences(libraryWords[kind]).takenInWords(told, kind), tone: 'done', action: { label: 'History', run: () => showPage('history') } }, { id: `setting-sync-everything-added-${kind}` })] : [])));
   return settingRow('sync-everything', 'Synchronize everything', hint,
     toggle({ on, label: 'Synchronize everything', onchange: chosen => void setSyncEverything(chosen), disabled: !!cannot || !!state.busy, id: 'sync-everything-on',
       attrs: { 'aria-describedby': notice ? 'setting-sync-everything-hint setting-sync-everything-notice' : 'setting-sync-everything-hint', title: null } }),
-    notice);
+    notice, added.length ? h('div.setting-added', {}, added) : undefined);
 }
 
 const settingsSection = (id: string, title: string, ...rows: (HTMLElement | null)[]) =>

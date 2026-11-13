@@ -468,10 +468,12 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* On the item pages (one switch per row, section headings not sticky), the opened row stays at the top of the table's scroll
    area while its details below it are scrolled and used, so its name and switch stay in view. */
 .ov-switched .ov-row.open { position: sticky; top: 0; z-index: 1; }
+/* An opened row's panel, scrolled to, starts below that pinned row, never under it. */
+.ov-switched .ov-row.open + .details { scroll-margin-top: 48px; }
 .ov-row.changed { box-shadow: inset 3px 0 0 var(--accent), inset 0 -1px 0 var(--line); }
 .ov-head { position: sticky; top: 0; z-index: 3; height: 60px; background: var(--surface); font-size: 12px; font-weight: 500; color: var(--ink-soft); }
 .ov-head > * { align-self: center; }
-.ov-section { position: sticky; top: 60px; z-index: 2; display: grid; grid-template-columns: 1fr auto; align-items: center; height: 32px; padding: 0 12px 0 16px; background: var(--chrome); box-shadow: inset 0 -1px 0 var(--line), inset 0 1px 0 var(--line); }
+.ov-section { position: sticky; top: 60px; z-index: 2; display: grid; grid-template-columns: 1fr auto; align-items: center; min-height: 32px; padding: 6px 12px 6px 16px; background: var(--chrome); box-shadow: inset 0 -1px 0 var(--line), inset 0 1px 0 var(--line); }
 .ov-section-label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .ov-section-label strong { font-weight: 600; }
 .ov-section-count { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
@@ -1327,6 +1329,8 @@ span.ins-confirm { margin-top: 0; }
 /* Only the prose keeps the reading measure: a message's action sits right after its text, on the same line where there's room. */
 .setting-hint, .setting-message-text { max-width: 72ch; }
 .setting-message { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 6px; margin: -8px 0 0; }
+/* What Synchronize everything just took in, a line per kind: spaced as the row's own lines are (each takes back 8px of 12). */
+.setting-added { grid-column: 1 / -1; display: grid; row-gap: 12px; }
 .setting-message .icon { flex: none; margin-top: 1px; }
 .setting-message-body { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 4px; min-width: 0; }
 .setting-failure { color: var(--danger); }

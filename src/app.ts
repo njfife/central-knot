@@ -1,3 +1,5 @@
+// The page's state and most pages' actions (MAP.md: the app's shell). A sync notice lives across reads here, until its page
+// shows it (keepUnshown); on its page, matrix.ts toldNotices keeps or folds it.
 import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';

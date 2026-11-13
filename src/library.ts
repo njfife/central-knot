@@ -109,6 +109,8 @@
 //     at a step of the person's own (Write to Claude Code)
 //   the record holds it deleted                      on: its tombstone is lifted          left found, for good
 //   a copy that is a plugin's part                   on                                   left found: its row keeps Add
+//   a skill Convert to skill made from an agent      on                                   left found: its row keeps Add
+//   every copy switched off by its tool's own switch on                                   left found: its row keeps Add
 //   a copy whose own time is inside the settle       on                                   left for the next pass
 //     window of the pass's clock
 //   a copy chosen that is gone or changed since      refused: choose again                (the rule chooses none)
@@ -358,6 +360,8 @@ export interface FoundCopy {
   at?: number;
   /** A plugin's part (parts.ts): the plugin put it in that harness. */
   part?: true;
+  /** That harness's own switch turns it off there (skillswitch.ts, mcpswitch.ts). */
+  off?: true;
 }
 /** What the take-in table is told of a found key. */
 export interface FoundKey {
@@ -365,13 +369,15 @@ export interface FoundKey {
   copies: FoundCopy[];
   /** The record holds it deleted (a tombstone). */
   deleted: boolean;
+  /** Convert to skill made it from an agent (agentskill.ts): spread, it would reach the tools that hold the agent. */
+  converted: boolean;
   /** A deleted item's copy still waits to leave a harness, at a step of the person's own (Write to Claude Code). */
   leaving: boolean;
 }
 /** Who asks to take a found key in: a click on its Add, or Synchronize everything. */
 export type TakenBy = 'click' | 'rule';
 /** Why a found key is left found (the header's FOUND table, one per row). */
-export type LeftFound = 'no-copy' | 'leaving' | 'deleted' | 'part' | 'settling' | 'choice-changed';
+export type LeftFound = 'no-copy' | 'leaving' | 'deleted' | 'part' | 'converted' | 'switched-off' | 'settling' | 'choice-changed';
 /** The table's answer: take it in from this copy (`chosen`: the person chose it among copies that differ), wait for a choice of copy, or leave it found. */
 export type TakeInAnswer = { take: FoundCopy; chosen: boolean } | { wait: 'choice' } | { leave: LeftFound };
 
@@ -385,6 +391,8 @@ export function takeInAnswer(by: TakenBy, found: FoundKey, chosen?: { harness: H
   if (found.leaving) return { leave: 'leaving' };
   if (rule && found.deleted) return { leave: 'deleted' };
   if (rule && copies.some(copy => copy.part)) return { leave: 'part' };
+  if (rule && found.converted) return { leave: 'converted' };
+  if (rule && copies.every(copy => copy.off)) return { leave: 'switched-off' };
   if (rule && settle && copies.some(copy => copy.at !== undefined && Math.abs(settle.clock - copy.at) < settle.ms)) return { leave: 'settling' };
   const pick = chosen && copies.find(copy => copy.harness === chosen.harness);
   if (!rule && chosen && (!pick || (chosen.hash !== undefined && pick.hash !== chosen.hash))) return { leave: 'choice-changed' };

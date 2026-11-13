@@ -65,7 +65,7 @@ import { stat } from 'node:fs/promises';
 import { carryOut, itemKey, keepVersion, managedAgain, newItem, plan, setCurrent, takeInAnswer, versionAt, wantedIn } from './library.ts';
 import type { Copies, FoundCopy, FoundKey, HarnessCopy, ItemKind, LeftFound, LibraryItem, Plan, Shelf, Source, TakenBy, Version } from './library.ts';
 import { appendHistory, historyCutoff, readHistory, replaceHistory } from './history.ts';
-import { newRecord, readRecord, remember, saveRecord, syncGate, writeAccess } from './share.ts';
+import { errorCode, newRecord, readRecord, remember, saveRecord, syncGate, writeAccess } from './share.ts';
 import type { ShareContext, SyncRecord } from './share.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, ItemNotice, PassResult, SyncNotice, TakenInNotice } from './types.ts';
 import { byToolOrder, toolName } from './words.ts';
@@ -129,6 +129,13 @@ export interface Disk<Entry extends Seen> {
    * unseen, "it is the plugin's") leaves it out.
    */
   parts?: Map<string, HarnessId[]>;
+  /** Keys Convert to skill made from an agent (agentskill.ts), which the rule leaves found. A kind with none leaves it out. */
+  converted?: Map<string, unknown>;
+  /**
+   * The harnesses whose own switch turns the item off there (skillswitch.ts, mcpswitch.ts), by key: where every found copy is
+   * off, the rule leaves it found. A kind with no such switch (agents) leaves it out.
+   */
+  switchedOff?: Map<string, HarnessId[]>;
 }
 /**
  * An item as Disk.held is told of it: its name, where it is wanted (library.ts wantedIn), what was applied where, and its
@@ -416,11 +423,19 @@ export function foundCopies<E extends Seen>(look: Look<unknown, E, Disk<E>>, key
  * Synchronize everything, and each kind's view, learn it.
  */
 export function foundKey(look: AnyLook, key: string, off: readonly HarnessId[] = []): FoundKey {
-  const parts = look.disk.parts?.get(key) ?? [], tombstone = look.library.items[key]?.deleted ? look.library.items[key] : undefined;
-  const copies = foundCopies(look, key, off).map((copy): FoundCopy => ({ harness: copy.tool, hash: copy.hash, at: copy.at, ...(parts.includes(copy.tool) ? { part: true } : {}) }));
-  const leaving = !!tombstone && plan(tombstone, copiesOf(look, tombstone)).remove.some(tool => look.disk.locked.get(tool)?.waits);
-  return { copies, deleted: !!tombstone, leaving };
+  const parts = look.disk.parts?.get(key) ?? [], switchedOff = look.disk.switchedOff?.get(key) ?? [];
+  const tombstone = look.library.items[key]?.deleted ? look.library.items[key] : undefined;
+  const copies = foundCopies(look, key, off).map((copy): FoundCopy => ({ harness: copy.tool, hash: copy.hash, at: copy.at,
+    ...(parts.includes(copy.tool) ? { part: true } : {}), ...(switchedOff.includes(copy.tool) ? { off: true } : {}) }));
+  return { copies, deleted: !!tombstone, converted: !!look.disk.converted?.has(key), leaving: !!tombstone && leavingIn(look, tombstone).length > 0 };
 }
+
+/**
+ * The harnesses a deleted item's copy still waits to leave, at a step of the person's own (Write to Claude Code: Disk.locked
+ * `waits`): the one place it is worked out, for the take-in table (foundKey) and for the row's words (servers.ts rowFacts `waits`).
+ */
+export const leavingIn = (look: AnyLook, tombstone: LibraryItem) =>
+  plan(tombstone, copiesOf(look, tombstone)).remove.filter(tool => look.disk.locked.get(tool)?.waits);
 
 /** A found key's answers, a click's and Synchronize everything's, as each kind's view gives its row (types.ts LibraryFacts takeInAnswers). */
 export const takeInAnswers = (look: AnyLook, key: string) => {
@@ -435,7 +450,7 @@ export const takeInAnswers = (look: AnyLook, key: string) => {
  * recorded, finished with the harnesses its plan writes or removes (`fill`: which of them it names).
  */
 type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'version' | 'previous'> & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed';
-  /** Synchronize everything took it in (no click): the harnesses it was found in, which its notice names. */ foundIn?: HarnessId[] };
+  /** A take-in's: the harnesses it was found in, which Synchronize everything's notice names. */ foundIn?: HarnessId[] };
 /**
  * What Pull brings for one item (gitrepo.ts): its name and content, and where the repo holds one harness's own part, that
  * part's text (Claude Code's file, for an agent); or its removal.
@@ -510,7 +525,7 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   if (kind.folderSeen) for (const tool of managed) if (pass.foldersNow[tool] && 'away' in pass.foldersNow[tool]) pass.foldersNow[tool] = await kind.folderSeen(context, tool);
   keepFolders(library, pass.foldersNow, managed, !options.only);
   await saveIfChanged(pass);
-  return { results: pass.results, writes: pass.writes, notices: pass.notices, settling: settle.settling, made: pass.made };
+  return { results: pass.results, writes: pass.writes, notices: pass.notices, settling: settle.settling, made: pass.made, ...(options.background ? { found: foundKeys(pass) } : {}) };
 }
 
 /**
@@ -695,7 +710,7 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
     const switched = (entry.kind === 'on' || entry.kind === 'off') && !entry.winner ? { version: taken } : {};
     const id = log({ ...entry, ...switched, losers: entry.losers ?? (fill ? before(did[fill]) : []), ...(tookFrom.length ? { tookFrom } : {}), ...(gaveBack.length ? { gaveBack } : {}) });
     // What Synchronize everything took in is no click's: its notice says it, and no click's Undo undoes it.
-    if (foundIn) pass.takenIn.push({ name: item.name, foundIn, history: id });
+    if (entry.cause === 'sync-everything') pass.takenIn.push({ name: item.name, foundIn: foundIn ?? [], history: id });
     else pass.made.push(id);
     pass.asked.delete(item.key);
   }
@@ -809,14 +824,25 @@ async function addClicked(pass: Pass, asked: ItemClick, refuse: Refuse) {
  * brings the next pass soon (`settling`, as a copy missing just now does). Nothing is recorded about what it leaves.
  */
 async function takeInByRule(pass: Pass) {
-  const keys = [...new Set([...pass.disk.byKey.keys(), ...(pass.disk.outside?.keys() ?? [])])].sort();
-  for (const key of keys) {
-    if (pass.library.items[key] && !pass.library.items[key].deleted) continue;
-    const answer = takeInAnswer('rule', foundKey(pass, key), undefined, pass.settle);
-    if ('take' in answer) await takeIn(pass, key, answer, [], 'rule');
-    else if ('leave' in answer && answer.leave === 'settling') pass.settle!.settling = true;
+  for (const key of foundKeys(pass)) {
+    const answer = takeInAnswer('rule', foundKey(pass, key), undefined, pass.settle), was = pass.library.items[key];
+    if ('leave' in answer && answer.leave === 'settling') pass.settle!.settling = true;
+    if (!('take' in answer)) continue;
+    // A copy saved again while it is kept (its store refuses it) is put back as it was and waits for the next pass; the keys
+    // taken in before it stay taken in, each with its entry.
+    const before = was && structuredClone(was);
+    try { await takeIn(pass, key, answer, [], 'rule'); }
+    catch (error) {
+      if (!errorCode(error)) throw error;
+      if (before) pass.library.items[key] = before; else delete pass.library.items[key];
+      pass.settle!.settling = true;
+    }
   }
 }
+
+/** The keys a managed harness has a copy of (its own, or one it has another way) that the library has no live item for. */
+const foundKeys = (pass: Pass) => [...new Set([...pass.disk.byKey.keys(), ...(pass.disk.outside?.keys() ?? [])])]
+  .filter(key => !pass.library.items[key] || pass.library.items[key].deleted).sort();
 
 /**
  * Takes a found item into the library, On, from the copy the take-in table answered: the one content every harness holds, or

@@ -23,7 +23,7 @@ function row(hashes: LibraryRow['hashes'], more: Partial<LibraryRow> = {}, agent
   const copyOf = (tool: string): Copies[keyof Copies] => (more.unseen?.[tool] ? { is: 'unseen', why: more.unseen[tool]! } : more.cannot?.[tool] ? { is: 'held', why: more.cannot[tool]! }
     : hashes?.[tool] !== undefined ? { is: 'present', hash: hashes[tool]!, at: 0 } : { is: 'absent' });
   const copies: Copies = Object.fromEntries(tools.map(tool => [tool, copyOf(tool)]));
-  const found: FoundKey = { copies: tools.flatMap(tool => (hashes?.[tool] !== undefined && !more.unseen?.[tool] ? [{ harness: tool as HarnessId, hash: hashes[tool]! }] : [])), deleted: !!agent?.deleted, leaving: false };
+  const found: FoundKey = { copies: tools.flatMap(tool => (hashes?.[tool] !== undefined && !more.unseen?.[tool] ? [{ harness: tool as HarnessId, hash: hashes[tool]! }] : [])), deleted: !!agent?.deleted, leaving: false, converted: false };
   const takeInAnswers = { click: takeInAnswer('click', found), rule: takeInAnswer('rule', found) };
   return { key: 'reviewer', name: 'reviewer', hashes, ...(agent && !agent.deleted ? { plan: plan(agent, copies) } : { takeInAnswers }), ...more };
 }
@@ -156,7 +156,7 @@ test('The status line says where the agent stands, and in which harnesses', () =
   // With Synchronize everything on, a found row says what the rule does with it.
   assert.equal(statusLine(differing, undefined, tools, true), 'Not in Central Knot · in Claude Code and Codex, with different copies. Add it to keep it in Central Knot and put it in every tool. Synchronize everything leaves it for you to choose: its copies differ.');
   assert.deepEqual([ruleSays({ leave: 'deleted' }), ruleSays({ leave: 'part' }), ruleSays({ leave: 'no-copy' })],
-    ['Synchronize everything leaves it: it was deleted from Central Knot, so only Add brings it back.', 'Synchronize everything leaves it: it is a plugin’s part, so only Add takes it in.', '']);
+    ['It was deleted from Central Knot, so it will not be added by itself again. Add, or Restore in History, brings it back.', 'Synchronize everything leaves it: it is a plugin’s part, so only Add takes it in.', '']);
 });
 
 test('The switch says what a click does: off everywhere, or on everywhere; a found agent’s Add says it takes it in, or asks which copy', () => {

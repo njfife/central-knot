@@ -2887,6 +2887,8 @@ async function syncEverythingFlow() {
   const record = JSON.parse(readFileSync(join(home, '.central-knot/sync.json'), 'utf8'));
   same('turned on, it is kept in the home’s sync record, and the row says what still waits for a choice', [await ruleOn(), record.syncEverything, await ruleSays()], ['true', true, '1 found item has copies that differ and waits for your choice of copy.']);
   same('the pass right after took in what was found: notes is in Codex now, byte for byte', readNow(join(codex, 'notes/SKILL.md')), text('notes', 'Take notes.'));
+  same('and Settings says what it took in, a line per kind, each with History', await a.all('.setting-added .setting-message', 'e.textContent'),
+    ['Synchronize everything took in 1 skill, found in Claude Code: notes. History can undo it.History', 'Synchronize everything took in 1 MCP server, found in Codex: files. History can undo it.History']);
   for (let tries = 0; tries < 80 && !readNow(join(codex, 'fresh/SKILL.md')); tries++) await wait(100);
   same('a skill saved just before is taken in soon after, with no click, once it has settled', readNow(join(codex, 'fresh/SKILL.md')), text('fresh', 'Just saved.'));
   // The read after that pass reaches the page: the sidebar's dot names both skills' notices, neither shown yet.
@@ -2924,12 +2926,18 @@ async function syncEverythingFlow() {
   await a.click('#header-refresh');
   same('and no pass takes it back: it is found, for good', [await sectionsNow(a), existsSync(join(codex, 'notes'))], [[['on', ['fresh']], ['found', ['notes', 'review']]], false]);
   await a.click('#open-notes');
-  check('its line says why: deleted, so only Add brings it back', /Synchronize everything leaves it: it was deleted from Central Knot, so only Add brings it back\./.test(await a.text('.details-status') ?? ''), await a.text('.details-status'));
+  check('its line says why: deleted, so it is not added by itself again; Add or Restore brings it back', /It was deleted from Central Knot, so it will not be added by itself again\. Add, or Restore in History, brings it back\./.test(await a.text('.details-status') ?? ''), await a.text('.details-status'));
+  // Two tools gain one new name with different content while Skills is open: the rule leaves it for a choice and writes
+  // nothing, and the open page still shows it, with no click.
+  skill(claude, 'split', text('split', 'One way.'));
+  skill(codex, 'split', text('split', 'Another way.'));
+  for (let tries = 0; tries < 80 && !(await rowKeys(a)).includes('split'); tries++) await wait(100);
+  check('a new item the rule leaves waiting reaches the open page by itself', (await rowKeys(a)).includes('split') && await a.exists('#decide-split'), await rowKeys(a));
   for (const page of ['overview', 'skills', 'mcp', 'harnesses']) await noAddAll(page);
   await a.click('#nav-settings');
   await a.click('#sync-everything-on');
   for (let tries = 0; tries < 40 && await ruleOn() !== 'false'; tries++) await wait(100);
-  same('turned off, it says what it would add now: nothing, since what was undone stays out', [await ruleOn(), await ruleSays()], ['false', 'Nothing found in your tools now would be added. 1 found item has copies that differ and waits for your choice of copy.']);
+  same('turned off, it says what it would add now: nothing, since what was undone stays out', [await ruleOn(), await ruleSays()], ['false', 'Nothing found in your tools now would be added. 2 found items have copies that differ and wait for your choice of copy.']);
   // Saved just before it is switched on again, with nothing else for that pass to write: the pass leaves it inside the settle
   // window, and nothing but the look again soon after (no watch event follows) takes it in before the 20 s poll.
   skill(claude, 'later', text('later', 'Saved just before.'));

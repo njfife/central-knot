@@ -21,10 +21,10 @@
 //   on or off whose click took tools' own    Undo: that action,     the item is as the click left it (asTheClickLeftIt);
 //     copies over (`tookFrom`)               each such copy given   after that, the plain action above, which gives
 //                                            back                   nothing back
-//   a found item taken in (on, `found`, or   Undo: out of Central   the item is as the click left it; after that, an
-//     `sync-everything` with no click;       Knot again, found      `on` one offers Turn off
-//     chosen)                                again, each tool it
-//                                            was found in keeping
+//   a found item taken in (on, `found`, or   Undo: out of Central   the item is as the click left it, and the place it
+//     `sync-everything` with no click;       Knot again, found      was taken from still holds that copy
+//     chosen)                                again, each tool it    (sourceReplaced); after that, an `on` one offers
+//                                            was found in keeping   Turn off
 //                                            its own copy
 //   (either Undo, when a copy would go back to Claude Code's MCP settings: not offered, see givesBackLater)
 //   deleted                                  Restore                the item is deleted
@@ -99,7 +99,10 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
         pulled: { glyph: 'git-branch', text: `Pulled from the Git repo into Central Knot${also('; put in')}.` },
       } as const;
       const { glyph, text } = said[event.cause === 'found' || event.cause === 'sync-everything' || event.cause === 'pulled' ? event.cause : 'switch'];
-      return { glyph, text: `${text}${overSaid}${gaveSaid}` };
+      // A take-in whose Undo would hand Claude Code's own MCP entry back while its settings wait for Write (givesBackLater): none.
+      const tookFrom = Object.fromEntries((event.tookFrom ?? []).map(copy => [copy.tool, copy.hash]));
+      const noUndo = tookIn(event) && givesBackLater(event, tookFrom) ? ` It has no Undo: Claude Code’s own entry can’t be handed back while its settings wait for Write to Claude Code. Turn it off instead (Central Knot keeps it), or keep it out of the other tools on its row.` : '';
+      return { glyph, text: `${text}${overSaid}${gaveSaid}${noUndo}` };
     }
     case 'off':
       if (event.only && event.gaveBack?.includes(event.only)) return { glyph: 'circle-off', text: `Kept out of ${where}: ${where} has its own copy back, as before. ${keeps}` };
@@ -214,7 +217,7 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
   if (isClearedSwitch(event) && stillCleared) return { label: 'Undo', help: `Turn ${name} off again in ${andList(event.switched!.map(entry => toolName(entry.tool)))}’s own settings`, change: now };
   // A found item taken in (by a click on Add, or by Synchronize everything), while it is still as that left it: its Undo takes it
   // out again (found once more, a tombstone the rule leaves for good), each tool it was found in keeping its own copy.
-  if (tookIn(event) && item.on && asTheClickLeftIt(event, item)) {
+  if (tookIn(event) && item.on && asTheClickLeftIt(event, item) && !sourceReplaced(event, item)) {
     if (givesBackLater(event, givenBack(event, item).giveBack)) return undefined;
     return { label: 'Undo', help: `Take ${name} out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own`, change: { ...now, deleted: true, ...givenBack(event, item) } };
   }
@@ -252,6 +255,14 @@ function asTheClickLeftIt(event: HistoryEvent, item: LibraryItem): boolean {
   const left = event.version ?? event.winner?.hash;
   return !!left && left === item.hash && !(event.tookFrom ?? []).some(copy => item.except.includes(copy.tool));
 }
+
+/**
+ * Whether the place a found item was taken from no longer holds that copy: the tool had it another way (a link, a copy in
+ * ~/.agents/skills: no copy of its own, so not in `tookFrom`), and Central Knot's copy is there now (Take over replaced it, or
+ * it went). Its Undo would then leave that tool nothing, so it is not offered.
+ */
+const sourceReplaced = (event: HistoryEvent, item: LibraryItem) => !!event.winner
+  && !(event.tookFrom ?? []).some(copy => copy.tool === event.winner!.tool) && item.applied[event.winner.tool] !== undefined;
 
 /** The copies an entry's click took over from tools (`tookFrom`), each a version still, for its Undo to give back (types.ts Change giveBack). */
 function givenBack(event: HistoryEvent, item: LibraryItem): Pick<Change, 'giveBack'> {

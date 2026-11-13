@@ -775,6 +775,8 @@ export interface PassResult {
   stopped?: string; results: DestinationResult[]; writes: number; made?: string[]; notices?: SyncNotice[];
   /** A deletion is inside its settle window: look again shortly. */
   settling?: boolean;
+  /** A pass of the whole home (librarypass.ts PassOptions background): the found keys it left found, which main.ts tells an open page of when they change. */
+  found?: string[];
 }
 
 // ---------- Instructions ----------

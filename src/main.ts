@@ -471,7 +471,8 @@ let pendingResults: DestinationResult[] = [], pendingNotices: SyncNotice[] = [];
 let pendingServerNotices: SyncNotice[] = [], pendingAgentNotices: SyncNotice[] = [];
 let lastStopped: string | undefined;
 
-interface ServersAndAgentsResult { failures: DestinationResult[]; stopped: DestinationResult[]; serverNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean }
+interface ServersAndAgentsResult { failures: DestinationResult[]; stopped: DestinationResult[]; serverNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean;
+  /** The servers' and agents' found keys the pass left found (librarypass.ts PassResult found), each with its kind's prefix. */ found: string[] }
 interface BackgroundPass { skills?: LibraryPass; serversAndAgents?: ServersAndAgentsResult }
 
 /**
@@ -498,6 +499,7 @@ async function pass(snapshots: Snapshot[], explicit = false): Promise<Background
     failures: [...crashes, ...[...(servers?.results ?? []), ...(agents?.results ?? [])].filter(entry => entry.outcome === 'failed')],
     stopped: ([['MCP sync', servers?.stopped], ['Agents sync', agents?.stopped]] as const).filter(([, why]) => why).map(([item, why]) => ({ item, outcome: 'failed' as const, message: why! })),
     serverNotices: servers?.notices ?? [], agentNotices: agents?.notices ?? [], settling: !!(servers?.settling || agents?.settling),
+    found: [...(servers?.found ?? []).map(key => `mcp:${key}`), ...(agents?.found ?? []).map(key => `agent:${key}`)],
     changed: !!(servers?.writes || servers?.notices?.length || agents?.writes || agents?.notices?.length) } };
 }
 
@@ -516,6 +518,7 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   const passed = await pass(before, explicit), { skills, serversAndAgents } = passed;
   keepServersAndAgents(serversAndAgents);
   lookAgainSoon(passed);
+  foundChanged(passed);
   // A pass that could not finish says so on the page instead of failing quietly.
   const caughtUp = [...pendingResults.splice(0), ...(skills?.results ?? []), ...(skills?.stopped ? [{ item: 'Sync', outcome: 'failed' as const, message: skills.stopped }] : [])];
   const notices = [...pendingNotices.splice(0), ...(skills?.notices ?? [])];
@@ -633,6 +636,14 @@ let watchers: FSWatcher[] = [];
 let poller: NodeJS.Timeout | undefined;
 let soon: NodeJS.Timeout | undefined;
 let followUp: NodeJS.Timeout | undefined;
+/** The found items the last pass of the whole home left found, all kinds: a change is news for an open page though nothing was written. */
+let lastFound: string | undefined;
+function foundChanged({ skills, serversAndAgents }: BackgroundPass): boolean {
+  if (!skills) return false;
+  const found = JSON.stringify([skills.found, serversAndAgents?.found]), changed = found !== lastFound;
+  lastFound = found;
+  return changed;
+}
 /**
  * Something a pass left inside its settle window (a copy missing just now, or a new one Synchronize everything waits to take
  * in while it is still being saved): look again just after it, so it finishes without a click. Otherwise an event or the poll.
@@ -707,6 +718,8 @@ async function backgroundPass() {
   // The page reads again whether or not the pass wrote: with Sync off an edit or deletion is only noted (it shows as waiting,
   // not as Synced), and a tool's own switch turned in its settings changes no content, only that tool's mark.
   if ((fromEvent && !syncOn) || fromSettings) changed = true;
+  // A new found item left as it is (copies that differ, say) writes nothing: the page hears of it when what is found changes.
+  if (foundChanged({ skills, serversAndAgents })) changed = true;
   lookAgainSoon({ skills, serversAndAgents });
   if (skills?.stopped && skills.stopped !== lastStopped) {
     pendingResults.push({ item: 'Sync', outcome: 'failed', message: skills.stopped });

@@ -11,12 +11,14 @@ import { tmpdir } from 'node:os';
 import { agentsView, applyAgents } from '../src/agents.ts';
 import { readHistory } from '../src/history.ts';
 import { libraryAction, librarySentence } from '../src/historyactions.ts';
-import { libraryWords, rowClicks, statusLine } from '../src/libraryrow.ts';
+import { libraryWords, rowClicks, sentences, statusLine } from '../src/libraryrow.ts';
 import { inUse, liveItems } from '../src/profileplan.ts';
 import { readLibraries, readProfiles, saveProfile, switchProfile } from '../src/profiles.ts';
 import { applyServers, serversView } from '../src/servers.ts';
 import { partsRecordPath, readRecord, readTree, saveRecord, setSyncEverything, syncGate, type ShareContext } from '../src/share.ts';
-import { applySkills, restoreSkill, skillsView } from '../src/skills.ts';
+import { applySkills, restoreSkill, skillKind, skillsView, takeOver } from '../src/skills.ts';
+import { convertAgentToSkill } from '../src/agentskill.ts';
+import { setDisabled } from '../src/skillswitch.ts';
 import type { Change, HarnessId, LibraryFacts, LibraryView, PassResult } from '../src/types.ts';
 
 const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
@@ -53,9 +55,9 @@ const serverNames = async (box: Box, tool: HarnessId) => {
 };
 
 /** main.ts's pass of the whole home, every kind in turn (the background pass, or Sync once). */
-async function background(box: Box, options: { now?: number; settleMs?: number } = {}) {
+async function background(box: Box, options: { now?: number; settleMs?: number } = {}, managed = tools) {
   const whole = { background: true, ...options } as const;
-  return { skills: await applySkills(box.context, tools, [], whole), mcp: await applyServers(box.context, tools, [], whole), agents: await applyAgents(box.context, tools, [], whole) };
+  return { skills: await applySkills(box.context, managed, [], whole), mcp: await applyServers(box.context, managed, [], whole), agents: await applyAgents(box.context, managed, [], whole) };
 }
 const wrote = (passes: Record<string, PassResult>) => Object.values(passes).reduce((sum, done) => sum + done.writes, 0);
 const noticesOf = (passes: Record<string, PassResult>) => Object.values(passes).flatMap(done => done.notices ?? []);
@@ -127,6 +129,12 @@ test('Switched on in a home with found items: each it may take is taken in and O
     // not offered; files's is, since Claude Code had none.
     const docs = (await entriesOf(box, 'mcp:docs')).at(-1)!, files = (await entriesOf(box, 'mcp:files')).at(-1)!;
     assert.deepEqual([docs.cause, libraryAction(docs, after.mcp.library.docs), libraryAction(files, after.mcp.library.files)?.label], ['sync-everything', undefined, 'Undo']);
+    // And it is said: the notice names the exception, and docs's entry says why it has no Undo and what to do instead.
+    const mcpNotice = done.mcp.notices!.find(notice => notice.kind === 'taken-in')!;
+    assert.equal(mcpNotice.kind === 'taken-in' && sentences(libraryWords.mcp).takenInWords(mcpNotice, 'mcp'),
+      'Synchronize everything took in 2 MCP servers, found in Claude Code and Codex: docs and files. History can undo each, except any found in Claude Code (its entry says why).');
+    assert.match(librarySentence(docs, libraryWords.mcp, tools)?.text ?? '', /It has no Undo: Claude Code’s own entry can’t be handed back while its settings wait for Write to Claude Code\. Turn it off instead/);
+    assert.doesNotMatch(librarySentence(files, libraryWords.mcp, tools)?.text ?? '', /no Undo/);
     // One notice per pass of a kind: how many, by name, and where they were found. None for a key it left.
     assert.deepEqual(noticesOf(done).map(notice => notice.kind === 'taken-in' ? [notice.items, notice.from] : notice.kind), [[['notes', 'tidy'], ['claude-cli']], [['docs', 'files'], ['claude-cli', 'codex-cli']], [['helper'], ['copilot-cli']]], 'each tool named once');
     // A click's Undo never undoes what the rule took in: none of it is a click's.
@@ -167,7 +175,7 @@ test('Undo of what the rule took in takes it out again for good: each tool keeps
     for (let run = 0; run < 10; run++) assert.equal(wrote(await background(box)), 0, `pass ${run + 1}`);
     const view = (await views(box)).skills;
     assert.deepEqual([placeIn(view, 'notes'), rowOf(view, 'notes')?.takeInAnswers?.rule], ['found', { leave: 'deleted' }]);
-    assert.match(statusLine(pageRow(rowOf(view, 'notes')!), view.library.notes, tools, true), /Synchronize everything leaves it: it was deleted from Central Knot, so only Add brings it back\.$/);
+    assert.match(statusLine(pageRow(rowOf(view, 'notes')!), view.library.notes, tools, true), /It was deleted from Central Knot, so it will not be added by itself again\. Add, or Restore in History, brings it back\.$/);
     await applySkills(box.context, tools, [add(view, 'notes')]);
     assert.equal(placeIn((await views(box)).skills, 'notes'), 'on');
   } finally { await box.cleanup(); }
@@ -344,5 +352,115 @@ test('An agent whose only copy is two files differing by case gets no Add, and t
     const view = (await views(box)).agents;
     assert.deepEqual(rowOf(view, 'reviewer')?.takeInAnswers, { click: { leave: 'no-copy' }, rule: { leave: 'no-copy' } });
     assert.equal(statusLine(pageRow(rowOf(view, 'reviewer')!), undefined, tools), 'Not in Central Knot · it can’t be taken in now (see below).');
+  } finally { await box.cleanup(); }
+});
+
+// ---------- What the rule leaves to a click, and how it keeps its word ----------
+
+test('A skill Convert to a Pi skill made is left found by the rule, so it never spreads to the tools that hold the agent; Add still takes it', async () => {
+  const box = await sandbox(), four: HarnessId[] = [...tools, 'pi-cli'];
+  try {
+    await mkdir(join(box.home, '.pi/agent/skills'), { recursive: true });
+    await putAgent(box, 'claude-cli', 'helper');
+    await turnOn(box);
+    await background(box, {}, four);
+    assert.equal((await convertAgentToSkill(box.context, four, 'helper')).stopped, undefined);
+    await background(box, {}, four);
+    const view = await skillsView(box.context, four);
+    assert.deepEqual([placeIn(view, 'helper'), rowOf(view, 'helper')?.takeInAnswers?.rule, await skillIn(box, 'codex-cli', 'helper'), await skillIn(box, 'copilot-cli', 'helper')],
+      ['found', { leave: 'converted' }, undefined, undefined]);
+    await applySkills(box.context, four, [add(view, 'helper')]);
+    assert.equal(placeIn(await skillsView(box.context, four), 'helper'), 'on');
+  } finally { await box.cleanup(); }
+});
+
+test('A server, or a skill, that every tool holding it has switched off in its own settings is left found by the rule, never spread switched on; Add still takes it', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, mcpFile['codex-cli']), '[mcp_servers.quiet]\ncommand = "npx"\nargs = ["quiet"]\nenabled = false\n');
+    await putSkill(box, 'copilot-cli', 'hushed');
+    await setDisabled(box.context, 'copilot-cli', { folder: 'hushed', name: 'hushed', skillFile: join(box.home, skillRoot['copilot-cli'], 'hushed', 'SKILL.md') }, true);
+    await turnOn(box);
+    assert.equal(wrote(await background(box)), 0);
+    let view = await views(box);
+    assert.deepEqual([rowOf(view.mcp, 'quiet')?.takeInAnswers?.rule, rowOf(view.skills, 'hushed')?.takeInAnswers?.rule, await serverNames(box, 'copilot-cli')],
+      [{ leave: 'switched-off' }, { leave: 'switched-off' }, []]);
+    await applyServers(box.context, tools, [add(view.mcp, 'quiet')]);
+    view = await views(box);
+    assert.equal(placeIn(view.mcp, 'quiet'), 'on');
+  } finally { await box.cleanup(); }
+});
+
+test('A skill saved again while the rule keeps another costs that other nothing: it is taken in with its entry, and the changed one waits for the next pass', async () => {
+  const box = await sandbox();
+  try {
+    for (const name of ['alpha', 'beta']) await putSkill(box, 'claude-cli', name, 'Original.');
+    await turnOn(box);
+    const store = skillKind.store;
+    let saved = false;
+    skillKind.store = async (...args) => {
+      if (args[1].key === 'beta' && !saved) { saved = true; await putSkill(box, 'claude-cli', 'beta', 'Saved during the pass.'); }
+      return store(...args);
+    };
+    let first: Awaited<ReturnType<typeof background>>;
+    try { first = await background(box); } finally { skillKind.store = store; }
+    const entries = async (key: string) => (await entriesOf(box, key)).filter(event => event.cause === 'sync-everything').length;
+    assert.deepEqual([first.skills.stopped, placeIn((await views(box)).skills, 'alpha'), placeIn((await views(box)).skills, 'beta'), await entries('alpha')], [undefined, 'on', 'found', 1]);
+    await background(box);
+    assert.deepEqual([placeIn((await views(box)).skills, 'beta'), await entries('beta'), await skillIn(box, 'codex-cli', 'beta')], ['on', 1, skill('beta', 'Saved during the pass.')]);
+  } finally { await box.cleanup(); }
+});
+
+test('A take-in’s Undo is not offered once the place it was found in no longer holds that copy (Take over replaced it): it offers Turn off instead', async () => {
+  const box = await sandbox();
+  try {
+    const shared = join(box.home, '.agents/skills/notes');
+    await mkdir(shared, { recursive: true });
+    await writeFile(join(shared, 'SKILL.md'), skill('notes', 'Original.'));
+    await turnOn(box);
+    await background(box);
+    const taken = (await entriesOf(box, 'notes')).find(event => event.cause === 'sync-everything')!;
+    assert.equal(libraryAction(taken, (await views(box)).skills.library.notes)?.label, 'Undo', 'while the shared copy is where it was found');
+    assert.equal((await takeOver(box.context, tools, 'notes', 'codex-cli')).stopped, undefined);
+    assert.equal(libraryAction(taken, (await views(box)).skills.library.notes)?.label, 'Turn off');
+  } finally { await box.cleanup(); }
+});
+
+test('A pass of the whole home says which found items it left, so a new one the rule leaves waiting reaches an open page', async () => {
+  const box = await sandbox();
+  try {
+    await turnOn(box);
+    assert.deepEqual((await background(box)).skills.found, []);
+    await putSkill(box, 'claude-cli', 'review', 'Review gently.');
+    await putSkill(box, 'codex-cli', 'review', 'Review hard.');
+    const done = await background(box);
+    assert.deepEqual([done.skills.writes, done.skills.found], [0, ['review']]);
+  } finally { await box.cleanup(); }
+});
+
+test('A skill only in ~/.agents/skills is taken in from there: the tools that read it have it that way, the others get Central Knot’s copy, and that folder is not written', async () => {
+  const box = await sandbox();
+  try {
+    const shared = join(box.home, '.agents/skills/notes');
+    await mkdir(shared, { recursive: true });
+    await writeFile(join(shared, 'SKILL.md'), skill('notes', 'Shared.'));
+    await turnOn(box);
+    await background(box);
+    assert.deepEqual([placeIn((await views(box)).skills, 'notes'), await readFile(join(shared, 'SKILL.md'), 'utf8'), await skillIn(box, 'claude-cli', 'notes'), await skillIn(box, 'copilot-cli', 'notes'), await skillIn(box, 'codex-cli', 'notes')],
+      ['on', skill('notes', 'Shared.'), skill('notes', 'Shared.'), undefined, undefined]);
+  } finally { await box.cleanup(); }
+});
+
+test('A click’s pass with Automatic sync on (no `only`) takes in the clicked item and runs no rule; the background pass after takes in the rest', async () => {
+  const box = await sandbox();
+  try {
+    await putSkill(box, 'claude-cli', 'notes');
+    await putSkill(box, 'claude-cli', 'tidy');
+    await turnOn(box);
+    await applySkills(box.context, tools, [add((await views(box)).skills, 'notes')]);
+    const view = (await views(box)).skills;
+    assert.deepEqual([placeIn(view, 'notes'), placeIn(view, 'tidy')], ['on', 'found']);
+    await background(box);
+    assert.equal(placeIn((await views(box)).skills, 'tidy'), 'on');
   } finally { await box.cleanup(); }
 });

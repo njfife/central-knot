@@ -66,6 +66,7 @@ export interface SkillDisk extends Disk<SkillCopy> {
   switches: Map<HarnessId, SwitchFile>;
   /** Skills Convert to skill made, by key: the agent each came from, and its tool, which never gets it back by itself. */
   converted: Map<string, ConvertedFrom>;
+  switchedOff: Map<string, HarnessId[]>;
   /** How a tool has the skill another way, if it does (library.ts held `anotherWay`), On or Off. */
   anotherWay(item: Wanted, tool: HarnessId): string | undefined;
   /** Why a tool can't be given the skill, if it can't. */
@@ -80,7 +81,7 @@ const ownLabel = (tool: HarnessId) => harnesses[tool].skillRoots('', '')[0].labe
 export async function readDisk(context: ShareContext, managed: HarnessId[]): Promise<SkillDisk> {
   const disk: SkillDisk = {
     byKey: new Map(), unseen: new Map(), uncopied: new Set(), locked: new Map(), problems: [], outside: new Map(), ways: new Map(), readsFrom: {},
-    through: await throughPlugins(context, managed, 'skill', itemKey), parts: await partsIn(context.home, 'skill'), shapes: new Map(), switches: new Map(), converted: new Map(),
+    through: await throughPlugins(context, managed, 'skill', itemKey), parts: await partsIn(context.home, 'skill'), shapes: new Map(), switches: new Map(), converted: new Map(), switchedOff: new Map(),
     anotherWay: (item, tool) => anotherWay(disk, managed, item, tool),
     cannotTake: (item, tool) => cannotTake(context, disk, item, tool),
     held: (item, tool) => {
@@ -103,6 +104,11 @@ export async function readDisk(context: ShareContext, managed: HarnessId[]): Pro
     if (copy && !('unseen' in copy)) disk.shapes.set(item.key, { ...copy.skill, folder: item.name });
   }
   for (const [key, slot] of [...disk.byKey, ...disk.outside]) if (!disk.shapes.has(key)) disk.shapes.set(key, Object.values(slot).find(Boolean)!.skill);
+  // Each copy (its own, else one it has another way) its tool's own switch turns off there: for the rule (librarypass.ts Disk.switchedOff).
+  for (const key of new Set([...disk.byKey.keys(), ...disk.outside.keys()])) {
+    const off = managed.filter(tool => { const copy = disk.byKey.get(key)?.[tool] ?? disk.outside.get(key)?.[tool]; return !!copy && isDisabled(context, disk.switches.get(tool)!, switchTarget(copy)); });
+    if (off.length) disk.switchedOff.set(key, off);
+  }
   return disk;
 }
 
@@ -463,8 +469,10 @@ export async function skillsForRepo(context: ShareContext, tools: HarnessId[]): 
 function loadTarget(look: SkillLook, key: string, name: string, tool: HarnessId): SwitchTarget | undefined {
   const disk = look.disk, source = disk.readsFrom[tool];
   const copy = disk.byKey.get(key)?.[tool] ?? disk.outside.get(key)?.[tool] ?? (source ? disk.byKey.get(key)?.[source] : undefined);
-  return copy && { folder: copy.name, name: copy.skill.name, skillFile: join(copy.directory, 'SKILL.md') };
+  return copy && switchTarget(copy);
 }
+/** How a tool's own switch names one copy of a skill. */
+const switchTarget = (copy: SkillCopy): SwitchTarget => ({ folder: copy.name, name: copy.skill.name, skillFile: join(copy.directory, 'SKILL.md') });
 
 /** Each version's note (library.ts VersionChange): the files that differ, as agents.ts changesOf says it for an agent's fields. */
 async function changesOf(context: ShareContext, item: LibraryItem): Promise<VersionChange[]> {

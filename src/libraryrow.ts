@@ -146,6 +146,8 @@ const KEPT_FIRST = 'before it is written over, a copy Central Knot doesn’t hav
 export const asksWhichCopy = (row: LibraryRow) => !!row.takeInAnswers && 'wait' in row.takeInAnswers.click;
 /** A found row's Add does something (the take-in table's answer for a click): takes it in, or asks which copy. */
 export const canAdd = (row: LibraryRow) => !!row.takeInAnswers && !('leave' in row.takeInAnswers.click);
+/** A deleted item's copy still waits to leave a tool at Write to Claude Code (the table's answer; `waits` names the tools). */
+const stillLeaving = (row: LibraryRow) => !!row.takeInAnswers && 'leave' in row.takeInAnswers.click && row.takeInAnswers.click.leave === 'leaving';
 
 // ---------- The clicks ----------
 
@@ -243,8 +245,8 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
   const where = (...states: HarnessIs[]) => harnessesWhere(row, item, tools, ...states);
   const own = where('own-copy'), place = placeOf(item);
   const waiting = where('waits'), waits = waiting.length ? `${sentence(named(waiting, tools))} still ${waiting.length === 1 ? 'has' : 'have'} it until you click Write to Claude Code.` : '';
-  // A deleted item whose copy there is still to go is a found row, with no Add, until it has gone.
-  if (place === 'found' && waits) return `Deleted from Central Knot · ${waits} History can restore it.`;
+  // A deleted item whose copy there is still to go is a found row, with no Add, until it has gone (the take-in table's answer).
+  if (place === 'found' && stillLeaving(row)) return `Deleted from Central Knot · ${waits} History can restore it.`;
   if (place === 'found') {
     const differ = asksWhichCopy(row) ? ', with different copies' : '';
     if (!canAdd(row)) return 'Not in Central Knot · it can’t be taken in now (see below).';
@@ -296,7 +298,7 @@ export function switchLabel(row: LibraryRow, item: LibraryItem | undefined, tool
 export function addLabel(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], question?: 'open' | 'closed'): string {
   const name = row.name ?? row.key;
   if (question) return `Add ${name}: its copies differ. Click to ${question === 'open' ? 'close the question' : 'choose which one Central Knot takes in'}.`;
-  if (row.waits?.length) return `Add ${name}: it was deleted from Central Knot, and its entry leaves ${andList(row.waits.map(toolName))} at the next Write to Claude Code. History can restore it.`;
+  if (stillLeaving(row)) return `Add ${name}: it was deleted from Central Knot, and its entry leaves ${andList((row.waits ?? []).map(toolName))} at the next Write to Claude Code. History can restore it.`;
   if (!canAdd(row)) return `Add ${name}: it can’t be added now; its line in the opened row says why.`;
   return `Add ${name} to Central Knot${whereAdded(row, item, tools)}`;
 }
@@ -320,14 +322,17 @@ export const notOnIn = (row: LibraryRow, item: LibraryItem | undefined, tools: r
 
 /**
  * What Synchronize everything does with a found item, as its row says it while the rule is on (the take-in table's answer for
- * the rule; library.ts takeInAnswer). Nothing where its row already says it can't be taken in.
+ * the rule; library.ts takeInAnswer). Nothing where its row already says it can't be taken in, nor for a copy still being
+ * saved, which the page never sees (its look has no settle clock).
  */
 export function ruleSays(answer: TakeInAnswer): string {
   if ('take' in answer) return 'Synchronize everything takes it in when sync runs.';
   if ('wait' in answer) return 'Synchronize everything leaves it for you to choose: its copies differ.';
-  return { deleted: 'Synchronize everything leaves it: it was deleted from Central Knot, so only Add brings it back.',
+  return { deleted: 'It was deleted from Central Knot, so it will not be added by itself again. Add, or Restore in History, brings it back.',
     part: 'Synchronize everything leaves it: it is a plugin’s part, so only Add takes it in.',
-    settling: 'Synchronize everything takes it in once it has stopped changing.', 'no-copy': '', leaving: '', 'choice-changed': '' }[answer.leave];
+    converted: 'Synchronize everything leaves it: Convert to skill made it from an agent, so only Add puts it in your other tools.',
+    'switched-off': 'Synchronize everything leaves it: every tool that has it has it switched off in its own settings, so only Add takes it in.',
+    settling: '', 'no-copy': '', leaving: '', 'choice-changed': '' }[answer.leave];
 }
 /** Where a found item is: "in Claude Code and Codex", or, with no copy of a harness's own, "Pi has it another way". */
 function foundWhere(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]) {
@@ -408,7 +413,7 @@ export function sentences(words: RowWords) {
     if (place === 'off' && row.waits?.length) return { text: `still in ${andList(row.waits.map(toolName))} until Write`, title: `Off. Central Knot keeps this ${noun}; its ${copy} leaves ${andList(row.waits.map(toolName))} when you click Write to Claude Code.` };
     if (place === 'off') return { text: 'in Central Knot only', title: `Central Knot keeps this ${noun} and its versions. No tool has it until you turn it on.` };
     const found = `A tool has this ${noun}; Central Knot doesn’t yet. Add it to keep it in Central Knot${whereAdded(row, item, tools)}.`;
-    if (place === 'found' && row.waits?.length) return { text: 'deleted', title: `Deleted from Central Knot. Its ${copy} leaves ${andList(row.waits.map(toolName))} when you click Write to Claude Code.` };
+    if (place === 'found' && stillLeaving(row)) return { text: 'deleted', title: `Deleted from Central Knot. Its ${copy} leaves ${andList((row.waits ?? []).map(toolName))} when you click Write to Claude Code.` };
     if (place === 'found' && !canAdd(row)) return { text: 'can’t be taken in', title: 'Its line in the opened row says why.' };
     if (place === 'found') return { text: 'not in Central Knot', title: found };
     const out = item!.except.filter(tool => tools.includes(tool)), keptOut = `Kept out of ${andList(out.map(toolName))}. Its switch there, in the opened row, puts it back.`;
@@ -480,12 +485,15 @@ export function sentences(words: RowWords) {
   }
 
   /**
-   * What Synchronize everything's notice says (types.ts TakenInNotice): how many it took in and where it found them, then
-   * their names. Each one's own Undo is its History entry's.
+   * What Synchronize everything's notice says (types.ts TakenInNotice), on its page and in Settings: how many it took in and
+   * where it found them, their names, and what History can undo. One found in Claude Code's MCP settings has no Undo
+   * (historyactions.ts givesBackLater), which is said, its entry saying why. `kind`: the page's name for the kind.
    */
-  function takenInWords(notice: Pick<TakenInNotice, 'items' | 'from'>): string {
-    const count = notice.items.length, many = count === 1 ? noun : words.many;
-    return `Synchronize everything took in ${count} ${many}, found in ${andList(notice.from.map(toolName))}: ${andList(notice.items)}. History can undo ${count === 1 ? 'it' : 'each'}.`;
+  function takenInWords(notice: Pick<TakenInNotice, 'items' | 'from'>, kind: 'skills' | 'mcp' | 'agents'): string {
+    const count = notice.items.length, many = count === 1 ? noun : words.many, without = notice.from.some(tool => writesWait(kind, tool));
+    const undo = !without ? `History can undo ${count === 1 ? 'it' : 'each'}.`
+      : count === 1 ? 'It was found in Claude Code, so History has no Undo for it (its entry says why).' : 'History can undo each, except any found in Claude Code (its entry says why).';
+    return `Synchronize everything took in ${count} ${many}, found in ${andList(notice.from.map(toolName))}: ${andList(notice.items)}. ${undo}`;
   }
 
   return { harnessLine, placeTag, said, noticeWords, takenInWords };

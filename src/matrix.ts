@@ -1,7 +1,8 @@
 // The item pages (Skills, MCP servers, Agents, and a harness's tabs for them): one On/Off switch per item, applied at once
 // in every tool Central Knot manages. A row's marks only say what each tool has; each tool's own controls are in the item's
 // details, and every click's result comes with an Undo of the whole click. Every kind is on Central Knot's library: its row is a
-// library row (`library()`): librarypages.ts says what each kind supplies, libraryrow.ts what such a row says.
+// library row (`library()`): librarypages.ts says what each kind supplies, libraryrow.ts what such a row says. A sync notice is
+// kept or folded once its page shows it (toldNotices); until then it lives across reads in app.ts keepUnshown.
 import { brandMark } from './brand.ts';
 import { caughtUpNames, defaultHistoryDays, groupBy, noticeNames } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
@@ -964,7 +965,7 @@ function syncNotice(notice: Told) {
   const [glyph, tone, text, action] = libraryNotice(library(), notice, undo);
   // The item's name opens its row here, so "what changed" is one click from the change itself.
   const rowKey = committedList().find(skill => skill.name === notice.item || skill.key === notice.item.toLowerCase())?.key;
-  const noticeKey = notice.history || `${notice.kind}:${notice.item}`;
+  const noticeKey = notice.history;
   state.seenNotices.add(notice.history);
   if (rowKey && !firstShown.has(noticeKey)) flashed.set(rowKey, Date.now());
   // The item's name opens its row: one click from "what changed" to the item, with no separate Details link.
@@ -976,7 +977,7 @@ function syncNotice(notice: Told) {
   const off = !!state.home && !state.home.syncOn;
   const history = !off ? smallAction('History', `notice-history-${notice.history}`, () => showPage('history')) : null;
   return h('p.sync-notice', { 'data-kind': notice.kind }, icon(glyph, 14, tone),
-    h('span.notice-text', {}, offNow && notice.kind !== 'deleted' ? 'Synced once: ' : '', ...said.map(part => typeof part === 'string' && !/\.\s/.test(part) ? part.replace(/\.$/, '') : part), '', h('span.notice-age', {}, ` · ${age(notice.history || `${notice.kind}:${notice.item}`)}`)),
+    h('span.notice-text', {}, offNow && notice.kind !== 'deleted' ? 'Synced once: ' : '', ...said.map(part => typeof part === 'string' && !/\.\s/.test(part) ? part.replace(/\.$/, '') : part), '', h('span.notice-age', {}, ` · ${age(notice.history)}`)),
     h('span.notice-actions', {},
       notice.kind === 'edit' || notice.kind === 'conflict' ? seeChangeLink(notice.history, notice.key) : null,
       action, history, off ? smallAction('Turn sync on', `notice-sync-on-${notice.history}`, () => void setSync(true)) : null),
@@ -992,7 +993,7 @@ function takenInNotice(notice: TakenInNotice & { once?: boolean }) {
   const off = !!state.home && !state.home.syncOn, once = notice.once ?? off;
   state.seenNotices.add(notice.history);
   return h('p.sync-notice', { 'data-kind': notice.kind }, icon('plus', 14, 'tone-success'),
-    h('span.notice-text', {}, once ? 'Synced once: ' : '', library().say.takenInWords(notice), h('span.notice-age', {}, ` · ${age(notice.history)}`)),
+    h('span.notice-text', {}, once ? 'Synced once: ' : '', library().say.takenInWords(notice, kind), h('span.notice-age', {}, ` · ${age(notice.history)}`)),
     h('span.notice-actions', {}, smallAction('History', `notice-history-${notice.history}`, () => showPage('history'))),
     closeButton(event => { event.stopPropagation(); state.dismissed.add(notice.history); rerender(); }, { id: `notice-dismiss-${notice.history}`, label: 'Dismiss this notice of what Synchronize everything took in', title: 'Dismiss', look: '.notice-dismiss' }));
 }
