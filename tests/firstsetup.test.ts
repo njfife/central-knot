@@ -15,7 +15,7 @@ import { readHistory } from '../src/history.ts';
 import { entriesNow, everythingAction, everythingDone, everythingPlan, everythingSentence, libraryAction } from '../src/historyactions.ts';
 import { rowClicks } from '../src/libraryrow.ts';
 import { applyServers, restoreServer, serversView } from '../src/servers.ts';
-import { asksNow, latestDone, waitingForChoice, walkPlace, wayBackIn, whatYesDoes, type Waiting } from '../src/setupcounts.ts';
+import { asksNow, latestDone, takenOutEarlier, waitingForChoice, walkPlace, wayBackIn, whatYesDoes, type Waiting } from '../src/setupcounts.ts';
 import { newRecord, partsRecordPath, readRecord, remember, saveRecord, syncGate, writeAccess, type ShareContext } from '../src/share.ts';
 import { applySkills, restoreSkill, skillsView, takeOver } from '../src/skills.ts';
 import { chooseTools } from '../src/toolchoice.ts';
@@ -500,6 +500,21 @@ test('The copy deleted by hand in the tool it was found in, not taken in yet (Au
     const undone = await everythingEntryAction(box.context, tools, switchOn.id);
     const undo = (await history(box)).find(event => event.id === undone.made![0])!;
     assert.deepEqual([undo.everything?.undo?.left, (await skillsView(box.context, tools)).library.notes.deleted, await filesIn(box)], [[{ item: 'notes', why: 'changed' }], undefined, before]);
+  } finally { await box.cleanup(); }
+});
+
+test('After the one Undo, what Yes would add is nothing, and Settings can say why: the items it took back are counted as taken out earlier', async () => {
+  const box = await sandbox();
+  try {
+    await putSkill(box, skillRoot['claude-cli'], 'notes');
+    await putSkill(box, skillRoot['claude-cli'], 'plan');
+    assert.equal(takenOutEarlier(await homeView(box)), 0);
+    await setSyncEverything(box.context, true, true);
+    await background(box);
+    const [switchOn] = await switchesOn(box);
+    await everythingEntryAction(box.context, tools, switchOn.id);
+    const view = await homeView(box);
+    assert.deepEqual([whatYesDoes(view).takes, takenOutEarlier(view)], [0, 2]);
   } finally { await box.cleanup(); }
 });
 

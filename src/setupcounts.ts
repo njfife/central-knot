@@ -45,6 +45,14 @@ export function waitingForChoice(home: HomeView): Waiting[] {
 }
 
 /**
+ * The found items the rule leaves for good because Central Knot holds them as deleted (the take-in table's rule column, `deleted`):
+ * taken out earlier, by Delete or by an Undo of their take-in, and not added by themselves again. Settings counts them, so "nothing
+ * would be added" beside a page full of found items says why.
+ */
+export const takenOutEarlier = (home: HomeView): number => KINDS.reduce((count, kind) => count
+  + kindSource(home, kind).facts.filter(fact => fact.takeInAnswers && 'leave' in fact.takeInAnswers.rule && fact.takeInAnswers.rule.leave === 'deleted').length, 0);
+
+/**
  * What Yes would do now, counted from the take-in table's rule column as the pass reads it (each kind's view): the items it takes
  * in, the tools that get one (a tool with no copy that can take it and has it no other way), the items that wait for a choice of
  * copy, the MCP servers Claude Code gets only at Write to Claude Code, and whether one was found in Claude Code (whose take-in has
