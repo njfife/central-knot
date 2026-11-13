@@ -198,5 +198,7 @@ test('A switch-on, a switch-off and an Undo say what they did; the Undo’s entr
   // Added again, edited and deleted since the Undo: its own Restore is offered, but the Undo's Restore passes it over.
   const touched = [deleted, undo, entry({ id: 'again', kind: 'deleted', losers: [] })];
   assert.deepEqual([restorePlan(undo, touched, about(item({ deleted: { at } }))).passed, everythingAction(undo, touched, about(item({ deleted: { at } })))], [['reviewer'], undefined]);
+  // A pass that removed its copy from a tool managed again since (`in-line`) changed nothing of the item: it still comes back.
+  assert.deepEqual(restorePlan(undo, [deleted, undo, entry({ id: 'line', kind: 'deleted', cause: 'in-line', losers: [] })], about(item({ deleted: { at } }))).back.map(event => event.id), ['gone']);
   assert.equal(everythingSentence(rule('undo', false, { everything: { ruleOn: false, undo: { switchedOff: true, itemUndos: [], left: [], keptIn: [] } } })).text, 'Undone: switched off; nothing it took in was taken back.');
 });

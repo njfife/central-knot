@@ -379,13 +379,14 @@ export function everythingPlan(switchOn: HistoryEvent, history: HistoryEvent[], 
 
 /**
  * What the Restore of a switch-on's Undo (`undo`) puts back: each item it took back (`undo.itemUndos`, the entries their own
- * Undos made) whose own Restore is offered and that no entry after the Undo's is about (`back`); the others were added, changed
- * or deleted since, and are passed over (`passed`, by name).
+ * Undos made) whose own Restore is offered and that no click or edit after the Undo's entry is about (`back`); the others were
+ * added, changed or deleted since, and are passed over (`passed`, by name). A pass's `in-line` entry (a copy removed from a tool
+ * managed again) is no change to the item.
  */
 export function restorePlan(undo: HistoryEvent, history: HistoryEvent[], about: EntryItem) {
   const after = history.slice(history.findIndex(entry => entry.id === undo.id) + 1);
   const itemUndos = history.filter(entry => undo.everything?.undo?.itemUndos.includes(entry.id));
-  const back = itemUndos.filter(entry => !after.some(later => later.key === entry.key) && libraryAction(entry, about(entry).item, about(entry).now)?.label === 'Restore');
+  const back = itemUndos.filter(entry => !after.some(later => later.key === entry.key && later.cause !== 'in-line') && libraryAction(entry, about(entry).item, about(entry).now)?.label === 'Restore');
   return { back, passed: itemUndos.filter(entry => !back.includes(entry)).map(entry => entry.item) };
 }
 
