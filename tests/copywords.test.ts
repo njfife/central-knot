@@ -85,6 +85,9 @@ test('choosing a copy names the one or two copies it replaces, and the tools it 
   assert.equal(choiceEffect(['Codex'], ['Claude Code'], ['Claude Code']), 'Replaces Codex’s copy; adds it to Claude Code at Write.');
   assert.equal(choiceEffect(['Claude Code'], ['Pi'], ['Claude Code']), 'Replaces Claude Code’s copy at Write; adds it to Pi.');
   assert.equal(choiceEffect([], ['Codex', 'Pi']), 'Adds it to Codex and Pi.');
+  // A tool whose differing copy it has another way (~/.agents/skills) is not written: it goes on reading that copy.
+  assert.equal(choiceEffect([], [], [], ['Copilot CLI', 'Codex']), 'Copilot CLI and Codex keep reading their copy from elsewhere, which Central Knot doesn’t write.');
+  assert.equal(choiceEffect(['Claude Code'], [], [], ['Codex']), 'Replaces Claude Code’s copy; Codex keeps reading its copy from elsewhere, which Central Knot doesn’t write.');
 });
 
 test('more than two replaced copies are counted, not named: five choices do not each repeat four names', () => {

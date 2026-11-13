@@ -17,8 +17,8 @@
 //   keepFolders    the folder identities the next pass compares with
 //
 // Also here: the page's look (lookFor: the same reading, guards applied in memory, nothing saved), so a mark says what a pass
-// will do, and a found row's answers from the take-in table (takeInAnswers); a History entry's action (restore), which is
-// always one of the clicks above; and for the tool choice (toolchoice.ts), folders let go (forgetFolders) and what managing
+// will do, and a found row's answers from the take-in table (takeInAnswers); a History entry's action (restore; several in one
+// pass: restoreAll, for Synchronize everything's one Undo), which is always one of the clicks above; and for the tool choice (toolchoice.ts), folders let go (forgetFolders) and what managing
 // a tool would do there, counted from the same look with it added (joinCounts). What a kind's page shows, and how the Git
 // repo reads it, stay with the kind (agents.ts agentsView and agentsForRepo, skills.ts skillsView and skillsForRepo, servers.ts
 // serversView and serversForRepo). History's sentences and actions for the library's entries are historyactions.ts's.
@@ -807,6 +807,32 @@ export async function restore<C, E extends Seen, D extends Disk<E>>(
   const entry = history.find(event => event.id === eventId);
   if (entry) { entry.undoneBy = done.made[0]; await replaceHistory(context, history); }
   return done;
+}
+
+/**
+ * Several entries' own actions, each the click restore would run for it alone, in one pass of the kind (Synchronize everything's
+ * one Undo and its Restore: everything.ts); each entry is marked done by the entry its click made (`undid`: entry, then that
+ * one). An entry with nothing left to do is passed over. A harness no longer managed is left as it is, as restore leaves it (the
+ * caller says so: everything.ts's Undo entry names those tools).
+ */
+export async function restoreAll<C, E extends Seen, D extends Disk<E>>(
+  kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[], eventIds: string[],
+): Promise<PassResult & { undid: Map<string, string> }> {
+  const { library, problem } = await kind.open(context);
+  if (problem) return { stopped: problem, results: [], writes: 0, undid: new Map() };
+  const asked = (await readHistory(context)).filter(event => eventIds.includes(event.id)).flatMap(past => {
+    const action = kind.historyAction(past, library.items[itemKey(past.key.slice(kind.historyPrefix.length))]);
+    return action ? [{ past, change: action.change }] : [];
+  });
+  if (!asked.length) return { results: [], writes: 0, undid: new Map() };
+  const done = await runPass(kind, context, tools, asked.map(({ change }) => itemClick(change)), { only: new Set(asked.map(({ change }) => change.key)) });
+  const history = await readHistory(context), made = history.filter(event => done.made?.includes(event.id)), undid = new Map<string, string>();
+  for (const { past } of asked) {
+    const by = made.find(event => event.key === `${kind.historyPrefix}${itemKey(past.key.slice(kind.historyPrefix.length))}`);
+    if (by) { history.find(event => event.id === past.id)!.undoneBy = by.id; undid.set(past.id, by.id); }
+  }
+  await replaceHistory(context, history);
+  return { ...done, undid };
 }
 
 // ---------- Clicks, and what Pull brings ----------

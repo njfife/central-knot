@@ -3041,6 +3041,118 @@ async function syncEverythingFlow() {
   await a.quit();
 }
 
+/**
+ * First setup on the page (firstsetup.ts): a folder home never asked shows the question on the Overview; Yes opens the walkthrough of
+ * the copies that differ, at the latest copy; Go on, no dates to go by, leaving half way and the Overview's way back in; the
+ * switch-on's one Undo in History and its Restore. Then a second home: Resume first, another build's home not asked, and No.
+ */
+async function firstSetupFlow() {
+  const homeFor = name => {
+    const home = join(scratch, name);
+    mkdirSync(join(home, '.local/bin'), { recursive: true });
+    for (const [tool, output] of [['claude', '2.1.309 (Claude Code)'], ['codex', 'codex-cli 0.142.3']]) {
+      writeFileSync(join(home, '.local/bin', tool), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`);
+      chmodSync(join(home, '.local/bin', tool), 0o755);
+    }
+    return { home, claude: join(home, '.claude/skills'), codex: join(home, '.codex/skills') };
+  };
+  const ago = hours => new Date(Date.now() - hours * 3_600_000);
+  const saved = (folder, hours) => { for (const path of [join(folder, 'SKILL.md'), folder]) utimesSync(path, ago(hours), ago(hours)); };
+  const opened = (home, data) => { mkdirSync(data, { recursive: true }); writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } })); };
+  const real = join(scratch, 'setup-real');
+  mkdirSync(real, { recursive: true });
+  const { home, claude, codex } = homeFor('home-setup');
+  saved(skill(claude, 'notes', text('notes', 'Take notes.')), 5);
+  saved(skill(claude, 'review', text('review', 'Review gently.')), 48);
+  saved(skill(codex, 'review', text('review', 'Review hard.')), 2);
+  writeFileSync(join(home, '.claude.json'), `${JSON.stringify({ mcpServers: { docs: { type: 'http', url: 'https://docs.example.test/mcp' } } }, null, 2)}\n`);
+  writeFileSync(join(home, '.codex/config.toml'), '[mcp_servers.docs]\nurl = "https://docs.example.test/mcp/v2"\n\n[mcp_servers.files]\ncommand = "files-mcp"\nargs = []\n');
+  for (const path of [join(home, '.claude.json'), join(home, '.codex/config.toml')]) utimesSync(path, ago(5), ago(5));
+  const data = join(scratch, 'setup-data');
+  opened(home, data);
+  const record = () => JSON.parse(readNow(join(home, '.central-knot/sync.json')) || '{}');
+  const a = await launch(data, [], real);
+  await a.click('#nav-overview');
+  const question = await a.text('#setup-question .setup-text') ?? '';
+  check('a home never asked shows the question, counted as the pass counts: 2 items it takes in and the tools that get them, 2 whose copies differ, latest wins, the server Claude Code gets at Write, one Undo',
+    /takes in the 2 items found in your tools .* \(Claude Code and Codex\);/.test(question) && /Where copies differ the latest wins: 2 items have copies that differ/.test(question)
+      && /Claude Code gets the MCP server when you click Write to Claude Code\. One Undo in History takes it all back\.$/.test(question), question);
+  check('the lead no longer says to open a card and turn something on where the question stands', !/Open one below/.test(await a.text('.overview-lead') ?? ''), await a.text('.overview-lead'));
+  same('Synchronize everything is the main button', await a.run(`document.querySelector('#setup-yes')?.className.includes('primary')`), true);
+  await fitsAtMinimum(a, 'the Overview with first setup’s question');
+  await a.shot('setup-question');
+  await a.click('#setup-yes');
+  for (let tries = 0; tries < 40 && !(await a.exists('#walkthrough')); tries++) await wait(100);
+  same('Yes stores the rule on, takes in what it may (notes is in Codex now), and opens the walkthrough on Skills at 1 of 2, review, its latest copy (Codex’s) the main button',
+    [record().syncEverything, readNow(join(codex, 'notes/SKILL.md')), await a.text('#walkthrough .walk-place'), await a.exists('#use-review-codex-cli .version-cta-main'), await a.exists('#use-review-claude-cli .version-cta-main')],
+    [true, text('notes', 'Take notes.'), ' · 1 of 2', true, false]);
+  check('the band after Yes says what it took in and that one Undo takes it back', /^Synchronize everything is on: it took in 2 items, and 2 items with copies that differ wait for your choice\. One Undo in History takes it back\./.test(await a.text('[data-outcome] .band-text') ?? ''), await a.text('[data-outcome] .band-text'));
+  await fitsAtMinimum(a, 'the walkthrough at its first item');
+  await a.shot('setup-walkthrough');
+  await a.click('#use-review-codex-cli');
+  same('a choice is the row’s own click: review is taken in with Codex’s copy, and the walkthrough says the next is on MCP servers',
+    [readNow(join(claude, 'review/SKILL.md')), await a.text('#walkthrough .band-text')], [text('review', 'Review hard.'), 'Next: docs, on MCP servers.']);
+  await a.click('#walk-go-on');
+  same('at docs, 2 of 2: its entries have no dates to go by, nothing is preselected, and Use the latest for the rest can’t be used',
+    [await a.text('#walkthrough .walk-place'), await a.exists('#walk-no-dates'), await a.exists('#walkthrough .version-cta-main'), await a.run(`document.querySelector('#walk-use-latest').disabled`)], [' · 2 of 2', true, false, true]);
+  await fitsAtMinimum(a, 'the walkthrough at an item with no dates');
+  await a.click('#walk-leave');
+  same('left half way: the band goes, docs stays found and its entries as they were', [await a.exists('#walkthrough'), (await sectionsNow(a)).find(([place]) => place === 'found')?.[1]], [false, ['docs']]);
+  await a.click('#nav-overview');
+  same('the Overview’s line counts what waits and leads back in', [await a.text('#setup-choosing'), await a.exists('#setup-question')], ['1 found item has copies that differ and waits for your choice. Choose copies', false]);
+  await a.click('#nav-history');
+  for (let tries = 0; tries < 30 && !(await a.exists('.history-row[data-kind="everything"]')); tries++) await wait(100);
+  const ruleRow = '.history-row[data-kind="everything"]';
+  same('History has the switch-on’s one entry, with its Undo', [await a.text(`${ruleRow} .history-about`), await a.text(`${ruleRow} .history-actions button`)],
+    ['Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. Undo takes back what it took in since.', 'Undo']);
+  await a.click(`${ruleRow} .history-actions button`);
+  for (let tries = 0; tries < 40 && existsSync(join(codex, 'notes')); tries++) await wait(100);
+  same('its Undo takes notes back out of Codex, leaves review (chosen, with its own Undo) as it is, and stores the rule off',
+    [existsSync(join(codex, 'notes')), readNow(join(claude, 'review/SKILL.md')), record().syncEverything], [false, text('review', 'Review hard.'), false]);
+  same('its entry says what it did and offers Restore; the switch-on’s says Undone', [await a.text(`${ruleRow} .history-about`), await a.text(`${ruleRow} .history-actions button`), await a.all(`${ruleRow} .history-done`)],
+    ['Undone: switched off, and 2 items it took in are out of Central Knot again, each tool it was found in keeping its own copy. Left in: review (you chose its copy: it has its own Undo).', 'Restore', ['Undone']]);
+  await fitsAtMinimum(a, 'History after the one Undo');
+  await a.shot('setup-undone');
+  await a.click(`${ruleRow} .history-actions button`);
+  for (let tries = 0; tries < 40 && !readNow(join(codex, 'notes/SKILL.md')); tries++) await wait(100);
+  same('its Restore switches the rule on again and puts notes back', [readNow(join(codex, 'notes/SKILL.md')), record().syncEverything], [text('notes', 'Take notes.'), true]);
+  same('no page errors, first setup', a.pageErrors, []);
+  await a.quit();
+
+  // A second home: a record made by a tool's Manage switch, then opened with no memory of it (Resume first); another build's home;
+  // and No, which changes no file.
+  const other = homeFor('home-setup-two');
+  saved(skill(other.claude, 'tidy', text('tidy', 'Tidy up.')), 5);
+  saved(skill(other.codex, 'plan', text('plan', 'Plan ahead.')), 5);
+  const first = join(scratch, 'setup-data-two');
+  opened(other.home, first);
+  const b = await launch(first, [], real);
+  await b.click('#nav-harnesses');
+  await b.click('#manage-codex-cli'); await b.click('#manage-codex-cli');
+  same('a Manage switch makes the record and leaves the question unanswered', ['syncEverything' in JSON.parse(readNow(join(other.home, '.central-knot/sync.json'))), await (async () => { await b.click('#nav-overview'); return b.exists('#setup-question'); })()], [false, true]);
+  await b.quit();
+  const second = join(scratch, 'setup-data-three');
+  opened(other.home, second);
+  const c = await launch(second, [], real);
+  await c.click('#nav-overview');
+  same('a home this app has no memory of: Resume comes first, and the question after it', [await c.exists('#setup-resume'), await c.exists('#setup-question')], [true, false]);
+  await c.click('#setup-resume-button');
+  check('resumed: the question', await c.exists('#setup-question'), await c.text('.overview-scroll'));
+  const sync = join(other.home, '.central-knot/sync.json'), mine = readNow(sync);
+  writeFileSync(sync, JSON.stringify({ ...JSON.parse(mine), owner: 'another-build', ownerName: 'Central Knot Alpha' }));
+  await c.click('#header-refresh');
+  same('another build’s home is not asked', await c.exists('#setup-question'), false);
+  writeFileSync(sync, mine);
+  await c.click('#header-refresh');
+  const before = tree(other.home);
+  await c.click('#setup-no');
+  same('No stores the rule off, changes no file in the tools, and the question goes for good', [JSON.parse(readNow(sync)).syncEverything, Object.fromEntries(Object.entries(tree(other.home)).filter(([path]) => !path.startsWith('.central-knot'))), await c.exists('#setup-question')],
+    [false, Object.fromEntries(Object.entries(before).filter(([path]) => !path.startsWith('.central-knot'))), false]);
+  check('and says so, with Settings as the way to change it', /^Left off: what Central Knot finds in your tools waits on its page for Add\./.test(await c.text('[data-outcome] .band-text') ?? ''), await c.text('[data-outcome] .band-text'));
+  same('no page errors, first setup in a second home', c.pageErrors, []);
+  await c.quit();
+}
+
 /** Force-kills the app part-way through real copies, then checks nothing half-written is visible to a tool. */
 async function crashFlow() {
   execChmod();
@@ -3353,7 +3465,7 @@ const started = Date.now();
 try {
   seedHome();
   // Each flow's time is printed, so a run that grows slow says where.
-  const flows = [harnessFlow, manageFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, suggestedFlow, otherAppsFlow, listDiffersFlow, pluginUpdatesFlow, repoBaseFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
+  const flows = [harnessFlow, manageFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, suggestedFlow, otherAppsFlow, listDiffersFlow, pluginUpdatesFlow, repoBaseFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, firstSetupFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
   const named = option('--flows')?.split(',');
   for (const flow of flows.filter(each => !named || named.includes(each.name))) {
     const from = Date.now();

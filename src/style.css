@@ -695,7 +695,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .version-entry-kind { color: var(--ink-soft); }
 .version-command { font-family: var(--mono); font-size: 11.5px; }
 .version-cta { grid-column: use; align-self: center; padding: 3px 10px; border: 1px solid var(--control-line); border-radius: 6px; background: var(--surface); font-size: 12px; font-weight: 600; white-space: nowrap; }
-/* An agent's newer copy: its Use this copy is the main one (latest wins everywhere else for agents). */
+/* The latest copy (library.ts latestCopy): its Use this copy is the main one. */
 .version-cta.version-cta-main { border-color: var(--accent); background: var(--accent); color: #fff; }
 /* A copy that can't be chosen: why (.version-why) where its quote would be, and no Use this copy. */
 .version.version-blocked { opacity: 0.75; cursor: not-allowed; }
@@ -717,6 +717,21 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
   /* Read both copies follows the note directly, where the list did. */
   .compare-note { margin-bottom: 0; }
 }
+
+/* ---------- First setup (firstsetup.ts) ---------- */
+/* The question at the top of the Overview: its title, its words at the reading measure, and its two answers under them. */
+.setup-question { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; max-width: var(--measure); padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.setup-title { font-size: 15px; line-height: 20px; font-weight: 600; }
+.setup-text { font-size: 13px; line-height: 1.5; color: var(--ink-soft); text-wrap: pretty; }
+.setup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* The walkthrough's band, marked as a copy question is: where it is and its actions on one line; while it asks, the item's copy
+   question under them, as wide as the band, which is the box its three layouts go by (The copy question, above). */
+.band-walk { box-shadow: inset 3px 0 0 var(--warning), inset 0 -1px 0 var(--line); }
+.band-walk.walk-asking { flex-direction: column; align-items: stretch; gap: 10px; padding: 10px 16px 12px; container: compare / inline-size; --close-room: 0px; }
+.walk-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; }
+.walk-head { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.walk-place, .walk-note { color: var(--ink-soft); }
+.walk-top .band-actions { margin-left: auto; }
 
 /* ---------- Skills: Files and contents (a list beside one skill's detail) ---------- */
 /* The page holds the result strip, then the list beside one skill's pane (.split), which takes the rest of the height. */

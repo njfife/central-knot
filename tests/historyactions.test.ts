@@ -3,10 +3,10 @@
 // click each action runs: tests/agents.test.ts and tests/agentswalk.test.ts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { doneWords, libraryAction, libraryEntry, librarySentence, versionChoices } from '../src/historyactions.ts';
+import { doneWords, everythingAction, everythingPlan, everythingSentence, libraryAction, libraryEntry, librarySentence, versionChoices } from '../src/historyactions.ts';
 import { libraryWords } from '../src/libraryrow.ts';
 import { newItem, type LibraryItem } from '../src/library.ts';
-import type { HistoryEvent } from '../src/types.ts';
+import type { HarnessId, HistoryEvent } from '../src/types.ts';
 
 const tools = ['claude-cli', 'copilot-cli', 'codex-cli'];
 const at = '2026-11-08T09:20:00.000Z';
@@ -139,4 +139,50 @@ test('A skill’s entries from before the library that no click can say again sh
 test('An action leaves the rest of the agent as it is: one kept out of a tool stays kept out of it', () => {
   const edit = entry({ kind: 'edit', previous: 'a', winner: { tool: 'codex-cli', hash: 'b' } });
   assert.deepEqual(offered(edit, item({ except: ['copilot-cli'] })), ['Undo', { key: 'reviewer', managed: true, off: ['copilot-cli'], version: 'a' }]);
+});
+
+// ---------- Synchronize everything's own entries (src/everything.ts) ----------
+
+const managed = tools as HarnessId[];
+const rule = (id: string, on: boolean, more: Partial<HistoryEvent> = {}): HistoryEvent =>
+  ({ id, at, key: 'home:everything', item: 'Synchronize everything', kind: 'everything', everything: { on }, losers: [], orderProved: true, ...more });
+/** reviewer, taken in by the rule from Claude Code at 'b' and put in Codex. */
+const ruleTook = (id: string, more: Partial<HistoryEvent> = {}) => entry({ id, kind: 'on', cause: 'sync-everything', winner: { tool: 'claude-cli', hash: 'b' }, losers: [{ tool: 'codex-cli', hash: '' }], tookFrom: [{ tool: 'claude-cli', hash: 'b' }], ...more });
+
+test('A switch-on’s Undo takes back what the rule took in after it, up to the next switch, and switches the rule off only while no switch came after it', () => {
+  const on = rule('on', true), took = ruleTook('took'), off = rule('off', false), later = ruleTook('later');
+  const itemOf = () => item();
+  assert.deepEqual(everythingPlan(on, [on, took], itemOf, managed).takeBack.map(event => event.id), ['took']);
+  assert.deepEqual(everythingAction(on, [on, took], itemOf, managed), { label: 'Undo', help: 'Switch Synchronize everything off and take back the 1 item it took in since, each tool it was found in keeping its own copy' });
+  // Switched off in Settings since: it takes back what it took in, and leaves the rule as it is; what came after the next switch is another's.
+  assert.deepEqual([everythingPlan(on, [on, took, off, later], itemOf, managed).takeBack.map(event => event.id), everythingPlan(on, [on, took, off], itemOf, managed).switchOff], [['took'], false]);
+  assert.equal(everythingAction(on, [on, took, off], itemOf, managed)?.help, 'Take back the 1 item it took in since, each tool it was found in keeping its own copy');
+  // Nothing left to do: none, as for a plain switch-off, and one already undone.
+  assert.equal(everythingAction(on, [on, took, off], () => item({ on: false }), managed), undefined);
+  assert.deepEqual([everythingAction(off, [on, took, off], itemOf, managed), everythingAction({ ...on, undoneBy: 'x' }, [on, took], itemOf, managed)], [undefined, undefined]);
+  // With nothing taken in yet it still switches the rule off.
+  assert.equal(everythingAction(on, [on], itemOf, managed)?.help, 'Switch Synchronize everything off');
+});
+
+test('Each take-in the Undo can’t take back is named with why, and so is a copy chosen meanwhile; one undone by itself already is neither', () => {
+  const on = rule('on', true), chosen = entry({ id: 'chosen', item: 'picked', kind: 'chosen', winner: { tool: 'codex-cli', hash: 'b' }, losers: [] });
+  const why = (agent: LibraryItem | undefined) => everythingPlan(on, [on, ruleTook('took'), chosen], () => agent, managed).left;
+  assert.deepEqual(why(item({ on: false })), [{ item: 'reviewer', why: 'off' }, { item: 'picked', why: 'chosen' }]);
+  assert.deepEqual(why(item({ hash: 'a' }))[0], { item: 'reviewer', why: 'changed' });
+  assert.deepEqual(why(item({ except: ['claude-cli'] }))[0], { item: 'reviewer', why: 'kept-out' });
+  assert.deepEqual(why(item({ deleted: { at } }))[0], { item: 'reviewer', why: 'deleted' });
+  assert.deepEqual(everythingPlan(on, [on, ruleTook('took', { undoneBy: 'x' })], () => item(), managed), { takeBack: [], left: [], switchOff: true, keptIn: [] });
+  // A tool a take-in wrote that isn't managed now keeps what it has.
+  assert.deepEqual(everythingPlan(on, [on, ruleTook('took')], () => item(), ['claude-cli']).keptIn, ['codex-cli']);
+});
+
+test('A switch-on, a switch-off and an Undo say what they did; the Undo’s entry offers Restore while an item it took back can be restored', () => {
+  assert.equal(everythingSentence(rule('on', true)).text, 'Switched on: a skill, MCP server or agent that turns up in a tool is taken into Central Knot by itself. Undo takes back what it took in since.');
+  assert.equal(everythingSentence(rule('off', false)).text, 'Switched off: what turns up in a tool waits on its page for Add.');
+  const deleted = entry({ id: 'gone', kind: 'deleted', gaveBack: ['claude-cli'], losers: [{ tool: 'codex-cli', hash: 'b' }] });
+  const undo = rule('undo', false, { everything: { on: false, undo: { switchedOff: true, tookBack: ['gone'], left: [{ item: 'docs', why: 'claude-code' }], keptIn: [] } } });
+  assert.equal(everythingSentence(undo).text, 'Undone: switched off, and 1 item it took in is out of Central Knot again, each tool it was found in keeping its own copy. Left in: docs (found in Claude Code: no Undo).');
+  assert.deepEqual(everythingAction(undo, [deleted, undo], () => item({ deleted: { at } }), managed), { label: 'Restore', help: 'Switch Synchronize everything on again and put back the 1 item this took out of Central Knot' });
+  assert.equal(everythingAction(undo, [deleted, undo], () => item(), managed), undefined, 'added again since: nothing to restore');
+  assert.equal(everythingSentence(rule('undo', false, { everything: { on: false, undo: { switchedOff: true, tookBack: [], left: [], keptIn: [] } } })).text, 'Undone: switched off; nothing it took in was taken back.');
 });

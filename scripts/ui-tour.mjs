@@ -5,7 +5,7 @@
 //   in well under a minute. It fails if a page doesn't open or throws. This is the run for every change.
 // - `--only a,b` runs the named feature sections: the ones a change touched.
 // - `--full` runs every feature section, hundreds of pictures over about ten minutes. For a new release only.
-// Features, in the order they run: shell, skills, sync, mcp, agents, plugins, profiles, sync-everything, plugin-skills, plugin-updates,
+// Features, in the order they run: shell, skills, sync, mcp, agents, plugins, profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
 // plugin-versions, parts, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
 // Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses, manage (a
@@ -746,6 +746,72 @@ if (wanted('profiles')) {
   await a.size(1280, 800);
 }
 
+// ---------- First setup: the one question, the walkthrough of copies that differ, and the one Undo (firstsetup.ts) ----------
+if (wanted('first-setup')) {
+  begin('first-setup');
+  await fresh();
+  // The Practice copy as a person's home might be: besides its own (review's two copies differ), two skills whose copies differ
+  // with dates that tell the latest, and an MCP server whose entries differ (no dates to go by). Every copy saved a while ago,
+  // past the settle window.
+  const ago = hours => new Date(Date.now() - hours * 3_600_000);
+  const put = (root, name, body, hours) => {
+    const folder = join(practice, root, name);
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 'SKILL.md'), `---\nname: ${name}\ndescription: The ${name} skill.\n---\n\n${body}\n`);
+    for (const path of [join(folder, 'SKILL.md'), folder]) utimesSync(path, ago(hours), ago(hours));
+  };
+  put('.claude/skills', 'deploy', 'Deploy from main after the checks pass.', 50);
+  put('.codex/skills', 'deploy', 'Deploy from main after the checks pass, then tag the release.', 2);
+  put('.claude/skills', 'triage', 'Label new issues by area and urgency, newest first.', 3);
+  put('.copilot/skills', 'triage', 'Label new issues by area.', 30);
+  for (const [path, hours] of [['.claude/skills/review', 72], ['.copilot/skills/review', 20]]) for (const at of [join(practice, path, 'SKILL.md'), join(practice, path)]) utimesSync(at, ago(hours), ago(hours));
+  edit(join(practice, '.codex/config.toml'), text => `${text}\n[mcp_servers.docs]\nurl = "https://docs.example.test/mcp/v2"\n`);
+  for (const path of [join(practice, '.codex/config.toml'), join(practice, '.claude.json'), join(practice, '.copilot/mcp-config.json')]) utimesSync(path, ago(5), ago(5));
+  await wait(2500);
+  await refresh();
+  await a.click('#nav-overview');
+  if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
+  await atEverySize('question-new-home', 'A new home (the Practice copy, never asked): the Overview’s one question, Synchronize everything?, under the lead. It says, counted as the pass counts, how many found items it takes in now and which tools get them, how many have copies that differ and are asked about one at a time (the latest preselected), that Claude Code gets its MCP servers at Write to Claude Code, and that one Undo in History takes it all back but a server found in Claude Code. Synchronize everything is the main button; No, I’ll add items myself beside it', true, '#setup-question');
+  await a.size(860, 560); await show('#setup-question'); await focusOn('#setup-yes');
+  await shot(a, 'question-focus-860', 'Tabbed to Synchronize everything at 860×560: its focus ring');
+  await a.run(`document.activeElement?.blur()`); await a.size(1280, 800);
+  await a.click('#setup-no');
+  await atEverySize('after-no', 'Clicked No, I’ll add items myself: the band says what turns up waits on its page for Add and that Settings can switch it on later; the question is gone, and the lead says to open a card and turn on what you want', true);
+  // A home from before this step, with an item already On, whose rule was never answered: the record without its answer.
+  await a.click('#nav-skills');
+  await turnOnRow('notes'); await switchOn('notes');
+  edit(join(practice, '.central-knot/sync.json'), text => { const record = JSON.parse(text); delete record.syncEverything; return JSON.stringify(record, null, 2); });
+  await refresh();
+  await a.click('#nav-overview');
+  await atEverySize('question-items-on', 'A home from before this step, with notes already On and the rule never answered: asked once, as a new home is; the skills card counts 1 synced', false, '#setup-question');
+  await a.click('#setup-yes');
+  await waitFor(a, `!!document.querySelector('#walkthrough')`, 15000);
+  await atEverySize('after-yes-walkthrough-first', 'Clicked Synchronize everything: the band says what it took in and that one Undo in History takes it back; the walkthrough opened on Skills at its first item, 1 of 4: deploy, with its copy question as its row asks it, Codex’s copy (the latest) the main button', true, '#walkthrough', 'start');
+  await a.size(860, 560); await show('#walkthrough', 'start'); await focusOn('#use-deploy-codex-cli');
+  await shot(a, 'walkthrough-focus-860', 'Tabbed to Codex’s copy, the latest, at 860×560: its row’s focus ring is on its Use this copy');
+  await a.run(`document.activeElement?.blur()`); await a.size(1280, 800);
+  await a.click('#use-deploy-codex-cli');
+  await atEverySize('walkthrough-second', 'Clicked Use this copy on Codex’s copy: the band says deploy is in Central Knot with Codex’s copy, with its own Undo; the walkthrough went on to 2 of 4, review, Copilot CLI’s copy the latest', false, '#walkthrough', 'start');
+  await a.click('#walk-skip'); await a.click('#walk-skip');
+  await shot(a, 'walkthrough-next-kind', 'Clicked Skip twice (review and triage stay found, their copies as they are): 4 of 4 is on MCP servers, so the band says so, with Go on');
+  await a.click('#walk-go-on');
+  await atEverySize('walkthrough-no-dates', 'Clicked Go on to MCP servers: 4 of 4, docs, whose entries have no time of their own, so no copy is preselected and the band says there are no dates to go by; Use the latest for the rest is unavailable', true, '#walkthrough', 'start');
+  await a.click('#walk-leave');
+  await a.click('#nav-overview');
+  await atEverySize('left-half-way', 'Left the walkthrough at docs and opened the Overview: review, triage and docs stay found, their copies as they were; the line under the lead counts them and leads back in with Choose copies', true, '#setup-choosing');
+  await a.click('#setup-choose');
+  await waitFor(a, `!!document.querySelector('#walkthrough')`, 15000);
+  await a.click('#walk-use-latest');
+  await atEverySize('after-use-latest', 'Clicked Choose copies (the walkthrough starts again at review, 1 of 3), then Use the latest for the rest: the band says it used the latest copy for 2 items, each with its own Undo in History, and skipped docs, with no dates to go by; the walkthrough says it is done', true, '#walkthrough', 'start');
+  await a.click('#nav-history');
+  await waitFor(a, `!!document.querySelector('.history-row[data-kind="everything"]')`, 15000);
+  await atEverySize('history-switch-on', 'Opened History: the entry Synchronize everything switched on, kind Setting, with its one Undo (its tooltip says what it takes back and what stays: the copies chosen, a server found in Claude Code), above the entries of what it took in, each with its own', true, '.history-row[data-kind="everything"]');
+  await a.click('.history-row[data-kind="everything"] .history-actions button');
+  await waitFor(a, `[...document.querySelectorAll('.history-row[data-kind="everything"]')].some(row => /Restore/.test(row.textContent))`, 15000);
+  await atEverySize('after-undo', 'Clicked its Undo: the newest entry says it switched the rule off and took the items back out of Central Knot, each tool keeping its own copy, and names what it left in (the copies chosen, docs found in Claude Code); it offers Restore; the switch-on entry says Undone', true, '.history-row[data-kind="everything"]');
+  if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
+}
+
 // ---------- One skill of an installed plugin, off and back on (ENB-06) ----------
 if (wanted('sync-everything')) {
   begin('sync-everything');
@@ -754,7 +820,7 @@ if (wanted('sync-everything')) {
   await atEverySize('skills-found-off', 'Opened Skills on the Practice copy, Synchronize everything off as it is until chosen: the Found heading says Add takes each in', false, '[data-section="found"]');
   await a.click('#nav-settings');
   await waitFor(a, `!!document.querySelector('#setting-sync-everything')`);
-  await atEverySize('settings-off', 'Opened Settings: under This home, Synchronize everything is off; its hint says an MCP server reaches Claude Code at Write to Claude Code and that History can undo each but a server found in Claude Code; its line says how many found items turning it on would add now, and how many wait for a choice of copy, with See Skills', true, '#setting-sync-everything');
+  await atEverySize('settings-off', 'Opened Settings: under This home, Synchronize everything is off; its hint says an MCP server reaches Claude Code at Write to Claude Code and that switching it on is one History entry whose Undo takes back all it took in but a server found in Claude Code; its line says how many found items turning it on would add now, and how many wait for a choice of copy, with Choose copies', true, '#setting-sync-everything');
   await a.size(860, 560); await show('#setting-sync-everything'); await focusOn('#sync-everything-on');
   await shot(a, 'settings-off-focus-860', 'Tabbed to its switch at 860×560: the focus ring, the row’s words beside it');
   await a.run(`document.activeElement?.blur()`); await a.size(1280, 800);
@@ -1169,7 +1235,7 @@ if (wanted('plugin-items')) {
   // already, and Claude Code has none, so nothing changes: said plainly, with the whole plugin's switch offered (not clicked
   // here: it is Claude Code's own command). The row's switch never turns a whole plugin off itself.
   await a.click('[id="switch-document-tools@team-tools/pdf-reader"]'); await a.settle();
-  await shot(a, 'main-switch-left', 'Clicked pdf-reader’s own switch (on in Claude Code): Copilot CLI and Codex have it off already, and Claude Code has no switch for one skill of a plugin, so nothing changed. The band says so in its normal tone, naming pdf-reader, with the information mark, and offers “Turn document-tools off in Claude Code”. The first-use tip is gone with the first click.');
+  await shot(a, 'main-switch-left', 'Clicked pdf-reader’s own switch (on in Claude Code): Copilot CLI and Codex have it off already, and Claude Code has no switch for one skill of a plugin, so nothing changed. The band says so in its normal tone, naming pdf-reader, with the information mark, and offers “Turn document-tools off in Claude Code”.');
   await size(860, 560); await shot(a, 'main-switch-left-860', 'The same at 860×560.'); await size(1280, 800);
   if (await a.has('#outcome-whole')) {
     await a.click('#outcome-whole'); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin')`, 15000);
@@ -1214,7 +1280,7 @@ if (wanted('plugin-items')) {
   if (await a.has('[id="open-issue-tracker@team-tools/issues"]')) {
     if (!(await a.has('[id="enable-issue-tracker@team-tools/issues-codex-cli"]'))) await a.click('[id="open-issue-tracker@team-tools/issues"]');
     await a.click('[id="enable-issue-tracker@team-tools/issues-codex-cli"]'); await waitFor(a, `!!document.querySelector('#outcome-undo-plugin, .bands .band')`, 15000);
-    await shot(a, 'mcp-switch-applied', 'Clicked issues’ Codex switch in its opened row, where the whole plugin was off: it is on in Codex at once. The result leads with the server clicked (“issues is on in Codex. Its plugin issue-tracker was turned on there, with its skill triage left off.”), with Undo; the first-use tip is gone.');
+    await shot(a, 'mcp-switch-applied', 'Clicked issues’ Codex switch in its opened row, where the whole plugin was off: it is on in Codex at once. The result leads with the server clicked (“issues is on in Codex. Its plugin issue-tracker was turned on there, with its skill triage left off.”), with Undo.');
     await size(1728, 1117); await shot(a, 'mcp-switch-applied-1728', 'The same at 1728×1117.'); await size(1280, 800);
     if (await a.has('#outcome-undo-plugin')) { await a.click('#outcome-undo-plugin'); await a.settle(); await shot(a, 'mcp-switch-undone', 'Clicked Undo: the plugin is off in Codex again, as it was.'); }
   }

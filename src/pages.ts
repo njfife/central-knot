@@ -8,6 +8,7 @@ import { andList, kindNames, kindNouns, noToolsSentence, orList, toolList } from
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { asksWhichCopy } from './libraryrow.ts';
 import { anyManaged, kindSource } from './itemrow.ts';
+import { setupLead } from './firstsetup.ts';
 
 // ---------- Overview ----------
 
@@ -104,7 +105,7 @@ function practiceBanner() {
       h('span', {}, ' Sample skills, MCP servers and agents in a throwaway folder. Nothing here touches your real tools, so try anything.')),
     // The first step stays inside the sandbox; the real home is the quieter second choice.
     button({ variant: 'primary', size: 'small', label: 'Try it: open Skills', id: 'intro-try', onclick: () => showPage('skills') }),
-    (() => { const real = button({ variant: 'link', size: 'small', label: `or use ${realHomeName}`, id: 'intro-use-real', onclick: () => void loadHome('actual') }); real.title = 'Only reads your tools; nothing is written there until you turn something on.'; return real; })(),
+    (() => { const real = button({ variant: 'link', size: 'small', label: `or use ${realHomeName}`, id: 'intro-use-real', onclick: () => void loadHome('actual') }); real.title = 'Only reads your tools; nothing is written there until you say so.'; return real; })(),
     button({ variant: 'ghost', size: 'small', icon: 'x', name: 'Hide this note', id: 'intro-dismiss', onclick: () => { setPracticeNote(false); rerender(); } }));
 }
 
@@ -182,15 +183,15 @@ function settleToolCounts(): void {
 afterLayout(settleToolCounts);
 
 /**
- * The lead's next step, only where it can be taken: with two tools or more and something unmanaged, manage it; with one
- * tool there is nothing to keep in step, so it says how a second one joins.
+ * The lead's next step, only where it can be taken: with two tools or more and something unmanaged, manage it (where first
+ * setup's question isn't asking: `asking`); with one tool there is nothing to keep in step, so it says how a second one joins.
  */
-function nextStep(home: HomeView, nothingManaged: boolean): string {
+function nextStep(home: HomeView, nothingManaged: boolean, asking: boolean): string {
   if (noToolManaged()) return '';
   if (!home.skills.items.length && !home.mcp.items.length && !home.agents.items.length) return ' Nothing found in this home yet.';
   // With a tool left out, the lead has said where its switch is.
   if (homeTools().length === 1) return home.sync.present.length > 1 ? '' : ' When a second tool is installed, or its folder appears here, Central Knot finds it on its own; then manage what you want the same in both.';
-  return nothingManaged && home.sync.access.allowed ? ' Open one below and turn on what you want the same in every tool.' : '';
+  return nothingManaged && home.sync.access.allowed && !asking ? ' Open one below and turn on what you want the same in every tool.' : '';
 }
 
 export function overviewPage() {
@@ -206,6 +207,8 @@ export function overviewPage() {
   const empty = noToolManaged();
   const nothingManaged = !anyManaged(home);
   const done = outcomeBand();
+  // First setup's one place: its question, or the way into its walkthrough (firstsetup.ts).
+  const setup = empty ? null : setupLead(home);
   return h('div.page', {},
     done ? h('div.bands', {}, done) : null,
     h('div.scroll.overview-scroll', { id: 'overview-scroll' },
@@ -213,7 +216,8 @@ export function overviewPage() {
       // A home with no tools has nothing to count: the way forward is another home.
       empty ? noToolsLead('overview') : h('p.overview-lead', {}, leadSentence(home),
         // The next step only where it can be taken: something to manage, and a home that can be written.
-        nextStep(home, nothingManaged)),
+        nextStep(home, nothingManaged, setup?.id === 'setup-question')),
+      setup,
       empty ? null : h('div.kind-cards', { 'data-count': String(heldKinds(home).length) },
         kindCard('skills', 'wand-sparkles', libraryFacts('skills'), homeTools()),
         absent.includes('mcp') ? null : kindCard('mcp', 'plug', libraryFacts('mcp'), home.mcp.tools),
@@ -227,8 +231,7 @@ export function overviewPage() {
         // Green only once something syncs; before that, sync is on and waiting, in the status bar's grey. With no tool managed
         // nothing syncs at all (the status bar says so).
         : empty || (home.syncOn && nothingManaged) ? null : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingManaged ? 'tone-muted' : 'tone-success') : 'tone-warning'),
-          ...(home.syncOn ? [nothingManaged ? 'Automatic sync is on. Once something is on, edits spread between tools in seconds, with Undo.'
-            : `Automatic sync is on: edits spread between tools in seconds${home.sync.syncEverything ? ', and what turns up in a tool is taken in by Synchronize everything' : ''}, with a notice and Undo.`]
+          ...(home.syncOn ? [`Automatic sync is on: edits spread between tools in seconds${home.sync.syncEverything ? ', and what turns up in a tool is taken in by Synchronize everything' : ''}, with a notice and Undo.`]
             : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync once', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
         h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Every change Central Knot makes is kept in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ', with Undo.'),
         // The two pages the cards don't cover, named once so a newcomer knows what they are; Plugins only where a tool here

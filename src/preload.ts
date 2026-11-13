@@ -31,7 +31,7 @@ const api: DesktopApi = {
   applyAgents: (changes, resume, home) => ipcRenderer.invoke('agents:apply', changes, resume, home),
   setSync: on => ipcRenderer.invoke('sync:set', on),
   syncNow: home => ipcRenderer.invoke('sync:now', home),
-  setSyncEverything: (on, home) => ipcRenderer.invoke('sync:everything', on, home),
+  setSyncEverything: (on, home, answering) => ipcRenderer.invoke('sync:everything', on, home, answering),
   manageTool: (tool, on, resume, home) => ipcRenderer.invoke('tools:manage', tool, on, resume, home),
   takeOverSync: home => ipcRenderer.invoke('sync:take-over', home),
   onSyncChanged: callback => { ipcRenderer.on('sync:changed', () => callback()); },

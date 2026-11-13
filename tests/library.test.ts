@@ -3,7 +3,7 @@
 // applied there last. Contents are single letters: 'a' is older than 'b', and so on.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { carryOut, decide, isLibraryItem, keepVersion, listed, managedAgain, newItem, plan, setCurrent, sourceWords, takeInAnswer, type HarnessCopy, type LibraryItem, type Shelf } from '../src/library.ts';
+import { carryOut, decide, isLibraryItem, keepVersion, latestCopy, listed, managedAgain, newItem, plan, setCurrent, sourceWords, takeInAnswer, type HarnessCopy, type LibraryItem, type Shelf } from '../src/library.ts';
 
 const has = (hash: string, at = 0): HarnessCopy => ({ is: 'present', hash, at });
 /** A copy with no time of its own (an MCP entry: its time is its whole file's). */
@@ -361,8 +361,34 @@ test('Found, the copy a click chose is gone or changed since: refused, choose ag
   assert.deepEqual(takeInAnswer('click', key, { harness: 'codex-cli', hash: 'y' }), { leave: 'choice-changed' });
   assert.deepEqual(takeInAnswer('click', key, { harness: 'copilot-cli' }), { leave: 'choice-changed' });
 });
-test('Found, copies that differ and none chosen: a click waits for the row’s question, and so does the rule', () =>
-  assert.deepEqual(both(found([copy('claude-cli', 'a'), copy('codex-cli', 'x')])), [{ wait: 'choice' }, { wait: 'choice' }]));
+test('Found, copies that differ and none chosen: a click waits for the row’s question, and so does the rule, with the latest copy where the times tell it', () => {
+  assert.deepEqual(both(found([copy('claude-cli', 'a'), copy('codex-cli', 'x')])), [{ wait: 'choice' }, { wait: 'choice' }]);
+  assert.deepEqual(both(found([copy('claude-cli', 'a', { at: 1000 }), copy('codex-cli', 'x', { at: 5000 })])), [{ wait: 'choice', latest: 'x' }, { wait: 'choice', latest: 'x' }]);
+});
+
+// ---------- latestCopy: which of the copies that differ is the latest ----------
+
+test('The latest copy is the content changed last, a second or more after every other', () => {
+  assert.equal(latestCopy([{ hash: 'a', at: 1_000 }, { hash: 'x', at: 2_000 }]), 'x');
+  assert.equal(latestCopy([{ hash: 'x', at: 9_000 }, { hash: 'a', at: 2_000 }, { hash: 'b', at: 4_000 }]), 'x', 'of three');
+});
+test('A content was made when its earliest copy was changed: a copy written later that only carries it doesn’t make it the latest', () =>
+  // 'a' was edited at 1 s and copied to Codex at 9 s; 'x' was edited at 5 s, after 'a' was.
+  assert.equal(latestCopy([{ hash: 'a', at: 1_000 }, { hash: 'a', at: 9_000 }, { hash: 'x', at: 5_000 }]), 'x'));
+test('No latest where a copy has no time of its own (an MCP entry): no dates to go by', () => {
+  assert.equal(latestCopy([{ hash: 'a' }, { hash: 'x' }]), undefined);
+  assert.equal(latestCopy([{ hash: 'a', at: 1_000 }, { hash: 'x' }]), undefined, 'one timed copy is not enough');
+  assert.equal(latestCopy([{ hash: 'a', at: 1_000 }, { hash: 'b', at: 5_000 }, { hash: 'x' }]), undefined, 'one copy with no time, and the others can’t be ordered against it');
+});
+test('No latest where the last two contents were changed less than a second apart (saved in the same second); one second apart is enough', () => {
+  assert.equal(latestCopy([{ hash: 'a', at: 10_000 }, { hash: 'x', at: 10_999 }]), undefined);
+  assert.equal(latestCopy([{ hash: 'a', at: 10_000 }, { hash: 'x', at: 10_000 }]), undefined, 'the very same time');
+  assert.equal(latestCopy([{ hash: 'a', at: 10_000 }, { hash: 'x', at: 11_000 }]), 'x');
+});
+test('No latest among copies that are all the same: there is nothing to choose', () => assert.equal(latestCopy([{ hash: 'a', at: 1_000 }, { hash: 'a', at: 5_000 }]), undefined));
+test('Known weakness, as written in latestCopy: a copy Central Knot wrote later carries that write’s time, so its older content reads as the latest', () =>
+  // The person edited Claude Code's copy to 'b' at 5 s; Central Knot had written 'a' into Codex at 8 s (a tool that was behind).
+  assert.equal(latestCopy([{ hash: 'b', at: 5_000 }, { hash: 'a', at: 8_000 }]), 'a'));
 test('Found otherwise: taken in from the one content (first harness), or from the copy a click chose', () => {
   assert.deepEqual(both(found([copy('claude-cli', 'a'), copy('codex-cli', 'a')])), [{ take: copy('claude-cli', 'a'), chosen: false }, { take: copy('claude-cli', 'a'), chosen: false }]);
   assert.deepEqual(takeInAnswer('click', found([copy('claude-cli', 'a'), copy('codex-cli', 'x')]), { harness: 'codex-cli', hash: 'x' }), { take: copy('codex-cli', 'x'), chosen: true });

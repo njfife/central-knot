@@ -8,7 +8,8 @@ import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover, findOtherApps } from './discovery.ts';
 import { configRoot, envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { CLAUDE_PROCESS, appCandidates, executableCandidates, searchPath } from './platform.ts';
-import { leftOutNow, managedNow, readRecord, setSyncEverything, syncGate, takeOverSync, writeAccess, type ShareContext } from './share.ts';
+import { leftOutNow, managedNow, readRecord, syncGate, takeOverSync, writeAccess, type ShareContext } from './share.ts';
+import { everythingUndo, setSyncEverything } from './everything.ts';
 import { chooseTools, whatJoiningDoes } from './toolchoice.ts';
 import { pruneHistory, readHistory } from './history.ts';
 import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skillVersion, skillsView, takeOver } from './skills.ts';
@@ -528,13 +529,13 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passed: 
   const snapshots = skills && (syncOn || explicit) ? await read() : before;
   const writable = (await writeAccess(shared)).allowed;
   const managed = await managedNow(shared, snapshots), present = presentTools(snapshots);
-  const syncEverything = (await readRecord(current!.home)).record?.syncEverything === true;
+  const syncEverything = (await readRecord(current!.home)).record?.syncEverything;
   const readId = handoff.id + 1;
   const made: HomeView = {
     mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), readId, profiles, parts: await readParts(current!.home),
     // Apps that run the tools or read their files are looked for only on this computer, like the tools' own apps.
     ...(current!.mode === 'actual' ? { otherApps: await findOtherApps(current!.home) } : {}),
-    sync: { managed, present, joining: await joiningCounts(shared, managed, present, syncEverything), writes: await skillFolders(shared, managed), access: await writeAccess(shared), gate: await syncGate(shared),
+    sync: { managed, present, joining: await joiningCounts(shared, managed, present, syncEverything === true), writes: await skillFolders(shared, managed), access: await writeAccess(shared), gate: await syncGate(shared),
       caughtUp: caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain),
       syncEverything },
     skills: await skillsView(shared, managed, notices),
@@ -1206,6 +1207,8 @@ app.whenReady().then(async () => {
       if (past?.kind === 'profile') return undoSwitch(context(), await toolsNow(), eventId);
       // A tool's Manage switch has no Undo (History offers none): the switch on its card is the way back.
       if (past?.kind === 'managing') return { stopped: 'Turning a tool’s Manage switch has no Undo: turn it back on the tool’s Harnesses card.', results: [], harnessWrites: 0 };
+      // Synchronize everything switched on: its one Undo; that Undo's entry: its Restore (everything.ts).
+      if (past?.kind === 'everything') return everythingUndo(context(), await toolsNow(), eventId);
       const key = past?.key ?? '';
       // A pull that changed only an agent's Claude Code settings has its own Undo (its earlier file, kept whole).
       if (past?.settingsFile) return undoSettingsChange(context(), eventId);
@@ -1236,11 +1239,11 @@ app.whenReady().then(async () => {
     return { ...result, view: await syncThenView() };
   });
   handle('sync:set', async on => { await saveSyncSetting(on === true); return current ? syncThenView() : null; });
-  // Synchronize everything, the open home's standing rule (share.ts setSyncEverything): turned on, the pass right after takes in
-  // what is found now, with Automatic sync on (with it off, at Sync once).
-  handle('sync:everything', async (on, home) => {
+  // Synchronize everything, the open home's standing rule (everything.ts setSyncEverything): turned on, the pass right after takes
+  // in what is found now, with Automatic sync on (with it off, at Sync once). `answering`: first setup's question (firstsetup.ts).
+  handle('sync:everything', async (on, home, answering) => {
     if (home !== current?.home) return { stopped: elsewhere, view: null };
-    const set = await setSyncEverything(context(), on === true);
+    const set = await setSyncEverything(context(), on === true, answering === true);
     if (!set.stopped) log(`sync: Synchronize everything ${on === true ? 'on' : 'off'} in ${home}`);
     return { ...set, view: await syncThenView() };
   });

@@ -15,7 +15,8 @@ import { libraryWords, rowClicks, sentences, statusLine } from '../src/libraryro
 import { inUse, liveItems } from '../src/profileplan.ts';
 import { readLibraries, readProfiles, saveProfile, switchProfile } from '../src/profiles.ts';
 import { applyServers, serversView } from '../src/servers.ts';
-import { partsRecordPath, readRecord, readTree, saveRecord, setSyncEverything, syncGate, type ShareContext } from '../src/share.ts';
+import { setSyncEverything } from '../src/everything.ts';
+import { partsRecordPath, readRecord, readTree, saveRecord, syncGate, type ShareContext } from '../src/share.ts';
 import { applySkills, restoreSkill, skillKind, skillsView, takeOver } from '../src/skills.ts';
 import { convertAgentToSkill } from '../src/agentskill.ts';
 import { setDisabled } from '../src/skillswitch.ts';

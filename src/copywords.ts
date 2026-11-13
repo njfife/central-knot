@@ -60,15 +60,17 @@ export function nearestLine(line: string, lines: string[]): string | undefined {
 
 /**
  * What choosing a copy does, said under its quote: the copies it replaces (`replaced`: their tools' names) and the tools it
- * adds the item to (`receiving`); `later`, those of them whose change waits for Write to Claude Code ("at Write"). More than two
- * replaced copies are counted, not named ("Replaces the other 4 copies."): the rows already name every copy, so five choices
- * would each repeat four names.
+ * adds the item to (`receiving`); `later`, those of them whose change waits for Write to Claude Code ("at Write"); `keeping`,
+ * the tools whose different copy is one they have another way (a link, ~/.agents/skills), which Central Knot doesn't write, so
+ * they go on reading it. More than two replaced copies are counted, not named ("Replaces the other 4 copies."): the rows already
+ * name every copy, so five choices would each repeat four names.
  */
-export function choiceEffect(replaced: string[], receiving: string[], later: string[] = []): string {
+export function choiceEffect(replaced: string[], receiving: string[], later: string[] = [], keeping: string[] = []): string {
   const at = (name: string, words: string) => (later.includes(name) ? `${words} at Write` : words);
   const replaces = replaced.length > 2 ? `replaces the other ${replaced.length} copies` : replaced.length ? `replaces ${andList(replaced.map(name => at(name, `${name}’s copy`)))}` : '';
   const adds = receiving.length ? `adds it to ${andList(receiving.map(name => at(name, name)))}` : '';
-  return `${sentence([replaces, adds].filter(Boolean).join('; '))}.`;
+  const keeps = keeping.length ? `${andList(keeping)} ${keeping.length === 1 ? 'keeps reading its' : 'keep reading their'} copy from elsewhere, which Central Knot doesn’t write` : '';
+  return `${sentence([replaces, adds, keeps].filter(Boolean).join('; '))}.`;
 }
 
 /**
