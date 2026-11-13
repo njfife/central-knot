@@ -161,5 +161,5 @@ function stillWaiting(home: HomeView): string {
   const waiting = waitingForChoice(home);
   if (!waiting.length) return walk.passed.length ? 'Every item has a copy chosen.' : 'No found item waits for a choice of copy now.';
   const pages = KINDS.filter(kind => waiting.some(item => item.kind === kind)).map(kind => `${andList(waiting.filter(item => item.kind === kind).map(item => item.name))} on ${kindNouns[kind].title}`);
-  return `Done. ${plural(waiting.length, 'skipped item')} still ${waiting.length === 1 ? 'waits' : 'wait'} for a choice, ${waiting.length === 1 ? 'its' : 'their'} copies as they are: ${andList(pages)}. Each row still asks.`;
+  return `${plural(waiting.length, 'skipped item')} still ${waiting.length === 1 ? 'waits' : 'wait'} for a choice, ${waiting.length === 1 ? 'its' : 'their'} copies as they are: ${andList(pages)}. Each row still asks.`;
 }

@@ -3164,7 +3164,7 @@ async function firstSetupFlow() {
   await fitsAtMinimum(a, 'the walkthrough at an item with no dates');
   await a.click('#walk-skip');
   same('skipped, the last: the band says what still waits and where, and docs stays found, its entries as they were',
-    [await a.text('#walkthrough .band-text'), (await sectionsNow(a)).find(([place]) => place === 'found')?.[1]], ['Done. 1 skipped item still waits for a choice, its copies as they are: docs on MCP servers. Each row still asks.', ['docs']]);
+    [await a.text('#walkthrough .band-text'), (await sectionsNow(a)).find(([place]) => place === 'found')?.[1]], ['1 skipped item still waits for a choice, its copies as they are: docs on MCP servers. Each row still asks.', ['docs']]);
   await a.click('#nav-overview');
   same('the Overview’s line counts what waits and starts choosing again, the last item having been skipped', [await a.text('#setup-choosing'), await a.exists('#setup-question')], ['1 found item has copies that differ and waits for your choice. Choose copies', false]);
   await a.click('#setup-choose');

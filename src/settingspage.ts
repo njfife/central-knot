@@ -370,7 +370,7 @@ function syncEverythingRow(): HTMLElement | null {
   const home = state.home;
   if (!home) return null;
   const on = !!home.sync.syncEverything, cannot = whyReadOnly(home) ?? (home.sync.gate.state === 'needs-resume' ? home.sync.gate.reason : undefined);
-  const hint = cannot ?? 'For this home: a skill, MCP server or agent that turns up in one of your tools is taken into Central Knot and turned on in every tool by itself (an MCP server reaches Claude Code when you click Write to Claude Code). Switching it on is one entry in History. ' + oneUndoCovers() + ' Off, what turns up waits on its page for Add.';
+  const hint = cannot ?? 'For this home: a skill, MCP server or agent that turns up in one of your tools is taken into Central Knot and turned on in every tool by itself (an MCP server reaches Claude Code when you click Write to Claude Code). Switching it on is one entry in History: ' + oneUndoCovers().replace(/^One Undo in History/, 'its Undo') + ' Off, what turns up waits on its page for Add.';
   const { takes, choosing } = whatYesDoes(home);
   const waiting = choosing ? `${plural(choosing, 'found item')} ${choosing === 1 ? 'has' : 'have'} copies that differ and ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy.` : '';
   const adds = !on ? (takes ? `Turning it on adds the ${plural(takes, 'item')} found in your tools now.` : 'Nothing found in your tools now would be added.') : '';
