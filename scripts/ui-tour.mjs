@@ -2089,7 +2089,7 @@ if (wanted('manage')) {
   await atEverySize('all-managed', 'Harnesses with every tool managed: each card has its Manage switch on, and the line under it says what turning it off would do', true);
   await focusOn('#manage-codex-cli'); await shot(a, 'switch-focus', 'Keyboard focus on Codex’s Manage switch, with its ring.');
   await a.click('#manage-codex-cli');
-  await atEverySize('codex-left-out', 'Clicked Codex’s switch: the band says Codex is left out and its copies stay; its card no longer opens, and its line says what turning it on would do now (nothing)', true);
+  await atEverySize('codex-left-out', 'Clicked Codex’s switch: the band says Codex is left out and its copies stay; its card no longer opens, and its line says what turning it on would do now: nothing written, its two found items shown again', true);
   // While Codex is left out: its copy of notes is edited by hand, and standup is turned off in Central Knot.
   edit(join(practice, '.codex/skills/notes/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Codex while it was left out.\n'));
   await a.click('#nav-skills'); await a.click('#switch-standup'); await a.settle();

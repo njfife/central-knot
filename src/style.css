@@ -1615,7 +1615,7 @@ button.harness-card-main:disabled { cursor: default; }
 .harness-card-attention:hover { background: var(--hover); text-decoration: underline; }
 .harness-card-attention:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .harness-card-path { font-size: 12px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: auto; padding: 0 16px 14px; }
-.harness-card-next { font-size: 12px; color: var(--ink-soft); }
+.harness-card-next { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 /* A tool's Manage switch on its card (managecard.ts): the switch and its word, then what a click does there. It sits at the
    foot of the card, above the folder, so the switches of a row of cards line up. A tool left out has its name and switch only. */
 .harness-manage { display: flex; flex-direction: column; gap: 6px; margin: auto 16px 10px; padding-top: 10px; border-top: 1px solid var(--line); }
