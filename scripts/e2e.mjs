@@ -552,7 +552,7 @@ async function practiceFlow() {
   await fitsAtMinimum(a, 'Skills');
 
   // One switch: a found skill's takes it into Central Knot and writes its folder to every tool at once. The pointer is over
-  // the list, as it is for a real click, so the rows keep their places until it leaves.
+  // the list, as it is for a real click; each row still goes under the heading true for it at once.
   const pointerOver = async selector => {
     const at = await a.run(`(() => { const box = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect(); return box ? [box.left + box.width / 2, box.top + box.height / 2] : null; })()`);
     if (at) await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at[0], y: at[1] });

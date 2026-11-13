@@ -2,7 +2,8 @@
 // which servers it synced, where, and at what content) made into library items, by serverstore.ts openLibrary: in memory at
 // each look until the first pass that may write saves the result.
 //
-// The rule: no settings file changes because of the migration, and every content kept before, or in a tool now, is a version.
+// The rule: no settings file that is there changes because of the migration (one the old record had as away is written afresh
+// by the first pass), and every content kept before, or in a tool now, is a version.
 //
 //   on the old record                                    in the library
 //   synced (`state: 'shared'`)                           On at its synced content; each recorded copy has what was last

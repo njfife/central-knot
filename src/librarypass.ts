@@ -91,6 +91,8 @@ export interface Disk<Entry extends Seen> {
    * Why a harness's folder can't be written now: no copy there can be written or removed (its copies are still read). `waits`:
    * the writes wait for a step of the person's own (Claude Code's settings file, written only by Write to Claude Code), so the
    * pass leaves each write and removal there undone, answers it held with `waits`, and plans it as it would any other.
+   * Write to Claude Code's own pass turns it round: there every other harness waits (servers.ts), so that click writes Claude
+   * Code alone and the next pass finishes the rest.
    */
   locked: Map<HarnessId, { why: string; waits?: true }>;
   /** What could not be read, in words for the page. */

@@ -311,8 +311,10 @@ export function whereAdded(row: LibraryRow, item: LibraryItem | undefined, tools
 export const notOnIn = (row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]) =>
   tools.filter(tool => item?.except.includes(tool as HarnessId) || !!row.switched?.[tool]);
 
-/** Whether a found item has a copy to take in: one of a harness's own, or one a harness has another way (a skill's shared copy). */
-/** Whether a found row's Add can take it in: a tool has a copy, and none of it is a deleted item's copy still to go (`waits`). */
+/**
+ * Whether a found row's Add can take it in: a tool has a copy (one of its own, or one it has another way: a skill's shared
+ * copy), and none of it is a deleted item's copy still to go (`waits`).
+ */
 export const canTakeIn = (row: LibraryRow) => !row.waits?.length && (Object.keys(row.hashes ?? {}).length > 0 || Object.keys(row.anotherWay ?? {}).length > 0);
 /** Where a found item is: "in Claude Code and Codex", or, with no copy of a harness's own, "Pi has it another way". */
 function foundWhere(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]) {
