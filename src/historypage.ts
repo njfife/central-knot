@@ -127,12 +127,14 @@ function libraryButtons(event: HistoryEvent) {
     ...versionChoices(event, item).map(choice => link(`Use ${who(choice.tool)}’s copy`, `Make ${who(choice.tool)}’s version of ${event.item} the current one`, `history-${event.id}-${choice.tool}`, choice.hash))];
 }
 
-/** A profile's or the base instructions' Undo (or Redo), naming what it undoes: "Undo switch", or "Undo in Claude Code and Codex". */
+/** A profile's or the base instructions' Undo (or Redo), naming what it undoes: "Undo switch", or "Undo pull in Claude Code and Codex". */
 function actions(event: HistoryEvent, action?: string) {
   if (!action) return h('span');
   // A base no tool gets is undone in Central Knot alone, so its Undo names no tools.
   const scope = event.base?.list.tools.length ? `in ${touchedToolsPhrase(event.base.list.tools)}` : '';
-  const label = event.kind === 'profile' ? `${action} switch` : `${action} ${scope}`.trim();
+  // A Pull's Undo says that it undoes the pull.
+  const verb = action === 'Undo' && event.via === 'repo' ? 'Undo pull' : action;
+  const label = event.kind === 'profile' ? `${action} switch` : `${verb} ${scope}`.trim();
   const control = button({ variant: 'link', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) });
   control.title = actionHelp(event);
   return control;

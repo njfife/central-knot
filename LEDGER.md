@@ -1587,7 +1587,7 @@ MCP servers are the third kind on the library, by implementing `librarypass.ts K
 | each tool's settings file | the library's `folders`: away where it is missing |
 
 **Sequences that behave differently from `next` on purpose.**
-- Off removes the entry from every tool (on `next` it flipped each tool's own switch and the entries stayed). The opened row's per-tool switch keeps a server out of that tool (on `next` it was the tool's own Enabled switch).
+- Off removes the entry from every tool (on `next` it flipped each tool's own switch and the entries stayed); On, or its Undo, puts it back after the file's other servers. The opened row's per-tool switch keeps a server out of that tool (on `next` it was the tool's own Enabled switch).
 - A server is found until it is added; Add takes it in (on `next` the halfway switch synced it).
 - An entry deleted by hand turns the server Off everywhere, kept in Central Knot (on `next` the deletion spread and History's Restore put it back). A file rewritten without its servers is no "reset" any more: each server turns Off (on `next` two or more gone at once were written back).
 - Two tools edited: the first in the page's order wins (on `next` the fixed order Copilot, Claude Code, Codex, Pi, OpenCode). An edit in Claude Code while it waits for Write loses to the newer current version and is kept as a version (on `next` it was a conflict notice).

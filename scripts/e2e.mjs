@@ -32,6 +32,12 @@ function check(name, ok, detail) {
 const same = (name, actual, expected) => check(name, JSON.stringify(actual) === JSON.stringify(expected), { actual, expected });
 // A file a poll reads; empty for the moment the app's checked write has it moved aside.
 const readNow = path => { try { return readFileSync(path, 'utf8'); } catch { return ''; } };
+/** A settings file with its MCP entries in name order: an entry Central Knot puts back goes at the end, so its place is Central Knot's; every other part is compared as it is. */
+const entriesSorted = text => {
+  if (!text.trimStart().startsWith('{')) { const [head, ...tables] = text.split(/^(?=\[)/m); return [head.trim(), ...tables.map(table => table.trim()).sort()]; }
+  const settings = JSON.parse(text);
+  return { ...settings, mcpServers: Object.fromEntries(Object.entries(settings.mcpServers ?? {}).sort(([first], [second]) => first.localeCompare(second))) };
+};
 
 // ---------- Disposable home ----------
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'ck-e2e-')));
@@ -972,7 +978,7 @@ async function practiceFlow() {
   same('Off takes files out of Copilot and Codex at once; Claude Code’s entry waits for Write, and the band says it removes it', [!!JSON.parse(readNow(mcpFiles[1])).mcpServers.files, readNow(mcpFiles[2]).includes('[mcp_servers.files]'), !!JSON.parse(readNow(mcpFiles[0])).mcpServers.files, /to remove files/.test(await a.text('.band-write-now') ?? '')],
     [false, false, true, true]);
   await a.click('#outcome-undo');
-  same('Undo puts files back in each tool, every file as it was, with nothing left to write', [mcpFiles.map(readNow), await switchOn(a, 'files'), await a.exists('#mcp-write-claude')], [mcpBefore, true, false]);
+  same('Undo puts files back in each tool, every file as it was but for the entry’s place, with nothing left to write', [mcpFiles.map(readNow).map(entriesSorted), await switchOn(a, 'files'), await a.exists('#mcp-write-claude')], [mcpBefore.map(entriesSorted), true, false]);
   // A server turned off in one tool, outside Central Knot (as `copilot mcp disable` writes it), is marked so; Central Knot leaves
   // that switch as it is, and its line says so. The opened row keeps a server out of one tool.
   const copilotMcpSwitch = join(practice, '.copilot/settings.json');
@@ -986,7 +992,7 @@ async function practiceFlow() {
   await a.click('#enable-docs-codex-cli');
   same('its Codex switch keeps it out of Codex at once', [readNow(mcpFiles[2]).includes('[mcp_servers.docs]'), /docs is kept out of Codex/.test(await a.text('.band-done') ?? '')], [false, true]);
   await a.click('#outcome-undo');
-  same('Undo puts it back in Codex, byte for byte', readNow(mcpFiles[2]), codexBefore);
+  same('Undo puts it back in Codex, every table byte for byte', entriesSorted(readNow(mcpFiles[2])), entriesSorted(codexBefore));
   writeFileSync(copilotMcpSwitch, readNow(copilotMcpSwitch).replace(/,?\n\s*"disabledMcpServers": \[\s*"docs"\s*\]/, ''));
   if (await a.exists('#enable-docs-codex-cli')) await a.click('#open-docs');
   // An MCP edit spreads within seconds: settings files are watched, not left to the 20 s poll.
