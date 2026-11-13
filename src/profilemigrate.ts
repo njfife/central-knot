@@ -88,7 +88,7 @@ export async function migrateProfiles(context: ShareContext, tools: HarnessId[])
   if (!(await onRecord(context, turnOff, serverClears.filter(clear => clear.at === 'own')))) return;
   await releaseSkills(context, holds.filter(hold => hold.kind === 'skill'), skills);
   await releaseInFiles(context, serverClears.filter(clear => clear.at === 'file'));
-  const kept = serverClears.filter(clear => clear.at === 'kept').map(({ hold }) => hold.row?.copies['claude-cli']?.folder ?? hold.name);
+  const kept = serverClears.filter(clear => clear.at === 'kept').map(({ hold }) => hold.row!.copies['claude-cli']!.folder);
   if (kept.length) await keepDenies(context.home, [...await keptDenies(context.home), ...kept]);
   const offNow = (kind: Hold['kind']) => ({ only: new Set(holds.filter(hold => hold.kind === kind && (turnOff.includes(hold) || library(hold)?.on === false)).map(hold => hold.key)) });
   await applySkills(context, tools, [], offNow('skill'));
@@ -99,13 +99,13 @@ export async function migrateProfiles(context: ShareContext, tools: HarnessId[])
 }
 
 /**
- * Where a held server's switch in one tool is released (ServerRelease): Claude Code's deny is kept while Claude Code has the
- * server's entry and the server, in the library, is not wanted there once this is done (`off`: turned Off now), so the entry
+ * Where a held server's switch in one tool is released (ServerRelease): Claude Code's deny, where it is set now, is kept while Claude Code has
+ * the server's entry and the server, in the library, is not wanted there once this is done (`off`: turned Off now), so the entry
  * doesn't start before Write takes it out; Codex's, Pi's and OpenCode's switch is in the kept own part where the entry is out of
  * the tool; every other is released in its settings file at once.
  */
 function releaseAt(hold: Hold, tool: HarnessId, off: boolean, item: LibraryItem | undefined): ServerRelease {
-  if (tool === 'claude-cli') return item && hold.row?.copies[tool] && (off || !wantedIn(item, tool)) ? 'kept' : 'file';
+  if (tool === 'claude-cli') return item && hold.row?.copies[tool] && offIn(hold, tool) && (off || !wantedIn(item, tool)) ? 'kept' : 'file';
   return tool !== 'copilot-cli' && !hold.row?.copies[tool] ? 'own' : 'file';
 }
 

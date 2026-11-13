@@ -740,11 +740,13 @@ async function startWatching() {
   // Agents folders too: an agent edited in one tool spreads like a skill (D-32).
   for (const id of agentTools) roots.add(join(configRoot(harnesses[id], current.home, overrideFor(id)), 'agents'));
   // MCP settings files and each tool's switch file (skillswitch.ts switchPath; a server's is one or the other): their folders are
-  // watched without recursion, and only an event for one of those files prompts a read.
-  const shared = context(), files = [...new Set([...mcpTools.map(id => mcpFile(shared, id)), ...harnessIds.map(id => switchPath(shared, id))])];
+  // watched without recursion, and only an event for one of those files prompts a read. Claude Code's MCP file holds no switch
+  // (mcpswitch.ts) and Claude Code rewrites it while it runs, so its events are not settings events: the page isn't redrawn for them.
+  const shared = context(), noSwitch = mcpFile(shared, 'claude-cli');
+  const files = [...new Set([...mcpTools.map(id => mcpFile(shared, id)), ...harnessIds.map(id => switchPath(shared, id))])];
   for (const folder of new Set(files.map(file => dirname(file)))) {
     const names = new Set(files.filter(file => dirname(file) === folder).map(file => basename(file)));
-    try { watchers.push(watch(folder, { persistent: false }, (_event, name) => { if (!name || names.has(name)) nudge(true); })); } catch { /* not there: polling covers it */ }
+    try { watchers.push(watch(folder, { persistent: false }, (_event, name) => { if (!name || names.has(name)) nudge(!name || join(folder, name) !== noSwitch); })); } catch { /* not there: polling covers it */ }
   }
   for (const root of roots) {
     try { watchers.push(watch(root, { recursive: true, persistent: false }, () => nudge())); } catch { /* not there: polling covers it */ }

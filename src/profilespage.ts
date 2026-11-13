@@ -112,12 +112,12 @@ function table(profile: Profile, list: LiveItem[], turns: Turns, isInUse: boolea
 }
 
 /** Find, the count, and when ticks take effect: they save at once; the library changes on Switch. */
-function findBar(shown: number, total: number, switchable: boolean) {
+function findBar(shown: number, total: number, onSwitch: boolean) {
   const input = findInput({ id: 'profile-find', label: 'Find a skill, MCP server or agent', value: find, onInput: text => { find = text; rerender(); },
     onKeydown: event => { if (event.key === 'Escape' && find) { find = ''; rerender(); } } });
   return h('div.toolbar', {}, h('label.find', {}, icon('search', 16, 'find-glyph'), input,
     find ? button({ variant: 'ghost', size: 'micro', icon: 'x', name: 'Clear', id: 'profile-find-clear', onclick: () => { find = ''; rerender(); document.getElementById('profile-find')?.focus(); } }) : null),
-    h('div.toolbar-end', {}, h('span.pf-save-note', {}, switchable ? 'Ticks save at once · items change on Switch' : 'Ticks save at once'), find ? h('span.result-count', {}, `${shown} of ${total}`) : null));
+    h('div.toolbar-end', {}, h('span.pf-save-note', {}, onSwitch ? 'Ticks save at once · items change on Switch' : 'Ticks save at once'), find ? h('span.result-count', {}, `${shown} of ${total}`) : null));
 }
 
 const matches = (item: LiveItem) => !find || `${item.name} ${descriptionOf(item)}`.toLowerCase().includes(find.toLowerCase());

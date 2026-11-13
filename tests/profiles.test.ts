@@ -429,10 +429,27 @@ test('Migration with Automatic sync off leaves an item that stays On to the ordi
   } finally { await box.cleanup(); }
 });
 
+test('Migration keeps no Claude Code deny for a listed switch a person had turned back on: a deny set by hand later stays', async () => {
+  const { box } = await oldHome('dev');
+  try {
+    const settings = mcpSwitchPath(box.context, 'claude-cli');
+    const deny = async (off: boolean) => writeFile(settings, withMcpSwitch('claude-cli', await readFile(settings, 'utf8'), 'sentry', off));
+    // sentry is turned Off (its Claude Code entry waits for Write) and its switch in Claude Code is turned back on by hand, before the upgrade.
+    await applyServers(box.context, box.tools, [{ key: 'sentry', managed: false, off: [] }]);
+    await deny(false);
+    await migrateProfiles(box.context, box.tools);
+    assert.doesNotMatch((await text(box, '.central-knot/claude-denies.json')) ?? '', /sentry/);
+    // A deny the person sets later is theirs: turning sentry On leaves it.
+    await deny(true);
+    await applyServers(box.context, box.tools, [{ key: 'sentry', managed: true, off: [], seenManaged: false }]);
+    assert.deepEqual(JSON.parse((await text(box, SETTINGS['claude-cli']))!).deniedMcpServers, [{ serverName: 'sentry' }]);
+  } finally { await box.cleanup(); }
+});
+
 test('A migration stopped part-way is finished by the next pass, with one History entry', async () => {
   const box = await goneHome();
   try {
-    // pager is On again before the upgrade, held off in Codex only: nothing is turned Off; docs stays Off.
+    // pager is On again before the upgrade and held off in every tool: the migration turns it Off, with its one entry; docs stays Off.
     await applySkills(box.context, box.tools, [{ key: 'pager', managed: true, off: [], seenManaged: false }]);
     await writeFile(join(box.home, '.central-knot/profiles.json'), `${JSON.stringify({ formatVersion: 1, profiles: [], offByProfile: { 'mcp:sentry': tools, 'skill:pager': tools } }, null, 2)}\n`);
     for (const tool of tools) await setDisabled(box.context, tool, { folder: 'pager', name: 'pager', skillFile: join(folderOf(box, tool, 'pager'), 'SKILL.md') }, true);
