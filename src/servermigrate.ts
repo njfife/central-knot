@@ -32,7 +32,7 @@
 // other's kept contents become its versions.
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { newItem, type LibraryItem, type Source } from './library.ts';
+import { newItem, type LibraryItem, type Origin } from './library.ts';
 import { sharedFileSeen, type KindLibrary } from './librarypass.ts';
 import { mcpFile, ownText, readTool, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { mcpTools } from './presence.ts';
@@ -69,7 +69,7 @@ const iso = (ms: number) => new Date(ms).toISOString();
 export function migrateItem(name: string, old: OldItem, kept: KeptServer[], onDisk: McpEntry[], files: Partial<Record<HarnessId, string>>): LibraryItem | undefined {
   const synced = old.state === 'shared', deleted = !synced ? old.deleted : undefined;
   if (!synced && !deleted) return undefined;
-  const contents = new Map<string, { at: number; from: Source }>(kept.map(content => [content.hash, { at: content.at, from: { how: 'migrated' } }]));
+  const contents = new Map<string, { at: number; from: Origin }>(kept.map(content => [content.hash, { at: content.at, from: { how: 'migrated' } }]));
   for (const entry of onDisk) if (!contents.has(entry.hash)) contents.set(entry.hash, { at: 0, from: { how: 'was-in', harness: entry.tool } });
   const current = deleted?.hash ?? old.hash;
   if (!contents.has(current)) return undefined;

@@ -17,7 +17,7 @@
 // What each harness's mark says is the library's plan for the item (library.ts plan), worked out by the kind's view
 // (agents.ts agentsView) from the same reading a pass makes (copiesOf), so a mark says what the next pass will do there and
 // never something of its own.
-import { sourceWords, theVersion, wantedIn, type LibraryItem, type Plan, type TakeInAnswer, type Version, type VersionChange } from './library.ts';
+import { originWords, theVersion, wantedIn, type LibraryItem, type Plan, type TakeInAnswer, type Version, type VersionChange } from './library.ts';
 import { clockTimesApart, dayAndTime } from './model.ts';
 import type { Change, HarnessId, ItemNotice, TakenInNotice } from './types.ts';
 import { andList, kindNouns, sentence, toolName, toolsPhrase } from './words.ts';
@@ -217,9 +217,9 @@ export function madeFrom(item: Pick<LibraryItem, 'versions'>, version: Version):
  * Where a listed version came from, as its row says it: a version made current again names the one it went back to, with
  * that one's time as `when` says it (the list's own form; madeAt by default).
  */
-export function versionSource(item: Pick<LibraryItem, 'versions'>, version: Version, when: (source: Version) => string = madeAt): string {
-  const source = version.from.how === 'made-current' ? madeFrom(item, version) : undefined;
-  return source ? `back to: ${sourceWords(source.from)}, ${when(source)}` : sourceWords(version.from);
+export function versionOrigin(item: Pick<LibraryItem, 'versions'>, version: Version, when: (back: Version) => string = madeAt): string {
+  const back = version.from.how === 'made-current' ? madeFrom(item, version) : undefined;
+  return back ? `back to: ${originWords(back.from)}, ${when(back)}` : originWords(version.from);
 }
 
 /** How many versions a folded list shows. */

@@ -4,7 +4,7 @@
 // version (library.ts), so a long list folds to its newest few with one line that shows the rest. Its words are libraryrow.ts's.
 // It draws what it is given and calls back on a click: matrix.ts keeps which list is unfolded and which version is being
 // read, gets a version's text as the kind gives it (librarypages.ts), and sends Make current as the item's click.
-import { foldVersions, madeFrom, versionChange, versionChangeHelp, versionSource } from './libraryrow.ts';
+import { foldVersions, madeFrom, versionChange, versionChangeHelp, versionOrigin } from './libraryrow.ts';
 import { readAgainst } from './diff.ts';
 import { button, h, icon, type Child } from './dom.ts';
 import { listed, theVersion, type LibraryItem, type Version, type VersionChange } from './library.ts';
@@ -33,7 +33,7 @@ export interface VersionListView {
   onMakeCurrent(version: Version): void;
 }
 
-function versionRow(view: VersionListView, version: Version, index: number, when: string, sourceWhen: (source: Version) => string) {
+function versionRow(view: VersionListView, version: Version, index: number, when: string, backWhen: (back: Version) => string) {
   const { item } = view, id = `${item.key}-${index}`;
   // The list starts with the current version (library.ts listed), and has each content once.
   const current = index === 0 && version.hash === item.hash;
@@ -49,7 +49,7 @@ function versionRow(view: VersionListView, version: Version, index: number, when
   const change = view.changes?.[index], note = versionChange(change);
   return h(`li.version-row${current ? '.version-row-current' : ''}`, { 'data-version': version.hash },
     h('span.version-when', { title: new Date(version.at).toLocaleString() }, when),
-    h('span.version-from', {}, h('span', {}, versionSource(item, version, sourceWhen)),
+    h('span.version-from', {}, h('span', {}, versionOrigin(item, version, backWhen)),
       note ? h('span.version-note', { title: versionChangeHelp(change) }, note) : null, current ? h('span.version-current', {}, icon('check', 12), 'Current') : null),
     h('span.version-actions', {}, readIt, makeCurrent),
     read ? h('div.version-read', { id: `version-read-text-${id}` }, versionText(read.text, current ? undefined : read.current)) : null);
@@ -81,15 +81,15 @@ export function versionList(view: VersionListView): HTMLElement {
   const { item } = view, all = listed(item);
   const { shown, rest } = foldVersions(all, view.unfolded);
   // One form for every time the list says: each row's, and the one a version made current again went back to.
-  const sources = shown.flatMap(version => (version.from.how === 'made-current' ? madeFrom(item, version) ?? [] : []));
+  const backs = shown.flatMap(version => (version.from.how === 'made-current' ? madeFrom(item, version) ?? [] : []));
   // Minutes are enough for a version: two made in the same minute read alike, the tooltip has the full time.
-  const said = timesApart([...shown, ...sources].map(version => version.at), view.now, true, false);
-  const times = said.slice(0, shown.length), sourceWhen = (source: Version) => said[shown.length + sources.indexOf(source)];
+  const said = timesApart([...shown, ...backs].map(version => version.at), view.now, true, false);
+  const times = said.slice(0, shown.length), backWhen = (back: Version) => said[shown.length + backs.indexOf(back)];
   const more = `Show ${rest} earlier ${rest === 1 ? 'version' : 'versions'}`;
   const unfold = rest > 0 ? button({ variant: 'link', size: 'small', label: more, id: `versions-all-${item.key}`, onclick: view.onUnfold }) : null;
   return h('div.versions', { role: 'group', 'aria-label': `Versions of ${item.name}` },
     h('p.versions-title', {}, h('strong', {}, 'Versions'), h('span.versions-count', {}, String(all.length)),
       h('span.versions-note', {}, 'Central Knot keeps every version.')),
-    h('ul.version-rows', {}, shown.map((version, index) => versionRow(view, version, index, times[index], sourceWhen))),
+    h('ul.version-rows', {}, shown.map((version, index) => versionRow(view, version, index, times[index], backWhen))),
     unfold);
 }

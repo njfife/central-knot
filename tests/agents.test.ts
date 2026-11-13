@@ -13,7 +13,7 @@ import { agentVersion, agentsView, applyAgents, restoreAgent } from '../src/agen
 import { convertAgentToSkill } from '../src/agentskill.ts';
 import { rowClicks, harnessIs, placeOf, libraryWords, sentences } from '../src/libraryrow.ts';
 import { librarySentence } from '../src/historyactions.ts';
-import { listed, sourceWords } from '../src/library.ts';
+import { listed, originWords } from '../src/library.ts';
 import { readHistory } from '../src/history.ts';
 import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
 import { readTomlTables } from '../src/textedit.ts';
@@ -29,7 +29,7 @@ async function on(box: Box, text = claudeAgent()) { await write(box, 'claude-cli
 async function versions(box: Box) {
   const item = (await itemOf(box))!;
   const lastLine = async (hash: string) => (await agentVersion(box.context, 'reviewer', hash))!.prompt.trim().split('\n').at(-1);
-  return Promise.all(listed(item).map(async (version, index) => `${await lastLine(version.hash)} (${sourceWords(version.from)})${index === 0 && version.hash === item.hash ? ' *' : ''}`));
+  return Promise.all(listed(item).map(async (version, index) => `${await lastLine(version.hash)} (${originWords(version.from)})${index === 0 && version.hash === item.hash ? ' *' : ''}`));
 }
 /** A hand edit: the file's last prompt line replaced. `seconds`: saved that long after now, where a test compares edit times. */
 async function edit(box: Box, tool: Tool, line: string, seconds?: number) {
@@ -236,7 +236,7 @@ for (const kept of ['Off', 'kept out of it'] as const) {
     assert.deepEqual((await pass(box)).notices, []);
     assert.equal(await readOf(box, 'codex-cli'), undefined);
     const record = (await agentsView(box.context, tools)).library!.reviewer;
-    assert.deepEqual(record.versions.map(version => [sourceWords(version.from), version.hash === record.hash]), [['was in Codex', false], ['found in Claude Code', true]]);
+    assert.deepEqual(record.versions.map(version => [originWords(version.from), version.hash === record.hash]), [['was in Codex', false], ['found in Claude Code', true]]);
     assert.ok(!(await historyOf(box)).some(event => event.kind === 'edit'), 'no edit was taken in');
   });
 }
@@ -253,7 +253,7 @@ inBox('A tool managed again with another file of the name of an agent deleted fr
   assert.deepEqual((await pass(box)).writes, 0);
   assert.equal(await readOf(box, 'codex-cli'), codexAgent('Someone else entirely.\n'));
   const view = await agentsView(box.context, tools), record = view.library!.reviewer;
-  assert.deepEqual([!!record.deleted, record.versions.map(version => sourceWords(version.from))], [true, ['found in Claude Code']], 'the tombstone gains nothing');
+  assert.deepEqual([!!record.deleted, record.versions.map(version => originWords(version.from))], [true, ['found in Claude Code']], 'the tombstone gains nothing');
   assert.deepEqual([placeOf(record), view.items.find(agent => agent.key === 'reviewer')?.copies['codex-cli'] !== undefined], ['found', true]);
   // The copy Central Knot put there, left as it was, is still its own to remove.
   await rm(fileOf(box, 'codex-cli'));

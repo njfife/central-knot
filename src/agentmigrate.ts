@@ -20,7 +20,7 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { agentHash, agentsFolder, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
 import type { AgentLibrary } from './agentstore.ts';
-import { newItem, type LibraryItem, type Source } from './library.ts';
+import { newItem, type LibraryItem, type Origin } from './library.ts';
 import { agentTools } from './presence.ts';
 import { sha256, storeDirectory, type ShareContext } from './share.ts';
 import type { HarnessId } from './types.ts';
@@ -56,7 +56,7 @@ const iso = (ms: number) => new Date(ms).toISOString();
  * worked examples are tests/agentmigrate.test.ts.
  */
 export function migrateItem(key: string, old: OldItem, kept: KeptContent[], onDisk: AgentEntry[], reset: ReadonlySet<HarnessId> = new Set()): LibraryItem | undefined {
-  const contents = new Map<string, { at: number; from: Source }>(kept.map(content => [content.hash, { at: content.at, from: { how: 'migrated' } }]));
+  const contents = new Map<string, { at: number; from: Origin }>(kept.map(content => [content.hash, { at: content.at, from: { how: 'migrated' } }]));
   for (const entry of onDisk) if (!contents.has(entry.hash)) contents.set(entry.hash, { at: entry.at, from: { how: 'was-in', harness: entry.tool } });
   const synced = old.state === 'shared';
   const deleted = !synced ? old.deleted : undefined;

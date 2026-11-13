@@ -26,6 +26,7 @@ import { applyBase, baseView, instructionsView, instructionVersion, repoBase, sa
 import { clearDraftFolders, draftSources, draftTools, writeDraft } from './draftbase.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoPulledBase, undoSettingsChange } from './gitrepo.ts';
+import { addSource, bringBack, checkSource, previewSource, removeSource, sourcesView } from './sources.ts';
 import { readParts } from './parts.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
@@ -1336,6 +1337,15 @@ app.whenReady().then(async () => {
   handle('repo:pull', async home => (home === current?.home ? pullRepo(context(), repoOptions()) : repoElsewhere()));
   handle('repo:push', async home => (home === current?.home ? pushRepo(context(), { ...repoOptions(), from: current!.mode === 'actual' ? hostname() : current!.label }) : repoElsewhere()));
   handle('repo:disconnect', async home => (home === current?.home ? disconnectRepo(context(), repoOptions()) : repoElsewhere()));
+  // Sources (sources.ts): a Git link read on a click, never written. Look and Check now fetch outside the queue, so a slow
+  // network never holds a sync pass up; what a check brings takes its turn with every other change (`queued`).
+  const sourceElsewhere = { stopped: elsewhere, view: null };
+  handleNow('sources:view', async () => (current ? sourcesView(context()) : null));
+  handleNow('sources:preview', async (link, home) => (home === current?.home && typeof link === 'string' ? previewSource(context(), link) : { refused: elsewhere, link: String(link ?? '') }));
+  handle('sources:add', async (token, home) => (home === current?.home && typeof token === 'string' ? addSource(context(), await toolsNow(), token) : sourceElsewhere));
+  handleNow('sources:check', async (id, home) => (home === current?.home && typeof id === 'string' ? checkSource(context(), toolsNow, id, queued) : sourceElsewhere));
+  handle('sources:bring-back', async (id, key, home) => (home === current?.home && typeof id === 'string' && typeof key === 'string' ? bringBack(context(), await toolsNow(), id, key) : sourceElsewhere));
+  handle('sources:remove', async (id, home) => (home === current?.home && typeof id === 'string' ? removeSource(context(), id) : sourceElsewhere));
   await loading;
   if (smoke) {
     try {

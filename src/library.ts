@@ -2,7 +2,7 @@
 // (servers.ts) and agents (agents.ts) use it. A kind is carried by the pass in librarypass.ts, whose `Kind` is the contract a kind implements; this file is only the model.
 //
 // Central Knot holds each item itself, with its versions. A harness (Claude Code, Codex, …) is not where an item lives: it is
-// somewhere an item is applied. Five ideas, and nothing else, describe an item:
+// somewhere an item is applied. Six ideas, and nothing else, describe an item:
 //
 //   item     What Central Knot holds (LibraryItem): one current version, and On or Off. On: applied to every managed
 //            harness. Off: in no harness; the item, its versions and each harness's own part stay in Central Knot.
@@ -15,6 +15,8 @@
 //            item is deleted. Only keepVersion and setCurrent add one.
 //   found    Something a managed harness has that the library doesn't. It is no item state: a click on Add takes it in, or
 //            the home's standing rule, Synchronize everything (FOUND, below).
+//   source   A place items are read from and never written: a Git link the person gave (sources.ts). What it holds comes in
+//            Off and follows it by its own table (A SOURCE, below); an item linked to one says which (`source`, `seen`).
 //
 // Content has two parts for agents and MCP servers: the shared part, which a version's hash names (an agent's name,
 // description and prompt), and each harness's own part (the other fields of its file). The library keeps the latest own
@@ -87,6 +89,33 @@
 // holds whichever pass comes first. History says each content that gave way there, and each copy removed there (librarypass.ts
 // cameBack and logItem); a harness managed for the first time is the table's "a copy, no A" row, told the same way.
 //
+// A SOURCE (sources.ts): a Git link the person gave, read on a click and never written. Each name read there meets the item
+// of that key in one step before the table, for every name at once (`fromSource`; librarypass.ts fromSourceStep carries it
+// out, as it carries out Pull). S is the content at the source now; an item linked to the source holds which source
+// (`source`) and the content last seen there (`seen`), and nothing else about it.
+//
+//   at the source                        the item                    what happens
+//   a name the library has no item for   none                        the item is made, Off, its first version from the source
+//   S = seen                             linked                      nothing
+//   S changed                            current = seen              S becomes the current version; On or Off stays as it is
+//   S changed                            current changed too         the later of the two is current, the other is kept as a
+//                                                                    version
+//   the name is gone, the source read    linked                      the item turns Off, once, and its link is let go, so a
+//     whole                                                          later read never turns Off what was turned On again
+//   the source, or that one skill,       linked                      nothing; the source's row says why
+//     can't be read
+//   a name the library has               not linked, same content    it is linked; nothing else changes
+//   a name the library has               not linked and differs,     not brought in, said on the source's row; Add there
+//                                        linked to another source,   brings a deleted one back, Off, as a new one comes
+//                                        or deleted
+//
+// The step writes no harness: the plan after it applies the current version where the item is On, as for any new version, so
+// an edit a harness holds that no pass has taken in yet meets S there (latest wins). A source's time is its head commit's
+// (the copy is one commit deep): a later, unrelated commit there makes an older edit of the skill count as the latest. Within
+// a second of the current version's time (the tie latestCopy uses) the current version stays and the source's is kept.
+// "Read whole": every skill there could be read; one that can't (a SKILL.md that stops parsing) leaves no name gone that
+// time. An item linked to a source that is no longer recorded reads as not linked, so Remove lets go of every link at once.
+//
 // Two promises hold the model together:
 // - H unseen is never H gone. A copy the adapter can't see for sure (unreadable, half saved, inside the settle window,
 //   its folder away) is `unseen`, and nothing happens in that harness. Only a copy that is really gone turns an item Off.
@@ -134,6 +163,7 @@
 // the settle window passed.
 //
 // Worked examples, one per row of each table: tests/library.test.ts. The same on real files: tests/agents.test.ts and tests/skills.test.ts.
+import { linkLabel } from './sourcelink.ts';
 import type { HarnessId } from './types.ts';
 import { toolName } from './words.ts';
 
@@ -142,14 +172,18 @@ export type ItemKind = 'skill' | 'agent' | 'mcp';
 
 /**
  * Where a version came from: taken in from a harness that had it (`found`, or `chosen` among copies that differed), edited
- * by hand in a harness (`edited`), a harness's copy that gave way to the current version (`was-in`), Pull (`pulled`), an
- * earlier version made current (`made-current`), or the record from before the library (`migrated`). `replacedBy`: on a
- * `was-in` copy, the version written over it, which its line on the page is compared with (absent in older records).
+ * by hand in a harness (`edited`), a harness's copy that gave way to the current version (`was-in`), Pull (`pulled`), read
+ * at a source (`source`, with its `link` as given), an earlier version made current (`made-current`), or the record from
+ * before the library (`migrated`). `replacedBy`: on a `was-in` copy, the version written over it, which its line on the page
+ * is compared with (absent in older records).
  */
-export interface Source { how: 'found' | 'chosen' | 'edited' | 'was-in' | 'pulled' | 'made-current' | 'migrated'; harness?: HarnessId; replacedBy?: string }
+export interface Origin { how: 'found' | 'chosen' | 'edited' | 'was-in' | 'pulled' | 'source' | 'made-current' | 'migrated'; harness?: HarnessId; replacedBy?: string; link?: string }
 
-/** One content an item has had. `at`: when it was made (a harness file's own time for a copy taken in; else the click's), shown beside it. */
-export interface Version { hash: string; at: string; from: Source }
+/**
+ * One content an item has had. `at`: when it was made (a harness file's own time for a copy taken in; a source's head commit's
+ * for one read there; else the click's), shown beside it.
+ */
+export interface Version { hash: string; at: string; from: Origin }
 
 /**
  * A listed version's note, as the kind works it out (agents.ts changesOf) and its row says it (libraryrow.ts versionChange):
@@ -184,6 +218,10 @@ export interface LibraryItem {
   own: Partial<Record<HarnessId, string>>;
   /** Deleted from Central Knot (a tombstone): in no harness, and a copy that turns up is found, never taken in by itself. */
   deleted?: { at: string };
+  /** The source it is linked to (sources.ts SourceRecord `id`): linked only while that source is recorded (the header's A SOURCE). */
+  source?: string;
+  /** The content last seen at that source, which the next read compares with. Set and let go with `source`. */
+  seen?: string;
 }
 
 /** An item's key, from its name as a harness writes it: one key across harnesses, compared as macOS compares file names (LibraryItem key). */
@@ -200,7 +238,7 @@ export function isLibraryItem(value: unknown): value is LibraryItem {
   const version = (entry: Partial<Version> | null) => text(entry?.hash) && text(entry?.at) && text(entry?.from?.how);
   return !!item && typeof item === 'object' && text(item.key) && text(item.name) && typeof item.on === 'boolean' && text(item.hash)
     && Array.isArray(item.versions) && item.versions.every(version) && Array.isArray(item.except) && texts(item.applied) && texts(item.own)
-    && (item.deleted === undefined || text(item.deleted?.at));
+    && (item.deleted === undefined || text(item.deleted?.at)) && (item.source === undefined || text(item.source)) && (item.seen === undefined || text(item.seen));
 }
 
 /** Where the current version is in `versions`: the newest entry that holds the current content (an earlier entry may hold it too). */
@@ -222,14 +260,14 @@ export function listed(item: Pick<LibraryItem, 'hash' | 'versions'>): Version[] 
 export const wantedIn = (item: Pick<LibraryItem, 'on' | 'deleted' | 'except'>, harness: HarnessId) =>
   item.on && !item.deleted && !item.except.includes(harness);
 
-/** A version in words: "edited in Codex", "was in Copilot CLI", "made current again". */
-export function sourceWords({ how, harness }: Source): string {
+/** A version in words: "edited in Codex", "was in Copilot CLI", "from github.com/owner/repo", "made current again". */
+export function originWords({ how, harness, link }: Origin): string {
   const where = harness ? toolName(harness) : 'a harness';
   return { found: `found in ${where}`, chosen: `chosen from ${where}`, edited: `edited in ${where}`, 'was-in': `was in ${where}`,
-    pulled: 'pulled from the Git repo', 'made-current': 'made current again', migrated: 'from before Central Knot kept versions' }[how];
+    pulled: 'pulled from the Git repo', source: `from ${link ? linkLabel(link) : 'a source'}`, 'made-current': 'made current again', migrated: 'from before Central Knot kept versions' }[how];
 }
 /** A version named in a sentence: "the version edited in Codex", "the version that was in Copilot CLI". */
-export const theVersion = (from: Source) => `the version ${from.how === 'was-in' ? 'that ' : ''}${sourceWords(from)}`;
+export const theVersion = (from: Origin) => `the version ${from.how === 'was-in' ? 'that ' : ''}${originWords(from)}`;
 
 // ---------- The rule ----------
 
@@ -282,7 +320,7 @@ export interface Plan {
   /** The item turns Off: the harness where its copy was deleted by hand. */
   turnedOffBy?: HarnessId;
   /** Copies to keep as versions before they are written over or removed, each with where it came from. */
-  keep: { harness: HarnessId; from: Source }[];
+  keep: { harness: HarnessId; from: Origin }[];
   /** Harnesses the current version is written to. */
   write: HarnessId[];
   /** Harnesses whose copy is removed. */
@@ -365,6 +403,38 @@ export function managedAgain(item: LibraryItem, harness: HarnessId, copy: Harnes
 /** A version's time for a copy taken in: the copy's own time, or the time it is taken where it has none (an MCP entry). */
 export const versionAt = (at: number | undefined) => new Date(at ?? Date.now()).toISOString();
 
+// ---------- A source ----------
+
+/** What a source holds of one name now: its content and the source's time (its head commit's), gone (the source read whole), or unreadable. */
+export type AtSource = { hash: string; at: string } | 'gone' | 'unreadable';
+/** Whom an item is linked to, as the source being read sees it: that source, another one still recorded, or none. */
+export type LinkedTo = 'this' | 'another' | 'none';
+/** Whom an item is linked to, as source `id` sees it, among the sources the home records now: a source no longer recorded is none. */
+export const linkedTo = (item: Pick<LibraryItem, 'source'> | undefined, id: string, recorded: ReadonlySet<string>): LinkedTo =>
+  (!item?.source || !recorded.has(item.source) ? 'none' : item.source === id ? 'this' : 'another');
+/**
+ * The header's A SOURCE table's answer for one name, a row each: the item is made (`make`: Off; a deleted one brought back by
+ * Add, `bringBack`), linked (`link`), S becomes current (`update`; already current, only `seen` moves on), S is kept as a version
+ * (`keep`), the item turns Off and is let go (`drop`), or `nothing`. A name the library has that is not brought in says why:
+ * its content differs (`differs`), it is another source's (`another`), or it is deleted (`deleted`).
+ */
+export type SourceAnswer = 'make' | 'link' | 'update' | 'keep' | 'drop' | 'nothing' | 'differs' | 'another' | 'deleted';
+
+/** The header's A SOURCE table for one name: `item` is the library's for its key (deleted or not), `here` what the source holds. */
+export function fromSource(item: LibraryItem | undefined, here: AtSource, linked: LinkedTo, bringBack = false): SourceAnswer {
+  if (here === 'unreadable') return 'nothing';
+  if (here === 'gone') return item && !item.deleted && linked === 'this' ? 'drop' : 'nothing';
+  if (!item) return 'make';
+  if (item.deleted) return bringBack ? 'make' : 'deleted';
+  if (linked === 'another') return 'another';
+  if (linked === 'none') return here.hash === item.hash ? 'link' : 'differs';
+  if (here.hash === item.seen) return 'nothing';
+  if (item.hash === item.seen || here.hash === item.hash) return 'update';
+  // Both changed: the later wins, the source's time being its head commit's; a tie keeps the current version.
+  const current = Date.parse(item.versions[currentIndex(item)]?.at ?? '') || 0;
+  return Date.parse(here.at) - current >= TIE_MS ? 'update' : 'keep';
+}
+
 // ---------- Found ----------
 
 /** One copy a found key has in a managed harness, as the take-in table reads it. */
@@ -440,7 +510,7 @@ export function latestCopy(copies: readonly Pick<FoundCopy, 'hash' | 'at'>[]): s
   const [last, before] = [...made].sort(([, first], [, second]) => second - first);
   return last && before && last[1] - before[1] >= TIE_MS ? last[0] : undefined;
 }
-/** Two contents changed less than this apart are a tie for latestCopy: no latest. */
+/** Two contents changed less than this apart are a tie for latestCopy (no latest) and for a source's version (fromSource: the current one stays). */
 const TIE_MS = 1000;
 
 // ---------- Versions ----------
@@ -512,7 +582,7 @@ export interface Hands<Content> extends Shelf<Content> {
  *   removal is saved at once: one not on record would read, after a crash, as a copy deleted by hand.
  */
 export async function carryOut<Content>(item: LibraryItem, made: Plan, hands: Hands<Content>) {
-  const versionOf = (harness: HarnessId, from: Source) => {
+  const versionOf = (harness: HarnessId, from: Origin) => {
     const copy = hands.copy(harness);
     return [{ hash: copy.hash, at: versionAt(copy.at), from }, copy.content] as const;
   };

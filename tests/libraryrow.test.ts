@@ -2,7 +2,7 @@
 // stands, what each harness's mark says, when its switch asks which copy, and the click each control sends.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FOLDED_VERSIONS, addLabel, asksWhichCopy, canAdd, rowClicks, foldVersions, harnessIs, madeFrom, placeOf, libraryWords, ruleSays, sentences, statusLine, switchLabel, versionChange, versionSource, type LibraryRow } from '../src/libraryrow.ts';
+import { FOLDED_VERSIONS, addLabel, asksWhichCopy, canAdd, rowClicks, foldVersions, harnessIs, madeFrom, placeOf, libraryWords, ruleSays, sentences, statusLine, switchLabel, versionChange, versionOrigin, type LibraryRow } from '../src/libraryrow.ts';
 import { readAgainst, wordDiff } from '../src/diff.ts';
 import { newItem, plan, takeInAnswer, type Copies, type FoundKey, type LibraryItem } from '../src/library.ts';
 import { anyManaged, kindSource } from '../src/itemrow.ts';
@@ -141,8 +141,8 @@ test('A version’s note says what it changed, or what a copy that gave way diff
   const found = { hash: 'a', at: at(9), from: { how: 'found' as const, harness: 'claude-cli' as const } }, again = { hash: 'a', at: at(1), from: { how: 'made-current' as const } };
   const item = { versions: [again, { hash: 'b', at: at(5), from: { how: 'edited' as const, harness: 'codex-cli' as const } }, found] };
   assert.equal(madeFrom(item, again), found);
-  assert.match(versionSource(item, again), /^back to: found in Claude Code, \d+:\d\d/);
-  assert.equal(versionSource(item, item.versions[1]), 'edited in Codex');
+  assert.match(versionOrigin(item, again), /^back to: found in Claude Code, \d+:\d\d/);
+  assert.equal(versionOrigin(item, item.versions[1]), 'edited in Codex');
 });
 
 test('The status line says where the agent stands, and in which harnesses', () => {

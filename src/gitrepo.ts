@@ -74,6 +74,8 @@ async function readState(home: string): Promise<RepoState | undefined> {
   } catch { return undefined; }
 }
 const saveState = (home: string, state: RepoState) => writeDurably(statePath(home), `${JSON.stringify(state, null, 2)}\n`);
+/** The address of the repo Pull and Push use in this home, if one is connected: a source refuses it (sources.ts). */
+export const connectedRepoAddress = async (home: string) => (await readState(home))?.url;
 
 /** One repo action at a time, whichever window or request asks: they share one clone. */
 let chain: Promise<unknown> = Promise.resolve();

@@ -3,7 +3,7 @@
 // applied there last. Contents are single letters: 'a' is older than 'b', and so on.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { carryOut, decide, isLibraryItem, keepVersion, latestCopy, listed, managedAgain, newItem, plan, setCurrent, sourceWords, takeInAnswer, type HarnessCopy, type LibraryItem, type Shelf } from '../src/library.ts';
+import { carryOut, decide, fromSource, isLibraryItem, keepVersion, latestCopy, linkedTo, listed, managedAgain, newItem, plan, setCurrent, originWords, takeInAnswer, type HarnessCopy, type LibraryItem, type Shelf } from '../src/library.ts';
 
 const has = (hash: string, at = 0): HarnessCopy => ({ is: 'present', hash, at });
 /** A copy with no time of its own (an MCP entry: its time is its whole file's). */
@@ -290,7 +290,7 @@ test('Making an earlier version current is a new version, so the list says when 
   const agent = item({ hash: 'b', versions: [{ hash: 'b', at: day(2), from: { how: 'edited', harness: 'codex-cli' } }, ...item().versions] });
   await setCurrent(shelf(agent).made, agent, { hash: 'a', at: day(3), from: { how: 'made-current' } }, 'text of a');
   assert.equal(agent.hash, 'a');
-  assert.deepEqual(agent.versions.map(version => [version.hash, sourceWords(version.from)]), [['a', 'made current again'], ['b', 'edited in Codex'], ['a', 'found in Claude Code']]);
+  assert.deepEqual(agent.versions.map(version => [version.hash, originWords(version.from)]), [['a', 'made current again'], ['b', 'edited in Codex'], ['a', 'found in Claude Code']]);
 });
 
 test('keepVersion keeps a content without making it current, once, as the newest taken; the list still shows the current one first', async () => {
@@ -392,4 +392,56 @@ test('Known weakness, as written in latestCopy: a copy Central Knot wrote later 
 test('Found otherwise: taken in from the one content (first harness), or from the copy a click chose', () => {
   assert.deepEqual(both(found([copy('claude-cli', 'a'), copy('codex-cli', 'a')])), [{ take: copy('claude-cli', 'a'), chosen: false }, { take: copy('claude-cli', 'a'), chosen: false }]);
   assert.deepEqual(takeInAnswer('click', found([copy('claude-cli', 'a'), copy('codex-cli', 'x')]), { harness: 'codex-cli', hash: 'x' }), { take: copy('codex-cli', 'x'), chosen: true });
+});
+
+// ---------- A source's table (library.ts's header, A SOURCE), one row each ----------
+
+/** An item linked to a source: its current version `hash` (made at `at`), and what was last seen there. */
+const linked = (hash: string, seen: string, at = '2026-11-02T10:00:00.000Z'): LibraryItem =>
+  ({ ...newItem('skill', 'notes', 'notes'), hash, versions: [{ hash, at, from: { how: 'source', link: 'team/notes' } }], source: 'src', seen });
+const there = (hash: string, at = '2026-11-03T10:00:00.000Z') => ({ hash, at });
+
+test('A source: a name the library has no item for is made, Off; a deleted one is not, but Add on its row brings it back', () => {
+  assert.equal(fromSource(undefined, there('s'), 'none'), 'make');
+  const tombstone = { ...linked('l', 'l'), deleted: { at: '2026-11-01T00:00:00.000Z' } };
+  assert.equal(fromSource(tombstone, there('s'), 'this'), 'deleted');
+  assert.equal(fromSource(tombstone, there('s'), 'this', true), 'make');
+});
+
+test('A source: S = seen is nothing; S changed with current = seen updates it; S changed to what is current already only moves seen on (update)', () => {
+  assert.equal(fromSource(linked('l', 's'), there('s'), 'this'), 'nothing');
+  assert.equal(fromSource(linked('l', 'l'), there('s'), 'this'), 'update');
+  assert.equal(fromSource(linked('l', 'old'), there('l'), 'this'), 'update');
+});
+
+test('A source: both changed, the later wins by the source’s head commit; a tie, under a second, keeps the current version', () => {
+  assert.equal(fromSource(linked('l', 'old', '2026-11-02T10:00:00.000Z'), there('s', '2026-11-03T10:00:00.000Z'), 'this'), 'update');
+  assert.equal(fromSource(linked('l', 'old', '2026-11-04T10:00:00.000Z'), there('s', '2026-11-03T10:00:00.000Z'), 'this'), 'keep');
+  assert.equal(fromSource(linked('l', 'old', '2026-11-03T10:00:00.000Z'), there('s', '2026-11-03T10:00:00.900Z'), 'this'), 'keep');
+  assert.equal(fromSource(linked('l', 'old', '2026-11-03T10:00:00.000Z'), there('s', '2026-11-03T10:00:01.000Z'), 'this'), 'update');
+});
+
+test('A source: a name gone, read whole, drops an item linked to it; one that can’t be read, or isn’t linked, changes nothing', () => {
+  assert.equal(fromSource(linked('l', 'l'), 'gone', 'this'), 'drop');
+  assert.equal(fromSource(linked('l', 'l'), 'unreadable', 'this'), 'nothing');
+  assert.equal(fromSource(linked('l', 'l'), 'gone', 'none'), 'nothing');
+  assert.equal(fromSource({ ...linked('l', 'l'), deleted: { at: '2026-11-01T00:00:00.000Z' } }, 'gone', 'this'), 'nothing');
+});
+
+test('A source: a name the library has that isn’t linked is linked when its content is the same, else not brought in; one linked to another source is never taken over', () => {
+  const own = { ...newItem('skill', 'notes', 'notes'), hash: 'l' };
+  assert.equal(fromSource(own, there('l'), 'none'), 'link');
+  assert.equal(fromSource(own, there('s'), 'none'), 'differs');
+  assert.equal(fromSource(linked('l', 'l'), there('l'), 'another'), 'another');
+});
+
+test('Whom an item is linked to: a source no longer recorded is none', () => {
+  const recorded = new Set(['src', 'other']);
+  assert.deepEqual([linkedTo(linked('l', 'l'), 'src', recorded), linkedTo(linked('l', 'l'), 'other', recorded), linkedTo(linked('l', 'l'), 'src', new Set()), linkedTo(undefined, 'src', recorded)], ['this', 'another', 'none', 'none']);
+});
+
+test('A version read at a source says where, short; an item’s two source values are optional strings', () => {
+  assert.equal(originWords({ how: 'source', link: 'https://github.com/stephenturner/skill-deslop/tree/main' }), 'from github.com/stephenturner/skill-deslop (main)');
+  assert.equal(isLibraryItem(linked('l', 'l')), true);
+  assert.equal(isLibraryItem({ ...linked('l', 'l'), seen: 4 }), false);
 });

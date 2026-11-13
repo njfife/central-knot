@@ -9,8 +9,9 @@
 // plugin-versions, parts, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
 // Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses, manage (a
-// tool's Manage switch, each state of the Harnesses list it changes, and the Skills page and Overview with tools left out), repo and
-// remove-build (another build of Central Knot on this Mac, as made-up bundles).
+// tool's Manage switch, each state of the Harnesses list it changes, and the Skills page and Overview with tools left out), repo,
+// remove-build (another build of Central Knot on this Mac, as made-up bundles) and sources (a Git link read on a click, made-up
+// repositories standing in for GitHub).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -177,7 +178,7 @@ const turnOnRow = async key => { if (await a.has(`#add-${key}, #switch-${key}:no
 if (only ? only.includes('light') : !full) {
   begin('light');
   if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
-  for (const name of ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'repo', 'settings']) {
+  for (const name of ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'sources', 'repo', 'settings']) {
     if (!(await a.has(`#nav-${name}`))) throw new Error(`The sidebar has no ${name} page.`);
     await a.click(`#nav-${name}`);
     if (!(await waitFor(a, `document.querySelector('#nav-${name}')?.getAttribute('aria-current') === 'page'`))) throw new Error(`The ${name} page did not open.`);
@@ -2421,6 +2422,79 @@ if (wanted('remove-build')) {
   await atEverySize('settings-row-syncs-here', 'Its Settings row: it synced this home last and isn’t open, so removing it takes over syncing first; the same two choices', false, '#settings-other-builds', 'start');
   await a.click('#nav-skills'); await a.click('#take-over-remove'); await waitFor(a, idle, 20000); await a.settle();
   await atEverySize('skills-taken-over-removed', 'Clicked "Take over and remove Central Knot Alpha": this app syncs the home now, said first, and the alpha is in the Trash');
+}
+
+// ---------- Sources: a Git link read on a click (sourcespage.ts), with made-up repositories standing in for GitHub ----------
+if (wanted('sources')) {
+  begin('sources');
+  // git's own url.<base>.insteadOf sends https://github.com/<path> to folders here: nothing reaches the network.
+  const hosts = join(scratch, 'source-hosts');
+  const repo = path => {
+    const dir = join(hosts, 'github.com', `${path}.git`);
+    mkdirSync(dir, { recursive: true });
+    execFileSync('git', ['init', '--quiet', '--initial-branch=main', dir]);
+    return (files, message = 'change') => {
+      for (const [file, text] of Object.entries(files)) { if (text === null) rmSync(join(dir, file), { recursive: true, force: true }); else { mkdirSync(join(dir, file, '..'), { recursive: true }); writeFileSync(join(dir, file), text); } }
+      execFileSync('git', ['-C', dir, '-c', 'user.name=Stephen', '-c', 'user.email=stephen@example.com', '-c', 'commit.gpgsign=false', 'add', '--all']);
+      execFileSync('git', ['-C', dir, '-c', 'user.name=Stephen', '-c', 'user.email=stephen@example.com', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', message]);
+    };
+  };
+  const skillMd = (name, body) => `---\nname: ${name}\ndescription: Find and remove the patterns that make writing read as machine-made.\n---\n\n${body}\n`;
+  const deslop = repo('stephenturner/skill-deslop');
+  deslop({ 'SKILL.md': skillMd('deslop', 'Read the text, list what reads as slop, and rewrite it plainly.'), 'references/phrases.md': '# Phrases\n', 'references/structures.md': '# Structures\n', 'references/examples.md': '# Examples\n', 'references/checklist.md': '# Checklist\n', 'README.md': '# skill-deslop\n', 'LICENSE': 'MIT License\n', '.gitignore': '.DS_Store\n' });
+  repo('team/kit')({ 'notes/SKILL.md': '---\nname: notes\ndescription: Take notes the team’s way.\n---\n\nThe team’s notes.\n', 'release/SKILL.md': '---\nname: release\ndescription: Cut a release.\n---\n\nCut it.\n', 'agents/writer.md': '---\nname: writer\n---\nWrite.\n' });
+  repo('team/plugin')({ '.claude-plugin/plugin.json': '{"name":"plugin"}', 'skills/pdf/SKILL.md': '---\nname: pdf\ndescription: PDFs.\n---\nPDFs.\n' });
+  await fresh({ GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${join(hosts, 'github.com')}/.insteadOf`, GIT_CONFIG_VALUE_0: 'https://github.com/' });
+  const busyDone = () => waitFor(a, `document.body.dataset.busy !== 'true'`, 20000);
+  const type = text => a.run(`(() => { const input = document.querySelector('#source-link'); input.value = ${JSON.stringify(text)}; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  const lookAt = async link => { await type(link); await a.click('#source-look'); await busyDone(); await a.settle(); };
+  const DESLOP = 'https://github.com/stephenturner/skill-deslop/tree/main';
+  await a.click('#nav-sources');
+  await shot(a, 'empty', 'Clicked Sources in the sidebar: the link field, Look, and a line saying what a source is (1280×800)');
+  await lookAt(DESLOP);
+  await atEverySize('look', `Pasted the owner’s link, ${DESLOP}, and clicked Look: where it read (branch main, its root folder, the commit), one skill, deslop, named by its SKILL.md with the repository’s name, skill-deslop, beside it; it comes in Off; its 8 files listed, SKILL.md and the four references among them. Add 1 skill, Cancel, and the line that what comes in is Off and nothing is written to the source`, true, '#source-preview');
+  await a.size(860, 560); await focusOn('#source-add'); await shot(a, 'look-focus-860', 'Tabbed to Add 1 skill at 860×560: its focus ring'); await a.run('document.activeElement?.blur()'); await a.size(1280, 800);
+  await a.click('#source-add'); await busyDone(); await a.settle();
+  await atEverySize('source-row', 'Clicked Add 1 skill: the band says deslop is in Central Knot, Off, with Open Skills; the source’s row: its link, branch, folder, commit and when it was read, Check now and Remove…, and deslop, In Central Knot, Off', true, '.source-row');
+  await a.click('#nav-skills'); await openRow('deslop');
+  await atEverySize('skill-off', 'On Skills, deslop’s row is Off, in no tool, as any Off item reads; opened, it says it is from github.com/stephenturner/skill-deslop (main), a source, with a link to Sources, and its one version says the same', true, '.ov-row[data-key="deslop"]', 'start');
+  await turnOnRow('deslop'); await switchOn('deslop');
+  await atEverySize('skill-on', 'Clicked its switch: deslop is On in every tool, each with SKILL.md and the four references; the opened row still says where it is from', false, '.ov-row[data-key="deslop"]', 'start');
+  deslop({ 'SKILL.md': skillMd('deslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice.') }, 'Keep the voice');
+  await a.click('#nav-sources');
+  await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
+  await atEverySize('updated', 'Changed deslop at the source and clicked Check now: the band says the source’s version is current now; it is in every tool it is on in', true, '.source-row');
+  await a.click('#nav-skills'); await openRow('deslop');
+  await atEverySize('updated-skill', 'On Skills, deslop’s opened row: two versions, the current one from the source, the earlier one too, each saying where it came from', false, '.ov-row[data-key="deslop"]', 'start');
+  await a.click('#nav-history');
+  await shot(a, 'updated-history', 'History: Updated from github.com/stephenturner/skill-deslop (main); that became the current version, in all 3 tools, with Undo (1280×800)');
+  deslop({ 'SKILL.md': skillMd('unslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice.') }, 'Rename to unslop');
+  await a.click('#nav-sources');
+  await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
+  await atEverySize('dropped', 'The skill was renamed unslop at the source; clicked Check now: deslop is off and no longer from the source, unslop is in Central Knot, Off; the row lists unslop', true, '.source-row');
+  await a.click('#nav-skills'); await openRow('deslop');
+  await atEverySize('dropped-skill', 'On Skills, deslop is Off, out of every tool, kept in Central Knot with its versions; its opened row no longer names a source', false, '.ov-row[data-key="deslop"]', 'start');
+  await a.click('#nav-history');
+  await shot(a, 'dropped-history', 'History: github.com/stephenturner/skill-deslop (main) no longer has it, so it is off and removed from all 3 tools, and no longer from that source, with Turn on; and unslop brought in, Off, with Turn on (1280×800)');
+  await a.click('#nav-sources');
+  await lookAt('https://github.com/team/plugin');
+  await atEverySize('plugin', 'Looked at a link to a plugin: where it read, and that it holds a plugin, which a later version brings; nothing here is read, so there is no Add, only Cancel', false, '#source-preview');
+  await lookAt('https://github.com/nobody/missing');
+  await atEverySize('cannot-read', 'Looked at a link with no repository there (or none this computer can read): why, in plain words, and Cancel', false, '#source-preview');
+  await a.click('#source-cancel');
+  await a.click('#nav-skills'); await turnOnRow('notes'); await switchOn('notes');
+  await a.click('#nav-sources');
+  await lookAt('team/kit');
+  await atEverySize('already-has', 'notes is On in Central Knot (the Practice copy’s own), and looked at team/kit: release comes in, Off; notes is not brought in, since Central Knot already has a different notes; the agent file there is named as coming in a later version', true, '#source-preview');
+  await a.click('#source-cancel');
+  rmSync(join(hosts, 'github.com/stephenturner'), { recursive: true, force: true });
+  await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
+  await atEverySize('check-failed', 'The repository was taken away; clicked Check now: the band says why it couldn’t be read, and the row says it too, under the last read it keeps; what came from it stays as it is', false, '.source-row');
+  await a.size(860, 560);
+  await a.click('.source-row .source-actions button.ghost');
+  await shot(a, 'remove-asked-860', 'Clicked Remove… at 860×560: the question in place, that its skills stay in Central Knot as they are, On or Off, with their versions, with Remove and Cancel');
+  await a.size(1280, 800);
+  if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 
 a.quit();
