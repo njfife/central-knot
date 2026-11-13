@@ -9,7 +9,8 @@
 // plugin-versions, parts, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
 // Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses, manage (a
-// tool's Manage switch, each state of the Harnesses list it changes, and the Skills page and Overview with tools left out) and repo.
+// tool's Manage switch, each state of the Harnesses list it changes, and the Skills page and Overview with tools left out), repo and
+// remove-build (another build of Central Knot on this Mac, as made-up bundles).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -19,6 +20,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
 import { serveReleases } from './update-fixture.mjs';
 import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
+import { standInApp, standInMac } from '../tests/macstandins.ts';
 
 const args = process.argv.slice(2);
 const out = resolve(args.find(arg => !arg.startsWith('--')) ?? 'ui-tour');
@@ -30,6 +32,9 @@ const command = flag('--electron') ? join(root, 'node_modules/electron/dist', re
 const scratch = mkdtempSync(join(tmpdir(), 'ck-tour-'));
 const HOME = join(scratch, 'home');
 mkdirSync(HOME, { recursive: true });
+// What stands in for /Applications, the running apps and the Trash in every launch (platform.ts macPlaces): the tour never
+// looks at or removes the real ones.
+const MAC = standInMac(join(scratch, 'mac'));
 // On Linux the file manager is a stand-in that opens nothing.
 mkdirSync(join(scratch, 'bin'));
 writeFileSync(join(scratch, 'bin/xdg-open'), '#!/bin/sh\nexit 0\n');
@@ -44,7 +49,7 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => p
 /** What a page threw, in any app this run started. */
 const pageErrors = [];
 async function launch(more = {}) {
-  const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), CK_PLUGIN_UPDATES_EVERY_MS: 'never', ...more };
+  const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), CK_PLUGIN_UPDATES_EVERY_MS: 'never', CK_TEST_APPS: MAC.root, ...more };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   // The app picks its own free debug ports (port 0) and says them, so no other run on this machine can be on them (cdp.mjs
@@ -2155,7 +2160,7 @@ if (wanted('manage')) {
   await atEverySize('all-managed', 'Harnesses with every tool managed: each card has its Manage switch on, and the line under it says what turning it off leaves as it is', true);
   await focusOn('#manage-codex-cli'); await shot(a, 'switch-focus', 'Keyboard focus on Codex’s Manage switch, with its ring.');
   await a.click('#manage-codex-cli');
-  await atEverySize('codex-left-out', 'Clicked Codex’s switch: the band says Codex is left out and its copies stay; its card has no counts, and its line says nothing in Codex would change on turning it on, and two found items would show under Found', true);
+  await atEverySize('codex-left-out', 'Clicked Codex’s switch: the band says Codex is left out and its copies stay; its card has no counts, and its line says no item in Codex would change on turning it on, and two found items would show under Found', true);
   // While Codex is left out: its copy of notes is edited by hand, and standup is turned off in Central Knot.
   edit(join(practice, '.codex/skills/notes/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Codex while it was left out.\n'));
   await a.click('#nav-skills'); await a.click('#switch-standup'); await a.settle();
@@ -2331,6 +2336,84 @@ if (wanted('repo')) {
   await shot(a, 'repo-disconnect-confirm-860', 'The same at 860×560.');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
   await a.click('#repo-disconnect-confirm'); await shot(a, 'repo-disconnected', 'Clicked "Disconnect": back to the start page; the tools are unchanged.');
+}
+
+// ---------- Another build of Central Knot on this Mac (otherbuilds.ts): made-up bundles in the stand-in for /Applications ----------
+if (wanted('remove-build')) {
+  begin('remove-build');
+  await fresh();
+  const ALPHA_ID = 'com.centralknot.alpha', id = 'com-centralknot-alpha';
+  const installed = join(MAC.applications, 'Central Knot Alpha.app');
+  const putBack = () => MAC.bundle(MAC.applications, 'Central Knot Alpha', ALPHA_ID);
+  const apps = [];
+  /** Stand-in copies of the alpha running from `paths` (one that quits when asked, or not), listed as running. */
+  const running = async (paths, quits = true) => { const started = await Promise.all(paths.map(() => standInApp(quits))); apps.push(...started); MAC.running(paths.map((path, at) => ({ bundleId: ALPHA_ID, pid: started[at].pid, path }))); };
+  const idle = `document.body.dataset.busy !== 'true'`;
+  const look = async page => { await a.click(`#nav-${page}`); await refresh(); };
+  putBack();
+  await look('overview');
+  if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
+  await atEverySize('overview-band', 'Central Knot Alpha is installed in the Applications folder and doesn’t sync this home: the Overview’s band says where it is, that one build syncs a home at a time, which app Remove moves to the Trash and what stays, with Remove and Keep both', true);
+  await shot(a, 'overview-band-hover', 'The pointer on "Remove Central Knot Alpha": its hover look (a tooltip doesn’t show in a picture).', await middleOf(`#other-build-action-${id}`));
+  await focusOn(`#other-build-action-${id}`); await shot(a, 'overview-band-focus', 'Keyboard focus on "Remove Central Knot Alpha", with its ring.');
+  await a.click('#nav-settings');
+  await atEverySize('settings-row', 'Settings › Other builds of Central Knot: a row for it, saying what it is, where, that one build syncs a home at a time, which app Remove moves to the Trash and what stays', true, '#settings-other-builds', 'start');
+  await a.click('#nav-overview'); await a.click(`#other-build-hide-${id}`);
+  await shot(a, 'overview-band-hidden', 'Clicked Keep both: the Overview no longer shows the band; both stay installed.');
+  await a.click('#nav-settings'); await show('#settings-other-builds', 'start');
+  await shot(a, 'settings-row-after-hiding', 'Settings still lists it while it is installed.');
+  await a.run(`localStorage.removeItem('ck-other-build-hidden-${ALPHA_ID}')`);
+  // Running: from its bundle, and a second copy from Downloads.
+  await running([installed, join(HOME, 'Downloads/Central Knot Alpha.app')]);
+  await look('settings'); await show('#settings-other-builds', 'start');
+  await atEverySize('settings-row-running', 'It is running, from its bundle and as a second copy from Downloads: the row says so, and that the Downloads copy quits too but stays where it is', false, '#settings-other-builds', 'start');
+  await a.click('#nav-overview');
+  await shot(a, 'overview-band-running', 'The Overview’s band, with it running.');
+  await a.click('#nav-settings'); await a.click(`[id^="other-build-row-"]`); await waitFor(a, idle, 20000); await a.settle(); await show('#settings-other-builds', 'start');
+  await atEverySize('settings-removed', 'Clicked Remove in Settings: both copies quit, the bundle went to the Trash, the row is gone and the section says where it went and what stays', false, '#settings-other-builds', 'start');
+  // Running only, from the Trash (as a sign-in might start it again): Quit, and where it runs from.
+  await running([join(HOME, '.Trash/Central Knot Alpha.app')]);
+  await look('overview');
+  await atEverySize('overview-band-from-trash', 'Removed, then running again from the Trash: the band says where it runs from and offers Quit, with what to do about sign-in');
+  await a.click('#nav-settings'); await show('#settings-other-builds', 'start');
+  await atEverySize('settings-row-from-trash', 'Its Settings row: running from the Trash, not from an Applications folder, with Quit', false, '#settings-other-builds', 'start');
+  await a.click('#nav-overview'); await a.click(`#other-build-action-${id}`); await waitFor(a, idle, 20000); await a.settle();
+  await shot(a, 'overview-quit', 'Clicked Quit: it quit; the band says so and that a sign-in start is turned off in Login Items.');
+  // Refused: macOS won't move it to the Trash (the stand-in's Trash can't be written), and a copy that won't quit.
+  putBack(); MAC.running([]);
+  mkdirSync(MAC.trash, { recursive: true }); chmodSync(MAC.trash, 0o555);
+  await look('overview'); await a.click(`#other-build-action-${id}`); await waitFor(a, idle, 20000); await a.settle();
+  await atEverySize('refused-trash', 'Clicked Remove where macOS refuses to move it to the Trash: nothing else was tried, the band says so, with Show in Finder; the build’s band is still there');
+  chmodSync(MAC.trash, 0o755);
+  await running([installed], false);
+  await look('overview'); await a.click(`#other-build-action-${id}`); await waitFor(a, idle, 20000); await a.settle();
+  await atEverySize('refused-running', 'Clicked Remove while it stays running (its window asking about unsaved work): after a few seconds nothing is removed, and the band says to quit it first');
+  for (const app of apps.splice(0)) app.kill('SIGKILL');
+  MAC.running([]);
+  await look('overview'); await a.click(`#other-build-action-${id}`); await waitFor(a, idle, 20000); await a.settle();
+  await atEverySize('overview-removed', 'Clicked Remove on the Overview: it is in the Trash; the band says what stays, and that a sign-in start is turned off in Login Items');
+  // A home a custom build syncs, with that build installed: no other build is offered, and Take over syncing is as before.
+  const acme = MAC.bundle(MAC.applications, 'Central Knot for Acme', 'com.centralknot.custom.acme');
+  mkdirSync(join(practice, '.central-knot'), { recursive: true });
+  writeFileSync(join(practice, '.central-knot/sync.json'), `${JSON.stringify({ formatVersion: 2, generation: 'tour-acme', owner: 'com.centralknot.custom.acme', ownerName: 'Acme Knot' })}\n`);
+  await look('skills');
+  await atEverySize('skills-custom-owner', 'A custom build (Acme Knot) synced this home last and is installed here: only the standard app and the alpha are ever offered, so this is Take over syncing as before, with no choice to remove it', false, '#other-owner', 'start');
+  await a.click('#nav-settings'); await show('#settings-home', 'start');
+  await shot(a, 'settings-custom-owner', 'Settings in that home: no Other builds section, since neither the standard app nor the alpha is here.');
+  rmSync(acme, { recursive: true });
+  // Where the alpha synced this home last: Take over syncing is two choices.
+  putBack();
+  mkdirSync(join(practice, '.central-knot'), { recursive: true });
+  writeFileSync(join(practice, '.central-knot/sync.json'), `${JSON.stringify({ formatVersion: 2, generation: 'tour-alpha', owner: ALPHA_ID, ownerName: 'Central Knot Alpha' })}\n`);
+  await look('skills');
+  await atEverySize('skills-two-choices', 'Central Knot Alpha synced this home last, isn’t open, and is installed here: Take over syncing is two choices, Take over and remove Central Knot Alpha (the band names the app that goes and what stays), or Take over, keep both', true, '#other-owner', 'start');
+  await shot(a, 'skills-two-choices-hover', 'The pointer on "Take over and remove Central Knot Alpha": its hover look.', await middleOf('#take-over-remove'));
+  await a.click('#nav-overview');
+  await atEverySize('overview-two-choices', 'The Overview says the same, with the same two choices and no band of its own for it; below, History’s line is about changes in your tools');
+  await a.click('#nav-settings'); await show('#settings-other-builds', 'start');
+  await atEverySize('settings-row-syncs-here', 'Its Settings row: it synced this home last and isn’t open, so removing it takes over syncing first; the same two choices', false, '#settings-other-builds', 'start');
+  await a.click('#nav-skills'); await a.click('#take-over-remove'); await waitFor(a, idle, 20000); await a.settle();
+  await atEverySize('skills-taken-over-removed', 'Clicked "Take over and remove Central Knot Alpha": this app syncs the home now, said first, and the alpha is in the Trash');
 }
 
 a.quit();

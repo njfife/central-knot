@@ -19,10 +19,12 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { connect } from './cdp.mjs';
 import { serveReleases } from './update-fixture.mjs';
 import { macDownload } from '../src/updates.ts';
+import { standInMac } from '../tests/macstandins.ts';
 
 const root = process.env.CK_PROOF_ROOT || '/private/tmp/ck-update-proof';
 const FIXTURE_PORT = 9471, DEBUG_PORT = 9472;
-const environment = { CK_TEST_HOME: join(root, 'home'), CK_TEST_USER_DATA: join(root, 'data'), CK_TEST_DEBUG_PORT: String(DEBUG_PORT), CK_UPDATE_RELEASES: `http://127.0.0.1:${FIXTURE_PORT}/releases` };
+// CK_TEST_APPS: what stands in for /Applications, the running apps and the Trash (platform.ts macPlaces), so the app never looks at the real ones.
+const environment = { CK_TEST_HOME: join(root, 'home'), CK_TEST_USER_DATA: join(root, 'data'), CK_TEST_DEBUG_PORT: String(DEBUG_PORT), CK_UPDATE_RELEASES: `http://127.0.0.1:${FIXTURE_PORT}/releases`, CK_TEST_APPS: join(root, 'mac') };
 if (process.argv[2] === '--env') { console.log(JSON.stringify(environment)); process.exit(0); }
 const [olderZip, olderTag, newerZip, newerTag, adhocZip, adhocTag] = process.argv.slice(2);
 if (!adhocTag) throw new Error('Usage: node scripts/update-proof.mjs <older.zip> <older tag> <newer.zip> <newer tag> <ad hoc.zip> <ad hoc tag>');
@@ -76,6 +78,7 @@ await stopAll();
 rmSync(root, { recursive: true, force: true });
 mkdirSync(join(home, 'Applications'), { recursive: true });
 mkdirSync(environment.CK_TEST_USER_DATA, { recursive: true });
+standInMac(environment.CK_TEST_APPS);
 execFileSync('/usr/bin/ditto', ['-x', '-k', olderZip, join(home, 'Applications')]);
 const installed = tree(app);
 /** The Developer ID team a bundle is signed by, as codesign says it ("not set" when ad hoc). */

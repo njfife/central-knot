@@ -20,6 +20,7 @@ import { applySkills } from '../src/skills.ts';
 import { managedNow, readRecord } from '../src/share.ts';
 import { ALPHA_BUILD, lineApp, macDownload } from '../src/updates.ts';
 import { STANDARD_BUILD } from '../src/values.ts';
+import { standInMac } from '../tests/macstandins.ts';
 
 if (process.platform !== 'darwin') throw new Error('The alpha check packages and opens Mac apps: run it on a Mac.');
 process.chdir(resolve(import.meta.dirname, '..'));
@@ -106,11 +107,17 @@ const alphaAsset = macDownload(ALPHA, version, 'zip');
 const forAlpha = await serveReleases([{ tag: 'v0.7.0-preview.1', zip }, { tag: 'v0.6.0-alpha.99', zip, asset: alphaAsset }, { tag: 'v0.6.0-alpha.97', zip, asset: alphaAsset }]);
 const forStandard = await serveReleases([{ tag: 'v0.6.0-alpha.99', zip, asset: alphaAsset }, { tag: 'v0.5.0-preview.99', zip }]);
 
+// What stands in for /Applications, the running apps and the Trash (platform.ts macPlaces): each app is listed as running from
+// its own bundle once it is started, so each says truthfully that the other is open; neither sees the real Applications folder.
+const mac = standInMac(join(scratch, 'mac'));
+const runningApps = [];
 async function launch(name, env) {
-  const exe = join('release', `${name}-darwin-arm64`, `${name}.app`, 'Contents/MacOS', name);
+  const bundle = resolve('release', `${name}-darwin-arm64`, `${name}.app`), exe = join(bundle, 'Contents/MacOS', name);
   mkdirSync(join(scratch, 'tmp'), { recursive: true });
   // No data folder is named: each app must choose its own.
-  const child = spawn(exe, ['--remote-debugging-port=0'], { env: { HOME, CFFIXED_USER_HOME: HOME, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp'), ...env }, stdio: ['ignore', 'ignore', 'pipe'] });
+  const child = spawn(exe, ['--remote-debugging-port=0'], { env: { HOME, CFFIXED_USER_HOME: HOME, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp'), CK_TEST_APPS: mac.root, ...env }, stdio: ['ignore', 'ignore', 'pipe'] });
+  runningApps.push({ bundleId: name === ALPHA ? ALPHA_BUILD : STANDARD_BUILD, pid: child.pid, path: bundle });
+  mac.running(runningApps);
   launched.add(child);
   const { port } = await debugPorts(child);
   let target;
@@ -145,7 +152,7 @@ check('the standard app is offered the newer preview, never the newer alpha', aw
 // Two apps, one home: each names the other as the person knows it, both ways.
 const band = '#other-owner .band-text';
 await alpha.click('#nav-skills');
-check('the alpha names the standard app as the one that syncs the home', await alpha.until(`!!document.querySelector('${band}')`) && /^Central Knot (is open and syncs|synced this home last)/.test(await alpha.text(band)), await alpha.text(band));
+check('the alpha names the standard app as the one that syncs the home, open now', await alpha.until(`!!document.querySelector('${band}')`) && /^Central Knot is open and syncs/.test(await alpha.text(band)), await alpha.text(band));
 check('and offers to take over in its own name', await alpha.run(`document.querySelector('#take-over-sync').title`) === 'Central Knot Alpha syncs this home from now on, from where Central Knot left it, and anything waiting is synced straight away. Central Knot stops syncing here until you take over from it again.', await alpha.run(`document.querySelector('#take-over-sync')?.title`));
 await alpha.click('#take-over-sync');
 check('taking over, the alpha says so and names the way back', await alpha.until(`!document.querySelector('#other-owner')`) && /^Central Knot Alpha now syncs this home( \(automatic sync is off here\))?\. To go back, take over in Central Knot\.$/.test(await alpha.text('#announcement')), await alpha.text('#announcement'));
@@ -155,7 +162,7 @@ check('the alpha keeps its settings in a folder of its own', existsSync(join(app
 // The standard app, open all along, reads the home again (its Refresh, as a person would).
 await plain.click('#nav-skills');
 await plain.click('#header-refresh');
-check('the standard app then names the alpha', await plain.until(`!!document.querySelector('${band}')`) && /^Central Knot Alpha (is open and syncs|synced this home last)/.test(await plain.text(band)), await plain.text(band));
+check('the standard app then names the alpha, open now', await plain.until(`!!document.querySelector('${band}')`) && /^Central Knot Alpha is open and syncs/.test(await plain.text(band)), await plain.text(band));
 check('and offers to take it back in its own name', await plain.run(`document.querySelector('#take-over-sync').title`) === 'Central Knot syncs this home from now on, from where Central Knot Alpha left it, and anything waiting is synced straight away. Central Knot Alpha stops syncing here until you take over from it again.', await plain.run(`document.querySelector('#take-over-sync')?.title`));
 await plain.click('#take-over-sync');
 check('taking it back, the standard app names the alpha as the way back', await plain.until(`!document.querySelector('#other-owner')`) && /^Central Knot now syncs this home( \(automatic sync is off here\))?\. To go back, take over in Central Knot Alpha\.$/.test(await plain.text('#announcement')), await plain.text('#announcement'));

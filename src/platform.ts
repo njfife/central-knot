@@ -74,8 +74,23 @@ export interface AppCandidate {
   carried?: { folders: string; binary?: string } | { file: string; runtimes?: string; binary?: string } | { binary: string };
 }
 
+/**
+ * Where this Mac's apps are, for every look at them (a tool's desktop app, the apps beside the tools, another build of Central
+ * Knot: otherbuilds.ts) and the one thing ever removed from them (otherbuilds.ts removeBuild): the person's own Applications
+ * folder, then the computer's; the program that says which apps are running (macOS's lsappinfo); and the Trash, unset for the
+ * account's own (Electron's shell.trashItem, in main.ts). A test names a folder of its own in CK_TEST_APPS, which stands in for
+ * /Applications, the running apps and the Trash (its Applications, lsappinfo and Trash), so no test looks at or changes the
+ * real ones; ~/Applications is then the test's throwaway HOME's. tests/macstandins.ts makes one.
+ */
+export interface MacPlaces { applications: string[]; lsappinfo: string; trash?: string }
+export function macPlaces(home: string, env: NodeJS.ProcessEnv = process.env): MacPlaces {
+  const test = env.CK_TEST_APPS;
+  if (test) return { applications: [join(home, 'Applications'), join(test, 'Applications')], lsappinfo: join(test, 'lsappinfo'), trash: join(test, 'Trash') };
+  return { applications: [join(home, 'Applications'), '/Applications'], lsappinfo: '/usr/bin/lsappinfo' };
+}
+
 export function appCandidates(home: string, binary: string, platform: string = process.platform): AppCandidate[] {
-  const where = [join(home, 'Applications'), '/Applications'];
+  const where = macPlaces(home).applications;
   const local = join(home, 'AppData', 'Local');
   const aliases = (family: string) => join(local, 'Microsoft', 'WindowsApps', family);
   const mac: Record<string, AppCandidate[]> = {
@@ -118,9 +133,9 @@ export const CLAUDE_PROCESS = '^[^ ]*node .*(@anthropic-ai/claude-code/|/bin/cla
  * computer, never run, and named on Harnesses only when found. `says`: what that means for what Central Knot sets up.
  */
 export const otherAppCandidates = (home: string): { name: string; says: string; apps: string[] }[] => {
-  const places = (names: string[]) => [join(home, 'Applications'), '/Applications'].flatMap(apps => names.map(name => join(apps, name)));
+  const places = (names: string[]) => macPlaces(home).applications.flatMap(apps => names.map(name => join(apps, name)));
   return [
     { name: 'T3 Code', says: 'Runs your tools for you. One it starts with this computer’s home uses what is set up here.', apps: places(['T3 Code.app', 'T3 Code (Nightly).app', 'T3 Code (Alpha).app']) },
     { name: 'VS Code', says: 'Its built-in Copilot lists skills from some of your tools’ folders. Central Knot doesn’t change VS Code’s own settings.', apps: places(['Visual Studio Code.app', 'Visual Studio Code - Insiders.app']) },
-  ].map(app => ({ ...app, apps: app.apps.filter(path => !homeOnly('other-apps') || path.startsWith(`${home}${sep}`)) }));
+  ];
 };

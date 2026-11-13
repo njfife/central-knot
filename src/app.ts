@@ -1152,8 +1152,10 @@ export const syncNow = () => busy('Syncing…', async () => {
  * Another build syncs this home: who, whether it is open now (where that can be told), what that means here, and that
  * taking over loses nothing. Said the same on every page.
  */
-export const otherOwnerSaid = (owner: { name: string; running?: boolean }) => `${owner.running === false ? `${owner.name} synced this home last and isn’t open, so nothing is syncing here now.`
-  : `${owner.name}${owner.running ? ' is open and' : ''} syncs this home, so skills, MCP servers and agents aren’t changed from here.`} Taking over keeps every managed item and choice.`;
+export const otherOwnerSaid = (owner: { name: string; running?: boolean }) =>
+  `${owner.name} ${ownerSyncs(owner)}, so ${owner.running === false ? 'nothing is syncing here now' : 'skills, MCP servers and agents aren’t changed from here'}. Taking over keeps every managed item and choice.`;
+/** What the build that syncs this home is doing, as far as can be told: whether it is open decides which. */
+export const ownerSyncs = (owner: { running?: boolean }) => (owner.running === false ? 'synced this home last and isn’t open' : owner.running ? 'is open and syncs this home' : 'syncs this home');
 /** What Take over syncing does, for its button's tooltip. */
 export const takeOverTitle = (owner: { name: string }) => `Central Knot syncs this home from now on, from where ${owner.name} left it, and anything waiting is synced straight away. ${owner.name} stops syncing here until you take over from it again.`;
 
