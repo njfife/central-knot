@@ -341,7 +341,7 @@ async function rowFacts(look: ServerLook, key: string, item: LibraryItem | undef
     key, name, description: shape ? summary(shape) : '', copies, on: !!item?.on, except: item?.except ?? [], cannot, edited,
     // The copies a tool managed again gives way with are kept before the plan, by the pass (librarypass.ts cameBack): said with it.
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
-      : { takeIn: takeInAnswers(look, key) }),
+      : { takeInAnswers: takeInAnswers(look, key) }),
     ...some('plugin', plugin), ...some('unseen', unseen), ...some('waits', waits), ...some('switchedOff', switchedOff), ...some('switchProblem', switchProblem),
   };
 }

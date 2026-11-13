@@ -241,7 +241,7 @@ const ago = (iso: string) => { const said = sinceThen(Date.parse(iso)); return s
 
 /** The real home's facts in the shape the page works with. */
 const fromFacts = (facts: SkillFacts): ItemRow => ({
-  key: facts.key, name: facts.name, description: facts.description, converted: facts.converted, unseen: facts.unseen, plan: facts.plan, takeIn: facts.takeIn, versionChanges: facts.versionChanges, managed: facts.managed, off: facts.off, cannot: facts.cannot, plugin: facts.plugin, edited: facts.edited, waits: facts.waits,
+  key: facts.key, name: facts.name, description: facts.description, converted: facts.converted, unseen: facts.unseen, plan: facts.plan, takeInAnswers: facts.takeInAnswers, versionChanges: facts.versionChanges, managed: facts.managed, off: facts.off, cannot: facts.cannot, plugin: facts.plugin, edited: facts.edited, waits: facts.waits,
   blocks: facts.choiceBlocks, hashes: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   copies: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   paths: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.directory])),
@@ -1349,7 +1349,7 @@ function section(role: 'on' | 'found' | 'off' | 'away', list: ItemRow[]) {
  */
 function foundNote(list: ItemRow[]) {
   if (!state.home?.sync.syncEverything) return 'in a tool, not in Central Knot yet. Add one to keep it in Central Knot and turn it on.';
-  const choosing = list.filter(skill => skill.takeIn && 'wait' in skill.takeIn.rule).length;
+  const choosing = list.filter(skill => skill.takeInAnswers && 'wait' in skill.takeInAnswers.rule).length;
   return `in a tool, not in Central Knot: Synchronize everything leaves these, and each row says why${choosing ? `. ${choosing} ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy` : ''}`;
 }
 

@@ -283,7 +283,7 @@ async function rowFacts(look: AgentLook, key: string, item: LibraryItem | undefi
     key, name, description: current?.description ?? '', copies, on: !!item?.on, except: item?.except ?? [], cannot, edited,
     // The copies a harness managed again gives way with are kept before the plan, by the pass (librarypass.ts cameBack): said with it.
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
-      : { takeIn: takeInAnswers(look, key) }),
+      : { takeInAnswers: takeInAnswers(look, key) }),
     ...(Object.keys(plugin).length ? { plugin } : {}), ...(Object.keys(unseen).length ? { unseen } : {}),
   };
 }

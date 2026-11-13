@@ -85,7 +85,7 @@ test('Kept out of Claude Code, a skill OpenCode read there becomes a copy of Ope
     // Copies that differ between Claude Code and Copilot CLI: Copilot's is chosen, and OpenCode then reads it in Claude Code's folder.
     await skill(box.home, '.claude/skills', 'review', text('review', 'Claude Code’s.'));
     await skill(box.home, '.copilot/skills', 'review', text('review', 'Copilot’s.'));
-    assert.deepEqual((await skillsView(box.context, three)).items.find(item => item.key === 'review')!.takeIn?.click, { wait: 'choice' });
+    assert.deepEqual((await skillsView(box.context, three)).items.find(item => item.key === 'review')!.takeInAnswers?.click, { wait: 'choice' });
     await applySkills(box.context, three, [{ key: 'review', managed: true, off: [], use: 'copilot-cli' }]);
     assert.equal(await readFile(join(box.home, '.claude/skills/review/SKILL.md'), 'utf8'), text('review', 'Copilot’s.'));
     assert.equal(await exists(join(box.home, OPENCODE, 'skills/review')), false, 'no second copy for OpenCode');

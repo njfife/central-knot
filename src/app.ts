@@ -195,7 +195,7 @@ const focusById = (id?: string | null) => (id ? document.getElementById(id) : nu
 export function setHome(view: HomeView | null | undefined, { reload = true } = {}): void {
   if (!view) return;
   const before = state.home ? homeTools().join() : undefined;
-  state.home = view;
+  state.home = keepUnshown(state.home, view);
   forgetLostHarness();
   if (before !== undefined && homeTools().join() === before) return;
   leaveAbsentPage();
@@ -1163,6 +1163,21 @@ api().onSaid(text => announce(text));
 
 /** Each page's sync notices in a view: what changed on its own, with its History event. */
 const noticesByPage = (view: HomeView): [Page, SyncNotice[]][] => [['skills', view.skills.notices], ['mcp', view.mcp.notices], ['agents', view.agents.notices]];
+
+/**
+ * A sync notice its page hasn't shown yet (state.seenNotices) stays in the next read of the same home until it is shown or
+ * dismissed: main says each notice once, and a pass's own writes (a settings file it wrote) bring a read with none right
+ * after the one that had them, so a page opened a moment later still tells what Synchronize everything, or an edit, did.
+ */
+function keepUnshown(was: HomeView | undefined, view: HomeView): HomeView {
+  if (!was || was.home !== view.home) return view;
+  const kept = (kind: PageKind) => {
+    const now = view[kind].notices, known = new Set(now.map(notice => notice.history));
+    const unshown = was[kind].notices.filter(notice => !known.has(notice.history) && !state.seenNotices.has(notice.history) && !state.dismissed.has(notice.history));
+    return unshown.length ? { ...view[kind], notices: [...unshown, ...now] } : view[kind];
+  };
+  return { ...view, skills: kept('skills'), mcp: kept('mcp'), agents: kept('agents') };
+}
 
 /**
  * A background pass changed something: read again quietly, keeping drafts. In the middle of an action it waits, and runs

@@ -137,7 +137,7 @@ test('Off with Claude Code open, then On again, then Off and Delete from Central
     assert.deepEqual([row.on, row.waits, view.library.docs.deleted !== undefined], [false, ['claude-cli'], true]);
     assert.equal(statusLine({ ...row, hashes: hashes(row) }, undefined, view.tools), 'Deleted from Central Knot · Claude Code still has it until you click Write to Claude Code. History can restore it.');
     assert.equal(say.harnessLine({ ...row, hashes: hashes(row) }, undefined, 'claude-cli', 'Claude Code'), 'Its entry here is removed when you click Write to Claude Code. History can restore it.');
-    assert.deepEqual([canAdd({ ...row, hashes: hashes(row) }), row.takeIn], [false, { click: { leave: 'leaving' }, rule: { leave: 'leaving' } }], 'no Add while the band is about to remove its last copy');
+    assert.deepEqual([canAdd({ ...row, hashes: hashes(row) }), row.takeInAnswers], [false, { click: { leave: 'leaving' }, rule: { leave: 'leaving' } }], 'no Add while the band is about to remove its last copy');
     await writeToClaude(box.context, all, ['docs']);
     view = await box.view();
     assert.deepEqual([view.items, await commandIn(box, 'claude-cli')], [[], undefined], 'gone from Claude Code, and from the page');

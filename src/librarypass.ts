@@ -6,7 +6,10 @@
 //                  unseen, never missing
 //   deletionsTold  a deleted item that History has no standing entry for gets one, so it always has its Restore
 //   pull, click    what Pull brings, and what the person asked (On, Off, a harness kept out, a version made current, Delete,
-//                  Restore, a found item taken in), recorded on the item
+//                  Restore, a found item taken in by Add), recorded on the item
+//   takeInByRule   in main.ts's pass of the whole home only (PassOptions background), with the home's Synchronize everything
+//                  on: each found item the take-in table lets it take (library.ts takeInAnswer, through foundKey), taken in as
+//                  Add takes it (takeIn); History's entry is an Add's, and the pass's one notice says what it took in
 //   guardFolders   on the items as the clicks left them: a harness managed again (library.ts managedAgain, for every item at
 //                  once), a folder moved, made again or gone
 //   syncItem       the library's plan for the item (copiesOf, plan), carried out by carryOut: History first (logItem), then
@@ -14,8 +17,8 @@
 //   keepFolders    the folder identities the next pass compares with
 //
 // Also here: the page's look (lookFor: the same reading, guards applied in memory, nothing saved), so a mark says what a pass
-// will do; a History entry's action (restore), which is always one of the clicks above; and the tool choice letting folders
-// go (forgetFolders). What a kind's page shows, and how the Git repo reads it, stay with the kind (agents.ts agentsView and
+// will do, and a found row's answers from the take-in table (takeInAnswers); a History entry's action (restore), which is
+// always one of the clicks above; and the tool choice letting folders go (forgetFolders). What a kind's page shows, and how the Git repo reads it, stay with the kind (agents.ts agentsView and
 // agentsForRepo, skills.ts skillsView and skillsForRepo, servers.ts serversView and serversForRepo). History's sentences and
 // actions for the library's entries are historyactions.ts's, for every kind.
 //
@@ -43,7 +46,8 @@
 // To put another kind on the library, every place it is wired in (this is the one list; librarypages.ts and LEDGER point
 // here, and the compiler names a member `Kind` lacks):
 // - the contract: its name in library.ts ItemKind, and one object implementing `Kind`, like agents.ts agentKind (a kind with
-//   no part of its own per tool has `ownOf` answer undefined and `keepOwn` false);
+//   no part of its own per tool has `ownOf` answer undefined and `keepOwn` false; its read fills Disk.parts where a plugin's
+//   part is one of its found copies, as share.ts partsIn gives them);
 // - its callers: runPass for its passes (the app's clicks through itemClick), restore for History's actions, lookFor for its
 //   page's view, and forgetFolders from toolchoice.ts chooseTools;
 // - its view: a types.ts LibraryView (as agents.ts agentsView gives), kept in types.ts HomeView under the page's name for the
@@ -418,7 +422,7 @@ export function foundKey(look: AnyLook, key: string, off: readonly HarnessId[] =
   return { copies, deleted: !!tombstone, leaving };
 }
 
-/** A found key's answers, a click's and Synchronize everything's, as each kind's view gives its row (types.ts LibraryFacts takeIn). */
+/** A found key's answers, a click's and Synchronize everything's, as each kind's view gives its row (types.ts LibraryFacts takeInAnswers). */
 export const takeInAnswers = (look: AnyLook, key: string) => {
   const found = foundKey(look, key);
   return { click: takeInAnswer('click', found), rule: takeInAnswer('rule', found) };

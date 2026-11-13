@@ -275,10 +275,10 @@ export interface SkillFacts {
    * sentence naming that tool as the page does (copywords.ts cantUse makes it a row's or a result's sentence).
    */
   choiceBlocks: Partial<Record<HarnessId, { tool: HarnessId; reason: string }[]>>;
-  /** A library kind's row (LibraryFacts, as itemrow.ts kindSource gives the page): its `unseen`, `plan`, `takeIn` and `versionChanges`. */
+  /** A library kind's row (LibraryFacts, as itemrow.ts kindSource gives the page): its `unseen`, `plan`, `takeInAnswers` and `versionChanges`. */
   unseen?: LibraryFacts['unseen'];
   plan?: LibraryFacts['plan'];
-  takeIn?: LibraryFacts['takeIn'];
+  takeInAnswers?: LibraryFacts['takeInAnswers'];
   versionChanges?: LibraryFacts['versionChanges'];
   /** MCP servers: tools whose write or removal waits for Write to Claude Code (types.ts LibraryFacts waits). */
   waits?: HarnessId[];
@@ -735,7 +735,7 @@ export interface LibraryFacts {
    * Found, not in the library: what a click on its Add does, and what Synchronize everything does with it (library.ts
    * takeInAnswer, each kind's view through librarypass.ts takeInAnswers).
    */
-  takeIn?: { click: TakeInAnswer; rule: TakeInAnswer };
+  takeInAnswers?: { click: TakeInAnswer; rule: TakeInAnswer };
   /**
    * Skills: how a tool has it another way (a link, a folder Central Knot doesn't own, another tool's folder it reads, a plugin),
    * as its line says it, On or Off (skills.ts anotherWay). Nothing of Central Knot's goes there while it does.

@@ -5,7 +5,7 @@
 //   in well under a minute. It fails if a page doesn't open or throws. This is the run for every change.
 // - `--only a,b` runs the named feature sections: the ones a change touched.
 // - `--full` runs every feature section, hundreds of pictures over about ten minutes. For a new release only.
-// Features, in the order they run: shell, skills, sync, mcp, agents, plugins, profiles, plugin-skills, plugin-updates,
+// Features, in the order they run: shell, skills, sync, mcp, agents, plugins, profiles, sync-everything, plugin-skills, plugin-updates,
 // plugin-versions, parts, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
 // Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses and repo.
@@ -746,6 +746,51 @@ if (wanted('profiles')) {
 }
 
 // ---------- One skill of an installed plugin, off and back on (ENB-06) ----------
+if (wanted('sync-everything')) {
+  begin('sync-everything');
+  await fresh();
+  await a.click('#nav-skills');
+  await atEverySize('skills-found-off', 'Opened Skills on the Practice copy, Synchronize everything off as it is until chosen: the Found heading says Add takes each in', false, '[data-section="found"]');
+  await a.click('#nav-settings');
+  await waitFor(a, `!!document.querySelector('#setting-sync-everything')`);
+  await atEverySize('settings-off', 'Opened Settings: under This home, Synchronize everything is off; its line says how many found items turning it on would add now, and how many wait for a choice of copy, with See Skills', true, '#setting-sync-everything');
+  await a.size(860, 560); await show('#setting-sync-everything'); await focusOn('#sync-everything-on');
+  await shot(a, 'settings-off-focus-860', 'Tabbed to its switch at 860×560: the focus ring, the row’s words beside it');
+  await a.run(`document.activeElement?.blur()`); await a.size(1280, 800);
+  // The Practice copy is copied when the app opens: past the settle window, its copies are as ones that have sat in a tool,
+  // so the pass right after the switch takes them all at once.
+  await wait(2500);
+  await a.click('#sync-everything-on');
+  await waitFor(a, `document.querySelector('#sync-everything-on')?.getAttribute('aria-checked') === 'true'`, 15000);
+  await atEverySize('settings-on', 'Clicked its switch: Synchronize everything is on, kept in the home’s sync record, and the pass right after took in what was found; its line says what still waits for a choice of copy', true, '#setting-sync-everything');
+  await a.click('#nav-overview');
+  await atEverySize('overview-on', 'Opened Overview: the sync line says what turns up in a tool is taken in by Synchronize everything');
+  await a.click('#nav-skills');
+  await atEverySize('skills-on', 'Opened Skills: one notice names the skills it took in and the tools it found them in; the Found heading says Synchronize everything leaves these, each row saying why, and counts what waits for a choice', true);
+  await openRow('review');
+  await atEverySize('skills-on-review', 'Opened review, left found: its copies differ, so it asks which copy every tool uses, as Add would', false, '.details');
+  await closeRow('review');
+  await a.click('#nav-mcp');
+  await atEverySize('mcp-on', 'Opened MCP servers: its notice names the servers it took in and where; Claude Code’s part waits for Write to Claude Code, in its one band', true);
+  await a.click('#nav-agents');
+  await atEverySize('agents-on', 'Opened Agents: its notice names the agents it took in and where they were found');
+  await a.click('#nav-history');
+  await waitFor(a, `!!document.querySelector('.history-row')`, 15000);
+  await atEverySize('history', 'Opened History: each item it took in has Add’s entry, saying Synchronize everything took it in and from which tool, with Undo (none for docs, whose Undo would give Claude Code’s copy back to its MCP file, which waits for Write)', true);
+  // The skill notes's own row, by its name and kind (release-notes, an agent, has one too).
+  const notesRow = `[...document.querySelectorAll('.history-row[data-kind="on"]')].find(row => row.querySelector('.history-what strong')?.textContent === 'notes' && row.querySelector('.history-kind')?.textContent === 'Skill')`;
+  await a.run(`${notesRow}.querySelector('.history-actions button').click()`); await a.settle();
+  await atEverySize('history-undone', 'Clicked Undo on notes’s entry: the result says it is out of Central Knot again, each tool it was found in keeping its own copy; the entry reads as undone', true);
+  await a.click('#nav-skills'); await refresh();
+  await openRow('notes');
+  await atEverySize('skills-undone-found', 'Opened Skills after a pass: notes is found again and stays so; its line says Synchronize everything leaves it, since it was deleted from Central Knot, and only Add brings it back', true, '.details');
+  await closeRow('notes');
+  await a.click('#nav-settings');
+  await a.click('#sync-everything-on');
+  await waitFor(a, `document.querySelector('#sync-everything-on')?.getAttribute('aria-checked') === 'false'`, 15000);
+  await atEverySize('settings-off-again', 'Clicked its switch again: off; its line says what turning it on would add now (notes, undone, would not be)', false, '#setting-sync-everything');
+}
+
 if (wanted('plugin-skills')) {
   await fresh();
   begin('plugin-skills');

@@ -45,7 +45,7 @@ export async function seen(box: Box, context = box.context): Promise<{ fact?: Li
   const view = await agentsView(context, box.tools);
   const fact = view.items.find(entry => entry.key === 'reviewer');
   const hashes = Object.fromEntries(Object.entries(fact?.copies ?? {}).map(([tool, copy]) => [tool, copy!.hash]));
-  return { fact, item: view.library.reviewer, row: { key: 'reviewer', name: fact?.name, hashes, plan: fact?.plan, cannot: fact?.cannot, unseen: fact?.unseen, takeIn: fact?.takeIn } };
+  return { fact, item: view.library.reviewer, row: { key: 'reviewer', name: fact?.name, hashes, plan: fact?.plan, cannot: fact?.cannot, unseen: fact?.unseen, takeInAnswers: fact?.takeInAnswers } };
 }
 export const itemOf = async (box: Box) => (await seen(box)).item;
 

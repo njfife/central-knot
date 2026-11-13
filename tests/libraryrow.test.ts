@@ -24,8 +24,8 @@ function row(hashes: LibraryRow['hashes'], more: Partial<LibraryRow> = {}, agent
     : hashes?.[tool] !== undefined ? { is: 'present', hash: hashes[tool]!, at: 0 } : { is: 'absent' });
   const copies: Copies = Object.fromEntries(tools.map(tool => [tool, copyOf(tool)]));
   const found: FoundKey = { copies: tools.flatMap(tool => (hashes?.[tool] !== undefined && !more.unseen?.[tool] ? [{ harness: tool as HarnessId, hash: hashes[tool]! }] : [])), deleted: !!agent?.deleted, leaving: false };
-  const takeIn = { click: takeInAnswer('click', found), rule: takeInAnswer('rule', found) };
-  return { key: 'reviewer', name: 'reviewer', hashes, ...(agent && !agent.deleted ? { plan: plan(agent, copies) } : { takeIn }), ...more };
+  const takeInAnswers = { click: takeInAnswer('click', found), rule: takeInAnswer('rule', found) };
+  return { key: 'reviewer', name: 'reviewer', hashes, ...(agent && !agent.deleted ? { plan: plan(agent, copies) } : { takeInAnswers }), ...more };
 }
 const marks = (hashes: LibraryRow['hashes'], agent: LibraryItem | undefined, more: Partial<LibraryRow> = {}) => tools.map(tool => harnessIs(row(hashes, more, agent), agent, tool));
 /** A row and its item, for the functions that take both. */
@@ -81,9 +81,9 @@ test('A harness that can’t be given a copy, or whose copy can’t be read, say
 
 test('A found row’s Add says the take-in table’s answer for a click: it asks which copy only where the copies differ, and an item in the library has none', () => {
   // The answers are library.ts takeInAnswer's, which each kind's view gives its found rows (tests/agents.test.ts has them on real files).
-  const differing = row({ 'claude-cli': 'a', 'codex-cli': 'x' }, { takeIn: { click: { wait: 'choice' }, rule: { wait: 'choice' } } });
-  const same = row({ 'claude-cli': 'a', 'codex-cli': 'a' }, { takeIn: { click: { take: { harness: 'claude-cli', hash: 'a' }, chosen: false }, rule: { take: { harness: 'claude-cli', hash: 'a' }, chosen: false } } });
-  const none = row({}, { takeIn: { click: { leave: 'no-copy' }, rule: { leave: 'no-copy' } } });
+  const differing = row({ 'claude-cli': 'a', 'codex-cli': 'x' }, { takeInAnswers: { click: { wait: 'choice' }, rule: { wait: 'choice' } } });
+  const same = row({ 'claude-cli': 'a', 'codex-cli': 'a' }, { takeInAnswers: { click: { take: { harness: 'claude-cli', hash: 'a' }, chosen: false }, rule: { take: { harness: 'claude-cli', hash: 'a' }, chosen: false } } });
+  const none = row({}, { takeInAnswers: { click: { leave: 'no-copy' }, rule: { leave: 'no-copy' } } });
   const inLibrary = row({ 'claude-cli': 'b' }, {}, item());
   assert.deepEqual([asksWhichCopy(differing), asksWhichCopy(same), asksWhichCopy(none), asksWhichCopy(inLibrary)], [true, false, false, false]);
   assert.deepEqual([canAdd(differing), canAdd(same), canAdd(none), canAdd(inLibrary)], [true, true, false, false]);
@@ -151,7 +151,7 @@ test('The status line says where the agent stands, and in which harnesses', () =
   assert.equal(statusLine(...withItem({ 'claude-cli': 'b', 'copilot-cli': 'b' }, item({ except: ['codex-cli'], applied: { 'claude-cli': 'b', 'copilot-cli': 'b' } })), tools), 'On in Claude Code and Copilot CLI · kept out of Codex');
   assert.equal(statusLine(...withItem({ 'claude-cli': 'b' }, item({ applied: { 'claude-cli': 'b' } })), tools), 'On in Claude Code · Copilot CLI and Codex get it when sync runs');
   assert.equal(statusLine(...withItem({ 'codex-cli': 'x' }, item({ on: false, applied: {} })), tools), 'Off · in Central Knot only. Turn it on to put it in every tool. Codex has a copy Central Knot didn’t put there.');
-  const differing = row({ 'claude-cli': 'a', 'codex-cli': 'x' }, { takeIn: { click: { wait: 'choice' }, rule: { wait: 'choice' } } });
+  const differing = row({ 'claude-cli': 'a', 'codex-cli': 'x' }, { takeInAnswers: { click: { wait: 'choice' }, rule: { wait: 'choice' } } });
   assert.equal(statusLine(differing, undefined, tools), 'Not in Central Knot · in Claude Code and Codex, with different copies. Add it to keep it in Central Knot and put it in every tool.');
   // With Synchronize everything on, a found row says what the rule does with it.
   assert.equal(statusLine(differing, undefined, tools, true), 'Not in Central Knot · in Claude Code and Codex, with different copies. Add it to keep it in Central Knot and put it in every tool. Synchronize everything leaves it for you to choose: its copies differ.');

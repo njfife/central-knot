@@ -544,7 +544,7 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
   return {
     key, name, description, copies, on: !!item?.on, except: item?.except ?? [], cannot: facts.cannot, edited,
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
-      : { takeIn: takeInAnswers(look, key), choiceBlocks: choiceBlocksOf(entries) }),
+      : { takeInAnswers: takeInAnswers(look, key), choiceBlocks: choiceBlocksOf(entries) }),
     ...some('plugin', facts.plugin), ...some('unseen', facts.unseen), ...some('anotherWay', facts.anotherWay), ...some('takeOver', facts.takeOver),
     ...some('loads', facts.loads), ...some('switchedOff', Object.keys(facts.loads).filter(tool => facts.loads[tool as HarnessId]!.off)), ...some('switchProblem', switchProblem),
     ...(converted ? { converted: { agent: converted.agent, origin: converted.origin, losses: converted.losses } } : {}),

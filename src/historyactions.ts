@@ -169,10 +169,14 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
   }
 }
 
-/** What an entry's row shows in place of its action once that action was used. */
+/** What an entry's row shows in place of its action once that action was used (a found item taken in: its Undo). */
 export function doneWords(event: HistoryEvent): string {
+  if (tookIn(event)) return 'Undone';
   return event.kind === 'off' ? 'Turned on since' : event.kind === 'on' ? 'Turned off since' : event.kind === 'deleted' ? 'Restored' : 'Undone';
 }
+
+/** A found item taken in, by a click on Add (`found`, or `chosen` among copies that differed) or by Synchronize everything. */
+const tookIn = (event: HistoryEvent) => event.kind === 'chosen' || (event.kind === 'on' && (event.cause === 'found' || event.cause === 'sync-everything'));
 
 /**
  * Whether an entry is a skill's tool switch cleared by the person (skills.ts clearSwitch), whose Undo sets it again: read here
@@ -210,8 +214,7 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
   if (isClearedSwitch(event) && stillCleared) return { label: 'Undo', help: `Turn ${name} off again in ${andList(event.switched!.map(entry => toolName(entry.tool)))}’s own settings`, change: now };
   // A found item taken in (by a click on Add, or by Synchronize everything), while it is still as that left it: its Undo takes it
   // out again (found once more, a tombstone the rule leaves for good), each tool it was found in keeping its own copy.
-  const tookIn = event.kind === 'chosen' || (event.kind === 'on' && (event.cause === 'found' || event.cause === 'sync-everything'));
-  if (tookIn && item.on && asTheClickLeftIt(event, item)) {
+  if (tookIn(event) && item.on && asTheClickLeftIt(event, item)) {
     if (givesBackLater(event, givenBack(event, item).giveBack)) return undefined;
     return { label: 'Undo', help: `Take ${name} out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own`, change: { ...now, deleted: true, ...givenBack(event, item) } };
   }

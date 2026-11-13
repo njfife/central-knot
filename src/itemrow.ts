@@ -36,8 +36,8 @@ export interface ItemRow {
   unseen?: Partial<Record<Tool, string>>;
   /** A library kind, in the library: what the next pass does in each harness (types.ts LibraryFacts plan). */
   plan?: Plan;
-  /** A library kind, found in a harness: what a click on its Add does, and Synchronize everything (types.ts LibraryFacts takeIn). */
-  takeIn?: SkillFacts['takeIn'];
+  /** A library kind, found in a harness: what a click on its Add does, and Synchronize everything (types.ts LibraryFacts takeInAnswers). */
+  takeInAnswers?: SkillFacts['takeInAnswers'];
   /** A library kind, in the library: what each listed version changed (types.ts LibraryFacts versionChanges). */
   versionChanges?: VersionChange[];
   /** A library kind: the names in each harness's own part of its copy (types.ts ToolCopy ownPart). */

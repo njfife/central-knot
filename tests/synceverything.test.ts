@@ -63,7 +63,7 @@ const views = async (box: Box) => ({ skills: await skillsView(box.context, tools
 const rowOf = (view: LibraryView, key: string) => view.items.find(item => item.key === key);
 const placeIn = (view: LibraryView, key: string) => { const item = view.library[key]; return !item || item.deleted ? 'found' : item.on ? 'on' : 'off'; };
 /** A row's click as the page sends it (libraryrow.ts rowClicks), from the row as the view gives it. */
-const pageRow = (fact: LibraryFacts) => ({ key: fact.key, name: fact.name, hashes: Object.fromEntries(Object.entries(fact.copies).map(([tool, copy]) => [tool, copy!.hash])), plan: fact.plan, takeIn: fact.takeIn });
+const pageRow = (fact: LibraryFacts) => ({ key: fact.key, name: fact.name, hashes: Object.fromEntries(Object.entries(fact.copies).map(([tool, copy]) => [tool, copy!.hash])), plan: fact.plan, takeInAnswers: fact.takeInAnswers });
 const add = (view: LibraryView, key: string): Change => rowClicks.on(pageRow(rowOf(view, key)!), view.library[key]?.deleted ? view.library[key] : undefined);
 const entriesOf = async (box: Box, key: string) => (await readHistory(box.context)).filter(event => event.key === key);
 const turnOn = async (box: Box) => assert.deepEqual(await setSyncEverything(box.context, true), {});
@@ -77,7 +77,7 @@ test('Synchronize everything is off where it was never chosen: a found skill wai
     await applySkills(box.context, tools, [add((await views(box)).skills, 'notes')], { only: new Set(['notes']) });
     await putSkill(box, 'claude-cli', 'tidy');
     for (let run = 0; run < 3; run++) assert.equal(wrote(await background(box)), 0);
-    const view = (await views(box)).skills, rule = rowOf(view, 'tidy')?.takeIn?.rule;
+    const view = (await views(box)).skills, rule = rowOf(view, 'tidy')?.takeInAnswers?.rule;
     assert.deepEqual([placeIn(view, 'tidy'), (await readRecord(box.home)).record?.syncEverything], ['found', undefined]);
     assert.ok(rule && 'take' in rule && rule.take.harness === 'claude-cli', 'what it would do, which Settings counts while it is off');
   } finally { await box.cleanup(); }
@@ -101,15 +101,15 @@ test('Switched on in a home with found items: each it may take is taken in and O
     await putServers(box, 'codex-cli', { files: { command: 'files-mcp' } });
     const claudeBefore = await readFile(join(box.home, mcpFile['claude-cli']), 'utf8');
     const before = await views(box);
-    assert.deepEqual([before.skills, before.mcp, before.agents].flatMap(view => view.items.filter(item => item.takeIn && 'take' in item.takeIn.rule).map(item => item.key)), ['notes', 'docs', 'files', 'helper'], 'what Settings counts while it is off');
+    assert.deepEqual([before.skills, before.mcp, before.agents].flatMap(view => view.items.filter(item => item.takeInAnswers && 'take' in item.takeInAnswers.rule).map(item => item.key)), ['notes', 'docs', 'files', 'helper'], 'what Settings counts while it is off');
     await turnOn(box);
     assert.equal((await readRecord(box.home)).record?.syncEverything, true);
     const done = await background(box);
     const after = await views(box);
     assert.deepEqual(['notes', 'review', 'old'].map(key => placeIn(after.skills, key)), ['on', 'found', 'found']);
     assert.deepEqual(await Promise.all(tools.map(tool => skillIn(box, tool, 'notes'))), [skill('notes'), skill('notes'), skill('notes')]);
-    const old = rowOf(after.skills, 'old')!.takeIn!;
-    assert.deepEqual([rowOf(after.skills, 'review')?.takeIn?.rule, 'take' in old.click, old.rule], [{ wait: 'choice' }, true, { leave: 'deleted' }]);
+    const old = rowOf(after.skills, 'old')!.takeInAnswers!;
+    assert.deepEqual([rowOf(after.skills, 'review')?.takeInAnswers?.rule, 'take' in old.click, old.rule], [{ wait: 'choice' }, true, { leave: 'deleted' }]);
     assert.deepEqual(['helper'].map(key => placeIn(after.agents, key)), ['on']);
     assert.deepEqual([placeIn(after.mcp, 'docs'), placeIn(after.mcp, 'files')], ['on', 'on']);
     // docs: its other tools are written, Claude Code's copy counts as applied and its file is untouched.
@@ -163,7 +163,7 @@ test('Undo of what the rule took in takes it out again for good: each tool keeps
     assert.deepEqual(await Promise.all(tools.map(tool => skillIn(box, tool, 'notes'))), [skill('notes'), undefined, undefined]);
     for (let run = 0; run < 10; run++) assert.equal(wrote(await background(box)), 0, `pass ${run + 1}`);
     const view = (await views(box)).skills;
-    assert.deepEqual([placeIn(view, 'notes'), rowOf(view, 'notes')?.takeIn?.rule], ['found', { leave: 'deleted' }]);
+    assert.deepEqual([placeIn(view, 'notes'), rowOf(view, 'notes')?.takeInAnswers?.rule], ['found', { leave: 'deleted' }]);
     assert.match(statusLine(pageRow(rowOf(view, 'notes')!), view.library.notes, tools, true), /Synchronize everything leaves it: it was deleted from Central Knot, so only Add brings it back\.$/);
     await applySkills(box.context, tools, [add(view, 'notes')]);
     assert.equal(placeIn((await views(box)).skills, 'notes'), 'on');
@@ -183,7 +183,7 @@ test('Deleted from Central Knot, then its copy put back by hand: never taken in 
     await putAgent(box, 'copilot-cli', 'helper', 'Put back by hand.');
     for (let run = 0; run < 10; run++) assert.equal(wrote(await background(box)), 0, `pass ${run + 1}`);
     const view = await views(box);
-    assert.deepEqual([placeIn(view.skills, 'notes'), placeIn(view.agents, 'helper'), rowOf(view.agents, 'helper')?.takeIn], ['found', 'off', undefined]);
+    assert.deepEqual([placeIn(view.skills, 'notes'), placeIn(view.agents, 'helper'), rowOf(view.agents, 'helper')?.takeInAnswers], ['found', 'off', undefined]);
     assert.deepEqual([await skillIn(box, 'codex-cli', 'notes'), await readFile(join(box.home, agentFile('copilot-cli', 'helper')), 'utf8')], [skill('notes', 'Put back by hand.'), agent('copilot-cli', 'helper', 'Put back by hand.')]);
   } finally { await box.cleanup(); }
 });
@@ -223,7 +223,7 @@ test('A copy that can’t be read, and an MCP entry in a form Central Knot doesn
     const done = await background(box);
     const view = await views(box);
     assert.deepEqual([wrote(done), noticesOf(done), Object.keys(view.skills.library), Object.keys(view.mcp.library), rowOf(view.skills, 'locked'), rowOf(view.skills, 'elsewhere')], [0, [], [], [], undefined, undefined]);
-    assert.deepEqual([rowOf(view.skills, 'linked')?.takeIn, rowOf(view.mcp, 'odd')?.takeIn], [{ click: { leave: 'no-copy' }, rule: { leave: 'no-copy' } }, { click: { leave: 'no-copy' }, rule: { leave: 'no-copy' } }]);
+    assert.deepEqual([rowOf(view.skills, 'linked')?.takeInAnswers, rowOf(view.mcp, 'odd')?.takeInAnswers], [{ click: { leave: 'no-copy' }, rule: { leave: 'no-copy' } }, { click: { leave: 'no-copy' }, rule: { leave: 'no-copy' } }]);
   } finally { await box.cleanup(); }
 });
 
@@ -238,7 +238,7 @@ test('A plugin’s parts are left found, each row keeping its Add; Add on one ta
     await turnOn(box);
     assert.equal(wrote(await background(box)), 0);
     let view = await views(box);
-    assert.deepEqual([rowOf(view.skills, 'alpha')?.takeIn?.rule, rowOf(view.agents, 'kit-agent')?.takeIn?.rule, 'take' in rowOf(view.skills, 'alpha')!.takeIn!.click], [{ leave: 'part' }, { leave: 'part' }, true]);
+    assert.deepEqual([rowOf(view.skills, 'alpha')?.takeInAnswers?.rule, rowOf(view.agents, 'kit-agent')?.takeInAnswers?.rule, 'take' in rowOf(view.skills, 'alpha')!.takeInAnswers!.click], [{ leave: 'part' }, { leave: 'part' }, true]);
     await applySkills(box.context, tools, [add(view.skills, 'alpha')]);
     await background(box);
     view = await views(box);
@@ -259,7 +259,7 @@ test('Two tools gain the same new name in one pass: one take-in where the conten
     const done = await background(box);
     const view = await views(box);
     assert.deepEqual([placeIn(view.skills, 'same'), (await entriesOf(box, 'same')).length, Object.keys(view.skills.library.same.applied).sort()], ['on', 1, [...tools].sort()]);
-    assert.deepEqual([placeIn(view.agents, 'split'), rowOf(view.agents, 'split')?.takeIn?.rule], ['found', { wait: 'choice' }]);
+    assert.deepEqual([placeIn(view.agents, 'split'), rowOf(view.agents, 'split')?.takeInAnswers?.rule], ['found', { wait: 'choice' }]);
     assert.deepEqual(noticesOf(done).map(notice => notice.kind === 'taken-in' ? [notice.items, notice.from] : notice.kind), [[['same'], ['claude-cli', 'codex-cli']]]);
   } finally { await box.cleanup(); }
 });
@@ -333,7 +333,7 @@ test('An agent whose only copy is two files differing by case gets no Add, and t
     await turnOn(box);
     assert.equal(wrote(await background(box)), 0);
     const view = (await views(box)).agents;
-    assert.deepEqual(rowOf(view, 'reviewer')?.takeIn, { click: { leave: 'no-copy' }, rule: { leave: 'no-copy' } });
+    assert.deepEqual(rowOf(view, 'reviewer')?.takeInAnswers, { click: { leave: 'no-copy' }, rule: { leave: 'no-copy' } });
     assert.equal(statusLine(pageRow(rowOf(view, 'reviewer')!), undefined, tools), 'Not in Central Knot · it can’t be taken in now (see below).');
   } finally { await box.cleanup(); }
 });

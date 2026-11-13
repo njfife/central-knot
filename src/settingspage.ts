@@ -359,9 +359,9 @@ function buildRow(): HTMLElement | null {
  * those it takes in (`takes`), and those that wait for a choice of copy (`choosing`), with the first page that has one.
  */
 function foundNow(home: HomeView) {
-  const kinds = (['skills', 'mcp', 'agents'] as const).map(kind => ({ kind, facts: kindSource(home, kind).facts.filter(fact => fact.takeIn) }));
-  const count = (answer: 'take' | 'wait') => kinds.reduce((sum, { facts }) => sum + facts.filter(fact => answer in fact.takeIn!.rule).length, 0);
-  const choosingOn = kinds.find(({ facts }) => facts.some(fact => 'wait' in fact.takeIn!.rule))?.kind;
+  const kinds = (['skills', 'mcp', 'agents'] as const).map(kind => ({ kind, facts: kindSource(home, kind).facts.filter(fact => fact.takeInAnswers) }));
+  const count = (answer: 'take' | 'wait') => kinds.reduce((sum, { facts }) => sum + facts.filter(fact => answer in fact.takeInAnswers!.rule).length, 0);
+  const choosingOn = kinds.find(({ facts }) => facts.some(fact => 'wait' in fact.takeInAnswers!.rule))?.kind;
   return { takes: count('take'), choosing: count('wait'), choosingOn };
 }
 

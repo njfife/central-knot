@@ -87,7 +87,7 @@ async function walk(seed: number): Promise<Finding[]> {
   const seen = async (): Promise<{ fact?: LibraryFacts; item?: LibraryItem; row: LibraryRow }> => {
     const view = await serversView(context(), tools), fact = view.items.find(each => each.key === 'docs');
     const hashes = Object.fromEntries(Object.entries(fact?.copies ?? {}).map(([tool, copy]) => [tool, copy!.hash]));
-    return { fact, item: view.library.docs, row: { key: 'docs', name: fact?.name, hashes, plan: fact?.plan, cannot: fact?.cannot, unseen: fact?.unseen, takeIn: fact?.takeIn, waits: fact?.waits } };
+    return { fact, item: view.library.docs, row: { key: 'docs', name: fact?.name, hashes, plan: fact?.plan, cannot: fact?.cannot, unseen: fact?.unseen, takeInAnswers: fact?.takeInAnswers, waits: fact?.waits } };
   };
   /** History's actions for every server (docs, and any that turned up in a tool), each against the item as it is now. */
   const historyActions = async () => {
@@ -241,7 +241,7 @@ async function walk(seed: number): Promise<Finding[]> {
       // (j) After a pass of the whole home with the rule on, nothing is left found that it would take in.
       if (rule && act.whole && !crashed) {
         const views = [await skillsView(context(), tools), await serversView(context(), tools), await agentsView(context(), tools)];
-        const left = views.flatMap(view => view.items.filter(each => each.takeIn && 'take' in each.takeIn.rule).map(each => each.key));
+        const left = views.flatMap(view => view.items.filter(each => each.takeInAnswers && 'take' in each.takeInAnswers.rule).map(each => each.key));
         if (left.length) fail(`(j) after a pass of the whole home the rule left ${left.join(', ')} to take in`);
       }
       othersAsWritten = await others();

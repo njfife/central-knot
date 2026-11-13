@@ -399,7 +399,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 
 .sync-notice-lines { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
 .sync-notice { position: relative; margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; padding-right: 26px; }
-.sync-notice > .notice-text { flex: 0 1 auto; min-width: 0; }
+/* A long sentence wraps beside its mark (14px and the 8px gap), never on a line of its own under it. */
+.sync-notice > .notice-text { flex: 0 1 auto; min-width: 0; max-width: calc(100% - 22px); }
 .sync-notice .btn { flex: none; height: 26px; padding: 0 10px; font-size: 12px; }
 .sync-notice > .notice-dismiss { position: absolute; top: 2px; right: 0; }
 .notice-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: none; }

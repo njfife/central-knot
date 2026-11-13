@@ -73,7 +73,7 @@ export async function seen(box: Box, context = box.context, key = 'notes'): Prom
   const view = await skillsView(context, box.tools);
   const fact = view.items.find(entry => entry.key === key);
   const hashes = Object.fromEntries(Object.entries(fact?.copies ?? {}).map(([tool, copy]) => [tool, copy!.hash]));
-  return { fact, item: view.library[key], row: { key, name: fact?.name, hashes, plan: fact?.plan, cannot: fact?.cannot, unseen: fact?.unseen, takeIn: fact?.takeIn, anotherWay: fact?.anotherWay } };
+  return { fact, item: view.library[key], row: { key, name: fact?.name, hashes, plan: fact?.plan, cannot: fact?.cannot, unseen: fact?.unseen, takeInAnswers: fact?.takeInAnswers, anotherWay: fact?.anotherWay } };
 }
 export const itemOf = async (box: Box, key = 'notes') => (await seen(box, box.context, key)).item;
 

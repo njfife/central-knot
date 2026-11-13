@@ -513,8 +513,9 @@ function keepServersAndAgents(outcome: ServersAndAgentsResult | undefined) {
 async function syncThenView(explicit = false): Promise<HomeView> {
   const shared: ShareContext = { ...context(), reads: new Map() };
   const before = await read();
-  const { skills, serversAndAgents } = await pass(before, explicit);
+  const passed = await pass(before, explicit), { skills, serversAndAgents } = passed;
   keepServersAndAgents(serversAndAgents);
+  lookAgainSoon(passed);
   // A pass that could not finish says so on the page instead of failing quietly.
   const caughtUp = [...pendingResults.splice(0), ...(skills?.results ?? []), ...(skills?.stopped ? [{ item: 'Sync', outcome: 'failed' as const, message: skills.stopped }] : [])];
   const notices = [...pendingNotices.splice(0), ...(skills?.notices ?? [])];
@@ -632,6 +633,13 @@ let watchers: FSWatcher[] = [];
 let poller: NodeJS.Timeout | undefined;
 let soon: NodeJS.Timeout | undefined;
 let followUp: NodeJS.Timeout | undefined;
+/**
+ * Something a pass left inside its settle window (a copy missing just now, or a new one Synchronize everything waits to take
+ * in while it is still being saved): look again just after it, so it finishes without a click. Otherwise an event or the poll.
+ */
+function lookAgainSoon({ skills, serversAndAgents }: BackgroundPass) {
+  if (skills?.settling || serversAndAgents?.settling) { clearTimeout(followUp); followUp = setTimeout(queueBackgroundPass, 2_500); }
+}
 
 /** The menus follow the open home's profiles and the library's items, which say which profile is in use. */
 function followProfiles(profiles: ProfilesView, items = lastItems) {
@@ -699,8 +707,7 @@ async function backgroundPass() {
   // The page reads again whether or not the pass wrote: with Sync off an edit or deletion is only noted (it shows as waiting,
   // not as Synced), and a tool's own switch turned in its settings changes no content, only that tool's mark.
   if ((fromEvent && !syncOn) || fromSettings) changed = true;
-  // A deletion waits out its settle window: look again just after it, so it finishes without a click. Otherwise wait for an event or the poll.
-  if (skills?.settling || serversAndAgents?.settling) { clearTimeout(followUp); followUp = setTimeout(queueBackgroundPass, 2_500); }
+  lookAgainSoon({ skills, serversAndAgents });
   if (skills?.stopped && skills.stopped !== lastStopped) {
     pendingResults.push({ item: 'Sync', outcome: 'failed', message: skills.stopped });
     changed = true;
