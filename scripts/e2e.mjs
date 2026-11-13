@@ -640,8 +640,9 @@ async function practiceFlow() {
   const readSwitches = () => switchFiles.map(file => (existsSync(file) ? readFileSync(file, 'utf8') : ''));
   const claudeSettingsBefore = readSwitches()[0];
   writeFileSync(switchFiles[0], JSON.stringify({ ...JSON.parse(claudeSettingsBefore || '{}'), skillOverrides: { 'release-notes': 'off' } }, null, 2));
-  await a.click('#header-refresh');
-  same('a switch set in Claude Code’s settings is read, not undone: the folder stays, the mark is off, the tag says so', [folders('release-notes').every(Boolean), await offMarks(a, 'release-notes'), /switched off in Claude Code/.test(await a.text('.ov-row[data-key="release-notes"]') ?? ''), await switchOn(a, 'release-notes')], [true, ['claude-cli'], true, true]);
+  // No Refresh: the settings file is watched, and the page reads again though the pass wrote nothing.
+  for (let tries = 0; tries < 80 && !(await offMarks(a, 'release-notes')).length; tries++) await wait(100);
+  same('a switch set in Claude Code’s settings reaches the open page, and is read, not undone: the folder stays, the mark is off, the tag says so', [folders('release-notes').every(Boolean), await offMarks(a, 'release-notes'), /switched off in Claude Code/.test(await a.text('.ov-row[data-key="release-notes"]') ?? ''), await switchOn(a, 'release-notes')], [true, ['claude-cli'], true, true]);
   await opened('release-notes');
   check('its line in the opened row says the tool doesn’t load it', /Claude Code doesn’t load it, and Central Knot leaves that switch as it is/.test(await a.text('.details') ?? ''), await a.text('.details'));
   await a.click('#clear-switch-release-notes-claude-cli');
@@ -677,7 +678,7 @@ async function practiceFlow() {
   same('before the click the page says what switching turns off, row by row and in the header', [await stateShown('notes'), await stateShown('standup'), await a.text('.profile-header p')], ['Stays on', 'Turns off', 'Switching turns 3 items off']);
   await a.click('#profile-switch');
   same('the switch takes what Incident leaves out out of every tool, and leaves notes', [folders('standup'), folders('release-notes'), folders('review'), folders('notes')], [gone, gone, gone, allOn.notes]);
-  same('the status bar, the list and the header say Incident is in use', [(await a.text('#status-profile'))?.trim(), await a.text('.profile-row.selected .profile-in-use'), await a.text('.profile-header p'), await a.exists('#profile-switch')], ['Incident', 'In use', 'In use · 1 item on, and nothing else in Central Knot', false]);
+  same('the status bar, the list and the header say Incident is in use', [(await a.text('#status-profile'))?.trim(), await a.text('.profile-row.selected .profile-in-use'), await a.text('.profile-header p'), await a.exists('#profile-switch')], ['Incident', 'In use', 'In use · 1 item on, the other 3 off', false]);
   check('the result says what it turned off, with Undo switch', /^Switched to Incident: 3 items turned off\./.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-undo'), await a.text('.bands'));
   await a.click('#outcome-undo');
   same('Undo switch puts every folder back, byte for byte, and no profile is in use', [allFolders(), (await a.text('#status-profile'))?.trim()], [allOn, 'No profile']);

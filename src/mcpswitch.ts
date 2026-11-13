@@ -1,6 +1,6 @@
 // An MCP server's own switch in one tool: read at each look for its mark (servers.ts), and written only to clear it: once by
-// the profiles migration (profilemigrate.ts), and for a Claude Code deny it kept (servers.ts releaseKeptDenies); a plugin's part
-// is switched with it too (partswitch.ts). The server's entry stays where it is; the tool just doesn't start it. Each switch was exercised in a throwaway home on 2026-11-09 (notes: ck-feedback/profiles/evidence.md):
+// the profiles migration (profilemigrate.ts; in a server's kept own part, ownWithoutSwitch, where its entry is out of the tool),
+// and for a Claude Code deny it kept (servers.ts releaseKeptDenies); a plugin's part is switched with it too (partswitch.ts). The server's entry stays where it is; the tool just doesn't start it. Each switch was exercised in a throwaway home on 2026-11-09 (notes: ck-feedback/profiles/evidence.md):
 //   Claude Code  settings.json  "deniedMcpServers": [{ "serverName": "<name>" }]   (2.1.321: the server leaves `claude mcp list`)
 //   Copilot CLI  settings.json  "disabledMcpServers": ["<name>"]                    (what `copilot mcp disable` writes on 1.0.107)
 //   Codex        config.toml    [mcp_servers.<name>] enabled = false                (0.142.3: `codex mcp list` shows it disabled)
@@ -10,7 +10,7 @@
 //                               `enabled: false` under "servers" is not honoured by 2.2.5, so it is not written there)
 // Claude Code's ~/.claude.json is never touched: its switch lives in settings.json, which Claude Code does not rewrite while it runs.
 import { readFile } from 'node:fs/promises';
-import { mcpFile, openCodeServer } from './mcp.ts';
+import { mcpFile, openCodeServer, type OwnPart } from './mcp.ts';
 import { errorCode, type ShareContext } from './share.ts';
 import { switchPath, type SwitchFile } from './skillswitch.ts';
 import { readTomlTables, setJsonMember } from './textedit.ts';
@@ -114,4 +114,20 @@ export function withMcpSwitch(tool: HarnessId, text: string, name: string, disab
       return setJsonMember(text, [...found.place, key], disabled ? off : undefined);
     }
   }
+}
+
+/**
+ * A server's own part in a tool (mcp.ts OwnPart, as Central Knot keeps it while the entry is out of the tool) with the tool's
+ * switch inside the entry cleared, as withMcpSwitch clears it in the file: Codex's `enabled = false` line, Pi's and OpenCode's
+ * `enabled: false`, OpenCode's `disabled: true` under `mcp.servers`. Undefined when the part has no such switch on (or the tool
+ * keeps its switch outside the entry: Claude Code, Copilot CLI). Every other own field stays.
+ */
+export function ownWithoutSwitch(tool: HarnessId, own: OwnPart): OwnPart | undefined {
+  if (tool !== 'codex-cli' && tool !== 'pi-cli' && tool !== 'opencode-cli') return undefined;
+  const [key, off] = tool === 'opencode-cli' ? openCodeOff(own.place ?? []) : ['enabled', false];
+  const value = own.extras[key];
+  // Codex's own lines are kept as written: the switch is its `enabled = false` line.
+  if (tool === 'codex-cli' ? !(typeof value === 'string' && /^\s*enabled\s*=\s*false\b/.test(value)) : value !== off) return undefined;
+  const { [key]: _cleared, ...extras } = own.extras;
+  return { ...own, extras };
 }

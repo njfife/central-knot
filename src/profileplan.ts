@@ -43,6 +43,12 @@ export function switchPlan(profile: Pick<Profile, 'items'>, live: LiveItem[]): T
 /** The live items a profile names: what it has. */
 export const namedItems = (profile: Pick<Profile, 'items'>, live: LiveItem[]) => live.filter(item => profile.items.includes(item.id));
 
+/**
+ * Whether a profile is offered to switch to (the page's Switch, the status bar's and the menu bar's menus): one with nothing in
+ * it would turn every item off, so it is offered once it has an item.
+ */
+export const switchable = (profile: Pick<Profile, 'items'>, live: LiveItem[]) => namedItems(profile, live).length > 0;
+
 /** The profiles in use: each one switching to which would change nothing. Two that name the same items are both in use. */
 export const inUse = (profiles: Profile[], live: LiveItem[]) => profiles.filter(profile => !changes(switchPlan(profile, live)));
 
@@ -57,7 +63,8 @@ export const changes = (turns: Turns) => turns.on.length + turns.off.length;
 
 /**
  * What the Undo of a switch's History entry turns back, decided from each item now: each item it turned On that is still On
- * goes Off, each it turned Off that is still Off goes On. An item changed since, or no longer in the library, is left.
+ * goes Off, each it turned Off that is still Off goes On. An item whose On or Off differs now, or one no longer in the library,
+ * is left (one turned back and forth since, and now as the switch left it, is turned back like any other).
  */
 export function undoPlan(event: Pick<HistoryEvent, 'profile'>, live: LiveItem[]): Turns {
   const still = (named: { id: string }[] | undefined, on: boolean) => live.filter(item => item.on === on && !!named?.some(entry => entry.id === item.id));

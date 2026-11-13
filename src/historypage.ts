@@ -88,10 +88,8 @@ function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; ac
   if (!was.on && !was.off) return { glyph, text: `Switched to ${was.toName ?? NO_PROFILE} with each tool’s own switches, before profiles were sets of items.` };
   const action = state.home && changes(undoPlan(event, homeItems(state.home))) ? 'Undo' : undefined;
   if (was.migrated) {
-    const off = was.off ?? [], cleared = was.cleared ?? 0;
-    const parts = [off.length && `${plural(off.length, 'item')} ${was.toName ?? 'a profile'} held off in every tool ${off.length === 1 ? 'is' : 'are'} off now`,
-      cleared && `${plural(cleared, 'switch', 'switches')} profiles had set in tools ${cleared === 1 ? 'was' : 'were'} cleared`].filter(Boolean);
-    return { glyph, text: `Profiles are sets of items now: ${parts.join('; ')}.`, action };
+    const off = was.off ?? [];
+    return { glyph, text: `Profiles are sets of items now: ${plural(off.length, 'item')} ${was.toName ?? 'a profile'} held off in every tool ${off.length === 1 ? 'is' : 'are'} off now, and the switches profiles had set in tools are released.`, action };
   }
   return { glyph, text: `Switched to ${was.toName}: ${turnsWords({ on: was.on ?? [], off: was.off ?? [] }, 'did')}.`, action };
 }

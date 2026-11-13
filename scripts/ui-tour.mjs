@@ -677,11 +677,11 @@ if (wanted('profiles')) {
   await a.click('#profile-new');
   await atEverySize('new-naming', 'Took notes, standup and release-notes, docs and files, and the agents code-reviewer and release-notes into Central Knot, then clicked "New profile": its name field is ready to type in');
   await name('Incident');
-  await atEverySize('new-named', 'Typed "Incident" and pressed Enter: nothing is in it yet, so it offers no switch; "Start from what’s on now" is the first step');
-  await a.click('#pf-skill\\:notes'); await a.click('#pf-mcp\\:docs');
-  await atEverySize('incident-ticked', 'Ticked notes and docs: before any switch, each row says what switching to Incident does to it, and the header counts it and says Claude Code’s part waits for Write to Claude Code', true);
+  await atEverySize('new-named', 'Typed "Incident" and pressed Enter: nothing is in it yet, so it offers no switch; the band says to tick at least one item, or start from what is on now');
+  await a.click('#pf-skill\\:notes'); await a.click('#pf-mcp\\:files');
+  await atEverySize('incident-ticked', 'Ticked notes and files: before any switch, each row says what switching to Incident does to it; the header counts it and, since docs (which Claude Code has) turns off, says Claude Code’s MCP servers change when you press Write to Claude Code, the line wrapping whole', true);
   await a.click('#profile-switch'); await a.run(`document.activeElement?.blur()`);
-  await atEverySize('incident-switched', 'Clicked "Switch to Incident": the result says what it turned off and what waits for Write to Claude Code, with that button and Undo switch; Incident is in use (the list, the header, the status bar)', true);
+  await atEverySize('incident-switched', 'Clicked "Switch to Incident": the result says what it turned off and that 1 MCP server waits for Write to Claude Code, with that button and Undo switch; Incident is in use (the list, the header: "2 items on, the other 5 off", the status bar)', true);
   await a.click('#profile-new'); await name('Development');
   await a.click('#profile-from-now');
   await a.click('#pf-skill\\:standup'); await a.click('#pf-agent\\:code-reviewer');
@@ -706,6 +706,15 @@ if (wanted('profiles')) {
   await atEverySize('delete-confirm', 'Clicked Delete on On call: deleting a profile changes no item');
   await a.click('#profile-delete-confirm');
   await atEverySize('deleted', 'Clicked Delete: the result says nothing changed, with Undo; Development is open');
+  // Eight profiles: the list column takes more of a narrow window.
+  for (const extra of ['Writing', 'Review', 'Support', 'Research', 'Travel', 'Release']) { await a.click('#profile-new'); await name(extra); }
+  await openProfile('Development');
+  await atEverySize('eight-profiles', 'Made six more profiles (eight in all) and opened Development: stacked at 860×560 the page scrolls as one, every profile and then the open one’s items, with no box scrolling inside');
+  await a.size(860, 560);
+  await a.run(`document.querySelector('.profiles-split').scrollTop = 10000`); await a.settle();
+  await shot(a, 'eight-profiles-860-scrolled', 'At 860×560, the page scrolled to its end: Development’s header, Find and its items, the table’s heading held at the top.');
+  await a.run(`document.querySelector('.profiles-split').scrollTop = 0`);
+  await a.size(1280, 800);
   await a.run(`(() => { const input = document.querySelector('#profile-find'); input.value = 'zzz'; input.dispatchEvent(new Event('input', { bubbles: true })); })()`); await a.settle();
   await atEverySize('find-nothing', 'Typed "zzz" in Find: nothing matches, and the count says 0 of 7');
   await a.run(`(() => { const input = document.querySelector('#profile-find'); input.value = 'release'; input.dispatchEvent(new Event('input', { bubbles: true })); })()`); await a.settle();
@@ -725,7 +734,9 @@ if (wanted('profiles')) {
   // The narrowest window: a long name's header, renaming, and the status bar shortening it once it is in use.
   await a.size(860, 560);
   await a.click('#profile-rename');
-  await name('Incident response and on-call for web apps');
+  const longName = 'Incident response and on-call: web apps!';
+  if (longName.length !== 40) throw new Error('The long name must be 40 characters.');
+  await name(longName);
   await shot(a, 'size-860-long-name', 'At 860×560, renamed Incident to a 40-character name: the header with Switch, Rename and Delete.');
   await a.click('#profile-rename'); await shot(a, 'size-860-renaming', 'Clicked Rename again: the field has the header to itself, with Enter / Esc hints.');
   await a.press('Escape');

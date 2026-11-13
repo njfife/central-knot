@@ -10,7 +10,8 @@
 // - a tool's own switch for a skill (toolFacts, `loads`): read at each look and never written by a pass. A switch set in a tool,
 //   by a person or by Central Knot before the library, is left as it is and shown as a mark on that tool's line.
 //   Three actions write it: clearSwitch, its Undo switchBack, and takeOver, which carries it to the copy it makes (takeOver
-//   is also the one that makes a copy outside Central Knot's its own).
+//   is also the one that makes a copy outside Central Knot's its own); and the profiles migration releases one an earlier
+//   profile set, once (profilemigrate.ts).
 // Around the pass: applySkills and restoreSkill run it for skills (the page's clicks through librarypass.ts itemClick);
 // skillsView is the Skills page's reading (types.ts LibraryView); skillsForRepo is what the Git repo's Push sends. Elsewhere: the folders, skillfiles.ts; where things
 // are kept and the migration from the earlier record, skillstore.ts and skillmigrate.ts; the row and its words,

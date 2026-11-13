@@ -1665,15 +1665,15 @@ A profile is a named set of library items (skills, MCP servers and agents). Swit
 | `profiles[].items`: `skill:<key>` | the same |
 | `profiles[].items`: `mcp:<name as written>` | `mcp:<key>` |
 | (no agents) | every agent On at migration joins every profile |
-| `offByProfile`: each listed switch that is off now | cleared (skills: `skillswitch.ts setDisabled`, Claude Code's override put back as kept; servers: `mcpswitch.ts withMcpSwitch`, one checked write per file) |
+| `offByProfile`: every listed switch, whether or not the item's copy is there now | released where it is (skills: `skillswitch.ts setDisabled`, Claude Code's override put back as kept, by the item's name where the copy is gone; servers: `mcpswitch.ts withMcpSwitch`, one checked write per file), or, for a server's switch inside an entry that is out of the tool (Codex, Pi, OpenCode), in the own part Central Knot keeps for it (`mcpswitch.ts ownWithoutSwitch`), every other own field kept |
 | a library item held off by listed switches in every tool that has it (every tool whose copy loads it now, all read) | Off, on record before any switch is cleared; its copies taken out by a pass after the clearing, so Codex's, Pi's and OpenCode's own part is kept with the switch cleared |
 | a listed switch turned back on by hand, an item one tool still loads, a tool that can't be read | the item stays as it is |
-| Claude Code's deny of a server not wanted there afterwards (turned Off, kept out, deleted) | kept, listed in `claude-denies.json`; cleared by the first servers pass that finds the server wanted in Claude Code |
+| Claude Code's deny of a server in the library not wanted there afterwards (turned Off, kept out, deleted) while Claude Code still has its entry | kept, listed in `claude-denies.json`; cleared by the first servers pass that finds the server wanted in Claude Code. With the entry gone, nothing can start: released at once |
 | a switch set by hand (not listed) | left, shown with its mark |
 | `active` | dropped |
 | the file | kept as `profiles.v1.json` |
 
-One History row says what it turned Off and how many switches it cleared ("Profiles are sets of items now: …"), with Undo (each item's Turn on). After it, one pass writes nothing.
+When it turns something Off, one History row says what ("Profiles are sets of items now: …"), with Undo (each item's Turn on). Its closing pass touches only the held items that are Off (turned Off now, or by a run that stopped part-way); an item that stays On is left to the ordinary sync rule, with Sync off too. After it, one pass writes nothing.
 
 *Claude Code's order, the smaller way:* keep the deny and clear it once the server is wanted in Claude Code again. The other way, clearing it when Write to Claude Code takes the entry out, also needs the list, and still leaves the deny when the server is turned On before Write (its entry never went, so Write has nothing to do for it). Wanted-again covers both cases with one rule.
 
@@ -1693,7 +1693,7 @@ One History row says what it turned Off and how many switches it cleared ("Profi
 - *Two profiles with the same items are both in use* and named together, since the name is worked out and neither is truer.
 - *An empty profile is offered nowhere* (page, status bar, menu bar), as before.
 - *Undo of a switch writes no profile row of its own*; it marks the switch's row undone by the first item row it made.
-- *The migration writes one History row* when it turns anything Off or clears a switch, so what it changed is said, with Undo.
+- *The migration writes one History row* when it turns anything Off, so what it changed is said, with Undo.
 - *Format 1 is read for the page* (its ids translated) where the migration waits; editing such a file is refused until it is moved, so its holds are never lost.
 - *Every plugin Apply all reads the home again* (`pluginstate.ts applyPluginOps`; before, only a change of parts did). The Mac run found it: the Skills page showed a plugin's skill still on in Codex after Apply all turned it off, because the page had followed only through the profiles' watch of the switch files, which this step deletes, and only while a profile existed. End-to-end check: "on the Skills page its Codex box shows it off, the plugin’s other skill on".
 
@@ -1714,3 +1714,13 @@ One History row says what it turned Off and how many switches it cleared ("Profi
 **Follow-ups.**
 - Found items joining a profile, the Harnesses page, first setup, plugins and Git links are later steps.
 - `profiles.v1.json` and `claude-denies.json` stay until a later clean-up.
+
+**Fix round 1** (eight reviewers of afc6cfe; `FIX-L3B-R1.md`). Each behaviour item was reproduced as a test that failed first.
+- *Every switch format 1 lists is released, copy or not* (`profilemigrate.ts releaseAt`, `onRecord`, `releaseSkills`, `releaseInFiles`; `mcpswitch.ts ownWithoutSwitch`): a server's switch inside an entry that is out of the tool is cleared in its kept own part; Claude Code's deny is released at once where Claude Code no longer has the entry (nothing can start), and kept only while it has it; a skill's rule goes by the item's name where its copy is gone. Test: "Migration releases a profile’s switch on a copy that is not there now …".
+- *The migration's closing pass touches only held items that are Off*, so with Sync off a waiting hand edit of an item that stays On is not copied. Test: "Migration with Automatic sync off leaves an item that stays On to the ordinary sync rule …".
+- *A watched file's change reaches the open page*, whether or not the pass wrote (`main.ts backgroundPass`), and each tool's switch file is watched as the MCP settings files are (`main.ts startWatching`): Claude Code's settings.json was not watched, and the profiles' stamp of switch files, which made the page follow, is gone. End-to-end check: "a switch set in Claude Code’s settings reaches the open page …" (no Refresh).
+- *A migration stopped part-way writes one History entry*: the entry is written only when something turns Off (its `cleared` count is gone), so the run that finishes it writes none. Test: "A migration stopped part-way is finished by the next pass, with one History entry". A stop between writing the entry and saving the items Off would still write a second one.
+- *The page*: the header wraps whole and says Claude Code's MCP servers change at Write to Claude Code only when one does (a server turning On that Claude Code lacks, or turning Off that it has); "In use · 2 items on, the other 5 off"; an empty profile says "Tick at least one item to switch to it"; whether a profile is offered is one rule (`profileplan.ts switchable`) for the page and both menus; stacked at 860×560 the page scrolls as one, every profile and then the items (with eight profiles the inner box showed two item rows). End-to-end check: "the status bar, the list and the header say Incident is in use".
+- *Next reader*: MAP says sources are under `src/`, names `main.ts switchFromMenu` and `historypage.ts profileSwitch`; `profilespage.ts` names a list `inUseNow` and a yes/no `isInUse`; Undo's wording is "whose On or Off differs now"; `skills.ts` names the migration among the writers of a skill's switch; `.pf-menu-note` is gone.
+- Pictures of the states changed: `/home/picoder/work/ck-one-switch-plan/tour-l3b-r2/`, at 860×560 and 1280×800, with `tour.md`.
+

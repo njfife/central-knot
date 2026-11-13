@@ -15,6 +15,7 @@ import { agentTools, mcpTools, noteTools, pluginTools, presentTools } from './pr
 import { installedPlugins } from './plugins.ts';
 import { checkFeed, type FeedCheck } from './bundlefeed.ts';
 import { mcpFile } from './mcp.ts';
+import { switchPath } from './skillswitch.ts';
 import { applyServers, restoreServer, serversView, serverVersion, writeToClaude } from './servers.ts';
 import { agentVersion, agentsView, applyAgents, restoreAgent } from './agents.ts';
 import { convertAgentToSkill } from './agentskill.ts';
@@ -27,7 +28,7 @@ import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
 import { migrateProfiles } from './profilemigrate.ts';
 import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from './profiles.ts';
-import { homeItems, inUse, inUseName, namedItems, type LiveItem } from './profileplan.ts';
+import { homeItems, inUse, inUseName, switchable, type LiveItem } from './profileplan.ts';
 import { defaultHistoryDays, historyDayChoices } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, PartRef, PartsPick, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
@@ -376,12 +377,12 @@ function switchFromMenu(id: string) {
  */
 function profileMenu(): Electron.MenuItemConstructorOptions {
   if (!lastProfiles.profiles.length) return { label: 'Profiles…', enabled: !!current, click: () => showPage('profiles') };
-  const usable = homeWritable && !!current, using = inUse(lastProfiles.profiles, lastItems);
+  const usable = homeWritable && !!current, inUseNow = inUse(lastProfiles.profiles, lastItems);
   return { label: `Profile: ${inUseName(lastProfiles.profiles, lastItems)}`, submenu: [
-    // An empty profile would turn everything off: offered once something is in it, as on the Profiles page.
+    // One not offered (nothing in it: profileplan.ts switchable) is shown disabled, as on the Profiles page.
     ...lastProfiles.profiles.map(profile => {
-      const empty = !namedItems(profile, lastItems).length;
-      return { label: empty ? `${profile.name} (empty)` : profile.name, type: 'checkbox' as const, checked: using.includes(profile), enabled: usable && !empty, click: () => switchFromMenu(profile.id) };
+      const empty = !switchable(profile, lastItems);
+      return { label: empty ? `${profile.name} (empty)` : profile.name, type: 'checkbox' as const, checked: inUseNow.includes(profile), enabled: usable && !empty, click: () => switchFromMenu(profile.id) };
     }),
     { type: 'separator' },
     { label: 'Edit profiles…', click: () => showPage('profiles') },
@@ -688,8 +689,9 @@ async function backgroundPass() {
   let changed = toolsChangedHere(snapshots);
   const { skills, serversAndAgents } = await pass(snapshots);
   keepServersAndAgents(serversAndAgents);
-  // Sync off: an edit or deletion is only noted. The page reads again quietly so it shows as waiting, not as Synced.
-  if (fromEvent && !syncOn) changed = true;
+  // A watched file changed: the page reads again, whether or not the pass wrote: with Sync off an edit or deletion is only
+  // noted (it shows as waiting, not as Synced), and a tool's own switch turned in its settings changes no content but its mark.
+  if (fromEvent) changed = true;
   // A deletion waits out its settle window: look again just after it, so it finishes without a click. Otherwise wait for an event or the poll.
   if (skills?.settling || serversAndAgents?.settling) { clearTimeout(followUp); followUp = setTimeout(queueBackgroundPass, 2_500); }
   if (skills?.stopped && skills.stopped !== lastStopped) {
@@ -733,11 +735,12 @@ async function startWatching() {
   roots.add(join(current.home, '.agents/skills'));
   // Agents folders too: an agent edited in one tool spreads like a skill (D-32).
   for (const id of agentTools) roots.add(join(configRoot(harnesses[id], current.home, overrideFor(id)), 'agents'));
-  // MCP settings files: their folders are watched without recursion, and only an event for the file itself prompts a read.
-  const shared = context();
-  for (const id of mcpTools) {
-    const file = mcpFile(shared, id);
-    try { watchers.push(watch(dirname(file), { persistent: false }, (_event, name) => { if (!name || name === basename(file)) nudge(); })); } catch { /* not there: polling covers it */ }
+  // MCP settings files and each tool's switch file (skillswitch.ts switchPath; a server's is one or the other): their folders are
+  // watched without recursion, and only an event for one of those files prompts a read.
+  const shared = context(), files = [...new Set([...mcpTools.map(id => mcpFile(shared, id)), ...harnessIds.map(id => switchPath(shared, id))])];
+  for (const folder of new Set(files.map(file => dirname(file)))) {
+    const names = new Set(files.filter(file => dirname(file) === folder).map(file => basename(file)));
+    try { watchers.push(watch(folder, { persistent: false }, (_event, name) => { if (!name || names.has(name)) nudge(); })); } catch { /* not there: polling covers it */ }
   }
   for (const root of roots) {
     try { watchers.push(watch(root, { recursive: true, persistent: false }, nudge)); } catch { /* not there: polling covers it */ }

@@ -12,10 +12,10 @@ import { newItem, type ItemKind } from '../src/library.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { migrateProfiles } from '../src/profilemigrate.ts';
-import { inUse, inUseName, liveItems, switchPlan, turnsWords, undoPlan, type Libraries } from '../src/profileplan.ts';
+import { inUse, inUseName, liveItems, switchable, switchPlan, turnsWords, undoPlan, type Libraries } from '../src/profileplan.ts';
 import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from '../src/profiles.ts';
-import { applyServers, writeToClaude } from '../src/servers.ts';
-import { applySkills } from '../src/skills.ts';
+import { applyServers, serversView, writeToClaude } from '../src/servers.ts';
+import { applySkills, skillsView } from '../src/skills.ts';
 import { setDisabled } from '../src/skillswitch.ts';
 import type { Profile } from '../src/types.ts';
 import { bytes, folderOf, put, sandbox, skillText, type Box, type Tool } from './skillclicks.ts';
@@ -50,6 +50,8 @@ test('A profile is in use exactly while switching to it would change nothing: tw
   assert.equal(inUseName([all, empty], live), 'No profile');
   const nothingOn = liveItems(libraryOf([['skill', 'dev', false]]));
   assert.deepEqual(inUse([dev, empty], nothingOn), [empty]);
+  // A profile with nothing live in it is not offered to switch to: it would turn every item off.
+  assert.deepEqual([dev, empty, profile('Gone', ['skill:gone', 'skill:loose'])].map(each => switchable(each, live)), [true, false, false]);
 });
 
 test('The Undo of a switch turns back each item still as the switch left it, decided from each item now', () => {
@@ -314,7 +316,7 @@ test('Migration clears the switches profiles set and turns Off only what they he
     assert.deepEqual(JSON.parse((await text(box, '.central-knot/profiles.json'))!), { formatVersion: 2, profiles: [
       { id: 'dev', name: 'Dev', items: ['skill:half', 'skill:mine', 'mcp:docs', 'agent:writer'] }, { id: 'all', name: 'All', items: ['skill:pager', 'mcp:sentry', 'agent:writer'] }] });
     const [told] = (await history(box)).filter(entry => entry.kind === 'profile');
-    assert.deepEqual([told.item, told.profile?.migrated, names(told.profile?.off ?? []), told.profile?.cleared], ['Dev', true, ['pager', 'sentry'], 10]);
+    assert.deepEqual([told.item, told.profile?.migrated, names(told.profile?.off ?? [])], ['Dev', true, ['pager', 'sentry']]);
     // Once moved, nothing is left to do: the migration and a pass write nothing more.
     await migrateProfiles(box.context, box.tools);
     for (const pass of [applySkills, applyServers, applyAgents]) assert.equal((await pass(box.context, box.tools, [])).writes, 0);
@@ -366,5 +368,80 @@ test('Migration waits where a pass may not write, and does nothing to a file it 
     await writeFile(join(box.home, '.central-knot/profiles.json'), '{ not json');
     await migrateProfiles(box.context, box.tools);
     assert.deepEqual([await files(box), await text(box, '.central-knot/profiles.json')], [before, '{ not json']);
+  } finally { await box.cleanup(); }
+});
+
+// ---------- A profiles file from before, with copies that are not there now ----------
+
+/**
+ * A home where a format 1 profile held switches off whose copies are gone now: docs held off in Claude Code (its deny) and in
+ * Codex (`enabled = false` in its table), then turned Off and written out of Claude Code, so Codex's own part keeps the switch;
+ * web held off in Codex, then kept out of Codex; pager held off in Codex (its rule, by path), then turned Off.
+ */
+async function goneHome() {
+  const box = await sandbox(tools);
+  for (const tool of tools) await put(box, tool, { 'SKILL.md': skillText('The pager skill.', 'pager') }, [], 'pager');
+  await writeFile(join(box.home, MCP['claude-cli']), `${JSON.stringify({ mcpServers: { docs: { type: 'stdio', command: 'docs' } } }, null, 2)}\n`);
+  await writeFile(join(box.home, MCP['codex-cli']), 'model = "gpt-6"\n\n[mcp_servers.docs]\ncommand = "docs"\nstartup_timeout_sec = 9\n\n[mcp_servers.web]\ncommand = "web"\n');
+  await applySkills(box.context, box.tools, [{ key: 'pager', managed: true, off: [] }]);
+  await applyServers(box.context, box.tools, ['docs', 'web'].map(key => ({ key, managed: true, off: [] })));
+  await writeToClaude(box.context, box.tools, ['docs', 'web']);
+  const serverOff = async (tool: Three, name: string) => writeFile(mcpSwitchPath(box.context, tool), withMcpSwitch(tool, await readFile(mcpSwitchPath(box.context, tool), 'utf8').catch(() => ''), name, true));
+  await serverOff('claude-cli', 'docs'); await serverOff('codex-cli', 'docs'); await serverOff('codex-cli', 'web');
+  await setDisabled(box.context, 'codex-cli', { folder: 'pager', name: 'pager', skillFile: join(folderOf(box, 'codex-cli', 'pager'), 'SKILL.md') }, true);
+  await writeFile(join(box.home, '.central-knot/profiles.json'), `${JSON.stringify({ formatVersion: 1, profiles: [{ id: 'all', name: 'All', items: ['mcp:docs', 'mcp:web', 'skill:pager'] }],
+    offByProfile: { 'mcp:docs': ['claude-cli', 'codex-cli'], 'mcp:web': ['codex-cli'], 'skill:pager': ['codex-cli'] } }, null, 2)}\n`);
+  // Then, in the earlier build: docs and pager Off (and docs written out of Claude Code), web kept out of Codex.
+  await applyServers(box.context, box.tools, [{ key: 'docs', managed: false, off: [], seenManaged: true }, { key: 'web', managed: true, off: ['codex-cli'], seenManaged: true }]);
+  await writeToClaude(box.context, box.tools, ['docs']);
+  await applySkills(box.context, box.tools, [{ key: 'pager', managed: false, off: [], seenManaged: true }]);
+  return box;
+}
+
+test('Migration releases a profile’s switch on a copy that is not there now: in a server’s kept own part, in Claude Code’s and Codex’s settings; turned On again, nothing is left switched off', async () => {
+  const box = await goneHome();
+  try {
+    assert.deepEqual([(await entries(box, 'docs'))['codex-cli'].entry, (await entries(box, 'web'))['codex-cli'].entry, await bytes(folderOf(box, 'codex-cli', 'pager'))], [undefined, undefined, undefined]);
+    await migrateProfiles(box.context, box.tools);
+    // Claude Code no longer has docs's entry, so nothing can start there: its deny goes at once, and nothing is kept for later.
+    assert.deepEqual([JSON.parse((await text(box, SETTINGS['claude-cli']))!).deniedMcpServers, await text(box, '.central-knot/claude-denies.json')], [undefined, undefined]);
+    await switchProfile(box.context, box.tools, 'all');
+    await applyServers(box.context, box.tools, [{ key: 'web', managed: true, off: [], seenManaged: true }]);
+    await writeToClaude(box.context, box.tools, ['docs']);
+    const servers = await serversView(box.context, box.tools), skills = await skillsView(box.context, box.tools);
+    assert.deepEqual(['docs', 'web'].map(key => servers.items.find(row => row.key === key)?.switchedOff ?? []), [[], []]);
+    assert.deepEqual(Object.values(skills.items.find(row => row.key === 'pager')?.loads ?? {}).map(at => at?.off), [false, false, false]);
+    assert.match((await text(box, MCP['codex-cli']))!, /\[mcp_servers\.docs\]\ncommand = "docs"\nstartup_timeout_sec = 9\n/, 'Codex’s other own field stays');
+  } finally { await box.cleanup(); }
+});
+
+test('Migration with Automatic sync off leaves an item that stays On to the ordinary sync rule: a waiting hand edit is not copied', async () => {
+  const box = await sandbox(['claude-cli', 'codex-cli']);
+  try {
+    await put(box, 'claude-cli');
+    await applySkills(box.context, box.tools, [{ key: 'notes', managed: true, off: [] }]);
+    await setDisabled(box.context, 'claude-cli', { folder: 'notes', name: 'notes', skillFile: join(folderOf(box, 'claude-cli'), 'SKILL.md') }, true);
+    await writeFile(join(box.home, '.central-knot/profiles.json'), JSON.stringify({ formatVersion: 1, profiles: [{ id: 'dev', name: 'Dev', items: [] }], offByProfile: { 'skill:notes': ['claude-cli'] } }));
+    const claudeCopy = await bytes(folderOf(box, 'claude-cli'));
+    await writeFile(join(folderOf(box, 'codex-cli'), 'SKILL.md'), skillText('A hand edit, waiting while Automatic sync is off.'));
+    await migrateProfiles(box.context, box.tools);
+    assert.deepEqual([await bytes(folderOf(box, 'claude-cli')), (await skillsView(box.context, box.tools)).items[0]?.loads?.['claude-cli']?.off], [claudeCopy, false]);
+  } finally { await box.cleanup(); }
+});
+
+test('A migration stopped part-way is finished by the next pass, with one History entry', async () => {
+  const box = await goneHome();
+  try {
+    // pager is On again before the upgrade, held off in Codex only: nothing is turned Off; docs stays Off.
+    await applySkills(box.context, box.tools, [{ key: 'pager', managed: true, off: [], seenManaged: false }]);
+    await writeFile(join(box.home, '.central-knot/profiles.json'), `${JSON.stringify({ formatVersion: 1, profiles: [], offByProfile: { 'mcp:sentry': tools, 'skill:pager': tools } }, null, 2)}\n`);
+    for (const tool of tools) await setDisabled(box.context, tool, { folder: 'pager', name: 'pager', skillFile: join(folderOf(box, tool, 'pager'), 'SKILL.md') }, true);
+    const crash = { ...box.context, fault: (at: string) => { if (at === 'before-remove') throw new Error('crash'); } };
+    await assert.rejects(migrateProfiles(crash, box.tools), /crash/);
+    assert.equal(JSON.parse((await text(box, '.central-knot/profiles.json'))!).formatVersion, 1);
+    await migrateProfiles(box.context, box.tools);
+    assert.equal(JSON.parse((await text(box, '.central-knot/profiles.json'))!).formatVersion, 2);
+    assert.deepEqual([(await live(box)).find(item => item.key === 'pager')?.on, await bytes(folderOf(box, 'codex-cli', 'pager'))], [false, undefined]);
+    assert.equal((await history(box)).filter(entry => entry.profile?.migrated).length, 1);
   } finally { await box.cleanup(); }
 });

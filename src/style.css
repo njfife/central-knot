@@ -1516,6 +1516,14 @@ span.ins-confirm { margin-top: 0; }
 /* The result of a switch spans the pane, like the table under it */
 .page.profiles-page > .bands > .band { padding-right: 16px; }
 
+/* Stacked in a narrow window, the Profiles page scrolls as one, every profile and then the open one's items, so many profiles
+   never leave the items a small box of their own */
+@container content (width < 880px) {
+  .profiles-split { overflow-y: auto; }
+  .profiles-split .list-scroll { max-height: none; overflow: visible; }
+  .profiles-split .detail-column, .profiles-split .pf-scroll { flex: none; min-height: auto; overflow: visible; }
+}
+
 /* Profiles table: each library item with its box, and what a switch does to it */
 .pf-scroll { display: flex; flex-direction: column; container-type: inline-size; }
 .pf-table { display: flex; flex-direction: column; }
@@ -1567,7 +1575,6 @@ span.ins-confirm { margin-top: 0; }
 .pf-menu-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .pf-menu-sep { height: 1px; margin: 2px 4px; background: var(--line); }
 .pf-menu-size { margin-left: auto; padding-left: 12px; font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
-.pf-menu-size + .pf-menu-note { margin-left: 0; padding-left: 8px; }
 
 /* ---------- Harnesses ---------- */
 .harness-scroll { container-type: inline-size; padding: 12px var(--pad-end) 16px 16px; display: flex; flex-direction: column; gap: 12px; }

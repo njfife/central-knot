@@ -416,11 +416,10 @@ export interface HistoryEvent {
   tookOver?: TookOver;
   /**
    * 'profile': a profile switch (`toName`: the profile, by its name then), or the profiles migration's one entry (`migrated`,
-   * `toName` the profile last switched to before it, `cleared` how many tool switches it cleared): the library items it turned
-   * On and Off. Its Undo turns back each item still as it left it (profileplan.ts undoPlan). An entry from before profiles
+   * `toName` the profile last switched to before it, written when it turns something Off): the library items it turned On and Off. Its Undo turns back each item still as it left it (profileplan.ts undoPlan). An entry from before profiles
    * were sets of items has neither `on` nor `off`: it is past.
    */
-  profile?: { toName?: string; on?: SwitchedItem[]; off?: SwitchedItem[]; migrated?: true; cleared?: number };
+  profile?: { toName?: string; on?: SwitchedItem[]; off?: SwitchedItem[]; migrated?: true };
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false); `before`, a Claude Code override it replaced ("name-only"), for Undo. */
   switched?: SwitchRecord[];
   /** 'added', from before the library: copies for tools a synced item synced to again. */
