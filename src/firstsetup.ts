@@ -43,13 +43,14 @@ function question(home: HomeView) {
   // What Yes adds at once, then what waits for a choice (nothing is chosen for anyone), then what Yes leaves to a later step.
   const now = yes.takes ? `Yes takes in now the ${plural(yes.takes, 'item')} found in your tools that Central Knot doesn’t keep yet, and puts each in the tools that lack it${yes.to.length ? ` (${andList(yes.to.map(toolName))})` : ''}; what turns up later is taken in too.`
     : 'Nothing found in your tools now is new to Central Knot; Yes takes in what turns up later.';
-  const choosing = yes.choosing ? ` ${plural(yes.choosing, 'more item')} ${yes.choosing === 1 ? 'has' : 'have'} copies that differ and ${yes.choosing === 1 ? 'waits' : 'wait'} for you: nothing is chosen for you. You’re asked about each, one at a time, with the latest copy offered first, or you skip it and its copies stay as they are.` : '';
+  const choosing = yes.choosing ? ` ${plural(yes.choosing, 'more item')} ${yes.choosing === 1 ? 'has' : 'have'} copies that differ and ${yes.choosing === 1 ? 'waits' : 'wait'} for you: nothing is chosen for you. You’re asked about each, one at a time, with the latest copy marked where one can be told, or you skip it and its copies stay as they are.` : '';
   const claude = yes.waitForClaude ? ` Claude Code gets ${yes.waitForClaude === 1 ? 'the MCP server' : `the ${yes.waitForClaude} MCP servers`} when you click Write to Claude Code.` : '';
   const later = home.syncOn ? '' : ' Automatic sync is off, so nothing is added until you click Sync once.';
   const no = 'No changes nothing: what is already on stays on and keeps syncing, and each found item waits on its page for Add.';
   return h('section.setup-question', { id: 'setup-question', 'aria-labelledby': 'setup-question-title' },
     h('h2.setup-title', { id: 'setup-question-title' }, 'Synchronize everything?'),
-    h('p.setup-text', {}, `${now}${choosing}${claude} ${oneUndoCovers(yes.fromClaude)}${later}`),
+    // One fact to a line, so the question reads at a glance: what Yes adds, what waits, Claude Code, the way back, Automatic sync.
+    h('div.setup-text', {}, ...[now, choosing, claude, oneUndoCovers(yes.fromClaude), later].map(line => line.trim()).filter(Boolean).map(line => h('p.setup-line', {}, `${line} `))),
     h('p.setup-text', { id: 'setup-no-says' }, no),
     h('div.setup-actions', {},
       button({ variant: 'primary', label: 'Synchronize everything', id: 'setup-yes', disabled: !!state.busy, onclick: () => void answer(true) }),

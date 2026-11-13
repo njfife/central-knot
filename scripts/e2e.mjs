@@ -3139,7 +3139,7 @@ async function firstSetupFlow() {
   await a.click('#nav-overview');
   const question = await a.text('#setup-question .setup-text') ?? '';
   check('a home never asked shows the question, counted as the pass counts: 2 items it takes in now and the tools that get them, then 2 more that wait with nothing chosen, the server Claude Code gets at Write, and what the one Undo covers',
-    /^Yes takes in now the 2 items found in your tools .* \(Claude Code and Codex\);/.test(question) && /2 more items have copies that differ and wait for you: nothing is chosen for you\. You’re asked about each, one at a time, with the latest copy offered first/.test(question)
+    /^Yes takes in now the 2 items found in your tools .* \(Claude Code and Codex\);/.test(question) && /2 more items have copies that differ and wait for you: nothing is chosen for you\. You’re asked about each, one at a time, with the latest copy marked where one can be told/.test(question)
       && /Claude Code gets the MCP server when you click Write to Claude Code\. One Undo in History takes back what it takes in; a copy you choose has its own Undo\.$/.test(question), question);
   same('and says what No leaves', await a.text('#setup-no-says'), 'No changes nothing: what is already on stays on and keeps syncing, and each found item waits on its page for Add.');
   check('the lead no longer says to open a card and turn something on where the question stands', !/Open one below/.test(await a.text('.overview-lead') ?? ''), await a.text('.overview-lead'));
@@ -3188,7 +3188,7 @@ async function firstSetupFlow() {
   same('its Restore switches the rule on again and puts notes back', [readNow(join(codex, 'notes/SKILL.md')), record().syncEverything], [text('notes', 'Take notes.'), true]);
   same('the status bar says so, and the switch-on offers its Undo again, which takes back what the Restore put back',
     [await a.run(`document.querySelector('#announcement').dataset.text`), await a.all(`${ruleRow} .history-actions button`), await a.all(`${ruleRow} .history-done`)],
-    ['Restored: 2 items are back in Central Knot, and Synchronize everything is on again; the switch-on’s Undo takes them back again.', ['Undo'], ['Restored']]);
+    ['Synchronize everything is on again. Restored 2 items; the switch-on’s Undo takes them back.', ['Undo'], ['Restored']]);
   same('no page errors, first setup', a.pageErrors, []);
   await a.quit();
 

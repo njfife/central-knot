@@ -697,7 +697,9 @@ function sayLibraryAction(past: HistoryEvent, result: ApplyResult) {
 function sayEverything(past: HistoryEvent, result: ApplyResult) {
   if (result.stopped) { tell({ page: state.page, item: past.item, text: result.stopped, warn: true, history: true }); return; }
   const made = (result.made ?? []).map(id => state.history.data?.find(event => event.id === id));
-  const text = everythingDone(past, made, made.filter(event => event?.kind === 'restored').length);
+  // Whether the Restore switched the rule on again: its Undo had switched it off, and the home, read after the click, has it on.
+  const switchedOn = !!past.everything?.undo?.switchedOff && state.home?.sync.syncEverything === true;
+  const text = everythingDone(past, made, made.filter(event => event?.kind === 'restored').length, switchedOn);
   const notDone = [...new Set(result.results.filter(keptBack).map(entry => entry.message))];
   tell({ page: state.page, item: past.item, warn: notDone.length > 0, history: true, text: [text, ...notDone.slice(0, 3)].join(' ') });
 }

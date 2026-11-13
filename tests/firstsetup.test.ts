@@ -271,7 +271,7 @@ test('The owner’s seven, choosing the shared copy: Claude Code’s own copy is
     assert.ok(after.library.review.versions.some(version => version.hash === ownHash), `Claude Code’s own (“${own.trim().split('\n').at(-1)}”) is a version`);
     const chosen = (await history(box)).at(-1)!;
     assert.deepEqual([chosen.kind, chosen.losers.map(loser => loser.tool)], ['chosen', ['claude-cli']]);
-    assert.equal(libraryAction(chosen, after.library.review, { managed: tools, edited: [] })?.label, 'Undo', 'its own Undo');
+    assert.equal(libraryAction(chosen, after.library.review, { managed: tools, pending: [] })?.label, 'Undo', 'its own Undo');
   } finally { await box.cleanup(); }
 });
 
@@ -487,6 +487,41 @@ for (const edited of ['claude-cli', 'codex-cli'] as const) test(`A hand edit in 
   } finally { await box.cleanup(); }
 });
 
+test('The copy deleted by hand in the tool it was found in, not taken in yet (Automatic sync off): the take-in is left in as changed, and the Undo says nothing of a copy that is gone', async () => {
+  const box = await sandbox();
+  try {
+    await putSkill(box, skillRoot['claude-cli'], 'notes', 'Original.');
+    await setSyncEverything(box.context, true, true);
+    await background(box);
+    await rm(join(box.home, skillRoot['claude-cli'], 'notes'), { recursive: true });
+    const before = await filesIn(box);
+    assert.notEqual(await ownUndo(box, 'notes'), 'Undo');
+    const [switchOn] = await switchesOn(box);
+    const undone = await everythingEntryAction(box.context, tools, switchOn.id);
+    const undo = (await history(box)).find(event => event.id === undone.made![0])!;
+    assert.deepEqual([undo.everything?.undo?.left, (await skillsView(box.context, tools)).library.notes.deleted, await filesIn(box)], [[{ item: 'notes', why: 'changed' }], undefined, before]);
+  } finally { await box.cleanup(); }
+});
+
+test('The Restore of an Undo switches the rule on only while no switch came after that Undo: off again in Settings since, it stays off', async () => {
+  const box = await sandbox();
+  try {
+    await putSkill(box, skillRoot['claude-cli'], 'notes');
+    await setSyncEverything(box.context, true, true);
+    await background(box);
+    const [switchOn] = await switchesOn(box);
+    const undone = await everythingEntryAction(box.context, tools, switchOn.id);
+    await setSyncEverything(box.context, true);
+    await setSyncEverything(box.context, false);
+    const undo = (await history(box)).find(event => event.id === undone.made![0])!;
+    assert.doesNotMatch(everythingAction(undo, await history(box), await entryItems(box, tools))?.help ?? '', /Switch Synchronize everything on/);
+    const restored = await everythingEntryAction(box.context, tools, undo.id);
+    const made = (await history(box)).filter(event => restored.made?.includes(event.id));
+    assert.deepEqual([(await recordOf(box))?.syncEverything, (await skillsView(box.context, tools)).library.notes.on], [false, true], 'the item is back; the rule is as Settings left it');
+    assert.equal(everythingDone(undo, made, made.filter(event => event.kind === 'restored').length, false), 'Restored 1 item; the switch-on’s Undo takes it back.');
+  } finally { await box.cleanup(); }
+});
+
 test('Taken over since in a tool that read it from ~/.agents/skills, though another tool’s identical copy was the one taken in: the take-in is left in as taken over, and no tool loses it', async () => {
   const box = await sandbox();
   try {
@@ -560,7 +595,7 @@ test('The band after an Undo’s Restore says what was restored, also where a la
     assert.equal(undo.everything?.ruleOn, true, 'the rule is on: the later switch-on set it');
     const restored = await everythingEntryAction(box.context, tools, undo.id);
     const made = (await history(box)).filter(event => restored.made?.includes(event.id));
-    assert.equal(everythingDone(undo, made, made.filter(event => event.kind === 'restored').length), 'Restored: 1 item is back in Central Knot; the switch-on’s Undo takes it back again.');
+    assert.equal(everythingDone(undo, made, made.filter(event => event.kind === 'restored').length, false), 'Restored 1 item; the switch-on’s Undo takes it back.');
   } finally { await box.cleanup(); }
 });
 

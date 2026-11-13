@@ -70,7 +70,7 @@ const pageRow = (fact: LibraryFacts) => ({ key: fact.key, name: fact.name, hashe
 const add = (view: LibraryView, key: string): Change => rowClicks.on(pageRow(rowOf(view, key)!), view.library[key]?.deleted ? view.library[key] : undefined);
 const entriesOf = async (box: Box, key: string) => (await readHistory(box.context)).filter(event => event.key === key);
 /** Nothing waits in the tools: no copy holds an edit not taken in, and the three tools are managed (historyactions.ts ItemNow). */
-const settled = { managed: tools, edited: [] as HarnessId[] };
+const settled = { managed: tools, pending: [] as HarnessId[] };
 const turnOn = async (box: Box) => assert.deepEqual(await setSyncEverything(box.context, true), {});
 
 // ---------- Off, and switched on ----------

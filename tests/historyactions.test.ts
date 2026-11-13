@@ -15,7 +15,7 @@ const item = (changes: Partial<LibraryItem> = {}): LibraryItem => ({ ...newItem(
   { hash: 'b', at, from: { how: 'edited', harness: 'codex-cli' } }, { hash: 'x', at, from: { how: 'was-in', harness: 'copilot-cli' } }, { hash: 'a', at, from: { how: 'found', harness: 'claude-cli' } }], ...changes });
 const entry = (fields: Partial<HistoryEvent>): HistoryEvent => ({ id: 'e', at, key: 'agent:reviewer', item: 'reviewer', kind: 'edit', losers: [], orderProved: true, ...fields });
 /** Nothing waits in the tools: no copy holds an edit not taken in, and these three are managed (historyactions.ts ItemNow). */
-const settled: ItemNow = { managed: tools as HarnessId[], edited: [] };
+const settled: ItemNow = { managed: tools as HarnessId[], pending: [] };
 const offered = (event: HistoryEvent, agent: LibraryItem | undefined) => { const action = libraryAction(event, agent, settled); return action && [action.label, action.change]; };
 const asIs = { key: 'reviewer', managed: true, off: [] };
 
@@ -173,7 +173,7 @@ test('A take-in is taken back only while every place it was found in still holds
   assert.deepEqual(why(item({ on: false })), [{ item: 'reviewer', why: 'off' }, { item: 'picked', why: 'off' }], 'a chosen copy is named by why its own Undo is gone');
   assert.deepEqual(why(item()), [{ item: 'picked', why: 'chosen' }], 'one chosen with its own Undo');
   assert.deepEqual(why(item({ hash: 'a' }))[0], { item: 'reviewer', why: 'changed' });
-  assert.deepEqual(why(item(), { ...settled, edited: ['codex-cli'] })[0], { item: 'reviewer', why: 'changed' }, 'a copy holds an edit not taken in yet');
+  assert.deepEqual(why(item(), { ...settled, pending: ['codex-cli'] })[0], { item: 'reviewer', why: 'changed' }, 'a copy holds an edit not taken in yet');
   assert.deepEqual(why(item(), { ...settled, managed: ['copilot-cli', 'codex-cli'] })[0], { item: 'reviewer', why: 'left-out' }, 'the tool it was found in is left out');
   assert.deepEqual(why(item({ except: ['claude-cli'] }))[0], { item: 'reviewer', why: 'kept-out' });
   assert.deepEqual(why(item({ deleted: { at } }))[0], { item: 'reviewer', why: 'deleted' });

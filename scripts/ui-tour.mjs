@@ -776,7 +776,7 @@ if (wanted('first-setup')) {
   await refresh();
   await a.click('#nav-overview');
   if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
-  await atEverySize('question-new-home', 'A new home (the Practice copy, never asked): the Overview’s question, Synchronize everything?, under the lead. Its first paragraph says apart what Yes takes in at once (6 items, and which tools get them) and the 4 more items whose copies differ, which wait with nothing chosen and are asked about one at a time with the latest copy offered first; that Claude Code gets its MCP server at Write to Claude Code; and what the one Undo covers (a copy you choose has its own Undo). Its second says No changes nothing. Synchronize everything is the main button, No, I’ll add items myself beside it', true, '#setup-question');
+  await atEverySize('question-new-home', 'A new home (the Practice copy, never asked): the Overview’s question, Synchronize everything?, under the lead. Its lines say apart what Yes takes in at once (6 items, and which tools get them) and the 4 more items whose copies differ, which wait with nothing chosen and are asked about one at a time with the latest copy marked where one can be told; that Claude Code gets its MCP server at Write to Claude Code; and what the one Undo covers (a copy you choose has its own Undo). Under them, No changes nothing. Synchronize everything is the main button, No, I’ll add items myself beside it', true, '#setup-question');
   await a.size(860, 560); await show('#setup-question'); await focusOn('#setup-yes');
   await shot(a, 'question-focus-860', 'Tabbed to Synchronize everything at 860×560: its focus ring');
   await a.run(`document.activeElement?.blur()`); await a.size(1280, 800);
@@ -820,7 +820,7 @@ if (wanted('first-setup')) {
   await atEverySize('after-undo', 'Clicked its Undo: at the top, its entry says it switched the rule off, took 5 items back out of Central Knot, each tool keeping its own copy, and left in deploy, review and triage, whose copies were chosen; it offers Restore. The entries under it are each item’s own Undo, each with Restore', true);
   await a.click('.history-row[data-kind="everything"] .history-actions button');
   await waitFor(a, `[...document.querySelectorAll('.history-row[data-kind="everything"] .history-done')].some(done => /Restored/.test(done.textContent))`, 15000);
-  await atEverySize('after-restore', 'Clicked Restore: at the top, an entry for each item restored; the Undo’s entry under them says Restored. The status bar starts “Restored: 5 items are back in Central Knot, and Synchronize everything is on again”; the rest of its sentence (that the switch-on’s Undo takes them back again) is cut off where the bar is narrow, and is in the .txt', true);
+  await atEverySize('after-restore', 'Clicked Restore: at the top, an entry for each item restored; the Undo’s entry under them says Restored. The status bar says “Synchronize everything is on again. Restored 5 items; the switch-on’s Undo takes them back.”, cut short at the narrower sizes.', true);
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 

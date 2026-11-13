@@ -76,7 +76,7 @@ async function saveRule(context: ShareContext, record: SyncRecord, on: boolean, 
 /** Each entry's item as History's actions are decided on it: each kind's items and what the managed tools hold of them now (librarypass.ts itemsNow). */
 async function entryItems(context: ShareContext, tools: HarnessId[]): Promise<EntryItem> {
   const kinds = { skills: await itemsNow(skillKind, context, tools), mcp: await itemsNow(serverKind, context, tools), agents: await itemsNow(agentKind, context, tools) };
-  return about => { const at = libraryEntry(about); return at ? kinds[at.kind].of(about) : { item: undefined, now: { managed: tools, edited: [] } }; };
+  return about => { const at = libraryEntry(about); return at ? kinds[at.kind].of(about) : { item: undefined, now: { managed: tools, pending: [] } }; };
 }
 /**
  * Each of these entries' own History action, the click History runs for it alone, one pass per kind (librarypass.ts restoreAll):
@@ -124,14 +124,14 @@ async function takeBack(context: ShareContext, tools: HarnessId[], switchOn: His
 }
 
 /**
- * The Restore of that Undo (restorePlan): the rule on again where the Undo switched it off, with no entry of its own; each item it
+ * The Restore of that Undo (restorePlan): the rule on again where the Undo switched it off and no switch came after it, with no entry of its own; each item it
  * took back that was not added, changed or deleted since, by its own Restore; then the switch-on, and each take-in whose item came
  * back, in force again (their `undoneBy` let go), so the switch-on's Undo takes back what this put back. The Undo's entry is marked
  * done by the first entry this made; each item passed over is said in the results.
  */
 async function putBack(context: ShareContext, tools: HarnessId[], undo: HistoryEvent, history: HistoryEvent[], about: EntryItem) {
-  const { back, passed } = restorePlan(undo, history, about), { record } = await readRecord(context.home);
-  if (undo.everything!.undo!.switchedOff && record) await saveRule(context, record, true, false);
+  const { back, passed, switchOn } = restorePlan(undo, history, about), { record } = await readRecord(context.home);
+  if (switchOn && record) await saveRule(context, record, true, false);
   const { results, writes, undid } = await ownActions(context, tools, back);
   const now = await readHistory(context), restored = new Set(undid.keys());
   for (const each of now) if ((each.undoneBy && restored.has(each.undoneBy)) || each.undoneBy === undo.id) delete each.undoneBy;

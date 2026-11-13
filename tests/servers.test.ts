@@ -20,7 +20,7 @@ import type { ShareContext } from '../src/share.ts';
 import type { Change, HarnessId, HomeView, LibraryFacts } from '../src/types.ts';
 
 /** Nothing waits in the tools: no copy holds an edit not taken in, and these three are managed (historyactions.ts ItemNow). */
-const settled = { managed: ['claude-cli', 'copilot-cli', 'codex-cli'] as HarnessId[], edited: [] as HarnessId[] };
+const settled = { managed: ['claude-cli', 'copilot-cli', 'codex-cli'] as HarnessId[], pending: [] as HarnessId[] };
 const all: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
 const FILES: Record<HarnessId, string> = {
   'claude-cli': '.claude.json', 'copilot-cli': '.copilot/mcp-config.json', 'codex-cli': '.codex/config.toml', 'pi-cli': '.pi/agent/mcp.json', 'opencode-cli': '.config/opencode/opencode.json',

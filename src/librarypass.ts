@@ -63,7 +63,7 @@
 // - History's sentences and actions for its entries: historyactions.ts, in the kind's words (historypage.ts asks it).
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-import { carryOut, itemKey, keepVersion, managedAgain, newItem, pendingEdits, plan, setCurrent, takeInAnswer, versionAt, wantedIn } from './library.ts';
+import { carryOut, itemKey, keepVersion, managedAgain, newItem, pendingChanges, plan, setCurrent, takeInAnswer, versionAt, wantedIn } from './library.ts';
 import type { ItemNow } from './historyactions.ts';
 import type { Copies, FoundCopy, FoundKey, HarnessCopy, ItemKind, LeftFound, LibraryItem, Plan, Shelf, Source, TakenBy, Version } from './library.ts';
 import { appendHistory, historyCutoff, readHistory, replaceHistory } from './history.ts';
@@ -803,7 +803,7 @@ export async function itemsNow<C, E extends Seen, D extends Disk<E>>(kind: Kind<
   const { look, problem } = await lookFor(kind, context, tools);
   const of = (entry: HistoryEvent) => {
     const item = look.library.items[itemKey(entry.key.slice(kind.historyPrefix.length))];
-    return { item, now: { managed: tools, edited: item && !item.deleted ? pendingEdits(plan(item, copiesOf(look, item))) : [] } };
+    return { item, now: { managed: tools, pending: item && !item.deleted ? pendingChanges(plan(item, copiesOf(look, item))) : [] } };
   };
   return { of, problem };
 }

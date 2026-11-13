@@ -52,7 +52,7 @@
 // To add an entry or an action: its kind (or its `cause`) in types.ts HistoryEvent, its sentence in librarySentence, its row
 // in libraryAction, the entry librarypass.ts logItem makes for it, and its case in historypage.ts describe.
 import type { IconName } from './icons.ts';
-import { itemKey, theVersion, type LibraryItem } from './library.ts';
+import { itemKey, pendingChanges, theVersion, type LibraryItem } from './library.ts';
 import { asItIs, versionClock, writesWait, type RowWords } from './libraryrow.ts';
 import type { Change, HarnessId, HistoryEvent, HomeView, LibraryFacts } from './types.ts';
 import { andList, sentence, toolName, toolsPhrase } from './words.ts';
@@ -256,24 +256,24 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
 
 /**
  * What the managed tools hold of an entry's item now, as a pass reads it (librarypass.ts itemsNow; on the page, the row's facts:
- * entriesNow): the tools Central Knot manages, and the tools whose copy holds an edit no pass has taken in yet (library.ts
- * pendingEdits). A take-in's Undo is decided on it (takeInHeld), not on the library's record alone.
+ * entriesNow): the tools Central Knot manages, and the tools whose copy holds a change no pass has taken in yet, an edit or the
+ * copy deleted by hand (library.ts pendingChanges). A take-in's Undo is decided on it (takeInHeld), not on the library's record alone.
  */
-export interface ItemNow { managed: readonly HarnessId[]; edited: readonly HarnessId[] }
+export interface ItemNow { managed: readonly HarnessId[]; pending: readonly HarnessId[] }
 /** An entry's item as History decides its action: the library's record (deleted or not), and what the tools hold of it now. */
 export type EntryItem = (entry: HistoryEvent) => { item: LibraryItem | undefined; now: ItemNow };
 
 /** The page's EntryItem: each entry's item and its row as the open home's view gives them (types.ts HomeView). */
 export const entriesNow = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents' | 'sync'>): EntryItem => entry => {
   const at = libraryEntry(entry), row = at && home[at.kind].items.find(fact => fact.key === at.key);
-  return { item: at && home[at.kind].library[at.key], now: { managed: home.sync.managed, edited: row?.edited ?? [] } };
+  return { item: at && home[at.kind].library[at.key], now: { managed: home.sync.managed, pending: row?.plan ? pendingChanges(row.plan) : [] } };
 };
 
 /**
  * Why a found item's take-in (tookIn) no longer offers its own Undo, or undefined while it does (libraryAction's row "a found
  * item taken in"). The one rule: it is taken back only while every place it was found in still holds the copy it held then, in a
  * tool still managed; anything else is left in. In the order asked: the item is deleted from Central Knot or Off since; at another
- * version, or a copy holds an edit not taken in yet (`changed`, by the copies now: ItemNow edited); a tool it was found in is not
+ * version, or a copy holds an edit not taken in yet or was deleted by hand (`changed`, by the copies now: ItemNow pending); a tool it was found in is not
  * managed now (`left-out`); a tool it took a copy from is kept out (`kept-out`); a place it was found in another way (a link,
  * ~/.agents/skills) holds Central Knot's copy now (`taken-over`); or the Undo would hand Claude Code its own MCP entry back
  * (`claude-code`: givesBackLater). Synchronize everything's one Undo leaves and names each by this (everythingPlan).
@@ -282,7 +282,7 @@ export type TakeInHeld = 'deleted' | 'off' | 'changed' | 'left-out' | 'kept-out'
 export function takeInHeld(event: HistoryEvent, item: LibraryItem | undefined, now: ItemNow): TakeInHeld | undefined {
   if (!item || item.deleted) return 'deleted';
   if (!item.on) return 'off';
-  if ((event.version ?? event.winner?.hash) !== item.hash || now.edited.length) return 'changed';
+  if ((event.version ?? event.winner?.hash) !== item.hash || now.pending.length) return 'changed';
   const found = foundIn(event), took = (event.tookFrom ?? []).map(copy => copy.tool);
   if (found.some(tool => !now.managed.includes(tool))) return 'left-out';
   if (took.some(tool => item.except.includes(tool))) return 'kept-out';
@@ -381,13 +381,15 @@ export function everythingPlan(switchOn: HistoryEvent, history: HistoryEvent[], 
  * What the Restore of a switch-on's Undo (`undo`) puts back: each item it took back (`undo.itemUndos`, the entries their own
  * Undos made) whose own Restore is offered and that no click or edit after the Undo's entry is about (`back`); the others were
  * added, changed or deleted since, and are passed over (`passed`, by name). A pass's `in-line` entry (a copy removed from a tool
- * managed again) is no change to the item.
+ * managed again) is no change to the item. `switchOn`: the Undo switched the rule off and no switch came after it, so the Restore
+ * switches it on again; a switch in Settings since is left as it is.
  */
 export function restorePlan(undo: HistoryEvent, history: HistoryEvent[], about: EntryItem) {
   const after = history.slice(history.findIndex(entry => entry.id === undo.id) + 1);
   const itemUndos = history.filter(entry => undo.everything?.undo?.itemUndos.includes(entry.id));
   const back = itemUndos.filter(entry => !after.some(later => later.key === entry.key && later.cause !== 'in-line') && libraryAction(entry, about(entry).item, about(entry).now)?.label === 'Restore');
-  return { back, passed: itemUndos.filter(entry => !back.includes(entry)).map(entry => entry.item) };
+  const switchOn = !!undo.everything?.undo?.switchedOff && !after.some(later => later.kind === 'everything' && !later.everything?.undo);
+  return { back, passed: itemUndos.filter(entry => !back.includes(entry)).map(entry => entry.item), switchOn };
 }
 
 /** Why take-ins were left in, after their names, for one of them and for several: "notes (changed since)". */
@@ -424,10 +426,10 @@ export function everythingSentence(event: HistoryEvent): { glyph: IconName; text
  * switch-on (its Undo ran: the Undo's entry, `made[0]`, says what it did) or an Undo's entry (its Restore ran: `restored` items
  * came back).
  */
-export function everythingDone(past: HistoryEvent, made: (HistoryEvent | undefined)[], restored: number): string {
+export function everythingDone(past: HistoryEvent, made: (HistoryEvent | undefined)[], restored: number, switchedOn: boolean): string {
   const undo = past.everything?.undo;
   if (!undo) return made[0] ? everythingSentence(made[0]).text : 'Undone.';
-  return `Restored: ${itemsSaid(restored)} ${restored === 1 ? 'is' : 'are'} back in Central Knot${undo.switchedOff ? ', and Synchronize everything is on again' : ''}; the switch-on’s Undo takes ${restored === 1 ? 'it' : 'them'} back again.`;
+  return `${switchedOn ? 'Synchronize everything is on again. ' : ''}Restored ${itemsSaid(restored)}; the switch-on’s Undo takes ${restored === 1 ? 'it' : 'them'} back.`;
 }
 
 /**
@@ -439,10 +441,10 @@ export function everythingAction(event: HistoryEvent, history: HistoryEvent[], a
   const switched = event.everything;
   if (event.undoneBy || !switched || (!switched.ruleOn && !switched.undo)) return undefined;
   if (switched.undo) {
-    const { back, passed } = restorePlan(event, history, about);
+    const { back, passed, switchOn } = restorePlan(event, history, about);
     if (!back.length) return undefined;
     const skipped = passed.length ? `; ${andList(passed)} ${passed.length === 1 ? 'was' : 'were'} added, changed or deleted since, and ${passed.length === 1 ? 'stays' : 'stay'} as ${passed.length === 1 ? 'it is' : 'they are'}` : '';
-    return { label: 'Restore', help: `${switched.undo.switchedOff ? 'Switch Synchronize everything on again and put' : 'Put'} back the ${itemsSaid(back.length)} this took out of Central Knot, which the switch-on’s Undo then takes back again${skipped}` };
+    return { label: 'Restore', help: `${switchOn ? 'Switch Synchronize everything on again and put' : 'Put'} back the ${itemsSaid(back.length)} this took out of Central Knot, which the switch-on’s Undo then takes back again${skipped}` };
   }
   const { takeBack, left, switchOff, keptIn } = everythingPlan(event, history, about);
   if (!switchOff && !takeBack.length) return undefined;
