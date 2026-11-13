@@ -8,7 +8,7 @@ import { harnessIds } from '../src/harnesses.ts';
 import { agentsView, applyAgents } from '../src/agents.ts';
 import { managedNow } from '../src/share.ts';
 import { applySkills, skillsView } from '../src/skills.ts';
-import { applyMcp, mcpView } from '../src/mcp.ts';
+import { applyServers, serversView } from '../src/servers.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
 
@@ -65,13 +65,14 @@ test('a tool that has a skill through an installed plugin has it another way, an
   } finally { await rm(base, { recursive: true, force: true }); }
 });
 
-test('an MCP server or agent a tool has through a plugin gets no entry or file of its own there', async () => {
+test('an MCP server or agent a tool has through a plugin gets no entry or file of its own there; a server’s part entry is the plugin’s, never taken in', async () => {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-plugin-parts-')));
   const home = join(base, 'home');
   const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
   try {
-    // Codex has both as its own items (as a plugin's parts leave them); Copilot CLI has neither.
+    // Codex has both as its own items (as a plugin's parts leave them); Copilot CLI has the server as the person's own, and no agent.
     await put(join(home, '.codex/config.toml'), '[mcp_servers.issues]\ncommand = "npx"\nargs = ["-y", "@example/issues-mcp"]\n');
+    await put(join(home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { issues: { type: 'local', command: 'npx', args: ['-y', '@example/issues-mcp'], tools: ['*'] } } }));
     await put(join(home, '.codex/agents/triager.toml'), 'name = "triager"\ndescription = "Sorts issues"\ndeveloper_instructions = "Sort new issues."\n');
     await mkdir(join(home, '.copilot/agents'), { recursive: true });
     await put(join(home, '.claude.json'), '{}\n');
@@ -85,17 +86,20 @@ test('an MCP server or agent a tool has through a plugin gets no entry or file o
     const from = { plugin: 'issue-tracker', marketplace: 'team', version: '1.2.0' };
 
     // A name alone could be another server or agent: nothing is claimed until they are on record as that plugin's parts.
-    assert.equal((await mcpView(context, tools)).servers.find(item => item.key === 'issues')!.plugin, undefined);
+    assert.equal((await serversView(context, tools)).items.find(item => item.key === 'issues')!.plugin, undefined);
     assert.equal((await agentsView(context, tools)).items.find(item => item.key === 'triager')!.plugin, undefined);
     await put(join(home, '.central-knot/plugin-parts.json'), JSON.stringify({ installs: [{ source: '/markets/team', marketName: 'team', plugin: 'issue-tracker', version: '1.2.0', tool: 'codex-cli', at: '2026-11-10T00:00:00.000Z', digest: 'd',
       items: [{ kind: 'mcp', name: 'issues', hash: 'h' }, { kind: 'agent', name: 'triager', hash: 'h' }] }] }));
 
-    const server = (await mcpView(context, tools)).servers.find(item => item.key === 'issues')!;
+    const server = (await serversView(context, tools)).items.find(item => item.key === 'issues')!;
     assert.deepEqual([server.plugin, server.cannot['claude-cli']], [{ 'claude-cli': { ...from, name: 'issues' } }, 'Claude Code has this MCP server through the plugin issue-tracker (version 1.2.0), so no separate copy is placed there.']);
-    const served = await applyMcp(context, tools, [{ key: 'issues', managed: true, off: [] }], { claudeNow: ['issues'] });
+    // Codex's entry is the plugin's part there: never found or taken in, and said why.
+    assert.deepEqual([Object.keys(server.copies), server.unseen?.['codex-cli']], [['copilot-cli'], 'Codex has it as part of a plugin Central Knot installed there, so it is the plugin’s.']);
+    const codexBefore = await readFile(join(home, '.codex/config.toml'), 'utf8');
+    const served = await applyServers(context, tools, [{ key: 'issues', managed: true, off: [] }]);
     assert.equal(served.stopped, undefined);
-    assert.ok(JSON.parse(await readFile(join(home, '.copilot/mcp-config.json'), 'utf8')).mcpServers.issues, 'the tool without it gets the server');
     assert.equal(await readFile(join(home, '.claude.json'), 'utf8'), '{}\n', 'Claude Code, which has it through the plugin, is not written');
+    assert.equal(await readFile(join(home, '.codex/config.toml'), 'utf8'), codexBefore, 'the part’s entry is left as it is');
 
     const agent = (await agentsView(context, tools)).items.find(item => item.key === 'triager')!;
     assert.deepEqual([agent.plugin, agent.cannot['claude-cli']], [{ 'claude-cli': { ...from, name: 'triager' } }, 'Claude Code has this agent through the plugin issue-tracker (version 1.2.0), so no separate copy is placed there.']);
@@ -105,7 +109,7 @@ test('an MCP server or agent a tool has through a plugin gets no entry or file o
     // Settled: a later pass neither writes there nor reads the missing copy as a deletion.
     const again = await applyAgents({ ...context, settleMs: 0 }, tools, []);
     assert.deepEqual([again.writes, await exists(join(home, '.copilot/agents/triager.agent.md')), await exists(join(home, '.codex/agents/triager.toml'))], [0, true, true]);
-    assert.equal((await applyMcp({ ...context, settleMs: 0 }, tools, [], { settleMs: 0 })).writes, 0);
+    assert.equal((await applyServers({ ...context, settleMs: 0 }, tools, [], { settleMs: 0 })).writes, 0);
     assert.ok(JSON.parse(await readFile(join(home, '.copilot/mcp-config.json'), 'utf8')).mcpServers.issues);
   } finally { await rm(base, { recursive: true, force: true }); }
 });

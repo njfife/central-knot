@@ -6,13 +6,13 @@ import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { readHistory } from '../src/history.ts';
 import { clearSwitch } from '../src/skills.ts';
-import { applyMcp } from '../src/mcp.ts';
+import { applyServers } from '../src/servers.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
-import { choseProfileInUse, holdsOnWhatIsHere, itemKeyOf, offAfterFailures, planSwitch, switchItems, type SwitchItem } from '../src/profileplan.ts';
+import { choseProfileInUse, holdsOnWhatIsHere, itemKeyOf, offAfterFailures, planSwitch, profileServers, switchItems, type SwitchItem } from '../src/profileplan.ts';
 import { deleteProfile, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from '../src/profiles.ts';
 import type { ShareContext } from '../src/share.ts';
 import { switchState } from '../src/skillswitch.ts';
-import type { HarnessId, HistoryEvent, SkillFacts } from '../src/types.ts';
+import type { HarnessId, HistoryEvent, LibraryFacts, SkillFacts } from '../src/types.ts';
 
 test('Each tool’s MCP switch: off writes its own form, on takes it out, and every other byte stays', () => {
   const before: Record<HarnessId, string> = {
@@ -65,10 +65,13 @@ test('A switch turns off what the profile leaves out, and back on only what a pr
   const none = planSwitch(items, undefined, { 'skill:pager': ['claude-cli'], 'mcp:sentry': ['claude-cli'] });
   assert.deepEqual(none.flips.map(flip => `${flip.item} ${flip.tool} ${flip.disabled ? 'off' : 'on'}`), ['skill:pager claude-cli on']);
   assert.deepEqual(none.offByProfile, {});
-  // What the home reads becomes items: a tool whose switch can't be read counts as on, and a server that belongs to an app is left out.
+  // What the home reads becomes items: a tool whose switch can't be read counts as on. A server goes by its name as written
+  // (its switch's name), with the tools that have its entry; one that belongs to an app (seen, never taken in) is left out.
   const facts = (key: string, extra: object) => ({ key, name: key, description: '', copies: { 'claude-cli': {}, 'codex-cli': {} }, ...extra }) as unknown as SkillFacts;
-  const read = switchItems([facts('dev', { disabled: ['claude-cli', 'codex-cli'], switchProblem: { 'codex-cli': 'unreadable' } })], { servers: [facts('app', { held: 'ChatGPT' })] });
-  assert.deepEqual(read.map(entry => [entry.id, entry.tools]), [['skill:dev', { 'claude-cli': 'off', 'codex-cli': 'on' }]]);
+  const row = (name: string, extra: object) => ({ key: name.toLowerCase(), name, description: '', copies: {}, on: false, except: [], cannot: {}, edited: [], ...extra }) as unknown as LibraryFacts;
+  const servers = profileServers({ items: [row('app', { unseen: { 'codex-cli': 'ChatGPT desktop keeps this server for itself.' } }), row('Sentry', { on: true, copies: { 'codex-cli': {} }, switchedOff: ['codex-cli'], plan: {} })] });
+  const read = switchItems([facts('dev', { disabled: ['claude-cli', 'codex-cli'], switchProblem: { 'codex-cli': 'unreadable' } })], servers);
+  assert.deepEqual(read.map(entry => [entry.id, entry.tools]), [['skill:dev', { 'claude-cli': 'off', 'codex-cli': 'on' }], ['mcp:Sentry', { 'codex-cli': 'off' }]]);
 });
 
 test('A flip that failed leaves its switch held or not, as it was', () => {
@@ -230,15 +233,15 @@ test('A switch set by hand afterwards is the person’s: profiles let go of it',
   } finally { await box.cleanup(); }
 });
 
-test('A managed MCP server a profile turned off keeps syncing, and stays off', async () => {
+test('An MCP server On in Central Knot that a profile turned off keeps its edits in step, and stays off', async () => {
   const box = await sandbox();
   try {
     const tools: HarnessId[] = ['claude-cli', 'codex-cli'];
-    assert.equal((await applyMcp(box.context, tools, [{ key: 'sentry', managed: true, off: [] }])).stopped, undefined);
+    assert.equal((await applyServers(box.context, tools, [{ key: 'sentry', managed: true, off: [] }])).stopped, undefined);
     await switchProfile(box.context, (await saveProfile(box.context, { name: 'Development', items: ['skill:dev'] })).id!);
     // An edit in Claude Code's own file spreads to Codex, whose entry keeps its enabled = false.
     await writeFile(join(box.home, '.claude.json'), '{\n  "mcpServers": { "sentry": { "type": "stdio", "command": "sentry", "args": ["--v2"] } }\n}\n');
-    await applyMcp(box.context, tools, []);
+    await applyServers(box.context, tools, []);
     const codex = await readFile(mcpSwitchPath(box.context, 'codex-cli'), 'utf8');
     assert.match(codex, /\[mcp_servers\.sentry\]\ncommand = "sentry"\nargs = \["--v2"\]\nenabled = false\n/);
     assert.equal(mcpDisabled('codex-cli', codex, 'sentry'), true);

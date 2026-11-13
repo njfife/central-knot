@@ -50,7 +50,7 @@ async function readDisk(context: ShareContext, managed: HarnessId[]): Promise<Ag
     disk.problems.push(...read.problems);
     const locked = `${nameOf(tool)}’s agents folder can’t be written, so Central Knot can’t change the agent there. `
       + `Once the folder’s permissions let it, ${nameOf(tool)} catches up when sync runs.`;
-    if (await exists(folder) && await access(folder, constants.W_OK).then(() => false, () => true)) disk.locked.set(tool, locked);
+    if (await exists(folder) && await access(folder, constants.W_OK).then(() => false, () => true)) disk.locked.set(tool, { why: locked });
     for (const key of read.unreadable.keys()) {
       const what = key === '*' ? 'agents folder' : 'file for this agent';
       disk.unseen.set(`${tool}:${key}`, `${nameOf(tool)}’s ${what} is there but could not be read. Nothing changes there until it reads again.`);
@@ -99,7 +99,7 @@ function agentHeld(disk: AgentDisk, managed: HarnessId[], item: Wanted, tool: Ha
  * copyIn). An edit in a folder that can't be written is still read and taken in; only the writes and removals there wait.
  */
 function cannotTake(disk: AgentDisk, managed: HarnessId[], item: Wanted, tool: HarnessId, hasCopy: boolean): string | undefined {
-  return (hasCopy ? undefined : agentHeld(disk, managed, item, tool)) ?? disk.locked.get(tool);
+  return (hasCopy ? undefined : agentHeld(disk, managed, item, tool)) ?? disk.locked.get(tool)?.why;
 }
 
 // ---------- The agents' Kind ----------

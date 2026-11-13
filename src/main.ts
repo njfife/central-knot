@@ -14,7 +14,8 @@ import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skil
 import { agentTools, mcpTools, noteTools, pluginTools, presentTools } from './presence.ts';
 import { installedPlugins } from './plugins.ts';
 import { checkFeed, type FeedCheck } from './bundlefeed.ts';
-import { applyMcp, mcpFile, mcpView, restoreMcp, undoClaudeWrite } from './mcp.ts';
+import { mcpFile } from './mcp.ts';
+import { applyServers, restoreServer, serversView, serverVersion, writeToClaude } from './servers.ts';
 import { agentVersion, agentsView, applyAgents, restoreAgent } from './agents.ts';
 import { convertAgentToSkill } from './agentskill.ts';
 import { applyBase, baseView, instructionsView, instructionVersion, repoBase, saveInstruction, undoBase } from './instructions.ts';
@@ -25,10 +26,10 @@ import { readParts } from './parts.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
 import { deleteProfile, driftNow, switchFilesStamp, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from './profiles.ts';
-import { activeProfile, driftOf, NO_PROFILE, presentItems, profileSkills, profilesInUse, switchItems, type SwitchItem } from './profileplan.ts';
+import { activeProfile, driftOf, NO_PROFILE, presentItems, profileServers, profileSkills, profilesInUse, switchItems, type SwitchItem } from './profileplan.ts';
 import { defaultHistoryDays, historyDayChoices, plural } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
-import type { ActionReport, Appearance, ApplyResult, PartRef, PartsPick, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
+import type { ActionReport, Appearance, ApplyResult, PartRef, PartsPick, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
 import { toolList } from './words.ts';
 import { buildTag, startUpdater, type PendingUpdate } from './updater.ts';
@@ -434,7 +435,7 @@ function refreshTray() {
   if (process.platform === 'darwin') tray.setTitle(`${unseen || unseenPlugins ? '•' : ''}${short ? ` ${short}` : ''}`.trim());
 }
 /** Sync once, from either menu: one pass that writes, with Automatic sync left off. */
-const syncOnce = () => fromTray(async () => { keepMcpAndAgents((await pass(await read(), true)).mcpAndAgents); });
+const syncOnce = () => fromTray(async () => { keepServersAndAgents((await pass(await read(), true)).serversAndAgents); });
 /** Menu bar actions take their turn like the page's, then tell the page. */
 async function fromTray(work: () => Promise<void>) {
   await queued(work).catch(() => undefined);
@@ -483,11 +484,11 @@ function makeTray() {
 
 /** What passes did since the page last read, so no notice is lost between reads. */
 let pendingResults: DestinationResult[] = [], pendingNotices: SyncNotice[] = [];
-let pendingMcpNotices: SyncNotice[] = [], pendingAgentNotices: SyncNotice[] = [];
+let pendingServerNotices: SyncNotice[] = [], pendingAgentNotices: SyncNotice[] = [];
 let lastStopped: string | undefined;
 
-interface McpAndAgentsResult { failures: DestinationResult[]; stopped: DestinationResult[]; mcpNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean }
-interface BackgroundPass { skills?: LibraryPass; mcpAndAgents?: McpAndAgentsResult }
+interface ServersAndAgentsResult { failures: DestinationResult[]; stopped: DestinationResult[]; serverNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean }
+interface BackgroundPass { skills?: LibraryPass; serversAndAgents?: ServersAndAgentsResult }
 
 /**
  * One pass on the open home: writes only with Sync on (or when asked explicitly); with Sync off nothing is done in the
@@ -500,31 +501,31 @@ async function pass(snapshots: Snapshot[], explicit = false): Promise<Background
   const managed = await managedNow(shared, snapshots);
   const crashes: DestinationResult[] = [];
   const crashed = (item: string) => (error: unknown) => { crashes.push({ item, outcome: 'failed', message: `${item} could not finish: ${error instanceof Error ? error.message : String(error)}` }); return undefined; };
-  // Skills and agents are Central Knot's library (library.ts); MCP servers keep their own engine (Claude Code still waits for Write now).
+  // Skills, MCP servers and agents are Central Knot's library (library.ts); Claude Code's MCP settings wait for Write to Claude Code.
   const skills = await applySkills(shared, managed, []).catch(crashed('Skills sync'));
-  const mcp = await applyMcp(shared, managed, []).catch(crashed('MCP sync'));
+  const servers = await applyServers(shared, managed, []).catch(crashed('MCP sync'));
   const agents = await applyAgents(shared, managed, []).catch(crashed('Agents sync'));
-  return { skills: skills ?? { results: [], writes: 0 }, mcpAndAgents: {
-    failures: [...crashes, ...[...(mcp?.results ?? []), ...(agents?.results ?? [])].filter(entry => entry.outcome === 'failed')],
-    stopped: ([['MCP sync', mcp?.stopped], ['Agents sync', agents?.stopped]] as const).filter(([, why]) => why).map(([item, why]) => ({ item, outcome: 'failed' as const, message: why! })),
-    mcpNotices: mcp?.notices ?? [], agentNotices: agents?.notices ?? [], settling: !!(mcp?.settling || agents?.settling),
-    changed: !!(mcp?.writes || mcp?.notices?.length || agents?.writes || agents?.notices?.length) } };
+  return { skills: skills ?? { results: [], writes: 0 }, serversAndAgents: {
+    failures: [...crashes, ...[...(servers?.results ?? []), ...(agents?.results ?? [])].filter(entry => entry.outcome === 'failed')],
+    stopped: ([['MCP sync', servers?.stopped], ['Agents sync', agents?.stopped]] as const).filter(([, why]) => why).map(([item, why]) => ({ item, outcome: 'failed' as const, message: why! })),
+    serverNotices: servers?.notices ?? [], agentNotices: agents?.notices ?? [], settling: !!(servers?.settling || agents?.settling),
+    changed: !!(servers?.writes || servers?.notices?.length || agents?.writes || agents?.notices?.length) } };
 }
 
-/** A failed MCP or agents pass, or a copy it could not write, is told on the page, never dropped. */
-function keepMcpAndAgents(outcome: McpAndAgentsResult | undefined) {
+/** A failed servers or agents pass, or a copy it could not write, is told on the page, never dropped. */
+function keepServersAndAgents(outcome: ServersAndAgentsResult | undefined) {
   if (!outcome) return;
   for (const failure of outcome.failures) if (!pendingResults.some(known => known.item === failure.item && known.harness === failure.harness && known.message === failure.message)) pendingResults.push(failure);
   for (const stop of outcome.stopped) if (!pendingResults.some(known => known.message === stop.message)) pendingResults.push(stop);
-  pendingMcpNotices.push(...outcome.mcpNotices);
+  pendingServerNotices.push(...outcome.serverNotices);
   pendingAgentNotices.push(...outcome.agentNotices);
 }
 
 async function syncThenView(explicit = false): Promise<HomeView> {
   const shared: ShareContext = { ...context(), reads: new Map() };
   const before = await read();
-  const { skills, mcpAndAgents } = await pass(before, explicit);
-  keepMcpAndAgents(mcpAndAgents);
+  const { skills, serversAndAgents } = await pass(before, explicit);
+  keepServersAndAgents(serversAndAgents);
   // A pass that could not finish says so on the page instead of failing quietly.
   const caughtUp = [...pendingResults.splice(0), ...(skills?.results ?? []), ...(skills?.stopped ? [{ item: 'Sync', outcome: 'failed' as const, message: skills.stopped }] : [])];
   const notices = [...pendingNotices.splice(0), ...(skills?.notices ?? [])];
@@ -544,7 +545,7 @@ async function syncThenView(explicit = false): Promise<HomeView> {
     sync: { tools: managed, writes: await skillFolders(shared, managed), access: await writeAccess(shared), gate: await syncGate(shared),
       caughtUp: caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain) },
     skills: await skillsView(shared, managed, notices),
-    mcp: await mcpView(shared, managed, pendingMcpNotices.splice(0)),
+    mcp: await serversView(shared, managed, pendingServerNotices.splice(0)),
     agents: await agentsView(shared, managed, pendingAgentNotices.splice(0)),
   };
   // What plugins installed whole bring, read with the home so the Skills, MCP servers and Agents pages show it without Plugins.
@@ -552,7 +553,7 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   made.pluginItems = await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), managed);
   // Another build syncs this home: whether it is open now decides what the page says about it.
   if (made.sync.gate.state === 'stopped' && made.sync.gate.owner) made.sync.gate.owner.running = await buildRunning(made.sync.gate.owner.build);
-  lastItems = switchItems(profileSkills(made.skills), made.mcp);
+  lastItems = switchItems(profileSkills(made.skills), profileServers(made.mcp));
   followProfiles(made.profiles);
   // Only once the view is built is anything kept about this home, so a switch that fails leaves nothing behind.
   handoff = { id: readId, home: current!.home, snapshots };
@@ -560,7 +561,7 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   addCarriedSoon(presentTools(snapshots));
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   // How many items are managed, so the first-close note says truthfully whether anything syncs.
-  lastManagedCount = made.mcp.servers.filter(fact => fact.managed).length + [...made.skills.items, ...made.agents.items].filter(fact => fact.on).length;
+  lastManagedCount = [...made.skills.items, ...made.mcp.items, ...made.agents.items].filter(fact => fact.on).length;
   return made;
 }
 
@@ -727,18 +728,18 @@ async function backgroundPass() {
   const snapshots = await read();
   // A tool installed or removed changes every page's columns.
   let changed = toolsChangedHere(snapshots);
-  const { skills, mcpAndAgents } = await pass(snapshots);
-  keepMcpAndAgents(mcpAndAgents);
+  const { skills, serversAndAgents } = await pass(snapshots);
+  keepServersAndAgents(serversAndAgents);
   // Sync off: an edit or deletion is only noted. The page reads again quietly so it shows as waiting, not as Synced.
   if (fromEvent && !syncOn) changed = true;
   // A deletion waits out its settle window: look again just after it, so it finishes without a click. Otherwise wait for an event or the poll.
-  if (skills?.settling || mcpAndAgents?.settling) { clearTimeout(followUp); followUp = setTimeout(queueBackgroundPass, 2_500); }
+  if (skills?.settling || serversAndAgents?.settling) { clearTimeout(followUp); followUp = setTimeout(queueBackgroundPass, 2_500); }
   if (skills?.stopped && skills.stopped !== lastStopped) {
     pendingResults.push({ item: 'Sync', outcome: 'failed', message: skills.stopped });
     changed = true;
   }
   lastStopped = skills?.stopped;
-  const wrote = !!skills && !!(skills.writes || skills.notices?.length || mcpAndAgents?.changed);
+  const wrote = !!skills && !!(skills.writes || skills.notices?.length || serversAndAgents?.changed);
   // Profiles: a switch turned in a tool, or an item that came or went (a file event can be one), changes what is held.
   if (await lookAtSwitchFiles(wrote || fromEvent)) changed = true;
   if (wrote) {
@@ -787,7 +788,7 @@ async function startWatching() {
 }
 
 
-/** Whether Claude Code (its CLI, or Claude desktop and its Code tab) is running (macOS and Linux). When this can't be told, Write now goes ahead as asked. */
+/** Whether Claude Code (its CLI, or Claude desktop and its Code tab) is running (macOS and Linux). When this can't be told, Write to Claude Code goes ahead as asked. */
 function claudeRunning(): Promise<boolean> {
   if (current?.mode !== 'actual' || process.platform === 'win32') return Promise.resolve(false);
   const found = (args: string[]) => new Promise<boolean>(done => execFile('pgrep', args, error => done(!error)));
@@ -1078,9 +1079,8 @@ app.whenReady().then(async () => {
   // Writes act only on the home the window says it is showing.
   const changes = (value: unknown): Change[] => (Array.isArray(value) ? value : []).filter((change): change is Change =>
     typeof change?.key === 'string' && typeof change.managed === 'boolean' && Array.isArray(change.off)
-    && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenManaged === undefined || typeof change.seenManaged === 'boolean')
+    && (change.use === undefined || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenManaged === undefined || typeof change.seenManaged === 'boolean')
   ).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged,
-    ...(change.disable ? { disable: ids(change.disable) } : {}), ...(change.enable ? { enable: ids(change.enable) } : {}),
     ...(typeof change.version === 'string' ? { version: change.version } : {}), ...(typeof change.deleted === 'boolean' ? { deleted: change.deleted } : {}),
     ...(change.giveBack && typeof change.giveBack === 'object' ? { giveBack: Object.fromEntries(Object.entries(change.giveBack).filter(([tool, hash]) => harnessIds.includes(tool as HarnessId) && typeof hash === 'string')) } : {}) }));
   // Marketplaces and plugins: their own module, given only what it needs from here.
@@ -1202,14 +1202,9 @@ app.whenReady().then(async () => {
       // A Pull that edited or deleted the base instructions: the base's own Undo puts the earlier base and its tools back.
       if (past?.base) return undoPulledBase(context(), await read(), eventId);
       const tools = await toolsNow();
-      if (key.startsWith('mcp:')) {
-        const result = await restoreMcp(context(), tools, eventId, typeof choice === 'string' ? choice : undefined);
-        // Undo of a server's Disable or Enable is a choice made by hand too.
-        await releaseProfileHolds(context(), switchedByHand([{ key: key.slice('mcp:'.length) }], result.results, 'mcp'));
-        return { stopped: result.stopped, results: result.results, harnessWrites: result.writes, made: result.made };
-      }
-      const restored = key.startsWith('agent:') ? await restoreAgent(context(), tools, eventId, typeof choice === 'string' ? choice : undefined)
-        : await restoreSkill(context(), tools, eventId, typeof choice === 'string' ? choice : undefined);
+      const version = typeof choice === 'string' ? choice : undefined;
+      const restored = key.startsWith('mcp:') ? await restoreServer(context(), tools, eventId, version)
+        : key.startsWith('agent:') ? await restoreAgent(context(), tools, eventId, version) : await restoreSkill(context(), tools, eventId, version);
       return { stopped: restored.stopped, results: restored.results, harnessWrites: restored.writes, made: restored.made };
     })()
     : { stopped: elsewhere, results: [], harnessWrites: 0 } satisfies ApplyResult));
@@ -1240,28 +1235,20 @@ app.whenReady().then(async () => {
     return { ...taken, view: await syncThenView() };
   });
   // With Sync off, a click writes exactly the items it is about; spreading anything else waits for Sync.
-  // MCP: a click writes every tool but Claude Code; Claude Code only through Write to Claude Code, once Claude is closed (MCP-02).
-  handle('mcp:apply', async (list, resume, home) => {
-    if (home !== current?.home) return { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 };
-    const asked = changes(list);
-    const result = await applyMcp(context(), await toolsNow(), asked, { resume: resume === true, ...(syncOn ? {} : { only: new Set(asked.map(change => change.key)) }) });
-    // A Disable or Enable chosen here takes that switch over from profiles, as a skill's does.
-    await releaseProfileHolds(context(), switchedByHand(asked.filter(change => change.disable?.length || change.enable?.length), result.results, 'mcp'));
-    return result;
-  });
+  // MCP servers: a click writes every tool but Claude Code; Claude Code only through Write to Claude Code, once Claude is closed.
+  handle('servers:apply', async (list, resume, home) => (home === current?.home
+    ? applyServers(context(), await toolsNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
+    : { stopped: elsewhere, results: [], writes: 0 }));
   handle('agents:apply', async (list, resume, home) => (home === current?.home
     ? applyAgents(context(), await toolsNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
-  // Write now is for when Claude Code is closed (MCP-02): a running Claude Code would write its older copy back over it.
-  // Its Undo goes through the same check: Claude Code closed, or it would write its copy back over the undone one.
-  handle('mcp:unwrite-claude', async (written, home) => (home === current?.home && Array.isArray(written)
-    ? current?.mode !== 'fixture' && await claudeRunning() ? { stopped: 'Claude Code or Claude desktop is still running. Quit it first, then click Undo again.', results: [], writes: 0 }
-      : undoClaudeWrite(context(), written.filter((write): write is ClaudeWrite => !!write && typeof write.name === 'string' && typeof write.after === 'string' && (write.before === null || typeof write.before === 'string') && (write.event === undefined || typeof write.event === 'string')))
-    : { stopped: elsewhere, results: [], writes: 0 }));
-  handle('mcp:write-claude', async (names, home) => (home === current?.home && Array.isArray(names)
+  // Write to Claude Code is for when Claude Code is closed: a running Claude Code would write its older copy back over it.
+  handle('servers:write-claude', async (keys, home) => (home === current?.home && Array.isArray(keys)
     // The practice copy is sample files: the real Claude Code never reads them, so it need not be closed there.
-    ? current?.mode !== 'fixture' && await claudeRunning() ? { stopped: 'Claude Code or Claude desktop is still running. Quit it first (every window and terminal session), then click Write to Claude Code again.', results: [], writes: 0 } : applyMcp(context(), await toolsNow(), [], { claudeNow: names.filter((name): name is string => typeof name === 'string'), ...(syncOn ? {} : { only: new Set(names.filter((name): name is string => typeof name === 'string')) }) })
-    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
+    ? current?.mode !== 'fixture' && await claudeRunning() ? { stopped: 'Claude Code or Claude desktop is still running. Quit it first (every window and terminal session), then click Write to Claude Code again.', results: [], writes: 0 }
+      : writeToClaude(context(), await toolsNow(), keys.filter((key): key is string => typeof key === 'string'))
+    : { stopped: elsewhere, results: [], writes: 0 }));
+  handleNow('servers:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await serverVersion(context(), key, hash)) ?? null : null));
   handle('skills:apply', async (list, resume, home) => (home === current?.home
     ? applySkills(context(), await toolsNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
     : { stopped: elsewhere, results: [], writes: 0 }));

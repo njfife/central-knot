@@ -44,11 +44,13 @@ export const inTool = (fact: Pick<SkillFacts, 'copies' | 'plugin'>, tool: Harnes
 /**
  * Whether a row of the person's own is this plugin's item already: some tool has that row's item through this plugin (its
  * box says so), or the row's copy in some tool is on record as this plugin's part (a Codex plugin's MCP server put into
- * Pi, which no box shows as through the plugin, since Codex may not start a plugin's servers).
+ * Pi, which no box shows as through the plugin, since Codex may not start a plugin's servers). An MCP server's part is no
+ * copy of the row's: its line says it is the plugin's (`unseen`, servers.ts), so it counts too.
  */
 const onOwnRow = (home: HomeView, fact: SkillFacts, row: PluginRow) => [fact.key, fact.name].some(name => !!name && samePart(row, { kind: row.kind, name }))
   && (Object.values(fact.plugin ?? {}).some(given => given.plugin === row.plugin && given.marketplace === row.marketName)
-    || (home.parts ?? []).some(install => install.plugin === row.plugin && install.marketName === row.marketName && fact.copies[install.tool] !== undefined && install.items.some(item => !item.removed && samePart(item, row))));
+    || (home.parts ?? []).some(install => install.plugin === row.plugin && install.marketName === row.marketName && (fact.copies[install.tool] !== undefined || fact.unseen?.[install.tool] !== undefined)
+      && install.items.some(item => !item.removed && samePart(item, row))));
 
 const memo = new WeakMap<HomeView, Partial<Record<Page, PageRows>>>();
 
@@ -83,12 +85,8 @@ export function pageRows(home: HomeView, page: Page): PageRows {
 /** How many plugin rows the page lists; in `tool`, those it has there. */
 export const pluginItemCount = (home: HomeView, page: Page, tool?: HarnessId): number => pageRows(home, page).rows.filter(row => !tool || row.copies[tool]).length;
 
-/**
- * The rows a page has: its own items, those with no copy left that History can put back (shown Off, even when the last one
- * just went), and a plugin's. None: the page shows its empty state instead.
- */
-export const rowCount = (home: HomeView, page: Page): number =>
-  (({ facts, gone }) => facts.length + gone.length)(kindSource(home, page)) + pluginItemCount(home, page);
+/** The rows a page has: its own items and a plugin's. None: the page shows its empty state instead. */
+export const rowCount = (home: HomeView, page: Page): number => kindSource(home, page).facts.length + pluginItemCount(home, page);
 
 /** The tools that have this item through the plugin, in column order. */
 export const pluginTools = (row: PluginRow) => (Object.keys(row.copies) as HarnessId[]).sort(byToolOrder);

@@ -8,7 +8,7 @@ import { discover } from '../src/discovery.ts';
 import { connectRepo, pullRepo, pushRepo } from '../src/gitrepo.ts';
 import { managedNow } from '../src/share.ts';
 import { applySkills, restoreSkill, skillsView } from '../src/skills.ts';
-import { applyMcp } from '../src/mcp.ts';
+import { applyServers } from '../src/servers.ts';
 import { applyAgents } from '../src/agents.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { Change } from '../src/types.ts';
@@ -52,7 +52,7 @@ export async function seedServerAndAgent(context: ShareContext) {
   await writeFile(join(context.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { docs: { type: 'local', command: 'docs-server', args: ['--port', '7'], env: { TOKEN: 'abc' }, tools: ['*'] } } }));
   await mkdir(join(context.home, '.claude/agents'), { recursive: true });
   await writeFile(join(context.home, '.claude/agents/planner.md'), '---\nname: planner\ndescription: Plans work.\nmodel: opus\n---\n\nPlan carefully.\n');
-  assert.ok(!(await applyMcp(context, tools, [{ key: 'docs', managed: true, off: [] }])).stopped);
+  assert.ok(!(await applyServers(context, tools, [{ key: 'docs', managed: true, off: [] }])).stopped);
   assert.ok(!(await applyAgents(context, tools, [{ key: 'planner', managed: true, off: [] }])).stopped);
 }
 

@@ -8,7 +8,7 @@
 // - No profile turns back on everything profiles turned off, and holds nothing.
 import { plural } from './model.ts';
 import { andList, problemText, toolName } from './words.ts';
-import type { HarnessId, HistoryEvent, LibraryView, McpView, Profile, ProfileFlip, ProfilesView, SkillFacts, ToolCopy } from './types.ts';
+import type { HarnessId, HistoryEvent, LibraryView, Profile, ProfileFlip, ProfilesView, SkillFacts, ToolCopy } from './types.ts';
 
 /** What every screen calls having no profile in use. */
 export const NO_PROFILE = 'No profile';
@@ -120,11 +120,22 @@ export function profileSkills(view: Pick<LibraryView, 'items'>): SkillFacts[] {
 }
 
 /**
- * Every standalone skill and MCP server the home has (`skills`: profileSkills). A server that belongs to an app (ChatGPT
- * desktop's own) is left out.
+ * What profiles read of MCP servers, from the MCP servers page's view (servers.ts serversView): each server, in Central Knot
+ * or found, with the tools that have its entry and whether each tool's own switch has it off, in the shape profiles were
+ * written for (types.ts SkillFacts). A server's switch goes by its name as written, so that is its key here. A server that is
+ * Off is in no tool, and a tool it is kept out of has no entry, so neither has a switch here; one seen only in a form never
+ * taken in (a server that belongs to an app) is left out.
  */
-export function switchItems(skills: SkillFacts[], mcp: Pick<McpView, 'servers'>): SwitchItem[] {
-  return [...skills.map(facts => toItem('skill', facts)), ...mcp.servers.filter(facts => !facts.held).map(facts => toItem('mcp', facts))];
+export function profileServers(view: Pick<LibraryView, 'items'>): SkillFacts[] {
+  return view.items.filter(row => row.plan || Object.keys(row.copies).length).map(row => ({
+    key: row.name, name: row.name, description: row.description, copies: row.copies, managed: row.on, off: row.except, cannot: {}, choiceBlocks: {},
+    disabled: row.switchedOff ?? [], ...(row.switchProblem ? { switchProblem: row.switchProblem } : {}),
+  }));
+}
+
+/** Every standalone skill and MCP server the home has (`skills`: profileSkills; `servers`: profileServers). */
+export function switchItems(skills: SkillFacts[], servers: SkillFacts[]): SwitchItem[] {
+  return [...skills.map(facts => toItem('skill', facts)), ...servers.map(facts => toItem('mcp', facts))];
 }
 
 /** A profile's items that the home has now (it may name skills or servers since removed): what it would keep on. */

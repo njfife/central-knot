@@ -1,15 +1,15 @@
-// History's entries about items in Central Knot's library (agents and skills), in one place: whose they are (libraryEntry),
+// History's entries about items in Central Knot's library (skills, MCP servers and agents), in one place: whose they are (libraryEntry),
 // what each says (librarySentence), what it still offers (libraryAction, versionChoices), and what its row shows once its
 // action was used (doneWords). Read by History's page (the row and its buttons), by app.ts (what is said after a click), by
 // librarypass.ts restore (the click an action runs, through each kind's Kind.historyAction) and by the tests. Pure: no
-// files, no DOM. The entries of MCP servers, profiles and instructions are still historypage.ts's own.
+// files, no DOM. The entries of profiles and instructions are historypage.ts's own.
 //
 // Every action is decided from the entry and the item as the library holds it now (library.ts LibraryItem), so it is offered
 // exactly while it would change something and is always safe to click. Most are a click the item's page could send as well
 // (types.ts Change). Two are not: an Undo that gives tools their own copies back (Change giveBack, which the page never
 // sends), and a cleared switch's Undo, which sets that tool's own switch again (skills.ts switchBack, not a Change). An entry
-// from before an item was on the library (a skill's Remove, Disable or take-over by the earlier engine) offers only what can
-// still be said as one of these; otherwise it shows as past, with no action.
+// from before an item was on the library (a skill's Remove, Disable or take-over by the earlier engine; an MCP server's Undo
+// write, Undo add or Finish undo) offers only what can still be said as one of these; otherwise it shows as past, with no action.
 //
 //   entry (HistoryEvent.kind, `cause`)       action                 offered while
 //   off: the switch, or a copy deleted       Turn on                the item is Off
@@ -26,6 +26,7 @@
 //                                            again, each tool it
 //                                            was found in keeping
 //                                            its own copy
+//   (either Undo, when a copy would go back to Claude Code's MCP settings: not offered, see givesBackLater)
 //   deleted                                  Restore                the item is deleted
 //   a content change: edit, conflict,        Undo; once later       the version from before it (`previous`) is not the
 //     current, and any entry from before     changes came, "Make    current one
@@ -45,18 +46,20 @@
 // To add an entry or an action: its kind (or its `cause`) in types.ts HistoryEvent, its sentence in librarySentence, its row
 // in libraryAction, the entry librarypass.ts logItem makes for it, and its case in historypage.ts describe.
 import type { IconName } from './icons.ts';
-import { theVersion, type LibraryItem } from './library.ts';
-import { asItIs, versionClock, type RowWords } from './libraryrow.ts';
+import { itemKey, theVersion, type LibraryItem } from './library.ts';
+import { asItIs, versionClock, writesWait, type RowWords } from './libraryrow.ts';
 import type { Change, HarnessId, HistoryEvent, LibraryFacts } from './types.ts';
 import { andList, toolName, toolsPhrase } from './words.ts';
 
 /**
  * Whose a History entry is among the library's kinds, by the page's name for the kind (app.ts PageKind), with the item's key:
- * an agent's is keyed `agent:<key>` (not a Pull's change to Claude Code's own settings alone, which is gitrepo.ts's); a skill's
- * by its key alone, as before the library (no other kind's key is without a `kind:` prefix). Undefined for any other entry.
+ * an agent's is keyed `agent:<key>` (not a Pull's change to Claude Code's own settings alone, which is gitrepo.ts's); an MCP
+ * server's `mcp:<key>` (before the library, `mcp:<name>` as written, whose key is share.ts itemKey of it); a skill's by its key
+ * alone, as before the library (no other kind's key is without a `kind:` prefix). Undefined for any other entry.
  */
-export function libraryEntry(event: HistoryEvent): { kind: 'agents' | 'skills'; key: string } | undefined {
+export function libraryEntry(event: HistoryEvent): { kind: 'agents' | 'skills' | 'mcp'; key: string } | undefined {
   if (event.key.startsWith('agent:')) return event.settingsFile ? undefined : { kind: 'agents', key: event.key.slice('agent:'.length) };
+  if (event.key.startsWith('mcp:')) return { kind: 'mcp', key: itemKey(event.key.slice('mcp:'.length)) };
   if (!event.key || event.key.includes(':') || event.base || event.kind === 'profile') return undefined;
   return { kind: 'skills', key: event.key };
 }
@@ -208,12 +211,13 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
   // it was found in keeping its own copy.
   const tookIn = event.kind === 'chosen' || (event.kind === 'on' && event.cause === 'found');
   if (tookIn && item.on && asTheClickLeftIt(event, item)) {
+    if (givesBackLater(event, givenBack(event, item).giveBack)) return undefined;
     return { label: 'Undo', help: `Take ${name} out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own`, change: { ...now, deleted: true, ...givenBack(event, item) } };
   }
   if (event.kind === 'off' || event.kind === 'on') {
     const action = switchAction(event.kind === 'off', event.only, item), back = givenBack(event, item).giveBack;
     // Copies go back only with an Undo, while the item is as the click left it; a plain Turn off or Turn on gives none back.
-    if (!action || !back || !asTheClickLeftIt(event, item)) return action;
+    if (!action || !back || !asTheClickLeftIt(event, item) || givesBackLater(event, back)) return action;
     const tools = (Object.keys(back) as HarnessId[]).map(toolName);
     const own = `${andList(tools)} ${tools.length === 1 ? 'has its own copy' : 'have their own copies'} back, as before`;
     return { label: 'Undo', help: `${action.help}; ${own}`, change: { ...action.change, giveBack: back } };
@@ -224,6 +228,16 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
   const latest = (event.version ?? event.winner?.hash) === item.hash;
   return { label: latest ? 'Undo' : 'Go back before this', help: `Make the version from before this change current again${everywhere}`, change: { ...now, version: event.previous } };
 }
+
+/**
+ * Whether an Undo would give a copy back to a harness that the kind writes only on a step of the person's own (libraryrow.ts
+ * writesWait: Claude Code's MCP settings, written by Write to Claude Code alone). That give-back would wait, and the write
+ * after would remove the copy instead, so such an Undo is not offered.
+ */
+const givesBackLater = (event: HistoryEvent, back: Change['giveBack']) => {
+  const kind = libraryEntry(event)?.kind;
+  return !!kind && Object.keys(back ?? {}).some(tool => writesWait(kind, tool));
+};
 
 /**
  * Whether the item is still as the entry's click left it: at the version it left (types.ts HistoryEvent version, or the

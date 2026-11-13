@@ -8,7 +8,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readAgents } from '../src/agentfiles.ts';
 import { applyAgents, restoreAgent } from '../src/agents.ts';
-import { applyMcp, readTool, restoreMcp } from '../src/mcp.ts';
+import { readTool } from '../src/mcp.ts';
+import { applyServers, restoreServer } from '../src/servers.ts';
 import { readHistory } from '../src/history.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
@@ -29,14 +30,14 @@ test('S2 concurrent MCP tool-specific setting is not overwritten',()=>box(async 
  const target=join(b.home,'.codex/config.toml');
  await fs.writeFile(join(b.home,'.copilot/mcp-config.json'),json('BASE'));
  await fs.writeFile(target,'[mcp_servers.docs]\ncommand="BASE"\nenabled=true\n');
- await applyMcp(b.context,tools.slice(1),managed('docs'));
+ await applyServers(b.context,tools.slice(1),managed('docs'));
  await fs.writeFile(join(b.home,'.copilot/mcp-config.json'),json('EDIT'));
  const original=fs.readFile;let reads=0;
  fs.readFile=(async(path:any,...rest:any[])=>{
    if(String(path)===target && ++reads===2)await fs.writeFile(target,'[mcp_servers.docs]\ncommand="BASE"\nenabled=false\n');
    return (original as any)(path,...rest);
  }) as typeof fs.readFile;syncBuiltinESMExports();
- try{await applyMcp(b.context,tools.slice(1),[]);}finally{fs.readFile=original;syncBuiltinESMExports();}
+ try{await applyServers(b.context,tools.slice(1),[]);}finally{fs.readFile=original;syncBuiltinESMExports();}
  assert.match(await fs.readFile(target,'utf8'),/enabled=false/,'concurrent native setting reverted');
 }));
 
@@ -71,12 +72,12 @@ test('S4 process death during agent Restore must not delete it everywhere',()=>b
 
 test('S6 Restore must not adopt an MCP edit saved after its write as baseline',()=>box(async b=>{
  const target=join(b.home,'.copilot/mcp-config.json');
- await fs.writeFile(target,json('BASE'));await applyMcp(b.context,tools.slice(1),managed('docs'));
- await fs.writeFile(target,json('EDIT'));await applyMcp(b.context,tools.slice(1),[]);
+ await fs.writeFile(target,json('BASE'));await applyServers(b.context,tools.slice(1),managed('docs'));
+ await fs.writeFile(target,json('EDIT'));await applyServers(b.context,tools.slice(1),[]);
  const event=(await readHistory(b.context)).find(e=>e.kind==='edit')!;
  const original=fs.link;let injected=false;
  fs.link=async(from,to)=>{await original(from,to);if(String(to)===target&&!injected){injected=true;await fs.writeFile(target,json('CONCURRENT'));}};syncBuiltinESMExports();
- try{await restoreMcp(b.context,tools.slice(1),event.id);}finally{fs.link=original;syncBuiltinESMExports();}
- await applyMcp(b.context,tools.slice(1),[]);
+ try{await restoreServer(b.context,tools.slice(1),event.id);}finally{fs.link=original;syncBuiltinESMExports();}
+ await applyServers(b.context,tools.slice(1),[]);
  assert.equal(await command(b.context,'copilot-cli'),'CONCURRENT');
 }));

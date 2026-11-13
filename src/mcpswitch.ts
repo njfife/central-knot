@@ -1,5 +1,5 @@
-// Turning an MCP server off in one tool with that tool's own switch, as profiles do. The server's entry stays where it is; the tool
-// just doesn't start it. Each switch was exercised in a throwaway home on 2026-11-09 (notes: ck-feedback/profiles/evidence.md):
+// An MCP server's own switch in one tool: read at each look for its mark (servers.ts), and flipped by profiles (profiles.ts). The
+// server's entry stays where it is; the tool just doesn't start it. Each switch was exercised in a throwaway home on 2026-11-09 (notes: ck-feedback/profiles/evidence.md):
 //   Claude Code  settings.json  "deniedMcpServers": [{ "serverName": "<name>" }]   (2.1.321: the server leaves `claude mcp list`)
 //   Copilot CLI  settings.json  "disabledMcpServers": ["<name>"]                    (what `copilot mcp disable` writes on 1.0.107)
 //   Codex        config.toml    [mcp_servers.<name>] enabled = false                (0.142.3: `codex mcp list` shows it disabled)
@@ -10,12 +10,11 @@
 // Claude Code's ~/.claude.json is never touched: its switch lives in settings.json, which Claude Code does not rewrite while it runs.
 import { readFile } from 'node:fs/promises';
 import { mcpFile, openCodeServer } from './mcp.ts';
-import { errorCode, writeFileChecked, type ShareContext } from './share.ts';
+import { errorCode, type ShareContext } from './share.ts';
 import { switchPath, type SwitchFile } from './skillswitch.ts';
-import { problemText, toolName } from './words.ts';
 import { readTomlTables, setJsonMember } from './textedit.ts';
 import { record, withoutBom } from './values.ts';
-import type { HarnessId, SkillFacts } from './types.ts';
+import type { HarnessId } from './types.ts';
 
 /**
  * The file that holds a tool's MCP switches: Claude Code's and Copilot's settings.json (beside their skill switches), Codex's
@@ -49,18 +48,6 @@ async function readMcpSwitchFile(context: ShareContext, tool: HarnessId): Promis
 /** Each tool's MCP switch file as read, or why it can't be used. */
 export async function readMcpSwitches(context: ShareContext, tools: HarnessId[]): Promise<Map<HarnessId, SwitchFile>> {
   return new Map(await Promise.all(tools.map(async tool => [tool, await readMcpSwitchFile(context, tool)] as const)));
-}
-
-/** What a server's facts say about its tools' switches: the tools that have it off, and the tools whose file can't be used. */
-export function mcpSwitchFacts(name: string, tools: HarnessId[], switches: Map<HarnessId, SwitchFile>): Pick<SkillFacts, 'disabled' | 'switchProblem'> {
-  const facts: Pick<SkillFacts, 'disabled' | 'switchProblem'> = {};
-  for (const tool of tools) {
-    const file = switches.get(tool);
-    if (!file) continue;
-    if (file.problem) (facts.switchProblem ??= {})[tool] = file.problem;
-    else if (mcpDisabled(tool, file.text, name)) (facts.disabled ??= []).push(tool);
-  }
-  return facts;
 }
 
 const deniesByName = (entry: unknown, name: string) => record(entry)?.serverName === name;
@@ -126,23 +113,4 @@ export function withMcpSwitch(tool: HarnessId, text: string, name: string, disab
       return setJsonMember(text, [...found.place, key], disabled ? off : undefined);
     }
   }
-}
-
-const failure = (message: string) => Object.assign(new Error(message), { code: 'CK_SWITCH' });
-
-/**
- * Turns a server off or on in one tool, by hand (a server's Enabled switch, or its Undo): one checked write, only over the text
- * read, then read back, so what is reported is what the tool will see. False when the tool already has it that way. Throws, with
- * the reason to show, when it can't: the file isn't the tool's format, or Codex, Pi or OpenCode has no entry for the server to switch.
- */
-export async function setMcpDisabled(context: ShareContext, tool: HarnessId, name: string, disabled: boolean): Promise<boolean> {
-  const file = await readMcpSwitchFile(context, tool);
-  if (file.problem) throw failure(problemText(file.problem));
-  if (mcpDisabled(tool, file.text, name) === disabled) return false;
-  let text: string;
-  try { text = withMcpSwitch(tool, file.text, name, disabled); } catch (error) { throw failure(error instanceof Error ? error.message : String(error)); }
-  await writeFileChecked(file.path, text, file.exists ? file.text : undefined);
-  const after = await readMcpSwitchFile(context, tool);
-  if (after.problem || mcpDisabled(tool, after.text, name) !== disabled) throw failure(`${toolName(tool)}’s settings did not take the change.`);
-  return true;
 }

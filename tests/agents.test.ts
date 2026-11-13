@@ -960,16 +960,6 @@ inBox('A page read before the agent changed is refused, and nothing is written',
   assert.equal(stale.made?.length, 0);
 });
 
-inBox('A click carrying the skills engine’s “keep both” (`use: \'separate\'`) is refused for an agent in Central Knot, and nothing changes', async box => {
-  await on(box);
-  const before = await filesOf(box);
-  for (const asked of [{ managed: false, off: [] }, { managed: true, off: ['codex-cli'] as HarnessId[] }]) {
-    const done = await applyAgents(box.context, tools, [{ key: 'reviewer', ...asked, use: 'separate' }]);
-    assert.deepEqual(done.results.map(entry => [entry.outcome, entry.unchanged, /no copy to choose/.test(entry.message)]), [['held', true, true]]);
-  }
-  assert.deepEqual([(await itemOf(box))!.on, (await itemOf(box))!.except, await filesOf(box)], [true, [], before]);
-});
-
 inBox('Every click is one History entry, and its Undo is that entry’s own action', async box => {
   await on(box);
   const off = await turnOff(box);

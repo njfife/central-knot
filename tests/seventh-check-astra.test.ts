@@ -5,8 +5,8 @@ import fs from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { applyMcp, readTool, restoreMcp } from '../src/mcp.ts';
-import { readHistory } from '../src/history.ts';
+import { readTool } from '../src/mcp.ts';
+import { applyServers, serversView, writeToClaude } from '../src/servers.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
 
@@ -32,33 +32,33 @@ for (const [name, initial] of [
   ['docs', 'model="gpt-5"\nmcp_servers = { docs = { command = "BASE" } }\n'],
   ['docs.v2', '[mcp_servers]\n"docs.v2" = { command = "BASE" }\n'],
 ]) {
-  test(`R1 inline Codex server ${name} is held on an edit, never given a second definition`, () => box(async (context, copilot, codex) => {
+  test(`R1 inline Codex server ${name} can't be seen for sure there, so an edit never gives it a second definition`, () => box(async (context, copilot, codex) => {
     validToml(initial);
     await fs.writeFile(codex, initial);
     await fs.writeFile(copilot, JSON.stringify({ mcpServers: { [name]: { command: 'BASE' } } }));
-    await applyMcp(context, tools, managed(name));
+    await applyServers(context, tools, managed(name));
     await fs.writeFile(copilot, JSON.stringify({ mcpServers: { [name]: { command: 'EDIT' } } }));
-    const result = await applyMcp(context, tools, []);
-    assert.deepEqual(result.results.map(entry => [entry.harness, entry.outcome]), [['codex-cli', 'held']], JSON.stringify(result.results));
+    await applyServers(context, tools, []);
     assert.equal(await fs.readFile(codex, 'utf8'), initial);
+    assert.match((await serversView(context, tools)).items[0]!.unseen?.['codex-cli'] ?? '', /not written in a form Central Knot edits/);
   }));
 }
 
 test('R2 dotted env fields are read, spread, and rewritten as valid TOML', () => box(async (context, copilot, codex) => {
   await fs.writeFile(codex, '[mcp_servers.docs]\ncommand="BASE"\nenv.REGION="west"\n');
-  await applyMcp(context, tools, managed());
+  await applyServers(context, tools, managed());
   assert.deepEqual((await readTool(context, 'copilot-cli')).entries[0]?.server.env, { REGION: 'west' });
   await fs.writeFile(copilot, JSON.stringify({ mcpServers: { docs: { command: 'BASE', env: { REGION: 'east' } } } }));
-  await applyMcp(context, tools, []);
+  await applyServers(context, tools, []);
   assert.equal(await fs.readFile(codex, 'utf8'), '[mcp_servers.docs]\ncommand = "BASE"\n\n[mcp_servers.docs.env]\nREGION = "east"\n');
 }));
 
 for (const broken of ['{"mcpServers":null}', '{"mcpServers":{"docs":null}}']) test(`R3 ${broken} must not delete the other copies`, () => box(async (context, copilot, codex) => {
   await fs.writeFile(copilot, json('BASE'));
-  await applyMcp(context, tools, managed());
+  await applyServers(context, tools, managed());
   await fs.writeFile(copilot, broken);
-  await applyMcp(context, tools, [], { now: 1000 });
-  await applyMcp(context, tools, [], { now: 4000 });
+  await applyServers(context, tools, [], { now: 1000 });
+  await applyServers(context, tools, [], { now: 4000 });
   assert.equal((await readTool(context, 'codex-cli')).entries[0]?.server.command, 'BASE');
 }));
 
@@ -68,44 +68,28 @@ test('R4 symlink target recovers after death in the checked write', () => box(as
   await fs.writeFile(target, 'model="gpt-5"\n[mcp_servers.docs]\ncommand="BASE"\n');
   await fs.symlink(target, codex);
   await fs.writeFile(copilot, json('BASE'));
-  await applyMcp(context, tools, managed());
+  await applyServers(context, tools, managed());
   await fs.writeFile(copilot, json('EDIT'));
-  const script = `import fs from 'node:fs/promises';import {syncBuiltinESMExports} from 'node:module';import {applyMcp} from './src/mcp.ts';
+  const script = `import fs from 'node:fs/promises';import {syncBuiltinESMExports} from 'node:module';import {applyServers} from './src/servers.ts';
     const original=fs.link;fs.link=async(from,to)=>{if(String(to)===process.env.CK_TARGET)process.exit(73);return original(from,to);};syncBuiltinESMExports();
-    const context=JSON.parse(process.env.CK_CONTEXT);context.read=async()=>[];await applyMcp(context,['copilot-cli','codex-cli'],[]);`;
+    const context=JSON.parse(process.env.CK_CONTEXT);context.read=async()=>[];await applyServers(context,['copilot-cli','codex-cli'],[]);`;
   const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: process.cwd(), env: { ...process.env, CK_TARGET: await fs.realpath(target), CK_CONTEXT: JSON.stringify(context) }, encoding: 'utf8' });
   assert.equal(child.status, 73, child.stderr);
-  await applyMcp(context, tools, [], { now: 1000 });
-  await applyMcp(context, tools, [], { now: 4000 });
+  await applyServers(context, tools, [], { now: 1000 });
+  await applyServers(context, tools, [], { now: 4000 });
   assert.equal((await readTool(context, 'codex-cli')).exists, true, `Broken link persists; dotfiles contains ${await fs.readdir(join(context.home, 'dotfiles'))}`);
   assert.ok((await fs.lstat(codex)).isSymbolicLink(), 'config.toml link replaced by a regular file');
-}));
-
-test('R5 historical native MCP fields are immutable per event', () => box(async (context, copilot, codex) => {
-  await fs.writeFile(copilot, json('A'));
-  await fs.writeFile(codex, '[mcp_servers.docs]\ncommand="A"\nenabled=false\n');
-  await applyMcp(context, tools, managed());
-  await fs.writeFile(copilot, json('B'));
-  await applyMcp(context, tools, []);
-  const firstEdit = (await readHistory(context)).find(event => event.kind === 'edit')!;
-  await fs.writeFile(copilot, json('A'));
-  await applyMcp(context, tools, []);
-  await fs.writeFile(codex, '[mcp_servers.docs]\ncommand="A"\nenabled=true\n');
-  await fs.writeFile(copilot, json('C'));
-  await applyMcp(context, tools, []);
-  await restoreMcp(context, tools, firstEdit.id);
-  assert.match(await fs.readFile(codex, 'utf8'), /enabled\s*=\s*false/, 'Undo A-to-B must recover A disabled, not the later A enabled');
 }));
 
 test('R6 pending removal must not follow a moved Claude config root', () => box(async (context, copilot, codex) => {
   const all: HarnessId[] = ['claude-cli', ...tools];
   await fs.writeFile(join(context.home, '.claude.json'), json('BASE'));
-  await applyMcp(context, all, managed());
+  await applyServers(context, all, managed());
   await fs.writeFile(copilot, '{"mcpServers":{}}');
-  await applyMcp(context, all, [], { settleMs: 0 });
+  await applyServers(context, all, [], { settleMs: 0 });
   const alternate = join(context.home, 'alternate-claude');
   await fs.mkdir(alternate);
   await fs.writeFile(join(alternate, '.claude.json'), json('BASE'));
-  await applyMcp({ ...context, overrides: { 'claude-cli': alternate } }, all, [], { claudeNow: ['docs'] });
+  await writeToClaude({ ...context, overrides: { 'claude-cli': alternate } }, all, ['docs']);
   assert.equal((await readTool({ ...context, overrides: { 'claude-cli': alternate } }, 'claude-cli')).entries[0]?.server.command, 'BASE');
 }));

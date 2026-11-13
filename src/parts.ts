@@ -4,7 +4,7 @@
 // and Agents pages use (byte-exact skill copies, each tool's MCP format, each tool's agent format). Values go in as-is.
 // What went in is recorded per plugin and tool (plugin-parts.json), so the items say where they came from, can be removed
 // together, show when the plugin has changed, and every run can be undone from the content kept in Central Knot's store
-// (skills in the Skills store, MCP servers in the MCP store, agent files beside them).
+// (skills in the Skills store, MCP servers and agent files in this module's own folder).
 // Nothing is ever overwritten that these parts did not put there, and a part edited or managed since is left alone.
 import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, readlink, rm, stat, unlink } from 'node:fs/promises';
@@ -17,7 +17,8 @@ import { loadProblems, parseSkill } from './discovery.ts';
 import { configRoot, harnesses, writeRoot } from './harnesses.ts';
 import { removeFolder, rootProblem, swapFolder } from './skillfiles.ts';
 import { skillsOn } from './skills.ts';
-import { canonical, cannotHold, editEntry, fromJson, keep as keepServer, kept as keptServer, readMcpRecord, readTool, serverHash, type NeutralServer } from './mcp.ts';
+import { canonical, cannotHold, editEntry, fromJson, readTool, serverHash, type NeutralServer } from './mcp.ts';
+import { serversOn } from './servers.ts';
 import { partsSummary, partsTools, partWords, samePart } from './pluginstatus.ts';
 import {
   changedWhileSyncing, errorCode, exists, importRevision, sha256, itemKey, partsRecordPath, placeCopy, readParts, readTree, removeFileChecked, storeDirectory, storedRevision, targetFor, writeAccess, writeDurably, writeFileChecked, type ShareContext,
@@ -30,8 +31,15 @@ import { toolNames } from './words.ts';
 
 const recordPath = partsRecordPath;
 const runPath = (home: string, run: string) => join(storeDirectory(home), 'plugin-parts-runs', `${run}.json`);
-/** Agent files as written, by their bytes' hash (skills and MCP servers are kept in their own pages' stores). */
+/** Agent files as written, by their bytes' hash (skills are kept in the Skills store). */
 const agentTextPath = (home: string, hash: string) => join(storeDirectory(home), 'items', 'plugin-parts', 'agent', `${hash}.txt`);
+/** A server part's shared part, by its hash; a part put in before these were kept here is in the MCP store of the time (`items/mcp/<name>/`). */
+const serverPaths = (home: string, name: string, hash: string) =>
+  [join(storeDirectory(home), 'items', 'plugin-parts', 'mcp', `${hash}.json`), join(storeDirectory(home), 'items', 'mcp', encodeURIComponent(name), `${hash}.json`)];
+async function keptServer(home: string, name: string, hash: string): Promise<NeutralServer | undefined> {
+  for (const path of serverPaths(home, name, hash)) { try { return JSON.parse(await readFile(path, 'utf8')) as NeutralServer; } catch { /* the next place */ } }
+  return undefined;
+}
 
 /** Which plugin's parts in which tool: the marketplace as added (however its address was spelled), the plugin and the tool. */
 type PartsOf = Pick<PartsInstall, 'source' | 'plugin' | 'tool'>;
@@ -120,7 +128,8 @@ async function partsFor(context: ShareContext, files: PluginFiles, tool: Harness
     // Fields beyond the shared ones (a timeout, say) have no recorded form in another tool: said, as an agent's are.
     const own = Object.keys(extras);
     plan.push({ kind: 'mcp', name: server, limit: staysBehind(own) });
-    ready.push({ kind: 'mcp', name: server, hash: serverHash(neutral), store: async () => { await keepServer(context, server, neutral); } });
+    const [path] = serverPaths(context.home, server, serverHash(neutral));
+    ready.push({ kind: 'mcp', name: server, hash: serverHash(neutral), store: async () => { if (!(await exists(path))) { await mkdir(join(path, '..'), { recursive: true }); await writeDurably(path, `${JSON.stringify(neutral, null, 2)}\n`); } } });
   }
   for (const agent of files.agents) {
     if (tool === 'pi-cli') { plan.push({ kind: 'agent', name: agent.name, why: 'Pi has no agents.', wholeKind: true }); continue; }
@@ -271,7 +280,7 @@ async function namesInUse(context: ShareContext, tool: HarnessId) {
     }
   }
   const skills = await skillsOn(context);
-  const mcpRecord = await readMcpRecord(context.home);
+  const servers = await serversOn(context);
   const agents = await agentsOn(context);
   return {
     /** Why this tool's own skills folder can't be written, if it can't (the Skills page's own rule). */
@@ -279,7 +288,7 @@ async function namesInUse(context: ShareContext, tool: HarnessId) {
     skillNamed: (name: string) => skillNames.has(name.toLowerCase()),
     managed(item: Pick<PartItem, 'kind' | 'name'>): boolean {
       if (item.kind === 'skill') return skills.has(itemKey(item.name));
-      if (item.kind === 'mcp') return mcpRecord.items[item.name]?.state === 'shared';
+      if (item.kind === 'mcp') return servers.has(itemKey(item.name));
       return agents.has(keyOf(item.name));
     },
   };
@@ -334,11 +343,11 @@ async function put(context: ShareContext, tool: HarnessId, item: PartItem, repla
     return;
   }
   if (item.kind === 'mcp') {
-    const server = (await keptServer(context, item.name, item.hash))?.server as NeutralServer | undefined;
+    const server = await keptServer(context.home, item.name, item.hash);
     if (!server) throw new Error('its kept copy is no longer in Central Knot’s store');
     // No extras given: an entry being replaced keeps the tool's own settings on it, and a new one gets the tool's defaults.
     const problem = await editEntry(context, tool, item.name, replacing?.neutralHash, server);
-    if (problem) throw new Error(problem);
+    if (problem) throw new Error(problem.stopped);
     return;
   }
   const text = await readFile(agentTextPath(context.home, item.hash), 'utf8');
@@ -351,7 +360,7 @@ async function put(context: ShareContext, tool: HarnessId, item: PartItem, repla
 /** Takes one part out, only while it still is what these parts put there (`was`, as onDisk read it). */
 async function take(context: ShareContext, tool: HarnessId, item: PartItem, was: There) {
   if (item.kind === 'skill') { await removeFolder(context, skillDir(context, tool, item.name), was.seen); return; }
-  if (item.kind === 'mcp') { const problem = await editEntry(context, tool, item.name, was.neutralHash, undefined); if (problem) throw new Error(problem); return; }
+  if (item.kind === 'mcp') { const problem = await editEntry(context, tool, item.name, was.neutralHash, undefined); if (problem) throw new Error(problem.stopped); return; }
   const file = agentFile(context, tool, item.name);
   const text = await readFile(file, 'utf8');
   if (sha256(text) !== was.seen) throw changedWhileSyncing();

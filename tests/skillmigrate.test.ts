@@ -175,7 +175,7 @@ test('Migration: a switch set before is left as it is: Codex still doesn’t loa
     const quiet = { folder: 'quiet', name: 'quiet', skillFile: join(folderOf(box, 'codex-cli', 'quiet'), 'SKILL.md') };
     assert.equal(isDisabled(box.context, await readSwitchFile(box.context, 'codex-cli'), quiet), true);
     const view = await skillsView(box.context, box.tools);
-    const home = { skills: view, mcp: { tools: [], servers: [], claudePending: [] }, agents: view, profiles: { profiles: [{ id: 'p', name: 'Work', items: [] }], active: 'p', offByProfile: { 'skill:steady': ['codex-cli'] } } } as unknown as HomeView;
+    const home = { skills: view, mcp: { tools: [], items: [], library: {} }, agents: view, profiles: { profiles: [{ id: 'p', name: 'Work', items: [] }], active: 'p', offByProfile: { 'skill:steady': ['codex-cli'] } } } as unknown as HomeView;
     const facts = kindSource(home, 'skills').facts;
     const say = sentences(libraryWords.skills), tools = all;
     const tag = (key: string) => { const fact = facts.find(entry => entry.key === key)!; return say.placeTag({ key, hashes: {}, switched: fact.switched, cannot: fact.cannot }, view.library[key], tools)?.text; };

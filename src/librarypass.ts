@@ -1,6 +1,6 @@
-// The pass: the library's model (library.ts) carried out on real files, the same for every kind of item. A kind (agents.ts
-// and skills.ts) implements `Kind`, below, and nothing else: where a harness keeps it, how a copy is read, written and removed in
-// that harness's format, a harness's own part, and its record and store. Everything here is the same for every kind:
+// The pass: the library's model (library.ts) carried out on real files, the same for every kind of item. A kind (skills.ts,
+// servers.ts, agents.ts) implements `Kind`, below, and nothing else: where a harness keeps it, how a copy is read, written and
+// removed in that harness's format, a harness's own part, and its record and store. Everything here is the same for every kind:
 //
 //   lookAt         each managed harness's copies, read once through the kind (Disk); a copy that can't be read for sure is
 //                  unseen, never missing
@@ -16,8 +16,17 @@
 // Also here: the page's look (lookFor: the same reading, guards applied in memory, nothing saved), so a mark says what a pass
 // will do; a History entry's action (restore), which is always one of the clicks above; and the tool choice letting folders
 // go (forgetFolders). What a kind's page shows, and how the Git repo reads it, stay with the kind (agents.ts agentsView and
-// agentsForRepo, skills.ts skillsView and skillsForRepo). History's sentences and actions for the library's entries are
-// historyactions.ts's, for every kind.
+// agentsForRepo, skills.ts skillsView and skillsForRepo, servers.ts serversView and serversForRepo). History's sentences and
+// actions for the library's entries are historyactions.ts's, for every kind.
+//
+// Two members exist for a kind whose copies are entries in one shared file (MCP servers), and change nothing for a kind of
+// folders (skills, agents), which leaves the first out and never sets the second:
+// - Kind.folderSeen answers the guard's look in place of its `stat` of a directory: a missing file is away (its entries are
+//   written afresh once the settle window has passed, never read as deletions), one that is there keeps one fixed identity
+//   (every save replaces the file, so an inode says nothing), and a file the pass itself made is noted as there at its end.
+// - Disk.locked's `waits`: a harness whose writes wait for a step of the person's own (Claude Code's settings file, until Write
+//   to Claude Code, which runs the pass with a kind whose read leaves it out). Its copies are planned as any other's; the pass
+//   leaves each write and removal there undone, answers it held with `waits`, and A stays, so the next look still owes it.
 //
 // Words: a `Kind` is what one kind implements (below); its `Disk` is what it read of the managed harnesses now; a `Look` is
 // one pass's or one page's reading (the Disk with the record, the folders and the settle clock); a `Shelf` (library.ts)
@@ -27,9 +36,9 @@
 // (Disk.held, and a folder that can't be written: Disk.locked). A pass answers with a types.ts PassResult; a result in it
 // with `outcome: 'held'` (types.ts DestinationResult, the app's word for an action not done this time) is not a held copy.
 //
-// Where the library meets the app's types, which the skills and MCP engines share and name for themselves: a click comes
-// as a types.ts Change (a row's, or a History entry's action) and itemClick makes it an ItemClick (`managed` is On); a
-// kind's page view is a types.ts LibraryView, which the pages read through itemrow.ts kindSource.
+// Where the library meets the app's types: a click comes as a types.ts Change (a row's, or a History entry's action) and
+// itemClick makes it an ItemClick (`managed` is On); a kind's page view is a types.ts LibraryView, which the pages read through
+// itemrow.ts kindSource.
 //
 // To put another kind on the library, every place it is wired in (this is the one list; librarypages.ts and LEDGER point
 // here, and the compiler names a member `Kind` lacks):
@@ -38,8 +47,8 @@
 // - its callers: runPass for its passes (the app's clicks through itemClick), restore for History's actions, lookFor for its
 //   page's view, and forgetFolders from toolchoice.ts chooseTools;
 // - its view: a types.ts LibraryView (as agents.ts agentsView gives), kept in types.ts HomeView under the page's name for the
-//   kind (app.ts PageKind), and found there by itemrow.ts libraryView, which kindSource and the page's bands and notices
-//   (matrix.ts listView) read with no edit of their own;
+//   kind (app.ts PageKind), and read there by itemrow.ts kindSource and the page's bands and notices (matrix.ts listView),
+//   with no edit of their own;
 // - its page: its words in libraryrow.ts libraryWords (agents.ts takes its Kind's from there), and its entry in
 //   librarypages.ts libraryPages (how Read gets a version, what its opened row shows of its own); matrix.ts then draws its
 //   rows as library rows, with no edit;
@@ -49,7 +58,7 @@
 // - History's sentences and actions for its entries: historyactions.ts, in the kind's words (historypage.ts asks it).
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-import { carryOut, keepVersion, managedAgain, newItem, plan, setCurrent, versionAt, wantedIn } from './library.ts';
+import { carryOut, itemKey, keepVersion, managedAgain, newItem, plan, setCurrent, versionAt, wantedIn } from './library.ts';
 import type { Copies, HarnessCopy, ItemKind, LibraryItem, Plan, Shelf, Source, Version } from './library.ts';
 import { appendHistory, historyCutoff, readHistory, replaceHistory } from './history.ts';
 import { newRecord, readRecord, remember, saveRecord, syncGate, writeAccess } from './share.ts';
@@ -78,8 +87,14 @@ export interface Disk<Entry extends Seen> {
   byKey: Map<string, Partial<Record<HarnessId, Entry>>>;
   /** Why a copy can't be seen for sure, by `harness:key` (`harness:*`: the whole folder): it is `unseen`, and nothing happens there. */
   unseen: Map<string, string>;
-  /** Why a harness's folder can't be written now: no copy there can be written or removed (its copies are still read). */
-  locked: Map<HarnessId, string>;
+  /**
+   * Why a harness's folder can't be written now: no copy there can be written or removed (its copies are still read). `waits`:
+   * the writes wait for a step of the person's own (Claude Code's settings file, written only by Write to Claude Code), so the
+   * pass leaves each write and removal there undone, answers it held with `waits`, and plans it as it would any other.
+   * Write to Claude Code's own pass turns it round: there every other harness waits (servers.ts), so that click writes Claude
+   * Code alone and the next pass finishes the rest.
+   */
+  locked: Map<HarnessId, { why: string; waits?: true }>;
   /** What could not be read, in words for the page. */
   problems: string[];
   /**
@@ -105,8 +120,11 @@ export interface Disk<Entry extends Seen> {
    */
   outside?: Map<string, Partial<Record<HarnessId, Entry>>>;
 }
-/** An item as Disk.held is told of it: its name, where it is wanted (library.ts wantedIn) and what was applied where. */
-export type Wanted = Pick<LibraryItem, 'key' | 'name' | 'on' | 'except' | 'deleted' | 'applied'>;
+/**
+ * An item as Disk.held is told of it: its name, where it is wanted (library.ts wantedIn), what was applied where, and its
+ * current version as this pass's clicks left it (none for a found item, which is asked about as taking it in would leave it).
+ */
+export type Wanted = Pick<LibraryItem, 'key' | 'name' | 'on' | 'except' | 'deleted' | 'applied'> & Partial<Pick<LibraryItem, 'hash'>>;
 
 /** One kind's part of the library as its record holds it: its items, and each harness's folder as a pass last saw it. */
 export interface KindLibrary { items: Record<string, LibraryItem>; folders: Partial<Record<HarnessId, FolderSeen>> }
@@ -128,7 +146,15 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
   harnesses(tools: readonly HarnessId[]): HarnessId[];
   /** A harness's folder for this kind, which the pass guards (gone, moved, made again), and the path of one item's copy in it. */
   folder(context: ShareContext, harness: HarnessId): string;
+  /** One copy's path, which keys the settle clock: unique per item in a harness (an MCP server's is its entry in the settings file). */
   pathOf(context: ShareContext, harness: HarnessId, name: string): string;
+  /**
+   * The guard's look at a harness's folder, in place of its `stat` of a directory (guardFolders): for a kind whose copies share
+   * one file (MCP servers' settings file), the file away when it is missing, else one fixed identity, so a file rewritten by a
+   * save is never a folder made again. Asked again at the end of a pass for a file noted away (runPass), since the pass may have
+   * made it. A kind of folders leaves it out.
+   */
+  folderSeen?(context: ShareContext, harness: HarnessId): Promise<FolderSeen>;
   /**
    * Its record: opened (an older one migrated; `persist`: the caller may write it; nothing recorded yet: an empty one) and
    * saved. A `problem` stops every write.
@@ -154,8 +180,9 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
   keepOwn(context: ShareContext, item: LibraryItem, harness: HarnessId, text: string): Promise<boolean>;
   /**
    * Writes a version into one harness in its format: over its copy (`here`, only while it is as read), every byte of its own
-   * part kept; else as the copy the harness last had (its kept own part), or a new one. Keeps what it wrote as that harness's
-   * own part. Answers why it could not be written, if it couldn't (the next pass tries again).
+   * part kept; else as the copy the harness last had (its kept own part), or a new one. Answers why it could not be written,
+   * if it couldn't (the next pass tries again). What it wrote is that harness's own part from then on: kept by the kind here
+   * (agents), or by the next pass's keepOwn before anything there is removed (MCP servers).
    */
   write(context: ShareContext, item: LibraryItem, harness: HarnessId, here: Entry | undefined, content: Content): Promise<{ stopped: string } | undefined>;
   /**
@@ -177,20 +204,18 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
  * What a person asked of one item: On or Off (`on`), the harnesses it is kept out of (`except`), a version to make current,
  * Delete from Central Knot (`deleted`: true) or its Restore (false), and, for a found item whose copies differ, the copy
  * every harness takes (`use`, as seen: `useHash`). `seenOn`: whether the page showed it On; a click made from an older read
- * is refused if that no longer holds. `use: 'separate'` is the MCP engine's "keep both", no choice here: a click carrying
- * it is refused (click, takeIn), so the pass does only what it is asked.
+ * is refused if that no longer holds.
  */
 export interface ItemClick {
   key: string; on: boolean; except: HarnessId[]; seenOn?: boolean;
-  use?: HarnessId | 'separate'; useHash?: string; version?: string; deleted?: boolean;
+  use?: HarnessId; useHash?: string; version?: string; deleted?: boolean;
   /** An Undo's: each harness whose own copy the undone click took over, given back there where the item no longer goes (types.ts Change). */
   giveBack?: Partial<Record<HarnessId, string>>;
 }
 
 /**
- * The app's click (types.ts Change, which the skills and MCP engines share; the page's and History's) as the library's: the
- * one place the two meet. `managed` is On, `off` the harnesses it is kept out of; a Change's fields for the other engines
- * (disable, enable, remove, everywhere, takeOver) are left behind.
+ * The app's click (types.ts Change: the page's and History's, for every kind) as the library's: the one place the two meet.
+ * `managed` is On, `off` the harnesses it is kept out of.
  */
 export function itemClick(change: Change): ItemClick {
   const { key, managed: on, off, seenManaged: seenOn, use, useHash, version, deleted, giveBack } = change;
@@ -251,8 +276,7 @@ export const unseenIn = (disk: Disk<Seen>, tool: HarnessId, key: string) => disk
 export async function guardFolders(look: AnyLook, items: LibraryItem[], shelf?: Shelf<unknown>) {
   for (const tool of look.managed) {
     const path = look.kind.folder(look.context, tool), was = look.library.folders[tool];
-    const info = await stat(path).catch(() => undefined);
-    const here: FolderSeen = info?.isDirectory() ? { path, ino: info.ino, birth: Math.round(info.birthtimeMs) } : { path, away: true };
+    const here = look.kind.folderSeen ? await look.kind.folderSeen(look.context, tool) : await folderAt(path);
     const forget = (which: LibraryItem[]) => { for (const item of which) delete item.applied[tool]; };
     if ('away' in here) {
       const backWithoutFolder = !was && Object.values(look.library.items).some(item => item.applied[tool] !== undefined);
@@ -262,7 +286,7 @@ export async function guardFolders(look: AnyLook, items: LibraryItem[], shelf?: 
       const where = `${toolName(tool)}’s ${look.kind.words.folder}`;
       if (stillSettling(look, path)) { look.disk.unseen.set(`${tool}:*`, `${where} isn’t there just now. If it stays away, Central Knot writes it afresh.`); continue; }
       forget(applied.filter(item => wantedIn(item, tool)));
-      const owed = `${where} isn’t there. Its copy is removed once the folder is back.`;
+      const owed = `${where} isn’t there. Its copy is removed once it is back.`;
       for (const item of applied.filter(item => !wantedIn(item, tool))) look.disk.unseen.set(`${tool}:${item.key}`, owed);
       continue;
     }
@@ -273,6 +297,18 @@ export async function guardFolders(look: AnyLook, items: LibraryItem[], shelf?: 
     else if ('away' in was || was.ino !== here.ino || was.birth !== here.birth) forget(items.filter(item => !look.disk.byKey.get(item.key)?.[tool]));
   }
 }
+
+/** A folder's identity on disk, or away when it is not a folder there. */
+async function folderAt(path: string): Promise<FolderSeen> {
+  const info = await stat(path).catch(() => undefined);
+  return info?.isDirectory() ? { path, ino: info.ino, birth: Math.round(info.birthtimeMs) } : { path, away: true };
+}
+
+/**
+ * A file every copy of a kind shares, as the guard sees it (Kind.folderSeen: MCP servers' settings file): away when it is
+ * missing, else one fixed identity, since every save (Central Knot's too) replaces the file and its own identity tells nothing.
+ */
+export const sharedFileSeen = (path: string, exists: boolean): FolderSeen => (exists ? { path, ino: 0, birth: 0 } : { path, away: true });
 
 /**
  * A harness managed again (library.ts managedAgain), for every item in the record, deleted ones too, not only the pass's: A
@@ -325,11 +361,12 @@ function copyIn(look: AnyLook, item: LibraryItem, tool: HarnessId, here: Seen | 
     // A copy of its own where the harness has the item another way too: the table's last row (library.ts wantedHere).
     return { is: 'present', hash: here.hash, at: here.at, ...(kindHeld?.anotherWay ? { anotherWay: kindHeld.why } : {}) };
   }
+  // A harness whose writes wait (Disk.locked `waits`) is planned as any other: the pass leaves the write for that step.
   const locked = look.disk.locked.get(tool);
-  const held = kindHeld ?? (wanted && locked ? { why: locked } : undefined);
+  const held = kindHeld ?? (wanted && locked && !locked.waits ? { why: locked.why } : undefined);
   if (held) return { is: 'held', ...held };
   const { copy, item: noun } = look.kind.words;
-  const missing = `${toolName(tool)}’s ${copy} for it is missing just now. If it stays missing, the ${noun} turns off everywhere.`;
+  const missing = `${toolName(tool)}’s ${copy} for it is missing just now. If it stays missing, the ${noun} turns off.`;
   if (wanted && item.applied[tool] !== undefined && stillSettling(look, path)) return { is: 'unseen', why: missing };
   seenAgain(look, path);
   return { is: 'absent' };
@@ -420,6 +457,9 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   const items = Object.values(library.items).filter(item => inScope(item.key));
   await guardFolders(pass, items, pass.shelf);
   for (const item of items) await syncItem(pass, item);
+  // A file noted away that this pass made (a kind of files: Kind.folderSeen) is noted as it is now, so the next pass doesn't
+  // take Central Knot's own write for a file made again (keepFolders: a click's pass still moves no known identity on).
+  if (kind.folderSeen) for (const tool of managed) if (pass.foldersNow[tool] && 'away' in pass.foldersNow[tool]) pass.foldersNow[tool] = await kind.folderSeen(context, tool);
   keepFolders(library, pass.foldersNow, managed, !options.only);
   await saveIfChanged(pass);
   return { results: pass.results, writes: pass.writes, notices: pass.notices, settling: settle.settling, made: pass.made };
@@ -486,10 +526,22 @@ async function syncItem(pass: Pass, item: LibraryItem) {
       }
     },
     log: () => appendHistory(context, logItem(pass, item, made, slot)),
-    write: harness => writeCopy(pass, item, harness, slot[harness]),
+    write: async harness => !waits(pass, item, harness) && writeCopy(pass, item, harness, slot[harness]),
     // An Undo gives a harness back the copy its click took over, as that harness's own, instead of removing what is there.
-    remove: harness => (giveBack[harness] ? giveBackCopy(pass, item, slot[harness]!, giveBack[harness]!) : removeCopy(pass, item, slot[harness]!)),
+    remove: async harness => !waits(pass, item, harness)
+      && (giveBack[harness] ? giveBackCopy(pass, item, slot[harness]!, giveBack[harness]!) : removeCopy(pass, item, slot[harness]!)),
   });
+}
+
+/**
+ * Whether a write or removal in this harness waits for a step of the person's own (Disk.locked `waits`): then it is left
+ * undone, said held with `waits` (a step to take, not a failure), and what is applied there stays, so the next look still owes it.
+ */
+function waits(pass: Pass, item: LibraryItem, tool: HarnessId): boolean {
+  const lock = pass.disk.locked.get(tool);
+  if (!lock?.waits) return false;
+  pass.results.push({ item: item.name, harness: tool, outcome: 'held', waits: true, message: lock.why });
+  return true;
 }
 
 /** Writes the current version into one harness (Kind.write). True when it is there (carryOut notes it as applied). */
@@ -619,7 +671,8 @@ export async function restore<C, E extends Seen, D extends Disk<E>>(
   kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[], eventId: string, version?: string,
 ): Promise<PassResult> {
   const past = (await readHistory(context)).find(entry => entry.id === eventId);
-  const key = past?.key.slice(kind.historyPrefix.length) ?? '';
+  // An item's key is its name as library.ts itemKey makes it; an MCP server's entries from before the library name it as written.
+  const key = itemKey(past?.key.slice(kind.historyPrefix.length) ?? '');
   const { library, problem } = await kind.open(context);
   if (problem) return { stopped: problem, results: [], writes: 0 };
   const action = past && kind.historyAction(past, library.items[key], version);
@@ -682,7 +735,7 @@ function turn(pass: Pass, item: LibraryItem, asked: ItemClick) {
 async function takeIn(pass: Pass, asked: ItemClick, tombstone: LibraryItem | undefined, refuse: Refuse) {
   const found = foundCopies(pass, asked.key, asked.except);
   if (!found.length) return refuse('No tool has a copy of it to take in any more.');
-  const chosen = asked.use && asked.use !== 'separate' ? found.find(entry => entry.tool === asked.use) : undefined;
+  const chosen = asked.use ? found.find(entry => entry.tool === asked.use) : undefined;
   const changedSince = asked.use && (!chosen || (asked.useHash && chosen.hash !== asked.useHash));
   if (changedSince) return refuse('The copy you chose changed since you chose it. Nothing was changed; choose again.', { chooseAgain: true });
   const differs = differ(found);

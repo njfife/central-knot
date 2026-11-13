@@ -45,7 +45,7 @@ export interface ShareContext {
   historyDays?: HistoryDays;
   /**
    * How long a copy must stay missing before it counts as deleted, so an atomic save is not a deletion (SYN-04). Unset, a
-   * library pass waits 2 s (librarypass.ts runPass) and the MCP engine the same (mcp.ts applyMcp); tests pass 0.
+   * pass waits 2 s (librarypass.ts runPass); tests pass 0.
    */
   settleMs?: number;
 }
@@ -71,7 +71,7 @@ export async function readParts(home: string): Promise<PartsInstall[]> {
 }
 const recordPath = (home: string) => join(storeDirectory(home), 'sync.json');
 
-export function itemKey(folder: string): string { return folder.normalize('NFC').toLowerCase(); }
+export { itemKey } from './library.ts';
 
 export const errorCode = (error: unknown) => (typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '');
 

@@ -108,12 +108,7 @@ const piPart: PartsInstall = { source: '/m', marketName: 'm', plugin: 'issue-tra
 /** A home's view with these skills (as the Skills page's view gives them: types.ts LibraryFacts, `on` for managed). */
 const homeOf = (skills: SkillFacts[], pluginItems: InstalledPlugin[], parts: PartsInstall[] = []) => ({
   skills: { tools: [], items: skills.map(({ managed, off, ...facts }) => ({ ...facts, on: managed, except: off, edited: [] })), library: {} },
-  mcp: { servers: [] }, agents: { items: [], library: {} }, parts, pluginItems }) as unknown as HomeView;
-
-test('a page whose last MCP server was just deleted still has a row: the server with no copy left, switched off', () => {
-  const home = { ...homeOf([], []), mcp: { servers: [], gone: [fact('only', {}, { gone: { history: 'e1', at: '', kind: 'deleted' } })] } } as unknown as HomeView;
-  assert.deepEqual([rowCount(home, 'mcp'), rowCount(homeOf([], []), 'mcp')], [1, 0]);
-});
+  mcp: { items: [], library: {} }, agents: { items: [], library: {} }, parts, pluginItems }) as unknown as HomeView;
 
 test('a plugin’s skill the person also has (its part in Pi, shown there as through the plugin elsewhere) is that one row, not a second', () => {
   const through = { plugin: 'issue-tracker', marketplace: 'm' };
@@ -126,7 +121,8 @@ test('a plugin’s skill the person also has (its part in Pi, shown there as thr
 
 test('a Codex plugin’s MCP server that is also the plugin’s part in Pi is that one row (no box shows Codex has it through the plugin)', () => {
   const part: PartsInstall = { ...piPart, items: [{ kind: 'mcp', name: 'issues', hash: '' }] };
-  const home = { ...homeOf([], [install('codex-cli')], [part]), mcp: { servers: [fact('issues', { 'pi-cli': true })] } } as unknown as HomeView;
+  // Pi's entry is the plugin's part there: the servers page shows it as a row that can't be taken in (servers.ts), with no copy.
+  const home = { ...homeOf([], [install('codex-cli')], [part]), mcp: { items: [{ key: 'issues', name: 'issues', description: '', copies: {}, on: false, except: [], cannot: {}, edited: [], unseen: { 'pi-cli': 'the plugin’s' } }], library: {} } } as unknown as HomeView;
   assert.deepEqual([pageRows(home, 'mcp').rows.length, pageRows(homeOf([], [install('codex-cli')]), 'mcp').rows.map(row => row.name)], [0, ['issues']]);
 });
 

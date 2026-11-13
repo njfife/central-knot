@@ -130,10 +130,11 @@ test('A tool\'s installs say what is installed, what could not be checked and wh
 
 test('A part removed from a tool by hand is no longer installed there; a kind the home does not read there still counts', () => {
   const facts = (key: string, tools: string[]) => ({ key, copies: Object.fromEntries(tools.map(tool => [tool, {}])) });
-  const home = { skills: { tools: ['codex-cli', 'pi-cli'], items: [{ ...facts('triage', ['codex-cli']), on: false, except: [] }], library: {} }, mcp: { tools: ['codex-cli'], servers: [facts('issues', ['codex-cli'])] }, agents: { tools: [], items: [], library: {} } } as unknown as HomeView;
+  const home = { skills: { tools: ['codex-cli', 'pi-cli'], items: [{ ...facts('triage', ['codex-cli']), on: false, except: [] }], library: {} }, mcp: { tools: ['codex-cli', 'pi-cli'], items: [{ key: 'issues', copies: {}, unseen: { 'codex-cli': 'the plugin’s' }, on: false, except: [] }], library: {} }, agents: { tools: [], items: [], library: {} } } as unknown as HomeView;
   assert.equal(partStillIn(home, 'codex-cli', { kind: 'skill', name: 'Triage' }), true);
   assert.equal(partStillIn(home, 'pi-cli', { kind: 'skill', name: 'triage' }), false);
-  assert.equal(partStillIn(home, 'pi-cli', { kind: 'mcp', name: 'issues' }), true);
+  // An MCP server's part is never one of the servers page's copies: its row says the tool has it as the plugin's.
+  assert.deepEqual([partStillIn(home, 'codex-cli', { kind: 'mcp', name: 'issues' }), partStillIn(home, 'pi-cli', { kind: 'mcp', name: 'issues' })], [true, false]);
   assert.equal(partStillIn(home, 'codex-cli', { kind: 'agent', name: 'helper' }), true);
 });
 
