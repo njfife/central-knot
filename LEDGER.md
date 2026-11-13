@@ -1724,3 +1724,50 @@ When it turns something Off, one History row says what ("Profiles are sets of it
 - *Next reader*: MAP says sources are under `src/`, names `main.ts switchFromMenu` and `historypage.ts profileSwitch`; `profilespage.ts` names a list `inUseNow` and a yes/no `isInUse`; Undo's wording is "whose On or Off differs now"; `skills.ts` names the migration among the writers of a skill's switch; `.pf-menu-note` is gone.
 - Pictures of the states changed: `/home/picoder/work/ck-one-switch-plan/tour-l3b-r2/`, at 860×560 and 1280×800, with `tour.md`.
 
+
+## Items live in Central Knot, step 4: "Synchronize everything" as a standing rule, November 13, 2026
+
+The owner's rule (plan, section 1): once "synchronize everything" is chosen, a new skill, agent or MCP server that turns up in a managed tool is taken into Central Knot and turned On everywhere by itself. This step adds that rule and its one setting per home. First setup's question, which chooses it for a new home, is step 5; with the rule off, found rows and Add are as they were.
+
+**What a person sees change.**
+- **Settings › This home › Synchronize everything** (a switch). Off where it was never chosen. Its line says what it does; while it is off, how many found items turning it on would add now; either way, how many found items wait for a choice of copy, with See Skills (or the page that has the first). Unchangeable, with the reason, where a pass may not write. There is no Add all anywhere: switching the rule on is the one way to add everything.
+- **Turned on**, the pass right after (Automatic sync on; with it off, Sync once) takes in everything found then that the rule may take, each as Add would (On everywhere, from the one content; Claude Code's MCP part waits for Write to Claude Code, in the one band). Each gets Add's History entry, "Found in Claude Code and taken into Central Knot by Synchronize everything; put in Codex.", with Add's Undo and its limits (none where the give-back would go to Claude Code's MCP file). One notice per pass of a kind: "Synchronize everything took in 3 skills, found in Claude Code and Copilot CLI: notes, release-notes and standup. History can undo each." A take-in's row reads "Undone" once its Undo is used.
+- **What it leaves found**, each row saying why while the rule is on: copies that differ (the row's question, as before; the Found heading and Settings count them), an item deleted from Central Knot or whose take-in was undone ("only Add brings it back"), a plugin's part, a copy that can't be read (quietly), and a skill or agent copy still being saved (taken at the next pass: 2.5 s later with Automatic sync on, at the next Sync once with it off). The Found heading says which rule is in force; so do Overview's sync line and the status bar's idle tooltip.
+
+**The take-in table** (`library.ts takeInAnswer`, in its header as FOUND, one column for a click on Add and one for the rule). Told a found key's readable copies (each a plugin's part or not), whether the record holds it deleted, and whether a deleted item's copy still waits to leave a harness at Write to Claude Code (`librarypass.ts foundKey`, the one place a click, the rule and each kind's view learn it), it answers take it (from which copy), wait for a choice, or leave it with a reason. The click's column is the behaviour before this step; it replaces `librarypass.ts takeIn`'s inline branches and `libraryrow.ts canTakeIn` and `needsChoice` (the row reads the answers as `LibraryFacts takeInAnswers`, through `asksWhichCopy` and `canAdd`).
+
+**Map of this step.**
+- `src/library.ts`: FOUND in the header; `FoundCopy`, `FoundKey`, `TakenBy`, `LeftFound`, `TakeInAnswer`, `takeInAnswer`.
+- `src/librarypass.ts`: `Disk.parts`; `foundKey`, `takeInAnswers`; `PassOptions.background` (main.ts's pass of the whole home, the only one the rule runs in); `passGate` (was `refusal`, now also hands back the sync record); `addClicked`, `takeInByRule`, `takeIn` (one take-in for both), `takenInNotice`; `logItem` keeps the rule's entries out of a pass's `made`.
+- `src/share.ts`: `SyncRecord.syncEverything` (checked as a boolean by `readRecord`), `setSyncEverything`, `partsIn` (what `skills.ts` and `agents.ts` reads put in `Disk.parts`).
+- `src/types.ts`: `SyncNotice` is `ItemNotice | TakenInNotice`; `HistoryEvent cause 'sync-everything'`; `SyncView.syncEverything`; `LibraryFacts.takeInAnswers` (was `differs`); `DesktopApi.setSyncEverything`.
+- The page: `settingspage.ts syncEverythingRow`, `app.ts setSyncEverything` and `keepUnshown`, `matrix.ts foundNote` and `takenInNotice`, `libraryrow.ts ruleSays` and `takenInWords`, `historyactions.ts` (the rule's sentence, its Undo, "Undone"), `pages.ts`, `renderer.ts`; `main.ts` (`sync:everything`, `{ background: true }` in `pass`, `lookAgainSoon`).
+- Tests: `tests/library.test.ts` (the table, row by row), `tests/synceverything.test.ts` (every way the brief named on real files), `tests/serverswalk.test.ts` (the rule on in odd seeds, new copies among the steps, checks (i) and (j)), `scripts/e2e.mjs syncEverythingFlow`, `scripts/ui-tour.mjs --only sync-everything`.
+
+**Sequences that behave differently from `next` on purpose.**
+- An agent row whose only copy can't be read (two files whose names differ only by case) has no Add; on `next` its Add was live and answered "No tool has a copy of it to take in any more." Test: "An agent whose only copy is two files differing by case gets no Add, and the rule leaves it".
+- An undone take-in's History row says "Undone" (on `next`, "Turned off since").
+- A sync notice its page hasn't shown yet stays in the next read until it is shown or dismissed (on `next` the next read dropped it; a pass's own writes to an MCP settings file bring such a read a second later, so turning the rule on from Settings lost every notice).
+- Every pass of the whole home that leaves something inside the settle window looks again 2.5 s later, a Refresh's or Sync once's too (on `next` only the background pass did).
+- A notice's sentence too long for its line wraps beside its mark, not under it.
+- A sync record whose `syncEverything` is not true or false reads as damaged.
+
+**Decisions made in this step, beyond the brief.**
+- *Where the rule runs* is said by the caller (`PassOptions.background`, main.ts's pass of the whole home), not worked out from `only`: with Automatic sync on a click's pass has no `only`, and the rule stays out of it too; the background pass right after takes in.
+- *The rule's take-ins are no click's*: they are not in a pass's `made`, so a click's Undo never undoes them; each has its own entry.
+- *The settle window is either side of the pass's clock* (`|clock − at| < window`): a copy written while the pass reads (its time just after the clock) waits; one dated far ahead is taken at once, so a future-dated file never holds the rule open.
+- *A plugin's part* is learnt by the kind's read from `plugin-parts.json` (`share.ts partsIn`); the page's "from <plugin>" tag still reads `home.parts` (`matrix.ts fromPlugins`), which also names parts in tools not managed.
+- *The Settings row* is in a section of its own, This home, since it is kept in the home's sync record, not the app's settings.
+
+**States the brief did not explain** (each leaves the item found, its reason on the row).
+- A key with a plugin's part in one tool and a copy of the person's own in another: left (a part).
+- Two tools gaining one name, one copy still inside the settle window: all of it waits until it has settled.
+
+**Validation.**
+- `npm test`: the type check and 681 tests.
+- The walk (`tests/serverswalk.test.ts`) on 100 fresh seeds, `CK_SEED` 14000 and 14050, 50 each: clean. The rule was on in 50; it took in 78 items in 39 of them, 246 new copies turned up, 2 take-ins were undone (`CK_TALLY=1`).
+- Each new rule switched off, 41 in all (the table's rows, `foundKey`, where the rule runs, the notice, `partsIn`, the setting, History, the row, the page's words and counts, main.ts's wiring): every one fails a named test or end-to-end check. Five survived at first and got one each: a tool named once in the notice, both `partsIn` filters, the record's boolean, and the quick look again.
+- End to end, `syncEverythingFlow` on Linux (`--electron`): 30 checks pass, three runs in a row; the "no Add all" checks stay. The Mac run is named in the pull request.
+- Pictures: `node scripts/ui-tour.mjs <out> --electron --no-sandbox --only sync-everything` under `xvfb-run`, 56 with their `.txt`, at 860×560, 1280×800, 1728×1117 and 2560×1440 and in light (`/home/picoder/work/ck-one-switch-plan/tour-l4/sync-everything/`).
+
+**Follow-ups.** First setup's question and its walk through differing copies; the Manage switch per tool; a taken-in item joining a profile; plugins; Git links.
