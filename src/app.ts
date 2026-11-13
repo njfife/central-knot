@@ -4,7 +4,7 @@ import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
 import type { ApplyResult, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SyncNotice } from './types.ts';
 import { anyManaged, kindSource } from './itemrow.ts';
-import { caughtUpNames, plural, withSetAside } from './model.ts';
+import { caughtUpNames, noticeNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
 import { pluginItemCount } from './pluginrows.ts';
@@ -439,7 +439,7 @@ function readFound(view: HomeView, from?: string): string {
   const counts = heldKinds(view).map(kind => plural(found[kind], kindNouns[kind].one, kindNouns[kind].many));
   // A catch-up that copied something has its own Caught up band, and what sync did on its own (an edit spread, a deletion)
   // its notice: either is a change, so neither read says "Nothing changed".
-  const caught = caughtUpNames(view.sync, new Set(view.skills.notices.map(notice => notice.item))).length > 0;
+  const caught = caughtUpNames(view.sync, new Set(view.skills.notices.flatMap(noticeNames))).length > 0;
   const told = [view.skills.notices, view.mcp.notices, view.agents.notices].some(notices => notices.length > 0);
   return `Read ${andList(counts)}${from ? ` from ${from}` : ''}.${caught || told ? '' : ' Nothing changed.'}`;
 }
@@ -1107,6 +1107,17 @@ export const setSync = (on: boolean) => busy(on ? 'Turning Sync on…' : 'Turnin
   announce(on ? 'Automatic sync on.' : 'Automatic sync off.', true);
 });
 
+/**
+ * Synchronize everything, the open home's standing rule, on or off (share.ts setSyncEverything). Turned on, main's next pass takes
+ * in what is found now: at once with Automatic sync on, at Sync once with it off. Answers why not, if it couldn't be set.
+ */
+export const setSyncEverything = (on: boolean) => busy(on ? 'Turning on Synchronize everything…' : 'Turning off Synchronize everything…', async () => {
+  const set = await api().setSyncEverything(on, state.home!.home);
+  if (set.view) setHome(set.view);
+  if (set.stopped) { announce(`Synchronize everything was not changed. ${set.stopped}`); return; }
+  announce(!on ? 'Synchronize everything is off: what turns up in a tool waits for Add.' : state.home?.syncOn ? 'Synchronize everything is on.' : 'Synchronize everything is on. It takes items in at Sync once, or when Automatic sync is on.', true);
+});
+
 export const syncNow = () => busy('Syncing…', async () => {
   const view = await api().syncNow(state.home!.home);
   setHome(view);
@@ -1175,9 +1186,9 @@ async function backgroundRefresh() {
       // A new sync notice is the news: the earlier result steps aside, and its Undo stays in History. Two Undo buttons for
       // different events, one above the other, is the one thing here that would mislead; the notice says where it went.
       const outcome = state.outcome;
-      if (outcome?.act) state.undoMoved = { page: outcome.page, label: outcome.act.label, items: outcome.items ?? (outcome.item ? [outcome.item] : []), notices: noticesByPage(view).flatMap(([, notices]) => notices.map(notice => notice.history || notice.item)) };
+      if (outcome?.act) state.undoMoved = { page: outcome.page, label: outcome.act.label, items: outcome.items ?? (outcome.item ? [outcome.item] : []), notices: noticesByPage(view).flatMap(([, notices]) => notices.map(notice => notice.history)) };
       state.outcome = undefined;
-      const items = [...new Set(fresh.flatMap(([, notices]) => notices.map(notice => notice.item)))];
+      const items = [...new Set(fresh.flatMap(([, notices]) => notices.flatMap(noticeNames)))];
       // On the page whose notice says it, screen readers hear it; elsewhere the status bar says it, beside the sidebar's dot.
       announce(`Sync changed ${andList(items)}.`, fresh.some(([page]) => page === state.page));
     }

@@ -4,7 +4,7 @@
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { rowClicks, needsChoice, type LibraryRow } from '../src/libraryrow.ts';
+import { rowClicks, asksWhichCopy, type LibraryRow } from '../src/libraryrow.ts';
 import { agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
 import { libraryAction, versionChoices } from '../src/historyactions.ts';
 import type { LibraryItem } from '../src/library.ts';
@@ -38,14 +38,14 @@ export const write = (box: Box, tool: Tool, text: string) => writeFile(fileOf(bo
 export const filesOf = async (box: Box) => Object.fromEntries(await Promise.all(tools.map(async tool => [tool, await readOf(box, tool as Tool)] as const))) as Record<Tool, string | undefined>;
 export const historyOf = async (box: Box, context = box.context) => (await readHistory(context)).filter(event => event.key === 'agent:reviewer');
 /** A plain pass, as the background runs it. */
-export const pass = (box: Box, context = box.context) => applyAgents(context, box.tools, []);
+export const pass = (box: Box, context = box.context) => applyAgents(context, box.tools, [], { background: true });
 
 /** The agent as the Agents page reads it: its row's facts, and its item in the library (deleted or not). */
 export async function seen(box: Box, context = box.context): Promise<{ fact?: LibraryFacts; item?: LibraryItem; row: LibraryRow }> {
   const view = await agentsView(context, box.tools);
   const fact = view.items.find(entry => entry.key === 'reviewer');
   const hashes = Object.fromEntries(Object.entries(fact?.copies ?? {}).map(([tool, copy]) => [tool, copy!.hash]));
-  return { fact, item: view.library.reviewer, row: { key: 'reviewer', name: fact?.name, hashes, plan: fact?.plan, cannot: fact?.cannot, unseen: fact?.unseen, differs: fact?.differs } };
+  return { fact, item: view.library.reviewer, row: { key: 'reviewer', name: fact?.name, hashes, plan: fact?.plan, cannot: fact?.cannot, unseen: fact?.unseen, takeIn: fact?.takeIn } };
 }
 export const itemOf = async (box: Box) => (await seen(box)).item;
 
@@ -54,7 +54,7 @@ const send = applyClick;
 /** The row's switch, On. A found agent whose copies differ opens the copy question instead: `choose` answers it. */
 export async function turnOn(box: Box, context = box.context): Promise<PassResult | 'choose'> {
   const { row, item } = await seen(box, context);
-  return needsChoice(row, item) ? 'choose' : send(box, rowClicks.on(row, item), context);
+  return asksWhichCopy(row) ? 'choose' : send(box, rowClicks.on(row, item), context);
 }
 export const choose = async (box: Box, use: Tool, context = box.context) => { const { row, item } = await seen(box, context); return send(box, rowClicks.on(row, item, use), context); };
 export const turnOff = async (box: Box, context = box.context) => { const { row, item } = await seen(box, context); return send(box, rowClicks.off(row, item), context); };

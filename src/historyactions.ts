@@ -21,9 +21,9 @@
 //   on or off whose click took tools' own    Undo: that action,     the item is as the click left it (asTheClickLeftIt);
 //     copies over (`tookFrom`)               each such copy given   after that, the plain action above, which gives
 //                                            back                   nothing back
-//   a found item taken in (on, `found`;      Undo: out of Central   the item is as the click left it; after that, an
-//     chosen)                                Knot again, found      `on` one offers Turn off
-//                                            again, each tool it
+//   a found item taken in (on, `found`, or   Undo: out of Central   the item is as the click left it; after that, an
+//     `sync-everything` with no click;       Knot again, found      `on` one offers Turn off
+//     chosen)                                again, each tool it
 //                                            was found in keeping
 //                                            its own copy
 //   (either Undo, when a copy would go back to Claude Code's MCP settings: not offered, see givesBackLater)
@@ -95,9 +95,10 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       const said = {
         switch: { glyph: 'circle-check', text: `Turned on${also(': put in')}.` },
         found: { glyph: 'plus', text: `Found in ${from} and taken into Central Knot${also('; put in')}.` },
+        'sync-everything': { glyph: 'plus', text: `Found in ${from} and taken into Central Knot by Synchronize everything${also('; put in')}.` },
         pulled: { glyph: 'git-branch', text: `Pulled from the Git repo into Central Knot${also('; put in')}.` },
       } as const;
-      const { glyph, text } = said[event.cause === 'found' || event.cause === 'pulled' ? event.cause : 'switch'];
+      const { glyph, text } = said[event.cause === 'found' || event.cause === 'sync-everything' || event.cause === 'pulled' ? event.cause : 'switch'];
       return { glyph, text: `${text}${overSaid}${gaveSaid}` };
     }
     case 'off':
@@ -207,9 +208,9 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
   // Offered while one of those tools still loads it (`loads`, the row's: each tool's own switch now; unknown, it is offered).
   const stillCleared = !loads || event.switched?.some(entry => !loads[entry.tool]?.off);
   if (isClearedSwitch(event) && stillCleared) return { label: 'Undo', help: `Turn ${name} off again in ${andList(event.switched!.map(entry => toolName(entry.tool)))}’s own settings`, change: now };
-  // A found item taken in, while it is still as that click left it: its Undo takes it out again (found once more), each tool
-  // it was found in keeping its own copy.
-  const tookIn = event.kind === 'chosen' || (event.kind === 'on' && event.cause === 'found');
+  // A found item taken in (by a click on Add, or by Synchronize everything), while it is still as that left it: its Undo takes it
+  // out again (found once more, a tombstone the rule leaves for good), each tool it was found in keeping its own copy.
+  const tookIn = event.kind === 'chosen' || (event.kind === 'on' && (event.cause === 'found' || event.cause === 'sync-everything'));
   if (tookIn && item.on && asTheClickLeftIt(event, item)) {
     if (givesBackLater(event, givenBack(event, item).giveBack)) return undefined;
     return { label: 'Undo', help: `Take ${name} out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own`, change: { ...now, deleted: true, ...givenBack(event, item) } };

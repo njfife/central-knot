@@ -3,7 +3,7 @@
 // applied there last. Contents are single letters: 'a' is older than 'b', and so on.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { carryOut, decide, isLibraryItem, keepVersion, listed, managedAgain, newItem, plan, setCurrent, sourceWords, type HarnessCopy, type LibraryItem, type Shelf } from '../src/library.ts';
+import { carryOut, decide, isLibraryItem, keepVersion, listed, managedAgain, newItem, plan, setCurrent, sourceWords, takeInAnswer, type HarnessCopy, type LibraryItem, type Shelf } from '../src/library.ts';
 
 const has = (hash: string, at = 0): HarnessCopy => ({ is: 'present', hash, at });
 /** A copy with no time of its own (an MCP entry: its time is its whole file's). */
@@ -321,4 +321,43 @@ test('A record’s value is an item only with every field in its shape', () => {
   assert.equal(isLibraryItem(item()), true);
   assert.equal(isLibraryItem({ ...item(), deleted: { at: day(1) } }), true);
   for (const broken of [null, {}, { ...item(), own: undefined }, { ...item(), on: 'yes' }, { ...item(), versions: [{ hash: 'a' }] }, { ...item(), applied: { 'claude-cli': 3 } }, { name: 'reviewer', state: 'shared', off: [], copies: [] }]) assert.equal(isLibraryItem(broken), false);
+});
+
+// ---------- takeInAnswer: the FOUND table, row by row, a click's column and Synchronize everything's ----------
+
+const copy = (harness: 'claude-cli' | 'codex-cli' | 'copilot-cli', hash: string, more: { at?: number; part?: true } = {}) => ({ harness, hash, ...more });
+const found = (copies: ReturnType<typeof copy>[], more: { deleted?: boolean; leaving?: boolean } = {}) => ({ copies, deleted: false, leaving: false, ...more });
+/** Both columns' answers for one found key. */
+const both = (key: ReturnType<typeof found>, settle?: { clock: number; ms: number }) => [takeInAnswer('click', key), takeInAnswer('rule', key, undefined, settle)];
+
+test('Found, no copy that can be read: a click is refused, and the rule leaves it found, quietly', () =>
+  assert.deepEqual(both(found([])), [{ leave: 'no-copy' }, { leave: 'no-copy' }]));
+test('Found, a deleted item’s copy still to leave a harness at Write to Claude Code: no Add, and the rule leaves it', () =>
+  assert.deepEqual(both(found([copy('claude-cli', 'a')], { deleted: true, leaving: true })), [{ leave: 'leaving' }, { leave: 'leaving' }]));
+test('Found, the record holds it deleted: a click takes it in (the tombstone is lifted), the rule leaves it for good', () =>
+  assert.deepEqual(both(found([copy('codex-cli', 'a')], { deleted: true })), [{ take: copy('codex-cli', 'a'), chosen: false }, { leave: 'deleted' }]));
+test('Found, a copy that is a plugin’s part: a click takes it in, the rule leaves it (its row keeps Add)', () =>
+  assert.deepEqual(both(found([copy('codex-cli', 'a', { part: true }), copy('claude-cli', 'a')])), [{ take: copy('codex-cli', 'a', { part: true }), chosen: false }, { leave: 'part' }]));
+test('Found, a copy whose own time is inside the settle window of the pass’s clock: a click takes it in, the rule leaves it for the next pass', () => {
+  const settle = { clock: 10_000, ms: 2000 };
+  assert.deepEqual(both(found([copy('claude-cli', 'a', { at: 9000 })]), settle), [{ take: copy('claude-cli', 'a', { at: 9000 }), chosen: false }, { leave: 'settling' }]);
+  // Exactly at the window's edge it has settled; a time ahead of the clock by less than the window is still being written.
+  assert.deepEqual(takeInAnswer('rule', found([copy('claude-cli', 'a', { at: 8000 })]), undefined, settle), { take: copy('claude-cli', 'a', { at: 8000 }), chosen: false });
+  assert.deepEqual(takeInAnswer('rule', found([copy('claude-cli', 'a', { at: 11_000 })]), undefined, settle), { leave: 'settling' });
+  // A time far ahead of the clock can't be judged by it: taken at once, never left for ever.
+  assert.deepEqual(takeInAnswer('rule', found([copy('claude-cli', 'a', { at: 99_000 })]), undefined, settle), { take: copy('claude-cli', 'a', { at: 99_000 }), chosen: false });
+  // A copy with no time of its own (an MCP entry) is taken at once; the page's look has no clock, so the window counts as passed.
+  assert.deepEqual(takeInAnswer('rule', found([copy('claude-cli', 'a')]), undefined, settle), { take: copy('claude-cli', 'a'), chosen: false });
+  assert.deepEqual(takeInAnswer('rule', found([copy('claude-cli', 'a', { at: 9000 })])), { take: copy('claude-cli', 'a', { at: 9000 }), chosen: false });
+});
+test('Found, the copy a click chose is gone or changed since: refused, choose again', () => {
+  const key = found([copy('claude-cli', 'a'), copy('codex-cli', 'x')]);
+  assert.deepEqual(takeInAnswer('click', key, { harness: 'codex-cli', hash: 'y' }), { leave: 'choice-changed' });
+  assert.deepEqual(takeInAnswer('click', key, { harness: 'copilot-cli' }), { leave: 'choice-changed' });
+});
+test('Found, copies that differ and none chosen: a click waits for the row’s question, and so does the rule', () =>
+  assert.deepEqual(both(found([copy('claude-cli', 'a'), copy('codex-cli', 'x')])), [{ wait: 'choice' }, { wait: 'choice' }]));
+test('Found otherwise: taken in from the one content (first harness), or from the copy a click chose', () => {
+  assert.deepEqual(both(found([copy('claude-cli', 'a'), copy('codex-cli', 'a')])), [{ take: copy('claude-cli', 'a'), chosen: false }, { take: copy('claude-cli', 'a'), chosen: false }]);
+  assert.deepEqual(takeInAnswer('click', found([copy('claude-cli', 'a'), copy('codex-cli', 'x')]), { harness: 'codex-cli', hash: 'x' }), { take: copy('codex-cli', 'x'), chosen: true });
 });

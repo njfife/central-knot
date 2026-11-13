@@ -2,9 +2,10 @@
 // temp home, with a skill and an agent on the library in the same home: every click the MCP servers page and History offer
 // (src/libraryrow.ts rowClicks, src/historyactions.ts), Write to Claude Code, edits by hand (the server's values, or only a
 // tool's own fields), entries deleted and made by hand, a settings file deleted, rewritten without its servers or made
-// unreadable, Automatic sync off and on, a crash at each step of a write or a removal, a tool left out and managed again, and
-// profile switches (src/profiles.ts: three profiles naming the server, the skill and the agent in different sets) and their Undo.
-// After every step:
+// unreadable, Automatic sync off and on, a crash at each step of a write or a removal, a tool left out and managed again,
+// profile switches (src/profiles.ts: three profiles naming the server, the skill and the agent in different sets) and their Undo,
+// and new copies turning up in tools (a server, a skill or an agent of a new name; sometimes the same name in two tools, with the
+// same content or not). Synchronize everything is on in the odd seeds (library.ts FOUND). After every step:
 //   (a) nothing is lost: each entry Central Knot wrote over or removed held a content that is a version of the server, or is
 //       still in a tool. Checked for the step, and for every such content since the walk began;
 //   (b) in a copy of the home put back after, a plain pass and Write to Claude Code, then two passes: the second writes nothing;
@@ -15,26 +16,30 @@
 //   (e) a tool Central Knot doesn't manage is never written, and Claude Code's file only by Write to Claude Code;
 //   (f) every click made a History entry, after a crash too (a profile switch: its one entry);
 //   (h) the skill's folders and the agent's files are as they were in every tool: a server's clicks never touch them (a profile
-//       switch, and its Undo, turn them On and Off too).
+//       switch, and its Undo, turn them On and Off too; a pass of the whole home may catch them up);
+//   (i) Synchronize everything never brings back what was deleted: a deleted server (docs, or one that turned up and was taken
+//       in, then undone or deleted) stays deleted through every step but its own Add and History's Restore; with the rule off,
+//       nothing is ever taken in by it;
+//   (j) with the rule on, after a pass of the whole home no found item is left that the rule would take in.
 // A step that makes the settings file unseeable (unreadable, deleted) is made from a settled home, and asserts that the pass
 // turns nothing Off and removes nothing.
 // The walks in SEEDS run in `npm test`. CK_WALKS=<n> runs n more seeds from CK_SEED=<n>; CK_ONLY=<seed> replays one walk,
-// with CK_TRACE=1 step by step.
+// with CK_TRACE=1 step by step; CK_TALLY=1 prints, per walk, how many new copies turned up and how many the rule took in.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { applyAgents } from '../src/agents.ts';
+import { agentsView, applyAgents } from '../src/agents.ts';
 import { readHistory } from '../src/history.ts';
 import { libraryAction, versionChoices } from '../src/historyactions.ts';
 import { wantedIn, type LibraryItem } from '../src/library.ts';
-import { harnessIs, needsChoice, placeOf, rowClicks, type LibraryRow } from '../src/libraryrow.ts';
+import { asksWhichCopy, harnessIs, placeOf, rowClicks, type LibraryRow } from '../src/libraryrow.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { changes, switchPlan, undoPlan } from '../src/profileplan.ts';
 import { liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from '../src/profiles.ts';
 import { applyServers, restoreServer, serversView, writeToClaude } from '../src/servers.ts';
-import type { ShareContext } from '../src/share.ts';
-import { applySkills } from '../src/skills.ts';
+import { setSyncEverything, type ShareContext } from '../src/share.ts';
+import { applySkills, skillsView } from '../src/skills.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import type { Change, DestinationResult, HarnessId, LibraryFacts, PassResult } from '../src/types.ts';
 import { bytes, folderOf, put, sandbox, trial, tools as allTools, type Tool } from './skillclicks.ts';
@@ -67,7 +72,11 @@ async function walk(seed: number): Promise<Finding[]> {
   const fail = (kind: string) => { found.push({ kind, trace: trace.join(' → ') }); };
   const taken = new Set<string>();
   const send = (change: Change, more: Partial<ShareContext> = {}) => applyServers(context(more), tools, [change], syncOn ? {} : { only: new Set(['docs']) });
-  const pass = (more: Partial<ShareContext> = {}) => applyServers(context(more), tools, []);
+  /** The servers' part of main.ts's pass of the whole home (the background pass, or Sync once), where the rule runs. */
+  const pass = (more: Partial<ShareContext> = {}) => applyServers(context(more), tools, [], { background: true });
+  /** main.ts's pass of the whole home: every kind. */
+  const wholePass = async (more: Partial<ShareContext> = {}) => { await applySkills(context(more), tools, [], { background: true }); await pass(more); await applyAgents(context(more), tools, [], { background: true }); };
+  const rule = seed % 2 === 1;
   const write = (more: Partial<ShareContext> = {}) => writeToClaude(context(more), tools, ['docs']);
   const files = async () => Object.fromEntries(await Promise.all(three.map(async tool => [tool, await readFile(file(tool), 'utf8').catch(() => undefined)] as const)));
   /** Each tool's docs entry as read: its content, and its own fields. */
@@ -78,11 +87,13 @@ async function walk(seed: number): Promise<Finding[]> {
   const seen = async (): Promise<{ fact?: LibraryFacts; item?: LibraryItem; row: LibraryRow }> => {
     const view = await serversView(context(), tools), fact = view.items.find(each => each.key === 'docs');
     const hashes = Object.fromEntries(Object.entries(fact?.copies ?? {}).map(([tool, copy]) => [tool, copy!.hash]));
-    return { fact, item: view.library.docs, row: { key: 'docs', name: fact?.name, hashes, plan: fact?.plan, cannot: fact?.cannot, unseen: fact?.unseen, differs: fact?.differs, waits: fact?.waits } };
+    return { fact, item: view.library.docs, row: { key: 'docs', name: fact?.name, hashes, plan: fact?.plan, cannot: fact?.cannot, unseen: fact?.unseen, takeIn: fact?.takeIn, waits: fact?.waits } };
   };
+  /** History's actions for every server (docs, and any that turned up in a tool), each against the item as it is now. */
   const historyActions = async () => {
-    const { item } = await seen();
-    return (await readHistory(context())).filter(event => event.key === 'mcp:docs').flatMap(event => {
+    const { library } = await serversView(context(), tools);
+    return (await readHistory(context())).filter(event => event.key.startsWith('mcp:')).flatMap(event => {
+      const item = library[event.key.slice('mcp:'.length)];
       const main = libraryAction(event, item), run = (version?: string) => () => restoreServer(context(), tools, event.id, version);
       return [...(main ? [{ event, label: main.label, run: run() }] : []), ...versionChoices(event, item).map(choice => ({ event, label: `Use ${choice.tool}’s`, run: run(choice.hash) }))];
     });
@@ -123,25 +134,33 @@ async function walk(seed: number): Promise<Finding[]> {
     await writeFile(join(box.home, agentFiles['claude-cli']), '---\nname: writer\ndescription: Writes docs\n---\n\nYou write docs.\n');
     await applyAgents(context(), tools, [{ key: 'writer', managed: true, off: [] }]);
     for (const [name, items] of [['Everything', ['mcp:docs', 'skill:notes', 'agent:writer']], ['No docs', ['skill:notes', 'agent:writer']], ['Docs alone', ['mcp:docs']]] as const) await saveProfile(context(), { name, items: [...items] });
+    if (rule) await setSyncEverything(context(), true);
+    trace.push(rule ? 'Synchronize everything on' : 'Synchronize everything off');
     othersAsWritten = await others();
     for (let step = 0; step < STEPS && !found.length; step++) {
       const { row, item, fact } = await seen();
       const place = placeOf(item), held = item && !item.deleted ? item : undefined;
-      type Act = { name: string; run: (more?: Partial<ShareContext>) => Promise<unknown>; app?: boolean; click?: boolean; byHand?: boolean; claude?: boolean; profile?: boolean };
+      type Act = { name: string; run: (more?: Partial<ShareContext>) => Promise<unknown>; app?: boolean; click?: boolean; byHand?: boolean; claude?: boolean; profile?: boolean; whole?: boolean;
+        /** The one deleted server this step may bring back: Add on its row, or History's Restore of it. */ brings?: string };
       const acts: Act[] = [];
       const add = (weight: number, act: Act) => { for (let count = 0; count < weight; count++) acts.push(act); };
       const clicks = (weight: number, name: string, change: Change) => add(weight, { name, app: true, click: true, run: more => send(change, more) });
       if (place === 'on') clicks(4, 'Off', rowClicks.off(row, item));
       if (place === 'off') clicks(4, 'On', rowClicks.on(row, item));
+      // Add and its copy choices may lift docs's tombstone; nothing else may (i).
+      const bring = (weight: number, name: string, change: Change) => add(weight, { name, app: true, click: true, brings: 'docs', run: more => send(change, more) });
       if (place === 'found' && Object.keys(fact?.copies ?? {}).length) {
-        if (!needsChoice(row, item)) clicks(4, 'Add', rowClicks.on(row, item));
-        else for (const tool of tools.filter(tool => fact?.copies[tool])) clicks(2, `choose ${tool}`, rowClicks.on(row, item, tool));
+        if (!asksWhichCopy(row)) bring(4, 'Add', rowClicks.on(row, item));
+        else for (const tool of tools.filter(tool => fact?.copies[tool])) bring(2, `choose ${tool}`, rowClicks.on(row, item, tool));
       }
       if (held?.on) for (const tool of tools) clicks(1, `${held.except.includes(tool) ? 'let in' : 'keep out of'} ${tool}`, rowClicks.inHarness(row, item, tool, !held.except.includes(tool)));
       for (const version of held?.versions.filter(version => version.hash !== held.hash).slice(0, 3) ?? []) clicks(1, `make current ${version.from.how}`, rowClicks.makeCurrent(row, item, version.hash));
       if (held) clicks(1, 'Delete', rowClicks.remove(row, item));
       if (fact?.waits?.length) add(3, { name: 'Write to Claude Code', app: true, claude: true, run: more => write(more) });
-      for (const action of await historyActions()) add(2, { name: `History: ${action.label} (${action.event.kind})`, app: true, run: () => action.run() });
+      for (const action of await historyActions()) {
+        const docs = action.event.key === 'mcp:docs';
+        add(docs ? 2 : 1, { name: `History: ${action.label} (${action.event.kind}${docs ? '' : ` of ${action.event.item}`})`, app: true, brings: action.label === 'Restore' ? action.event.key.slice('mcp:'.length) : undefined, run: () => action.run() });
+      }
       for (const profile of await switches()) add(2, { name: `switch to ${profile.name}`, app: true, click: true, profile: true, run: more => switchProfile(context(more), tools, profile.id) });
       for (const event of await switchUndos()) add(2, { name: `History: Undo switch to ${event.item}`, app: true, profile: true, run: more => undoSwitch(context(more), tools, event.id) });
       for (const tool of three) {
@@ -154,6 +173,24 @@ async function walk(seed: number): Promise<Finding[]> {
       }
       add(1, { name: 'Claude Code rewrites its file without servers', run: async () => { await writeFile(file('claude-cli'), `${JSON.stringify({ numStartups: ++marker })}\n`); } });
       add(2, { name: 'pass', app: true, run: more => pass(more) });
+      add(2, { name: 'pass of the whole home', app: true, whole: true, run: more => wholePass(more) });
+      // New copies turn up: a server, a skill or an agent of a new name, in one tool or (the same name) two, alike or not.
+      const where = pick(three), also = pick(three.filter(tool => tool !== where)), twice = next() < 0.3, alike = next() < 0.5;
+      const fresh = `fresh${++marker}`, body = (tool: Tool) => (alike || tool === where ? 'Same.' : `Other ${tool}.`);
+      const inWhere = twice ? [where, also] : [where], said = `${fresh} in ${where}${twice ? ` and ${also}${alike ? ', alike' : ', differing'}` : ''}`;
+      add(2, { name: `new server ${said}`, run: async () => {
+        for (const tool of inWhere) {
+          const text = await readFile(file(tool), 'utf8').catch(() => undefined);
+          if (text !== undefined) await writeFile(file(tool), writeEntry(text, tool, fresh, { transport: 'stdio', command: 'npx', args: [body(tool)] }));
+        }
+      } });
+      add(2, { name: `new skill ${said}`, run: async () => {
+        for (const tool of inWhere) await put(box, tool, { 'SKILL.md': `---\nname: ${fresh}\ndescription: New.\n---\n\n${body(tool)}\n` }, [], fresh);
+      } });
+      add(2, { name: `new agent ${said}`, run: async () => {
+        for (const tool of inWhere) await writeFile(join(box.home, agentFiles[tool].replace('writer', fresh)), tool === 'codex-cli'
+          ? `name = "${fresh}"\ndescription = "New"\ndeveloper_instructions = """\n${body(tool)}\n"""\n` : `---\nname: ${fresh}\ndescription: New\n---\n\n${body(tool)}\n`);
+      } });
       add(1, { name: `Automatic sync ${syncOn ? 'off' : 'on'}`, run: async () => { syncOn = !syncOn; } });
       const out = pick([...three]);
       if (tools.includes(out) && tools.length > 1) add(1, { name: `${out} left out by the tool choice`, run: async () => { manage(tools.filter(tool => tool !== out)); await chooseTools(context(), tools); } });
@@ -178,10 +215,11 @@ async function walk(seed: number): Promise<Finding[]> {
       const crash = act.app && !act.byHand && next() < 0.1 ? pick(['before-remove', 'before-rename', 'mid-replace'] as const) : undefined;
       trace.push(`${act.name}${crash ? ` [crash ${crash}]` : ''}`);
       const before = await files(), entriesBefore = await entries(), managedBefore = [...tools], countBefore = await historyCount(), switchesBefore = await switchCount();
+      const deletedBefore = Object.values((await serversView(context(), tools)).library).filter(each => each.deleted).map(each => each.key);
       let done: unknown, crashed = false;
       try { done = await act.run(crash ? { fault: at => { if (at === crash) throw new Error('crash'); } } : {}); }
       catch (error) { if ((error as Error).message === 'crash') crashed = true; else { fail(`threw: ${(error as Error).message.slice(0, 140)}`); break; } }
-      if (!act.app && syncOn && next() < 0.7) { trace.push('background pass'); await pass(); }
+      if (!act.app && syncOn && next() < 0.7) { trace.push('background pass'); await wholePass(); }
       last = act.click && !crashed ? done as PassResult : act.app ? undefined : last;
       const after = await files(), versions = new Set(((await seen()).item?.versions ?? []).map(version => version.hash));
       if (process.env.CK_TRACE) console.log(`--- ${trace.at(-1)}${crashed ? ' (crashed)' : ''}\n    ${JSON.stringify({ place: placeOf((await seen()).item), entries: Object.fromEntries(Object.entries(await entries()).map(([tool, entry]) => [tool, entry?.hash.slice(0, 6)])) })}`);
@@ -195,7 +233,17 @@ async function walk(seed: number): Promise<Finding[]> {
         if (was && was.hash !== (await entries())[tool]?.hash) taken.add(was.hash);
       }
       for (const content of taken) if (!versions.has(content) && !here.has(content)) { taken.delete(content); fail('(a) a content Central Knot wrote over or removed is neither a version nor in any tool'); }
-      if (!same(await others(), othersAsWritten) && act.app && !act.profile) fail(`(h) ${act.name} touched the skill or the agent`);
+      if (!same(await others(), othersAsWritten) && act.app && !act.profile && !act.whole) fail(`(h) ${act.name} touched the skill or the agent`);
+      // (i) The rule never lifts a tombstone, and never acts while it is off.
+      const libraryNow = (await serversView(context(), tools)).library;
+      for (const key of deletedBefore) if (key !== act.brings && !libraryNow[key]?.deleted) fail(`(i) ${act.name} brought back the deleted server ${key === 'docs' ? key : 'that turned up'}`);
+      if (!rule && (await readHistory(context())).some(event => event.cause === 'sync-everything')) fail(`(i) ${act.name}: Synchronize everything took something in while off`);
+      // (j) After a pass of the whole home with the rule on, nothing is left found that it would take in.
+      if (rule && act.whole && !crashed) {
+        const views = [await skillsView(context(), tools), await serversView(context(), tools), await agentsView(context(), tools)];
+        const left = views.flatMap(view => view.items.filter(each => each.takeIn && 'take' in each.takeIn.rule).map(each => each.key));
+        if (left.length) fail(`(j) after a pass of the whole home the rule left ${left.join(', ')} to take in`);
+      }
       othersAsWritten = await others();
       // (f) Every click has its History entry, a crashed one too.
       const answer = act.click && !crashed ? done as PassResult : undefined;
@@ -236,6 +284,7 @@ async function walk(seed: number): Promise<Finding[]> {
         }
       });
     }
+    if (process.env.CK_TALLY) { const all = await readHistory(context()); console.log(`TALLY seed ${seed} rule ${rule} taken ${all.filter(event => event.cause === 'sync-everything').length} new ${trace.filter(step => step.startsWith('new ')).length} undone ${all.filter(event => event.cause === 'sync-everything' && event.undoneBy).length}`); }
   } finally { for (const tool of three) await chmod(join(file(tool), '..'), 0o755).catch(() => undefined); await box.cleanup(); }
   return found;
 }
@@ -243,7 +292,7 @@ async function walk(seed: number): Promise<Finding[]> {
 const extra = Number(process.env.CK_WALKS ?? 0), from = Number(process.env.CK_SEED ?? 5000);
 const only = process.env.CK_ONLY;
 const walks = only ? [Number(only)] : [...SEEDS, ...Array.from({ length: extra }, (_, index) => from + index)];
-test(`A random walk of ${STEPS} steps over an MCP server with a skill and an agent in one home, profile switches among them, ${walks.length} times: nothing Central Knot removes or writes over is lost, passes settle, every action offered does something, Off then On keeps each entry, Claude Code is written only by Write, and only a profile switch touches the skill and agent`, async () => {
+test(`A random walk of ${STEPS} steps over an MCP server with a skill and an agent in one home, profile switches and new copies among them, Synchronize everything on in half, ${walks.length} times: nothing Central Knot removes or writes over is lost, passes settle, every action offered does something, Off then On keeps each entry, Claude Code is written only by Write, only a profile switch touches the skill and agent, nothing deleted comes back by itself, and the rule leaves nothing it would take`, async () => {
   const findings = new Map<string, { count: number; trace: string }>();
   const waiting = [...walks];
   await Promise.all(Array.from({ length: only ? 1 : 6 }, async () => {

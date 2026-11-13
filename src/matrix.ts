@@ -3,7 +3,7 @@
 // details, and every click's result comes with an Undo of the whole click. Every kind is on Central Knot's library: its row is a
 // library row (`library()`): librarypages.ts says what each kind supplies, libraryrow.ts what such a row says.
 import { brandMark } from './brand.ts';
-import { caughtUpNames, defaultHistoryDays, groupBy } from './model.ts';
+import { caughtUpNames, defaultHistoryDays, groupBy, noticeNames } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
 import { andList, byToolOrder, kindNouns, toolNames, toolsPhrase } from './words.ts';
 import { readFlag, writeFlag } from './flags.ts';
@@ -11,11 +11,11 @@ import { whyReadOnly, otherOwnerSaid, saidInStatusBar, takeOverSync, takeOverTit
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { kindSource, type ItemRow, type KindSource, type Tool } from './itemrow.ts';
-import { addLabel, canTakeIn, harnessIs, inLibrary, madeFrom, needsChoice as libraryNeedsChoice, placeOf as libraryPlace, rowClicks, statusLine, switchLabel, versionClock, writesWait, type HarnessIs, isPartial } from './libraryrow.ts';
+import { addLabel, asksWhichCopy, canAdd, harnessIs, inLibrary, madeFrom, placeOf as libraryPlace, rowClicks, statusLine, switchLabel, versionClock, writesWait, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
-import type { Change, DestinationResult, SkillFacts, SyncNotice, SyncView, HarnessId, PartsInstall, ThroughPlugin } from './types.ts';
+import type { Change, DestinationResult, ItemNotice, SkillFacts, SyncNotice, SyncView, HarnessId, PartsInstall, TakenInNotice, ThroughPlugin } from './types.ts';
 import { market } from './pluginstate.ts';
 import { pluginKey, type PluginDraft } from './pluginplan.ts';
 import { alongWords, cantSwitch, click as clickPluginItem, clickWords, itemSaid, onNow as itemOn, switchWords, turnEvery, type PluginItemAt } from './pluginswitch.ts';
@@ -241,7 +241,7 @@ const ago = (iso: string) => { const said = sinceThen(Date.parse(iso)); return s
 
 /** The real home's facts in the shape the page works with. */
 const fromFacts = (facts: SkillFacts): ItemRow => ({
-  key: facts.key, name: facts.name, description: facts.description, converted: facts.converted, unseen: facts.unseen, plan: facts.plan, differs: facts.differs, versionChanges: facts.versionChanges, managed: facts.managed, off: facts.off, cannot: facts.cannot, plugin: facts.plugin, edited: facts.edited, waits: facts.waits,
+  key: facts.key, name: facts.name, description: facts.description, converted: facts.converted, unseen: facts.unseen, plan: facts.plan, takeIn: facts.takeIn, versionChanges: facts.versionChanges, managed: facts.managed, off: facts.off, cannot: facts.cannot, plugin: facts.plugin, edited: facts.edited, waits: facts.waits,
   blocks: facts.choiceBlocks, hashes: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   copies: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   paths: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.directory])),
@@ -286,8 +286,8 @@ const standingOf = (skill: ItemRow): 0 | 1 | 2 => ({ on: 0, found: 1, off: 2 } a
 const placeNames = ['On', 'Found', 'Off'] as const;
 /** Rows under a heading go by name, a leading dot aside (".hidden" sorts with the h's). */
 const byKey = (first: { key: string }, second: { key: string }) => first.key.replace(/^\./, '').localeCompare(second.key.replace(/^\./, ''));
-/** Whether its copies differ so that its Add must ask which copy every tool uses: a found item's only (libraryrow.ts needsChoice). */
-const differs = (skill: ItemRow) => libraryNeedsChoice(skill, itemOf(skill));
+/** Whether its copies differ so that its Add must ask which copy every tool uses: a found item's only (libraryrow.ts asksWhichCopy). */
+const differs = (skill: ItemRow) => asksWhichCopy(skill);
 /** Copies differ and need a choice, among the items this page is about: on a harness's page, the ones it has. */
 const needsChoice = (skill: ItemRow) => inFocus(skill) && differs(skill);
 
@@ -295,8 +295,8 @@ const needsChoice = (skill: ItemRow) => inFocus(skill) && differs(skill);
  * How many items one tool has whose copies differ and need a choice: what the "Copies differ" chip counts on that tool's
  * Harnesses page, read from the facts the same way the table reads them.
  */
-export function differingIn({ facts, library: items }: KindSource, tool: Tool) {
-  return facts.filter(fact => fact.copies[tool as HarnessId] !== undefined && libraryNeedsChoice(fromFacts(fact), items[fact.key])).length;
+export function differingIn({ facts }: KindSource, tool: Tool) {
+  return facts.filter(fact => fact.copies[tool as HarnessId] !== undefined && asksWhichCopy(fact)).length;
 }
 type Filter = 'all' | 'attention' | 'plugins';
 const newView = () => ({
@@ -755,7 +755,7 @@ function helpBand(): HTMLElement | null {
  * only for a different catch-up). `told`: the notices that already say an item's change. Null once dismissed.
  */
 export function caughtUpBand(sync: SyncView, told: SyncNotice[]): HTMLElement | null {
-  const items = caughtUpNames(sync, new Set(told.map(notice => notice.item)));
+  const items = caughtUpNames(sync, new Set(told.flatMap(noticeNames)));
   const key = `caught-up:${items.join(',')}`;
   if (!items.length || state.dismissed.has(key)) return null;
   const tools = [...new Set(sync.caughtUp.filter(result => items.includes(result.item) && result.outcome === 'written' && result.harness).map(result => names[result.harness!]))];
@@ -813,9 +813,9 @@ function listNotices() {
   const background = result ? [] : (state.home?.sync.caughtUp ?? []).filter(entry => entry.outcome !== 'written' && entry.outcome !== 'removed');
   if (background.length) bands.push(problemsBand(background));
   const told = toldNotices();
-  const shownNotices = told.filter(notice => !state.dismissed.has(notice.history || notice.item));
+  const shownNotices = told.filter(notice => !state.dismissed.has(notice.history));
   // An earlier result's Undo that stepped aside for this notice: one faint closing line inside the notice, not a band of its own.
-  const moved = state.undoMoved?.page === state.page && !state.outcome && shownNotices.some(notice => state.undoMoved!.notices.includes(notice.history || notice.item))
+  const moved = state.undoMoved?.page === state.page && !state.outcome && shownNotices.some(notice => state.undoMoved!.notices.includes(notice.history))
     ? h('span.notice-tail.tone-faint', { id: 'undo-moved' }, ...movedUndoText(state.undoMoved!.label, state.undoMoved!.items), h('button.inline-link', { type: 'button', id: 'notice-undo-moved', onclick: () => showPage('history') }, 'History'), '.') : null;
   if (shownNotices.length) {
     const lines = shownNotices.slice(0, 6).map(syncNotice);
@@ -905,7 +905,7 @@ function toldNotices(): Told[] {
   if (!kept) keptNotices.set(kind, kept = new Map());
   let folded = foldedNotices.get(kind);
   if (!folded) foldedNotices.set(kind, folded = new Set());
-  const keyOf = (notice: SyncNotice) => notice.history || notice.item;
+  const keyOf = (notice: SyncNotice) => notice.history;
   // A newer event, or a newer click's result, folds what was said before into History, where it stays with its Undo: notices never
   // pile up. Turning sync on or off retires the ones it no longer lists.
   const news = fresh.filter(notice => !kept!.has(keyOf(notice)) && !folded!.has(keyOf(notice)));
@@ -922,12 +922,12 @@ function toldNotices(): Told[] {
 function visibleNotices() {
   if (!state.home) return [];
   const told = toldNotices();
-  return told.filter(notice => !state.dismissed.has(notice.history || notice.item));
+  return told.filter(notice => !state.dismissed.has(notice.history));
 }
 
 /** Notices stay until read; a quiet × clears them. */
 // Each notice has its own ×; with three or more, one more control dismisses them all.
-const dismissNotices = (list: SyncNotice[]) => list.length < 3 ? null : smallAction('Dismiss all', 'notices-dismiss', () => { for (const notice of list) state.dismissed.add(notice.history || notice.item); rerender(); });
+const dismissNotices = (list: SyncNotice[]) => list.length < 3 ? null : smallAction('Dismiss all', 'notices-dismiss', () => { for (const notice of list) state.dismissed.add(notice.history); rerender(); });
 
 /** When Central Knot first showed each notice, so a notice left up says how old it is. */
 const firstShown = new Map<string, number>();
@@ -947,7 +947,7 @@ const age = (key: string) => {
 type NoticeLook = [IconName, string, string, HTMLElement | null];
 
 /** A library item's notice (libraryrow.ts noticeWords), with its button: Undo, or Turn on after a copy deleted by hand turned it off. */
-function libraryNotice(lib: LibraryPage, notice: Told, undo: (title: string) => HTMLElement): NoticeLook {
+function libraryNotice(lib: LibraryPage, notice: ItemNotice, undo: (title: string) => HTMLElement): NoticeLook {
   const { text, action, help } = lib.say.noticeWords(notice);
   if (action === 'undo') return [notice.kind === 'conflict' ? 'diff' : 'check', notice.kind === 'conflict' ? 'tone-warning' : 'tone-success', text, undo(help)];
   const on = button({ variant: 'outline', size: 'small', label: 'Turn on', id: `notice-restore-${notice.history}`, onclick: () => void restoreEvent(notice.history) });
@@ -956,6 +956,7 @@ function libraryNotice(lib: LibraryPage, notice: Told, undo: (title: string) => 
 }
 
 function syncNotice(notice: Told) {
+  if (notice.kind === 'taken-in') return takenInNotice(notice);
   // Undo is the one action here that writes files: a small outlined button, apart from the quieter links. It says "Undo", as
   // every strip's result does; its tooltip says where.
   const undo = (title: string) => { const action = button({ variant: 'outline', size: 'small', label: 'Undo', id: `notice-undo-${notice.history}`, onclick: () => void restoreEvent(notice.history) }); action.title = title; action.setAttribute('aria-label', `Undo: ${title}`); return action; };
@@ -964,11 +965,11 @@ function syncNotice(notice: Told) {
   // The item's name opens its row here, so "what changed" is one click from the change itself.
   const rowKey = committedList().find(skill => skill.name === notice.item || skill.key === notice.item.toLowerCase())?.key;
   const noticeKey = notice.history || `${notice.kind}:${notice.item}`;
-  state.seenNotices.add(notice.history || notice.item);
+  state.seenNotices.add(notice.history);
   if (rowKey && !firstShown.has(noticeKey)) flashed.set(rowKey, Date.now());
   // The item's name opens its row: one click from "what changed" to the item, with no separate Details link.
   const name = rowKey && view.comparing !== rowKey
-    ? h('button.item-name.notice-name', { type: 'button', id: `notice-open-${notice.history || notice.item}`, title: `Show ${notice.item}’s details`, onclick: (event: Event) => { event.stopPropagation(); view.comparing = undefined; openRow(rowKey); } }, notice.item)
+    ? h('button.item-name.notice-name', { type: 'button', id: `notice-open-${notice.history}`, title: `Show ${notice.item}’s details`, onclick: (event: Event) => { event.stopPropagation(); view.comparing = undefined; openRow(rowKey); } }, notice.item)
     : h('strong.item-name', {}, notice.item);
   const said = notice.item && text.startsWith(notice.item) ? [name, text.slice(notice.item.length)] : [text];
   // With sync off, a notice can only come from Sync now: say sync stays off, and offer to turn it on.
@@ -978,9 +979,22 @@ function syncNotice(notice: Told) {
     h('span.notice-text', {}, offNow && notice.kind !== 'deleted' ? 'Synced once: ' : '', ...said.map(part => typeof part === 'string' && !/\.\s/.test(part) ? part.replace(/\.$/, '') : part), '', h('span.notice-age', {}, ` · ${age(notice.history || `${notice.kind}:${notice.item}`)}`)),
     h('span.notice-actions', {},
       notice.kind === 'edit' || notice.kind === 'conflict' ? seeChangeLink(notice.history, notice.key) : null,
-      action, history, off ? smallAction('Turn sync on', `notice-sync-on-${notice.history || notice.item}`, () => void setSync(true)) : null),
-    closeButton(event => { event.stopPropagation(); state.dismissed.add(notice.history || notice.item); rerender(); }, { id: `notice-dismiss-${notice.history || notice.item}`, label: `Dismiss this notice about ${notice.item}`, title: 'Dismiss', look: '.notice-dismiss' }),
+      action, history, off ? smallAction('Turn sync on', `notice-sync-on-${notice.history}`, () => void setSync(true)) : null),
+    closeButton(event => { event.stopPropagation(); state.dismissed.add(notice.history); rerender(); }, { id: `notice-dismiss-${notice.history}`, label: `Dismiss this notice about ${notice.item}`, title: 'Dismiss', look: '.notice-dismiss' }),
     notice.history ? changePanel(notice.history) : null);
+}
+
+/**
+ * Synchronize everything's notice for one pass (types.ts TakenInNotice): how many it took in, where it found them and their
+ * names, with History, where each one's own Undo is. Nothing to undo here: each item has its own entry.
+ */
+function takenInNotice(notice: TakenInNotice & { once?: boolean }) {
+  const off = !!state.home && !state.home.syncOn, once = notice.once ?? off;
+  state.seenNotices.add(notice.history);
+  return h('p.sync-notice', { 'data-kind': notice.kind }, icon('plus', 14, 'tone-success'),
+    h('span.notice-text', {}, once ? 'Synced once: ' : '', library().say.takenInWords(notice), h('span.notice-age', {}, ` · ${age(notice.history)}`)),
+    h('span.notice-actions', {}, smallAction('History', `notice-history-${notice.history}`, () => showPage('history'))),
+    closeButton(event => { event.stopPropagation(); state.dismissed.add(notice.history); rerender(); }, { id: `notice-dismiss-${notice.history}`, label: 'Dismiss this notice of what Synchronize everything took in', title: 'Dismiss', look: '.notice-dismiss' }));
 }
 
 /**
@@ -1214,7 +1228,7 @@ function librarySwitch(skill: ItemRow, id: string) {
 function addButton(skill: ItemRow, id: string) {
   const question = isDiffering(skill) ? (view.comparing === skill.key ? 'open' : 'closed') : undefined;
   const label = addLabel(skill, itemOf(skill), toolList(), question);
-  return h('button.btn.outline.small.add-item', { type: 'button', id, title: label, 'aria-label': label, disabled: !canWrite() || !canTakeIn(skill),
+  return h('button.btn.outline.small.add-item', { type: 'button', id, title: label, 'aria-label': label, disabled: !canWrite() || !canAdd(skill),
     onclick: (event: Event) => { event.stopPropagation(); flip(skill, true); } }, 'Add');
 }
 
@@ -1322,12 +1336,21 @@ function row(skill: ItemRow) {
 function section(role: 'on' | 'found' | 'off' | 'away', list: ItemRow[]) {
   if (!list.length) return null;
   const label = role === 'away' ? `Not in ${names[focus!]}` : placeNames[role === 'on' ? 0 : role === 'found' ? 1 : 2];
-  const note = role === 'found' ? 'in a tool, not in Central Knot yet. Add one to keep it in Central Knot and turn it on.'
-    : role === 'off' ? offNote(list) : role === 'away' ? 'only other tools have these' : null;
+  const note = role === 'found' ? foundNote(list) : role === 'off' ? offNote(list) : role === 'away' ? 'only other tools have these' : null;
   return h('div', { role: 'rowgroup' },
     h(`div.ov-section${role === 'off' || role === 'away' ? '.ov-section-away' : ''}`, { role: 'row', 'data-section': role },
       h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(list.length)), note ? sectionNote(note) : null)),
     [...list].sort(byKey).flatMap(row));
+}
+
+/**
+ * The Found heading's note: which rule is in force. Off, Add takes each in. On, Synchronize everything has left these (each row
+ * says why), and how many wait for a choice of copy (the take-in table's answer for the rule: libraryrow.ts ruleSays).
+ */
+function foundNote(list: ItemRow[]) {
+  if (!state.home?.sync.syncEverything) return 'in a tool, not in Central Knot yet. Add one to keep it in Central Knot and turn it on.';
+  const choosing = list.filter(skill => skill.takeIn && 'wait' in skill.takeIn.rule).length;
+  return `in a tool, not in Central Knot: Synchronize everything leaves these, and each row says why${choosing ? `. ${choosing} ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy` : ''}`;
 }
 
 /** The Off heading's note: no tool has these, or (while a write waits) the tools that still have some until Write to Claude Code. */
@@ -1336,8 +1359,8 @@ function offNote(list: ItemRow[]) {
   return still.length ? `in Central Knot; still in ${andList(still.map(tool => names[tool]))} until Write` : 'in Central Knot only; no tool has these';
 }
 
-/** What the item is now, in one line (libraryrow.ts statusLine). */
-const switchStatus = (skill: ItemRow) => statusLine(skill, itemOf(skill), toolList());
+/** What the item is now, in one line (libraryrow.ts statusLine), and for a found one, what Synchronize everything does with it while it is on. */
+const switchStatus = (skill: ItemRow) => statusLine(skill, itemOf(skill), toolList(), !!state.home?.sync.syncEverything);
 
 /** What one tool has, for its row in the item's details: what its copy is, then whether its own switch has it off. */
 function harnessLine(skill: ItemRow, tool: Tool): string {
@@ -1458,7 +1481,7 @@ function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
   const box = (...children: (Child | Child[])[]) => h(`div.compare.details${placement === 'row' ? '' : '.details-bare'}${differs ? '.details-differs' : ''}${kind === 'mcp' ? '.details-mcp' : '.details-grid'}`, { role: 'region', 'aria-label': `Details for ${skill.key}` }, ...children);
   if (differs) return box(close, compareChoices(skill, inFiles));
   // A found row none of whose copies can be read has no files to show.
-  const files = lib.files && !inFiles && (inLibrary(itemOf(skill)) || canTakeIn(skill)) ? smallAction('Files and contents', `files-${skill.key}`, () => openFiles(skill.key)) : null;
+  const files = lib.files && !inFiles && (inLibrary(itemOf(skill)) || canAdd(skill)) ? smallAction('Files and contents', `files-${skill.key}`, () => openFiles(skill.key)) : null;
   const remove = !inFiles ? libraryDelete(lib, skill) : null;
   return box(
     h('div.details-head', {},
@@ -1470,7 +1493,7 @@ function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
       files ? h('div.details-actions', {}, files) : null),
     // What every tool shares of it, and what stays each harness's own, said where it is true: an item in Central Knot, or a
     // found one that can be taken in.
-    toolList().length > 1 && (inLibrary(itemOf(skill)) || canTakeIn(skill)) ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), lib.words.shared) : null,
+    toolList().length > 1 && (inLibrary(itemOf(skill)) || canAdd(skill)) ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), lib.words.shared) : null,
     h('div.details-tools', {}, toolList().map(toolRow)),
     libraryVersions(lib, skill),
     inFiles || kind === 'mcp' ? null : wherePaths(skill),

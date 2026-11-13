@@ -3,12 +3,13 @@
 // deletions made by hand, the folders that are not Central Knot's, a tool's own switch, the store, crashes, and the tool
 // choice. The migration from the earlier record is tests/skillmigrate.test.ts; the seeded walk is tests/librarywalk.test.ts.
 import { test } from 'node:test';
+import { itemNotice } from './notices.ts';
 import assert from 'node:assert/strict';
 import { chmod, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readHistory } from '../src/history.ts';
 import { librarySentence } from '../src/historyactions.ts';
-import { addLabel, canTakeIn, harnessIs, isPartial, libraryWords, placeOf, sentences, statusLine, switchLabel } from '../src/libraryrow.ts';
+import { addLabel, canAdd, harnessIs, isPartial, libraryWords, placeOf, sentences, statusLine, switchLabel } from '../src/libraryrow.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
 import { clearSwitch, skillChange, skillsView, takeOver } from '../src/skills.ts';
 import { pruneDeleted } from '../src/skillstore.ts';
@@ -70,7 +71,7 @@ test('An edit in one tool becomes the current version and reaches the others; Un
     await turnOn(box);
     await put(box, 'codex-cli', { 'SKILL.md': skillText('Edited in Codex.'), 'extra.md': 'more\n' });
     const done = await pass(box);
-    assert.deepEqual(done.notices?.map(notice => [notice.kind, notice.winner]), [['edit', 'codex-cli']]);
+    assert.deepEqual(done.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner]), [['edit', 'codex-cli']]);
     for (const tool of tools) assert.deepEqual(await bytes(folderOf(box, tool)), await bytes(folderOf(box, 'codex-cli')), tool);
     const edit = (await historyOf(box)).find(event => event.kind === 'edit')!;
     assert.deepEqual(await skillChange(box.context, edit.id), { before: skillText(), after: skillText('Edited in Codex.') });
@@ -93,7 +94,7 @@ test('Two edits: the latest wins by the folder’s time, where a file removed in
     await touch(folderOf(box, 'copilot-cli'), at(5));
     await utimes(folderOf(box, 'copilot-cli'), at(20), at(20));
     const done = await pass(box);
-    assert.deepEqual(done.notices?.map(notice => [notice.kind, notice.winner, notice.losers]), [['conflict', 'copilot-cli', ['codex-cli']]]);
+    assert.deepEqual(done.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner, notice.losers]), [['conflict', 'copilot-cli', ['codex-cli']]]);
     for (const tool of tools) assert.deepEqual(Object.keys((await bytes(folderOf(box, tool)))!), ['SKILL.md'], tool);
     const versions = (await itemOf(box))!.versions;
     assert.deepEqual(versions.map(version => version.from.how), ['edited', 'edited', 'found']);
@@ -115,7 +116,7 @@ test('A file edited inside a folder makes its time: the later edit wins although
     await utimes(join(folderOf(box, 'claude-cli'), 'SKILL.md'), at(20), at(20));
     await utimes(folderOf(box, 'claude-cli'), at(1), at(1));
     const done = await pass(box);
-    assert.deepEqual(done.notices?.map(notice => [notice.kind, notice.winner]), [['conflict', 'claude-cli']]);
+    assert.deepEqual(done.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner]), [['conflict', 'claude-cli']]);
     for (const tool of tools) assert.equal(await readFile(join(folderOf(box, tool), 'SKILL.md'), 'utf8'), skillText('Claude Code’s edit.'), tool);
   } finally { await box.cleanup(); }
 });
@@ -128,7 +129,7 @@ test('A folder really deleted by hand in one tool turns the skill Off everywhere
     const before = await everywhere(box);
     await rm(folderOf(box, 'copilot-cli'), { recursive: true });
     const done = await pass(box);
-    assert.deepEqual(done.notices?.map(notice => [notice.kind, notice.winner]), [['deleted', 'copilot-cli']]);
+    assert.deepEqual(done.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner]), [['deleted', 'copilot-cli']]);
     assert.deepEqual(Object.values(await everywhere(box)).filter(Boolean), []);
     assert.equal((await itemOf(box))!.on, false);
     const off = (await historyOf(box)).find(event => event.kind === 'off')!;
@@ -200,14 +201,14 @@ test('A found skill whose only copy can’t be copied as it is (a link inside) i
     await mkdir(join(box.home, roots['codex-cli'], 'not-a-skill'), { recursive: true });
     const { fact, item, row } = await seen(box);
     assert.match(fact!.unseen?.['claude-cli'] ?? '', /can’t be copied as it is/);
-    assert.deepEqual([canTakeIn(row), statusLine(row, item, tools)], [false, 'Not in Central Knot · it can’t be taken in now (see below).']);
+    assert.deepEqual([canAdd(row), statusLine(row, item, tools)], [false, 'Not in Central Knot · it can’t be taken in now (see below).']);
     assert.equal((await seen(box, box.context, 'not-a-skill')).fact, undefined);
     // Found only where a tool has it another way (the shared folder), it says so, and can be taken in.
     await rm(folderOf(box, 'claude-cli'), { recursive: true });
     await mkdir(join(box.home, '.agents/skills/notes'), { recursive: true });
     await writeFile(join(box.home, '.agents/skills/notes/SKILL.md'), skillText());
     const shared = await seen(box);
-    assert.deepEqual([canTakeIn(shared.row), statusLine(shared.row, shared.item, tools)], [true, 'Not in Central Knot · Copilot CLI and Codex have it another way. Add it to keep it in Central Knot and put it in Claude Code.']);
+    assert.deepEqual([canAdd(shared.row), statusLine(shared.row, shared.item, tools)], [true, 'Not in Central Knot · Copilot CLI and Codex have it another way. Add it to keep it in Central Knot and put it in Claude Code.']);
   } finally { await box.cleanup(); }
 });
 

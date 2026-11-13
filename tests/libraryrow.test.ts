@@ -2,11 +2,11 @@
 // stands, what each harness's mark says, when its switch asks which copy, and the click each control sends.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FOLDED_VERSIONS, addLabel, rowClicks, foldVersions, harnessIs, madeFrom, needsChoice, placeOf, libraryWords, sentences, statusLine, switchLabel, versionChange, versionSource, type LibraryRow } from '../src/libraryrow.ts';
+import { FOLDED_VERSIONS, addLabel, asksWhichCopy, canAdd, rowClicks, foldVersions, harnessIs, madeFrom, placeOf, libraryWords, ruleSays, sentences, statusLine, switchLabel, versionChange, versionSource, type LibraryRow } from '../src/libraryrow.ts';
 import { readAgainst, wordDiff } from '../src/diff.ts';
-import { newItem, plan, type Copies, type LibraryItem } from '../src/library.ts';
+import { newItem, plan, takeInAnswer, type Copies, type FoundKey, type LibraryItem } from '../src/library.ts';
 import { anyManaged, kindSource } from '../src/itemrow.ts';
-import type { HomeView, LibraryFacts } from '../src/types.ts';
+import type { HarnessId, HomeView, LibraryFacts } from '../src/types.ts';
 
 const { harnessLine, noticeWords, placeTag, said } = sentences(libraryWords.agents);
 
@@ -16,13 +16,16 @@ const item = (changes: Partial<LibraryItem> = {}): LibraryItem => ({ ...newItem(
   versions: [{ hash: 'b', at: '2026-11-08T09:20:00.000Z', from: { how: 'found', harness: 'claude-cli' } }], applied: { 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'b' }, ...changes });
 /**
  * The row agents.ts gives the page for `agent` when the harnesses hold `hashes`: for an agent in the library, its plan from
- * those copies (a harness in `cannot` is held, one in `unseen` unknown, as librarypass.ts copiesOf reads them).
+ * those copies (a harness in `cannot` is held, one in `unseen` unknown, as librarypass.ts copiesOf reads them); for a found
+ * one, the take-in table's answers from the copies that can be read (librarypass.ts foundKey).
  */
 function row(hashes: LibraryRow['hashes'], more: Partial<LibraryRow> = {}, agent?: LibraryItem): LibraryRow {
   const copyOf = (tool: string): Copies[keyof Copies] => (more.unseen?.[tool] ? { is: 'unseen', why: more.unseen[tool]! } : more.cannot?.[tool] ? { is: 'held', why: more.cannot[tool]! }
     : hashes?.[tool] !== undefined ? { is: 'present', hash: hashes[tool]!, at: 0 } : { is: 'absent' });
   const copies: Copies = Object.fromEntries(tools.map(tool => [tool, copyOf(tool)]));
-  return { key: 'reviewer', name: 'reviewer', hashes, ...more, ...(agent && !agent.deleted ? { plan: plan(agent, copies) } : {}) };
+  const found: FoundKey = { copies: tools.flatMap(tool => (hashes?.[tool] !== undefined && !more.unseen?.[tool] ? [{ harness: tool as HarnessId, hash: hashes[tool]! }] : [])), deleted: !!agent?.deleted, leaving: false };
+  const takeIn = { click: takeInAnswer('click', found), rule: takeInAnswer('rule', found) };
+  return { key: 'reviewer', name: 'reviewer', hashes, ...(agent && !agent.deleted ? { plan: plan(agent, copies) } : { takeIn }), ...more };
 }
 const marks = (hashes: LibraryRow['hashes'], agent: LibraryItem | undefined, more: Partial<LibraryRow> = {}) => tools.map(tool => harnessIs(row(hashes, more, agent), agent, tool));
 /** A row and its item, for the functions that take both. */
@@ -76,11 +79,14 @@ test('A harness that can’t be given a copy, or whose copy can’t be read, say
   assert.equal(lineIn({ 'claude-cli': 'b' }, agent, 'codex-cli', 'Codex', why), 'Codex can’t store this name (é). Rename it in Claude Code to use it there.');
 });
 
-test('Only a found agent whose copies differ asks which copy; an agent in the library never does', () => {
-  // Whether the found copies differ is librarypass.ts foundCopies' answer (tests/agents.test.ts has it on real files).
-  const differing = row({ 'claude-cli': 'a', 'codex-cli': 'x' }, { differs: true });
-  assert.deepEqual([needsChoice(differing, undefined), needsChoice(differing, item({ on: false })), needsChoice(differing, item({ deleted: { at: 'then' } }))], [true, false, true]);
-  assert.equal(needsChoice(row({ 'claude-cli': 'a', 'codex-cli': 'a' }, { differs: false }), undefined), false);
+test('A found row’s Add says the take-in table’s answer for a click: it asks which copy only where the copies differ, and an item in the library has none', () => {
+  // The answers are library.ts takeInAnswer's, which each kind's view gives its found rows (tests/agents.test.ts has them on real files).
+  const differing = row({ 'claude-cli': 'a', 'codex-cli': 'x' }, { takeIn: { click: { wait: 'choice' }, rule: { wait: 'choice' } } });
+  const same = row({ 'claude-cli': 'a', 'codex-cli': 'a' }, { takeIn: { click: { take: { harness: 'claude-cli', hash: 'a' }, chosen: false }, rule: { take: { harness: 'claude-cli', hash: 'a' }, chosen: false } } });
+  const none = row({}, { takeIn: { click: { leave: 'no-copy' }, rule: { leave: 'no-copy' } } });
+  const inLibrary = row({ 'claude-cli': 'b' }, {}, item());
+  assert.deepEqual([asksWhichCopy(differing), asksWhichCopy(same), asksWhichCopy(none), asksWhichCopy(inLibrary)], [true, false, false, false]);
+  assert.deepEqual([canAdd(differing), canAdd(same), canAdd(none), canAdd(inLibrary)], [true, true, false, false]);
 });
 
 test('Each control sends the agent as it is with one thing changed', () => {
@@ -145,7 +151,12 @@ test('The status line says where the agent stands, and in which harnesses', () =
   assert.equal(statusLine(...withItem({ 'claude-cli': 'b', 'copilot-cli': 'b' }, item({ except: ['codex-cli'], applied: { 'claude-cli': 'b', 'copilot-cli': 'b' } })), tools), 'On in Claude Code and Copilot CLI · kept out of Codex');
   assert.equal(statusLine(...withItem({ 'claude-cli': 'b' }, item({ applied: { 'claude-cli': 'b' } })), tools), 'On in Claude Code · Copilot CLI and Codex get it when sync runs');
   assert.equal(statusLine(...withItem({ 'codex-cli': 'x' }, item({ on: false, applied: {} })), tools), 'Off · in Central Knot only. Turn it on to put it in every tool. Codex has a copy Central Knot didn’t put there.');
-  assert.equal(statusLine(row({ 'claude-cli': 'a', 'codex-cli': 'x' }, { differs: true }), undefined, tools), 'Not in Central Knot · in Claude Code and Codex, with different copies. Add it to keep it in Central Knot and put it in every tool.');
+  const differing = row({ 'claude-cli': 'a', 'codex-cli': 'x' }, { takeIn: { click: { wait: 'choice' }, rule: { wait: 'choice' } } });
+  assert.equal(statusLine(differing, undefined, tools), 'Not in Central Knot · in Claude Code and Codex, with different copies. Add it to keep it in Central Knot and put it in every tool.');
+  // With Synchronize everything on, a found row says what the rule does with it.
+  assert.equal(statusLine(differing, undefined, tools, true), 'Not in Central Knot · in Claude Code and Codex, with different copies. Add it to keep it in Central Knot and put it in every tool. Synchronize everything leaves it for you to choose: its copies differ.');
+  assert.deepEqual([ruleSays({ leave: 'deleted' }), ruleSays({ leave: 'part' }), ruleSays({ leave: 'no-copy' })],
+    ['Synchronize everything leaves it: it was deleted from Central Knot, so only Add brings it back.', 'Synchronize everything leaves it: it is a plugin’s part, so only Add takes it in.', '']);
 });
 
 test('The switch says what a click does: off everywhere, or on everywhere; a found agent’s Add says it takes it in, or asks which copy', () => {
@@ -218,7 +229,7 @@ test('The sentences that name the item or its copies are in the kind’s words: 
 });
 
 test('The same sentences in another kind’s words name that kind and its copies, never an agent or a file', () => {
-  const notes = sentences({ item: 'note', an: 'a note', copy: 'page', shared: '', own: () => '', body: 'Text' });
+  const notes = sentences({ item: 'note', an: 'a note', many: 'notes', copy: 'page', shared: '', own: () => '', body: 'Text' });
   const out = item({ except: ['codex-cli'], applied: { 'claude-cli': 'b', 'copilot-cli': 'b' } });
   const said = [
     notes.harnessLine(row({ 'claude-cli': 'b', 'copilot-cli': 'b' }, {}, out), out, 'codex-cli', 'Codex'),

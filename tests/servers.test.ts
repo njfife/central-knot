@@ -3,6 +3,7 @@
 // and deletions, files that are missing, unreadable or rewritten, what is never taken in, what a tool can't hold, and a tool's
 // own switch left as it is. The model's rule is library.ts's; each case here is a worked example of it on entries.
 import { test } from 'node:test';
+import { itemNotice } from './notices.ts';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -10,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { readHistory } from '../src/history.ts';
 import { libraryAction } from '../src/historyactions.ts';
 import { kindSource } from '../src/itemrow.ts';
-import { asItIs, canTakeIn, libraryWords, sentences, statusLine } from '../src/libraryrow.ts';
+import { asItIs, canAdd, libraryWords, sentences, statusLine } from '../src/libraryrow.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { discover } from '../src/discovery.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
@@ -136,7 +137,7 @@ test('Off with Claude Code open, then On again, then Off and Delete from Central
     assert.deepEqual([row.on, row.waits, view.library.docs.deleted !== undefined], [false, ['claude-cli'], true]);
     assert.equal(statusLine({ ...row, hashes: hashes(row) }, undefined, view.tools), 'Deleted from Central Knot · Claude Code still has it until you click Write to Claude Code. History can restore it.');
     assert.equal(say.harnessLine({ ...row, hashes: hashes(row) }, undefined, 'claude-cli', 'Claude Code'), 'Its entry here is removed when you click Write to Claude Code. History can restore it.');
-    assert.equal(canTakeIn({ ...row, hashes: hashes(row) }), false, 'no Add while the band is about to remove its last copy');
+    assert.deepEqual([canAdd({ ...row, hashes: hashes(row) }), row.takeIn], [false, { click: { leave: 'leaving' }, rule: { leave: 'leaving' } }], 'no Add while the band is about to remove its last copy');
     await writeToClaude(box.context, all, ['docs']);
     view = await box.view();
     assert.deepEqual([view.items, await commandIn(box, 'claude-cli')], [[], undefined], 'gone from Claude Code, and from the page');
@@ -155,7 +156,7 @@ test('`codex mcp remove` of Codex’s only server turns it Off everywhere; Centr
     // What `codex mcp remove docs` leaves: no servers table at all.
     await writeFile(box.path('codex-cli'), 'model = "gpt-6"\n');
     const pass = await applyServers(box.context, all, []);
-    assert.deepEqual(pass.notices?.map(notice => [notice.kind, notice.winner]), [['deleted', 'codex-cli']]);
+    assert.deepEqual(pass.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner]), [['deleted', 'codex-cli']]);
     for (const tool of all.slice(1)) assert.equal(await commandIn(box, tool), undefined, `${tool}: Off everywhere`);
     const view = await box.view();
     assert.deepEqual([view.items[0]?.on, view.library.docs.versions.length], [false, 1]);
@@ -220,7 +221,7 @@ test('An edit in one tool becomes the current version and reaches the others; of
     // An edit in Codex: the current version, in every tool but Claude Code, which waits.
     await writeFile(box.path('codex-cli'), (await box.files())['codex-cli']!.replace('args = ["-y", "docs"]', 'args = ["-y", "docs", "--v2"]'));
     const edited = await applyServers(box.context, all, []);
-    assert.deepEqual(edited.notices?.map(notice => [notice.kind, notice.winner]), [['edit', 'codex-cli']]);
+    assert.deepEqual(edited.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner]), [['edit', 'codex-cli']]);
     for (const tool of ['copilot-cli', 'pi-cli', 'opencode-cli'] as const) assert.deepEqual(await argsIn(box, tool), ['-y', 'docs', '--v2'], tool);
     assert.equal(JSON.parse((await box.files())['copilot-cli']!).mcpServers.docs.timeout, 99, 'Copilot keeps its own field');
     assert.deepEqual((await box.row('docs'))?.waits, ['claude-cli']);
@@ -228,7 +229,7 @@ test('An edit in one tool becomes the current version and reaches the others; of
     await writeFile(box.path('pi-cli'), (await box.files())['pi-cli']!.replace('"--v2"', '"--pi"'));
     await writeFile(box.path('opencode-cli'), (await box.files())['opencode-cli']!.replace('"--v2"', '"--opencode"'));
     const both = await applyServers(box.context, all, []);
-    assert.deepEqual(both.notices?.map(notice => [notice.kind, notice.winner, notice.losers]), [['conflict', 'pi-cli', ['opencode-cli']]]);
+    assert.deepEqual(both.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner, notice.losers]), [['conflict', 'pi-cli', ['opencode-cli']]]);
     assert.deepEqual(await argsIn(box, 'opencode-cli'), ['-y', 'docs', '--pi']);
     assert.ok((await box.view()).library.docs.versions.some(version => version.from.how === 'edited' && version.from.harness === 'opencode-cli'));
   } finally { await box.cleanup(); }

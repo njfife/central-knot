@@ -8,7 +8,7 @@ import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover, findOtherApps } from './discovery.ts';
 import { configRoot, envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { CLAUDE_PROCESS, appCandidates, executableCandidates, searchPath } from './platform.ts';
-import { managedNow, syncGate, syncsHere, takeOverSync, writeAccess, type ShareContext } from './share.ts';
+import { managedNow, readRecord, setSyncEverything, syncGate, syncsHere, takeOverSync, writeAccess, type ShareContext } from './share.ts';
 import { pruneHistory, readHistory } from './history.ts';
 import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skillVersion, skillsView, takeOver } from './skills.ts';
 import { agentTools, mcpTools, noteTools, pluginTools, presentTools } from './presence.ts';
@@ -489,9 +489,11 @@ async function pass(snapshots: Snapshot[], explicit = false): Promise<Background
   const crashes: DestinationResult[] = [];
   const crashed = (item: string) => (error: unknown) => { crashes.push({ item, outcome: 'failed', message: `${item} could not finish: ${error instanceof Error ? error.message : String(error)}` }); return undefined; };
   // Skills, MCP servers and agents are Central Knot's library (library.ts); Claude Code's MCP settings wait for Write to Claude Code.
-  const skills = await applySkills(shared, managed, []).catch(crashed('Skills sync'));
-  const servers = await applyServers(shared, managed, []).catch(crashed('MCP sync'));
-  const agents = await applyAgents(shared, managed, []).catch(crashed('Agents sync'));
+  // The pass of the whole home: the home's standing rule, Synchronize everything, takes found items in here and nowhere else.
+  const whole = { background: true } as const;
+  const skills = await applySkills(shared, managed, [], whole).catch(crashed('Skills sync'));
+  const servers = await applyServers(shared, managed, [], whole).catch(crashed('MCP sync'));
+  const agents = await applyAgents(shared, managed, [], whole).catch(crashed('Agents sync'));
   return { skills: skills ?? { results: [], writes: 0 }, serversAndAgents: {
     failures: [...crashes, ...[...(servers?.results ?? []), ...(agents?.results ?? [])].filter(entry => entry.outcome === 'failed')],
     stopped: ([['MCP sync', servers?.stopped], ['Agents sync', agents?.stopped]] as const).filter(([, why]) => why).map(([item, why]) => ({ item, outcome: 'failed' as const, message: why! })),
@@ -528,7 +530,8 @@ async function syncThenView(explicit = false): Promise<HomeView> {
     // Apps that run the tools or read their files are looked for only on this computer, like the tools' own apps.
     ...(current!.mode === 'actual' ? { otherApps: await findOtherApps(current!.home) } : {}),
     sync: { tools: managed, writes: await skillFolders(shared, managed), access: await writeAccess(shared), gate: await syncGate(shared),
-      caughtUp: caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain) },
+      caughtUp: caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain),
+      syncEverything: (await readRecord(current!.home)).record?.syncEverything === true },
     skills: await skillsView(shared, managed, notices),
     mcp: await serversView(shared, managed, pendingServerNotices.splice(0)),
     agents: await agentsView(shared, managed, pendingAgentNotices.splice(0)),
@@ -1190,6 +1193,14 @@ app.whenReady().then(async () => {
     return { ...result, view: await syncThenView() };
   });
   handle('sync:set', async on => { await saveSyncSetting(on === true); return current ? syncThenView() : null; });
+  // Synchronize everything, the open home's standing rule (share.ts setSyncEverything): turned on, the pass right after takes in
+  // what is found now, with Automatic sync on (with it off, at Sync once).
+  handle('sync:everything', async (on, home) => {
+    if (home !== current?.home) return { stopped: elsewhere, view: null };
+    const set = await setSyncEverything(context(), on === true);
+    if (!set.stopped) log(`sync: Synchronize everything ${on === true ? 'on' : 'off'} in ${home}`);
+    return { ...set, view: await syncThenView() };
+  });
   handle('sync:now', async home => (home === current?.home ? syncThenView(true) : null));
   // Take over syncing (ORG-08): this build becomes the home's sync owner, then reads and syncs it as its owner.
   handle('sync:take-over', async home => {
