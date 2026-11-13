@@ -316,7 +316,7 @@ async function manageFlow() {
   same('turning it off wrote nothing in Codex', codex(), before);
   const card = await a.text('#harness-codex-cli');
   check('its card says it is left out, with its switch, opens nothing, and never says Not found or Install', card.includes('Not managed') && card.includes('Left out') && !/Not found|Install/.test(card) && !(await a.exists('button#harness-codex-cli')), card);
-  check('its line says what turning it on would do: nothing in Codex would change', (await a.text('#manage-codex-cli-line') ?? '').startsWith('On: nothing in Codex would change'), await a.text('#manage-codex-cli-line'));
+  check('its line says what turning it on would do: no item in Codex would change', (await a.text('#manage-codex-cli-line') ?? '').startsWith('On: no item in Codex would change'), await a.text('#manage-codex-cli-line'));
   await fitsAtMinimum(a, 'Harnesses with a tool left out');
   await a.click('#nav-skills');
   check('the Skills page has no Codex mark', (await a.exists('.tool-mark')) && !(await a.exists('.tool-mark[data-tool="codex-cli"]')));

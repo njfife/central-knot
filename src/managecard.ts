@@ -57,7 +57,7 @@ function onLine(home: HomeView, tool: HarnessId): string {
     waits ? `${plural(waits, 'MCP server change')} left for Write to Claude Code` : '',
   ].filter(Boolean);
   const besides = [takenIn ? `${plural(takenIn, 'found item')} taken in by Synchronize everything` : '', found ? `${plural(found, 'found item')} shown under Found` : ''].filter(Boolean);
-  const then = `On: ${changes.length ? listed(changes) : `nothing in ${names[tool]} would change`}${besides.length ? `; ${listed(besides)}` : ''}.`;
+  const then = `On: ${changes.length ? listed(changes) : `no item in ${names[tool]} would change`}${besides.length ? `; ${listed(besides)}` : ''}.`;
   // A tool new to the plugin updates gets what the other managed tools have, while they run by themselves (pluginupdates.ts):
   // said only where another managed tool has a plugin to bring, as the marketplaces were last read.
   const bring = !!market.view && home.sync.managed.some(other => other !== tool && !!installsIn(market.view!, other)?.installed.length);
@@ -90,6 +90,6 @@ export function doneWords(tool: HarnessId, on: boolean, syncOn: boolean, did: re
     waits ? `${plural(waits, 'MCP server change')} left for Write to Claude Code` : '',
     left ? `${plural(left, 'item')} not changed there this time (its row says why)` : '',
   ].filter(Boolean);
-  if (!clauses.length) return { text: `Central Knot manages ${name} now. Nothing there needed changing.` };
+  if (!clauses.length) return { text: `Central Knot manages ${name} now. No item there needed changing.` };
   return { text: `Central Knot manages ${name} now: ${listed(clauses)}.`, note: 'Each change there is in History.', warn: left > 0 };
 }
