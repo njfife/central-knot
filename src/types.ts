@@ -78,7 +78,7 @@ export type SyncGate =
 
 export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** A refusal made before anything was changed, the record included: the click did nothing. */ unchanged?: true; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true; /** `held`: waits for Write to Claude Code (MCP-02), as it should (not a failure). */ waits?: true; }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; /** The home as a whole: its tools, access, owner and what the background did. */ sync: SyncView; /** Skills: those in Central Knot's library (library.ts) and those found in a tool. */ skills: LibraryView; /** MCP servers: those in Central Knot's library (library.ts) and those found in a tool. */ mcp: LibraryView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; /** The home as a whole: its tools, access, owner and what the background did. */ sync: SyncView; /** Skills: those in Central Knot's library (library.ts) and those found in a tool. */ skills: LibraryView; /** MCP servers: those in Central Knot's library (library.ts) and those found in a tool. */ mcp: LibraryView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of library items to have On (profileplan.ts). */ profiles: ProfilesView }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
@@ -196,8 +196,8 @@ export interface DesktopApi {
   /** Adds or changes a profile's name and items (Central Knot's own file; no tool is written). */
   saveProfile(profile: ProfileEdit, home: string): Promise<{ problem?: string; id?: string; profiles?: ProfilesView }>;
   deleteProfile(id: string, home: string): Promise<{ problem?: string; profiles?: ProfilesView }>;
-  /** Switches to a profile (null: No profile) with each tool's own switches. One History entry, with Undo. */
-  switchProfile(id: string | null, home: string): Promise<ProfileSwitchResult>;
+  /** Switches to a profile: what it names On, every other library item Off. One History entry, with Undo. */
+  switchProfile(id: string, home: string): Promise<ProfileSwitchResult>;
   /** A switch made from the menu bar: what it did, so the page can show it with Undo. */
   onProfileSwitched(callback: (result: ProfileSwitchResult) => void): void;
   /** Turns one skill of an installed plugin off (`on` false) or back on in one tool, with that tool's own switch (ENB-06). */
@@ -278,8 +278,6 @@ export interface SkillFacts {
   plan?: LibraryFacts['plan'];
   differs?: LibraryFacts['differs'];
   versionChanges?: LibraryFacts['versionChanges'];
-  /** Profiles' view of a skill or server (profileplan.ts): tools whose copy is turned off with the tool's own switch. The copy stays there; the tool doesn't load it. */
-  disabled?: HarnessId[];
   /** MCP servers: tools whose write or removal waits for Write to Claude Code (types.ts LibraryFacts waits). */
   waits?: HarnessId[];
   /** Skills and MCP servers: why a tool's switch can't be used at all: its settings file can't be read or is in a form Central Knot doesn't edit. */
@@ -346,7 +344,7 @@ export interface Change {
   giveBack?: Partial<Record<HarnessId, string>>;
 }
 
-export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch: the switches it flipped. */ flips?: ProfileFlip[]; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
+export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, what is not as it asked, and the MCP servers that wait for Write to Claude Code. */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left' | 'waits'>; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
 
 /** What sync did on its own: an edit spread, competing edits resolved, or a copy deleted by hand that turned an item off. */
 export interface SyncNotice {
@@ -385,7 +383,7 @@ export interface HistoryEvent {
   at: string;
   key: string;
   item: string;
-  /** 'profile': a profile switch (key 'profiles:switch', item the profile's name); Undo switches back.
+  /** 'profile': a profile switch, or the profiles migration (key 'profiles:switch', item the profile's name: `profile`).
    * 'switched': a skill's tool switch cleared, or its Undo (`switched`).
    * 'took-over': a skill's copy outside Central Knot taken over (`losers`: that copy), which has no Undo.
    * From before an item was on the library, read only for their sentences (historypage.ts describe): 'added' (copies a change
@@ -416,8 +414,12 @@ export interface HistoryEvent {
   version?: string;
   /** 'took-over' from before the library: what was replaced, removed and placed (read only to tell such an entry apart). */
   tookOver?: TookOver;
-  /** 'profile': which profile was in use before and after, and every switch it flipped. */
-  profile?: { from?: string; fromName?: string; to?: string; toName?: string; flips: ProfileFlip[] };
+  /**
+   * 'profile': a profile switch (`toName`: the profile, by its name then), or the profiles migration's one entry (`migrated`,
+   * `toName` the profile last switched to before it, written when it turns something Off): the library items it turned On and Off. Its Undo turns back each item still as it left it (profileplan.ts undoPlan). An entry from before profiles
+   * were sets of items has neither `on` nor `off`: it is past.
+   */
+  profile?: { toName?: string; on?: SwitchedItem[]; off?: SwitchedItem[]; migrated?: true };
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false); `before`, a Claude Code override it replaced ("name-only"), for Undo. */
   switched?: SwitchRecord[];
   /** 'added', from before the library: copies for tools a synced item synced to again. */
@@ -953,18 +955,13 @@ export interface RepoResult { view: RepoView; stopped?: string; /** Connect: the
 // ---------- Profiles ----------
 
 /**
- * A named set of skills and MCP servers to have on, chosen from what the home has. Switching to it turns everything else off with
- * each tool's own switch (nothing is moved or deleted) and turns back on what an earlier switch turned off. Items are named by
- * kind and key: `skill:<key>` and `mcp:<name>`.
+ * A named set of library items to have On (profileplan.ts): `skill:<key>`, `agent:<key>` and `mcp:<key>`. Switching to it
+ * turns those On and every other library item Off; nothing else is kept about it, and which profile is in use is worked out.
  */
 export interface Profile { id: string; name: string; items: string[] }
 
 export interface ProfilesView {
   profiles: Profile[];
-  /** The profile last switched to; none means No profile. */
-  active?: string;
-  /** What profile switches turned off and have not turned back on, per item and tool. Switches turned off by hand are never here. */
-  offByProfile: Record<string, HarnessId[]>;
   /** Why profiles can't be read or saved here, if they can't. */
   problem?: string;
 }
@@ -975,7 +972,13 @@ export interface ProfilesView {
  */
 export interface ProfileEdit { id?: string; name?: string; items?: string[]; restore?: boolean }
 
-/** One switch a profile change flipped: an item in one tool, turned off (true) or back on. */
-export interface ProfileFlip { item: string; name: string; tool: HarnessId; disabled: boolean }
+/** A library item a profile switch named, as History keeps it: its id (profileplan.ts itemId) and its name then. */
+export interface SwitchedItem { id: string; name: string }
 
-export interface ProfileSwitchResult { stopped?: string; /** The profile switched to, by name (No profile included). */ name?: string; /** It was already in use: its switches were applied again. */ again?: boolean; results: DestinationResult[]; flips: ProfileFlip[]; /** The History entry, for Undo. */ event?: string; view?: HomeView }
+/**
+ * What a switch did: the profile's name, the items it turned On and Off and those not as it asked once its passes ran (`left`:
+ * one turned Off again because a copy was deleted by hand; History says so), by name; the MCP servers whose Claude Code part
+ * waits for Write to Claude Code, by key; and what could not be done in a tool (`results`). `event`: its History entry; none
+ * when nothing changed.
+ */
+export interface ProfileSwitchResult { stopped?: string; name?: string; on: string[]; off: string[]; left: string[]; waits: string[]; results: DestinationResult[]; event?: string; view?: HomeView }

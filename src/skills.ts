@@ -8,12 +8,12 @@
 // - why a tool can't be given a skill (cannotTake): a name it reserves, a shape it won't load (share.ts targetFor), or a
 //   skill converted from one of its agents;
 // - a tool's own switch for a skill (toolFacts, `loads`): read at each look and never written by a pass. A switch set in a tool,
-//   by a person, a profile or Central Knot before the library, is left as it is and shown as a mark on that tool's line.
+//   by a person or by Central Knot before the library, is left as it is and shown as a mark on that tool's line.
 //   Three actions write it: clearSwitch, its Undo switchBack, and takeOver, which carries it to the copy it makes (takeOver
-//   is also the one that makes a copy outside Central Knot's its own).
+//   is also the one that makes a copy outside Central Knot's its own); and the profiles migration releases one an earlier
+//   profile set, once (profilemigrate.ts).
 // Around the pass: applySkills and restoreSkill run it for skills (the page's clicks through librarypass.ts itemClick);
-// skillsView is the Skills page's reading (types.ts LibraryView), which profiles read through profileplan.ts profileSkills;
-// skillsForRepo is what the Git repo's Push sends. Elsewhere: the folders, skillfiles.ts; where things
+// skillsView is the Skills page's reading (types.ts LibraryView); skillsForRepo is what the Git repo's Push sends. Elsewhere: the folders, skillfiles.ts; where things
 // are kept and the migration from the earlier record, skillstore.ts and skillmigrate.ts; the row and its words,
 // libraryrow.ts with librarypages.ts; History's sentences and actions, historyactions.ts.
 import { randomUUID } from 'node:crypto';
@@ -334,10 +334,8 @@ export const forgetSkillFolders = (context: ShareContext, managed: readonly Harn
 
 /**
  * Clears a tool's own switch that turns a skill off there (the mark on its line), whoever set it, for a skill in Central Knot
- * or one found in a tool. The switch goes back to
- * what it was before it was set where the tool kept that (Claude Code's override); History's `switched` entry says so, which
- * a profile's Undo reads (profileplan.ts changedSince). There is no Undo: setting it again is the tool's own business. Ends
- * with a pass on the skill.
+ * or one found in a tool. The switch goes back to what it was before it was set where the tool kept that (Claude Code's
+ * override); History's `switched` entry says so, and its Undo sets the switch again (switchBack). Ends with a pass on the skill.
  */
 export async function clearSwitch(context: ShareContext, tools: HarnessId[], key: string, tool: HarnessId): Promise<PassResult> {
   const stop = (stopped: string): PassResult => ({ stopped, results: [], writes: 0 });
@@ -359,15 +357,13 @@ export async function clearSwitch(context: ShareContext, tools: HarnessId[], key
 
 /**
  * What Claude Code's override for a skill held before its switch was set (say "name-only"), which clearing it puts back: as
- * skillswitch.ts keeps it, else as a Disable from 0.4.0-preview.1 recorded it only in its History entry (a profile's switch
- * that came after it replaced nothing).
+ * skillswitch.ts keeps it, else as a Disable from 0.4.0-preview.1 recorded it only in its History entry.
  */
 async function overrideBefore(context: ShareContext, key: string, tool: HarnessId, target: SwitchTarget): Promise<string | undefined> {
   const kept = (await readKeptOverrides(context))[target.folder];
   if (tool !== 'claude-cli' || kept !== undefined) return kept;
   let before: string | undefined;
   for (const event of await readHistory(context)) {
-    if (event.kind === 'profile' && event.profile?.flips.some(flip => flip.tool === tool && flip.disabled && flip.item === `skill:${key}`)) before = undefined;
     if (event.kind !== 'switched' || event.key !== key) continue;
     for (const entry of event.switched ?? []) if (entry.tool === tool && entry.disabled && entry.target?.folder === target.folder) before = entry.before;
   }
@@ -395,7 +391,7 @@ export async function takeOver(context: ShareContext, tools: HarnessId[], key: s
   const known = item.versions.some(version => version.hash === copy.hash);
   const keep: Version | undefined = known ? undefined : { hash: copy.hash, at: iso(copy.at), from: { how: 'was-in', harness: tool, replacedBy: item.hash } };
   const loser = { tool, hash: copy.hash, path: way.path, ...(way.linkTo ? { linkTo: way.linkTo } : {}) };
-  // Each tool that read the copy, and whether its own switch had it off (a profile's hold, or the person's).
+  // Each tool that read the copy, and whether its own switch had it off (whoever set it).
   const readers = look.managed.filter(each => look.disk.ways.get(key)?.[each]?.path === way.path);
   const heldOff = readers.flatMap(each => { const target = loadTarget(look, key, item.name, each); return target && isDisabled(context, look.disk.switches.get(each)!, target) ? [{ tool: each, target }] : []; });
   const result = await runTakeOver(context, item, keep, way);

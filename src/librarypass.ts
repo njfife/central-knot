@@ -420,6 +420,8 @@ interface Pass extends AnyLook {
   asked: Map<string, Asked>;
   /** An Undo's copies to give back, by item (ItemClick giveBack). */
   giveBack: Map<string, Partial<Record<HarnessId, string>>>;
+  /** History has the clicks in an entry of the caller's own (PassOptions told). */
+  told: boolean;
   results: DestinationResult[]; notices: SyncNotice[]; writes: number; made: string[];
 }
 /** What may be asked of a pass besides its clicks. */
@@ -430,6 +432,11 @@ export interface PassOptions<Content> {
   resume?: boolean;
   /** What Pull brings, by item (gitrepo.ts): each becomes that item's current version before the pass (pull). */
   pulled?: Map<string, Pulled<Content>>;
+  /**
+   * The clicks are told to History in one entry the caller wrote first (a profile switch: profiles.ts), so their own On and
+   * Off entries are not written (logItem). What else the pass finds (an edit taken in, a copy deleted by hand) is told as ever.
+   */
+  told?: boolean;
   /** The settle window and its clock; tests pass their own. */
   settleMs?: number; now?: number;
 }
@@ -450,7 +457,7 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   const settle = { clock: options.now ?? Date.now(), ms: options.settleMs ?? context.settleMs ?? 2000, settling: false };
   const look: AnyLook = await lookAt(kind, context, managed, library, settle);
   const store = (item: LibraryItem, hash: string, content: unknown) => kind.store(context, item, hash, content as C);
-  const pass: Pass = { ...look, shelf: { store, save: () => saveIfChanged(pass) }, saved, asked: new Map(), giveBack: new Map(), results: [], notices: [], writes: 0, made: [] };
+  const pass: Pass = { ...look, shelf: { store, save: () => saveIfChanged(pass) }, saved, asked: new Map(), giveBack: new Map(), told: !!options.told, results: [], notices: [], writes: 0, made: [] };
   await deletionsTold(pass);
   for (const [key, brought] of options.pulled ?? []) await pull(pass, key, brought);
   for (const asked of clicks) await click(pass, asked);
@@ -610,7 +617,8 @@ async function deletionsTold(pass: Pass) {
 
 /**
  * History's entries for one item's pass, made before anything of it is saved (carryOut): what was asked (with the harnesses
- * its plan writes or removes), an edit taken in, and a copy deleted by hand that turned it Off. The last two are also notices,
+ * its plan writes or removes; not for a profile switch's clicks, which its own entry tells: PassOptions told), an edit taken
+ * in, and a copy deleted by hand that turned it Off. The last two are also notices,
  * since no one asked for them. A harness whose copy can't be changed this time is said in the pass's results, and the next
  * pass finishes it. A copy a harness managed again gives way with has its entry from cameBack, which may concern an item
  * outside this pass.
@@ -636,7 +644,9 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
   /** Each of these harnesses with what it held before the pass. */
   const before = (tools: HarnessId[]) => tools.map(tool => ({ tool, hash: slot[tool]?.hash ?? '' }));
   const asked = pass.asked.get(item.key);
-  if (asked) {
+  // A profile switch's clicks are told in its own entry (PassOptions told).
+  if (asked && pass.told) pass.asked.delete(item.key);
+  else if (asked) {
     const { fill, ...entry } = asked;
     // A switch's entry says the version it left (`taken`, once this pass is carried out), so its Undo is offered only while it still is.
     const switched = (entry.kind === 'on' || entry.kind === 'off') && !entry.winner ? { version: taken } : {};

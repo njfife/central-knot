@@ -1,5 +1,5 @@
 // History: the log of what changed in a home, kept in `.central-knot/history.json`, newest last. Every kind writes here (the
-// library's pass for skills and agents, mcp.ts, profiles.ts, gitrepo.ts, instructions); what an entry says and offers is
+// library's pass for skills, MCP servers and agents, profiles.ts, gitrepo.ts, instructions); what an entry says and offers is
 // each kind's own (historyactions.ts for the library's kinds, historypage.ts for the rest). History's days (Settings) are its
 // only retention rule, applied on every read; after a write, a deleted skill's versions older than those days go too
 // (skillstore.ts pruneDeleted), so nothing History can no longer restore is kept for it.

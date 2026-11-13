@@ -333,9 +333,10 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
     market.lastRun = recordRun(market.draft, ops, result.done, undo, home);
     market.problem = result.stopped;
     showView(await api().plugins().catch(() => null));
-    // Parts are ordinary skills, MCP servers and agents: the other pages see them (and where they came from) at once.
+    // The item pages show what plugins bring, each with its switch in each tool, and parts are ordinary skills, MCP servers and
+    // agents: every plugin change is seen there (and where it came from) at once.
+    setHome(await api().refresh().catch(() => null));
     if (ops.some(op => isParts(op.action))) {
-      setHome(await api().refresh().catch(() => null));
       // What each tool now holds changed, so every plugin's plan (which names clash) is read again when shown.
       market.partsPlans.clear();
       readShown();

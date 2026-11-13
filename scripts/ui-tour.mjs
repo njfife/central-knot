@@ -660,77 +660,89 @@ if (wanted('plugins')) {
 }
 
 // ---------- Profiles ----------
+// Profiles are sets of library items (src/profiles.ts): every state of the Profiles page at four sizes, with the light
+// appearance once, on a practice copy whose skills, MCP servers and agents are taken into Central Knot first.
 if (wanted('profiles')) {
   begin('profiles');
   // The name field saves and closes on blur, which a window losing focus (macOS) also causes: reopened with Rename then.
   const name = async text => { if (!(await a.has('#profile-name'))) await a.click('#profile-rename'); await a.run(`(() => { const input = document.querySelector('#profile-name'); input.value = ${JSON.stringify(text)}; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`); await a.settle(); };
-  await a.click('#nav-profiles'); await shot(a, 'empty', 'Clicked "Profiles" in the sidebar before any profile exists.');
-  await a.click('#profile-new'); await shot(a, 'new-naming', 'Clicked "New profile": a profile is made and its name field is ready to type in.');
+  const openProfile = async text => { await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes(${JSON.stringify(text)})).click()`); await a.settle(); };
+  await a.click('#nav-profiles');
+  await atEverySize('empty', 'Clicked "Profiles" in the sidebar before any profile exists', true);
+  for (const [page, keys] of [['skills', ['notes', 'standup', 'release-notes']], ['mcp', ['docs', 'files']], ['agents', ['code-reviewer', 'release-notes']]]) {
+    await a.click(`#nav-${page}`); await a.settle();
+    for (const key of keys) { await turnOnRow(key); await switchOn(key); }
+  }
+  await a.click('#nav-profiles');
+  await a.click('#profile-new');
+  await atEverySize('new-naming', 'Took notes, standup and release-notes, docs and files, and the agents code-reviewer and release-notes into Central Knot, then clicked "New profile": its name field is ready to type in');
   await name('Incident');
-  await shot(a, 'new-named', 'Typed "Incident" and pressed Enter. Nothing is in it yet.');
-  await a.click('#pf-skill\\:notes'); await a.click('#pf-mcp\\:docs');
-  await shot(a, 'incident-ticked', 'Ticked the notes skill and the docs MCP server. The blue rings show what switching to Incident turns off.');
-  await a.click('#profile-switch');
-  const claudeSettings = readFileSync(join(practice, '.claude/settings.json'), 'utf8');
-  await shot(a, 'incident-switched', `Clicked "Switch to Incident". Claude Code's settings.json now holds:\n\n\`\`\`json\n${claudeSettings}\`\`\`\n`);
-  await a.click('#pf-skill\\:review'); await shot(a, 'incident-drift', 'Ticked review in Incident, the profile in use: the subtitle says what Apply would change, nothing is written yet.');
-  await a.click('#pf-skill\\:review');
-  await a.click('#profile-delete'); await shot(a, 'delete-in-use', 'Clicked Delete on Incident, which is in use: it says why not, inline.');
-  await a.click('#profile-delete-cancel');
+  await atEverySize('new-named', 'Typed "Incident" and pressed Enter: nothing is in it yet, so it offers no switch; the band says to tick at least one item, or start from what is on now');
+  await a.click('#pf-skill\\:notes'); await a.click('#pf-mcp\\:files');
+  await atEverySize('incident-ticked', 'Ticked notes and files: before any switch, each row says what switching to Incident does to it; the header counts it and, since docs (which Claude Code has) turns off, says Claude Code’s MCP servers change when you press Write to Claude Code, the line wrapping whole', true);
+  await a.click('#profile-switch'); await a.run(`document.activeElement?.blur()`);
+  await atEverySize('incident-switched', 'Clicked "Switch to Incident": the result says what it turned off and that 1 MCP server waits for Write to Claude Code, with that button and Undo switch; Incident is in use (the list, the header: "2 items on, the other 5 off", the status bar)', true);
   await a.click('#profile-new'); await name('Development');
-  await a.click('#profile-from-now'); await shot(a, 'development-from-now', 'Made a second profile, "Development", and clicked "Start from what\'s on now".');
-  await a.click('#pf-skill\\:standup');
-  await shot(a, 'development-edited', 'Ticked standup too.');
-  await a.click('#status-profile'); await shot(a, 'status-menu', 'Clicked "Incident" in the status bar: the profile menu, with focus on the profile in use.');
+  await a.click('#profile-from-now');
+  await a.click('#pf-skill\\:standup'); await a.click('#pf-agent\\:code-reviewer');
+  await atEverySize('development-ticked', 'Made "Development", clicked "Start from what’s on now", then ticked standup and code-reviewer: switching turns those two on');
+  await a.click('#status-profile');
+  await shot(a, 'status-menu', 'Clicked "Incident" in the status bar: the profile menu, a tick on the profile in use, with focus on it.');
   await a.press('ArrowDown'); await shot(a, 'status-menu-keys', 'Pressed the Down arrow key: focus moves to Development (Up, Down, Home and End move; Escape closes).');
   await a.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes('Development')).click()`); await a.settle();
   // A scripted click counts as a keyboard choice (focus returns to the status item, ringed); a mouse click leaves no ring.
   await a.run(`document.activeElement?.blur()`);
-  await shot(a, 'switched-from-status', 'Chose "Development" in that menu.');
-  await a.click('#profile-row-none'); await shot(a, 'no-profile', 'Clicked "No profile" in the list: what profiles turned off, and how profiles work.');
-  await a.click('#nav-skills'); await shot(a, 'skills-with-profile', 'The Skills page while Development is in use: release-notes and review are off where a profile turned them off (the profile mark).');
-  await a.click('#nav-mcp'); await shot(a, 'mcp-with-profile', 'The MCP servers page while Development is in use: files is off in Copilot CLI and Codex.');
-  await a.click('#nav-skills');
-  // Rows stay open across pages, so notes may already be open from earlier.
-  if (!(await a.has('#enable-notes-claude-cli'))) await a.click('#open-notes');
-  await a.click('#enable-notes-claude-cli');
-  await a.click('#nav-profiles');
-  await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Development')).click()`); await a.settle();
-  await shot(a, 'off-by-hand', 'On the Skills page, turned notes off in Claude Code by hand (its own switch in notes’ details), then came back to Development: that switch shows as off by hand (its own mark), which profiles leave alone, and the subtitle says so.');
-  const copilotSettings = join(practice, '.copilot/settings.json');
-  const copilotKept = existsSync(copilotSettings) ? readFileSync(copilotSettings, 'utf8') : undefined;
-  writeFileSync(copilotSettings, '{ not json');
-  await a.click('#header-refresh');
-  await shot(a, 'cant-switch', 'Outside the app, Copilot\'s settings.json was broken, then Refresh: Copilot\'s cells say they can\'t be switched, and why is listed under the table.');
-  if (copilotKept === undefined) rmSync(copilotSettings); else writeFileSync(copilotSettings, copilotKept);
-  await a.click('#header-refresh');
-  await a.click('#nav-history'); await shot(a, 'history', 'Clicked "History": each switch is one row with Undo.');
-  const undo = await a.run(`document.querySelector('.history-row[data-kind="profile"] button')?.id ?? ''`);
-  if (undo) { await a.click(`#${undo}`); await shot(a, 'history-undone', 'Clicked "Undo switch" on the newest switch: Incident is in use again.'); }
-  await a.click('#nav-profiles');
-  await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Incident')).click()`); await a.settle();
-  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
-    await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: width > 1300 ? 1 : 2, mobile: false });
-    for (const theme of ['dark', 'light']) {
-      await a.theme(theme);
-      await a.settle();
-      await shot(a, `size-${width}-${theme}`, `Incident open on the Profiles page at ${width}×${height}, ${theme}.`);
-    }
-  }
-  // The narrowest window with a profile that is not in use: its header while renaming, and while confirming Delete.
-  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false });
-  await a.theme('dark');
-  await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Development')).click()`); await a.settle();
+  await atEverySize('development-in-use', 'Chose "Development" in that menu: Development is in use; the column says what is on now');
+  await a.click('#nav-skills'); await a.settle();
+  await shot(a, 'skills-with-profile', 'The Skills page while Development is in use: each skill is On or Off in Central Knot, as Development has it; nothing marks a profile.');
+  await a.click('#switch-standup'); await a.settle();
+  await a.click('#nav-profiles'); await openProfile('Development');
+  await atEverySize('after-hand-click', 'On the Skills page, turned standup off by hand, then came back: no profile is in use now (the status bar says No profile), and Development says what switching to it would turn back on', true);
+  await a.click('#profile-switch'); await a.run(`document.activeElement?.blur()`);
+  await a.click('#profile-new'); await name('On call');
+  await a.click('#profile-from-now');
+  await atEverySize('two-in-use', 'Switched to Development again, then made "On call" from what is on now: both have the same items, so both are in use, and the status bar names both');
+  await a.click('#profile-delete');
+  await atEverySize('delete-confirm', 'Clicked Delete on On call: deleting a profile changes no item');
+  await a.click('#profile-delete-confirm');
+  await atEverySize('deleted', 'Clicked Delete: the result says nothing changed, with Undo; Development is open');
+  // Eight profiles: the list column takes more of a narrow window.
+  for (const extra of ['Writing', 'Review', 'Support', 'Research', 'Travel', 'Release']) { await a.click('#profile-new'); await name(extra); }
+  await openProfile('Development');
+  await atEverySize('eight-profiles', 'Made six more profiles (eight in all) and opened Development: stacked at 860×560 the page scrolls as one, every profile and then the open one’s items, with no box scrolling inside');
+  await a.size(860, 560);
+  await a.run(`document.querySelector('.profiles-split').scrollTop = 10000`); await a.settle();
+  await shot(a, 'eight-profiles-860-scrolled', 'At 860×560, the page scrolled to its end: Development’s header, Find and its items, the table’s heading held at the top.');
+  await a.run(`document.querySelector('.profiles-split').scrollTop = 0`);
+  await a.size(1280, 800);
+  await a.run(`(() => { const input = document.querySelector('#profile-find'); input.value = 'zzz'; input.dispatchEvent(new Event('input', { bubbles: true })); })()`); await a.settle();
+  await atEverySize('find-nothing', 'Typed "zzz" in Find: nothing matches, and the count says 0 of 7');
+  await a.run(`(() => { const input = document.querySelector('#profile-find'); input.value = 'release'; input.dispatchEvent(new Event('input', { bubbles: true })); })()`); await a.settle();
+  await atEverySize('find-some', 'Typed "release" in Find: the skill and the agent called release-notes, each under its kind, with a tick for all of them shown');
+  await a.click('#profile-find-clear');
+  const profilesFile = join(practice, '.central-knot/profiles.json'), kept = readFileSync(profilesFile, 'utf8');
+  writeFileSync(profilesFile, '{ not json');
+  await refresh();
+  await atEverySize('unreadable', 'Outside the app, profiles.json was broken, then Refresh: the page says why profiles can’t be used, changes nothing, and the list is gone with it');
+  writeFileSync(profilesFile, kept);
+  await refresh();
+  await a.click('#nav-history');
+  await shot(a, 'history', 'Clicked "History": each switch is one row, naming the profile and what it turned on and off, with Undo switch.');
+  await a.run(`document.querySelector('.history-row[data-kind="profile"] .history-actions button')?.click()`); await a.settle();
+  await shot(a, 'history-undone', 'Clicked "Undo switch" on the newest switch: the status bar says what it turned back; each item it turned has a row of its own.');
+  await a.click('#nav-profiles'); await openProfile('Incident');
+  // The narrowest window: a long name's header, renaming, and the status bar shortening it once it is in use.
+  await a.size(860, 560);
   await a.click('#profile-rename');
-  await name('Development and code review for web apps');
-  await shot(a, 'size-860-long-name', 'At 860×560, renamed Development to a 40-character name: the header with Switch, Rename and Delete.');
+  const longName = 'Incident response and on-call: web apps!';
+  if (longName.length !== 40) throw new Error('The long name must be 40 characters.');
+  await name(longName);
+  await shot(a, 'size-860-long-name', 'At 860×560, renamed Incident to a 40-character name: the header with Switch, Rename and Delete.');
   await a.click('#profile-rename'); await shot(a, 'size-860-renaming', 'Clicked Rename again: the field has the header to itself, with Enter / Esc hints.');
   await a.press('Escape');
-  await a.click('#profile-delete'); await shot(a, 'size-860-delete-confirm', 'At 860×560, clicked Delete on Development: the confirmation wraps under the title.');
-  await a.click('#profile-delete-cancel');
   await a.click('#profile-switch'); await a.run(`document.activeElement?.blur()`);
   await shot(a, 'size-860-long-name-in-use', 'Still at 860×560, switched to the profile with the 40-character name: the status bar item shortens it with an ellipsis (the full name is on hover).');
-  await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
+  await a.size(1280, 800);
 }
 
 // ---------- One skill of an installed plugin, off and back on (ENB-06) ----------
@@ -1648,9 +1660,10 @@ if (wanted('updates')) {
   const folder = join(scratch, 'update-home');
   cpSync(join(root, 'fixtures/home'), folder, { recursive: true });
   await reopen('v0.5.0-preview.4', { home: { mode: 'custom', path: folder } });
+  // Nothing is in Central Knot in this fresh home, so the new, empty profile is the one in use: the status bar names it.
   await a.click('#nav-profiles'); await a.click('#profile-new');
   await a.run(`(() => { const input = document.querySelector('#profile-name'); input.value = 'Incident'; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`); await a.settle();
-  await a.click('#pf-skill\\:notes'); await a.click('#profile-switch'); await a.run(`document.activeElement?.blur()`);
+  await a.run(`document.activeElement?.blur()`);
   await waitFor(a, `document.querySelector('#update-control')?.dataset.look === 'available'`, 20000);
   await shot(a, 'narrow-update', 'At 860×560 in a folder home with a profile in use ("Incident") and sync on with nothing managed yet, a newer release is found: the rail’s last icon stands out; the status bar keeps the version.');
   await typeDraft();

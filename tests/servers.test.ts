@@ -13,7 +13,7 @@ import { kindSource } from '../src/itemrow.ts';
 import { asItIs, canTakeIn, libraryWords, sentences, statusLine } from '../src/libraryrow.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { discover } from '../src/discovery.ts';
-import { saveProfile, switchProfile, readProfiles } from '../src/profiles.ts';
+import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { applyServers, restoreServer, serversView, writeToClaude } from '../src/servers.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { Change, HarnessId, HomeView, LibraryFacts } from '../src/types.ts';
@@ -291,7 +291,7 @@ test('Make current with Automatic sync off asks after the click what each tool c
   } finally { await box.cleanup(); }
 });
 
-test('A tool’s own switch is left as it is: a profile left a server out, then Off, a profile switch and On; the switch inside Codex’s and OpenCode’s entries comes back with it, where each had it', async () => {
+test('A tool’s own switch is left as it is: set in each tool by hand, then Off and On; the switch inside Codex’s and OpenCode’s entries comes back with it, Claude Code’s stays in its settings', async () => {
   const box = await sandbox();
   try {
     const tools: HarnessId[] = ['claude-cli', 'codex-cli', 'opencode-cli'];
@@ -302,27 +302,25 @@ test('A tool’s own switch is left as it is: a profile left a server out, then 
     await writeFile(join(box.home, '.claude/settings.json'), '{\n  "theme": "dark"\n}\n');
     await box.send(on('docs'), tools);
     await writeToClaude(box.context, tools, ['docs']);
-    // A profile without it: Codex's and OpenCode's switch in their entry, Claude Code's in its settings list.
-    const profile = (await saveProfile(box.context, { name: 'Writing', items: [] })).id!;
-    assert.equal((await switchProfile(box.context, profile)).stopped, undefined);
+    // Switched off by hand: Codex's and OpenCode's switch in their entry, Claude Code's in its settings list.
+    for (const tool of tools) await writeFile(mcpSwitchPath(box.context, tool), withMcpSwitch(tool, await readFile(mcpSwitchPath(box.context, tool), 'utf8'), 'docs', true));
     let view = await serversView(box.context, tools);
     assert.deepEqual(view.items[0]?.switchedOff, ['claude-cli', 'codex-cli', 'opencode-cli']);
-    const home = { skills: { tools, items: [], library: {} }, mcp: view, agents: { tools, items: [], library: {} }, profiles: await readProfiles(box.home) } as unknown as HomeView;
-    assert.deepEqual(kindSource(home, 'mcp').facts[0]?.switched, { 'claude-cli': 'switched off in Claude Code by the profile Writing', 'codex-cli': 'switched off in Codex by the profile Writing', 'opencode-cli': 'switched off in OpenCode by the profile Writing' });
+    const home = { skills: { tools, items: [], library: {} }, mcp: view, agents: { tools, items: [], library: {} } } as unknown as HomeView;
+    assert.deepEqual(kindSource(home, 'mcp').facts[0]?.switched, { 'claude-cli': 'switched off in Claude Code’s own settings', 'codex-cli': 'switched off in Codex’s own settings', 'opencode-cli': 'switched off in OpenCode’s own settings' });
     assert.match(say.harnessLine({ key: 'docs', hashes: { 'codex-cli': 'x' }, plan: { current: ['codex-cli'], write: [], remove: [], forget: [], found: [], keep: [] }, switched: { 'codex-cli': 'switched off in Codex’s own settings' } }, view.library.docs, 'codex-cli', 'Codex'),
       /It is switched off in Codex’s own settings: Codex doesn’t start it\. Central Knot leaves that switch as it is, so it is still off there after Off and On\./);
     // Off: out of Codex (its own fields kept, the switch with them); Claude Code waits.
     await box.send(off('docs'), tools);
     assert.equal(await commandIn(box, 'codex-cli'), undefined);
-    // No profile: back on only where a profile turned it off and the tool still has it (Claude Code's entry, still waiting).
-    await switchProfile(box.context, null);
-    assert.doesNotMatch(await readFile(join(box.home, '.claude/settings.json'), 'utf8'), /deniedMcpServers/);
-    // On: Codex's and OpenCode's entries come back as they were, each where it was and switched off in its own fields; the row says so.
+    // On: Codex's and OpenCode's entries come back as they were, each where it was and switched off in its own fields; the row
+    // says so. Claude Code's switch was never touched.
     await box.send({ ...on('docs'), seenManaged: false }, tools);
     assert.match((await box.files())['codex-cli']!, /\[mcp_servers\.docs\]\ncommand = "npx"\nenabled = false\n/);
     assert.deepEqual(JSON.parse((await box.files())['opencode-cli']!).mcp, { servers: { docs: { type: 'local', command: ['npx'], disabled: true } } });
+    assert.match(await readFile(join(box.home, '.claude/settings.json'), 'utf8'), /"serverName": "docs"/);
     view = await serversView(box.context, tools);
-    assert.deepEqual([view.items[0]?.on, view.items[0]?.switchedOff], [true, ['codex-cli', 'opencode-cli']]);
+    assert.deepEqual([view.items[0]?.on, view.items[0]?.switchedOff], [true, ['claude-cli', 'codex-cli', 'opencode-cli']]);
   } finally { await box.cleanup(); }
 });
 

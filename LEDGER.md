@@ -1638,3 +1638,89 @@ MCP servers are the third kind on the library, by implementing `librarypass.ts K
 - *After a click each row is under the heading true for it*: rows were held in place while the pointer or focus was on them, under a heading that no longer fit. Of regrouping at once and a heading that claims nothing while held, regrouping at once is the smaller: the hold (`matrix.ts pinRows`, `regroupIfLeft`, the pointer and focus tracking, `state.reads`) is deleted, for Skills and Agents too. End-to-end checks: "after a click each row is under the heading true for it, from the keyboard too, and the headings count their rows", "after a click with the pointer over the list too, each row is under the heading true for it", "after a click each agent is under the heading true for it, from the keyboard too", and the skills check "and its row is under On at once, the pointer over the list too".
 - *A row's line is shortened only when it has no room*: an opened item's dock takes half the width (was 60%), so a server's URL beside its name and tag shows whole at full screen. End-to-end check: "docked at full screen, a row's line is shortened only when it has no room".
 - *Next reader*: `readTool`'s `section`, the `reset` notice kind and README's "was reset" line are gone; the "same bytes back" promise says what holds for an MCP entry; one name for a shared file's fixed identity (`librarypass.ts sharedFileSeen`); MAP names `mcp.ts cannotHold`; stale pointers fixed.
+
+## Items live in Central Knot, step 3b: profiles are sets of On items, November 13, 2026
+
+A profile is a named set of library items (skills, MCP servers and agents). Switching to it turns each item it names On and every other library item Off, by the library's own clicks, in one pass per kind; nothing in a profile flips a tool's own switch any more. Which profile is in use is worked out from what is On, never stored. The rules are `profileplan.ts`'s, pure, read by the switch, the page, History and the menus alike.
+
+**What a person sees change.**
+- **The Profiles page** lists every library item under Skills, MCP servers and Agents, each with its box and one column that says what a switch does to it ("Turns on", "Turns off", "Stays on", "Stays off"; "On" or "Off" for the profile in use). The header counts it ("Switching turns 2 items on and 5 off") and says an MCP server's change in Claude Code waits for Write to Claude Code. The per-tool columns, "off by hand", the "by a profile" mark, No profile, "Apply to tools" and the drift dot are gone. A profile with nothing in it offers no switch (it would turn everything off); its first step is "Start from what's on now". Any profile can be deleted, the one in use too: no item changes, and Undo makes it again.
+- **A switch** writes one History row ("Switched to Incident: 2 items turned on and 5 turned off."), and the items' own On and Off rows are not written for it. Its result band offers Undo switch and, when an MCP server's part waits for Claude Code, Write to Claude Code (never said done). Switching to the profile in use changes nothing and writes nothing.
+- **Undo switch** turns back each item still as the switch left it (one it turned On that is On, one it turned Off that is Off), by each item's own Turn on or Turn off, each with its own row; an item changed since stays. No copies are given back. Its band offers no Undo of the Undo: each item's row has its own action.
+- **The profile in use** is the one whose items are exactly the On items, ids naming no live item skipped. It shows in the list ("In use"), the header, the status bar and beside the menu bar icon, and follows a hand click, an item taken in or pulled, a copy deleted by hand, a Delete. None matching: No profile. Two with the same items: both, "Development and On call". An empty profile is in use while nothing is On.
+- **The menus**: each profile is a checkbox item ticked while it is in use; the No profile item and "Apply … to tools" are gone.
+
+**Map of this step.**
+- `src/profileplan.ts` (rewritten, pure): `liveItems`, `homeItems`, `switchPlan`, `inUse`, `inUseName`, `undoPlan`, `turnsWords`.
+- `src/profiles.ts` (rewritten): profiles.json format 2 (`readProfileFile` also reads format 1 for the page), `saveProfile`, `deleteProfile`, `whyNotNow` (the one gate every kind's pass shares, asked first), `switchProfile` (the entry first, then `turnTogether`: the clicks with `PassOptions.told`, and what each item became read back), `undoSwitch`, `liveNow` for the menus.
+- `src/profilemigrate.ts` (new): format 1 moved once (its header has the steps and their order).
+- `src/librarypass.ts`: `PassOptions.told` (a profile switch's clicks are told in its own entry; `logItem` leaves their On and Off entries out). `src/servers.ts`: `releaseKeptDenies` after every servers pass; `src/serverstore.ts`: `keptDenies`, `claude-denies.json`.
+- The page: `src/profilespage.ts` (rewritten), the status bar's menu in it; `src/main.ts` (`profileMenu`, `followProfiles` from the library's items, `migrateProfiles` first in every pass); `src/app.ts` (`switchToProfile`, `turnedOutcome`); `src/historypage.ts` (`profileSwitch`); `src/harnesspage.ts` (the name in use).
+- `MAP.md`'s Profiles area, a path for a profile switch, and the names that meant two things.
+
+**Migration of profiles.json, format 1 to 2** (`profilemigrate.ts`; `tests/profiles.test.ts` holds the fixture home). It runs first in every pass main makes, with Sync on or off, where a pass may write (`whyNotNow`: preview-only, another build's home or one waiting for Resume wait).
+
+| In format 1 | In format 2 |
+| --- | --- |
+| `profiles[].items`: `skill:<key>` | the same |
+| `profiles[].items`: `mcp:<name as written>` | `mcp:<key>` |
+| (no agents) | every agent On at migration joins every profile |
+| `offByProfile`: every listed switch, whether or not the item's copy is there now | released where it is (skills: `skillswitch.ts setDisabled`, Claude Code's override put back as kept, by the item's name where the copy is gone; servers: `mcpswitch.ts withMcpSwitch`, one checked write per file), or, for a server's switch inside an entry that is out of the tool (Codex, Pi, OpenCode), in the own part Central Knot keeps for it (`mcpswitch.ts ownWithoutSwitch`), every other own field kept |
+| a library item held off by listed switches in every tool that has it (every tool whose copy loads it now, all read) | Off, on record before any switch is cleared; its copies taken out by a pass after the clearing, so Codex's, Pi's and OpenCode's own part is kept with the switch cleared |
+| a listed switch turned back on by hand, an item one tool still loads, a tool that can't be read | the item stays as it is |
+| Claude Code's deny of a server in the library not wanted there afterwards (turned Off, kept out, deleted) while Claude Code still has its entry | kept, listed in `claude-denies.json`; cleared by the first servers pass that finds the server wanted in Claude Code. With the entry gone, nothing can start: released at once |
+| a switch set by hand (not listed) | left, shown with its mark |
+| `active` | dropped |
+| the file | kept as `profiles.v1.json` |
+
+When it turns something Off, one History row says what ("Profiles are sets of items now: …"), with Undo (each item's Turn on). Its closing pass touches only the held items that are Off (turned Off now, or by a run that stopped part-way); an item that stays On is left to the ordinary sync rule, with Sync off too. After it, one pass writes nothing.
+
+*Claude Code's order, the smaller way:* keep the deny and clear it once the server is wanted in Claude Code again. The other way, clearing it when Write to Claude Code takes the entry out, also needs the list, and still leaves the deny when the server is turned On before Write (its entry never went, so Write has nothing to do for it). Wanted-again covers both cases with one rule.
+
+**Sequences that behave differently from `next` on purpose.**
+- A switch turns what a profile leaves out Off in the library, which takes its copies out of every tool (on `next` it flipped each tool's own switch and the copies stayed); it turns On what the profile names, also where a switch set by hand had it off (on `next` a hand switch stayed off: such switches are now tools' own marks, which no switch touches).
+- Agents are in profiles (on `next` none).
+- No profile is no action (on `next` it turned back on everything profiles had turned off); the status bar says No profile when none matches.
+- The profile in use follows the library by itself (on `next` it was stored, and drift counted what no longer matched, with "Apply to tools").
+- Undo switch is each item's own Turn on or Turn off, each with its own row, and has no Redo (on `next` the Undo was a switch of its own, with Redo; it refused when the profile switched from was deleted).
+- The profile in use can be deleted (on `next` it couldn't).
+- A tool's own switch an earlier profile set reads as that tool's own (on `next`, "switched off by the profile Incident"); the migration clears those it can.
+- A switch in a home waiting for Resume is refused before anything is written (on `next` profiles flipped switches there).
+
+**Decisions made in this step, beyond the brief.**
+- *A switch asks the passes' one gate first* (`profiles.ts whyNotNow`) and refuses in plain words, so no switch is ever refused part-way by a pass and no entry has to say a part was not done. Every kind's pass shares that gate (write access, the sync owner, Resume), so per kind there is nothing left to refuse in ordinary use.
+- *What each item became is read back after the passes.* The walk found one way an item is not as the switch asked: a server whose Claude Code entry was lost (Claude Code rewrote its file) while its removal waited turns Off again in the same pass that turns it On (the library's deleted-by-hand rule). The band lists only what is as asked and says the rest "is not as it asked: History says why"; History keeps the switch's row, then the item's own deleted-by-hand row. Test: "A server whose entry Claude Code lost while its removal waited …".
+- *Two profiles with the same items are both in use* and named together, since the name is worked out and neither is truer.
+- *An empty profile is offered nowhere* (page, status bar, menu bar), as before.
+- *Undo of a switch writes no profile row of its own*; it marks the switch's row undone by the first item row it made.
+- *The migration writes one History row* when it turns anything Off, so what it changed is said, with Undo.
+- *Format 1 is read for the page* (its ids translated) where the migration waits; editing such a file is refused until it is moved, so its holds are never lost.
+- *Every plugin Apply all reads the home again* (`pluginstate.ts applyPluginOps`; before, only a change of parts did). The Mac run found it: the Skills page showed a plugin's skill still on in Codex after Apply all turned it off, because the page had followed only through the profiles' watch of the switch files, which this step deletes, and only while a profile existed. End-to-end check: "on the Skills page its Codex box shows it off, the plugin’s other skill on".
+
+**Deleted.** `profileplan.ts`'s `planSwitch`, `driftOf`, `offAfterFlips`, `offAfterFailures`, `releaseHolds`, `holdsOnWhatIsHere`, `offByHand`, `standing`, `changedSince`, `choseProfileInUse`, `changedProfile`, `redoneSwitch`, `profileSkills`, `profileServers`, `switchItems`, `presentItems`, `profilesInUse`, `activeProfile`, `flipCounts`, `flipWords`, `flipSummary`, `SwitchItem`, its `ItemKind`; `profiles.ts`'s flipping (`switchOf`, `editText`, `writeFlips`, `whyNotTaken`, `flipAll`), `undoProfileSwitch`, `whatGoesBack`, `switchFilesStamp`, `driftNow`, `releaseProfileHolds`, `switchedByHand`, `offByProfile`, `active`; `main.ts`'s drift, `lastStamp`, `lookAtSwitchFiles`, the No profile and Apply items, and `releaseProfileHolds`'s last caller (Clear the switch; step 3a removed the two for servers); the page's per-tool columns, legend, notes, "off by hand", No profile view and Stop using profiles; `itemrow.ts profileItemOf`, `matrix.ts turnedOffByProfile` and the key's "Off by a profile"; `skills.ts`'s read of a profile's flips; `skillswitch.ts switchState` and `switchedText` (only profiles called them); `types.ts ProfileFlip`, `ApplyResult.flips`, `SkillFacts.disabled`, `ProfilesView.active`/`offByProfile`; the CSS only those used. Tests: the old `tests/profiles.test.ts`, `skillmigrate.test.ts`'s profile-hold test; `servers.test.ts`'s switch test now sets the switches by hand.
+
+**States the brief did not explain** (each takes the choice that keeps every content and writes nothing else).
+- A listed switch whose file can't be read or changed at migration: left as it is, a tool's own switch from then on.
+- A listed switch for an item only found (not in the library): cleared; nothing else.
+- A crash inside the migration between clearing the switches and moving the file: the next pass runs it again; the items already Off stay Off (they are on record first), so it reaches the same end. One more History row may be written.
+
+**Validation.**
+- `npm test`: the type check and 656 tests.
+- The walk (`tests/serverswalk.test.ts`: a server, a skill and an agent, now with three profiles, switches and their Undo among the steps; (h) lets a profile's actions touch the skill and the agent, (c) counts a record change as doing something): seeds 11000–11049 found one class (the band claiming an item turned on that the same pass turned Off again, above), fixed; then 11000–11049 and 11050–11099, each half, clean.
+- Each new rule switched off: 24, every one failing a named test (one, "a switch off now counts", survived at first and got the `back` skill in the migration's fixture).
+- End-to-end checks (`scripts/e2e.mjs`) rewritten for profiles: the page's preview row by row, the switch's folders and the name in use everywhere, an empty profile offering no switch, Undo switch byte for byte, the status bar's switch on Skills, a hand click changing the name, and History's Undo leaving what changed since. Run on the Mac (no Linux run, per the brief).
+- Pictures: `node scripts/ui-tour.mjs <out> --electron --no-sandbox --only profiles` under `xvfb-run`, 68 pictures of every state of the Profiles page at 860×560, 1280×800, 1728×1117 and 2560×1440 and in light, each with its `.txt` (`/home/picoder/work/ck-one-switch-plan/tour-l3b/`).
+
+**Follow-ups.**
+- Found items joining a profile, the Harnesses page, first setup, plugins and Git links are later steps.
+- `profiles.v1.json` and `claude-denies.json` stay until a later clean-up.
+
+**Fix round 1** (eight reviewers of afc6cfe; `FIX-L3B-R1.md`). Each behaviour item was reproduced as a test that failed first.
+- *Every switch format 1 lists is released, copy or not* (`profilemigrate.ts releaseAt`, `onRecord`, `releaseSkills`, `releaseInFiles`; `mcpswitch.ts ownWithoutSwitch`): a server's switch inside an entry that is out of the tool is cleared in its kept own part; Claude Code's deny is released at once where Claude Code no longer has the entry (nothing can start), and kept only while it has it; a skill's rule goes by the item's name where its copy is gone. Test: "Migration releases a profile’s switch on a copy that is not there now …".
+- *The migration's closing pass touches only held items that are Off*, so with Sync off a waiting hand edit of an item that stays On is not copied. Test: "Migration with Automatic sync off leaves an item that stays On to the ordinary sync rule …".
+- *A settings file's change reaches the open page*, whether or not the pass wrote (`main.ts backgroundPass`, `settingsTouched`), and each tool's switch file is watched as the MCP settings files are (`main.ts startWatching`): Claude Code's settings.json was not watched, and the profiles' stamp of switch files, which made the page follow, is gone. A folder's event tells the page only with Sync off, as before: telling it after every event re-read the page after each of Central Knot's own copies, and the Mac run's crash check took 107 s longer. End-to-end check: "a switch set in Claude Code’s settings reaches the open page …" (no Refresh).
+- *A migration stopped part-way writes one History entry*: the entry is written only when something turns Off (its `cleared` count is gone), so the run that finishes it writes none. Test: "A migration stopped part-way is finished by the next pass, with one History entry". A stop between writing the entry and saving the items Off would still write a second one.
+- *The page*: the header wraps whole and says Claude Code's MCP servers change at Write to Claude Code only when one does (a server turning On that Claude Code lacks, or turning Off that it has); "In use · 2 items on, the other 5 off"; an empty profile says "Tick at least one item to switch to it"; whether a profile is offered is one rule (`profileplan.ts switchable`) for the page and both menus; stacked at 860×560 the page scrolls as one, every profile and then the items (with eight profiles the inner box showed two item rows). End-to-end check: "the status bar, the list and the header say Incident is in use".
+- *Next reader*: MAP says sources are under `src/`, names `main.ts switchFromMenu` and `historypage.ts profileSwitch`; `profilespage.ts` names a list `inUseNow` and a yes/no `isInUse`; Undo's wording is "whose On or Off differs now"; `skills.ts` names the migration among the writers of a skill's switch; `.pf-menu-note` is gone.
+- Pictures of the states changed: `/home/picoder/work/ck-one-switch-plan/tour-l3b-r2/`, at 860×560 and 1280×800, with `tour.md`.
+

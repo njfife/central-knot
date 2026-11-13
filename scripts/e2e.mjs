@@ -638,11 +638,11 @@ async function practiceFlow() {
   // its line says so; Clear the switch, in the opened row, clears it.
   const switchFiles = ['.claude/settings.json', '.copilot/settings.json', '.codex/config.toml'].map(file => join(practice, file));
   const readSwitches = () => switchFiles.map(file => (existsSync(file) ? readFileSync(file, 'utf8') : ''));
-  const settledJson = (text, index) => (index === 2 ? text : JSON.stringify(Object.fromEntries(Object.entries(text.trim() ? JSON.parse(text) : {}).filter(([, value]) => !(value && typeof value === 'object' && !Object.keys(value).length)))));
   const claudeSettingsBefore = readSwitches()[0];
   writeFileSync(switchFiles[0], JSON.stringify({ ...JSON.parse(claudeSettingsBefore || '{}'), skillOverrides: { 'release-notes': 'off' } }, null, 2));
-  await a.click('#header-refresh');
-  same('a switch set in Claude Code’s settings is read, not undone: the folder stays, the mark is off, the tag says so', [folders('release-notes').every(Boolean), await offMarks(a, 'release-notes'), /switched off in Claude Code/.test(await a.text('.ov-row[data-key="release-notes"]') ?? ''), await switchOn(a, 'release-notes')], [true, ['claude-cli'], true, true]);
+  // No Refresh: the settings file is watched, and the page reads again though the pass wrote nothing.
+  for (let tries = 0; tries < 80 && !(await offMarks(a, 'release-notes')).length; tries++) await wait(100);
+  same('a switch set in Claude Code’s settings reaches the open page, and is read, not undone: the folder stays, the mark is off, the tag says so', [folders('release-notes').every(Boolean), await offMarks(a, 'release-notes'), /switched off in Claude Code/.test(await a.text('.ov-row[data-key="release-notes"]') ?? ''), await switchOn(a, 'release-notes')], [true, ['claude-cli'], true, true]);
   await opened('release-notes');
   check('its line in the opened row says the tool doesn’t load it', /Claude Code doesn’t load it, and Central Knot leaves that switch as it is/.test(await a.text('.details') ?? ''), await a.text('.details'));
   await a.click('#clear-switch-release-notes-claude-cli');
@@ -661,49 +661,43 @@ async function practiceFlow() {
   same('its Undo puts Codex’s folder back as it was', folders('standup'), standupOn);
   await opened('standup', false);
 
-  // Profiles: a profile with only notes in it turns every other skill and MCP server off with each tool's own switch, in one
-  // History step; the folders and MCP entries stay where they are, and Undo puts every switch back.
-  const switchesBefore = readSwitches();
-  const claudeJsonBefore = readFileSync(join(practice, '.claude.json'), 'utf8');
+  // Profiles: a profile with only notes in it. Before the click the page says what switching turns off; the switch turns every
+  // other skill Off (each one's own Off: its folders leave every tool, Central Knot keeps it) in one History step; the profile in
+  // use is worked out, so a hand click changes it; and Undo switch puts every folder back.
+  const skillsOn = ['notes', 'release-notes', 'standup', 'review'];
+  const allFolders = () => Object.fromEntries(skillsOn.map(key => [key, folders(key)]));
+  const allOn = allFolders(), gone = [null, null, null];
   await a.click('#nav-profiles');
   await a.click('#profile-new');
   await a.run(`(() => { const input = document.querySelector('#profile-name'); input.value = 'Incident'; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
   await a.settle();
+  same('an empty profile offers no switch: it would turn everything off', [await a.exists('#profile-switch'), await a.exists('#profile-from-now')], [false, true]);
   await a.click('#pf-skill\\:notes');
-  check('ticking only edits the profile', JSON.stringify(readSwitches()) === JSON.stringify(switchesBefore));
+  same('ticking only edits the profile', allFolders(), allOn);
+  const stateShown = key => a.text(`.pf-row[data-item="skill:${key}"] .pf-state`);
+  same('before the click the page says what switching turns off, row by row and in the header', [await stateShown('notes'), await stateShown('standup'), await a.text('.profile-header p')], ['Stays on', 'Turns off', 'Switching turns 3 items off']);
   await a.click('#profile-switch');
-  const [claudeSwitches, copilotSwitches, codexSwitches] = readSwitches();
-  same('the switch turns the rest off in each tool’s own settings, and leaves notes (ticked) on', [JSON.parse(claudeSwitches).skillOverrides?.notes ?? 'on', (JSON.parse(copilotSwitches).disabledSkills ?? []).includes('notes'), JSON.parse(claudeSwitches).skillOverrides?.standup, JSON.parse(claudeSwitches).deniedMcpServers, JSON.parse(copilotSwitches).disabledMcpServers, codexSwitches.split(/\n(?=\[)/).find(table => table.startsWith('[mcp_servers.files]'))?.includes('\nenabled = false\n')],
-    ['on', false, 'off', [{ serverName: 'docs' }], ['files'], true]);
-  same('nothing is moved: folders and MCP entries stay', [existsSync(join(practice, '.claude/skills/standup/SKILL.md')), readFileSync(join(practice, '.claude.json'), 'utf8') === claudeJsonBefore], [true, true]);
-  same('the status bar names the profile in use', (await a.text('#status-profile'))?.trim(), 'Incident');
+  same('the switch takes what Incident leaves out out of every tool, and leaves notes', [folders('standup'), folders('release-notes'), folders('review'), folders('notes')], [gone, gone, gone, allOn.notes]);
+  same('the status bar, the list and the header say Incident is in use', [(await a.text('#status-profile'))?.trim(), await a.text('.profile-row.selected .profile-in-use'), await a.text('.profile-header p'), await a.exists('#profile-switch')], ['Incident', 'In use', 'In use · 1 item on, the other 3 off', false]);
+  check('the result says what it turned off, with Undo switch', /^Switched to Incident: 3 items turned off\./.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-undo'), await a.text('.bands'));
   await a.click('#outcome-undo');
-  // settings.json files the switch made hold only emptied switch lists afterwards; Codex's config.toml is byte for byte as it was.
-  same('Undo switch puts every switch back', readSwitches().map(settledJson), switchesBefore.map(settledJson));
-  same('…and No profile is in use again', (await a.text('#status-profile'))?.trim(), 'No profile');
+  same('Undo switch puts every folder back, byte for byte, and no profile is in use', [allFolders(), (await a.text('#status-profile'))?.trim()], [allOn, 'No profile']);
   await a.click('#nav-skills');
-  // A switch from the status bar: its result shows on the Skills page with its Undo. A skill it switched off in every tool
-  // stays On in Central Knot, every folder in place; its marks and tag say each tool's switch is off.
+  // A switch from the status bar: its result shows on the Skills page with its Undo, and a skill it turned off is under Off.
   const switchFromBar = async name => { await a.click('#status-profile'); await a.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes(${JSON.stringify(name)})).click()`); await a.settle(); };
   const statusShown = () => a.run(`(() => { const region = document.querySelector('#announcement'); return region.classList.contains('visually-hidden') ? '' : region.dataset.text; })()`);
   const openRow = async (key, probe) => { if (!(await a.exists(probe))) await a.click(`#open-${key}`); };
   await switchFromBar('Incident');
-  check('the switch’s result shows on Skills, with Undo switch', (await a.text('.band-done') ?? '').includes('Incident is the profile now') && await a.exists('#outcome-undo'), await a.text('.bands'));
-  same('a skill the profile leaves out is switched off in every tool, its folders in place, still On in Central Knot', [await offMarks(a, 'standup'), /switched off in all 3 tools/.test(await a.text('.ov-row[data-key="standup"]') ?? ''), folders('standup').every(Boolean), await switchOn(a, 'standup'), await offMarks(a, 'notes')],
-    [['claude-cli', 'copilot-cli', 'codex-cli'], true, true, true, []]);
-  await a.click('#outcome-undo');
-  // On History (no result band) the switch is listed at once and its result is said in the status bar, as is its Undo from there.
+  check('the switch’s result shows on Skills, with Undo switch', /^Switched to Incident/.test(await a.text('.band-done') ?? '') && await a.exists('#outcome-undo'), await a.text('.bands'));
+  same('a skill it leaves out is under Off, in Central Knot only', [(await sectionsNow(a)).find(([section]) => section === 'off')?.[1], folders('standup')], [['release-notes', 'review', 'standup'], gone]);
+  // Turned back on by hand: the profile in use is worked out, so the status bar follows at once.
+  await a.click('#switch-standup');
+  same('after a hand click no profile is in use, and the status bar says so', (await a.text('#status-profile'))?.trim(), 'No profile');
+  // On History, the switch's Undo turns back only what is still as the switch left it: standup, turned on since, stays.
   await a.click('#nav-history');
-  const profileRows = async () => (await a.all('.history-row[data-kind="profile"]')).length;
-  const rowsBeforeSwitch = await profileRows();
-  await switchFromBar('Incident');
-  check('a switch from the status bar on History is listed at once and said', (await profileRows()) === rowsBeforeSwitch + 1 && /^Incident is the profile now/.test(await statusShown() ?? ''), [rowsBeforeSwitch, await profileRows(), await statusShown()]);
-  // Claude Code's switch for standup is turned back on by hand: the Undo leaves it, and says so where it can be seen.
-  const claudeSettings = JSON.parse(readFileSync(switchFiles[0], 'utf8'));
-  delete claudeSettings.skillOverrides.standup;
-  writeFileSync(switchFiles[0], JSON.stringify(claudeSettings, null, 2));
   await a.run(`document.querySelector('.history-row[data-kind="profile"] .history-actions button').click()`); await a.settle();
-  check('its Undo from History says what it did, and what it left, in the status bar', /^Undone:/.test(await statusShown() ?? '') && /changed since, so it was left as it is/.test(await statusShown() ?? '') && (await a.text('#status-profile'))?.trim() === 'No profile', await statusShown());
+  check('its Undo from History says what it did, in the status bar', /^Undone: 2 items turned on\./.test(await statusShown() ?? ''), await statusShown());
+  same('…and every skill is on again', skillsOn.map(key => folders(key).every(Boolean)), [true, true, true, true]);
   await a.click('#nav-skills');
   // An armed Delete from Central Knot stays on the visit it was clicked on.
   const standupOpen = () => openRow('standup', '#delete-standup, #delete-confirm-standup');
@@ -2267,8 +2261,7 @@ async function updateFlow() {
     await a.click('#profile-new');
     await a.run(`(() => { const input = document.querySelector('#profile-name'); input.value = 'Incident response on call'; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
     await a.settle();
-    await a.click('#pf-skill\\:notes');
-    await a.click('#profile-switch');
+    // Nothing is in Central Knot in this fresh home, so the empty profile is the one in use: the status bar names it.
     await sizeTo(a, 860, 560);
     /** In the rail, then open: the sidebar fits, and nothing in the status bar runs into its neighbour. */
     const fitsBothWays = async when => {
@@ -2278,7 +2271,7 @@ async function updateFlow() {
       same(`and the status bar fits: ${when}`, await crowding(), []);
       await a.click('#sidebar-toggle');
     };
-    same('the narrow bar has the profile, idle sync and the version', [await a.exists('#status-profile'), await a.text('#sync-switch .sync-state'), await a.text('#status-version')], [true, 'On · nothing synced', '0.5.0 preview 5']);
+    same('the narrow bar has the profile in use, idle sync and the version', [(await a.text('#status-profile'))?.trim(), await a.text('#sync-switch .sync-state'), await a.text('#status-version')], ['Incident response on call', 'On · nothing synced', '0.5.0 preview 5']);
     await fitsBothWays('Check for updates');
     await reaches('available');
     await fitsBothWays('Update available');

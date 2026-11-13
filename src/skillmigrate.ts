@@ -27,8 +27,8 @@
 //                                                        question chooses when the person turns it on
 // Every revision kept under items/<folder>/<hash>/ is a version of its skill (displaced content was kept there too); the old
 // folders stay where they are. The record's folder identities (`roots`) become the library's `folders`, so a folder reset
-// before the library is never read as deletions. A switch set in any tool and a profile's hold are left exactly as they are:
-// both are read at each look (skills.ts).
+// before the library is never read as deletions. A switch set in any tool, by a person or a profile, is left exactly as it is:
+// it is read at each look (skills.ts), and a profile's is released by profilemigrate.ts.
 import { readdir, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { harnessIds, harnesses } from './harnesses.ts';

@@ -1,7 +1,7 @@
 // A tool's own switch for one skill (capability data, Appendix B; ENB-01, ENB-02): the copy stays where it is and keeps receiving
 // updates; the tool just doesn't load it. Central Knot's Off never writes it (Off takes the folder out: library.ts). It is read
 // for the mark on that tool's line (skills.ts rowFacts), cleared by the one action that writes it for a skill (skills.ts
-// clearSwitch), and flipped by profiles (profiles.ts) and for a plugin's skill (plugins.ts). Each tool keeps its switch in its own
+// clearSwitch, and its Undo), released once by the profiles migration (profilemigrate.ts), and flipped for a plugin's skill (plugins.ts). Each tool keeps its switch in its own
 // user-wide settings file, which is edited in place: only the switch changes. Every other byte stays, apart from these: the JSON
 // list holding Copilot's or Pi's switches is written back as a list (same entries, JSON layout); a list or map Enable leaves empty
 // goes with its last entry (and a JSON settings file that wasn't there is left as `{}`); a config.toml without a final newline
@@ -73,7 +73,7 @@ export async function setDisabled(context: ShareContext, tool: HarnessId, target
 }
 
 // Claude Code overrides a Disable replaced (say "name-only"), by skill folder. Kept in the store, not only in History (which
-// expires), so any later Enable puts the value back: the Skills page's and a profile's alike.
+// expires), so any later Enable puts the value back.
 const keptOverridesPath = (context: ShareContext) => join(storeDirectory(context.home), 'skill-overrides.json');
 export async function readKeptOverrides(context: ShareContext): Promise<Record<string, string>> {
   try { return (record(JSON.parse(await readFile(keptOverridesPath(context), 'utf8'))) ?? {}) as Record<string, string>; } catch { return {}; }
@@ -84,17 +84,6 @@ export async function keepOverrides(context: ShareContext, changes: Record<strin
   const next = { ...kept };
   for (const [folder, value] of Object.entries(changes)) { if (value === undefined) delete next[folder]; else next[folder] = value; }
   if (JSON.stringify(next) !== JSON.stringify(kept)) await writeDurably(keptOverridesPath(context), `${JSON.stringify(next, null, 2)}\n`);
-}
-
-/**
- * For a caller that edits several switches in one file with one checked write (profiles.ts): whether `text` turns this copy off,
- * and `text` with it turned off or on (`restore` as for setDisabled), with what Claude Code's override held before. Both throw
- * when the text isn't the tool's format.
- */
-export const switchState = (context: ShareContext, tool: HarnessId, text: string, target: SwitchTarget) => stateIn(context, tool, parse(tool, text), target).disabled;
-export function switchedText(context: ShareContext, tool: HarnessId, text: string, target: SwitchTarget, disabled: boolean, restore?: string): { text: string; previous?: string } {
-  const parsed = parse(tool, text);
-  return { text: withSwitch(context, { tool, path: '', text, exists: true, parsed }, target, disabled, restore), previous: stateIn(context, tool, parsed, target).previous };
 }
 
 /** A switch change's failure in words: its own reason, or the plain one for a file system error. */

@@ -2,11 +2,11 @@
 // Undo or Restore where the kept content allows it (CON-02, DEL-03). Skills', MCP servers' and agents' entries are worded, and
 // their actions decided, by historyactions.ts; here are profiles' and the base instructions' entries, and the sentences of
 // entries from before an item was on the library (which offer only what historyactions.ts finds left to do).
-import { DAY_MS, timesApart } from './model.ts';
+import { DAY_MS, plural, timesApart } from './model.ts';
 import { noTools, restoreEvent, showPage, shownPath, state, touchedToolsPhrase } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
-import { changedProfile, flipSummary, NO_PROFILE, redoneSwitch } from './profileplan.ts';
+import { changes, homeItems, NO_PROFILE, turnsWords, undoPlan } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
 import { doneWords, keptOver, libraryAction, libraryEntry, librarySentence, versionChoices } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
@@ -79,20 +79,19 @@ function pulledBase(event: HistoryEvent, tools: string): { glyph: IconName; text
   return { glyph: 'git-branch', text: `${first ? 'Added in the git repo, so Pull set' : 'Changed in the git repo, so Pull updated'} the base instructions${tools ? ` in ${tools}` : ''}.`, action: 'Undo' };
 }
 
-/** A profile switch: what it switched to, and how many items it turned off and on, where. An undo says what it undid. */
-function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; action: string } {
-  const switched = event.profile!;
-  // Said as the result of the switch said it.
-  const counts = flipSummary(switched.flips) || 'no switch needed changing';
-  const undid = state.history.data?.find(other => other.undoneBy === event.id);
-  const to = switched.toName ?? NO_PROFILE;
-  // A redo undoes an undo: it makes that switch again (named by the switch, not the profile in use), and its own Undo undoes it once more.
-  const redid = state.history.data && redoneSwitch(state.history.data, event);
-  if (redid) return { glyph: 'sliders-horizontal', text: `Redid the switch to ${redid.profile?.toName ?? NO_PROFILE}: ${counts}.`, action: 'Undo' };
-  if (undid?.kind === 'profile') return { glyph: 'undo-2', text: `Undid the switch to ${undid.profile?.toName ?? NO_PROFILE}; back to ${to}: ${counts}.`, action: 'Redo' };
-  // Apply to tools: the profile in use, made to match again.
-  if (!changedProfile(event)) return { glyph: 'sliders-horizontal', text: `Applied ${to} to tools again: ${counts}.`, action: 'Undo' };
-  return { glyph: 'sliders-horizontal', text: `Switched${switched.fromName ? ` from ${switched.fromName}` : ''} to ${to}: ${counts}.`, action: 'Undo' };
+/**
+ * A profile entry (profiles.ts): a switch, or the profiles migration (profilemigrate.ts), with the items it turned On and Off. Its Undo is offered while an item is still as it left it (profileplan.ts undoPlan). One from before
+ * profiles were sets of items has neither list, and is past: it offers nothing.
+ */
+function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; action?: string } {
+  const was = event.profile!, glyph: IconName = 'sliders-horizontal';
+  if (!was.on && !was.off) return { glyph, text: `Switched to ${was.toName ?? NO_PROFILE} with each tool’s own switches, before profiles were sets of items.` };
+  const action = state.home && changes(undoPlan(event, homeItems(state.home))) ? 'Undo' : undefined;
+  if (was.migrated) {
+    const off = was.off ?? [];
+    return { glyph, text: `Profiles are sets of items now: ${plural(off.length, 'item')} ${was.toName ?? 'a profile'} held off in every tool ${off.length === 1 ? 'is' : 'are'} off now, and the switches profiles had set in tools are released.`, action };
+  }
+  return { glyph, text: `Switched to ${was.toName}: ${turnsWords({ on: was.on ?? [], off: was.off ?? [] }, 'did')}.`, action };
 }
 
 /** Skills, MCP servers, agents and profile switches share History; each row says which it is. */
@@ -105,7 +104,8 @@ const day = (iso: string) => {
   return date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 };
 /** What a profile's or the base instructions' Undo will do, said before the click. */
-const actionHelp = (event: HistoryEvent) => (event.kind === 'profile' ? `Each switch this changed goes back, where it is still as this left it; ${event.profile?.fromName ?? NO_PROFILE} is in use again if this switch is the one that chose the profile in use`
+const actionHelp = (event: HistoryEvent) => (event.kind === 'profile'
+  ? `Undo: ${turnsWords(undoPlan(event, homeItems(state.home!)), 'will')}, as each was before this; an item changed since stays as it is`
   : 'Put the base instructions back as they were before this Pull, and in the tools that got them (where their file is unchanged since)');
 
 /** A library entry's buttons (historyactions.ts): its own action, and one "Use <harness>’s copy" for each copy that gave way. */
