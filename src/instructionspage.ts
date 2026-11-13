@@ -160,7 +160,7 @@ export function instructionsPage() {
   // From the files' own read (pagedata.ts): what it found, else that it is reading or could not read.
   const files = state.instructions.data;
   if (!files) return h('div.page', {}, h('div.scroll', {}, instructionsNotRead()));
-  if (!files.length) return h('div.page', {}, noToolsState('instructions-choose-home'));
+  if (!files.length) return h('div.page', {}, noToolsState('instructions'));
   return h('div.page', {}, instructionBands(),
     h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
       h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own file when a session starts. Changes are reviewed before saving, and earlier versions are kept on each card. Automatic sync leaves these files alone; base instructions change them only when you save.'),

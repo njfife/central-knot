@@ -8,7 +8,7 @@ import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
 import { managedNow } from '../src/share.ts';
 import { applySkills, skillsView } from '../src/skills.ts';
-import { absentKindsIn, absentTools, heldKinds, managedTools, noteTools, presentTools } from '../src/presence.ts';
+import { absentKindsIn, heldKinds, managedTools, noteTools, presentTools } from '../src/presence.ts';
 import { readRecord, saveRecord, type ShareContext } from '../src/share.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import type { Change, HarnessId, Snapshot } from '../src/types.ts';
@@ -40,7 +40,6 @@ test('a tool is present when its own folder exists; the others are missing', asy
   try {
     const snapshots = await box.read();
     assert.deepEqual(presentTools(snapshots), ['claude-cli', 'codex-cli']);
-    assert.deepEqual(absentTools(snapshots), ['copilot-cli', 'pi-cli', 'opencode-cli']);
   } finally { await box.cleanup(); }
 });
 
@@ -90,12 +89,12 @@ test('a present tool the record leaves out is not managed: no row shows it, and 
   const box = await home({ '.claude/skills': ['brief'] }, ['.codex']);
   try {
     const snapshots = await box.read();
-    assert.deepEqual(managedTools(snapshots), ['claude-cli', 'codex-cli'], 'a record that names no tools manages every present one');
-    assert.deepEqual(managedTools(snapshots, ['codex-cli', 'pi-cli']), ['codex-cli'], 'only present tools, in discovery order');
-    assert.deepEqual(managedTools(snapshots, []), [], 'an empty list manages none');
+    assert.deepEqual(managedTools(snapshots), ['claude-cli', 'codex-cli'], 'a record that leaves no tool out manages every present one');
+    assert.deepEqual(managedTools(snapshots, ['claude-cli', 'pi-cli']), ['codex-cli'], 'only present tools not left out, in discovery order');
+    assert.deepEqual(managedTools(snapshots, ['claude-cli', 'codex-cli']), [], 'every present tool left out manages none');
     await box.apply([{ key: 'brief', managed: true, off: [] }]);
     // Codex is left out from now on: a new skill turned on in Claude Code goes nowhere else, and Codex's own copy is left as it is.
-    assert.deepEqual(await chooseTools(box.context, ['claude-cli']), {});
+    assert.deepEqual(await chooseTools(box.context, 'codex-cli', false), {});
     await mkdir(join(box.path, '.claude/skills/later'), { recursive: true });
     await writeFile(join(box.path, '.claude/skills/later/SKILL.md'), text('later'));
     await writeFile(join(box.path, '.codex/skills/brief/SKILL.md'), text('brief edited in Codex'));
@@ -108,12 +107,12 @@ test('a present tool the record leaves out is not managed: no row shows it, and 
   } finally { await box.cleanup(); }
 });
 
-test('a record whose list names an unknown tool reads as damaged', async () => {
+test('a record whose tools left out name an unknown tool reads as damaged', async () => {
   const box = await home({ '.claude/skills': ['brief'] });
   try {
-    await chooseTools(box.context, ['claude-cli']);
+    await chooseTools(box.context, 'claude-cli', false);
     const { record } = await readRecord(box.path);
-    await saveRecord(box.path, { ...record!, tools: ['nope' as HarnessId] });
+    await saveRecord(box.path, { ...record!, leftOut: ['nope' as HarnessId] });
     assert.match((await readRecord(box.path)).problem ?? '', /damaged/);
   } finally { await box.cleanup(); }
 });
@@ -122,13 +121,13 @@ test('a tool managed again: what was deleted there meanwhile does not spread, an
   const box = await home({ '.claude/skills': ['gone', 'edited'] }, ['.codex']);
   try {
     await box.apply([{ key: 'gone', managed: true, off: [] }, { key: 'edited', managed: true, off: [] }]);
-    await chooseTools(box.context, ['claude-cli']);
+    await chooseTools(box.context, 'codex-cli', false);
     await rm(join(box.path, '.codex/skills/gone'), { recursive: true });
     await writeFile(join(box.path, '.codex/skills/edited/SKILL.md'), text('edited in Codex while left out'));
     await box.apply();
     await writeFile(join(box.path, '.claude/skills/edited/SKILL.md'), text('edited later in Claude Code'));
     await box.apply();
-    await chooseTools(box.context, ['claude-cli', 'codex-cli']);
+    await chooseTools(box.context, 'codex-cli', true);
     await box.apply();
     assert.ok(await exists(join(box.path, '.claude/skills/gone/SKILL.md')), 'the deletion in Codex did not spread');
     assert.equal(await readFile(join(box.path, '.codex/skills/gone/SKILL.md'), 'utf8'), text('gone'), 'Codex gets the copy back');
@@ -142,10 +141,10 @@ test('with Claude Code left out by the tool choice, OpenCode has the skill anoth
   const box = await home({ '.claude/skills': ['brief'] }, ['.config/opencode']);
   try {
     await box.apply([{ key: 'brief', managed: true, off: [] }]);
-    await chooseTools(box.context, ['opencode-cli']);
+    await chooseTools(box.context, 'claude-cli', false);
     await box.apply();
     assert.equal(await exists(join(box.path, '.config/opencode/skills/brief')), false, 'OpenCode reads the copy in ~/.claude/skills: no second one');
-    assert.match((await box.view()).items.find(item => item.key === 'brief')!.anotherWay?.['opencode-cli'] ?? '', /also reads a copy at .*\.claude\/skills, which is not Central Knot’s/);
+    assert.match((await box.view()).items.find(item => item.key === 'brief')!.anotherWay?.['opencode-cli'] ?? '', /^OpenCode loads the copy in Claude Code’s skills folder \(.*\.claude\/skills\), which Central Knot doesn’t manage here\.$/);
     // Gone from Claude Code's folder too: OpenCode then gets the skill of its own.
     await rm(join(box.path, '.claude/skills/brief'), { recursive: true });
     await box.apply();
@@ -166,9 +165,11 @@ test('a kind no tool in the home can hold is absent; a home with no tools holds 
 test('the tools count as changed only while the same home stays open', () => {
   const tools = (...present: HarnessId[]) => harnessIds.map(harness => ({ harness, detection: present.includes(harness) ? 'Detected' : 'Not found' }) as Snapshot);
   const opened = noteTools({ home: '', tools: '' }, '/a', tools('claude-cli'));
-  assert.equal(opened.changed, false, 'a home just opened is only noted');
+  assert.deepEqual([opened.changed, opened.joined], [false, []], 'a home just opened is only noted');
   assert.equal(noteTools(opened.noted, '/a', tools('claude-cli')).changed, false);
   const added = noteTools(opened.noted, '/a', tools('claude-cli', 'codex-cli'));
-  assert.deepEqual([added.changed, added.noted.tools], [true, 'claude-cli,codex-cli']);
-  assert.equal(noteTools(added.noted, '/b', tools('claude-cli')).changed, false, 'another home is a switch, not a change');
+  assert.deepEqual([added.changed, added.noted.tools, added.joined], [true, 'claude-cli,codex-cli', ['codex-cli']], 'a tool installed meanwhile joined');
+  assert.deepEqual(noteTools(added.noted, '/a', tools('claude-cli')).joined, [], 'one that went joined nothing');
+  const other = noteTools(added.noted, '/b', tools('claude-cli', 'pi-cli'));
+  assert.deepEqual([other.changed, other.joined], [false, []], 'another home is a switch, not a change');
 });

@@ -147,8 +147,8 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
       } });
       const out = pick(allTools as Tool[]);
       if (tools.includes(out) && tools.length > 1) add(1, { name: `${out} uninstalled`, run: async () => manage(tools.filter(tool => tool !== out)) });
-      else if (!tools.includes(out)) add(2, { name: `${out} managed again`, run: async () => { manage([...tools, out]); await chooseTools(context(), tools); } });
-      if (tools.includes(out) && tools.length > 1) add(1, { name: `${out} left out by the tool choice`, run: async () => { manage(tools.filter(tool => tool !== out)); await chooseTools(context(), tools); } });
+      else if (!tools.includes(out)) add(2, { name: `${out} managed again`, run: async () => { manage([...tools, out]); await chooseTools(context(), out, true); } });
+      if (tools.includes(out) && tools.length > 1) add(1, { name: `${out} left out by the tool choice`, run: async () => { manage(tools.filter(tool => tool !== out)); await chooseTools(context(), out, false); } });
       // A copy made unseeable, from a settled home with the agent on in that harness: the pass must turn nothing Off and remove nothing.
       const hidden = pick(tools as Tool[]);
       if (settled && place === 'on' && held && !held.except.includes(hidden) && fact?.copies[hidden]) {

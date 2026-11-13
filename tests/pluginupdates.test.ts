@@ -361,6 +361,22 @@ test('Selections that wait: a tool new here gets, once, the plugins every other 
   assert.deepEqual(box.record()?.waiting, []);
 });
 
+test('A tool whose Manage switch is turned off is forgotten as seen, with what waited for it: turned on again, it is new and gets what the others have', async () => {
+  const { box, updates } = setup();
+  const join = (plugin: string, tool: HarnessId): DueUpdate => ({ source: '/market', marketName: 'team', plugin, tool, action: 'install' });
+  box.tools = ['claude-cli', 'codex-cli'];
+  await updates.check();
+  // Codex is left out: the reads of the home no longer name it (main.ts passes the managed tools), and it is forgotten.
+  box.tools = ['claude-cli'];
+  await updates.forgetTool('codex-cli');
+  assert.deepEqual(box.record()?.seenTools, ['claude-cli']);
+  // Turned on again: a read names it, a check is made at once, and it gets the plugin Claude Code has.
+  box.tools = ['claude-cli', 'codex-cli'];
+  box.joins = { 'codex-cli': [join('issue-tracker', 'codex-cli')] };
+  await updates.present(box.tools);
+  assert.deepEqual(box.calls, ['install issue-tracker codex-cli']);
+});
+
 test('Selections that wait only while plugins change by themselves: a tool first seen with the switch or Automatic sync off is noted, and gets nothing later', async () => {
   const { box, updates } = setup();
   const join = (plugin: string, tool: HarnessId): DueUpdate => ({ source: '/market', marketName: 'team', plugin, tool, action: 'install' });

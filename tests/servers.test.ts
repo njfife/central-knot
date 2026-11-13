@@ -141,8 +141,10 @@ test('Off with Claude Code open, then On again, then Off and Delete from Central
     await writeToClaude(box.context, all, ['docs']);
     view = await box.view();
     assert.deepEqual([view.items, await commandIn(box, 'claude-cli')], [[], undefined], 'gone from Claude Code, and from the page');
-    const deleted = (await readHistory(box.context)).filter(event => event.kind === 'deleted').at(-1)!;
-    assert.equal(libraryAction(deleted, view.library.docs)?.label, 'Restore');
+    // The Delete's entry keeps its Restore; what Write to Claude Code removed is an entry of its own, with nothing to undo.
+    const deleted = (await readHistory(box.context)).filter(event => event.kind === 'deleted');
+    assert.deepEqual(deleted.slice(-2).map(event => [event.cause, event.losers.map(loser => loser.tool), libraryAction(event, view.library.docs)?.label]),
+      [[undefined, [], 'Restore'], ['in-line', ['claude-cli'], undefined]]);
   } finally { await box.cleanup(); }
 });
 const hashes = (row: LibraryFacts) => Object.fromEntries(Object.entries(row.copies).map(([tool, copy]) => [tool, copy!.hash]));

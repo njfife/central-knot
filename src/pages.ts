@@ -1,10 +1,10 @@
-import { absentKinds, announce, noTools, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type PageKind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, type Page } from './app.ts';
+import { absentKinds, announce, noToolManaged, noToolManagedSentence, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type PageKind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, type Page } from './app.ts';
 import { afterLayout, button, cardGrid, emptyState, fileBlocks, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, syncOwner, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
-import { absentTools, heldKinds, isPresent } from './presence.ts';
+import { heldKinds } from './presence.ts';
 import { brandMark, itemsTable, outcomeBand, showFiltered, skillsBrowser, wrappingPath } from './matrix.ts';
-import { andList, kindNames, kindNouns, noToolsSentence, orList } from './words.ts';
+import { andList, kindNames, kindNouns, noToolsSentence, orList, toolList } from './words.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { asksWhichCopy } from './libraryrow.ts';
 import { anyManaged, kindSource } from './itemrow.ts';
@@ -27,17 +27,22 @@ const emptyBands = () => {
 const chooseHomeButton = (id: string) => button({ variant: 'outline', icon: 'folder-open', label: 'Choose another home…', id, onclick: () => void loadHome('custom') });
 
 /**
- * A home with no tools, wherever it shows: one sentence, `more` if a page has more to say, and the way to another home,
- * at the top left, as the Overview's lead sits.
+ * A home with no tool managed, wherever it shows: one sentence (none installed, or every one left out: app.ts
+ * noToolManagedSentence), `more` if a page has more to say, and the way on, at the top left, as the Overview's lead sits:
+ * another home (`<page>-choose-home`), or Harnesses, where each tool's Manage switch is (`<page>-open-harnesses`).
  */
-const noToolsLead = (id: string, more?: string) => [h('p.overview-lead', {}, noToolsSentence, more ? ` ${more}` : ''), h('div.overview-actions', {}, chooseHomeButton(id))];
+const noToolsLead = (page: string, more?: string) => {
+  const leftOut = !!state.home?.sync.present.length;
+  return [h('p.overview-lead', {}, state.home ? noToolManagedSentence(state.home) : noToolsSentence, more ? ` ${more}` : ''),
+    h('div.overview-actions', {}, leftOut ? button({ variant: 'outline', icon: 'boxes', label: 'Open Harnesses', id: `${page}-open-harnesses`, onclick: () => showPage('harnesses') }) : chooseHomeButton(`${page}-choose-home`))];
+};
 
-/** A page with nothing to show in a home with no tools: the same lead and action as the Overview's, in its place. */
-export const noToolsState = (id: string, more?: string) => h('div.scroll.overview-scroll.no-tools', { id: `${id}-scroll` }, noToolsLead(id, more));
+/** A page with nothing to show in a home with no tool managed: the same lead and action as the Overview's, in its place. */
+export const noToolsState = (page: string, more?: string) => h('div.scroll.overview-scroll.no-tools', { id: `${page}-no-tools-scroll` }, noToolsLead(page, more));
 
-/** An empty page: what is missing and the way forward. In a home with no tools at all, that is another home. */
+/** An empty page: what is missing and the way forward. In a home with no tool managed, that is another home or Harnesses. */
 const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, body: string, id: string) => {
-  if (noTools()) return h('div.page', {}, emptyBands(), noToolsState(`${id}-choose-home`));
+  if (noToolManaged()) return h('div.page', {}, emptyBands(), noToolsState(id));
   return h('div.page', {}, emptyBands(), emptyState(glyph, title, body,
     h('div.empty-actions', {},
       button({ variant: 'outline', label: 'See which folders were read', id: `${id}-tools`, onclick: () => showPage('harnesses') }),
@@ -55,7 +60,9 @@ function addHint(holders: HarnessId[], noun: string) {
 /** What each kind's page says when no tool in this home has one: also used on a harness's page for that kind. */
 export function kindEmpty(kind: PageKind): { glyph: Parameters<typeof emptyState>[0]; title: string; body: string } {
   const holders = state.home?.[kind].tools ?? [];
-  return { glyph: ({ skills: 'wand-sparkles', mcp: 'plug', agents: 'bot' } as const)[kind], title: `No ${kindNouns[kind].many} here yet`, body: `None of your tools has ${kindNouns[kind].a} in this home. ${addHint(holders, kindNouns[kind].many)}` };
+  // A tool left out may well have some: only the managed ones are said to have none.
+  const whose = homeTools().length < (state.home?.sync.present.length ?? 0) ? 'the tools Central Knot manages' : 'your tools';
+  return { glyph: ({ skills: 'wand-sparkles', mcp: 'plug', agents: 'bot' } as const)[kind], title: `No ${kindNouns[kind].many} here yet`, body: `None of ${whose} has ${kindNouns[kind].a} in this home. ${addHint(holders, kindNouns[kind].many)}` };
 }
 const emptyKindPage = (kind: PageKind, id: string) => { const empty = kindEmpty(kind); return nothingHere(empty.glyph, empty.title, empty.body, id); };
 const noSkills = (id: string) => emptyKindPage('skills', id);
@@ -66,17 +73,20 @@ const noSkills = (id: string) => emptyKindPage('skills', id);
  */
 function leadSentence(home: HomeView): string {
   const tools = homeTools();
-  if (noTools()) return noToolsSentence;
+  if (noToolManaged()) return noToolManagedSentence(home);
   const named = andList(tools.map(toolName));
   const holdersOf = { skills: tools, mcp: home.mcp.tools, agents: home.agents.tools };
   const held = heldKinds(home).map(kind => [kindNouns[kind].many, holdersOf[kind]] as const);
-  if (tools.length === 1) return `Central Knot keeps the ${andList(held.map(([kind]) => kind))} you choose the same between your tools. Only ${named} is in this home, so there is nothing to keep in step yet.`;
+  // Installed tools whose Manage switch is off are named once, with where their switch is.
+  const out = home.sync.present.filter(tool => !tools.includes(tool));
+  const leftOut = out.length ? ` ${toolList(out)} ${out.length === 1 ? 'is' : 'are'} left out (${out.length === 1 ? 'its switch is' : 'their switches are'} on Harnesses).` : '';
+  if (tools.length === 1) return `Central Knot keeps the ${andList(held.map(([kind]) => kind))} you choose the same between your tools. ${out.length ? `It manages only ${named} here` : `Only ${named} is in this home`}, so there is nothing to keep in step yet.${leftOut}`;
   const everywhere = held.filter(([, holders]) => holders.length === tools.length).map(([kind]) => kind);
   const some = held.filter(([, holders]) => holders.length < tools.length).map(([kind, holders]) => {
     const without = tools.filter(tool => !holders.includes(tool));
     return holders.length >= without.length ? `${kind} in all but ${andList(without.map(toolName))}` : `${kind} in ${andList(holders.map(toolName))}`;
   });
-  return `Central Knot keeps the ${andList(everywhere)} you choose the same in ${named}${some.map(part => `; ${part}`).join('')}.`;
+  return `Central Knot keeps the ${andList(everywhere)} you choose the same in ${named}${some.map(part => `; ${part}`).join('')}.${leftOut}`;
 }
 
 /** Shown before any home has been read, or when reading failed. */
@@ -177,9 +187,10 @@ afterLayout(settleToolCounts);
  * tool there is nothing to keep in step, so it says how a second one joins.
  */
 function nextStep(home: HomeView, nothingManaged: boolean): string {
-  if (noTools()) return '';
+  if (noToolManaged()) return '';
   if (!home.skills.items.length && !home.mcp.items.length && !home.agents.items.length) return ' Nothing found in this home yet.';
-  if (homeTools().length === 1) return ' When a second tool is installed, or its folder appears here, Central Knot finds it on its own; then manage what you want the same in both.';
+  // With a tool left out, the lead has said where its switch is.
+  if (homeTools().length === 1) return home.sync.present.length > 1 ? '' : ' When a second tool is installed, or its folder appears here, Central Knot finds it on its own; then manage what you want the same in both.';
   return nothingManaged && home.sync.access.allowed ? ' Open one below and turn on what you want the same in every tool.' : '';
 }
 
@@ -199,7 +210,7 @@ export function overviewPage() {
   };
   // Kinds no tool here can hold have no card (app.ts absentKinds); they are named once, below.
   const absent = absentKinds();
-  const empty = noTools();
+  const empty = noToolManaged();
   const nothingManaged = !anyManaged(home);
   // A click's result, then another build of Central Knot found on this Mac (otherbuildview.ts).
   const bands = [outcomeBand(), ...otherBuildBands(home)].filter(band => !!band);
@@ -208,7 +219,7 @@ export function overviewPage() {
     h('div.scroll.overview-scroll', { id: 'overview-scroll' },
       practiceBanner(),
       // A home with no tools has nothing to count: the way forward is another home.
-      empty ? noToolsLead('overview-choose-home') : h('p.overview-lead', {}, leadSentence(home),
+      empty ? noToolsLead('overview') : h('p.overview-lead', {}, leadSentence(home),
         // The next step only where it can be taken: something to manage, and a home that can be written.
         nextStep(home, nothingManaged)),
       empty ? null : h('div.kind-cards', { 'data-count': String(heldKinds(home).length) },
@@ -220,8 +231,9 @@ export function overviewPage() {
         !home.sync.access.allowed ? h('p.overview-line', {}, icon('lock', 14, 'tone-warning'), `Automatic sync is paused. Preview only: ${previewReason(home.sync.access.reason)}.`)
         // Another build syncs this home: said here, with the way to take over (and to remove that build, where it is installed here).
         : syncOwner(home.sync.gate) ? ownerLine(home)
-        // Green only once something syncs; before that, sync is on and waiting, in the status bar's grey.
-        : home.syncOn && nothingManaged ? null : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingManaged ? 'tone-muted' : 'tone-success') : 'tone-warning'),
+        // Green only once something syncs; before that, sync is on and waiting, in the status bar's grey. With no tool managed
+        // nothing syncs at all (the status bar says so).
+        : empty || (home.syncOn && nothingManaged) ? null : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingManaged ? 'tone-muted' : 'tone-success') : 'tone-warning'),
           ...(home.syncOn ? [nothingManaged ? 'Automatic sync is on. Once something is on, edits spread between tools in seconds, with Undo.'
             : `Automatic sync is on: edits spread between tools in seconds${home.sync.syncEverything ? ', and what turns up in a tool is taken in by Synchronize everything' : ''}, with a notice and Undo.`]
             : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync once', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
@@ -256,8 +268,8 @@ export const fact = (term: string, value: Node | string) => [h('dt', {}, term), 
 
 interface Found { tool: HarnessId; skill: Skill }
 
-/** Every copy of one skill that this home's tools read (presence.ts), from what discovery found. */
-const copiesOf = (home: HomeView, key: string): Found[] => home.snapshots.filter(isPresent).flatMap(snapshot => snapshot.skills
+/** Every copy of one skill that the tools Central Knot manages here read, from what discovery found. */
+const copiesOf = (home: HomeView, key: string): Found[] => home.snapshots.filter(snapshot => home.sync.managed.includes(snapshot.harness)).flatMap(snapshot => snapshot.skills
   .filter(skill => skill.folder.normalize('NFC').toLowerCase() === key)
   .map(skill => ({ tool: snapshot.harness, skill })));
 

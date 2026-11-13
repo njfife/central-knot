@@ -5,9 +5,9 @@
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
 import { lineDiff } from './diff.ts';
-import { errorCode, landingOf, plainError, recoverParked, removeFileChecked, sha256, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { errorCode, landingOf, managedNow, plainError, recoverParked, removeFileChecked, sha256, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { baseAction, comparableBase, draftedOwn, fileWithBase, readersOfFile, sameBase, splitBase } from './basetext.ts';
-import { lineCount, linesOf, toolList } from './words.ts';
+import { leftOutSentence, lineCount, linesOf, toolList, toolName } from './words.ts';
 import { harnessIds } from './harnesses.ts';
 import { isPresent } from './presence.ts';
 import { onlyAllowed } from './values.ts';
@@ -127,22 +127,33 @@ function baseIfInvolved(state: BaseHeld) {
   return state.chosen || state.copy !== undefined || state.leftPlain ? state : undefined;
 }
 
-/** Tools in this home (presence.ts): an absent tool has no file to edit, and a folder is never created for it here. */
-const present = (snapshots: Snapshot[]) => snapshots.filter(isPresent);
-
-/** Each present tool's bound file and, for tools whose files are one physical file (linked dotfiles), the others reading it. */
-async function destinations(snapshots: Snapshot[], home: string) {
-  const bound = await Promise.all(present(snapshots).map(async snapshot => ({ snapshot, ...await bind(snapshot.harness, snapshot.root, home) })));
+/**
+ * Each file of a tool Central Knot manages here (share.ts managedNow), bound: a tool not installed has no file and a folder is
+ * never made for it, and a tool left out (its Manage switch off) has none here. `sameFile`: the other managed tools that read
+ * the same physical file (linked dotfiles). `leftOutReads`: a tool left out that reads it too, through a link: such a file is
+ * shown, never written (writable), since nothing is written in a tool left out.
+ */
+async function destinations(context: ShareContext, snapshots: Snapshot[]) {
+  const managed = await managedNow(context, snapshots);
+  const bound = await Promise.all(snapshots.filter(isPresent).map(async snapshot => ({ snapshot, ...await bind(snapshot.harness, snapshot.root, context.home) })));
   const landings = await Promise.all(bound.map(entry => landingOf(entry.path)));
-  return bound.map((entry, index) => ({ ...entry, sameFile: bound.filter((other, at) => at !== index && landings[at] && landings[at] === landings[index]).map(other => other.snapshot.harness) }));
+  const readersWith = (index: number) => bound.filter((other, at) => at !== index && landings[at] && landings[at] === landings[index]).map(other => other.snapshot.harness);
+  return bound.flatMap((entry, index) => (managed.includes(entry.snapshot.harness)
+    ? [{ ...entry, sameFile: readersWith(index).filter(tool => managed.includes(tool)), leftOutReads: readersWith(index).find(tool => !managed.includes(tool)) }] : []));
 }
+type Destination = Awaited<ReturnType<typeof destinations>>[number];
+/** The files a save may write: not one a tool left out reads too. */
+const writable = (bound: Destination[]) => bound.filter(entry => !entry.leftOutReads);
+/** Why a file a tool left out reads too is not written. */
+const linkedOut = (path: string, tool: HarnessId) => `${basename(path)} is the same file as ${toolName(tool)} reads (a link), and ${toolName(tool)} is left out of Central Knot here`;
 
-/** Every detected tool's instruction file, read as it is now. */
+/** Every managed tool's instruction file, read as it is now. */
 export async function instructionsView(context: ShareContext, snapshots: Snapshot[]): Promise<InstructionFile[]> {
   const files: InstructionFile[] = [];
   const base = await readBase(context.home, (await writeAccess(context)).allowed);
-  for (const { snapshot, path, readers, notes, sameFile } of await destinations(snapshots, context.home)) {
+  for (const { snapshot, path, readers, notes, sameFile, leftOutReads } of await destinations(context, snapshots)) {
     if (sameFile.length) notes.push(`This is the same file as ${toolList(sameFile)} reads (a link), so they get the same base instructions.`);
+    if (leftOutReads) notes.push(`This is the same file as ${toolName(leftOutReads)} reads (a link), and ${toolName(leftOutReads)} is left out of Central Knot here, so it can’t be saved from here.`);
     const text = await readText(path);
     // Lines starting with @ pull other files into Claude's context; those files are not shown or changed here.
     if (snapshot.harness === 'claude-cli' && text && /^@\S/m.test(text)) notes.push('Lines starting with @ import other files. Those files are not shown or changed here.');
@@ -158,10 +169,13 @@ export async function instructionsView(context: ShareContext, snapshots: Snapsho
 export async function saveInstruction(context: ShareContext, snapshots: Snapshot[], tool: HarnessId, text: string, expected: string, restoring = false): Promise<InstructionSave> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason };
-  // Only a tool in this home (presence.ts): a save never recreates the folder of a tool that has gone.
+  // Only a tool managed in this home: a save never recreates the folder of a tool that has gone, nor writes in one left out.
   const snapshot = snapshots.find(entry => entry.harness === tool);
   if (!snapshot || !isPresent(snapshot)) return { stopped: 'That tool is not in this home.' };
+  if (!(await managedNow(context, snapshots)).includes(tool)) return { stopped: leftOutSentence(tool) };
   const { path } = await bind(tool, snapshot.root, context.home);
+  const shared = (await destinations(context, snapshots)).find(entry => entry.snapshot.harness === tool)?.leftOutReads;
+  if (shared) return { stopped: `${linkedOut(path, shared)}, so nothing was saved.` };
   const current = await readText(path);
   if (hashOf(current) !== expected) return { stopped: 'The file changed since you opened it, so nothing was saved. Read it again and redo the edit.' };
   if (current === text) return { saved: false };
@@ -181,7 +195,7 @@ export async function saveInstruction(context: ShareContext, snapshots: Snapshot
  */
 async function recordRestoredCopy(context: ShareContext, snapshots: Snapshot[], tool: HarnessId, copy: string): Promise<string | undefined> {
   const base = await readBase(context.home);
-  const destination = (await destinations(snapshots, context.home)).find(entry => entry.snapshot.harness === tool);
+  const destination = (await destinations(context, snapshots)).find(entry => entry.snapshot.harness === tool);
   const readers = readersOfFile(tool, destination?.sameFile ?? []);
   if (!readers.some(reader => base.list.tools.includes(reader))) return undefined;
   const wrote = sameBase(copy, base.text) || (await shelf(context.home, 'base')).some(old => sameBase(copy, old.text));
@@ -238,7 +252,7 @@ export async function applyBase(context: ShareContext, snapshots: Snapshot[], re
   const baseChanged = { stopped: 'The base instructions changed outside Central Knot since the review, so nothing was saved.', changed: true, written: [], left: [] };
   const stored = await readBase(context.home, true);
   if (hashOf(stored.raw) !== request.expected) return baseChanged;
-  const bound = await destinations(snapshots, context.home);
+  const all = await destinations(context, snapshots), bound = writable(all);
   // One physical file is chosen when any tool reading it is.
   const chosen = new Set(request.text.trim() ? bound.filter(entry => request.tools.includes(entry.snapshot.harness)).flatMap(entry => readersOfFile(entry.snapshot.harness, entry.sameFile)) : []);
   const files = await reviewedFiles(bound, request.seen);
@@ -249,6 +263,8 @@ export async function applyBase(context: ShareContext, snapshots: Snapshot[], re
   const absent = stored.list.tools.filter(tool => !bound.some(entry => entry.snapshot.harness === tool));
   const list: BaseList = { tools: [...absent, ...bound.map(entry => entry.snapshot.harness).filter(tool => chosen.has(tool))], written: { ...stored.list.written }, leftPlain: { ...stored.list.leftPlain } };
   const result: BaseResult = { written: [], left: [], undo: { text: stored.text, list: stored.list, baseHash: hashOf(baseNow), files: [] } };
+  // A chosen tool whose file a tool left out reads too keeps it as it is.
+  for (const entry of all) if (entry.leftOutReads && request.tools.includes(entry.snapshot.harness)) result.left.push({ tool: entry.snapshot.harness, why: 'left-out' });
   for (const { tool, readers, path, current } of files) {
     const text = current ?? '';
     const isChosen = chosen.has(tool);
@@ -324,9 +340,11 @@ export async function undoBase(context: ShareContext, snapshots: Snapshot[], und
   const { raw, list: now } = await readBase(context.home, true);
   if (hashOf(raw) !== undo.baseHash) return baseChanged;
   try { await storeBaseText(context.home, undo.text, raw); } catch (error) { return storeFailure(error, baseChanged); }
-  const bound = await destinations(snapshots, context.home);
+  const all = await destinations(context, snapshots), bound = writable(all);
   const result: BaseResult = { written: [], left: [] };
   for (const file of undo.files) {
+    // A tool left out since keeps its file as it is: the undo says so.
+    if (!bound.some(entry => entry.snapshot.harness === file.tool) && snapshots.some(entry => entry.harness === file.tool && isPresent(entry))) { result.left.push({ tool: file.tool, why: 'left-out' }); continue; }
     // The very file the save wrote, even if the tool now reads another (an override appeared since): that one is never touched.
     const snapshot = snapshots.find(entry => entry.harness === file.tool);
     const path = file.path;
@@ -342,7 +360,7 @@ export async function undoBase(context: ShareContext, snapshots: Snapshot[], und
   }
   // A file the undo left as it is keeps the records that describe it now, so its copy isn't taken for an edit made there.
   const list: BaseList = { tools: undo.list.tools, written: { ...undo.list.written }, leftPlain: { ...undo.list.leftPlain } };
-  for (const { tool } of result.left) keepRecords(list, now, readersOfFile(tool, bound.find(entry => entry.snapshot.harness === tool)?.sameFile ?? []));
+  for (const { tool } of result.left) keepRecords(list, now, readersOfFile(tool, all.find(entry => entry.snapshot.harness === tool)?.sameFile ?? []));
   try { await writeBaseList(context.home, list); }
   catch (error) { result.problem = `The list of tools that get the base could not be put back: ${plainError(error)}`; }
   return result;

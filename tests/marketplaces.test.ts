@@ -13,7 +13,7 @@ const marketplace = (root: string, name: string, plugins: string[]) => Promise.a
   ...plugins.map(plugin => put(join(root, `plugins/${plugin}/skills/${plugin}/SKILL.md`), `---\nname: ${plugin}\ndescription: ${plugin}\n---\n`)),
 ]);
 
-async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?: boolean; app?: DesktopApp; pi?: boolean; /** Not this computer's own home. */ folderHome?: boolean; /** What adding the marketplace to a tool's own list comes to, where not `added`. */ listing?: Partial<Record<HarnessId, Awaited<ReturnType<typeof engine.addMarketplace>>>>; /** A bundled build: the marketplace it carries is in this folder under the base, and these plugins are not packed. */ bundled?: { folder: string; unpackaged?: string[]; kept?: string[] } } = {}) {
+async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?: boolean; app?: DesktopApp; pi?: boolean; /** Not this computer's own home. */ folderHome?: boolean; /** What adding the marketplace to a tool's own list comes to, where not `added`. */ listing?: Partial<Record<HarnessId, Awaited<ReturnType<typeof engine.addMarketplace>>>>; /** Tools whose Manage switch is off here (MarketplaceHost leftOut). */ leftOut?: HarnessId[]; /** A bundled build: the marketplace it carries is in this folder under the base, and these plugins are not packed. */ bundled?: { folder: string; unpackaged?: string[]; kept?: string[] } } = {}) {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-markets-')));
   const home = join(base, 'home');
   await mkdir(home, { recursive: true });
@@ -29,6 +29,7 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?:
     pickFolder: async () => undefined,
     openExternal: async () => {},
     changed: (_source, plugin, tools) => { told.push(`${plugin} ${tools.join(',')}`); },
+    leftOut: async () => [...(options.leftOut ?? [])],
     // With Pi in the home, the parts engine's context too, so a plugin's parts can go into it.
     ...(options.pi ? { share: () => ({ home, mode: 'custom' as const, read: async () => [], build: 'test', settingsPath: join(base, 'settings.json'), realHome: join(base, 'real') }) } : {}),
     ...(options.bundled ? { bundled: () => ({ source: join(base, options.bundled!.folder), view: { app: 'Acme Knot', displayName: 'Acme plugins', release: 'November 10, 2026 (GitHub: acme/plugins)', unpackaged: (options.bundled!.unpackaged ?? []).map(name => ({ name, reason: 'It is an npm package.' })), kept: options.bundled!.kept } }) } : {}),
@@ -116,6 +117,46 @@ test('One tool’s error fails that tool only: the others’ reports stay, and l
     const result = await box.markets.install(root, 'team', 'pdf', ['claude-cli', 'copilot-cli', 'codex-cli'], box.home);
     assert.deepEqual(result.reports.map(report => [report.tool, report.outcome, !!report.changed]), [['claude-cli', 'installed', true], ['copilot-cli', 'failed', false], ['codex-cli', 'installed', true]]);
     assert.match(result.reports[1]!.message, /disk full/);
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin action that names a tool whose Manage switch is off is refused whole, whatever else it names: install, update, uninstall, a switch, parts', async () => {
+  const box = await setup({ leftOut: ['codex-cli'] });
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root, 'team', ['pdf']);
+    await box.markets.add(root);
+    const words = 'Codex is left out of Central Knot here (its Manage switch on Harnesses is off), so nothing was changed there.';
+    const install = await box.markets.install(root, 'team', 'pdf', ['claude-cli', 'codex-cli'], box.home);
+    const update = await box.markets.update(root, 'team', 'pdf', ['codex-cli'], box.home);
+    const uninstall = await box.markets.uninstall(root, 'team', 'pdf', 'codex-cli', box.home);
+    const whole = await box.markets.setWhole(root, 'team', 'pdf', 'codex-cli', false, box.home);
+    const skill = await box.markets.setSkill(root, 'team', 'pdf', 'pdf', 'codex-cli', false, box.home);
+    const part = await box.markets.setPart(root, 'team', 'pdf', { kind: 'mcp', name: 'docs' }, 'codex-cli', false, box.home);
+    for (const done of [install, update, uninstall, whole, skill, part]) assert.deepEqual([done.stopped, done.reports], [words, []]);
+    assert.deepEqual(box.calls.filter(call => call.includes('codex-cli')), [], 'no command ran for Codex');
+    assert.match((await box.markets.addCarriedTo('codex-cli', box.home)).stopped ?? '', /^Codex is left out/);
+  } finally { await box.cleanup(); }
+  const pi = await setup({ pi: true, leftOut: ['pi-cli'] });
+  try {
+    const root = join(pi.base, 'market');
+    await marketplace(root, 'team', ['pdf']);
+    await pi.markets.add(root);
+    const parts = await pi.markets.parts(root, 'team', 'pdf', 'pi-cli', 'install', undefined, pi.home);
+    assert.deepEqual([parts.stopped, parts.reports], ['Pi is left out of Central Knot here (its Manage switch on Harnesses is off), so nothing was changed there.', []]);
+    assert.equal(await stat(join(pi.home, '.pi')).then(() => true, () => false), false, 'nothing was written in Pi');
+  } finally { await pi.cleanup(); }
+});
+
+test('A carried marketplace addition queued before a tool is left out asks again at its turn, and writes nothing there', async () => {
+  const leftOut: HarnessId[] = [];
+  const box = await setup({ bundled: { folder: 'carried' }, codex: true, leftOut });
+  try {
+    await marketplace(join(box.base, 'carried'), 'team', ['pdf']);
+    // The person turns Codex's Manage switch off while the addition waits for its turn in the queue.
+    const turn = <T>(work: () => Promise<T>) => { leftOut.splice(0, leftOut.length, 'codex-cli'); return work(); };
+    const reports = await box.markets.addCarried(['codex-cli'], turn);
+    assert.deepEqual([reports, box.calls.filter(call => call.startsWith('list'))], [[], []]);
   } finally { await box.cleanup(); }
 });
 

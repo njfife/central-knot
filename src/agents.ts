@@ -21,7 +21,7 @@ import { libraryAction } from './historyactions.ts';
 import { listed, plan } from './library.ts';
 import { libraryWords } from './libraryrow.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
-import { copiesOf, forgetFolders, itemClick, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
+import { copiesOf, itemClick, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { throughPlugins } from './plugins.ts';
 import type { AgentTool } from './presence.ts';
 import { errorCode, exists, partsIn, recoverParked, removeFileChecked, syncGate, writeAccess, writeFileChecked } from './share.ts';
@@ -173,12 +173,6 @@ export const restoreAgent = (context: ShareContext, tools: HarnessId[], eventId:
 
 /** One version's content, for the Agents page to show: undefined when the store no longer has it. */
 export const agentVersion = (context: ShareContext, key: string, hash: string) => readVersion(context, key, hash);
-
-/**
- * The tool choice (toolchoice.ts) lets go of the agents folders of the harnesses it leaves out at once (librarypass.ts
- * forgetFolders), so a harness managed again is told apart whether or not a pass runs before it is back.
- */
-export const forgetAgentFolders = (context: ShareContext, managed: readonly HarnessId[]) => forgetFolders(agentKind, context, managed);
 
 /** The agents that are On in the library, by key (plugin parts ask which agents Central Knot keeps in step: parts.ts). */
 export async function agentsOn(context: ShareContext): Promise<Map<string, LibraryItem>> {

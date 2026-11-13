@@ -232,6 +232,12 @@ export function foldVersions(versions: readonly Version[], unfolded: boolean): {
 
 // ---------- Words ----------
 
+/**
+ * Where an item that is Off is: in Central Knot only, or, while some installed tool is left out (`leftOut`: its Manage switch
+ * off; it keeps whatever it had), in no tool Central Knot manages.
+ */
+const offWhere = (leftOut: readonly string[]) => (leftOut.length ? 'in no tool Central Knot manages' : 'in Central Knot only');
+
 /** The home's harnesses by name, as a sentence lists them ("all 3 tools", or their names). */
 const named = (some: readonly string[], tools: readonly string[]) => toolsPhrase([...some], [...tools]);
 const harnessesWhere = (row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], ...states: HarnessIs[]) =>
@@ -239,9 +245,9 @@ const harnessesWhere = (row: LibraryRow, item: LibraryItem | undefined, tools: r
 
 /**
  * An item's status in one line: on and where, in Central Knot only, or found in a harness and not in Central Knot yet (and,
- * with Synchronize everything on: `everything`, what it does with it).
+ * with Synchronize everything on: `everything`, what it does with it). `leftOut`: the installed tools left out (offWhere).
  */
-export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], everything = false): string {
+export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], everything = false, leftOut: readonly string[] = []): string {
   const where = (...states: HarnessIs[]) => harnessesWhere(row, item, tools, ...states);
   const own = where('own-copy'), place = placeOf(item);
   const waiting = where('waits'), waits = waiting.length ? `${sentence(named(waiting, tools))} still ${waiting.length === 1 ? 'has' : 'have'} it until you click Write to Claude Code.` : '';
@@ -255,7 +261,7 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
     return `Not in Central Knot · ${foundWhere(row, item, tools)}${differ}. Add it to keep it in Central Knot${whereAdded(row, item, tools)}${below}.${rule}`;
   }
   const ownSaid = own.length ? ` ${sentence(named(own, tools))} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there.` : '';
-  if (place === 'off') return `Off · ${waiting.length ? `still in ${named(waiting, tools)} until you click Write to Claude Code` : 'in Central Knot only'}. Turn it on to put it in every tool.${ownSaid}`;
+  if (place === 'off') return `Off · ${waiting.length ? `still in ${named(waiting, tools)} until you click Write to Claude Code` : offWhere(leftOut)}. Turn it on to put it in every tool.${ownSaid}`;
   // A copy deleted by hand turns the item Off at the next pass: that is what it is about to be.
   const deletedIn = row.plan?.turnedOffBy;
   if (deletedIn) return `On · its copy was deleted in ${toolName(deletedIn)}, so it turns off when sync runs. Central Knot keeps it.`;
@@ -406,12 +412,14 @@ export function sentences(words: RowWords) {
 
   /**
    * The tag after an item's name when it isn't plainly on everywhere: where it stands, or the tools it is kept out of, and
-   * (its tooltip) what that means. `tools`: the home's harnesses.
+   * (its tooltip) what that means. `tools`: the home's harnesses; `leftOut`: the installed tools left out (offWhere).
    */
-  function placeTag(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]): { text: string; title: string } | undefined {
+  function placeTag(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], leftOut: readonly string[] = []): { text: string; title: string } | undefined {
     const place = placeOf(item);
     if (place === 'off' && row.waits?.length) return { text: `still in ${andList(row.waits.map(toolName))} until Write`, title: `Off. Central Knot keeps this ${noun}; its ${copy} leaves ${andList(row.waits.map(toolName))} when you click Write to Claude Code.` };
-    if (place === 'off') return { text: 'in Central Knot only', title: `Central Knot keeps this ${noun} and its versions. No tool has it until you turn it on.` };
+    const none = leftOut.length ? `No tool it manages has it until you turn it on; ${andList(leftOut.map(toolName))}, left out, ${leftOut.length === 1 ? 'keeps whatever it has' : 'keep whatever they have'}.`
+      : 'No tool has it until you turn it on.';
+    if (place === 'off') return { text: offWhere(leftOut), title: `Central Knot keeps this ${noun} and its versions. ${none}` };
     const found = `A tool has this ${noun}; Central Knot doesn’t yet. Add it to keep it in Central Knot${whereAdded(row, item, tools)}.`;
     if (place === 'found' && stillLeaving(row)) return { text: 'deleted', title: `Deleted from Central Knot. Its ${copy} leaves ${andList((row.waits ?? []).map(toolName))} when you click Write to Claude Code.` };
     if (place === 'found' && !canAdd(row)) return { text: 'can’t be taken in', title: 'Its line in the opened row says why.' };
@@ -436,8 +444,8 @@ export function sentences(words: RowWords) {
 
   /** What the result says after each click. `notIn`: the harnesses where the click's write or removal didn't go through. */
   const said = {
-    off(name: string, notIn: readonly string[], tools: readonly string[]): string {
-      const left = notIn.length ? `, but still in ${named(notIn, tools)}` : ': no tool has it';
+    off(name: string, notIn: readonly string[], tools: readonly string[], leftOut: readonly string[] = []): string {
+      const left = notIn.length ? `, but still in ${named(notIn, tools)}` : leftOut.length ? ': no tool Central Knot manages has it' : ': no tool has it';
       return `${name} is off${left}. Central Knot keeps it, and turning it on puts each ${copy} back as it was.`;
     },
     /** A found item taken in; `use`: the harness whose copy was chosen where they differed. */

@@ -16,6 +16,7 @@ import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, Cata
 import { writeDurably, type ShareContext } from './share.ts';
 import { SKILL_SWITCH_TESTED_FROM, copyDiffers, heldReason, keptReason, marketTitle, notCarried, partsOf, partsOffer, partsTools, stateOf, unavailable, updateTools, versionToCompare } from './pluginstatus.ts';
 import { isFolder, isHttps, onlyAllowed, record, shortBuild } from './values.ts';
+import { leftOutSentence } from './words.ts';
 
 /** What runs a tool's plugin commands when it is a desktop app's own copy: "Claude desktop’s Code tab 2.1.321". */
 export const viaLabel = (app: DesktopApp, answered = app.carriedVersion) => `${app.name}’s ${app.carries}${answered ? ` ${shortBuild(answered)}` : ''}`;
@@ -25,10 +26,13 @@ export interface MarketplaceHost {
   /** The home on screen, or undefined before one is open. `actual`: it is this computer's own home, not a folder opened as one. */
   home(): { home: string; overrides?: Partial<Record<HarnessId, string>>; actual?: boolean } | undefined;
   /**
-   * This home's tools, in the order the page shows them, and the snapshots they were found in: one read (or the read a
-   * Refresh or home switch just made, named by `readId`), so the columns and what each tool's install says always agree.
+   * The tools Central Knot manages in this home (presence.ts managedTools), in the order the page shows them, and the snapshots
+   * they were found in: one read (or the read a Refresh or home switch just made, named by `readId`), so the columns and what
+   * each tool's install says always agree.
    */
   read(readId?: number): Promise<{ tools: HarnessId[]; snapshots: Snapshot[] }>;
+  /** The tools whose Manage switch is off here (share.ts SyncRecord leftOut): no plugin action writes in them, whatever a request names. */
+  leftOut?(): Promise<HarnessId[]>;
   /** Whether writing is allowed in this home, and why not. */
   writeAccess(): Promise<{ allowed: boolean; reason?: string }>;
   /** Central Knot's own data folder: the added list here, Git copies under plugins/. */
@@ -417,11 +421,17 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return shown;
   }
 
-  // Writes act only on the home on screen, and only where writing is allowed there.
-  const guard = async (home: unknown) => {
+  // Writes act only on the home on screen, only where writing is allowed there, and in no tool whose Manage switch is off.
+  const guard = async (home: unknown, tools: readonly HarnessId[] = []) => {
     if (home !== host.home()?.home) return 'The home on screen is not the one open. Nothing was changed. Read it again.';
     const writing = await host.writeAccess();
-    return writing.allowed ? undefined : writing.reason ?? 'Writing isn’t allowed in this home, so nothing was changed.';
+    if (!writing.allowed) return writing.reason ?? 'Writing isn’t allowed in this home, so nothing was changed.';
+    return leftOutOf(tools);
+  };
+  /** Why nothing is written in these tools, if one of them is left out here: asked at the moment of writing (host.leftOut). */
+  const leftOutOf = async (tools: readonly HarnessId[]) => {
+    const out = await host.leftOut?.() ?? [], tool = tools.find(each => out.includes(each));
+    return tool && leftOutSentence(tool);
   };
 
   /**
@@ -429,7 +439,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
    * gives another name than the one chosen (`marketName`), fails for its tools instead of stopping the whole run.
    */
   async function install(source: string, marketName: string, plugin: string, tools: PluginTool[], home: unknown, run = use.install): Promise<PluginActionResult> {
-    const stopped = await guard(home);
+    const stopped = await guard(home, tools);
     if (stopped) return { stopped, reports: [] };
     const ctx: engine.PluginContext = { ...(await context({ clis: true })), checked: new Map() };
     const { catalog } = await catalogFor(ctx, source, { counts: false });
@@ -533,7 +543,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /** One tool's own uninstall of one plugin. `marketName` is the catalog's name for it; `source` is checked against what the tool has. */
   async function uninstall(source: string, marketName: string, plugin: string, tool: PluginTool, home: unknown): Promise<PluginActionResult> {
-    const stopped = await guard(home);
+    const stopped = await guard(home, [tool]);
     if (stopped) return { stopped, reports: [] };
     return told(source, plugin, { reports: withoutFileBytes([await use.uninstall(await context({ clis: true }), marketName, plugin, tool, source)]) });
   }
@@ -553,7 +563,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /** Installs, updates, removes or undoes one plugin's parts in one tool (parts.ts). `run`: the parts run an Undo reverses; `pick`: only these parts change. */
   async function parts(source: string, marketName: string, plugin: string, tool: HarnessId, mode: 'install' | 'remove' | 'undo', run: string | undefined, home: unknown, pick?: PartsPick): Promise<PluginActionResult> {
-    const stopped = await guard(home);
+    const stopped = await guard(home, [tool]);
     if (stopped) return { stopped, reports: [] };
     const share = host.share?.();
     if (!share) return { reports: failedFor([tool], 'Parts can’t be installed here.') };
@@ -575,7 +585,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /** One tool's own switch for one skill of an installed plugin (ENB-06). `marketName` and `source` as for uninstall. */
   async function setSkill(source: string, marketName: string, plugin: string, skill: string, tool: PluginTool, on: boolean, home: unknown): Promise<PluginActionResult> {
-    const stopped = await guard(home);
+    const stopped = await guard(home, [tool]);
     if (stopped) return { stopped, reports: [] };
     const ctx = await context({ clis: true });
     // Its marketplace entry says where its skills are, so the installed copy is read as the page reads the marketplace's
@@ -586,14 +596,14 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /** One tool's own switch for one MCP server or agent of an installed plugin. `marketName` and `source` as for uninstall. */
   async function setPart(source: string, marketName: string, plugin: string, part: PartRef, tool: PluginTool, on: boolean, home: unknown): Promise<PluginActionResult> {
-    const stopped = await guard(home);
+    const stopped = await guard(home, [tool]);
     if (stopped) return { stopped, reports: [] };
     return { reports: withoutFileBytes([await use.setPart(await context(), marketName, plugin, part, tool, on, source)]) };
   }
 
   /** One tool's own switch for a whole installed plugin. `marketName` and `source` as for uninstall. */
   async function setWhole(source: string, marketName: string, plugin: string, tool: PluginTool, on: boolean, home: unknown): Promise<PluginActionResult> {
-    const stopped = await guard(home);
+    const stopped = await guard(home, [tool]);
     if (stopped) return { stopped, reports: [] };
     const ctx = await context({ clis: true });
     return { reports: withoutFileBytes([await use.setWhole(ctx, marketName, plugin, tool, on, source)]) };
@@ -654,9 +664,10 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     for (const tool of todo.filter(candidate => binaries[candidate])) {
       const key = `${open.home}\u0000${tool}`;
       tried.add(key);
-      // The home may have been switched while this waited its turn: then nothing more is added, and the tools left are
-      // tried again the next time this computer's home is read.
-      const report = await turn(async () => { const now = host.home(); return now?.actual && now.home === open.home ? addCarriedToTool(tool) : undefined; });
+      // The home may have been switched (or the tool left out) while this waited its turn: then nothing more is added, and
+      // the tools left are tried again the next time this computer's home is read.
+      // Its Manage switch may have been turned off meanwhile too: asked again now, as every write asks it (guard).
+      const report = await turn(async () => { const now = host.home(); return now?.actual && now.home === open.home && !(await leftOutOf([tool])) ? addCarriedToTool(tool) : undefined; });
       if (report) reports.push(report);
       else { tried.delete(key); break; }
     }
@@ -665,7 +676,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /** The same for one tool, asked for on the marketplace's About tab: also the way back after taking it out in the tool. */
   async function addCarriedTo(tool: PluginTool, home: unknown): Promise<{ stopped?: string; report?: ListedReport; view?: PluginsView }> {
-    const stopped = await guard(home);
+    const stopped = await guard(home, [tool]);
     if (stopped) return { stopped };
     const report = await addCarriedToTool(tool);
     return { report, view: await view() };

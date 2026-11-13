@@ -1,7 +1,7 @@
 // Plugins: browse marketplaces, choose which plugins go to which tools, then Apply all.
 // The list of marketplaces sits at the left; the chosen one shows its plugins or its README, and a plugin opens its own page
 // (pluginpage.ts). Boxes only choose changes; Apply all runs them (pluginstate.ts, pluginplan.ts).
-import { announce, noTools, rerender, showPage, state as app } from './app.ts';
+import { announce, noToolManaged, rerender, showPage, state as app } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { button, closeButton, emptyState, h, icon, pendingCount, rereadBand, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
@@ -431,7 +431,7 @@ export function pluginsPage() {
   // From the marketplaces' own read (pagedata.ts): what it found, else that it is reading or could not read.
   if (!view) return h('div.page', {}, h('div.scroll', {}, h('p.empty', {}, market.read.state === 'failed' ? 'Marketplaces could not be read.' : 'Reading marketplaces…')));
   // A home with no tools: another home is the way forward.
-  if (noTools()) return h('div.page', {}, noToolsState('plugins-choose-home'));
+  if (noToolManaged()) return h('div.page', {}, noToolsState('plugins'));
   // Tools, but none that takes plugins (only Pi): the sidebar hides Plugins then, so this is a marketplace read that saw a plugin tool go before the home's read did.
   if (!view.tools.length) return h('div.page', {}, emptyState('puzzle', 'No tool in this home can install plugins', 'None of the tools found here takes plugins. Once one is installed, Central Knot finds it on its own, or at once with Refresh at the top.',
     button({ variant: 'outline', label: 'See Harnesses', id: 'plugins-no-tools', onclick: () => showPage('harnesses') })));

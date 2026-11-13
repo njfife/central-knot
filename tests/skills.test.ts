@@ -595,14 +595,14 @@ test('The tool choice lets go of a tool’s folder: a tool left out and back get
   try {
     await put(box, 'claude-cli');
     await turnOn(box);
-    await chooseTools(context, ['claude-cli', 'copilot-cli']);
+    await chooseTools(context, 'codex-cli', false);
     box.tools.splice(0, box.tools.length, 'claude-cli', 'copilot-cli');
     await put(box, 'codex-cli', { 'SKILL.md': skillText('Edited while left out.') });
     await rm(folderOf(box, 'copilot-cli'), { recursive: true });
     await pass(box);
     assert.equal((await itemOf(box))!.on, false, 'a folder deleted in a managed tool still turns it Off');
     await turnOn(box);
-    await chooseTools(context, tools as HarnessId[]);
+    await chooseTools(context, 'codex-cli', true);
     box.tools.splice(0, box.tools.length, ...tools);
     await pass(box);
     assert.equal(await readFile(join(folderOf(box, 'codex-cli'), 'SKILL.md'), 'utf8'), skillText(), 'the library wins in a tool managed again');

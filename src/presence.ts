@@ -1,5 +1,7 @@
-// Which tools are in a home (presentTools) and which of them Central Knot manages (managedTools). Pages offer and name only
-// these, and sync writes only to managed ones, so the rule lives here, once, for the main process and the page alike.
+// Which tools are in a home (presentTools) and which of them Central Knot manages (managedTools): every installed tool but
+// the ones whose Manage switch is off (share.ts SyncRecord leftOut, changed only by toolchoice.ts chooseTools). Central Knot
+// writes only in managed tools, and every page but Harnesses (a left-out tool's card and switch) shows only those, so the
+// rule lives here, once, for the main process and the page alike.
 import type { HarnessId, Snapshot } from './types.ts';
 
 /**
@@ -20,33 +22,29 @@ export const isPresent = (snapshot: Snapshot): boolean =>
  */
 export const hasCowork = (snapshots: Snapshot[]): boolean => snapshots.some(snapshot => snapshot.harness === 'claude-cli' && !!snapshot.app);
 
-/**
- * The tools installed in this home, in discovery order. Plugins, plugin updates, instructions and noteTools go by these;
- * skills, MCP servers and agents go by managedTools (as does the Tools page, through the skills view, until it can show both).
- */
+/** The tools installed in this home, in discovery order: Harnesses has a card for each, with its Manage switch, and noteTools watches them. */
 export const presentTools = (snapshots: Snapshot[]): HarnessId[] => snapshots.filter(isPresent).map(snapshot => snapshot.harness);
 
 /**
- * The tools Central Knot manages in this home, in discovery order: the present ones the sync record lists (toolchoice.ts
- * chooseTools sets the list). With no list (every record made before the choice existed, and a home with no record yet) it
- * manages every present tool; an empty list manages none. Every item page and every sync pass draws from these, so a present
- * tool left out is neither shown with items nor written.
+ * The tools Central Knot manages in this home, in discovery order: the installed ones the sync record doesn't leave out.
+ * Skills, MCP servers, agents, plugins, plugin updates and instruction files all go by these, in the pass and on the pages,
+ * so a tool left out is neither written nor shown anywhere but on its Harnesses card. A tool installed later is managed by
+ * itself; one left out stays left out when it is uninstalled and installed again.
  */
-export const managedTools = (snapshots: Snapshot[], chosen?: readonly HarnessId[]): HarnessId[] => {
-  const present = presentTools(snapshots);
-  return chosen ? present.filter(tool => chosen.includes(tool)) : present;
-};
+export const managedTools = (snapshots: Snapshot[], leftOut: readonly HarnessId[] = []): HarnessId[] => presentTools(snapshots).filter(tool => !leftOut.includes(tool));
 
 /** The tools last noted in the open home, and that home, so a change is acted on once. */
 export interface NotedTools { home: string; tools: string }
 
 /**
  * Notes which tools are in `home`. `changed` only when they differ from those noted while that same home stayed open: a home
- * just opened is only noted, since opening it starts watching and the page reads it anyway.
+ * just opened is only noted, since opening it starts watching and the page reads it anyway. `joined`: the tools installed since
+ * the last note in that same home (main.ts says which of them Central Knot manages now); kept in memory only, never stored.
  */
-export function noteTools(last: NotedTools, home: string, snapshots: Snapshot[]): { noted: NotedTools; changed: boolean } {
-  const noted = { home, tools: presentTools(snapshots).join() };
-  return { noted, changed: home === last.home && noted.tools !== last.tools };
+export function noteTools(last: NotedTools, home: string, snapshots: Snapshot[]): { noted: NotedTools; changed: boolean; joined: HarnessId[] } {
+  const now = presentTools(snapshots), noted = { home, tools: now.join() };
+  const before = home === last.home ? last.tools.split(',') : now;
+  return { noted, changed: home === last.home && noted.tools !== last.tools, joined: now.filter(tool => !before.includes(tool)) };
 }
 
 /**
@@ -83,6 +81,3 @@ export function absentKindsIn(view: ToolsHeld): HomeKind[] {
 
 /** The kinds a home's tools hold that sync keeps the same (skills, MCP servers, agents), in that order. */
 export const heldKinds = (view: ToolsHeld): ('skills' | 'mcp' | 'agents')[] => (['skills', 'mcp', 'agents'] as const).filter(kind => !absentKindsIn(view).includes(kind));
-
-/** The tools looked for and not found here, in discovery order: only the Tools page names them, as information. */
-export const absentTools = (snapshots: Snapshot[]): HarnessId[] => snapshots.filter(snapshot => !isPresent(snapshot)).map(snapshot => snapshot.harness);
