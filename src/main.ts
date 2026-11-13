@@ -30,7 +30,7 @@ import { trayIconPng } from './trayicon.ts';
 import { homePass } from './homepass.ts';
 import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from './profiles.ts';
 import { homeItems, inUse, inUseName, switchable, type LiveItem } from './profileplan.ts';
-import { defaultHistoryDays, historyDayChoices } from './model.ts';
+import { defaultHistoryDays, historyDayChoices, syncOwner } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, PartRef, PartsPick, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
@@ -541,9 +541,8 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   // With the view's own reads, so each tool's installed plugins are read once for these rows and the pages' Through a plugin boxes.
   made.pluginItems = await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), managed);
   // Another build of Central Knot on this Mac, and whether the one that syncs this home is open now (what the page says of it).
-  if (looksForBuilds()) {
-    const owner = made.sync.gate.state === 'stopped' ? made.sync.gate.owner : undefined;
-    const builds = buildsContext(owner);
+  const builds = buildsContext(), owner = syncOwner(made.sync.gate);
+  if (builds) {
     made.otherBuilds = await lookForBuilds(builds);
     if (owner) owner.running = await isRunning(builds, owner.build);
   }
@@ -603,15 +602,15 @@ function lookAtFeed(): Promise<void> {
 }
 
 /**
- * Whether another build of Central Knot is looked for (otherbuilds.ts): on a Mac, by an installed app, where macOS can say
- * which apps run; elsewhere and in a run from the source only where a test named its stand-ins (CK_TEST_APPS).
+ * What a look at another build of Central Knot, or a click on one, goes by (otherbuilds.ts BuildsContext); the one guard on all
+ * of it: undefined, so nothing is looked for, quit or removed, but on a Mac in an installed app (where macOS can say which apps
+ * run), or where a test named its stand-ins (CK_TEST_APPS); never in a smoke run.
  */
-const looksForBuilds = () => !smoke && ((process.platform === 'darwin' && app.isPackaged) || testApps);
-/** What a look at another build, or a click on one, goes by (otherbuilds.ts BuildsContext); `owner`: the open home's sync owner. */
-function buildsContext(owner?: { build: string; name: string }): BuildsContext {
+function buildsContext(): BuildsContext | undefined {
+  if (smoke || !((process.platform === 'darwin' && app.isPackaged) || testApps)) return undefined;
   const places = macPlaces(homedir());
   return {
-    own: BUILD, known: knownBuilds(owner), places, home: homedir(),
+    own: BUILD, known: knownBuilds(), places, home: homedir(),
     ...(app.isPackaged ? { ownBundle: process.execPath.replace(/\/Contents\/MacOS\/[^/]+$/, '') } : {}),
     trash: places.trash ? intoFolder(places.trash) : bundle => shell.trashItem(bundle),
   };
@@ -1236,18 +1235,21 @@ app.whenReady().then(async () => {
   });
   handle('sync:now', async home => (home === current?.home ? syncThenView(true) : null));
   // Another build of Central Knot: removed (taken over from first, where asked) or quit, on a click alone. One log line each.
+  const notHere = { said: 'Another build is removed or quit only by the installed app on a Mac.', done: false, view: null };
   handle('builds:remove', async (home, path, build, takeOver) => {
     if (home !== current?.home || typeof path !== 'string' || typeof build !== 'string') return { said: elsewhere, done: false, view: null };
-    const gate = await syncGate(context());
-    const removal = await removeClick(context(), buildsContext(gate.state === 'stopped' ? gate.owner : undefined), path, build, takeOver === true);
+    const builds = buildsContext();
+    if (!builds) return notHere;
+    const removal = await removeClick(context(), builds, path, build, takeOver === true);
     if (removal.took) log(`sync: took over syncing ${home} from ${removal.took}`);
     log(`other build: ${removal.done ? `moved ${path} to the Trash` : `${path} not removed: ${removal.said}`}`);
     return { said: removal.said, done: removal.done, ...(removal.show ? { show: removal.show } : {}), view: await syncThenView() };
   });
   handle('builds:quit', async build => {
     if (typeof build !== 'string' || !current) return { said: elsewhere, done: false, view: null };
-    const gate = await syncGate(context());
-    const quit = await quitBuild(buildsContext(gate.state === 'stopped' ? gate.owner : undefined), build);
+    const builds = buildsContext();
+    if (!builds) return notHere;
+    const quit = await quitBuild(builds, build);
     log(`other build: asked ${build} to quit: ${quit.said}`);
     return { ...quit, view: await syncThenView() };
   });

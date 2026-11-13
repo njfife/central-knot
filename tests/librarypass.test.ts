@@ -10,7 +10,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { wantedIn } from '../src/library.ts';
 import { copiesOf, lookFor, runPass, type Disk, type ItemClick, type Kind, type KindLibrary, type Seen } from '../src/librarypass.ts';
-import type { ShareContext } from '../src/share.ts';
+import { takeOverSync, type ShareContext } from '../src/share.ts';
+import { readHistory } from '../src/history.ts';
 import type { HarnessId } from '../src/types.ts';
 
 interface Note extends Seen { file: string; text: string }
@@ -104,5 +105,29 @@ test('A tool that has the item another way and holds a copy Central Knot didn’
     const { look, live } = await lookFor(kind, context, tools);
     assert.deepEqual(copiesOf(look, live[0])['opencode-cli'], { is: 'present', hash: hashOf('My own plan.\n'), at: 0, anotherWay: 'OpenCode reads Claude Code’s copy.' });
     assert.equal((await runPass(kind, context, tools, [])).writes, 0, 'nothing is written or removed there');
+  } finally { await cleanup(); }
+});
+
+test('A pass whose home another build takes over during its first item writes nothing more: the second item is not written, and it says why', async () => {
+  const { context, cleanup } = await sandbox();
+  try {
+    // OpenCode doesn't read Claude Code's folder here, so each item is written into its own.
+    const toy = noteKind(), read = toy.read;
+    const writes: string[] = [];
+    const kind: Kind<string, Note> = {
+      ...toy, read: async (at, managed) => ({ ...await read(at, managed), held: () => undefined }),
+      write: async (at, item, tool, here, text) => {
+        // The other build takes over while the first item is being written.
+        if (!writes.length) await takeOverSync({ ...context, build: 'other', buildName: 'The other build' });
+        writes.push(item.name);
+        return toy.write(at, item, tool, here, text);
+      },
+    };
+    for (const name of ['first', 'second']) await writeFile(join(folderOf(context, 'claude-cli'), `${name}.txt`), `${name}\n`);
+    const result = await runPass(kind, context, tools, [{ key: 'first', on: true, except: [] }, { key: 'second', on: true, except: [] }]);
+    assert.deepEqual(writes, ['first'], 'the second item is not written');
+    assert.equal(result.stopped, 'The other build took over syncing this home meanwhile, so this stopped there.');
+    assert.deepEqual(await readdir(folderOf(context, 'opencode-cli')), ['first.txt']);
+    assert.ok(!(await readHistory(context)).some(event => event.key === 'note:second'), 'nor is anything recorded of it');
   } finally { await cleanup(); }
 });

@@ -2,7 +2,7 @@
 // (app-settings.json) and applies them; this page shows them, one full-width row each, and changes one at a time. One row is
 // the open home's, not the app's: Synchronize everything, kept in the home's sync record (share.ts SyncRecord syncEverything)
 // and switched through app.ts setSyncEverything. One section is this Mac's: another build of Central Knot found here, a row
-// each with Remove or Quit (otherBuildsSection; its words and clicks are otherbuildview.ts's).
+// each with its actions (otherBuildsSection; its words and clicks are otherbuildview.ts's).
 import { announce, machine, rerender, setSyncEverything, showPage, state, whyReadOnly } from './app.ts';
 import { button, h, icon, toggle } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -15,7 +15,7 @@ import { libraryWords, sentences } from './libraryrow.ts';
 import { buildWords, releasesPage, tagWords, updateStatus } from './updates.ts';
 import { checkNow, settingUpdateButton, unsavedWork, updates } from './updateview.ts';
 import { checkPluginsNow, checkedWords, pluginUpdates } from './pluginupdateview.ts';
-import { buildAction, buildHint, rowMessage, slug } from './otherbuildview.ts';
+import { buildActions, buildHint, rowMessage, slug } from './otherbuildview.ts';
 import type { BuildOutcome } from './types.ts';
 import { PRODUCT } from './values.ts';
 
@@ -404,7 +404,8 @@ function otherBuildsSection(): HTMLElement | null {
   if (!home || (!found.length && !said)) return null;
   const show = (outcome: BuildOutcome) => { const message = rowMessage(outcome); void act('other-builds', async () => message, () => message.text); };
   return settingsSection('other-builds', `Other builds of ${PRODUCT}`,
-    ...found.map(each => settingRow(`other-build-${slug(each.installed ?? each.build)}`, each.name, buildHint(home, each), buildAction(home, each, `other-build-row-${slug(each.installed ?? each.build)}`, show))),
+    ...found.map(each => settingRow(`other-build-${slug(each.installed ?? each.build)}`, each.name, buildHint(home, each),
+      h('div.setting-actions', {}, ...buildActions(home, each, `other-build-row-${slug(each.installed ?? each.build)}`, show)))),
     said ? h('div.setting-row.setting-said', {}, messageLine(said, { id: 'setting-other-builds-message' })) : null);
 }
 

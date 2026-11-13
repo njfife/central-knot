@@ -2248,20 +2248,20 @@ if (wanted('remove-build')) {
   putBack();
   await look('overview');
   if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
-  await atEverySize('overview-band', 'Central Knot Alpha is installed in the Applications folder and doesn’t sync this home: the Overview’s band says where it is, that one build syncs a home at a time and what Remove does, with Remove and the close button', true);
-  await shot(a, 'overview-band-hover', 'The pointer on "Remove Central Knot Alpha" (its tooltip says what it does).', await middleOf(`#other-build-action-${id}`));
+  await atEverySize('overview-band', 'Central Knot Alpha is installed in the Applications folder and doesn’t sync this home: the Overview’s band says where it is, that one build syncs a home at a time, which app Remove moves to the Trash and what stays, with Remove and Keep both', true);
+  await shot(a, 'overview-band-hover', 'The pointer on "Remove Central Knot Alpha": its hover look (a tooltip doesn’t show in a picture).', await middleOf(`#other-build-action-${id}`));
   await focusOn(`#other-build-action-${id}`); await shot(a, 'overview-band-focus', 'Keyboard focus on "Remove Central Knot Alpha", with its ring.');
   await a.click('#nav-settings');
-  await atEverySize('settings-row', 'Settings › Other builds of Central Knot: a row for it, saying what it is, where, that one build syncs a home at a time and what Remove does', true, '#settings-other-builds', 'start');
+  await atEverySize('settings-row', 'Settings › Other builds of Central Knot: a row for it, saying what it is, where, that one build syncs a home at a time, which app Remove moves to the Trash and what stays', true, '#settings-other-builds', 'start');
   await a.click('#nav-overview'); await a.click(`#other-build-hide-${id}`);
-  await shot(a, 'overview-band-hidden', 'Clicked the band’s close button: the Overview no longer shows it.');
+  await shot(a, 'overview-band-hidden', 'Clicked Keep both: the Overview no longer shows the band; both stay installed.');
   await a.click('#nav-settings'); await show('#settings-other-builds', 'start');
   await shot(a, 'settings-row-after-hiding', 'Settings still lists it while it is installed.');
   await a.run(`localStorage.removeItem('ck-other-build-hidden-${ALPHA_ID}')`);
   // Running: from its bundle, and a second copy from Downloads.
   await running([installed, join(HOME, 'Downloads/Central Knot Alpha.app')]);
   await look('settings'); await show('#settings-other-builds', 'start');
-  await atEverySize('settings-row-running', 'It is running, from its bundle and as a second copy from Downloads: the row says so', false, '#settings-other-builds', 'start');
+  await atEverySize('settings-row-running', 'It is running, from its bundle and as a second copy from Downloads: the row says so, and that the Downloads copy quits too but stays where it is', false, '#settings-other-builds', 'start');
   await a.click('#nav-overview');
   await shot(a, 'overview-band-running', 'The Overview’s band, with it running.');
   await a.click('#nav-settings'); await a.click(`[id^="other-build-row-"]`); await waitFor(a, idle, 20000); await a.settle(); await show('#settings-other-builds', 'start');
@@ -2287,17 +2287,26 @@ if (wanted('remove-build')) {
   MAC.running([]);
   await look('overview'); await a.click(`#other-build-action-${id}`); await waitFor(a, idle, 20000); await a.settle();
   await atEverySize('overview-removed', 'Clicked Remove on the Overview: it is in the Trash; the band says what stays, and that a sign-in start is turned off in Login Items');
-  // Where it syncs this home: Take over syncing is two choices.
+  // A home a custom build syncs, with that build installed: no other build is offered, and Take over syncing is as before.
+  const acme = MAC.bundle(MAC.applications, 'Central Knot for Acme', 'com.centralknot.custom.acme');
+  mkdirSync(join(practice, '.central-knot'), { recursive: true });
+  writeFileSync(join(practice, '.central-knot/sync.json'), `${JSON.stringify({ formatVersion: 2, generation: 'tour-acme', owner: 'com.centralknot.custom.acme', ownerName: 'Acme Knot' })}\n`);
+  await look('skills');
+  await atEverySize('skills-custom-owner', 'A custom build (Acme Knot) synced this home last and is installed here: only the standard app and the alpha are ever offered, so this is Take over syncing as before, with no choice to remove it', false, '#other-owner', 'start');
+  await a.click('#nav-settings'); await show('#settings-home', 'start');
+  await shot(a, 'settings-custom-owner', 'Settings in that home: no Other builds section, since neither the standard app nor the alpha is here.');
+  rmSync(acme, { recursive: true });
+  // Where the alpha synced this home last: Take over syncing is two choices.
   putBack();
   mkdirSync(join(practice, '.central-knot'), { recursive: true });
   writeFileSync(join(practice, '.central-knot/sync.json'), `${JSON.stringify({ formatVersion: 2, generation: 'tour-alpha', owner: ALPHA_ID, ownerName: 'Central Knot Alpha' })}\n`);
   await look('skills');
-  await atEverySize('skills-two-choices', 'Central Knot Alpha syncs this home and is installed here: Take over syncing is two choices, Take over and remove Central Knot Alpha, or Take over, keep both', true, '#other-owner', 'start');
-  await shot(a, 'skills-two-choices-hover', 'The pointer on "Take over and remove Central Knot Alpha".', await middleOf('#take-over-remove'));
+  await atEverySize('skills-two-choices', 'Central Knot Alpha synced this home last, isn’t open, and is installed here: Take over syncing is two choices, Take over and remove Central Knot Alpha (the band names the app that goes and what stays), or Take over, keep both', true, '#other-owner', 'start');
+  await shot(a, 'skills-two-choices-hover', 'The pointer on "Take over and remove Central Knot Alpha": its hover look.', await middleOf('#take-over-remove'));
   await a.click('#nav-overview');
-  await atEverySize('overview-two-choices', 'The Overview says the same, with the same two choices (and no band of its own for it)');
+  await atEverySize('overview-two-choices', 'The Overview says the same, with the same two choices and no band of its own for it; below, History’s line is about changes in your tools');
   await a.click('#nav-settings'); await show('#settings-other-builds', 'start');
-  await shot(a, 'settings-row-syncs-here', 'Its Settings row while it syncs this home: the action is Take over and remove.');
+  await atEverySize('settings-row-syncs-here', 'Its Settings row: it synced this home last and isn’t open, so removing it takes over syncing first; the same two choices', false, '#settings-other-builds', 'start');
   await a.click('#nav-skills'); await a.click('#take-over-remove'); await waitFor(a, idle, 20000); await a.settle();
   await atEverySize('skills-taken-over-removed', 'Clicked "Take over and remove Central Knot Alpha": this app syncs the home now, said first, and the alpha is in the Trash');
 }

@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import { intoFolder, knownBuilds, lookForBuilds, quitBuild, removeBuild, removeClick, type BuildsContext } from '../src/otherbuilds.ts';
 import { macPlaces } from '../src/platform.ts';
 import { readRecord, type ShareContext } from '../src/share.ts';
-import { ALPHA_BUILD } from '../src/updates.ts';
+import { ALPHA_BUILD, type BuildApp } from '../src/updates.ts';
 import { STANDARD_BUILD } from '../src/values.ts';
 import { standInApp, standInMac } from './macstandins.ts';
 
@@ -62,13 +62,11 @@ test('Another build is a bundle at the top of an Applications folder, named for 
   ]);
 }));
 
-test('It is the same from either side: the alpha finds the standard app, and the build a home’s record names as its owner counts too', () => aMac(async ({ stand, context }) => {
+test('It is the same from either side: the alpha finds the standard app; a custom build, even one a home’s record names, is not offered', () => aMac(async ({ stand, context }) => {
   const standard = stand.bundle(stand.applications, STANDARD, STANDARD_BUILD);
   stand.bundle(stand.applications, ALPHA, ALPHA_BUILD);
-  const acme = stand.bundle(stand.applications, 'Central Knot for Acme', 'com.centralknot.custom.acme');
+  stand.bundle(stand.applications, 'Central Knot for Acme', 'com.centralknot.custom.acme');
   assert.deepEqual(await lookForBuilds(context), [{ build: STANDARD_BUILD, name: STANDARD, installed: standard, running: [] }]);
-  const owned = { ...context, known: knownBuilds({ build: 'com.centralknot.custom.acme', name: 'Acme Knot' }) };
-  assert.deepEqual((await lookForBuilds(owned))?.map(found => [found.name, found.installed]), [[STANDARD, standard], ['Acme Knot', acme]]);
 }, ALPHA_BUILD));
 
 test('A running build is found by its bundle id wherever it runs from; one with no bundle in an Applications folder is found running, for Quit', () => aMac(async ({ stand, downloads, context, runs }) => {
@@ -163,11 +161,66 @@ test('Where whether it runs can’t be told, nothing is removed', () => aMac(asy
   assert.ok(existsSync(alpha));
 }));
 
+test('The bundle is checked again as the last thing before the Trash: one swapped in while the other app was quitting is not removed', () => aMac(async ({ stand, context, runs, trashed }) => {
+  const alpha = stand.bundle(stand.applications, ALPHA, ALPHA_BUILD);
+  const [app] = await runs([{ bundleId: ALPHA_BUILD, path: alpha, quits: false }]);
+  const removing = removeBuild(context, alpha, ALPHA_BUILD);
+  // While Remove waits for it to quit, the bundle is replaced by another app's, and then the alpha quits.
+  await wait(400);
+  rmSync(alpha, { recursive: true });
+  stand.bundle(stand.applications, ALPHA, 'com.example.unrelated');
+  app.kill('SIGKILL');
+  const removal = await removing;
+  assert.equal(removal.done, false, removal.said);
+  assert.ok(existsSync(join(alpha, 'Contents/Info.plist')), 'the swapped-in app is where it was');
+  assert.deepEqual(trashed(), []);
+}));
+
+test('A copy listed as running that can’t be asked about means whether it runs isn’t known: nothing is quit or removed', () => aMac(async ({ stand, context, runs }) => {
+  const alpha = stand.bundle(stand.applications, ALPHA, ALPHA_BUILD);
+  const [app] = await runs([{ bundleId: ALPHA_BUILD, path: alpha, quits: true }]);
+  // macOS lists the copy, then can't say anything about it.
+  const halting = join(stand.root, 'lsappinfo-halting');
+  writeFileSync(halting, `#!${process.execPath}\nif (process.argv[2] === 'find') console.log('ASN:0x0-0x${app.pid!.toString(16)}-"stand-in":'); else process.exit(1);\n`, { mode: 0o755 });
+  const halted = { ...context, places: { ...context.places, lsappinfo: halting } };
+  assert.deepEqual(await removeBuild(halted, alpha, ALPHA_BUILD), { said: `Central Knot couldn’t tell whether ${ALPHA} is running, so nothing was removed. Quit ${ALPHA}, then try again.`, done: false });
+  assert.deepEqual(await lookForBuilds(halted), [{ build: ALPHA_BUILD, name: ALPHA, installed: alpha }], 'the look says nothing of it running');
+  assert.ok(alive(app) && existsSync(alpha));
+}));
+
+test('Only the standard app and the alpha are ever offered: an app a home’s record names as its owner is not found, quit or removed', () => aMac(async ({ stand, home, context: mac, runs }) => {
+  let context = mac;
+  const other = stand.bundle(stand.applications, 'Central Knot for Acme', 'com.example.other');
+  const [app] = await runs([{ bundleId: 'com.example.other', path: other, quits: true }]);
+  const synced = homeOwnedBy(home, 'com.example.other', 'Acme Tools');
+  // Even handed the home's owner, as this code once was, only the two are known.
+  const known = (knownBuilds as (owner?: unknown) => BuildApp[])({ build: 'com.example.other', name: 'Acme Tools' });
+  assert.deepEqual(known.map(build => build.bundleId), [STANDARD_BUILD, ALPHA_BUILD]);
+  context = { ...context, known };
+  assert.deepEqual(await lookForBuilds(context), []);
+  assert.equal((await quitBuild(context, 'com.example.other')).done, false);
+  assert.equal((await removeClick(synced, context, other, 'com.example.other', true)).done, false);
+  assert.ok(alive(app) && existsSync(other));
+  assert.equal((await readRecord(synced.home)).record?.owner, 'com.example.other', 'nothing was taken over either');
+}));
+
+test('Every script that starts the app names its stand-in for this Mac, so none looks at the real Applications folders, Trash or running apps', () => {
+  const scripts = join(import.meta.dirname, '../scripts');
+  const starting = readdirSync(scripts).filter(name => /\.m?[jt]s$/.test(name)).map(name => [name, readFileSync(join(scripts, name), 'utf8')] as const)
+    .filter(([, text]) => /\bspawn\(/.test(text) && /Contents\/MacOS|electron\/path\.txt/.test(text));
+  assert.ok(starting.length >= 5, starting.map(([name]) => name).join());
+  // Set in the app's environment, not only named in a comment line.
+  const sets = (text: string) => /\bCK_TEST_APPS\s*:/.test(text.replace(/^\s*\/\/.*$/gm, ''));
+  assert.deepEqual(starting.filter(([, text]) => !sets(text)).map(([name]) => name), []);
+});
+
 /** A home whose sync record names the alpha as its owner, and the standard app's context for it. */
-function homeOwnedByAlpha(base: string): ShareContext {
+const homeOwnedByAlpha = (base: string) => homeOwnedBy(base, ALPHA_BUILD, ALPHA);
+/** A home whose sync record names `owner` as its owner, and the standard app's context for it. */
+function homeOwnedBy(base: string, owner: string, ownerName: string): ShareContext {
   const home = join(base, 'synced');
   mkdirSync(join(home, '.central-knot'), { recursive: true });
-  writeFileSync(join(home, '.central-knot/sync.json'), `${JSON.stringify({ formatVersion: 2, generation: 'g-1', owner: ALPHA_BUILD, ownerName: ALPHA })}\n`);
+  writeFileSync(join(home, '.central-knot/sync.json'), `${JSON.stringify({ formatVersion: 2, generation: 'g-1', owner, ownerName })}\n`);
   return { home, mode: 'custom', read: async () => [], build: STANDARD_BUILD, buildName: STANDARD, settingsPath: join(base, 'settings.json'), realHome: join(base, 'real') };
 }
 

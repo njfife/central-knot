@@ -1,4 +1,4 @@
-import type { HarnessId, HistoryDays, HomeView, Snapshot, SyncNotice, SyncView } from './types.ts';
+import type { HarnessId, HistoryDays, HomeView, Snapshot, SyncGate, SyncNotice, SyncView } from './types.ts';
 
 const monograms: Record<HarnessId, string> = { 'claude-cli': 'Cc', 'copilot-cli': 'Cp', 'codex-cli': 'Cx', 'pi-cli': 'Pi', 'opencode-cli': 'Oc' };
 export { toolName } from './words.ts';
@@ -9,6 +9,9 @@ export const clockTime = (iso: string) => new Date(iso).toLocaleTimeString(undef
 /** A path's last part: the file's own name. */
 export const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 /** The items a sync notice names: its one item, or every item Synchronize everything took in. */
+/** The build that syncs a home in this one's place, where its record names another (share.ts syncGate); undefined otherwise. */
+export const syncOwner = (gate: SyncGate) => (gate.state === 'stopped' ? gate.owner : undefined);
+
 export const noticeNames = (notice: SyncNotice) => (notice.kind === 'taken-in' ? notice.items : [notice.item]);
 /** Items the background passes wrote where they were missing, leaving out those a sync notice already tells (`told`: their names). */
 export const caughtUpNames = (sync: SyncView, told: Set<string>) =>

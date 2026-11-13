@@ -4,7 +4,7 @@
 // library row (`library()`): librarypages.ts says what each kind supplies, libraryrow.ts what such a row says. A sync notice is
 // kept or folded once its page shows it (toldNotices); until then it lives across reads in app.ts keepUnshown.
 import { brandMark } from './brand.ts';
-import { caughtUpNames, defaultHistoryDays, groupBy, noticeNames } from './model.ts';
+import { caughtUpNames, defaultHistoryDays, groupBy, noticeNames, syncOwner } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
 import { andList, byToolOrder, kindNouns, toolNames, toolsPhrase } from './words.ts';
 import { readFlag, writeFlag } from './flags.ts';
@@ -789,9 +789,9 @@ function writeStepBand(waiting: ItemRow[]) {
  * this one changes no skill, MCP server or agent here until it is told to take over.
  */
 function otherOwnerBand(): HTMLElement | null {
-  const home = state.home, gate = home?.sync.gate;
-  if (gate?.state !== 'stopped' || !gate.owner) return null;
-  const { said, buttons } = takeOverChoices(home!, { variant: 'outline', size: 'small' }, { take: 'take-over-sync', remove: 'take-over-remove' }, !!state.busy || !home!.sync.access.allowed);
+  const home = state.home;
+  if (!home || !syncOwner(home.sync.gate)) return null;
+  const { said, buttons } = takeOverChoices(home, { variant: 'outline', size: 'small' }, { take: 'take-over-sync', remove: 'take-over-remove' }, !!state.busy || !home.sync.access.allowed);
   return h(`div.band${buttons.length > 1 ? '.band-two' : ''}`, { role: 'status', id: 'other-owner' }, icon('circle-alert', 14, 'tone-warning'), h('span.band-text', {}, said), h('span.band-actions', {}, buttons));
 }
 

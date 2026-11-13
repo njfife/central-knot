@@ -1,6 +1,6 @@
 import { absentKinds, announce, noTools, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type PageKind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, type Page } from './app.ts';
 import { afterLayout, button, cardGrid, emptyState, fileBlocks, h, icon, pathText, section } from './dom.ts';
-import { fullToolName, plural, skillCount, toolName } from './model.ts';
+import { fullToolName, plural, skillCount, syncOwner, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
 import { absentTools, heldKinds, isPresent } from './presence.ts';
 import { brandMark, itemsTable, outcomeBand, showFiltered, skillsBrowser, wrappingPath } from './matrix.ts';
@@ -219,13 +219,14 @@ export function overviewPage() {
         absent.length && !empty ? h('p.overview-line', { id: 'overview-absent' }, icon('info', 14, 'tone-muted'), `No tool here holds ${orList(absent.map(kind => kindNames[kind]))}.`) : null,
         !home.sync.access.allowed ? h('p.overview-line', {}, icon('lock', 14, 'tone-warning'), `Automatic sync is paused. Preview only: ${previewReason(home.sync.access.reason)}.`)
         // Another build syncs this home: said here, with the way to take over (and to remove that build, where it is installed here).
-        : home.sync.gate.state === 'stopped' && home.sync.gate.owner ? ownerLine(home)
+        : syncOwner(home.sync.gate) ? ownerLine(home)
         // Green only once something syncs; before that, sync is on and waiting, in the status bar's grey.
         : home.syncOn && nothingManaged ? null : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingManaged ? 'tone-muted' : 'tone-success') : 'tone-warning'),
           ...(home.syncOn ? [nothingManaged ? 'Automatic sync is on. Once something is on, edits spread between tools in seconds, with Undo.'
             : `Automatic sync is on: edits spread between tools in seconds${home.sync.syncEverything ? ', and what turns up in a tool is taken in by Synchronize everything' : ''}, with a notice and Undo.`]
             : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync once', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
-        h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Every change Central Knot makes is kept in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ', with Undo.'),
+        // Not a build of Central Knot removed to the Trash: that is in the Trash until the Trash is emptied (otherbuildview.ts).
+        h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Every change Central Knot makes in your tools is kept in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ', with Undo.'),
         // The two pages the cards don't cover, named once so a newcomer knows what they are; Plugins only where a tool here
         // installs them, and neither in a home with no tools.
         empty ? null : h('p.overview-line', {}, icon('info', 14, 'tone-muted'), 'Also here: ', button({ variant: 'link', size: 'micro', label: 'Instructions', id: 'overview-instructions', onclick: () => showPage('instructions') }), ' (each tool’s own instruction file)',
