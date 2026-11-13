@@ -60,6 +60,9 @@ export const noToolsSentence = 'No tools were found in this home.';
 /** Why nothing was changed in a tool whose Manage switch is off (toolchoice.ts), wherever a request named it anyway. */
 export const leftOutSentence = (tool: string) => `${toolName(tool)} is left out of Central Knot here (its Manage switch on Harnesses is off), so nothing was changed there.`;
 
+/** What an Undo says of a tool it would have written that isn't managed now (left out, or uninstalled): it changed nothing there. */
+export const notManagedHere = (tool: string) => `${toolName(tool)} isn’t managed here now, so this changed nothing there.`;
+
 /** What the status bar says once when tools are installed while the app is open and Central Knot manages them (main.ts, presence.ts noteTools). */
 export const joinedWords = (tools: HarnessId[]) => `${toolList(tools)} ${tools.length === 1 ? 'is' : 'are'} installed now, and Central Knot manages ${tools.length === 1 ? 'it' : 'them'}. Harnesses has the Manage switch.`;
 

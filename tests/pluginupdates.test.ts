@@ -368,7 +368,7 @@ test('A tool whose Manage switch is turned off is forgotten as seen, with what w
   await updates.check();
   // Codex is left out: the reads of the home no longer name it (main.ts passes the managed tools), and it is forgotten.
   box.tools = ['claude-cli'];
-  await updates.leftOut('codex-cli');
+  await updates.forgetTool('codex-cli');
   assert.deepEqual(box.record()?.seenTools, ['claude-cli']);
   // Turned on again: a read names it, a check is made at once, and it gets the plugin Claude Code has.
   box.tools = ['claude-cli', 'codex-cli'];

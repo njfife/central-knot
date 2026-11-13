@@ -559,6 +559,9 @@ export const noToolManaged = (): boolean => !!state.home && !homeTools().length;
 export const noToolManagedSentence = (view: HomeView): string => (view.sync.present.length
   ? `Central Knot manages none of the tools here: ${toolList(view.sync.present)} ${view.sync.present.length === 1 ? 'is' : 'are'} left out.` : noToolsSentence);
 
+/** The tools installed in the open home whose Manage switch is off: pages that say where an item is say "no tool Central Knot manages" while there are any. */
+export const leftOutTools = (): HarnessId[] => (state.home ? state.home.sync.present.filter(tool => !state.home!.sync.managed.includes(tool)) : []);
+
 /** The open home's tools by name, for sentences: "Claude Code and Codex". */
 export const homeToolNames = (): string[] => homeTools().map(toolName);
 
@@ -951,7 +954,7 @@ function leftText(result: BaseResult, undoing = false) {
   const one = edited.length === 1;
   return [edited.length ? ` ${fileNames(edited)} ${one ? 'was' : 'were'} left as ${one ? 'it is' : 'they are'}: ${undoing ? 'changed there since the save' : `${one ? 'its' : 'their'} copy of the base was edited there`}.` : '',
     failed.length ? ` ${fileNames(failed)} could not be written; nothing in ${failed.length === 1 ? 'it' : 'them'} changed.` : '',
-    out.length ? ` ${toolList(out)}’s file${out.length === 1 ? ' was' : 's were'} left as ${out.length === 1 ? 'it is' : 'they are'}: left out of Central Knot here.` : '',
+    out.length ? ` ${fileNames(out)} ${out.length === 1 ? 'was' : 'were'} left as ${out.length === 1 ? 'it is' : 'they are'}: a tool left out of Central Knot here reads ${out.length === 1 ? 'it' : 'them'}.` : '',
     result.problem ? ` ${result.problem}` : ''].join('');
 }
 

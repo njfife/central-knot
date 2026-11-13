@@ -892,9 +892,9 @@ inBox('A deleted agent can always be restored: a Delete whose pass saved another
   assert.deepEqual((await historyActions(box)).map(action => `${action.event.kind}: ${action.label}`), ['deleted: Restore']);
   await (await historyActions(box)).find(action => action.label === 'Restore')!.run();
   assert.deepEqual(await filesOf(box), before);
-  // Once it is told, nothing is written twice.
+  // Once it is told, nothing is written twice. (The copies that pass removed have an entry of their own, `in-line`, with no Restore.)
   await pass(box);
-  assert.equal((await historyOf(box)).filter(event => event.kind === 'deleted').length, 1);
+  assert.equal((await historyOf(box)).filter(event => event.kind === 'deleted' && event.cause !== 'in-line').length, 1);
 });
 
 // ---------- The record, and the things around it ----------

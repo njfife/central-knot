@@ -218,7 +218,7 @@ function everyHarness(home: HomeView) {
     h('div.scroll.harness-scroll', { id: 'harnesses-scroll' },
       h('p.tools-note', {}, icon('info', 14, 'tone-muted'),
         h('span', {}, home.sync.managed.length ? 'Each AI coding tool and what it has. Open one to manage its skills, MCP servers, agents, instructions and plugins; its switch says whether Central Knot manages it at all.'
-          : 'Central Knot manages none of your tools here. Turn one on to keep its skills, MCP servers and agents in Central Knot.',
+          : 'Central Knot manages none of your tools here. Turn one on to manage it; its items not in Central Knot yet then show as found, and Add keeps them. What Central Knot keeps already stays kept.',
           // Where no Manage switch can be turned, said once here (each disabled switch's tooltip says it too).
           manageLocked(home) ? ` ${manageLocked(home)}` : null,
           home.mode === 'actual' ? null : [home.mode === 'fixture' ? ' Practice copy: installed apps aren’t checked; ' : ' A folder: installed apps aren’t checked; ',
@@ -255,7 +255,7 @@ function tabs(home: HomeView, tool: HarnessId) {
     }));
 }
 
-/** Moves between found harnesses without going back to the list. */
+/** Moves between managed harnesses without going back to the list. */
 function switcher(home: HomeView, tool: HarnessId) {
   const others = home.sync.managed;
   if (others.length < 2) return null;

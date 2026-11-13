@@ -33,7 +33,7 @@ import { openLibrary, readConverted, readVersion, recordedSkills, saveLibrary, s
 import { isDisabled, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, type SwitchFile } from './skillswitch.ts';
 import { harnesses } from './harnesses.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, Skill, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy } from './types.ts';
-import { andList, throughPlugin, toolName } from './words.ts';
+import { andList, notManagedHere, throughPlugin, toolName } from './words.ts';
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const nameOf = (tool: HarnessId) => toolName(tool);
@@ -312,15 +312,20 @@ export async function applySkills(context: ShareContext, tools: HarnessId[], cha
  */
 export async function restoreSkill(context: ShareContext, tools: HarnessId[], eventId: string, version?: string): Promise<PassResult> {
   const past = (await readHistory(context)).find(event => event.id === eventId);
-  if (past && !past.undoneBy && isClearedSwitch(past)) return switchBack(context, past);
+  if (past && !past.undoneBy && isClearedSwitch(past)) return switchBack(context, tools, past);
   return restore(skillKind, context, tools, eventId, version);
 }
 
-/** Clear the switch's Undo: each tool's own switch has the skill off again, as before, with an entry of its own. */
-async function switchBack(context: ShareContext, past: HistoryEvent): Promise<PassResult> {
+/**
+ * Clear the switch's Undo: each tool's own switch has the skill off again, as before, with an entry of its own. A tool not
+ * managed now (`tools`) is left as it is, as every Undo leaves one, and said; with no tool left to set, it is refused.
+ */
+async function switchBack(context: ShareContext, tools: HarnessId[], past: HistoryEvent): Promise<PassResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
-  const entries = past.switched!.filter(entry => entry.target);
+  const recorded = past.switched!.filter(entry => entry.target), away = recorded.filter(entry => !tools.includes(entry.tool));
+  const entries = recorded.filter(entry => tools.includes(entry.tool));
+  if (!entries.length) return { stopped: away.map(entry => notManagedHere(entry.tool)).join(' '), results: [], writes: 0 };
   const already = await Promise.all(entries.map(async ({ tool, target }) => isDisabled(context, await readSwitchFile(context, tool), target!)));
   if (already.every(Boolean)) return { stopped: `${andList(entries.map(entry => toolName(entry.tool)))}’s own switch has it off already. Nothing was changed.`, results: [], writes: 0 };
   for (const { tool, target } of entries) {
@@ -332,6 +337,7 @@ async function switchBack(context: ShareContext, past: HistoryEvent): Promise<Pa
   for (const entry of history) if (entry.id === past.id) entry.undoneBy = event.id;
   await replaceHistory(context, [...history, event]);
   const results = entries.map(({ tool }): DestinationResult => ({ item: past.item, harness: tool, outcome: 'switched', disabled: true, message: `${toolName(tool)}’s own switch has it off again.` }));
+  results.push(...away.map(({ tool }): DestinationResult => ({ item: past.item, harness: tool, outcome: 'held', message: notManagedHere(tool) })));
   return { results, writes: entries.length, made: [event.id] };
 }
 

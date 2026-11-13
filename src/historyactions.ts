@@ -14,8 +14,8 @@
 //   entry (HistoryEvent.kind, `cause`)       action                 offered while
 //   off: the switch, or a copy deleted       Turn on                the item is Off
 //     by hand (`winner`: where)
-//   off in a tool managed again              none: no click turned it off
-//     (`tool-back`)
+//   on, off or deleted by a pass no click    none: nothing was asked (a deleted item's Restore is its Delete's
+//     asked (`in-line`)                      entry's); an `on`'s copies written over are offered back below
 //   off in one harness (`only`)              Turn on in <harness>   the item is On and kept out of that harness
 //   on: the switch, or an item Pull          Turn off               the item is On
 //     brought
@@ -94,6 +94,8 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
   const overSaid = over.length ? ` ${andList(over)}’s own ${words.copy}${over.length === 1 ? ' was' : 's were'} written over and kept as a version.` : '';
   switch (event.kind) {
     case 'on': {
+      // A pass no click asked wrote the current version over copies there (a tool managed again, a folder writable again).
+      if (event.cause === 'in-line') return { glyph: 'circle-check', text: `Written over in ${tools} with the current version when sync reached ${event.losers.length === 1 ? 'it' : 'them'}; what was there is one of its versions.` };
       if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}: its ${words.copy} there is back.${overSaid}${gaveSaid}` };
       const said = {
         switch: { glyph: 'circle-check', text: `Turned on${also(': put in')}.` },
@@ -111,11 +113,8 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       if (event.only && event.gaveBack?.includes(event.only)) return { glyph: 'circle-off', text: `Kept out of ${where}: ${where} has its own copy back, as before. ${keeps}` };
       if (event.only) return { glyph: 'circle-off', text: `Kept out of ${where}: its copy there was removed. ${keeps}${gaveSaid}` };
       if (event.cause === 'deleted-by-hand') return { glyph: 'trash-2', text: `Its copy was deleted in ${from}, so it was turned off${also(' and removed from')}. ${keeps}` };
-      // Off (or kept out) while those tools were left out or away: their copies went once they were managed again.
-      if (event.cause === 'tool-back') {
-        const away = andList(event.losers.map(loser => toolName(loser.tool))), one = event.losers.length === 1;
-        return { glyph: 'circle-off', text: `Off while Central Knot didn’t manage ${away}, so its ${words.copy} there was removed once ${one ? 'it was' : 'they were'} managed again. ${keeps}` };
-      }
+      // A pass no click asked took its copies out where it is off (or kept out): a tool managed again, a folder writable again.
+      if (event.cause === 'in-line') return { glyph: 'circle-off', text: `Off in ${tools}, so its ${words.copy} there was removed when sync reached ${event.losers.length === 1 ? 'it' : 'them'}. ${keeps}` };
       return { glyph: 'circle-off', text: `Turned off${also(': removed from')}.${gaveSaid} ${keeps}` };
     case 'current': {
       // The version as it was first kept says where the content came from; the entry that made it current again doesn't.
@@ -126,6 +125,8 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
     case 'deleted': {
       // One with a `winner` is from before the library (a deletion sync spread from a tool): the general sentence says it.
       if (event.winner) return undefined;
+      // Its copies a pass no click asked removed afterwards, where they were left (a tool managed again).
+      if (event.cause === 'in-line') return { glyph: 'trash-2', text: `Deleted from Central Knot, so its ${words.copy} in ${tools} was removed when sync reached ${event.losers.length === 1 ? 'it' : 'them'}. History can restore it.` };
       // The Undo of taking a found item in: out of Central Knot again, each tool it was found in keeping its own copy.
       if (gave.length) return { glyph: 'undo-2', text: `Undone: taken out of Central Knot again${also(' and removed from')}; ${andList(gave)} ${gave.length === 1 ? 'keeps its own copy' : 'keep their own copies'}, as before. History keeps it.` };
       const how = pulled ? 'Removed in the Git repo, so Pull deleted it' : 'Deleted';
@@ -210,6 +211,9 @@ const isVersion = (item: LibraryItem, hash: string | undefined): hash is string 
  */
 export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined, version?: string, loads?: LibraryFacts['loads']): EntryAction | undefined {
   if (!item || event.undoneBy) return undefined;
+  // A pass no click asked brought tools into line: nothing was asked, so nothing is undone here (a deleted item's Restore is
+  // its Delete's entry's).
+  if (event.cause === 'in-line') return undefined;
   const name = item.name, now = asItIs(item.key, item), everywhere = item.on ? ', in every tool it is on in' : '';
   if (event.kind === 'deleted') {
     const help = `Put ${name} back in Central Knot as it was${item.on ? ', and in every tool it was on in' : ''}`;
@@ -230,8 +234,6 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
     if (givesBackLater(event, givenBack(event, item).giveBack)) return undefined;
     return { label: 'Undo', help: `Take ${name} out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own`, change: { ...now, deleted: true, ...givenBack(event, item) } };
   }
-  // A copy removed from a tool managed again: no click turned it off, so there is nothing to undo.
-  if (event.kind === 'off' && event.cause === 'tool-back') return undefined;
   if (event.kind === 'off' || event.kind === 'on') {
     const action = switchAction(event.kind === 'off', event.only, item), back = givenBack(event, item).giveBack;
     // Copies go back only with an Undo, while the item is as the click left it; a plain Turn off or Turn on gives none back.

@@ -38,7 +38,7 @@ One row per item with one On/Off switch, applied in every managed tool; each cli
 
 ## History
 What Central Knot did, on its own or on a click, newest first, with Undo or Restore while the kept content allows it.
-- `historypage.ts` the page, and what the entries of profiles and instructions say (`describe`) · `historyactions.ts` skills', MCP servers' and agents' entries: whose (`libraryEntry`), sentence, action, done words
+- `historypage.ts` the page, and what the entries of profiles, instructions and a tool's Manage switch say (`describe`; the switch's: `managingWords`) · `historyactions.ts` skills', MCP servers' and agents' entries: whose (`libraryEntry`), sentence, action, done words
 - `history.ts` the file, kept for every kind (`appendHistory`, `readHistory`) and pruned by History's days (`pruneHistory`; Settings sets the days); an entry is a `types.ts HistoryEvent`, its action `app.ts restoreEvent` (paths below).
 - **Start:** `historypage.ts describe`. **Examples:** `tests/historyactions.test.ts`; each kind's Restore in `tests/skills.test.ts`, `tests/servers.test.ts` and `tests/agents.test.ts`.
 
@@ -126,7 +126,7 @@ How each is run: `AGENTS.md` ("Checking a change") and README ("For developers")
 - **A kind of item onto the library:** every place it is wired in is the recipe in `librarypass.ts`'s header.
 - **A tool:** its definition in `harnesses.ts`, its id in `types.ts HarnessId`, its name in `words.ts toolNames`, and each kind's reader and writer for it (`agentfiles.ts`, `mcp.ts`, `mcpswitch.ts`, `skillswitch.ts`, `discovery.ts`).
 - **A field on a click (`types.ts Change`):** `main.ts changes` must copy it too, or the packaged app drops it while the unit tests pass.
-- **A History entry or action:** for skills, MCP servers and agents (the library's kinds), the recipe at the end of `historyactions.ts`'s header; for profiles and instructions, a case in `historypage.ts describe`.
+- **A History entry or action:** for skills, MCP servers and agents (the library's kinds), the recipe at the end of `historyactions.ts`'s header; for profiles, instructions and a tool's Manage switch, a case in `historypage.ts describe`.
 - **A skill folder name a tool keeps for itself:** `harnesses.ts HarnessDefinition.reservedSkills` (that tool's definition); its three readers are `discovery.ts`, `skillfiles.ts readSkillsFolder` and `skills.ts cannotTake`; tests in `tests/skills.test.ts` (a name a tool keeps for itself) and `tests/discovery.test.ts`.
 - **A call from the page to main:** `types.ts DesktopApi`, `preload.ts`, and its handler in `main.ts`.
 - **A page:** `app.ts pages` and `renderer.ts renderPage`. **A Settings row:** a section or row in `settingspage.ts settingsPage`; its value saved by `main.ts saveAppSettings` (`main.ts AppSettings`) and sent to the page as `types.ts AppPreferences`; a home's own setting (Synchronize everything) is kept in its sync record instead (`share.ts SyncRecord`) and reaches the page in `types.ts SyncView`.

@@ -299,9 +299,12 @@ async function manageFlow() {
   const a = await launch(join(scratch, 'manage-data'), ['--practice-copy']);
   const practice = await a.run(`document.querySelector('.status-home').title`);
   const switches = () => a.all('[id^="manage-"][role="switch"]', 'e.id + ":" + e.getAttribute("aria-checked")');
+  // standup on in every tool first, so Codex has a copy of Central Knot's while it is left out.
+  await a.click('#nav-skills');
+  await a.click('#add-standup');
   await a.click('#nav-harnesses');
   same('every installed tool’s card has its Manage switch, on', await switches(), ['manage-claude-cli:true', 'manage-copilot-cli:true', 'manage-codex-cli:true']);
-  check('before the click, the line says its copies stay and every item stays on', (await a.text('#manage-codex-cli-line')) === 'Off leaves Codex as it is: its copies stay, and every item stays on.', await a.text('#manage-codex-cli-line'));
+  check('before the click, the line says its copies stay and every item stays as it is', (await a.text('#manage-codex-cli-line')) === 'Off leaves Codex as it is: its copies stay, and every item stays as it is.', await a.text('#manage-codex-cli-line'));
   const codex = () => tree(join(practice, '.codex'));
   const before = codex();
   await a.click('#manage-codex-cli');
@@ -309,7 +312,7 @@ async function manageFlow() {
   same('turning it off wrote nothing in Codex', codex(), before);
   const card = await a.text('#harness-codex-cli');
   check('its card says it is left out, with its switch, opens nothing, and never says Not found or Install', card.includes('Not managed') && card.includes('Left out') && !/Not found|Install/.test(card) && !(await a.exists('button#harness-codex-cli')), card);
-  check('its line says what turning it on would do', (await a.text('#manage-codex-cli-line') ?? '').startsWith('On: '), await a.text('#manage-codex-cli-line'));
+  check('its line says what turning it on would do: nothing in Codex would change', (await a.text('#manage-codex-cli-line') ?? '').startsWith('On: nothing in Codex would change'), await a.text('#manage-codex-cli-line'));
   await fitsAtMinimum(a, 'Harnesses with a tool left out');
   await a.click('#nav-skills');
   check('the Skills page has no Codex mark', (await a.exists('.tool-mark')) && !(await a.exists('.tool-mark[data-tool="codex-cli"]')));
@@ -324,11 +327,17 @@ async function manageFlow() {
   same('History has one entry for the flip, naming the tool, with no Undo', [
     await a.run(`${newest}.querySelector('.history-kind').textContent`), await a.run(`${newest}.querySelector('.history-what strong').textContent`),
     await a.run(`${newest}.querySelector('.history-about').textContent`), await a.run(`${newest}.querySelectorAll('.history-actions button').length`)],
-  ['Tool', 'Codex', 'Left out from here on: Central Knot writes nothing in Codex, and its copies there stay as they are.', 0]);
+  ['Tool', 'Codex', 'Left out from here on: Central Knot writes nothing in Codex, and its copies there stay as they are. No Undo: its switch on Harnesses is the way back.', 0]);
   await a.click('#nav-harnesses');
+  // A hand edit in Codex while it is left out reads no page again (nothing was written), so its line still says nothing would
+  // change; the band after the click says what the pass did there.
+  const standup = join(practice, '.codex/skills/standup/SKILL.md');
+  writeFileSync(standup, `${readFileSync(standup, 'utf8')}\nEdited in Codex while it was left out.\n`);
+  await wait(2500);
   await a.click('#manage-codex-cli');
-  check('turned on again, the band says Central Knot manages Codex now', (await a.text('.band-done .band-text') ?? '').startsWith('Central Knot manages Codex now'), await a.text('.band-done'));
-  same('nothing changed meanwhile, so turning it on wrote nothing in Codex', codex(), before);
+  same('turned on again, the band says what the pass did there, not what the card said before', await a.text('.band-done .band-text'),
+    'Central Knot manages Codex now: Central Knot’s version written there for 1 item (over its copy there, which a version keeps). Each change there is in History.');
+  same('turning it on put Central Knot’s version back over the hand edit: Codex holds what it held before', codex(), before);
   check('and its card opens its page again', await a.exists('button#harness-codex-cli'));
   // Clicked while main is busy (a held queue standing in for a long pass): the flip waits its turn behind it, the page says it
   // is busy and takes no other switch meanwhile, and the flip lands once the pass is done.
@@ -348,9 +357,9 @@ async function manageFlow() {
   // With Automatic sync off, a tool's line says when it is brought into line, and the band after the click says it again.
   await a.click('#sync-switch');
   await a.click('#manage-codex-cli');
-  check('with Automatic sync off, the line before turning it on says it happens at Sync once or the next click', (await a.text('#manage-codex-cli-line') ?? '').endsWith('With Automatic sync off, this happens at Sync once or at your next click on any item.'), await a.text('#manage-codex-cli-line'));
+  check('with Automatic sync off, the line before turning it on says Sync once brings it into line, and a click its own item', (await a.text('#manage-codex-cli-line') ?? '').endsWith('With Automatic sync off, Sync once brings it into line; a click on an item brings that item.'), await a.text('#manage-codex-cli-line'));
   await a.click('#manage-codex-cli');
-  check('and so does the band after it', (await a.text('.band-done .band-text') ?? '') === 'Central Knot manages Codex now. With Automatic sync off, it is brought into line at Sync once or at your next click on any item.', await a.text('.band-done'));
+  check('and so does the band after it', (await a.text('.band-done .band-text') ?? '') === 'Central Knot manages Codex now. With Automatic sync off, Sync once brings it into line; a click on an item brings that item.', await a.text('.band-done'));
   await a.click('#sync-switch');
   // Every tool left out: the pages say so and point to Harnesses, not that no tool was found.
   for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#manage-${tool}`);

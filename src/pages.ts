@@ -37,7 +37,7 @@ const noToolsLead = (page: string, more?: string) => {
 };
 
 /** A page with nothing to show in a home with no tool managed: the same lead and action as the Overview's, in its place. */
-export const noToolsState = (page: string, more?: string) => h('div.scroll.overview-scroll.no-tools', { id: `${page}-choose-home-scroll` }, noToolsLead(page, more));
+export const noToolsState = (page: string, more?: string) => h('div.scroll.overview-scroll.no-tools', { id: `${page}-no-tools-scroll` }, noToolsLead(page, more));
 
 /** An empty page: what is missing and the way forward. In a home with no tool managed, that is another home or Harnesses. */
 const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, body: string, id: string) => {

@@ -321,7 +321,7 @@ export function autoUpdates(host: AutoUpdateHost) {
    * no longer noted as seen, and what waited to go into it goes. Turned on again, it is new here and gets what the other
    * tools have, as a tool installed later does (present).
    */
-  async function leftOut(tool: HarnessId): Promise<void> {
+  async function forgetTool(tool: HarnessId): Promise<void> {
     const home = host.home();
     if (!home) return;
     const mine = await recordFor(home);
@@ -331,5 +331,5 @@ export function autoUpdates(host: AutoUpdateHost) {
     await save();
   }
 
-  return { view, check, tick, close, settled, underWay, present, leftOut };
+  return { view, check, tick, close, settled, underWay, present, forgetTool };
 }

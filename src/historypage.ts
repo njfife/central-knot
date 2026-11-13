@@ -100,8 +100,8 @@ function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; ac
  * Harnesses card is the way back, and each change a sync made there has its own entry.
  */
 const managingWords = ({ tool, on }: NonNullable<HistoryEvent['managing']>): { glyph: IconName; text: string } => (on
-  ? { glyph: 'boxes', text: `Central Knot manages ${toolName(tool)} from here on: sync brings it into line, each change with its own entry.` }
-  : { glyph: 'boxes', text: `Left out from here on: Central Knot writes nothing in ${toolName(tool)}, and its copies there stay as they are.` });
+  ? { glyph: 'boxes', text: `Central Knot manages ${toolName(tool)} from here on: sync brings it into line, each change with its own entry. No Undo: its switch on Harnesses is the way back.` }
+  : { glyph: 'boxes', text: `Left out from here on: Central Knot writes nothing in ${toolName(tool)}, and its copies there stay as they are. No Undo: its switch on Harnesses is the way back.` });
 
 /** Skills, MCP servers, agents, profile switches and tools' Manage switches share History; each row says which it is. */
 const kindOf = (event: HistoryEvent) => (event.kind === 'profile' ? 'Profile' : event.kind === 'managing' ? 'Tool' : event.base ? 'Instructions' : event.key.startsWith('mcp:') ? 'MCP server' : event.key.startsWith('agent:') ? 'Agent' : 'Skill');

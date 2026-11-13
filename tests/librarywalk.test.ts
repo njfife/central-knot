@@ -36,8 +36,11 @@ import { chooseTools } from '../src/toolchoice.ts';
 import type { Change, HarnessId, HistoryDays, HistoryEvent, PassResult } from '../src/types.ts';
 import { bytes, folderOf, historyActions, put, roots, sandbox, seen, skillText, tools as allTools, trial, undo, type Tool } from './skillclicks.ts';
 
-/** The walks every `npm test` runs (more, from any seed: CK_WALKS and CK_SEED). */
-const SEEDS = [1, 2, 3, 4];
+/**
+ * The walks every `npm test` runs (more, from any seed: CK_WALKS and CK_SEED). 51317 ends by deleting by hand a copy the person
+ * made in Codex, which Central Knot never took in: their own deletion, which the checker must not count as a loss.
+ */
+const SEEDS = [1, 2, 3, 4, 51317];
 const STEPS = 16;
 const random = (seed: number) => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 /** An answer that means the page or History offered an action that is stale or does nothing. */
@@ -214,8 +217,9 @@ async function walk(seed: number): Promise<Finding[]> {
       if (act.app) for (const where of [...allTools, 'shared'] as (Tool | 'shared')[]) {
         if (same(after[where], before[where])) continue;
         if (where === 'shared' ? act.writes !== 'shared' : !managedBefore.includes(where) && !/managed again/.test(act.name)) fail(`(e) ${act.name} changed ${where === 'shared' ? 'the shared folder' : where}, which isn’t Central Knot’s`);
+        // A step that is the person's own deletion as well (byHand) took that copy itself: it is no loss of Central Knot's.
         const was = contentsBefore[where];
-        if (was) taken.add(was);
+        if (was && !act.byHand) taken.add(was);
       }
       if (act.app && act.writes !== 'switch' && !same(await switchesNow(), switchesBefore)) fail(`(e) ${act.name} wrote a tool’s own switch`);
       for (const content of taken) if (!versions.has(content) && !here.has(content)) { taken.delete(content); fail('(a) a content Central Knot wrote over or removed is neither a version nor in any folder'); }

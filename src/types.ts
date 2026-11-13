@@ -105,9 +105,10 @@ export interface DesktopApi {
   setSyncEverything(on: boolean, home: string): Promise<{ stopped?: string; view: HomeView | null }>;
   /**
    * A tool's Manage switch (toolchoice.ts chooseTools): Central Knot's care of it turned on or off, then the home read and synced.
-   * `resume`: the page showed a home that waits for Resume, which the switch resumes as a click does.
+   * `resume`: the page showed a home that waits for Resume, which the switch resumes as a click does. `did`: what that pass did in
+   * the tool (its results there), which the band after the click says.
    */
-  manageTool(tool: HarnessId, on: boolean, resume: boolean, home: string): Promise<{ stopped?: string; view: HomeView | null }>;
+  manageTool(tool: HarnessId, on: boolean, resume: boolean, home: string): Promise<{ stopped?: string; view: HomeView | null; did: DestinationResult[] }>;
   /** Makes this build the home's sync owner, in place of the build that syncs it now; every managed item and choice stays. */
   takeOverSync(home: string): Promise<{ stopped?: string; from?: string; view: HomeView | null }>;
   onSyncChanged(callback: () => void): void;
@@ -442,11 +443,12 @@ export interface HistoryEvent {
    * a found item taken in by a click on Add ('on'; `winner`: where it was found). `sync-everything`: the same, taken in by the
    * home's standing rule, Synchronize everything, with no click. `pulled`: Pull did it ('on' for an item new here, 'edit',
    * 'deleted'). `deleted-by-hand`: its copy was deleted by hand ('off'; `winner`: where). `tool-back`: a tool managed again held a
-   * copy the item didn't have ('kept-edit'; `losers`: that copy), which gave way to the current version (library.ts managedAgain),
-   * or held the copy of an item that is Off there, which was removed ('off'; `losers`: where). `own-copy`: a harness's own copy,
-   * which Central Knot had never put there and no click took over, gave way to the current version ('kept-edit'; `losers`).
+   * copy the item didn't have ('kept-edit'; `losers`: that copy), which gave way to the current version (library.ts managedAgain).
+   * `own-copy`: a harness's own copy, which Central Knot had never put there and no click took over, gave way to the current
+   * version ('kept-edit'; `losers`). `in-line`: a pass no click asked brought harnesses into line with the item: copies written
+   * over ('on'; `losers`, each with what it held), or removed ('off', or 'deleted' for a deleted item) (librarypass.ts logItem).
    */
-  cause?: 'switch' | 'found' | 'sync-everything' | 'pulled' | 'deleted-by-hand' | 'tool-back' | 'own-copy';
+  cause?: 'switch' | 'found' | 'sync-everything' | 'pulled' | 'deleted-by-hand' | 'tool-back' | 'own-copy' | 'in-line';
   /**
    * The version current once this entry's change was made: 'current', the version made current; an 'edit' Pull made, the
    * version pulled; 'on' / 'off' by a switch, the version it was at (historyactions.ts asTheClickLeftIt).

@@ -474,7 +474,8 @@ let lastStopped: string | undefined;
 
 interface ServersAndAgentsResult { failures: DestinationResult[]; stopped: DestinationResult[]; serverNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean;
   /** The servers' and agents' found keys the pass left found (librarypass.ts PassResult found), each with its kind's prefix. */ found: string[] }
-interface BackgroundPass { skills?: LibraryPass; serversAndAgents?: ServersAndAgentsResult }
+/** `done`: every result of the pass, all three kinds, for a caller that says what it did (a tool's Manage switch). */
+interface BackgroundPass { skills?: LibraryPass; serversAndAgents?: ServersAndAgentsResult; done?: DestinationResult[] }
 
 /**
  * One pass on the open home: writes only with Sync on (or when asked explicitly); with Sync off nothing is done in the
@@ -489,7 +490,7 @@ async function pass(snapshots: Snapshot[], explicit = false): Promise<Background
   if (profilesFailed !== undefined) logFailure('moving profiles', profilesFailed);
   if (!synced) return {};
   const { skills, servers, agents, crashes } = synced;
-  return { skills: skills ?? { results: [], writes: 0 }, serversAndAgents: {
+  return { skills: skills ?? { results: [], writes: 0 }, done: [skills, servers, agents].flatMap(kind => kind?.results ?? []), serversAndAgents: {
     failures: [...crashes, ...[...(servers?.results ?? []), ...(agents?.results ?? [])].filter(entry => entry.outcome === 'failed')],
     stopped: ([['MCP sync', servers?.stopped], ['Agents sync', agents?.stopped]] as const).filter(([, why]) => why).map(([item, why]) => ({ item, outcome: 'failed' as const, message: why! })),
     serverNotices: servers?.notices ?? [], agentNotices: agents?.notices ?? [], settling: !!(servers?.settling || agents?.settling),
@@ -507,6 +508,11 @@ function keepServersAndAgents(outcome: ServersAndAgentsResult | undefined) {
 }
 
 async function syncThenView(explicit = false): Promise<HomeView> {
+  return (await syncAndView(explicit)).view;
+}
+
+/** One pass, then the view built from the home as it left it; `passed`: what the pass did. */
+async function syncAndView(explicit = false): Promise<{ view: HomeView; passed: BackgroundPass }> {
   const shared: ShareContext = { ...context(), reads: new Map() };
   const before = await read();
   const passed = await pass(before, explicit), { skills, serversAndAgents } = passed;
@@ -548,7 +554,7 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   // How many items are managed, so the first-close note says truthfully whether anything syncs (nothing does with no tool managed).
   lastManagedCount = managed.length ? [...made.skills.items, ...made.mcp.items, ...made.agents.items].filter(fact => fact.on).length : 0;
-  return made;
+  return { view: made, passed };
 }
 
 /** For each installed tool left out, what turning its Manage switch on would do there now (toolchoice.ts whatJoiningDoes): its card says it. */
@@ -1240,15 +1246,17 @@ app.whenReady().then(async () => {
   });
   handle('sync:now', async home => (home === current?.home ? syncThenView(true) : null));
   // A tool's Manage switch (toolchoice.ts chooseTools), then the home read again: with Automatic sync on, that pass brings a tool
-  // turned on into line. A tool turned off is forgotten by the plugin updates, so it is new to them when it is managed again.
+  // turned on into line, and what it did there (`did`) is what the page's band says. A tool turned off is forgotten by the plugin
+  // updates, so it is new to them when it is managed again.
   handle('tools:manage', async (tool, on, resume, home) => {
-    if (home !== current?.home || !isTool(tool) || typeof on !== 'boolean') return { stopped: elsewhere, view: null };
+    if (home !== current?.home || !isTool(tool) || typeof on !== 'boolean') return { stopped: elsewhere, view: null, did: [] };
     const chosen = await chooseTools(context(), tool, on, resume === true);
     if (!chosen.stopped) {
       log(`sync: ${tool} ${on ? 'managed' : 'left out'} in ${home}`);
-      if (!on) await pluginUpdates?.leftOut(tool).catch(error => logFailure('plugin updates', error));
+      if (!on) await pluginUpdates?.forgetTool(tool).catch(error => logFailure('plugin updates', error));
     }
-    return { ...chosen, view: await syncThenView() };
+    const { view, passed } = await syncAndView();
+    return { ...chosen, view, did: (passed.done ?? []).filter(result => result.harness === tool) };
   });
   // Take over syncing (ORG-08): this build becomes the home's sync owner, then reads and syncs it as its owner.
   handle('sync:take-over', async home => {
