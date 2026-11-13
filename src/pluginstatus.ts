@@ -179,7 +179,7 @@ export const pageOfPart = { skill: 'skills', mcp: 'mcp', agent: 'agents' } as co
 export const partOfPage = { skills: 'skill', mcp: 'mcp', agents: 'agent' } as const;
 
 /** Whether the home, as last read, still has this part in the tool: a copy removed by hand since is no longer installed there. */
-export function partStillIn(home: Pick<HomeView, 'manage' | 'mcp' | 'agents'>, tool: HarnessId, part: Pick<PartItem, 'kind' | 'name'>): boolean {
+export function partStillIn(home: Pick<HomeView, 'skills' | 'mcp' | 'agents'>, tool: HarnessId, part: Pick<PartItem, 'kind' | 'name'>): boolean {
   const { tools, facts } = kindSource(home, pageOfPart[part.kind]);
   // A kind the home doesn't read in that tool can't be checked: the part counts as there.
   return !tools.includes(tool) || facts.some(fact => fact.copies[tool] !== undefined && [fact.key, fact.name].some(name => !!name && samePart(part, { kind: part.kind, name })));

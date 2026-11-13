@@ -13,7 +13,7 @@ import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
 import { repo, repoPage, waitingCounts, waitingWords } from './repopage.ts';
 import { profilesPage, profileStatus } from './profilespage.ts';
-import type { HomeMode, HomeView, ManageView } from './types.ts';
+import type { HomeMode, HomeView, SyncView } from './types.ts';
 import { anyManaged } from './itemrow.ts';
 import { followUpdates, sidebarEnd, statusEnd } from './updateview.ts';
 import { followPluginUpdates } from './pluginupdateview.ts';
@@ -52,7 +52,7 @@ function navRow(page: Page, label: string, glyph: IconName, count?: number | str
 }
 
 const homeManages = () => !!state.home && anyManaged(state.home);
-const noticesFor = (page: Page) => !state.home ? [] : page === 'skills' ? state.home.manage.notices : page === 'mcp' ? state.home.mcp.notices : page === 'agents' ? state.home.agents.notices : [];
+const noticesFor = (page: Page) => !state.home ? [] : page === 'skills' ? state.home.skills.notices : page === 'mcp' ? state.home.mcp.notices : page === 'agents' ? state.home.agents.notices : [];
 const unseen = (page: Page) => noticesFor(page).filter(notice => !state.dismissed.has(notice.history || notice.item) && !state.seenNotices.has(notice.history || notice.item)).length;
 const unseenText = (page: Page) => { const list = noticesFor(page).filter(notice => !state.dismissed.has(notice.history || notice.item)); return `${list.length} automatic ${list.length === 1 ? 'change' : 'changes'}: ${list.slice(0, 3).map(notice => notice.item).join(', ')}`; };
 
@@ -98,7 +98,7 @@ function renderSidebar() {
     navRow('overview', titles.overview, 'layout-grid'),
     navRow('harnesses', titles.harnesses, 'boxes'),
     // Each page's rows, a plugin's items included.
-    row('skills', 'wand-sparkles', home && home.manage.skills.length + pluginItemCount(home, 'skills')),
+    row('skills', 'wand-sparkles', home && home.skills.items.length + pluginItemCount(home, 'skills')),
     row('mcp', 'plug', home && home.mcp.servers.length + pluginItemCount(home, 'mcp')),
     row('agents', 'bot', home && home.agents.items.length + pluginItemCount(home, 'agents')),
     row('instructions', 'pencil-line'),
@@ -141,11 +141,11 @@ function renderPage() {
 }
 
 /** What the home lets Central Knot write, said in the status bar; `short` stands in when the bar is narrow (style.css). */
-function writeFact(manage: ManageView): { glyph: IconName; text: string; short?: string; tone: string } {
+function writeFact(sync: SyncView): { glyph: IconName; text: string; short?: string; tone: string } {
   // Another build syncing this home stops only this build's syncing (the switch beside this says whose it is): plugins and
   // instruction files are still written from here.
-  if (manage.gate.state === 'stopped' && !manage.gate.owner) return { glyph: 'circle-alert', text: 'Writing is stopped', tone: 'tone-danger' };
-  if (!manage.access.allowed) return { glyph: 'lock', text: 'Preview only', tone: '' };
+  if (sync.gate.state === 'stopped' && !sync.gate.owner) return { glyph: 'circle-alert', text: 'Writing is stopped', tone: 'tone-danger' };
+  if (!sync.access.allowed) return { glyph: 'lock', text: 'Preview only', tone: '' };
   if (state.home?.mode === 'actual') return { glyph: 'pencil-line', text: 'Writes to your real tools', short: 'Real tools', tone: '' };
   if (state.home?.mode === 'fixture') return { glyph: 'pencil-line', text: 'Changes stay here', short: 'Stays here', tone: '' };
   return { glyph: 'pencil-line', text: 'Changes write only inside this folder', short: 'Writes here only', tone: '' };
@@ -160,18 +160,18 @@ function syncSwitch(home: HomeView) {
   // A narrow status bar calls it "Sync" (style.css): the switch and its state keep their words, and the tooltip names it whole.
   const label = h('span.sync-label', {}, h('span.fact-long', {}, 'Automatic sync'), h('span.fact-short', {}, 'Sync'));
   // With no tools there is nothing to sync: the switch is shown, not offered.
-  if (!home.manage.tools.length) {
+  if (!home.sync.tools.length) {
     return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: 'No tools were found in this home, so there is nothing to sync.' },
       label, h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, 'Nothing to sync'));
   }
-  if (!home.manage.access.allowed) {
-    return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: home.manage.access.reason ?? 'Preview only: nothing is written here' },
+  if (!home.sync.access.allowed) {
+    return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: home.sync.access.reason ?? 'Preview only: nothing is written here' },
       label, h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, 'Paused'));
   }
   // Another build syncs this home (ORG-08): this one's switch is shown, not offered, and says whose it is.
-  if (home.manage.gate.state === 'stopped' && home.manage.gate.owner) {
-    return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: `${home.manage.gate.owner.name} syncs this home. Take over syncing, on Skills, MCP servers or Agents, to have Central Knot sync it instead.` },
-      label, h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, home.manage.gate.owner.running === false ? `${home.manage.gate.owner.name}’s, not open` : `By ${home.manage.gate.owner.name}`));
+  if (home.sync.gate.state === 'stopped' && home.sync.gate.owner) {
+    return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: `${home.sync.gate.owner.name} syncs this home. Take over syncing, on Skills, MCP servers or Agents, to have Central Knot sync it instead.` },
+      label, h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, home.sync.gate.owner.running === false ? `${home.sync.gate.owner.name}’s, not open` : `By ${home.sync.gate.owner.name}`));
   }
   const idle = home.syncOn && !homeManages();
   const title = idle ? 'Automatic sync is on: it starts once you turn something on. Click to turn it off.'
@@ -183,7 +183,7 @@ function syncSwitch(home: HomeView) {
 
 function renderStatus() {
   const home = state.home;
-  const write = home && writeFact(home.manage);
+  const write = home && writeFact(home.sync);
   region('status-facts').replaceChildren(
     home
       ? h('span.status-item.status-home', { title: home.home }, icon(home.mode === 'fixture' ? 'flask-conical' : home.mode === 'actual' ? 'laptop' : 'folder-open', 14), h('span', {}, h('span', { id: 'home-label' }, home.label)))

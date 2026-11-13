@@ -8,8 +8,9 @@ import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover, findOtherApps } from './discovery.ts';
 import { configRoot, envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { CLAUDE_PROCESS, appCandidates, executableCandidates, searchPath } from './platform.ts';
-import { managedNow, syncsHere, takeOverSync, writeAccess, type ShareContext } from './share.ts';
-import { applyChanges, deleteEverywhere, eventChange, manageView, pruneHistory, readHistory, restoreFromHistory } from './manage.ts';
+import { managedNow, syncGate, syncsHere, takeOverSync, writeAccess, type ShareContext } from './share.ts';
+import { pruneHistory, readHistory } from './history.ts';
+import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skillVersion, skillsView, takeOver } from './skills.ts';
 import { agentTools, mcpTools, noteTools, pluginTools, presentTools } from './presence.ts';
 import { installedPlugins } from './plugins.ts';
 import { checkFeed, type FeedCheck } from './bundlefeed.ts';
@@ -24,10 +25,10 @@ import { readParts } from './parts.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
 import { deleteProfile, driftNow, switchFilesStamp, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from './profiles.ts';
-import { activeProfile, driftOf, NO_PROFILE, presentItems, profilesInUse, switchItems, type SwitchItem } from './profileplan.ts';
+import { activeProfile, driftOf, NO_PROFILE, presentItems, profileSkills, profilesInUse, switchItems, type SwitchItem } from './profileplan.ts';
 import { defaultHistoryDays, historyDayChoices, plural } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
-import type { ActionReport, Appearance, ApplyResult, PartRef, PartsPick, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
+import type { ActionReport, Appearance, ApplyResult, PartRef, PartsPick, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
 import { toolList } from './words.ts';
 import { buildTag, startUpdater, type PendingUpdate } from './updater.ts';
@@ -486,25 +487,24 @@ let pendingMcpNotices: SyncNotice[] = [], pendingAgentNotices: SyncNotice[] = []
 let lastStopped: string | undefined;
 
 interface McpAndAgentsResult { failures: DestinationResult[]; stopped: DestinationResult[]; mcpNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean }
-interface PassResult { skills?: ApplyResult; mcpAndAgents?: McpAndAgentsResult }
+interface BackgroundPass { skills?: LibraryPass; mcpAndAgents?: McpAndAgentsResult }
 
 /**
- * One pass on the open home: writes only with Sync on (or when asked explicitly), otherwise it just keeps the evidence.
- * `snapshots`: the caller's read of the home, which the pass uses instead of reading it again.
+ * One pass on the open home: writes only with Sync on (or when asked explicitly); with Sync off nothing is done in the
+ * background, and an edit or a deletion waits for Sync or a click on its item. `snapshots`: the caller's read of the home,
+ * which the pass uses instead of reading it again.
  */
-async function pass(snapshots: Snapshot[], explicit = false): Promise<PassResult> {
+async function pass(snapshots: Snapshot[], explicit = false): Promise<BackgroundPass> {
   const shared: ShareContext = { ...context(), read: async () => snapshots, reads: new Map() };
-  if (!(await syncsHere(shared))) return {};
-  const skills = await applyChanges(shared, [], false, { observeOnly: !syncOn && !explicit });
-  // MCP servers catch up with the same switch: edits and deletions spread with Sync on (Claude Code still waits for Write now).
-  if (!syncOn && !explicit) return { skills };
+  if (!(await syncsHere(shared)) || (!syncOn && !explicit)) return {};
   const managed = await managedNow(shared, snapshots);
   const crashes: DestinationResult[] = [];
   const crashed = (item: string) => (error: unknown) => { crashes.push({ item, outcome: 'failed', message: `${item} could not finish: ${error instanceof Error ? error.message : String(error)}` }); return undefined; };
+  // Skills and agents are Central Knot's library (library.ts); MCP servers keep their own engine (Claude Code still waits for Write now).
+  const skills = await applySkills(shared, managed, []).catch(crashed('Skills sync'));
   const mcp = await applyMcp(shared, managed, []).catch(crashed('MCP sync'));
-  // Agents follow the same switch and rules (D-32).
   const agents = await applyAgents(shared, managed, []).catch(crashed('Agents sync'));
-  return { skills, mcpAndAgents: {
+  return { skills: skills ?? { results: [], writes: 0 }, mcpAndAgents: {
     failures: [...crashes, ...[...(mcp?.results ?? []), ...(agents?.results ?? [])].filter(entry => entry.outcome === 'failed')],
     stopped: ([['MCP sync', mcp?.stopped], ['Agents sync', agents?.stopped]] as const).filter(([, why]) => why).map(([item, why]) => ({ item, outcome: 'failed' as const, message: why! })),
     mcpNotices: mcp?.notices ?? [], agentNotices: agents?.notices ?? [], settling: !!(mcp?.settling || agents?.settling),
@@ -541,7 +541,9 @@ async function syncThenView(explicit = false): Promise<HomeView> {
     mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), readId, profiles, parts: await readParts(current!.home),
     // Apps that run the tools or read their files are looked for only on this computer, like the tools' own apps.
     ...(current!.mode === 'actual' ? { otherApps: await findOtherApps(current!.home) } : {}),
-    manage: await manageView(shared, { caughtUp: caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain), notices, snapshots }),
+    sync: { tools: managed, writes: await skillFolders(shared, managed), access: await writeAccess(shared), gate: await syncGate(shared),
+      caughtUp: caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain) },
+    skills: await skillsView(shared, managed, notices),
     mcp: await mcpView(shared, managed, pendingMcpNotices.splice(0)),
     agents: await agentsView(shared, managed, pendingAgentNotices.splice(0)),
   };
@@ -549,8 +551,8 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   // With the view's own reads, so each tool's installed plugins are read once for these rows and the pages' Through a plugin boxes.
   made.pluginItems = await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), managed);
   // Another build syncs this home: whether it is open now decides what the page says about it.
-  if (made.manage.gate.state === 'stopped' && made.manage.gate.owner) made.manage.gate.owner.running = await buildRunning(made.manage.gate.owner.build);
-  lastItems = switchItems(made.manage, made.mcp);
+  if (made.sync.gate.state === 'stopped' && made.sync.gate.owner) made.sync.gate.owner.running = await buildRunning(made.sync.gate.owner.build);
+  lastItems = switchItems(profileSkills(made.skills), made.mcp);
   followProfiles(made.profiles);
   // Only once the view is built is anything kept about this home, so a switch that fails leaves nothing behind.
   handoff = { id: readId, home: current!.home, snapshots };
@@ -558,7 +560,7 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   addCarriedSoon(presentTools(snapshots));
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   // How many items are managed, so the first-close note says truthfully whether anything syncs.
-  lastManagedCount = [...made.manage.skills, ...made.mcp.servers].filter(fact => fact.managed).length + made.agents.items.filter(fact => fact.on).length;
+  lastManagedCount = made.mcp.servers.filter(fact => fact.managed).length + [...made.skills.items, ...made.agents.items].filter(fact => fact.on).length;
   return made;
 }
 
@@ -736,7 +738,7 @@ async function backgroundPass() {
     changed = true;
   }
   lastStopped = skills?.stopped;
-  const wrote = !!skills && !!(skills.harnessWrites || skills.notices?.length || mcpAndAgents?.changed);
+  const wrote = !!skills && !!(skills.writes || skills.notices?.length || mcpAndAgents?.changed);
   // Profiles: a switch turned in a tool, or an item that came or went (a file event can be one), changes what is held.
   if (await lookAtSwitchFiles(wrote || fromEvent)) changed = true;
   if (wrote) {
@@ -1078,9 +1080,9 @@ app.whenReady().then(async () => {
     typeof change?.key === 'string' && typeof change.managed === 'boolean' && Array.isArray(change.off)
     && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenManaged === undefined || typeof change.seenManaged === 'boolean')
   ).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged,
-    ...(change.disable ? { disable: ids(change.disable) } : {}), ...(change.enable ? { enable: ids(change.enable) } : {}), ...(change.remove ? { remove: ids(change.remove) } : {}),
-    ...(change.everywhere === true ? { everywhere: true } : {}), ...(change.takeOver === true ? { takeOver: true } : {}),
-    ...(typeof change.version === 'string' ? { version: change.version } : {}), ...(typeof change.deleted === 'boolean' ? { deleted: change.deleted } : {}) }));
+    ...(change.disable ? { disable: ids(change.disable) } : {}), ...(change.enable ? { enable: ids(change.enable) } : {}),
+    ...(typeof change.version === 'string' ? { version: change.version } : {}), ...(typeof change.deleted === 'boolean' ? { deleted: change.deleted } : {}),
+    ...(change.giveBack && typeof change.giveBack === 'object' ? { giveBack: Object.fromEntries(Object.entries(change.giveBack).filter(([tool, hash]) => harnessIds.includes(tool as HarnessId) && typeof hash === 'string')) } : {}) }));
   // Marketplaces and plugins: their own module, given only what it needs from here.
   const markets = carriedMarket = registerMarketplaces({ handle, handleNow }, {
     home: () => (current ? { home: current.home, overrides: context().overrides, actual: current.mode === 'actual' } : undefined),
@@ -1154,7 +1156,7 @@ app.whenReady().then(async () => {
   // Instruction files: read fresh each time; a save writes only the file the editor opened, for the home on screen.
   // Reveal only: the file manager selects it; nothing is opened, run or written.
   handle('file:show', async path => { if (typeof path === 'string' && isAbsolute(path)) shell.showItemInFolder(path); });
-  handle('history:change', async eventId => (current && typeof eventId === 'string' ? eventChange(context(), eventId) : undefined));
+  handle('history:change', async eventId => (current && typeof eventId === 'string' ? skillChange(context(), eventId) : undefined));
   handle('agents:convert', async (key, home) => (home === current?.home && typeof key === 'string'
     ? convertAgentToSkill(context(), await toolsNow(), key)
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.' }));
@@ -1206,16 +1208,11 @@ app.whenReady().then(async () => {
         await releaseProfileHolds(context(), switchedByHand([{ key: key.slice('mcp:'.length) }], result.results, 'mcp'));
         return { stopped: result.stopped, results: result.results, harnessWrites: result.writes, made: result.made };
       }
-      if (key.startsWith('agent:')) return restoreAgent(context(), tools, eventId, typeof choice === 'string' ? choice : undefined).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes, made: result.made }));
-      const restored = await restoreFromHistory(context(), eventId, resume === true, typeof choice === 'string' ? choice : undefined);
-      // Undo of a Disable or Enable is a choice made by hand, like the switch itself: profiles stop holding those switches.
-      await releaseProfileHolds(context(), switchedByHand([{ key }], restored.results));
-      return restored;
+      const restored = key.startsWith('agent:') ? await restoreAgent(context(), tools, eventId, typeof choice === 'string' ? choice : undefined)
+        : await restoreSkill(context(), tools, eventId, typeof choice === 'string' ? choice : undefined);
+      return { stopped: restored.stopped, results: restored.results, harnessWrites: restored.writes, made: restored.made };
     })()
     : { stopped: elsewhere, results: [], harnessWrites: 0 } satisfies ApplyResult));
-  handle('manage:delete-everywhere', async (key, resume, home) => (home === current?.home && typeof key === 'string'
-    ? deleteEverywhere(context(), key, resume === true)
-    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
   // Profiles: their definitions are Central Knot's own file; a switch flips each tool's own switches (profiles.ts).
   handle('profiles:save', async (profile, home) => {
     if (home !== current?.home || !profile || typeof profile !== 'object') return { problem: elsewhere };
@@ -1265,14 +1262,20 @@ app.whenReady().then(async () => {
     // The practice copy is sample files: the real Claude Code never reads them, so it need not be closed there.
     ? current?.mode !== 'fixture' && await claudeRunning() ? { stopped: 'Claude Code or Claude desktop is still running. Quit it first (every window and terminal session), then click Write to Claude Code again.', results: [], writes: 0 } : applyMcp(context(), await toolsNow(), [], { claudeNow: names.filter((name): name is string => typeof name === 'string'), ...(syncOn ? {} : { only: new Set(names.filter((name): name is string => typeof name === 'string')) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
-  handle('manage:apply', async (list, resume, home) => {
-    if (home !== current?.home) return { stopped: elsewhere, results: [], harnessWrites: 0 } satisfies ApplyResult;
-    const asked = changes(list);
-    const result = await applyChanges(context(), asked, resume === true, syncOn ? {} : { only: new Set(asked.map(change => change.key)) });
-    // A Disable or Enable chosen here takes that switch over from profiles: a later switch leaves it as set by hand.
-    await releaseProfileHolds(context(), switchedByHand(asked.filter(change => change.disable?.length || change.enable?.length), result.results));
+  handle('skills:apply', async (list, resume, home) => (home === current?.home
+    ? applySkills(context(), await toolsNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
+    : { stopped: elsewhere, results: [], writes: 0 }));
+  // A skill's two actions a Change can't carry: a tool's own switch cleared (set by hand from then on, so profiles stop
+  // holding it), and a copy outside Central Knot's taken over.
+  handle('skills:clear-switch', async (key, tool, home) => {
+    if (home !== current?.home || typeof key !== 'string' || !isTool(tool)) return { stopped: elsewhere, results: [], writes: 0 };
+    const result = await clearSwitch(context(), await toolsNow(), key, tool);
+    await releaseProfileHolds(context(), switchedByHand([{ key }], result.results));
     return result;
   });
+  handle('skills:take-over', async (key, tool, home) => (home === current?.home && typeof key === 'string' && isTool(tool)
+    ? takeOver(context(), await toolsNow(), key, tool) : { stopped: elsewhere, results: [], writes: 0 }));
+  handleNow('skills:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await skillVersion(context(), key, hash)) ?? null : null));
   // The git repo the Managed set lives in. Reading it, and asking the repo for its latest commit, waits for no sync pass;
   // Connect, Pull, Push and Disconnect take their turn with every other change.
   // Every repo call knows whether Automatic sync is on: while it is off, an MCP server's or agent's deletion waits for it.
@@ -1292,7 +1295,7 @@ app.whenReady().then(async () => {
         const check = async () => {
           if (document.body.dataset.ready === 'true') {
             const view = await window.centralKnot.refresh();
-            resolveResult({ rows: document.querySelectorAll('.kind-card').length, home: document.querySelector('#home-label').textContent, skills: view.manage.skills.map(skill => skill.key + ':' + Object.keys(skill.copies).length).join(','), allowed: view.manage.access.allowed });
+            resolveResult({ rows: document.querySelectorAll('.kind-card').length, home: document.querySelector('#home-label').textContent, skills: view.skills.items.map(skill => skill.key + ':' + Object.keys(skill.copies).length).join(','), allowed: view.sync.access.allowed });
           } else if (Date.now() > deadline) rejectResult(new Error('Renderer did not become ready'));
           else setTimeout(check, 30);
         }; check();

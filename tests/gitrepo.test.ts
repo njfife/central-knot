@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { connectRepo, pullRepo, pushRepo, repoView, undoSettingsChange } from '../src/gitrepo.ts';
-import { applyChanges, manageView, readHistory, restoreFromHistory } from '../src/manage.ts';
+import { readHistory } from '../src/history.ts';
 import { applyMcp, mcpView, restoreMcp } from '../src/mcp.ts';
 import { agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
-import { tools, git, world, skill, live, rows, seedServerAndAgent, serverAndAgentOnTwo, edit } from './gitrepo-world.ts';
+import { tools, git, world, skill, live, rows, seedServerAndAgent, serverAndAgentOnTwo, edit, applySkillsIn, skillRows, restoreIn } from './gitrepo-world.ts';
 
 test('Push puts the Managed set in the repo’s layout; another computer pulls it into its tools, Managed, and is then up to date', async () => {
   const box = await world();
@@ -14,7 +14,7 @@ test('Push puts the Managed set in the repo’s layout; another computer pulls i
     const first = await box.home('first');
     await skill(first, '.claude/skills', 'review');
     await writeFile(join(first.home, '.claude/skills/review/notes.log'), 'kept as-is\n');
-    assert.ok(!(await applyChanges(first, [{ key: 'review', managed: true, off: [] }])).stopped);
+    assert.ok(!(await applySkillsIn(first, [{ key: 'review', managed: true, off: [] }])).stopped);
     await seedServerAndAgent(first);
     let view = live((await connectRepo(first, box.remote, '')).view);
     assert.equal(view.branch, 'main');
@@ -38,13 +38,13 @@ test('Push puts the Managed set in the repo’s layout; another computer pulls i
     const second = await box.home('second');
     view = live((await connectRepo(second, box.remote, '')).view);
     assert.deepEqual(rows(view.incoming), ['docs:added', 'planner:added', 'review:added']);
-    assert.equal((await manageView(second)).skills.length, 0, 'connecting writes nothing to the tools');
+    assert.equal((await skillRows(second)).length, 0, 'connecting writes nothing to the tools');
     // With Sync off, Pull still does what it shows (each item's pass runs for that item alone).
     const pulled = await pullRepo(second, { syncOn: false });
     assert.equal(pulled.stopped, undefined);
     assert.equal(pulled.pulled, 3);
     for (const root of ['.claude/skills', '.copilot/skills']) assert.equal(await readFile(join(second.home, root, 'review/notes.log'), 'utf8'), 'kept as-is\n');
-    assert.ok((await manageView(second)).skills.find(item => item.key === 'review')!.managed);
+    assert.ok((await skillRows(second)).find(item => item.key === 'review')!.on);
     const docs = (await mcpView(second, tools)).servers.find(server => server.key === 'docs')!;
     assert.ok(docs.managed && docs.copies['copilot-cli']);
     assert.ok((await agentsView(second, tools)).items.find(agent => agent.key === 'planner')!.on);
@@ -52,17 +52,18 @@ test('Push puts the Managed set in the repo’s layout; another computer pulls i
     assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: opus/);
     view = live(pulled.view);
     assert.deepEqual([view.incoming, view.outgoing, view.base?.id], [[], [], view.latest?.id]);
-    // Undo add after a Pull takes back every copy Pull made of a skill or an MCP server. An agent Pull brought in is in Central
-    // Knot now: its entry turns it off, which takes it out of every harness and keeps it.
+    // Undo add after a Pull takes back every copy Pull made of an MCP server. A skill or an agent Pull brought in is in Central
+    // Knot now: its entry turns it off, which takes it out of every tool and keeps it.
     const addedBy = (key: string, kind = 'added') => readHistory(second).then(events => events.find(event => event.key === key && event.kind === kind)!);
-    const review = await addedBy('review');
-    assert.deepEqual([review.via, review.losers.map(loser => loser.tool).sort()], ['repo', tools]);
-    assert.equal((await restoreFromHistory(second, review.id)).stopped, undefined);
     assert.equal((await restoreMcp(second, tools, (await addedBy('mcp:docs')).id)).stopped, undefined);
+    const skillIn = await addedBy('review', 'on');
+    assert.deepEqual([skillIn.via, skillIn.cause, skillIn.losers.map(loser => loser.tool).sort()], ['repo', 'pulled', tools]);
+    assert.equal((await restoreIn(second, skillIn.id)).stopped, undefined);
     const takenIn = await addedBy('agent:planner', 'on');
     assert.deepEqual([takenIn.via, takenIn.cause], ['repo', 'pulled']);
     assert.equal((await restoreAgent(second, tools, takenIn.id)).stopped, undefined);
-    assert.deepEqual([(await manageView(second)).skills, (await mcpView(second, tools)).servers].map(list => list.length), [0, 0]);
+    assert.equal((await mcpView(second, tools)).servers.length, 0);
+    assert.deepEqual((await skillRows(second)).map(item => [item.key, item.on, Object.keys(item.copies)]), [['review', false, []]]);
     assert.deepEqual((await agentsView(second, tools)).items.map(agent => [agent.key, agent.on, Object.keys(agent.copies)]), [['planner', false, []]]);
   } finally { await box.cleanup(); }
 });

@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdir, readFile, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { connectRepo, pullRepo, pushRepo, repoView } from '../src/gitrepo.ts';
-import { applyChanges, readHistory, restoreFromHistory } from '../src/manage.ts';
+import { readHistory } from '../src/history.ts';
 import { applyMcp, mcpView } from '../src/mcp.ts';
 import { agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
-import { tools, skillText, git, world, skill, live, rows, seedServerAndAgent, serverAndAgentOnTwo, edit, oneSkillAndAnAuthor } from './gitrepo-world.ts';
+import { tools, skillText, git, world, skill, live, rows, seedServerAndAgent, serverAndAgentOnTwo, edit, oneSkillAndAnAuthor, applySkillsIn, restoreIn, skillsLibrary } from './gitrepo-world.ts';
 
 test('Deletions of an MCP server and an agent wait while Automatic sync is off, come in once it is on, and Restore brings Claude Code’s own file back', async () => {
   const box = await world();
@@ -63,7 +63,7 @@ test('Where only Claude Code takes MCP servers, the repo’s server waits, said 
   } finally { await box.cleanup(); }
 });
 
-test('A skill only one tool has: Pull replaces that copy, and Undo in History puts it back; a SKILL.md that stops parsing is held, never a removal', async () => {
+test('A skill only one tool has: Pull replaces that copy, and Undo in History puts it back; a SKILL.md that stops parsing can’t be read for sure, so it is never a removal', async () => {
   const box = await world();
   try {
     const { first, author, commit } = await oneSkillAndAnAuthor(box, { off: ['copilot-cli'] });
@@ -72,11 +72,13 @@ test('A skill only one tool has: Pull replaces that copy, and Undo in History pu
     await pullRepo(first);
     assert.match(await readFile(join(first.home, '.claude/skills/solo/SKILL.md'), 'utf8'), /After/);
     const pulled = (await readHistory(first)).find(event => event.key === 'solo' && event.via === 'repo')!;
-    assert.equal((await restoreFromHistory(first, pulled.id)).stopped, undefined);
+    assert.equal((await restoreIn(first, pulled.id)).stopped, undefined);
     assert.match(await readFile(join(first.home, '.claude/skills/solo/SKILL.md'), 'utf8'), /Before/);
-    // A SKILL.md that stops parsing hides the skill from every tool's listing: that is never offered as a removal.
+    // The Undo made the version from before the pull current: that is what Push would send.
+    assert.deepEqual(rows(live(await repoView(first)).outgoing), ['solo:changed']);
+    // A SKILL.md that stops parsing is a copy that can't be read: it changes nothing, and is never offered as a removal.
     await writeFile(join(first.home, '.claude/skills/solo/SKILL.md'), '---\nname: solo\ndescription: Has: a colon\n---\n');
-    assert.deepEqual(live(await repoView(first)).outgoing.map(row => [row.name, !!row.held]), [['solo', true]]);
+    assert.deepEqual(rows(live(await repoView(first)).outgoing), ['solo:changed']);
   } finally { await box.cleanup(); }
 });
 
@@ -104,12 +106,12 @@ test('A commit outside the layout still has to be pulled before a push; the bran
   } finally { await box.cleanup(); }
 });
 
-test('Pull counts and says only its own items: another Managed skill held for its own reason doesn’t make a pulled one look stuck', async () => {
+test('Pull counts and says only its own items: another skill in Central Knot held for its own reason doesn’t make a pulled one look stuck', async () => {
   const box = await world();
   try {
     const { first, author, commit } = await oneSkillAndAnAuthor(box);
     await skill(first, '.claude/skills', 'linked');
-    await applyChanges(first, [{ key: 'linked', managed: true, off: [] }]);
+    await applySkillsIn(first, [{ key: 'linked', managed: true, off: [] }]);
     await symlink('SKILL.md', join(first.home, '.claude/skills/linked/alias.md'));
     await mkdir(join(author, 'skills/fresh'), { recursive: true });
     await writeFile(join(author, 'skills/fresh/SKILL.md'), skillText('fresh'));
@@ -120,12 +122,12 @@ test('Pull counts and says only its own items: another Managed skill held for it
   } finally { await box.cleanup(); }
 });
 
-test('A skill of the repo’s name that this computer never Managed: the row says so, and Undo of the Pull brings that skill back', async () => {
+test('A skill of the repo’s name that is only found here: the row says so, Pull takes the repo’s in and keeps this one as a version, which can be made current again', async () => {
   const box = await world();
   try {
     const first = await box.home('first');
     await skill(first, '.claude/skills', 'review', skillText('review', 'Shared.'));
-    await applyChanges(first, [{ key: 'review', managed: true, off: [] }]);
+    await applySkillsIn(first, [{ key: 'review', managed: true, off: [] }]);
     await connectRepo(first, box.remote, '');
     await pushRepo(first);
     const second = await box.home('second');
@@ -134,8 +136,11 @@ test('A skill of the repo’s name that this computer never Managed: the row say
     assert.deepEqual(view.incoming.map(row => [row.name, row.change, row.alsoHere]), [['review', 'added', 'unmanaged']]);
     await pullRepo(second);
     for (const root of ['.claude/skills', '.copilot/skills']) assert.match(await readFile(join(second.home, root, 'review/SKILL.md'), 'utf8'), /Shared/);
-    const replaced = (await readHistory(second)).find(event => event.key === 'review' && event.kind === 'edit' && event.via === 'repo')!;
-    assert.equal((await restoreFromHistory(second, replaced.id)).stopped, undefined, 'the replaced copy is still in the store');
+    // Taken into Central Knot from the repo; the skill found here is kept first, as a copy that gave way to it.
+    const item = (await skillsLibrary(second)).review;
+    const mine = item.versions.find(version => version.from.how === 'was-in')!;
+    assert.deepEqual([item.on, mine.from.harness, mine.from.replacedBy], [true, 'claude-cli', item.hash]);
+    assert.equal((await applySkillsIn(second, [{ key: 'review', managed: true, off: [], version: mine.hash }])).stopped, undefined, 'and can be made current again');
     assert.match(await readFile(join(second.home, '.claude/skills/review/SKILL.md'), 'utf8'), /Mine/);
   } finally { await box.cleanup(); }
 });

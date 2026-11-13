@@ -9,7 +9,8 @@ import { mcpFile } from './mcp.ts';
 import { managedTools } from './presence.ts';
 import type { HarnessId, HistoryDays, HomeMode, PartsInstall, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
 
-export const FORMAT_VERSION = 1;
+/** sync.json's format (SyncRecord); format 1 is read until the skills migration (skillstore.ts) writes format 2. */
+export const FORMAT_VERSION = 2;
 /** A text's SHA-256, hex: what Central Knot names content by. */
 export const sha256 = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
 const STAGE_PREFIX = '.ck-stage-';
@@ -42,22 +43,21 @@ export interface ShareContext {
   now?: () => number;
   /** How many days History keeps events, and deleted items' content (STO-04); the default unless Settings says otherwise. */
   historyDays?: HistoryDays;
-  /** How long a copy must stay missing before it counts as deleted, so an atomic save is not a deletion (SYN-04). Default 2 s. */
+  /**
+   * How long a copy must stay missing before it counts as deleted, so an atomic save is not a deletion (SYN-04). Unset, a
+   * library pass waits 2 s (librarypass.ts runPass) and the MCP engine the same (mcp.ts applyMcp); tests pass 0.
+   */
   settleMs?: number;
 }
 
-export interface RecordCopy { harness: HarnessId; directory: string; hash: string; created: boolean; /** `removing`: a deletion could not remove this copy yet; it is retried while it still holds `hash`. */ status: 'pending' | 'written' | 'removing' }
-export interface RecordItem { name: string; hash: string; state: 'shared' | 'dont-share'; startId: string; observedAt: string; copies: RecordCopy[]; /** Tools this managed skill does not sync to. */ off?: HarnessId[]; /** Differing copies kept as they are on purpose. */ separate?: boolean; /** A chosen copy not yet in every tool: the tool whose copy wins, that copy's content ID, and whether the item was synced already when it was chosen (its 'chosen' History entry says so, for its Undo). */ use?: { tool: HarnessId; hash: string; wasSynced?: true }; /** Deleted everywhere it synced: when, from which tool, and the content it had. A copy turning up later is new input, never a revival (D-37). */ deleted?: { at: string; tool: HarnessId; hash: string };
-  /**
-   * Copies an Undo of a copy choice left as their tool's own (by tool, their content): never adopted as this skill's copy just
-   * behind, though the store holds their content, so the skill waits for a choice as before it. Each is let go once that copy
-   * changes or goes, or a choice is made.
-   */
-  keptOwn?: Partial<Record<HarnessId, string>>;
-  /** Content about to be overwritten or removed, put on record before the disk changes, so a crash or a partial failure never lets it be pruned. Cleared once History names it. */
-  displaced?: { tool: HarnessId; hash: string; /** A per-tool Remove (its folder, and whether it stopped syncing there), recovered as one if History never named it. */ removal?: { folder: string; stoppedSync: boolean } }[] }
-export interface SyncRecord { formatVersion: number; generation: string; owner: string; /** The owner's own name, as people know it (a record made before there were custom builds has none). */ ownerName?: string; /** Each skills folder's identity at the last pass, so a folder made again reads as a reset, not as deletions. */ roots?: Record<string, { ino: number; birth: number }>; lastStartId?: string; /** Set while a Start is copying, so a crash and retry stay one Start. */ activeStartId?: string; items: Record<string, RecordItem>;
-  /** The tools Central Knot manages in this home (presence.ts managedTools). Unset: every tool present. */ tools?: HarnessId[] }
+/**
+ * The home's sync record (sync.json): which build syncs this home (`owner`, ORG-08), the generation it remembers, and the tools
+ * Central Knot manages here (presence.ts managedTools; unset: every tool present). Format 2. Format 1 also held the skills,
+ * with `items`, `roots` and more: skillstore.ts moves them into the library and writes format 2 (sync.v1.json keeps the
+ * earlier file); until it has, those fields are carried through every save as they are.
+ */
+export interface SyncRecord { formatVersion: number; generation: string; owner: string; /** The owner's own name, as people know it (a record made before there were custom builds has none). */ ownerName?: string;
+  tools?: HarnessId[] }
 
 export function storeDirectory(home: string): string { return join(home, '.central-knot'); }
 /** Where the plugins' parts are recorded (parts.ts writes it): which plugin's parts went into which tool as separate items. */
@@ -111,10 +111,10 @@ export async function readTree(directory: string, options: { includeGit?: boolea
       if ((entry.name === '.git' && !options.includeGit) || notCopied(entry.name, entry.isFile())) continue;
       const path = join(current, entry.name);
       const relativePath = relative(directory, path).split(sep).join('/');
-      if (entry.isSymbolicLink()) { held ??= `It contains a link (${relativePath}), and Central Knot creates and follows no links here.`; files.set(relativePath, { sha256: 'link', mode: 0 }); }
+      if (entry.isSymbolicLink()) { held ??= `It contains a link (${relativePath}), and Central Knot creates and follows no links here. Replace the link with the file it leads to, then Refresh.`; files.set(relativePath, { sha256: 'link', mode: 0 }); }
       else if (entry.isDirectory()) { directories.push(relativePath); await visit(path); }
       else if (entry.isFile()) files.set(relativePath, { sha256: await hashFile(path), mode: (await stat(path)).mode & 0o777 });
-      else { held ??= `It contains a special file (${relativePath}).`; files.set(relativePath, { sha256: 'special', mode: 0 }); }
+      else { held ??= `It contains a special file (${relativePath}). Move it out of the folder, then Refresh.`; files.set(relativePath, { sha256: 'special', mode: 0 }); }
     }
   }
   await visit(directory);
@@ -162,6 +162,7 @@ const copilotLosses: Record<string, string> = {
   'disable-model-invocation: true': 'Copilot CLI hides it from the model, and `/name` failed in print mode.',
 };
 
+/** Whether `harness` loads a skill of this shape, and why not (`skipped`, worded the same way for every tool where the reason is the same). */
 export function targetFor(harness: HarnessId, directory: string, source: Skill): PlanTarget {
   switch (harness) {
     case 'copilot-cli':
@@ -171,14 +172,17 @@ export function targetFor(harness: HarnessId, directory: string, source: Skill):
       return { harness, directory, limits: source.metadataKeys.map(key => copilotLosses[key]) };
     case 'codex-cli':
       if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Codex does not load a skill in a folder starting with a dot.' };
+      if (!source.hasFrontmatter) return { harness, directory, limits: [], skipped: 'Codex will not load a skill with no YAML frontmatter.' };
       if (source.codexProblem) return { harness, directory, limits: [], skipped: `Codex will not load it: ${source.codexProblem}.` };
       return { harness, directory, limits: [] };
     case 'pi-cli':
       if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Pi does not load a skill in a folder starting with a dot.' };
+      if (!source.hasFrontmatter) return { harness, directory, limits: [], skipped: 'Pi will not load a skill with no YAML frontmatter.' };
       if (source.piProblem) return { harness, directory, limits: [], skipped: `Pi will not load it: ${source.piProblem}.` };
       return { harness, directory, limits: [] };
     case 'opencode-cli':
       if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'OpenCode does not load a skill in a folder starting with a dot.' };
+      if (!source.hasFrontmatter) return { harness, directory, limits: [], skipped: 'OpenCode 1.x will not load a skill with no YAML frontmatter.' };
       if (source.opencodeProblem) return { harness, directory, limits: [], skipped: `OpenCode 1.x will not load it: ${source.opencodeProblem}.` };
       return { harness, directory, limits: [] };
     case 'claude-cli':
@@ -209,20 +213,6 @@ export async function landingOf(path: string): Promise<string | undefined> {
   }
 }
 
-function validItems(items: unknown): boolean {
-  if (typeof items !== 'object' || items === null || Array.isArray(items)) return false;
-  return Object.values(items).every(item => typeof item === 'object' && item !== null
-    && typeof item.name === 'string' && typeof item.hash === 'string' && (item.state === 'shared' || item.state === 'dont-share')
-    && typeof item.startId === 'string' && typeof item.observedAt === 'string'
-    && (item.off === undefined || (Array.isArray(item.off) && item.off.every(knownTool)))
-    && (item.separate === undefined || typeof item.separate === 'boolean')
-    && (item.deleted === undefined || (typeof item.deleted === 'object' && item.deleted !== null && typeof item.deleted.at === 'string' && knownTool(item.deleted.tool) && typeof item.deleted.hash === 'string'))
-    && (item.use === undefined || (typeof item.use === 'object' && item.use !== null && knownTool(item.use.tool) && typeof item.use.hash === 'string'))
-    && Array.isArray(item.copies) && item.copies.every((copy: Partial<RecordCopy>) => typeof copy === 'object' && copy !== null
-      && typeof copy.directory === 'string' && isAbsolute(copy.directory) && typeof copy.hash === 'string' && knownTool(copy.harness)
-      && (copy.status === 'pending' || copy.status === 'written' || copy.status === 'removing') && typeof copy.created === 'boolean'));
-}
-
 export async function readRecord(home: string): Promise<{ record?: SyncRecord; problem?: string }> {
   let text: string;
   try { text = await readFile(recordPath(home), 'utf8'); }
@@ -231,11 +221,8 @@ export async function readRecord(home: string): Promise<{ record?: SyncRecord; p
     const record = JSON.parse(text) as SyncRecord;
     if (!Number.isInteger(record?.formatVersion) || record.formatVersion < 1) return { problem: 'The sync record is damaged.' };
     if (record.formatVersion > FORMAT_VERSION) return { problem: 'The sync record was written by a newer Central Knot.' };
-    if (typeof record.generation !== 'string' || typeof record.owner !== 'string' || !validItems(record.items)
-      || ![record.lastStartId, record.activeStartId].every(id => id === undefined || typeof id === 'string')
+    if (typeof record.generation !== 'string' || typeof record.owner !== 'string'
       || (record.tools !== undefined && !(Array.isArray(record.tools) && record.tools.every(knownTool)))) return { problem: 'The sync record is damaged.' };
-    // No prototype: a skill may be called constructor or __proto__.
-    record.items = Object.assign(Object.create(null), record.items);
     return { record };
   } catch { return { problem: 'The sync record is damaged.' }; }
 }
@@ -358,7 +345,7 @@ export async function managedNow(context: ShareContext, snapshots: Snapshot[]): 
 }
 
 /** A home's first sync record, owned by this build. */
-export const newRecord = (context: ShareContext): SyncRecord => ({ formatVersion: FORMAT_VERSION, generation: randomUUID(), owner: context.build, ownerName: context.buildName, items: Object.create(null) });
+export const newRecord = (context: ShareContext): SyncRecord => ({ formatVersion: FORMAT_VERSION, generation: randomUUID(), owner: context.build, ownerName: context.buildName });
 
 /**
  * Stops work under way once another build has taken over syncing this home (takeOverSync): the record on disk is then

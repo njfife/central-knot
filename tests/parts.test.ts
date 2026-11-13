@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pluginFiles } from '../src/catalogdetail.ts';
 import { discover } from '../src/discovery.ts';
-import { applyChanges } from '../src/manage.ts';
+import { appendHistory } from '../src/history.ts';
+import { applySkills } from '../src/skills.ts';
 import { installParts, partsCurrent, planParts, readParts, removeParts, undoParts } from '../src/parts.ts';
 import { saveProfile, switchProfile } from '../src/profiles.ts';
 import type { ShareContext } from '../src/share.ts';
@@ -215,15 +216,15 @@ test('Updates: changed parts replaced, dropped ones removed, unreadable sources 
   } finally { await box.cleanup(); }
 });
 
-test('A Disable of a part skill in its tool keeps the kept copy that Undo of Remove parts needs', async () => {
+test('A History write keeps the copy that Undo of Remove parts needs: nothing prunes a plugin part’s kept skill', async () => {
   const box = await sandbox();
   box.context.read = async () => [await discover({ home: box.home, mode: 'custom', harness: 'codex-cli' })];
   box.context.settleMs = 0;
   try {
     assert.equal((await installParts(box.context, { ...target, tool: 'codex-cli' }, await box.files())).outcome, 'installed');
-    // The Disable makes a sync record entry for the name, and its History write prunes the store.
-    const disabled = await applyChanges(box.context, [{ key: 'figma-design', managed: false, off: [], disable: ['codex-cli'] }]);
-    assert.equal(disabled.results[0]?.outcome, 'switched');
+    // A skills pass and its History write: the part's kept skill stays in the store parts keep it in.
+    await applySkills(box.context, ['codex-cli'], []);
+    await appendHistory(box.context, [{ id: 'x', at: new Date().toISOString(), key: 'other', item: 'other', kind: 'edit', losers: [], orderProved: true }]);
     const removed = await removeParts(box.context, { ...target, tool: 'codex-cli' });
     const undone = await undoParts(box.context, removed.partsRun!);
     assert.equal(undone?.outcome, 'installed', undone?.message ?? '');

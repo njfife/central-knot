@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { applyMcp, mcpView, readMcpRecord, readTool, restoreMcp, undoClaudeWrite } from '../src/mcp.ts';
-import { readHistory } from '../src/manage.ts';
+import { readHistory } from '../src/history.ts';
 import { clickResults } from '../src/clickplan.ts';
 import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
 import { chooseTools } from '../src/toolchoice.ts';

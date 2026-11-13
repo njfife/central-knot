@@ -174,7 +174,7 @@ export const instructionsNotRead = (): HTMLElement => h('p.empty', {}, state.ins
 /** The bands above instruction cards: a re-read under way, an orphaned draft, the last result (a save's own result sits on its card instead) and, where saving is off, why. */
 export function instructionBands(): HTMLElement | null {
   const done = state.outcome?.kind === 'saved' ? null : outcomeBand();
-  const access = state.home?.manage.access;
+  const access = state.home?.sync.access;
   const preview = access && !access.allowed ? h('div.band', { role: 'status' }, icon('lock', 14, 'tone-warning'), h('span.band-text', {}, 'Preview only: you can read these files here, but saving is off in this home.')) : null;
   const orphan = orphanDraft();
   const reread = rereadBand(state.instructions);

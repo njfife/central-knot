@@ -39,6 +39,20 @@ test('A harness that has the item another way: nothing of Central Knot’s goes 
     assert.equal(decide(wanted, 'b', anotherWay, undefined), 'nothing');
   }
 });
+/** A copy of the harness's own where it has the item another way too (a copy in ~/.agents/skills beside it). */
+const bothWays = (hash: string): HarnessCopy => ({ is: 'present', hash, at: 0, anotherWay: 'it reads a copy in ~/.agents/skills' });
+test('A copy of its own where the harness has the item another way too: Central Knot’s copy is removed, so it is never loaded twice', () => {
+  assert.equal(decide(ON, 'b', bothWays('b'), 'b'), 'remove');
+  assert.equal(decide(ON, 'b', bothWays('a'), 'a'), 'remove');
+});
+test('A copy of its own where the harness has the item another way too, edited there: the edit is taken in first, then the copy goes', () => {
+  assert.equal(decide(ON, 'b', bothWays('c'), 'b'), 'take-in');
+  assert.equal(decide(ON, 'c', bothWays('b'), 'a'), 'latest-wins');
+});
+test('A copy of its own that Central Knot never put there, where the harness has the item another way too: left alone (both ways)', () => {
+  assert.equal(decide(ON, 'b', bothWays('x'), undefined), 'found');
+  assert.equal(decide(ON, 'b', bothWays('b'), undefined), 'found');
+});
 test('Off, and the copy a removal was owed for is gone already: only forgotten', () => {
   assert.equal(decide(OFF, 'b', none, 'b'), 'forget');
   assert.equal(decide(OFF, 'b', none, undefined), 'nothing');
@@ -141,6 +155,11 @@ test('A harness that has the item another way never turns it Off; once the other
 });
 
 // ---------- Copies with no time of their own ----------
+
+test('Both ways in a whole plan: the edit in the copy that goes is taken in and reaches the others, and nothing is written where it has the item another way', () => {
+  const made = plan(item(), { 'claude-cli': has('a'), 'copilot-cli': has('a'), 'codex-cli': { is: 'present', hash: 'b', at: time(3), anotherWay: 'it reads a copy in ~/.agents/skills' } });
+  assert.deepEqual(made, { ...quiet, takeIn: 'codex-cli', write: ['claude-cli', 'copilot-cli'], remove: ['codex-cli'], current: [] });
+});
 
 test('An edit with no time of its own, made on the current version, is taken in', () => {
   assert.equal(plan(item(), { 'claude-cli': has('a'), 'copilot-cli': has('a'), 'codex-cli': untimed('b') }).takeIn, 'codex-cli');

@@ -4,7 +4,7 @@
 import { deleteProfileDef, NONE, profileState, rerender, saveProfileDef, showPage, shownPath, state, switchToProfile, whyReadOnly } from './app.ts';
 import { brandMark, outcomeBand, problemsBand } from './matrix.ts';
 import { button, checkbox, emptyState, eyebrow, findInput, h, icon } from './dom.ts';
-import { activeProfile, driftOf, flipCounts, flipWords, NO_PROFILE, offByHand, presentItems, profilesInUse, planSwitch, switchItems, type ItemKind, type SwitchItem, type SwitchPlan } from './profileplan.ts';
+import { activeProfile, driftOf, flipCounts, flipWords, NO_PROFILE, offByHand, presentItems, profilesInUse, planSwitch, switchItems, type ItemKind, type SwitchItem, type SwitchPlan, profileSkills } from './profileplan.ts';
 import { andList, toolName } from './words.ts';
 import { plural } from './model.ts';
 import type { HarnessId, Profile } from './types.ts';
@@ -14,8 +14,8 @@ let find = '';
 let menuOpen = false;
 
 /** A column per tool with skills or MCP servers: a tool that has only MCP servers still has switches to show. */
-const tools = (): HarnessId[] => { const home = state.home!; return [...new Set([...home.manage.tools, ...home.mcp.tools])]; };
-const items = (): SwitchItem[] => switchItems(state.home!.manage, state.home!.mcp);
+const tools = (): HarnessId[] => { const home = state.home!; return [...new Set([...home.sync.tools, ...home.mcp.tools])]; };
+const items = (): SwitchItem[] => switchItems(profileSkills(state.home!.skills), state.home!.mcp);
 const profiles = () => state.home!.profiles;
 /** Whether profiles can be changed now: nothing busy, the home writable, and its profiles file readable. */
 const canEditProfiles = () => !state.busy && !whyReadOnly(state.home!) && !profiles().problem;
@@ -356,7 +356,7 @@ export function profilesPage(): HTMLElement {
   const readOnly = whyReadOnly(home);
   // What couldn't be done since the last read, told here too: sync's failures, or a menu bar switch that couldn't start or whose
   // switches all failed.
-  const problems = home.manage.caughtUp.filter(result => result.outcome === 'failed' || result.outcome === 'held');
+  const problems = home.sync.caughtUp.filter(result => result.outcome === 'failed' || result.outcome === 'held');
   const bands = [outcomeBand(),
     view.problem ? h('div.band.band-danger', { role: 'alert' }, icon('circle-alert', 14), h('span.band-text', { title: view.problem }, view.problem)) : null,
     problems.length ? problemsBand(problems) : null,

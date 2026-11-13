@@ -323,7 +323,7 @@ ul { list-style: none; }
 .text-action:hover { background: var(--hover); }
 .text-action.decide { flex: none; white-space: nowrap; color: var(--warning); border: 1px solid color-mix(in oklab, var(--warning) 45%, transparent); padding: 1px 7px; border-radius: 999px; font-size: 11.5px; }
 .text-action.text-danger { color: var(--danger); }
-/* A destructive action kept quiet until the pointer or focus is on it (Delete everywhere, last in an item's details). */
+/* A destructive action kept quiet until the pointer or focus is on it (Delete from Central Knot, last in an item's details). */
 .text-action.text-danger-quiet { color: var(--ink-soft); }
 .text-action.text-danger-quiet:hover, .text-action.text-danger-quiet:focus-visible { color: var(--danger); }
 .text-action:disabled { color: var(--ink-faint); cursor: default; background: none; }
@@ -471,6 +471,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
   .history-row:nth-child(even of .history-row):not(:hover):not(:has(:focus-visible)) { background: var(--row-stripe); }
 }
 .ov-row.open { background: var(--chrome); }
+/* On the item pages (one switch per row, section headings not sticky), the opened row stays at the top of the table's scroll
+   area while its details below it are scrolled and used, so its name and switch stay in view. */
+.ov-switched .ov-row.open { position: sticky; top: 0; z-index: 1; }
 .ov-row.changed { box-shadow: inset 3px 0 0 var(--accent), inset 0 -1px 0 var(--line); }
 .ov-head { position: sticky; top: 0; z-index: 3; height: 60px; background: var(--surface); font-size: 12px; font-weight: 500; color: var(--ink-soft); }
 .ov-head > * { align-self: center; }
@@ -515,6 +518,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .switch[aria-checked="mixed"] { background: var(--switch-mixed); }
 .switch[aria-checked="mixed"] .switch-knob { transform: translateX(7px); }
 .switch[aria-checked="mixed"] .switch-knob::after { content: ""; position: absolute; left: 3px; right: 3px; top: calc(50% - 1px); height: 2px; border-radius: 1px; background: #8b8b95; }
+/* A switch that can't be used now (a found item with nothing to take in, a preview-only home): it looks unavailable. */
+.switch:disabled { opacity: 0.4; cursor: not-allowed; }
+/* On in some tools only (kept out of others by the person, or switched off in a tool's own settings): on, its track striped, so it never reads as on everywhere nor as halfway. */
+.switch.switch-partial[aria-checked="true"] { background: repeating-linear-gradient(135deg, var(--switch-on) 0 4px, color-mix(in oklab, var(--switch-on) 52%, var(--switch-off)) 4px 7px); }
 
 /* A cell says what that tool has: green synced, blue pending (dashed), amber differing or waiting, striped can't. */
 .cell-button, .legend-cell { position: relative; display: grid; place-items: center; width: 30px; height: 26px; border-radius: 7px; border: 1px solid var(--cell-line); background: transparent; color: var(--ink-faint); }
@@ -748,12 +755,12 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .detail-scroll p { overflow-wrap: anywhere; }
 .detail-scroll pre { overflow-wrap: anywhere; white-space: pre-wrap; }
 .detail-files { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
-/* The Files view's details (matrix.ts filesLayout): its status and choices, where each copy is, then Delete everywhere. */
+/* The Files view's details (matrix.ts filesLayout): its status and choices, where each copy is, then Delete from Central Knot. */
 .files-details, .files-tail { display: flex; flex-direction: column; gap: 12px; }
 .files-details > .details-actions, .files-tail > .details-actions { margin-top: 0; }
 /*
  * A wide pane has two tracks: the file, and a column at the right edge that holds the details, then where each copy is
- * and Delete everywhere, one under the other. The file takes 64% of the pane less the gap, until that is more than a
+ * and Delete from Central Knot, one under the other. The file takes 64% of the pane less the gap, until that is more than a
  * file's box can use (--file-box: .content's max-width, 120 characters of 12px monospace; scripts/e2e.mjs
  * FILE_COLUMN_BLANK fails if the two drift apart); from there the details take the rest, so no width is left blank
  * beside them. The script decides it from the pane's width (matrix.ts settleFilesColumns, data-columns); below that
@@ -952,9 +959,8 @@ span.ins-confirm { margin-top: 0; }
   .history-row { grid-template-columns: minmax(80px, max-content) minmax(0, 1fr) auto; column-gap: 16px; row-gap: 2px; }
   .history-about { grid-column: 2 / -1; grid-row: 2; margin-left: 22px; }
   .history-row > .change-panel { margin-top: 10px; }
-  /* The name takes the line it is on, and an agent entry's copies to choose from sit beside it, above the sentence. */
+  /* The name takes the line it is on. */
   .history-row .history-what > strong { max-width: none; }
-  .history-row .history-actions-below { grid-column: auto; grid-row: auto; justify-content: flex-end; margin: 0; }
 }
 .history-row > .history-when { padding-top: 2px; }
 .history-when { font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -968,9 +974,6 @@ span.ins-confirm { margin-top: 0; }
 .history-undone .history-what strong { color: var(--ink-soft); }
 .history-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 2px 12px; text-align: right; }
 .history-actions .btn.link { flex: 0 1 auto; min-width: 0; height: auto; padding: 0; white-space: normal; text-align: right; }
-/* An agent entry with copies to choose from ("Use Claude Code’s copy") has its links on a line of their own under the
-   sentence, side by side: a cell spanning the sentence's flexible column never widens the actions column every row shares. */
-.history-actions-below { grid-column: 3 / -1; grid-row: 2; justify-content: flex-start; margin: -6px 0 0 -8px; }
 
 /* ---------- Plugins: marketplaces at the left, the chosen marketplace or plugin at the right ---------- */
 .plugins-page { --market-list-width: 236px; --market-gutter: 24px; }
@@ -1476,6 +1479,8 @@ span.ins-confirm { margin-top: 0; }
 .details-outside .details-note { overflow-wrap: anywhere; }
 .details-outside > .details-actions { margin-top: 0; }
 .tool-switch-word { min-width: 56px; text-align: right; }
+/* A tool whose own settings switch the item off: that state, said in its own word in place of Central Knot's switch. */
+.tool-switch-word-own { min-width: 0; color: var(--ink-soft); white-space: nowrap; }
 /* A tool whose switch file can't be used says so where its switch would be. */
 .tool-switch-na { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-soft); }
 /* Remove runs at once and History keeps the copy: quiet until pointed at. A row without it keeps the same space. */
@@ -1862,6 +1867,8 @@ button.harness-card-main:focus-visible { outline: 0; }
 .ov-marks, .ov-open { display: flex; align-items: center; }
 .ov-open .row-open { width: 24px; height: 24px; margin: 0; }
 .switch-slot { display: block; width: 32px; }
+/* A found item's Add, in the switch's place and as wide, so its name starts where an On row's does (matrix.ts addButton). */
+.btn.small.add-item { width: 32px; height: 22px; padding: 0; font-size: 12px; }
 /* A tool's mark: its own mark, plainly, where it is on; grey and struck through where it is off (the copy kept); faint where
    it has no copy; an amber glyph where copies differ or something waits. Only says: never a button. */
 .tool-marks { display: inline-flex; align-items: center; gap: 2px; }
@@ -1872,6 +1879,8 @@ button.harness-card-main:focus-visible { outline: 0; }
 /* Muted, but one step plainer in the light appearance and at 100% zoom, where thin marks fade most. */
 .tool-mark.mark-off > * { opacity: 0.62; }
 .tool-mark.mark-none > * { opacity: 0.34; }
+/* A library item's state of that tool's own (kept out, switched off in its own settings, can't take it): its glyph, quiet, not struck. */
+.tool-mark.mark-held > * { opacity: 0.8; }
 @media (prefers-color-scheme: dark) and (min-resolution: 1.5dppx) {
   .tool-mark.mark-off > * { opacity: 0.5; }
   .tool-mark.mark-none > * { opacity: 0.22; }

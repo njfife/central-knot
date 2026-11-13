@@ -75,14 +75,20 @@ export type SyncGate =
   | { state: 'needs-resume'; reason: string }
   | { state: 'stopped'; reason: string; /** Set when another build syncs this home: its identity, its name, and whether it is open now (where that can be told). */ owner?: { build: string; name: string; running?: boolean } };
 
-export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** A refusal made before anything was changed, the record included: the click did nothing. */ unchanged?: true; /** A take-over step: a link replaced by a real copy, a tool given its own copy, or the shared copy removed (or, in its Undo, each put back). */ tookOver?: 'link' | 'placed' | 'shared'; /** With `tookOver` 'shared': the folder the copy was removed from. */ folder?: string; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true; /** `held`: waits for Write to Claude Code (MCP-02), as it should (not a failure). */ waits?: true; }
+export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** A refusal made before anything was changed, the record included: the click did nothing. */ unchanged?: true; /** `switched`: which way. */ disabled?: boolean; /** `held`: its copies differ, so it waits for a choice of copy (not a failure). */ differs?: true; /** `held`: waits for Write to Claude Code (MCP-02), as it should (not a failure). */ waits?: true; }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; /** The home as a whole: its tools, access, owner and what the background did. */ sync: SyncView; /** Skills: those in Central Knot's library (library.ts) and those found in a tool. */ skills: LibraryView; /** MCP servers across tools. */ mcp: McpView; /** Agents: those in Central Knot's library (library.ts) and those found in a harness. */ agents: LibraryView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** This computer's home only: apps found here that run the tools or read their files (T3 Code, VS Code). */ otherApps?: OtherApp[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
   refresh(): Promise<HomeView | null>;
-  apply(changes: Change[], resume: boolean, home: string): Promise<ApplyResult>;
+  applySkills(changes: Change[], resume: boolean, home: string): Promise<PassResult>;
+  /** Clears a tool's own switch that turns a skill off there (skills.ts clearSwitch). */
+  clearSkillSwitch(key: string, tool: HarnessId, home: string): Promise<PassResult>;
+  /** Makes a copy outside Central Knot's own (a link, a copy in ~/.agents/skills) Central Knot's (skills.ts takeOver). */
+  takeOverSkill(key: string, tool: HarnessId, home: string): Promise<PassResult>;
+  /** One version of a skill: its SKILL.md and the names of its other files (skills.ts skillVersion). */
+  skillVersion(key: string, hash: string): Promise<{ skill: string; files: string[] } | null>;
   history(): Promise<HistoryList>;
   applyMcp(changes: Change[], resume: boolean, home: string): Promise<McpResult>;
   writeClaude(names: string[], home: string): Promise<McpResult>;
@@ -136,7 +142,6 @@ export interface DesktopApi {
   onUpdatesChanged(callback: (view: UpdateView) => void): void;
   /** `choice`: which overwritten edit to put back, for an event with several. */
   restore(eventId: string, resume: boolean, home: string, choice?: string): Promise<ApplyResult>;
-  deleteEverywhere(key: string, resume: boolean, home: string): Promise<ApplyResult>;
   /** Each tool's own instruction file (INS-01). */
   instructions(readId?: number): Promise<InstructionFile[] | null>;
   /** One version of an agent as Central Knot's library holds it: its name, description and prompt; null when it is no longer kept. */
@@ -211,17 +216,6 @@ export interface PluginActionResult { stopped?: string; reports: ActionReport[] 
 
 // ---------- Managing skills across tools ----------
 
-/** Where a copy outside Central Knot's own copies sits, so the page can say it and an explicit action can take it over. */
-export interface Outside {
-  /** 'link': a link in the tool's own skills folder. 'shared': a copy (folder or link) in ~/.agents/skills, which other apps read too. */
-  kind: 'link' | 'shared';
-  /** The link's own text, when this entry is a link. Removing it removes only the link. */
-  linkTo?: string;
-  /** 'shared': why Manage can't give each tool its own copy instead: a tool's own skills folder is this folder. Delete still removes it. */
-  pinned?: string;
-  /** With `pinned`: the tool whose skills folder is a link to the shared folder. */
-  pinnedBy?: HarnessId;
-}
 
 export interface ToolCopy {
   hash: string;
@@ -239,18 +233,8 @@ export interface ToolCopy {
    * (libraryrow.ts RowWords body: an agent's prompt).
    */
   body?: string;
-  /** False for a copy reached through a link or in a folder other tools share: background sync never writes there. */
+  /** Whether Central Knot may write over this copy (an MCP entry's file). */
   writable: boolean;
-  /**
-   * A copy that is not writable but that Central Knot takes over when the person asks (Manage, Delete everywhere, Remove,
-   * Replace with managed copies): a link in the tool's own skills folder, or a copy in the shared ~/.agents/skills folder.
-   */
-  outside?: Outside;
-  /**
-   * The tool here whose own skills folder this copy is in, when it is another tool's: OpenCode reads Claude Code's folder, so a
-   * skill there is Claude Code's copy, which OpenCode reads. It is no second copy: sync neither follows it nor writes beside it.
-   */
-  readsFrom?: HarnessId;
   /** Folder name as found, with its case. */
   folder: string;
   /** Skills: the name this tool reads for this copy (its frontmatter name), which Copilot's switch goes by. */
@@ -270,8 +254,6 @@ export interface SkillFacts {
   name: string;
   description: string;
   copies: Partial<Record<HarnessId, ToolCopy>>;
-  /** Further copies a tool also reads, such as Copilot's in ~/.agents/skills. */
-  extra: (ToolCopy & { tool: HarnessId })[];
   managed: boolean;
   off: HarnessId[];
   /** Why a tool that lacks the skill could not load a copy. */
@@ -302,14 +284,13 @@ export interface SkillFacts {
   disabled?: HarnessId[];
   /** Skills and MCP servers: why a tool's switch can't be used at all: its settings file can't be read or is in a form Central Knot doesn't edit. */
   switchProblem?: Partial<Record<HarnessId, SwitchProblem>>;
-  /** Skills: a quiet note that Disable isn't verified on a tool's build (older than verified, or unreadable). Disable is still offered. */
-  disableNote?: Partial<Record<HarnessId, string>>;
-  /** Skills: tools whose own skills folder has a broken link by this name, with where it led: a copy written there replaces it. */
-  brokenLink?: Partial<Record<HarnessId, string>>;
-  /** Skills, managed: its links or shared copy are back since a take-over (Manage, Replace with managed copies) removed them. */
-  outsideBack?: true;
   /** No tool has a copy any more: it was deleted or removed, and History can put it back (this event) while it keeps it. */
   gone?: GoneItem;
+  /** A library kind's row (LibraryFacts, as itemrow.ts kindSource gives the page): how a tool has it another way, and which copies Take over can make Central Knot's. */
+  anotherWay?: LibraryFacts['anotherWay'];
+  takeOver?: LibraryFacts['takeOver'];
+  /** Skills: a tool whose own switch turns it off there, said as its mark says it ("switched off in Codex’s own settings"); itemrow.ts kindSource words it. */
+  switched?: Partial<Record<HarnessId, string>>;
 }
 
 /** An item with no copy left, from the History event that took the last one: when, and the event that puts it back. */
@@ -327,18 +308,17 @@ export interface SwitchTarget { folder: string; name: string; /** Absolute path 
  */
 export interface SwitchRecord { tool: HarnessId; disabled: boolean; target?: SwitchTarget; before?: string }
 
-export interface ManageView {
+/**
+ * What is true of the open home as a whole, which every page reads: the tools Central Knot manages, where each keeps its
+ * skills, whether Central Knot may write here and who syncs it, and what the background passes did since the page last read.
+ */
+export interface SyncView {
   tools: HarnessId[];
-  /** Where each tool's new copies go, and which other tools read that folder too. */
-  writes: Partial<Record<HarnessId, { to: string; alsoReadBy: string[]; /** Why Central Knot does not write there, if it does not. */ blocked?: string }>>;
-  skills: SkillFacts[];
-  /** Skills no tool has any more that History can put back (manage.ts goneFacts): shown Off. */
-  gone?: SkillFacts[];
-  /** What sync did on its own during the read that produced this view. */
-  notices: SyncNotice[];
+  /** Where each tool's skills folder is, which other apps read it too, and why Central Knot does not write there, if it does not. */
+  writes: Partial<Record<HarnessId, { to: string; alsoReadBy: string[]; blocked?: string }>>;
   access: WriteAccess;
   gate: SyncGate;
-  /** What the automatic catch-up just did, if anything. */
+  /** What the background passes did since the page last read: copies written or removed, and what failed. */
   caughtUp: DestinationResult[];
 }
 
@@ -359,23 +339,20 @@ export interface Change {
   useHash?: string;
   /** Whether the page showed it managed: a change made from an older read is refused if that no longer holds. */
   seenManaged?: boolean;
-  /** Skills and MCP servers: tools to disable it in with each tool's own switch. Tools named in neither list keep their switch as it is. */
+  /** MCP servers: tools to disable it in with each tool's own switch. Tools named in neither list keep their switch as it is. */
   disable?: HarnessId[];
-  /** Skills and MCP servers: tools to enable it in again. */
+  /** MCP servers: tools to enable it in again. */
   enable?: HarnessId[];
-  /** Skills: tools whose copy is removed, kept in History for Restore. A managed skill also stops syncing there. */
-  remove?: HarnessId[];
   /** A library item: the version to make current (its hash), in every harness the item is on in. */
   version?: string;
   /** A library item: true deletes it from Central Knot (out of every harness; History can restore it); false restores a deleted one. */
   deleted?: boolean;
-  /** Skills: Delete everywhere for an unmanaged skill: the removed tools' other copies (in ~/.agents/skills) go too. */
-  everywhere?: boolean;
   /**
-   * Skills: the person asked for the skill's copies outside Central Knot (links in tools' folders, the copy in ~/.agents/skills)
-   * to be taken over: each link becomes a real copy and the shared copy is removed, kept first so Undo can put them back.
+   * A library item, sent by an Undo (History's entry `tookFrom`): each harness whose own copy the undone click took over, and
+   * that copy's content (a version). Where the item no longer goes there after this click, that copy is given back as the
+   * harness's own instead of being removed.
    */
-  takeOver?: boolean;
+  giveBack?: Partial<Record<HarnessId, string>>;
 }
 
 export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch: the switches it flipped. */ flips?: ProfileFlip[]; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
@@ -396,7 +373,11 @@ export interface SyncNotice {
 }
 
 /** One entry in History: what changed, which content won, and what is kept to Undo or Restore it. */
-/** A take-over, for its Undo: links replaced by real copies, shared copies removed, and copies made for tools that read the shared one. */
+/**
+ * A skill's take-over from before the library (Replace with managed copies), as its History entry recorded it: links replaced
+ * by real copies, shared copies removed, copies made for tools that read the shared one. Only read to tell such an entry
+ * apart (historyactions.ts librarySentence): it shows as past, with no action.
+ */
 export interface TookOver {
   /** Each link and its text. `placed`: the content put in its place (none: a link left leading nowhere, removed). */
   links: { tool: HarnessId; path: string; linkTo: string; hash: string; placed?: string }[];
@@ -446,7 +427,10 @@ export interface HistoryEvent {
    * the agent didn't have ('kept-edit'; `losers`: that copy), which gave way to the current version (library.ts managedAgain).
    */
   cause?: 'switch' | 'found' | 'pulled' | 'deleted-by-hand' | 'tool-back';
-  /** 'current': the version made current; an agent's 'edit' Pull made: the version pulled. */
+  /**
+   * The version current once this entry's change was made: 'current', the version made current; an agent's 'edit' Pull made,
+   * the version pulled; 'on' / 'off' by a switch, the version it was at (historyactions.ts asTheClickLeftIt).
+   */
   version?: string;
   /** 'took-over': what was replaced, removed and placed, so Undo can put it back exactly. */
   tookOver?: TookOver;
@@ -478,6 +462,13 @@ export interface HistoryEvent {
     /** 'removed': a copy outside the tool's own folder (in ~/.agents/skills), put back at this path. */ path?: string;
     /** 'removed': the copy was a link with this text; Restore makes the link again. */ linkTo?: string;
     /** 'chosen', a skill's or an agent's: when the replaced copy was last edited (its file's time), which its Undo gives it again. */ editedAt?: string }[];
+  /**
+   * A library item's click: each harness whose own copy (one Central Knot had not put there) the click took over, by writing
+   * over it or by counting it as the item's because it was the same, with that copy's content. Its Undo gives each back.
+   */
+  tookFrom?: { tool: HarnessId; hash: string }[];
+  /** A library item's Undo: the harnesses whose own copy it gave back instead of removing it (the undone entry's `tookFrom`). */
+  gaveBack?: HarnessId[];
   /** The synced content before this event, to put back on Undo. */
   previous?: string;
   orderProved: boolean;
@@ -758,13 +749,34 @@ export interface LibraryFacts {
   versionChanges?: VersionChange[];
   /** Found, not in the library: its copies differ, so the switch asks which one every harness takes. */
   differs?: boolean;
+  /**
+   * Skills: how a tool has it another way (a link, a folder Central Knot doesn't own, another tool's folder it reads, a plugin),
+   * as its line says it, On or Off (skills.ts anotherWay). Nothing of Central Knot's goes there while it does.
+   */
+  anotherWay?: Partial<Record<HarnessId, string>>;
+  /**
+   * Skills, found with copies that differ: what stops one tool's copy being the one every tool takes (the copy question): a
+   * tool holding another copy that wouldn't load this one, with why (copywords.ts cantUse leads it in).
+   */
+  choiceBlocks?: Partial<Record<HarnessId, { tool: HarnessId; reason: string }[]>>;
+  /** Skills: a copy outside Central Knot's own that Take over can make Central Knot's, by tool: a link in its folder, or a copy in ~/.agents/skills. */
+  takeOver?: Partial<Record<HarnessId, { kind: 'link' | 'shared'; path: string }>>;
+  /**
+   * Skills: the copy each tool loads (its own, or one it has another way; not a plugin's), as its own switch names it, and
+   * whether that switch turns it off there (`off`): the copy stays, and the tool doesn't load it. Read at each look.
+   */
+  loads?: Partial<Record<HarnessId, SwitchTarget & { off: boolean }>>;
+  /** Skills: why a tool's switch can't be read (its settings file), for the tools in `loads`. */
+  switchProblem?: Partial<Record<HarnessId, SwitchProblem>>;
+  /** Skills: made by Convert to skill from an agent: which, from which tool's, and what an agent had that a skill doesn't. */
+  converted?: { agent: string; origin: HarnessId; losses: string[] };
 }
 
 // ---------- MCP servers ----------
 export interface McpView {
   tools: HarnessId[];
   servers: SkillFacts[];
-  /** Ones no tool has any more that History can put back (manage.ts goneFacts): shown Off. */
+  /** Ones no tool has any more that History can put back (mcp.ts goneFacts): shown Off. */
   gone?: SkillFacts[];
   /** Claude Code entries are written only by Write now with Claude closed, until a background write is proved safe (V-09). */
   claudePending: string[];

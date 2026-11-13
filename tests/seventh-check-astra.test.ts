@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { applyMcp, readTool, restoreMcp } from '../src/mcp.ts';
-import { readHistory } from '../src/manage.ts';
+import { readHistory } from '../src/history.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
 

@@ -441,7 +441,7 @@ function connectedPage(view: ConnectedRepoView) {
 
 /** Turns Automatic sync on, beside the words that ask for it (none while it is already on). */
 const syncOnButton = (id: string) => (state.home && !state.home.syncOn
-  ? button({ variant: 'link', size: 'micro', label: 'Turn sync on', id, disabled: !!state.busy || !state.home.manage.access.allowed, onclick: () => void setSync(true) }) : undefined);
+  ? button({ variant: 'link', size: 'micro', label: 'Turn sync on', id, disabled: !!state.busy || !state.home.sync.access.allowed, onclick: () => void setSync(true) }) : undefined);
 
 /** Disconnect…: asks first, in place (disconnectQuestion), with focus on Cancel. */
 const disconnectButton = (disabled: boolean) => button({ variant: 'ghost', size: 'small', icon: 'unplug', label: 'Disconnect…', id: 'repo-disconnect', disabled,

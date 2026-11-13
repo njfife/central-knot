@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { applyAgents } from '../src/agents.ts';
 import { applyMcp, readTool, restoreMcp } from '../src/mcp.ts';
-import { readHistory } from '../src/manage.ts';
+import { readHistory } from '../src/history.ts';
 import { readRecord, saveRecord, type ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
 const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];

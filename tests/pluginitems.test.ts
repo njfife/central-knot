@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { readItemTexts, readPluginItems } from '../src/pluginitems.ts';
 import { inTool, cellWords, handledWhere, offIn, pageRows, pluginItemCount, rowCount, toolWords } from '../src/pluginrows.ts';
 import type { PluginContext } from '../src/plugins.ts';
+import { kindSource } from '../src/itemrow.ts';
 import type { HarnessId, HomeView, InstalledPlugin, PartsInstall, SkillFacts } from '../src/types.ts';
 
 const put = async (path: string, text: string) => { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, text); };
@@ -101,14 +102,17 @@ test('a copy that can’t be read is said, and neither it nor broken records sto
 
 // ---------- Rows ----------
 
-const fact = (key: string, copies: Partial<Record<HarnessId, true>>, extra: Partial<SkillFacts> = {}): SkillFacts => ({ key, name: key, description: '', copies: Object.fromEntries(Object.keys(copies).map(tool => [tool, { hash: 'h', directory: '', rootLabel: '', lines: 1, modified: '', summary: '', writable: true, folder: key }])), extra: [], managed: false, off: [], cannot: {}, choiceBlocks: {}, ...extra });
+const fact = (key: string, copies: Partial<Record<HarnessId, true>>, extra: Partial<SkillFacts> = {}): SkillFacts => ({ key, name: key, description: '', copies: Object.fromEntries(Object.keys(copies).map(tool => [tool, { hash: 'h', directory: '', rootLabel: '', lines: 1, modified: '', summary: '', writable: true, folder: key }])), managed: false, off: [], cannot: {}, choiceBlocks: {}, ...extra });
 const install = (tool: HarnessId, extra: Partial<InstalledPlugin> = {}): InstalledPlugin => ({ tool, plugin: 'issue-tracker', marketName: 'm', version: '2.0.0', listed: true, items: [{ kind: 'skill', name: 'triage', description: 'Sorts issues.' }, { kind: 'mcp', name: 'issues', description: '', runs: 'npx -y issues' }], ...extra });
 const piPart: PartsInstall = { source: '/m', marketName: 'm', plugin: 'issue-tracker', tool: 'pi-cli', at: '', digest: '', items: [{ kind: 'skill', name: 'triage', hash: '' }] };
-const homeOf = (skills: SkillFacts[], pluginItems: InstalledPlugin[], parts: PartsInstall[] = []) => ({ manage: { skills }, mcp: { servers: [] }, agents: { items: [] }, parts, pluginItems }) as unknown as HomeView;
+/** A home's view with these skills (as the Skills page's view gives them: types.ts LibraryFacts, `on` for managed). */
+const homeOf = (skills: SkillFacts[], pluginItems: InstalledPlugin[], parts: PartsInstall[] = []) => ({
+  skills: { tools: [], items: skills.map(({ managed, off, ...facts }) => ({ ...facts, on: managed, except: off, edited: [] })), library: {} },
+  mcp: { servers: [] }, agents: { items: [], library: {} }, parts, pluginItems }) as unknown as HomeView;
 
-test('a page whose last skill was just deleted still has a row: the skill with no copy left, switched off', () => {
-  const home = { ...homeOf([], []), manage: { skills: [], gone: [fact('only', {}, { gone: { history: 'e1', at: '', kind: 'deleted' } })] } } as unknown as HomeView;
-  assert.deepEqual([rowCount(home, 'skills'), rowCount(homeOf([], []), 'skills')], [1, 0]);
+test('a page whose last MCP server was just deleted still has a row: the server with no copy left, switched off', () => {
+  const home = { ...homeOf([], []), mcp: { servers: [], gone: [fact('only', {}, { gone: { history: 'e1', at: '', kind: 'deleted' } })] } } as unknown as HomeView;
+  assert.deepEqual([rowCount(home, 'mcp'), rowCount(homeOf([], []), 'mcp')], [1, 0]);
 });
 
 test('a plugin’s skill the person also has (its part in Pi, shown there as through the plugin elsewhere) is that one row, not a second', () => {
@@ -116,7 +120,7 @@ test('a plugin’s skill the person also has (its part in Pi, shown there as thr
   const home = homeOf([fact('triage', { 'pi-cli': true }, { plugin: { 'claude-cli': through, 'copilot-cli': through } })], [install('claude-cli'), install('copilot-cli')], [piPart]);
   assert.deepEqual([pageRows(home, 'skills').rows.length, pluginItemCount(home, 'skills'), pluginItemCount(home, 'skills', 'claude-cli')], [0, 0, 0]);
   // That row is the tools' too: each one's page draws it and each one's count has it (one rule, inTool).
-  const [triage] = home.manage.skills;
+  const [triage] = kindSource(home, 'skills').facts;
   assert.deepEqual((['claude-cli', 'copilot-cli', 'pi-cli', 'codex-cli'] as const).map(tool => inTool(triage!, tool)), [true, true, true, false]);
 });
 

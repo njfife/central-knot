@@ -9,7 +9,7 @@ import { agentsView, applyAgents } from '../src/agents.ts';
 import { discover, findOtherApps } from '../src/discovery.ts';
 import { envOverride, harnesses } from '../src/harnesses.ts';
 import { instructionsView } from '../src/instructions.ts';
-import { applyChanges, manageView, readHistory, restoreFromHistory } from '../src/manage.ts';
+import { applySkills, skillsView } from '../src/skills.ts';
 import { applyMcp, mcpView, readTool } from '../src/mcp.ts';
 import { mcpDisabled, withMcpSwitch } from '../src/mcpswitch.ts';
 import { appCandidates, executableCandidates } from '../src/platform.ts';
@@ -53,150 +53,75 @@ test('OpenCode reads its own skills, Claude Code’s and the shared folder; a sk
     const snapshot = await discover({ home: box.home, mode: 'custom', harness: 'opencode-cli' });
     assert.deepEqual(snapshot.skills.map(found => `${found.folder}: ${found.rootLabel}`).sort(), ['from-claude: Claude Code skills', 'nameless: Claude Code skills', 'own: OpenCode skills', 'shared: Shared .agents skills']);
 
-    const view = await manageView(box.context);
-    const fromClaude = view.skills.find(item => item.key === 'from-claude')!;
-    assert.equal(fromClaude.copies['opencode-cli']!.directory, join(box.home, '.claude/skills/from-claude'));
-    assert.deepEqual([fromClaude.copies['opencode-cli']!.writable, fromClaude.copies['opencode-cli']!.readsFrom], [false, 'claude-cli'], 'it is Claude Code’s copy, which OpenCode reads');
-    assert.match(view.skills.find(item => item.key === 'nameless')!.cannot['opencode-cli']!, /OpenCode 1\.x will not load it: its frontmatter has no name/);
+    const view = await skillsView(box.context, tools);
+    const fromClaude = view.items.find(item => item.key === 'from-claude')!;
+    assert.deepEqual(Object.keys(fromClaude.copies), ['claude-cli'], 'Claude Code’s copy is Claude Code’s, which OpenCode reads');
+    assert.match(fromClaude.anotherWay?.['opencode-cli'] ?? '', /^OpenCode reads Claude Code’s copy/);
+    assert.match(view.items.find(item => item.key === 'shared')!.anotherWay?.['opencode-cli'] ?? '', /also reads a copy at .*\.agents\/skills, which is not Central Knot’s/);
 
-    // Managed in both: OpenCode already reads Claude Code's copy, so nothing is written for it.
-    const first = await applyChanges(box.context, [{ key: 'from-claude', managed: true, off: [] }]);
-    assert.equal(first.harnessWrites, 0, JSON.stringify(first.results));
+    // Taken in, on in both: OpenCode already reads Claude Code's copy, so nothing is written for it.
+    const first = await applySkills(box.context, tools, [{ key: 'from-claude', managed: true, off: [] }]);
+    assert.equal(first.writes, 0, JSON.stringify(first.results));
     assert.equal(await exists(join(box.home, OPENCODE, 'skills/from-claude')), false);
-    // OpenCode's own skill reaches Claude Code, whose copy OpenCode then reads too.
-    const second = await applyChanges(box.context, [{ key: 'own', managed: true, off: [] }]);
-    assert.equal(second.harnessWrites, 1, JSON.stringify(second.results));
+    // OpenCode's own skill reaches Claude Code, whose copy OpenCode then reads too; its own copy, never Central Knot's, stays.
+    const second = await applySkills(box.context, tools, [{ key: 'own', managed: true, off: [] }]);
+    assert.equal(second.writes, 1, JSON.stringify(second.results));
     assert.equal(await readFile(join(box.home, '.claude/skills/own/SKILL.md'), 'utf8'), text('own'));
-    assert.equal((await applyChanges(box.context, [])).harnessWrites, 0, 'settled');
-    // An edit in OpenCode's own copy spreads to Claude Code's.
-    await writeFile(join(box.home, OPENCODE, 'skills/own/SKILL.md'), text('own', 'Edited in OpenCode.'));
-    const edited = await applyChanges(box.context, []);
-    assert.equal(edited.harnessWrites, 1, JSON.stringify(edited.results));
-    assert.equal(await readFile(join(box.home, '.claude/skills/own/SKILL.md'), 'utf8'), text('own', 'Edited in OpenCode.'));
+    assert.equal(await readFile(join(box.home, OPENCODE, 'skills/own/SKILL.md'), 'utf8'), text('own'));
+    assert.equal((await applySkills(box.context, tools, [])).writes, 0, 'settled');
+    // An edit in Claude Code's copy is the skill's; OpenCode reads it there.
+    await writeFile(join(box.home, '.claude/skills/own/SKILL.md'), text('own', 'Edited in Claude Code.'));
+    const edited = await applySkills(box.context, tools, []);
+    assert.deepEqual(edited.notices?.map(notice => notice.winner), ['claude-cli']);
   } finally { await box.cleanup(); }
 });
 
-test('The copy OpenCode reads in Claude Code’s folder is Claude Code’s: it blocks no choice, is never called older, and Remove says it still loads', async () => {
+test('Kept out of Claude Code, a skill OpenCode read there becomes a copy of OpenCode’s own; let back in, that copy goes, so it is loaded once', async () => {
   const three: HarnessId[] = ['claude-cli', 'copilot-cli', 'opencode-cli'];
   const box = await sandbox(three);
-  const said = (result: { results: { message: string }[] }) => result.results.map(entry => entry.message).join(' | ');
   try {
-    // Copies that differ between Claude Code and Copilot CLI: Copilot's can be chosen, and OpenCode then reads it in Claude Code's folder.
+    // Copies that differ between Claude Code and Copilot CLI: Copilot's is chosen, and OpenCode then reads it in Claude Code's folder.
     await skill(box.home, '.claude/skills', 'review', text('review', 'Claude Code’s.'));
     await skill(box.home, '.copilot/skills', 'review', text('review', 'Copilot’s.'));
-    const review = (await manageView(box.context)).skills.find(item => item.key === 'review')!;
-    assert.deepEqual(review.choiceBlocks['copilot-cli'], []);
-    const chosen = await applyChanges(box.context, [{ key: 'review', managed: true, off: [], use: 'copilot-cli', useHash: review.copies['copilot-cli']!.hash }]);
-    assert.equal(await readFile(join(box.home, '.claude/skills/review/SKILL.md'), 'utf8'), text('review', 'Copilot’s.'), said(chosen));
+    assert.equal((await skillsView(box.context, three)).items.find(item => item.key === 'review')!.differs, true);
+    await applySkills(box.context, three, [{ key: 'review', managed: true, off: [], use: 'copilot-cli' }]);
+    assert.equal(await readFile(join(box.home, '.claude/skills/review/SKILL.md'), 'utf8'), text('review', 'Copilot’s.'));
     assert.equal(await exists(join(box.home, OPENCODE, 'skills/review')), false, 'no second copy for OpenCode');
-    // Choosing "OpenCode's" copy of a skill it reads in Claude Code's folder chooses Claude Code's.
-    await skill(box.home, '.claude/skills', 'twin', text('twin', 'Claude Code’s.'));
-    await skill(box.home, '.copilot/skills', 'twin', text('twin', 'Copilot’s.'));
-    const twin = (await manageView(box.context)).skills.find(item => item.key === 'twin')!;
-    await applyChanges(box.context, [{ key: 'twin', managed: true, off: [], use: 'opencode-cli', useHash: twin.copies['opencode-cli']!.hash }]);
-    assert.equal(await readFile(join(box.home, '.copilot/skills/twin/SKILL.md'), 'utf8'), text('twin', 'Claude Code’s.'));
 
-    // Claude Code left out of a managed skill: its copy goes stale, so OpenCode gets its own, and nothing is called older.
+    // Kept out of Claude Code: its copy goes, OpenCode gets its own, and an edit in Copilot CLI reaches it.
     await skill(box.home, '.claude/skills', 'notes');
-    await applyChanges(box.context, [{ key: 'notes', managed: true, off: [] }]);
-    assert.equal(await exists(join(box.home, OPENCODE, 'skills/notes')), false);
-    await applyChanges(box.context, [{ key: 'notes', managed: true, off: ['claude-cli'] }]);
-    assert.equal(await readFile(join(box.home, OPENCODE, 'skills/notes/SKILL.md'), 'utf8'), text('notes'));
+    await applySkills(box.context, three, [{ key: 'notes', managed: true, off: [] }]);
+    await applySkills(box.context, three, [{ key: 'notes', managed: true, off: ['claude-cli'] }]);
+    assert.deepEqual([await exists(join(box.home, '.claude/skills/notes')), await readFile(join(box.home, OPENCODE, 'skills/notes/SKILL.md'), 'utf8')], [false, text('notes')]);
     await writeFile(join(box.home, '.copilot/skills/notes/SKILL.md'), text('notes', 'Edited in Copilot.'));
-    const edited = await applyChanges(box.context, []);
-    assert.equal(await readFile(join(box.home, OPENCODE, 'skills/notes/SKILL.md'), 'utf8'), text('notes', 'Edited in Copilot.'), said(edited));
-    assert.equal(await readFile(join(box.home, '.claude/skills/notes/SKILL.md'), 'utf8'), text('notes'), 'Claude Code’s copy is left alone');
-    assert.doesNotMatch(said(edited), /older copy|does not change/);
+    await applySkills(box.context, three, []);
+    assert.equal(await readFile(join(box.home, OPENCODE, 'skills/notes/SKILL.md'), 'utf8'), text('notes', 'Edited in Copilot.'));
+    // Let back in: Claude Code gets the current version, and OpenCode's own copy, Central Knot's, goes.
+    await applySkills(box.context, three, [{ key: 'notes', managed: true, off: [] }]);
+    assert.deepEqual([await readFile(join(box.home, '.claude/skills/notes/SKILL.md'), 'utf8'), await exists(join(box.home, OPENCODE, 'skills/notes'))], [text('notes', 'Edited in Copilot.'), false]);
 
-    // Remove from Claude Code of a skill managed in all three: OpenCode gets a copy of its own in the same pass, and is not said to have lost it.
-    await skill(box.home, '.claude/skills', 'kept');
-    await applyChanges(box.context, [{ key: 'kept', managed: true, off: [] }]);
-    const kept = await applyChanges(box.context, [{ key: 'kept', managed: true, off: [], remove: ['claude-cli'] }]);
-    assert.deepEqual([await exists(join(box.home, '.claude/skills/kept')), await exists(join(box.home, OPENCODE, 'skills/kept/SKILL.md'))], [false, true], said(kept));
-    assert.doesNotMatch(said(kept), /no longer has the skill/);
-
-    // Remove takes OpenCode's own copy out and says the skill still loads there from Claude Code's folder.
-    await skill(box.home, `${OPENCODE}/skills`, 'own');
-    await applyChanges(box.context, [{ key: 'own', managed: true, off: [] }]);
-    const removed = await applyChanges(box.context, [{ key: 'own', managed: true, off: ['opencode-cli'], remove: ['opencode-cli'] }]);
-    assert.equal(await exists(join(box.home, OPENCODE, 'skills/own')), false);
-    assert.match(said(removed), /Removed from OpenCode\. Restore it from History\. OpenCode still reads Claude Code’s copy; Disable it in OpenCode/);
-    // Remove asked of the copy it only reads is refused, with what does work.
-    const refused = await applyChanges(box.context, [{ key: 'own', managed: true, off: ['opencode-cli'], remove: ['opencode-cli'] }]);
-    assert.match(said(refused), /OpenCode reads Claude Code’s copy\. Disable it in OpenCode to stop it loading there, or remove it from Claude Code\./);
-
-    // OpenCode's own copy of a managed skill deleted by hand: the deletion spreads, and nothing is left to remove by hand.
-    await skill(box.home, `${OPENCODE}/skills`, 'gone');
-    await applyChanges(box.context, [{ key: 'gone', managed: true, off: [] }]);
+    // OpenCode's own copy, Central Knot's (Claude Code kept out), deleted by hand: the skill turns off everywhere.
+    await skill(box.home, '.claude/skills', 'gone');
+    await applySkills(box.context, three, [{ key: 'gone', managed: true, off: [] }]);
+    await applySkills(box.context, three, [{ key: 'gone', managed: true, off: ['claude-cli'] }]);
+    assert.equal(await exists(join(box.home, OPENCODE, 'skills/gone/SKILL.md')), true);
     await rm(join(box.home, OPENCODE, 'skills/gone'), { recursive: true });
-    const first = await applyChanges(box.context, []);
-    const second = await applyChanges(box.context, []);
-    assert.deepEqual([await exists(join(box.home, '.claude/skills/gone')), await exists(join(box.home, '.copilot/skills/gone'))], [false, false], `${said(first)} / ${said(second)}`);
-    assert.doesNotMatch(`${said(first)} ${said(second)}`, /Remove it yourself/);
-  } finally { await box.cleanup(); }
-});
-
-test('Restore, Remove and leaving Claude Code out keep OpenCode’s own copy apart from the one it reads', async () => {
-  const said = (result: { results: { message: string }[] }) => result.results.map(entry => entry.message).join(' | ');
-  const last = async (context: ShareContext, kind: string) => (await readHistory(context)).filter(event => event.kind === kind).at(-1)!.id;
-  const box = await sandbox();
-  try {
-    // OpenCode's own copy, removed and restored, while Claude Code's folder holds a different one of that name.
-    await skill(box.home, `${OPENCODE}/skills`, 'x', text('x', 'OpenCode’s own.'));
-    await skill(box.home, '.claude/skills', 'x', text('x', 'Claude Code’s.'));
-    await applyChanges(box.context, [{ key: 'x', managed: false, off: [], remove: ['opencode-cli'] }]);
-    assert.equal(await exists(join(box.home, OPENCODE, 'skills/x')), false);
-    const restored = await restoreFromHistory(box.context, await last(box.context, 'removed'));
-    assert.equal(await readFile(join(box.home, OPENCODE, 'skills/x/SKILL.md'), 'utf8'), text('x', 'OpenCode’s own.'), said(restored));
-
-    // Managed in both, held only in Claude Code's folder; then Claude Code is left out: OpenCode gets that copy as its own.
-    await skill(box.home, '.claude/skills', 'delta');
-    assert.equal((await applyChanges(box.context, [{ key: 'delta', managed: true, off: [] }])).harnessWrites, 0);
-    const left = await applyChanges(box.context, [{ key: 'delta', managed: true, off: ['claude-cli'] }]);
-    assert.equal(await readFile(join(box.home, OPENCODE, 'skills/delta/SKILL.md'), 'utf8'), text('delta'), said(left));
-    assert.match(said(left), /OpenCode read Claude Code’s copy, which is left out here, so it has a copy of its own now/);
-    assert.doesNotMatch(said(await applyChanges(box.context, [])), /No tool it syncs to/);
-    // Managed with Claude Code left out from the start: the same.
-    await skill(box.home, '.claude/skills', 'epsilon');
-    await applyChanges(box.context, [{ key: 'epsilon', managed: true, off: ['claude-cli'] }]);
-    assert.equal(await exists(join(box.home, OPENCODE, 'skills/epsilon/SKILL.md')), true);
-    // That copy is one Apply all added: it is in History, so Undo takes it out again.
-    assert.deepEqual((await readHistory(box.context)).filter(event => event.kind === 'added' && event.key === 'epsilon').map(event => event.losers.map(copy => copy.tool)), [['opencode-cli']]);
-    // OpenCode's own copy deleted by hand is a deletion: it is not made again from Claude Code's.
-    await rm(join(box.home, OPENCODE, 'skills/epsilon'), { recursive: true });
-    await applyChanges(box.context, []); await applyChanges(box.context, []);
-    assert.equal(await exists(join(box.home, OPENCODE, 'skills/epsilon')), false);
-
-    // Remove from Claude Code of a managed skill OpenCode only reads: OpenCode keeps the skill, as a copy of its own.
-    await skill(box.home, '.claude/skills', 'alpha');
-    await applyChanges(box.context, [{ key: 'alpha', managed: true, off: [] }]);
-    const taken = await applyChanges(box.context, [{ key: 'alpha', managed: true, off: ['claude-cli'], remove: ['claude-cli'] }]);
-    assert.deepEqual([await exists(join(box.home, '.claude/skills/alpha')), await exists(join(box.home, OPENCODE, 'skills/alpha/SKILL.md'))], [false, true], said(taken));
-    // Unmanaged: the copy goes, and the result says OpenCode read it and has the skill no longer.
-    await skill(box.home, '.claude/skills', 'beta');
-    const gone = await applyChanges(box.context, [{ key: 'beta', managed: false, off: [], remove: ['claude-cli'] }]);
-    assert.match(said(gone), /Removed from Claude Code\. Restore it from History\. OpenCode read this copy, so it no longer has the skill\./);
-
-    // A deletion restored: Claude Code's copy comes back, and OpenCode reads it again, with no second copy of its own.
-    await skill(box.home, '.claude/skills', 'zeta');
-    await applyChanges(box.context, [{ key: 'zeta', managed: true, off: [] }]);
-    await rm(join(box.home, '.claude/skills/zeta'), { recursive: true });
-    await applyChanges(box.context, []); await applyChanges(box.context, []);
-    const back = await restoreFromHistory(box.context, await last(box.context, 'deleted'));
-    assert.deepEqual([await exists(join(box.home, '.claude/skills/zeta/SKILL.md')), await exists(join(box.home, OPENCODE, 'skills/zeta'))], [true, false], said(back));
-    assert.doesNotMatch(said(back), /does not change/);
+    await applySkills(box.context, three, []);
+    assert.equal((await skillsView(box.context, three)).library.gone.on, false);
+    assert.equal(await exists(join(box.home, '.copilot/skills/gone')), false);
   } finally { await box.cleanup(); }
 });
 
 test('A skill new to both Claude Code and OpenCode goes to Claude Code’s folder only, where OpenCode reads it', async () => {
   const box = await sandbox(['claude-cli', 'copilot-cli', 'opencode-cli']);
+  const three: HarnessId[] = ['claude-cli', 'copilot-cli', 'opencode-cli'];
   try {
     await skill(box.home, '.copilot/skills', 'fresh');
-    const result = await applyChanges(box.context, [{ key: 'fresh', managed: true, off: [] }]);
-    assert.equal(result.harnessWrites, 1, JSON.stringify(result.results));
+    const result = await applySkills(box.context, three, [{ key: 'fresh', managed: true, off: [] }]);
+    assert.equal(result.writes, 1, JSON.stringify(result.results));
     assert.deepEqual([await exists(join(box.home, '.claude/skills/fresh/SKILL.md')), await exists(join(box.home, OPENCODE, 'skills/fresh'))], [true, false]);
-    assert.equal((await manageView(box.context)).skills.find(item => item.key === 'fresh')!.copies['opencode-cli']!.readsFrom, 'claude-cli');
-    assert.equal((await applyChanges(box.context, [])).harnessWrites, 0, 'settled');
+    assert.match((await skillsView(box.context, three)).items.find(item => item.key === 'fresh')!.anotherWay?.['opencode-cli'] ?? '', /reads Claude Code’s copy/);
+    assert.equal((await applySkills(box.context, three, [])).writes, 0, 'settled');
   } finally { await box.cleanup(); }
 });
 

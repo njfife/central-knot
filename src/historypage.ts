@@ -4,25 +4,29 @@ import { DAY_MS, timesApart } from './model.ts';
 import { noTools, restoreEvent, showPage, shownPath, state, touchedToolsPhrase, unwriteClaudeNow } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
-import { tookOverHistory } from './outsidewords.ts';
 import { changedProfile, flipSummary, NO_PROFILE, redoneSwitch } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
-import { agentAction, agentKeyOf, agentSentence, doneWords, isAgentEntry, keptOver, versionChoices } from './historyactions.ts';
+import { doneWords, keptOver, libraryAction, libraryEntry, librarySentence, versionChoices } from './historyactions.ts';
+import { libraryWords } from './libraryrow.ts';
 import { button, emptyState, h, icon, rereadBand } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HistoryEvent } from './types.ts';
 
 const who = (tool?: string) => (tool ? toolName(tool) : 'Central Knot');
 
-/** The agent an entry is about, as Central Knot's library holds it now (deleted or not). */
-const agentOf = (event: HistoryEvent) => state.home?.agents.library?.[agentKeyOf(event)];
+/** The skill or agent an entry is about, as Central Knot's library holds it now (deleted or not). */
+const itemOf = (event: HistoryEvent) => { const entry = libraryEntry(event); return entry && state.home?.[entry.kind].library?.[entry.key]; };
+/** A skill's or agent's entry in its kind's words (historyactions.ts librarySentence). */
+/** A take-over's entry names the copy's path as the page shows paths (from ~, or "…" inside another home). */
+const pathsShown = (event: HistoryEvent): HistoryEvent => (event.kind === 'took-over' ? { ...event, losers: event.losers.map(copy => (copy.path ? { ...copy, path: shownPath(copy.path) } : copy)) } : event);
+const said = (event: HistoryEvent) => { const entry = libraryEntry(event); return entry && librarySentence(pathsShown(event), libraryWords[entry.kind], state.home?.[entry.kind].tools ?? [], itemOf(event), undid(event)); };
 /** Whether the entry is another's Undo: that one's `undoneBy` names it. */
 const undid = (event: HistoryEvent) => !!state.history.data?.some(other => other.undoneBy === event.id);
 
 function describe(event: HistoryEvent): { glyph: IconName; text: string; action?: string } {
-  // An agent's entry says it in the library's words (historyactions.ts); an older kind keeps the general sentence below.
-  const agent = isAgentEntry(event) ? agentSentence(event, state.home?.agents.tools ?? [], agentOf(event), undid(event)) : undefined;
-  if (agent) return agent;
+  // A library item's entry says it in the library's words (historyactions.ts); an older kind keeps the general sentence below.
+  const library = said(event);
+  if (library) return library;
   const order = event.orderProved ? '' : ' Order not proved; the fixed tool order decided.';
   // A Pull's edit or deletion of the base instructions: said as the pull, undone or not.
   if (event.base) return pulledBase(event, event.base.list.tools.length ? touchedToolsPhrase(event.base.list.tools) : '');
@@ -51,10 +55,11 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
       return { glyph: 'circle-off', text: `${text.charAt(0).toUpperCase()}${text.slice(1)}, using ${one ? `${one}’s` : 'each tool’s'} own switch.`, action: 'Undo' };
     }
     case 'profile': return profileSwitch(event);
-    // An agent's own kinds: agentSentence says every one of them, so they are answered before this switch.
-    case 'on': case 'off': case 'current': return agentSentence(event, state.home?.agents.tools ?? [], agentOf(event), undid(event))!;
+    // A library item's own kinds: librarySentence says every one of them, so they are answered before this switch.
+    case 'on': case 'off': case 'current': return said(event)!;
     case 'removed': return { glyph: 'circle-minus', text: `Removed from ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}; Central Knot kept the ${event.losers.length === 1 ? 'copy' : 'copies'}.`, action: 'Restore' };
-    case 'took-over': return { glyph: 'arrow-down-to-line', text: tookOverText(event, !!event.undoneBy), action: 'Undo' };
+    // A skill's copies taken over before Central Knot kept versions (Replace with managed copies): past, with no action now.
+    case 'took-over': return { glyph: 'arrow-down-to-line', text: `Took over its copies outside Central Knot${event.undoneBy ? '; this was undone, and they were put back as they were' : ''}.` };
     case 'written': return { glyph: 'pencil-line', text: 'Write to Claude Code replaced Claude Code’s own entry with the synced one; Central Knot kept it.', action: 'Undo write' };
     case 'added': {
       const where = touchedToolsPhrase(event.losers.map(loser => loser.tool));
@@ -77,15 +82,6 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
       return { glyph: 'undo-2', text: `Undid ${undone ? named(undone) : 'a change'}; the earlier version is back${where}.`, action: 'Redo edit' };
     }
   }
-}
-
-/** A take-over, said as what it did to which folder: links replaced by real copies, tools given their own, the shared copy removed. */
-function tookOverText(event: HistoryEvent, undone: boolean): string {
-  const told = event.tookOver;
-  if (!told) return 'Took over its copies outside Central Knot.';
-  // The same words as the Skills page (outsidewords.ts), and the folder through the same path-shortening ("~/.agents/skills").
-  const text = tookOverHistory(told.links.filter(link => link.placed).map(link => who(link.tool)), told.placed.map(copy => who(copy.tool)), told.shared.length ? shownPath(told.shared[0].path.replace(/\/[^/]+$/, '')) : undefined);
-  return `${text}${undone ? '; this was undone, and they are back as they were.' : '. Central Knot kept what it replaced.'}`;
 }
 
 /** The base instructions as a Pull changed them: set for the first time, edited, or deleted; `tools` names the tools that get them. */
@@ -113,7 +109,7 @@ function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; ac
 
 /** Skills, MCP servers, agents and profile switches share History; each row says which it is. */
 const kindOf = (event: HistoryEvent) => (event.kind === 'profile' ? 'Profile' : event.base ? 'Instructions' : event.key.startsWith('mcp:') ? 'MCP server' : event.key.startsWith('agent:') ? 'Agent' : 'Skill');
-/** The overwritten edits a skill conflict or kept edit can put back, one per content (mirrors restorableChoices in manage.ts). */
+/** The overwritten edits an MCP server's conflict or kept edit can put back, one per content (as mcp.ts restoreMcp offers them). */
 function choices(event: HistoryEvent) {
   if (event.key.startsWith('mcp:') || (event.kind !== 'conflict' && event.kind !== 'kept-edit')) return [];
   const seen = new Set<string>();
@@ -146,23 +142,25 @@ const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'pro
   : event.base ? 'Put the base instructions back as they were before this Pull, and in the tools that got them (where their file is unchanged since)'
   : event.kind === 'switched' ? (event.switched ?? []).map(entry => `${entry.disabled ? 'Enable' : 'Disable'} it again in ${who(entry.tool)}`).join('; ')
   : event.kind === 'removed' ? `Put the removed copy back in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}`
-  : event.kind === 'took-over' ? `Put the links and the shared copy back as they were${event.tookOver?.managedNow ? `, remove the copies that turning it on added, and stop syncing ${event.item}` : ''} (only while unchanged)`
   : event.kind === 'added' ? `Remove the copies ${event.via === 'repo' ? 'Pull' : 'it'} added (only while unchanged) and stop syncing ${event.item}${event.rejoined ? ' there' : ''}` : action === 'Restore' ? `Put ${event.item} back in every tool it synced to`
   : action === 'Finish undo' ? `${unfinished(event, true)} (only while unchanged since)`
   : event.kind === 'written' ? 'Put back what Claude Code had before (quit Claude Code first)'
   : action === 'Redo edit' || action === 'Delete again' ? 'Undo the undo: put back the version that was replaced'
     : `Put ${event.item} back as it was before this change, in every tool it syncs to (including where it was edited)`);
 
-/** An agent entry's buttons (historyactions.ts): its own action, and one "Use <harness>’s copy" for each copy that gave way. */
-function agentButtons(event: HistoryEvent) {
-  const item = agentOf(event), own = agentAction(event, item);
+/** A library entry's buttons (historyactions.ts): its own action, and one "Use <harness>’s copy" for each copy that gave way. */
+function libraryButtons(event: HistoryEvent) {
+  const entry = libraryEntry(event)!, item = itemOf(event);
+  // A skill's own switches as the page last read them, so an action that would change nothing there is not offered.
+  const loads = entry.kind === 'skills' ? state.home?.skills.items.find(row => row.key === entry.key)?.loads : undefined;
+  const own = libraryAction(event, item, undefined, loads);
   const link = (label: string, help: string, id: string, version?: string) => {
     const control = button({ variant: 'link', size: 'small', label, name: `${label} (${event.item}): ${help}`, id, disabled: !!state.busy, onclick: () => void restoreEvent(event.id, version) });
     control.title = help;
     return control;
   };
-  // Restore over an agent of that name made since (a found copy that isn't the restored version): it is kept as a version.
-  const found = own?.label === 'Restore' ? state.home?.agents.items.find(row => row.key === agentKeyOf(event)) : undefined;
+  // Restore over an item of that name made since (a found copy that isn't the restored version): it is kept as a version.
+  const found = own?.label === 'Restore' ? state.home?.[entry.kind].items.find(row => row.key === entry.key) : undefined;
   const over = Object.entries(found?.copies ?? {}).filter(([, copy]) => copy && copy.hash !== item?.hash).map(([tool]) => tool);
   const help = own && over.length ? `${own.help}. ${keptOver(event.item, over)}` : own?.help;
   return [own ? link(own.label, help!, `history-${event.id}`) : null,
@@ -177,7 +175,7 @@ function actions(event: HistoryEvent, action?: string) {
   }
   if (!action) return h('span');
   // The scope is the tools the event touched, as the notices say it.
-  // Undo and Restore write the earlier version to every tool the item syncs to (restoreFromHistory), so they say "in all tools".
+  // Undo and Restore write the earlier version to every tool the server syncs to (mcp.ts restoreMcp), so they say "in all tools".
   // Only an 'added' undo is narrower: it removes the copies a switch (or Pull) added, in those tools alone.
   const touched = event.base ? event.base.list.tools : event.kind === 'added' || event.kind === 'removed' ? [...new Set(event.losers.map(loser => loser.tool))] : event.kind === 'switched' ? (event.switched ?? []).map(entry => entry.tool) : [];
   // A base no tool gets is undone in Central Knot alone, so its Undo names no tools.
@@ -220,10 +218,10 @@ export function historyPage() {
       // steady column at the right, the same on every row. Narrow, what happened takes a line of its own beneath (style.css).
       h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event)), h('strong', { title: event.item }, event.item)),
       h('span.history-about', {}, about.text),
-      event.undoneBy ? h('span.history-actions', {}, h('span.history-done', {}, isAgentEntry(event) ? doneWords(event) : event.kind === 'removed' ? 'Restored' : 'Undone'))
-        : h(`span.history-actions${isAgentEntry(event) && versionChoices(event, agentOf(event)).length ? '.history-actions-below' : ''}`, {},
+      event.undoneBy ? h('span.history-actions', {}, h('span.history-done', {}, libraryEntry(event) ? doneWords(event) : event.kind === 'removed' ? 'Restored' : 'Undone'))
+        : h('span.history-actions', {},
           !event.base && (event.kind === 'edit' || event.kind === 'conflict') ? seeChangeLink(event.id, event.key, true) : null,
-          isAgentEntry(event) ? agentButtons(event) : actions(event, about.action)),
+          libraryEntry(event) ? libraryButtons(event) : actions(event, about.action)),
       changePanel(event.id))];
   }))));
 }

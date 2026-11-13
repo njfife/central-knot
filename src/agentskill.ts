@@ -1,12 +1,13 @@
 // Convert to skill (AGT-02): a one-time snapshot of an agent as an ordinary skill, for Pi, which has no native agents.
 // It is no part of syncing agents (agents.ts): the skill is written to Pi's own skills folder (no root the agent's tool
 // reads, AGT-03), where it came from is recorded so it is never placed back in that tool, and skill edits never write to
-// any agent. The caller then manages it like any skill (manage.ts shows where a converted skill came from).
+// any agent. The caller then takes it into Central Knot's library, On in Pi alone (skills.ts says where a converted skill
+// came from, and never gives it to the agent's own tool by itself).
 import { mkdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isAgentTool, keyOf, readAgents, safeName, type AgentEntry } from './agentfiles.ts';
 import { harnesses, writeRoot } from './harnesses.ts';
-import { readConverted, recordConverted } from './manage.ts';
+import { readConverted, recordConverted } from './skillstore.ts';
 import { agentTools } from './presence.ts';
 import { writeAccess, writeFileChecked, type ShareContext } from './share.ts';
 import type { HarnessId } from './types.ts';

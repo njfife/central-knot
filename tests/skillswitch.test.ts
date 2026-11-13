@@ -5,8 +5,9 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
-import { applyChanges, manageView, readHistory, restoreFromHistory } from '../src/manage.ts';
-import { isDisabled, readSwitchFile, setDisabled, switchPath, unverifiedBuild } from '../src/skillswitch.ts';
+import { readHistory } from '../src/history.ts';
+import { applySkills, clearSwitch, skillsView } from '../src/skills.ts';
+import { isDisabled, readSwitchFile, setDisabled, switchPath } from '../src/skillswitch.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
 
@@ -76,22 +77,6 @@ test('Each tool’s switch: Disable writes its own form, Enable takes it out, an
     await writeFile(claude, '\uFEFF{ "model": "opus" }\n');
     await setDisabled(box.context, 'claude-cli', target, true);
     assert.ok((await readFile(claude, 'utf8')).startsWith('\uFEFF{'));
-    // Below the build where each switch was seen working, or with no build read, a note says so; nothing more.
-    assert.deepEqual(['2.1.300', '2.1.311', '2.2.0', undefined].map(version => !!unverifiedBuild('claude-cli', version)), [true, false, false, true]);
-  } finally { await box.cleanup(); }
-});
-
-test('Disable is best effort: a build older than the one verified only gets a note, and the switch is still written', async () => {
-  const box = await sandbox(['claude-cli', 'codex-cli']);
-  const read = box.context.read;
-  box.context.read = async () => (await read()).map(snapshot => snapshot.harness === 'codex-cli' ? { ...snapshot, probe: { ...snapshot.probe, version: '0.100.0' } } : snapshot);
-  try {
-    await skill(box.home, 'claude-cli', 'notes');
-    await applyChanges(box.context, [{ key: 'notes', managed: true, off: [] }]);
-    assert.match((await manageView(box.context)).skills.find(item => item.key === 'notes')!.disableNote?.['codex-cli'] ?? '', /Not checked on this version of Codex \(0\.100\.0\)/);
-    const result = await applyChanges(box.context, [{ key: 'notes', managed: true, off: [], disable: ['codex-cli'] }]);
-    assert.ok(result.results.some(entry => entry.outcome === 'switched' && entry.harness === 'codex-cli'), JSON.stringify(result));
-    assert.deepEqual((await manageView(box.context)).skills.find(item => item.key === 'notes')!.disabled, ['codex-cli']);
   } finally { await box.cleanup(); }
 });
 
@@ -131,113 +116,34 @@ test('Codex: a name rule is overruled by a path rule, the person’s own rule ke
   } finally { await box.cleanup(); }
 });
 
-test('Managed and disabled in two tools: each copy arrives switched off (Codex by path, Copilot by its name), keeps receiving edits, and Undo enables them', async () => {
+test('A switch set in two tools before a skill is taken in: each copy arrives where it was, still switched off (Codex by path, Copilot by its name), keeps receiving edits, and Clear the switch clears each', async () => {
   const box = await sandbox(['claude-cli', 'codex-cli', 'copilot-cli']);
+  const tools: HarnessId[] = ['claude-cli', 'codex-cli', 'copilot-cli'];
   try {
     // Copilot names a skill by its frontmatter name, which here differs from the folder.
     await skill(box.home, 'claude-cli', 'notes', text('Notes Helper'));
-    // A Disable that can't happen (Codex's skill rules in a form not edited here) changes nothing at all, so no copy arrives enabled.
-    await writeFile(join(box.home, '.codex/config.toml'), 'skills = { config = [] }\n');
-    const held = await applyChanges(box.context, [{ key: 'notes', managed: true, off: [], disable: ['codex-cli'] }]);
-    assert.ok(held.results.some(entry => entry.outcome === 'held' && /Nothing was changed/.test(entry.message)), JSON.stringify(held));
-    assert.deepEqual([(await manageView(box.context)).skills.find(item => item.key === 'notes')!.managed, held.harnessWrites], [false, 0]);
-    await rm(join(box.home, '.codex/config.toml'));
-    const result = await applyChanges(box.context, [{ key: 'notes', managed: true, off: [], disable: ['codex-cli', 'copilot-cli'] }]);
-    assert.equal(result.results.filter(entry => entry.outcome === 'switched').length, 2, JSON.stringify(result));
+    await applySkills(box.context, tools, [{ key: 'notes', managed: true, off: [] }]);
     const copy = join(box.home, '.codex/skills/notes/SKILL.md');
-    assert.equal(await readFile(copy, 'utf8'), text('Notes Helper'));
+    await setDisabled(box.context, 'codex-cli', { folder: 'notes', name: 'Notes Helper', skillFile: copy }, true);
+    await setDisabled(box.context, 'copilot-cli', { folder: 'notes', name: 'Notes Helper', skillFile: join(box.home, '.copilot/skills/notes/SKILL.md') }, true);
     assert.ok((await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes(`path = ${JSON.stringify(copy)}\nenabled = false`));
     assert.deepEqual(JSON.parse(await readFile(join(box.home, '.copilot/settings.json'), 'utf8')).disabledSkills, ['Notes Helper']);
-    let notes = (await manageView(box.context)).skills.find(item => item.key === 'notes')!;
-    assert.deepEqual([notes.managed, notes.disabled], [true, ['codex-cli', 'copilot-cli']]);
-    // Disable is not exclusion: an edit still reaches the disabled copy.
+    const loads = async () => Object.entries((await skillsView(box.context, tools)).items.find(item => item.key === 'notes')!.loads ?? {}).filter(([, at]) => at?.off).map(([tool]) => tool).sort();
+    assert.deepEqual(await loads(), ['codex-cli', 'copilot-cli']);
+    // A switch is not exclusion: an edit still reaches the copy switched off, and the switch stays.
     await writeFile(join(box.home, '.claude/skills/notes/SKILL.md'), text('Notes Helper', 'Edited.'));
-    await applyChanges(box.context, []);
-    await applyChanges(box.context, []);
+    await applySkills(box.context, tools, []);
     assert.equal(await readFile(copy, 'utf8'), text('Notes Helper', 'Edited.'));
-    const switched = (await readHistory(box.context)).find(event => event.kind === 'switched')!;
-    assert.equal((await restoreFromHistory(box.context, switched.id)).stopped, undefined);
-    notes = (await manageView(box.context)).skills.find(item => item.key === 'notes')!;
-    assert.equal(notes.disabled, undefined);
+    assert.deepEqual(await loads(), ['codex-cli', 'copilot-cli']);
+    for (const tool of ['codex-cli', 'copilot-cli'] as HarnessId[]) assert.equal((await clearSwitch(box.context, tools, 'notes', tool)).stopped, undefined);
+    assert.deepEqual(await loads(), []);
+    assert.deepEqual((await readHistory(box.context)).filter(event => event.kind === 'switched').map(event => event.switched?.map(entry => [entry.tool, entry.disabled])), [[['codex-cli', false]], [['copilot-cli', false]]]);
+    // A switch that isn't set any more has nothing to clear: refused, nothing written.
+    assert.match((await clearSwitch(box.context, tools, 'notes', 'codex-cli')).stopped ?? '', /doesn’t turn notes off any more/);
   } finally { await box.cleanup(); }
 });
 
-test('Remove from one tool: unmanaged or managed, only that copy goes, nothing brings it back, and Restore puts it back', async () => {
-  const box = await sandbox(['claude-cli', 'copilot-cli']);
-  try {
-    await skill(box.home, 'claude-cli', 'loose'); await skill(box.home, 'copilot-cli', 'loose');
-    await skill(box.home, 'claude-cli', 'kept');
-    await applyChanges(box.context, [{ key: 'kept', managed: true, off: [] }]);
-    const result = await applyChanges(box.context, [
-      { key: 'loose', managed: false, off: [], remove: ['copilot-cli'], disable: ['claude-cli'] },
-      { key: 'kept', managed: true, off: [], remove: ['copilot-cli'], seenManaged: true },
-    ]);
-    assert.equal(result.results.filter(entry => entry.outcome === 'removed').length, 2, JSON.stringify(result));
-    // Disable works on an unmanaged skill too, beside its removal elsewhere.
-    assert.deepEqual((await manageView(box.context)).skills.find(item => item.key === 'loose')!.disabled, ['claude-cli']);
-    // A later pass neither re-adds the managed copy nor reads its removal as a deletion to spread.
-    await applyChanges(box.context, []);
-    await applyChanges(box.context, []);
-    const view = await manageView(box.context);
-    for (const key of ['loose', 'kept']) {
-      const facts = view.skills.find(item => item.key === key)!;
-      assert.ok(facts.copies['claude-cli'] && !facts.copies['copilot-cli'], key);
-    }
-    assert.deepEqual(view.skills.find(item => item.key === 'kept')!.off, ['copilot-cli']);
-    for (const removed of (await readHistory(box.context)).filter(event => event.kind === 'removed')) {
-      assert.equal((await restoreFromHistory(box.context, removed.id)).stopped, undefined);
-    }
-    assert.equal(await readFile(join(box.home, '.copilot/skills/loose/SKILL.md'), 'utf8'), text('loose'));
-    const kept = (await manageView(box.context)).skills.find(item => item.key === 'kept')!;
-    assert.deepEqual([kept.managed, kept.off, !!kept.copies['copilot-cli']], [true, [], true]);
-    await applyChanges(box.context, []);
-    // Removing a managed skill's every copy unmanages it, quietly; Restore puts both back and manages it again.
-    await skill(box.home, 'claude-cli', 'whole');
-    await applyChanges(box.context, [{ key: 'whole', managed: true, off: [] }]);
-    const gone = await applyChanges(box.context, [{ key: 'whole', managed: true, off: [], remove: ['claude-cli', 'copilot-cli'], seenManaged: true }]);
-    assert.deepEqual(gone.results.map(entry => entry.outcome), ['removed', 'removed'], JSON.stringify(gone));
-    assert.equal((await manageView(box.context)).skills.some(item => item.key === 'whole'), false);
-    await restoreFromHistory(box.context, (await readHistory(box.context)).find(event => event.kind === 'removed' && event.key === 'whole')!.id);
-    const whole = (await manageView(box.context)).skills.find(item => item.key === 'whole')!;
-    assert.deepEqual([whole.managed, whole.off, Object.keys(whole.copies).length], [true, [], 2]);
-    // A copy in a tool whose box is off doesn't count: removing the synced ones still unmanages the skill, with no stray result.
-    await skill(box.home, 'claude-cli', 'side'); await skill(box.home, 'copilot-cli', 'side');
-    await applyChanges(box.context, [{ key: 'side', managed: true, off: ['copilot-cli'] }]);
-    const side = await applyChanges(box.context, [{ key: 'side', managed: true, off: ['copilot-cli'], remove: ['claude-cli'], seenManaged: true }]);
-    assert.deepEqual([side.results.map(entry => entry.outcome), (await manageView(box.context)).skills.find(item => item.key === 'side')!.managed], [['removed'], false]);
-    // Unticking a tool and removing its copy in one change: Restore later doesn't turn syncing there back on.
-    await skill(box.home, 'claude-cli', 'both'); await applyChanges(box.context, [{ key: 'both', managed: true, off: [] }]);
-    await applyChanges(box.context, [{ key: 'both', managed: true, off: ['copilot-cli'], remove: ['copilot-cli'], seenManaged: true }]);
-    assert.deepEqual((await readHistory(box.context)).find(event => event.kind === 'removed' && event.key === 'both')!.stoppedSync, []);
-    // Removing the very copy chosen for every tool is refused, changing nothing.
-    await skill(box.home, 'claude-cli', 'pick'); await skill(box.home, 'copilot-cli', 'pick', text('pick', 'Other.'));
-    const refused = await applyChanges(box.context, [{ key: 'pick', managed: true, off: [], use: 'claude-cli', remove: ['claude-cli'] }]);
-    assert.ok(refused.results.some(entry => entry.outcome === 'held' && /also asked to remove it/.test(entry.message)), JSON.stringify(refused));
-    // A Restore that can't finish everywhere (a different copy took one tool's place) puts back the rest, and a retry finishes.
-    await skill(box.home, 'claude-cli', 'pair'); await skill(box.home, 'copilot-cli', 'pair');
-    await applyChanges(box.context, [{ key: 'pair', managed: false, off: [], remove: ['claude-cli', 'copilot-cli'] }]);
-    const pair = (await readHistory(box.context)).find(event => event.kind === 'removed' && event.key === 'pair')!;
-    await skill(box.home, 'claude-cli', 'pair', text('pair', 'Someone else’s.'));
-    await restoreFromHistory(box.context, pair.id);
-    assert.equal(await readFile(join(box.home, '.copilot/skills/pair/SKILL.md'), 'utf8'), text('pair'));
-    await rm(join(box.home, '.claude/skills/pair'), { recursive: true });
-    assert.equal((await restoreFromHistory(box.context, pair.id)).stopped, undefined);
-    assert.equal(await readFile(join(box.home, '.claude/skills/pair/SKILL.md'), 'utf8'), text('pair'));
-    assert.ok((await readHistory(box.context)).find(event => event.id === pair.id)!.undoneBy, 'done once every copy is back');
-    // A removal that doesn't happen (the copy was edited just then) keeps the copy, and it keeps syncing.
-    const copilotKept = join(box.home, '.copilot/skills/kept/SKILL.md');
-    const editing = { ...box.context, fault: (step: string) => { if (step === 'before-remove') writeFileSync(copilotKept, text('kept', 'Edited just now.')); } };
-    const held = await applyChanges(editing, [{ key: 'kept', managed: true, off: [], remove: ['copilot-cli'], seenManaged: true }]);
-    assert.ok(held.results.some(entry => entry.outcome === 'held' && /changed just now/.test(entry.message)), JSON.stringify(held));
-    assert.deepEqual([(await manageView(box.context)).skills.find(item => item.key === 'kept')!.off, await readFile(copilotKept, 'utf8')], [[], text('kept', 'Edited just now.')]);
-    // …as an ordinary edit, which spreads.
-    await applyChanges(box.context, []);
-    await applyChanges(box.context, []);
-    assert.equal(await readFile(join(box.home, '.claude/skills/kept/SKILL.md'), 'utf8'), text('kept', 'Edited just now.'));
-  } finally { await box.cleanup(); }
-});
-
-test('Enable puts back the Claude Code override a Disable replaced, after History’s window has passed', async () => {
+test('Clear the switch puts back the Claude Code override the switch replaced, kept after History’s window has passed', async () => {
   const box = await sandbox(['claude-cli']);
   let now = Date.parse('2026-11-01T00:00:00Z');
   const context: ShareContext = { ...box.context, historyDays: 7, now: () => now };
@@ -245,24 +151,30 @@ test('Enable puts back the Claude Code override a Disable replaced, after Histor
     await skill(box.home, 'claude-cli', 'pager');
     const original = '{\n  "skillOverrides": { "pager": "name-only" }\n}\n';
     await writeFile(switchPath(context, 'claude-cli'), original);
-    await applyChanges(context, [{ key: 'pager', managed: false, off: [], disable: ['claude-cli'] }]);
+    // Set as the earlier Disable did: the override it replaced is kept beside the record (skillswitch.ts keepOverrides).
+    const target = { folder: 'pager', name: 'pager', skillFile: join(box.home, '.claude/skills/pager/SKILL.md') };
+    const { previous } = await setDisabled(context, 'claude-cli', target, true);
+    const { keepOverrides } = await import('../src/skillswitch.ts');
+    await keepOverrides(context, { pager: previous });
     now += 8 * 24 * 60 * 60 * 1000;
     assert.equal((await readHistory(context)).length, 0);
-    await applyChanges(context, [{ key: 'pager', managed: false, off: [], enable: ['claude-cli'] }]);
+    await clearSwitch(context, ['claude-cli'], 'pager', 'claude-cli');
     assert.equal(await readFile(switchPath(context, 'claude-cli'), 'utf8'), original);
   } finally { await box.cleanup(); }
 });
 
-test('Enable puts back a Claude Code override 0.4.0-preview.1 recorded only in History', async () => {
+test('Clear the switch puts back a Claude Code override 0.4.0-preview.1 recorded only in History', async () => {
   const box = await sandbox(['claude-cli']);
   try {
     await skill(box.home, 'claude-cli', 'pager');
     const original = '{\n  "skillOverrides": { "pager": "name-only" }\n}\n';
     await writeFile(switchPath(box.context, 'claude-cli'), original);
-    await applyChanges(box.context, [{ key: 'pager', managed: false, off: [], disable: ['claude-cli'] }]);
+    const target = { folder: 'pager', name: 'pager', skillFile: join(box.home, '.claude/skills/pager/SKILL.md') };
+    await setDisabled(box.context, 'claude-cli', target, true);
     // That release kept the replaced value only in the Disable's History event.
-    await rm(join(box.home, '.central-knot/skill-overrides.json'));
-    await applyChanges(box.context, [{ key: 'pager', managed: false, off: [], enable: ['claude-cli'] }]);
+    await mkdir(join(box.home, '.central-knot'), { recursive: true });
+    await writeFile(join(box.home, '.central-knot/history.json'), JSON.stringify({ events: [{ id: 'd', at: new Date().toISOString(), key: 'pager', item: 'pager', kind: 'switched', switched: [{ tool: 'claude-cli', disabled: true, target, before: 'name-only' }], losers: [], orderProved: true }] }));
+    await clearSwitch(box.context, ['claude-cli'], 'pager', 'claude-cli');
     assert.equal(await readFile(switchPath(box.context, 'claude-cli'), 'utf8'), original);
   } finally { await box.cleanup(); }
 });

@@ -11,7 +11,7 @@ import { configRoot, harnesses, openCodeSettings } from './harnesses.ts';
 import { mcpTools } from './presence.ts';
 import { FORMAT_VERSION, newRecord, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readJsonc, readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
-import { appendHistory, goneFacts, readHistory, replaceHistory } from './manage.ts';
+import { appendHistory, readHistory, replaceHistory } from './history.ts';
 import { undoChoice } from './choiceundo.ts';
 import { mcpSwitchFacts, readMcpSwitches, setMcpDisabled } from './mcpswitch.ts';
 import { throughPlugins } from './plugins.ts';
@@ -367,6 +367,34 @@ function claudeWaits(item: McpRecordItem | undefined, slot: Partial<Record<Harne
 }
 
 /**
+ * MCP servers no tool has a copy of any more that History can still put back: for each, its latest deletion or removal, while
+ * that is not undone. They show switched Off until History lets them go. `keyOf` reads an event's server name (undefined:
+ * another kind's event); `here` are the names some tool has now.
+ */
+function goneFacts(events: HistoryEvent[], here: Set<string>, keyOf: (event: HistoryEvent) => string | undefined): SkillFacts[] {
+  const removals = new Map<string, HistoryEvent[]>();
+  for (const event of events) {
+    const key = keyOf(event);
+    if (key !== undefined && !here.has(key) && (event.kind === 'deleted' || event.kind === 'removed')) removals.set(key, [...(removals.get(key) ?? []), event]);
+  }
+  return [...removals].filter(([, list]) => !list.at(-1)!.undoneBy).map(([key, list]) => {
+    const latest = list.at(-1)!;
+    // A deletion puts it back in every tool it synced to. A removal puts it back where it took it from; each other tool's own
+    // latest removal, still open, puts that tool's copy back too.
+    const covered = new Set(latest.losers.map(loser => loser.tool));
+    const also: string[] = [];
+    if (latest.kind === 'removed') for (const older of list.slice(0, -1).reverse()) {
+      if (older.kind !== 'removed') break;
+      const more = older.losers.some(loser => !covered.has(loser.tool));
+      for (const loser of older.losers) covered.add(loser.tool);
+      if (more && !older.undoneBy) also.push(older.id);
+    }
+    return { key, name: latest.item, description: '', copies: {}, managed: false, off: [], cannot: {}, choiceBlocks: {},
+      gone: { history: latest.id, at: latest.at, kind: latest.kind as 'deleted' | 'removed', ...(also.length ? { also } : {}) } };
+  });
+}
+
+/**
  * The servers each tool has through its installed plugins, by name: such a tool gets no entry of its own beside the
  * plugin's. Only a server Central Knot installed elsewhere as that plugin's part counts: a name alone could be another server.
  */
@@ -401,7 +429,7 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
     if (claudeWaits(item, slot, present)) claudePending.push(name);
     // Edits waiting to spread, as skills and agents mark them: a recorded copy now holding other content.
     const edited = item?.state === 'shared' ? item.copies.filter(copy => !copy.status && slot[copy.tool] && slot[copy.tool]!.hash !== copy.hash).map(copy => copy.tool) : [];
-    servers.push({ key: name, name, description: summary(sample), copies, extra: [], managed: item?.state === 'shared', off: item?.off ?? [], cannot, ...(Object.keys(plugin).length ? { plugin } : {}), held, separate: item?.separate, choiceBlocks: {},
+    servers.push({ key: name, name, description: summary(sample), copies, managed: item?.state === 'shared', off: item?.off ?? [], cannot, ...(Object.keys(plugin).length ? { plugin } : {}), held, separate: item?.separate, choiceBlocks: {},
       edited: edited.length ? edited : undefined, ...mcpSwitchFacts(name, entries.map(entry => entry.tool), switches) });
   }
   const gone = goneFacts(await readHistory(context), new Set(byName.keys()), event => (event.key.startsWith('mcp:') ? event.key.slice('mcp:'.length) : undefined));
@@ -721,7 +749,7 @@ async function flipMcpSwitches(context: ShareContext, name: string, present: Har
 
 /**
  * Undo of a server's Disable or Enable: each switch the event changed goes back. A tool already back as it was needs nothing. A
- * new 'switched' event records what was flipped, and its own Undo flips it again (as for a skill's, manage.ts undoSwitched).
+ * new 'switched' event records what was flipped, and its own Undo flips it again.
  */
 async function undoSwitchedMcp(context: ShareContext, history: HistoryEvent[], past: HistoryEvent): Promise<McpResult> {
   if (past.undoneBy) return { stopped: 'That change was already undone.', results: [], writes: 0 };

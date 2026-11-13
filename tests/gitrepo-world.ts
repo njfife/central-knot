@@ -6,10 +6,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { discover } from '../src/discovery.ts';
 import { connectRepo, pullRepo, pushRepo } from '../src/gitrepo.ts';
-import { applyChanges } from '../src/manage.ts';
+import { managedNow } from '../src/share.ts';
+import { applySkills, restoreSkill, skillsView } from '../src/skills.ts';
 import { applyMcp } from '../src/mcp.ts';
 import { applyAgents } from '../src/agents.ts';
 import type { ShareContext } from '../src/share.ts';
+import type { Change } from '../src/types.ts';
 import type { HarnessId, RepoView } from '../src/types.ts';
 
 export const tools: HarnessId[] = ['claude-cli', 'copilot-cli'];
@@ -30,6 +32,13 @@ export async function world() {
   };
   return { base, remote, home, cleanup: () => rm(base, { recursive: true, force: true }) };
 }
+
+/** The skills kind in one of these homes, with the tools it manages there: a pass with clicks, the Skills page's rows, a History action. */
+const toolsOf = async (context: ShareContext) => managedNow(context, await context.read());
+export const applySkillsIn = async (context: ShareContext, changes: Change[] = []) => applySkills(context, await toolsOf(context), changes);
+export const skillRows = async (context: ShareContext) => (await skillsView(context, await toolsOf(context))).items;
+export const skillsLibrary = async (context: ShareContext) => (await skillsView(context, await toolsOf(context))).library;
+export const restoreIn = async (context: ShareContext, eventId: string, version?: string) => restoreSkill(context, await toolsOf(context), eventId, version);
 
 export async function skill(context: ShareContext, root: string, folder: string, text = skillText(folder)) {
   await mkdir(join(context.home, root, folder), { recursive: true });
@@ -64,7 +73,7 @@ export const edit = async (path: string, from: string, to: string) => writeFile(
 export async function oneSkillAndAnAuthor(box: Awaited<ReturnType<typeof world>>, options: { off?: HarnessId[] } = {}) {
   const first = await box.home('first');
   await skill(first, '.claude/skills', 'solo', skillText('solo', 'Before.'));
-  await applyChanges(first, [{ key: 'solo', managed: true, off: options.off ?? [] }]);
+  await applySkillsIn(first, [{ key: 'solo', managed: true, off: options.off ?? [] }]);
   await connectRepo(first, box.remote, '');
   await pushRepo(first);
   const author = join(box.base, 'author');

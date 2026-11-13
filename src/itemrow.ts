@@ -1,9 +1,10 @@
 // An item (a skill, an MCP server or an agent) as the item pages draw it, and what each tool's mark says about it; and each
-// kind's items in a home as every page reads them (kindSource). Pure: no DOM. A skill's and an MCP server's marks are here
-// (cellOf); a library kind's (agents) follow Central Knot's library and are in libraryrow.ts.
+// kind's items in a home as every page reads them (kindSource). Pure: no DOM. An MCP server's marks are here (cellOf); a
+// library kind's (skills, agents) follow Central Knot's library and are in libraryrow.ts.
 import { comparedTools, copiesDiffer } from './syncrules.ts';
 import type { LibraryItem, Plan, VersionChange } from './library.ts';
-import type { GoneItem, HarnessId, HomeView, LibraryView, Outside, SkillFacts, SwitchProblem, ThroughPlugin } from './types.ts';
+import type { GoneItem, HarnessId, HomeView, LibraryFacts, LibraryView, ProfilesView, SkillFacts, SwitchProblem, ThroughPlugin } from './types.ts';
+import { toolName } from './words.ts';
 export { comparedTools, copiesDiffer };
 
 /** A tool, as a column. */
@@ -16,8 +17,6 @@ export interface ItemRow {
   converted?: { agent: string; origin: string; losses: string[] };
   /** Shown name, with its case. */
   name?: string;
-  /** Other copies a tool also reads, for the details. */
-  extra?: { tool: Tool; directory: string; summary: string; writable: boolean; same: boolean; outside?: Outside }[];
   description: string;
   copies: Partial<Record<Tool, string>>;
   managed: boolean;
@@ -55,20 +54,12 @@ export interface ItemRow {
   disabled?: Tool[];
   /** Skills: why a tool's switch can't be used at all (its settings file, named in `file`). */
   switchProblem?: Partial<Record<Tool, SwitchProblem>>;
-  /** Skills: a quiet note that Disable isn't verified on a tool's build (older, or unreadable); the switch is offered anyway. */
-  disableNote?: Partial<Record<Tool, string>>;
-  /** Skills: whether Central Knot may change each tool's copy (not a link or a shared folder), so Remove can be offered. */
-  writable?: Partial<Record<Tool, boolean>>;
-  /** Skills: a tool whose copy is another tool's, read in that tool's own folder (OpenCode reads Claude Code's), and whose. */
-  reads?: Partial<Record<Tool, Tool>>;
-  /** Skills: a tool's copy that is a link in its own folder, or the shared folder's copy: taken over when the person asks. */
-  outside?: Partial<Record<Tool, Outside>>;
-  /** Skills: a broken link by this name in a tool's own folder, and where it led: a copy written there replaces it. */
-  brokenLink?: Partial<Record<Tool, string>>;
-  /** Skills, synced: its links or shared copy are back since a take-over removed them. */
-  outsideBack?: boolean;
   /** No tool has a copy any more; History can put it back. */
   gone?: GoneItem;
+  /** A library kind: how a tool has it another way, which copies Take over can make Central Knot's, and (skills) a tool whose own switch has it off, in words. */
+  anotherWay?: Partial<Record<Tool, string>>;
+  takeOver?: Partial<Record<Tool, { kind: 'link' | 'shared'; path: string }>>;
+  switched?: Partial<Record<Tool, string>>;
 }
 
 /** What one tool has of an item, as its mark on the row shows it. */
@@ -103,28 +94,39 @@ export interface KindSource { tools: HarnessId[]; facts: SkillFacts[]; waiting: 
  * One kind in a home, as every page that lists or counts its items reads it: its facts, the tools that can hold it (Pi has
  * no agents), the MCP servers whose Claude Code entries wait for Write now (their cells say so instead of reading as
  * differing copies), and the items History can put back. The one place a library kind's view (types.ts LibraryView) meets
- * the rows the skills and MCP engines still give (SkillFacts): there, On is `managed` and the harnesses it is kept out of
- * are `off`, and it has no copies read elsewhere (`extra`) and no choice blocks.
+ * the rows the MCP engine still gives (SkillFacts): there, On is `managed` and the harnesses it is kept out of are `off`,
+ * and it has no choice blocks.
  */
-export function kindSource(home: Pick<HomeView, 'manage' | 'mcp' | 'agents'>, which: 'skills' | 'mcp' | 'agents'): KindSource {
+export function kindSource(home: Pick<HomeView, 'skills' | 'mcp' | 'agents'> & { profiles?: HomeView['profiles'] }, which: 'skills' | 'mcp' | 'agents'): KindSource {
   const view = libraryView(home, which);
-  if (view) return { tools: view.tools, facts: libraryRows(view), waiting: [], gone: [], library: view.library };
-  if (which === 'mcp') return { tools: home.mcp.tools, facts: home.mcp.servers, waiting: home.mcp.claudePending, gone: home.mcp.gone ?? [] };
-  return { tools: home.manage.tools, facts: home.manage.skills, waiting: [], gone: home.manage.gone ?? [] };
+  if (view) return { tools: view.tools, facts: libraryRows(view, home.profiles), waiting: [], gone: [], library: view.library };
+  return { tools: home.mcp.tools, facts: home.mcp.servers, waiting: home.mcp.claudePending, gone: home.mcp.gone ?? [] };
 }
 /**
- * A library kind's view in a home (types.ts HomeView keeps it under the page's name for the kind); undefined for a kind still
- * on its own engine (skills, MCP servers). kindSource and the page's bands (matrix.ts listView) read a kind's view here.
+ * A library kind's view in a home (types.ts HomeView keeps it under the page's name for the kind); undefined for MCP servers,
+ * still on their own engine. kindSource and the page's bands (matrix.ts listView) read a kind's view here.
  */
-export const libraryView = (home: Pick<HomeView, 'agents'>, which: 'skills' | 'mcp' | 'agents'): LibraryView | undefined =>
-  (which === 'agents' ? home[which] : undefined);
-/** A library view's rows as SkillFacts, made once per view read, so a page that caches by them redraws only on a new read. */
+export const libraryView = (home: Pick<HomeView, 'skills' | 'agents'>, which: 'skills' | 'mcp' | 'agents'): LibraryView | undefined =>
+  (onLibrary(which) ? home[which as 'skills' | 'agents'] : undefined);
+/** Whether a page's kind is on the library (skills and agents); MCP servers are not yet. The one place this is said. */
+export const onLibrary = (which: 'skills' | 'mcp' | 'agents') => which !== 'mcp';
+/**
+ * A library view's rows as SkillFacts, made once per view read, so a page that caches by them redraws only on a new read.
+ * A tool whose own switch turns a skill off (`loads`, `off`) is said as its mark says it: by a profile, naming the profile in
+ * use, where profiles hold that switch (`profiles`), else in that tool's own settings.
+ */
 const rowsOf = new WeakMap<LibraryView, SkillFacts[]>();
-function libraryRows(view: LibraryView): SkillFacts[] {
-  const made = rowsOf.get(view) ?? view.items.map(({ on, except, ...facts }): SkillFacts => ({ ...facts, managed: on, off: except, extra: [], choiceBlocks: {} }));
+function libraryRows(view: LibraryView, profiles?: ProfilesView): SkillFacts[] {
+  const active = profiles?.profiles.find(profile => profile.id === profiles.active)?.name;
+  const switchedOff = (key: string, loads: LibraryFacts['loads']) => Object.fromEntries(Object.entries(loads ?? {}).filter(([, at]) => at?.off).map(([tool]) =>
+    [tool, profiles?.offByProfile[`skill:${key}`]?.includes(tool as HarnessId) ? `switched off in ${toolName(tool)} by ${active ? `the profile ${active}` : 'a profile'}` : `switched off in ${toolName(tool)}’s own settings`]));
+  const made = rowsOf.get(view) ?? view.items.map(({ on, except, loads, ...facts }): SkillFacts => {
+    const switched = switchedOff(facts.key, loads);
+    return { ...facts, managed: on, off: except, choiceBlocks: facts.choiceBlocks ?? {}, ...(Object.keys(switched).length ? { switched } : {}) };
+  });
   rowsOf.set(view, made);
   return made;
 }
 /** Whether anything in the home is managed: a skill or MCP server synced, or an item On in the library. */
-export const anyManaged = (home: Pick<HomeView, 'manage' | 'mcp' | 'agents'>) =>
+export const anyManaged = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents'>) =>
   (['skills', 'mcp', 'agents'] as const).some(which => kindSource(home, which).facts.some(fact => fact.managed));

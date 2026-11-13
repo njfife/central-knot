@@ -27,7 +27,7 @@ import { join } from 'node:path';
 import { agentHash, agentText, parseAgent } from '../src/agentfiles.ts';
 import { rowClicks, harnessIs, needsChoice, placeOf } from '../src/libraryrow.ts';
 import { applyAgents } from '../src/agents.ts';
-import { pruneHistory, readHistory } from '../src/manage.ts';
+import { pruneHistory, readHistory } from '../src/history.ts';
 import { wantedIn } from '../src/library.ts';
 import { DAY_MS } from '../src/model.ts';
 import type { ShareContext } from '../src/share.ts';
@@ -235,11 +235,9 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
         if (expected !== undefined && ownOf(tool, now) !== expected) fail(`(g) ${act.name} wrote ${tool}’s file without its own part as last seen`);
       }
       if (act.app) for (const tool of managedBefore.filter(tool => tools.includes(tool)) as Tool[]) { const own = ownOf(tool, after[tool]); if (own !== undefined) lastOwn[tool] = own; }
-      // (f) From a settled home, a click's Undo puts every file back as it was, where every copy in a managed harness was one
-      // the agent had: a copy it never had, which the click adopts or writes over (kept as a version), is not put back by an
-      // Undo that is a switch.
-      const onlyItsOwn = (managedBefore as Tool[]).every(tool => before[tool] === undefined || contentOf(tool, before[tool]) === held?.applied[tool]);
-      if (act.click && settledBefore && !crashed && !blocked && onlyItsOwn && last?.made?.length) {
+      // (f) From a settled home, a click's Undo puts every file back as it was, a copy the click took over from a harness too
+      // (taken in, written over, or counted as the agent's: its Undo gives it back).
+      if (act.click && settledBefore && !crashed && !blocked && last?.made?.length) {
         const click = last;
         await trial(box, async () => {
           await undo(box, click, context());

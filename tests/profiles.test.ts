@@ -4,7 +4,8 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:f
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
-import { applyChanges, readHistory, restoreFromHistory } from '../src/manage.ts';
+import { readHistory } from '../src/history.ts';
+import { clearSwitch } from '../src/skills.ts';
 import { applyMcp } from '../src/mcp.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { choseProfileInUse, holdsOnWhatIsHere, itemKeyOf, offAfterFailures, planSwitch, switchItems, type SwitchItem } from '../src/profileplan.ts';
@@ -66,7 +67,7 @@ test('A switch turns off what the profile leaves out, and back on only what a pr
   assert.deepEqual(none.offByProfile, {});
   // What the home reads becomes items: a tool whose switch can't be read counts as on, and a server that belongs to an app is left out.
   const facts = (key: string, extra: object) => ({ key, name: key, description: '', copies: { 'claude-cli': {}, 'codex-cli': {} }, ...extra }) as unknown as SkillFacts;
-  const read = switchItems({ skills: [facts('dev', { disabled: ['claude-cli', 'codex-cli'], switchProblem: { 'codex-cli': 'unreadable' } })] }, { servers: [facts('app', { held: 'ChatGPT' })] });
+  const read = switchItems([facts('dev', { disabled: ['claude-cli', 'codex-cli'], switchProblem: { 'codex-cli': 'unreadable' } })], { servers: [facts('app', { held: 'ChatGPT' })] });
   assert.deepEqual(read.map(entry => [entry.id, entry.tools]), [['skill:dev', { 'claude-cli': 'off', 'codex-cli': 'on' }]]);
 });
 
@@ -104,7 +105,7 @@ async function sandbox() {
   await mkdir(join(home, '.codex'), { recursive: true });
   await writeFile(join(home, '.codex/config.toml'), 'model = "gpt"\n\n[mcp_servers.sentry]\ncommand = "sentry"\n');
   await writeFile(join(home, '.claude/settings.json'), '{\n  "theme": "dark"\n}\n');
-  return { home, context, cleanup: () => rm(base, { recursive: true, force: true }) };
+  return { home, context, tools, cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 
 test('Switching to a profile turns the rest off in each tool’s settings, in one History step that Undo reverses', async () => {
@@ -210,18 +211,17 @@ test('A switch set by hand afterwards is the person’s: profiles let go of it',
     const dev = (await saveProfile(box.context, { name: 'Development', items: ['skill:dev'] })).id!;
     const all = (await saveProfile(box.context, { name: 'Everything', items: ['skill:dev', 'skill:pager', 'mcp:sentry'] })).id!;
     await switchProfile(box.context, dev);
-    // On the Skills page: pager enabled in Claude Code by hand, then that Enable undone in History (as main.ts does after each).
-    const enable = [{ key: 'pager', managed: false, off: [], enable: ['claude-cli' as HarnessId] }];
-    await releaseProfileHolds(box.context, switchedByHand(enable, (await applyChanges(box.context, enable)).results));
-    const enabled = (await readHistory(box.context)).filter(event => event.kind === 'switched').at(-1)!;
-    await releaseProfileHolds(box.context, switchedByHand([{ key: 'pager' }], (await restoreFromHistory(box.context, enabled.id)).results));
+    // On the Skills page: pager's switch in Claude Code cleared by hand (as main.ts does after it). It is the person's choice
+    // (its Undo, in History, sets the switch again: skills.test.ts), so profiles let go of it.
+    await releaseProfileHolds(box.context, switchedByHand([{ key: 'pager' }], (await clearSwitch(box.context, box.tools, 'pager', 'claude-cli')).results));
     assert.equal((await readProfiles(box.home)).offByProfile['skill:pager'], undefined);
-    // Undo of the switch leaves pager as set by hand, too: an Enable and its Undo are both choices made by hand.
+    // Undo of the switch leaves pager as set by hand, too: a switch cleared on the Skills page is a choice made by hand.
     const switched = (await readHistory(box.context)).find(event => event.kind === 'profile')!;
     assert.ok(!(await undoProfileSwitch(box.context, switched.id)).flips.some(flip => flip.item === 'skill:pager'));
+    // Cleared, pager is on in Claude Code: a profile that leaves it out holds it off, and one that has it puts it back on.
     await switchProfile(box.context, dev);
     const result = await switchProfile(box.context, all);
-    assert.deepEqual(result.flips.map(flip => flip.item).sort(), ['mcp:sentry', 'mcp:sentry'], 'pager stays off: it was last set by hand');
+    assert.deepEqual(result.flips.map(flip => flip.item).sort(), ['mcp:sentry', 'mcp:sentry', 'skill:pager']);
     // Turned back on in the tool's own settings, then the switch that turned it off undone: profiles no longer hold it.
     const offAgain = (await switchProfile(box.context, dev)).event!;
     await writeFile(mcpSwitchPath(box.context, 'codex-cli'), (await readFile(mcpSwitchPath(box.context, 'codex-cli'), 'utf8')).replace('enabled = false\n', ''));
@@ -267,7 +267,7 @@ test('A settings file that can’t be written fails only its own flips, and an U
   } finally { for (const folder of folders) await chmod(folder, 0o755); await box.cleanup(); }
 });
 
-test('A profile switch and back keeps a Claude Code override other than off, as a Skills page Enable does', async () => {
+test('A profile switch and back keeps a Claude Code override other than off', async () => {
   const box = await sandbox();
   try {
     const settings = join(box.home, '.claude/settings.json');
@@ -278,27 +278,22 @@ test('A profile switch and back keeps a Claude Code override other than off, as 
     assert.match(await readFile(settings, 'utf8'), /"pager": "off"/);
     await switchProfile(box.context, null);
     assert.equal(await readFile(settings, 'utf8'), original);
-    // Turned off by a profile, on again from the Skills page: the same kept value comes back.
+    // Turned off by a profile, its switch cleared on the Skills page: the same kept value comes back.
     await switchProfile(box.context, dev);
-    await applyChanges(box.context, [{ key: 'pager', managed: false, off: [], enable: ['claude-cli'] }]);
+    await clearSwitch(box.context, box.tools, 'pager', 'claude-cli');
     assert.equal(await readFile(settings, 'utf8'), original);
   } finally { await box.cleanup(); }
 });
 
-test('An override taken out by hand stays out when a profile, then the Skills page, switch the skill off and on', async () => {
+test('An override taken out by hand stays out when a profile switches the skill off and the Skills page clears that switch', async () => {
   const box = await sandbox();
   try {
     const settings = join(box.home, '.claude/settings.json');
-    await writeFile(settings, '{\n  "skillOverrides": { "pager": "name-only" }\n}\n');
-    // History keeps what this Disable replaced; the Enable puts it back.
-    await applyChanges(box.context, [{ key: 'pager', managed: false, off: [], disable: ['claude-cli'] }]);
-    await applyChanges(box.context, [{ key: 'pager', managed: false, off: [], enable: ['claude-cli'] }]);
-    assert.equal(JSON.parse(await readFile(settings, 'utf8')).skillOverrides.pager, 'name-only');
-    // The person takes the override out, and a profile turns the skill off: that replaced nothing, and it is the latest Disable.
+    // The person takes an override out, and a profile turns the skill off: that replaced nothing.
     await writeFile(settings, '{}\n');
     await switchProfile(box.context, (await saveProfile(box.context, { name: 'Dev', items: ['skill:dev'] })).id!);
     assert.equal(JSON.parse(await readFile(settings, 'utf8')).skillOverrides.pager, 'off');
-    await applyChanges(box.context, [{ key: 'pager', managed: false, off: [], enable: ['claude-cli'] }]);
+    await clearSwitch(box.context, box.tools, 'pager', 'claude-cli');
     assert.equal(JSON.parse(await readFile(settings, 'utf8')).skillOverrides?.pager, undefined);
   } finally { await box.cleanup(); }
 });

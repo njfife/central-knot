@@ -85,5 +85,24 @@ test('A tool that reads another’s folder has the item another way only while t
     await runPass(kind, context, tools, [click(true, ['claude-cli'])]);
     assert.deepEqual(await copies(context), [undefined, 'Plan.\n']);
     assert.equal((await runPass(kind, context, tools, [])).writes, 0, 'and it stays so');
+    // Let back into Claude Code: OpenCode has it another way again, so its own copy, which Central Knot put there, goes.
+    await runPass(kind, context, tools, [click(true, [])]);
+    assert.deepEqual(await copies(context), ['Plan.\n', undefined]);
+    assert.equal((await runPass(kind, context, tools, [])).writes, 0, 'one way, and it stays so');
+  } finally { await cleanup(); }
+});
+
+test('A tool that has the item another way and holds a copy Central Knot didn’t put there: that copy is left alone', async () => {
+  const { context, cleanup } = await sandbox();
+  try {
+    const kind = noteKind();
+    await writeFile(join(folderOf(context, 'claude-cli'), 'plan.txt'), 'Plan.\n');
+    await writeFile(join(folderOf(context, 'opencode-cli'), 'plan.txt'), 'My own plan.\n');
+    // Taken in from Claude Code's copy (the copy question chose it); OpenCode's own copy was never Central Knot's.
+    await runPass(kind, context, tools, [{ ...click(true, []), use: 'claude-cli' }]);
+    assert.deepEqual(await copies(context), ['Plan.\n', 'My own plan.\n']);
+    const { look, live } = await lookFor(kind, context, tools);
+    assert.deepEqual(copiesOf(look, live[0])['opencode-cli'], { is: 'present', hash: hashOf('My own plan.\n'), at: 0, anotherWay: 'OpenCode reads Claude Code’s copy.' });
+    assert.equal((await runPass(kind, context, tools, [])).writes, 0, 'nothing is written or removed there');
   } finally { await cleanup(); }
 });

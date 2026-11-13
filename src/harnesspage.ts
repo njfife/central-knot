@@ -153,7 +153,7 @@ function summaryCard(snapshot: Snapshot, home: HomeView) {
   const path = h('span.harness-card-path', { title: snapshot.root }, h('span.mono', {}, shownPath(snapshot.root)));
   if (!here) return h('div.card.harness-card.harness-card-missing', { id: `harness-${tool}`, 'aria-label': `${names[tool]}: not found` },
     // When no tool at all was found, the note above already says to install one; each card need not repeat it.
-    h('div.harness-card-main', {}, head, status, home.manage.tools.length ? h('span.harness-card-next', {}, `Install ${names[tool]}, then Refresh.`) : null), path);
+    h('div.harness-card-main', {}, head, status, home.sync.tools.length ? h('span.harness-card-next', {}, `Install ${names[tool]}, then Refresh.`) : null), path);
   const kinds = KINDS.map(kind => tally(home, kind, tool));
   // Two groups (the three kinds, then its file and plugins), which sit side by side on a wide card.
   const body = [head, status, h('span.harness-counts', {},
@@ -202,16 +202,16 @@ function everyHarness(home: HomeView) {
   const done = outcomeBand();
   const cards = listed(home);
   // What the read's catch-up copied is news here too, not only on the Skills tables.
-  const caught = caughtUpBand(home.manage);
+  const caught = caughtUpBand(home.sync, home.skills.notices);
   // A home with no tools says so as every page does, with another home to choose; on this computer, which tools were looked for.
-  if (!home.manage.tools.length) {
+  if (!home.sync.tools.length) {
     const looked = home.mode === 'actual' ? `Not found on ${thisMachine}: ${andList(home.snapshots.map(snapshot => names[snapshot.harness]))}. Central Knot looks for them again each time it reads this home.` : undefined;
     return h('div.page', {}, done ? h('div.bands', {}, done) : null, noToolsState('harnesses-choose-home', looked));
   }
   return h('div.page', {}, done || caught ? h('div.bands', {}, done, caught) : null,
     h('div.scroll.harness-scroll', { id: 'harnesses-scroll' },
       h('p.tools-note', {}, icon('info', 14, 'tone-muted'),
-        h('span', {}, home.manage.tools.length ? 'Each AI coding tool and what it has. Open one to manage its skills, MCP servers, agents, instructions and plugins.'
+        h('span', {}, home.sync.tools.length ? 'Each AI coding tool and what it has. Open one to manage its skills, MCP servers, agents, instructions and plugins.'
           : 'None of the AI coding tools Central Knot knows was found here. Install one, then Refresh.',
           home.mode === 'actual' ? null : [home.mode === 'fixture' ? ' Practice copy: installed apps aren’t checked; ' : ' A folder: installed apps aren’t checked; ',
             button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' shows their versions.'],
@@ -249,7 +249,7 @@ function tabs(home: HomeView, tool: HarnessId) {
 
 /** Moves between found harnesses without going back to the list. */
 function switcher(home: HomeView, tool: HarnessId) {
-  const others = home.manage.tools;
+  const others = home.sync.tools;
   if (others.length < 2) return null;
   return h('div.harness-switch', { role: 'group', 'aria-label': 'Other harnesses' }, others.map(other => h(`button.harness-switch-item${other === tool ? '.selected' : ''}`, {
     type: 'button', id: `harness-switch-${other}`, 'aria-pressed': String(other === tool), title: names[other], disabled: !!state.busy && other !== tool,
@@ -317,7 +317,7 @@ function pluginsTab(tool: HarnessId) {
 /** Where the tool's files are, how it was found, and which other products read them. */
 function aboutTab(snapshot: Snapshot, home: HomeView) {
   const tool = snapshot.harness;
-  const disclosed = home.manage.writes[tool];
+  const disclosed = home.sync.writes[tool];
   const roots = new Map(snapshot.skills.map(skill => [dirname(skill.directory), skill.rootLabel]));
   const issues = readProblems(snapshot);
   // Every path can be copied.
