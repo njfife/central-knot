@@ -645,8 +645,12 @@ async function profilesSaved(): Promise<ProfilesView> {
   return profiles;
 }
 
-/** A watcher event since the last pass: with Sync off nothing is written, but the page still shows the edit as pending. */
-let touched = false;
+/**
+ * A watcher event since the last pass: with Sync off nothing is written, but the page still shows the edit as pending.
+ * `settingsTouched`: one was for a settings file (an MCP settings file or a tool's switch file), whose own switch a tool may
+ * have turned, which changes no content and so no write: the page reads again for it whether or not the pass wrote.
+ */
+let touched = false, settingsTouched = false;
 
 /** The tools Central Knot manages in the open home, read now: the one way the requests below learn them. */
 const toolsNow = async (): Promise<HarnessId[]> => managedNow(context(), await read());
@@ -680,8 +684,8 @@ function queueBackgroundPass() { if (current && !smoke) void queued(backgroundPa
 
 async function backgroundPass() {
   if (!current) return;
-  const fromEvent = touched;
-  touched = false;
+  const fromEvent = touched, fromSettings = settingsTouched;
+  touched = settingsTouched = false;
   // The home is read once per pass, whatever Sync or write access say (reading writes nothing), and the pass uses that read.
   // Whatever the pass finds, the page is told once, at the end (it keeps the news until it can read).
   const snapshots = await read();
@@ -689,9 +693,9 @@ async function backgroundPass() {
   let changed = toolsChangedHere(snapshots);
   const { skills, serversAndAgents } = await pass(snapshots);
   keepServersAndAgents(serversAndAgents);
-  // A watched file changed: the page reads again, whether or not the pass wrote: with Sync off an edit or deletion is only
-  // noted (it shows as waiting, not as Synced), and a tool's own switch turned in its settings changes no content but its mark.
-  if (fromEvent) changed = true;
+  // The page reads again whether or not the pass wrote: with Sync off an edit or deletion is only noted (it shows as waiting,
+  // not as Synced), and a tool's own switch turned in its settings changes no content, only that tool's mark.
+  if ((fromEvent && !syncOn) || fromSettings) changed = true;
   // A deletion waits out its settle window: look again just after it, so it finishes without a click. Otherwise wait for an event or the poll.
   if (skills?.settling || serversAndAgents?.settling) { clearTimeout(followUp); followUp = setTimeout(queueBackgroundPass, 2_500); }
   if (skills?.stopped && skills.stopped !== lastStopped) {
@@ -711,7 +715,7 @@ async function backgroundPass() {
   if (changed || wrote) send('sync:changed');
 }
 
-const nudge = () => { touched = true; clearTimeout(soon); soon = setTimeout(queueBackgroundPass, DEBOUNCE_MS); };
+const nudge = (settings = false) => { touched = true; settingsTouched ||= settings; clearTimeout(soon); soon = setTimeout(queueBackgroundPass, DEBOUNCE_MS); };
 
 /** Stops watching the folders and the poll; passes already due (an edit's debounce, a deletion's settle) still run. */
 function closeWatchers() {
@@ -740,10 +744,10 @@ async function startWatching() {
   const shared = context(), files = [...new Set([...mcpTools.map(id => mcpFile(shared, id)), ...harnessIds.map(id => switchPath(shared, id))])];
   for (const folder of new Set(files.map(file => dirname(file)))) {
     const names = new Set(files.filter(file => dirname(file) === folder).map(file => basename(file)));
-    try { watchers.push(watch(folder, { persistent: false }, (_event, name) => { if (!name || names.has(name)) nudge(); })); } catch { /* not there: polling covers it */ }
+    try { watchers.push(watch(folder, { persistent: false }, (_event, name) => { if (!name || names.has(name)) nudge(true); })); } catch { /* not there: polling covers it */ }
   }
   for (const root of roots) {
-    try { watchers.push(watch(root, { recursive: true, persistent: false }, nudge)); } catch { /* not there: polling covers it */ }
+    try { watchers.push(watch(root, { recursive: true, persistent: false }, () => nudge())); } catch { /* not there: polling covers it */ }
   }
   poller = setInterval(queueBackgroundPass, POLL_MS);
 }
