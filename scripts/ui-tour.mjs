@@ -766,7 +766,7 @@ if (wanted('sync-everything')) {
   await a.click('#nav-overview');
   await atEverySize('overview-on', 'Opened Overview: the sync line says what turns up in a tool is taken in by Synchronize everything');
   await a.click('#nav-skills');
-  await atEverySize('skills-on', 'Opened Skills: one notice names the skills it took in and the tools it found them in; the Found heading says Synchronize everything leaves these, each row saying why, and counts what waits for a choice', true);
+  await atEverySize('skills-on', 'Opened Skills: one notice names the skills it took in and the tools it found them in; the Found heading says Synchronize everything leaves these, the opened row saying why, and counts what waits for a choice', true);
   await openRow('review');
   await atEverySize('skills-on-review', 'Opened review, left found: its copies differ, so it asks which copy every tool uses, as Add would; the question starts below the pinned row', false, '.ov-row.open + .details', 'start');
   await closeRow('review');

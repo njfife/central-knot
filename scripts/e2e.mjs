@@ -2840,7 +2840,7 @@ async function sharedCopiesFlow() {
 /**
  * Synchronize everything (Settings › This home), on the page: off where it was never chosen, its row saying what it would add
  * now and what waits for a choice of copy; turned on, the pass right after takes in what it may, says so in one notice per
- * page and in History with Add's Undo, and leaves the rest found, the Found heading and each row saying why; that Undo takes
+ * page and in History with Add's Undo, and leaves the rest found, the Found heading and each opened row saying why; that Undo takes
  * it out for good. No page offers an Add all.
  */
 async function syncEverythingFlow() {
@@ -2900,7 +2900,7 @@ async function syncEverythingFlow() {
   check('Overview’s sync line says the rule in force', /edits spread between tools in seconds, and what turns up in a tool is taken in by Synchronize everything/.test(await a.text('.overview-more') ?? ''), await a.text('.overview-more'));
   await a.click('#nav-skills');
   same('on the Skills page notes and fresh are On and review stays found', await sectionsNow(a), [['on', ['fresh', 'notes']], ['found', ['review']]]);
-  check('the Found heading says the rule in force: Synchronize everything leaves these, and how many wait for a choice', /Synchronize everything leaves these, and each row says why\. 1 waits for your choice of copy/.test(await foundNote() ?? ''), await foundNote());
+  check('the Found heading says the rule in force: Synchronize everything leaves these, and how many wait for a choice', /Synchronize everything leaves these \(open a row to see why\)\. 1 waits for your choice of copy/.test(await foundNote() ?? ''), await foundNote());
   const notice = '.sync-notice[data-kind="taken-in"] .notice-text';
   same('one notice per pass says how many it took in, where they were found, and their names', await a.all(notice, 'e.textContent.replace(/ · .*$/, "")'),
     ['Synchronize everything took in 1 skill, found in Claude Code: fresh. History can undo it.', 'Synchronize everything took in 1 skill, found in Claude Code: notes. History can undo it.']);

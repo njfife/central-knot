@@ -1345,13 +1345,13 @@ function section(role: 'on' | 'found' | 'off' | 'away', list: ItemRow[]) {
 }
 
 /**
- * The Found heading's note: which rule is in force. Off, Add takes each in. On, Synchronize everything has left these (each row
- * says why), and how many wait for a choice of copy (the take-in table's answer for the rule: libraryrow.ts ruleSays).
+ * The Found heading's note: which rule is in force. Off, Add takes each in, and Settings holds the rule that takes them all.
+ * On, Synchronize everything has left these (the opened row says why), and how many wait for a choice of copy (the take-in table's answer for the rule: libraryrow.ts ruleSays).
  */
 function foundNote(list: ItemRow[]) {
-  if (!state.home?.sync.syncEverything) return 'in a tool, not in Central Knot yet. Add one to keep it in Central Knot and turn it on.';
+  if (!state.home?.sync.syncEverything) return 'in a tool, not in Central Knot yet. Add one to keep it in Central Knot and turn it on. Synchronize everything, in Settings, adds every one it can by itself.';
   const choosing = list.filter(skill => skill.takeInAnswers && 'wait' in skill.takeInAnswers.rule).length;
-  return `in a tool, not in Central Knot: Synchronize everything leaves these, and each row says why${choosing ? `. ${choosing} ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy` : ''}`;
+  return `in a tool, not in Central Knot: Synchronize everything leaves these (open a row to see why)${choosing ? `. ${choosing} ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy` : ''}`;
 }
 
 /** The Off heading's note: no tool has these, or (while a write waits) the tools that still have some until Write to Claude Code. */
