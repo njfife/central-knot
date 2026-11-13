@@ -771,7 +771,7 @@ if (wanted('first-setup')) {
   await refresh();
   await a.click('#nav-overview');
   if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
-  await atEverySize('question-new-home', 'A new home (the Practice copy, never asked): the Overview’s one question, Synchronize everything?, under the lead. It says, counted as the pass counts, how many found items it takes in now and which tools get them, how many have copies that differ and are asked about one at a time (the latest preselected), that Claude Code gets its MCP servers at Write to Claude Code, and that one Undo in History takes it all back but a server found in Claude Code. Synchronize everything is the main button; No, I’ll add items myself beside it', true, '#setup-question');
+  await atEverySize('question-new-home', 'A new home (the Practice copy, never asked): the Overview’s one question, Synchronize everything?, under the lead. It says, counted as the pass counts, how many found items it takes in now and which tools get them, how many have copies that differ and are asked about one at a time (the latest preselected), that Claude Code gets its MCP servers at Write to Claude Code, and that one Undo in History takes it all back. Synchronize everything is the main button; No, I’ll add items myself beside it', true, '#setup-question');
   await a.size(860, 560); await show('#setup-question'); await focusOn('#setup-yes');
   await shot(a, 'question-focus-860', 'Tabbed to Synchronize everything at 860×560: its focus ring');
   await a.run(`document.activeElement?.blur()`); await a.size(1280, 800);
@@ -805,10 +805,10 @@ if (wanted('first-setup')) {
   await atEverySize('after-use-latest', 'Clicked Choose copies (the walkthrough starts again at review, 1 of 3), then Use the latest for the rest: the band says it used the latest copy for 2 items, each with its own Undo in History, and skipped docs, with no dates to go by; the walkthrough says it is done', true, '#walkthrough', 'start');
   await a.click('#nav-history');
   await waitFor(a, `!!document.querySelector('.history-row[data-kind="everything"]')`, 15000);
-  await atEverySize('history-switch-on', 'Opened History: the entry Synchronize everything switched on, kind Setting, with its one Undo (its tooltip says what it takes back and what stays: the copies chosen, a server found in Claude Code), above the entries of what it took in, each with its own', true, '.history-row[data-kind="everything"]');
+  await atEverySize('history-switch-on', 'Opened History: the entry Synchronize everything switched on, kind Setting, with its one Undo (its tooltip says what it takes back and what stays: the copies chosen in the walkthrough), above the entries of what it took in, each with its own', true, '.history-row[data-kind="everything"]');
   await a.click('.history-row[data-kind="everything"] .history-actions button');
   await waitFor(a, `[...document.querySelectorAll('.history-row[data-kind="everything"]')].some(row => /Restore/.test(row.textContent))`, 15000);
-  await atEverySize('after-undo', 'Clicked its Undo: the newest entry says it switched the rule off and took the items back out of Central Knot, each tool keeping its own copy, and names what it left in (the copies chosen, docs found in Claude Code); it offers Restore; the switch-on entry says Undone', true, '.history-row[data-kind="everything"]');
+  await atEverySize('after-undo', 'Clicked its Undo: the newest entry says it switched the rule off and took the items back out of Central Knot, each tool keeping its own copy, and names what it left in: deploy, review and triage, whose copies were chosen, each with its own Undo; it offers Restore; the switch-on entry says Undone', true, '.history-row[data-kind="everything"]');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 
