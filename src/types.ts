@@ -431,7 +431,8 @@ export interface HistoryEvent {
    * 'edit' / 'conflict': an edit taken in (`winner`), or Pull's (`cause`); `losers` are the harnesses written, each with what it
    *   held before, and on a 'conflict' the edits that gave way. 'kept-edit': edits not taken in that were written over (`losers`),
    *   or (`cause: 'tool-back'`) a copy a tool managed again held, which gave way to the current version.
-   * 'deleted': it was deleted from Central Knot. 'chosen': it was taken in with the `winner`'s copy, where the found copies differed.
+   * 'deleted': it was deleted from Central Knot; with `cause: 'in-line'`, not a deletion: a copy of an item already deleted was
+   *   removed from a harness (librarypass.ts logItem), so a reader counting deletions leaves that cause out. 'chosen': it was taken in with the `winner`'s copy, where the found copies differed.
    * 'managing': a tool's Manage switch was turned (`managing`; key `tool:<id>`, item the tool's name), which has no Undo. */
   kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed' | 'profile' | 'took-over' | 'written' | 'on' | 'off' | 'current' | 'managing';
   /** 'managing': the tool, and whether Central Knot manages it from then on (toolchoice.ts chooseTools). */

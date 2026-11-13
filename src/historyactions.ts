@@ -15,7 +15,7 @@
 //   off: the switch, or a copy deleted       Turn on                the item is Off
 //     by hand (`winner`: where)
 //   on, off or deleted by a pass no click    none: nothing was asked (a deleted item's Restore is its Delete's
-//     asked (`in-line`)                      entry's); an `on`'s copies written over are offered back below
+//     asked (`in-line`)                      entry's; what an `on` wrote over is kept among the item's versions)
 //   off in one harness (`only`)              Turn on in <harness>   the item is On and kept out of that harness
 //   on: the switch, or an item Pull          Turn off               the item is On
 //     brought
