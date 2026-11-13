@@ -18,9 +18,10 @@
 //
 // Also here: the page's look (lookFor: the same reading, guards applied in memory, nothing saved), so a mark says what a pass
 // will do, and a found row's answers from the take-in table (takeInAnswers); a History entry's action (restore), which is
-// always one of the clicks above; and the tool choice letting folders go (forgetFolders). What a kind's page shows, and how the Git repo reads it, stay with the kind (agents.ts agentsView and
-// agentsForRepo, skills.ts skillsView and skillsForRepo, servers.ts serversView and serversForRepo). History's sentences and
-// actions for the library's entries are historyactions.ts's, for every kind.
+// always one of the clicks above; and for the tool choice (toolchoice.ts), folders let go (forgetFolders) and what managing
+// a tool would do there, counted from the same look with it added (joinCounts). What a kind's page shows, and how the Git
+// repo reads it, stay with the kind (agents.ts agentsView and agentsForRepo, skills.ts skillsView and skillsForRepo, servers.ts
+// serversView and serversForRepo). History's sentences and actions for the library's entries are historyactions.ts's.
 //
 // Two members exist for a kind whose copies are entries in one shared file (MCP servers), and change nothing for a kind of
 // folders (skills, agents), which leaves the first out and never sets the second:
@@ -49,7 +50,7 @@
 //   no part of its own per tool has `ownOf` answer undefined and `keepOwn` false; its read fills Disk.parts where a plugin's
 //   part is one of its found copies, as share.ts partsIn gives them);
 // - its callers: runPass for its passes (the app's clicks through itemClick), restore for History's actions, lookFor for its
-//   page's view, and forgetFolders from toolchoice.ts chooseTools;
+//   page's view, and forgetFolders and joinCounts from toolchoice.ts;
 // - its view: a types.ts LibraryView (as agents.ts agentsView gives), kept in types.ts HomeView under the page's name for the
 //   kind (app.ts PageKind), and read there by itemrow.ts kindSource and the page's bands and notices (matrix.ts listView),
 //   with no edit of their own;
@@ -67,7 +68,7 @@ import type { Copies, FoundCopy, FoundKey, HarnessCopy, ItemKind, LeftFound, Lib
 import { appendHistory, historyCutoff, readHistory, replaceHistory } from './history.ts';
 import { errorCode, newRecord, readRecord, remember, saveRecord, syncGate, writeAccess } from './share.ts';
 import type { ShareContext, SyncRecord } from './share.ts';
-import type { Change, DestinationResult, HarnessId, HistoryEvent, ItemNotice, PassResult, SyncNotice, TakenInNotice } from './types.ts';
+import type { Change, DestinationResult, HarnessId, HistoryEvent, ItemNotice, JoinCounts, PassResult, SyncNotice, TakenInNotice } from './types.ts';
 import { byToolOrder, toolName } from './words.ts';
 
 const now = () => new Date().toISOString();
@@ -251,6 +252,8 @@ export interface Look<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
   foldersNow: KindLibrary['folders'];
   /** By item, the copies a harness managed again holds that give way to the library (cameBack): what the page says will be kept. */
   givingWay: Map<string, Plan['keep']>;
+  /** The harnesses this look found managed again, or seen for the first time, with their folder there (cameBack ran for them). */
+  back: Set<HarnessId>;
   /** How long a copy must stay missing before it counts as deleted by hand, the clock it is measured on, and whether a copy is inside it now. */
   settle?: { clock: number; ms: number; settling: boolean };
 }
@@ -260,7 +263,7 @@ type AnyLook = Look<unknown, Seen, Disk<Seen>>;
 async function lookAt<C, E extends Seen, D extends Disk<E>>(
   kind: Kind<C, E, D>, context: ShareContext, managed: HarnessId[], library: KindLibrary, settle?: Look<C, E, D>['settle'],
 ): Promise<Look<C, E, D>> {
-  return { kind, context, managed, library, disk: await kind.read(context, managed), foldersNow: {}, givingWay: new Map(), settle };
+  return { kind, context, managed, library, disk: await kind.read(context, managed), foldersNow: {}, givingWay: new Map(), back: new Set(), settle };
 }
 
 /**
@@ -273,6 +276,36 @@ export async function lookFor<C, E extends Seen, D extends Disk<E>>(kind: Kind<C
   const look = await lookAt(kind, context, kind.harnesses(tools), library);
   await guardFolders(look, live);
   return { look, live, problem };
+}
+
+/**
+ * What managing one more harness (`joining`) would do there now, as its Harnesses card says before its Manage switch is turned
+ * on: the look a pass makes with `tools` (the managed harnesses with `joining` among them, in their order; the guards included,
+ * so cameBack's copies that give way are counted; nothing is saved), and each item's plan there, deleted items' too. `rule`: the home's Synchronize
+ * everything is on, so a found item it can take is counted as taken in. The one place this is counted; tests/managetool.test.ts
+ * holds it equal to what the pass then does.
+ */
+export async function joinCounts<C, E extends Seen, D extends Disk<E>>(
+  kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[], joining: HarnessId, rule: boolean,
+): Promise<JoinCounts> {
+  const counts: JoinCounts = { written: 0, kept: 0, removed: 0, waits: 0, found: 0, takenIn: 0 };
+  const { library, problem } = await kind.open(context);
+  if (problem || !kind.harnesses([joining]).length) return counts;
+  const look = await lookAt(kind, context, kind.harnesses(tools), library);
+  const items = Object.values(library.items);
+  await guardFolders(look, items);
+  const waits = !!look.disk.locked.get(joining)?.waits;
+  for (const item of items) {
+    const made = plan(item, copiesOf(look, item));
+    counts.kept += [...made.keep, ...(look.givingWay.get(item.key) ?? [])].filter(kept => kept.harness === joining).length;
+    if (made.write.includes(joining)) counts[waits ? 'waits' : 'written']++;
+    if (made.remove.includes(joining)) counts[waits ? 'waits' : 'removed']++;
+  }
+  for (const [key, slot] of look.disk.byKey) {
+    if (!slot[joining] || (library.items[key] && !library.items[key].deleted)) continue;
+    counts[rule && 'take' in takeInAnswer('rule', foundKey(look, key)) ? 'takenIn' : 'found']++;
+  }
+  return counts;
 }
 
 export const unseenIn = (disk: Disk<Seen>, tool: HarnessId, key: string) => disk.unseen.get(`${tool}:${key}`) ?? disk.unseen.get(`${tool}:*`);
@@ -309,7 +342,7 @@ export async function guardFolders(look: AnyLook, items: LibraryItem[], shelf?: 
     }
     look.foldersNow[tool] = here;
     seenAgain(look, path);
-    if (!was) await cameBack(look, tool, shelf);
+    if (!was) { look.back.add(tool); await cameBack(look, tool, shelf); }
     else if (was.path !== path) forget(items);
     else if ('away' in was || was.ino !== here.ino || was.birth !== here.birth) forget(items.filter(item => !look.disk.byKey.get(item.key)?.[tool]));
   }
@@ -546,8 +579,9 @@ function keepFolders(library: KindLibrary, now: KindLibrary['folders'], managed:
 export async function forgetFolders<C, E extends Seen, D extends Disk<E>>(kind: Kind<C, E, D>, context: ShareContext, managed: readonly HarnessId[]) {
   const { library, problem } = await kind.open(context, true);
   if (problem) return;
+  const before = JSON.stringify(library.folders);
   keepFolders(library, {}, managed, true);
-  await kind.save(context.home, library);
+  if (JSON.stringify(library.folders) !== before) await kind.save(context.home, library);
 }
 
 /** Saves the record when it is not as last saved: before any harness file changes (syncItem), and when the pass ends. */
@@ -701,7 +735,7 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
     pass.notices.push({ key, item: item.name, kind, winner, losers, orderProved: true, history });
   /** Each of these harnesses with what it held before the pass. */
   const before = (tools: HarnessId[]) => tools.map(tool => ({ tool, hash: slot[tool]?.hash ?? '' }));
-  const asked = pass.asked.get(item.key);
+  const asked = pass.asked.get(item.key), clicked = !!asked;
   // A profile switch's clicks are told in its own entry (PassOptions told).
   if (asked && pass.told) pass.asked.delete(item.key);
   else if (asked) {
@@ -729,6 +763,14 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
   // Edits no pass had taken in that give way to the current version (Pull, Make current): each is a version, offered back here.
   const gaveWay = made.takeIn ? [] : made.keep.filter(kept => kept.from.how === 'edited').map(kept => kept.harness);
   if (gaveWay.length) log({ kind: 'kept-edit', losers: before(gaveWay) });
+  // A harness's own copies that Central Knot never put there, which no click took over (a tool managed for the first time, or
+  // installed later): each gave way to the current version, is a version now, and is offered back here.
+  const theirs = clicked ? [] : made.keep.filter(kept => kept.from.how === 'was-in').map(kept => kept.harness);
+  if (theirs.length) log({ kind: 'kept-edit', cause: 'own-copy', losers: before(theirs) });
+  // Copies of an item that is Off there, removed from a harness managed again (an item turned Off or kept out while it was
+  // away): the item holds each as the version Central Knot had put there; the entry says where they went.
+  const leftWhileAway = clicked ? [] : did.removed.filter(tool => pass.back.has(tool) && !made.turnedOffBy);
+  if (leftWhileAway.length) log({ kind: 'off', cause: 'tool-back', losers: before(leftWhileAway) });
   return events;
 }
 
@@ -748,6 +790,9 @@ export async function restore<C, E extends Seen, D extends Disk<E>>(
   const action = past && kind.historyAction(past, library.items[key], version);
   if (!action) return { stopped: `That change has nothing left to undo: the ${kind.words.item} is as that would leave it.`, results: [], writes: 0 };
   const done = await runPass(kind, context, tools, [itemClick(action.change)], { only: new Set([key]) });
+  // A harness the entry wrote, removed or took a copy from that isn't managed now is left as it is: the result says so.
+  const away = new Set([...past.losers, ...(past.tookFrom ?? [])].map(copy => copy.tool).filter(tool => !kind.harnesses(tools).includes(tool) && kind.harnesses([tool]).length));
+  if (!done.stopped) done.results.push(...[...away].sort(byToolOrder).map((tool): DestinationResult => ({ item: past.item, harness: tool, outcome: 'held', message: `${toolName(tool)} isn’t managed here now, so this changed nothing there.` })));
   // One of an entry's version choices ("Use Codex’s") leaves the entry open: its other choices still stand.
   if (!done.made?.length || version) return done;
   const history = await readHistory(context);

@@ -133,7 +133,8 @@ export async function migrateSkills(context: ShareContext, record: SyncRecord, r
   const items = legacy.items ?? {};
   if (!oldSkills(items)) throw new Error('Its skills record from before is damaged.');
   const snapshots = await context.read();
-  const managed = snapshots.length ? managedTools(snapshots, record.tools) : record.tools ?? harnessIds;
+  // A record from before the library leaves no tool out (the Manage switch came later): every installed tool was managed.
+  const managed = snapshots.length ? managedTools(snapshots) : [...harnessIds];
   const tools = await read(context, managed);
   // Every tool's own folder in this home, managed or not: each content found is a version, and every copy is left where it is.
   const elsewhere = new Map<string, Partial<Record<HarnessId, SkillCopy>>>();

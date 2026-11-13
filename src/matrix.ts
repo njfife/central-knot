@@ -539,7 +539,7 @@ function compareChoices(skill: ItemRow, inFiles = false) {
   // A group's content was made when its earliest copy was: a copy sync wrote is newer than the edit it carries. Marked only when
   // every copy's time is known and one group's is the latest. A copy an Undo of a choice puts back has its earlier time again.
   // Left so: a copy sync wrote into a tool that was behind, alone in its group, carries the time of that write, not of the edit
-  // it holds; "most recent" gets its full meaning with first setup (one-switch step 7).
+  // it holds.
   const editedAt = groups.map(group => Math.min(...group.map(tool => Date.parse(versions[tool]?.at ?? ''))));
   const last = Math.max(...editedAt);
   const latest = groups.length > 1 && editedAt.every(Number.isFinite) && editedAt.filter(at => at === last).length === 1 ? groups[editedAt.indexOf(last)] : undefined;

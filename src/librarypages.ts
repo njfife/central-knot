@@ -60,7 +60,7 @@ function serverParts(server: NeutralServer): { name: string; text: string; block
 
 /** Pi has no native agents (CD §5): an agent can reach it only as a skill, by an explicit, one-time Convert to skill (AGT-02). */
 function convertBlock(agent: ItemRow) {
-  if (!state.home?.sync.tools.includes('pi-cli')) return null;
+  if (!state.home?.sync.managed.includes('pi-cli')) return null;
   const done = state.home.skills.items.find(entry => entry.converted?.agent.toLowerCase() === agent.key.toLowerCase());
   if (done) return h('p.details-limits.details-note', {}, icon('check', 12, 'tone-muted'), `Converted to a Pi skill, “${done.name}”: see it on the Skills page.`);
   const convert = (event: Event) => { event.stopPropagation(); void convertAgent(agent.key, agent.name ?? agent.key); };

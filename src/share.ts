@@ -53,13 +53,17 @@ export interface ShareContext {
 
 /**
  * The home's sync record (sync.json): which build syncs this home (`owner`, ORG-08), the generation it remembers, the tools
- * Central Knot manages here (presence.ts managedTools; unset: every tool present), and whether its standing rule is on
- * (`syncEverything`). Format 2. Format 1 also held the skills, with `items`, `roots` and more: skillstore.ts moves them into
- * the library and writes format 2 (sync.v1.json keeps the earlier file); until it has, those fields are carried through every
- * save as they are.
+ * left out of Central Knot's care here (`leftOut`), and whether its standing rule is on (`syncEverything`). Format 2. Format 1
+ * also held the skills, with `items`, `roots` and more: skillstore.ts moves them into the library and writes format 2
+ * (sync.v1.json keeps the earlier file); until it has, those fields are carried through every save as they are.
  */
 export interface SyncRecord { formatVersion: number; generation: string; owner: string; /** The owner's own name, as people know it (a record made before there were custom builds has none). */ ownerName?: string;
-  tools?: HarnessId[];
+  /**
+   * The tools whose Manage switch is off here (toolchoice.ts chooseTools): installed or not, Central Knot writes nothing in
+   * them. Every other installed tool is managed (presence.ts managedTools), so a tool installed later is managed by itself,
+   * and a record with none (every record made before the switch) manages every installed tool.
+   */
+  leftOut?: HarnessId[];
   /**
    * Synchronize everything: a skill, MCP server or agent found in a managed tool is taken in and turned On by itself (library.ts
    * FOUND; librarypass.ts takeInByRule). Off where it was never chosen; set by setSyncEverything alone.
@@ -243,7 +247,7 @@ export async function readRecord(home: string): Promise<{ record?: SyncRecord; p
     if (!Number.isInteger(record?.formatVersion) || record.formatVersion < 1) return { problem: 'The sync record is damaged.' };
     if (record.formatVersion > FORMAT_VERSION) return { problem: 'The sync record was written by a newer Central Knot.' };
     if (typeof record.generation !== 'string' || typeof record.owner !== 'string'
-      || (record.tools !== undefined && !(Array.isArray(record.tools) && record.tools.every(knownTool)))
+      || (record.leftOut !== undefined && !(Array.isArray(record.leftOut) && record.leftOut.every(knownTool)))
       || (record.syncEverything !== undefined && typeof record.syncEverything !== 'boolean')) return { problem: 'The sync record is damaged.' };
     return { record };
   } catch { return { problem: 'The sync record is damaged.' }; }
@@ -361,10 +365,12 @@ export async function removeFileChecked(path: string, expected: string) {
   await unlink(parked);
 }
 
-/** The tools Central Knot manages in this home now, as its sync record says (presence.ts managedTools). */
+/** The tools Central Knot manages in this home now: those installed, less the ones the sync record leaves out (presence.ts managedTools). */
 export async function managedNow(context: ShareContext, snapshots: Snapshot[]): Promise<HarnessId[]> {
-  return managedTools(snapshots, (await readRecord(context.home)).record?.tools);
+  return managedTools(snapshots, await leftOutNow(context));
 }
+/** The tools the sync record leaves out (SyncRecord leftOut); none where there is no record, or it can't be read. */
+export const leftOutNow = async (context: ShareContext): Promise<HarnessId[]> => (await readRecord(context.home)).record?.leftOut ?? [];
 
 /** A home's first sync record, owned by this build. */
 export const newRecord = (context: ShareContext): SyncRecord => ({ formatVersion: FORMAT_VERSION, generation: randomUUID(), owner: context.build, ownerName: context.buildName });

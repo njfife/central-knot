@@ -14,6 +14,8 @@
 //   entry (HistoryEvent.kind, `cause`)       action                 offered while
 //   off: the switch, or a copy deleted       Turn on                the item is Off
 //     by hand (`winner`: where)
+//   off in a tool managed again              none: no click turned it off
+//     (`tool-back`)
 //   off in one harness (`only`)              Turn on in <harness>   the item is On and kept out of that harness
 //   on: the switch, or an item Pull          Turn off               the item is On
 //     brought
@@ -34,7 +36,8 @@
 //                                            this current"
 //   conflict, chosen, kept-edit (an edit     Use <harness>’s        that copy's version is not the current one
 //     not taken in that was written over,
-//     or a copy a tool managed again held),
+//     a copy a tool managed again held, or
+//     a copy of a tool's own: `own-copy`),
 //     and on (a tool's own copy the click
 //     wrote over): copies that gave way
 //   switched: a skill's tool switch          Undo: sets that        some tool still loads it (`loads`)
@@ -108,6 +111,11 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       if (event.only && event.gaveBack?.includes(event.only)) return { glyph: 'circle-off', text: `Kept out of ${where}: ${where} has its own copy back, as before. ${keeps}` };
       if (event.only) return { glyph: 'circle-off', text: `Kept out of ${where}: its copy there was removed. ${keeps}${gaveSaid}` };
       if (event.cause === 'deleted-by-hand') return { glyph: 'trash-2', text: `Its copy was deleted in ${from}, so it was turned off${also(' and removed from')}. ${keeps}` };
+      // Off (or kept out) while those tools were left out or away: their copies went once they were managed again.
+      if (event.cause === 'tool-back') {
+        const away = andList(event.losers.map(loser => toolName(loser.tool))), one = event.losers.length === 1;
+        return { glyph: 'circle-off', text: `Off while Central Knot didn’t manage ${away}, so its ${words.copy} there was removed once ${one ? 'it was' : 'they were'} managed again. ${keeps}` };
+      }
       return { glyph: 'circle-off', text: `Turned off${also(': removed from')}.${gaveSaid} ${keeps}` };
     case 'current': {
       // The version as it was first kept says where the content came from; the entry that made it current again doesn't.
@@ -157,6 +165,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       if (event.winner) return undefined;
       const where = andList([...new Set(event.losers.map(loser => toolName(loser.tool)))]);
       if (event.cause === 'tool-back') return { glyph: 'diff', text: `${where}’s copy changed while Central Knot didn’t manage ${where}; it gave way to the current version and is kept as a version.` };
+      if (event.cause === 'own-copy') return { glyph: 'diff', text: `${where} had a copy of its own, which Central Knot hadn’t put there; it gave way to the current version and is kept as a version.` };
       return { glyph: 'diff', text: `Edited in ${where}, not taken in yet, and written over by the current version: the edit is kept as a version.` };
     }
     case 'conflict': {
@@ -221,6 +230,8 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
     if (givesBackLater(event, givenBack(event, item).giveBack)) return undefined;
     return { label: 'Undo', help: `Take ${name} out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own`, change: { ...now, deleted: true, ...givenBack(event, item) } };
   }
+  // A copy removed from a tool managed again: no click turned it off, so there is nothing to undo.
+  if (event.kind === 'off' && event.cause === 'tool-back') return undefined;
   if (event.kind === 'off' || event.kind === 'on') {
     const action = switchAction(event.kind === 'off', event.only, item), back = givenBack(event, item).giveBack;
     // Copies go back only with an Undo, while the item is as the click left it; a plain Turn off or Turn on gives none back.

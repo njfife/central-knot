@@ -16,6 +16,7 @@ import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, Cata
 import { writeDurably, type ShareContext } from './share.ts';
 import { SKILL_SWITCH_TESTED_FROM, copyDiffers, heldReason, keptReason, marketTitle, notCarried, partsOf, partsOffer, partsTools, stateOf, unavailable, updateTools, versionToCompare } from './pluginstatus.ts';
 import { isFolder, isHttps, onlyAllowed, record, shortBuild } from './values.ts';
+import { leftOutSentence } from './words.ts';
 
 /** What runs a tool's plugin commands when it is a desktop app's own copy: "Claude desktop’s Code tab 2.1.321". */
 export const viaLabel = (app: DesktopApp, answered = app.carriedVersion) => `${app.name}’s ${app.carries}${answered ? ` ${shortBuild(answered)}` : ''}`;
@@ -25,10 +26,13 @@ export interface MarketplaceHost {
   /** The home on screen, or undefined before one is open. `actual`: it is this computer's own home, not a folder opened as one. */
   home(): { home: string; overrides?: Partial<Record<HarnessId, string>>; actual?: boolean } | undefined;
   /**
-   * This home's tools, in the order the page shows them, and the snapshots they were found in: one read (or the read a
-   * Refresh or home switch just made, named by `readId`), so the columns and what each tool's install says always agree.
+   * The tools Central Knot manages in this home (presence.ts managedTools), in the order the page shows them, and the snapshots
+   * they were found in: one read (or the read a Refresh or home switch just made, named by `readId`), so the columns and what
+   * each tool's install says always agree.
    */
   read(readId?: number): Promise<{ tools: HarnessId[]; snapshots: Snapshot[] }>;
+  /** The tools whose Manage switch is off here (share.ts SyncRecord leftOut): no plugin action writes in them, whatever a request names. */
+  leftOut?(): Promise<HarnessId[]>;
   /** Whether writing is allowed in this home, and why not. */
   writeAccess(): Promise<{ allowed: boolean; reason?: string }>;
   /** Central Knot's own data folder: the added list here, Git copies under plugins/. */
@@ -423,14 +427,22 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const writing = await host.writeAccess();
     return writing.allowed ? undefined : writing.reason ?? 'Writing isn’t allowed in this home, so nothing was changed.';
   };
+  /** Of `tools`, those left out of Central Knot here (host.leftOut), each with its report: nothing runs in them. */
+  const leftOutOf = async (tools: HarnessId[]) => {
+    const out = await host.leftOut?.() ?? [];
+    const refused = tools.filter(tool => out.includes(tool));
+    return { refused, reports: refused.flatMap(tool => failedFor([tool], leftOutSentence(tool))) };
+  };
 
   /**
    * Each tool's own install (or with `run`, its update). A plugin gone from the marketplace, or a marketplace that now
    * gives another name than the one chosen (`marketName`), fails for its tools instead of stopping the whole run.
    */
-  async function install(source: string, marketName: string, plugin: string, tools: PluginTool[], home: unknown, run = use.install): Promise<PluginActionResult> {
+  async function install(source: string, marketName: string, plugin: string, asked: PluginTool[], home: unknown, run = use.install): Promise<PluginActionResult> {
     const stopped = await guard(home);
     if (stopped) return { stopped, reports: [] };
+    const out = await leftOutOf(asked), tools = asked.filter(tool => !out.refused.includes(tool));
+    if (!tools.length) return { reports: out.reports };
     const ctx: engine.PluginContext = { ...(await context({ clis: true })), checked: new Map() };
     const { catalog } = await catalogFor(ctx, source, { counts: false });
     if (!catalog?.plugins.some(item => item.name === plugin)) return { reports: failedFor(tools, 'It is no longer in the marketplace as last read. Refresh the marketplace.') };
@@ -449,7 +461,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       // An install from the build's own marketplace put it in that tool's list too: noted, so it is never added again by itself.
       if (carried && reports.at(-1)?.outcome === 'installed') await noteAdded(catalog.name, ctx.home, tool).catch(() => undefined);
     }
-    return told(source, plugin, { reports: withoutFileBytes(reports) });
+    return told(source, plugin, { reports: [...out.reports, ...withoutFileBytes(reports)] });
   }
 
   /** Tells the host which tools a change to a plugin worked in (host.changed), and gives the result back. */
@@ -535,6 +547,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   async function uninstall(source: string, marketName: string, plugin: string, tool: PluginTool, home: unknown): Promise<PluginActionResult> {
     const stopped = await guard(home);
     if (stopped) return { stopped, reports: [] };
+    const out = await leftOutOf([tool]);
+    if (out.refused.length) return { reports: out.reports };
     return told(source, plugin, { reports: withoutFileBytes([await use.uninstall(await context({ clis: true }), marketName, plugin, tool, source)]) });
   }
 
@@ -557,6 +571,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     if (stopped) return { stopped, reports: [] };
     const share = host.share?.();
     if (!share) return { reports: failedFor([tool], 'Parts can’t be installed here.') };
+    const out = await leftOutOf([tool]);
+    if (out.refused.length) return { reports: out.reports };
     if (mode === 'undo') {
       // A run with nothing kept for it was undone already: done, so "Undo the rest" isn't offered for it again.
       const undone = run ? await undoParts(share, run) : undefined;
@@ -577,6 +593,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   async function setSkill(source: string, marketName: string, plugin: string, skill: string, tool: PluginTool, on: boolean, home: unknown): Promise<PluginActionResult> {
     const stopped = await guard(home);
     if (stopped) return { stopped, reports: [] };
+    const out = await leftOutOf([tool]);
+    if (out.refused.length) return { reports: out.reports };
     const ctx = await context({ clis: true });
     // Its marketplace entry says where its skills are, so the installed copy is read as the page reads the marketplace's
     // (none to read where the tool lists no marketplace of that name now).
@@ -588,6 +606,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   async function setPart(source: string, marketName: string, plugin: string, part: PartRef, tool: PluginTool, on: boolean, home: unknown): Promise<PluginActionResult> {
     const stopped = await guard(home);
     if (stopped) return { stopped, reports: [] };
+    const out = await leftOutOf([tool]);
+    if (out.refused.length) return { reports: out.reports };
     return { reports: withoutFileBytes([await use.setPart(await context(), marketName, plugin, part, tool, on, source)]) };
   }
 
@@ -595,6 +615,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   async function setWhole(source: string, marketName: string, plugin: string, tool: PluginTool, on: boolean, home: unknown): Promise<PluginActionResult> {
     const stopped = await guard(home);
     if (stopped) return { stopped, reports: [] };
+    const out = await leftOutOf([tool]);
+    if (out.refused.length) return { reports: out.reports };
     const ctx = await context({ clis: true });
     return { reports: withoutFileBytes([await use.setWhole(ctx, marketName, plugin, tool, on, source)]) };
   }
@@ -667,6 +689,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   async function addCarriedTo(tool: PluginTool, home: unknown): Promise<{ stopped?: string; report?: ListedReport; view?: PluginsView }> {
     const stopped = await guard(home);
     if (stopped) return { stopped };
+    if ((await leftOutOf([tool])).refused.length) return { stopped: leftOutSentence(tool) };
     const report = await addCarriedToTool(tool);
     return { report, view: await view() };
   }

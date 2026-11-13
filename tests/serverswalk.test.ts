@@ -193,8 +193,8 @@ async function walk(seed: number): Promise<Finding[]> {
       } });
       add(1, { name: `Automatic sync ${syncOn ? 'off' : 'on'}`, run: async () => { syncOn = !syncOn; } });
       const out = pick([...three]);
-      if (tools.includes(out) && tools.length > 1) add(1, { name: `${out} left out by the tool choice`, run: async () => { manage(tools.filter(tool => tool !== out)); await chooseTools(context(), tools); } });
-      else if (!tools.includes(out)) add(2, { name: `${out} managed again`, run: async () => { manage([...tools, out]); await chooseTools(context(), tools); } });
+      if (tools.includes(out) && tools.length > 1) add(1, { name: `${out} left out by the tool choice`, run: async () => { manage(tools.filter(tool => tool !== out)); await chooseTools(context(), out, false); } });
+      else if (!tools.includes(out)) add(2, { name: `${out} managed again`, run: async () => { manage([...tools, out]); await chooseTools(context(), out, true); } });
       // A settings file made unseeable, from a settled home with the server on there: the pass turns nothing Off and removes nothing.
       const hidden = pick(tools as Tool[]);
       if (settled && place === 'on' && held && !held.except.includes(hidden) && fact?.copies[hidden]) {

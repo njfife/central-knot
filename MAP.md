@@ -23,16 +23,16 @@ An item Central Knot holds with its versions, On or Off, applied to every manage
 - **Start:** `library.ts`'s header, then `librarypass.ts`'s. **Examples:** `tests/library.test.ts` (one per row of the rule), `tests/librarypass.test.ts` (a toy kind), `tests/skills.test.ts`, `tests/servers.test.ts` and `tests/agents.test.ts` (real files), `tests/synceverything.test.ts` (Synchronize everything, every kind on real files), `tests/skillmigrate.test.ts`, `tests/servermigrate.test.ts` and `tests/agentmigrate.test.ts`, the four migrations as one upgrade over homes two older versions made (`tests/upgrade.test.ts`, the homes and how they were made in tests/upgrade/), `tests/skillsafety.test.ts`, `tests/libraryrow.test.ts`, the seeded walks `tests/agentswalk.test.ts` (an agent, clicking through `tests/agentclicks.ts`), `tests/librarywalk.test.ts` (a skill and an agent in one home, clicking through `tests/skillclicks.ts`) and `tests/serverswalk.test.ts` (a server with a skill and an agent in one home); the `tests/*-check-*.test.ts` files are regressions from earlier review rounds.
 
 ## The tools in a home
-Which tools a home has, where each keeps its files, and which of them Central Knot manages.
+Which tools a home has, where each keeps its files, and which of them Central Knot manages: every installed tool but the ones whose Manage switch is off (kept in the home's record as the tools left out: `share.ts SyncRecord leftOut`). A tool left out has its card and switch on Harnesses and shows on no other page; nothing of Central Knot's is written there.
 - `harnesses.ts` each tool's definition: config folder, skill roots, binary · `discovery.ts` one tool in a home read (`discover`): its skills, CLI version, desktop apps
 - `platform.ts` where CLIs and apps are looked for · `presence.ts` the tools present (`presentTools`) and managed (`managedTools`), and what each can hold
-- `toolchoice.ts` the one place the managed tools change (`chooseTools`); no page calls it yet, the tests do
-- **Start:** `presence.ts`. **Examples:** `tests/discovery.test.ts`, `tests/presence.test.ts`, `tests/cowork.test.ts`.
+- `toolchoice.ts` a tool's Manage switch: the one place the managed tools change (`chooseTools`), and what turning one on would do there (`whatJoiningDoes`, from `librarypass.ts joinCounts`) · `managecard.ts` the switch on a Harnesses card, the line beside it and the band after it
+- **Start:** `presence.ts`, then `toolchoice.ts`. **Examples:** `tests/managetool.test.ts` (the switch on real files, each way it can go wrong), `tests/discovery.test.ts`, `tests/presence.test.ts`, `tests/cowork.test.ts`; on screen, `scripts/e2e.mjs manageFlow`.
 
 ## The item pages: Overview, Skills, MCP servers, Agents, Harnesses
 One row per item with one On/Off switch, applied in every managed tool; each click's result comes with one Undo.
 - `pages.ts` Overview, and the Skills, MCP servers and Agents pages around their tables · `matrix.ts` the tables: rows, details, bands, the copy question, library rows (`librarySwitch`)
-- `harnesspage.ts` Harnesses: a page per tool, the same tables with it first · `itemrow.ts` every kind's rows as the pages read them (`kindSource`)
+- `harnesspage.ts` Harnesses: a card per tool (its Manage switch is managecard.ts, under The tools in a home), and a page per managed tool, the same tables with it first · `itemrow.ts` every kind's rows as the pages read them (`kindSource`)
 - `clickplan.ts` which of a pass's results are a click's own (`clickResults`) · `copywords.ts` the copy question's words
 - **Start:** `matrix.ts itemsTable`; a click leaves through `app.ts applyClick`. **Examples:** `tests/clickplan.test.ts`, `tests/copywords.test.ts`; on screen, the flows in `scripts/e2e.mjs`.
 
@@ -94,7 +94,7 @@ The main process, the window's frame, Settings, and what every page shares.
 
 ## The store and safe writes
 What every engine stands on: `.central-knot/`, which build syncs a home, and writes that never lose a save made meanwhile.
-- `share.ts` the store: the home's record of who syncs it, its tools and Synchronize everything (`readRecord`, `setSyncEverything`), which build syncs here (`syncGate`), checked writes (`writeFileChecked`), a skill's folder copied (`placeCopy`)
+- `share.ts` the store: the home's record of who syncs it, the tools left out and Synchronize everything (`readRecord`, `setSyncEverything`), which build syncs here (`syncGate`), checked writes (`writeFileChecked`), a skill's folder copied (`placeCopy`)
 - `textedit.ts` one entry of a JSON or TOML file changed, every other byte kept · `values.ts` untrusted values checked, with safe defaults
 - **Start:** `share.ts`'s exports, by their comments; a skill's copy is written over by `skillfiles.ts swapFolder`. **Examples:** `tests/share-recovery.test.ts`, `tests/textedit.test.ts`, `tests/skillsafety.test.ts`.
 
@@ -107,6 +107,7 @@ How each is run: `AGENTS.md` ("Checking a change") and README ("For developers")
 
 ## Paths that cross areas
 - **A click on an item page:** a row's switch in `matrix.ts` → `app.ts applyClick`, sent by `app.ts kindPages` through `preload.ts` → `main.ts changes` (the sanitizer) → `skills.ts applySkills`, `servers.ts applyServers` or `agents.ts applyAgents` (→ `librarypass.ts runPass`) → the result kept for `app.ts lastResult`, drawn by `matrix.ts outcomeBand`. Write to Claude Code: the band in `matrix.ts` → `app.ts writeClaudeNow` → `main.ts` (Claude closed) → `servers.ts writeToClaude`.
+- **A tool's Manage switch:** the switch on its Harnesses card (`managecard.ts`) → `main.ts`'s `tools:manage` → `toolchoice.ts chooseTools` (the record's tools left out, the folders let go, one History entry) → `main.ts syncThenView`, whose pass brings a tool turned on into line, and whose view counts again what turning each tool left out on would do (`SyncView joining`).
 - **A background pass:** a folder watch or the poll (`main.ts startWatching`) → `main.ts backgroundPass` → `main.ts pass` → `homepass.ts homePass` (a profiles file from before moved, then with Sync on, or Sync once: skills, MCP servers and agents, `librarypass.ts PassOptions background`, the one pass Synchronize everything takes found items in: `librarypass.ts takeInByRule`) → `sync:changed` → `app.ts backgroundRefresh` → `main.ts syncThenView`, which builds the `types.ts HomeView` every page reads.
 - **A History action:** a button in `historypage.ts` → `app.ts restoreEvent` → `main.ts`'s `history:restore`, sent on by the entry → `skills.ts restoreSkill`, `servers.ts restoreServer` or `agents.ts restoreAgent` (→ `librarypass.ts restore`), `profiles.ts undoSwitch` or `gitrepo.ts undoPulledBase`.
 - **A profile switch:** the page's Switch or the status bar's menu (`profilespage.ts`) → `main.ts`'s `profiles:switch`, or the menu bar's (`main.ts profileMenu` → `main.ts switchFromMenu`) → `profiles.ts switchProfile` (`profileplan.ts switchPlan`; the entry first, then `skills.ts applySkills`, `servers.ts applyServers` and `agents.ts applyAgents` with the clicks) → `app.ts switchToProfile`'s band, with Write to Claude Code when a server waits.

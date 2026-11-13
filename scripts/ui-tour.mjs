@@ -8,7 +8,8 @@
 // Features, in the order they run: shell, skills, sync, mcp, agents, plugins, profiles, sync-everything, plugin-skills, plugin-updates,
 // plugin-versions, parts, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
-// Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses and repo.
+// Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses, manage (a
+// tool's Manage switch, each state of the Harnesses list it changes, and the Skills page and Overview with tools left out) and repo.
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -2074,6 +2075,44 @@ if (wanted('harnesses')) {
   await size(1280, 800);
   // This computer's home (in the tour, an empty throwaway folder on Linux): detection, a Not found card, and its header.
   await a.click('#home-actual'); await a.click('#nav-harnesses'); await shot(a, 'this-computer-list', 'Clicked "This computer’s home" at the bottom left, then Harnesses: each tool with how it was found; tools not found have a card that does not open.');
+}
+
+// ---------- A tool's Manage switch (Harnesses cards; toolchoice.ts) ----------
+if (wanted('manage')) {
+  await fresh();
+  begin('manage');
+  if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
+  // notes and standup On in every tool first, so Codex has copies of Central Knot's to keep, or lose, while it is left out.
+  await a.click('#nav-skills');
+  for (const key of ['notes', 'standup']) { await turnOnRow(key); await switchOn(key); }
+  await a.click('#nav-harnesses'); await waitFor(a, `!/…/.test(document.querySelector('.harness-cards')?.textContent ?? '…')`);
+  await atEverySize('all-managed', 'Harnesses with every tool managed: each card has its Manage switch on, and the line under it says what turning it off would do', true);
+  await focusOn('#manage-codex-cli'); await shot(a, 'switch-focus', 'Keyboard focus on Codex’s Manage switch, with its ring.');
+  await a.click('#manage-codex-cli');
+  await atEverySize('codex-left-out', 'Clicked Codex’s switch: the band says Codex is left out and its copies stay; its card no longer opens, and its line says what turning it on would do now (nothing)', true);
+  // While Codex is left out: its copy of notes is edited by hand, and standup is turned off in Central Knot.
+  edit(join(practice, '.codex/skills/notes/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Codex while it was left out.\n'));
+  await a.click('#nav-skills'); await a.click('#switch-standup'); await a.settle();
+  await atEverySize('skills-one-left-out', 'The Skills page with Codex left out: no Codex mark on any row; standup, turned off, left Claude Code and Copilot CLI only');
+  await a.click('#nav-overview');
+  await atEverySize('overview-one-left-out', 'The Overview with Codex left out: the lead names the managed tools and says where Codex’s switch is');
+  await a.click('#nav-harnesses'); await refresh();
+  await atEverySize('codex-line-before-on', 'Back on Harnesses, after a Refresh: Codex’s line says what turning it on will do there, counted from the pass’s own plans: keep its edited notes as a version, write notes, remove standup', true, '#manage-codex-cli');
+  await a.click('#manage-codex-cli');
+  await atEverySize('codex-on-band', 'Clicked Codex’s switch again: the band says Central Knot manages Codex now and what it did there, with History for each change', true);
+  await a.click('#nav-history'); await waitFor(a, `!!document.querySelector('.history-row')`);
+  await shot(a, 'history', 'History: the two flips as Tool entries (no Undo), the copy Codex held kept as a version with “Use Codex’s”, and standup’s copy removed from Codex once it was back');
+  await a.click('#nav-harnesses');
+  for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#manage-${tool}`);
+  await atEverySize('all-left-out', 'Every tool’s switch turned off: each card says it is left out, with its line; the note at the top says Central Knot manages none', true);
+  await a.click('#nav-overview');
+  await atEverySize('overview-none-managed', 'The Overview with no tool managed: it names the tools left out and points to Harnesses; the sidebar holds only the pages that need no tool', true);
+  await a.click('#overview-open-harnesses');
+  for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#manage-${tool}`);
+  // Another build syncs this home: every switch is off with the reason.
+  edit(join(practice, '.central-knot/sync.json'), text => JSON.stringify({ ...JSON.parse(text), owner: 'another-build', ownerName: 'Central Knot Alpha' }));
+  await refresh();
+  await atEverySize('another-build', 'Another build (Central Knot Alpha) syncs this home: every Manage switch is disabled (its tooltip says why), and the note at the top says why once', true);
 }
 
 // ---------- Git repo ----------
