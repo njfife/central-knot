@@ -10,7 +10,7 @@ import { readFlag, writeFlag } from './flags.ts';
 import { whyReadOnly, otherOwnerSaid, saidInStatusBar, takeOverSync, takeOverTitle, tell, type Click, type Outcome, type PageKind, harnessKindShown, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, retireTip, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
-import { kindSource, profileItemOf, type ItemRow, type KindSource, type Tool } from './itemrow.ts';
+import { kindSource, type ItemRow, type KindSource, type Tool } from './itemrow.ts';
 import { addLabel, canTakeIn, harnessIs, inLibrary, madeFrom, needsChoice as libraryNeedsChoice, placeOf as libraryPlace, rowClicks, statusLine, switchLabel, versionClock, writesWait, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
@@ -257,8 +257,6 @@ const listView = () => state.home?.[kind];
 const nouns = Object.fromEntries((['skills', 'mcp', 'agents'] as const).map(each => [each, [kindNouns[each].short[0].replace(/^./, first => first.toUpperCase()), kindNouns[each].title]])) as Record<PageKind, [string, string]>;
 /** What this table shows: skills, MCP servers or agents. The same marks mean the same things on each. */
 let kind: PageKind = 'skills';
-/** Whether a profile switch turned this item off in this tool, not a switch turned by hand (itemrow.ts profileItemOf). */
-const turnedOffByProfile = (skill: ItemRow, tool: Tool) => { const id = profileItemOf(kind, skill); return !!id && !!state.home?.profiles.offByProfile[id]?.includes(tool as HarnessId); };
 const factsCache: Partial<Record<PageKind, { from: unknown; list: ItemRow[] }>> = {};
 
 /** This table's kind as the library carries it (librarypages.ts). */
@@ -1228,7 +1226,7 @@ type MarkLook = 'on' | 'off' | 'none' | 'differs' | 'waits' | 'held';
 
 /** What a mark says in the key, by what it is (libraryrow.ts HarnessIs, and a plugin's item). */
 const keyWords = {
-  on: 'On there', 'plugin-off': 'Off there', profile: 'Off by a profile (see Profiles)', none: 'No copy',
+  on: 'On there', 'plugin-off': 'Off there', none: 'No copy',
   'will-sync': 'Gets a copy when sync runs next', 'write-now': 'Waits for Write to Claude Code',
   taken: 'Edited, becomes the current version', deleted: 'Deleted there; turns off when sync runs', leaving: 'Removed when sync runs', own: 'Its own copy, not from Central Knot',
   current: 'Has the current version', has: 'Has it', 'kept-out': 'Kept out', 'off-in-ck': 'Off: in Central Knot only', unseen: 'Left as it is (its line says why)', 'cannot-take': 'Can’t take it',
@@ -1270,7 +1268,7 @@ function libraryMark(lib: LibraryPage, skill: ItemRow, tool: Tool): ReturnType<t
   // Off, or found: a harness with no copy while Central Knot keeps the item is off there; a found item's own copy is simply on.
   const drawn = is === 'none' && inLibrary(item) ? { look: 'off' as const, key: 'off-in-ck' as const } : is === 'own-copy' && !inLibrary(item) ? { look: 'on' as const, key: 'has' as const } : libraryMarks[is];
   // Loaded there, but that tool's own switch turns it off: a mark of its own, whoever set the switch (libraryrow.ts `switched`).
-  const switched = skill.switched?.[tool] && drawn.look === 'on' ? { look: 'held' as const, key: (turnedOffByProfile(skill, tool) ? 'profile' : 'switched') as keyof typeof keyWords, glyph: 'circle-off' as IconName } : undefined;
+  const switched = skill.switched?.[tool] && drawn.look === 'on' ? { look: 'held' as const, key: 'switched' as const, glyph: 'circle-off' as IconName } : undefined;
   return { ...(switched ?? drawn), state: is, words };
 }
 

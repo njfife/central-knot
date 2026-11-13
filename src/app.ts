@@ -2,7 +2,7 @@ import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
-import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SyncNotice } from './types.ts';
+import type { ApplyResult, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SyncNotice } from './types.ts';
 import { anyManaged, kindSource } from './itemrow.ts';
 import { caughtUpNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
@@ -11,7 +11,7 @@ import { pluginItemCount } from './pluginrows.ts';
 import { clickResults, keptBack } from './clickplan.ts';
 import { libraryAction, libraryEntry, librarySentence } from './historyactions.ts';
 import { libraryWords } from './libraryrow.ts';
-import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, sentence, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
+import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
@@ -19,7 +19,7 @@ import { clear as clearPluginOp, resultLines, resultSentence, reverse, runPlan, 
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
-import { activeProfile, flipSummary, NO_PROFILE, redoneSwitch } from './profileplan.ts';
+import { turnsWords } from './profileplan.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -642,13 +642,12 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   await putHistory();
   const restored = result.results.filter(entry => entry.outcome === 'written');
   const where = [...new Set(restored.map(entry => entry.harness ?? ''))].filter(Boolean);
-  // The new History event is the one that undid this; offering it inline makes the undo itself undoable here.
   const past = state.history.data?.find(event => event.id === eventId);
-  const undoneBy = past?.undoneBy;
   // An Undo of a profile switch lists what it couldn't change in its own band, so the page's problems band gets only a stop.
   if (past?.kind !== 'profile' || result.stopped) kindPages[(past && libraryEntry(past)?.kind) || 'agents'].keep(result.results, result.notices);
   if (past?.kind === 'profile') {
-    if (result.stopped) tell(undefined, result.stopped); else undoOutcome(result, undoneBy);
+    // Each item it turned back has its own History entry, with its own action: the band offers no Undo of the Undo.
+    if (result.stopped || !result.switched) tell(undefined, result.stopped); else turnedOutcome('Undone', result.switched, result.results);
     return;
   }
   const everywhere = touchedToolsPhrase(where);
@@ -1216,29 +1215,9 @@ export const writeClaudeNow = (keys: string[]) => busy('Writing to Claude Code�
 
 // ---------- Profiles ----------
 
-/**
- * What a switch or its undo did not change, said once after the result: switches that could not change (a failure, a tool that
- * can't be switched), and, for an undo, switches left as they are because they changed since.
- */
-const notChangedNote = (results: DestinationResult[]) => {
-  const failed = results.filter(couldNotChange);
-  const items = (list: DestinationResult[]) => new Set(list.map(entry => entry.item)).size;
-  const stayed = items(results.filter(entry => entry.outcome === 'stayed'));
-  return (failed.length ? ` ${plural(items(failed), 'item')} could not change: ${failed.slice(0, 2).map(entry => entry.message).join(' ')}${failed.length > 2 ? ' …' : ''}` : '')
-    + (stayed ? ` ${plural(stayed, 'item')} changed since, so ${stayed === 1 ? 'it was' : 'they were'} left as ${stayed === 1 ? 'it is' : 'they are'}.` : '');
-};
-/** A switch that failed, or whose tool can't be read: it stayed as it was. */
-const couldNotChange = (entry: DestinationResult) => entry.outcome === 'failed' || entry.outcome === 'held';
-/** What flips changed, in words; with none, whether nothing needed it (`nothing`) or the switches it needed couldn't change. */
-const changedWords = (result: { flips?: ProfileFlip[]; results: DestinationResult[] }, nothing: string) =>
-  flipSummary(result.flips ?? []) || (result.results.some(couldNotChange) ? 'no switch changed' : nothing);
-
-/** The Profiles page's id for No profile, in the list and in `profileState.open`. */
-export const NONE = 'none';
-
-/** What the Profiles page is doing with its profiles. */
+/** The Profiles page's state: which profile is open, and what it is doing with it. */
 export const profileState = {
-  /** The profile open: a profile's id, or NONE for No profile; unset shows the one in use. */
+  /** The profile open, by id; unset shows the first one in use, else the first. */
   open: undefined as string | undefined,
   /** The profile whose Delete is asking to be confirmed. */
   confirmDelete: undefined as string | undefined,
@@ -1248,31 +1227,25 @@ export const profileState = {
   draft: undefined as string | undefined,
 };
 
-/** What a switch did, as the result band says it, with Undo switch (from the page or, next time the window shows, the menu bar). */
-function switchOutcome(result: ProfileSwitchResult) {
-  const name = result.name ?? NO_PROFILE;
-  const said = result.again ? `Applied ${name} to tools again.` : `${name} is the profile now.`;
-  const what = changedWords(result, 'nothing needed switching');
-  tell({ page: state.page, item: name, text: `${said} ${sentence(what)}${result.flips.length ? '; new sessions use it.' : '.'}${notChangedNote(result.results)}`,
-    act: result.event ? { label: 'Undo switch', id: 'outcome-undo', title: 'Switch back: each switch this changed goes back', run: () => void restoreEvent(result.event!) } : undefined });
-}
-
 /**
- * What an Undo of a profile switch did, as its band says it, with the Undo of that undo (`undoneBy`, the new History entry). Said
- * from the profiles as they are now: an undo of an older switch puts its switches back but leaves the profile a later switch
- * chose. Undoing an undo redoes the switch, and its own Undo is an undo again.
+ * What a switch or its Undo did, as its band says it: what it turned On and Off, the MCP servers whose Claude Code part waits
+ * for Write to Claude Code (offered as the band's second button: never said done), and what could not change.
  */
-function undoOutcome(result: ApplyResult, undoneBy: string | undefined) {
-  const inUse = (state.home && activeProfile(state.home.profiles)?.name) ?? NO_PROFILE;
-  const history = state.history.data ?? [];
-  const made = history.find(event => event.id === undoneBy);
-  const redo = !!made && !!redoneSwitch(history, made);
-  tell({ page: state.page, text: `${redo ? 'Redone' : 'Undone'}: ${changedWords(result, 'nothing needed putting back')}; ${inUse} is the profile in use. New sessions use it.${notChangedNote(result.results)}`,
-    act: undoneBy ? { label: redo ? 'Undo switch' : 'Redo switch', id: 'outcome-undo', run: () => void restoreEvent(undoneBy) } : undefined });
+function turnedOutcome(lead: string, turned: Pick<ProfileSwitchResult, 'on' | 'off' | 'left' | 'waits'>, results: DestinationResult[], act?: Outcome['act']) {
+  const waits = turned.waits.length;
+  const waitSaid = waits ? ` ${plural(waits, 'MCP server')} ${waits === 1 ? 'waits' : 'wait'} for Write to Claude Code.` : '';
+  const leftSaid = turned.left.length ? ` ${andList(turned.left)} ${turned.left.length === 1 ? 'is' : 'are'} not as it asked: History says why.` : '';
+  const notDone = results.length ? ` ${results.slice(0, 2).map(entry => entry.message).join(' ')}${results.length > 2 ? ' …' : ''}` : '';
+  tell({ page: state.page, text: `${lead}: ${turnsWords(turned, 'did') || 'nothing changed'}.${waitSaid}${leftSaid}${notDone}`, warn: results.length > 0 || turned.left.length > 0, act,
+    next: waits ? { label: 'Write to Claude Code', id: 'outcome-write-claude', title: 'Quit Claude Code first: it rewrites its settings file while open', run: () => void writeClaudeNow(turned.waits) } : undefined });
 }
 
-/** Switches to a profile (null: No profile). The band says what changed, with Undo; the menu bar follows. */
-export const switchToProfile = (id: string | null) => busy('Switching profile…', async () => {
+/** What a switch did, with Undo switch (from the page or, next time the window shows, the menu bar). */
+const switchOutcome = (result: ProfileSwitchResult) => turnedOutcome(`Switched to ${result.name}`, result, result.results,
+  result.event ? { label: 'Undo switch', id: 'outcome-undo', title: 'Turn back each item this switch changed, where it is still as the switch left it', run: () => void restoreEvent(result.event!) } : undefined);
+
+/** Switches to a profile. The band says what changed, with Undo; the menu bar follows. */
+export const switchToProfile = (id: string) => busy('Switching profile…', async () => {
   const result = await api().switchProfile(id, state.home!.home);
   if (result.view) setHome(result.view);
   if (result.stopped) { announce(result.stopped); return; }
@@ -1308,6 +1281,6 @@ export const deleteProfileDef = (id: string) => busy('Deleting profile…', asyn
   profileState.confirmDelete = undefined;
   if (result.problem || !gone) { announce(result.problem ?? 'That profile is gone.'); return; }
   profileState.open = undefined;
-  tell({ page: 'profiles', item: gone.name, text: `Deleted the profile ${gone.name}. Nothing in your tools changed.`,
+  tell({ page: 'profiles', item: gone.name, text: `Deleted the profile ${gone.name}. No item changed.`,
     act: { label: 'Undo', id: 'outcome-undo-delete-profile', title: `Make ${gone.name} again, with the same items`, run: () => void saveProfileDef({ ...gone, restore: true }, `${gone.name} is back.`) } });
 });

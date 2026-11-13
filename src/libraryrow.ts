@@ -265,7 +265,7 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
     another.length ? `${andList(another.map(toolName))} ${another.length === 1 ? 'has' : 'have'} it another way` : '',
     out.length ? `kept out of ${named(out, tools)}` : '',
     waiting.length ? `${andList(waiting.map(toolName))} ${waiting.length === 1 ? 'waits' : 'wait'} for Write to Claude Code` : '',
-    // A harness's own switch that turns it off there (skills, or a profile's): it has the item and doesn't load it, as the tag says.
+    // A harness's own switch that turns it off there: it has the item and doesn't load it, as the tag says.
     switched.length ? `switched off in ${andList(switched.map(toolName))}` : ''];
   return `${parts.filter(Boolean).join(' · ')}${ownSaid ? `.${ownSaid}` : ''}`;
 }

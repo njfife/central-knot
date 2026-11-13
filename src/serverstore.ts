@@ -5,6 +5,8 @@
 //   items/mcp/<key>/versions/<hash>.json      one version's content: the shared part (mcp.ts NeutralServer)
 //   items/mcp/<key>/own/<hash>.json           one tool's own part of the server's entry (mcp.ts OwnPart), as a pass last saw it
 //   items/mcp/<name>/<hash>.json, <hash>/…    servers kept before the library: read once by the migration, never deleted
+//   claude-denies.json                        Claude Code's denies of servers that the profiles migration kept (servers.ts
+//                                             releaseKeptDenies clears each, and drops it here, once its server is wanted there)
 //
 // Every file under items/ is named by what it holds, so a second file never replaces a first, and nothing here is pruned.
 // The pass (librarypass.ts, through servers.ts serverKind) is the only caller that changes an item; this module only reads
@@ -120,3 +122,13 @@ export async function keptOwn(context: ShareContext, item: LibraryItem, tool: Ha
   if (!hash) return undefined;
   try { return JSON.parse(await readFile(ownPath(context, item.key, hash), 'utf8')) as OwnPart; } catch { return undefined; }
 }
+
+// ---------- Claude Code's denies the profiles migration kept ----------
+
+const deniesPath = (home: string) => join(storeDirectory(home), 'claude-denies.json');
+/** The servers, by their names in Claude Code, whose deny there the profiles migration kept (profilemigrate.ts); none when there is no list. */
+export async function keptDenies(home: string): Promise<string[]> {
+  try { const names: unknown = JSON.parse(await readFile(deniesPath(home), 'utf8')); return Array.isArray(names) ? names.filter(name => typeof name === 'string') : []; } catch { return []; }
+}
+/** Keeps the list as given. */
+export const keepDenies = (home: string, names: string[]) => writeDurably(deniesPath(home), `${JSON.stringify([...new Set(names)])}\n`);

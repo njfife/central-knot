@@ -1,5 +1,6 @@
-// An MCP server's own switch in one tool: read at each look for its mark (servers.ts), and flipped by profiles (profiles.ts). The
-// server's entry stays where it is; the tool just doesn't start it. Each switch was exercised in a throwaway home on 2026-11-09 (notes: ck-feedback/profiles/evidence.md):
+// An MCP server's own switch in one tool: read at each look for its mark (servers.ts), and written only to clear it: once by
+// the profiles migration (profilemigrate.ts), and for a Claude Code deny it kept (servers.ts releaseKeptDenies); a plugin's part
+// is switched with it too (partswitch.ts). The server's entry stays where it is; the tool just doesn't start it. Each switch was exercised in a throwaway home on 2026-11-09 (notes: ck-feedback/profiles/evidence.md):
 //   Claude Code  settings.json  "deniedMcpServers": [{ "serverName": "<name>" }]   (2.1.321: the server leaves `claude mcp list`)
 //   Copilot CLI  settings.json  "disabledMcpServers": ["<name>"]                    (what `copilot mcp disable` writes on 1.0.107)
 //   Codex        config.toml    [mcp_servers.<name>] enabled = false                (0.142.3: `codex mcp list` shows it disabled)

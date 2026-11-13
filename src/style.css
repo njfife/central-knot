@@ -1500,6 +1500,8 @@ span.ins-confirm { margin-top: 0; }
 .profiles-split .detail-column .pane-header, .profiles-split .detail-column > .bands { max-width: none; }
 .profiles-split .toolbar-end { border-left: 0; padding-left: 0; }
 .profile-header .pane-title h2, .profile-header .pane-title p { overflow-wrap: anywhere; }
+/* What a switch will do, and that Claude Code's part waits, is said whole: it wraps rather than being cut */
+.profile-header .pane-title p { white-space: normal; }
 .profile-header { flex-wrap: wrap; row-gap: 8px; }
 .profile-header .pane-title { flex: 1 1 220px; }
 .profile-actions { flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; gap: 8px; min-width: 0; }
@@ -1508,64 +1510,41 @@ span.ins-confirm { margin-top: 0; }
 .profile-confirm-actions { display: inline-flex; gap: 8px; flex-wrap: nowrap; }
 .profile-name-input { width: min(100%, 360px); height: 28px; padding: 0 8px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); color: var(--ink); font: 600 14px/20px var(--sans); user-select: text; cursor: text; }
 .profile-name-input:focus { outline: 2px solid var(--focus); outline-offset: -2px; }
-.pf-sub-caveat { color: var(--warning); }
-.pf-sub-caveat .icon { display: inline-block; vertical-align: -2px; margin-right: 4px; }
-@media (max-width: 1100px) { .pf-sub-sessions { display: none; } }
 /* The setup step in an empty profile is a full small button, not the band's inline link size */
 .band #profile-from-now { height: 28px; padding: 0 8px; flex: none; }
 .profiles-page .band:has(#profile-from-now) { flex-wrap: wrap; row-gap: 6px; }
 /* The result of a switch spans the pane, like the table under it */
 .page.profiles-page > .bands > .band { padding-right: 16px; }
 
-/* Profiles table: per tool, what is on and what the open view's action changes */
+/* Profiles table: each library item with its box, and what a switch does to it */
 .pf-scroll { display: flex; flex-direction: column; container-type: inline-size; }
-.pf-table { --pf-col: clamp(96px, 12cqi, 260px); display: flex; flex-direction: column; min-width: calc(240px + var(--pf-tools) * var(--pf-col)); }
-.pf-row { display: grid; grid-template-columns: minmax(240px, 1fr) repeat(var(--pf-tools), var(--pf-col)); align-items: center; min-height: 37px; box-shadow: inset 0 -1px 0 var(--control-line); }
+.pf-table { display: flex; flex-direction: column; }
+.pf-row { display: grid; grid-template-columns: minmax(0, 1fr) clamp(96px, 14cqi, 200px); align-items: center; min-height: 37px; box-shadow: inset 0 -1px 0 var(--control-line); }
 .pf-row:not(.pf-head):hover { background: var(--hover); }
 .pf-row:not(.pf-head):focus-within { background: var(--hover); }
 .pf-head { position: sticky; top: 0; z-index: 2; background: var(--surface); min-height: 40px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink-soft); }
 .pf-head .pf-name { padding-left: 16px; }
-.pf-head-cell { flex-direction: column; gap: 2px; color: var(--ink); }
-.pf-head-name { white-space: nowrap; }
 .pf-name { position: relative; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px; }
 .pf-name-text { flex: 0 1 auto; min-width: 48px; font-weight: 500; overflow-wrap: anywhere; }
 /* A long name wraps instead of being cut: rows grow, keeping their minimum height */
 .pf-row:not(.pf-head) .pf-name { padding-block: 6px; }
-/* In a profile, what it leaves out reads quieter, so its set reads as a set at any width */
-.pf-table-profile .pf-row:not(.pf-included):not(.pf-head) .pf-name-text { color: var(--ink-soft); font-weight: 400; }
+/* What the profile leaves out reads quieter, so its set reads as a set at any width */
+.pf-row:not(.pf-included):not(.pf-head) .pf-name-text { color: var(--ink-soft); font-weight: 400; }
 .pf-desc { flex: 1 1 0; min-width: 0; max-width: 80ch; font-size: 12px; line-height: 16px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pf-tick { position: relative; flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin-left: -4px; border-radius: 6px; color: var(--ink-soft); }
 .pf-tick:hover { background: var(--press); color: var(--ink); }
 .pf-tick .tick-box { margin: 0; }
 .pf-tick:has(.hidden-input:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px; }
 .pf-included .pf-tick { color: var(--ink); }
-.pf-cell { display: flex; align-items: center; justify-content: center; height: 100%; }
-.pf-row .pf-cell { position: relative; }
-.pf-row:not(.pf-head) .pf-cell::before { content: ''; position: absolute; width: 28px; height: 28px; border-radius: 6px; }
-.pf-cell-pending::before { box-shadow: inset 0 0 0 1.5px var(--accent); }
-.pf-dot { width: 9px; height: 9px; border-radius: 999px; background: var(--ink); }
-.pf-dot-accent { background: var(--accent-ink); }
+/* What a switch does to the row: quiet where nothing changes, the accent where it turns on or off */
+.pf-state { padding: 0 16px; font-size: 12px; line-height: 16px; color: var(--ink-soft); white-space: nowrap; }
+.pf-state-moves { color: var(--accent-ink); font-weight: 500; }
 .pf-section { display: flex; align-items: center; height: 33px; padding: 0 16px; background: var(--chrome); box-shadow: inset 0 -1px 0 var(--line), inset 0 1px 0 var(--line); position: sticky; top: 40px; z-index: 1; }
 .pf-section-label { display: flex; align-items: center; gap: 8px; font-size: 12px; line-height: 16px; }
 .pf-section-count { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
-.pf-legend { align-items: center; gap: 8px 20px; padding: 16px; font-size: 12px; line-height: 16px; }
-.pf-legend-mark { position: relative; width: 20px; height: 20px; display: grid; place-items: center; }
-.pf-legend-mark.pf-cell-pending::before { content: ''; position: absolute; inset: 0; border-radius: 5px; }
 .pf-none { padding: 24px 16px; color: var(--ink-soft); }
-.pf-how { list-style: none; margin: 0; padding: 16px 16px 8px; display: flex; flex-direction: column; gap: 10px; max-width: 72ch; }
-.pf-how li { display: flex; align-items: flex-start; gap: 10px; color: var(--ink-soft); }
-.pf-how li .icon { flex: none; margin-top: 3px; }
-.pf-eyebrow { padding: 16px 16px 8px; }
-.pf-blocked { list-style: none; margin: 0; padding: 0 16px 16px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; line-height: 16px; color: var(--ink-soft); max-width: 80ch; }
-.pf-blocked li { display: flex; align-items: flex-start; gap: 8px; }
-.pf-blocked .icon { flex: none; margin-top: 1px; }
-.pf-note-path { display: block; font-family: var(--mono); font-size: 11px; color: var(--ink-faint); overflow-wrap: anywhere; }
 .pf-save-note { font-size: 12px; line-height: 16px; color: var(--ink-soft); white-space: nowrap; }
 @container (max-width: 639px) { .pf-save-note { display: none; } }
-/* A row's states and full description, shown under it while its tick box has keyboard focus */
-.pf-tip { display: none; position: absolute; left: 44px; top: calc(100% + 2px); z-index: 4; max-width: min(560px, 90%); padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); box-shadow: var(--overlay); font-size: 12px; line-height: 16px; color: var(--ink); flex-direction: column; gap: 2px; }
-.pf-tip-desc { color: var(--ink-soft); }
-.pf-name:has(.hidden-input:focus-visible) .pf-tip { display: flex; }
 
 /* Status bar: the profile in use, with a menu to switch */
 /* It gives way first in a crowded bar: a long name ends in an ellipsis (its tooltip and the menu have it whole). The sync switch
@@ -1579,8 +1558,6 @@ span.ins-confirm { margin-top: 0; }
 .status-profile:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .status-profile .icon { color: var(--accent-ink); flex: none; }
 .status-profile .status-profile-chevron { color: var(--ink-soft); }
-.status-profile-drift { width: 6px; height: 6px; border-radius: 999px; background: var(--accent-ink); flex: none; }
-.status-profile-drift-text { font-weight: 400; color: var(--accent-ink); }
 .pf-menu { position: absolute; bottom: calc(100% + 6px); left: -10px; z-index: 20; min-width: 200px; max-width: 320px; max-height: 60vh; overflow-y: auto; padding: 4px; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--overlay); }
 .pf-menu-item { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: 6px; font-size: 13px; line-height: 20px; color: var(--ink); white-space: nowrap; }
 .pf-menu-item:hover:not(:disabled) { background: var(--hover); }
@@ -1589,13 +1566,8 @@ span.ins-confirm { margin-top: 0; }
 .pf-menu-tick { width: 14px; flex: none; display: grid; place-items: center; color: var(--accent-ink); }
 .pf-menu-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .pf-menu-sep { height: 1px; margin: 2px 4px; background: var(--line); }
-.pf-menu-note { margin-left: auto; padding-left: 12px; font-size: 12px; color: var(--accent-ink); }
 .pf-menu-size { margin-left: auto; padding-left: 12px; font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
 .pf-menu-size + .pf-menu-note { margin-left: 0; padding-left: 8px; }
-/* A narrow status bar keeps the profile in use whole: its drift keeps only its dot (the words stay in its tooltip). */
-@container status (width < 1000px) { .status-profile-drift-text { display: none; } }
-
-/* Skills and MCP pages: a copy a profile turned off reads as off, not only by its corner mark */
 
 /* ---------- Harnesses ---------- */
 .harness-scroll { container-type: inline-size; padding: 12px var(--pad-end) 16px 16px; display: flex; flex-direction: column; gap: 12px; }

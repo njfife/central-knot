@@ -2,7 +2,7 @@
 // page reads them (kindSource). Pure: no DOM. Every kind is on Central Knot's library: what a row and each tool's mark say is
 // libraryrow.ts's, from the kind's view (types.ts LibraryView).
 import type { LibraryItem, Plan, VersionChange } from './library.ts';
-import type { HarnessId, HomeView, LibraryFacts, LibraryView, ProfilesView, SkillFacts, ThroughPlugin } from './types.ts';
+import type { HarnessId, HomeView, LibraryFacts, LibraryView, SkillFacts, ThroughPlugin } from './types.ts';
 import { toolName } from './words.ts';
 
 /** A tool, as a column. */
@@ -60,26 +60,18 @@ export interface KindSource { tools: HarnessId[]; facts: SkillFacts[]; library: 
  * agents), and its items. The one place a kind's view (types.ts LibraryView) meets the rows the pages draw (SkillFacts):
  * there, On is `managed` and the harnesses it is kept out of are `off`.
  */
-export function kindSource(home: Pick<HomeView, 'skills' | 'mcp' | 'agents'> & { profiles?: HomeView['profiles'] }, which: 'skills' | 'mcp' | 'agents'): KindSource {
+export function kindSource(home: Pick<HomeView, 'skills' | 'mcp' | 'agents'>, which: 'skills' | 'mcp' | 'agents'): KindSource {
   const view = home[which];
-  return { tools: view.tools, facts: libraryRows(view, which, home.profiles), library: view.library };
+  return { tools: view.tools, facts: libraryRows(view), library: view.library };
 }
-
-/** The item a profile names for a row, where profiles hold that kind (profileplan.ts): a skill by its key, an MCP server by its name as written. */
-export const profileItemOf = (which: 'skills' | 'mcp' | 'agents', row: { key: string; name?: string }) =>
-  (which === 'skills' ? `skill:${row.key}` : which === 'mcp' ? `mcp:${row.name ?? row.key}` : undefined);
 
 /**
  * A library view's rows as SkillFacts, made once per view read, so a page that caches by them redraws only on a new read.
- * A tool whose own switch turns the item off (`switchedOff`) is said as its mark says it: by a profile, naming the profile
- * in use, where profiles hold that switch (`profiles`), else in that tool's own settings.
+ * A tool whose own switch turns the item off (`switchedOff`) is said as its mark says it: in that tool's own settings.
  */
 const rowsOf = new WeakMap<LibraryView, SkillFacts[]>();
-function libraryRows(view: LibraryView, which: 'skills' | 'mcp' | 'agents', profiles?: ProfilesView): SkillFacts[] {
-  const active = profiles?.profiles.find(profile => profile.id === profiles.active)?.name;
-  const byProfile = (row: LibraryFacts, tool: HarnessId) => { const id = profileItemOf(which, row); return !!id && !!profiles?.offByProfile[id]?.includes(tool); };
-  const switchedOff = (row: LibraryFacts) => Object.fromEntries((row.switchedOff ?? []).map(tool =>
-    [tool, byProfile(row, tool) ? `switched off in ${toolName(tool)} by ${active ? `the profile ${active}` : 'a profile'}` : `switched off in ${toolName(tool)}’s own settings`]));
+function libraryRows(view: LibraryView): SkillFacts[] {
+  const switchedOff = (row: LibraryFacts) => Object.fromEntries((row.switchedOff ?? []).map(tool => [tool, `switched off in ${toolName(tool)}’s own settings`]));
   const made = rowsOf.get(view) ?? view.items.map((row): SkillFacts => {
     const { on, except, loads: _loads, switchedOff: _off, switchProblem: _problem, ...facts } = row, switched = switchedOff(row);
     return { ...facts, managed: on, off: except, choiceBlocks: facts.choiceBlocks ?? {}, ...(Object.keys(switched).length ? { switched } : {}) };

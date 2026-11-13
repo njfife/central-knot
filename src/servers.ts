@@ -18,23 +18,24 @@
 //   built the other way round: Claude Code's file open, every other tool's writes waiting for the next pass.
 // - a tool's own switch for a server (mcpswitch.ts) is read at each look for its mark (`switchedOff`) and never written by a
 //   pass. Where it lives inside the entry (Codex, Pi, OpenCode) it is that tool's own field, so it comes back with the entry.
+//   One write follows a pass: Claude Code's deny of a server the profiles migration turned Off was kept, so the server doesn't
+//   start there before Write to Claude Code takes its entry out, and is cleared once the server is wanted there (releaseKeptDenies).
 // Around the pass: applyServers, writeToClaude and restoreServer run it (the page's clicks through librarypass.ts itemClick);
-// serversView is the MCP servers page's reading (types.ts LibraryView), which profiles read through profileplan.ts
-// profileServers; serversForRepo is what the Git repo's Push sends. Elsewhere: the formats, mcp.ts; where things are kept and
+// serversView is the MCP servers page's reading (types.ts LibraryView); serversForRepo is what the Git repo's Push sends. Elsewhere: the formats, mcp.ts; where things are kept and
 // the migration from the earlier record, serverstore.ts and servermigrate.ts; the row and its words, libraryrow.ts with
 // librarypages.ts; History's sentences and actions, historyactions.ts.
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { libraryAction } from './historyactions.ts';
-import { listed, plan } from './library.ts';
+import { listed, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, differ, forgetFolders, foundCopies, itemClick, lookFor, restore, runPass, sharedFileSeen, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords, writesWait } from './libraryrow.ts';
 import { cannotHold, editEntry, mcpFile, ownText, readTool, recoverSettings, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
-import { mcpDisabled, readMcpSwitches } from './mcpswitch.ts';
+import { mcpDisabled, mcpSwitchPath, readMcpSwitches, withMcpSwitch } from './mcpswitch.ts';
 import { throughPlugins } from './plugins.ts';
 import { mcpTools } from './presence.ts';
-import { keepOwn, keptOwn, openLibrary, readVersion, recordedServers, saveLibrary, storeVersion } from './serverstore.ts';
-import { itemKey, readParts, syncGate, writeAccess, type ShareContext } from './share.ts';
+import { keepDenies, keepOwn, keptDenies, keptOwn, openLibrary, readVersion, recordedServers, saveLibrary, storeVersion } from './serverstore.ts';
+import { errorCode, itemKey, readParts, syncGate, writeAccess, writeFileChecked, type ShareContext } from './share.ts';
 import type { SwitchFile } from './skillswitch.ts';
 import type { Change, HarnessId, LibraryFacts, LibraryView, PassResult, SyncNotice, ThroughPlugin, ToolCopy } from './types.ts';
 import { throughPlugin, toolName } from './words.ts';
@@ -188,10 +189,32 @@ export type PulledServer = { name: string; server: NeutralServer } | { removed: 
 type ServerPassOptions = Omit<PassOptions<NeutralServer>, 'pulled'> & { pulled?: Map<string, PulledServer> };
 
 /** One pass over the servers (librarypass.ts runPass): the page's clicks in `changes` (itemClick), then every server brought into line. */
-export function applyServers(context: ShareContext, tools: HarnessId[], changes: Change[], options: ServerPassOptions = {}): Promise<PassResult> {
+export async function applyServers(context: ShareContext, tools: HarnessId[], changes: Change[], options: ServerPassOptions = {}): Promise<PassResult> {
   const pulled = options.pulled && new Map([...options.pulled].map(([key, brought]) =>
     [key, 'removed' in brought ? brought : { name: brought.name, content: brought.server }] as const));
-  return runPass(serverKind, context, tools, changes.map(itemClick), { ...options, pulled });
+  return releaseKeptDenies(context, tools, await runPass(serverKind, context, tools, changes.map(itemClick), { ...options, pulled }));
+}
+
+/**
+ * After a pass that ran (`done`): Claude Code's deny of each server the profiles migration kept it for (serverstore.ts
+ * keptDenies) is cleared once the server is wanted in Claude Code, so it is never left switched off there once it is On; it
+ * stays while the server is Off, kept out of Claude Code or deleted, where its entry may still wait for Write to Claude Code.
+ * A settings file that can't be read or changed meanwhile keeps the deny for the next pass.
+ */
+async function releaseKeptDenies(context: ShareContext, tools: HarnessId[], done: PassResult): Promise<PassResult> {
+  const kept = done.stopped || !tools.includes('claude-cli') ? [] : await keptDenies(context.home);
+  if (!kept.length) return done;
+  const { library } = await openLibrary(context);
+  const wanted = kept.filter(name => { const item = library.items[itemKey(name)]; return !!item && wantedIn(item, 'claude-cli'); });
+  if (!wanted.length) return done;
+  const file = mcpSwitchPath(context, 'claude-cli');
+  try {
+    const text = await readFile(file, 'utf8').catch(error => { if (errorCode(error) === 'ENOENT') return ''; throw error; });
+    const cleared = wanted.reduce((now, name) => withMcpSwitch('claude-cli', now, name, false), text);
+    if (cleared !== text) await writeFileChecked(file, cleared, text);
+    await keepDenies(context.home, kept.filter(name => !wanted.includes(name)));
+  } catch { /* the next pass tries again */ }
+  return done;
 }
 
 /**
@@ -200,12 +223,13 @@ export function applyServers(context: ShareContext, tools: HarnessId[], changes:
  * Its Undo is the library's: Make current an earlier version, then Write again.
  */
 export async function writeToClaude(context: ShareContext, tools: HarnessId[], keys: string[]): Promise<PassResult> {
-  const done = await runPass(kindFor(true), context, tools, [], { only: new Set(keys) });
+  const done = await releaseKeptDenies(context, tools, await runPass(kindFor(true), context, tools, [], { only: new Set(keys) }));
   return { ...done, results: done.results.filter(result => result.harness === 'claude-cli') };
 }
 
 /** A History entry's action on a server (librarypass.ts restore; historyactions.ts says which click it is). */
-export const restoreServer = (context: ShareContext, tools: HarnessId[], eventId: string, version?: string) => restore(serverKind, context, tools, eventId, version);
+export const restoreServer = async (context: ShareContext, tools: HarnessId[], eventId: string, version?: string) =>
+  releaseKeptDenies(context, tools, await restore(serverKind, context, tools, eventId, version));
 
 /**
  * The tool choice (toolchoice.ts) lets go of the settings files of the tools it leaves out at once (librarypass.ts

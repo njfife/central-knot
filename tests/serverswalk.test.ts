@@ -2,7 +2,8 @@
 // temp home, with a skill and an agent on the library in the same home: every click the MCP servers page and History offer
 // (src/libraryrow.ts rowClicks, src/historyactions.ts), Write to Claude Code, edits by hand (the server's values, or only a
 // tool's own fields), entries deleted and made by hand, a settings file deleted, rewritten without its servers or made
-// unreadable, Automatic sync off and on, a crash at each step of a write or a removal, and a tool left out and managed again.
+// unreadable, Automatic sync off and on, a crash at each step of a write or a removal, a tool left out and managed again, and
+// profile switches (src/profiles.ts: three profiles naming the server, the skill and the agent in different sets) and their Undo.
 // After every step:
 //   (a) nothing is lost: each entry Central Knot wrote over or removed held a content that is a version of the server, or is
 //       still in a tool. Checked for the step, and for every such content since the walk began;
@@ -12,8 +13,9 @@
 //   (d) from a settled home, Off then On, with Write to Claude Code after each, puts each entry back with the same values and
 //       own fields, and every other byte of each file as it was;
 //   (e) a tool Central Knot doesn't manage is never written, and Claude Code's file only by Write to Claude Code;
-//   (f) every click made a History entry, after a crash too;
-//   (h) the skill's folders and the agent's files are as they were in every tool: a server's clicks never touch them.
+//   (f) every click made a History entry, after a crash too (a profile switch: its one entry);
+//   (h) the skill's folders and the agent's files are as they were in every tool: a server's clicks never touch them (a profile
+//       switch, and its Undo, turn them On and Off too).
 // A step that makes the settings file unseeable (unreadable, deleted) is made from a settled home, and asserts that the pass
 // turns nothing Off and removes nothing.
 // The walks in SEEDS run in `npm test`. CK_WALKS=<n> runs n more seeds from CK_SEED=<n>; CK_ONLY=<seed> replays one walk,
@@ -28,17 +30,19 @@ import { libraryAction, versionChoices } from '../src/historyactions.ts';
 import { wantedIn, type LibraryItem } from '../src/library.ts';
 import { harnessIs, needsChoice, placeOf, rowClicks, type LibraryRow } from '../src/libraryrow.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
+import { changes, switchPlan, undoPlan } from '../src/profileplan.ts';
+import { liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from '../src/profiles.ts';
 import { applyServers, restoreServer, serversView, writeToClaude } from '../src/servers.ts';
 import type { ShareContext } from '../src/share.ts';
 import { applySkills } from '../src/skills.ts';
 import { chooseTools } from '../src/toolchoice.ts';
-import type { Change, HarnessId, LibraryFacts, PassResult } from '../src/types.ts';
+import type { Change, DestinationResult, HarnessId, LibraryFacts, PassResult } from '../src/types.ts';
 import { bytes, folderOf, put, sandbox, trial, tools as allTools, type Tool } from './skillclicks.ts';
 
 const SEEDS = [1, 2, 3, 4];
 const STEPS = 16;
 const random = (seed: number) => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
-const STALE = /nothing left to undo|no longer in Central Knot’s store|changed since the page was read|at that version already|No tool has a copy/;
+const STALE = /nothing left to undo|nothing to undo|Nothing to undo|no longer in Central Knot’s store|changed since the page was read|at that version already|No tool has a copy/;
 const same = (first: unknown, second: unknown) => JSON.stringify(first) === JSON.stringify(second);
 const FILES = { 'claude-cli': '.claude.json', 'copilot-cli': '.copilot/mcp-config.json', 'codex-cli': '.codex/config.toml' } as const;
 /** The walk's three tools (skillclicks.ts tools). */
@@ -84,6 +88,11 @@ async function walk(seed: number): Promise<Finding[]> {
     });
   };
   const historyCount = async () => (await readHistory(context())).filter(event => event.key === 'mcp:docs').length;
+  // Profiles: each switch the page offers (one that would change something), and each switch entry whose Undo History offers.
+  const onNow = async () => JSON.stringify([await liveNow(context()), ...await Promise.all(['skills', 'mcp', 'agents'].map(name => readFile(join(box.home, `.central-knot/${name}.json`), 'utf8').catch(() => '')))]);
+  const switches = async () => { const items = await liveNow(context()); return (await readProfiles(box.home)).profiles.filter(profile => changes(switchPlan(profile, items))); };
+  const switchUndos = async () => { const items = await liveNow(context()); return (await readHistory(context())).filter(event => event.kind === 'profile' && !event.undoneBy && changes(undoPlan(event, items))); };
+  const switchCount = async () => (await readHistory(context())).filter(event => event.kind === 'profile').length;
   const others = async () => ({ skill: await Promise.all(three.map(tool => bytes(folderOf(box, tool)))), agent: await Promise.all(three.map(tool => readFile(join(box.home, agentFiles[tool]), 'utf8').catch(() => undefined))) });
   let othersAsWritten: Awaited<ReturnType<typeof others>>;
 
@@ -113,11 +122,12 @@ async function walk(seed: number): Promise<Finding[]> {
     for (const tool of three) await mkdir(join(box.home, agentFiles[tool], '..'), { recursive: true });
     await writeFile(join(box.home, agentFiles['claude-cli']), '---\nname: writer\ndescription: Writes docs\n---\n\nYou write docs.\n');
     await applyAgents(context(), tools, [{ key: 'writer', managed: true, off: [] }]);
+    for (const [name, items] of [['Everything', ['mcp:docs', 'skill:notes', 'agent:writer']], ['No docs', ['skill:notes', 'agent:writer']], ['Docs alone', ['mcp:docs']]] as const) await saveProfile(context(), { name, items: [...items] });
     othersAsWritten = await others();
     for (let step = 0; step < STEPS && !found.length; step++) {
       const { row, item, fact } = await seen();
       const place = placeOf(item), held = item && !item.deleted ? item : undefined;
-      type Act = { name: string; run: (more?: Partial<ShareContext>) => Promise<unknown>; app?: boolean; click?: boolean; byHand?: boolean; claude?: boolean };
+      type Act = { name: string; run: (more?: Partial<ShareContext>) => Promise<unknown>; app?: boolean; click?: boolean; byHand?: boolean; claude?: boolean; profile?: boolean };
       const acts: Act[] = [];
       const add = (weight: number, act: Act) => { for (let count = 0; count < weight; count++) acts.push(act); };
       const clicks = (weight: number, name: string, change: Change) => add(weight, { name, app: true, click: true, run: more => send(change, more) });
@@ -132,6 +142,8 @@ async function walk(seed: number): Promise<Finding[]> {
       if (held) clicks(1, 'Delete', rowClicks.remove(row, item));
       if (fact?.waits?.length) add(3, { name: 'Write to Claude Code', app: true, claude: true, run: more => write(more) });
       for (const action of await historyActions()) add(2, { name: `History: ${action.label} (${action.event.kind})`, app: true, run: () => action.run() });
+      for (const profile of await switches()) add(2, { name: `switch to ${profile.name}`, app: true, click: true, profile: true, run: more => switchProfile(context(more), tools, profile.id) });
+      for (const event of await switchUndos()) add(2, { name: `History: Undo switch to ${event.item}`, app: true, profile: true, run: more => undoSwitch(context(more), tools, event.id) });
       for (const tool of three) {
         const text = await readFile(file(tool), 'utf8').catch(() => undefined), has = (await entries())[tool];
         if (has) {
@@ -165,7 +177,7 @@ async function walk(seed: number): Promise<Finding[]> {
       const act = pick(acts);
       const crash = act.app && !act.byHand && next() < 0.1 ? pick(['before-remove', 'before-rename', 'mid-replace'] as const) : undefined;
       trace.push(`${act.name}${crash ? ` [crash ${crash}]` : ''}`);
-      const before = await files(), entriesBefore = await entries(), managedBefore = [...tools], countBefore = await historyCount();
+      const before = await files(), entriesBefore = await entries(), managedBefore = [...tools], countBefore = await historyCount(), switchesBefore = await switchCount();
       let done: unknown, crashed = false;
       try { done = await act.run(crash ? { fault: at => { if (at === crash) throw new Error('crash'); } } : {}); }
       catch (error) { if ((error as Error).message === 'crash') crashed = true; else { fail(`threw: ${(error as Error).message.slice(0, 140)}`); break; } }
@@ -183,16 +195,22 @@ async function walk(seed: number): Promise<Finding[]> {
         if (was && was.hash !== (await entries())[tool]?.hash) taken.add(was.hash);
       }
       for (const content of taken) if (!versions.has(content) && !here.has(content)) { taken.delete(content); fail('(a) a content Central Knot wrote over or removed is neither a version nor in any tool'); }
-      if (!same(await others(), othersAsWritten) && act.app) fail(`(h) ${act.name} touched the skill or the agent`);
+      if (!same(await others(), othersAsWritten) && act.app && !act.profile) fail(`(h) ${act.name} touched the skill or the agent`);
       othersAsWritten = await others();
       // (f) Every click has its History entry, a crashed one too.
       const answer = act.click && !crashed ? done as PassResult : undefined;
       const refused = !!answer && (!!answer.stopped || answer.results.some(entry => entry.unchanged || entry.differs));
-      if (act.click && !refused && await historyCount() === countBefore) fail(`(f) ${act.name} made no History entry`);
+      const told = act.profile ? await switchCount() > switchesBefore : await historyCount() > countBefore;
+      if (act.click && !refused && !told) fail(`(f) ${act.name} made no History entry`);
       settled = await settles();
       // (c) Every action offered now does something.
       const now = await seen(), live = now.item && !now.item.deleted ? now.item : undefined;
-      const offered: { name: string; run: () => Promise<PassResult> }[] = (await historyActions()).map(action => ({ name: `History’s ${action.label} on ${action.event.kind}`, run: action.run }));
+      // `moves`: a profile's action, which does something when it turns an item On or Off, or changes a record (the same pass may
+      // turn an item Off again, as a copy deleted by hand while a removal waited, which its record and History say).
+      type Offered = { name: string; run: () => Promise<{ stopped?: string; results: DestinationResult[] }>; moves?: boolean };
+      const offered: Offered[] = (await historyActions()).map(action => ({ name: `History’s ${action.label} on ${action.event.kind}`, run: action.run }));
+      for (const profile of await switches()) offered.push({ name: `the Profiles page’s Switch to ${profile.name}`, moves: true, run: () => switchProfile(context(), tools, profile.id) });
+      for (const event of await switchUndos()) offered.push({ name: `History’s Undo switch to ${event.item}`, moves: true, run: () => undoSwitch(context(), tools, event.id) });
       const page = (name: string, change: Change) => offered.push({ name: `the page’s ${name}`, run: () => send(change) });
       if (live) page(live.on ? 'Off' : 'On', live.on ? rowClicks.off(now.row, live) : rowClicks.on(now.row, live));
       if (live) page('Delete', rowClicks.remove(now.row, live));
@@ -200,10 +218,11 @@ async function walk(seed: number): Promise<Finding[]> {
       for (const [index, version] of (live?.versions ?? []).entries()) if (version.hash !== live!.hash) page(`Make current #${index}`, rowClicks.makeCurrent(now.row, live, version.hash));
       if (now.fact?.waits?.length) offered.push({ name: 'the band’s Write to Claude Code', run: () => write() });
       for (const action of offered) await trial(box, async () => {
-        const was = await record(), answer = await action.run();
+        const was = await record(), items = await onNow(), answer = await action.run();
         const refusal = answer.stopped ?? answer.results.find(entry => entry.unchanged)?.message;
+        const nothing = action.moves ? items === await onNow() : same(after, await files()) && was === await record();
         if (refusal && STALE.test(refusal)) fail(`(c) ${action.name}: “${refusal.slice(0, 100)}”`);
-        else if (!refusal && same(after, await files()) && was === await record()) fail(`(c) ${action.name} does nothing`);
+        else if (!refusal && nothing) fail(`(c) ${action.name} does nothing`);
       });
       // (d) Off then On, from a settled home, each with Write to Claude Code: the same values and own fields, the rest byte for byte.
       if (settled && live?.on) await trial(box, async () => {
@@ -224,7 +243,7 @@ async function walk(seed: number): Promise<Finding[]> {
 const extra = Number(process.env.CK_WALKS ?? 0), from = Number(process.env.CK_SEED ?? 5000);
 const only = process.env.CK_ONLY;
 const walks = only ? [Number(only)] : [...SEEDS, ...Array.from({ length: extra }, (_, index) => from + index)];
-test(`A random walk of ${STEPS} steps over an MCP server with a skill and an agent in one home, ${walks.length} times: nothing Central Knot removes or writes over is lost, passes settle, every action offered does something, Off then On keeps each entry, Claude Code is written only by Write, and the skill and agent are never touched`, async () => {
+test(`A random walk of ${STEPS} steps over an MCP server with a skill and an agent in one home, profile switches among them, ${walks.length} times: nothing Central Knot removes or writes over is lost, passes settle, every action offered does something, Off then On keeps each entry, Claude Code is written only by Write, and only a profile switch touches the skill and agent`, async () => {
   const findings = new Map<string, { count: number; trace: string }>();
   const waiting = [...walks];
   await Promise.all(Array.from({ length: only ? 1 : 6 }, async () => {

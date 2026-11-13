@@ -222,7 +222,7 @@ const agentFile = (context: ShareContext, tool: HarnessId, name: string) => {
  * A part as it is in the tool now, read fresh: absent, there but unreadable right now (with why), or there with `seen`, its fingerprint.
  * For an MCP entry `seen` covers the tool's own settings on it too (a narrowed Copilot `tools`, say), so an edit to those
  * counts as an edit; `neutralHash` is its neutral hash, which an MCP write is checked against. The tool's on/off key (Codex's,
- * Pi's and OpenCode's `enabled`, OpenCode's `disabled`) is left out: profiles own that switch, and a server turned off is not one the person edited.
+ * Pi's and OpenCode's `enabled`, OpenCode's `disabled`) is left out: it is the part's switch (partswitch.ts), and a server turned off is not one the person edited.
  */
 type OnDisk = { state: 'absent'; /** A link is in a skill's place whose target is gone (where it led): it holds nothing, so a part may take its place. */ brokenLink?: string }
   | { state: 'unreadable'; /** What is in its place and why it couldn't be read, to finish "Couldn't change the skill: …". */ why: string }

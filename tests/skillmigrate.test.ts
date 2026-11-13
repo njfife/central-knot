@@ -13,8 +13,6 @@ import { pushRepo, connectRepo, pullRepo } from '../src/gitrepo.ts';
 import { readTree, storeFolder, type ShareContext } from '../src/share.ts';
 import { applySkills, skillsView } from '../src/skills.ts';
 import { setDisabled, isDisabled, readSwitchFile } from '../src/skillswitch.ts';
-import { readProfiles, switchProfile, saveProfile } from '../src/profiles.ts';
-import { discover } from '../src/discovery.ts';
 import type { HarnessId, HomeView } from '../src/types.ts';
 import { bytes, folderOf, put, roots, sandbox, skillText, type Box, type Tool } from './skillclicks.ts';
 
@@ -175,14 +173,14 @@ test('Migration: a switch set before is left as it is: Codex still doesn’t loa
     const quiet = { folder: 'quiet', name: 'quiet', skillFile: join(folderOf(box, 'codex-cli', 'quiet'), 'SKILL.md') };
     assert.equal(isDisabled(box.context, await readSwitchFile(box.context, 'codex-cli'), quiet), true);
     const view = await skillsView(box.context, box.tools);
-    const home = { skills: view, mcp: { tools: [], items: [], library: {} }, agents: view, profiles: { profiles: [{ id: 'p', name: 'Work', items: [] }], active: 'p', offByProfile: { 'skill:steady': ['codex-cli'] } } } as unknown as HomeView;
+    const home = { skills: view, mcp: { tools: [], items: [], library: {} }, agents: view } as unknown as HomeView;
     const facts = kindSource(home, 'skills').facts;
     const say = sentences(libraryWords.skills), tools = all;
     const tag = (key: string) => { const fact = facts.find(entry => entry.key === key)!; return say.placeTag({ key, hashes: {}, switched: fact.switched, cannot: fact.cannot }, view.library[key], tools)?.text; };
     assert.equal(tag('quiet'), 'switched off in Codex');
     assert.match(tag('silent') ?? '', /^switched off in (all 3 tools|Claude Code, Copilot CLI and Codex)/);
-    // A profile's hold is said with the profile's name.
-    assert.deepEqual(facts.find(entry => entry.key === 'steady')!.switched, { 'codex-cli': 'switched off in Codex by the profile Work' });
+    // A switch an earlier profile set is a switch like any other here (the profiles migration clears it: profiles.test.ts).
+    assert.deepEqual(facts.find(entry => entry.key === 'steady')!.switched, { 'codex-cli': 'switched off in Codex’s own settings' });
   } finally { await box.cleanup(); }
 });
 
@@ -213,27 +211,6 @@ test('Migration: a reader before anything is written sees the migrated skills an
     assert.equal(items.steady.on, true);
     assert.equal(await stat(join(box.home, '.central-knot/skills.json')).then(() => true, () => false), false);
     assert.deepEqual(JSON.parse(await readFile(join(box.home, '.central-knot/sync.json'), 'utf8')), record);
-  } finally { await box.cleanup(); }
-});
-
-test('A profile that leaves out a found skill and an Off one, then No profile: the hold on the Off one is dropped, and turned on its switch shows', async () => {
-  const { box } = await oldHome();
-  try {
-    await pass(box);
-    // leftout is On, steady is turned Off; "apart" is found. A profile with neither leaves them out.
-    const reading: ShareContext = { ...box.context, read: () => Promise.all(all.map(harness => discover({ home: box.home, mode: 'custom', harness }))) };
-    await applySkills(reading, box.tools, [{ key: 'steady', managed: false, off: [] }]);
-    const only = (await saveProfile(reading, { name: 'Only leftout', items: ['skill:leftout'] })).id!;
-    const switched = await switchProfile(reading, only);
-    assert.equal(switched.stopped, undefined);
-    assert.ok(switched.flips.some(flip => flip.item === 'skill:apart'), 'a found skill is left out too');
-    assert.ok(!switched.flips.some(flip => flip.item === 'skill:steady'), 'an Off skill is in no tool: nothing to switch');
-    await switchProfile(reading, null);
-    assert.equal((await readProfiles(box.home)).offByProfile['skill:steady'], undefined, 'No profile drops the hold, as no folder is there');
-    await applySkills(reading, box.tools, [{ key: 'steady', managed: true, off: [] }]);
-    const view = await skillsView(reading, box.tools);
-    const steady = view.items.find(entry => entry.key === 'steady')!;
-    assert.ok(Object.values(steady.loads ?? {}).some(at => at?.off), 'a switch still set shows its mark: the row does not read as plain on');
   } finally { await box.cleanup(); }
 });
 

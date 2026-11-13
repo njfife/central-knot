@@ -15,7 +15,7 @@ import { applyServers, serversView } from '../src/servers.ts';
 import { mcpDisabled, withMcpSwitch } from '../src/mcpswitch.ts';
 import { appCandidates, executableCandidates } from '../src/platform.ts';
 import type { ShareContext } from '../src/share.ts';
-import { isDisabled, readSwitchFile, switchState, switchedText } from '../src/skillswitch.ts';
+import { isDisabled, readSwitchFile, setDisabled } from '../src/skillswitch.ts';
 import { readJsonc } from '../src/textedit.ts';
 import type { HarnessId } from '../src/types.ts';
 
@@ -130,27 +130,28 @@ test('OpenCode’s skill switch is a deny rule by name, written last so it decid
   const box = await sandbox();
   try {
     const target = { folder: 'alpha', name: 'alpha', skillFile: join(box.home, '.claude/skills/alpha/SKILL.md') };
-    const state = (file: string) => switchState(box.context, 'opencode-cli', file, target);
-    const flip = (file: string, disabled: boolean) => switchedText(box.context, 'opencode-cli', file, target, disabled).text;
-    // No settings yet: the file is made with the rule alone, and Enable leaves it empty.
-    assert.deepEqual(readJsonc(flip('', true)), { permission: { skill: { alpha: 'deny' } } });
-    assert.deepEqual(readJsonc(flip(flip('', true), false)), {});
+    // The settings file holding `text`: whether it turns alpha off, and what it holds once alpha is turned off or on.
+    const state = async (text: string) => { await writeFile(settings(box.home), text); return isDisabled(box.context, await readSwitchFile(box.context, 'opencode-cli'), target); };
+    const flip = async (text: string, disabled: boolean) => { await writeFile(settings(box.home), text); await setDisabled(box.context, 'opencode-cli', target, disabled); return readFile(settings(box.home), 'utf8'); };
+    // Empty settings: the rule alone, and Enable leaves them empty.
+    assert.deepEqual(readJsonc(await flip('', true)), { permission: { skill: { alpha: 'deny' } } });
+    assert.deepEqual(readJsonc(await flip(await flip('', true), false)), {});
     // A wider rule after the skill's own would decide (the last match wins), so the skill's rule moves to the end.
     const wide = '{\n  // kept\n  "permission": { "skill": { "alpha": "deny", "*": "allow" }, "bash": "ask" },\n}\n';
-    assert.equal(state(wide), false, 'the later "*" rule allows it');
-    const off = flip(wide, true);
+    assert.equal(await state(wide), false, 'the later "*" rule allows it');
+    const off = await flip(wide, true);
     assert.deepEqual(Object.entries((readJsonc(off) as { permission: { skill: Record<string, string> } }).permission.skill), [['*', 'allow'], ['alpha', 'deny']]);
     assert.ok(off.includes('// kept') && off.includes('"bash": "ask"'));
-    assert.equal(state(off), true);
-    assert.deepEqual((readJsonc(flip(off, false)) as { permission: unknown }).permission, { skill: { '*': 'allow' }, bash: 'ask' });
+    assert.equal(await state(off), true);
+    assert.deepEqual((readJsonc(await flip(off, false)) as { permission: unknown }).permission, { skill: { '*': 'allow' }, bash: 'ask' });
     // Every skill denied by a pattern: Enable gives this one its own rule after it.
     const denied = '{ "permission": { "skill": { "al*": "deny" } } }';
-    assert.equal(state(denied), true);
-    assert.deepEqual((readJsonc(flip(denied, false)) as { permission: { skill: unknown } }).permission.skill, { 'al*': 'deny', alpha: 'allow' });
+    assert.equal(await state(denied), true);
+    assert.deepEqual((readJsonc(await flip(denied, false)) as { permission: { skill: unknown } }).permission.skill, { 'al*': 'deny', alpha: 'allow' });
     // Asked for what already holds, nothing changes: the person's other permission rules are not touched.
     const other = '{ "permission": { "bash": "ask" } }';
-    assert.equal(flip(other, false), other);
-    assert.equal(flip(off, true), off);
+    assert.equal(await flip(other, false), other);
+    assert.equal(await flip(off, true), off);
     // A "*" written after `skill` decides for every skill (measured on both lines). A rule for one skill would count only if
     // `skill` moved after it, which would make the rules it overrules count again: reported, never edited.
     await writeFile(settings(box.home), '{ "permission": { "skill": { "beta": "deny" }, "*": "allow" } }\n');
@@ -159,14 +160,14 @@ test('OpenCode’s skill switch is a deny rule by name, written last so it decid
     // What such a file turns off is still read, so the page shows it: here every skill is off.
     await writeFile(settings(box.home), '{ "permission": { "skill": { "alpha": "allow" }, "*": "deny" } }\n');
     assert.equal(isDisabled(box.context, await readSwitchFile(box.context, 'opencode-cli'), target), true);
-    assert.equal(state('{ "permission": { "*": "deny" } }'), true, 'every permission denied, skills too');
+    assert.equal(await state('{ "permission": { "*": "deny" } }'), true, 'every permission denied, skills too');
     // A rule's comment stays with it when another rule goes, and a rule already last changes its word in place.
     const noted = '{\n  "permission": {\n    "skill": {\n      // mine\n      "beta": "deny",\n      // about alpha\n      "alpha": "deny"\n    }\n  }\n}\n';
-    assert.equal(flip(noted, false), '{\n  "permission": {\n    "skill": {\n      // mine\n      "beta": "deny"\n    }\n  }\n}\n');
+    assert.equal(await flip(noted, false), '{\n  "permission": {\n    "skill": {\n      // mine\n      "beta": "deny"\n    }\n  }\n}\n');
     const wider = '{ "permission": { "skill": { "*": "deny", /* kept */ "alpha": "allow" } } }';
-    assert.equal(flip(wider, true), wider.replace('"alpha": "allow"', '"alpha": "deny"'));
+    assert.equal(await flip(wider, true), wider.replace('"alpha": "allow"', '"alpha": "deny"'));
     // One word for every skill becomes a map that says the same.
-    assert.deepEqual((readJsonc(flip('{ "permission": { "skill": "ask" } }', true)) as { permission: { skill: unknown } }).permission.skill, { '*': 'ask', alpha: 'deny' });
+    assert.deepEqual((readJsonc(await flip('{ "permission": { "skill": "ask" } }', true)) as { permission: { skill: unknown } }).permission.skill, { '*': 'ask', alpha: 'deny' });
     // `permission` as one word has no place for a skill's rule: reported, never written.
     await writeFile(settings(box.home), '{ "permission": "allow" }\n');
     assert.match((await readSwitchFile(box.context, 'opencode-cli')).problem?.reason ?? '', /permission as one word/);
