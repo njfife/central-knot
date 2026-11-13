@@ -64,19 +64,24 @@ async function fixture() {
   return { home, context, files, cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 
-test('Every state the old MCP record holds becomes its item: after one pass every settings file is as it was, every content is a version, and a second pass writes nothing', async () => {
+test('Every state the old MCP record holds becomes its item: after one pass every settings file is as it was but the missing one, which gets its servers afresh; every content is a version, and a second pass writes nothing', async () => {
   const box = await fixture();
   try {
     const before = await box.files();
     const oldRecord = await readFile(join(box.home, '.central-knot/mcp.json'), 'utf8');
     const first = await applyServers(box.context, managed, []);
-    assert.deepEqual(first.results.filter(result => result.outcome === 'written' || result.outcome === 'removed'), [], JSON.stringify(first.results));
-    assert.deepEqual(await box.files(), before, 'no settings file changes because of the migration');
+    // Copilot's file was missing at the old engine's last look, as now: nothing is applied there, so each server it is on in is written afresh.
+    assert.deepEqual(first.results.filter(result => result.outcome === 'written' || result.outcome === 'removed').map(result => [result.item, result.harness]),
+      [['synced', 'copilot-cli'], ['behind', 'copilot-cli'], ['leftout', 'copilot-cli'], ['collide', 'copilot-cli']], JSON.stringify(first.results));
+    const copilot = (await readTool(box.context, 'copilot-cli')).entries.find(entry => entry.name === 'synced');
+    assert.deepEqual([copilot?.server.command, copilot?.extras], ['S', { tools: ['search'] }], 'with the own fields kept for it before');
+    const after = await box.files();
+    assert.deepEqual({ ...after, 'copilot-cli': undefined }, before, 'no other settings file changes because of the migration');
     assert.equal(await readFile(join(box.home, '.central-knot/mcp.v1.json'), 'utf8'), oldRecord, 'the old record is kept as it was');
     // The record as the pass left it (the page's look writes a file away for longer than the settle window afresh, in memory).
     const view = await serversView(box.context, managed), items = JSON.parse(await readFile(join(box.home, '.central-knot/mcp.json'), 'utf8')).items as typeof view.library;
     const of = (key: string) => [items[key]?.on, items[key]?.hash, items[key]?.except, items[key]?.applied, !!items[key]?.deleted];
-    // Synced: On at its content, each recorded copy applied (the away one too); a tool's own fields kept for it.
+    // Synced: On at its content, each recorded copy applied (Copilot's as just written); a tool's own fields kept for it.
     assert.deepEqual(of('synced'), [true, H('S'), [], { 'claude-cli': H('S'), 'codex-cli': H('S'), 'pi-cli': H('S'), 'copilot-cli': H('S') }, false]);
     assert.deepEqual(Object.keys(items.synced.own).sort(), ['claude-cli', 'codex-cli', 'copilot-cli', 'pi-cli'], 'the own fields kept before, and the pass keeps each tool’s as it reads it');
     // Claude Code behind: still owed the write, which waits for Write to Claude Code; the displaced content is a version.
@@ -98,11 +103,7 @@ test('Every state the old MCP record holds becomes its item: after one pass ever
     assert.ok(view.items.some(item => item.key === 'alone' && !item.on));
     const second = await applyServers(box.context, managed, []);
     assert.equal(second.writes, 0, JSON.stringify(second.results));
-    assert.deepEqual(await box.files(), before);
-    // Copilot's file away past the settle window: written afresh, each entry with the own fields kept for it before.
-    await applyServers(box.context, managed, [], { now: Date.now() + 1e6 });
-    const copilot = (await readTool(box.context, 'copilot-cli')).entries.find(entry => entry.name === 'synced');
-    assert.deepEqual([copilot?.server.command, copilot?.extras], ['S', { tools: ['search'] }]);
+    assert.deepEqual(await box.files(), after);
   } finally { await box.cleanup(); }
 });
 
@@ -115,7 +116,7 @@ test('A crash while the migration writes leaves the old record and every setting
       assert.deepEqual([await readFile(join(box.home, '.central-knot/mcp.json'), 'utf8'), await box.files()], [oldRecord, before], step);
       await applyServers(box.context, managed, []);
       assert.equal(JSON.parse(await readFile(join(box.home, '.central-knot/mcp.json'), 'utf8')).formatVersion, 2, step);
-      assert.deepEqual(await box.files(), before, step);
+      assert.deepEqual({ ...await box.files(), 'copilot-cli': undefined }, before, `${step}: every file but Copilot’s missing one, written afresh`);
     } finally { await box.cleanup(); }
   }
 });
@@ -140,6 +141,19 @@ test('History’s MCP entries from before the library stay listed and offer only
     assert.equal((await serversView(box.context, managed)).library.behind.hash, H('OLD'));
     assert.deepEqual(libraryAction(history.find(entry => entry.kind === 'written')!, items.behind)?.change.version, H('OLD'), 'its Undo makes the entry Claude Code had current again');
     assert.equal((await readTool(box.context, 'claude-cli')).entries.find(entry => entry.name === 'gone')?.server.command, 'G');
+  } finally { await box.cleanup(); }
+});
+
+test('A copy the old record had as away is not applied: a settings file back empty before the upgrade gets its entries written afresh, not read as deletions', async () => {
+  const box = await fixture();
+  try {
+    box.context.settleMs = 0;
+    await writeFile(join(box.home, FILES['copilot-cli']), '{}\n');
+    await applyServers(box.context, managed, []);
+    await applyServers(box.context, managed, []);
+    const items = JSON.parse(await readFile(join(box.home, '.central-knot/mcp.json'), 'utf8')).items;
+    assert.deepEqual([items.synced.on, (await readHistory(box.context)).filter(event => event.cause === 'deleted-by-hand').length], [true, 0]);
+    assert.deepEqual((await readTool(box.context, 'copilot-cli')).entries.map(entry => [entry.name, entry.server.command]).sort(), [['behind', 'NEW'], ['collide', 'C'], ['leftout', 'L'], ['synced', 'S']]);
   } finally { await box.cleanup(); }
 });
 

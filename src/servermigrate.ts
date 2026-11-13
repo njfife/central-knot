@@ -1,6 +1,6 @@
 // The MCP record from before the library (mcp.json format 1: each tool's settings file was the truth, and Central Knot recorded
-// which servers it synced, where, and at what content) made into library items. Run once per home, by serverstore.ts
-// openLibrary, which writes the result.
+// which servers it synced, where, and at what content) made into library items, by serverstore.ts openLibrary: in memory at
+// each look until the first pass that may write saves the result.
 //
 // The rule: no settings file changes because of the migration, and every content kept before, or in a tool now, is a version.
 //
@@ -9,6 +9,8 @@
 //                                                        synced there applied, so a copy that is behind (Claude Code
 //                                                        waiting for Write) is still owed it, and an edit not spread yet is
 //                                                        taken in by the first pass, as the earlier engine would have
+//   a copy whose file was missing at the last look       nothing applied there: an entry missing there is written afresh,
+//     (`away`)                                           never read as deleted by hand
 //   a tool it was left out of (`off`)                    that tool kept out, nothing applied: an entry there stays
 //   a tool holding a differing entry never recorded      that tool kept out, nothing applied: the entry stays as it is
 //     (a same-name collision waiting for a choice)
@@ -30,8 +32,8 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { newItem, type LibraryItem, type Source } from './library.ts';
-import type { KindLibrary } from './librarypass.ts';
-import { mcpFile, readTool, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
+import { sharedFileSeen, type KindLibrary } from './librarypass.ts';
+import { mcpFile, ownText, readTool, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { mcpTools } from './presence.ts';
 import { itemKey, sha256, storeDirectory, type ShareContext } from './share.ts';
 import type { HarnessId } from './types.ts';
@@ -82,7 +84,7 @@ export function migrateItem(name: string, old: OldItem, kept: KeptServer[], onDi
     if (copy.file && copy.file !== files[copy.tool]) continue;
     // A removal still owed goes once it can, while the entry is the one it was owed for.
     if (copy.status === 'removing') { if (!synced && here?.hash === copy.hash) item.applied[copy.tool] = copy.hash; }
-    else if (synced && !leftOut.has(copy.tool)) item.applied[copy.tool] = copy.hash;
+    else if (synced && !leftOut.has(copy.tool) && !copy.away) item.applied[copy.tool] = copy.hash;
   }
   // An entry that differs and was never on record: the earlier engine held for a choice of copy and wrote nothing there.
   if (synced) for (const entry of onDisk) if (item.applied[entry.tool] === undefined && entry.hash !== current) leftOut.add(entry.tool);
@@ -104,7 +106,7 @@ async function readKept(context: ShareContext, name: string): Promise<KeptServer
     for (const tool of mcpTools) {
       const text = await readFile(join(base, hash, `${tool}.json`), 'utf8').catch(() => undefined);
       const extras = text === undefined ? undefined : (() => { try { return JSON.parse(text).extras; } catch { return undefined; } })();
-      if (extras && typeof extras === 'object') own[tool] = JSON.stringify(extras);
+      if (extras && typeof extras === 'object') own[tool] = ownText({ name, extras });
     }
     found.push({ hash, server, at: await stat(join(base, file)).then(info => info.mtimeMs, () => 0), own });
   }
@@ -127,7 +129,7 @@ export async function migrateServers(context: ShareContext, old: OldServerRecord
   for (const tool of mcpTools) {
     const file = mcpFile(context, tool), read = await readTool(context, tool);
     files[tool] = file;
-    migrated.folders[tool] = read.exists ? { path: file, ino: 0, birth: 0 } : { path: file, away: true };
+    migrated.folders[tool] = sharedFileSeen(file, read.exists);
     onDisk.push(...read.entries);
   }
   for (const [name, was] of Object.entries(old.items)) {

@@ -788,7 +788,7 @@ async function startWatching() {
 }
 
 
-/** Whether Claude Code (its CLI, or Claude desktop and its Code tab) is running (macOS and Linux). When this can't be told, Write now goes ahead as asked. */
+/** Whether Claude Code (its CLI, or Claude desktop and its Code tab) is running (macOS and Linux). When this can't be told, Write to Claude Code goes ahead as asked. */
 function claudeRunning(): Promise<boolean> {
   if (current?.mode !== 'actual' || process.platform === 'win32') return Promise.resolve(false);
   const found = (args: string[]) => new Promise<boolean>(done => execFile('pgrep', args, error => done(!error)));

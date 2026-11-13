@@ -348,12 +348,12 @@ export interface Change {
 
 export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch: the switches it flipped. */ flips?: ProfileFlip[]; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
 
-/** What sync did on its own: an edit spread, competing edits resolved, or a deletion spread or overruled. */
+/** What sync did on its own: an edit spread, competing edits resolved, or a copy deleted by hand that turned an item off. */
 export interface SyncNotice {
   key: string;
   item: string;
-  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'reset';
-  /** The tool whose edit or deletion won; for a reset, the tool whose folder lost everything. */
+  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit';
+  /** The tool whose edit or deletion won. */
   winner: HarnessId;
   /** Tools whose differing copies gave way, or still hold the item after a deletion lost. */
   losers: HarnessId[];

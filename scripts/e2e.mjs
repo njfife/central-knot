@@ -569,10 +569,8 @@ async function practiceFlow() {
   same('adding a found skill takes it in and writes it to every tool at once, byte for byte', [await switchOn(a, 'notes'), folders('notes')[2], folders('notes')[1]], [true, folders('notes')[0], folders('notes')[0]]);
   const statusBarShows = () => a.run(`(() => { const region = document.querySelector('#announcement'); return region.classList.contains('visually-hidden') ? '' : region.dataset.text; })()`);
   check('the result says where it is now, in the strip at the top only', (await a.text('.band-done') ?? '').includes('notes is in Central Knot now, and on in all 3 tools.') && !(await statusBarShows()), [await a.text('.bands'), await statusBarShows()]);
-  same('and its row stays where it was while the pointer is over the list', (await sectionsNow(a))[0], ['found', ['notes', 'release-notes', 'review', 'standup']]);
+  same('and its row is under On at once, the pointer over the list too: each heading is true for its rows and counts them', [(await sectionsNow(a))[0], await a.text('.ov-section[data-section="on"] .ov-section-count')], [['on', ['notes']], '1']);
   await pointerOver('.toolbar');
-  await a.settle();
-  same('once the pointer leaves the list, the rows regroup and the headings count again', [(await sectionsNow(a))[0], await a.text('.ov-section[data-section="on"] .ov-section-count')], [['on', ['notes']], '1']);
   // Off takes the folder out of every tool; Central Knot keeps it. Its Undo (On) puts every folder back, byte for byte.
   const notesOn = folders('notes');
   await a.click('#switch-notes');
@@ -583,8 +581,6 @@ async function practiceFlow() {
   check('and says so in the same strip, which goes after a few seconds', /^Undone: notes is as before\./.test(await a.text('.band-done') ?? '') && !(await statusBarShows()), [await a.text('.bands'), await statusBarShows()]);
   for (let tries = 0; tries < 80 && await a.exists('.band-done'); tries++) await wait(100);
   check('…and leaves nothing behind in the status bar', !(await a.exists('.band-done')) && !(await statusBarShows()), [await a.text('.bands'), await statusBarShows()]);
-  // From here the pointer stays off the list, so each click's row regroups at once.
-  await pointerOver('.toolbar');
   // A skill already the same in every tool is taken in with nothing written. Delete from Central Knot takes it out of every
   // tool and off the page.
   const sameDirs = ['.claude/skills', '.copilot/skills', '.codex/skills'].map(root => join(practice, root, 'same-everywhere'));
@@ -738,7 +734,7 @@ async function practiceFlow() {
   await wait(2200);
   await a.click('#header-refresh');
   same('then the skill turns off everywhere', releaseNotesIn(), [false, false, false]);
-  check('with a notice that Central Knot keeps it, offering Turn on', (await a.text('.sync-notices') ?? '').includes('release-notes was deleted in Copilot CLI, so it is off everywhere. Central Knot keeps it') && /Turn on/.test(await a.text('.sync-notices') ?? ''), await a.text('.bands'));
+  check('with a notice that Central Knot keeps it, offering Turn on', (await a.text('.sync-notices') ?? '').includes('release-notes was deleted in Copilot CLI, so it is off and was taken out of Claude Code and Codex. Central Knot keeps it') && /Turn on/.test(await a.text('.sync-notices') ?? ''), await a.text('.bands'));
   check('and the table keeps it under Off, in Central Knot only', ((await sectionsNow(a)).find(([role]) => role === 'off')?.[1] ?? []).includes('release-notes') && /in Central Knot only/.test(await a.text('.ov-row[data-key="release-notes"]') ?? '') && !(await switchOn(a, 'release-notes')), await sectionsNow(a));
   await a.click('#nav-history');
   check('History lists it', (await a.text('#history-scroll') ?? '').includes('release-notes'), await a.text('#history-scroll'));
@@ -957,7 +953,11 @@ async function practiceFlow() {
   check('a found server has Add where a switch would be, and there is no Apply all', await a.exists('#add-docs') && !(await a.exists('#switch-docs')) && !(await a.exists('#apply, #manage-all')));
   const tomlBefore = readFileSync(join(practice, '.codex/config.toml'), 'utf8');
   await a.click('#add-docs');
+  // files is added from the keyboard (focus on its Add, as Tab leaves it): its row moves under On at once, and each heading counts its rows.
+  await a.run(`document.querySelector('#add-files').focus()`);
+  await a.press('Shift');
   await a.click('#add-files');
+  same('after a click each row is under the heading true for it, from the keyboard too, and the headings count their rows', [await sectionsNow(a), await a.text('.ov-section[data-section="on"] .ov-section-count')], [[['on', ['docs', 'files']]], '2']);
   check('taking files in says where it is on, and that Claude Code waits for Write, as a plain note, not a warning', /^files is in Central Knot now, and on in Copilot CLI and Codex\. Claude Code waits for Write to Claude Code\./.test(await a.text('.band-done .band-text') ?? '')
     && !(await a.exists('.band-done .tone-warning')), [await a.text('.bands'), await a.text('.toolbar')]);
   const copilotMcp = JSON.parse(readFileSync(join(practice, '.copilot/mcp-config.json'), 'utf8')).mcpServers;
@@ -974,7 +974,13 @@ async function practiceFlow() {
   // Off: out of every tool, Central Knot keeps it; Claude Code's entry goes with Write. Undo puts each entry back as it was.
   const mcpFiles = ['.claude.json', '.copilot/mcp-config.json', '.codex/config.toml'].map(file => join(practice, file));
   const mcpBefore = mcpFiles.map(readNow);
+  // Turned off with the pointer over the list, its row open: it moves under Off at once.
+  await a.click('#open-files');
+  await pointerOver('#switch-files');
   await a.click('#switch-files');
+  same('after a click with the pointer over the list too, each row is under the heading true for it', [await sectionsNow(a), await a.text('.ov-section[data-section="on"] .ov-section-count'), await a.text('.ov-section[data-section="off"] .ov-section-count')], [[['on', ['docs']], ['off', ['files']]], '1', '1']);
+  await pointerOver('.toolbar');
+  await a.click('#open-files');
   same('Off takes files out of Copilot and Codex at once; Claude Code’s entry waits for Write, and the band says it removes it', [!!JSON.parse(readNow(mcpFiles[1])).mcpServers.files, readNow(mcpFiles[2]).includes('[mcp_servers.files]'), !!JSON.parse(readNow(mcpFiles[0])).mcpServers.files, /to remove files/.test(await a.text('.band-write-now') ?? '')],
     [false, false, true, true]);
   await a.click('#outcome-undo');
@@ -987,6 +993,10 @@ async function practiceFlow() {
   same('a server off in Copilot CLI is marked there', await offMarks(a, 'docs'), ['copilot-cli']);
   await a.click('#open-docs');
   await a.shot('practice-mcp-disabled');
+  // Full screen on a 1728×1117 display: the details dock beside the table, and a row's line, its tag and URL here, still shows whole.
+  await sizeTo(a, 1728, 1117);
+  same('docked at full screen, a row’s line is shortened only when it has no room', await a.all('.ov-row[data-key] .ov-name-about', 'e.scrollWidth <= e.clientWidth'), [true, true]);
+  await fullSize(a);
   check('its line says Central Knot leaves that switch as it is', /switched off in Copilot CLI’s own settings: Copilot CLI doesn’t start it\. Central Knot leaves that switch as it is/.test(await a.text('.details') ?? ''), await a.text('.details'));
   const codexBefore = readNow(mcpFiles[2]);
   await a.click('#enable-docs-codex-cli');
@@ -1014,7 +1024,11 @@ async function practiceFlow() {
     [await a.text('#add-code-reviewer'), /^Found\s*2/.test((await a.text('[data-section="found"]') ?? '').trim()), /not in Central Knot/.test(await agentRow('code-reviewer') ?? ''),
       /Add one to keep it in Central Knot and turn it on\./.test(await a.text('[data-section="found"]') ?? '')], ['Add', true, true, true]);
   await a.click('#add-code-reviewer');
+  // release-notes is added from the keyboard: the rows are shared with Skills and MCP servers, so it is under On at once too.
+  await a.run(`document.querySelector('#add-release-notes').focus()`);
+  await a.press('Shift');
   await a.click('#add-release-notes');
+  same('after a click each agent is under the heading true for it, from the keyboard too', await sectionsNow(a), [['on', ['code-reviewer', 'release-notes']]]);
   const reviewerFiles = ['.claude/agents/code-reviewer.md', '.copilot/agents/code-reviewer.agent.md', '.codex/agents/code-reviewer.toml'].map(file => join(practice, file));
   const [claudeAgent, , codexAgent] = reviewerFiles;
   const reviewerNow = () => reviewerFiles.map(file => (existsSync(file) ? readFileSync(file, 'utf8') : null));
@@ -1026,8 +1040,9 @@ async function practiceFlow() {
   // Off takes the agent out of every harness. Central Knot keeps it: its row stays, off, with its description; On (here the
   // result's Undo) writes every harness's file back byte for byte, Claude Code's own fields included.
   await a.click('#switch-code-reviewer');
-  same('Off takes the agent out of every harness; its row stays, off, in Central Knot only, with its description',
-    [reviewerNow(), await switchState('code-reviewer'), /in Central Knot only/.test(await agentRow('code-reviewer') ?? ''), /Reviews a change/.test(await agentRow('code-reviewer') ?? '')], [[null, null, null], 'false', true, true]);
+  same('Off takes the agent out of every harness; its row moves under Off, in Central Knot only, with its description',
+    [reviewerNow(), await switchState('code-reviewer'), /in Central Knot only/.test(await agentRow('code-reviewer') ?? ''), /Reviews a change/.test(await agentRow('code-reviewer') ?? ''), await sectionsNow(a)],
+    [[null, null, null], 'false', true, true, [['on', ['release-notes']], ['off', ['code-reviewer']]]]);
   check('the result says Central Knot keeps it', /code-reviewer is off: no tool has it\. Central Knot keeps it/.test(await a.text('main') ?? ''), (await a.text('main') ?? '').slice(0, 300));
   await a.click('#outcome-undo');
   same('Undo turns it on again: every harness’s file is back byte for byte', reviewerNow(), taken);

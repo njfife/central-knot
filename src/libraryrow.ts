@@ -9,7 +9,7 @@
 //   on     in Central Knot's library and On: applied to every managed harness it is not kept out of; `partial` when the
 //          person keeps it out of some (the opened row's switches), which its row and switch tell apart from On everywhere
 //   off    in the library and Off: in Central Knot only, in no harness
-//   found  in a managed harness, not in the library; its switch takes it in
+//   found  in a managed harness, not in the library; its Add takes it in
 // A harness's line can say three more things the kind's view works out at each look and that change nothing a pass does: how
 // the harness has the item another way (`anotherWay`), that its own switch turns it off there (`switched`, skills and MCP
 // servers), and that a write or removal there waits for Write to Claude Code (`waits`, MCP servers).
@@ -22,6 +22,13 @@ import type { Change, HarnessId, SyncNotice } from './types.ts';
 import { andList, kindNouns, sentence, toolName, toolsPhrase } from './words.ts';
 
 // ---------- What a kind supplies ----------
+
+/**
+ * Whether a kind's writes and removals in a harness wait for a step of the person's own: Claude Code's MCP settings, which
+ * Central Knot writes only when the person clicks Write to Claude Code (servers.ts holds them back until then). The page and
+ * History say so before a click (matrix.ts, historyactions.ts).
+ */
+export const writesWait = (kind: 'skills' | 'mcp' | 'agents', tool: string) => kind === 'mcp' && tool === 'claude-cli';
 
 /** A kind's words on its rows, where they differ from another kind's. */
 export interface RowWords {
@@ -230,8 +237,8 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
   const where = (...states: HarnessIs[]) => harnessesWhere(row, item, tools, ...states);
   const own = where('own-copy'), place = placeOf(item);
   const waiting = where('waits'), waits = waiting.length ? `${sentence(named(waiting, tools))} still ${waiting.length === 1 ? 'has' : 'have'} it until you click Write to Claude Code.` : '';
-  // A deleted item whose copy there is still to go is a found row until it has gone.
-  if (place === 'found' && waits) return `Deleted from Central Knot · ${waits}`;
+  // A deleted item whose copy there is still to go is a found row, with no Add, until it has gone.
+  if (place === 'found' && waits) return `Deleted from Central Knot · ${waits} History can restore it.`;
   if (place === 'found') {
     const differ = needsChoice(row, item) ? ', with different copies' : '';
     if (!canTakeIn(row)) return 'Not in Central Knot · it can’t be taken in now (see below).';
@@ -239,10 +246,10 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
     return `Not in Central Knot · ${foundWhere(row, item, tools)}${differ}. Add it to keep it in Central Knot${whereAdded(row, item, tools)}${below}.`;
   }
   const ownSaid = own.length ? ` ${sentence(named(own, tools))} ${own.length === 1 ? 'has a copy' : 'have copies'} Central Knot didn’t put there.` : '';
-  if (place === 'off') return `Off · in Central Knot only. Turn it on to put it in every tool.${ownSaid}${waits ? ` ${waits}` : ''}`;
+  if (place === 'off') return `Off · ${waiting.length ? `still in ${named(waiting, tools)} until you click Write to Claude Code` : 'in Central Knot only'}. Turn it on to put it in every tool.${ownSaid}`;
   // A copy deleted by hand turns the item Off at the next pass: that is what it is about to be.
   const deletedIn = row.plan?.turnedOffBy;
-  if (deletedIn) return `On · its copy was deleted in ${toolName(deletedIn)}, so it turns off everywhere when sync runs. Central Knot keeps it.`;
+  if (deletedIn) return `On · its copy was deleted in ${toolName(deletedIn)}, so it turns off when sync runs. Central Knot keeps it.`;
   // A harness holding the current version that only waits for an edit made elsewhere has it on.
   const waitsForEdit = (tool: string) => row.hashes?.[tool] === item!.hash;
   const gets = where('gets-it').filter(tool => !waitsForEdit(tool)), out = where('kept-out', 'leaving'), cannot = where('cannot');
@@ -282,6 +289,7 @@ export function switchLabel(row: LibraryRow, item: LibraryItem | undefined, tool
 export function addLabel(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[], question?: 'open' | 'closed'): string {
   const name = row.name ?? row.key;
   if (question) return `Add ${name}: its copies differ. Click to ${question === 'open' ? 'close the question' : 'choose which one Central Knot takes in'}.`;
+  if (row.waits?.length) return `Add ${name}: it was deleted from Central Knot, and its entry leaves ${andList(row.waits.map(toolName))} at the next Write to Claude Code. History can restore it.`;
   if (!canTakeIn(row)) return `Add ${name}: it can’t be added now; its line in the opened row says why.`;
   return `Add ${name} to Central Knot${whereAdded(row, item, tools)}`;
 }
@@ -304,7 +312,8 @@ export const notOnIn = (row: LibraryRow, item: LibraryItem | undefined, tools: r
   tools.filter(tool => item?.except.includes(tool as HarnessId) || !!row.switched?.[tool]);
 
 /** Whether a found item has a copy to take in: one of a harness's own, or one a harness has another way (a skill's shared copy). */
-export const canTakeIn = (row: LibraryRow) => Object.keys(row.hashes ?? {}).length > 0 || Object.keys(row.anotherWay ?? {}).length > 0;
+/** Whether a found row's Add can take it in: a tool has a copy, and none of it is a deleted item's copy still to go (`waits`). */
+export const canTakeIn = (row: LibraryRow) => !row.waits?.length && (Object.keys(row.hashes ?? {}).length > 0 || Object.keys(row.anotherWay ?? {}).length > 0);
 /** Where a found item is: "in Claude Code and Codex", or, with no copy of a harness's own, "Pi has it another way". */
 function foundWhere(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]) {
   const own = harnessesWhere(row, item, tools, 'own-copy');
@@ -356,7 +365,7 @@ export function sentences(words: RowWords) {
         const gone = inLib!.on ? `the ${noun} is kept out of this tool` : `the ${noun} is off`;
         return `Edited in ${where}. When sync runs it becomes the current version${reaches}, then its copy here is removed: ${gone}.`;
       }
-      case 'deleted': return `Its copy was deleted in ${where}. When sync runs, the ${noun} turns off everywhere; Central Knot keeps it.`;
+      case 'deleted': return `Its copy was deleted in ${where}. When sync runs, the ${noun} turns off; Central Knot keeps it.`;
       case 'leaving': {
         const kept = row.plan?.keep.some(entry => entry.harness === tool);
         return kept ? 'Has a copy Central Knot doesn’t have yet. When sync runs it is kept as a version, then removed.' : 'Its copy is removed when sync runs. Central Knot keeps it.';
@@ -370,7 +379,7 @@ export function sentences(words: RowWords) {
       case 'unseen': return row.unseen![tool]!;
       case 'waits': {
         if (row.plan?.write.includes(tool as HarnessId)) return has ? `Its ${copy} here is behind. It gets the current version when you click Write to Claude Code.` : `It gets the ${noun} when you click Write to Claude Code.`;
-        return `Its ${copy} here is removed when you click Write to Claude Code. Central Knot keeps it.`;
+        return `Its ${copy} here is removed when you click Write to Claude Code. ${inLib ? 'Central Knot keeps it.' : 'History can restore it.'}`;
       }
     }
   }
@@ -381,6 +390,7 @@ export function sentences(words: RowWords) {
    */
   function placeTag(row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]): { text: string; title: string } | undefined {
     const place = placeOf(item);
+    if (place === 'off' && row.waits?.length) return { text: `still in ${andList(row.waits.map(toolName))} until Write`, title: `Off. Central Knot keeps this ${noun}; its ${copy} leaves ${andList(row.waits.map(toolName))} when you click Write to Claude Code.` };
     if (place === 'off') return { text: 'in Central Knot only', title: `Central Knot keeps this ${noun} and its versions. No tool has it until you turn it on.` };
     const found = `A tool has this ${noun}; Central Knot doesn’t yet. Add it to keep it in Central Knot${whereAdded(row, item, tools)}.`;
     if (place === 'found' && row.waits?.length) return { text: 'deleted', title: `Deleted from Central Knot. Its ${copy} leaves ${andList(row.waits.map(toolName))} when you click Write to Claude Code.` };
@@ -443,7 +453,8 @@ export function sentences(words: RowWords) {
     const who = toolName(notice.winner), others = andList(notice.losers.map(toolName)), name = notice.item;
     const earlier = `Make the version from before ${who}’s edit current again, in every tool ${name} is on in`;
     if (notice.kind === 'deleted') {
-      const text = `${name} was deleted in ${who}, so it is off everywhere. Central Knot keeps it.`;
+      // The tools it was taken out of (one whose removal waits for Write to Claude Code is not among them: the band says it).
+      const text = `${name} was deleted in ${who}, so it is off${others ? ` and was taken out of ${others}` : ''}. Central Knot keeps it.`;
       return { text, action: 'turn-on', help: `Put ${name} back in every tool, each ${copy} as it was` };
     }
     if (notice.kind === 'conflict') {

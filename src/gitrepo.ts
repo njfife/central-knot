@@ -440,8 +440,8 @@ function pullOf(row: RepoChange): NonNullable<RepoChange['pull']> {
 
 /**
  * Sorts what differs into what Pull brings in and what Push sends. `unfinished`: items the last Pull couldn't finish, offered to
- * Pull again while the repo still has what it had then. `syncOn`: whether Automatic sync is on; while it is off, an MCP server's or
- * agent's deletion coming in waits for it (`sync: 'waits'`), since Pull can't spread one without it.
+ * Pull again while the repo still has what it had then. `syncOn`: whether Automatic sync is on; while it is off, an agent's
+ * deletion coming in waits for it (`sync: 'waits'`), since Pull can't spread one without it.
  */
 export function classify(sides: Pick<Sides, 'base' | 'latest' | 'here' | 'unsent' | 'unmanaged'>, unfinished: Unfinished = {}, syncOn = true): { incoming: RepoChange[]; outgoing: RepoChange[] } {
   const incoming: RepoChange[] = [];

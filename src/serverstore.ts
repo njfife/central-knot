@@ -3,7 +3,7 @@
 //   mcp.json                                  the record: each server as a LibraryItem, and each tool's settings file as last seen
 //   mcp.v1.json                               the record from before the library, as it was (servermigrate.ts made the new one from it)
 //   items/mcp/<key>/versions/<hash>.json      one version's content: the shared part (mcp.ts NeutralServer)
-//   items/mcp/<key>/own/<hash>.json           one tool's own fields for the server (mcp.ts McpEntry extras), as a pass last saw them
+//   items/mcp/<key>/own/<hash>.json           one tool's own part of the server's entry (mcp.ts OwnPart), as a pass last saw it
 //   items/mcp/<name>/<hash>.json, <hash>/…    servers kept before the library: read once by the migration, never deleted
 //
 // Every file under items/ is named by what it holds, so a second file never replaces a first, and nothing here is pruned.
@@ -13,15 +13,13 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { isLibraryItem, type LibraryItem } from './library.ts';
 import type { KindLibrary } from './librarypass.ts';
-import { serverHash, type NeutralServer } from './mcp.ts';
+import { serverHash, type NeutralServer, type OwnPart } from './mcp.ts';
 import { isOldRecord, migrateServers, type OldServerRecord } from './servermigrate.ts';
 import { NOTHING_CHANGED, errorCode, exists, sha256, storeDirectory, writeDurably, type ShareContext } from './share.ts';
 import type { HarnessId } from './types.ts';
 
 /** The record: the servers' part of the library (librarypass.ts KindLibrary: the items, and each settings file as last seen). */
 export interface ServerLibrary extends KindLibrary { formatVersion: number }
-/** A tool's own fields for one server, as its settings file holds them (JSON values, or TOML lines for Codex). */
-export type OwnFields = Record<string, unknown>;
 
 /** Format 2 is the library's. Format 1 (servermigrate.ts) is migrated. */
 const FORMAT_VERSION = 2;
@@ -105,12 +103,9 @@ export async function readVersion(context: ShareContext, key: string, hash: stri
   try { return JSON.parse(await readFile(path, 'utf8')) as NeutralServer; } catch { return notStoredYet.get(path); }
 }
 
-/** A tool's own fields as text, the form `own` keeps them in (servers.ts serverKind ownOf). */
-export const ownText = (fields: OwnFields) => JSON.stringify(fields);
-
 const storeOwn = (context: ShareContext, key: string, text: string) => storeOnce(ownPath(context, key, sha256(text)), text);
 
-/** Keeps a tool's own fields for the server as that tool's own part of the item; true when they differ from the ones kept. The caller saves the record. */
+/** Keeps a tool's own part of the server's entry as that tool's own part of the item; true when it differs from the one kept. The caller saves the record. */
 export async function keepOwn(context: ShareContext, item: LibraryItem, tool: HarnessId, text: string): Promise<boolean> {
   const hash = sha256(text);
   await storeOwn(context, item.key, text);
@@ -119,9 +114,9 @@ export async function keepOwn(context: ShareContext, item: LibraryItem, tool: Ha
   return was !== hash;
 }
 
-/** The own fields kept for a tool, which an entry written there afresh gets back (none kept: the tool's defaults). */
-export async function keptOwn(context: ShareContext, item: LibraryItem, tool: HarnessId): Promise<OwnFields | undefined> {
+/** The own part kept for a tool, which an entry written there afresh gets back (none kept: the item's name and the tool's defaults). */
+export async function keptOwn(context: ShareContext, item: LibraryItem, tool: HarnessId): Promise<OwnPart | undefined> {
   const hash = item.own[tool];
   if (!hash) return undefined;
-  try { return JSON.parse(await readFile(ownPath(context, item.key, hash), 'utf8')) as OwnFields; } catch { return undefined; }
+  try { return JSON.parse(await readFile(ownPath(context, item.key, hash), 'utf8')) as OwnPart; } catch { return undefined; }
 }

@@ -17,7 +17,8 @@
 // Content has two parts for agents and MCP servers: the shared part, which a version's hash names (an agent's name,
 // description and prompt), and each harness's own part (the other fields of its file). The library keeps the latest own
 // part per harness (`own`: its file as a pass last saw or wrote it), so Off then On, or Turn on after a copy was deleted by
-// hand, writes the same file back, byte for byte. A skill's version is its whole folder.
+// hand, writes the same file back, byte for byte; an MCP entry comes back with the same values, name, place and own fields
+// and lines (servers.ts), after the file's other servers. A skill's version is its whole folder.
 //
 // THE RULE. What happens in one harness follows from three contents: L, the item's current version; H, what the harness
 // holds now; A, what was applied there last. `decide` is this table, one line per row:

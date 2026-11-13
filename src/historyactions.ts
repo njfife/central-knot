@@ -26,6 +26,7 @@
 //                                            again, each tool it
 //                                            was found in keeping
 //                                            its own copy
+//   (either Undo, when a copy would go back to Claude Code's MCP settings: not offered, see givesBackLater)
 //   deleted                                  Restore                the item is deleted
 //   a content change: edit, conflict,        Undo; once later       the version from before it (`previous`) is not the
 //     current, and any entry from before     changes came, "Make    current one
@@ -46,7 +47,7 @@
 // in libraryAction, the entry librarypass.ts logItem makes for it, and its case in historypage.ts describe.
 import type { IconName } from './icons.ts';
 import { itemKey, theVersion, type LibraryItem } from './library.ts';
-import { asItIs, versionClock, type RowWords } from './libraryrow.ts';
+import { asItIs, versionClock, writesWait, type RowWords } from './libraryrow.ts';
 import type { Change, HarnessId, HistoryEvent, LibraryFacts } from './types.ts';
 import { andList, toolName, toolsPhrase } from './words.ts';
 
@@ -210,12 +211,13 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
   // it was found in keeping its own copy.
   const tookIn = event.kind === 'chosen' || (event.kind === 'on' && event.cause === 'found');
   if (tookIn && item.on && asTheClickLeftIt(event, item)) {
+    if (givesBackLater(event, givenBack(event, item).giveBack)) return undefined;
     return { label: 'Undo', help: `Take ${name} out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own`, change: { ...now, deleted: true, ...givenBack(event, item) } };
   }
   if (event.kind === 'off' || event.kind === 'on') {
     const action = switchAction(event.kind === 'off', event.only, item), back = givenBack(event, item).giveBack;
     // Copies go back only with an Undo, while the item is as the click left it; a plain Turn off or Turn on gives none back.
-    if (!action || !back || !asTheClickLeftIt(event, item)) return action;
+    if (!action || !back || !asTheClickLeftIt(event, item) || givesBackLater(event, back)) return action;
     const tools = (Object.keys(back) as HarnessId[]).map(toolName);
     const own = `${andList(tools)} ${tools.length === 1 ? 'has its own copy' : 'have their own copies'} back, as before`;
     return { label: 'Undo', help: `${action.help}; ${own}`, change: { ...action.change, giveBack: back } };
@@ -226,6 +228,16 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
   const latest = (event.version ?? event.winner?.hash) === item.hash;
   return { label: latest ? 'Undo' : 'Go back before this', help: `Make the version from before this change current again${everywhere}`, change: { ...now, version: event.previous } };
 }
+
+/**
+ * Whether an Undo would give a copy back to a harness that the kind writes only on a step of the person's own (libraryrow.ts
+ * writesWait: Claude Code's MCP settings, written by Write to Claude Code alone). That give-back would wait, and the write
+ * after would remove the copy instead, so such an Undo is not offered.
+ */
+const givesBackLater = (event: HistoryEvent, back: Change['giveBack']) => {
+  const kind = libraryEntry(event)?.kind;
+  return !!kind && Object.keys(back ?? {}).some(tool => writesWait(kind, tool));
+};
 
 /**
  * Whether the item is still as the entry's click left it: at the version it left (types.ts HistoryEvent version, or the

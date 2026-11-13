@@ -81,6 +81,9 @@ test('choosing a copy names the one or two copies it replaces, and the tools it 
   assert.equal(choiceEffect(['Codex'], []), 'Replaces Codex’s copy.');
   assert.equal(choiceEffect(['Claude Code', 'Copilot CLI'], []), 'Replaces Claude Code’s copy and Copilot CLI’s copy.');
   assert.equal(choiceEffect(['Codex'], ['Claude Code']), 'Replaces Codex’s copy; adds it to Claude Code.');
+  // A tool whose change waits for Write to Claude Code (an MCP server's, in Claude Code) says when it happens.
+  assert.equal(choiceEffect(['Codex'], ['Claude Code'], ['Claude Code']), 'Replaces Codex’s copy; adds it to Claude Code at Write.');
+  assert.equal(choiceEffect(['Claude Code'], ['Pi'], ['Claude Code']), 'Replaces Claude Code’s copy at Write; adds it to Pi.');
   assert.equal(choiceEffect([], ['Codex', 'Pi']), 'Adds it to Codex and Pi.');
 });
 

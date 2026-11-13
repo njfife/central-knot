@@ -348,17 +348,17 @@ if (wanted('mcp')) {
   await atEverySize('taken-in-waits', 'Clicked Add on docs, then on files: files is in Central Knot, on in Copilot CLI and Codex; the result says Claude Code waits for Write to Claude Code as a plain note; the amber band says what it adds, with its one button; files’s Claude Code mark is a clock', true);
   await shot(a, 'waits-hover', 'The pointer on files’s Claude Code mark: its tooltip says it gets the server when Write to Claude Code is clicked.', await middleOf('#cell-files-claude-cli'));
   await openRow('files');
-  await atEverySize('waits-open', 'Opened files: Claude Code’s line says it gets the MCP server when Write to Claude Code is clicked; the other tools have the current version, Codex’s own setting named after its line', false, '.details');
+  await atEverySize('waits-open', 'Opened files: Claude Code’s line says it gets the MCP server when Write to Claude Code is clicked, and its switch says “Waits for Write” in place of On; the other tools have the current version, Codex’s own setting named after its line', false, '.details');
   await closeRow('files');
   await a.click('#mcp-write-claude'); await a.settle();
   await atEverySize('written', 'Clicked Write to Claude Code (Claude Code quit): files is in Claude Code too, the rest of its settings kept; the band is gone', false, '.bands');
   // Off: out of every tool; Claude Code's entry goes with Write. Then Delete from Central Knot before that write.
   await a.click('#switch-files'); await a.settle();
-  await atEverySize('off-waits', 'Turned files off: it left Copilot CLI and Codex at once; the result says it is still in Claude Code; the band now offers to remove it there', true);
+  await atEverySize('off-waits', 'Turned files off: it left Copilot CLI and Codex at once and its row is under Off at once; the result, the Off heading and the row say it is still in Claude Code until Write; the band now offers to remove it there', true);
   await openRow('files');
-  await atEverySize('off-waits-open', 'Opened the Off row: "Off · in Central Knot only … Claude Code still has it until you click Write to Claude Code."; Claude Code’s line says its entry is removed then', false, '.details');
+  await atEverySize('off-waits-open', 'Opened the Off row: "Off · still in Claude Code until you click Write to Claude Code."; Claude Code’s line says its entry is removed then', false, '.details');
   await a.click('#delete-files'); await a.click('#delete-confirm-files'); await a.settle();
-  await atEverySize('deleted-waits', 'Then Delete from Central Knot, still before the write: files is a row tagged "deleted", "Deleted from Central Knot · Claude Code still has it until you click Write to Claude Code."; the band removes it', true);
+  await atEverySize('deleted-waits', 'Then Delete from Central Knot, still before the write: files is a row tagged "deleted", with no Add, "Deleted from Central Knot · Claude Code still has it until you click Write to Claude Code. History can restore it."; Claude Code’s line says History can restore it; the band removes it', true);
   await a.click('#mcp-write-claude'); await a.settle();
   // A tool's own switch, set in its settings: read, never written; its line says Central Knot leaves it as it is.
   const switchesBefore = existsSync(settings.copilotSwitches) ? readFileSync(settings.copilotSwitches, 'utf8') : '{}';
@@ -385,10 +385,10 @@ if (wanted('mcp')) {
   await a.click('#version-read-docs-1');
   await closeRow('docs');
   if (await a.has('#mcp-write-claude')) { await a.click('#mcp-write-claude'); await a.settle(); }
-  // What `codex mcp remove docs` leaves: docs turns off everywhere; Central Knot keeps it, and the notice offers Turn on.
+  // What `codex mcp remove docs` leaves: docs turns off, Claude Code's entry going at Write; Central Knot keeps it, and the notice offers Turn on.
   edit(settings.codex, text => text.replace(/\n?\[mcp_servers\.docs\][^[]*/, '\n'));
   await refresh(); await wait(2300); await refresh();
-  await atEverySize('deleted-by-hand', 'Outside the app, docs was removed from Codex’s settings (as `codex mcp remove docs` does), then Refresh past the settle window: it is off everywhere, kept in Central Knot; the notice offers Turn on', true, '.sync-notices');
+  await atEverySize('deleted-by-hand', 'Outside the app, docs was removed from Codex’s settings (as `codex mcp remove docs` does), then Refresh past the settle window: it is off and taken out of Copilot CLI, still in Claude Code until Write, kept in Central Knot; the notice offers Turn on', true, '.sync-notices');
   const restore = await a.run(`document.querySelector('[id^="notice-restore-"]')?.id ?? ''`);
   if (restore) { await a.click(`#${restore}`); await a.settle(); }
   // A server a tool can't hold (SSE, in Codex), and a server whose copies differ (the copy question).
@@ -401,7 +401,7 @@ if (wanted('mcp')) {
   await atEverySize('cannot-hold', 'Added live, an SSE server from Claude Code: Copilot CLI has it now; Codex can’t take it (its own mark, "Codex has no SSE transport."), and the status says so', false, '.details');
   await closeRow('live');
   await a.click('#add-search'); await a.settle();
-  await atEverySize('copy-question', 'Clicked search’s Add: Copilot CLI’s and Codex’s entries differ, so the row asks which one every tool uses, each row quoting its own command with the words only it has marked', true, '.details-differs');
+  await atEverySize('copy-question', 'Clicked search’s Add: Copilot CLI’s and Codex’s entries differ, so the row asks which one every tool uses, each row quoting its own command with the words only it has marked; what choosing does says Claude Code’s part happens at Write', true, '.details-differs');
   await a.click('#use-search-copilot-cli'); await switchOn('search');
   await atEverySize('chosen', 'Clicked "Use this copy" on Copilot CLI’s: search is in Central Knot, on in Copilot CLI and Codex; Codex’s entry is kept as a version; Claude Code waits for Write', false, '.bands');
   await a.click('#nav-history');

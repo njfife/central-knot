@@ -554,9 +554,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 
 /* Wide content (renderer.ts state.wide): the open row's details dock beside the table, which keeps the rest of the width. */
 .ov-page.docked { display: grid; grid-template-columns: minmax(0, 1fr) clamp(400px, 30cqw, 560px); grid-template-rows: minmax(0, 1fr); }
-/* An agent's dock holds its versions, one line each: it takes the larger share of the width (the table, its names, needs
-   less), the table the rest. */
-.ov-page.docked.dock-wide { grid-template-columns: minmax(0, 1fr) clamp(440px, 60cqw, 1200px); }
+/* An item's dock holds its versions, one line each: it takes half the width, the table the rest, so a row's line (an MCP
+   server's command or URL beside its name and tag) is shortened only when even that has no room for it. */
+.ov-page.docked.dock-wide { grid-template-columns: minmax(0, 1fr) clamp(440px, 50cqw, 1200px); }
 .dock-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .docked .ov-row.open { background: var(--picked); box-shadow: inset 2px 0 0 var(--accent), inset 0 -1px 0 var(--line); }
 .dock { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--surface); }

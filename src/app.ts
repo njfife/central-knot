@@ -90,8 +90,6 @@ export const state = {
   skillsView: 'table' as 'table' | 'files',
   /** Counts moves to another page, so what belongs to one visit (an armed Delete) can tell it has ended. */
   visit: 0,
-  /** Counts reads the person asked for (Refresh), and reads that brought outside news: the tables regroup their rows then (matrix.ts pinRows). */
-  reads: 0,
   /**
    * What the status bar says (announce): the newest message, whether it is for screen readers only, and its place in
    * the order messages were said, so the newest always wins.
@@ -343,12 +341,21 @@ export const applyClick = (click: Click) => busy('Applying…', async () => {
   // A hold that came after the change is said beside what was done, not dropped.
   const text = done || !refusal ? [said, plugText, click.also, [click.note, waits].filter(Boolean).join(' '), refusal?.message].filter(Boolean).join(' ') + choose : refusal.message;
   const switchedBack = plugged?.back ?? [];
-  const undo = click.undoing || !done ? undefined : made.length || switchedBack.length ? () => void undoClick(click, made, switchedBack) : undefined;
+  const undo = click.undoing || !done ? undefined : (made.length && await allUndoable(made)) || switchedBack.length ? () => void undoClick(click, made, switchedBack) : undefined;
   const warned = failed || !!plugged?.failed.length || !!plugged?.stopped;
   tell({ page: state.page, items: click.items, warn: warned || !!click.also || !!refusal, band: true, fade: click.undoing && !warned, next: done || !refusal ? click.next : undefined,
     text, act: undo ? { label: 'Undo', id: 'outcome-undo', title: 'Put back everything this did', run: undo } : undefined });
   for (const item of click.items) flashRow(item);
 });
+
+/**
+ * Whether each History entry a click made still offers its own action, so the click's Undo can run them all: an Add that would
+ * give Claude Code its MCP entry back offers none (historyactions.ts givesBackLater).
+ */
+async function allUndoable(made: string[]) {
+  const events = (await api().history()).events.filter(event => made.includes(event.id));
+  return events.every(event => { const entry = libraryEntry(event); return !entry || !!libraryAction(event, state.home?.[entry.kind].library[entry.key]); });
+}
 
 /** Undo of one click: each History entry it made goes back, newest first, by its own action (historyactions.ts). */
 const undoClick = (click: Click, made: string[], switchedBack: PluginOp[] = []) => busy('Undoing…', async () => {
@@ -495,7 +502,6 @@ export async function readAgain() {
     const view = await api().refresh();
     if (!view) return;
     state.skillsResult = undefined;
-    state.reads += 1;
     // Said first, so a page that leaves (setHome) adds its reason after what was read.
     announce(readSummary(view));
     setHome(view, { reload: false });
@@ -1167,8 +1173,6 @@ async function backgroundRefresh() {
     const known = new Set(state.home ? noticesByPage(state.home).flatMap(([, notices]) => notices.map(notice => notice.history)) : []);
     const fresh = noticesByPage(view).map(([page, notices]) => [page, notices.filter(notice => !known.has(notice.history))] as const).filter(([, notices]) => notices.length);
     if (fresh.length) {
-      // Outside news: the tables regroup their rows, as on Refresh.
-      state.reads += 1;
       // A new sync notice is the news: the earlier result steps aside, and its Undo stays in History. Two Undo buttons for
       // different events, one above the other, is the one thing here that would mislead; the notice says where it went.
       const outcome = state.outcome;
