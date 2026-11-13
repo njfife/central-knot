@@ -125,7 +125,7 @@ try {
   await until(page, `document.querySelector('#update-control[data-look="available"]')`, 30_000);
   await page.run(`document.querySelector('#update-control').click()`);
   const foreign = await failedText(page);
-  check('a zip signed by another identity is refused and says so', /isn’t signed by Central Knot’s developer.*wasn’t changed/.test(foreign), foreign);
+  check('a zip signed by another identity is refused and says so', new RegExp(`isn’t signed by ${appName}’s developer.*wasn’t changed`).test(foreign), foreign);
   page.close(); await stopAll();
   check('after the refused zip the installed app is unchanged', tree(app) === installed);
 
