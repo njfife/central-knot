@@ -12,7 +12,8 @@ concurrency:
 jobs:
   mac:
     runs-on: [self-hosted, macOS, ARM64, ck-mac]
-    timeout-minutes: 15
+    # A run takes about 15 minutes, most of it the end-to-end checks (their crash rounds about 4½); the limit leaves room for them.
+    timeout-minutes: 20
     steps:
       # An app left running by a cancelled or failed run would hold a debug port that this run could attach to.
       - run: pkill -f "$GITHUB_WORKSPACE/(release|node_modules/electron)/" || true
