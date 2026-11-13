@@ -10,6 +10,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
 import { serveReleases } from './update-fixture.mjs';
 import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
+import { standInMac } from '../tests/macstandins.ts';
 
 const args = process.argv.slice(2);
 const flag = name => args.includes(name);
@@ -42,6 +43,9 @@ const entriesSorted = text => {
 // ---------- Disposable home ----------
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'ck-e2e-')));
 const HOME = join(scratch, 'home');
+// What stands in for /Applications, the running apps and the Trash in every launch (platform.ts macPlaces): no flow looks at
+// or removes the real ones.
+const MAC = standInMac(join(scratch, 'mac'));
 const CLAUDE = join(HOME, '.claude/skills'), COPILOT = join(HOME, '.copilot/skills'), AGENTS = join(HOME, '.agents/skills'), CODEX = join(HOME, '.codex/skills');
 const text = (name, body = 'Body.', extra = '') => `---\nname: ${name}\ndescription: The ${name} skill.\n${extra}---\n\n${body}\n`;
 function skill(base, folder, content = text(folder)) {
@@ -124,7 +128,7 @@ async function launch(userData = join(scratch, 'data'), extra = [], home = HOME,
   // OpenCode, and the apps named under the Harnesses cards (T3 Code, VS Code), are looked for only inside the throwaway home:
   // a machine that has them installed (the Mac these run on does) would otherwise bring them into every flow that opens
   // "This Mac's home".
-  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), CK_TEST_HOME_ONLY: 'opencode,other-apps', CK_PLUGIN_UPDATES_EVERY_MS: 'never', ...more };
+  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), CK_TEST_HOME_ONLY: 'opencode,other-apps', CK_PLUGIN_UPDATES_EVERY_MS: 'never', CK_TEST_APPS: MAC.root, ...more };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   // The app picks its own free debug ports (port 0) and says them, so no other run on this machine can be on them (cdp.mjs
@@ -2649,6 +2653,61 @@ async function otherAppsFlow() {
   await a.quit();
 }
 
+/**
+ * Another build of Central Knot on this Mac (otherbuilds.ts), as made-up bundles in a stand-in for /Applications: offered on
+ * the Overview and in Settings, removed into the stand-in's Trash, gone from both pages after; an app of another id under the
+ * product's name is offered nowhere. Where the build syncs the home, Take over syncing is two choices, and the first removes it.
+ */
+async function otherBuildFlow() {
+  const mac = standInMac(join(scratch, 'mac-builds'));
+  const alpha = () => mac.bundle(mac.applications, 'Central Knot Alpha', 'com.centralknot.alpha');
+  const helper = mac.bundle(mac.applications, 'Central Knot Helper', 'com.example.helper');
+  alpha();
+  const inTrash = () => (existsSync(mac.trash) ? readdirSync(mac.trash) : []);
+  const a = await launch(join(scratch, 'builds-data'), ['--practice-copy'], HOME, { CK_TEST_APPS: mac.root });
+  const practice = await a.run(`document.querySelector('.status-home').title`);
+  const bandText = () => a.text('#other-build-com-centralknot-alpha .band-text');
+  const band = await bandText() ?? '';
+  check('the Overview names the other build, where it is, that one build syncs a home, and what Remove does', band.startsWith(`Central Knot Alpha is installed here too, in ${mac.applications}. Only one build of Central Knot syncs a home at a time. Removing Central Knot Alpha quits it and moves it to the Trash`), band);
+  check('with Remove beside it', await a.text('#other-build-action-com-centralknot-alpha') === 'Remove Central Knot Alpha');
+  check('an app of another id under the product’s name is offered nowhere', !(await a.run('document.body.innerText')).includes('Helper'));
+  await fitsAtMinimum(a, 'the Overview with another build’s band');
+  await a.click('#nav-settings');
+  const rowId = `#setting-other-build-${`${mac.applications}/Central Knot Alpha.app`.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+  const row = await a.text(rowId) ?? '';
+  check('Settings has a row for it: what it is, where, that one build syncs a home, and Remove', row.startsWith(`Central Knot AlphaInstalled in ${mac.applications}. Only one build of Central Knot syncs a home at a time.`) && row.endsWith('Remove Central Knot Alpha'), row);
+  check('and nothing for the other app', !(await a.run('document.body.innerText')).includes('Helper'));
+  await fitsAtMinimum(a, 'Settings with another build’s row');
+  await a.click('#nav-overview');
+  await a.click('#other-build-action-com-centralknot-alpha');
+  check('Remove moves the bundle to the Trash: gone from the folder, in the stand-in’s Trash', !existsSync(join(mac.applications, 'Central Knot Alpha.app')) && inTrash().join() === 'Central Knot Alpha.app', inTrash());
+  const said = await a.text('[data-outcome] .band-text') ?? '';
+  check('the band says where it went and what stays, and is gone', said.startsWith('Central Knot Alpha is in the Trash, where it stays until you empty the Trash. Your skills, MCP servers and agents') && said.endsWith('turn it off in System Settings › General › Login Items.') && !(await a.exists('#other-build-com-centralknot-alpha')), said);
+  await a.click('#nav-settings');
+  check('Settings has no row for it after', !(await a.exists(rowId)));
+  check('the other app is where it was', existsSync(join(helper, 'Contents/Info.plist')));
+  // Put back from the Trash: found again. The home's record now names it as the one that syncs this home.
+  alpha();
+  mkdirSync(join(practice, '.central-knot'), { recursive: true });
+  writeFileSync(join(practice, '.central-knot/sync.json'), `${JSON.stringify({ formatVersion: 2, generation: 'from-the-alpha', owner: 'com.centralknot.alpha', ownerName: 'Central Knot Alpha' })}\n`);
+  await a.click('#nav-skills');
+  await a.click('#header-refresh');
+  const owner = await a.text('#other-owner') ?? '';
+  check('where it syncs the home, Take over syncing is two choices, each saying what it does', owner.includes('Central Knot Alpha is installed here too: remove it to the Trash as you take over, or keep both.')
+    && await a.text('#take-over-remove') === 'Take over and remove Central Knot Alpha' && await a.text('#take-over-sync') === 'Take over, keep both', owner);
+  await a.click('#nav-overview');
+  check('and the Overview offers the same two choices, with no band of its own for it', !(await a.exists('#other-build-com-centralknot-alpha')) && await a.exists('#overview-take-over-remove'));
+  await fitsAtMinimum(a, 'the Overview with the two take-over choices');
+  await a.click('#nav-skills');
+  await fitsAtMinimum(a, 'Skills with the two take-over choices');
+  await a.click('#take-over-remove');
+  const record = JSON.parse(readFileSync(join(practice, '.central-knot/sync.json'), 'utf8'));
+  check('Take over and remove: this build syncs the home, and the other is in the Trash', record.owner !== 'com.centralknot.alpha' && !existsSync(join(mac.applications, 'Central Knot Alpha.app')) && inTrash().length === 2, { owner: record.owner, trash: inTrash() });
+  check('said in that order, where the click was', (await a.text('[data-outcome] .band-text') ?? '').startsWith('Central Knot now syncs this home. Central Knot Alpha is in the Trash'), await a.text('[data-outcome] .band-text'));
+  same('no page errors, another build', a.pageErrors, []);
+  await a.quit();
+}
+
 async function realHomeFlow() {
   const before = { rich: tree(join(CLAUDE, 'rich')), unrelated: readFileSync(join(HOME, '.claude/unrelated.json'), 'utf8') };
   const a = await launch();
@@ -3261,7 +3320,7 @@ const started = Date.now();
 try {
   seedHome();
   // Each flow's time is printed, so a run that grows slow says where.
-  const flows = [harnessFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, suggestedFlow, otherAppsFlow, listDiffersFlow, pluginUpdatesFlow, repoBaseFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
+  const flows = [harnessFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, suggestedFlow, otherAppsFlow, otherBuildFlow, listDiffersFlow, pluginUpdatesFlow, repoBaseFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
   const named = option('--flows')?.split(',');
   for (const flow of flows.filter(each => !named || named.includes(each.name))) {
     const from = Date.now();

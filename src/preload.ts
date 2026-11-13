@@ -33,6 +33,8 @@ const api: DesktopApi = {
   syncNow: home => ipcRenderer.invoke('sync:now', home),
   setSyncEverything: (on, home) => ipcRenderer.invoke('sync:everything', on, home),
   takeOverSync: home => ipcRenderer.invoke('sync:take-over', home),
+  removeOtherBuild: (home, path, build, takeOver) => ipcRenderer.invoke('builds:remove', home, path, build, takeOver),
+  quitOtherBuild: build => ipcRenderer.invoke('builds:quit', build),
   onSyncChanged: callback => { ipcRenderer.on('sync:changed', () => callback()); },
   onSaid: callback => { ipcRenderer.on('said', (_event, text) => callback(String(text))); },
   getSettings: () => ipcRenderer.invoke('settings:get'),

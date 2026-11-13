@@ -18,6 +18,7 @@ import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
 import { applySkills } from '../src/skills.ts';
 import { managedNow, syncGate } from '../src/share.ts';
+import { standInMac } from '../tests/macstandins.ts';
 
 const args = process.argv.slice(2);
 const flag = name => args.includes(name);
@@ -123,7 +124,8 @@ for (const [name, output] of [['claude', '2.1.309 (Claude Code)'], ['copilot', '
 }
 const addedBy = name => { try { return readFileSync(join(HOME, `added-by-${name}.txt`), 'utf8').trim().split('\n'); } catch { return []; } };
 async function launch() {
-  const env = { HOME, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp') };
+  // CK_TEST_APPS: what stands in for /Applications, the running apps and the Trash (platform.ts macPlaces): none of them runs here.
+  const env = { HOME, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp'), CK_TEST_APPS: standInMac(join(scratch, 'mac')).root };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   // No data folder is named: the build must choose its own.
@@ -315,9 +317,8 @@ check('a second open keeps the unpacked marketplace as it is', statSync(marketFo
 // ---------- One build syncs a home at a time ----------
 await b.click('#nav-skills');
 const ownerSays = () => b.run(`document.querySelector('#other-owner .band-text')?.textContent ?? ''`);
-// Whether the standard app is open now is asked of macOS for an installed app; a development run can't tell.
-check('Skills says the standard app syncs this home', await b.until(`!!document.querySelector('#other-owner')`) && (dev ? await ownerSays() === 'Central Knot syncs this home, so skills, MCP servers and agents aren’t changed from here. Taking over keeps every managed item and choice.'
-  : /^Central Knot (is open and syncs this home, so skills, MCP servers and agents aren’t changed from here|synced this home last and isn’t open, so nothing is syncing here now)\. Taking over keeps every managed item and choice\.$/.test(await ownerSays())), await ownerSays());
+// Whether the standard app is open now is asked of the stand-in for macOS's list of running apps, where it isn't.
+check('Skills says the standard app syncs this home', await b.until(`!!document.querySelector('#other-owner')`) && await ownerSays() === 'Central Knot synced this home last and isn’t open, so nothing is syncing here now. Taking over keeps every managed item and choice.', await ownerSays());
 check('with Take over syncing beside it', await b.run(`document.querySelector('#take-over-sync')?.textContent`) === 'Take over syncing');
 check('Skills fits with it at 1280', await b.fits());
 await b.shot('skills-other-owner-1280');

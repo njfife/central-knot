@@ -8,7 +8,7 @@ import { caughtUpNames, defaultHistoryDays, groupBy, noticeNames } from './model
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
 import { andList, byToolOrder, kindNouns, toolNames, toolsPhrase } from './words.ts';
 import { readFlag, writeFlag } from './flags.ts';
-import { whyReadOnly, otherOwnerSaid, saidInStatusBar, takeOverSync, takeOverTitle, tell, type Click, type Outcome, type PageKind, harnessKindShown, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, retireTip, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
+import { whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, retireTip, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { kindSource, type ItemRow, type KindSource, type Tool } from './itemrow.ts';
@@ -23,6 +23,7 @@ import { alongWords, cantSwitch, click as clickPluginItem, clickWords, itemSaid,
 import { partOfPage, samePart, versionWord } from './pluginstatus.ts';
 import { cellWords, handledWhere, inTool, insideTitle, offIn, pageRows, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
 import { folded, lineDiff } from './diff.ts';
+import { takeOverChoices } from './otherbuildview.ts';
 
 const names = toolNames as Record<Tool, string>;
 
@@ -783,15 +784,15 @@ function writeStepBand(waiting: ItemRow[]) {
 }
 
 /**
- * Another build syncs this home (ORG-08): who, whether it is open now, and Take over syncing. Only one build syncs a home
- * at a time; this one changes no skill, MCP server or agent here until it is told to take over.
+ * Another build syncs this home (ORG-08): who, whether it is open now, and Take over syncing, or where that build is installed
+ * here the two choices that remove it or keep both (otherbuildview.ts takeOverChoices). Only one build syncs a home at a time;
+ * this one changes no skill, MCP server or agent here until it is told to take over.
  */
 function otherOwnerBand(): HTMLElement | null {
-  const gate = state.home?.sync.gate;
+  const home = state.home, gate = home?.sync.gate;
   if (gate?.state !== 'stopped' || !gate.owner) return null;
-  const take = button({ variant: 'outline', size: 'small', label: 'Take over syncing', id: 'take-over-sync', disabled: !!state.busy || !state.home!.sync.access.allowed, onclick: () => void takeOverSync() });
-  take.title = takeOverTitle(gate.owner);
-  return h('div.band', { role: 'status', id: 'other-owner' }, icon('circle-alert', 14, 'tone-warning'), h('span.band-text', {}, otherOwnerSaid(gate.owner)), take);
+  const { said, buttons } = takeOverChoices(home!, { variant: 'outline', size: 'small' }, { take: 'take-over-sync', remove: 'take-over-remove' }, !!state.busy || !home!.sync.access.allowed);
+  return h(`div.band${buttons.length > 1 ? '.band-two' : ''}`, { role: 'status', id: 'other-owner' }, icon('circle-alert', 14, 'tone-warning'), h('span.band-text', {}, said), h('span.band-actions', {}, buttons));
 }
 
 /** The bands above a table, from its kind's view (listView). */

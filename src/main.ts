@@ -7,7 +7,8 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, watch, wri
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover, findOtherApps } from './discovery.ts';
 import { configRoot, envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
-import { CLAUDE_PROCESS, appCandidates, executableCandidates, searchPath } from './platform.ts';
+import { CLAUDE_PROCESS, appCandidates, executableCandidates, macPlaces, searchPath } from './platform.ts';
+import { intoFolder, isRunning, knownBuilds, lookForBuilds, quitBuild, removeClick, type BuildsContext } from './otherbuilds.ts';
 import { managedNow, readRecord, setSyncEverything, syncGate, takeOverSync, writeAccess, type ShareContext } from './share.ts';
 import { pruneHistory, readHistory } from './history.ts';
 import { applySkills, clearSwitch, restoreSkill, skillChange, skillFolders, skillVersion, skillsView, takeOver } from './skills.ts';
@@ -74,6 +75,9 @@ if (smoke) app.setPath('userData', mkdtempSync(join(tmpdir(), 'central-knot-smok
 if (process.env.CK_TEST_HOME) process.env.HOME = process.env.CK_TEST_HOME;
 if (process.env.CK_TEST_USER_DATA) app.setPath('userData', process.env.CK_TEST_USER_DATA);
 if (process.env.CK_TEST_DEBUG_PORT) app.commandLine.appendSwitch('remote-debugging-port', process.env.CK_TEST_DEBUG_PORT);
+// Test-only too: CK_TEST_APPS names a folder that stands in for /Applications, the running apps and the Trash (platform.ts
+// macPlaces), so a test never looks at or removes the real ones; with it, another build is looked for in a development run too.
+const testApps = !!process.env.CK_TEST_APPS;
 // Asked now, while the window is being made, so the first read of this computer's tools doesn't wait on a shell's startup.
 void searchPath();
 /** This build's name in a home's sync record: its app's bundle id (the standard app's, the alpha's or a custom build's own). */
@@ -536,8 +540,13 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   // What plugins installed whole bring, read with the home so the Skills, MCP servers and Agents pages show it without Plugins.
   // With the view's own reads, so each tool's installed plugins are read once for these rows and the pages' Through a plugin boxes.
   made.pluginItems = await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), managed);
-  // Another build syncs this home: whether it is open now decides what the page says about it.
-  if (made.sync.gate.state === 'stopped' && made.sync.gate.owner) made.sync.gate.owner.running = await buildRunning(made.sync.gate.owner.build);
+  // Another build of Central Knot on this Mac, and whether the one that syncs this home is open now (what the page says of it).
+  if (looksForBuilds()) {
+    const owner = made.sync.gate.state === 'stopped' ? made.sync.gate.owner : undefined;
+    const builds = buildsContext(owner);
+    made.otherBuilds = await lookForBuilds(builds);
+    if (owner) owner.running = await isRunning(builds, owner.build);
+  }
   followProfiles(made.profiles, homeItems(made));
   // Only once the view is built is anything kept about this home, so a switch that fails leaves nothing behind.
   handoff = { id: readId, home: current!.home, snapshots };
@@ -594,12 +603,18 @@ function lookAtFeed(): Promise<void> {
 }
 
 /**
- * Whether the build with this identity is open now, as macOS has it (an installed app, by its bundle id); undefined
- * where that can't be told (other systems, or a build run from its source).
+ * Whether another build of Central Knot is looked for (otherbuilds.ts): on a Mac, by an installed app, where macOS can say
+ * which apps run; elsewhere and in a run from the source only where a test named its stand-ins (CK_TEST_APPS).
  */
-function buildRunning(build: string): Promise<boolean | undefined> {
-  if (process.platform !== 'darwin' || !app.isPackaged) return Promise.resolve(undefined);
-  return new Promise(done => execFile('/usr/bin/lsappinfo', ['info', '-only', 'pid', '-app', build], { timeout: 5_000 }, (error, out) => done(error ? undefined : /"pid"\s*=\s*\d+/.test(String(out)))));
+const looksForBuilds = () => !smoke && ((process.platform === 'darwin' && app.isPackaged) || testApps);
+/** What a look at another build, or a click on one, goes by (otherbuilds.ts BuildsContext); `owner`: the open home's sync owner. */
+function buildsContext(owner?: { build: string; name: string }): BuildsContext {
+  const places = macPlaces(homedir());
+  return {
+    own: BUILD, known: knownBuilds(owner), places, home: homedir(),
+    ...(app.isPackaged ? { ownBundle: process.execPath.replace(/\/Contents\/MacOS\/[^/]+$/, '') } : {}),
+    trash: places.trash ? intoFolder(places.trash) : bundle => shell.trashItem(bundle),
+  };
 }
 
 /** The marketplace feature's own work at open (marketplaces.ts); set once its requests are registered. */
@@ -1220,6 +1235,22 @@ app.whenReady().then(async () => {
     return { ...set, view: await syncThenView() };
   });
   handle('sync:now', async home => (home === current?.home ? syncThenView(true) : null));
+  // Another build of Central Knot: removed (taken over from first, where asked) or quit, on a click alone. One log line each.
+  handle('builds:remove', async (home, path, build, takeOver) => {
+    if (home !== current?.home || typeof path !== 'string' || typeof build !== 'string') return { said: elsewhere, done: false, view: null };
+    const gate = await syncGate(context());
+    const removal = await removeClick(context(), buildsContext(gate.state === 'stopped' ? gate.owner : undefined), path, build, takeOver === true);
+    if (removal.took) log(`sync: took over syncing ${home} from ${removal.took}`);
+    log(`other build: ${removal.done ? `moved ${path} to the Trash` : `${path} not removed: ${removal.said}`}`);
+    return { said: removal.said, done: removal.done, ...(removal.show ? { show: removal.show } : {}), view: await syncThenView() };
+  });
+  handle('builds:quit', async build => {
+    if (typeof build !== 'string' || !current) return { said: elsewhere, done: false, view: null };
+    const gate = await syncGate(context());
+    const quit = await quitBuild(buildsContext(gate.state === 'stopped' ? gate.owner : undefined), build);
+    log(`other build: asked ${build} to quit: ${quit.said}`);
+    return { ...quit, view: await syncThenView() };
+  });
   // Take over syncing (ORG-08): this build becomes the home's sync owner, then reads and syncs it as its owner.
   handle('sync:take-over', async home => {
     if (home !== current?.home) return { stopped: elsewhere, view: null };

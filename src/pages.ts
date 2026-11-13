@@ -1,4 +1,4 @@
-import { absentKinds, announce, noTools, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type PageKind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, otherOwnerSaid, takeOverSync, takeOverTitle, type Page } from './app.ts';
+import { absentKinds, announce, noTools, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type PageKind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, type Page } from './app.ts';
 import { afterLayout, button, cardGrid, emptyState, fileBlocks, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
@@ -8,6 +8,7 @@ import { andList, kindNames, kindNouns, noToolsSentence, orList } from './words.
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { asksWhichCopy } from './libraryrow.ts';
 import { anyManaged, kindSource } from './itemrow.ts';
+import { otherBuildBands, takeOverChoices } from './otherbuildview.ts';
 
 // ---------- Overview ----------
 
@@ -182,6 +183,12 @@ function nextStep(home: HomeView, nothingManaged: boolean): string {
   return nothingManaged && home.sync.access.allowed ? ' Open one below and turn on what you want the same in every tool.' : '';
 }
 
+/** The Overview's line where another build syncs this home: who, and Take over syncing or the two choices (otherbuildview.ts takeOverChoices). */
+function ownerLine(home: HomeView) {
+  const { said, buttons } = takeOverChoices(home, { variant: 'link', size: 'micro' }, { take: 'overview-take-over', remove: 'overview-take-over-remove' }, !!state.busy);
+  return h('p.overview-line', { id: 'overview-other-owner' }, icon('circle-alert', 14, 'tone-warning'), `${said} `, ...buttons.flatMap((choice, index) => (index ? [' · ', choice] : [choice])));
+}
+
 export function overviewPage() {
   const home = state.home;
   if (!home) return notRead();
@@ -194,9 +201,10 @@ export function overviewPage() {
   const absent = absentKinds();
   const empty = noTools();
   const nothingManaged = !anyManaged(home);
-  const done = outcomeBand();
+  // A click's result, then another build of Central Knot found on this Mac (otherbuildview.ts).
+  const bands = [outcomeBand(), ...otherBuildBands(home)].filter(band => !!band);
   return h('div.page', {},
-    done ? h('div.bands', {}, done) : null,
+    bands.length ? h('div.bands', {}, bands) : null,
     h('div.scroll.overview-scroll', { id: 'overview-scroll' },
       practiceBanner(),
       // A home with no tools has nothing to count: the way forward is another home.
@@ -210,9 +218,8 @@ export function overviewPage() {
       h('div.overview-more', {},
         absent.length && !empty ? h('p.overview-line', { id: 'overview-absent' }, icon('info', 14, 'tone-muted'), `No tool here holds ${orList(absent.map(kind => kindNames[kind]))}.`) : null,
         !home.sync.access.allowed ? h('p.overview-line', {}, icon('lock', 14, 'tone-warning'), `Automatic sync is paused. Preview only: ${previewReason(home.sync.access.reason)}.`)
-        // Another build syncs this home: said here, with the way to take over.
-        : home.sync.gate.state === 'stopped' && home.sync.gate.owner ? h('p.overview-line', { id: 'overview-other-owner' }, icon('circle-alert', 14, 'tone-warning'), `${otherOwnerSaid(home.sync.gate.owner)} `,
-          button({ variant: 'link', size: 'micro', label: 'Take over syncing', id: 'overview-take-over', disabled: !!state.busy, attrs: { title: takeOverTitle(home.sync.gate.owner) }, onclick: () => void takeOverSync() }))
+        // Another build syncs this home: said here, with the way to take over (and to remove that build, where it is installed here).
+        : home.sync.gate.state === 'stopped' && home.sync.gate.owner ? ownerLine(home)
         // Green only once something syncs; before that, sync is on and waiting, in the status bar's grey.
         : home.syncOn && nothingManaged ? null : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingManaged ? 'tone-muted' : 'tone-success') : 'tone-warning'),
           ...(home.syncOn ? [nothingManaged ? 'Automatic sync is on. Once something is on, edits spread between tools in seconds, with Undo.'
