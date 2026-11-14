@@ -513,7 +513,7 @@ export async function writeAccess(context: ShareContext): Promise<WriteAccess> {
       const override = context.overrides?.[id];
       if (override !== undefined && !isAbsolute(override)) return { allowed: false, reason: `Preview only: ${harnesses[id].configEnv} is not an absolute path, so its folder is unknown.` };
     }
-    return { allowed: true, reason: 'Your real folders: Apply all writes here.' };
+    return { allowed: true, reason: 'Your real folders: Central Knot writes here.' };
   }
   const refused = { allowed: false, reason: 'Preview only: this folder reaches your real configuration. To write there, choose your real home instead.' };
   const real = async (path: string) => { try { return await realpath(path); } catch { return undefined; } };
@@ -535,7 +535,7 @@ export async function writeAccess(context: ShareContext): Promise<WriteAccess> {
     const resolved = await landingOf(path);
     if (!resolved || guarded.some(root => inside(resolved, root))) return refused;
   }
-  return { allowed: true, reason: 'Disposable home: Apply all writes only inside it.' };
+  return { allowed: true, reason: 'Disposable home: Central Knot writes only inside it.' };
 }
 
 // ---------- Start ----------

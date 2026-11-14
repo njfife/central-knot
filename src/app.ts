@@ -24,7 +24,7 @@ import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, toolL
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
-import { clear as clearPluginOp, resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, type PluginOp } from './pluginplan.ts';
+import { resultLines, resultSentence, reverse, runPlan, strayHolds, succeeded, type PluginOp } from './pluginplan.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
 import { absentKindsIn, heldKinds, type HomeKind } from './presence.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
@@ -301,7 +301,7 @@ export interface Click {
    * Its part in the tools that have the item through a plugin (pluginswitch.ts turnEvery): run once the copies' part went
    * through, never beside a click refused as a whole. `said`: what that part brought with it, said when it all worked.
    */
-  plugins?: { ops: PluginOp[]; draft: Map<string, PluginOp>; said?: string };
+  plugins?: { ops: PluginOp[]; said?: string };
   /** Offered beside the Undo: the next step the result names (the whole plugin's switch where one item has none). */
   next?: Outcome['next'];
 }
@@ -342,7 +342,7 @@ export const applyClick = (click: Click) => busy('Applying…', async () => {
   if (result.stopped) { tell({ page: state.page, items: click.items, warn: true, band: true, text: result.stopped }); return; }
   const made = result.made ?? [];
   // The plugins' part, once the copies' part went through (a whole-click refusal leaves it unrun).
-  const plugged = click.plugins?.ops.length && (did || made.length || !refusal) ? await runSwitches(click.plugins.ops, click.plugins.draft) : undefined;
+  const plugged = click.plugins?.ops.length && (did || made.length || !refusal) ? await runSwitches(click.plugins.ops) : undefined;
   if (plugged) setHome(await api().refresh());
   const done = did || made.length > 0 || !!plugged?.done.length;
   // Said from what happened: a tool whose write failed, copy or plugin switch, is not called on (or off); nor one whose write waits.
@@ -376,7 +376,7 @@ async function allUndoable(made: string[]) {
 const undoClick = (click: Click, made: string[], switchedBack: PluginOp[] = []) => busy('Undoing…', async () => {
   const home = state.home!;
   // The plugin items' switches go back first: other tools than the copies', so the rest is undone whatever they do.
-  const unswitched = switchedBack.length ? await runSwitches(switchedBack, new Map(), true) : undefined;
+  const unswitched = switchedBack.length ? await runSwitches(switchedBack, true) : undefined;
   const events = (await api().history()).events.filter(event => made.includes(event.id)).sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
   const results: DestinationResult[] = [];
   let stopped: string | undefined;
@@ -400,15 +400,14 @@ const undoClick = (click: Click, made: string[], switchedBack: PluginOp[] = []) 
 const switchProblems = (ran: Awaited<ReturnType<typeof runSwitches>>) => [ran.stopped, ...ran.failed.map(line => `${line.plugin}: ${line.text.replace(/\.$/, '')}.`)].filter(Boolean).join(' ');
 
 /**
- * Runs plugin switch choices (pluginswitch.ts) with each tool's own switch. What ran leaves `draft`. A plugin that failed to
- * come on leaves no item switched off for it: those written before it are put back. Returns what ran, in lines, the tools where
- * something didn't, and the choices that turn it all back.
+ * Runs plugin switch choices (pluginswitch.ts) with each tool's own switch. A plugin that failed to come on leaves no item
+ * switched off for it: those written before it are put back. Returns what ran, in lines, the tools where something didn't,
+ * and the choices that turn it all back.
  */
-async function runSwitches(ops: PluginOp[], draft: Map<string, PluginOp>, undo = false) {
+async function runSwitches(ops: PluginOp[], undo = false) {
   const home = state.home!.home;
   const plan = { install: api().installPlugin, uninstall: api().uninstallPlugin, setSkill: api().setPluginSkill, setPart: api().setPluginPart, setWhole: api().setPluginOn };
   const result = await runPlan(ops, plan, home);
-  for (const entry of result.done) clearPluginOp(draft, entry);
   const strays = strayHolds(result.done);
   const putBack = strays.length ? (await runPlan(reverse(strays), plan, home)).done : [];
   const restored = strays.filter(stray => putBack.some(back => back.tool === stray.tool && back.plugin === stray.plugin && back.skill === stray.skill && back.part?.kind === stray.part?.kind && back.part?.name === stray.part?.name && succeeded(back.report)));
@@ -427,16 +426,16 @@ interface SwitchWords { said?: string; undone?: string; also?: string; note?: st
 /**
  * Turns plugins' items on or off from the Skills, MCP servers and Agents pages (pluginswitch.ts), with each tool's own
  * switch, then reads the home again: a click with nothing of the person's own to change (a tool's switch for a plugin's item,
- * a plugin row's switch). What ran leaves `draft`. The result offers Undo, which runs what this run changed, reversed.
+ * a plugin row's switch). The result offers Undo, which runs what this run changed, reversed.
  */
-export const applyPluginSwitches = (ops: PluginOp[], draft: Map<string, PluginOp>, words: SwitchWords = {}) => switchPlugins(ops, draft, words, false);
+export const applyPluginSwitches = (ops: PluginOp[], words: SwitchWords = {}) => switchPlugins(ops, words, false);
 
-const switchPlugins = (ops: PluginOp[], draft: Map<string, PluginOp>, { said, undone, also, note, next }: SwitchWords, undo: boolean) => busy(undo ? 'Undoing…' : 'Applying…', async () => {
-  const ran = await runSwitches(ops, draft, undo);
+const switchPlugins = (ops: PluginOp[], { said, undone, also, note, next }: SwitchWords, undo: boolean) => busy(undo ? 'Undoing…' : 'Applying…', async () => {
+  const ran = await runSwitches(ops, undo);
   setHome(await api().refresh());
   const worked = !ran.failed.length && !ran.stopped;
   const text = [worked && said ? said : ran.stopped ?? resultSentence(ran.lines, undo), worked ? '' : switchProblems({ ...ran, stopped: undefined }), also, note].filter(Boolean).join(' ') || 'Nothing changed.';
-  const act = ran.back.length ? { label: 'Undo', id: 'outcome-undo-plugin', title: 'Turn them back as they were', run: () => void switchPlugins(ran.back, new Map(), { said: undone }, true) } : undefined;
+  const act = ran.back.length ? { label: 'Undo', id: 'outcome-undo-plugin', title: 'Turn them back as they were', run: () => void switchPlugins(ran.back, { said: undone }, true) } : undefined;
   tell({ page: state.page, text, warn: !worked || !!also, band: true, fade: undo && worked, act, next: worked ? next : undefined });
 });
 

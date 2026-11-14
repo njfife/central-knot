@@ -1,6 +1,6 @@
 // What the plugin pages say about a plugin and a tool, worked out from the view alone (no DOM): whether a tool can take
 // it, whether it is installed there, and a short summary of what it holds.
-import type { Components, HarnessId, HomeView, InstallState, InstalledCopy, MarketplaceView, Outcome, PartItem, PartKind, PartsPick, PartsState, PluginContents, PluginDetail, PluginView, PluginsView } from './types.ts';
+import type { Components, HarnessId, HomeView, InstallState, InstalledCopy, MarketplaceView, Outcome, PartItem, PartKind, PartsState, PluginContents, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { groupBy, plural } from './model.ts';
 import { SAFE_NAME, compareVersions, isCommitHash } from './values.ts';
 import { andList, toolNames as names } from './words.ts';
@@ -239,13 +239,6 @@ export function partsMark(view: PluginsView, entry: MarketplaceView, plugin: str
 /** "2 skills · 1 MCP server", from parts as recorded. */
 export function partsSummary(items: PartsState['items'], separator = ' · '): string {
   return (['skill', 'mcp', 'agent'] as const).map(kind => { const n = items.filter(item => item.kind === kind).length; return n ? `${n} ${partWords[kind][n > 1 ? 1 : 0]}` : ''; }).filter(Boolean).join(separator);
-}
-
-/** "Will add 2 parts", "Will take out 1 part", "Will add 2 parts, take out 1": what a pick does on Apply all. */
-export function pickWords(pick: PartsPick): string {
-  const add = pick.on.length ? `add ${plural(pick.on.length, 'part')}` : '';
-  const out = pick.off.length ? `take out ${pick.on.length ? pick.off.length : plural(pick.off.length, 'part')}` : '';
-  return `Will ${[add, out].filter(Boolean).join(', ')}`;
 }
 
 /** "version 1.2", or nothing when the catalog gave none. */

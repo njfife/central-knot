@@ -154,9 +154,10 @@ test('what the Update button says at each step', () => {
   assert.deepEqual([held.label, held.busy], ['Restart to update', false]);
   assert.match(held.title, /loses your unsaved instructions draft\. Click to restart anyway\.$/, 'the button says what restarting loses');
   assert.equal(updateButton({ ...base, step: 'downloading' })!.busy, true);
-  // While it downloads the button says whether it will restart by itself: not with something unsaved open.
+  // While it downloads the button says whether it will restart by itself, or why it may wait: the hold's own reason.
   assert.equal(updateButton({ ...base, step: 'downloading' })!.title, 'Downloading 0.5.0 preview 5. Central Knot restarts into it when it’s ready.');
-  assert.equal(updateButton({ ...base, step: 'downloading' }, { held: 'Restarting now loses 1 change waiting for Apply all.' })!.title, 'Downloading 0.5.0 preview 5. Something here isn’t saved yet, so Central Knot will wait for you to restart.');
+  assert.equal(updateButton({ ...base, step: 'downloading' }, { held: 'Restarting now stops the plugin changes under way.' })!.title,
+    'Downloading 0.5.0 preview 5. Restarting now stops the plugin changes under way. If that still holds when it’s ready, Central Knot waits for you to restart.');
   assert.equal(label({ failed: 'The download didn’t finish.' }), 'Update to 0.5.0 preview 5', 'after a failure it can be tried again');
 });
 
@@ -189,11 +190,11 @@ test('what the sidebar’s update control shows, from the quiet arrows to the bu
   assert.deepEqual(shown({ available: preview5, step: 'ready' }), { look: 'ready', label: 'Restart to update', does: 'restart', busy: false });
   // Something unsaved holds it: the control never restarts on a click, it opens Settings, whose row says what would be lost
   // beside its own Restart button. Its name says the loss too.
-  const loses = 'Restarting now loses 3 changes waiting for Apply all.';
+  const loses = 'Restarting now stops the plugin changes under way.';
   assert.deepEqual(shown({ available: preview5, step: 'ready' }, { held: loses }), { look: 'held', label: 'Restart to update…', does: 'settings', busy: false });
   const held = updateIndicator({ ...base, available: preview5, step: 'ready' }, { held: loses })!;
-  assert.deepEqual([held.glyph, held.name, held.title], ['triangle-alert', 'Restart to update: Restarting now loses 3 changes waiting for Apply all. Opens Settings',
-    '0.5.0 preview 5 is ready. Restarting now loses 3 changes waiting for Apply all. Click to open Settings, where you can restart anyway.']);
+  assert.deepEqual([held.glyph, held.name, held.title], ['triangle-alert', 'Restart to update: Restarting now stops the plugin changes under way. Opens Settings',
+    '0.5.0 preview 5 is ready. Restarting now stops the plugin changes under way. Click to open Settings, where you can restart anyway.']);
   // Restarting anyway from Settings: the control shows it, busy.
   assert.deepEqual(shown({ available: preview5, step: 'ready' }, { held: loses, restarting: true }), { look: 'ready', label: 'Restarting…', does: 'restart', busy: true });
   // A download that failed: the release is still offered, and the click tries again.

@@ -629,7 +629,7 @@ const writeProblem = (change: RepoChange, tool: HarnessId, noun: string, error: 
 /** Said when sync would not take the repo's version on (the reason is in the results beside it): Pull tries again next time. */
 const notManaged = (change: RepoChange, tool: HarnessId) => notIn(change.name, `It is in ${harnesses[tool].name} now, but sync couldn’t make it Managed yet.`);
 /**
- * The end of an MCP server's or agent's pull. A pass that writes the repo's version runs for that one item, as Apply all does; a
+ * The end of an MCP server's or agent's pull. A pass that writes the repo's version runs for that one item, as a click on its page does; a
  * deletion needs an ordinary pass (only sync spreads deletions), decided at once for this item alone. Either way only this item's
  * results are kept (`own`), and a version that went in but that sync didn't take on is said.
  */
@@ -799,7 +799,7 @@ export async function undoPulledBase(context: ShareContext, snapshots: Snapshot[
  * Says in History that Pull made these events (`made`: each pulled item's new events), so their Undo reads as undoing a pull, and
  * accounts for the copy Pull wrote into the first tool itself, which sync never saw being replaced:
  * - an item no tool here had: that copy joins its 'added' event (one is made if sync added no other copy), so Undo add takes every
- *   copy away, as it does after Apply all;
+ *   copy away, as it does after an Add on its page;
  * - an item whose first tool's copy Pull replaced: that copy joins the event sync made (first, when it was an edit made here that
  *   hadn't spread, so Undo puts that back), or, when sync had nothing else to replace (the only tool with it, or only an agent's
  *   Claude Code settings changed), an edit event of its own. Its content was kept before the write.

@@ -64,7 +64,7 @@ export interface AutoUpdateHost {
   paused(): boolean;
   /** What is due now: reads every marketplace again; `stopped` when nothing may be changed in this home. */
   pending(home: string): Promise<Pending>;
-  /** The calls an update makes, as Apply all makes them (an update without the reinstall route: see plugins.update), and the install a tool new here is owed. */
+  /** The calls an update makes, as the Plugins page makes them (an update without the reinstall route: see plugins.update), and the install a tool new here is owed. */
   api: Required<Pick<PlanApi, 'update' | 'parts' | 'install'>>;
   /** These tools are no longer new here: on the plugins record's `tools` from now on (marketplaces.ts noteJoined). */
   noteJoined(tools: HarnessId[], home: string): Promise<void>;
@@ -196,7 +196,7 @@ export function autoUpdates(host: AutoUpdateHost) {
   function keep(mine: UpdatesRecord, ops: DueUpdate[], done: PluginDone[], at: number): 'updated' | 'failed' | undefined {
     const changed = done.filter(entry => succeeded(entry.report) && (entry.report.changed || entry.report.notes?.length));
     const newHere = (entry: PluginDone) => ops.some(op => op.newHere && keyOf(op) === keyOf(entry) && op.action === entry.action);
-    // The words Apply all uses, one line per plugin, as read afterwards (Settings says an update can't be undone); a part
+    // The words the Plugins page uses, one line per plugin, as read afterwards (Settings says an update can't be undone); a part
     // left alone (edited since, say) is a line of its own to read. An install says why it happened: nobody clicked it.
     const said = (entries: PluginDone[], why = '') => resultLines(entries, false, { after: true }).map(line => ({ at, source: line.source, plugin: line.plugin, text: line.ok && why ? `${line.text}${why}` : line.text, ...(line.ok ? {} : { warn: true as const }) }));
     const lines = [...said(changed.filter(entry => !newHere(entry))), ...said(changed.filter(newHere), ' (new here; the plugin is on)')];

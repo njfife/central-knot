@@ -117,11 +117,7 @@ export function emptyState(glyph: IconName, title: string, body: string | undefi
 export const eyebrow = (text: string, count?: number) => h('h3.eyebrow', {}, text, count === undefined ? null : h('span.eyebrow-count', {}, String(count)));
 export const section = (title: string, ...body: (Child | Child[])[]) => h('section.section', {}, eyebrow(title), ...body);
 
-/** A pending-change count that shortens first in a crowded bar (fitBars): `short` replaces `full`, which stays its tooltip. */
-export const pendingCount = (full: string, short: string): HTMLElement =>
-  h('span.apply-count.apply-quiet', { title: full }, h('span.count-full', {}, full), h('span.count-short', {}, short));
-
-/** What a crowded bar gives up, in order, until it fits: long pending counts, then button labels, then its single line. */
+/** What a crowded bar gives up, in order, until it fits: some padding, then button labels, then its single line. */
 const FIT_STEPS = ['bar-short', 'bar-icons', 'bar-wrap'];
 
 /**

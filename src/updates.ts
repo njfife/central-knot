@@ -162,8 +162,11 @@ export function whyNoUpdate({ packaged, tag, bundle, home, team, writable }: Upd
   return undefined;
 }
 
-/** Said while an update downloads with something unsaved open: it won't restart by itself, as it otherwise would. */
-export const restartWaits = 'Something here isn’t saved yet, so Central Knot will wait for you to restart.';
+/**
+ * Said while an update downloads with its restart held: the hold's own reason (`held`), and what happens once it is ready.
+ * The hold is asked again then (updateview.ts takeUpdates): one that has ended by then restarts as usual.
+ */
+export const restartWaits = (held: string) => `${held} If that still holds when it’s ready, Central Knot waits for you to restart.`;
 
 /** A build's name where its version shows: "0.5.0 preview 4" for a release, the package version otherwise. */
 export const buildWords = (view: Pick<UpdateView, 'tag' | 'version'>) => (view.tag && tagVersion(view.tag) ? tagWords(view.tag) : view.version);
@@ -171,7 +174,7 @@ export const buildWords = (view: Pick<UpdateView, 'tag' | 'version'>) => (view.t
 /**
  * The Update button's words while there is an update this copy can install (Settings' button, and the sidebar control in
  * those steps), or nothing otherwise. `held`: why the page won't restart by itself once the update is ready (something typed
- * and not saved); `restarting`: the page has asked main to restart.
+ * and not saved, or a plugin run under way); `restarting`: the page has asked main to restart.
  */
 export function updateButton(view: UpdateView, { held, restarting = false }: { held?: string; restarting?: boolean } = {}): { label: string; title: string; busy: boolean; held?: boolean } | undefined {
   const next = view.available;
@@ -179,7 +182,7 @@ export function updateButton(view: UpdateView, { held, restarting = false }: { h
   const words = tagWords(next.tag);
   if (view.step === 'downloading') {
     const percent = Math.floor((view.progress ?? 0) * 100);
-    return { label: `Downloading… ${percent}%`, title: `Downloading ${words}. ${held ? restartWaits : 'Central Knot restarts into it when it’s ready.'}`, busy: true };
+    return { label: `Downloading… ${percent}%`, title: `Downloading ${words}. ${held ? restartWaits(held) : 'Central Knot restarts into it when it’s ready.'}`, busy: true };
   }
   if (view.step === 'installing') return { label: 'Preparing update…', title: `Checking and unpacking ${words}.`, busy: true };
   if (view.step === 'ready') {
@@ -197,7 +200,7 @@ export function updateButton(view: UpdateView, { held, restarting = false }: { h
  * - `available`: a newer release this copy can install. It stands out; a click downloads it, prepares it and restarts.
  * - `working`: downloading (with its progress) or preparing it.
  * - `ready`: prepared; a click restarts into it.
- * - `held`: prepared, but something unsaved keeps it from restarting by itself. It never restarts on a click: it opens Settings'
+ * - `held`: prepared, but something unsaved or a plugin run under way keeps it from restarting by itself. It never restarts on a click: it opens Settings'
  *   Updates row, which says what restarting would lose, beside its own Restart button.
  * - `elsewhere`: a newer release this copy can't install itself (Settings says why and links the release). It opens Settings.
  * `does` is what a click does; `name` is the control's full name for a screen reader and the folded sidebar, whose control

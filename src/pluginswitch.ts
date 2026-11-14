@@ -3,7 +3,7 @@
 // Codex and an agent in Claude Code, partswitch.ts), else the whole plugin's. A click applies at once: it is worked out as
 // the plugin choices it needs (pluginplan), which run, report and undo like the Plugins page's.
 // Pure functions over plain data; the page draws and applies.
-import { choose, clear, queued, queuedPart, queuedWhole, wholeChoice, type PluginDraft, type PluginOp } from './pluginplan.ts';
+import { choose, chosenPart, chosenSkill, chosenWhole, clear, wholeChoice, type PluginDraft, type PluginOp } from './pluginplan.ts';
 import { NO_SKILL_SWITCH, hasPartSwitch, noSwitchReason, partWords, samePart } from './pluginstatus.ts';
 import { andList, toolNames as names } from './words.ts';
 import type { HarnessId, InstalledPlugin, PartKind, PluginItem } from './types.ts';
@@ -34,13 +34,13 @@ const itemOffNow = (install: InstalledPlugin, part: Part) => !!{ skill: install.
 
 /** Whether the whole plugin is off in the item's tool once the draft runs. */
 const wholeOffAfter = (draft: PluginDraft, item: PluginItemAt) => {
-  const chosen = queuedWhole(draft, where(item).source, item.install.plugin, item.tool);
+  const chosen = chosenWhole(draft, where(item).source, item.install.plugin, item.tool);
   return chosen ? chosen === 'plugin-off' : !!item.install.off;
 };
 /** Whether one item of the plugin has its own switch off in the item's tool once the draft runs. */
 const itemOffAfter = (draft: PluginDraft, item: PluginItemAt, part: Part) => {
   const { source, plugin, tool } = where(item);
-  const chosen = part.kind === 'skill' ? queued(draft, source, plugin, tool, part.name) : queuedPart(draft, source, plugin, tool, part);
+  const chosen = part.kind === 'skill' ? chosenSkill(draft, source, plugin, tool, part.name) : chosenPart(draft, source, plugin, tool, part);
   return chosen ? chosen === 'skill-off' || chosen === 'part-off' : itemOffNow(item.install, part);
 };
 

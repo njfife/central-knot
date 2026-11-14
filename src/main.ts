@@ -905,7 +905,7 @@ function logged(channel: string, args: unknown[], result: unknown) {
   if (typeof stopped === 'string') log(`${channel} stopped: ${stopped}`);
   // A plugin step's request names the marketplace and the plugin second and third; a pick of single parts names them last.
   const pick = channel === 'plugins:parts' ? args[7] as PartsPick | null : null;
-  const picked = pick ? ` (${[pick.on.length ? `on: ${pick.on.map(part => `${part.kind} ${part.name}`).join(', ')}` : '', pick.off.length ? `off: ${pick.off.map(part => `${part.kind} ${part.name}`).join(', ')}` : '', pick.rest ? 'with the rest' : ''].filter(Boolean).join('; ')})` : '';
+  const picked = pick ? ` (${[pick.on.length ? `on: ${pick.on.map(part => `${part.kind} ${part.name}`).join(', ')}` : '', pick.off.length ? `off: ${pick.off.map(part => `${part.kind} ${part.name}`).join(', ')}` : ''].filter(Boolean).join('; ')})` : '';
   // One item's switch names the item fourth: a skill by its name, an MCP server or agent as a part.
   const part = channel === 'plugins:part' ? args[3] as PartRef | null : null;
   const switched = part ? ` (${part.kind} ${part.name})` : channel === 'plugins:skill' && typeof args[3] === 'string' ? ` (skill ${args[3]})` : '';
@@ -1157,7 +1157,7 @@ app.whenReady().then(async () => {
     } catch (error) { logFailure('sources (by itself)', error); } finally { checkingSources = false; }
   }
   // Plugin updates that arrive by themselves (pluginupdates.ts): each step takes its turn in the queue, like the page's own
-  // Apply all, and is logged as one; none starts once the app is quitting (one already running is waited for: see before-quit).
+  // steps, and is logged as one; none starts once the app is quitting (one already running is waited for: see before-quit).
   const noPluginUpdates: PluginUpdatesView = { on: false, paused: false, checking: false, updated: [], failed: [], first: false };
   if (!smoke) {
     const recordPath = join(app.getPath('userData'), 'plugin-updates.json');
@@ -1175,7 +1175,7 @@ app.whenReady().then(async () => {
       home: () => current?.home, on: pluginUpdatesOn, paused: () => !syncOn, log, now: Date.now, every,
       pending: home => queued(() => markets.pendingUpdates(home)),
       api: {
-        // A selection that waits installs as Apply all does.
+        // An install a tool new here is owed runs as the page's own install does.
         install: (source, marketName, plugin, tools, home) => step('plugins:install', [source, marketName, plugin, tools, home], () => markets.install(source, marketName, plugin, onlyAllowed(tools, pluginTools), home)),
         update: (source, marketName, plugin, tools, home) => step('plugins:update', [source, marketName, plugin, tools, home], () => markets.update(source, marketName, plugin, onlyAllowed(tools, pluginTools), home, { reinstall: false })),
         parts: (source, marketName, plugin, tool, mode, run, home, pick) => step('plugins:parts', [source, marketName, plugin, tool, mode, run, home, pick], () => markets.parts(source, marketName, plugin, tool, mode, run, home, pick)),
