@@ -358,7 +358,7 @@ test('A managed tool turning up asks for a check now while plugins change by the
   box.due = [owed('issue-tracker', 'codex-cli')];
   box.paused = true;
   await updates.toolJoined();
-  assert.deepEqual(box.calls, []);
+  assert.deepEqual([box.calls, box.said.length], [[], 0], 'no check at all');
   box.paused = false;
   await updates.toolJoined();
   assert.deepEqual(box.calls, ['install issue-tracker codex-cli']);

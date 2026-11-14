@@ -658,6 +658,13 @@ test('Keep out takes it out of that tool alone and records it; the switch then s
     assert.deepEqual([sw.entry, sw.tools['pi-cli']!.wanted, sw.tools['claude-cli']!.wanted], [{ on: true, except: ['pi-cli'] }, false, true]);
     await box.markets.turn(box.root, 'pdf', 'let-in', 'pi-cli', box.home);
     assert.deepEqual([(await box.record()).plugins[0]!.except, await exists(box.piSkill('pdf'))], [[], true]);
+    // Kept out again and turned off; then its parts put into Pi outside the switch. On puts it where it is wanted and takes
+    // nothing out: Pi's copy stays, shown with Turn off there.
+    await box.markets.turn(box.root, 'pdf', 'keep-out', 'pi-cli', box.home);
+    await box.markets.turn(box.root, 'pdf', 'off', undefined, box.home);
+    await box.markets.parts(box.root, 'team', 'pdf', 'pi-cli', 'install', undefined, box.home);
+    const on = await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    assert.deepEqual([on.done.map(step => [step.tool, step.action]), await exists(box.piSkill('pdf')), (await box.acts('pdf'))['pi-cli']], [[['claude-cli', 'install']], true, 'remove-parts']);
   } finally { await box.cleanup(); }
 });
 
