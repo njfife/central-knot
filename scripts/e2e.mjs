@@ -3655,6 +3655,16 @@ esac
   await a.click('#pfix-0-issue-tracker-claude-cli');
   await done();
   same('Install there puts it back', [installed(), await a.run(`document.querySelector('.plugin-tool[data-tool="claude-cli"] .cell-button')?.dataset.state`)], [true, 'installed']);
+  // An install Claude Code refuses (its stand-in knows only issue-tracker): said in the problem band and on Claude Code's line.
+  await a.click('#plugin-back');
+  await a.click('#popen-0-document-tools');
+  for (let tries = 0; tries < 50 && !(await a.exists('#pswitch-page-0-document-tools')); tries++) await wait(100);
+  await a.click('#pswitch-page-0-document-tools');
+  await done();
+  same('a refused install is said, its line offers Install there, and Pi has its parts', [/Could not add the marketplace|Not installed/.test(await a.text('.plugin-problems') ?? ''), await a.run(`document.querySelector('.plugin-tool[data-tool="claude-cli"] .cell-button')?.dataset.state`),
+    await a.exists('#pfix-0-document-tools-claude-cli'), existsSync(join(home, '.pi/agent/skills/pdf-reader/SKILL.md'))], [true, 'missing', true, true]);
+  await pictures('plugin-switch-failed');
+  await fitsAtMinimum(a, 'a plugin’s page with an install that failed');
   same('no page errors, a plugin’s switch', a.pageErrors, []);
   await a.quit();
 }
