@@ -230,8 +230,7 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
    * Merge (library.ts MERGE): the source's version (`theirs`) merged into `yours` against `base`, path by path as library.ts
    * mergeFiles says, a file both sides changed by a line merge run here. Merged: the content, stored under the item already
    * (as `store` stores one), and nothing else of the merge's left behind; else the conflicting paths, or why it couldn't run.
-   * A kind a source brings must have it (SourcedKind: sources.ts's table holds no other); a kind no source brings leaves it out
-   * (MCP servers).
+   * A kind no source brings leaves it out (MCP servers): see SourcedKind.
    */
   merge?(context: ShareContext, item: LibraryItem, three: { base: Content; yours: Content; theirs: Content }): Promise<MergeResult<Content>>;
 }

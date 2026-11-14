@@ -205,9 +205,8 @@ const readable = (found: Holds) => found.kinds.some(each => each.items.some(item
 
 /**
  * What was read at a source of one kind, as the pass and the table are given it (the one place that decides it): each item of
- * that kind there by key, with its content or why it is unreadable, and whether the source was read whole for this kind: the
- * link's folder is there and is no plugin or marketplace, at least one item of any kind there can be read, and every item of
- * this kind can be read (library.ts "Read whole"). `recorded`: the ids of the sources the home records.
+ * that kind there by key, with its content or why it is unreadable, and whether the source was read whole for this kind
+ * (library.ts "Read whole"). `recorded`: the ids of the sources the home records.
  */
 export function readOf(source: SourceRecord, found: Holds, entry: SourceKind, recorded: ReadonlySet<string>, clicked: RowClick = {}): SourceRead<unknown> {
   const there = itemsOf(found, entry), names: SourceRead<unknown>['names'] = new Map();

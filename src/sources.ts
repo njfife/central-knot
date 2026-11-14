@@ -2,24 +2,23 @@
 // library.ts's header (A SOURCE: sourceAnswers and fromSource; what counts as changed here: changedHere); the pass carries it
 // out in one step before its clicks (librarypass.ts fromSourceStep), one pass per kind a source brings. This module owns what
 // is around that step:
-// - the kinds a source brings, one table (sourceKinds: a SourceKind each, its Kind with Merge, its pass and its reader at a
-//   link). Skills and agents are its entries in this version. Every run, click and view goes through it: runSource,
-//   rowClick, namesOf, libraryNow, sourcesView and sourceFacts. To add a kind: its entry in sourceKinds, its reader in
-//   atlink.ts (given what the kinds before it found), its Merge in merge.ts (the compiler names what an entry lacks), its view's
-//   one call to sourceFacts, and the Sources page's words (sourcespage.ts, which words a line by its kind and a sentence about
-//   every source by the kinds the view names, SourcesView `kinds`; its aside names the kinds still to come);
+// - the kinds a source brings, one table (sourceKinds: a SourceKind each, its Kind, its pass and its reader at a link).
+//   Skills and agents are its entries in this version. Every run, click and view goes through it: runSource, rowClick,
+//   namesOf, libraryNow, sourcesView and sourceFacts. To add a kind: its entry in sourceKinds, its reader in atlink.ts (given
+//   what the kinds before it found), its Merge in merge.ts (the compiler names what an entry lacks), its view's one call to
+//   sourceFacts, and the Sources page's words (sourcespage.ts, which words a line by its kind and a sentence about every
+//   source by the kinds the view names, SourcesView `kinds`; its aside names the kinds still to come);
 // - a link resolved (sourcelink.ts readLink; its branch, named or the default one, found among the repository's own: refsOf),
 //   and fetched (plugins.ts copySource: the shallow copy marketplaces get, this computer's git and its sign-in, nothing asked
-//   or kept); each source's last read is kept with its record (sourcestore.ts), and read once per click, and once per build
-//   of the home's view (lastFound); what is at it, and each kind's read of it, is atlink.ts's (holdsAt, readOf: whether it was
-//   read whole is decided there);
+//   or kept); each source's last read is kept with its record (sourcestore.ts), read from there by each click and view, and
+//   once for a whole build of the home's view, which every kind's view asks (lastFound); what is at it, and each kind's read
+//   of it, is atlink.ts's (holdsAt, readOf: whether it was read whole is decided there);
 // - the clicks: Look (previewSource: what Add would do, name by name, before anything is kept), Add, Check now, a click on one
 //   name's line in its kind (rowClick: Add on one the library holds deleted; Replace, Merge and Keep mine on one whose version
 //   waits) and Remove;
 // - the check once a day (checkDue: the rhythm is here, main.ts only calls it on its schedule's turn, with Automatic sync on);
-// - what the table says, as the page shows it: the Sources page's view (sourcesView) and each linked item's row on its kind's
-//   page (sourceFacts, which each kind's view asks), both from the same answers the pass carries out, with the tools read
-//   now; and each item a source removed (sourceFacts `removed`: library.ts removedBy), which both pages read from its kind's view.
+// - what the table says, as the pages show it: the Sources page's view (sourcesView) and each linked or removed item's row on
+//   its kind's page (sourceFacts), both from the same answers the pass carries out, with the tools read now.
 // Kept elsewhere: the page (sourcespage.ts); the words of a source's History entries (historyactions.ts) and of its versions
 // (library.ts originWords); the Git repo's refusal of a source (gitrepo.ts connectRepo, through sourcestore.ts sourceAt), as
 // a source refuses that repo here (theGitRepo, at Look and at Add).
@@ -61,9 +60,9 @@ const recordedOf = (sources: SourceRecord[]) => new Set(sources.map(source => so
 // ---------- The kinds a source brings ----------
 
 /**
- * One kind a source brings, as the table holds it: its Kind, which must have Merge (librarypass.ts SourcedKind); its pass
- * (`apply`, the one its page's clicks run), given one read of the source or the items a Merge asks for first; its reader at a
- * link (atlink.ts ReaderAt); and what a read with none of it says it found there (`noneThere`, after "No skill at its root:").
+ * One kind a source brings, as the table holds it: its Kind (librarypass.ts SourcedKind); its pass (`apply`, the one its
+ * page's clicks run), given one read of the source or the items a Merge asks for first; its reader at a link (atlink.ts
+ * ReaderAt); and what a read with none of it says it found there (`noneThere`, after "No skill or agent at its root:").
  */
 export interface SourceKind<Content = unknown> {
   kind: SourcedKind<Content>;
@@ -378,8 +377,6 @@ export async function checkDue(context: ShareContext, toolsNow: () => Promise<Ha
 /**
  * The Sources page: each source with its last read, why that read isn't whole if it isn't, what the table says of each item
  * there and of each item linked to it, kind by kind (namesOf), and why the last Check now couldn't fetch it, if it couldn't.
- * Each item a source removed is not here: the page reads it from its kind's view (sourceFacts), which every refresh of the
- * home reads again.
  */
 export async function sourcesView(context: ShareContext, tools: HarnessId[]): Promise<SourcesView> {
   const access = await writeAccess(context);
