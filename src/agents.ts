@@ -158,8 +158,11 @@ async function writeAgent(context: ShareContext, item: LibraryItem, harness: Har
 
 // ---------- The pass, for agents ----------
 
-/** What Pull brings for one agent (gitrepo.ts): its shared part and the repo's whole file (Claude Code's own part), or its removal. */
-export type PulledAgent = { agent: SharedAgent; claudeFile: string } | { removed: true };
+/**
+ * What Pull brings for one agent (gitrepo.ts): the name of its file in the repo, which names the item as a found agent's file
+ * names it (whatever its front matter says), its shared part and the repo's whole file (Claude Code's own part); or its removal.
+ */
+export type PulledAgent = { name: string; agent: SharedAgent; claudeFile: string } | { removed: true };
 type AgentPassOptions = Omit<PassOptions<SharedAgent>, 'pulled'> & { pulled?: Map<string, PulledAgent> };
 
 /** One pass over the agents (librarypass.ts runPass): the page's clicks in `changes` (itemClick), then every agent brought into line. */
@@ -167,7 +170,7 @@ export function applyAgents(context: ShareContext, tools: HarnessId[], changes: 
   // The repo's file is Claude Code's own part of the agent.
   const own = (claudeFile: string) => ({ harness: 'claude-cli' as const, text: claudeFile });
   const pulled = options.pulled && new Map([...options.pulled].map(([key, brought]) =>
-    [key, 'removed' in brought ? brought : { name: brought.agent.name, content: brought.agent, own: own(brought.claudeFile) }] as const));
+    [key, 'removed' in brought ? brought : { name: brought.name, content: brought.agent, own: own(brought.claudeFile) }] as const));
   return runPass(agentKind, context, tools, changes.map(itemClick), { ...options, pulled });
 }
 

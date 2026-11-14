@@ -925,9 +925,22 @@ test('A name that is not one file’s name (a path in it) is written nowhere, al
     const before = await listing();
     const text = '---\nname: ../../escaped\ndescription: d\n---\n\nP.\n';
     // As Pull brings it (gitrepo.ts): the repo's file is Claude Code's own part, so the record has one for a tool that never held it.
-    await applyAgents(box.context, box.tools, [], { only: new Set(['helper']), pulled: new Map([['helper', { agent: { name: '../../escaped', description: 'd', prompt: 'P.\n' }, claudeFile: text }]]) });
+    await applyAgents(box.context, box.tools, [], { only: new Set(['helper']), pulled: new Map([['helper', { name: '../../escaped', agent: { name: '../../escaped', description: 'd', prompt: 'P.\n' }, claudeFile: text }]]) });
     await applyAgents(box.context, box.tools, [], { background: true });
     assert.deepEqual(await listing(), before, 'no file anywhere, inside the agents folders or outside them');
+  } finally { await box.cleanup(); }
+});
+
+test('A pulled agent is named by its file in the repo, as a found one is by its file: front matter that names it otherwise makes no second agent', async () => {
+  const box = await sandbox();
+  try {
+    // The repo holds agents/reviewer.md whose front matter says `name: code-reviewer`.
+    const text = '---\nname: code-reviewer\ndescription: Reviews code\n---\n\nYou review code.\n';
+    await applyAgents(box.context, box.tools, [], { only: new Set(['reviewer']), pulled: new Map([['reviewer', { name: 'reviewer', agent: { name: 'code-reviewer', description: 'Reviews code', prompt: 'You review code.\n' }, claudeFile: text }]]) });
+    await applyAgents(box.context, box.tools, [], { background: true });
+    await applyAgents(box.context, box.tools, [], { background: true });
+    const view = await agentsView(box.context, box.tools);
+    assert.deepEqual([view.items.map(item => item.key), view.library.reviewer?.on, (await readdir(join(box.home, '.claude/agents'))).sort()], [['reviewer'], true, ['reviewer.md']]);
   } finally { await box.cleanup(); }
 });
 

@@ -695,7 +695,7 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
   const text = await readFile(join(dir, item.paths[0]), 'utf8');
   const agent = fromMarkdown(change.name, text);
   if (!agent) return [notIn(change.name, item.problem ?? 'It could not be read.')];
-  const done = await applyAgents(context, tools, [], { only, pulled: new Map([[key, { agent, claudeFile: text }]]) });
+  const done = await applyAgents(context, tools, [], { only, pulled: new Map([[key, { name: change.name, agent, claudeFile: text }]]) });
   const here = (await agentsView(context, tools)).library[key];
   // Only where Claude Code has the agent (it is On and not kept out there): a copy it holds otherwise is not Central Knot's.
   if (done.stopped || !tools.includes('claude-cli') || !here || !wantedIn(here, 'claude-cli')) return outcome(done);
