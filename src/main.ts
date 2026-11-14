@@ -35,7 +35,7 @@ import { applyBase, baseView, instructionsView, instructionVersion, repoBase, sa
 import { clearDraftFolders, draftSources, draftTools, writeDraft } from './draftbase.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoPulledBase, undoSettingsChange } from './gitrepo.ts';
-import { addSource, bringBack, checkDue, checkSource, mergeFromSource, previewSource, removeSource, replaceFromSource, sourcesView } from './sources.ts';
+import { addSource, bringBack, checkDue, checkSource, keepFromSource, mergeFromSource, previewSource, removeSource, replaceFromSource, sourcesView } from './sources.ts';
 import { linkLabel } from './sourcelink.ts';
 import { readParts } from './parts.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
@@ -1369,6 +1369,8 @@ app.whenReady().then(async () => {
   handle('sources:bring-back', async (id, key, home) => (home === current?.home && typeof id === 'string' && typeof key === 'string' ? bringBack(context(), await toolsNow(), id, key) : sourceElsewhere));
   handle('sources:replace', async (id, key, home) => (home === current?.home && typeof id === 'string' && typeof key === 'string' ? replaceFromSource(context(), await toolsNow(), id, key) : sourceElsewhere));
   handle('sources:merge', async (id, key, home) => (home === current?.home && typeof id === 'string' && typeof key === 'string' ? mergeFromSource(context(), await toolsNow(), id, key) : sourceElsewhere));
+  handle('sources:keep', async (id, key, home) => (home === current?.home && typeof id === 'string' && typeof key === 'string'
+    ? keepFromSource(context(), await toolsNow(), id, key) : sourceElsewhere));
   handle('sources:remove', async (id, home) => (home === current?.home && typeof id === 'string' ? removeSource(context(), await toolsNow(), id) : sourceElsewhere));
   await loading;
   if (smoke) {

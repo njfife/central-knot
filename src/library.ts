@@ -107,11 +107,13 @@
 //   S changed                            linked, changed here        nothing: the current version stays, in Central Knot and in
 //                                                                    every tool, and S waits (`wait`), said on the item's row
 //                                                                    and the source's; Replace there makes S current (`update`),
-//                                                                    Merge there merges S into it (`merge`: MERGE, below)
+//                                                                    Merge there merges S into it (`merge`: MERGE, below), Keep
+//                                                                    mine there keeps the current version (`keep`: KEEP MINE)
 //   the name is gone, the source read    linked                      the item turns Off and its link is let go, so later reads
-//     whole                                                          leave it as it is, turned back On or not, until the name
-//                                                                    comes back unchanged (re-linked: "its current version this
-//                                                                    same link's", below); then its going again turns it Off again
+//     whole                                                          leave it as it is, turned back On or not, and its row and
+//                                                                    the source's say so while it is Off (REMOVED, below); the
+//                                                                    name back unchanged links it again ("its current version
+//                                                                    this same link's", below), and its going again turns it Off
 //   that skill can't be read, or the     linked                      nothing; the source's row says why
 //     source wasn't read whole
 //   a name the library has               not linked, same content    it is linked; nothing else changes
@@ -125,6 +127,14 @@
 // "Read whole": the source was fetched and holds at least one skill, and every skill there could be read (sources.ts readOf
 // decides it, the one place). A source that holds no skill that can be read (its one skill deleted there, every skill
 // unreadable, its folder gone, a plugin) is not read whole: no name is gone, and the source turns nothing Off.
+//
+// REMOVED AT ITS SOURCE (`removedBy`, the one place it is decided; worked out at each look, never stored): an item that is Off,
+// linked to no source, has a version from a recorded source's link, and that source's last read doesn't hold its name. That
+// source's row on Sources and the item's row on Skills say so (sources.ts sourcesView, sourceFacts). The drop let the link go,
+// so turning it On (its switch, History's Turn on, a profile) is the revert: it is no longer Off, and nothing says it any more.
+// Nor once the item is deleted, the source removed, or a read holds the name again, readable or not: unchanged here since, the
+// item is linked again and follows the source (`once`); changed here, it is not brought in and never written over
+// (`differs`). A read that doesn't hold the name, whole or not, leaves it.
 //
 // CHANGED HERE (`changedHere`, the one place it is decided): the current version is not `seen`, or a managed tool's copy holds
 // an edit no pass has taken in yet, or can't be seen for sure where Central Knot applied it (a save may still be settling).
@@ -157,11 +167,17 @@
 // A folder that holds a file the merge keeps is kept. No conflict: S is kept as a version (never current), the merged folder
 // becomes current dated by the click (Origin `merged`), `seen` moves on to S, and the plan writes it where the item is On; it
 // still differs from S, so it is still changed here and the source's next change waits with S as its base. Its Undo, as
-// Replace's, puts back the version before and `seen` as it was. Merged to exactly yours, only `seen` moves on (S is kept); to
+// Replace's, puts back the version before and `seen` as it was. Merged to exactly yours, it is Keep mine's outcome (below); to
 // exactly S, the item follows its source again. Any conflict, or a line merge that can't run, changes nothing, and the answer
 // names the conflicting files, or why. Yours is the current version with every tool's edit in it: Merge's click first runs a pass for
 // the item alone (sources.ts mergeFromSource), which takes in an edit a tool holds as any pass does; a tool's copy that still
 // holds a change then (a save landing between the two, or one settling) leaves Merge undone (`wait`), and it says so.
+//
+// KEEP MINE (`keep`, a key handed to the step as Replace's is): the current version stays, and nothing is written to a tool; S
+// is kept as a version (never current) and `seen` moves on to S, so the source's next change is compared with S, and the next
+// Merge reads that base from the stored versions. A Merge whose result is exactly yours ends the same way: one outcome, with
+// one History entry (an `edit`, cause `source-kept`, with `seen` as it was), whose Undo moves only `seen` back (librarypass.ts
+// keepMine, makeCurrent). A conflict Merge can't settle is fixed this way: make the change in yours by hand, then Keep mine.
 //
 // The step writes no harness: the plan after it applies the current version where the item is On, as for any new version, so
 // a copy deleted by hand that no pass has seen yet turns the item Off whatever the source answered (THE RULE), and a dropped
@@ -519,17 +535,18 @@ export function linkedTo(item: LibraryItem | undefined, { id, link }: { id: stri
  * The header's A SOURCE table's answer for one name, a row each: the item is made (`make`: Off; a deleted one brought back by
  * Add), linked (`link`), only `seen` moves on (`same`: S is the current version already), S becomes current (`update`; Replace's
  * too), S waits for the person (`wait`: the item was changed here), S is merged into the current version (`merge`: Merge's
- * answer alone, never a row's), the item turns Off and is let go (`drop`), or `nothing`. A name the library has that is not
- * brought in says why: its content differs (`differs`), it is another source's (`another`), or it is deleted (`deleted`).
+ * answer alone, never a row's), S is kept as a version and the current one stays (`keep`: Keep mine's alone), the item turns
+ * Off and is let go (`drop`), or `nothing`. A name the library has that is not brought in says why: its content differs
+ * (`differs`), it is another source's (`another`), or it is deleted (`deleted`).
  */
-export type SourceAnswer = 'make' | 'link' | 'same' | 'update' | 'wait' | 'merge' | 'drop' | 'nothing' | 'differs' | 'another' | 'deleted';
+export type SourceAnswer = 'make' | 'link' | 'same' | 'update' | 'wait' | 'merge' | 'keep' | 'drop' | 'nothing' | 'differs' | 'another' | 'deleted';
 
 /**
  * What the table is told of one name besides the item and S: what each managed tool holds of the item now (librarypass.ts
  * copiesOf; none, for what the record alone says), and a click on the source's row for it, Add on a deleted one (`bringBack`),
- * or Replace or Merge on one whose version waits (`replace`, `merge`).
+ * or Replace, Merge or Keep mine on one whose version waits (`replace`, `merge`, `keep`).
  */
-export interface SourceAsked { copies?: Copies; bringBack?: boolean; replace?: boolean; merge?: boolean }
+export interface SourceAsked { copies?: Copies; bringBack?: boolean; replace?: boolean; merge?: boolean; keep?: boolean }
 
 /** The header's A SOURCE table for one name: `item` is the library's for its key (deleted or not), `here` what the source holds. */
 export function fromSource(item: LibraryItem | undefined, here: AtSource, linked: LinkedTo, asked: SourceAsked = {}): SourceAnswer {
@@ -544,6 +561,8 @@ export function fromSource(item: LibraryItem | undefined, here: AtSource, linked
   if (linked === 'once') return here.hash === item.hash ? 'link' : changedHere(item, item.hash, copies) ? 'differs' : 'update';
   if (here.hash === item.seen) return 'nothing';
   if (here.hash === item.hash) return 'same';
+  // Keep mine keeps the current version, so nothing a tool holds stops it (KEEP MINE): it writes nothing.
+  if (asked.keep) return 'keep';
   if (!changedHere(item, item.seen, copies) || asked.replace) return 'update';
   // Merge merges into the current version: a change a tool still holds (MERGE: a save landing, or settling) leaves it waiting.
   return asked.merge && !toolHoldsChange(item, copies) ? 'merge' : 'wait';
@@ -573,19 +592,31 @@ export interface SourceSeen { id: string; link: string; commitAt: string; whole:
 /**
  * The table for one read, all at once: an answer for each name it holds and each item linked to the source (`items`: the
  * library's, deleted ones too), by key. `recorded`: the sources the home records now. `asked`: the keys a click on the source's
- * row asks for (Add on one held deleted, Replace or Merge on one whose version waits), and what the managed tools hold of an item now.
+ * row asks for (Add on one held deleted, Replace, Merge or Keep mine on one whose version waits), and what the managed tools hold of an item now.
  * The pass carries these out (librarypass.ts fromSourceStep), and the Sources page and each linked item's row say them
  * (sources.ts sourcesView, sourceFacts); their keys are the pass's scope.
  */
 export function sourceAnswers(items: Record<string, LibraryItem>, read: SourceSeen, recorded: ReadonlySet<string>,
-  asked: { bringBack?: ReadonlySet<string>; replace?: ReadonlySet<string>; merge?: ReadonlySet<string>; copies?: (item: LibraryItem) => Copies } = {}): Map<string, SourceAnswer> {
+  asked: { bringBack?: ReadonlySet<string>; replace?: ReadonlySet<string>; merge?: ReadonlySet<string>; keep?: ReadonlySet<string>;
+    copies?: (item: LibraryItem) => Copies } = {}): Map<string, SourceAnswer> {
   const linked = Object.values(items).filter(item => linkedTo(item, read, recorded) === 'this').map(item => item.key);
   return new Map([...new Set([...read.names.keys(), ...linked])].map(key => {
     const entry = read.names.get(key), item = items[key];
     const here: AtSource = !entry ? (read.whole ? 'gone' : 'unreadable') : 'hash' in entry ? { hash: entry.hash } : 'unreadable';
-    const about: SourceAsked = { copies: item && asked.copies?.(item), bringBack: asked.bringBack?.has(key), replace: asked.replace?.has(key), merge: asked.merge?.has(key) };
+    const about: SourceAsked = { copies: item && asked.copies?.(item), bringBack: asked.bringBack?.has(key), replace: asked.replace?.has(key),
+      merge: asked.merge?.has(key), keep: asked.keep?.has(key) };
     return [key, fromSource(item, here, linkedTo(item, read, recorded), about)];
   }));
+}
+
+/**
+ * The recorded source that removed an item, if one did (the header's REMOVED AT ITS SOURCE): the item is Off and linked to
+ * none, one of its versions came from that source's link, and that source's last read doesn't hold its name. `reads`: every
+ * source the home records, each with its last read's names.
+ */
+export function removedBy<Read extends Pick<SourceSeen, 'id' | 'link' | 'names'>>(item: LibraryItem, reads: readonly Read[]): Read | undefined {
+  if (item.on || item.deleted || linkedSource(item, new Set(reads.map(read => read.id)))) return undefined;
+  return reads.find(read => !read.names.has(item.key) && item.versions.some(version => version.from.link === read.link));
 }
 
 /** One path in a folder as Merge compares it (the header's MERGE): a file, by its bytes' hash and its executable bit, or a folder. */

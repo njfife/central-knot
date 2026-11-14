@@ -82,6 +82,7 @@ const api: DesktopApi = {
   bringBackFromSource: (id, key, home) => ipcRenderer.invoke('sources:bring-back', id, key, home),
   replaceFromSource: (id, key, home) => ipcRenderer.invoke('sources:replace', id, key, home),
   mergeFromSource: (id, key, home) => ipcRenderer.invoke('sources:merge', id, key, home),
+  keepFromSource: (id, key, home) => ipcRenderer.invoke('sources:keep', id, key, home),
   removeSource: (id, home) => ipcRenderer.invoke('sources:remove', id, home),
   saveProfile: (profile, home) => ipcRenderer.invoke('profiles:save', profile, home),
   deleteProfile: (id, home) => ipcRenderer.invoke('profiles:delete', id, home),

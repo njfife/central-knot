@@ -3,7 +3,7 @@
 // applied there last. Contents are single letters: 'a' is older than 'b', and so on.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { carryOut, changedHere, decide, fromSource, isLibraryItem, keepVersion, latestCopy, linkedTo, listed, managedAgain, mergeFiles, newItem, noteAgainst, plan, setCurrent, originWords, sourceAnswers, takeInAnswer, type HarnessCopy, type LibraryItem, type PathIs, type Shelf, type Version } from '../src/library.ts';
+import { carryOut, changedHere, decide, fromSource, isLibraryItem, keepVersion, latestCopy, linkedTo, listed, managedAgain, mergeFiles, newItem, noteAgainst, plan, removedBy, setCurrent, originWords, sourceAnswers, takeInAnswer, type HarnessCopy, type LibraryItem, type PathIs, type Shelf, type Version } from '../src/library.ts';
 
 const has = (hash: string, at = 0): HarnessCopy => ({ is: 'present', hash, at });
 /** A copy with no time of its own (an MCP entry: its time is its whole file's). */
@@ -510,6 +510,36 @@ test('A source: Merge on its row merges S into the current version where it was 
   assert.equal(fromSource(on, there('s'), 'this', { merge: true, copies: { 'claude-cli': unseen } }), 'wait', 'Claude Code’s copy settling where it was applied');
   assert.equal(fromSource(linked('l', 'l'), there('s'), 'this', { merge: true }), 'update', 'nothing of its own to merge');
   assert.equal(fromSource(linked('mine', 's'), there('s'), 'this', { merge: true }), 'nothing', 'nothing waits any more');
+});
+
+test('A source: Keep mine on its row keeps the current version, whatever a tool holds, and even where nothing was changed here; with nothing waiting it changes nothing', () => {
+  assert.equal(fromSource(linked('mine', 'old'), there('s'), 'this', { keep: true }), 'keep');
+  const on = { ...linked('mine', 'old'), on: true, applied: { 'claude-cli': 'mine' } } satisfies LibraryItem;
+  assert.equal(fromSource(on, there('s'), 'this', { keep: true, copies: { 'claude-cli': holds('saved just now') } }), 'keep', 'it writes nothing, so a tool’s edit doesn’t stop it');
+  assert.equal(fromSource(linked('l', 'l'), there('s'), 'this', { keep: true }), 'keep', 'the click is the person’s: the source’s version doesn’t come in over it');
+  assert.equal(fromSource(linked('mine', 's'), there('s'), 'this', { keep: true }), 'nothing', 'nothing waits any more');
+  assert.equal(fromSource(linked('s', 'old'), there('s'), 'this', { keep: true }), 'same', 'the source has yours: only seen moves on');
+});
+
+/** A source's last read as removedBy reads it: its id, its link and the names it holds. */
+const lastRead = (names: [string, { hash: string } | { unreadable: string }][], id = 'src', link = 'team/notes') => ({ id, link, names: new Map(names) });
+
+test('Removed at its source: Off, linked to none, a version from a recorded source’s link, and that source’s last read without its name; any of these not so, and nothing says it', () => {
+  const dropped = { ...linked('l', 'l'), source: undefined, seen: undefined };
+  const reads = [lastRead([['jottings', { hash: 'j' }]])];
+  assert.equal(removedBy(dropped, reads), reads[0]);
+  assert.equal(removedBy({ ...dropped, on: true }, reads), undefined, 'turned On: the revert');
+  assert.equal(removedBy({ ...dropped, deleted: { at: '2026-11-05T10:00:00.000Z' } }, reads), undefined, 'deleted');
+  assert.equal(removedBy({ ...dropped, source: 'src' }, reads), undefined, 'linked to it again');
+  assert.equal(removedBy({ ...dropped, source: 'gone' }, reads), reads[0], 'linked to a source no longer recorded is linked to none');
+  assert.equal(removedBy(dropped, []), undefined, 'its source removed');
+  assert.equal(removedBy(dropped, [lastRead([['notes', { hash: 's' }]])]), undefined, 'the name back');
+  assert.equal(removedBy(dropped, [lastRead([['notes', { unreadable: 'its SKILL.md can’t be read' }]])]), undefined, 'the name back, unreadable: that line says why');
+  const empty = [lastRead([])];
+  assert.equal(removedBy(dropped, empty), empty[0], 'a read with no skill at all, not whole, leaves it');
+  assert.equal(removedBy(dropped, [lastRead([['jottings', { hash: 'j' }]], 'src', 'team/other')]), undefined, 'no version from that link');
+  const merged = { ...dropped, versions: [{ hash: 'l', at: '2026-11-04T10:00:00.000Z', from: { how: 'merged' as const, link: 'team/notes' } }] };
+  assert.equal(removedBy(merged, reads), reads[0], 'a version Merge made, with that link, counts too');
 });
 
 // ---------- Merge's table (library.ts's header, MERGE), one row each ----------

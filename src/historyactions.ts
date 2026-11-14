@@ -42,6 +42,9 @@
 //                                            (`seen`) puts back the
 //                                            source's version the
 //                                            item had taken
+//   Keep mine (edit, `source-kept`), at the  Undo: only `seen`      the item is linked, at that version; the entry that
+//     version it kept (previous = version)   goes back              Undo makes (current, previous = version) offers
+//                                                                   nothing, at any version
 //   conflict, chosen, kept-edit (an edit     Use <harness>’s        that copy's version is not the current one
 //     not taken in that was written over,
 //     a copy a tool managed again held, or
@@ -136,6 +139,8 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
     case 'current': {
       // The version as it was first kept says where the content came from; the entry that made it current again doesn't.
       const made = item?.versions.findLast(version => version.hash === event.version), when = made && item && versionClock(item, made);
+      // Keep mine's Undo: the version stayed, and only the source's version it had taken went back (librarypass.ts makeCurrent).
+      if (event.previous !== undefined && event.previous === event.version) return { glyph: 'undo-2', text: 'Undone: yours stays current, and the source’s version it was kept over waits again.' };
       if (undid) return { glyph: 'undo-2', text: `Undone: ${when ? `the version from ${when}` : 'the version before'} is current again${also(', in')}.` };
       return { glyph: 'undo-2', text: `${made ? `T${theVersion(made.from).slice(1)} (${when})` : 'An earlier version'} was made current${also(', in')}.` };
     }
@@ -164,6 +169,10 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       if (event.cause === 'source' && event.seen !== undefined) return { glyph: 'link-2', text: `Replaced with ${source}’s version; that became the current version${tools ? `, in ${tools}` : ''}. The version it replaced is kept.` };
       if (event.cause === 'source') return { glyph: 'link-2', text: `Updated from ${source}; that became the current version${tools ? `, in ${tools}` : ''}.` };
       if (event.cause === 'source-merged') return { glyph: 'link-2', text: `Merged ${source}’s version into yours; that became the current version${tools ? `, in ${tools}` : ''}. The version it had and the source’s are kept.` };
+      // Keep mine, or a Merge whose result was exactly yours: no tool was written.
+      if (event.cause === 'source-kept') {
+        return { glyph: 'link-2', text: `Yours stays current over ${source}’s version, which no longer waits: it is kept as a version, and the source’s next change is compared with it.` };
+      }
       return { glyph: 'pencil-line', text: `Edited in ${from}; that became the current version${tools ? `, in ${tools} too` : ''}.` };
     case 'switched': {
       // Clear the switch's Undo turns the tool's switch off again (`cause` 'switch'); any other that turned a switch off is
@@ -268,6 +277,13 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
     const own = `${andList(tools)} ${tools.length === 1 ? 'has its own copy' : 'have their own copies'} back, as before`;
     return { label: 'Undo', help: `${action.help}; ${own}`, change: { ...action.change, giveBack: back } };
   }
+  // Keep mine moved only `seen` on: its Undo moves it back (librarypass.ts makeCurrent, asked for the current version), while
+  // the item is at the version it kept. The entry that Undo makes (previous = version) offers nothing: Keep mine is on the source's row.
+  if (event.cause === 'source-kept') {
+    const asLeft = !!item.source && event.version === item.hash && event.seen !== undefined;
+    return asLeft ? { label: 'Undo', help: 'Make the source’s version wait again; yours stays current', change: { ...now, version: item.hash, seen: event.seen } } : undefined;
+  }
+  if (event.kind === 'current' && event.previous !== undefined && event.previous === event.version) return undefined;
   // Copies an earlier engine added, removed, switched or took over: there is no earlier version to go back to.
   if (['added', 'removed', 'switched', 'took-over'].includes(event.kind) || !isVersion(item, event.previous)) return undefined;
   // Undo while what this entry made is still current; once later changes came, it says what it does instead.

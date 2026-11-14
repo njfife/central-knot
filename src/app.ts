@@ -667,6 +667,8 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const view = await api().refresh();
   setHome(view);
   await putHistory();
+  // A source's band offers its click's Undo (sourcespage.ts whatItDid): its rows say what waits there now.
+  if (state.page === 'sources') await loadSources();
   const restored = result.results.filter(entry => entry.outcome === 'written');
   const where = [...new Set(restored.map(entry => entry.harness ?? ''))].filter(Boolean);
   const past = state.history.data?.find(event => event.id === eventId);

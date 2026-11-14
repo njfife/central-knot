@@ -10,11 +10,12 @@
 //   and fetched (plugins.ts copySource: the shallow copy marketplaces get, this computer's git and its sign-in, nothing asked
 //   or kept); each source's last read is kept with its record (sourcestore.ts);
 // - the clicks: Look (previewSource: what Add would do, name by name, before anything is kept), Add, Check now, Add on one name
-//   the library holds deleted (bringBack), Replace and Merge on one whose version waits (replaceFromSource, mergeFromSource)
-//   and Remove;
+//   the library holds deleted (bringBack), Replace, Merge and Keep mine on one whose version waits (replaceFromSource,
+//   mergeFromSource, keepFromSource) and Remove;
 // - the check once a day (checkDue: the rhythm is here, main.ts only calls it on its schedule's turn, with Automatic sync on);
 // - what the table says, as the page shows it: the Sources page's view (sourcesView) and each linked item's row on Skills
-//   (sourceFacts, which skills.ts skillsView asks), both from the same answers the pass carries out, with the tools read now.
+//   (sourceFacts, which skills.ts skillsView asks), both from the same answers the pass carries out, with the tools read now;
+//   and each item a source removed (sourceFacts `removed`: library.ts removedBy), which both pages read from the Skills view.
 // Kept elsewhere: the page (sourcespage.ts); the words of a source's History entries (historyactions.ts) and of its versions
 // (library.ts originWords); the Git repo's refusal of a source (gitrepo.ts connectRepo, through sourcestore.ts sourceAt), as
 // a source refuses that repo here (theGitRepo, at Look and at Add). Only skills come from a source in this version: nothing
@@ -34,7 +35,7 @@ import { basename, join } from 'node:path';
 import { inside } from './catalogdetail.ts';
 import { parseSkill } from './discovery.ts';
 import { connectedRepoAddress } from './gitrepo.ts';
-import { changedHere, itemKey, linkedSource, sourceAnswers, type Copies, type LibraryItem } from './library.ts';
+import { changedHere, itemKey, linkedSource, removedBy, sourceAnswers, type Copies, type LibraryItem } from './library.ts';
 import { copiesOf, lookFor, type SourceRead } from './librarypass.ts';
 import { copySource, gitFailure, runGit, sameSource } from './plugins.ts';
 import { exists, libraryGate, readTree, removeTree, writeAccess, writeDurably, type ShareContext } from './share.ts';
@@ -131,8 +132,8 @@ function readOf(source: SourceRecord, found: Holds, sources: SourceRecord[], cli
   for (const skill of found.skills) names.set(skill.key, 'unreadable' in skill ? { unreadable: skill.unreadable } : { name: skill.name, hash: skill.hash, content: { directory: skill.directory, hash: skill.hash } });
   return { id: source.id, link: source.link, commitAt: source.commitAt, whole: found.holds === 'skills' && found.skills.every(skill => !('unreadable' in skill)), names, recorded: recordedOf(sources), ...clicked };
 }
-/** A click on one name's row at a source: Add on one held deleted (`bringBack`), or Replace or Merge on one whose version waits (`replace`, `merge`). */
-type RowClick = Pick<SourceRead<SkillContent>, 'bringBack' | 'replace' | 'merge'>;
+/** A click on one name's row at a source: Add on one held deleted (`bringBack`), or Replace, Merge or Keep mine on one whose version waits (`replace`, `merge`, `keep`). */
+type RowClick = Pick<SourceRead<SkillContent>, 'bringBack' | 'replace' | 'merge' | 'keep'>;
 
 /** A source's last read as kept here (none kept reads as nothing at the link's folder: sourcestore.ts), and as the table reads it. */
 async function lastRead(context: ShareContext, source: SourceRecord, sources: SourceRecord[], clicked?: RowClick) {
@@ -336,8 +337,8 @@ export async function checkSource(context: ShareContext, toolsNow: () => Promise
  * A click on one name's row at a source, from the source's last read (no fetch): Add on a name the library holds deleted
  * brings it back Off (`bringBack`); Replace on one whose version waits makes the source's version current and keeps the one
  * the item had as a version (`replace`); Merge merges it into the current version (`merge`, library.ts MERGE), after a pass for
- * that item alone, which takes in an edit a tool holds: it is yours. Each is then the table's own answer (library.ts
- * fromSource), carried out by the pass.
+ * that item alone, which takes in an edit a tool holds: it is yours; Keep mine keeps the current version and the source's
+ * as a version (`keep`, library.ts KEEP MINE). Each is then the table's own answer (library.ts fromSource), carried out by the pass.
  */
 async function fromRow(context: ShareContext, tools: HarnessId[], id: string, clicked: RowClick): Promise<SourceResult> {
   const { sources, problem } = await readSources(context.home), source = sources.find(each => each.id === id);
@@ -353,6 +354,8 @@ export const bringBack = (context: ShareContext, tools: HarnessId[], id: string,
 export const replaceFromSource = (context: ShareContext, tools: HarnessId[], id: string, key: string) => fromRow(context, tools, id, { replace: new Set([key]) });
 /** Merge on one name whose version waits at a source's row: the source's version, as last read, merged into the current one. */
 export const mergeFromSource = (context: ShareContext, tools: HarnessId[], id: string, key: string) => fromRow(context, tools, id, { merge: new Set([key]) });
+/** Keep mine on one name whose version waits at a source's row: the current version stays, and the source's, as last read, no longer waits. */
+export const keepFromSource = (context: ShareContext, tools: HarnessId[], id: string, key: string) => fromRow(context, tools, id, { keep: new Set([key]) });
 
 /** Remove: the source is forgotten, with its last read. Each item it brought stays as it is, On or Off, with its versions, no longer linked. */
 export async function removeSource(context: ShareContext, tools: HarnessId[], id: string): Promise<SourceResult> {
@@ -399,7 +402,8 @@ export async function checkDue(context: ShareContext, toolsNow: () => Promise<Ha
 
 /**
  * The Sources page: each source with its last read, why that read isn't whole if it isn't, what the table says of each skill
- * there and of each item linked to it (namesOf), and why the last Check now couldn't fetch it, if it couldn't.
+ * there and of each item linked to it (namesOf), and why the last Check now couldn't fetch it, if it couldn't. Each item a
+ * source removed is not here: the page reads it from the Skills view (sourceFacts), which every refresh of the home reads again.
  */
 export async function sourcesView(context: ShareContext, tools: HarnessId[]): Promise<SourcesView> {
   const access = await writeAccess(context);
@@ -415,20 +419,25 @@ export async function sourcesView(context: ShareContext, tools: HarnessId[]): Pr
 /**
  * Each item linked to a source the home records, as its row on Skills says it (types.ts LibraryFacts fromSource): the source's
  * link, and whether that source's last read has a version that waits (the table's `wait`, from the same answers as the Sources
- * page), or else whether it is changed here (library.ts changedHere), so the source's next change will meet it. `items` and
- * `copies`: the Skills view's own look (skills.ts skillsView).
+ * page), or else whether it is changed here (library.ts changedHere), so the source's next change will meet it; and each item
+ * a source removed (`removed`: library.ts removedBy), with that source's link. `items` and `copies`: the Skills view's own look
+ * (skills.ts skillsView).
  */
 export async function sourceFacts(context: ShareContext, items: Record<string, LibraryItem>, copies: (item: LibraryItem) => Copies): Promise<Map<string, NonNullable<LibraryFacts['fromSource']>>> {
   const { sources } = await readSources(context.home), facts = new Map<string, NonNullable<LibraryFacts['fromSource']>>();
-  const recorded = recordedOf(sources);
-  for (const source of sources) {
+  const recorded = recordedOf(sources), reads = await Promise.all(sources.map(async source => (await lastRead(context, source, sources)).read));
+  for (const [index, source] of sources.entries()) {
     const linked = Object.values(items).filter(item => !item.deleted && linkedSource(item, recorded) === source.id);
     if (!linked.length) continue;
-    const answers = sourceAnswers(items, (await lastRead(context, source, sources)).read, recorded, { copies });
+    const answers = sourceAnswers(items, reads[index], recorded, { copies });
     for (const item of linked) {
       const waits = answers.get(item.key) === 'wait', nextWaits = !waits && changedHere(item, item.seen, copies(item));
       facts.set(item.key, { link: source.link, ...(waits ? { waits: true as const } : {}), ...(nextWaits ? { nextWaits: true as const } : {}) });
     }
+  }
+  for (const item of Object.values(items)) {
+    const by = removedBy(item, reads);
+    if (by) facts.set(item.key, { link: by.link, removed: true });
   }
   return facts;
 }

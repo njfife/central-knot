@@ -485,7 +485,8 @@ export type Pulled<Content> = { name: string; content: Content; own?: { harness:
  * One read of a source as the pass is given it (sources.ts readOf): the table's reading of it (library.ts SourceSeen), with each
  * readable name's own name and content. `recorded`: the sources the home records now. `bringBack`: keys held deleted that a
  * click on Add on the source's row brings back; `replace`: keys whose waiting version a click on Replace there makes current;
- * `merge`: keys whose waiting version a click on Merge there merges into the current one.
+ * `merge`: keys whose waiting version a click on Merge there merges into the current one; `keep`: keys whose waiting version a
+ * click on Keep mine there keeps as a version, the current one staying.
  */
 export interface SourceRead<Content> extends SourceSeen {
   names: Map<string, { name: string; hash: string; content: Content } | { unreadable: string }>;
@@ -493,6 +494,7 @@ export interface SourceRead<Content> extends SourceSeen {
   bringBack?: ReadonlySet<string>;
   replace?: ReadonlySet<string>;
   merge?: ReadonlySet<string>;
+  keep?: ReadonlySet<string>;
 }
 interface Pass extends AnyLook {
   shelf: Shelf<unknown>;
@@ -1021,13 +1023,19 @@ function takenInNotice(taken: Pass['takenIn']): TakenInNotice {
 /**
  * Makes an earlier version current: a new version (library.ts setCurrent), which the pass then applies like any other. `seen`:
  * History's Undo of a Replace or a Merge puts back the source's version the item had taken before it (types.ts Change seen);
- * its entry records the one it replaced, so the Undo of that Undo puts it back in turn.
+ * its entry records the one it replaced, so the Undo of that Undo puts it back in turn. The Undo of Keep mine asks for the
+ * current version itself: only `seen` goes back (library.ts KEEP MINE), and its entry says so (previous = version).
  */
 async function makeCurrent(pass: Pass, item: LibraryItem, version: string, refuse: Refuse, seen?: string) {
+  const previous = item.hash, before = item.seen, puts = seen !== undefined && !!item.source;
+  if (version === item.hash && puts) {
+    item.seen = seen;
+    pass.asked.set(item.key, { kind: 'current', previous, version, seen: before });
+    return;
+  }
   const content = item.versions.some(known => known.hash === version) ? await pass.kind.readVersion(pass.context, item.key, version) : undefined;
   if (!content) return refuse('That version is no longer in Central Knot’s store, so it can’t be made current.');
   if (version === item.hash) return refuse(`${item.name} is at that version already.`);
-  const previous = item.hash, before = item.seen, puts = seen !== undefined && !!item.source;
   if (puts) item.seen = seen;
   await setCurrent(pass.shelf, item, { hash: version, at: now(), from: { how: 'made-current' } }, content);
   pass.asked.set(item.key, { kind: 'current', previous, version, fill: 'written', ...(puts && before !== undefined ? { seen: before } : {}) });
@@ -1037,14 +1045,16 @@ async function makeCurrent(pass: Pass, item: LibraryItem, version: string, refus
  * A source read on a click or by the daily check (library.ts A SOURCE: sourceAnswers, a fromSource answer for every name it holds
  * and every item linked to it, told what the managed tools hold of each item now: copiesOf), carried out: made Off (`make`),
  * linked (`link`; `same` only moves `seen` on), its content made current (`update`, Replace's dated by its click), merged into
- * the current version (`merge`: mergeIn), or turned Off with its link let go (`drop`); `wait` changes nothing. Each change a
- * person sees is History's entry with the source's `link`: an `off` (cause `source`) for one made, an `edit` for one made
- * current (a Replace's with `seen` as it was; a Merge's with cause `source-merged`), an `off` (cause `source-dropped`) for one
- * dropped. No harness is written here: the plan after it applies the current version where the item is On, and takes in a
- * tool's edit no pass had taken in. Answers the keys it answered for: the pass's scope.
+ * the current version (`merge`: mergeIn), S kept beside the current version (`keep`: keepMine), or turned Off with its link
+ * let go (`drop`); `wait` changes nothing. Each change a person sees is History's entry with the source's `link`: an `off`
+ * (cause `source`) for one made, an `edit` for one made current (a Replace's with `seen` as it was; a Merge's with cause
+ * `source-merged`), an `edit` for one kept (cause `source-kept`), an `off` (cause `source-dropped`) for one dropped. No
+ * harness is written here: the plan after it applies the current version where the item is On, and takes in a tool's edit no
+ * pass had taken in. Answers the keys it answered for: the pass's scope.
  */
 async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Set<string>> {
-  const answers = sourceAnswers(pass.library.items, read, read.recorded, { bringBack: read.bringBack, replace: read.replace, merge: read.merge, copies: item => copiesOf(pass, item) });
+  const clicked = { bringBack: read.bringBack, replace: read.replace, merge: read.merge, keep: read.keep };
+  const answers = sourceAnswers(pass.library.items, read, read.recorded, { ...clicked, copies: item => copiesOf(pass, item) });
   const origin: Origin = { how: 'source', link: read.link }, link = read.link;
   for (const [key, answer] of answers) {
     const item = pass.library.items[key], entry = read.names.get(key);
@@ -1073,6 +1083,7 @@ async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Se
       await setCurrent(pass.shelf, item!, { hash: entry.hash, at: replace ? now() : read.commitAt, from: origin }, entry.content);
       pass.asked.set(key, { kind: 'edit', cause: 'source', previous, version: entry.hash, link, fill: 'written', ...(replace ? { seen: before } : {}) });
     } else if (answer === 'merge') pass.sourced.get(key)!.merge = await mergeIn(pass, item!, entry, read);
+    else if (answer === 'keep') await keepMine(pass, item!, entry, read);
   }
   await saveIfChanged(pass);
   return new Set(answers.keys());
@@ -1082,7 +1093,7 @@ async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Se
  * Merge (library.ts MERGE), for an item the table answered `merge`: the kind merges S into the current version against `seen`
  * (Kind.merge). Merged: S is kept as a version (never current), the merged version becomes current dated by the click, and
  * `seen` moves on to S; its entry is an `edit` (cause `source-merged`) with `seen` as it was, which its Undo puts back. Merged
- * to exactly the current version, only `seen` moves on (S kept). A conflict, or a merge that couldn't run, changes nothing.
+ * to exactly the current version, it is Keep mine (keepMine). A conflict, or a merge that couldn't run, changes nothing.
  */
 async function mergeIn(pass: Pass, item: LibraryItem, there: { hash: string; content: unknown }, read: SourceRead<unknown>): Promise<MergeDone> {
   const version = (hash: string | undefined) => (hash ? pass.kind.readVersion(pass.context, item.key, hash) : undefined);
@@ -1092,12 +1103,26 @@ async function mergeIn(pass: Pass, item: LibraryItem, there: { hash: string; con
   const done = await pass.kind.merge!(pass.context, item, { base, yours, theirs: there.content });
   if (!('merged' in done)) return done;
   const hash = pass.kind.hashOf(done.merged), previous = item.hash, before = item.seen;
+  if (hash === previous) { await keepMine(pass, item, there, read); return 'had'; }
   if (hash !== there.hash) await keepVersion(pass.shelf, item, { hash: there.hash, at: read.commitAt, from: { how: 'source', link: read.link, replacedBy: hash } }, there.content);
   item.seen = there.hash;
-  if (hash === previous) { await saveIfChanged(pass); return 'had'; }
   await setCurrent(pass.shelf, item, { hash, at: now(), from: { how: 'merged', link: read.link } }, done.merged);
   pass.asked.set(item.key, { kind: 'edit', cause: 'source-merged', previous, version: hash, link: read.link, fill: 'written', seen: before });
   return 'merged';
+}
+
+/**
+ * Keep mine (library.ts KEEP MINE), for an item the table answered `keep`, and Merge's result when it is exactly the current
+ * version: S is kept as a version that was never current, and `seen` moves on to S; nothing else changes and no tool is
+ * written. Its entry is an `edit` (cause `source-kept`) at the current version (previous = version), with `seen` as it was,
+ * which its Undo puts back (makeCurrent).
+ */
+async function keepMine(pass: Pass, item: LibraryItem, there: { hash: string; content: unknown }, read: SourceRead<unknown>) {
+  const before = item.seen;
+  await keepVersion(pass.shelf, item, { hash: there.hash, at: read.commitAt, from: { how: 'source', link: read.link, replacedBy: item.hash } }, there.content);
+  item.seen = there.hash;
+  await saveIfChanged(pass);
+  pass.asked.set(item.key, { kind: 'edit', cause: 'source-kept', previous: item.hash, version: item.hash, link: read.link, seen: before });
 }
 
 /**
