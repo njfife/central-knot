@@ -112,7 +112,7 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'results' | 'no
     made.length ? `${names(made)} ${are(made)} in Central Knot, Off: turn ${made.length === 1 ? 'it' : 'them'} on in Skills.` : '',
     linked.length ? `${names(linked)} ${are(linked)} in Central Knot already, the same, and ${linked.length === 1 ? 'is' : 'are'} now from it.` : '',
     left.length ? `Not brought in: ${names(left)} (${left.length === 1 ? 'its row says' : 'their rows say'} why).` : '',
-    result.notWhole ? `Not all of ${label} could be read (its row says why), so nothing was turned off.` : '',
+    result.notWhole ? `Not all of ${label} could be read (its row says why), so the source turned nothing off.` : '',
   ].filter(Boolean);
   const turnOn = dropped.length === 1 && dropped[0].history ? { id: dropped[0].history, label: `Turn ${dropped[0].name} on` } : undefined;
   const undo = !turnOn && updated.length === 1 && updated[0].history ? { id: updated[0].history, label: 'Undo the update' } : undefined;
@@ -142,7 +142,7 @@ function stateWords(name: SourceName, preview: boolean): { text: string; warns?:
     case 'differs': return { text: `Not brought in: Central Knot already has a different ${called}. To take this one instead, delete yours from Central Knot on Skills (that also takes it out of every tool it is on in), then ${preview ? 'once the source is added, Add on its row' : 'Add on this row'}.`, warns: true };
     case 'another': return { text: `Not brought in: Central Knot has ${called} from ${name.why ? linkLabel(name.why) : 'another source'}`, warns: true };
     case 'deleted': return { text: `Not brought in: deleted from Central Knot.${preview ? ' Once the source is added, Add on its row brings it back, or Restore in History.' : ''}`, warns: true };
-    case 'unreadable': return { text: `Can’t be read: ${name.why}. ${preview ? 'Add can’t bring it in.' : 'Until it can, nothing from this source is turned off.'}`, warns: true };
+    case 'unreadable': return { text: `Can’t be read: ${name.why}. ${preview ? 'Add can’t bring it in.' : 'Until it can, this source turns nothing off.'}`, warns: true };
   }
 }
 
@@ -231,7 +231,7 @@ function sourceRow(source: SourceView) {
       button({ variant: 'outline', size: 'small', label: 'Remove', id: `source-remove-confirm-${source.id}`, disabled: !!state.busy, onclick: () => void remove(source) }),
       button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `source-remove-cancel-${source.id}`, onclick: () => { sources.confirmRemove = undefined; rerender(); } })) : null,
     source.problem ? h('p.source-refused', {}, icon('circle-alert', 14, 'tone-danger'), h('span', {}, `Couldn’t fetch it at the last check: ${source.problem} What came from it stays as it is; below is its last read.`)) : null,
-    source.unread ? h('p.source-refused', {}, icon('triangle-alert', 14, 'tone-warning'), h('span', {}, `${source.unread} Until it can be read, nothing from it is turned off.`)) : null,
+    source.unread ? h('p.source-refused', {}, icon('triangle-alert', 14, 'tone-warning'), h('span', {}, `${source.unread} Until it can be read, this source turns nothing off.`)) : null,
     source.names.length ? h('ul.source-names', {}, source.names.map(name => nameRow(name, false, bringBackButton(name)))) : null);
 }
 

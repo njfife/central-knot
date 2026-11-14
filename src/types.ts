@@ -1030,7 +1030,8 @@ export interface SourcesView { sources: SourceView[]; access: WriteAccess; probl
 export type SourcePreview = (SourceFound & { token: string; refused?: string }) | { refused: string; link: string };
 /**
  * What a source's click did: the pass's answers by name (PassResult sourced), and its results; why it stopped; whether the source
- * wasn't read whole (`notWhole`: nothing was turned off; the source's row says why); and the page's view after.
+ * wasn't read whole (`notWhole`: the source turned nothing off, though the pass may have, for a copy deleted by hand; the
+ * source's row says why); and the page's view after.
  */
 export interface SourceResult { stopped?: string; sourced?: PassResult['sourced']; results?: DestinationResult[]; notWhole?: true; view: SourcesView | null }
 

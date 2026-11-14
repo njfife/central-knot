@@ -120,11 +120,12 @@
 //
 // "Read whole": the source was fetched and holds at least one skill, and every skill there could be read (sources.ts readOf
 // decides it, the one place). A source that holds no skill that can be read (its one skill deleted there, every skill
-// unreadable, its folder gone, a plugin) is not read whole: no name is gone, and nothing turns Off.
+// unreadable, its folder gone, a plugin) is not read whole: no name is gone, and the source turns nothing Off.
 //
 // The step writes no harness: the plan after it applies the current version where the item is On, as for any new version, so
-// an edit a harness holds that no pass has taken in yet meets S there (latest wins), and a dropped item's copies leave the
-// harnesses as any Off item's do. Where that edit wins, S was kept, not made current: the table answered `update`, and the
+// an edit a harness holds that no pass has taken in yet meets S there (latest wins), a copy deleted by hand that no pass has
+// seen yet turns the item Off whatever the source answered (THE RULE), and a dropped item's copies leave the harnesses as any
+// Off item's do. Where that edit wins, S was kept, not made current: the table answered `update`, and the
 // pass, once its plan is known, tells History and the click `keep` (librarypass.ts asTold, the second place that decides it).
 // A source's time is its head commit's (`commitAt`: the copy is one commit deep): a later, unrelated commit there makes an
 // older edit of the skill count as the latest. Within a second of the current version's time (the tie latestCopy uses: sourceTime)

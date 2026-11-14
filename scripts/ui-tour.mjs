@@ -2476,7 +2476,7 @@ if (wanted('sources')) {
   await atEverySize('dropped', 'The skill was renamed unslop at the source; clicked Check now: the band leads, under a warning mark, with deslop no longer at the source, turned off and taken out of all 3 tools, Central Knot keeping it, with Turn deslop on; then unslop in Central Knot, Off; the row lists unslop', true, '.source-row');
   deslop({ 'SKILL.md': '---\nname: [unslop\n---\nBroken.\n' }, 'Break the front matter');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
-  await atEverySize('unreadable', 'Its SKILL.md stopped parsing at the source; clicked Check now: the band, under a warning mark and with no Open Skills, says not all of the source could be read, so nothing was turned off, and that its row says why; the row has one line for the skill, unslop, at the root of skill-deslop, saying its SKILL.md can’t be read and why, and that until it can nothing from this source is turned off', false, '.source-row');
+  await atEverySize('unreadable', 'Its SKILL.md stopped parsing at the source; clicked Check now: the band, under a warning mark and with no Open Skills, says not all of the source could be read, so the source turned nothing off, and that its row says why; the row has one line for the skill, unslop, at the root of skill-deslop, saying its SKILL.md can’t be read and why, and that until it can this source turns nothing off', false, '.source-row');
   deslop({ 'SKILL.md': skillMd('unslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice.') }, 'Mend the front matter');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
   await a.click('#nav-skills'); await openRow('deslop');
