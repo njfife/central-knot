@@ -897,6 +897,27 @@ inBox('A deleted agent can always be restored: a Delete whose pass saved another
   assert.equal((await historyOf(box)).filter(event => event.kind === 'deleted' && event.cause !== 'in-line').length, 1);
 });
 
+test('An agent whose name only its own tool can hold (it starts with “_”) goes back where it was found: On, Off and On again leave that tool its file, and no other tool is given one', async () => {
+  const box = await sandbox();
+  try {
+    const file = join(box.home, '.claude/agents/_helper.md'), text = '---\nname: _helper\ndescription: Does things\n---\n\nYou do.\n';
+    await writeFile(file, text);
+    const row = async () => {
+      const view = await agentsView(box.context, box.tools), fact = view.items.find(entry => entry.key === '_helper');
+      const hashes = Object.fromEntries(Object.entries(fact?.copies ?? {}).map(([tool, copy]) => [tool, copy!.hash]));
+      return { item: view.library._helper, row: { key: '_helper', name: fact?.name, hashes, plan: fact?.plan, cannot: fact?.cannot, unseen: fact?.unseen, takeInAnswers: fact?.takeInAnswers } };
+    };
+    const click = async (which: 'on' | 'off') => { const { row: facts, item } = await row(); return applyAgents(box.context, box.tools, [rowClicks[which](facts, item)]); };
+    const there = async () => [await readFile(file, 'utf8').catch(() => undefined), await readFile(join(box.home, '.copilot/agents/_helper.agent.md'), 'utf8').catch(() => undefined), await readFile(join(box.home, '.codex/agents/_helper.toml'), 'utf8').catch(() => undefined)];
+    assert.equal((await click('on')).stopped, undefined);
+    assert.deepEqual(await there(), [text, undefined, undefined], 'On: it stays where it was found; the others can’t hold that name');
+    await click('off');
+    assert.deepEqual(await there(), [undefined, undefined, undefined], 'Off takes its one copy out');
+    await click('on');
+    assert.deepEqual([await there(), (await row()).item?.on], [[text, undefined, undefined], true], 'On again: the tool that held it gets its file back, byte for byte');
+  } finally { await box.cleanup(); }
+});
+
 // ---------- The record, and the things around it ----------
 
 inBox('A damaged, unreadable or newer agents record stops every write and is never rewritten; a missing one is a first run', async box => {

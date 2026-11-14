@@ -141,9 +141,10 @@ export interface Disk<Entry extends Seen> {
 }
 /**
  * An item as Disk.held is told of it: its name, where it is wanted (library.ts wantedIn), what was applied where, and its
- * current version as this pass's clicks left it (none for a found item, which is asked about as taking it in would leave it).
+ * current version as this pass's clicks left it (none for a found item, which is asked about as taking it in would leave it),
+ * and each harness's own part where the record keeps one.
  */
-export type Wanted = Pick<LibraryItem, 'key' | 'name' | 'on' | 'except' | 'deleted' | 'applied'> & Partial<Pick<LibraryItem, 'hash'>>;
+export type Wanted = Pick<LibraryItem, 'key' | 'name' | 'on' | 'except' | 'deleted' | 'applied'> & Partial<Pick<LibraryItem, 'hash' | 'own'>>;
 
 /** One kind's part of the library as its record holds it: its items, and each harness's folder as a pass last saw it. */
 export interface KindLibrary { items: Record<string, LibraryItem>; folders: Partial<Record<HarnessId, FolderSeen>> }

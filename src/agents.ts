@@ -83,13 +83,16 @@ async function agentsThroughPlugins(context: ShareContext, tools: HarnessId[]): 
 
 /**
  * Why a harness with no copy can't be given the agent, for an agent's own reasons (Disk.held): a plugin brings the agent
- * there, or its name can't be stored there. Worked out at each look and never stored. A plugin that brings the agent is "has
+ * there, or its name can't be stored there (unless that harness held it under that name before). Worked out at each look and
+ * never stored. A plugin that brings the agent is "has
  * it another way" in the model's terms (library.ts); agents still hold it as can't-take, so nothing they do changes.
  */
 function agentHeld(disk: AgentDisk, managed: HarnessId[], item: Wanted, tool: HarnessId): string | undefined {
   const given = disk.through.get(tool)?.get(item.key);
   if (given) return throughPlugin(tool, given, 'agent');
-  const why = nameProblem(item.name);
+  // A harness that held the agent under this name (its own part is kept: LibraryItem own) can be given it back: the name was
+  // that harness's own, so an agent only it can hold goes Off and On again there. Every other harness still can't store it.
+  const why = item.own?.[tool] === undefined ? nameProblem(item.name) : undefined;
   // Where to rename it: a tool that has it.
   const holder = managed.find(other => disk.byKey.get(item.key)?.[other]);
   return why && `${nameOf(tool)} can’t store this name (${why}). Rename it ${holder ? `in ${nameOf(holder)} ` : ''}to use it there.`;
