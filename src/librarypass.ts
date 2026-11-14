@@ -135,8 +135,6 @@ export interface Disk<Entry extends Seen> {
    * unseen, "it is the plugin's") leaves it out.
    */
   parts?: Map<string, HarnessId[]>;
-  /** Keys Convert to skill made from an agent (agentskill.ts), which the rule leaves found. A kind with none leaves it out. */
-  converted?: Map<string, unknown>;
   /**
    * The harnesses whose own switch turns the item off there (skillswitch.ts, mcpswitch.ts), by key: where every found copy is
    * off, the rule leaves it found. A kind with no such switch (agents) leaves it out.
@@ -162,8 +160,8 @@ export type FolderSeen = { path: string } & ({ away: true } | { ino: number; bir
  */
 export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<Entry>> {
   kind: ItemKind;
-  /** How a sentence names one item, one copy and a harness's folder of them: "agent", "file", "agents folder". */
-  words: { item: string; copy: string; folder: string };
+  /** How a sentence names one item, one copy and a harness's folder of them: "agent", "file", "agents folder" (Pi's: "skills folder"). */
+  words: { item: string; copy: string; folder(harness: HarnessId): string };
   /** History's entries about this kind are keyed `<historyPrefix><item key>` ("agent:reviewer"). */
   historyPrefix: string;
   /** Of the harnesses Central Knot manages, those that can hold this kind. */
@@ -191,8 +189,12 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
   hashOf(content: Content): string;
   /** Finishes a write or removal a crash interrupted in a harness's folder, so a copy moved aside is never read as deleted. */
   recover(context: ShareContext, harness: HarnessId): Promise<void>;
-  /** Reads what each managed harness holds now. A copy that can't be read for sure is `unseen`, never left out. */
-  read(context: ShareContext, managed: HarnessId[]): Promise<D>;
+  /**
+   * Reads what each managed harness holds now. A copy that can't be read for sure is `unseen`, never left out. `library` is the
+   * kind's record as opened, for a kind whose folder in a harness is another kind's too (agents in Pi's skills folder): there a
+   * file is its copy only for a key the record holds (agentfiles.ts). The other kinds read without it.
+   */
+  read(context: ShareContext, managed: HarnessId[], library: KindLibrary): Promise<D>;
   /** A copy's content, as a version holds it. */
   contentOf(entry: Entry): Content;
   /**
@@ -254,7 +256,7 @@ type AnyLook = Look<unknown, Seen, Disk<Seen>>;
 async function lookAt<C, E extends Seen, D extends Disk<E>>(
   kind: Kind<C, E, D>, context: ShareContext, managed: HarnessId[], library: KindLibrary, settle?: Look<C, E, D>['settle'],
 ): Promise<Look<C, E, D>> {
-  return { kind, context, managed, library, disk: await kind.read(context, managed), foldersNow: {}, givingWay: new Map(), settle };
+  return { kind, context, managed, library, disk: await kind.read(context, managed, library), foldersNow: {}, givingWay: new Map(), settle };
 }
 
 /**
@@ -326,7 +328,7 @@ export async function guardFolders(look: AnyLook, items: LibraryItem[], shelf?: 
       if (!backWithoutFolder) look.foldersNow[tool] = here;
       const applied = items.filter(item => item.applied[tool] !== undefined);
       if (!applied.length) continue;
-      const where = `${toolName(tool)}’s ${look.kind.words.folder}`;
+      const where = `${toolName(tool)}’s ${look.kind.words.folder(tool)}`;
       if (stillSettling(look, path)) { look.disk.unseen.set(`${tool}:*`, `${where} isn’t there just now. If it stays away, Central Knot writes it afresh.`); continue; }
       forget(applied.filter(item => wantedIn(item, tool)));
       const owed = `${where} isn’t there. Its copy is removed once it is back.`;
@@ -453,7 +455,7 @@ export function foundKey(look: AnyLook, key: string, except: readonly HarnessId[
   const tombstone = look.library.items[key]?.deleted ? look.library.items[key] : undefined;
   const copies = foundCopies(look, key, except).map((copy): FoundCopy => ({ harness: copy.tool, hash: copy.hash, at: copy.at,
     ...(parts.includes(copy.tool) ? { part: true } : {}), ...(switchedOff.includes(copy.tool) ? { switchedOff: true } : {}) }));
-  return { copies, deleted: !!tombstone, converted: !!look.disk.converted?.has(key), leaving: !!tombstone && leavingIn(look, tombstone).length > 0 };
+  return { copies, deleted: !!tombstone, leaving: !!tombstone && leavingIn(look, tombstone).length > 0 };
 }
 
 /**
