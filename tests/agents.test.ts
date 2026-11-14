@@ -21,8 +21,8 @@ import { readHistory } from '../src/history.ts';
 import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
 import { readTomlTables } from '../src/textedit.ts';
 import { chooseTools } from '../src/toolchoice.ts';
-import type { HarnessId } from '../src/types.ts';
-import { choose, claudeAgent, claudeOwn, codexAgent, deleteIt, fileOf, filesOf, historyActions, historyOf, itemOf, keepOut, makeCurrent, pass, readOf, sandbox, seen, tools, turnOff, turnOn, undo, write, type Box, type Tool } from './agentclicks.ts';
+import type { HarnessId, PassResult } from '../src/types.ts';
+import { choose, claudeAgent, claudeOwn, codexAgent, deleteIt, fileOf, filesOf, historyActions, historyOf, itemOf, keepOut, makeCurrent, pass, readOf, sandbox, seen, tools, trial, turnOff, turnOn, undo, write, type Box, type Tool } from './agentclicks.ts';
 
 const { harnessLine, noticeWords } = sentences(libraryWords.agents);
 const inBox = (name: string, body: (box: Box) => Promise<void>, options: { skip?: boolean } = {}) => test(name, options, async () => { const box = await sandbox(); try { await body(box); } finally { await box.cleanup(); } });
@@ -398,6 +398,23 @@ inBox('Two edits: the latest wins, the other is a version, and History can make 
   const use = (await historyActions(box)).find(action => action.label === 'Use claude-cli’s')!;
   await use.run();
   assert.match((await readOf(box, 'copilot-cli'))!, /Edit one\./);
+});
+
+inBox('Two edits meet: the winner’s note is against the version current before both; the loser, never current, is compared with the winner that took its place', async box => {
+  await on(box);
+  await write(box, 'claude-cli', (await readOf(box, 'claude-cli'))!.replace('Reviews code', 'Reviews diffs'));
+  await utimes(fileOf(box, 'claude-cli'), new Date(), new Date(Date.now() + 5000));
+  await edit(box, 'codex-cli', 'Be thorough.', 9);
+  await pass(box);
+  assert.deepEqual(await versions(box), ['Be thorough. (edited in Codex) *', 'Be brief. (edited in Claude Code)', 'Be brief. (found in Claude Code)']);
+  // Codex's edit changed only the prompt of the version current before both; Claude Code's description edit was never current.
+  assert.deepEqual((await seen(box)).fact?.versionChanges, [{ changed: ['prompt'] }, { differs: ['description', 'prompt'] }, 'first']);
+  // Use this version on the loser, then a new edit: the loser was current once, so the new edit's note is against it.
+  await makeCurrent(box, (await itemOf(box))!.versions[1].hash);
+  await edit(box, 'copilot-cli', 'Be kind.', 15);
+  await pass(box);
+  assert.deepEqual((await versions(box)).slice(0, 2), ['Be kind. (edited in Copilot CLI) *', 'Be brief. (made current again)']);
+  assert.deepEqual((await seen(box)).fact?.versionChanges, [{ changed: ['prompt'] }, { changed: ['description', 'prompt'] }, { changed: ['prompt'] }, 'first']);
 });
 
 inBox('A copy deleted by hand turns the agent Off everywhere, once it has stayed missing for the settle window', async box => {
@@ -790,8 +807,88 @@ inBox('An edit saved between the read and the removal stays where it is, and bec
   const off = await turnOff(box, racing);
   assert.match(off.results.find(entry => entry.harness === 'claude-cli')!.message, /changed just now/);
   assert.match((await readOf(box, 'claude-cli'))!, /Edit late\./, 'the save is not lost');
+  // History names the tools it was taken out of, not Claude Code, where it stays.
+  assert.equal(librarySentence((await historyOf(box)).at(-1)!, libraryWords.agents, tools)?.text, 'Turned off: removed from Copilot CLI and Codex. Central Knot keeps it.');
   await pass(box);
   assert.deepEqual([await readOf(box, 'claude-cli'), await versions(box)], [undefined, ['Edit late. (edited in Claude Code) *', 'Be brief. (found in Claude Code)']]);
+});
+
+inBox('Turned On over Codex’s own file, which changes just as it is written: History doesn’t name Codex as written; the next pass writes it and says so; the On’s Undo, before and after, undoes exactly what was written', async box => {
+  await on(box);
+  await turnOff(box);
+  await write(box, 'codex-cli', codexAgent('You review code.\nMine.\n'));
+  let saved = false;
+  const racing: ShareContext = { ...box.context, fault: step => { if (step === 'before-rename' && !saved) { saved = true; writeFileSync(fileOf(box, 'codex-cli'), codexAgent('You review code.\nMine, saved again.\n')); } } };
+  const turned = await turnOn(box, racing) as PassResult;
+  assert.deepEqual(turned.results.map(entry => [entry.harness, entry.outcome]), [['claude-cli', 'written'], ['copilot-cli', 'written'], ['codex-cli', 'held']]);
+  const entry = (await historyOf(box)).at(-1)!;
+  // The copy the click took over stays on record for its Undo; only the tools written are named as written.
+  assert.deepEqual([entry.kind, entry.losers.map(loser => loser.tool), entry.tookFrom?.map(copy => copy.tool)], ['on', ['claude-cli', 'copilot-cli'], ['codex-cli']]);
+  assert.equal(librarySentence(entry, libraryWords.agents, tools)?.text, 'Turned on: put in Claude Code and Copilot CLI.');
+  // Its Undo before the write happens: Codex's file, never written, stays as it is.
+  await trial(box, async () => {
+    await (await historyActions(box)).find(action => action.event.id === entry.id && action.label === 'Undo')!.run();
+    assert.deepEqual(await filesOf(box), { 'claude-cli': undefined, 'copilot-cli': undefined, 'codex-cli': codexAgent('You review code.\nMine, saved again.\n') });
+  });
+  // The next pass keeps what Codex saved and writes over it, and History says so.
+  await pass(box);
+  assert.match((await readOf(box, 'codex-cli'))!, /Be brief\./);
+  const later = (await historyOf(box)).at(-1)!;
+  assert.deepEqual([later.kind, later.cause, later.losers.map(loser => loser.tool)], ['kept-edit', 'own-copy', ['codex-cli']]);
+  // Its Undo after: Codex's own file as the click found it comes back; what Codex saved meanwhile is a version.
+  await (await historyActions(box)).find(action => action.event.id === entry.id && action.label === 'Undo')!.run();
+  assert.deepEqual([await readOf(box, 'claude-cli'), await readOf(box, 'copilot-cli')], [undefined, undefined]);
+  assert.match((await readOf(box, 'codex-cli'))!, /Mine\.\n/);
+  assert.ok((await versions(box)).includes('Mine, saved again. (was in Codex)'));
+});
+
+inBox('A removal held twice: the pass that holds it again adds no entry naming it; the pass that removes it says so, once', async box => {
+  await on(box);
+  /** A context whose first removal finds Claude Code's file saved again just before it. */
+  const savedAgain = (prompt: string): ShareContext => { let saved = false; return { ...box.context, fault: step => { if (step === 'before-remove' && !saved) { saved = true; writeFileSync(fileOf(box, 'claude-cli'), claudeAgent(prompt)); } } }; };
+  await turnOff(box, savedAgain('You review code.\nEdit late.\n'));
+  const told = (await historyOf(box)).length;
+  await pass(box, savedAgain('You review code.\nEdit later.\n'));
+  assert.deepEqual((await historyOf(box)).slice(told).map(event => [event.kind, event.cause]), [['edit', undefined]], 'the edit taken in, and no in-line Off');
+  await pass(box);
+  assert.equal(await readOf(box, 'claude-cli'), undefined);
+  const removed = (await historyOf(box)).filter(event => event.cause === 'in-line');
+  assert.deepEqual(removed.map(event => [event.kind, event.losers.map(loser => loser.tool)]), [['off', ['claude-cli']]]);
+});
+
+inBox('Kept out of Codex, then let back in, each time as a file is saved there just then: History says neither that its copy was removed nor that it is back', async box => {
+  await on(box);
+  /** A context whose first step `at` finds a file saved in Codex just before it. */
+  const savedThen = (at: 'before-remove' | 'before-rename', prompt: string): ShareContext => { let saved = false; return { ...box.context, fault: step => { if (step === at && !saved) { saved = true; writeFileSync(fileOf(box, 'codex-cli'), codexAgent(prompt)); } } }; };
+  await keepOut(box, 'codex-cli', true, savedThen('before-remove', 'You review code.\nEdit late.\n'));
+  assert.equal(librarySentence((await historyOf(box)).at(-1)!, libraryWords.agents, tools)?.text, 'Kept out of Codex. Central Knot keeps it.');
+  await pass(box); // the edit saved there is taken in, and Codex's copy goes
+  assert.equal(await readOf(box, 'codex-cli'), undefined);
+  await keepOut(box, 'codex-cli', false, savedThen('before-rename', 'You review code.\nMine.\n'));
+  assert.equal(librarySentence((await historyOf(box)).at(-1)!, libraryWords.agents, tools)?.text, 'Turned on in Codex.');
+  assert.match((await readOf(box, 'codex-cli'))!, /Mine\./, 'the file saved there stays');
+});
+
+inBox('An Undo whose own file to give back changes just as it is given back: History doesn’t say Codex has its own file back', async box => {
+  await on(box);
+  await turnOff(box);
+  await write(box, 'codex-cli', codexAgent('You review code.\nMine.\n'));
+  const turned = await turnOn(box) as PassResult;
+  let saved = false;
+  const racing: ShareContext = { ...box.context, fault: step => { if (step === 'before-rename' && !saved) { saved = true; writeFileSync(fileOf(box, 'codex-cli'), codexAgent('You review code.\nSaved just then.\n')); } } };
+  await undo(box, turned, racing);
+  const entry = (await historyOf(box)).at(-1)!;
+  assert.deepEqual([entry.kind, entry.gaveBack], ['off', undefined]);
+  assert.equal(librarySentence(entry, libraryWords.agents, tools)?.text, 'Turned off: removed from Claude Code and Copilot CLI. Central Knot keeps it.');
+  assert.match((await readOf(box, 'codex-cli'))!, /Saved just then\./, 'what Codex saved stays');
+});
+
+inBox('Turned on while Codex is left out: History names the tools it was put in, never Codex', async box => {
+  await on(box);
+  await turnOff(box);
+  box.tools = ['claude-cli', 'copilot-cli'];
+  await turnOn(box);
+  assert.equal(librarySentence((await historyOf(box)).at(-1)!, libraryWords.agents, tools)?.text, 'Turned on: put in Claude Code and Copilot CLI.');
 });
 
 inBox('A removal that finds the copy changed since it was read waits for the next look: its result is held, not failed', async box => {

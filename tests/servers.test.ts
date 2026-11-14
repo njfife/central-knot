@@ -12,7 +12,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readHistory } from '../src/history.ts';
-import { libraryAction } from '../src/historyactions.ts';
+import { libraryAction, librarySentence } from '../src/historyactions.ts';
 import { kindSource } from '../src/itemrow.ts';
 import { asItIs, canAdd, libraryWords, sentences, statusLine } from '../src/libraryrow.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
@@ -317,7 +317,7 @@ test('A tool’s own switch is left as it is: set in each tool by hand, then Off
     assert.deepEqual(view.items[0]?.switchedOff, ['claude-cli', 'codex-cli', 'opencode-cli']);
     const home = { skills: { tools, items: [], library: {} }, mcp: view, agents: { tools, items: [], library: {} } } as unknown as HomeView;
     assert.deepEqual(kindSource(home, 'mcp').facts[0]?.switched, { 'claude-cli': 'switched off in Claude Code’s own settings', 'codex-cli': 'switched off in Codex’s own settings', 'opencode-cli': 'switched off in OpenCode’s own settings' });
-    assert.match(say.harnessLine({ key: 'docs', hashes: { 'codex-cli': 'x' }, plan: { current: ['codex-cli'], write: [], remove: [], forget: [], found: [], keep: [] }, switched: { 'codex-cli': 'switched off in Codex’s own settings' } }, view.library.docs, 'codex-cli', 'Codex'),
+    assert.match(say.harnessLine({ key: 'docs', hashes: { 'codex-cli': 'x' }, plan: { orderProved: true, current: ['codex-cli'], write: [], remove: [], forget: [], found: [], keep: [] }, switched: { 'codex-cli': 'switched off in Codex’s own settings' } }, view.library.docs, 'codex-cli', 'Codex'),
       /It is switched off in Codex’s own settings: Codex doesn’t start it\. Central Knot leaves that switch as it is, so it is still off there after Off and On\./);
     // Off: out of Codex (its own fields kept, the switch with them); Claude Code waits.
     await box.send(off('docs'), tools);
@@ -555,6 +555,59 @@ test('Claude Code’s copy waiting for Write to Claude Code, then edited in Clau
   assert.equal(view.items[0]!.description, 'Command · COPILOT-EDIT');
   assert.ok(item.versions.some(version => version.from.how === 'edited' && version.from.harness === 'claude-cli'), 'Claude Code’s edit is a version');
   assert.deepEqual(view.items[0]!.waits, ['claude-cli'], 'Claude Code still owes the write');
+}));
+
+test('Two tools’ entries edited between passes have no time to order them: History and the notice say the times can’t tell, never that the first tool’s was the latest', () => inBox(async box => {
+  await fs.writeFile(box.path('copilot-cli'), docsRuns('BASE'));
+  await applyServers(box.context, copilotAndCodex, [on('docs')]);
+  await fs.writeFile(box.path('copilot-cli'), docsRuns('COPILOT-EDIT'));
+  await fs.writeFile(box.path('codex-cli'), '[mcp_servers.docs]\ncommand = "CODEX-EDIT"\n');
+  const met = itemNotice((await applyServers(box.context, copilotAndCodex, [])).notices![0]);
+  // Copilot CLI's edit is the current version because Copilot CLI comes first among the tools, not because it was later.
+  assert.deepEqual([met.kind, met.winner, met.losers, met.orderProved, await commandIn(box, 'codex-cli')], ['conflict', 'copilot-cli', ['codex-cli'], false, 'COPILOT-EDIT']);
+  assert.equal(say.noticeWords(met).text, 'docs: Copilot CLI’s edit is the current version, though the times can’t tell which edit came last. Codex’s is kept as a version.');
+  const entry = (await readHistory(box.context)).find(event => event.kind === 'conflict')!;
+  assert.equal(entry.orderProved, false);
+  assert.equal(librarySentence(entry, libraryWords.mcp, copilotAndCodex)?.text, 'Copilot CLI’s edit became the current version, though the times can’t tell which edit came last. Codex’s is kept as a version.');
+}));
+
+test('Claude Code’s write waiting while its entry is edited by hand and Copilot CLI and Codex edit theirs: no time decided, as History says; Write to Claude Code then names Claude Code, once', () => inBox(async box => {
+  const docs = (command: string) => JSON.stringify({ mcpServers: { docs: { type: 'stdio', command } } });
+  await fs.writeFile(box.path('claude-cli'), docs('BASE'));
+  await applyServers(box.context, three, [on('docs')]);
+  await fs.writeFile(box.path('copilot-cli'), docsRuns('COPILOT-1'));
+  await applyServers(box.context, three, []); // Codex gets it; Claude Code waits for Write to Claude Code
+  await fs.writeFile(box.path('claude-cli'), docs('CLAUDE-EDIT'));
+  await fs.writeFile(box.path('copilot-cli'), docsRuns('COPILOT-2'));
+  await fs.writeFile(box.path('codex-cli'), '[mcp_servers.docs]\ncommand = "CODEX-2"\n');
+  const told = (await readHistory(box.context)).length;
+  await applyServers(box.context, three, []);
+  const met = (await readHistory(box.context)).slice(told);
+  // Copilot CLI's edit is taken in by the tools' order; Claude Code's and Codex's are kept, and only Codex is written.
+  assert.deepEqual(met.map(event => [event.kind, event.winner?.tool, event.orderProved, event.losers.map(loser => loser.tool)]), [['conflict', 'copilot-cli', false, ['claude-cli', 'codex-cli']]]);
+  assert.match(librarySentence(met[0], libraryWords.mcp, three)!.text, /^Copilot CLI’s edit became the current version, though the times can’t tell which edit came last\./);
+  assert.deepEqual([await commandIn(box, 'codex-cli'), await commandIn(box, 'claude-cli'), (await box.row('docs'))?.waits], ['COPILOT-2', 'CLAUDE-EDIT', ['claude-cli']]);
+  await writeToClaude(box.context, three, ['docs']);
+  const written = (await readHistory(box.context)).slice(told + 1);
+  assert.deepEqual(written.map(event => [event.kind, event.cause, event.losers.map(loser => loser.tool)]), [['on', 'in-line', ['claude-cli']]]);
+  assert.equal(await commandIn(box, 'claude-cli'), 'COPILOT-2');
+}));
+
+test('Claude Code’s entry edited by hand while its write waits gives way to the current version: History says so, not that it was written over; Write to Claude Code names the write, once', () => inBox(async box => {
+  const docs = (command: string) => JSON.stringify({ mcpServers: { docs: { type: 'stdio', command } } });
+  await fs.writeFile(box.path('claude-cli'), docs('BASE'));
+  await applyServers(box.context, three, [on('docs')]);
+  await fs.writeFile(box.path('copilot-cli'), docsRuns('COPILOT-1'));
+  await applyServers(box.context, three, []); // Codex gets it; Claude Code waits for Write to Claude Code
+  await fs.writeFile(box.path('claude-cli'), docs('CLAUDE-EDIT'));
+  const told = (await readHistory(box.context)).length;
+  await applyServers(box.context, three, []);
+  const kept = (await readHistory(box.context)).slice(told);
+  assert.deepEqual([kept.map(event => [event.kind, event.losers.map(loser => loser.tool)]), await commandIn(box, 'claude-cli')], [[['kept-edit', ['claude-cli']]], 'CLAUDE-EDIT']);
+  assert.equal(librarySentence(kept[0], libraryWords.mcp, three)?.text, 'Edited in Claude Code, not taken in yet; it gave way to the current version and is kept as a version.');
+  await writeToClaude(box.context, three, ['docs']);
+  const written = (await readHistory(box.context)).slice(told + 1);
+  assert.deepEqual([written.map(event => [event.kind, event.cause, event.losers.map(loser => loser.tool)]), await commandIn(box, 'claude-cli')], [[['on', 'in-line', ['claude-cli']]], 'COPILOT-1']);
 }));
 
 test('A removal Claude Code owes goes to the file it was owed in, never to Claude Code’s settings moved somewhere else since', () => inBox(async box => {

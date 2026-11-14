@@ -3,7 +3,7 @@
 // applied there last. Contents are single letters: 'a' is older than 'b', and so on.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { carryOut, decide, fromSource, isLibraryItem, keepVersion, latestCopy, linkedTo, listed, managedAgain, newItem, plan, setCurrent, originWords, sourceAnswers, takeInAnswer, type HarnessCopy, type LibraryItem, type Shelf } from '../src/library.ts';
+import { carryOut, decide, fromSource, isLibraryItem, keepVersion, latestCopy, linkedTo, listed, managedAgain, newItem, noteAgainst, plan, setCurrent, originWords, sourceAnswers, takeInAnswer, type HarnessCopy, type LibraryItem, type Shelf, type Version } from '../src/library.ts';
 
 const has = (hash: string, at = 0): HarnessCopy => ({ is: 'present', hash, at });
 /** A copy with no time of its own (an MCP entry: its time is its whole file's). */
@@ -65,7 +65,7 @@ const time = (number: number) => Date.parse(day(number));
 /** An agent On at version 'a' (made on the 1st), applied to Claude Code, Copilot CLI and Codex. */
 const item = (changes: Partial<LibraryItem> = {}): LibraryItem => ({ ...newItem('reviewer', 'reviewer'), on: true, hash: 'a',
   versions: [{ hash: 'a', at: day(1), from: { how: 'found', harness: 'claude-cli' } }], applied: { 'claude-cli': 'a', 'copilot-cli': 'a', 'codex-cli': 'a' }, ...changes });
-const quiet = { takeIn: undefined, turnedOffBy: undefined, keep: [], write: [], remove: [], forget: [], found: [] };
+const quiet = { takeIn: undefined, orderProved: true, turnedOffBy: undefined, keep: [], write: [], remove: [], forget: [], found: [] };
 
 test('Every harness holds the current version: nothing to do', () => {
   assert.deepEqual(plan(item(), { 'claude-cli': has('a'), 'copilot-cli': has('a'), 'codex-cli': has('a') }), { ...quiet, current: ['claude-cli', 'copilot-cli', 'codex-cli'] });
@@ -76,21 +76,22 @@ test('An edit in Codex becomes the current version and is written to the others'
     { ...quiet, takeIn: 'codex-cli', write: ['claude-cli', 'copilot-cli'], current: ['codex-cli'] });
 });
 
-test('Two edits: the latest wins, and the other is kept as a version before it is written over', () => {
+test('Two edits: the latest wins, as their times prove; the other is kept as a version that was never current before it is written over', () => {
   assert.deepEqual(plan(item(), { 'claude-cli': has('c', time(3)), 'copilot-cli': has('a'), 'codex-cli': has('b', time(2)) }),
-    { ...quiet, takeIn: 'claude-cli', keep: [{ harness: 'codex-cli', from: { how: 'edited', harness: 'codex-cli' } }], write: ['copilot-cli', 'codex-cli'], current: ['claude-cli'] });
+    { ...quiet, takeIn: 'claude-cli', keep: [{ harness: 'codex-cli', from: { how: 'edited', harness: 'codex-cli', replacedBy: 'c' } }], write: ['copilot-cli', 'codex-cli'], current: ['claude-cli'] });
 });
 
-test('Two edits made at the same moment: the first harness wins', () => {
+test('Two edits made at the same moment: the first harness wins, and the plan says no time decided', () => {
   const made = plan(item(), { 'claude-cli': has('c', time(2)), 'codex-cli': has('b', time(2)) });
-  assert.equal(made.takeIn, 'claude-cli');
+  assert.deepEqual([made.takeIn, made.orderProved], ['claude-cli', false]);
+  assert.equal(plan(item(), { 'claude-cli': has('c', time(2) + 1), 'codex-cli': has('b', time(2)) }).orderProved, true, 'a millisecond apart is a time');
 });
 
 test('A copy edited before the current version was made loses to it: kept as a version, then written over', () => {
   // 'b' became current on the 3rd (an edit taken in from Claude Code); Codex's write failed then, and its copy was edited on the 2nd.
   const moved = item({ hash: 'b', versions: [{ hash: 'b', at: day(3), from: { how: 'edited', harness: 'claude-cli' } }, ...item().versions], applied: { 'claude-cli': 'b', 'codex-cli': 'a' } });
   assert.deepEqual(plan(moved, { 'claude-cli': has('b'), 'codex-cli': has('x', time(2)) }),
-    { ...quiet, keep: [{ harness: 'codex-cli', from: { how: 'edited', harness: 'codex-cli' } }], write: ['codex-cli'], current: ['claude-cli'] });
+    { ...quiet, keep: [{ harness: 'codex-cli', from: { how: 'edited', harness: 'codex-cli', replacedBy: 'b' } }], write: ['codex-cli'], current: ['claude-cli'] });
   // Edited on the 4th instead, after the current version: it wins.
   assert.equal(plan(moved, { 'claude-cli': has('b'), 'codex-cli': has('x', time(4)) }).takeIn, 'codex-cli');
 });
@@ -120,7 +121,7 @@ test('Off: copies as applied are removed; an edit no pass took in becomes the cu
 test('Off with two edits no pass took in: the latest becomes the current version, the other is kept, and both copies are removed', () => {
   const off = item({ on: false });
   assert.deepEqual(plan(off, { 'claude-cli': has('b', time(2)), 'copilot-cli': has('c', time(3)), 'codex-cli': has('a') }),
-    { ...quiet, takeIn: 'copilot-cli', keep: [{ harness: 'claude-cli', from: { how: 'edited', harness: 'claude-cli' } }], remove: ['claude-cli', 'copilot-cli', 'codex-cli'], current: [] });
+    { ...quiet, takeIn: 'copilot-cli', keep: [{ harness: 'claude-cli', from: { how: 'edited', harness: 'claude-cli', replacedBy: 'c' } }], remove: ['claude-cli', 'copilot-cli', 'codex-cli'], current: [] });
 });
 
 test('A single edit is taken in even when its file’s time is older than the current version (a file copied with its time kept)', () => {
@@ -165,15 +166,36 @@ test('An edit with no time of its own, made on the current version, is taken in'
   assert.equal(plan(item(), { 'claude-cli': has('a'), 'copilot-cli': has('a'), 'codex-cli': untimed('b') }).takeIn, 'codex-cli');
 });
 
-test('Two edits with no time of their own: which came last can’t be told, so the first harness wins and the other is kept as a version', () => {
+test('Two edits with no time of their own: which came last can’t be told, so the first harness wins, the plan says no time decided, and the other is kept as a version', () => {
   assert.deepEqual(plan(item(), { 'claude-cli': untimed('c'), 'copilot-cli': has('a'), 'codex-cli': untimed('b') }),
-    { ...quiet, takeIn: 'claude-cli', keep: [{ harness: 'codex-cli', from: { how: 'edited', harness: 'codex-cli' } }], write: ['copilot-cli', 'codex-cli'], current: ['claude-cli'] });
+    { ...quiet, takeIn: 'claude-cli', orderProved: false, keep: [{ harness: 'codex-cli', from: { how: 'edited', harness: 'codex-cli', replacedBy: 'c' } }], write: ['copilot-cli', 'codex-cli'], current: ['claude-cli'] });
+});
+
+test('An edit with no time of its own that loses to the rule, beside an edit taken in: no time ordered the two, and the plan says so', () => {
+  // Codex's write of 'b' was held; Codex's copy was then edited (no time), and Claude Code's edited on 'b'.
+  const moved = item({ hash: 'b', versions: [{ hash: 'b', at: day(3), from: { how: 'edited', harness: 'copilot-cli' } }, ...item().versions], applied: { 'claude-cli': 'b', 'codex-cli': 'a' } });
+  const made = plan(moved, { 'claude-cli': untimed('c'), 'codex-cli': untimed('x') });
+  assert.deepEqual([made.takeIn, made.orderProved, made.keep], ['claude-cli', false, [{ harness: 'codex-cli', from: { how: 'edited', harness: 'codex-cli', replacedBy: 'c' } }]]);
+  // With a time, the one that lost to the rule was made before the current version, so before the edit taken in.
+  assert.equal(plan(moved, { 'claude-cli': untimed('c'), 'codex-cli': has('x', time(2)) }).orderProved, true);
 });
 
 test('An edit with no time of its own, where the current version had moved on as well: the current version stays; the edit is kept and written over', () => {
   const moved = item({ hash: 'b', versions: [{ hash: 'b', at: day(3), from: { how: 'edited', harness: 'claude-cli' } }, ...item().versions], applied: { 'claude-cli': 'b', 'codex-cli': 'a' } });
   assert.deepEqual(plan(moved, { 'claude-cli': has('b'), 'codex-cli': untimed('x') }),
-    { ...quiet, keep: [{ harness: 'codex-cli', from: { how: 'edited', harness: 'codex-cli' } }], write: ['codex-cli'], current: ['claude-cli'] });
+    { ...quiet, keep: [{ harness: 'codex-cli', from: { how: 'edited', harness: 'codex-cli', replacedBy: 'b' } }], write: ['codex-cli'], current: ['claude-cli'] });
+});
+
+test('A version’s note: one never current is compared with the version that took its place; any other with the version current before it, passing over those never current', () => {
+  const versions: Version[] = [{ hash: 'c', at: day(3), from: { how: 'edited', harness: 'codex-cli' } }, { hash: 'b', at: day(3), from: { how: 'edited', harness: 'claude-cli', replacedBy: 'c' } },
+    { hash: 'x', at: day(2), from: { how: 'was-in', harness: 'copilot-cli', replacedBy: 'a' } }, { hash: 'a', at: day(1), from: { how: 'chosen', harness: 'claude-cli' } }];
+  assert.deepEqual(versions.map(version => noteAgainst({ versions }, version)), [{ how: 'changed', against: 'a' }, { how: 'differs', against: 'c' }, { how: 'differs', against: 'a' }, 'none']);
+  // An edit that lost to the first version doesn't make that version one taken in with copies: only a copy that gave way does.
+  const lost: Version[] = [{ hash: 'b', at: day(2), from: { how: 'edited', harness: 'codex-cli', replacedBy: 'a' } }, { hash: 'a', at: day(1), from: { how: 'found', harness: 'claude-cli' } }];
+  assert.equal(noteAgainst({ versions: lost }, lost[1]), 'first');
+  // An edit that lost, stored before it said what beat it, reads as it did: as current once.
+  const older: Version[] = [{ hash: 'c', at: day(3), from: { how: 'edited', harness: 'codex-cli' } }, { hash: 'b', at: day(3), from: { how: 'edited', harness: 'claude-cli' } }, lost[1]];
+  assert.deepEqual(noteAgainst({ versions: older }, older[0]), { how: 'changed', against: 'b' });
 });
 
 test('A version taken in from a copy with no time of its own is dated when it is taken', async () => {

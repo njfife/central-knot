@@ -81,6 +81,8 @@ test('A content change offers Undo: the version from before it made current, unl
 test('Competing edits and a choice among found copies offer each copy that gave way, while its version is not the current one', () => {
   const conflict = entry({ kind: 'conflict', winner: { tool: 'codex-cli', hash: 'b' }, previous: 'a', losers: [{ tool: 'copilot-cli', hash: 'x' }, { tool: 'claude-cli', hash: 'a' }] });
   assert.equal(librarySentence(conflict, libraryWords.agents, tools)?.text, 'Codex’s edit was the latest, so it became the current version. Copilot CLI’s is kept as a version.');
+  // Where no time decided (an entry stored by the engine before the library holds the same false where its tool order did):
+  assert.equal(librarySentence({ ...conflict, orderProved: false }, libraryWords.agents, tools)?.text, 'Codex’s edit became the current version, though the times can’t tell which edit came last. Copilot CLI’s is kept as a version.');
   assert.deepEqual(versionChoices(conflict, item()), [{ tool: 'copilot-cli', hash: 'x' }]);
   assert.deepEqual(libraryAction(conflict, item(), settled, 'x')?.change, { ...asIs, version: 'x' });
   assert.deepEqual(versionChoices(conflict, item({ hash: 'x' })), [], 'that copy’s version is current now');

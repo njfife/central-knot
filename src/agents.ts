@@ -18,7 +18,7 @@ import { access } from 'node:fs/promises';
 import { agentHash, agentText, agentsFolder, changedFields, fileFor, isAgentTool, nameProblem, oneFileName, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
 import { fileTextFor, keepOwn, openLibrary, readVersion, saveLibrary, storeVersion } from './agentstore.ts';
 import { libraryAction } from './historyactions.ts';
-import { itemKey, listed, pendingEdits, plan } from './library.ts';
+import { itemKey, listed, noteAgainst, pendingEdits, plan } from './library.ts';
 import { libraryWords } from './libraryrow.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, itemClick, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
@@ -208,22 +208,17 @@ export async function agentsForRepo(context: ShareContext, tools: HarnessId[]): 
 
 // ---------- View ----------
 
-/**
- * Each listed version's note (library.ts VersionChange). A copy that gave way is compared with the version written over
- * it. Any other is compared with the version taken before it, passing over copies that gave way, which were never current;
- * with none, it is the first version, unless copies were taken in with it (the chosen one, or Pull's over copies found here).
- */
+/** Each listed version's note (library.ts VersionChange): its fields compared with the version library.ts noteAgainst names. */
 async function changesOf(context: ShareContext, item: LibraryItem): Promise<VersionChange[]> {
   const compare = async (version: Version, against: string) => {
     const [was, is] = await Promise.all([readVersion(context, item.key, against), readVersion(context, item.key, version.hash)]);
     return was && is ? changedFields(was, is) : undefined;
   };
   return Promise.all(listed(item).map(async (version): Promise<VersionChange> => {
-    if (version.from.replacedBy) { const fields = await compare(version, version.from.replacedBy); return fields ? { differs: fields } : 'unknown'; }
-    const before = item.versions.slice(item.versions.indexOf(version) + 1).find(older => older.from.how !== 'was-in');
-    if (before) { const fields = await compare(version, before.hash); return fields ? { changed: fields } : 'unknown'; }
-    const takenWith = version.from.how === 'chosen' || item.versions.some(other => other.from.replacedBy === version.hash);
-    return takenWith ? 'none' : 'first';
+    const basis = noteAgainst(item, version);
+    if (typeof basis === 'string') return basis;
+    const fields = await compare(version, basis.against);
+    return !fields ? 'unknown' : basis.how === 'differs' ? { differs: fields } : { changed: fields };
   }));
 }
 

@@ -168,6 +168,22 @@ test('Both changed, the edit here later: it stays current, the source’s is kep
     await repo.commit({ 'SKILL.md': skillMd('notes', 'Theirs again.') }, '2026-11-06T10:00:00.500Z');
     assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'keep' }], 'half a second apart is a tie: the current one stays');
     assert.equal(await bodyOf(box, 'notes'), 'Mine again.');
+    // The source's commit is half a second later: History doesn't call the current version later.
+    assert.equal((await sentences(box, 'notes')).at(-1), 'github.com/team/notes changed it too, though the times can’t tell which edit came last: the current version stays, and the source’s is kept as a version.');
+  } finally { await box.cleanup(); }
+});
+
+test('A source’s change Check now keeps, the current version being later, was never current: the next edit here is noted against the version current before it', async () => {
+  const box = await sandbox();
+  try {
+    const { repo, id } = await oneSkill(box, 'notes', { on: true });
+    await editHere(box, 'notes', 'Mine.', '2026-11-05T10:00:00Z');
+    // An earlier change at the source, which also adds a file, so a note against it reads apart from one against "Mine.".
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'Theirs.'), 'extra.md': 'From the source.\n' }, '2026-11-04T10:00:00Z');
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'keep' }]);
+    await editHere(box, 'notes', 'Mine again.', '2026-11-07T10:00:00Z');
+    // "Mine again." changed only SKILL.md from "Mine."; the source's version is noted against "Mine.", which took its place.
+    assert.deepEqual((await seen(box, box.context, 'notes')).fact?.versionChanges, [{ changed: ['SKILL.md'] }, { differs: ['SKILL.md', 'extra.md'] }, { changed: ['SKILL.md'] }, 'first']);
   } finally { await box.cleanup(); }
 });
 
@@ -584,6 +600,10 @@ test('Automatic sync off, an edit in Codex later than the source’s change, Che
     assert.deepEqual([answered(done), await bodyOf(box, 'notes')], [[{ name: 'notes', answer: 'keep' }], 'Edited in Codex.']);
     const told = (await readHistory(box.context)).filter(event => event.key === 'notes').slice(-2).map(event => [event.kind, event.cause ?? event.winner?.tool]);
     assert.deepEqual(told, [['kept-edit', 'source'], ['edit', 'codex-cli']]);
+    // The source's version was never current: the edit's note is against the one before it, and its own against the edit.
+    const item = (await itemOf(box, 'notes'))!;
+    assert.deepEqual(item.versions.map(version => [version.from.how, version.from.replacedBy === item.hash]), [['edited', false], ['source', true], ['source', false]]);
+    assert.deepEqual((await seen(box, box.context, 'notes')).fact?.versionChanges, [{ changed: ['SKILL.md'] }, { differs: ['SKILL.md'] }, 'first']);
     assert.equal(done.sourced?.[0].history, (await readHistory(box.context)).find(event => event.kind === 'kept-edit' && event.cause === 'source')?.id, 'the answer names the entry that says it');
   } finally { await box.cleanup(); }
 });

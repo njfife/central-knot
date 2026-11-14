@@ -54,8 +54,10 @@
 // edits the latest wins: an edit made on the current version (L = A) always counts, one made where L had moved on as well
 // only when it is later than L. A copy with no time of its own (`at` absent: an MCP entry, whose time is its whole file's)
 // can't be ordered: such an edit counts only when made on the current version, and of several the first harness wins (as
-// equal times do); one made where L had moved on as well loses to L and is kept as a version. `plan` applies the table to
-// every managed harness of one item at once and says what to keep, write and remove.
+// equal times do); one made where L had moved on as well loses to L and is kept as a version. Where no time decided, the plan
+// says so (Plan orderProved), and History and the notice never call the edit taken in the latest. An edit that lost is kept as
+// a version that was never current (Origin replacedBy). `plan` applies the table to every managed harness of one item at once
+// and says what to keep, write and remove.
 //
 // "Held" has two reasons, both worked out at each look and never stored: it can't be given the item (a name it can't store, a
 // folder it can't write), or it has the item another way (`anotherWay`, which only skills answer: through a plugin, OpenCode
@@ -125,9 +127,10 @@
 // harnesses as any Off item's do. Where that edit wins, S was kept, not made current: the table answered `update`, and the
 // pass, once its plan is known, tells History and the click `keep` (librarypass.ts asTold, the second place that decides it).
 // A source's time is its head commit's (`commitAt`: the copy is one commit deep): a later, unrelated commit there makes an
-// older edit of the skill count as the latest. Within a second of the current version's time
-// (the tie latestCopy uses) the current version stays and the source's is kept. Whether an item is linked is `linkedTo`'s
-// alone: one linked to a source that is no longer recorded reads as not linked, so Remove lets go of every link at once.
+// older edit of the skill count as the latest. Within a second of the current version's time (the tie latestCopy uses: sourceTime)
+// the current version stays and the source's is kept, and History doesn't call the current version later. A source's content
+// kept, either way, was never current (Origin replacedBy). Whether an item is linked is `linkedTo`'s alone: one linked to a
+// source that is no longer recorded reads as not linked, so Remove lets go of every link at once.
 //
 // Two promises hold the model together:
 // - H unseen is never H gone. A copy the adapter can't see for sure (unreadable, half saved, inside the settle window,
@@ -189,8 +192,10 @@ export type ItemKind = 'skill' | 'agent' | 'mcp';
  * Where a version came from: taken in from a harness that had it (`found`, or `chosen` among copies that differed), edited
  * by hand in a harness (`edited`), a harness's copy that gave way to the current version (`was-in`), Pull (`pulled`), read
  * at a source (`source`, with its `link` as given), an earlier version made current (`made-current`), or the record from
- * before the library (`migrated`). `replacedBy`: on a `was-in` copy, the version written over it, which its line on the page
- * is compared with (absent in older records).
+ * before the library (`migrated`). `replacedBy`: on a version that was never current, the version that took its place, which
+ * its line on the page is compared with (noteAgainst): a `was-in` copy, an edit that lost to another (plan), or a source's
+ * content the current version beat (librarypass.ts fromSourceStep, its `keep`) or an edit made here beat (librarypass.ts
+ * asTold). Absent in older records, where an edit that lost reads as current once.
  */
 export interface Origin { how: 'found' | 'chosen' | 'edited' | 'was-in' | 'pulled' | 'source' | 'made-current' | 'migrated'; harness?: HarnessId; replacedBy?: string; link?: string }
 
@@ -201,11 +206,11 @@ export interface Origin { how: 'found' | 'chosen' | 'edited' | 'was-in' | 'pulle
 export interface Version { hash: string; at: string; from: Origin }
 
 /**
- * A listed version's note, as the kind works it out (agents.ts changesOf) and its row says it (libraryrow.ts versionChange):
- * `changed`, the parts of it that differ from the version current before it; `differs`, for a copy that gave way (`was-in`),
- * the parts that differ from the version written over it. Each part by the kind's word for it ("prompt"). `first`: the first
- * version, taken alone. `none`: nothing to note (the copy chosen among several: its words say so). `unknown`: a content no
- * longer kept.
+ * A listed version's note, against what noteAgainst says, as each kind compares the contents (agents.ts changesOf) and its row
+ * says it (libraryrow.ts versionChange): `changed`, the parts of it that differ from the version current before it; `differs`,
+ * for a version that was never current, the parts that differ from the version that took its place. Each part by the kind's
+ * word for it ("prompt"). `first`: the first version, taken alone. `none`: nothing to note (the copy chosen among several: its
+ * words say so). `unknown`: a content no longer kept.
  */
 export type VersionChange = { changed: string[] } | { differs: string[] } | 'first' | 'none' | 'unknown';
 
@@ -270,6 +275,26 @@ export function listed(item: Pick<LibraryItem, 'hash' | 'versions'>): Version[] 
   return ordered.filter(version => !seen.has(version.hash) && !!seen.add(version.hash));
 }
 
+/**
+ * Whether a version was never the item's current version: a copy that gave way (`was-in`), or one beaten by the version that
+ * took its place (`replacedBy`). The one place this is decided.
+ */
+export const neverCurrent = (from: Origin) => from.how === 'was-in' || from.replacedBy !== undefined;
+
+/**
+ * What a listed version's note (VersionChange) compares it with, for every kind (each kind's changesOf compares the contents):
+ * a version that was never current, the version that took its place (`differs`); any other, the version current before it
+ * (`changed`), passing over versions that were never current. With none, it is the first version, unless copies were taken in
+ * with it (`none`: the copy chosen, or Pull's over copies found here, each of which a `was-in` names).
+ */
+export function noteAgainst(item: Pick<LibraryItem, 'versions'>, version: Version): { how: 'changed' | 'differs'; against: string } | 'first' | 'none' {
+  if (version.from.replacedBy) return { how: 'differs', against: version.from.replacedBy };
+  const before = item.versions.slice(item.versions.indexOf(version) + 1).find(older => !neverCurrent(older.from));
+  if (before) return { how: 'changed', against: before.hash };
+  const takenWith = version.from.how === 'chosen' || item.versions.some(other => other.from.how === 'was-in' && other.from.replacedBy === version.hash);
+  return takenWith ? 'none' : 'first';
+}
+
 /** Whether the item should be in this harness: On, not deleted, and not kept out of it. */
 export const wantedIn = (item: Pick<LibraryItem, 'on' | 'deleted' | 'except'>, harness: HarnessId) =>
   item.on && !item.deleted && !item.except.includes(harness);
@@ -331,6 +356,12 @@ export function decide(wanted: boolean, current: string, copy: HarnessCopy, appl
 export interface Plan {
   /** The harness whose changed copy becomes the current version. */
   takeIn?: HarnessId;
+  /**
+   * Whether times prove the edit taken in came after every other edit beside it (latestEdit). False where they can't: two edits'
+   * times are equal or missing, so the harnesses' order decided, or an edit with no time lost to the rule beside it. True where
+   * no edit is taken in.
+   */
+  orderProved: boolean;
   /** The item turns Off: the harness where its copy was deleted by hand. */
   turnedOffBy?: HarnessId;
   /** Copies to keep as versions before they are written over or removed, each with where it came from. */
@@ -358,18 +389,19 @@ export type Copies = Partial<Record<HarnessId, HarnessCopy>>;
 export function plan(item: LibraryItem, copies: Copies): Plan {
   const harnesses = Object.keys(copies) as HarnessId[];
   const verdict = (state: LibraryItem, harness: HarnessId) => decide(wantedIn(state, harness), state.hash, copies[harness]!, state.applied[harness]);
-  const takeIn = latestEdit(item, copies, new Map(harnesses.map(harness => [harness, verdict(item, harness)])));
+  const { takeIn, orderProved } = latestEdit(item, copies, new Map(harnesses.map(harness => [harness, verdict(item, harness)])));
   const turnedOffBy = harnesses.find(harness => verdict(item, harness) === 'turn-off');
   const taken = takeIn ? (copies[takeIn] as { hash: string }).hash : item.hash;
   const after: LibraryItem = { ...item, on: item.on && !turnedOffBy, hash: taken };
-  const made: Plan = { takeIn, turnedOffBy, keep: [], write: [], remove: [], forget: [], current: [], found: [] };
+  const made: Plan = { takeIn, orderProved, turnedOffBy, keep: [], write: [], remove: [], forget: [], current: [], found: [] };
   const known = new Set(item.versions.map(version => version.hash));
   for (const harness of harnesses) {
     const copy = copies[harness]!, does = verdict(after, harness), wanted = wantedHere(wantedIn(after, harness), copy);
     const lost = does === 'take-in' || does === 'latest-wins';
-    // A copy about to be written over or removed is kept first, unless the library has that content already.
+    // A copy about to be written over or removed is kept first, unless the library has that content already. Either way it
+    // was never current: the version taken in, or the current one, took its place.
     if (copy.is === 'present' && !known.has(copy.hash) && (lost || does === 'keep-then-write')) {
-      made.keep.push({ harness, from: does === 'keep-then-write' ? { how: 'was-in', harness, replacedBy: taken } : { how: 'edited', harness } });
+      made.keep.push({ harness, from: { how: does === 'keep-then-write' ? 'was-in' : 'edited', harness, replacedBy: taken } });
       known.add(copy.hash);
     }
     if (does === 'write' || does === 'keep-then-write' || (lost && wanted)) made.write.push(harness);
@@ -386,17 +418,22 @@ export const pendingEdits = (made: Plan): HarnessId[] => [...(made.takeIn ? [mad
 export const pendingChanges = (made: Plan): HarnessId[] => [...pendingEdits(made), ...(made.turnedOffBy ? [made.turnedOffBy] : [])];
 
 /**
- * The edit that becomes the current version, among the harnesses whose copy is one (`verdicts`): the latest. An edit made on
- * the current version (`take-in`) always counts; one made where the current version had moved on as well (`latest-wins`)
+ * The edit that becomes the current version (`takeIn`), among the harnesses whose copy is one (`verdicts`): the latest. An edit
+ * made on the current version (`take-in`) always counts; one made where the current version had moved on as well (`latest-wins`)
  * only when it is later than the current version. A copy with no time of its own is later than nothing: of several edits
- * that count, the first harness wins where none has a time (the sort keeps the harnesses' order).
+ * that count, the first harness wins where none has a time (the sort keeps the harnesses' order), as where two times are equal.
+ * `orderProved` says which decided (Plan orderProved), here where it is decided: a time, only where the next edit that counts
+ * is earlier by time and every edit that lost to the rule has a time (so it was earlier than the current version).
  */
-function latestEdit(item: LibraryItem, copies: Copies, verdicts: Map<HarnessId, Verdict>): HarnessId | undefined {
-  const at = (harness: HarnessId) => (copies[harness] as { at?: number }).at ?? -Infinity;
+function latestEdit(item: LibraryItem, copies: Copies, verdicts: Map<HarnessId, Verdict>): Pick<Plan, 'takeIn' | 'orderProved'> {
+  const timeOf = (harness: HarnessId) => (copies[harness] as { at?: number }).at, at = (harness: HarnessId) => timeOf(harness) ?? -Infinity;
   const currentSince = Date.parse(item.versions[currentIndex(item)]?.at ?? '') || 0;
-  const counts = [...verdicts].filter(([harness, does]) => does === 'take-in' || (does === 'latest-wins' && at(harness) > currentSince));
+  const edits = [...verdicts].filter(([, does]) => does === 'take-in' || does === 'latest-wins');
+  const counts = (harness: HarnessId, does: Verdict) => does === 'take-in' || at(harness) > currentSince;
   // Two copies with no time compare as NaN, which a sort takes as equal: they stay in the harnesses' order.
-  return counts.map(([harness]) => harness).sort((first, second) => at(second) - at(first))[0];
+  const [takeIn, next] = edits.filter(([harness, does]) => counts(harness, does)).map(([harness]) => harness).sort((first, second) => at(second) - at(first));
+  const lostUntimed = edits.some(([harness, does]) => !counts(harness, does) && timeOf(harness) === undefined);
+  return { takeIn, orderProved: !takeIn || ((!next || at(takeIn) > at(next)) && !lostUntimed) };
 }
 
 /**
@@ -457,8 +494,17 @@ export function fromSource(item: LibraryItem | undefined, here: AtSource, linked
   if (here.hash === item.seen) return 'nothing';
   if (item.hash === item.seen || here.hash === item.hash) return 'update';
   // Both changed: the later wins, the source's time being its head commit's; a tie keeps the current version.
-  const current = Date.parse(item.versions[currentIndex(item)]?.at ?? '') || 0;
-  return Date.parse(here.commitAt) - current >= TIE_MS ? 'update' : 'keep';
+  return sourceTime(item, here.commitAt) === 'later' ? 'update' : 'keep';
+}
+
+/**
+ * A source's content, by its head commit's time, against the item's current version: later or earlier by the tie or more, or
+ * a `tie`. fromSource's `update` is only `later`; of its `keep`, only `earlier` is the current version proved later
+ * (librarypass.ts fromSourceStep records which, as History's orderProved).
+ */
+export function sourceTime(item: LibraryItem, commitAt: string): 'later' | 'earlier' | 'tie' {
+  const apart = Date.parse(commitAt) - (Date.parse(item.versions[currentIndex(item)]?.at ?? '') || 0);
+  return apart >= TIE_MS ? 'later' : apart <= -TIE_MS ? 'earlier' : 'tie';
 }
 
 /**
@@ -558,7 +604,7 @@ export function latestCopy(copies: readonly Pick<FoundCopy, 'hash' | 'at'>[]): s
   const [last, before] = [...made].sort(([, first], [, second]) => second - first);
   return last && before && last[1] - before[1] >= TIE_MS ? last[0] : undefined;
 }
-/** Two contents changed less than this apart are a tie for latestCopy (no latest) and for a source's version (fromSource: the current one stays). */
+/** Two contents changed less than this apart are a tie for latestCopy (no latest) and for a source's version (sourceTime: the current one stays). */
 const TIE_MS = 1000;
 
 // ---------- Versions ----------
@@ -619,8 +665,10 @@ export interface Hands<Content> extends Shelf<Content> {
 
 /**
  * Carries out one item's plan in the model's order; the pass calls this for every item of every kind, and nothing else orders
- * these steps. The order holds for this item: a pass that carries out several saves the whole record each time (Shelf.save),
- * so another item's save can carry this one's click to disk before this item's History is told. The pass covers what that
+ * these steps. Answers the harnesses whose write or removal was held (left undone this time: the next pass tries again), so
+ * the pass can take them out of what History was told first (librarypass.ts untell). The order holds for this item: a pass
+ * that carries out several saves the whole record each time (Shelf.save), so another item's save can carry this one's click
+ * to disk before this item's History is told. The pass covers what that
  * leaves (librarypass.ts deletionsTold: a deleted item with no entry gets one).
  * - History first: an entry whose change never lands offers nothing (every action is worked out from the item as it is),
  *   while a change on record with no entry could leave a deleted item with no Restore.
@@ -629,7 +677,7 @@ export interface Hands<Content> extends Shelf<Content> {
  * - Disk last: the writes, then the removals (a crash in between leaves the item in a harness too many, never too few). Each
  *   removal is saved at once: one not on record would read, after a crash, as a copy deleted by hand.
  */
-export async function carryOut<Content>(item: LibraryItem, made: Plan, hands: Hands<Content>) {
+export async function carryOut<Content>(item: LibraryItem, made: Plan, hands: Hands<Content>): Promise<HarnessId[]> {
   const versionOf = (harness: HarnessId, from: Origin) => {
     const copy = hands.copy(harness);
     return [{ hash: copy.hash, at: versionAt(copy.at), from }, copy.content] as const;
@@ -642,10 +690,12 @@ export async function carryOut<Content>(item: LibraryItem, made: Plan, hands: Ha
   for (const harness of made.current) item.applied[harness] = item.hash;
   for (const harness of made.forget) delete item.applied[harness];
   await hands.save();
-  for (const harness of made.write) if (await hands.write(harness)) item.applied[harness] = item.hash;
+  const held: HarnessId[] = [];
+  for (const harness of made.write) if (await hands.write(harness)) item.applied[harness] = item.hash; else held.push(harness);
   for (const harness of made.remove) {
-    if (!(await hands.remove(harness))) continue;
+    if (!(await hands.remove(harness))) { held.push(harness); continue; }
     delete item.applied[harness];
     await hands.save();
   }
+  return held;
 }
