@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FROM_DIRECTORY, blocked, cantUninstall, partsOffer, removableTools, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, partStillIn, pluginPlace, otherVersions, otherVersionsLine, toolsWithoutPlugin, unavailable, updateTools } from '../src/pluginstatus.ts';
+import { FROM_DIRECTORY, blocked, cantUninstall, partsOffer, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, partStillIn, pluginPlace, otherVersions, otherVersionsLine, toolNow, unavailable, updateTools } from '../src/pluginstatus.ts';
 import { readInTurn, readInto, type Read } from '../src/reads.ts';
 import type { HomeView, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
 
@@ -8,12 +8,13 @@ const entry: MarketplaceView = { source: 'a/b', origins: ['central-knot'], name:
   states: { p: { 'claude-cli': { state: 'installed', path: '/x' }, 'codex-cli': { state: 'held', reason: 'other' } } } };
 const view: PluginsView = { home: '/h', tools: ['claude-cli', 'copilot-cli', 'codex-cli'], clis: { 'claude-cli': true, 'copilot-cli': true, 'codex-cli': true }, canWrite: true, marketplaces: [entry] };
 
-test('A tool can take a plugin only when its CLI is there, it is not held or refused, and it is not installed yet', () => {
-  assert.deepEqual(toolsWithoutPlugin(view, entry, 'p'), ['copilot-cli']);
+test('A tool takes a plugin by its own installer only when its CLI is there and it is not held or refused; otherwise as parts, or not at all, and the table is told why', () => {
+  const route = (tool: Parameters<typeof toolNow>[3], at = entry) => toolNow(view, at, 'p', tool, undefined, false).route;
+  assert.deepEqual([route('claude-cli'), route('copilot-cli'), route('codex-cli')], ['whole', 'whole', { cannot: 'other' }]);
   assert.match(blocked({ ...view, clis: {} }, entry, 'claude-cli') ?? '', /command-line tool wasn’t found/);
   assert.match(blocked({ ...view, clis: {}, desktopOnly: { 'claude-cli': 'Claude desktop' } }, entry, 'claude-cli') ?? '', /^Only Claude desktop was found here, and the copy of Claude Code it carries isn’t there yet \(the app adds it once it has run\). Claude Code’s command-line tool wasn’t found either.$/);
   assert.equal(blocked(view, { ...entry, copilotRefuses: 'Copilot refuses npm.' }, 'copilot-cli'), 'Copilot refuses npm.');
-  assert.deepEqual(toolsWithoutPlugin(view, { ...entry, copilotRefuses: 'x' }, 'p'), []);
+  assert.equal(route('copilot-cli', { ...entry, copilotRefuses: 'x' }), 'parts', 'Copilot CLI refusing the marketplace takes its parts instead');
   // One answer for every box, panel and key: held says why, installed is never unavailable, a missing CLI is.
   assert.equal(unavailable(view, entry, 'p', 'codex-cli'), 'other');
   assert.equal(unavailable({ ...view, clis: {} }, entry, 'p', 'claude-cli'), undefined);
@@ -45,7 +46,7 @@ test('Update is offered only where a tool’s copy is older and can be changed h
   assert.deepEqual(updateTools(view, copies, 'p', undefined).plugin, [], 'nothing to compare with');
   // Claude Code's copy from the Anthropic Directory is installed, and left to Claude Code: behind or not, no Update, no Uninstall.
   const directory = at({ 'claude-cli': { state: 'installed', path: '/x', version: '1.9.0', directory: 'p@anthropic-plugin-directory' } });
-  assert.deepEqual([updateTools(view, directory, 'p', '2.0.0').plugin, removableTools(view, directory, 'p'), toolsWithoutPlugin(view, directory, 'p')], [[], [], ['copilot-cli', 'codex-cli']]);
+  assert.deepEqual([updateTools(view, directory, 'p', '2.0.0').plugin, toolNow(view, directory, 'p', 'claude-cli', undefined, false)], [[], { has: 'whole', route: 'whole', stuck: FROM_DIRECTORY }]);
   assert.equal(cantUninstall(view, directory, 'p', 'claude-cli'), FROM_DIRECTORY);
   assert.deepEqual(copiesToCompare(view, directory), [], 'its files aren’t compared with the marketplace’s');
 });

@@ -7,7 +7,6 @@ import { busy, clickResumes, setHome, state, tell } from './app.ts';
 import { h, toggle } from './dom.ts';
 import { plural } from './model.ts';
 import { market } from './pluginstate.ts';
-import { installsIn } from './pluginstatus.ts';
 import { pluginUpdates } from './pluginupdateview.ts';
 import type { DestinationResult, HarnessId, HomeView } from './types.ts';
 import { toolNames as names } from './words.ts';
@@ -58,11 +57,11 @@ function onLine(home: HomeView, tool: HarnessId): string {
   ].filter(Boolean);
   const besides = [takenIn ? `${plural(takenIn, 'found item')} taken in by Synchronize everything` : '', found ? `${plural(found, 'found item')} shown under Found` : ''].filter(Boolean);
   const then = `On: ${changes.length ? listed(changes) : `no item in ${names[tool]} would change`}${besides.length ? `; ${listed(besides)}` : ''}.`;
-  // A tool new to the plugin updates gets what the other managed tools have, while they run by themselves (pluginupdates.ts):
-  // said only where another managed tool has a plugin to bring, as the marketplaces were last read.
-  const bring = !!market.view && home.sync.managed.some(other => other !== tool && !!installsIn(market.view!, other)?.installed.length);
+  // A tool managed again gets each plugin that is on and not kept out of it, while the automatic updates run by themselves
+  // (pluginrecord.ts, pluginupdates.ts): said only where such a plugin is listed, as the marketplaces were last read.
+  const bring = !!market.view?.marketplaces.some(entry => Object.values(entry.switches ?? {}).some(sw => !!sw.entry?.on && !sw.entry.except.includes(tool)));
   const auto = pluginUpdates.view?.on && !pluginUpdates.view.paused;
-  const also = bring && auto ? ' It also gets the plugins your other tools have, and its instruction file is back on Instructions.' : ' Its instruction file is back on Instructions.';
+  const also = bring && auto ? ' It also gets each plugin that is on and not kept out of it, and its instruction file is back on Instructions.' : ' Its instruction file is back on Instructions.';
   return `${then}${also}${home.syncOn ? '' : ` ${SYNC_OFF}`}`;
 }
 const listed = (clauses: string[]) => (clauses.length < 2 ? clauses.join('') : `${clauses.slice(0, -1).join(', ')} and ${clauses.at(-1)}`);

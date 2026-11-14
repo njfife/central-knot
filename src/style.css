@@ -1099,16 +1099,17 @@ span.ins-confirm { margin-top: 0; }
 @container table (width >= 700px) {
   .plugin-table > .plugin-row:nth-child(even of .plugin-row):not(:hover):not(:has(:focus-visible)) { background: var(--row-stripe); }
 }
-.plugin-table .ov-row { grid-template-columns: minmax(0, 1fr) repeat(var(--tool-count, 3), 120px) 28px; height: auto; min-height: 40px; }
+.plugin-table .ov-row { grid-template-columns: 48px minmax(0, 1fr) repeat(var(--tool-count, 3), 120px) 28px; height: auto; min-height: 40px; }
 /* Four or five tool columns in a narrow table give room back to the plugin's name; with five, each tool's mark sits over its name. */
-@container table (width < 700px) { .plugin-table[data-tools="4"] .ov-row { grid-template-columns: minmax(0, 1fr) repeat(4, 96px) 28px; } }
+@container table (width < 700px) { .plugin-table[data-tools="3"] .ov-row { grid-template-columns: 48px minmax(0, 1fr) repeat(3, 96px) 28px; } }
+@container table (width < 800px) { .plugin-table[data-tools="4"] .ov-row { grid-template-columns: 48px minmax(0, 1fr) repeat(4, 96px) 28px; } }
 @container table (width < 800px) {
-  .plugin-table[data-tools="5"] .ov-row { grid-template-columns: minmax(0, 1fr) repeat(5, 84px) 28px; }
+  .plugin-table[data-tools="5"] .ov-row { grid-template-columns: 48px minmax(0, 1fr) repeat(5, 84px) 28px; }
   .plugin-table[data-tools="5"] .ov-head .ov-tool-head { flex-direction: column; gap: 3px; }
 }
 /* Five tools in the smallest window with the sidebar open: the category stays in the chips above the table. */
 @container table (width < 700px) {
-  .plugin-table[data-tools="5"] .ov-row { grid-template-columns: minmax(0, 1fr) repeat(5, 76px) 28px; }
+  .plugin-table[data-tools="5"] .ov-row { grid-template-columns: 44px minmax(0, 1fr) repeat(5, 76px) 28px; }
   .plugin-table[data-tools="5"] .plugin-row-open > .plugin-chip { display: none; }
 }
 /* Room above the tool icons, so the pinned header doesn't touch the toolbar's rule */
@@ -1116,6 +1117,18 @@ span.ins-confirm { margin-top: 0; }
 .plugin-table .ov-head .ov-name { padding: 6px 0; font-size: 12px; font-weight: 400; color: var(--ink-soft); }
 .market-hint > span { max-width: 110ch; }
 .plugin-row { cursor: pointer; }
+/* A plugin's one switch heads its row; each tool's mark only says what it has (no click: the switch and the plugin's page act). */
+.plugin-row-switch { justify-content: flex-start; padding-left: 8px; }
+.cell-button.cell-mark { cursor: inherit; }
+.cell-button.cell-mark:hover { border-color: var(--cell-line); background: transparent; }
+.cell-button.cell-mark.cell-on:hover { border-color: transparent; filter: none; }
+.cell-synced.cell-on.cell-mark:hover { background: var(--cell-on); }
+.cell-differs.cell-on.cell-mark:hover { background: var(--cell-warn); }
+.cell-kept { color: var(--ink-soft); border-style: dotted; }
+.plugin-tool-actions { display: inline-flex; flex-wrap: wrap; gap: 0 12px; }
+.plugin-tool-actions > .btn { padding-inline: 0; }
+.plugin-panel-switch { display: inline-flex; align-items: center; gap: 10px; }
+.toolbar-result-more { color: var(--ink-soft); }
 .plugin-row-name { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; padding: 8px 12px 8px 0; text-align: left; }
 .plugin-row-name > span { max-width: 100%; }
 .plugin-row-open { all: unset; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
@@ -1163,15 +1176,13 @@ span.ins-confirm { margin-top: 0; }
 .plugin-panel-head { display: flex; align-items: center; gap: 12px; height: 28px; margin-bottom: 10px; }
 .plugin-panel h3, .plugin-section h3 { margin: 0; font-size: 14px; font-weight: 650; }
 .plugin-tool-rows { --tool-min: 170px; --tool-gap: 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 40px; }
-.plugin-tool-rows > .btn.choice-wrapped { margin-left: auto; }
-/* With room for them (pluginpage.ts settlePluginTools, which reads --tool-min and --tool-gap): a column per tool, sharing the box's width as the sections below share the page's, and Choose all as the last column. */
-.plugin-tool-rows[data-layout="columns"] { display: grid; grid-template-columns: repeat(var(--tool-count, 3), minmax(var(--tool-min), 1fr)) auto; justify-items: start; column-gap: var(--tool-gap); }
-.plugin-tool-rows[data-layout="columns"] > .btn { grid-column: -2 / -1; }
+/* With room for them (pluginpage.ts settlePluginTools, which reads --tool-min and --tool-gap): a column per tool, sharing the box's width as the sections below share the page's. */
+.plugin-tool-rows[data-layout="columns"] { display: grid; grid-template-columns: repeat(var(--tool-count, 3), minmax(var(--tool-min), 1fr)); justify-items: start; align-items: start; column-gap: var(--tool-gap); }
 /* What it holds and how each tool takes it sit beside the README from about 1100px of page; below that, one above the other. */
 .plugin-columns { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 48px; }
 /* What it holds gets the larger share: its rows carry a description and a switch per tool, the README only prose. */
 @container plugin (width >= 1100px) { .plugin-columns:has(> .plugin-readme) { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); } }
-.plugin-tool { display: flex; align-items: center; gap: 10px; min-width: var(--tool-min); }
+.plugin-tool { display: flex; align-items: flex-start; gap: 10px; min-width: var(--tool-min); }
 .plugin-tool-text { display: flex; flex-direction: column; gap: 1px; }
 .plugin-tool-name { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .plugin-tool-state { display: flex; flex-direction: column; font-size: 11.5px; color: var(--ink-soft); }

@@ -6,15 +6,17 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { installedContents, marketplacePage, pluginDetail, pluginFiles, readmeIn, sourceLabel, type PluginFiles } from './catalogdetail.ts';
 import { searchPath } from './platform.ts';
-import { failedFor, succeeded, type PluginOp } from './pluginplan.ts';
+import { failedFor, reverse, runPlan, succeeded, type PlanApi, type PluginDone, type PluginOp } from './pluginplan.ts';
+import { entryOf, firstRecord, newEntry, owedTo, partsReadable, readPluginRecord, savePluginRecord, withEntry, type Holding, type Owed, type PluginEntry, type PluginRecord, type PluginSwitch, type WaitedBefore } from './pluginrecord.ts';
 import { findBinary, probeVersion } from './discovery.ts';
 import * as engine from './plugins.ts';
 import { installParts, partsCurrent, planParts, readParts, removeParts, undoParts } from './parts.ts';
 import { suggestedMarketplaces, type SuggestedMarketplace } from './suggested.ts';
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
-import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartRef, PartsInstall, PartsPick, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
+import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartRef, PartsInstall, PartsPick, PartsState, PluginActionResult, PluginDetail, PluginTurn, PluginTurnResult, PluginView, PluginsView, Snapshot } from './types.ts';
+import { harnessIds } from './harnesses.ts';
 import { writeDurably, type ShareContext } from './share.ts';
-import { SKILL_SWITCH_TESTED_FROM, copyDiffers, heldReason, keptReason, marketTitle, notCarried, partsOf, partsOffer, partsTools, stateOf, unavailable, updateTools, versionToCompare } from './pluginstatus.ts';
+import { SKILL_SWITCH_TESTED_FROM, copyDiffers, firstReadWaits, heldReason, keptReason, marketTitle, notCarried, partsTools, recordUnread, toolNow, updateTools, versionToCompare } from './pluginstatus.ts';
 import { isFolder, isHttps, onlyAllowed, record, shortBuild } from './values.ts';
 import { leftOutSentence } from './words.ts';
 
@@ -45,6 +47,8 @@ export interface MarketplaceHost {
   changed?(source: string, plugin: string, tools: HarnessId[]): void;
   /** A bundled build's own marketplace (bundle.ts): the folder it is unpacked in, and how the page shows it. Always listed, first. */
   bundled?(): { source: string; view: BundledView } | undefined;
+  /** The installs the version before waited to make in a tool new here, in the open home (pluginupdates.ts waitedBefore): read once, by the plugins record's first read. */
+  waitedBefore?(): Promise<WaitedBefore[]>;
 }
 /** The engine calls that touch Git or a tool, replaceable in tests. */
 export interface MarketplaceEngine {
@@ -60,6 +64,9 @@ export interface MarketplaceEngine {
   setPart: typeof engine.setPart;
   setWhole: typeof engine.setWhole;
 }
+
+/** How the plugins record was read for one view (marketplaces recordFor). */
+interface RecordRead { record?: PluginRecord; problem?: string; unknown: HarnessId[]; partsKnown: boolean }
 
 /** The binary each tool's plugin commands run with, and for those that are a desktop app's own copy, which app carries it. */
 export interface Routes { binaries: Partial<Record<HarnessId, string>>; apps: Partial<Record<HarnessId, DesktopApp>> }
@@ -175,10 +182,13 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       const other = await engine.heldBy(ctx, tool, catalog.name, source);
       if (other) held.set(tool, { state: 'held', reason: heldReason(tool, catalog.name, other) });
     }
+    // Each tool's own switch for a whole plugin, read once: one turned off there is still installed, marked off.
+    const offIn = new Map(await Promise.all(tools.map(async tool => [tool, new Set((await engine.installedOnce(ctx, tool).catch(() => [])).filter(found => found.off).map(found => `${found.plugin}@${found.marketplace}`))] as const)));
     const states: MarketplaceView['states'] = {};
     for (const plugin of plugins) {
       const pairs = await Promise.all(tools.map(async tool => {
-        const own = held.get(tool) ?? await engine.installState(ctx, tool, catalog.name, plugin.name, plugin.entry);
+        const read = held.get(tool) ?? await engine.installState(ctx, tool, catalog.name, plugin.name, plugin.entry);
+        const own: InstallState = read.state === 'installed' && offIn.get(tool)?.has(`${plugin.name}@${catalog.name}`) ? { ...read, off: true } : read;
         // Claude Code may have this same plugin from the Anthropic Directory instead.
         return [tool, own.state === 'not-installed' && tool === 'claude-cli' ? (await engine.fromDirectory(ctx, catalog, plugin)) ?? own : own] as const;
       }));
@@ -273,9 +283,9 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /**
    * One marketplace on the page. A catalog that can't be read becomes a problem on its entry, never a broken page.
-   * `records`: the parts record as read once for the whole view.
+   * `records`: the parts record as read once for the whole view; `recorded`: the plugins record's entries.
    */
-  async function entryView(ctx: engine.PluginContext, tools: HarnessId[], source: string, origins: MarketplaceView['origins'], fresh: boolean, records: PartsInstall[]): Promise<MarketplaceView> {
+  async function entryView(ctx: engine.PluginContext, tools: HarnessId[], source: string, origins: MarketplaceView['origins'], fresh: boolean, records: PartsInstall[], recorded: PluginEntry[]): Promise<MarketplaceView> {
     const bundled = carriedAs(source);
     const base: MarketplaceView = { source, origins, name: '', kind: isFolder(source) ? 'folder' : 'git', plugins: [], states: {}, page: marketplacePage(source), sourceLabel: bundled ? `Comes with ${bundled.app}` : sourceLabel(source), ...(bundled ? { bundled } : {}) };
     try {
@@ -287,7 +297,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       const { parts, recordedName } = await partsStates(ctx, catalog, source, records);
       // A plugin the catalog dropped stays listed while its parts are in a tool, so they can still be removed together.
       for (const name of Object.keys(parts ?? {})) if (!shown.some(plugin => plugin.name === name)) shown.push({ name, description: catalog ? 'Its parts stay as they are, and can still be removed together.' : 'Its marketplace can’t be read now. Its parts can still be removed together.', gone: true });
-      if (!catalog) return { ...base, name: recordedName ?? '', problem: problem ?? read?.problem, plugins: shown, parts };
+      if (!catalog) return { ...base, ...await unreadEntry(ctx, tools, source, recorded.filter(entry => engine.sameSource(entry.source, source)), shown), name: recordedName ?? recorded.find(entry => engine.sameSource(entry.source, source))?.marketName ?? '', problem: problem ?? read?.problem, parts };
       // A plugin the catalog dropped stays listed while a tool still has it installed: kept as it is, marked, until it is uninstalled (PLG-08).
       const dropped = await droppedPlugins(ctx, tools.filter(takesPlugins), catalog, source);
       for (const name of dropped) {
@@ -301,8 +311,67 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     } catch { return { ...base, problem: 'It could not be read.' }; }
   }
 
+  /**
+   * A marketplace whose catalog can't be read, for the plugins the home records from it: each stays listed, with what each
+   * tool's own record says it has, read by the name the record keeps, so a catalog that can't be read never reads as "not
+   * installed" (its switch can still turn it off; nothing can go in until the catalog reads).
+   */
+  async function unreadEntry(ctx: engine.PluginContext, tools: HarnessId[], source: string, recorded: PluginEntry[], shown: PluginView[]): Promise<Pick<MarketplaceView, 'plugins' | 'states'>> {
+    const plugins = [...shown];
+    for (const entry of recorded) if (!plugins.some(plugin => plugin.name === entry.plugin)) plugins.push({ name: entry.plugin, description: 'Its marketplace can’t be read now. It stays as it is in the tools that have it.', gone: true });
+    const states: MarketplaceView['states'] = {};
+    for (const marketName of new Set(recorded.map(entry => entry.marketName))) {
+      const mine = plugins.filter(plugin => recorded.some(entry => entry.plugin === plugin.name && entry.marketName === marketName));
+      Object.assign(states, await statesFor(ctx, tools.filter(takesPlugins), { name: marketName, source, kind: isFolder(source) ? 'folder' : 'git', fetchedAt: '', plugins: [] }, source, mine));
+    }
+    return { plugins, states };
+  }
+
+  /**
+   * The home's plugins record (pluginrecord.ts), made by its first read when there is none and saved where writing is allowed.
+   * `unknown`: the tools whose own record of their plugins can't be read now, and `partsKnown`, whether the parts record can
+   * be. While one can't, a home with no record yet gets none (`problem` says why), so nothing is decided from a read that isn't whole.
+   */
+  async function recordFor(ctx: engine.PluginContext, tools: HarnessId[], writable: boolean): Promise<RecordRead> {
+    const unknown = (await Promise.all(tools.filter(takesPlugins).map(async tool => ((await engine.recordReadable(ctx, tool)) ? [] : [tool])))).flat();
+    const partsKnown = !host.share || await partsReadable(ctx.home);
+    const read = await readPluginRecord(ctx.home);
+    if (read.problem || read.record) return { ...read, unknown, partsKnown };
+    if (unknown.length || !partsKnown) return { problem: firstReadWaits(unknown, partsKnown), unknown, partsKnown };
+    const record = firstRecord(tools, await holdingsIn(ctx, tools), await host.waitedBefore?.() ?? []);
+    if (writable) await savePluginRecord(ctx.home, record);
+    return { record, unknown, partsKnown };
+  }
+
+  /** The plugins the managed tools hold now, for the first read: installed whole from a marketplace the tool's record names, and parts on record. */
+  async function holdingsIn(ctx: engine.PluginContext, tools: HarnessId[]): Promise<Holding[]> {
+    const holdings: Holding[] = [];
+    for (const tool of tools.filter(takesPlugins)) {
+      const registered = await engine.registeredMarketplaces(ctx, tool);
+      for (const found of await engine.installedPlugins(ctx, tool)) {
+        const source = registered.find(entry => entry.name === found.marketplace)?.source;
+        if (source && found.state.state !== 'not-installed') holdings.push({ tool, source, marketName: found.marketplace, plugin: found.plugin });
+      }
+    }
+    if (host.share) for (const install of await readParts(ctx.home)) if (tools.includes(install.tool)) holdings.push({ tool: install.tool, source: install.source, marketName: install.marketName, plugin: install.plugin });
+    return holdings;
+  }
+
+  /** One listed plugin's switch: its entry in `record`, and the table's answer for each tool of the view (pluginrecord.ts owedTo). */
+  function switchOf(view: PluginsView, entry: MarketplaceView, plugin: PluginView, known: RecordRead, record = known.record): PluginSwitch {
+    const recorded = entryOf(record, entry.source, plugin.name);
+    const owed = (tool: HarnessId): Owed => owedTo(recorded, tool, toolNow(view, entry, plugin.name, tool, plugin.components, known.unknown.includes(tool) || !known.partsKnown), record?.tools ?? []);
+    return { ...(recorded ? { entry: { on: recorded.on, except: recorded.except } } : {}), tools: Object.fromEntries(view.tools.map(tool => [tool, owed(tool)])) };
+  }
+
   /** Every marketplace: added here, or already added in a tool. `fresh`: every Git source fetched again. */
-  async function view(fresh = false, readId?: number): Promise<PluginsView> {
+  const view = async (fresh = false, readId?: number): Promise<PluginsView> => (await look(fresh, readId)).view;
+
+  /**
+   * The view, and how the plugins record was read for it (`known`). `only`: just that marketplace (a click on one of its
+   * plugins), with no suggestions.
+   */
+  async function look(fresh = false, readId?: number, only?: string): Promise<{ view: PluginsView; known: RecordRead }> {
     const ctx: engine.PluginContext = { ...(await context({ clis: true })), reads: new Map() };
     const read = await host.read(readId);
     // Pi takes no plugins, only their parts, so it is a column only where parts can go in.
@@ -324,9 +393,11 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const share = host.share?.();
     const records = share ? await readParts(share.home) : [];
     for (const install of records) if (!known.some(item => engine.sameSource(item.source, install.source))) note(install.source, 'central-knot');
+    const recordRead = await recordFor(ctx, tools, writing.allowed);
     const marketplaces: MarketplaceView[] = [];
     // All at once: one unreachable source doesn't hold up the others.
-    marketplaces.push(...await Promise.all(known.map(({ source, origins }) => entryView(ctx, tools, source, origins, fresh, records))));
+    const listed = only ? known.filter(item => engine.sameSource(item.source, only)) : known;
+    marketplaces.push(...await Promise.all(listed.map(({ source, origins }) => entryView(ctx, tools, source, origins, fresh, records, recordRead.record?.plugins ?? []))));
     const desktopOnly = Object.fromEntries(tools.flatMap(tool => { const app = read.snapshots.find(snapshot => snapshot.harness === tool)?.app; return !ctx.binaries[tool] && app ? [[tool, app.name]] : []; }));
     // The app's own copy, named with the version it answers (the Copilot runtime may run a newer Copilot CLI it updated to).
     const via = Object.fromEntries(await Promise.all(Object.entries(ctx.apps ?? {}).filter(([tool]) => tools.includes(tool as HarnessId)).map(async ([tool, app]) => [tool, viaLabel(app, await cliVersion(ctx.binaries[tool as HarnessId]))] as const)));
@@ -335,10 +406,12 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     // What is offered without being looked for: the default of a plugin tool that is here, unless it is listed already (a
     // tool added it, or the person did), was declined, or this build carries its own marketplace.
     const no = await declined();
-    const suggested = host.bundled?.() ? [] : offers
+    const suggested = host.bundled?.() || only ? [] : offers
       .map(offer => ({ source: offer.source, name: offer.name, tools: offer.tools.filter(tool => read.tools.includes(tool)) }))
       .filter(offer => offer.tools.length && ![...known.map(item => item.source), ...no].some(source => engine.sameSource(source, offer.source)));
-    return { home: ctx.home, tools, clis: Object.fromEntries(tools.map(tool => [tool, !!ctx.binaries[tool]])), canWrite: writing.allowed, reason: writing.allowed ? undefined : writing.reason, marketplaces, desktopOnly, via, versions, suggested };
+    const shown: PluginsView = { home: ctx.home, tools, clis: Object.fromEntries(tools.map(tool => [tool, !!ctx.binaries[tool]])), canWrite: writing.allowed, reason: writing.allowed ? undefined : writing.reason, marketplaces, desktopOnly, via, versions, suggested, ...(recordRead.problem ? { switchProblem: recordRead.problem } : {}) };
+    for (const entry of marketplaces) entry.switches = Object.fromEntries(entry.plugins.map(plugin => [plugin.name, switchOf(shown, entry, plugin, recordRead)]));
+    return { view: shown, known: recordRead };
   }
 
   /**
@@ -484,50 +557,41 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   });
 
   /**
-   * What Update all would choose now, in every marketplace, with each Git marketplace fetched again first (as Refresh
-   * does): for each plugin some tool has, installed or as parts, an update in each tool whose copy is behind and its parts
-   * brought up to date in each tool holding them out of date (pluginstatus.updateTools, as the page asks it). A plugin's
-   * files are read first, as its page reads them (from the repository it is kept in, too), so a copy that differs at the
-   * same version counts. Each op carries the version offered. Nothing here writes to a tool.
-   *
-   * A marketplace that couldn't be read now gives nothing and is named in `unread`: its last copy says nothing about what
-   * it offers today (`unreadSources`: the same, as added; `offline`: every Git marketplace did, so the next try can come sooner). A plugin its catalog dropped
-   * is left as it is. One turned off in a tool is still updated there, and update() keeps it off.
+   * What is due now, with each Git marketplace fetched again first (as Refresh does). Nothing here writes to a tool.
+   * - The updates Update all would choose: for each plugin some tool has, installed or as parts, an update in each tool whose
+   *   copy is behind and its parts brought up to date in each tool holding them out of date (pluginstatus.updateTools, as the
+   *   page asks it). A plugin's files are read first, as its page reads them (from the repository it is kept in, too), so a copy
+   *   that differs at the same version counts. Each op carries the version offered. One turned off in a tool is still updated
+   *   there, and update() keeps it off. A plugin its catalog dropped is left as it is.
+   * - The installs the plugins' table owes the automatic updates (pluginrecord.ts `background`: an On plugin a managed tool
+   *   new here lacks), each marked `newHere`.
+   * - `newTools`: the managed tools not on the plugins record's `tools` whose owed installs are all known now (none waits on a
+   *   marketplace that couldn't be read); each joins it once its installs are in (pluginupdates.ts, noteJoined).
+   * A marketplace that couldn't be read now gives nothing and is named in `unread`: its last copy says nothing about what it
+   * offers today (`unreadSources`: the same, as added; `offline`: every Git marketplace did, so the next try can come sooner).
    */
-  /**
-   * What is due now: the updates Update all would choose and, for selections that wait (pluginupdates.ts), the tools here
-   * that plugins go into (`tools`) with what each would get to have every plugin that all the other tools taking plugins
-   * whole have (`joins`): an install where the tool takes the plugin, its parts where it takes parts.
-   */
-  async function pendingUpdates(home: unknown): Promise<{ stopped?: string; ops: (PluginOp & { offered?: string })[]; unread: string[]; unreadSources: string[]; offline?: true; tools?: HarnessId[]; joins?: Partial<Record<HarnessId, PluginOp[]>> }> {
+  async function pendingUpdates(home: unknown): Promise<{ stopped?: string; ops: (PluginOp & { offered?: string; newHere?: true })[]; unread: string[]; unreadSources: string[]; offline?: true; newTools?: HarnessId[] }> {
     const stopped = await guard(home);
     if (stopped) return { stopped, ops: [], unread: [], unreadSources: [] };
     const shown = await view(true);
-    const ops: (PluginOp & { offered?: string })[] = [];
+    const ops: (PluginOp & { offered?: string; newHere?: true })[] = [];
     const unread: string[] = [], unreadSources: string[] = [];
-    const joins: Partial<Record<HarnessId, PluginOp[]>> = {};
-    const whole = shown.tools.filter(takesPlugins);
-    // The plugins each of them has turned off, by marketplace and name.
-    const ctx = await context();
-    const offIn = new Map(await Promise.all(whole.map(async tool => [tool, new Set((await engine.installedPlugins(ctx, tool).catch(() => [])).filter(found => found.off).map(found => `${found.marketplace}\u0000${found.plugin}`))] as const)));
+    const { record } = await readPluginRecord(shown.home);
+    const fresh = record ? shown.tools.filter(tool => !record.tools.includes(tool)) : [];
+    const waits = new Set<HarnessId>();
     for (const entry of shown.marketplaces) {
-      if (entry.problem || !entry.name) { unread.push(marketTitle(entry)); unreadSources.push(entry.source); continue; }
+      const switches = Object.values(entry.switches ?? {});
+      if (entry.problem || !entry.name) {
+        unread.push(marketTitle(entry)); unreadSources.push(entry.source);
+        for (const tool of fresh) if (switches.some(each => each.tools[tool]?.wanted && each.tools[tool]?.has === 'none')) waits.add(tool);
+        continue;
+      }
       for (const plugin of entry.plugins) {
         if (plugin.gone) continue;
-        // A plugin every other tool that takes plugins whole has, and has on, is one a tool without it would get: one
-        // turned off somewhere is not wanted everywhere.
-        const installedIn = whole.filter(tool => stateOf(entry, plugin.name, tool).state === 'installed');
-        const has = installedIn.filter(tool => !offIn.get(tool)?.has(`${entry.name}\u0000${plugin.name}`));
-        for (const tool of shown.tools) {
-          // The others that count are those that can hold it: a tool with no way to install here neither has it nor lacks it.
-          const others = whole.filter(other => other !== tool && (installedIn.includes(other) || !unavailable(shown, entry, plugin.name, other)));
-          if (!others.length || !others.every(other => has.includes(other))) continue;
-          // A tool that has it already (on or off), or its parts, gets nothing.
-          const action = takesPlugins(tool) ? (installedIn.includes(tool) || unavailable(shown, entry, plugin.name, tool) ? undefined : 'install' as const)
-            : !partsOf(entry, plugin.name, tool) && partsOffer(shown, entry, plugin.name, tool, plugin.components) ? 'install-parts' as const : undefined;
-          if (action) (joins[tool] ??= []).push({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action });
+        for (const [tool, owed] of Object.entries(entry.switches?.[plugin.name]?.tools ?? {}) as [HarnessId, Owed][]) {
+          if (owed.background && (owed.act === 'install' || owed.act === 'install-parts')) ops.push({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action: owed.act, newHere: true });
         }
-        const copied = shown.tools.some(tool => { const state = stateOf(entry, plugin.name, tool); return state.state === 'installed' && !state.live && !state.directory; });
+        const copied = shown.tools.some(tool => { const state = entry.states[plugin.name]?.[tool]; return state?.state === 'installed' && !state.live && !state.directory; });
         if (!copied && !entry.parts?.[plugin.name]) continue;
         const files = copied ? await detail(entry.source, plugin.name).catch(() => null) : undefined;
         const offered = versionToCompare(plugin, files);
@@ -538,7 +602,90 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     }
     // Every Git marketplace failed to read: most likely this computer is offline just now.
     const git = shown.marketplaces.filter(entry => entry.kind === 'git');
-    return { ops, unread, unreadSources, tools: shown.tools, joins, ...(git.length && git.every(entry => entry.problem) ? { offline: true as const } : {}) };
+    return { ops, unread, unreadSources, newTools: fresh.filter(tool => !waits.has(tool)), ...(git.length && git.every(entry => entry.problem) ? { offline: true as const } : {}) };
+  }
+
+  /** Tools the automatic updates brought each On plugin into: on the plugins record's `tools` from now on (pluginrecord.ts). */
+  async function noteJoined(tools: HarnessId[], home: unknown): Promise<void> {
+    if (!tools.length || (await guard(home))) return;
+    const { record } = await readPluginRecord(String(home));
+    const more = tools.filter(tool => !record?.tools.includes(tool));
+    if (record && more.length) await savePluginRecord(String(home), { ...record, tools: [...record.tools, ...more] });
+  }
+
+  /** A tool whose Manage switch was turned on again: off the plugins record's `tools`, so it is new here and owed each On plugin not kept out of it. */
+  async function toolManaged(tool: HarnessId, home: unknown): Promise<void> {
+    if (await guard(home)) return;
+    const { record } = await readPluginRecord(String(home));
+    if (record?.tools.includes(tool)) await savePluginRecord(String(home), { ...record, tools: record.tools.filter(each => each !== tool) });
+  }
+
+  /** The calls a turn and its Undo make: this module's own, so each asks what a click asks (guard). */
+  const ownApi: PlanApi = {
+    install: (source, marketName, plugin, tools, home) => install(source, marketName, plugin, toolIds(tools), home),
+    uninstall: (source, marketName, plugin, tool, home) => (takesPlugins(tool) ? uninstall(source, marketName, plugin, tool, home) : Promise.resolve({ reports: failedFor([tool], 'It takes no plugins.') })),
+    setSkill: async () => ({ stopped: 'A whole plugin’s switch turns no single skill.', reports: [] }),
+    setWhole: (source, marketName, plugin, tool, on, home) => (takesPlugins(tool) ? setWhole(source, marketName, plugin, tool, on, home) : Promise.resolve({ reports: failedFor([tool], 'It takes no plugins.') })),
+    parts: (source, marketName, plugin, tool, mode, run, home, pick) => parts(source, marketName, plugin, tool, mode, run, home, pick),
+  };
+
+  /** The entry a turn records: On or Off, Add's On, a tool kept out or let in; Install there and Turn off there change none. */
+  function turnedEntry(before: PluginEntry | undefined, what: PluginTurn, tool: HarnessId | undefined, fresh: () => PluginEntry): PluginEntry | undefined {
+    if (what === 'on' || what === 'off') return { ...(before ?? fresh()), on: what === 'on' };
+    if (what === 'add') return before ? undefined : { ...fresh(), on: true };
+    if (!before || !tool) return undefined;
+    if (what === 'keep-out' || what === 'let-in') return { ...before, except: harnessIds.filter(each => (each === tool ? what === 'keep-out' : before.except.includes(each))) };
+    return before;
+  }
+
+  /**
+   * A click on a whole plugin (`what`): its switch On or Off, Add for a plugin found in a tool, one tool kept out or let in,
+   * or one tool brought into line (`fix`: Install there, Turn off there). The entry is recorded first; then the table
+   * (pluginrecord.ts owedTo) is asked once with it, and what it owes runs by each tool's own route: On and Add run only its
+   * installs, Off only its uninstalls, the others only that tool's. A tool where nothing can run (held, or its record can't be
+   * read) is a report saying why. `back` is the Undo: what changed, reversed (pluginplan.ts reverse), with a tool's own switch
+   * for the whole plugin turned off again where an uninstall took a copy that was off there.
+   */
+  async function turn(source: string, plugin: string, what: PluginTurn, tool: HarnessId | undefined, home: unknown): Promise<PluginTurnResult> {
+    const stopped = await guard(home);
+    if (stopped) return { stopped, done: [] };
+    const { view: shown, known } = await look(false, undefined, source);
+    const entry = shown.marketplaces.find(candidate => engine.sameSource(candidate.source, source));
+    const listed = entry?.plugins.find(candidate => candidate.name === plugin);
+    if (shown.switchProblem || !known.record) return { stopped: shown.switchProblem ?? 'The plugins record isn’t there. Nothing was changed.', done: [] };
+    if (!entry || !listed || (tool && !shown.tools.includes(tool))) return { stopped: 'It is no longer listed here, so nothing was changed. Read the page again.', done: [] };
+    const before = entryOf(known.record, source, plugin);
+    const after = turnedEntry(before, what, tool, () => newEntry(entry.source, entry.name || before?.marketName || '', plugin, false));
+    if (!after) return { stopped: 'That doesn’t apply to this plugin now, so nothing was changed. Read the page again.', done: [] };
+    const record = withEntry(known.record, source, plugin, after);
+    if (after !== before) await savePluginRecord(shown.home, record);
+    const goes = what === 'on' || what === 'add' || what === 'let-in' ? 'in' : what === 'fix' ? 'any' : 'out';
+    const ops: PluginOp[] = [], held: PluginDone[] = [];
+    const marketName = entry.name || after.marketName;
+    for (const [each, owed] of Object.entries(switchOf(shown, entry, listed, known, record).tools) as [HarnessId, Owed][]) {
+      if (tool && each !== tool) continue;
+      const inward = owed.act === 'install' || owed.act === 'install-parts';
+      if (owed.act && (goes === 'any' || inward === (goes === 'in'))) ops.push({ source: entry.source, marketName, plugin, tool: each, action: ({ install: 'install', 'install-parts': 'install-parts', uninstall: 'remove', 'remove-parts': 'remove-parts' } as const)[owed.act] });
+      // A tool holding another marketplace under this name is left alone: its plugins are not this one's to change, and Off says so.
+      const other = entry.states[plugin]?.[each];
+      const why = owed.has === 'unknown' ? recordUnread(each) : owed.held && (goes === 'any' || owed.wanted === (goes === 'in')) ? owed.held : goes === 'out' && other?.state === 'held' ? other.reason : undefined;
+      if (why) held.push({ source: entry.source, marketName, plugin, tool: each, action: goes === 'out' ? 'remove' : 'install', report: { tool: each, outcome: 'held', message: why, runs: [] } });
+    }
+    const ran = ops.length ? await runPlan(ops, ownApi, String(home)) : { done: [] as PluginDone[] };
+    // A copy turned off in a tool's own settings comes back off: its whole-plugin switch is turned off again after the install.
+    const offBefore = (each: HarnessId) => { const state = entry.states[plugin]?.[each]; return state?.state === 'installed' && !!state.off; };
+    const back = reverse(ran.done).flatMap(op => (op.action === 'install' && offBefore(op.tool) ? [op, { ...op, action: 'plugin-off' as const }] : [op]));
+    return { done: [...ran.done, ...held], before: before ?? null, back, ...(ran.stopped ? { stopped: ran.stopped } : {}) };
+  }
+
+  /** The Undo of a turn: the plugin's entry put back as it was (`before`; null: none), then `back` run as a turn runs. */
+  async function undoTurn(source: string, plugin: string, before: PluginEntry | null, back: PluginOp[], home: unknown): Promise<{ stopped?: string; done: PluginDone[] }> {
+    const stopped = await guard(home);
+    if (stopped) return { stopped, done: [] };
+    const read = await readPluginRecord(String(home));
+    if (!read.record) return { stopped: read.problem ?? 'The plugins record isn’t there. Nothing was changed.', done: [] };
+    await savePluginRecord(String(home), withEntry(read.record, source, plugin, before ?? undefined));
+    return runPlan(back, ownApi, String(home));
   }
 
   /** One tool's own uninstall of one plugin. `marketName` is the catalog's name for it; `source` is checked against what the tool has. */
@@ -682,7 +829,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { report, view: await view() };
   }
 
-  return { view, detail, readme, add, forget, decline, install, update, uninstall, setSkill, setPart, setWhole, partsPlan, parts, pendingUpdates, addCarried, addCarriedTo };
+  return { view, detail, readme, add, forget, decline, install, update, uninstall, setSkill, setPart, setWhole, partsPlan, parts, pendingUpdates, noteJoined, toolManaged, turn, undoTurn, addCarried, addCarriedTo };
 }
 
 type Handle = (channel: string, work: (...args: unknown[]) => Promise<unknown>) => void;
@@ -740,6 +887,23 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
     const { kind, name } = record(part) ?? {};
     return open() && isSource(source) && isName(marketplace) && isName(plugin) && (kind === 'mcp' || kind === 'agent') && isText(name, 200) && typeof on === 'boolean' && ids.length ? markets.setPart(source, marketplace, plugin, { kind, name }, ids[0]!, on, home) : refused(tool);
   });
+  // A whole plugin's switch and its Undo (turn, undoTurn). An Undo's steps come back from the page as the turn gave them: each is
+  // checked to be one a turn makes, for this plugin, before any runs.
+  const TURNS: PluginTurn[] = ['on', 'off', 'add', 'keep-out', 'let-in', 'fix'];
+  handle('plugins:turn', async (source, plugin, what, tool, home) => (open() && isText(source) && isName(plugin) && TURNS.includes(what as PluginTurn) && (tool == null || harnessIds.includes(tool as HarnessId))
+    ? markets.turn(source, plugin, what as PluginTurn, (tool ?? undefined) as HarnessId | undefined, home) : { stopped: 'That request was malformed, so nothing ran.', done: [] }));
+  const isBack = (source: string, plugin: string) => (op: unknown): op is PluginOp => {
+    const step = record(op);
+    return !!step && step.source === source && step.plugin === plugin && isName(step.marketName) && harnessIds.includes(step.tool as HarnessId)
+      && ['install', 'remove', 'remove-parts', 'undo-parts', 'plugin-off'].includes(step.action as string) && (step.run === undefined || isText(step.run, 64));
+  };
+  const isEntry = (source: string, plugin: string) => (value: unknown): value is PluginEntry => {
+    const entry = record(value);
+    return !!entry && typeof entry.id === 'string' && engine.sameSource(String(entry.source), source) && entry.plugin === plugin && isName(entry.marketName) && typeof entry.on === 'boolean'
+      && Array.isArray(entry.except) && entry.except.every(tool => harnessIds.includes(tool as HarnessId));
+  };
+  handle('plugins:undo-turn', async (source, plugin, before, back, home) => (open() && isText(source) && isName(plugin) && (before === null || isEntry(source, plugin)(before)) && Array.isArray(back) && back.length <= 50 && back.every(isBack(source, plugin))
+    ? markets.undoTurn(source, plugin, before as PluginEntry | null, back as PluginOp[], home) : { stopped: 'That request was malformed, so nothing ran.', done: [] }));
   handle('plugins:whole', async (source, marketplace, plugin, tool, on, home) => {
     const ids = toolIds([tool]);
     return open() && isSource(source) && isName(marketplace) && isName(plugin) && typeof on === 'boolean' && ids.length ? markets.setWhole(source, marketplace, plugin, ids[0]!, on, home) : refused(tool);

@@ -9,7 +9,7 @@ const due = (plugin: string, tool: HarnessId, action: DueUpdate['action'] = 'upd
 /** A stand-in app: what is due, what each tool answers (by `plugin tool`), the clock, and everything the updates said or saved. */
 function setup(options: { on?: boolean; every?: number } = {}) {
   const box = {
-    home: '/home/a' as string | undefined, on: options.on ?? true, paused: false, offline: false, clock: 1_000_000, due: [] as DueUpdate[], unread: [] as string[], stopped: undefined as string | undefined, tools: undefined as HarnessId[] | undefined, joins: {} as Partial<Record<HarnessId, DueUpdate[]>>,
+    home: '/home/a' as string | undefined, on: options.on ?? true, paused: false, offline: false, clock: 1_000_000, due: [] as DueUpdate[], unread: [] as string[], stopped: undefined as string | undefined, newTools: undefined as HarnessId[] | undefined, joined: [] as HarnessId[][],
     unreadSources: [] as string[], stops: new Set<string>(), answers: new Map<string, Partial<ActionReport>>(), calls: [] as string[], logs: [] as string[], said: [] as { view: PluginUpdatesView; news?: 'updated' | 'failed' }[], saved: undefined as UpdatesRecord[] | undefined,
     /** The saved record of the home that is open. */
     record: () => box.saved?.find(saved => saved.home === box.home),
@@ -17,7 +17,8 @@ function setup(options: { on?: boolean; every?: number } = {}) {
   const report = (plugin: string, tool: HarnessId): ActionReport => ({ tool, outcome: 'updated', changed: true, version: '2.0.0', message: 'Updated to 2.0.0.', runs: [], ...box.answers.get(`${plugin} ${tool}`) });
   const host: AutoUpdateHost = {
     home: () => box.home, on: () => box.on, paused: () => box.paused, now: () => box.clock, every: options.every ?? 4 * HOUR, log: line => box.logs.push(line),
-    pending: async () => ({ stopped: box.stopped, ops: box.stopped ? [] : box.due, unread: box.unread, unreadSources: box.unreadSources, ...(box.offline ? { offline: true as const } : {}), ...(box.tools ? { tools: box.tools, joins: box.joins } : {}) }),
+    pending: async () => ({ stopped: box.stopped, ops: box.stopped ? [] : box.due, unread: box.unread, unreadSources: box.unreadSources, ...(box.offline ? { offline: true as const } : {}), ...(box.newTools ? { newTools: box.newTools } : {}) }),
+    noteJoined: async tools => { box.joined.push(tools); },
     api: {
       install: async (_source, _market, plugin, tools) => { box.calls.push(`install ${plugin} ${tools.join(',')}`); return { reports: tools.map(tool => ({ ...report(plugin, tool), outcome: 'installed' as const, message: 'Installed.', ...box.answers.get(`${plugin} ${tool}`) })) }; },
       update: async (_source, _market, plugin, tools) => {
@@ -306,113 +307,65 @@ test('A failure whose marketplace was taken off the list is settled at the next 
   assert.deepEqual([view.failed, view.checked?.failed], [[], 0]);
 });
 
-test('Selections that wait: a tool new here gets, once, the plugins every other tool has; the tools here at the start get nothing', async () => {
+/** An install a plugin's table owes a tool new here (pluginrecord.ts `background`). */
+const owed = (plugin: string, tool: HarnessId, action: DueUpdate['action'] = 'install'): DueUpdate => ({ source: '/market', marketName: 'team', plugin, tool, action, newHere: true });
+
+test('A tool new here gets each install it is owed at the check, said with why; it joins the record’s tools once every one is in, and one that fails is tried again later', async () => {
   const { box, updates } = setup();
-  const join = (plugin: string, tool: HarnessId, action: DueUpdate['action'] = 'install'): DueUpdate => ({ source: '/market', marketName: 'team', plugin, tool, action });
-  // The first check with this feature: the tools here are noted, and nothing is installed, though Copilot CLI lacks a plugin.
-  box.tools = ['claude-cli', 'copilot-cli'];
-  box.joins = { 'copilot-cli': [join('document-tools', 'copilot-cli')] };
-  await updates.check();
-  assert.deepEqual([box.calls, box.record()?.seenTools, box.record()?.waiting], [[], ['claude-cli', 'copilot-cli'], []]);
-  // Codex and Pi appear: what every other tool has goes in, as an install or as parts, and the note says why.
-  box.tools = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'];
-  box.joins = { 'copilot-cli': [join('document-tools', 'copilot-cli')], 'codex-cli': [join('issue-tracker', 'codex-cli'), join('spark', 'codex-cli')], 'pi-cli': [join('issue-tracker', 'pi-cli', 'install-parts')] };
+  box.newTools = ['codex-cli', 'pi-cli'];
+  box.due = [owed('issue-tracker', 'codex-cli'), owed('spark', 'codex-cli'), owed('issue-tracker', 'pi-cli', 'install-parts')];
   box.answers.set('spark codex-cli', { outcome: 'failed', changed: false, message: 'Codex is not signed in.' });
-  box.clock += 4 * HOUR;
   const view = await updates.check();
   assert.deepEqual(box.calls, ['install issue-tracker codex-cli', 'parts install issue-tracker pi-cli', 'install spark codex-cli']);
-  assert.deepEqual(view.updated.map(line => [line.plugin, line.text]), [['issue-tracker', 'installed in Codex; parts updated in Pi (new here; your other tools have this plugin)']]);
-  assert.deepEqual(view.failed, [], 'a waiting install that fails says nothing');
-  assert.deepEqual(box.record()?.waiting?.map(wait => [wait.plugin, wait.tool, wait.tries]), [['spark', 'codex-cli', 1]]);
-  assert.equal(box.said.at(-1)?.view.updated.length, 1);
-  // What went in is off the list for good: taken out of Codex later, it is not put back. The one that failed is tried
-  // again later, not at once, and given up after three tries.
+  assert.deepEqual(view.updated.map(line => [line.plugin, line.text]), [['issue-tracker', 'installed in Codex; parts updated in Pi (new here; the plugin is on)']]);
+  assert.deepEqual(box.joined, [['pi-cli']], 'Pi has all it was owed; Codex waits for spark');
+  assert.deepEqual(view.failed.map(failure => [failure.plugin, failure.text]), [['spark', 'Codex is not signed in.']]);
+  // Tried again at the next check's time, not at once; once it goes in, Codex joins too.
   box.calls.length = 0;
-  box.joins = { 'codex-cli': [join('issue-tracker', 'codex-cli'), join('spark', 'codex-cli')] };
+  box.newTools = ['codex-cli'];
+  box.due = [owed('spark', 'codex-cli')];
   box.clock += 1;
   await updates.check();
-  assert.deepEqual(box.calls, [], 'not yet');
+  assert.deepEqual([box.calls, box.joined.length], [[], 1], 'not yet');
+  box.answers.delete('spark codex-cli');
   box.clock += 4 * HOUR;
   await updates.check();
-  box.clock += 8 * HOUR;
-  await updates.check();
-  assert.deepEqual([box.calls, box.record()?.waiting], [['install spark codex-cli', 'install spark codex-cli'], []]);
-  assert.equal(box.logs.filter(line => /spark did not go into Codex/.test(line)).length, 3);
-  assert.equal(box.logs.filter(line => /spark did not go into Codex, and is not tried again: Codex is not signed in\./.test(line)).length, 1, 'said once, at the last try');
-  // A tool that was missed by one read and is found again is not new.
-  box.calls.length = 0;
-  box.tools = ['claude-cli'];
-  box.clock += 4 * HOUR;
-  await updates.check();
-  box.tools = ['claude-cli', 'codex-cli'];
-  box.joins = { 'codex-cli': [join('issue-tracker', 'codex-cli')] };
-  box.clock += 4 * HOUR;
-  await updates.check();
-  assert.deepEqual(box.calls, []);
-  // Put in by hand before its turn: no longer due, so it leaves the list.
-  box.tools = ['claude-cli', 'codex-cli', 'opencode-cli'];
-  box.joins = { 'opencode-cli': [join('issue-tracker', 'opencode-cli', 'install-parts')] };
-  box.answers.set('issue-tracker opencode-cli', { outcome: 'failed', changed: false, message: 'No.' });
-  box.clock += 4 * HOUR;
-  await updates.check();
-  box.joins = {};
-  box.clock += 1;
-  await updates.check();
-  assert.deepEqual(box.record()?.waiting, []);
+  assert.deepEqual([box.calls, box.joined.at(-1)], [['install spark codex-cli'], ['codex-cli']]);
 });
 
-test('A tool whose Manage switch is turned off is forgotten as seen, with what waited for it: turned on again, it is new and gets what the others have', async () => {
+test('The installs a tool new here is owed run only while plugins change by themselves: with the switch or Automatic sync off, nothing installs and the tool waits off the list', async () => {
   const { box, updates } = setup();
-  const join = (plugin: string, tool: HarnessId): DueUpdate => ({ source: '/market', marketName: 'team', plugin, tool, action: 'install' });
-  box.tools = ['claude-cli', 'codex-cli'];
+  box.newTools = ['codex-cli'];
+  box.due = [owed('issue-tracker', 'codex-cli'), due('document-tools', 'claude-cli')];
+  box.paused = true;
+  await updates.check(true);
+  assert.deepEqual([box.calls, box.joined], [['update document-tools claude-cli'], []], 'Check now still updates; the install waits');
+  box.paused = false;
+  box.on = false;
+  box.calls.length = 0;
+  await updates.check(true);
+  assert.deepEqual([box.calls, box.joined], [['update document-tools claude-cli'], []]);
+  box.on = true;
+  box.calls.length = 0;
+  box.due = [owed('issue-tracker', 'codex-cli')];
   await updates.check();
-  // Codex is left out: the reads of the home no longer name it (main.ts passes the managed tools), and it is forgotten.
-  box.tools = ['claude-cli'];
-  await updates.forgetTool('codex-cli');
-  assert.deepEqual(box.record()?.seenTools, ['claude-cli']);
-  // Turned on again: a read names it, a check is made at once, and it gets the plugin Claude Code has.
-  box.tools = ['claude-cli', 'codex-cli'];
-  box.joins = { 'codex-cli': [join('issue-tracker', 'codex-cli')] };
-  await updates.present(box.tools);
+  assert.deepEqual([box.calls, box.joined], [['install issue-tracker codex-cli'], [['codex-cli']]]);
+});
+
+test('A managed tool turning up asks for a check now while plugins change by themselves, and not otherwise', async () => {
+  const { box, updates } = setup();
+  box.newTools = ['codex-cli'];
+  box.due = [owed('issue-tracker', 'codex-cli')];
+  box.paused = true;
+  await updates.toolJoined();
+  assert.deepEqual(box.calls, []);
+  box.paused = false;
+  await updates.toolJoined();
   assert.deepEqual(box.calls, ['install issue-tracker codex-cli']);
 });
 
-test('Selections that wait only while plugins change by themselves: a tool first seen with the switch or Automatic sync off is noted, and gets nothing later', async () => {
+test('The installs the version before waited to make for a tool new here are read from its saved record, for the plugins record’s first read', async () => {
   const { box, updates } = setup();
-  const join = (plugin: string, tool: HarnessId): DueUpdate => ({ source: '/market', marketName: 'team', plugin, tool, action: 'install' });
-  box.tools = ['claude-cli'];
-  await updates.check();
-  // Automatic sync is off when Codex is installed: each read of the home notes it, and nothing waits.
-  box.paused = true;
-  await updates.present(['claude-cli', 'codex-cli']);
-  assert.deepEqual([box.record()?.seenTools, box.record()?.waiting ?? [], box.calls], [['claude-cli', 'codex-cli'], [], []]);
-  // Sync on again, weeks later: Codex is not new, whatever it lacks.
-  box.paused = false;
-  box.tools = ['claude-cli', 'codex-cli'];
-  box.joins = { 'codex-cli': [join('issue-tracker', 'codex-cli')] };
-  box.clock += 60 * 24 * HOUR;
-  await updates.check();
-  assert.deepEqual(box.calls, []);
-  // The switch off and Check now: a tool first seen by that check is noted too, and gets nothing then or after.
-  box.on = false;
-  box.tools = ['claude-cli', 'codex-cli', 'copilot-cli'];
-  box.joins = { 'copilot-cli': [join('issue-tracker', 'copilot-cli')] };
-  await updates.check(true);
-  box.on = true;
-  box.clock += 4 * HOUR;
-  await updates.check();
-  assert.deepEqual([box.calls, box.record()?.seenTools], [[], ['claude-cli', 'codex-cli', 'copilot-cli']]);
-  // On, and a tool not seen before turns up in a read of the home: a check is made at once, and it gets what waits.
-  box.tools = ['claude-cli', 'codex-cli', 'copilot-cli', 'opencode-cli'];
-  box.joins = { 'opencode-cli': [{ ...join('issue-tracker', 'opencode-cli'), action: 'install-parts' }] };
-  await updates.present(box.tools);
-  assert.deepEqual(box.calls, ['parts install issue-tracker opencode-cli']);
-  // An update of the same parts due in the same check is run once.
-  box.calls.length = 0;
-  box.tools = [...box.tools, 'pi-cli'];
-  box.joins = { 'pi-cli': [{ ...join('issue-tracker', 'pi-cli'), action: 'install-parts' }] };
-  box.due = [due('issue-tracker', 'pi-cli', 'install-parts')];
-  box.clock += 4 * HOUR;
-  await updates.check();
-  assert.deepEqual(box.calls, ['parts install issue-tracker pi-cli']);
+  box.saved = [{ home: '/home/a', updated: [], failures: [], waiting: [{ source: '/market', marketName: 'team', plugin: 'spark', tool: 'codex-cli', action: 'install', tries: 1, at: 5 }, { nonsense: true }] } as UpdatesRecord];
+  assert.deepEqual(await updates.waitedBefore(), [{ source: '/market', marketName: 'team', plugin: 'spark', tool: 'codex-cli', action: 'install', tries: 1, at: 5 }]);
 });

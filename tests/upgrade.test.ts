@@ -38,6 +38,9 @@ import { asksNow } from '../src/setupcounts.ts';
 import { applySkills } from '../src/skills.ts';
 import type { HarnessId, HistoryEvent, HomeView } from '../src/types.ts';
 import { appContext, filesIn, type AfterPass, type Files } from './upgrade/start.ts';
+import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
+import * as plugins_ from '../src/plugins.ts';
+import { autoUpdates } from '../src/pluginupdates.ts';
 
 const fixtures = fileURLToPath(new URL('upgrade/', import.meta.url));
 /** Where tests/upgrade/make.mjs made the homes: their records name the home's files by paths under it. */
@@ -271,3 +274,94 @@ for (const old of homes) for (const sync of ['off', 'on'] as const) {
     });
   });
 }
+
+// ---------- The first launch with a plugins record (pluginrecord.ts), over a home with plugins the version before left ----------
+//
+// The home is alpha-1 with plugins in its tools, as their own commands write them (the shapes tests/plugins.test.ts uses: no
+// version of Central Knot writes a tool's install record), and Pi's parts made by parts.ts, whose record has kept alpha.1's
+// form: pdf installed in Claude Code, and in Copilot CLI turned off there by its own switch; memo in Claude Code and as parts
+// in Pi; xlsx in Claude Code from the Anthropic Directory; old in Claude Code from a marketplace that can't be read now; and
+// pdf in Codex, which is left out. Its first launch reads the Plugins page, then two automatic checks run, by this version's
+// own code, with each tool's commands replaced by stand-ins that note what was asked of them.
+describe('Upgrading alpha-1 with plugins in its tools', () => {
+  let box: Box;
+  const market = () => join(box.base, 'market');
+  const skill = (name: string) => `---\nname: ${name}\ndescription: The ${name} skill.\n---\n\nUse ${name}.\n`;
+  const put = async (path: string, text: string) => { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, text); };
+  const asked: string[] = [];
+  let made: Files;
+  before(async () => {
+    box = await place('alpha-1');
+    const home = box.home;
+    await put(join(market(), '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'team', plugins: ['pdf', 'memo', 'xlsx'].map(name => ({ name, source: `./plugins/${name}` })) }));
+    for (const name of ['pdf', 'memo', 'xlsx']) await put(join(market(), `plugins/${name}/skills/${name}/SKILL.md`), skill(name));
+    const copy = async (root: string, name: string) => { await put(join(root, `skills/${name}/SKILL.md`), skill(name)); return root; };
+    // Claude Code: pdf and memo from team, xlsx from the Anthropic Directory, old from a marketplace whose folder is gone now.
+    const claude = (name: string, marketName = 'team') => copy(join(home, '.claude/plugins/cache', marketName, name, 'unknown'), name);
+    await put(join(home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'git', url: market() } }, gone: { source: { source: 'git', url: join(box.base, 'gone-market') } } }));
+    await put(join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: {
+      'pdf@team': [{ scope: 'user', installPath: await claude('pdf'), version: 'unknown' }], 'memo@team': [{ scope: 'user', installPath: await claude('memo'), version: 'unknown' }],
+      'xlsx@anthropic-plugin-directory': [{ scope: 'user', installPath: await claude('xlsx', 'anthropic-plugin-directory'), version: 'unknown', directoryRepositoryKey: 'github.com/acme/xlsx#' }],
+      'old@gone': [{ scope: 'user', installPath: await claude('old', 'gone'), version: 'unknown' }] } }));
+    // Copilot CLI: pdf, turned off with its own switch.
+    await put(join(home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { team: { source: { source: 'git', url: market() } } } }));
+    await put(join(home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'pdf', marketplace: 'team', cache_path: await copy(join(home, '.copilot/installed-plugins/team/pdf'), 'pdf'), enabled: false }] }));
+    // Codex: pdf, and Codex is left out of Central Knot here.
+    await writeFile(join(home, '.codex/config.toml'), `${await readFile(join(home, '.codex/config.toml'), 'utf8')}\n[marketplaces.team]\nsource = ${JSON.stringify(market())}\n\n[plugins."pdf@team"]\nenabled = true\n`);
+    await copy(join(home, '.codex/plugins/cache/team/pdf/local'), 'pdf');
+    const sync = JSON.parse(await readFile(join(box.store, 'sync.json'), 'utf8'));
+    await writeFile(join(box.store, 'sync.json'), `${JSON.stringify({ ...sync, leftOut: ['codex-cli'] }, null, 2)}\n`);
+    // Pi: memo's parts, put in by parts.ts as the Plugins page did.
+    await mkdir(join(home, '.pi/agent'), { recursive: true });
+    const { markets } = plugins();
+    const putIn = await markets.parts(market(), 'team', 'memo', 'pi-cli', 'install', undefined, home);
+    assert.equal(putIn.reports[0]?.outcome, 'installed', JSON.stringify(putIn));
+    asked.length = 0;
+    made = await filesIn(home);
+  });
+  after(() => rm(box.base, { recursive: true, force: true }));
+
+  /** This version's plugins for the home: the real engine but for each tool's commands, which only note what was asked. */
+  function plugins() {
+    const context = appContext(box.home, box.appData);
+    const host: MarketplaceHost = {
+      home: () => ({ home: box.home }), dataDir: join(box.appData, 'data'), pickFolder: async () => undefined, openExternal: async () => {},
+      read: async () => ({ tools: await managedNow(context, await context.read()), snapshots: [] }),
+      leftOut: async () => (await readRecord(box.home)).record?.leftOut ?? [], writeAccess: () => writeAccess(context), share: () => context,
+    };
+    const noted = (what: string) => async (...args: unknown[]) => { asked.push(`${what} ${args.slice(2, 4).join(' ')}`); return { tool: args[3], outcome: 'failed', message: 'Not in this test.', runs: [] } as never; };
+    const use: MarketplaceEngine = { findClis: async () => ({ binaries: { 'claude-cli': '/bin/true', 'copilot-cli': '/bin/true' }, apps: {} }), checkAccess: noted('check'), addMarketplace: noted('add marketplace'),
+      readCatalog: plugins_.readCatalog, readRemotePlugin: plugins_.readRemotePlugin, install: noted('install'), uninstall: noted('uninstall'), update: noted('update'), setSkill: noted('skill'), setPart: noted('part'), setWhole: noted('whole') };
+    return { markets: createMarketplaces(host, use, []) };
+  }
+
+  test('the first launch and two automatic checks run no install or uninstall, and leave every tool file and the parts record as they were', async () => {
+    const { markets } = plugins();
+    await markets.view();
+    let clock = 1_000_000;
+    const updates = autoUpdates({ home: () => box.home, on: () => true, paused: () => false, pending: home => markets.pendingUpdates(home), log: () => {}, now: () => clock, every: 60_000,
+      api: { install: markets.install, update: markets.update, parts: markets.parts }, noteJoined: markets.noteJoined, load: async () => undefined, save: async () => {}, changed: () => {} });
+    await updates.check();
+    clock += 120_000;
+    await updates.check();
+    assert.deepEqual(asked, []);
+    const now = await filesIn(box.home);
+    assert.deepEqual([changedInTools(made, now), now.sha256['.central-knot/plugin-parts.json'] === made.sha256['.central-knot/plugin-parts.json']], [[], true]);
+  });
+
+  test('plugins.json holds each plugin some managed tool has, On, kept out of every tool that lacks it; not the Directory’s copy; every managed tool on its list', async () => {
+    const record = await readJson(join(box.store, 'plugins.json'));
+    const entries = Object.fromEntries(record.plugins.map((entry: { plugin: string; on: boolean; except: string[]; marketName: string }) => [entry.plugin, [entry.marketName, entry.on, entry.except]]));
+    assert.deepEqual(entries, {
+      pdf: ['team', true, ['codex-cli', 'pi-cli', 'opencode-cli']],
+      memo: ['team', true, ['copilot-cli', 'codex-cli', 'opencode-cli']],
+      old: ['gone', true, ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli']] });
+    assert.deepEqual(record.tools, ['claude-cli', 'copilot-cli', 'pi-cli']);
+  });
+
+  test('a later look writes nothing: the record stays as the first launch made it', async () => {
+    const was = await filesIn(box.home);
+    await plugins().markets.view();
+    assert.deepEqual(writtenBetween(was, await filesIn(box.home)), []);
+  });
+});

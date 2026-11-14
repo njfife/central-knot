@@ -1,9 +1,12 @@
 // Plugin updates that arrive by themselves (PLG-09). Every few hours, with or without a window, Central Knot reads the
 // marketplaces again and runs what Update all would choose on the Plugins page, through each tool's own command: the same
 // route as the button, so a plugin turned off stays off, one a tool no longer has is not put back, and one its marketplace
-// dropped is left as it is. What it did is kept for the page's note and the Settings row; a failed update is tried again,
-// less often each time. The steps are here, without Electron; main.ts gives them the app's parts (AutoUpdateHost).
+// dropped is left as it is. It also makes the installs a plugin's table owes a tool new here (pluginrecord.ts `background`),
+// and then puts that tool on the plugins record's `tools`; it never uninstalls. What it did is kept for the page's note and
+// the Settings row; a failed update or install is tried again, less often each time. The steps are here, without Electron;
+// main.ts gives them the app's parts (AutoUpdateHost).
 import { resultLines, runPlan, succeeded, type PlanApi, type PluginDone, type PluginOp } from './pluginplan.ts';
+import type { WaitedBefore } from './pluginrecord.ts';
 import type { HarnessId, PluginUpdateLine, PluginUpdatesView } from './types.ts';
 import { toolNames as names } from './words.ts';
 
@@ -23,8 +26,8 @@ const RETRY_CAP_MS = 24 * 60 * 60_000;
 /** The note keeps this many lines of what was updated; older ones stay in the log. */
 const NOTE_LINES = 40;
 
-/** An update that is due: the op Update all would choose, with the version the marketplace offers. */
-export type DueUpdate = PluginOp & { offered?: string };
+/** What is due: the op Update all would choose, with the version the marketplace offers, or (`newHere`) an install a plugin's table owes a tool new here. */
+export type DueUpdate = PluginOp & { offered?: string; newHere?: true };
 
 /**
  * An update that failed: which, what the tool said, when it was last tried and how often, and whether the note about it
@@ -42,21 +45,14 @@ export interface UpdatesRecord {
   failures: Failure[];
   /** A note of updates was closed here once: it no longer says that plugins update by themselves now. */
   told?: true;
-  /**
-   * Selections that wait. `seenTools`: the tools plugins go into that this home has had; it only grows, so a tool that
-   * is missed by one read and found by the next is not new. `waiting`: for a tool first seen since, the plugins every
-   * other tool had at that moment and it lacked, each until it is in (or no longer due, or tried WAITING_TRIES times).
-   */
-  seenTools?: HarnessId[];
-  waiting?: Waiting[];
 }
-/** A plugin waiting to go into a tool that is new here: the install, how often it was tried and when last. */
-export type Waiting = PluginOp & { tries: number; at: number };
-/** A waiting install that keeps failing (a tool not signed in yet, say) is given up after this many tries; its box on Plugins still installs it. */
-export const WAITING_TRIES = 3;
 
-/** What a check found to do (marketplaces.pendingUpdates). `unread`: the marketplaces that couldn't be read, by name, and `unreadSources`, as added. */
-export interface Pending { stopped?: string; ops: DueUpdate[]; unread: string[]; unreadSources: string[]; offline?: true; /** The tools here that plugins go into, and what each would get to have the plugins every other tool has (marketplaces.pendingUpdates). */ tools?: HarnessId[]; joins?: Partial<Record<HarnessId, PluginOp[]>> }
+/**
+ * What a check found to do (marketplaces.pendingUpdates). `unread`: the marketplaces that couldn't be read, by name, and
+ * `unreadSources`, as added. `newTools`: the tools new here whose owed installs are all among `ops`; each goes on the plugins
+ * record's `tools` once every one of its installs is in.
+ */
+export interface Pending { stopped?: string; ops: DueUpdate[]; unread: string[]; unreadSources: string[]; offline?: true; newTools?: HarnessId[] }
 
 /** What the automatic updates need from the app around them. */
 export interface AutoUpdateHost {
@@ -68,8 +64,10 @@ export interface AutoUpdateHost {
   paused(): boolean;
   /** What is due now: reads every marketplace again; `stopped` when nothing may be changed in this home. */
   pending(home: string): Promise<Pending>;
-  /** The calls an update makes, as Apply all makes them (an update without the reinstall route: see plugins.update), and the install a waiting selection makes. */
+  /** The calls an update makes, as Apply all makes them (an update without the reinstall route: see plugins.update), and the install a tool new here is owed. */
   api: Required<Pick<PlanApi, 'update' | 'parts' | 'install'>>;
+  /** These tools have each On plugin now: on the plugins record's `tools` from now on (marketplaces.ts noteJoined). */
+  noteJoined(tools: HarnessId[], home: string): Promise<void>;
   /** Every home's record as last saved, if the file is there and can be read. */
   load(): Promise<UpdatesRecord[] | undefined>;
   save(records: UpdatesRecord[]): Promise<void>;
@@ -87,8 +85,8 @@ const keyOf = (op: Pick<PluginOp, 'source' | 'plugin' | 'tool'>) => `${op.source
 export const retryAfter = (tries: number, every: number) => Math.min(RETRY_CAP_MS, every * 2 ** Math.max(0, tries - 1));
 
 export function autoUpdates(host: AutoUpdateHost) {
-  // Only updates run by themselves, and the installs of selections that wait: nothing here uninstalls or switches a skill.
-  const never = async () => ({ stopped: 'Only updates run by themselves.', reports: [] });
+  // Only updates run by themselves, and the installs a tool new here is owed: nothing here uninstalls or switches a skill.
+  const never = async () => ({ stopped: 'Only updates and installs run by themselves.', reports: [] });
   const api: PlanApi = { uninstall: never, setSkill: never, ...host.api };
   /** Each home's record, read from the file once. A note, its failures and the time of the last check are about one home's tools. */
   let records: Map<string, UpdatesRecord> | undefined;
@@ -172,71 +170,33 @@ export function autoUpdates(host: AutoUpdateHost) {
       const failure = mine.failures.find(known => known.key === keyOf(op));
       return !!failure && failure.offered === op.offered && (!!failure.manual || (!asked && at < failure.at + retryAfter(failure.tries, host.every)));
     };
-    const ops = due.ops.filter(op => !waits(op));
+    // The installs a tool new here is owed run only while plugins change by themselves here (the switch on, Automatic sync on);
+    // until then the tool stays off the plugins record's `tools`, and its plugins' pages say what waits.
+    const auto = host.on() && !host.paused();
+    const ops = due.ops.filter(op => (auto || !op.newHere) && !waits(op));
     host.log(`plugin updates: checked${due.unread.length ? ` (couldn’t read ${due.unread.join(', ')})` : ''}: ${due.ops.length} due${due.ops.length > ops.length ? `, ${due.ops.length - ops.length} waiting` : ''}`);
-    const joining = waitingNow(mine, due, at, asked, ops);
-    const { done: all, stopped } = ops.length || joining.length ? await runPlan([...ops, ...joining], api, home) : { done: [] as PluginDone[], stopped: undefined };
+    const { done, stopped } = ops.length ? await runPlan(ops, api, home) : { done: [] as PluginDone[], stopped: undefined };
     if (stopped) host.log(`plugin updates: stopped: ${stopped}`);
-    const joined = all.filter(entry => joining.some(op => keyOf(op) === keyOf(entry) && op.action === entry.action));
-    const done = all.filter(entry => !joined.includes(entry));
-    const arrived = keepJoined(mine, joined, at);
-    // Something went in or was updated: that is the news, also when another update failed in the same check.
-    const kept = keep(mine, ops, done, at);
-    const news = arrived ? 'updated' as const : kept;
+    // A tool new here is on the record's `tools` once each install it was owed is in: one still failing is tried again later.
+    const went = (op: DueUpdate) => done.some(entry => keyOf(entry) === keyOf(op) && entry.action === op.action && succeeded(entry.report));
+    const joined = auto && !stopped ? (due.newTools ?? []).filter(tool => due.ops.every(op => !op.newHere || op.tool !== tool || went(op))) : [];
+    if (joined.length) await host.noteJoined(joined, home).catch(error => host.log(`plugin updates: the plugins record couldn’t be saved: ${error instanceof Error ? error.message : String(error)}`));
+    const news = keep(mine, ops, done, at);
     mine.checked = { at, updated: done.filter(entry => succeeded(entry.report) && entry.report.changed).length, failed: open(mine), unread: due.unread, ...(due.offline ? { offline: true as const } : {}), ...(stopped ? { stopped, partway: true as const } : {}) };
     await save(mine, news);
   }
 
   /**
-   * Selections that wait. A tool plugins go into that this home has not had before gets, once, the plugins every other
-   * tool has now; the tools here when this first runs are only noted, so nothing is installed for them. What still waits
-   * and is still due is returned to be installed now: all of it when the person asked, else what was not tried yet or
-   * has waited as long as a failed update would.
+   * Keeps what a check came to: the note's lines for what changed, and each failure with its count of tries. Says what is news:
+   * something went in or was updated, also when another failed in the same check.
    */
-  function waitingNow(mine: UpdatesRecord, due: Pending, at: number, asked: boolean, ops: DueUpdate[]): Waiting[] {
-    if (!due.tools) return [];
-    // Only while plugins change by themselves here. With the switch off or Automatic sync off, a tool first seen is noted
-    // and gets nothing, then or later: it may be long in use by the time they are turned on again.
-    const auto = host.on() && !host.paused();
-    const fresh = mine.seenTools ? due.tools.filter(tool => !mine.seenTools!.includes(tool)) : [];
-    mine.seenTools = [...(mine.seenTools ?? due.tools), ...fresh];
-    for (const tool of auto ? fresh : []) {
-      const gets = due.joins?.[tool] ?? [];
-      host.log(`plugin updates: ${names[tool]} is new here: ${gets.length ? `${gets.map(op => op.plugin).join(', ')} wait to go in` : 'nothing waits to go in'}`);
-      mine.waiting = [...(mine.waiting ?? []), ...gets.map(op => ({ ...op, tries: 0, at }))];
-    }
-    // No longer due: put in by hand since, or no longer a plugin every other tool has. Marketplaces that couldn't be read say nothing.
-    mine.waiting = (mine.waiting ?? []).filter(wait => due.unreadSources.includes(wait.source) || due.joins?.[wait.tool]?.some(op => keyOf(op) === keyOf(wait)));
-    // One this check already updates (parts that are behind) is not also installed.
-    return auto ? mine.waiting.filter(wait => !due.unreadSources.includes(wait.source) && !ops.some(op => keyOf(op) === keyOf(wait)) && (asked || !wait.tries || at >= wait.at + retryAfter(wait.tries, host.every))) : [];
-  }
-
-  /**
-   * Keeps what the waiting installs came to. One that went in leaves the list for good (taken out later, it stays out) and
-   * is a line of the note; one that failed is tried again later, quietly, and given up after WAITING_TRIES tries.
-   */
-  function keepJoined(mine: UpdatesRecord, joined: PluginDone[], at: number): boolean {
-    const went = joined.filter(entry => succeeded(entry.report));
-    for (const entry of joined) {
-      const wait = mine.waiting?.find(known => keyOf(known) === keyOf(entry));
-      if (!wait) continue;
-      const last = wait.tries + 1 >= WAITING_TRIES;
-      if (succeeded(entry.report) || last) mine.waiting = mine.waiting!.filter(known => known !== wait);
-      else { wait.tries++; wait.at = at; }
-      if (!succeeded(entry.report)) host.log(`plugin updates: ${entry.plugin} did not go into ${names[entry.tool]}${last ? ', and is not tried again' : ''}: ${entry.report.message}`);
-    }
-    // In the words Apply all uses, with why it happened: nobody clicked this.
-    const lines = resultLines(went.filter(entry => entry.report.changed), false, { after: true }).map(line => ({ at, source: line.source, plugin: line.plugin, text: `${line.text.replace(/\.$/, '')} (new here; your other tools have this plugin)`, ...(line.ok ? {} : { warn: true as const }) }));
-    mine.updated = [...mine.updated, ...lines].slice(-NOTE_LINES);
-    return lines.length > 0;
-  }
-
-  /** Keeps what a check's updates came to: the note's lines for what changed, and each failure with its count of tries. Says what is news. */
   function keep(mine: UpdatesRecord, ops: DueUpdate[], done: PluginDone[], at: number): 'updated' | 'failed' | undefined {
     const changed = done.filter(entry => succeeded(entry.report) && (entry.report.changed || entry.report.notes?.length));
+    const newHere = (entry: PluginDone) => ops.some(op => op.newHere && keyOf(op) === keyOf(entry) && op.action === entry.action);
     // The words Apply all uses, one line per plugin, as read afterwards (Settings says an update can't be undone); a part
-    // left alone (edited since, say) is a line of its own to read.
-    const lines = resultLines(changed, false, { after: true }).map(line => ({ at, source: line.source, plugin: line.plugin, text: line.text, ...(line.ok ? {} : { warn: true as const }) }));
+    // left alone (edited since, say) is a line of its own to read. An install says why it happened: nobody clicked it.
+    const said = (entries: PluginDone[], why = '') => resultLines(entries, false, { after: true }).map(line => ({ at, source: line.source, plugin: line.plugin, text: line.ok && why ? `${line.text}${why}` : line.text, ...(line.ok ? {} : { warn: true as const }) }));
+    const lines = [...said(changed.filter(entry => !newHere(entry))), ...said(changed.filter(newHere), ' (new here; the plugin is on)')];
     mine.updated = [...mine.updated, ...lines].slice(-NOTE_LINES);
     let failedNew = false;
     for (const entry of done) {
@@ -301,35 +261,22 @@ export function autoUpdates(host: AutoUpdateHost) {
   }
 
   /**
-   * The tools plugins go into in the open home (the ones Central Knot manages), each time it is read. One not seen here before is new: with plugins changing
-   * by themselves a check is made now, not at the schedule's next turn, and it gets what the others have. Otherwise (the
-   * switch off, Automatic sync off, or the first time this runs here) it is only noted, so it is never taken for new later.
+   * A managed tool turned up in the open home, or was managed again: with plugins changing by themselves, a check now rather
+   * than at the schedule's next turn, so it gets each On plugin not kept out of it soon.
    */
-  async function present(tools: HarnessId[]): Promise<void> {
-    const home = host.home();
-    if (!home) return;
-    const mine = await recordFor(home);
-    const unseen = tools.filter(tool => !mine.seenTools?.includes(tool));
-    if (!unseen.length) return;
-    if (mine.seenTools && host.on() && !host.paused()) { if (!running) await check(); return; }
-    mine.seenTools = [...(mine.seenTools ?? []), ...unseen];
-    await save();
+  async function toolJoined(): Promise<void> {
+    if (host.home() && host.on() && !host.paused() && !running) await check();
   }
 
   /**
-   * A tool whose Manage switch was turned off in the open home (toolchoice.ts): no longer one plugins go into here, so it is
-   * no longer noted as seen, and what waited to go into it goes. Turned on again, it is new here and gets what the other
-   * tools have, as a tool installed later does (present).
+   * The installs the version before waited to make in a tool new here (its record's `waiting`, which this version no longer
+   * writes), in the open home: the plugins record's first read leaves those tools out of `except` (pluginrecord.ts firstRecord).
    */
-  async function forgetTool(tool: HarnessId): Promise<void> {
+  async function waitedBefore(): Promise<WaitedBefore[]> {
     const home = host.home();
-    if (!home) return;
-    const mine = await recordFor(home);
-    if (!mine.seenTools?.includes(tool) && !mine.waiting?.some(wait => wait.tool === tool)) return;
-    if (mine.seenTools) mine.seenTools = mine.seenTools.filter(seen => seen !== tool);
-    if (mine.waiting) mine.waiting = mine.waiting.filter(wait => wait.tool !== tool);
-    await save();
+    const waiting = home ? (await recordFor(home) as UpdatesRecord & { waiting?: unknown }).waiting : undefined;
+    return (Array.isArray(waiting) ? waiting : []).filter((wait): wait is WaitedBefore => typeof wait?.tool === 'string' && typeof wait.source === 'string' && typeof wait.plugin === 'string');
   }
 
-  return { view, check, tick, close, settled, underWay, present, forgetTool };
+  return { view, check, tick, close, settled, underWay, toolJoined, waitedBefore };
 }
