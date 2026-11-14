@@ -421,7 +421,7 @@ const CUT_OFF = `(() => {
   return out;
 })()`;
 
-/** Sizes the page as the window would be, and lets the app hear the resize. */
+/** Sizes the page to width × height, and lets the app hear the resize. A real window that size leaves its page shorter (SMALLEST). */
 async function sizeTo(a, width, height) {
   await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
   await a.run(`window.dispatchEvent(new Event('resize'))`);
@@ -434,14 +434,36 @@ async function fullSize(a) {
 }
 
 /**
- * At the smallest window, first with the sidebar folded to its rail and then open, nothing on this page is cut off.
- * `again` puts back what the sidebar toggle's click closes, such as an open menu.
+ * The page in the app's smallest window (main.ts minWidth, minHeight: 860×560), as [width, height]: the Mac's title bar, 32 pt
+ * in a real window on macOS 26, comes off its height. Every check at the smallest size sizes the page to this.
+ */
+const SMALLEST = [860, 560 - 32];
+
+/**
+ * Each row of the sidebar (a page, a home, the update control) that shows less than its full height: under the edge of a list
+ * that scrolls, or of the window. CUT_OFF accepts a row a scroll can bring into view; here none may wait for one. Empty when
+ * every row shows whole.
+ */
+const SIDEBAR_CUT = `[...document.querySelectorAll('#sidebar button')].flatMap(row => {
+  const own = row.getBoundingClientRect();
+  let top = Math.max(own.top, 0), bottom = Math.min(own.bottom, innerHeight);
+  for (let up = row.parentElement; up; up = up.parentElement) {
+    if (getComputedStyle(up).overflowY === 'visible') continue;
+    const edge = up.getBoundingClientRect();
+    top = Math.max(top, edge.top); bottom = Math.min(bottom, edge.bottom);
+  }
+  return bottom - top < own.height - 1 ? [Math.max(0, Math.round(bottom - top)) + ' of ' + Math.round(own.height) + 'px shows: ' + row.getAttribute('aria-label')] : [];
+})`;
+
+/**
+ * In the smallest window, first with the sidebar folded to its rail and then open, nothing on this page is cut off, and every
+ * row of the sidebar shows whole. `again` puts back what the sidebar toggle's click closes, such as an open menu.
  */
 async function fitsAtMinimum(a, where, again = async () => {}) {
-  await sizeTo(a, 860, 560); await again();
-  same(`nothing cut off at 860×560 with the rail: ${where}`, await a.run(CUT_OFF), []);
+  await sizeTo(a, ...SMALLEST); await again();
+  same(`nothing cut off at 860×560 with the rail: ${where}`, [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], []);
   await a.click('#sidebar-toggle'); await again();
-  same(`nothing cut off at 860×560 with the sidebar open: ${where}`, await a.run(CUT_OFF), []);
+  same(`nothing cut off at 860×560 with the sidebar open: ${where}`, [...await a.run(CUT_OFF), ...await a.run(SIDEBAR_CUT)], []);
   await a.click('#sidebar-toggle');
   await fullSize(a);
 }
@@ -515,7 +537,7 @@ const FILE_COLUMN_BLANK = `(() => {
  */
 async function copyQuestionFits(a, key, words) {
   same('each row quotes its copy’s first line, in quotation marks, and says what choosing it does', await copyQuestionWords(a, false), words);
-  for (const [width, height, shape] of [[860, 560, 'under'], [1280, 800, 'under'], [1728, 1117, 'beside'], [2560, 1440, 'beside']]) {
+  for (const [width, height, shape] of [[...SMALLEST, 'under'], [1280, 800, 'under'], [1728, 1117, 'beside'], [2560, 1440, 'beside']]) {
     await sizeTo(a, width, height);
     same(`at ${width}×${height} the copy question’s list is ${shape} the question, as wide as its box, clear of the close button, nothing cut off`, [...await a.run(copyQuestionMisfits(shape)), ...await a.run(CUT_OFF)], []);
   }
@@ -591,7 +613,7 @@ async function blockedCopyKeepsItsRow(a, practice) {
     { quote: '“Copilot CLI’s loose notes.”', tinted: [], does: 'Replaces Claude Code’s copy and Codex’s copy.' },
     { quote: '“Codex’s loose notes run on well past what a row has room to quote: every open question, each decision and who made it, and what is still to…”', tinted: [], does: 'Replaces Claude Code’s copy and Copilot CLI’s copy.' },
   ]);
-  for (const [width, height, shape] of [[860, 560, 'under'], [1728, 1117, 'beside']]) {
+  for (const [width, height, shape] of [[...SMALLEST, 'under'], [1728, 1117, 'beside']]) {
     await sizeTo(a, width, height);
     same(`at ${width}×${height} the three rows, one of them not to be chosen, share their columns, ${shape} the question`, [...await a.run(copyQuestionMisfits(shape)), ...await a.run(CUT_OFF)], []);
   }
@@ -988,7 +1010,7 @@ async function practiceFlow() {
   if (!(await a.exists('#files-standup'))) await a.click('#open-standup');
   await a.click('#files-standup');
   await a.click('#list-zz-6');
-  await sizeTo(a, 860, 560);
+  await sizeTo(a, ...SMALLEST);
   check('the chosen row stays in view in the stacked list', await a.run(`(() => { const list = document.querySelector('#skills-list'), row = document.querySelector('#list-zz-6'), head = list.querySelector('.list-head'); const area = list.getBoundingClientRect(), box = row.getBoundingClientRect(); return box.top >= area.top + head.offsetHeight - 1 && box.bottom <= area.top + list.clientHeight + 1; })()`));
   await fullSize(a);
   await a.press('Escape');
@@ -1161,7 +1183,7 @@ async function practiceFlow() {
   same('and marks what differs from the current version: the words only the current one has are struck through', await a.all('.version-read .change-gone', 'e.textContent'), ['Edited in Codex.']);
   same('Read is headed by what differs from the current version', await a.text('.version-read-legend strong'), 'Differs from current in: description');
   check('the prompt reads upright', await a.run(`getComputedStyle(document.querySelector('.version-read-block')).fontStyle`) === 'normal');
-  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
+  for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) {
     await sizeTo(a, width, height);
     same(`nothing is cut off at ${width}×${height} with an agent’s row open on its versions, one being read`, await a.run(CUT_OFF), []);
   }
@@ -1273,7 +1295,7 @@ async function practiceFlow() {
   await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#add-marketplace');
   check('the marketplace is listed and opened, with its plugins', (await a.text('.market-list')).includes('ck-test-market') && await a.exists('[data-plugin="document-tools"]') && (await a.text('.market-title-line')).includes('By Platform team'), await a.text('#plugins-scroll'));
-  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 1, mobile: false });
+  await a.send('Emulation.setDeviceMetricsOverride', { width: SMALLEST[0], height: SMALLEST[1], deviceScaleFactor: 1, mobile: false });
   // Scrolled just past the header's own place, it stays flush with the scroller's top while the first row passes under it.
   // The scroller is held short for the measurement, so the five-plugin fixture scrolls far enough at any layout.
   const pinned = await a.run(`(() => {
@@ -2447,7 +2469,7 @@ async function updateFlow() {
     await a.run(`(() => { const input = document.querySelector('#profile-name'); input.value = 'Incident response on call'; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
     await a.settle();
     // Nothing is in Central Knot in this fresh home, so the empty profile is the one in use: the status bar names it.
-    await sizeTo(a, 860, 560);
+    await sizeTo(a, ...SMALLEST);
     /** In the rail, then open: the sidebar fits, and nothing in the status bar runs into its neighbour. */
     const fitsBothWays = async when => {
       same(`at 860×560, in the rail, the sidebar fits and the control is its icon alone: ${when}`, [await a.run(`document.body.classList.contains('rail')`), await sidebarFit(), await a.run(`getComputedStyle(document.querySelector('#update-control .nav-label')).display`)], [true, [], 'none']);
@@ -2471,7 +2493,7 @@ async function updateFlow() {
     await a.quit();
     writeFileSync(join(narrowData, 'app-settings.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(narrowData, 'app-settings.json'), 'utf8')), update: { tag: 'v0.5.0-preview.6', page: 'https://github.com/njfife/central-knot/releases/tag/v0.5.0-preview.6', from: 'v0.5.0-preview.5' } }));
     a = await launch(narrowData, [], HOME, as('v0.5.0-preview.6'));
-    await sizeTo(a, 860, 560);
+    await sizeTo(a, ...SMALLEST);
     for (let i = 0; i < 40 && !/now on/.test(await a.text('#announcement') ?? ''); i++) await wait(250);
     same('nor after the restart, where the note is its mark and the release notes link waits in Settings', [await a.exists('#status-profile'), await a.run(`getComputedStyle(document.getElementById('said-link')).display`), await crowding()], [true, 'none', []]);
     same('no page errors in the narrow window', a.pageErrors, []);
@@ -2596,7 +2618,7 @@ async function fewToolsFlow() {
   await a.click('#popen-0-document-tools');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-tool-via')); tries++) await wait(100);
   const box = await a.text('.plugin-panel');
-  for (const [width, height] of [[860, 560], [1728, 1117]]) {
+  for (const [width, height] of [SMALLEST, [1728, 1117]]) {
     await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
     await wait(300);
     await a.shot(`app-only-plugin-${width}`);
@@ -2645,7 +2667,7 @@ async function openCodeFlow() {
   const onlyHere = { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' };
   const a = await launch(join(scratch, 'opencode-data'), flag('--electron') ? ['--as-released'] : [], home, onlyHere);
   // With --shots, a page's picture at each window size the app must fit.
-  const pictures = async (page, name) => { if (!shots) return; for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(page, width, height); await page.shot(`${name}-${width}`); } await fullSize(page); };
+  const pictures = async (page, name) => { if (!shots) return; for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(page, width, height); await page.shot(`${name}-${width}`); } await fullSize(page); };
   await a.click('#nav-harnesses');
   const card = await a.text('#harness-opencode-cli');
   await pictures(a, 'opencode-harnesses');
@@ -2758,7 +2780,7 @@ async function suggestedFlow() {
   const onlyHere = { CK_TEST_HOME_ONLY: 'claude,copilot,codex,pi,opencode' };
   const data = join(scratch, 'suggested-data');
   const a = await launch(data, flag('--electron') ? ['--as-released'] : [], home, onlyHere);
-  const pictures = async name => { if (!shots) return; for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); await a.shot(`${name}-${width}`); } await fullSize(a); };
+  const pictures = async name => { if (!shots) return; for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); await a.shot(`${name}-${width}`); } await fullSize(a); };
   const offered = page => page.all('.market-suggestion', `e.querySelector('.market-suggestion-name').textContent + ' · ' + e.querySelector('.market-suggestion-meta').textContent`);
   await a.click('#nav-plugins');
   same('with Claude Code alone, its own marketplace is suggested, and no other tool’s', await offered(a), ['claude-plugins-official · For Claude Code']);
@@ -2828,7 +2850,7 @@ async function otherAppsFlow() {
   const pi = await a.text('#harness-pi-cli') ?? '';
   check('pi-gui alone makes Pi a tool here, named as the third-party app it is, with no CLI', pi.includes('pi-gui (third-party) 0.4.0 · no CLI found') && await a.exists('button#harness-pi-cli'), pi);
   await fitsAtMinimum(a, 'Harnesses with other apps named');
-  if (shots) for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); await a.shot(`other-apps-${width}`); }
+  if (shots) for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); await a.shot(`other-apps-${width}`); }
   await fullSize(a);
   same('no page errors, other apps', a.pageErrors, []);
   await a.quit();
