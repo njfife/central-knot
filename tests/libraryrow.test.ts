@@ -141,7 +141,8 @@ test('A version’s note says what it changed, or what a copy that gave way diff
   const found = { hash: 'a', at: at(9), from: { how: 'found' as const, harness: 'claude-cli' as const } }, again = { hash: 'a', at: at(1), from: { how: 'made-current' as const } };
   const item = { versions: [again, { hash: 'b', at: at(5), from: { how: 'edited' as const, harness: 'codex-cli' as const } }, found] };
   assert.equal(madeFrom(item, again), found);
-  assert.match(versionOrigin(item, again), /^back to: found in Claude Code, \d+:\d\d/);
+  // Nine minutes ago reads "yesterday at" in the first minutes after midnight.
+  assert.match(versionOrigin(item, again), /^back to: found in Claude Code, (yesterday at )?\d+:\d\d/);
   assert.equal(versionOrigin(item, item.versions[1]), 'edited in Codex');
 });
 
