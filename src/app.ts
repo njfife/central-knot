@@ -306,8 +306,15 @@ const kindPages: Record<PageKind, { send: (changes: Change[], resume: boolean, h
 /** Each item page's last click's result, as kindPages keeps it: what the page's bands and notices read. */
 export const lastResult = (kind: PageKind): PassResult | undefined => ({ skills: state.skillsResult, mcp: state.mcpResult, agents: state.agentsResult })[kind];
 
+/**
+ * Whether a click in this home is a Resume: the page shows it waiting for one (share.ts libraryGate `resume`). Sent with the
+ * clicks that resume such a home, as Resume itself does: an item page's clicks (first setup's walkthrough's too), a tool's
+ * Manage switch, Take over, Clear the switch and Convert to a skill. History's actions, a profile switch and Synchronize
+ * everything's switch send nothing, and are refused there until Resume.
+ */
+export const clickResumes = (home: HomeView) => home.sync.gate.state === 'needs-resume';
 /** Sends one kind's changes for the open home. */
-const send = (kind: PageKind, changes: Change[]) => kindPages[kind].send(changes, state.home!.sync.gate.state === 'needs-resume', state.home!.home);
+const send = (kind: PageKind, changes: Change[]) => kindPages[kind].send(changes, clickResumes(state.home!), state.home!.home);
 
 /**
  * One click, applied at once: an item's switch, or one tool's control in its details. The result says what was done, or why
@@ -365,7 +372,7 @@ const undoClick = (click: Click, made: string[], switchedBack: PluginOp[] = []) 
   const results: DestinationResult[] = [];
   let stopped: string | undefined;
   for (const event of events) {
-    const result = await api().restore(event.id, home.sync.gate.state === 'needs-resume', home.home);
+    const result = await api().restore(event.id, home.home);
     if (result.stopped) { stopped = result.stopped; break; }
     results.push(...result.results);
   }
@@ -644,7 +651,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   // one place that decides it: historyactions.ts restorePlan), for the words after it.
   const clicked = state.history.data?.find(event => event.id === eventId);
   const switchesOn = !!clicked?.everything?.undo && !!state.history.data && restorePlan(clicked, state.history.data, entriesNow(home)).switchOn;
-  const result = await api().restore(eventId, home.sync.gate.state === 'needs-resume', home.home, choice);
+  const result = await api().restore(eventId, home.home, choice);
   // The notice for an undone event has done its job; its result band says what happened.
   if (!result.stopped) state.dismissed.add(eventId);
   const view = await api().refresh();
@@ -716,7 +723,7 @@ function sayEverything(past: HistoryEvent, result: ApplyResult, switchedOn: bool
 export const skillAction = (action: 'clear-switch' | 'take-over', key: string, tool: HarnessId, name: string) =>
   busy(action === 'take-over' ? 'Taking it over…' : 'Clearing the switch…', async () => {
     const home = state.home!;
-    const result = await (action === 'take-over' ? api().takeOverSkill(key, tool, home.home) : api().clearSkillSwitch(key, tool, home.home));
+    const result = await (action === 'take-over' ? api().takeOverSkill(key, tool, clickResumes(home), home.home) : api().clearSkillSwitch(key, tool, clickResumes(home), home.home));
     setHome(await api().refresh());
     kindPages.skills.keep(result.results, result.notices);
     if (result.stopped) { tell({ page: state.page, item: name, text: result.stopped, warn: true, band: true }); return; }
@@ -733,10 +740,10 @@ export const skillAction = (action: 'clear-switch' | 'take-over', key: string, t
 /** Converts an agent to a Pi skill, then takes that skill into Central Knot, On in Pi only: never the agent's own tool by itself. */
 export const convertAgent = (key: string, name: string) => busy('Converting…', async () => {
   const home = state.home!;
-  const made = await api().convertAgent(key, home.home);
+  const made = await api().convertAgent(key, clickResumes(home), home.home);
   if (made.stopped || !made.skill) { announce(made.stopped ?? 'Nothing was converted.'); return; }
   const others = home.sync.managed.filter(tool => tool !== 'pi-cli');
-  const applied = await api().applySkills([{ key: made.skill, managed: true, off: others }], home.sync.gate.state === 'needs-resume', home.home);
+  const applied = await api().applySkills([{ key: made.skill, managed: true, off: others }], clickResumes(home), home.home);
   const view = await api().refresh();
   setHome(view);
   const from = toolName(made.origin ?? 'claude-cli');

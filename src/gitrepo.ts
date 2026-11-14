@@ -18,7 +18,7 @@ import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/p
 import type { Dirent } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
-import { agentHash, agentText, fromMarkdown, keyOf, readAgents, safeName, type AgentEntry, type NeutralAgent } from './agentfiles.ts';
+import { agentHash, agentText, fromMarkdown, readAgents, safeName, type AgentEntry, type NeutralAgent } from './agentfiles.ts';
 import { agentsForRepo, agentsView, applyAgents } from './agents.ts';
 import { parseSkill } from './discovery.ts';
 import { harnesses } from './harnesses.ts';
@@ -30,7 +30,7 @@ import { applyServers, serversForRepo, serversView } from './servers.ts';
 import { gitEnv, gitFailure, runGit, whyGitFailed, whyPushFailed } from './plugins.ts';
 import { PRODUCT } from './values.ts';
 import { leftOutSentence } from './words.ts';
-import { copyTree, errorCode, exists, gateRefusal, itemKey, managedNow, notCopied, sha256 as sha, syncGate, plainError, readTree, removeTree, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext, type Tree } from './share.ts';
+import { copyTree, errorCode, exists, itemKey, libraryGate, managedNow, notCopied, sha256 as sha, plainError, readTree, removeTree, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext, type Tree } from './share.ts';
 import { undoBase } from './instructions.ts';
 import type { BaseUndo, DestinationResult, HarnessId, HistoryEvent, RepoChange, RepoCommit, RepoKind, RepoResult, RepoView, Snapshot } from './types.ts';
 
@@ -175,7 +175,7 @@ const asLines = (text: string) => (text && !text.endsWith('\n') ? `${text}\n` : 
  */
 const BASE_KEY = 'instructions:base';
 const serverKey = (name: string) => `mcp:${name}`;
-const agentKey = (name: string) => `agent:${keyOf(name)}`;
+const agentKey = (name: string) => `agent:${itemKey(name)}`;
 
 /** An agent as the repo holds it: what every tool holds, and Claude Code's own settings (model, tools), which the repo carries too. */
 const agentId = (agent: NeutralAgent) => sha(JSON.stringify([agentHash(agent), agent.fields]));
@@ -687,9 +687,9 @@ async function pullServer(context: ShareContext, dir: string, change: RepoChange
  */
 async function pullAgent(context: ShareContext, dir: string, change: RepoChange, item: SideItem | undefined, wrote: Wrote): Promise<DestinationResult[]> {
   const tools = await managedNow(context, await context.read());
-  const key = keyOf(change.name);
+  const key = itemKey(change.name);
   const only = new Set([key]);
-  const ours = (result: DestinationResult) => keyOf(result.item) === key;
+  const ours = (result: DestinationResult) => itemKey(result.item) === key;
   const outcome = (done: { stopped?: string; results: DestinationResult[] }) => (done.stopped ? [notIn(change.name, done.stopped)] : done.results.filter(ours));
   if (!item) return outcome(await applyAgents(context, tools, [], { only, pulled: new Map([[key, { removed: true }]]) }));
   const text = await readFile(join(dir, item.paths[0]), 'utf8');
@@ -709,7 +709,7 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
  * (undoSettingsChange).
  */
 async function pullClaudeSettings(context: ShareContext, change: RepoChange, hash: string, text: string, wrote: Wrote): Promise<DestinationResult[]> {
-  const existing = (await readAgents(context, 'claude-cli')).entries.find(entry => entry.key === keyOf(change.name));
+  const existing = (await readAgents(context, 'claude-cli')).entries.find(entry => entry.key === itemKey(change.name));
   if (!existing || existing.hash !== hash || existing.text === text) return [];
   try { await writeFileChecked(existing.file, text, existing.text); } catch (error) { return [writeProblem(change, 'claude-cli', 'file', error)]; }
   wrote({ tool: 'claude-cli', before: existing.hash, after: existing.hash, settingsOnly: await keepSettingsFile(context, existing, text) });
@@ -734,15 +734,12 @@ async function keepSettingsFile(context: ShareContext, existing: AgentEntry, nex
 /**
  * Undo (and Redo) of a change to only an agent's Claude Code settings: the file it replaced goes back, only while the file still
  * holds what that change wrote (an edit since is never lost), and the file it displaces is kept, in a 'restored' event of its own
- * that undoes this. Nothing spreads: no other tool has those settings. The same gates as every restore come first.
+ * that undoes this. Nothing spreads: no other tool has those settings. The gate every restore meets comes first (share.ts libraryGate).
  */
 export async function undoSettingsChange(context: ShareContext, eventId: string): Promise<{ stopped?: string; results: DestinationResult[]; harnessWrites: number }> {
   const stop = (stopped: string) => ({ stopped, results: [], harnessWrites: 0 });
-  const access = await writeAccess(context);
-  if (!access.allowed) return stop(access.reason);
-  const gate = await syncGate(context);
-  const gated = gateRefusal(gate);
-  if (gated) return stop(gated);
+  const gate = await libraryGate(context);
+  if ('refused' in gate) return stop(gate.refused);
   const history = await readHistory(context);
   const past = history.find(event => event.id === eventId);
   if (!past?.settingsFile) return stop('That change can’t be restored.');
@@ -848,14 +845,11 @@ async function sayingWhy(context: ShareContext, options: RepoOptions, action: 'P
 
 /** What Pull and Push both start from: a writable home, a connected repo checked just now, and the three sides compared. */
 async function readyToMove(context: ShareContext, options: RepoOptions): Promise<{ dir: string; state: RepoState; sides: Sides } | { refused: RepoResult }> {
-  const access = await writeAccess(context);
-  if (!access.allowed) return { refused: await refusal(context, access.reason, options) };
+  // Pull writes a tool's copy before sync runs, so the gate for library writes is asked first; only asked: Pull's pass enters it.
+  const gate = await libraryGate(context);
+  if ('refused' in gate) return { refused: await refusal(context, gate.refused, options) };
   const found = await openClone(context);
   if (!found) return { refused: await refusal(context, 'No repo is connected.', options) };
-  // Pull writes a tool's copy before sync runs, so sync's own gate (another build syncing, a record to resume) is asked first.
-  const gate = await syncGate(context);
-  const gated = gateRefusal(gate);
-  if (gated) return { refused: await refusal(context, gated, options) };
   const problem = await check(context);
   if (problem) return { refused: await refusal(context, problem, options) };
   const state = (await readState(context.home))!;

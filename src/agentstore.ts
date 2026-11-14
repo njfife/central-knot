@@ -9,43 +9,19 @@
 // Every file under items/ is named by what it holds, so a second file never replaces a first, and nothing here is pruned.
 // The pass (librarypass.ts, through agents.ts agentKind) is the only caller that changes an item; this module only reads and
 // writes what it is given.
-import { mkdir, readFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { agentHash, agentText, parseAgent, type AgentEntry, type SharedAgent } from './agentfiles.ts';
-import { isOldRecord, migrateAgents, type OldAgentRecord } from './agentmigrate.ts';
-import { isLibraryItem, type LibraryItem } from './library.ts';
+import { isOldRecord, migrateAgents } from './agentmigrate.ts';
+import { emptyLibrary, keepOwnPart, readLibraryFile, saveLibraryFile, storeOnce, type RecordFile, type StoredLibrary } from './kindstore.ts';
+import type { LibraryItem } from './library.ts';
 import type { KindLibrary } from './librarypass.ts';
-import { NOTHING_CHANGED, errorCode, exists, sha256, storeDirectory, writeDurably, type ShareContext } from './share.ts';
+import { sha256, storeDirectory, writeDurably, type ShareContext } from './share.ts';
 import type { HarnessId } from './types.ts';
 
-/** The record: the agents' part of the library (librarypass.ts KindLibrary: the items, and each agents folder as last seen). */
-export interface AgentLibrary extends KindLibrary { formatVersion: number }
-
-/** Format 3 is the library's. Format 2 (agentmigrate.ts) and 1 (before agents were rewritten: nothing to carry over) are migrated. */
-const FORMAT_VERSION = 3;
-const recordPath = (home: string) => join(storeDirectory(home), 'agents.json');
+/** agents.json. Format 3 is the library's; 2 (agentmigrate.ts) and 1 (before agents were rewritten: nothing to carry over) are migrated. */
+const RECORD: RecordFile = { file: 'agents.json', format: 3, said: 'The agents record' };
 const backupPath = (home: string, version: number) => join(storeDirectory(home), `agents.v${version}.json`);
-/** No prototype on `items`: an agent may be called constructor or __proto__. */
-const emptyLibrary = (): AgentLibrary => ({ formatVersion: FORMAT_VERSION, items: Object.create(null), folders: {} });
-
-type Inspected = { library: AgentLibrary } | { older: OldAgentRecord; text: string } | { problem: string } | Record<string, never>;
-/** Reads the record as it is. Unreadable, damaged or newer is a `problem` that stops every write; the file is never touched. */
-async function inspect(home: string): Promise<Inspected> {
-  let text: string;
-  try { text = await readFile(recordPath(home), 'utf8'); }
-  catch (error) { return errorCode(error) === 'ENOENT' ? {} : { problem: `The agents record could not be read. ${NOTHING_CHANGED}` }; }
-  const damaged = { problem: `The agents record is damaged. ${NOTHING_CHANGED}` };
-  try {
-    const record = JSON.parse(text) as Partial<AgentLibrary> | null;
-    const version = record?.formatVersion;
-    const items = record?.items;
-    if (!Number.isInteger(version) || version! < 1 || !items || typeof items !== 'object' || Array.isArray(items)) return damaged;
-    if (version! > FORMAT_VERSION) return { problem: `The agents record was written by a newer Central Knot. ${NOTHING_CHANGED}` };
-    if (version! < FORMAT_VERSION) return isOldRecord(record) ? { older: record, text } : damaged;
-    if (!Object.values(items).every(isLibraryItem)) return damaged;
-    return { library: { formatVersion: FORMAT_VERSION, items, folders: record!.folders ?? {} } };
-  } catch { return damaged; }
-}
 
 /**
  * The agents' library in this home; empty when nothing is recorded yet. A record from before the library is migrated on the
@@ -53,13 +29,13 @@ async function inspect(home: string): Promise<Inspected> {
  * that leaves the old record and its kept files as they were whatever stops it: the new contents first (new names only), then
  * the old record's copy, then the new record in its place.
  */
-export async function openLibrary(context: ShareContext, persist = false): Promise<{ library: AgentLibrary; problem?: string }> {
-  const read = await inspect(context.home);
-  if ('problem' in read) return { library: emptyLibrary(), problem: read.problem };
+export async function openLibrary(context: ShareContext, persist = false): Promise<{ library: StoredLibrary; problem?: string }> {
+  const read = await readLibraryFile(context.home, RECORD, isOldRecord);
+  if ('problem' in read) return { library: emptyLibrary(RECORD), problem: read.problem };
   if ('library' in read) return { library: read.library };
-  if (!('older' in read)) return { library: emptyLibrary() };
+  if (!('older' in read)) return { library: emptyLibrary(RECORD) };
   const migrated = await migrateAgents(context, read.older);
-  const library: AgentLibrary = { ...emptyLibrary(), items: migrated.items, folders: migrated.folders };
+  const library: StoredLibrary = { ...emptyLibrary(RECORD), items: migrated.items, folders: migrated.folders };
   // A reader, or a home that can't be written: the migrated contents are read from memory until a writer stores them.
   for (const { key, hash, agent } of migrated.versions) notStoredYet.set(versionPath(context, key, hash), agent);
   if (!persist) return { library };
@@ -72,20 +48,13 @@ export async function openLibrary(context: ShareContext, persist = false): Promi
   return { library };
 }
 
-export const saveLibrary = (home: string, { items, folders }: KindLibrary) =>
-  writeDurably(recordPath(home), `${JSON.stringify({ formatVersion: FORMAT_VERSION, items, folders } satisfies AgentLibrary, null, 2)}\n`);
+export const saveLibrary = (home: string, library: KindLibrary) => saveLibraryFile(home, RECORD, library);
 
 // ---------- Contents ----------
 
 const itemFolder = (context: ShareContext, key: string) => join(storeDirectory(context.home), 'items', 'agents', encodeURIComponent(key));
 const versionPath = (context: ShareContext, key: string, hash: string) => join(itemFolder(context, key), 'versions', `${hash}.json`);
 const ownPath = (context: ShareContext, key: string, fileHash: string) => join(itemFolder(context, key), 'own', `${fileHash}.txt`);
-/** Writes a file named by its content, once. */
-async function storeOnce(path: string, text: string) {
-  if (await exists(path)) return;
-  await mkdir(dirname(path), { recursive: true });
-  await writeDurably(path, text);
-}
 /** Stores one version's content (its shared part) under the agent, once. */
 export const storeVersion = (context: ShareContext, key: string, hash: string, { name, description, prompt }: SharedAgent) =>
   storeOnce(versionPath(context, key, hash), `${JSON.stringify({ name, description, prompt }, null, 2)}\n`);
@@ -102,13 +71,8 @@ export async function readVersion(context: ShareContext, key: string, hash: stri
   try { const agent = JSON.parse(await readFile(path, 'utf8')) as SharedAgent; readBefore.set(path, agent); return agent; } catch { return notStoredYet.get(path); }
 }
 
-/** Keeps a harness's whole file as that harness's own part of the item; true when it differs from the one kept. The caller saves the record. */
-export async function keepOwn(context: ShareContext, item: LibraryItem, tool: HarnessId, text: string): Promise<boolean> {
-  await storeOwn(context, item.key, text);
-  const was = item.own[tool];
-  item.own[tool] = sha256(text);
-  return was !== item.own[tool];
-}
+/** Keeps a harness's whole file as that harness's own part of the item (kindstore.ts keepOwnPart). */
+export const keepOwn = (context: ShareContext, item: LibraryItem, tool: HarnessId, text: string) => keepOwnPart(item, tool, text, hash => ownPath(context, item.key, hash));
 
 /**
  * The file a harness gets for a version: the file it had, exactly, when that holds this version; else that file with the

@@ -67,8 +67,8 @@ import { carryOut, itemKey, keepVersion, managedAgain, newItem, pendingChanges, 
 import type { ItemNow } from './historyactions.ts';
 import type { Copies, FoundCopy, FoundKey, HarnessCopy, ItemKind, LeftFound, LibraryItem, Plan, Shelf, Source, TakenBy, Version } from './library.ts';
 import { appendHistory, historyCutoff, readHistory, replaceHistory } from './history.ts';
-import { errorCode, newRecord, readRecord, remember, saveRecord, stillOwned, syncGate, writeAccess } from './share.ts';
-import type { ShareContext, SyncRecord } from './share.ts';
+import { errorCode, libraryGate, stillOwned } from './share.ts';
+import type { ShareContext } from './share.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, ItemNotice, JoinCounts, PassResult, SyncNotice, TakenInNotice } from './types.ts';
 import { byToolOrder, notManagedHere, toolName } from './words.ts';
 
@@ -533,8 +533,10 @@ export interface PassOptions<Content> {
 export async function runPass<C, E extends Seen, D extends Disk<E>>(
   kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[], clicks: ItemClick[], options: PassOptions<C> = {},
 ): Promise<PassResult> {
-  const gate = await passGate(context, clicks.length > 0 || !!options.pulled?.size, options.resume);
-  if ('refused' in gate) return gate.refused;
+  const gate = await libraryGate(context, { start: clicks.length > 0 || !!options.pulled?.size, resume: options.resume });
+  if ('refused' in gate) return { stopped: gate.refused, results: [], writes: 0 };
+  // A home with no sync record gets one only when something is asked of the pass (a click, or what Pull brings).
+  if (!gate.record) return { results: [], writes: 0 };
   const { library, problem } = await kind.open(context, true);
   if (problem) return { stopped: problem, results: [], writes: 0 };
   const managed = kind.harnesses(tools);
@@ -602,24 +604,6 @@ async function saveIfChanged(pass: Pass) {
   await stillOwned(pass.context.home, pass.context.build);
   await pass.kind.save(pass.context.home, pass.library);
   pass.saved = text;
-}
-
-/**
- * Whether the pass may write, and the home's sync record it runs under (which holds Synchronize everything). Refused: a
- * preview-only home, another build's record, or one that needs Resume. A home with no sync record yet gets one when something
- * is asked of the pass (`asked`: a click, or what Pull brings); else it has nothing to do.
- */
-async function passGate(context: ShareContext, asked: boolean, resume = false): Promise<{ refused: PassResult } | { record: SyncRecord }> {
-  const refused = (stopped?: string) => ({ refused: { ...(stopped ? { stopped } : {}), results: [], writes: 0 } });
-  const access = await writeAccess(context);
-  if (!access.allowed) return refused(access.reason);
-  const gate = await syncGate(context);
-  if (gate.state === 'stopped' || (gate.state === 'needs-resume' && !resume)) return refused(gate.reason);
-  let { record } = await readRecord(context.home);
-  if (!record && !asked) return refused();
-  if (!record) { record = newRecord(context); await saveRecord(context.home, record); }
-  if (gate.state !== 'ready') await remember(context, record.generation);
-  return { record };
 }
 
 /** Brings one item into line with its harnesses: the library's plan, carried out in the library's order (carryOut). */
@@ -947,7 +931,7 @@ const foundKeys = (pass: Pass) => [...new Set([...pass.disk.byKey.keys(), ...(pa
  */
 async function takeIn(pass: Pass, key: string, answer: { take: FoundCopy; chosen: boolean }, except: HarnessId[], by: TakenBy) {
   const found = foundCopies(pass, key, except), source = found.find(entry => entry.tool === answer.take.harness)!;
-  const item = pass.library.items[key] ?? newItem(pass.kind.kind, key, source.name);
+  const item = pass.library.items[key] ?? newItem(key, source.name);
   Object.assign(item, { on: true, except: [...except], name: source.name } satisfies Partial<LibraryItem>);
   delete item.deleted;
   pass.library.items[key] = item;
@@ -990,7 +974,7 @@ async function pull(pass: Pass, key: string, brought: Pulled<unknown>) {
     return;
   }
   const { name, content, own } = brought, hash = pass.kind.hashOf(content);
-  const item = known ?? newItem(pass.kind.kind, key, name);
+  const item = known ?? newItem(key, name);
   pass.library.items[key] = item;
   if (!live) {
     for (const copy of foundCopies(pass, key, [])) {

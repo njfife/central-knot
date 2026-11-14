@@ -63,7 +63,7 @@ test('Off, and the copy a removal was owed for is gone already: only forgotten',
 const day = (number: number) => new Date(Date.UTC(2026, 10, number)).toISOString();
 const time = (number: number) => Date.parse(day(number));
 /** An agent On at version 'a' (made on the 1st), applied to Claude Code, Copilot CLI and Codex. */
-const item = (changes: Partial<LibraryItem> = {}): LibraryItem => ({ ...newItem('agent', 'reviewer', 'reviewer'), on: true, hash: 'a',
+const item = (changes: Partial<LibraryItem> = {}): LibraryItem => ({ ...newItem('reviewer', 'reviewer'), on: true, hash: 'a',
   versions: [{ hash: 'a', at: day(1), from: { how: 'found', harness: 'claude-cli' } }], applied: { 'claude-cli': 'a', 'copilot-cli': 'a', 'codex-cli': 'a' }, ...changes });
 const quiet = { takeIn: undefined, turnedOffBy: undefined, keep: [], write: [], remove: [], forget: [], found: [] };
 

@@ -14,7 +14,7 @@ import { codexSkillSwitches, type CodexSkillSwitch } from './skillswitch.ts';
 import { partOff, serverHeld, withPartSwitch } from './partswitch.ts';
 import { DIRECTORY, INLINE_SKILLS_CONFIG, hasPartSwitch, heldReason, noCli, offByBareName, noSwitchReason, samePart } from './pluginstatus.ts';
 import { takesPlugins, type PluginTool } from './presence.ts';
-import { errorCode, readParts, writeFileChecked } from './share.ts';
+import { errorCode, itemKey, readParts, writeFileChecked } from './share.ts';
 import { SAFE_NAME, compareVersions, githubRepo, isCommitHash, isFolder, isHttps, record, strings, text, withoutBom } from './values.ts';
 
 /** Names the tools accept (values.ts holds it, so the page can check a skill's name too). */
@@ -640,12 +640,12 @@ export type GivenByPlugin = ThroughPlugin & { asParts: boolean; text?: string };
 
 /**
  * What each of `tools` has through its installed plugins, of one kind: by tool, then by the item's key on its page
- * (`keyOf` its name). A name alone doesn't make two items one: the caller counts an item as the plugin's when it is
+ * (share.ts itemKey of its name). A name alone doesn't make two items one: the caller counts an item as the plugin's when it is
  * `asParts` (Central Knot installed it elsewhere as that plugin's part) or, for a skill, when its SKILL.md is the same.
  * A name two plugins hold goes by the one it is a part of, else the first listed. Read once where `home` carries `reads`
  * (one pass or one view), since the Skills, MCP servers and Agents pages all ask.
  */
-export async function throughPlugins(home: { home: string; overrides?: Partial<Record<HarnessId, string>>; reads?: Map<string, Promise<unknown>> }, tools: HarnessId[], kind: PartKind, keyOf: (name: string) => string): Promise<Map<HarnessId, Map<string, GivenByPlugin>>> {
+export async function throughPlugins(home: { home: string; overrides?: Partial<Record<HarnessId, string>>; reads?: Map<string, Promise<unknown>> }, tools: HarnessId[], kind: PartKind): Promise<Map<HarnessId, Map<string, GivenByPlugin>>> {
   const context: PluginContext = { home: home.home, dataDir: '', binaries: {}, overrides: home.overrides, reads: home.reads ?? new Map() };
   const found = new Map<HarnessId, Map<string, GivenByPlugin>>();
   const installs = await once(context, 'plugin-parts-record', () => readParts(home.home));
@@ -656,7 +656,8 @@ export async function throughPlugins(home: { home: string; overrides?: Partial<R
     for (const { kind: partKind, name, ...plugin } of parts) {
       if (partKind !== kind) continue;
       const asParts = installs.some(install => install.plugin === plugin.plugin && (!plugin.source || sameSource(install.source, plugin.source)) && install.items.some(item => !item.removed && samePart(item, { kind, name })));
-      if (!byKey.has(keyOf(name)) || (asParts && !byKey.get(keyOf(name))!.asParts)) byKey.set(keyOf(name), { ...plugin, name, asParts });
+      const key = itemKey(name);
+      if (!byKey.has(key) || (asParts && !byKey.get(key)!.asParts)) byKey.set(key, { ...plugin, name, asParts });
     }
     if (byKey.size) found.set(tool, byKey);
   }

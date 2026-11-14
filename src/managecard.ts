@@ -3,7 +3,7 @@
 // would do there is counted by its whatJoiningDoes, which reaches the page in the view (types.ts SyncView joining). The band says
 // what the pass after the click did there, from its results (main.ts `tools:manage`, `did`). The cards themselves, the left-out
 // one included, are harnesspage.ts's.
-import { busy, setHome, state, tell } from './app.ts';
+import { busy, clickResumes, setHome, state, tell } from './app.ts';
 import { h, toggle } from './dom.ts';
 import { plural } from './model.ts';
 import { market } from './pluginstate.ts';
@@ -70,7 +70,7 @@ const listed = (clauses: string[]) => (clauses.length < 2 ? clauses.join('') : `
 /** The switch's click: chooseTools in main's queue, then the home as read after it; the band says what that pass did there. */
 const manageTool = (tool: HarnessId, on: boolean) => busy(on ? `Managing ${names[tool]}…` : `Leaving ${names[tool]} out…`, async () => {
   const home = state.home!;
-  const done = await window.centralKnot.manageTool(tool, on, home.sync.gate.state === 'needs-resume', home.home);
+  const done = await window.centralKnot.manageTool(tool, on, clickResumes(home), home.home);
   if (done.view) setHome(done.view);
   if (done.stopped) { tell({ page: 'harnesses', band: true, warn: true, text: `Nothing changed: ${done.stopped}` }); return; }
   tell({ page: 'harnesses', band: true, ...doneWords(tool, on, home.syncOn, done.did) });

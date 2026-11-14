@@ -24,7 +24,7 @@ import { bytes, folderOf, put, sandbox, skillText, type Box, type Tool } from '.
 
 const libraryOf = (items: [ItemKind, string, boolean, boolean?][]): Libraries => {
   const libraries: Libraries = { skill: {}, mcp: {}, agent: {} };
-  for (const [kind, key, on, deleted] of items) libraries[kind][key] = { ...newItem(kind, key, key), on, ...(deleted ? { deleted: { at: '' } } : {}) };
+  for (const [kind, key, on, deleted] of items) libraries[kind][key] = { ...newItem(key, key), on, ...(deleted ? { deleted: { at: '' } } : {}) };
   return libraries;
 };
 const ids = (items: { id: string }[]) => items.map(item => item.id);
