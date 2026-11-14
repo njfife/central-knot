@@ -2172,13 +2172,18 @@ async function listDiffersFlow() {
       'Updates document-tools in Claude Code and issue-tracker in Claude Code. It replaces the copies that differ from the marketplace’s: document-tools and issue-tracker. Runs now. An update can’t be undone.');
     // The release downloads in about 3 seconds; each plugin's update takes 3.
     await b.run(`(document.getElementById('update-control').click(), document.getElementById('market-update-all-0').click(), true)`);
-    for (let tries = 0; tries < 80 && await look() !== 'held'; tries++) await wait(250);
-    same('the app’s update, ready during the run, waits for it, and says why', [await look(), await busy(), /Restarting now stops the plugin changes under way\./.test(await b.run(`document.getElementById('update-control').title`))], ['held', true, true]);
-    for (let tries = 0; tries < 150 && (await busy() || await behind()); tries++) await wait(100);
-    const said = await b.run(`document.querySelector('#announcement')?.dataset.text ?? ''`);
-    check('the run went to its end: both updates in one result, no Undo, no row behind, and the app still running', !(await behind()) && !(await b.exists('#plugins-undo')) && b.child.exitCode === null
-      && /document-tools: updated to the marketplace’s copy of 1\.2\.0 in Claude Code.*; issue-tracker: updated to the marketplace’s copy of 2\.0\.0 in Claude Code/.test(said), said);
-    same('no page errors, Update all', b.pageErrors, []);
+    // A restart in the middle (the stand-in's install quits the app) would leave the page unreachable: that is raced, not waited on.
+    const quit = new Promise(done => b.child.once('exit', () => done('restarted mid-run')));
+    const held = (async () => { for (let tries = 0; tries < 80 && await look() !== 'held'; tries++) await wait(250); return 'waited'; })();
+    same('the app’s update, ready during the run, waits for it rather than restarting', await Promise.race([quit, held]), 'waited');
+    if (b.child.exitCode === null) {
+      same('and the control says why while the run goes on', [await look(), await busy(), /Restarting now stops the plugin changes under way\./.test(await b.run(`document.getElementById('update-control').title`))], ['held', true, true]);
+      for (let tries = 0; tries < 150 && (await busy() || await behind()); tries++) await wait(100);
+      const said = await b.run(`document.querySelector('#announcement')?.dataset.text ?? ''`);
+      check('the run went to its end: both updates in one result, no Undo, no row behind, and the app still running', !(await behind()) && !(await b.exists('#plugins-undo')) && b.child.exitCode === null
+        && /document-tools: updated to the marketplace’s copy of 1\.2\.0 in Claude Code.*; issue-tracker: updated to the marketplace’s copy of 2\.0\.0 in Claude Code/.test(said), said);
+      same('no page errors, Update all', b.pageErrors, []);
+    }
   } finally { writeFileSync(claudeStub, stubBefore); await b.quit(); await fixture.close(); }
 }
 

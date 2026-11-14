@@ -16,7 +16,7 @@ import { takesPlugins } from './presence.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginUpdateNotes } from './pluginupdateview.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
-import { andList, orList, toolName, toolNames as names } from './words.ts';
+import { andList, byToolOrder, orList, toolName, toolNames as names } from './words.ts';
 
 /** "9:20 AM" today, else "Nov 8". */
 const when = (iso: string) => (new Date(iso).toDateString() === new Date().toDateString() ? clockTime(iso) : new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
@@ -346,7 +346,7 @@ const UNDO_WORDS: [PluginOp['action'][], string][] = [[['remove'], 'uninstalls i
 
 /** Undo's tooltip, from what it will run (`back`): what it reverses where, that an update in the same run stays, and what a switch's Undo can't put back. */
 function undoTitle(back: PluginOp[]): string {
-  const where = (actions: PluginOp['action'][]) => andList([...new Set(back.filter(op => actions.includes(op.action)).map(op => names[op.tool]))]);
+  const where = (actions: PluginOp['action'][]) => andList([...new Set(back.filter(op => actions.includes(op.action)).map(op => op.tool))].sort(byToolOrder).map(tool => names[tool]));
   const does = UNDO_WORDS.filter(([actions]) => where(actions)).map(([actions, verb]) => `${verb} ${where(actions)}`);
   const updated = !market.lastRun?.undo && market.lastRun?.done.some(entry => entry.action === 'update' && entry.report.changed);
   const said = [`Reverses what changed, through each tool’s own command or switch: ${andList(does)}.`, updated ? 'The update itself stays: it can’t be undone.' : ''];
