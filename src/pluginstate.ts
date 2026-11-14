@@ -3,10 +3,10 @@
 import { announce, busy, rerender, setHome, state as app, tell } from './app.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { plural } from './model.ts';
-import { isParts, resultLines, forSource, pluginKey, prune, recordRun, resultSentence, reverse, runPlan, type LastRun, type PluginDraft, type PluginOp } from './pluginplan.ts';
-import { FIND_FROM, categoriesOf, copiesToCompare, marketTitle, matches, partsTools, pluginPlace } from './pluginstatus.ts';
+import { notUndone, resultLines, forSource, pluginKey, prune, recordRun, resultSentence, reverse, runPlan, type LastRun, type PluginDone, type PluginDraft, type PluginOp } from './pluginplan.ts';
+import { FIND_FROM, categoriesOf, copiesToCompare, marketTitle, matches, partsTools, pluginPlace, undoLimits } from './pluginstatus.ts';
 import { readInTurn, readInto, type Read } from './reads.ts';
-import type { HarnessId, MarketplaceView, PartPlan, PluginDetail, PluginsView } from './types.ts';
+import type { HarnessId, MarketplaceView, PartPlan, PluginDetail, PluginTurn, PluginsView } from './types.ts';
 import { toolNames } from './words.ts';
 
 const api = () => window.centralKnot;
@@ -41,7 +41,7 @@ export const market = {
   draft: new Map() as PluginDraft,
   /** The last Apply all (or Undo), so the toolbar can say what happened and offer the way back, in that home only. */
   lastRun: undefined as LastRun | undefined,
-  /** The plugin and tools a command is running for, so their boxes show it is working. */
+  /** The plugin and tools a command is running for, so their marks show it is working. */
   working: undefined as { source: string; plugin: string; tools: HarnessId[] } | undefined,
   /** Where the person is: the marketplace shown, its tab, an open plugin page, and the filter. */
   nav: startNav(),
@@ -332,19 +332,72 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
     market.working = undefined;
     market.lastRun = recordRun(market.draft, ops, result.done, undo, home);
     market.problem = result.stopped;
-    showView(await api().plugins().catch(() => null));
-    // The item pages show what plugins bring, each with its switch in each tool, and parts are ordinary skills, MCP servers and
-    // agents: every plugin change is seen there (and where it came from) at once.
-    setHome(await api().refresh().catch(() => null));
-    if (ops.some(op => isParts(op.action))) {
-      // What each tool now holds changed, so every plugin's plan (which names clash) is read again when shown.
-      market.partsPlans.clear();
-      readShown();
-    }
+    await readAgain();
   }
   // A result that offers Undo is said in the toolbar, with its Undo; one that only tells (an Undo done) in the status bar.
   announce(market.problem ?? (resultSentence(resultLines(result.done, undo), undo) || 'Nothing changed.'), !market.problem && undoOps().length > 0);
 });
+
+/** What each tool now has changed: the page and the item pages read again, and every plugin's parts plan when shown. */
+async function readAgain(): Promise<void> {
+  showView(await api().plugins().catch(() => null));
+  // The item pages show what plugins bring, each with its switch in each tool, and parts are ordinary skills, MCP servers and
+  // agents: every plugin change is seen there (and where it came from) at once.
+  setHome(await api().refresh().catch(() => null));
+  market.partsPlans.clear();
+  readShown();
+}
+
+/**
+ * A plugin's one switch (pluginrecord.ts), at once: On or Off, Add for one found in a tool, one tool kept out or let in, or
+ * one tool brought into line (`fix`). Main records it first, then runs what its table owes; the result is said with its
+ * Undo, and what that Undo can't put back.
+ */
+export const turnPlugin = (entry: MarketplaceView, plugin: string, what: PluginTurn, tool?: HarnessId) => act('applying', async () => {
+  const home = app.home!.home, view = market.view;
+  market.problem = undefined;
+  market.working = { source: entry.source, plugin, tools: tool ? [tool] : view?.tools ?? [] };
+  rerender();
+  let done: PluginDone[] = [];
+  try {
+    const result = await api().turnPlugin(entry.source, plugin, what, tool, home);
+    done = result.done;
+    const removed = done.filter(step => step.action === 'remove' && step.report.changed).map(step => step.tool);
+    const limits = view ? undoLimits(view, entry, plugin, removed, app.home?.pluginItems) : [];
+    market.lastRun = { done, undo: false, home, ...(result.back ? { turn: { source: entry.source, plugin, before: result.before ?? null, back: result.back, limits } } : {}) };
+    market.problem = result.stopped;
+  } finally {
+    market.working = undefined;
+    await readAgain();
+  }
+  announce(market.problem ?? (resultSentence(resultLines(done, false), false) || 'Nothing changed.'), !market.problem && undoOps().length > 0);
+});
+
+/** The Undo of a plugin's switch (or "Undo the rest" after it): its entry put back, then its steps run, in main. */
+const undoTurn = (last: LastRun & { turn: NonNullable<LastRun['turn']> }) => act('undoing', async () => {
+  const home = app.home!.home, back = last.undo ? last.rest ?? [] : last.turn.back;
+  market.problem = undefined;
+  market.working = { source: last.turn.source, plugin: last.turn.plugin, tools: [...new Set(back.map(op => op.tool))] };
+  rerender();
+  let done: PluginDone[] = [];
+  try {
+    const result = await api().undoPluginTurn(last.turn.source, last.turn.plugin, last.turn.before, back, home);
+    done = result.done;
+    market.lastRun = { done, undo: true, home, rest: notUndone(back, done), turn: last.turn };
+    market.problem = result.stopped;
+  } finally {
+    market.working = undefined;
+    await readAgain();
+  }
+  announce(market.problem ?? (resultSentence(resultLines(done, true), true) || 'Nothing changed.'));
+});
+
+/** Undo, or "Undo the rest": the last run's way back, by the route that made it (a plugin's switch, or Apply all). */
+export function undoLast(): void {
+  const last = market.lastRun;
+  if (last?.turn) void undoTurn({ ...last, turn: last.turn });
+  else void applyPluginOps(undoOps(), true);
+}
 
 /**
  * Closes the problem band: the stop reason and the problem lines go, and the run itself stays, so the toolbar keeps its
@@ -356,9 +409,9 @@ export function dismissProblems(): void {
   if (market.lastRun) market.lastRun = { ...market.lastRun, problemsClosed: true };
 }
 
-/** The way back from the last run, while it is for the home on screen: its reversal, or what an Undo didn't get to. */
+/** The way back from the last run, while it is for the home on screen: its reversal (a switch's, as main gave it), or what an Undo didn't get to. */
 export function undoOps(): PluginOp[] {
   const last = market.lastRun;
   if (!last || last.home !== app.home?.home) return [];
-  return last.undo ? last.rest ?? [] : reverse(last.done);
+  return last.undo ? last.rest ?? [] : last.turn?.back ?? reverse(last.done);
 }

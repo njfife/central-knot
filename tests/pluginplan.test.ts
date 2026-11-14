@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { batches, clickPart, flipPick, partStand, pickOf, recordRun, resultLines, resultSentence, prune, reverse, setPick, summary, toggle, toggleMany, queued, type PluginDone, type PluginDraft, type PluginOp } from '../src/pluginplan.ts';
-import type { HarnessId } from '../src/types.ts';
+import type { HarnessId, MarketplaceView, PluginsView } from '../src/types.ts';
 
 const op = (plugin: string, tool: HarnessId, action: PluginOp['action'] = 'install'): PluginOp => ({ source: 'anthropics/skills', marketName: 'anthropic-agent-skills', plugin, tool, action });
 
@@ -16,12 +16,12 @@ test('Choosing a box queues it, choosing it again takes it back, and another act
   assert.equal(queued(draft, 'anthropics/skills', 'pdf', 'claude-cli'), 'remove');
 });
 
-test('Install in all queues every tool, and a second click clears them all', () => {
+test('Update in all queues every tool’s update, and a second click clears them all', () => {
   const draft: PluginDraft = new Map();
-  const ops = [op('pdf', 'claude-cli'), op('pdf', 'codex-cli')];
+  const ops = [op('pdf', 'claude-cli', 'update'), op('pdf', 'codex-cli', 'update'), op('pdf', 'pi-cli', 'install-parts')];
   toggle(draft, ops[0]!);
   toggleMany(draft, ops);
-  assert.deepEqual(summary(draft), { plugins: 1, installs: 2, updates: 0, removals: 0, skillsOff: { skills: 0, tools: 0 }, skillsOn: { skills: 0, tools: 0 }, partsInstalls: 0, partsUpdates: 0, partsRemovals: 0, partsOn: 0, partsOff: 0 });
+  assert.deepEqual(summary(draft), { plugins: 1, updates: 2, skillsOff: { skills: 0, tools: 0 }, skillsOn: { skills: 0, tools: 0 }, partsUpdates: 1, partsOn: 0, partsOff: 0 });
   toggleMany(draft, ops);
   assert.equal(draft.size, 0);
 });
@@ -75,25 +75,34 @@ test('Undo reverses only what really changed, and the report names each plugin o
   ]);
 });
 
-test('Choices that no longer mean anything are dropped: no longer listed, already installed, not installed, held, or no CLI', () => {
+/** A marketplace view of plugins with these install states and switches (pluginrecord.ts), for prune. */
+const viewOf = (plugins: string[], states: MarketplaceView['states'], extra: Partial<MarketplaceView> = {}, tools: HarnessId[] = ['claude-cli', 'codex-cli']): PluginsView => ({ home: '/h', tools, clis: { 'claude-cli': true }, canWrite: true,
+  marketplaces: [{ source: 'anthropics/skills', origins: ['central-knot'], name: 'anthropic-agent-skills', kind: 'git', sourceLabel: 'GitHub: anthropics/skills', plugins: plugins.map(name => ({ name, description: '' })), states, ...extra }] });
+
+test('Choices that no longer mean anything are dropped: an update of a plugin no longer installed, held or with no CLI, one no longer listed, and an install or uninstall, which only a plugin’s switch makes', () => {
   const draft: PluginDraft = new Map();
-  toggle(draft, op('done', 'claude-cli'));
-  toggle(draft, op('gone', 'claude-cli', 'remove'));
-  toggle(draft, op('held', 'claude-cli'));
-  toggle(draft, op('nocli', 'codex-cli'));
-  toggle(draft, op('keep', 'claude-cli'));
-  toggle(draft, op('unlisted', 'claude-cli'));
-  toggle(draft, { ...op('keep', 'claude-cli'), source: 'removed/market' });
-  const plugins = ['done', 'gone', 'held', 'nocli', 'keep'].map(name => ({ name, description: '' }));
-  prune(draft, { home: '/h', tools: ['claude-cli', 'codex-cli'], clis: { 'claude-cli': true }, canWrite: true, marketplaces: [{ source: 'anthropics/skills', origins: ['central-knot'], name: 'anthropic-agent-skills', kind: 'git', sourceLabel: 'GitHub: anthropics/skills', plugins,
-    states: { done: { 'claude-cli': { state: 'installed', path: '/p' } }, held: { 'claude-cli': { state: 'held', reason: 'other' } } } }] });
-  assert.deepEqual([...draft.values()].map(entry => entry.plugin), ['keep']);
-  // A refresh that makes Copilot refuse the whole marketplace drops a Copilot choice, as its box now shows "not available".
-  toggle(draft, op('keep', 'copilot-cli'));
-  prune(draft, { home: '/h', tools: ['claude-cli', 'copilot-cli'], clis: { 'claude-cli': true, 'copilot-cli': true }, canWrite: true, marketplaces: [{ source: 'anthropics/skills', origins: ['central-knot'], name: 'anthropic-agent-skills', kind: 'git', sourceLabel: 'GitHub: anthropics/skills', plugins, states: {}, copilotRefuses: 'npm source' }] });
-  assert.deepEqual([...draft.values()].map(entry => entry.tool), ['claude-cli']);
+  for (const plugin of ['keep', 'gone', 'held', 'nocli', 'unlisted']) toggle(draft, op(plugin, plugin === 'nocli' ? 'codex-cli' : 'claude-cli', 'update'));
+  toggle(draft, { ...op('keep', 'claude-cli', 'update'), source: 'removed/market' });
+  draft.set('stray install', op('keep', 'codex-cli', 'install'));
+  draft.set('stray uninstall', op('keep', 'codex-cli', 'remove'));
+  const installed = { state: 'installed' as const, path: '/p' };
+  prune(draft, viewOf(['keep', 'gone', 'held', 'nocli'], { keep: { 'claude-cli': installed }, held: { 'claude-cli': { state: 'held', reason: 'other' } }, nocli: { 'codex-cli': installed } }));
+  assert.deepEqual([...draft.values()].map(entry => `${entry.plugin} ${entry.action}`), ['keep update']);
   // A marketplace that renamed itself makes plugin@old another plugin: the choice goes.
-  prune(draft, { home: '/h', tools: ['claude-cli'], clis: { 'claude-cli': true }, canWrite: true, marketplaces: [{ source: 'anthropics/skills', origins: ['central-knot'], name: 'renamed', kind: 'git', sourceLabel: 'GitHub: anthropics/skills', plugins, states: {} }] });
+  prune(draft, viewOf(['keep'], { keep: { 'claude-cli': installed } }, { name: 'renamed' }));
+  assert.equal(draft.size, 0);
+});
+
+test('A pick in Pi saved in the draft, then the plugin turned Off: the pick and Pi’s parts update leave the draft, so Apply all never adds what the switch took out (worked example 5c)', () => {
+  const part = { kind: 'skill' as const, name: 'tdd' };
+  const parts = { pdf: { 'pi-cli': { at: '', items: [part], changed: true } } };
+  const switched = (on: boolean) => ({ pdf: { entry: { on, except: [] }, tools: { 'pi-cli': { wanted: on, has: 'parts' as const, takes: true } } } });
+  const draft: PluginDraft = new Map();
+  setPick(draft, op('pdf', 'pi-cli'), { on: [{ kind: 'skill', name: 'grill-me' }], off: [] });
+  toggle(draft, op('pdf', 'pi-cli', 'install-parts'));
+  prune(draft, viewOf(['pdf'], {}, { parts, switches: switched(true) }, ['pi-cli']));
+  assert.equal(draft.size, 2, 'On: both stand');
+  prune(draft, viewOf(['pdf'], {}, { parts, switches: switched(false) }, ['pi-cli']));
   assert.equal(draft.size, 0);
 });
 
@@ -151,16 +160,16 @@ test('After a run, what ran leaves the draft, the rest stays chosen, and the too
 test('A skill’s switch is its own choice: it runs between installs and removals, its Undo turns it back, and the report names the skill', () => {
   const off = (tool: HarnessId, skill = 'pdf-reader'): PluginOp => ({ ...op('docs', tool, 'skill-off'), skill });
   const draft: PluginDraft = new Map();
-  toggle(draft, op('docs', 'codex-cli', 'remove'));
+  toggle(draft, op('docs', 'codex-cli', 'update'));
   toggle(draft, off('codex-cli'));
   toggle(draft, off('codex-cli', 'spreadsheet'));
-  assert.equal(queued(draft, 'anthropics/skills', 'docs', 'codex-cli'), 'remove', 'the plugin’s own choice stays');
+  assert.equal(queued(draft, 'anthropics/skills', 'docs', 'codex-cli'), 'update', 'the plugin’s own choice stays');
   assert.equal(queued(draft, 'anthropics/skills', 'docs', 'codex-cli', 'pdf-reader'), 'skill-off');
   toggle(draft, off('codex-cli', 'spreadsheet'));
   toggle(draft, off('copilot-cli'));
-  assert.deepEqual(summary(draft), { plugins: 1, installs: 0, updates: 0, removals: 1, skillsOff: { skills: 1, tools: 2 }, skillsOn: { skills: 0, tools: 0 }, partsInstalls: 0, partsUpdates: 0, partsRemovals: 0, partsOn: 0, partsOff: 0 }, 'one skill in two tools counts once');
+  assert.deepEqual(summary(draft), { plugins: 1, updates: 1, skillsOff: { skills: 1, tools: 2 }, skillsOn: { skills: 0, tools: 0 }, partsUpdates: 0, partsOn: 0, partsOff: 0 }, 'one skill in two tools counts once');
   toggle(draft, off('copilot-cli'));
-  assert.deepEqual(batches([...draft.values(), op('docs', 'claude-cli')]).map(step => [step.action, step.skill]), [['install', undefined], ['skill-off', 'pdf-reader'], ['remove', undefined]]);
+  assert.deepEqual(batches([...draft.values(), op('docs', 'claude-cli'), op('docs', 'copilot-cli', 'remove')]).map(step => [step.action, step.skill]), [['install', undefined], ['update', undefined], ['skill-off', 'pdf-reader'], ['remove', undefined]]);
   const done = (tool: HarnessId, outcome: 'skill-off' | 'skill-on', changed?: boolean): PluginDone => ({ ...off(tool), action: outcome, report: { tool, outcome, message: '', runs: [], changed } });
   const run = [done('codex-cli', 'skill-off', true), done('copilot-cli', 'skill-off', true), done('claude-cli', 'skill-off')];
   assert.deepEqual(reverse(run).map(back => [back.tool, back.action, back.skill]), [['copilot-cli', 'skill-on', 'pdf-reader'], ['codex-cli', 'skill-on', 'pdf-reader']], 'last first');
@@ -183,7 +192,7 @@ test('A skill’s switch is dropped once it means nothing: not installed there, 
   assert.deepEqual([...draft.values()].map(entry => `${entry.tool} ${entry.skill}`), ['codex-cli keep', 'copilot-cli keep', 'copilot-cli old']);
 });
 
-test('Single parts picked for a tool are one choice: beside an install of its parts they are its exceptions, and the whole plugin or a removal takes them back', async () => {
+test('Single parts picked for a tool are one choice: beside an update of its parts they are its exceptions', async () => {
   const draft: PluginDraft = new Map();
   const at = op('pdf', 'pi-cli');
   const part = (name: string) => ({ kind: 'skill' as const, name });
@@ -193,7 +202,7 @@ test('Single parts picked for a tool are one choice: beside an install of its pa
   assert.deepEqual(pickOf(draft, at.source, 'pdf', 'pi-cli'), { on: [part('tdd')], off: [part('grill-me')] });
   assert.deepEqual([summary(draft).partsOn, summary(draft).partsOff, summary(draft).plugins], [1, 1, 0]);
   assert.deepEqual(batches([...draft.values()]).map(step => [step.action, step.tools, step.pick]), [['pick-parts', ['pi-cli'], { on: [part('tdd')], off: [part('grill-me')], rest: false }]]);
-  // With all the tool's parts installed too, it is one step: that install, with the pick as its exceptions.
+  // With all the tool's parts updated too, it is one step: that update, with the pick as its exceptions.
   toggle(draft, op('pdf', 'pi-cli', 'install-parts'));
   const steps = batches([...draft.values()]);
   assert.deepEqual(steps.map(step => [step.action, step.pick?.rest]), [['pick-parts', true]]);
@@ -203,14 +212,6 @@ test('Single parts picked for a tool are one choice: beside an install of its pa
   recordRun(ran, [...ran.values()], done, false, '/home');
   assert.equal(ran.size, 0);
   assert.deepEqual(reverse(done).map(back => [back.action, back.run]), [['undo-parts', 'r']]);
-  // The whole plugin, or all its parts out, is another choice for the tool: the pick goes. Picking parts takes back an install.
-  toggle(draft, op('pdf', 'pi-cli', 'remove-parts'));
-  assert.equal(pickOf(draft, at.source, 'pdf', 'pi-cli'), undefined);
-  toggle(draft, op('pdf', 'claude-cli'));
-  setPick(draft, op('pdf', 'claude-cli'), { on: [part('tdd')], off: [] });
-  assert.equal(queued(draft, at.source, 'pdf', 'claude-cli'), undefined);
-  toggle(draft, op('pdf', 'claude-cli'));
-  assert.equal(pickOf(draft, at.source, 'pdf', 'claude-cli'), undefined);
   // A second click on a part's switch takes its choice back, whichever way the switch now points; an empty pick is no choice.
   setPick(draft, op('pdf', 'codex-cli'), flipPick(flipPick(undefined, part('tdd'), true), part('tdd'), false));
   assert.equal(pickOf(draft, at.source, 'pdf', 'codex-cli'), undefined);
@@ -219,7 +220,8 @@ test('Single parts picked for a tool are one choice: beside an install of its pa
 
 test('A new view keeps a pick: a part to put in stays even when the record still lists it (removed by hand), and one to take out goes once it is no longer there', () => {
   const part = (name: string) => ({ kind: 'skill' as const, name });
-  const entry = (items: string[]) => ({ source: 'anthropics/skills', name: 'anthropic-agent-skills', plugins: [{ name: 'pdf' }], states: {}, parts: { pdf: { 'pi-cli': { at: '', items: items.map(part) } } } });
+  const entry = (items: string[]) => ({ source: 'anthropics/skills', name: 'anthropic-agent-skills', plugins: [{ name: 'pdf' }], states: {}, parts: { pdf: { 'pi-cli': { at: '', items: items.map(part) } } },
+    switches: { pdf: { entry: { on: true, except: [] }, tools: { 'pi-cli': { wanted: true, has: 'parts', takes: true } } } } });
   const view = (items: string[]) => ({ home: '/h', tools: ['pi-cli'], clis: {}, canWrite: true, marketplaces: [entry(items)] }) as unknown as Parameters<typeof prune>[1];
   const draft: PluginDraft = new Map();
   setPick(draft, op('pdf', 'pi-cli'), { on: [part('tdd')], off: [part('grill-me')] });
@@ -232,7 +234,7 @@ test('A new view keeps a pick: a part to put in stays even when the record still
   assert.equal(pickOf(draft, 'anthropics/skills', 'pdf', 'pi-cli'), undefined);
 });
 
-test('Clicks on part switches: a second click takes the choice back, an install’s exception goes with the install, and a removal comes apart part by part', () => {
+test('Clicks on part switches: a second click takes the choice back, and an update’s exception goes with the update', () => {
   const part = (name: string) => ({ kind: 'skill' as const, name });
   const at = op('pdf', 'pi-cli');
   const plan = [{ ...part('tdd') }, { ...part('grill-me') }, { ...part('qa'), out: true as const }];
@@ -249,8 +251,8 @@ test('Clicks on part switches: a second click takes the choice back, an install�
   assert.deepEqual(stand('tdd', ['tdd']), ['off', false]);
   click('tdd', ['tdd']);
   assert.deepEqual([stand('tdd', ['tdd']), draft.size], [[undefined, true], 0]);
-  // All the tool's parts chosen for install: each that would go in waits on; one flipped is the install's exception, and
-  // one the person had left out is turned on by its own click. Taking the install back takes its exceptions with it.
+  // All the tool's parts chosen for update: each that would go in waits on; one flipped is the update's exception, and
+  // one the person had left out is turned on by its own click. Taking the update back takes its exceptions with it.
   toggle(draft, op('pdf', 'pi-cli', 'install-parts'));
   assert.deepEqual([stand('tdd'), stand('qa')], [['on', true], [undefined, false]]);
   click('tdd');
@@ -258,11 +260,6 @@ test('Clicks on part switches: a second click takes the choice back, an install�
   assert.deepEqual([stand('tdd'), stand('qa'), pickOf(draft, at.source, 'pdf', 'pi-cli')], [['off', false], ['on', true], { on: [part('qa')], off: [part('tdd')] }]);
   toggle(draft, op('pdf', 'pi-cli', 'install-parts'));
   assert.equal(draft.size, 0);
-  // All its parts chosen for removal: keeping one makes it a choice part by part, without that one.
-  toggle(draft, op('pdf', 'pi-cli', 'remove-parts'));
-  assert.deepEqual(stand('tdd', ['tdd', 'grill-me']), ['off', false]);
-  click('tdd', ['tdd', 'grill-me']);
-  assert.deepEqual([queued(draft, at.source, 'pdf', 'pi-cli'), pickOf(draft, at.source, 'pdf', 'pi-cli'), stand('tdd', ['tdd', 'grill-me'])], [undefined, { on: [], off: [part('grill-me')] }, [undefined, true]]);
   // The result names the parts: "skill tdd put into Pi".
   const done: PluginDone[] = [{ ...at, action: 'pick-parts', pick: { on: [part('tdd')], off: [part('qa')] }, report: { tool: 'pi-cli', outcome: 'installed', message: '', runs: [], changed: true, partsRun: 'r' } }];
   assert.equal(resultSentence(resultLines(done), false), 'pdf: skill tdd put into Pi; skill qa taken out of Pi.');

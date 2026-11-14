@@ -13,7 +13,7 @@ const marketplace = (root: string, name: string, plugins: string[]) => Promise.a
   ...plugins.map(plugin => put(join(root, `plugins/${plugin}/skills/${plugin}/SKILL.md`), `---\nname: ${plugin}\ndescription: ${plugin}\n---\n`)),
 ]);
 
-async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?: boolean; app?: DesktopApp; pi?: boolean; /** Not this computer's own home. */ folderHome?: boolean; /** What adding the marketplace to a tool's own list comes to, where not `added`. */ listing?: Partial<Record<HarnessId, Awaited<ReturnType<typeof engine.addMarketplace>>>>; /** Tools whose Manage switch is off here (MarketplaceHost leftOut). */ leftOut?: HarnessId[]; /** A bundled build: the marketplace it carries is in this folder under the base, and these plugins are not packed. */ bundled?: { folder: string; unpackaged?: string[]; kept?: string[] } } = {}) {
+async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?: boolean; app?: DesktopApp; pi?: boolean; /** The managed tools the home is read with, where not the three that take plugins (and Pi). Changed in place, it is the next read's. */ tools?: HarnessId[]; /** Engine calls in place of the stand-ins below. */ engine?: Partial<MarketplaceEngine>; /** Not this computer's own home. */ folderHome?: boolean; /** What adding the marketplace to a tool's own list comes to, where not `added`. */ listing?: Partial<Record<HarnessId, Awaited<ReturnType<typeof engine.addMarketplace>>>>; /** Tools whose Manage switch is off here (MarketplaceHost leftOut). */ leftOut?: HarnessId[]; /** A bundled build: the marketplace it carries is in this folder under the base, and these plugins are not packed. */ bundled?: { folder: string; unpackaged?: string[]; kept?: string[] } } = {}) {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-markets-')));
   const home = join(base, 'home');
   await mkdir(home, { recursive: true });
@@ -23,7 +23,7 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?:
   const ran: (string | undefined)[] = [];
   const host: MarketplaceHost = {
     home: () => ({ home, actual: !options.folderHome }),
-    read: async () => ({ tools: ['claude-cli', 'copilot-cli', 'codex-cli', ...(options.pi ? ['pi-cli' as const] : [])], snapshots: [] }),
+    read: async () => ({ tools: [...(options.tools ?? ['claude-cli', 'copilot-cli', 'codex-cli', ...(options.pi ? ['pi-cli' as const] : [])])], snapshots: [] }),
     writeAccess: async () => (options.allowed === false ? { allowed: false, reason: 'Preview only.' } : { allowed: true }),
     dataDir: join(base, 'data'),
     pickFolder: async () => undefined,
@@ -46,6 +46,7 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?:
     setPart: async (_context, marketplace, plugin, part, tool, on) => { calls.push(`${part.kind} ${part.name} of ${plugin}@${marketplace} ${tool} ${on}`); return { tool, outcome: on ? 'part-on' : 'part-off', message: '', runs: [], changed: true }; },
     setWhole: async (_context, marketplace, plugin, tool, on) => { calls.push(`whole ${plugin}@${marketplace} ${tool} ${on}`); return { tool, outcome: on ? 'plugin-on' : 'plugin-off', message: '', runs: [], changed: true }; },
     setSkill: async (_context, marketplace, plugin, skill, tool, on, _source, entry) => { calls.push(`skill ${plugin}:${skill}@${marketplace} ${tool} ${on} entry=${entry?.name}`); return { tool, outcome: on ? 'skill-on' : 'skill-off', message: '', runs: [], changed: true }; },
+    ...options.engine,
   };
   // The suggested marketplaces are folders here, so a test never reaches the network: one for Claude Code and Codex, one for a tool this home lacks.
   const offers = [{ source: join(base, 'offered'), name: 'Offered', tools: ['claude-cli', 'codex-cli'] as const }, { source: join(base, 'for-pi'), name: 'Not here', tools: [] }];
@@ -449,15 +450,8 @@ test('What is due by itself is what Update all would choose: an older copy and o
     assert.deepEqual(due.ops.map(op => [op.plugin, op.tool, op.action, op.offered, op.marketName, op.source]), [
       ['notes', 'claude-cli', 'update', '2.0.0', 'team', root], ['pdf', 'claude-cli', 'update', '2.0.0', 'team', root], ['pdf', 'pi-cli', 'install-parts', '2.0.0', 'team', root]]);
     assert.deepEqual([due.stopped, due.unread, due.unreadSources], [undefined, ['Folder: broken'], [broken]], 'named as the Plugins page names it, and by where it was added from');
-    // For selections that wait: the tools plugins go into here, and what each would get to have what every other tool that can
-    // take plugins has. Copilot CLI and Codex have no command-line tool here, so they neither count nor get anything; Pi would
-    // get the parts of what Claude Code has and Pi has no parts of yet.
-    const gets = (found: typeof due) => Object.fromEntries(Object.entries(found.joins ?? {}).map(([tool, ops]) => [tool, ops!.map(op => `${op.plugin}:${op.action}`)]));
-    assert.deepEqual([due.tools, gets(due)], [['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'], { 'pi-cli': ['notes:install-parts', 'xlsx:install-parts'] }]);
-    // A plugin turned off in a tool that has it is not one every tool has: it goes nowhere by itself.
-    await put(join(box.home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'xlsx@team': false } }));
-    assert.deepEqual(gets(await box.markets.pendingUpdates(box.home)), { 'pi-cli': ['notes:install-parts'] });
-    await rm(join(box.home, '.claude/settings.json'));
+    // The plugins record was made by that read (its first): every tool here is on its `tools`, so nothing is owed by itself.
+    assert.deepEqual([due.ops.filter(op => op.newHere), due.newTools], [[], []]);
     // The update itself is the button's, told not to uninstall in order to reinstall.
     box.calls.length = 0;
     await box.markets.update(root, 'team', 'pdf', ['claude-cli'], box.home, { reinstall: false });
@@ -581,5 +575,296 @@ test('A plugin the build’s marketplace no longer offers goes into no other too
     assert.deepEqual(refused.reports.map(report => [report.outcome, report.message]), [['failed', 'Acme plugins no longer offers this plugin. It stays in the tools that have it until you uninstall it.']]);
     assert.deepEqual((await box.markets.update(carried, 'team', 'pdf', ['claude-cli'], box.home)).reports.map(report => report.outcome), ['updated']);
     assert.deepEqual(box.calls.filter(call => /^(install|update)/.test(call)), ['update pdf claude-cli']);
+  } finally { await box.cleanup(); }
+});
+
+// ---------- A whole plugin's one switch (pluginrecord.ts), through createMarketplaces with the engine replaced ----------
+
+/**
+ * A home with Claude Code and Pi (unless `tools` says otherwise), where Claude Code installs for real as far as its records go:
+ * the stand-in install writes its install record and copy (and the stand-in uninstall takes them out), so each look after a
+ * click reads what the click did. Pi takes parts through the real parts.ts. The marketplace has pdf and notes (a skill each)
+ * and reviewer (an agent alone, which Pi can't take).
+ */
+async function switchHome(options: Parameters<typeof setup>[0] = {}) {
+  let box!: Awaited<ReturnType<typeof setup>>;
+  const listed = async () => (JSON.parse(await readFile(join(box.home, '.claude/plugins/installed_plugins.json'), 'utf8').catch(() => '{"plugins":{}}')) as { plugins: Record<string, unknown> }).plugins;
+  const write = async (plugins: Record<string, unknown>) => put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins }));
+  box = await setup({ pi: true, tools: ['claude-cli', 'pi-cli'], ...options, engine: {
+    install: async (_context, catalog, plugin, tool) => {
+      box.calls.push(`install ${plugin} ${tool}`);
+      const copy = join(box.home, '.claude/plugins/cache', catalog.name, plugin, '1.0.0');
+      await put(join(copy, `skills/${plugin}/SKILL.md`), `---\nname: ${plugin}\ndescription: ${plugin}\n---\n`);
+      await write({ ...await listed(), [`${plugin}@${catalog.name}`]: [{ scope: 'user', installPath: copy, version: '1.0.0' }] });
+      return { tool, outcome: 'installed', message: 'Installed.', runs: [], changed: true };
+    },
+    uninstall: async (_context, marketplace, plugin, tool) => {
+      box.calls.push(`uninstall ${plugin} ${tool}`);
+      const { [`${plugin}@${marketplace}`]: _gone, ...rest } = await listed();
+      await write(rest);
+      return { tool, outcome: 'uninstalled', message: 'Uninstalled.', runs: [], changed: true };
+    },
+    ...options.engine,
+  } });
+  const root = join(box.base, 'market');
+  await marketplace(root, 'team', ['pdf', 'notes']);
+  await addAgentOnly(root);
+  await box.markets.add(root);
+  // Claude Code names the marketplace's source, as its own add records it.
+  await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'git', url: root } } }));
+  const record = async () => JSON.parse(await readFile(join(box.home, '.central-knot/plugins.json'), 'utf8')) as { tools: HarnessId[]; plugins: { plugin: string; on: boolean; except: HarnessId[] }[] };
+  const switchOf = async (plugin: string) => (await box.markets.view()).marketplaces.find(entry => entry.source === root)!.switches![plugin]!;
+  const acts = async (plugin: string) => Object.fromEntries(Object.entries((await switchOf(plugin)).tools).map(([tool, owed]) => [tool, owed!.act ?? owed!.held ?? '']));
+  return { ...box, root, record, switchOf, acts, piSkill: (plugin: string) => join(box.home, `.pi/agent/skills/${plugin}/SKILL.md`) };
+}
+const exists = (path: string) => stat(path).then(() => true, () => false);
+/** Adds reviewer, a plugin holding one agent alone, to the marketplace at `root`. */
+async function addAgentOnly(root: string) {
+  const manifest = join(root, '.claude-plugin/marketplace.json'), read = JSON.parse(await readFile(manifest, 'utf8'));
+  await put(manifest, JSON.stringify({ ...read, plugins: [...read.plugins, { name: 'reviewer', source: './plugins/reviewer' }] }));
+  await put(join(root, 'plugins/reviewer/agents/reviewer.md'), '---\nname: reviewer\ndescription: Reviews.\n---\nReview the diff.\n');
+}
+
+test('On puts a plugin into every managed tool that takes it, by its route; a tool where it can’t go is said, and nothing runs there; Off takes it out of each', async () => {
+  const box = await switchHome();
+  try {
+    await mkdir(join(box.home, '.pi/agent'), { recursive: true });
+    const on = await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    assert.deepEqual(box.calls.filter(call => /^(install|uninstall)/.test(call)), ['install pdf claude-cli'], 'Claude Code by its own installer');
+    assert.equal(await exists(box.piSkill('pdf')), true, 'Pi by its parts');
+    assert.deepEqual(on.done.map(step => [step.tool, step.action, step.report.outcome]), [['claude-cli', 'install', 'installed'], ['pi-cli', 'install-parts', 'installed']]);
+    assert.deepEqual((await box.record()).plugins.map(entry => [entry.plugin, entry.on, entry.except]), [['pdf', true, []]]);
+    assert.deepEqual(await box.acts('pdf'), { 'claude-cli': '', 'pi-cli': '' }, 'in line in both');
+    // reviewer holds an agent alone, which Pi takes no part of: said, and nothing runs there.
+    const agent = await box.markets.turn(box.root, 'reviewer', 'on', undefined, box.home);
+    assert.deepEqual(agent.done.map(step => [step.tool, step.report.outcome, step.report.message]), [['claude-cli', 'installed', 'Installed.'], ['pi-cli', 'held', 'None of its parts can go into Pi.']]);
+    const off = await box.markets.turn(box.root, 'pdf', 'off', undefined, box.home);
+    assert.deepEqual(off.done.filter(step => step.report.changed).map(step => [step.tool, step.action]), [['claude-cli', 'remove'], ['pi-cli', 'remove-parts']]);
+    assert.equal(await exists(box.piSkill('pdf')), false);
+    assert.deepEqual([(await box.record()).plugins.find(entry => entry.plugin === 'pdf')!.on, await box.acts('pdf')], [false, { 'claude-cli': '', 'pi-cli': '' }]);
+  } finally { await box.cleanup(); }
+});
+
+test('Keep out takes it out of that tool alone and records it; the switch then shows it partial; Let in puts it back there', async () => {
+  const box = await switchHome();
+  try {
+    await mkdir(join(box.home, '.pi/agent'), { recursive: true });
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    box.calls.length = 0;
+    const out = await box.markets.turn(box.root, 'pdf', 'keep-out', 'pi-cli', box.home);
+    assert.deepEqual([out.done.map(step => [step.tool, step.action]), box.calls.filter(call => /^(install|uninstall)/.test(call))], [[['pi-cli', 'remove-parts']], []]);
+    assert.deepEqual([(await box.record()).plugins[0]!.except, await exists(box.piSkill('pdf'))], [['pi-cli'], false]);
+    const sw = await box.switchOf('pdf');
+    assert.deepEqual([sw.entry, sw.tools['pi-cli']!.wanted, sw.tools['claude-cli']!.wanted], [{ on: true, except: ['pi-cli'] }, false, true]);
+    await box.markets.turn(box.root, 'pdf', 'let-in', 'pi-cli', box.home);
+    assert.deepEqual([(await box.record()).plugins[0]!.except, await exists(box.piSkill('pdf'))], [[], true]);
+    // Kept out again and turned off; then its parts put into Pi outside the switch. On puts it where it is wanted and takes
+    // nothing out: Pi's copy stays, shown with Take out there.
+    await box.markets.turn(box.root, 'pdf', 'keep-out', 'pi-cli', box.home);
+    await box.markets.turn(box.root, 'pdf', 'off', undefined, box.home);
+    await box.markets.parts(box.root, 'team', 'pdf', 'pi-cli', 'install', undefined, box.home);
+    const on = await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    assert.deepEqual([on.done.map(step => [step.tool, step.action]), await exists(box.piSkill('pdf')), (await box.acts('pdf'))['pi-cli']], [[['claude-cli', 'install']], true, 'remove-parts']);
+  } finally { await box.cleanup(); }
+});
+
+test('Off, then Undo: installed again where it was, a copy that was off in a tool’s own settings off again there, and the record On', async () => {
+  const box = await switchHome();
+  try {
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    await put(join(box.home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'pdf@team': false } }));
+    const off = await box.markets.turn(box.root, 'pdf', 'off', undefined, box.home);
+    assert.deepEqual(off.back?.map(op => [op.tool, op.action]), [['pi-cli', 'undo-parts'], ['claude-cli', 'install'], ['claude-cli', 'plugin-off']], 'Claude Code’s own switch comes back off after its install');
+    box.calls.length = 0;
+    const undone = await box.markets.undoTurn(box.root, 'pdf', off.before!, off.back!, box.home);
+    assert.deepEqual(box.calls.filter(call => /^(install|uninstall|whole)/.test(call)), ['install pdf claude-cli', 'whole pdf@team claude-cli false']);
+    assert.deepEqual([undone.stopped, (await box.record()).plugins.map(entry => [entry.on, entry.except])], [undefined, [[true, []]]]);
+  } finally { await box.cleanup(); }
+});
+
+test('On over a plugin some tools still have (Off, its uninstall undone by hand), then Undo: only what the click put in comes out, and the record is as before', async () => {
+  const box = await switchHome();
+  try {
+    await mkdir(join(box.home, '.pi/agent'), { recursive: true });
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    await box.markets.turn(box.root, 'pdf', 'off', undefined, box.home);
+    // Put back in Claude Code with its own command: Off, but Claude Code has it.
+    await box.markets.install(box.root, 'team', 'pdf', ['claude-cli'], box.home);
+    assert.deepEqual((await box.acts('pdf'))['claude-cli'], 'uninstall', 'shown so, with a way to turn it off there');
+    const before = await box.record();
+    box.calls.length = 0;
+    const on = await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    assert.deepEqual(on.done.filter(step => step.report.changed).map(step => step.tool), ['pi-cli'], 'Claude Code has it already: only Pi');
+    await box.markets.undoTurn(box.root, 'pdf', on.before!, on.back!, box.home);
+    assert.deepEqual([box.calls.filter(call => /^(install|uninstall)/.test(call)), await exists(box.piSkill('pdf')), await box.record()], [[], false, before]);
+    assert.equal((await box.switchOf('pdf')).tools['claude-cli']!.has, 'whole', 'Claude Code keeps the copy it had before the click');
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin installed in a tool with no entry here is found: nothing takes it in by itself, and Add turns it On and puts it where it is missing', async () => {
+  const box = await switchHome();
+  try {
+    await mkdir(join(box.home, '.pi/agent'), { recursive: true });
+    await box.markets.view();
+    // Installed by hand in Claude Code after the plugins record was made.
+    await box.markets.install(box.root, 'team', 'notes', ['claude-cli'], box.home);
+    const sw = await box.switchOf('notes');
+    assert.deepEqual([sw.entry, sw.tools['claude-cli']!.has, sw.tools['pi-cli']!.act], [undefined, 'whole', undefined]);
+    assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops.filter(op => op.plugin === 'notes'), [], 'the automatic updates leave it alone');
+    const added = await box.markets.turn(box.root, 'notes', 'add', undefined, box.home);
+    assert.deepEqual([added.done.filter(step => step.report.changed).map(step => step.tool), added.before], [['pi-cli'], null]);
+    await box.markets.undoTurn(box.root, 'notes', added.before!, added.back!, box.home);
+    assert.deepEqual([(await box.record()).plugins.some(entry => entry.plugin === 'notes'), await exists(box.piSkill('notes'))], [false, false]);
+  } finally { await box.cleanup(); }
+});
+
+test('A tool new here is owed each On plugin not kept out of it by the automatic updates, and joins the record’s tools; one already there is not owed what was taken out of it by hand', async () => {
+  const tools: HarnessId[] = ['claude-cli'];
+  const box = await switchHome({ tools });
+  try {
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    await box.markets.turn(box.root, 'notes', 'on', undefined, box.home);
+    // Taken out of Claude Code with its own /plugin: the check puts nothing back; its line offers Install there (worked example 5a).
+    await box.markets.uninstall(box.root, 'team', 'pdf', 'claude-cli', box.home);
+    // Pi is installed later, and notes kept out of it before any check.
+    tools.push('pi-cli');
+    await mkdir(join(box.home, '.pi/agent'), { recursive: true });
+    await box.markets.turn(box.root, 'notes', 'keep-out', 'pi-cli', box.home);
+    const due = await box.markets.pendingUpdates(box.home);
+    assert.deepEqual([due.ops.filter(op => op.newHere).map(op => [op.plugin, op.tool, op.action]), due.newTools], [[['pdf', 'pi-cli', 'install-parts']], ['pi-cli']]);
+    const pdf = (await box.switchOf('pdf')).tools['claude-cli']!;
+    assert.deepEqual([pdf.act, pdf.background], ['install', undefined]);
+    await box.markets.noteJoined(['pi-cli'], box.home);
+    assert.deepEqual((await box.record()).tools, ['claude-cli', 'pi-cli']);
+    assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops.filter(op => op.newHere), [], 'once on the list, nothing is owed to Pi by itself');
+    // Its Manage switch turned off and on: new again.
+    await box.markets.toolManaged('pi-cli', box.home);
+    assert.deepEqual((await box.markets.pendingUpdates(box.home)).newTools, ['pi-cli']);
+  } finally { await box.cleanup(); }
+});
+
+test('A first read made while the marketplace couldn’t be read gives the answer a read online gives: the next check owes nothing (worked example 5b)', async () => {
+  const box = await switchHome();
+  try {
+    await box.markets.install(box.root, 'team', 'pdf', ['claude-cli'], box.home);
+    // A home with no plugins record yet (one the version before made), opened while its marketplace can't be read.
+    await rm(join(box.home, '.central-knot/plugins.json'));
+    await rm(box.root, { recursive: true });
+    const offline = await box.markets.view();
+    assert.match(offline.marketplaces.find(entry => entry.source === box.root)!.problem ?? '', /./);
+    assert.deepEqual((await box.record()).plugins.map(entry => [entry.plugin, entry.on, entry.except]), [['pdf', true, ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli']]]);
+    const sw = offline.marketplaces.find(entry => entry.source === box.root)!.switches!.pdf!;
+    assert.deepEqual([sw.tools['claude-cli']!.has, sw.tools['claude-cli']!.act], ['whole', undefined], 'still installed in Claude Code, read by its record');
+    await marketplace(box.root, 'team', ['pdf', 'notes']);
+    assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops, []);
+  } finally { await box.cleanup(); }
+});
+
+test('A tool record that can’t be read is unknown, not empty: the first read waits, nothing is written, and it runs once the record reads', async () => {
+  const box = await switchHome({ tools: ['claude-cli', 'codex-cli', 'pi-cli'] });
+  try {
+    await box.markets.install(box.root, 'team', 'pdf', ['claude-cli'], box.home);
+    await rm(join(box.home, '.central-knot/plugins.json'));
+    await put(join(box.home, '.codex/config.toml'), '[plugins."pdf@team"\nenabled = true\n');
+    const waiting = await box.markets.view();
+    assert.match(waiting.switchProblem ?? '', /^Codex’s record of its plugins can’t be read now/);
+    assert.equal(await exists(join(box.home, '.central-knot/plugins.json')), false);
+    assert.match((await box.markets.turn(box.root, 'pdf', 'off', undefined, box.home)).stopped ?? '', /can’t be read now/);
+    await put(join(box.home, '.codex/config.toml'), 'model = "o4"\n');
+    assert.equal((await box.markets.view()).switchProblem, undefined);
+    assert.deepEqual((await box.record()).plugins.map(entry => [entry.plugin, entry.except]), [['pdf', ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli']]]);
+  } finally { await box.cleanup(); }
+});
+
+test('Off reaches nothing it must not: a tool left out, Claude Code’s copy from the Anthropic Directory and a same-named marketplace from elsewhere are said, and nothing runs there', async () => {
+  const box = await setup({ leftOut: ['codex-cli'], tools: ['claude-cli', 'copilot-cli'] });
+  try {
+    const root = join(box.base, 'market');
+    await put(join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'official', plugins: [{ name: 'incident-io', version: '2.0.0', source: { source: 'git-subdir', url: 'https://github.com/incident-io/skills.git', path: 'plugins/incident-io' } }] }));
+    await box.markets.add(root);
+    const copy = join(box.home, '.claude/plugins/cache/anthropic-plugin-directory/incident-io/1.0.0-6af50e2e23e9');
+    await put(join(copy, 'skills/incidents/SKILL.md'), '---\nname: incidents\ndescription: Incidents.\n---\n');
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'incident.io@anthropic-plugin-directory': [{ scope: 'user', installPath: copy, version: '1.0.0', directoryRepositoryKey: 'github.com/incident-io/skills#plugins/incident-io' }] } }));
+    await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { official: { source: { source: 'git', url: 'https://example.com/other.git' } } } }));
+    // Not recorded by the first read (the Directory's copy is no marketplace's), so On records it; it has it in Claude Code already.
+    await box.markets.turn(root, 'incident-io', 'on', undefined, box.home);
+    const tools = Object.keys((await box.markets.view()).marketplaces.find(entry => entry.source === root)!.switches!['incident-io']!.tools);
+    assert.deepEqual(tools, ['claude-cli', 'copilot-cli'], 'Codex is left out: no line, so no command');
+    box.calls.length = 0;
+    const off = await box.markets.turn(root, 'incident-io', 'off', undefined, box.home);
+    assert.deepEqual(box.calls.filter(call => /^(install|uninstall)/.test(call)), [], 'nothing ran');
+    assert.deepEqual(off.done.map(step => [step.tool, step.report.outcome, step.report.message]), [
+      ['claude-cli', 'held', 'Claude Code has its copy from the Anthropic Directory: update or uninstall it in Claude Code (/plugin).'],
+      ['copilot-cli', 'held', 'Copilot CLI has a different marketplace named “official” (https://example.com/other.git). Central Knot leaves it alone.']]);
+    assert.equal(JSON.parse(await readFile(join(box.home, '.central-knot/plugins.json'), 'utf8')).plugins[0].on, false, 'the record is Off');
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin turned off in a tool’s own settings is brought to no new tool by itself; the new tool’s line says why, and Install there still puts it in, also once it is on again', async () => {
+  const tools: HarnessId[] = ['claude-cli'];
+  const box = await switchHome({ tools });
+  try {
+    await box.markets.install(box.root, 'team', 'pdf', ['claude-cli'], box.home);
+    // Turned off in Claude Code with its own /plugin, then the upgrade: no plugins record yet, so the first read records it On.
+    await put(join(box.home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'pdf@team': false } }));
+    await rm(join(box.home, '.central-knot/plugins.json'));
+    await box.markets.view();
+    tools.push('pi-cli');
+    await mkdir(join(box.home, '.pi/agent'), { recursive: true });
+    const due = await box.markets.pendingUpdates(box.home);
+    assert.deepEqual([due.ops.filter(op => op.newHere), due.newTools], [[], ['pi-cli']], 'nothing owed to Pi by itself');
+    const pi = (await box.switchOf('pdf')).tools['pi-cli']!;
+    assert.deepEqual([pi.act, pi.background, pi.offElsewhere], ['install-parts', undefined, true]);
+    // That check made Pi no longer new. Turned on again in Claude Code later, it is still not brought to Pi by itself (Install there does it).
+    await box.markets.noteJoined(due.newTools!, box.home);
+    await put(join(box.home, '.claude/settings.json'), '{}');
+    assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops.filter(op => op.newHere), []);
+    assert.equal((await box.switchOf('pdf')).tools['pi-cli']!.act, 'install-parts', 'its line still offers Install there');
+  } finally { await box.cleanup(); }
+});
+
+test('A tool new here is new for one check: a marketplace that can’t be read no longer keeps it new for good; a check that reached no marketplace doesn’t count', async () => {
+  const tools: HarnessId[] = ['claude-cli'];
+  const box = await switchHome({ tools });
+  try {
+    const old = join(box.base, 'old');
+    await marketplace(old, 'old', ['legacy']);
+    await box.markets.add(old);
+    await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'git', url: box.root } }, old: { source: { source: 'git', url: old } } }));
+    await box.markets.install(box.root, 'team', 'pdf', ['claude-cli'], box.home);
+    await box.markets.install(old, 'old', 'legacy', ['claude-cli'], box.home);
+    await rm(join(box.home, '.central-knot/plugins.json'));
+    await box.markets.view();
+    // legacy's marketplace goes away; Pi is installed later.
+    await rm(old, { recursive: true });
+    tools.push('pi-cli');
+    await mkdir(join(box.home, '.pi/agent'), { recursive: true });
+    const due = await box.markets.pendingUpdates(box.home);
+    assert.deepEqual([due.ops.filter(op => op.newHere).map(op => `${op.plugin}→${op.tool}`), due.newTools], [['pdf→pi-cli'], ['pi-cli']]);
+    await box.markets.noteJoined(due.newTools!, box.home);
+    assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops.filter(op => op.newHere), [], 'taken out of Pi later, it is not put back');
+    // Managed again while no marketplace can be read: that check doesn't count, and Pi stays new.
+    await box.markets.toolManaged('pi-cli', box.home);
+    await rm(box.root, { recursive: true });
+    assert.deepEqual((await box.markets.pendingUpdates(box.home)).newTools, []);
+  } finally { await box.cleanup(); }
+});
+
+test('A click’s record write keeps what a check wrote while the click was reading: each write changes the record as it is then', async () => {
+  const tools: HarnessId[] = ['claude-cli'];
+  const box = await switchHome({ tools });
+  try {
+    await box.markets.view();
+    tools.push('pi-cli');
+    await mkdir(join(box.home, '.pi/agent'), { recursive: true });
+    // The check notes Pi joined while the click is still reading the marketplaces: after the click has read the record (the
+    // view asks for the parts engine's context once before reading it, and again for each marketplace after).
+    const share = box.host.share!;
+    let asked = 0, joined: Promise<void> | undefined;
+    box.host.share = () => { if (++asked === 2) joined = box.markets.noteJoined(['pi-cli'], box.home); return share(); };
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    await joined;
+    const record = await box.record();
+    assert.deepEqual([record.tools, record.plugins.map(entry => [entry.plugin, entry.on])], [['claude-cli', 'pi-cli'], [['pdf', true]]]);
   } finally { await box.cleanup(); }
 });

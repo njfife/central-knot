@@ -6,6 +6,8 @@
 import type { LeftIn } from './historyactions.ts';
 import type { LibraryItem, Plan, SourceAnswer, TakeInAnswer, VersionChange } from './library.ts';
 import type { NeutralServer } from './mcp.ts';
+import type { PluginDone, PluginOp } from './pluginplan.ts';
+import type { PluginEntry, PluginSwitch } from './pluginrecord.ts';
 
 export type HomeMode = 'fixture' | 'custom' | 'actual';
 export type HarnessId = 'claude-cli' | 'copilot-cli' | 'codex-cli' | 'pi-cli' | 'opencode-cli';
@@ -225,6 +227,10 @@ export interface DesktopApi {
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
   updatePlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
+  /** A whole plugin's switch (`on`, `off`), Add, a tool kept out or let in, or one tool brought into line (`fix`): recorded first, then run as its table owes (marketplaces.ts turn). */
+  turnPlugin(source: string, plugin: string, what: PluginTurn, tool: HarnessId | undefined, home: string): Promise<PluginTurnResult>;
+  /** The Undo of a turn: its record put back, then `back` run (marketplaces.ts undoTurn). */
+  undoPluginTurn(source: string, plugin: string, before: PluginEntry | null, back: PluginOp[], home: string): Promise<{ stopped?: string; done: PluginDone[] }>;
   /** The git repo the Managed set lives in, if any. `check` asks the repo for its latest commit first. */
   repo(check?: boolean): Promise<RepoView | null>;
   connectRepo(url: string, branch: string, home: string): Promise<RepoResult>;
@@ -269,6 +275,10 @@ export interface DesktopApi {
 }
 
 export interface PluginActionResult { stopped?: string; reports: ActionReport[] }
+/** What a click on a whole plugin asks (DesktopApi.turnPlugin). */
+export type PluginTurn = 'on' | 'off' | 'add' | 'keep-out' | 'let-in' | 'fix';
+/** What a turn did: each tool's report (`done`), the plugin's entry before it (`before`, null: none), and its Undo (`back`). */
+export interface PluginTurnResult { stopped?: string; done: PluginDone[]; before?: PluginEntry | null; back?: PluginOp[] }
 
 // ---------- Managing skills across tools ----------
 
@@ -611,7 +621,9 @@ export type InstallState = { state: 'installed'; path: string; live?: boolean;
   /** Where the tool has a switch for one skill of a plugin: the skills the installed copy holds, and those of them turned off. */
   skills?: string[]; skillsOff?: SkillOff[];
   /** Why none of its skills can be switched here, whatever the skill: the tool's config is written in a form Central Knot doesn't edit. */
-  switchesHeld?: string } | { state: 'not-installed' } | { state: 'not-known'; reason: string }
+  switchesHeld?: string;
+  /** The tool's own switch has the whole plugin turned off there (a mark: the plugin is still installed). */
+  off?: true } | { state: 'not-installed' } | { state: 'not-known'; reason: string }
   /** The tool has a different marketplace under the same name: Central Knot neither reads nor changes its plugins. */
   | { state: 'held'; reason: string };
 
@@ -706,6 +718,8 @@ export interface MarketplaceView {
   codexOnly?: string;
   /** Plugins whose parts are in tools that can't take the plugin itself, by plugin and tool. */
   parts?: Record<string, Partial<Record<HarnessId, PartsState>>>;
+  /** Each listed plugin's one switch, by plugin (pluginrecord.ts PluginSwitch). */
+  switches?: Record<string, PluginSwitch>;
 }
 
 /**
@@ -759,6 +773,8 @@ export interface PluginsView {
   versions?: Partial<Record<HarnessId, string>>;
   /** Marketplaces offered without being looked for (suggested.ts): each with the tools here it is the default of. One click adds one; nothing is fetched before. */
   suggested?: { source: string; name: string; tools: HarnessId[] }[];
+  /** Why no plugin's switch can be used now (the plugins record can't be read, or before it is first made, a tool's record can't be). */
+  switchProblem?: string;
 }
 
 // ---------- A kind on Central Knot's library (library.ts): its page's view ----------
