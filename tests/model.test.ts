@@ -8,15 +8,21 @@ test('plural words read naturally', () => {
   assert.equal(plural(0, 'skill'), '0 skills');
 });
 
-test('caught-up names list each written skill once and leave out ones a notice already tells', () => {
+test('The Caught up band names each item written once, of any kind, with the tools it went to; an item a notice on any page tells, and a write that waits, are left out', () => {
   const caughtUp = [
-    { item: 'review', outcome: 'written' },
-    { item: 'review', outcome: 'written' },
-    { item: 'deploy', outcome: 'written' },
-    { item: 'notes', outcome: 'kept' },
+    { item: 'review', harness: 'codex-cli', outcome: 'written' },
+    { item: 'review', harness: 'pi-cli', outcome: 'written' },
+    { item: 'docs', harness: 'pi-cli', outcome: 'written' },
+    { item: 'docs', harness: 'claude-cli', outcome: 'held', waits: true },
+    { item: 'reviewer', harness: 'codex-cli', outcome: 'written' },
+    { item: 'notes', harness: 'codex-cli', outcome: 'removed' },
   ];
-  const manage = { caughtUp } as unknown as Parameters<typeof caughtUpNames>[0];
-  assert.deepEqual(caughtUpNames(manage, new Set(['deploy'])), ['review']);
+  const told = (item: string) => [{ kind: 'edit', item }];
+  const view = (notices: { skills?: object[]; mcp?: object[]; agents?: object[] }) =>
+    ({ sync: { caughtUp }, skills: { notices: notices.skills ?? [] }, mcp: { notices: notices.mcp ?? [] }, agents: { notices: notices.agents ?? [] } }) as unknown as Parameters<typeof caughtUpNames>[0];
+  assert.deepEqual(caughtUpNames(view({})), { items: ['review', 'docs', 'reviewer'], tools: ['codex-cli', 'pi-cli'] });
+  // reviewer's edit is told on the Agents page, docs's on the MCP servers page: neither is named again.
+  assert.deepEqual(caughtUpNames(view({ agents: told('reviewer'), mcp: told('docs') })), { items: ['review'], tools: ['codex-cli', 'pi-cli'] });
 });
 
 test('Every row of a list says its time in one form: how long ago while that tells them apart, else the clock, to the second where two would match', () => {

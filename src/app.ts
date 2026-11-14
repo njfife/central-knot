@@ -451,7 +451,7 @@ function readFound(view: HomeView, from?: string): string {
   const counts = heldKinds(view).map(kind => plural(found[kind], kindNouns[kind].one, kindNouns[kind].many));
   // A catch-up that copied something has its own Caught up band, and what sync did on its own (an edit spread, a deletion)
   // its notice: either is a change, so neither read says "Nothing changed".
-  const caught = caughtUpNames(view.sync, new Set(view.skills.notices.flatMap(noticeNames))).length > 0;
+  const caught = caughtUpNames(view).items.length > 0;
   const told = [view.skills.notices, view.mcp.notices, view.agents.notices].some(notices => notices.length > 0);
   return `Read ${andList(counts)}${from ? ` from ${from}` : ''}.${caught || told ? '' : ' Nothing changed.'}`;
 }
