@@ -652,15 +652,15 @@ function libraryTag(skill: ItemRow) {
   const tag = library()?.say.placeTag(skill, itemOf(skill), toolList(), leftOutTools());
   return tag ? h('span.row-tag', { title: tag.title }, tag.text) : null;
 }
-/** The tag after an item's name while a version waits at the source it is linked to (libraryrow.ts fromSourceWords). */
+/** The tag after an item's name while a version waits at the source it is linked to, or once its source removed it (libraryrow.ts fromSourceWords). */
 function sourceTag(skill: ItemRow) {
   const tag = skill.fromSource && fromSourceWords(skill.fromSource).tag;
   return tag ? h('span.row-tag.row-tag-source', { title: tag.title }, icon('link-2', 12, 'tone-warning'), tag.text) : null;
 }
-/** The opened row's line saying which source an item is from, and whether a version waits there, with its link to Sources. */
+/** The opened row's line saying which source an item is from, and whether a version waits there or it removed the item, with its link to Sources. */
 function fromSourceLine(key: string, from: NonNullable<ItemRow['fromSource']>) {
   const said = fromSourceWords(from);
-  return h('p.details-limits.details-note', {}, icon('link-2', 12, from.waits ? 'tone-warning' : 'tone-muted'), h('span', {}, said.before,
+  return h('p.details-limits.details-note', {}, icon('link-2', 12, from.waits || from.removed ? 'tone-warning' : 'tone-muted'), h('span', {}, said.before,
     h('button.inline-link', { type: 'button', id: `from-source-${key}`, title: from.link, onclick: () => showPage('sources') }, 'Sources'), said.after));
 }
 

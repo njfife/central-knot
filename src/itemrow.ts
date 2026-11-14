@@ -16,8 +16,8 @@ export type Tool = string;
  */
 export interface ItemRow {
   key: string;
-  /** A library item linked to a source the home records: its link, and whether a version waits there, or else the next one would (types.ts LibraryFacts fromSource). */
-  fromSource?: { link: string; waits?: true; nextWaits?: true };
+  /** A library item from a source the home records: its link, and whether a version waits there, or the next one would, or the source removed it (types.ts LibraryFacts fromSource). */
+  fromSource?: LibraryFacts['fromSource'];
   /** Shown name, with its case. */
   name?: string;
   description: string;
