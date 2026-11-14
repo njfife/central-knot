@@ -571,6 +571,28 @@ test('Two tools’ entries edited between passes have no time to order them: His
   assert.equal(librarySentence(entry, libraryWords.mcp, copilotAndCodex)?.text, 'Copilot CLI’s edit became the current version, though the times can’t tell which edit came last. Codex’s is kept as a version.');
 }));
 
+test('Claude Code’s write waiting while its entry is edited by hand and Copilot CLI and Codex edit theirs: no time decided, as History says; Write to Claude Code then names Claude Code, once', () => inBox(async box => {
+  const docs = (command: string) => JSON.stringify({ mcpServers: { docs: { type: 'stdio', command } } });
+  await fs.writeFile(box.path('claude-cli'), docs('BASE'));
+  await applyServers(box.context, three, [on('docs')]);
+  await fs.writeFile(box.path('copilot-cli'), docsRuns('COPILOT-1'));
+  await applyServers(box.context, three, []); // Codex gets it; Claude Code waits for Write to Claude Code
+  await fs.writeFile(box.path('claude-cli'), docs('CLAUDE-EDIT'));
+  await fs.writeFile(box.path('copilot-cli'), docsRuns('COPILOT-2'));
+  await fs.writeFile(box.path('codex-cli'), '[mcp_servers.docs]\ncommand = "CODEX-2"\n');
+  const told = (await readHistory(box.context)).length;
+  await applyServers(box.context, three, []);
+  const met = (await readHistory(box.context)).slice(told);
+  // Copilot CLI's edit is taken in by the tools' order; Claude Code's and Codex's are kept, and only Codex is written.
+  assert.deepEqual(met.map(event => [event.kind, event.winner?.tool, event.orderProved, event.losers.map(loser => loser.tool)]), [['conflict', 'copilot-cli', false, ['claude-cli', 'codex-cli']]]);
+  assert.match(librarySentence(met[0], libraryWords.mcp, three)!.text, /^Copilot CLI’s edit became the current version, though the times can’t tell which edit came last\./);
+  assert.deepEqual([await commandIn(box, 'codex-cli'), await commandIn(box, 'claude-cli'), (await box.row('docs'))?.waits], ['COPILOT-2', 'CLAUDE-EDIT', ['claude-cli']]);
+  await writeToClaude(box.context, three, ['docs']);
+  const written = (await readHistory(box.context)).slice(told + 1);
+  assert.deepEqual(written.map(event => [event.kind, event.cause, event.losers.map(loser => loser.tool)]), [['on', 'in-line', ['claude-cli']]]);
+  assert.equal(await commandIn(box, 'claude-cli'), 'COPILOT-2');
+}));
+
 test('A removal Claude Code owes goes to the file it was owed in, never to Claude Code’s settings moved somewhere else since', () => inBox(async box => {
   await fs.writeFile(box.path('claude-cli'), docsRuns('BASE'));
   await applyServers(box.context, three, [on('docs')]);

@@ -584,6 +584,10 @@ test('Automatic sync off, an edit in Codex later than the source’s change, Che
     assert.deepEqual([answered(done), await bodyOf(box, 'notes')], [[{ name: 'notes', answer: 'keep' }], 'Edited in Codex.']);
     const told = (await readHistory(box.context)).filter(event => event.key === 'notes').slice(-2).map(event => [event.kind, event.cause ?? event.winner?.tool]);
     assert.deepEqual(told, [['kept-edit', 'source'], ['edit', 'codex-cli']]);
+    // The source's version was never current: the edit's note is against the one before it, and its own against the edit.
+    const item = (await itemOf(box, 'notes'))!;
+    assert.deepEqual(item.versions.map(version => [version.from.how, version.from.replacedBy === item.hash]), [['edited', false], ['source', true], ['source', false]]);
+    assert.deepEqual((await seen(box, box.context, 'notes')).fact?.versionChanges, [{ changed: ['SKILL.md'] }, { differs: ['SKILL.md'] }, 'first']);
     assert.equal(done.sourced?.[0].history, (await readHistory(box.context)).find(event => event.kind === 'kept-edit' && event.cause === 'source')?.id, 'the answer names the entry that says it');
   } finally { await box.cleanup(); }
 });

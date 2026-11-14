@@ -421,7 +421,7 @@ export const pendingChanges = (made: Plan): HarnessId[] => [...pendingEdits(made
  * only when it is later than the current version. A copy with no time of its own is later than nothing: of several edits
  * that count, the first harness wins where none has a time (the sort keeps the harnesses' order), as where two times are equal.
  * `orderProved` says which decided (Plan orderProved), here where it is decided: a time, only where the next edit that counts
- * is earlier by its time and every edit that lost to the rule had a time (so it was earlier than the current version).
+ * is earlier by time and every edit that lost to the rule has a time (so it was earlier than the current version).
  */
 function latestEdit(item: LibraryItem, copies: Copies, verdicts: Map<HarnessId, Verdict>): Pick<Plan, 'takeIn' | 'orderProved'> {
   const timeOf = (harness: HarnessId) => (copies[harness] as { at?: number }).at, at = (harness: HarnessId) => timeOf(harness) ?? -Infinity;
@@ -431,8 +431,7 @@ function latestEdit(item: LibraryItem, copies: Copies, verdicts: Map<HarnessId, 
   // Two copies with no time compare as NaN, which a sort takes as equal: they stay in the harnesses' order.
   const [takeIn, next] = edits.filter(([harness, does]) => counts(harness, does)).map(([harness]) => harness).sort((first, second) => at(second) - at(first));
   const lostUntimed = edits.some(([harness, does]) => !counts(harness, does) && timeOf(harness) === undefined);
-  const beforeIt = !next || (timeOf(next) !== undefined && at(takeIn) > at(next));
-  return { takeIn, orderProved: !takeIn || (beforeIt && !lostUntimed) };
+  return { takeIn, orderProved: !takeIn || ((!next || at(takeIn) > at(next)) && !lostUntimed) };
 }
 
 /**

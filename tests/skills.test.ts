@@ -104,6 +104,30 @@ test('Two edits: the latest wins by the folder’s time, where a file removed in
   } finally { await box.cleanup(); }
 });
 
+test('Two edits a minute apart: History and the notice call the later one the latest; two saved in the same millisecond: the times can’t tell, and neither do they', async () => {
+  const box = await sandbox();
+  try {
+    await put(box, 'claude-cli');
+    await turnOn(box);
+    await put(box, 'codex-cli', { 'SKILL.md': skillText('Codex’s edit.') });
+    await touch(folderOf(box, 'codex-cli'), at(10));
+    await put(box, 'copilot-cli', { 'SKILL.md': skillText('Copilot’s edit.') });
+    await touch(folderOf(box, 'copilot-cli'), at(11));
+    const apart = itemNotice((await pass(box)).notices![0]);
+    assert.equal(say.noticeWords(apart).text, 'notes: Copilot CLI’s edit is the latest, so it is the current version. Codex’s is kept as a version.');
+    assert.equal(librarySentence((await historyOf(box)).at(-1)!, libraryWords.skills, tools)?.text, 'Copilot CLI’s edit was the latest, so it became the current version. Codex’s is kept as a version.');
+    // The same millisecond: Claude Code comes first among the tools, and that is all that decided.
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Claude Code’s edit.') });
+    await touch(folderOf(box, 'claude-cli'), at(30));
+    await put(box, 'codex-cli', { 'SKILL.md': skillText('Codex’s second edit.') });
+    await touch(folderOf(box, 'codex-cli'), at(30));
+    const tie = itemNotice((await pass(box)).notices![0]);
+    assert.deepEqual([tie.winner, tie.orderProved], ['claude-cli', false]);
+    assert.equal(say.noticeWords(tie).text, 'notes: Claude Code’s edit is the current version, though the times can’t tell which edit came last. Codex’s is kept as a version.');
+    assert.equal(librarySentence((await historyOf(box)).at(-1)!, libraryWords.skills, tools)?.text, 'Claude Code’s edit became the current version, though the times can’t tell which edit came last. Codex’s is kept as a version.');
+  } finally { await box.cleanup(); }
+});
+
 test('A file edited inside a folder makes its time: the later edit wins although its folder’s own time is the earlier', async () => {
   const box = await sandbox();
   try {

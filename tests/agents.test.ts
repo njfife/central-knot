@@ -807,6 +807,8 @@ inBox('An edit saved between the read and the removal stays where it is, and bec
   const off = await turnOff(box, racing);
   assert.match(off.results.find(entry => entry.harness === 'claude-cli')!.message, /changed just now/);
   assert.match((await readOf(box, 'claude-cli'))!, /Edit late\./, 'the save is not lost');
+  // History names the tools it was taken out of, not Claude Code, where it stays.
+  assert.equal(librarySentence((await historyOf(box)).at(-1)!, libraryWords.agents, tools)?.text, 'Turned off: removed from Copilot CLI and Codex. Central Knot keeps it.');
   await pass(box);
   assert.deepEqual([await readOf(box, 'claude-cli'), await versions(box)], [undefined, ['Edit late. (edited in Claude Code) *', 'Be brief. (found in Claude Code)']]);
 });
@@ -838,6 +840,49 @@ inBox('Turned On over Codex’s own file, which changes just as it is written: H
   assert.deepEqual([await readOf(box, 'claude-cli'), await readOf(box, 'copilot-cli')], [undefined, undefined]);
   assert.match((await readOf(box, 'codex-cli'))!, /Mine\.\n/);
   assert.ok((await versions(box)).includes('Mine, saved again. (was in Codex)'));
+});
+
+inBox('A removal held twice: the pass that holds it again adds no entry naming it; the pass that removes it says so, once', async box => {
+  await on(box);
+  /** A context whose first removal finds Claude Code's file saved again just before it. */
+  const savedAgain = (prompt: string): ShareContext => { let saved = false; return { ...box.context, fault: step => { if (step === 'before-remove' && !saved) { saved = true; writeFileSync(fileOf(box, 'claude-cli'), claudeAgent(prompt)); } } }; };
+  await turnOff(box, savedAgain('You review code.\nEdit late.\n'));
+  const told = (await historyOf(box)).length;
+  await pass(box, savedAgain('You review code.\nEdit later.\n'));
+  assert.deepEqual((await historyOf(box)).slice(told).map(event => [event.kind, event.cause]), [['edit', undefined]], 'the edit taken in, and no in-line Off');
+  await pass(box);
+  assert.equal(await readOf(box, 'claude-cli'), undefined);
+  const removed = (await historyOf(box)).filter(event => event.cause === 'in-line');
+  assert.deepEqual(removed.map(event => [event.kind, event.losers.map(loser => loser.tool)]), [['off', ['claude-cli']]]);
+});
+
+inBox('Kept out of Codex while Codex’s file changes just as it is removed: History doesn’t say its copy there was removed', async box => {
+  await on(box);
+  const racing: ShareContext = { ...box.context, fault: step => { if (step === 'before-remove') writeFileSync(fileOf(box, 'codex-cli'), codexAgent('You review code.\nEdit late.\n')); } };
+  await keepOut(box, 'codex-cli', true, racing);
+  assert.equal(librarySentence((await historyOf(box)).at(-1)!, libraryWords.agents, tools)?.text, 'Kept out of Codex. Central Knot keeps it.');
+});
+
+inBox('An Undo whose own file to give back changes just as it is given back: History doesn’t say Codex has its own file back', async box => {
+  await on(box);
+  await turnOff(box);
+  await write(box, 'codex-cli', codexAgent('You review code.\nMine.\n'));
+  const turned = await turnOn(box) as PassResult;
+  let saved = false;
+  const racing: ShareContext = { ...box.context, fault: step => { if (step === 'before-rename' && !saved) { saved = true; writeFileSync(fileOf(box, 'codex-cli'), codexAgent('You review code.\nSaved just then.\n')); } } };
+  await undo(box, turned, racing);
+  const entry = (await historyOf(box)).at(-1)!;
+  assert.deepEqual([entry.kind, entry.gaveBack], ['off', undefined]);
+  assert.equal(librarySentence(entry, libraryWords.agents, tools)?.text, 'Turned off: removed from Claude Code and Copilot CLI. Central Knot keeps it.');
+  assert.match((await readOf(box, 'codex-cli'))!, /Saved just then\./, 'what Codex saved stays');
+});
+
+inBox('Turned on while Codex is left out: History names the tools it was put in, never Codex', async box => {
+  await on(box);
+  await turnOff(box);
+  box.tools = ['claude-cli', 'copilot-cli'];
+  await turnOn(box);
+  assert.equal(librarySentence((await historyOf(box)).at(-1)!, libraryWords.agents, tools)?.text, 'Turned on: put in Claude Code and Copilot CLI.');
 });
 
 inBox('A removal that finds the copy changed since it was read waits for the next look: its result is held, not failed', async box => {

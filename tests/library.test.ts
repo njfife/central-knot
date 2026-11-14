@@ -3,7 +3,7 @@
 // applied there last. Contents are single letters: 'a' is older than 'b', and so on.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { carryOut, decide, fromSource, isLibraryItem, keepVersion, latestCopy, linkedTo, listed, managedAgain, newItem, plan, setCurrent, originWords, sourceAnswers, takeInAnswer, type HarnessCopy, type LibraryItem, type Shelf } from '../src/library.ts';
+import { carryOut, decide, fromSource, isLibraryItem, keepVersion, latestCopy, linkedTo, listed, managedAgain, newItem, noteAgainst, plan, setCurrent, originWords, sourceAnswers, takeInAnswer, type HarnessCopy, type LibraryItem, type Shelf, type Version } from '../src/library.ts';
 
 const has = (hash: string, at = 0): HarnessCopy => ({ is: 'present', hash, at });
 /** A copy with no time of its own (an MCP entry: its time is its whole file's). */
@@ -184,6 +184,18 @@ test('An edit with no time of its own, where the current version had moved on as
   const moved = item({ hash: 'b', versions: [{ hash: 'b', at: day(3), from: { how: 'edited', harness: 'claude-cli' } }, ...item().versions], applied: { 'claude-cli': 'b', 'codex-cli': 'a' } });
   assert.deepEqual(plan(moved, { 'claude-cli': has('b'), 'codex-cli': untimed('x') }),
     { ...quiet, keep: [{ harness: 'codex-cli', from: { how: 'edited', harness: 'codex-cli', replacedBy: 'b' } }], write: ['codex-cli'], current: ['claude-cli'] });
+});
+
+test('A version’s note: one never current is compared with the version that took its place; any other with the version current before it, passing over those never current', () => {
+  const versions: Version[] = [{ hash: 'c', at: day(3), from: { how: 'edited', harness: 'codex-cli' } }, { hash: 'b', at: day(3), from: { how: 'edited', harness: 'claude-cli', replacedBy: 'c' } },
+    { hash: 'x', at: day(2), from: { how: 'was-in', harness: 'copilot-cli', replacedBy: 'a' } }, { hash: 'a', at: day(1), from: { how: 'chosen', harness: 'claude-cli' } }];
+  assert.deepEqual(versions.map(version => noteAgainst({ versions }, version)), [{ how: 'changed', against: 'a' }, { how: 'differs', against: 'c' }, { how: 'differs', against: 'a' }, 'none']);
+  // An edit that lost to the first version doesn't make that version one taken in with copies: only a copy that gave way does.
+  const lost: Version[] = [{ hash: 'b', at: day(2), from: { how: 'edited', harness: 'codex-cli', replacedBy: 'a' } }, { hash: 'a', at: day(1), from: { how: 'found', harness: 'claude-cli' } }];
+  assert.equal(noteAgainst({ versions: lost }, lost[1]), 'first');
+  // An edit that lost, stored before it said what beat it, reads as it did: as current once.
+  const older: Version[] = [{ hash: 'c', at: day(3), from: { how: 'edited', harness: 'codex-cli' } }, { hash: 'b', at: day(3), from: { how: 'edited', harness: 'claude-cli' } }, lost[1]];
+  assert.deepEqual(noteAgainst({ versions: older }, older[0]), { how: 'changed', against: 'b' });
 });
 
 test('A version taken in from a copy with no time of its own is dated when it is taken', async () => {
