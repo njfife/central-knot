@@ -81,7 +81,7 @@ await wait(2300);
 const deleted = await pass();
 say('4b after settling: Off everywhere', deleted);
 console.log('   ', await state());
-const event = deleted.notices?.find(notice => notice.kind === 'deleted') as { history: string } | undefined;
+const event = deleted.notices?.find(notice => notice.kind === 'deleted-by-hand') as { history: string } | undefined;
 if (event) { say('5 Turn on, from History', await restoreSkill(context, tools, event.history)); console.log('   ', await state()); }
 say('6 Delete from Central Knot', await pass([{ key: 'ck-trial', on: true, except: [], deleted: true }]));
 console.log('   ', await state());

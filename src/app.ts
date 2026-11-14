@@ -487,7 +487,7 @@ const openHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mod
   const previous = state.home;
   const view = await api().selectHome(mode);
   if (view && view.home !== previous?.home) { forgetRepoPrompts(true); forgetSourcePrompts(true); }
-  // Sync follows the open home: leaving one with managed items stops its syncing, so the band says so and offers the way back.
+  // Sync follows the open home: leaving one with items On stops its syncing, so the band says so and offers the way back.
   const left = previous && view && previous.home !== view.home && anyOn(previous) ? previous : undefined;
   const leftText = left ? ` ${left.label} is not syncing while another home is open.` : '';
   if (!view) { announce(''); return; }
