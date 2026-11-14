@@ -3,8 +3,8 @@
 // what it won't bring in and why, before anything is kept; Add brings each skill into Central Knot, Off. Each source has a row:
 // its link, what it brought (On or Off), when it was last read, why it couldn't be read if so, Check now and Remove; a skill
 // there the library holds deleted has its own Add, and one whose version waits (library.ts changedHere) its own Merge, Replace
-// and Keep mine; a skill the source removed (library.ts REMOVED AT ITS SOURCE, which the Skills view says: types.ts LibraryFacts
-// fromSource) has a line with Turn on, its switch on Skills. Every line and click carries its item's kind (types.ts SourceName
+// and Keep mine; a skill the source removed (library.ts REMOVED AT ITS SOURCE, which its kind's view says: types.ts LibraryFacts
+// fromSource) has a line with Turn on, its switch on its kind's page. Every line and click carries its item's kind (types.ts SourceName
 // `kind`; ids too: source-merge-<id>-skill-<key>), which pluginstatus.ts pageOfPart maps to its page; skills are the only kind
 // a source brings in this version, so the words say skill. Every state a row says is the engine's (types.ts SourceNameState,
 // and that fromSource); this page only words it. Its own page rather than the Git repo's: that page is Pull and Push of the
