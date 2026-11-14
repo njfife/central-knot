@@ -84,7 +84,7 @@ export function migrateItem(key: string, old: OldSkill, kept: Kept[], onDisk: Pa
   const lastSynced = synced ? old.hash : old.deleted!.hash;
   const current = chosen ?? (contents.has(lastSynced) ? lastSynced : !synced && contents.has(old.hash) ? old.hash : undefined);
   if (current === undefined) return undefined;
-  const item: LibraryItem = { ...newItem('skill', key, old.name), on: true, hash: current, except: [...new Set(old.off ?? [])] };
+  const item: LibraryItem = { ...newItem(key, old.name), on: true, hash: current, except: [...new Set(old.off ?? [])] };
   // The order the library takes them in: the current one first, then the others newest first.
   const versions = [...contents].map(([hash, { at, from }]) => ({ hash, at: iso(at), from })).sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
   item.versions = [...versions.filter(version => version.hash === current), ...versions.filter(version => version.hash !== current)];

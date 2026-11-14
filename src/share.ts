@@ -1,3 +1,11 @@
+// What every engine stands on (MAP.md, "The store and safe writes"). Among it, the gate for library writes (libraryGate), the
+// one answer to "may this write of the library happen now". Entered by a pass (librarypass.ts), a profile switch and its Undo
+// (profiles.ts), a tool's Manage switch (toolchoice.ts), Synchronize everything's switch (everything.ts), a skill's Take over
+// and Clear the switch with its Undo (skills.ts), and Convert to a skill (agentskill.ts); only asked by Pull and Push before
+// they start, a Claude Code settings Undo (gitrepo.ts), Synchronize everything's Undo and Restore, and the profiles migration;
+// asked for a file of Central Knot's own by editing a profile. It is not the gate for every write: reads, takeOverSync (it
+// changes the owner), otherbuilds.ts, connecting and disconnecting the repo, instructions.ts, parts.ts and marketplaces.ts ask
+// writeAccess alone; syncsHere is whether this build syncs the home at all (the background pass, History kept tidy).
 import { createHash, randomUUID } from 'node:crypto';
 import { STANDARD_BUILD, PRODUCT } from './values.ts';
 import { createReadStream } from 'node:fs';
@@ -404,8 +412,33 @@ export async function remember(context: ShareContext, generation: string) {
 
 export const NOTHING_CHANGED = 'Nothing was written or deleted. Put the record back, then try again.';
 
-/** Why nothing may be written right now (another build owns syncing, or the record needs Resume), if so. */
-export const gateRefusal = (gate: SyncGate) => (gate.state === 'stopped' || gate.state === 'needs-resume' ? gate.reason : undefined);
+/** What a write of the library asks of libraryGate. With none set, it only asks: nothing is made or remembered. */
+export interface Entering {
+  /** It enters a write: a home with no sync record gets one, this build's, remembered as its own. */
+  start?: boolean;
+  /** The click is a Resume (the page showed a home waiting for one): such a home is let in and remembered. */
+  resume?: boolean;
+  /** It writes a file of Central Knot's own (profiles.json): a home waiting for Resume does not stop it. */
+  ownFile?: boolean;
+}
+
+/**
+ * The gate for library writes: whether one may happen now, else why not in plain words: a preview-only home (writeAccess),
+ * another build's record or one that can't be read (syncGate `stopped`), or one waiting for Resume (unless `resume` or
+ * `ownFile`). Let in, it has already done what entering needs before anything is written: the record made (`start`), the
+ * home remembered (`start`, `resume`), so a click that writes before its own pass never finds that pass refused. Answers the
+ * home's record, where it has one.
+ */
+export async function libraryGate(context: ShareContext, asked: Entering = {}): Promise<{ refused: string } | { record?: SyncRecord }> {
+  const access = await writeAccess(context);
+  if (!access.allowed) return { refused: access.reason };
+  const gate = await syncGate(context);
+  if (gate.state === 'stopped' || (gate.state === 'needs-resume' && !asked.resume && !asked.ownFile)) return { refused: gate.reason };
+  let { record } = await readRecord(context.home);
+  if (!record && asked.start) { record = newRecord(context); await saveRecord(context.home, record); await remember(context, record.generation); }
+  else if (record && gate.state === 'needs-resume' && asked.resume) await remember(context, record.generation);
+  return { record };
+}
 
 /** Section 3's stops: none of these turns into first setup or adopts a stale record. */
 export async function syncGate(context: ShareContext): Promise<SyncGate> {

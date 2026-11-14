@@ -11,7 +11,7 @@ import type { HarnessId, HistoryEvent } from '../src/types.ts';
 const tools = ['claude-cli', 'copilot-cli', 'codex-cli'];
 const at = '2026-11-08T09:20:00.000Z';
 /** "reviewer", On at version 'b' (edited in Codex), with the earlier 'a' and a copy that gave way, 'x'. */
-const item = (changes: Partial<LibraryItem> = {}): LibraryItem => ({ ...newItem('agent', 'reviewer', 'reviewer'), on: true, hash: 'b', versions: [
+const item = (changes: Partial<LibraryItem> = {}): LibraryItem => ({ ...newItem('reviewer', 'reviewer'), on: true, hash: 'b', versions: [
   { hash: 'b', at, from: { how: 'edited', harness: 'codex-cli' } }, { hash: 'x', at, from: { how: 'was-in', harness: 'copilot-cli' } }, { hash: 'a', at, from: { how: 'found', harness: 'claude-cli' } }], ...changes });
 const entry = (fields: Partial<HistoryEvent>): HistoryEvent => ({ id: 'e', at, key: 'agent:reviewer', item: 'reviewer', kind: 'edit', losers: [], orderProved: true, ...fields });
 /** Nothing waits in the tools: no copy holds an edit not taken in, and these three are managed (historyactions.ts ItemNow). */
@@ -130,7 +130,7 @@ test('Whose an entry is: an agent’s and a server’s by their prefix (a server
 });
 
 test('A skill’s entries from before the library that no click can say again show as past: Remove, Disable, take-over, copies added', () => {
-  const skill = { ...item(), kind: 'skill' as const, key: 'notes', name: 'notes' };
+  const skill = { ...item(), key: 'notes', name: 'notes' };
   for (const kind of ['removed', 'switched', 'took-over', 'added'] as const) assert.equal(libraryAction(entry({ key: 'notes', kind, previous: 'a' }), skill, settled), undefined, kind);
   // A skill's copies taken over now, and a tool's switch cleared, are said in the skill's words; neither has an Undo.
   assert.equal(librarySentence(entry({ key: 'notes', kind: 'switched', switched: [{ tool: 'codex-cli', disabled: false }] }), libraryWords.skills, tools)?.text, 'Codex’s own switch for it was cleared: Codex loads it again.');

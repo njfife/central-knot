@@ -5,11 +5,11 @@
 // came from, and never gives it to the agent's own tool by itself).
 import { mkdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { isAgentTool, keyOf, readAgents, safeName, type AgentEntry } from './agentfiles.ts';
+import { isAgentTool, readAgents, safeName, type AgentEntry } from './agentfiles.ts';
 import { harnesses, writeRoot } from './harnesses.ts';
 import { readConverted, recordConverted } from './skillstore.ts';
 import { agentTools } from './presence.ts';
-import { writeAccess, writeFileChecked, type ShareContext } from './share.ts';
+import { itemKey, libraryGate, writeFileChecked, type ShareContext } from './share.ts';
 import type { HarnessId } from './types.ts';
 
 /** What an agent has that a skill never does (AGT-02): said on the converted skill, never "agent installed". */
@@ -18,15 +18,19 @@ export const conversionLosses = ['its own isolated context', 'tool restrictions'
 /** The agent's copy with the most of it: Claude Code's first, as the fullest format, among the tools here. */
 async function fullestCopy(context: ShareContext, tools: HarnessId[], key: string): Promise<AgentEntry | undefined> {
   for (const tool of agentTools.filter(tool => tools.includes(tool) && isAgentTool(tool))) {
-    const entry = (await readAgents(context, tool)).entries.find(candidate => candidate.key === keyOf(key));
+    const entry = (await readAgents(context, tool)).entries.find(candidate => candidate.key === itemKey(key));
     if (entry) return entry;
   }
   return undefined;
 }
 
-export async function convertAgentToSkill(context: ShareContext, tools: HarnessId[], key: string): Promise<{ stopped?: string; skill?: string; origin?: HarnessId }> {
-  const access = await writeAccess(context);
-  if (!access.allowed) return { stopped: access.reason };
+/**
+ * Converts one agent: its fullest copy written as Pi's skill, and where it came from recorded. Refused where a click may not
+ * write (share.ts libraryGate); `resume`: the click is a Resume, so the pass that takes the skill in after it is not refused.
+ */
+export async function convertAgentToSkill(context: ShareContext, tools: HarnessId[], key: string, resume = false): Promise<{ stopped?: string; skill?: string; origin?: HarnessId }> {
+  const gate = await libraryGate(context, { start: true, resume });
+  if ('refused' in gate) return { stopped: gate.refused };
   if (!tools.includes('pi-cli')) return { stopped: 'Pi is not in this home, so there is nowhere to convert to.' };
   const entry = await fullestCopy(context, tools, key);
   if (!entry) return { stopped: 'That agent is not there any more.' };

@@ -8,7 +8,7 @@
 // copyQuestion, which listNotices hands it, so this module needs nothing of matrix.ts), the latest copy preselected (library.ts latestCopy, in the take-in answer). Settings' Synchronize everything row
 // counts as the question does and leads in too (settingspage.ts). What Yes does in the engine, and its one Undo in History, are
 // everything.ts's.
-import { applyClick, busy, noToolManaged, rerender, setHome, showPage, state, syncNow, tell, whyReadOnly, type PageKind } from './app.ts';
+import { applyClick, busy, clickResumes, noToolManaged, rerender, setHome, showPage, state, syncNow, tell, whyReadOnly, type PageKind } from './app.ts';
 import { button, closeButton, h, icon } from './dom.ts';
 import { rowClicks } from './libraryrow.ts';
 import { plural } from './model.ts';
@@ -122,7 +122,7 @@ const useLatest = (left: Waiting[]) => busy('Choosing the latest copies…', asy
   const sent: { kind: PageKind; result: PassResult }[] = [];
   for (const kind of KINDS) {
     const changes: Change[] = dated.filter(item => item.kind === kind).map(item => rowClicks.on({ key: item.key, hashes: { [item.latest!.tool]: item.latest!.hash } }, undefined, item.latest!.tool));
-    if (changes.length) sent.push({ kind, result: await send[kind](changes, home.sync.gate.state === 'needs-resume', home.home) });
+    if (changes.length) sent.push({ kind, result: await send[kind](changes, clickResumes(home), home.home) });
   }
   setHome(await window.centralKnot.refresh());
   walk.passed.push(...undated.map(walkId));

@@ -21,6 +21,7 @@ import { mcpFile } from './mcp.ts';
 import { switchPath } from './skillswitch.ts';
 import { applyServers, restoreServer, serversView, serverVersion, writeToClaude } from './servers.ts';
 import { agentVersion, agentsView, applyAgents, restoreAgent } from './agents.ts';
+import { libraryEntry } from './historyactions.ts';
 import { convertAgentToSkill } from './agentskill.ts';
 import { applyBase, baseView, instructionsView, instructionVersion, repoBase, saveInstruction, undoBase } from './instructions.ts';
 import { clearDraftFolders, draftSources, draftTools, writeDraft } from './draftbase.ts';
@@ -1183,8 +1184,8 @@ app.whenReady().then(async () => {
   // Reveal only: the file manager selects it; nothing is opened, run or written.
   handle('file:show', async path => { if (typeof path === 'string' && isAbsolute(path)) shell.showItemInFolder(path); });
   handle('history:change', async eventId => (current && typeof eventId === 'string' ? skillChange(context(), eventId) : undefined));
-  handle('agents:convert', async (key, home) => (home === current?.home && typeof key === 'string'
-    ? convertAgentToSkill(context(), await toolsNow(), key)
+  handle('agents:convert', async (key, resume, home) => (home === current?.home && typeof key === 'string'
+    ? convertAgentToSkill(context(), await toolsNow(), key, resume === true)
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.' }));
   handleNow('agents:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await agentVersion(context(), key, hash)) ?? null : null));
   handle('instructions:view', async readId => (current ? instructionsView(context(), await readFor(readId as number | undefined)) : null));
@@ -1215,7 +1216,8 @@ app.whenReady().then(async () => {
   const otherHome = { stopped: notOpenHome, written: [], left: [] };
   handle('instructions:apply-base', async (request, home) => (home === current?.home && isBaseApply(request) ? applyBase(context(), await read(), request) : otherHome));
   handle('instructions:undo-base', async (undo, home) => (home === current?.home && isBaseUndo(undo) ? undoBase(context(), await read(), undo) : otherHome));
-  handle('history:restore', async (eventId, resume, home, choice) => (home === current?.home && typeof eventId === 'string'
+  // `resume` is not passed on: History's actions wait for Resume, which the page offers first.
+  handle('history:restore', async (eventId, _resume, home, choice) => (home === current?.home && typeof eventId === 'string'
     ? await (async () => {
       const past = (await readHistory(context())).find(entry => entry.id === eventId);
       if (past?.kind === 'profile') return undoSwitch(context(), await toolsNow(), eventId);
@@ -1223,15 +1225,15 @@ app.whenReady().then(async () => {
       if (past?.kind === 'managing') return { stopped: 'Turning a tool’s Manage switch has no Undo: turn it back on the tool’s Harnesses card.', results: [], harnessWrites: 0 };
       // Synchronize everything switched on: its one Undo; that Undo's entry: its Restore (everything.ts).
       if (past?.kind === 'everything') return everythingEntryAction(context(), await toolsNow(), eventId);
-      const key = past?.key ?? '';
       // A pull that changed only an agent's Claude Code settings has its own Undo (its earlier file, kept whole).
       if (past?.settingsFile) return undoSettingsChange(context(), eventId);
       // A Pull that edited or deleted the base instructions: the base's own Undo puts the earlier base and its tools back.
       if (past?.base) return undoPulledBase(context(), await read(), eventId);
-      const tools = await toolsNow();
+      // A library item's entry goes to its kind's restore, by the one rule for whose an entry is; any other reaches none.
+      const whose = past && libraryEntry(past);
+      if (!whose) return { stopped: 'That History entry has nothing Central Knot can undo. Nothing was changed.', results: [], harnessWrites: 0 };
       const version = typeof choice === 'string' ? choice : undefined;
-      const restored = key.startsWith('mcp:') ? await restoreServer(context(), tools, eventId, version)
-        : key.startsWith('agent:') ? await restoreAgent(context(), tools, eventId, version) : await restoreSkill(context(), tools, eventId, version);
+      const restored = await { skills: restoreSkill, mcp: restoreServer, agents: restoreAgent }[whose.kind](context(), await toolsNow(), eventId, version);
       return { stopped: restored.stopped, results: restored.results, harnessWrites: restored.writes, made: restored.made };
     })()
     : { stopped: elsewhere, results: [], harnessWrites: 0 } satisfies ApplyResult));
@@ -1320,10 +1322,10 @@ app.whenReady().then(async () => {
     ? applySkills(context(), await toolsNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
     : { stopped: elsewhere, results: [], writes: 0 }));
   // A skill's two actions a Change can't carry: a tool's own switch cleared, and a copy outside Central Knot's taken over.
-  handle('skills:clear-switch', async (key, tool, home) => (home === current?.home && typeof key === 'string' && isTool(tool)
-    ? clearSwitch(context(), await toolsNow(), key, tool) : { stopped: elsewhere, results: [], writes: 0 }));
-  handle('skills:take-over', async (key, tool, home) => (home === current?.home && typeof key === 'string' && isTool(tool)
-    ? takeOver(context(), await toolsNow(), key, tool) : { stopped: elsewhere, results: [], writes: 0 }));
+  handle('skills:clear-switch', async (key, tool, resume, home) => (home === current?.home && typeof key === 'string' && isTool(tool)
+    ? clearSwitch(context(), await toolsNow(), key, tool, resume === true) : { stopped: elsewhere, results: [], writes: 0 }));
+  handle('skills:take-over', async (key, tool, resume, home) => (home === current?.home && typeof key === 'string' && isTool(tool)
+    ? takeOver(context(), await toolsNow(), key, tool, resume === true) : { stopped: elsewhere, results: [], writes: 0 }));
   handleNow('skills:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await skillVersion(context(), key, hash)) ?? null : null));
   // The git repo the Managed set lives in. Reading it, and asking the repo for its latest commit, waits for no sync pass;
   // Connect, Pull, Push and Disconnect take their turn with every other change.

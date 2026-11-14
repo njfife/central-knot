@@ -19,8 +19,8 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { agentHash, agentsFolder, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
-import type { AgentLibrary } from './agentstore.ts';
 import { newItem, type LibraryItem, type Source } from './library.ts';
+import type { KindLibrary } from './librarypass.ts';
 import { agentTools } from './presence.ts';
 import { sha256, storeDirectory, type ShareContext } from './share.ts';
 import type { HarnessId } from './types.ts';
@@ -64,7 +64,7 @@ export function migrateItem(key: string, old: OldItem, kept: KeptContent[], onDi
   const lastSynced = deleted?.hash ?? old.hash;
   const current = contents.has(lastSynced) ? lastSynced : synced || deleted ? undefined : latest;
   if (current === undefined) return undefined;
-  const item: LibraryItem = { ...newItem('agent', key, old.name), on: synced || !!deleted, hash: current };
+  const item: LibraryItem = { ...newItem(key, old.name), on: synced || !!deleted, hash: current };
   if (deleted) item.deleted = { at: deleted.at };
   // The order the library takes them in: the current one last taken (first), then the others newest first.
   const versions = [...contents].map(([hash, { at, from }]) => ({ hash, at: iso(at), from })).sort((first, second) => Date.parse(second.at) - Date.parse(first.at));
@@ -109,7 +109,7 @@ async function readKept(context: ShareContext, key: string): Promise<KeptContent
 /** A migrated record: its items and folders, and the contents the new store needs for them (each version, and each harness's own file). */
 export interface Migrated {
   items: Record<string, LibraryItem>;
-  folders: AgentLibrary['folders'];
+  folders: KindLibrary['folders'];
   versions: { key: string; hash: string; agent: SharedAgent }[];
   own: { key: string; text: string }[];
 }

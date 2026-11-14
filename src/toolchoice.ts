@@ -9,7 +9,7 @@ import { harnessIds } from './harnesses.ts';
 import { appendHistory } from './history.ts';
 import { forgetFolders, joinCounts } from './librarypass.ts';
 import { serverKind } from './servers.ts';
-import { newRecord, readRecord, remember, saveRecord, syncGate, writeAccess, type ShareContext } from './share.ts';
+import { libraryGate, saveRecord, type ShareContext } from './share.ts';
 import { skillKind } from './skills.ts';
 import type { HarnessId, HistoryEvent, JoinCounts } from './types.ts';
 import { toolName } from './words.ts';
@@ -24,11 +24,9 @@ import { toolName } from './words.ts';
  * Undo, since the switch is the way back. Run between passes, like any other write to the records.
  */
 export async function chooseTools(context: ShareContext, tool: HarnessId, on: boolean, resume = false): Promise<{ stopped?: string }> {
-  const access = await writeAccess(context);
-  if (!access.allowed) return { stopped: access.reason };
-  const gate = await syncGate(context);
-  if (gate.state === 'stopped' || (gate.state === 'needs-resume' && !resume)) return { stopped: gate.reason };
-  const record = (await readRecord(context.home)).record ?? newRecord(context);
+  const gate = await libraryGate(context, { start: true, resume });
+  if ('refused' in gate) return { stopped: gate.refused };
+  const record = gate.record!; // made by the gate where there was none (`start`)
   const leftOut = record.leftOut ?? [];
   if (leftOut.includes(tool) !== on) return {};
   const next = on ? leftOut.filter(other => other !== tool) : [...leftOut, tool];
@@ -41,7 +39,6 @@ export async function chooseTools(context: ShareContext, tool: HarnessId, on: bo
   }
   if (next.length) record.leftOut = next; else delete record.leftOut;
   await saveRecord(context.home, record);
-  if (gate.state !== 'ready') await remember(context, record.generation);
   await appendHistory(context, [managingEntry(context, tool, on)]);
   return {};
 }

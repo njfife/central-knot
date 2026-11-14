@@ -73,7 +73,7 @@ export function migrateItem(name: string, old: OldItem, kept: KeptServer[], onDi
   for (const entry of onDisk) if (!contents.has(entry.hash)) contents.set(entry.hash, { at: 0, from: { how: 'was-in', harness: entry.tool } });
   const current = deleted?.hash ?? old.hash;
   if (!contents.has(current)) return undefined;
-  const item: LibraryItem = { ...newItem('mcp', itemKey(name), name), on: true, hash: current };
+  const item: LibraryItem = { ...newItem(itemKey(name), name), on: true, hash: current };
   if (deleted) item.deleted = { at: deleted.at };
   // The order the library takes them in: the current one last taken (first), then the others newest first.
   const versions = [...contents].map(([hash, { at, from }]) => ({ hash, at: iso(at), from })).sort((first, second) => Date.parse(second.at) - Date.parse(first.at));

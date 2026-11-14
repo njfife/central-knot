@@ -15,38 +15,18 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { isLibraryItem, type LibraryItem } from './library.ts';
+import { emptyLibrary, readLibraryFile, saveLibraryFile, type RecordFile, type StoredLibrary } from './kindstore.ts';
+import type { LibraryItem } from './library.ts';
 import type { KindLibrary } from './librarypass.ts';
-import { NOTHING_CHANGED, copyTree, errorCode, exists, finishCopy, readRecord, readTree, removeTree, saveRecord, storeDirectory, storeFolder, writeDurably, type ShareContext } from './share.ts';
+import { NOTHING_CHANGED, copyTree, exists, finishCopy, readRecord, readTree, removeTree, saveRecord, storeDirectory, storeFolder, writeDurably, type ShareContext } from './share.ts';
 import { migrateSkills, type Migrated, type ToolsRead } from './skillmigrate.ts';
 import type { HarnessId } from './types.ts';
 
-/** The record: the skills' part of the library (librarypass.ts KindLibrary: the items, and each skills folder as last seen). */
-export interface SkillLibrary extends KindLibrary { formatVersion: number }
 /** A version's content: the folder that holds it (in the store, or a tool's copy being taken in) and its hash. */
 export interface SkillContent { directory: string; hash: string }
 
-const FORMAT_VERSION = 1;
-const recordPath = (home: string) => join(storeDirectory(home), 'skills.json');
-/** No prototype on `items`: a skill may be called constructor or __proto__. */
-const emptyLibrary = (): SkillLibrary => ({ formatVersion: FORMAT_VERSION, items: Object.create(null), folders: {} });
-
-type Inspected = { library: SkillLibrary } | { problem: string } | Record<string, never>;
-/** Reads the record as it is. Unreadable, damaged or newer is a `problem` that stops every write; the file is never touched. */
-async function inspect(home: string): Promise<Inspected> {
-  let text: string;
-  try { text = await readFile(recordPath(home), 'utf8'); }
-  catch (error) { return errorCode(error) === 'ENOENT' ? {} : { problem: `The skills record could not be read. ${NOTHING_CHANGED}` }; }
-  const damaged = { problem: `The skills record is damaged. ${NOTHING_CHANGED}` };
-  try {
-    const record = JSON.parse(text) as Partial<SkillLibrary> | null;
-    const version = record?.formatVersion, items = record?.items;
-    if (!Number.isInteger(version) || version! < 1 || !items || typeof items !== 'object' || Array.isArray(items)) return damaged;
-    if (version! > FORMAT_VERSION) return { problem: `The skills record was written by a newer Central Knot. ${NOTHING_CHANGED}` };
-    if (!Object.values(items).every(isLibraryItem)) return damaged;
-    return { library: { formatVersion: FORMAT_VERSION, items: Object.assign(Object.create(null), items), folders: record!.folders ?? {} } };
-  } catch { return damaged; }
-}
+/** skills.json, format 1: the library's from the start (the skills before it were in sync.json). */
+const RECORD: RecordFile = { file: 'skills.json', format: 1, said: 'The skills record' };
 
 /**
  * The skills' library in this home; empty when nothing is recorded yet. Skills recorded before the library (in sync.json,
@@ -56,19 +36,19 @@ async function inspect(home: string): Promise<Inspected> {
  * skills.json is written is finished by the next opening (finishMigration).
  */
 export async function openLibrary(context: ShareContext, persist: boolean, read: (context: ShareContext, managed: HarnessId[]) => Promise<ToolsRead>)
-  : Promise<{ library: SkillLibrary; problem?: string }> {
-  const found = await inspect(context.home);
-  if ('problem' in found) return { library: emptyLibrary(), problem: found.problem };
+  : Promise<{ library: StoredLibrary; problem?: string }> {
+  const found = await readLibraryFile(context.home, RECORD);
+  if ('problem' in found) return { library: emptyLibrary(RECORD), problem: found.problem };
   const { record, problem } = await readRecord(context.home);
   if ('library' in found) {
     if (persist && record?.formatVersion === 1) await finishMigration(context);
     return { library: found.library };
   }
-  if (problem || record?.formatVersion !== 1) return { library: emptyLibrary() };
+  if (problem || record?.formatVersion !== 1) return { library: emptyLibrary(RECORD) };
   let migrated: Migrated;
   try { migrated = await migrateSkills(context, record, read); }
-  catch (error) { return { library: emptyLibrary(), problem: `The skills recorded before could not be read: ${error instanceof Error ? error.message : String(error)} ${NOTHING_CHANGED}` }; }
-  const library: SkillLibrary = { ...emptyLibrary(), items: migrated.items, folders: migrated.folders };
+  catch (error) { return { library: emptyLibrary(RECORD), problem: `The skills recorded before could not be read: ${error instanceof Error ? error.message : String(error)} ${NOTHING_CHANGED}` }; }
+  const library: StoredLibrary = { ...emptyLibrary(RECORD), items: migrated.items, folders: migrated.folders };
   // A reader, or a home that can't be written: the migrated versions are read where they are until a writer stores them.
   for (const version of migrated.versions) notStoredYet.set(versionPath(context, version.key, version.hash), version.directory);
   if (!persist) return { library };
@@ -84,7 +64,7 @@ export async function openLibrary(context: ShareContext, persist: boolean, read:
 
 /** The skills recorded in skills.json as they are, for a reading of the tools: none before the migration has written it. */
 export async function recordedSkills(home: string): Promise<Record<string, LibraryItem>> {
-  const read = await inspect(home);
+  const read = await readLibraryFile(home, RECORD);
   return 'library' in read ? read.library.items : {};
 }
 
@@ -98,8 +78,7 @@ async function finishMigration(context: ShareContext) {
   await saveRecord(context.home, { ...kept, formatVersion: 2 });
 }
 
-export const saveLibrary = (home: string, { items, folders }: KindLibrary) =>
-  writeDurably(recordPath(home), `${JSON.stringify({ formatVersion: FORMAT_VERSION, items, folders } satisfies SkillLibrary, null, 2)}\n`);
+export const saveLibrary = (home: string, library: KindLibrary) => saveLibraryFile(home, RECORD, library);
 
 // ---------- Versions ----------
 
@@ -141,9 +120,9 @@ export async function readVersion(context: ShareContext, key: string, hash: stri
  * itself. A live skill keeps every version.
  */
 export async function pruneDeleted(context: ShareContext, cutoff: number): Promise<void> {
-  const read = await inspect(context.home);
+  const read = await readLibraryFile(context.home, RECORD);
   if (!('library' in read)) return;
-  for (const item of Object.values(read.library.items) as LibraryItem[]) {
+  for (const item of Object.values(read.library.items)) {
     if (item.deleted && Date.parse(item.deleted.at) < cutoff) await removeTree(join(itemFolder(context, item.key), 'versions')).catch(() => undefined);
   }
 }

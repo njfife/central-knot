@@ -15,10 +15,10 @@
 // through applyAgents).
 import { constants } from 'node:fs';
 import { access } from 'node:fs/promises';
-import { agentHash, agentText, agentsFolder, changedFields, fileFor, isAgentTool, keyOf, nameProblem, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
+import { agentHash, agentText, agentsFolder, changedFields, fileFor, isAgentTool, nameProblem, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
 import { fileTextFor, keepOwn, openLibrary, readVersion, saveLibrary, storeVersion } from './agentstore.ts';
 import { libraryAction } from './historyactions.ts';
-import { listed, pendingEdits, plan } from './library.ts';
+import { itemKey, listed, pendingEdits, plan } from './library.ts';
 import { libraryWords } from './libraryrow.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, itemClick, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
@@ -74,7 +74,7 @@ async function readDisk(context: ShareContext, managed: HarnessId[]): Promise<Ag
  */
 async function agentsThroughPlugins(context: ShareContext, tools: HarnessId[]): Promise<ThroughPlugins> {
   const found: ThroughPlugins = new Map();
-  for (const [tool, given] of await throughPlugins(context, tools, 'agent', keyOf)) {
+  for (const [tool, given] of await throughPlugins(context, tools, 'agent')) {
     const asParts = [...given].flatMap(([key, { asParts: isPart, text: _text, ...plugin }]) => (isPart ? [[key, plugin] as const] : []));
     found.set(tool, new Map(asParts));
   }

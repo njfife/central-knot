@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, readlink, rm, stat, unlink } from 'node:fs/promises';
 import type { Stats } from 'node:fs';
 import { isAbsolute, join, sep } from 'node:path';
-import { agentText, fileFor, fromMarkdown, isAgentTool, keyOf, safeName } from './agentfiles.ts';
+import { agentText, fileFor, fromMarkdown, isAgentTool, safeName } from './agentfiles.ts';
 import { agentsOn } from './agents.ts';
 import { PLUGIN_ONLY, type PluginFiles } from './catalogdetail.ts';
 import { loadProblems, parseSkill } from './discovery.ts';
@@ -289,7 +289,7 @@ async function namesInUse(context: ShareContext, tool: HarnessId) {
     managed(item: Pick<PartItem, 'kind' | 'name'>): boolean {
       if (item.kind === 'skill') return skills.has(itemKey(item.name));
       if (item.kind === 'mcp') return servers.has(itemKey(item.name));
-      return agents.has(keyOf(item.name));
+      return agents.has(itemKey(item.name));
     },
   };
 }

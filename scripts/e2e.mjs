@@ -1895,6 +1895,9 @@ async function practiceFlow() {
     same('Show log file opens the log’s folder and names the file', [existsSync(opened) && readFileSync(opened, 'utf8').trim(), await a.text('#setting-log .setting-note')],
       [join(scratch, 'data'), 'Opened the log’s folder. The file is central-knot.log.']);
   }
+  // History's action for an entry that is no library item's (here, none at all) reaches no kind's restore (main.ts history:restore).
+  same('an entry that is no library item’s is refused in words, and reaches no kind’s restore',
+    (await a.run(`window.centralKnot.restore('no-such-entry', false, ${JSON.stringify(practice)})`)).stopped, 'That History entry has nothing Central Knot can undo. Nothing was changed.');
   // Keep history for: 30 days at first, and History shows only what the window covers. A longer window saves at once; a shorter
   // one asks first (Cancel writes nothing), then removes what is older from this home's History file and from the History page.
   // This home's History also holds the removals made above, so its intro names Restore too.

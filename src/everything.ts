@@ -28,7 +28,7 @@ import { appendHistory, clock, readHistory, replaceHistory } from './history.ts'
 import { everythingAction, everythingPlan, libraryEntry, restorePlan, type EntryItem, type LeftIn } from './historyactions.ts';
 import { itemsNow, restoreAll, type Kind, type Seen } from './librarypass.ts';
 import { serverKind } from './servers.ts';
-import { gateRefusal, newRecord, readRecord, remember, saveRecord, syncGate, writeAccess, type ShareContext, type SyncRecord } from './share.ts';
+import { libraryGate, readRecord, saveRecord, type ShareContext, type SyncRecord } from './share.ts';
 import { skillKind } from './skills.ts';
 import type { ApplyResult, DestinationResult, HarnessId, HistoryEvent } from './types.ts';
 
@@ -36,23 +36,17 @@ const entry = (context: ShareContext, everything: NonNullable<HistoryEvent['ever
   id: randomUUID(), at: new Date(clock(context)).toISOString(), key: 'home:everything', item: 'Synchronize everything', kind: 'everything', everything, losers: [], orderProved: true,
 });
 
-/** Why nothing may be written in this home now (preview only, another build's, a damaged record, one waiting for Resume), if so. */
-async function cannotWrite(context: ShareContext): Promise<string | undefined> {
-  const access = await writeAccess(context);
-  return access.allowed ? gateRefusal(await syncGate(context)) : access.reason;
-}
-
 /**
  * Turns the rule on or off. A switch from off (or never answered) to on, and from on to off, is told to History first, then the
  * record is saved; a first answer of off (first setup's No) is stored with no entry, since nothing was on. Nothing is taken in
  * here: the next pass of the whole home (the background pass, or Sync once) takes in what it finds then. A home with no sync record
- * gets one, as the first click makes it. `answering`: first setup's question, refused once the home has an answer (given in another
- * window, say). Refused, in plain words, where a pass may not write.
+ * gets one, as the first click makes it (share.ts libraryGate). `answering`: first setup's question, refused once the home has an
+ * answer (given in another window, say). Refused, in plain words, where a click may not write: a home waiting for Resume too.
  */
 export async function setSyncEverything(context: ShareContext, on: boolean, answering = false): Promise<{ stopped?: string }> {
-  const refused = await cannotWrite(context);
-  if (refused) return { stopped: refused };
-  const record = (await readRecord(context.home)).record ?? newRecord(context);
+  const gate = await libraryGate(context, { start: true });
+  if ('refused' in gate) return { stopped: gate.refused };
+  const record = gate.record!; // made by the gate where there was none (`start`)
   if (answering && record.syncEverything !== undefined) return { stopped: `This home was asked already: Synchronize everything is ${record.syncEverything ? 'on' : 'off'}. Settings › This home can change it.` };
   await saveRule(context, record, on);
   return {};
@@ -60,15 +54,13 @@ export async function setSyncEverything(context: ShareContext, on: boolean, answ
 
 /**
  * Saves the rule in the home's record: a switch from off (or never answered) to on, or from on to off, told to History first
- * (`told`: false for the one Undo, whose own entry says it), returned. A home with no record yet is remembered as this build's.
+ * (`told`: false for the one Undo, whose own entry says it), returned.
  */
 async function saveRule(context: ShareContext, record: SyncRecord, on: boolean, told = true): Promise<HistoryEvent | undefined> {
   if (record.syncEverything === on) return undefined;
   const said = told && (on || record.syncEverything) ? entry(context, { ruleOn: on }) : undefined;
   if (said) await appendHistory(context, [said]);
-  const first = (await syncGate(context)).state === 'first-setup';
   await saveRecord(context.home, { ...record, syncEverything: on });
-  if (first) await remember(context, record.generation);
   return said;
 }
 
@@ -98,8 +90,8 @@ async function ownActions(context: ShareContext, tools: HarnessId[], entries: Hi
 
 /** A Synchronize everything entry's History action: a switch-on's one Undo, or that Undo's Restore (historyactions.ts everythingAction says which). */
 export async function everythingEntryAction(context: ShareContext, tools: HarnessId[], eventId: string): Promise<ApplyResult> {
-  const refused = await cannotWrite(context);
-  if (refused) return { stopped: refused, results: [], harnessWrites: 0 };
+  const gate = await libraryGate(context);
+  if ('refused' in gate) return { stopped: gate.refused, results: [], harnessWrites: 0 };
   const history = await readHistory(context), event = history.find(each => each.id === eventId), about = await entryItems(context, tools);
   const action = event && everythingAction(event, history, about);
   if (!action) return { stopped: 'That change has nothing left to undo.', results: [], harnessWrites: 0 };

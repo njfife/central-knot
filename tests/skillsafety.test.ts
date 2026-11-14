@@ -9,7 +9,7 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
-import { gateRefusal, managedNow, readRecord, saveRecord, storeDirectory, syncGate, takeOverSync, writeAccess, type ShareContext } from '../src/share.ts';
+import { libraryGate, managedNow, readRecord, saveRecord, storeDirectory, syncGate, takeOverSync, writeAccess, type ShareContext } from '../src/share.ts';
 import { applySkills, skillsView } from '../src/skills.ts';
 import type { Change, HarnessId, Snapshot } from '../src/types.ts';
 import { lineApp, releaseLine } from '../src/updates.ts';
@@ -325,9 +325,10 @@ test('One build syncs a home at a time: the other names the owner, and Take over
     const path = join(box.home, '.central-knot/sync.json');
     const { ownerName: _name, ...unnamed } = JSON.parse(await readFile(path, 'utf8'));
     await writeFile(path, JSON.stringify(unnamed));
-    assert.match(gateRefusal(await syncGate(acme)) ?? '', /^Central Knot syncs this home/);
+    const refusal = async () => { const gate = await libraryGate(acme); return 'refused' in gate ? gate.refused : ''; };
+    assert.match(await refusal(), /^Central Knot syncs this home/);
     await writeFile(path, JSON.stringify({ ...unnamed, owner: 'com.example.other' }));
-    assert.match(gateRefusal(await syncGate(acme)) ?? '', /^Another Central Knot build \(com\.example\.other\) syncs this home/);
+    assert.match(await refusal(), /^Another Central Knot build \(com\.example\.other\) syncs this home/);
     // A record that can't be read is taken over by nobody.
     await writeFile(path, '{ damaged');
     assert.match((await takeOverSync(acme)).stopped ?? '', /^The sync record is damaged\./);

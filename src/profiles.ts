@@ -16,7 +16,7 @@ import { itemKey, type ItemKind } from './library.ts';
 import type { KindLibrary } from './librarypass.ts';
 import { changes, liveItems, switchPlan, undoPlan, type Libraries, type LiveItem, type Turns } from './profileplan.ts';
 import { applyServers, serverKind } from './servers.ts';
-import { errorCode, storeDirectory, syncGate, writeAccess, writeDurably, type ShareContext } from './share.ts';
+import { errorCode, libraryGate, storeDirectory, writeDurably, type ShareContext } from './share.ts';
 import { applySkills, skillKind } from './skills.ts';
 import { strings } from './values.ts';
 import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, PassResult, Profile, ProfileEdit, ProfileSwitchResult, ProfilesView } from './types.ts';
@@ -63,28 +63,14 @@ export const saveProfiles = (home: string, profiles: Profile[]) =>
   writeDurably(profilesPath(home), `${JSON.stringify({ formatVersion: FORMAT_VERSION, profiles }, null, 2)}\n`);
 
 /**
- * Why the library may not be changed now, if so: what makes every kind's pass refuse (librarypass.ts refusal) is one gate, so
- * a switch, its Undo and the migration ask it first and change nothing when it refuses: a preview-only home, another build
- * owning sync, or a record this app has no memory of (Resume first).
- */
-export async function whyNotNow(context: ShareContext): Promise<string | undefined> {
-  const access = await writeAccess(context);
-  if (!access.allowed) return access.reason;
-  const gate = await syncGate(context);
-  return gate.state === 'stopped' || gate.state === 'needs-resume' ? gate.reason : undefined;
-}
-
-/**
  * The home's profiles, ready to change, or why they can't be changed here: a preview-only home, another build owning sync (the
  * page's whyReadOnly in app.ts says the same), a profiles file that can't be read, or one from before profiles were sets of
  * items, which the next pass moves first (profilemigrate.ts, once nothing waits for Resume). Editing a profile writes Central
- * Knot's own file alone, so a record waiting for Resume does not stop it.
+ * Knot's own file alone, so a record waiting for Resume does not stop it (share.ts libraryGate `ownFile`).
  */
 async function openProfiles(context: ShareContext): Promise<{ profiles: Profile[] } | { stop: string }> {
-  const access = await writeAccess(context);
-  if (!access.allowed) return { stop: access.reason };
-  const gate = await syncGate(context);
-  if (gate.state === 'stopped') return { stop: gate.reason };
+  const gate = await libraryGate(context, { ownFile: true });
+  if ('refused' in gate) return { stop: gate.refused };
   const { view, format } = await readProfileFile(context.home);
   if (view.problem) return { stop: view.problem };
   if (format === 1) return { stop: 'These profiles were made by an earlier Central Knot, and are moved to this one the next time it syncs this home. Nothing was changed.' };
@@ -198,8 +184,8 @@ export async function switchProfile(context: ShareContext, tools: HarnessId[], i
   if ('stop' in opened) return stopped(opened.stop);
   const profile = opened.profiles.find(each => each.id === id);
   if (!profile) return stopped('That profile is gone. Nothing was switched.');
-  const why = await whyNotNow(context);
-  if (why) return stopped(`${why} Nothing was switched.`);
+  const gate = await libraryGate(context, { start: true });
+  if ('refused' in gate) return stopped(`${gate.refused} Nothing was switched.`);
   const read = await readLibraries(context);
   if ('stop' in read) return stopped(read.stop);
   const turns = switchPlan(profile, liveItems(read.libraries));
@@ -221,8 +207,8 @@ export async function undoSwitch(context: ShareContext, tools: HarnessId[], even
   const history = await readHistory(context);
   const past = history.find(entry => entry.id === eventId);
   if (!past?.profile?.on || past.undoneBy) return stop('That switch has nothing to undo.');
-  const why = await whyNotNow(context);
-  if (why) return stop(`${why} Nothing was undone.`);
+  const gate = await libraryGate(context, { start: true });
+  if ('refused' in gate) return stop(`${gate.refused} Nothing was undone.`);
   const read = await readLibraries(context);
   if ('stop' in read) return stop(read.stop);
   const turns = undoPlan(past, liveItems(read.libraries));

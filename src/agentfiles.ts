@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { parseDocument, stringify as stringifyYaml } from 'yaml';
 import { configRoot, harnesses } from './harnesses.ts';
 import { agentTools, type AgentTool } from './presence.ts';
-import { errorCode, sha256, type ShareContext } from './share.ts';
+import { errorCode, itemKey, sha256, type ShareContext } from './share.ts';
 import { readTomlTables, tomlValue } from './textedit.ts';
 import type { HarnessId } from './types.ts';
 
@@ -33,7 +33,6 @@ const suffixes: Record<AgentTool, string> = { 'claude-cli': '.md', 'copilot-cli'
 /** A harness's agents folder in this home. */
 export const agentsFolder = (context: ShareContext, tool: HarnessId) => join(configRoot(harnesses[tool], context.home, context.overrides?.[tool]), 'agents');
 export const fileFor = (context: ShareContext, tool: AgentTool, name: string) => join(agentsFolder(context, tool), `${name}${suffixes[tool]}`);
-export const keyOf = (name: string) => name.normalize('NFC').toLowerCase();
 /**
  * Why an agent's name can't become a file name in a harness, in a few words ("é", "starts with “.”"); none when it can.
  * Agent names become file names: letters, digits, dot, dash, underscore and space only, no separators, no dot-files.
@@ -103,11 +102,11 @@ export async function readAgents(context: ShareContext, tool: AgentTool): Promis
     const name = file.slice(0, -suffix.length);
     const path = join(agentsFolder(context, tool), file);
     let text: string;
-    try { text = await readFile(path, 'utf8'); } catch { problems.push(`${path} could not be read.`); unreadable.set(keyOf(name), path); continue; }
+    try { text = await readFile(path, 'utf8'); } catch { problems.push(`${path} could not be read.`); unreadable.set(itemKey(name), path); continue; }
     const agent = parseAgent(tool, name, text);
-    if (!agent) { problems.push(`${path} could not be read as an agent, so it is left alone.`); unreadable.set(keyOf(name), path); continue; }
+    if (!agent) { problems.push(`${path} could not be read as an agent, so it is left alone.`); unreadable.set(itemKey(name), path); continue; }
     const at = await stat(path).then(info => info.mtimeMs, () => 0);
-    entries.push({ name, key: keyOf(name), tool, file: path, text, agent, hash: agentHash(agent), bytes: sha256(text), at });
+    entries.push({ name, key: itemKey(name), tool, file: path, text, agent, hash: agentHash(agent), bytes: sha256(text), at });
   }
   return { entries, problems, unreadable };
 }
