@@ -2293,13 +2293,13 @@ async function sourcesFlow() {
   commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('Remove slop.', 'Remove slop, firmly.') });
   await a.click(`#source-check-${id}`);
   await until(async () => await a.exists(`#source-replace-${id}-deslop`));
-  check('Check now leaves the edit current in every tool, says the source’s version waits, and its line offers Replace', /deslop changed at the source, and was changed here too, so yours stays current: Replace on its row takes the source’s\./.test(await a.text('.band-done .band-text') ?? '')
-    && /Changed at the source and here: yours stays current until you replace it\./.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '') && Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('my way')), [await a.text('.band-done'), await a.text('.source-row')]);
+  check('Check now leaves the edit current in every tool, says the source’s version waits, and its line offers Replace', /deslop changed at the source; yours stays current, since it was changed here or a tool’s copy can’t be read just now: Replace on its row takes the source’s\./.test(await a.text('.band-done .band-text') ?? '')
+    && /Changed at the source\. Yours stays current until you replace it, since it was changed here or a tool’s copy can’t be read just now\./.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '') && Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('my way')), [await a.text('.band-done'), await a.text('.source-row')]);
   await a.shot('sources-waiting');
   await a.click('#nav-skills');
   const waitingRow = await a.text('.ov-row[data-key="deslop"]') ?? '';
   if (!(await a.exists('.details'))) await a.click('#open-deslop');
-  check('its row on Skills says the source has an update, and its opened row says Replace is on Sources', /update at its source/.test(waitingRow) && /which has a newer version\. Yours stays current, since it was changed here too; Replace on Sources makes the source’s current and keeps yours as a version\./.test(await a.text('.details') ?? ''), [waitingRow, await a.text('.details')]);
+  check('its row on Skills says the source has an update, and its opened row says Replace is on Sources', /update at its source/.test(waitingRow) && /which has a newer version\. Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now; Replace on Sources makes the source’s current and keeps yours as a version\./.test(await a.text('.details') ?? ''), [waitingRow, await a.text('.details')]);
   await a.shot('skills-waiting');
   await a.click('#nav-sources');
   await a.click(`#source-replace-${id}-deslop`);

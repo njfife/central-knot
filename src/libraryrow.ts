@@ -110,13 +110,13 @@ export interface LibraryRow {
 
 /**
  * What an item's row says of the source it is linked to (types.ts LibraryFacts fromSource): while a version waits there (the
- * item changed here too: library.ts A SOURCE), the tag after its name; and the opened row's line, written around its link to
+ * item changed here, or a tool's copy unreadable: library.ts changedHere), the tag after its name; and the opened row's line, written around its link to
  * Sources (`before`, the link, `after`).
  */
 export function fromSourceWords(from: { link: string; waits?: true }): { tag?: { text: string; title: string }; before: string; after: string } {
   const label = linkLabel(from.link);
   if (!from.waits) return { before: `From ${label}, a source. What changes there comes in once a day while Automatic sync is on, and at Check now on `, after: ', unless you change it here.' };
-  const waits = 'Yours stays current, since it was changed here too';
+  const waits = 'Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now';
   return { tag: { text: 'update at its source', title: `${label} has a newer version. ${waits}; Replace on Sources makes the source’s current and keeps yours as a version.` },
     before: `From ${label}, a source, which has a newer version. ${waits}; Replace on `, after: ' makes the source’s current and keeps yours as a version.' };
 }

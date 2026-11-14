@@ -2,7 +2,7 @@
 // follows is library.ts's A SOURCE). One field takes the link; Look reads it and shows, skill by skill, what Add would do and
 // what it won't bring in and why, before anything is kept; Add brings each skill into Central Knot, Off. Each source has a row:
 // its link, what it brought (On or Off), when it was last read, why it couldn't be read if so, Check now and Remove; a skill
-// there the library holds deleted has its own Add, and one whose version waits (changed here too) its own Replace. Every state
+// there the library holds deleted has its own Add, and one whose version waits (library.ts changedHere) its own Replace. Every state
 // a row says is the engine's (types.ts SourceNameState); this page only words it. Its own page rather than the Git repo's: that page is Pull and Push of the whole set, two-way and in Central
 // Knot's layout, while a source is read only, holds a few skills, and its rows grow one per link.
 import { announce, busy, rerender, showPage, state } from './app.ts';
@@ -116,7 +116,7 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'results' | 'no
       const into = where(name, 'written'), now = into.length ? `, now in ${toolsPhrase(into, homeTools)}` : ', kept Off';
       return name === replaced ? `${name} has the source’s version${now}; the one it had is kept as a version.` : `${name} was updated from its source${now}.`;
     }),
-    waiting.length ? `${names(waiting)} changed at the source, and ${waiting.length === 1 ? 'was' : 'were'} changed here too, so yours ${waiting.length === 1 ? 'stays' : 'stay'} current: Replace on ${waiting.length === 1 ? 'its row' : 'each one’s row'} takes the source’s.` : '',
+    waiting.length ? `${names(waiting)} changed at the source; yours ${waiting.length === 1 ? 'stays current, since it was' : 'stay current, since they were'} changed here or a tool’s copy can’t be read just now: Replace on ${waiting.length === 1 ? 'its row' : 'each one’s row'} takes the source’s.` : '',
     made.length ? `${names(made)} ${are(made)} in Central Knot, Off: turn ${made.length === 1 ? 'it' : 'them'} on in Skills.` : '',
     linked.length ? `${names(linked)} ${are(linked)} in Central Knot already, the same, and ${linked.length === 1 ? 'is' : 'are'} now from it.` : '',
     left.length ? `Not brought in: ${names(left)} (${left.length === 1 ? 'its row says' : 'their rows say'} why).` : '',
@@ -125,7 +125,7 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'results' | 'no
   const turnOn = dropped.length === 1 && dropped[0].history ? { id: dropped[0].history, label: `Turn ${dropped[0].name} on` } : undefined;
   const undo = !turnOn && updated.length === 1 && updated[0].history ? { id: updated[0].history, label: updated[0].name === replaced ? 'Undo the replace' : 'Undo the update' } : undefined;
   return {
-    text: said.length ? said.join(' ') : `Checked ${label}: nothing to bring in.`, warns: dropped.length > 0 || !!result.notWhole,
+    text: said.length ? said.join(' ') : `Checked ${label}: nothing came in from it.`, warns: dropped.length > 0 || !!result.notWhole,
     ...(updated.length ? { note: `See each change, or undo it, in History.` } : {}), ...(turnOn ?? undo ? { undo: turnOn ?? undo } : {}),
     // Open Skills where something there changed: not for a read that only says what can't be read, or what waits.
     skills: dropped.length + updated.length + made.length + linked.length > 0,
@@ -145,7 +145,7 @@ function stateWords(name: SourceName, preview: boolean): { text: string; warns?:
     case 'make': return { text: preview ? 'Comes in, Off: in no tool until you turn it on' : 'Comes in, Off, at the next Check now' };
     case 'link': return { text: `Already in Central Knot, the same: ${next} links it to this source` };
     case 'update': return { text: preview ? 'Came from this link before and is unchanged: Add links it again, and the source’s version becomes current' : `Changed at the source: ${next} makes that the current version` };
-    case 'wait': return { text: 'Changed at the source and here: yours stays current until you replace it. Replace makes the source’s current and keeps yours as a version.', warns: true };
+    case 'wait': return { text: 'Changed at the source. Yours stays current until you replace it, since it was changed here or a tool’s copy can’t be read just now. Replace makes the source’s current and keeps yours as a version.', warns: true };
     case 'drop': return { text: `No longer at the source: ${next} turns it off`, warns: true };
     case 'differs': return { text: `Not brought in: Central Knot already has a different ${called}. To take this one instead, delete yours from Central Knot on Skills (that also takes it out of every tool it is on in), then ${preview ? 'once the source is added, Add on its row' : 'Add on this row'}.`, warns: true };
     case 'another': return { text: `Not brought in: Central Knot has ${called} from ${name.why ? linkLabel(name.why) : 'another source'}`, warns: true };

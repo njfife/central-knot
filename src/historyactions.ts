@@ -39,9 +39,7 @@
 //                                            this current"; a
 //                                            Replace's (`seen`) puts
 //                                            back the source's
-//                                            version it had taken,
-//                                            so the source's waits
-//                                            again
+//                                            version it had taken
 //   conflict, chosen, kept-edit (an edit     Use <harness>’s        that copy's version is not the current one
 //     not taken in that was written over,
 //     a copy a tool managed again held, or
@@ -271,10 +269,9 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
   if (['added', 'removed', 'switched', 'took-over'].includes(event.kind) || !isVersion(item, event.previous)) return undefined;
   // Undo while what this entry made is still current; once later changes came, it says what it does instead.
   const latest = (event.version ?? event.winner?.hash) === item.hash;
-  // A Replace's Undo puts back the source's version the item had taken, so the version it replaced waits on the source again.
+  // A Replace's Undo puts back the source's version the item had taken (`seen`), so where it had been changed here, that waits again.
   const replaced = event.seen !== undefined ? { seen: event.seen } : {};
-  const waits = event.seen !== undefined ? '; the source’s version waits again' : '';
-  return { label: latest ? 'Undo' : 'Go back before this', help: `Make the version from before this change current again${everywhere}${waits}`, change: { ...now, version: event.previous, ...replaced } };
+  return { label: latest ? 'Undo' : 'Go back before this', help: `Make the version from before this change current again${everywhere}`, change: { ...now, version: event.previous, ...replaced } };
 }
 
 /**

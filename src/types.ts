@@ -376,8 +376,8 @@ export interface Change {
   giveBack?: Partial<Record<HarnessId, string>>;
   /**
    * With `version`, History's Undo of a Replace (HistoryEvent seen): the source's content the item had taken before it, which
-   * becomes its `seen` again (library.ts LibraryItem seen), so the source's version waits again. Made by History's action in
-   * main alone (librarypass.ts restoreAll), never sent by the page.
+   * becomes its `seen` again (library.ts LibraryItem seen), so where the item had been changed here the source's version waits
+   * again. Made by History's action in main alone (librarypass.ts restoreAll), never sent by the page.
    */
   seen?: string;
 }
@@ -487,7 +487,8 @@ export interface HistoryEvent {
   link?: string;
   /**
    * A Replace's 'edit' (`cause` 'source'): the source's content the item had taken before it (library.ts LibraryItem seen),
-   * which its Undo puts back with the version before (Change seen), so the source's version waits again.
+   * which its Undo puts back with the version before (Change seen), so where it had been changed here the source's version
+   * waits again.
    */
   seen?: string;
   /**
@@ -1048,7 +1049,8 @@ export interface SourcesView { sources: SourceView[]; access: WriteAccess; probl
 /** A link read before anything is kept: what Add would do (`token` names it for Add), or why it can't be added. */
 export type SourcePreview = (SourceFound & { token: string; refused?: string }) | { refused: string; link: string };
 /**
- * What a source's click did: the pass's answers by name (PassResult sourced), and its results; why it stopped; whether the source
+ * What a source's click did: the pass's answers by name (PassResult sourced, but a `wait` the source's row no longer says once
+ * the pass is done: sources.ts answer), and its results; why it stopped; whether the source
  * wasn't read whole (`notWhole`: the source turned nothing off, though the pass may have, for a copy deleted by hand; the
  * source's row says why); and the page's view after.
  */

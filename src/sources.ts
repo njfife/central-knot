@@ -264,10 +264,16 @@ const foundOf = (source: Resolved & Partial<Pick<SourceRecord, 'commit' | 'commi
   return { link: source.link, repository: source.repository, ref: source.ref, folder: source.folder, commit: source.commit, commitAt: source.commitAt, holds: found.holds, names, ...(unread ? { unread } : {}) };
 };
 
-/** A click's answer: why it stopped, what the pass did, why the source wasn't read whole, and the page's view after. */
+/**
+ * A click's answer: why it stopped, what the pass did, why the source wasn't read whole, and the page's view after. A `wait`
+ * is told only where the source's row still says it once the pass is done: the plan after the step may give a tool's copy way
+ * (a tool managed again) or take in the source's own text, and then nothing waits.
+ */
 async function answer(context: ShareContext, tools: HarnessId[], done: Omit<SourceResult, 'view'> = {}): Promise<SourceResult> {
-  const { stopped, sourced, results, notWhole } = done;
-  return { ...(stopped ? { stopped } : {}), ...(sourced ? { sourced } : {}), ...(results ? { results } : {}), ...(notWhole ? { notWhole } : {}), view: await sourcesView(context, tools) };
+  const { stopped, results, notWhole } = done, view = await sourcesView(context, tools);
+  const waitsNow = new Set(view.sources.flatMap(source => source.names.filter(name => name.state === 'wait').map(name => name.key)));
+  const sourced = done.sourced?.filter(entry => entry.answer !== 'wait' || waitsNow.has(itemKey(entry.name)));
+  return { ...(stopped ? { stopped } : {}), ...(sourced ? { sourced } : {}), ...(results ? { results } : {}), ...(notWhole ? { notWhole } : {}), view };
 }
 
 /** Add: the look `token` read becomes a source, recorded first, then carried out by the pass: each skill there comes in Off. */
@@ -327,8 +333,8 @@ export async function checkSource(context: ShareContext, toolsNow: () => Promise
 
 /**
  * A click on one name's row at a source, from the source's last read (no fetch): Add on a name the library holds deleted
- * brings it back Off (`bringBack`); Replace on one whose version waits makes that version current, the one it had kept as a
- * version (`replace`). Each is then the table's own answer (library.ts fromSource), carried out by the pass.
+ * brings it back Off (`bringBack`); Replace on one whose version waits makes the source's version current and keeps the one
+ * the item had as a version (`replace`). Each is then the table's own answer (library.ts fromSource), carried out by the pass.
  */
 async function fromRow(context: ShareContext, tools: HarnessId[], id: string, clicked: RowClick): Promise<SourceResult> {
   const { sources, problem } = await readSources(context.home), source = sources.find(each => each.id === id);

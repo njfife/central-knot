@@ -134,7 +134,7 @@
 // an edit here: a tool's edit no pass has taken in is taken in by the plan after the step, and S waits. Replace (a key handed
 // to the step, read from the last read) makes S current dated by its click, so an edit a tool saved before the click gives way
 // to it and is kept as a version (THE RULE); its Undo puts back the version before and `seen` as it was (types.ts Change
-// seen), so S waits again. The step reads the tools before the guards (librarypass.ts guardFolders): a tool managed again in
+// seen), so where it had been changed here S waits again. The step reads the tools before the guards (librarypass.ts guardFolders): a tool managed again in
 // that same pass can read as changed here, and S then waits one read more; nothing reads as unchanged that is not.
 //
 // The step writes no harness: the plan after it applies the current version where the item is On, as for any new version, so
@@ -248,7 +248,10 @@ export interface LibraryItem {
   deleted?: { at: string };
   /** The source it is linked to (sources.ts SourceRecord `id`): linked only while that source is recorded (the header's A SOURCE). */
   source?: string;
-  /** The content last seen at that source, which the next read compares with. Set and let go with `source`. */
+  /**
+   * The source's content this item last took (made current, or found current already); it stays while a version waits there,
+   * as the base of the change made here (the header's CHANGED HERE). Set and let go with `source`.
+   */
   seen?: string;
 }
 

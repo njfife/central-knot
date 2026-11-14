@@ -7,7 +7,7 @@ import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readHistory } from '../src/history.ts';
 import { doneWords, libraryAction, librarySentence } from '../src/historyactions.ts';
-import { libraryWords } from '../src/libraryrow.ts';
+import { fromSourceWords, libraryWords } from '../src/libraryrow.ts';
 import { addSource, bringBack, checkDue, checkSource, previewSource, removeSource, replaceFromSource, SOURCE_CHECK_EVERY_MS, sourcesView } from '../src/sources.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import type { SourcePreview } from '../src/types.ts';
@@ -158,6 +158,27 @@ test('Changed here, then the source changes: its version waits, whatever the tim
   } finally { await box.cleanup(); }
 });
 
+test('Check now says a version waits only where the source’s row still says so after the pass: a tool managed again whose copy gives way (Automatic sync off), and the source’s own text pasted into a tool', async () => {
+  const box = await sandbox();
+  try {
+    // Codex left out, edited there meanwhile, managed again with no pass before the check: the pass gives Codex's copy way.
+    const { repo, id } = await oneSkill(box, 'notes', { on: true });
+    await chooseTools(box.context, 'codex-cli', false);
+    await editIn(box, 'codex-cli', 'notes', 'Edited in Codex while left out.', '2026-11-05T10:00:00Z');
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'Theirs.') }, '2026-11-06T10:00:00Z');
+    await chooseTools(box.context, 'codex-cli', true);
+    const done = await check(box, id);
+    assert.deepEqual([answered(done), await notices(box, 'notes')], [[], ['update', false]], 'nothing waits, so the band says no Replace');
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'update' }]);
+
+    // The source's new text pasted into Codex by hand: taken in, it is the source's own, so nothing waits.
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'Theirs, pasted.') }, '2026-11-07T10:00:00Z');
+    await editIn(box, 'codex-cli', 'notes', 'Theirs, pasted.', '2026-11-08T10:00:00Z');
+    const pasted = await check(box, id);
+    assert.deepEqual([answered(pasted), await notices(box, 'notes')], [[], ['same', false]]);
+  } finally { await box.cleanup(); }
+});
+
 test('Replace: the source’s version becomes current in every tool, the edit is kept as a version and History says so; then the item follows its source again', async () => {
   const box = await sandbox();
   try {
@@ -179,7 +200,7 @@ test('Replace: the source’s version becomes current in every tool, the edit is
   } finally { await box.cleanup(); }
 });
 
-test('Undo of a Replace: the edit is current again in every tool, and the source’s version waits again; the next check doesn’t take it', async () => {
+test('Undo of a Replace over an edit made here: the edit is current again in every tool, and the source’s version waits again; the next check doesn’t take it', async () => {
   const box = await sandbox();
   try {
     const { repo, id } = await oneSkill(box, 'notes', { on: true });
@@ -189,7 +210,7 @@ test('Undo of a Replace: the edit is current again in every tool, and the source
     await replace(box, id, 'notes');
     const entry = (await readHistory(box.context)).at(-1)!, item = (await itemOf(box, 'notes'))!;
     const undo = libraryAction(entry, item, { managed: box.tools, pending: [] })!;
-    assert.deepEqual([undo.label, undo.help], ['Undo', 'Make the version from before this change current again, in every tool it is on in; the source’s version waits again']);
+    assert.deepEqual([undo.label, undo.help], ['Undo', 'Make the version from before this change current again, in every tool it is on in']);
     await restoreSkill(box.context, box.tools, entry.id);
     for (const tool of box.tools) assert.equal(await toolBody(box, tool, 'notes'), 'Mine.');
     assert.deepEqual(await notices(box, 'notes'), ['wait', true]);
@@ -220,8 +241,9 @@ test('A tool’s edit still settling when the check runs (its copy moved away by
     await repo.commit({ 'SKILL.md': skillMd('notes', 'From the source.') }, '2026-11-07T10:00:00Z');
     await rm(folderOf(box, 'codex-cli', 'notes'), { recursive: true });
     const settling = { ...box.context, settleMs: 60_000 };
-    assert.deepEqual(answered(await checkSource(settling, now(box), id, inTurn)), [{ name: 'notes', answer: 'wait' }]);
-    assert.equal(await bodyOf(box, 'notes'), 'First.');
+    // The pass waits; the page's look reads the settle window as passed, so its row (and so the click's band) says no wait.
+    assert.deepEqual(answered(await checkSource(settling, now(box), id, inTurn)), []);
+    assert.equal(await bodyOf(box, 'notes'), 'First.', 'the source’s version waited');
     // The save lands, older than the source's commit.
     await editIn(box, 'codex-cli', 'notes', 'Saved in Codex.', '2026-11-06T10:00:00Z');
     await applySkills(settling, box.tools, []);
@@ -257,11 +279,19 @@ test('A copy that can’t be read where the skill is applied: the source’s cha
     await writeFile(codex, '---\nname: [notes\n---\nHalf saved.\n');
     assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'wait' }]);
     assert.deepEqual(await notices(box, 'notes'), ['wait', true], 'the page reads the tools as the pass does');
-    await replace(box, id, 'notes');
+    // Nothing was changed here: its words say it waits for either reason, and claim neither.
+    assert.equal(fromSourceWords((await seen(box, box.context, 'notes')).fact!.fromSource!).before,
+      'From github.com/team/notes, a source, which has a newer version. Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now; Replace on ');
+    const replaced = await replace(box, id, 'notes');
     assert.deepEqual([await toolBody(box, 'claude-cli', 'notes'), await toolBody(box, 'codex-cli', 'notes')], ['Theirs.', 'Half saved.']);
     await writeFile(codex, asWritten);
     await applySkills(box.context, box.tools, []);
     assert.equal(await toolBody(box, 'codex-cli', 'notes'), 'Theirs.');
+    // Its Undo promises only the version before: nothing was changed here, so once undone the item follows its source again.
+    const entry = (await readHistory(box.context)).find(event => event.id === replaced.sourced?.[0].history)!;
+    assert.equal(libraryAction(entry, (await itemOf(box, 'notes'))!, { managed: box.tools, pending: [] })!.help, 'Make the version from before this change current again, in every tool it is on in');
+    await restoreSkill(box.context, box.tools, entry.id);
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'update' }]);
   } finally { await box.cleanup(); }
 });
 
