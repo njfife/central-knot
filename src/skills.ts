@@ -321,13 +321,13 @@ export async function restoreSkill(context: ShareContext, tools: HarnessId[], ev
  * managed now (`tools`) is left as it is, as every Undo leaves one, and said; with no tool left to set, it is refused.
  */
 async function switchBack(context: ShareContext, tools: HarnessId[], past: HistoryEvent): Promise<PassResult> {
-  const gate = await libraryGate(context, { start: true });
-  if ('refused' in gate) return { stopped: gate.refused, results: [], writes: 0 };
   const recorded = past.switched!.filter(entry => entry.target), away = recorded.filter(entry => !tools.includes(entry.tool));
   const entries = recorded.filter(entry => tools.includes(entry.tool));
   if (!entries.length) return { stopped: away.map(entry => notManagedHere(entry.tool)).join(' '), results: [], writes: 0 };
   const already = await Promise.all(entries.map(async ({ tool, target }) => isDisabled(context, await readSwitchFile(context, tool), target!)));
   if (already.every(Boolean)) return { stopped: `${andList(entries.map(entry => toolName(entry.tool)))}’s own switch has it off already. Nothing was changed.`, results: [], writes: 0 };
+  const gate = await libraryGate(context, { start: true });
+  if ('refused' in gate) return { stopped: gate.refused, results: [], writes: 0 };
   for (const { tool, target } of entries) {
     try { await setDisabled(context, tool, target!, true); }
     catch (error) { return { stopped: `Could not set ${toolName(tool)}’s switch: ${switchFailure(error)}`, results: [], writes: 0 }; }
@@ -347,18 +347,18 @@ async function switchBack(context: ShareContext, tools: HarnessId[], past: Histo
  * Clears a tool's own switch that turns a skill off there (the mark on its line), whoever set it, for a skill in Central Knot
  * or one found in a tool. The switch goes back to what it was before it was set where the tool kept that (Claude Code's
  * override); History's `switched` entry says so, and its Undo sets the switch again (switchBack). Ends with a pass on the skill.
- * Refused where a click may not write (share.ts libraryGate); `resume`: the click is a Resume, as on the item pages.
+ * Its own refusals first; then the gate (share.ts libraryGate), entered only to write. `resume`: the click is a Resume.
  */
 export async function clearSwitch(context: ShareContext, tools: HarnessId[], key: string, tool: HarnessId, resume = false): Promise<PassResult> {
   const stop = (stopped: string): PassResult => ({ stopped, results: [], writes: 0 });
-  const gate = await libraryGate(context, { start: true, resume });
-  if ('refused' in gate) return stop(gate.refused);
   if (!tools.includes(tool)) return stop(`${toolName(tool)} isn’t managed here now. Nothing was changed.`);
   const { look, live } = await lookFor(skillKind, context, tools);
   // A skill in Central Knot, or one found in a tool: either can have a tool's switch set.
   const name = live.find(entry => entry.key === key)?.name ?? foundCopies(look, key, [])[0]?.name ?? key;
   const target = loadTarget(look, key, name, tool);
   if (!target || !isDisabled(context, look.disk.switches.get(tool)!, target)) return stop(`${toolName(tool)}’s own switch doesn’t turn ${name} off any more. Nothing was changed.`);
+  const gate = await libraryGate(context, { start: true, resume });
+  if ('refused' in gate) return stop(gate.refused);
   try { await setDisabled(context, tool, target, false, await overrideBefore(context, key, tool, target)); }
   catch (error) { return stop(`Could not clear ${toolName(tool)}’s switch: ${switchFailure(error)}`); }
   const event: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), key, item: name, kind: 'switched', switched: [{ tool, disabled: false, target }], losers: [], orderProved: true };
@@ -388,20 +388,20 @@ async function overrideBefore(context: ShareContext, key: string, tool: HarnessI
  * or a copy in ~/.agents/skills (never a folder that is the only one a tool can have, nor another tool's own folder). Its
  * content becomes a version first if the library doesn't hold it ("was in Codex"); History is told; then the link, or the
  * shared copy, goes, and the pass gives each tool that read it the library's current version. A found skill is taken in
- * first, by its switch. Nothing puts a link or a shared copy back, so there is no Undo; the content stays a version. Refused
- * where a click may not write (share.ts libraryGate); `resume`: the click is a Resume, which the gate remembers first, so the
- * closing pass is never refused after the copy went.
+ * first, by its switch. Nothing puts a link or a shared copy back, so there is no Undo; the content stays a version. Its own
+ * refusals first; then the gate (share.ts libraryGate), entered only to write. `resume`: the click is a Resume, which the gate
+ * remembers before the copy goes, so the closing pass is never refused after it.
  */
 export async function takeOver(context: ShareContext, tools: HarnessId[], key: string, tool: HarnessId, resume = false): Promise<PassResult> {
   const stop = (stopped: string): PassResult => ({ stopped, results: [], writes: 0 });
-  const gate = await libraryGate(context, { start: true, resume });
-  if ('refused' in gate) return stop(gate.refused);
   if (!tools.includes(tool)) return stop(`${toolName(tool)} isn’t managed here now. Nothing was changed.`);
   const { look, live } = await lookFor(skillKind, context, tools);
   const item = live.find(entry => entry.key === key);
   if (!item) return stop('Turn it on first: Central Knot takes over a copy only of a skill it has.');
   const way = look.disk.ways.get(key)?.[tool], copy = look.disk.outside.get(key)?.[tool];
   if (!way?.take || !copy) return stop(`${toolName(tool)} has no copy of ${item.name} for Central Knot to take over now. Nothing was changed.`);
+  const gate = await libraryGate(context, { start: true, resume });
+  if ('refused' in gate) return stop(gate.refused);
   const known = item.versions.some(version => version.hash === copy.hash);
   const keep: Version | undefined = known ? undefined : { hash: copy.hash, at: iso(copy.at), from: { how: 'was-in', harness: tool, replacedBy: item.hash } };
   const loser = { tool, hash: copy.hash, path: way.path, ...(way.linkTo ? { linkTo: way.linkTo } : {}) };

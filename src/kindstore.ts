@@ -14,7 +14,10 @@ export interface StoredLibrary extends KindLibrary { formatVersion: number }
 /** One kind's record file: its name in `.central-knot/`, the format this build writes, and how a sentence names it. */
 export interface RecordFile { file: string; format: number; said: string }
 
-/** The empty record. No prototype on `items`: an item may be called constructor or __proto__. */
+/**
+ * The empty record. No prototype on `items`, so a key such as constructor or __proto__ is only ever an item's. Whether a tool
+ * can hold such a name is the kind's own rule (an agent's must start with a letter or digit: agentfiles.ts nameProblem).
+ */
 export const emptyLibrary = (record: RecordFile): StoredLibrary => ({ formatVersion: record.format, items: Object.create(null), folders: {} });
 
 /**

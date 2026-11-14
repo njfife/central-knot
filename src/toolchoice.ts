@@ -9,7 +9,7 @@ import { harnessIds } from './harnesses.ts';
 import { appendHistory } from './history.ts';
 import { forgetFolders, joinCounts } from './librarypass.ts';
 import { serverKind } from './servers.ts';
-import { libraryGate, saveRecord, type ShareContext } from './share.ts';
+import { leftOutNow, libraryGate, saveRecord, type ShareContext } from './share.ts';
 import { skillKind } from './skills.ts';
 import type { HarnessId, HistoryEvent, JoinCounts } from './types.ts';
 import { toolName } from './words.ts';
@@ -20,15 +20,15 @@ import { toolName } from './words.ts';
  * guardFolders); its copies stay as they are and every item stays as it is. On: it is managed again, and the next pass brings it
  * into line. Refused, as a click is, where nothing may be written (preview only, another build's home, a damaged record); in a
  * home that waits for Resume it resumes, as a click does, only when asked (`resume`: the page showed that state). The first act
- * in a home with no record makes the record (Synchronize everything is left unanswered). One History entry says it; it has no
+ * in a home with no record makes the record (Synchronize everything is left unanswered); a switch that is so already does neither. One History entry says it; it has no
  * Undo, since the switch is the way back. Run between passes, like any other write to the records.
  */
 export async function chooseTools(context: ShareContext, tool: HarnessId, on: boolean, resume = false): Promise<{ stopped?: string }> {
+  // A switch that is so already changes nothing, so it enters no gate: no record made, no home resumed.
+  if ((await leftOutNow(context)).includes(tool) !== on) return {};
   const gate = await libraryGate(context, { start: true, resume });
   if ('refused' in gate) return { stopped: gate.refused };
-  const record = gate.record!; // made by the gate where there was none (`start`)
-  const leftOut = record.leftOut ?? [];
-  if (leftOut.includes(tool) !== on) return {};
+  const { record } = gate, leftOut = record.leftOut ?? [];
   const next = on ? leftOut.filter(other => other !== tool) : [...leftOut, tool];
   // The records let go first: if a write here fails, the record is unchanged and nothing is half left out.
   if (!on) {

@@ -176,7 +176,7 @@ export interface DesktopApi {
   /** Main's update state changed (a check, download progress, ready, failed). */
   onUpdatesChanged(callback: (view: UpdateView) => void): void;
   /** `choice`: which overwritten edit to put back, for an event with several. */
-  restore(eventId: string, resume: boolean, home: string, choice?: string): Promise<ApplyResult>;
+  restore(eventId: string, home: string, choice?: string): Promise<ApplyResult>;
   /** Each tool's own instruction file (INS-01). */
   instructions(readId?: number): Promise<InstructionFile[] | null>;
   /** One version of an agent as Central Knot's library holds it: its name, description and prompt; null when it is no longer kept. */

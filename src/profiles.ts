@@ -177,19 +177,19 @@ function outcome(turns: Turns, done: Turns, results: DestinationResult[]) {
 
 /**
  * Switches to a profile: each item it names On, every other library item Off (profileplan.ts switchPlan), told to History in one
- * entry written before anything changes. Nothing to change: no entry.
+ * entry written before anything changes. Nothing to change: no entry, and the gate is not entered (no record made).
  */
 export async function switchProfile(context: ShareContext, tools: HarnessId[], id: string): Promise<ProfileSwitchResult> {
   const opened = await openProfiles(context);
   if ('stop' in opened) return stopped(opened.stop);
   const profile = opened.profiles.find(each => each.id === id);
   if (!profile) return stopped('That profile is gone. Nothing was switched.');
-  const gate = await libraryGate(context, { start: true });
-  if ('refused' in gate) return stopped(`${gate.refused} Nothing was switched.`);
   const read = await readLibraries(context);
   if ('stop' in read) return stopped(read.stop);
   const turns = switchPlan(profile, liveItems(read.libraries));
   if (!changes(turns)) return { name: profile.name, on: [], off: [], left: [], waits: [], results: [] };
+  const gate = await libraryGate(context, { start: true });
+  if ('refused' in gate) return stopped(`${gate.refused} Nothing was switched.`);
   const event = profileEvent(context, profile.name, { toName: profile.name, on: named(turns.on), off: named(turns.off) });
   await appendHistory(context, [event]);
   const { results, done } = await turnTogether(context, tools, turns, true);
@@ -207,12 +207,12 @@ export async function undoSwitch(context: ShareContext, tools: HarnessId[], even
   const history = await readHistory(context);
   const past = history.find(entry => entry.id === eventId);
   if (!past?.profile?.on || past.undoneBy) return stop('That switch has nothing to undo.');
-  const gate = await libraryGate(context, { start: true });
-  if ('refused' in gate) return stop(`${gate.refused} Nothing was undone.`);
   const read = await readLibraries(context);
   if ('stop' in read) return stop(read.stop);
   const turns = undoPlan(past, liveItems(read.libraries));
   if (!changes(turns)) return stop('Nothing to undo: each item that switch changed was changed again since.');
+  const gate = await libraryGate(context, { start: true });
+  if ('refused' in gate) return stop(`${gate.refused} Nothing was undone.`);
   const { results, made, done } = await turnTogether(context, tools, turns, false);
   if (made.length) {
     const now = await readHistory(context), entry = now.find(each => each.id === eventId);

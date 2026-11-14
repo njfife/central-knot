@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { chmod, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readHistory } from '../src/history.ts';
-import { librarySentence } from '../src/historyactions.ts';
+import { libraryEntry, librarySentence } from '../src/historyactions.ts';
 import { addLabel, canAdd, harnessIs, isPartial, libraryWords, placeOf, sentences, statusLine, switchLabel } from '../src/libraryrow.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
 import { clearSwitch, skillChange, skillsView, takeOver } from '../src/skills.ts';
@@ -349,6 +349,22 @@ test('A copy in ~/.agents/skills is not Central Knot’s: the tools that read it
     const versions = (await itemOf(box))!.versions;
     assert.ok(versions.some(version => version.from.how === 'found'), 'what the shared copy held is a version');
     assert.equal((await historyOf(box)).at(-1)?.kind, 'took-over');
+  } finally { await box.cleanup(); }
+});
+
+test('A skill whose folder is named with a colon (Finder shows “review/fix”): its entry is a skill’s, and the click’s Undo takes it out again', async () => {
+  const box = await sandbox();
+  try {
+    const name = 'review:fix';
+    await put(box, 'claude-cli', { 'SKILL.md': skillText('Body.', name) }, [], name);
+    assert.notEqual(await turnOn(box, box.context, name), 'choose');
+    const on = (await historyOf(box, box.context, name)).at(-1)!;
+    assert.deepEqual(libraryEntry(on), { kind: 'skills', key: name }, 'History routes it to the skills, as the page offers its Undo');
+    const undo = (await historyActions(box, box.context, name)).find(action => action.event.id === on.id);
+    assert.equal(undo?.label, 'Undo', 'its Undo is offered');
+    assert.equal((await undo!.run()).stopped, undefined);
+    assert.deepEqual([!!(await bytes(folderOf(box, 'claude-cli', name))), await bytes(folderOf(box, 'copilot-cli', name)), await bytes(folderOf(box, 'codex-cli', name))],
+      [true, undefined, undefined], 'out of Central Knot again: Claude Code keeps the copy it was found in');
   } finally { await box.cleanup(); }
 });
 

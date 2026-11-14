@@ -1216,8 +1216,7 @@ app.whenReady().then(async () => {
   const otherHome = { stopped: notOpenHome, written: [], left: [] };
   handle('instructions:apply-base', async (request, home) => (home === current?.home && isBaseApply(request) ? applyBase(context(), await read(), request) : otherHome));
   handle('instructions:undo-base', async (undo, home) => (home === current?.home && isBaseUndo(undo) ? undoBase(context(), await read(), undo) : otherHome));
-  // `resume` is not passed on: History's actions wait for Resume, which the page offers first.
-  handle('history:restore', async (eventId, _resume, home, choice) => (home === current?.home && typeof eventId === 'string'
+  handle('history:restore', async (eventId, home, choice) => (home === current?.home && typeof eventId === 'string'
     ? await (async () => {
       const past = (await readHistory(context())).find(entry => entry.id === eventId);
       if (past?.kind === 'profile') return undoSwitch(context(), await toolsNow(), eventId);

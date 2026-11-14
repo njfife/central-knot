@@ -46,7 +46,7 @@ const entry = (context: ShareContext, everything: NonNullable<HistoryEvent['ever
 export async function setSyncEverything(context: ShareContext, on: boolean, answering = false): Promise<{ stopped?: string }> {
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return { stopped: gate.refused };
-  const record = gate.record!; // made by the gate where there was none (`start`)
+  const { record } = gate;
   if (answering && record.syncEverything !== undefined) return { stopped: `This home was asked already: Synchronize everything is ${record.syncEverything ? 'on' : 'off'}. Settings › This home can change it.` };
   await saveRule(context, record, on);
   return {};

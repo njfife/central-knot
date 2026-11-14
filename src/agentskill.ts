@@ -25,12 +25,10 @@ async function fullestCopy(context: ShareContext, tools: HarnessId[], key: strin
 }
 
 /**
- * Converts one agent: its fullest copy written as Pi's skill, and where it came from recorded. Refused where a click may not
- * write (share.ts libraryGate); `resume`: the click is a Resume, so the pass that takes the skill in after it is not refused.
+ * Converts one agent: its fullest copy written as Pi's skill, and where it came from recorded. Its own refusals first; then the
+ * gate (share.ts libraryGate), entered only to write. `resume`: the click is a Resume, so the pass taking the skill in runs.
  */
 export async function convertAgentToSkill(context: ShareContext, tools: HarnessId[], key: string, resume = false): Promise<{ stopped?: string; skill?: string; origin?: HarnessId }> {
-  const gate = await libraryGate(context, { start: true, resume });
-  if ('refused' in gate) return { stopped: gate.refused };
   if (!tools.includes('pi-cli')) return { stopped: 'Pi is not in this home, so there is nowhere to convert to.' };
   const entry = await fullestCopy(context, tools, key);
   if (!entry) return { stopped: 'That agent is not there any more.' };
@@ -40,6 +38,8 @@ export async function convertAgentToSkill(context: ShareContext, tools: HarnessI
   const folder = join(writeRoot(harnesses['pi-cli'], context.home, context.overrides?.['pi-cli']), name);
   try { await stat(folder); return { stopped: `Pi already has a skill named “${name}”. Nothing was written.` }; } catch { /* free */ }
   if ((await readConverted(context.home))[skill]) return { stopped: `“${name}” was converted before.` };
+  const gate = await libraryGate(context, { start: true, resume });
+  if ('refused' in gate) return { stopped: gate.refused };
   const front = `---\nname: ${JSON.stringify(name)}\ndescription: ${JSON.stringify(agent.description)}\n---\n\n`;
   await mkdir(folder, { recursive: true });
   await writeFileChecked(join(folder, 'SKILL.md'), `${front}${agent.prompt.replace(/^\s+/, '')}${agent.prompt.endsWith('\n') ? '' : '\n'}`, undefined);

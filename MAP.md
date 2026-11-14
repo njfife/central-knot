@@ -102,7 +102,7 @@ The main process, the window's frame, Settings, and what every page shares.
 
 ## The store and safe writes
 What every engine stands on: `.central-knot/`, which build syncs a home, and writes that never lose a save made meanwhile.
-- `share.ts` the store: the home's record of who syncs it, the tools left out and Synchronize everything (`readRecord`, `SyncRecord`), which build syncs here (`syncGate`), the gate for library writes (`libraryGate`; its header names who asks it and who doesn't), checked writes (`writeFileChecked`), a skill's folder copied (`placeCopy`)
+- `share.ts` the store: the home's record of who syncs it, the tools left out and Synchronize everything (`readRecord`, `SyncRecord`), which build syncs here (`syncGate`), the gate for library writes (`libraryGate`; its header says which writes ask it, and which don't), checked writes (`writeFileChecked`), a skill's folder copied (`placeCopy`)
 - `textedit.ts` one entry of a JSON or TOML file changed, every other byte kept · `values.ts` untrusted values checked, with safe defaults
 - **Start:** `share.ts`'s header, then its exports, by their comments; a skill's copy is written over by `skillfiles.ts swapFolder`. **Examples:** `tests/share-recovery.test.ts`, `tests/textedit.test.ts`, `tests/skillsafety.test.ts`, `tests/librarygate.test.ts` (the gate for the clicks that write before their pass).
 

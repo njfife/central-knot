@@ -307,8 +307,10 @@ const kindPages: Record<PageKind, { send: (changes: Change[], resume: boolean, h
 export const lastResult = (kind: PageKind): PassResult | undefined => ({ skills: state.skillsResult, mcp: state.mcpResult, agents: state.agentsResult })[kind];
 
 /**
- * Whether a click in this home is a Resume: the page shows it waiting for one, and any click resumes it, as Resume itself does.
- * Sent with every click; the engine lets such a home in (share.ts libraryGate `resume`).
+ * Whether a click in this home is a Resume: the page shows it waiting for one (share.ts libraryGate `resume`). Sent with the
+ * clicks that resume such a home, as Resume itself does: an item page's clicks (first setup's walkthrough's too), a tool's
+ * Manage switch, Take over, Clear the switch and Convert to a skill. History's actions, a profile switch and Synchronize
+ * everything's switch send nothing, and are refused there until Resume.
  */
 export const clickResumes = (home: HomeView) => home.sync.gate.state === 'needs-resume';
 /** Sends one kind's changes for the open home. */
@@ -370,7 +372,7 @@ const undoClick = (click: Click, made: string[], switchedBack: PluginOp[] = []) 
   const results: DestinationResult[] = [];
   let stopped: string | undefined;
   for (const event of events) {
-    const result = await api().restore(event.id, clickResumes(home), home.home);
+    const result = await api().restore(event.id, home.home);
     if (result.stopped) { stopped = result.stopped; break; }
     results.push(...result.results);
   }
@@ -649,7 +651,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   // one place that decides it: historyactions.ts restorePlan), for the words after it.
   const clicked = state.history.data?.find(event => event.id === eventId);
   const switchesOn = !!clicked?.everything?.undo && !!state.history.data && restorePlan(clicked, state.history.data, entriesNow(home)).switchOn;
-  const result = await api().restore(eventId, clickResumes(home), home.home, choice);
+  const result = await api().restore(eventId, home.home, choice);
   // The notice for an undone event has done its job; its result band says what happened.
   if (!result.stopped) state.dismissed.add(eventId);
   const view = await api().refresh();
