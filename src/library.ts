@@ -107,7 +107,8 @@
 //   S changed                            linked, not changed here    S becomes the current version; On or Off stays as it is
 //   S changed                            linked, changed here        nothing: the current version stays, in Central Knot and in
 //                                                                    every tool, and S waits (`wait`), said on the item's row
-//                                                                    and the source's; Replace there makes S current (`update`)
+//                                                                    and the source's; Replace there makes S current (`update`),
+//                                                                    Merge there merges S into it (`merge`: MERGE, below)
 //   the name is gone, the source read    linked                      the item turns Off and its link is let go, so later reads
 //     whole                                                          leave it as it is, turned back On or not, until the name
 //                                                                    comes back unchanged (re-linked: "its current version this
@@ -137,6 +138,31 @@
 // to it and is kept as a version (THE RULE); its Undo puts back the version before and `seen` as it was (types.ts Change
 // seen), so where it had been changed here S waits again. The step reads the tools before the guards (librarypass.ts guardFolders): a tool managed again in
 // that same pass can read as changed here, and S then waits one read more; nothing reads as unchanged that is not.
+//
+// MERGE (`mergeFiles`, a key handed to the step as Replace's is; the kind runs the line merge: librarypass.ts Kind.merge). Three
+// folders: the base (`seen`), yours (the current version) and S, compared path by path, each path a file (its bytes and its
+// executable bit, apart) or a folder. Nothing is normalised: a file that differs only in its line endings or its last newline
+// differs.
+//
+//   the path                                                        the merged version has
+//   the same on both sides (unchanged, changed alike, or gone on    that
+//     both)
+//   changed on one side only (its bytes or its executable bit,      that side's
+//     added or deleted)
+//   a file whose bytes both sides changed, differently              the line merge of the three (git merge-file); one that
+//                                                                   doesn't merge cleanly, a binary file's too, is a conflict
+//   deleted on one side and changed on the other; added on both     a conflict
+//     sides differently; a file on one side and a folder on the
+//     other
+//
+// A folder that holds a file the merge keeps is kept. No conflict: S is kept as a version (never current), the merged folder
+// becomes current dated by the click (Origin `merged`), `seen` moves on to S, and the plan writes it where the item is On; it
+// still differs from S, so it is still changed here and the source's next change waits with S as its base. Its Undo, as
+// Replace's, puts back the version before and `seen` as it was. Merged to exactly yours, only `seen` moves on (S is kept); to
+// exactly S, the item follows its source again. Any conflict, or a line merge that can't run, changes nothing, and the answer
+// names the conflicting files, or why. Yours is the current version with every tool's edit in it: Merge's click first runs a pass for
+// the item alone (sources.ts mergeFromSource), which takes in an edit a tool holds as any pass does; a tool's copy that still
+// holds a change then (a save landing between the two, or one settling) leaves Merge undone (`wait`), and it says so.
 //
 // The step writes no harness: the plan after it applies the current version where the item is On, as for any new version, so
 // a copy deleted by hand that no pass has seen yet turns the item Off whatever the source answered (THE RULE), and a dropped
@@ -203,12 +229,13 @@ export type ItemKind = 'skill' | 'agent' | 'mcp';
 /**
  * Where a version came from: taken in from a harness that had it (`found`, or `chosen` among copies that differed), edited
  * by hand in a harness (`edited`), a harness's copy that gave way to the current version (`was-in`), Pull (`pulled`), read
- * at a source (`source`, with its `link` as given), an earlier version made current (`made-current`), or the record from
+ * at a source (`source`, with its `link` as given), Merge's of a source's version into it (`merged`, with that `link`), an
+ * earlier version made current (`made-current`), or the record from
  * before the library (`migrated`). `replacedBy`: on a version that was never current, the version that took its place, which
  * its line on the page is compared with (noteAgainst): a `was-in` copy, or an edit that gave way (plan). Absent in older
  * records, where an edit that lost reads as current once.
  */
-export interface Origin { how: 'found' | 'chosen' | 'edited' | 'was-in' | 'pulled' | 'source' | 'made-current' | 'migrated'; harness?: HarnessId; replacedBy?: string; link?: string }
+export interface Origin { how: 'found' | 'chosen' | 'edited' | 'was-in' | 'pulled' | 'source' | 'merged' | 'made-current' | 'migrated'; harness?: HarnessId; replacedBy?: string; link?: string }
 
 /**
  * One content an item has had. `at`: when it was made (a harness file's own time for a copy taken in; a source's head commit's
@@ -313,11 +340,12 @@ export function noteAgainst(item: Pick<LibraryItem, 'versions'>, version: Versio
 export const wantedIn = (item: Pick<LibraryItem, 'on' | 'deleted' | 'except'>, harness: HarnessId) =>
   item.on && !item.deleted && !item.except.includes(harness);
 
-/** A version in words: "edited in Codex", "was in Copilot CLI", "from github.com/owner/repo", "made current again". */
+/** A version in words: "edited in Codex", "was in Copilot CLI", "from github.com/owner/repo", "made current again", "merged with …’s version". */
 export function originWords({ how, harness, link }: Origin): string {
   const where = harness ? toolName(harness) : 'a harness';
   return { found: `found in ${where}`, chosen: `chosen from ${where}`, edited: `edited in ${where}`, 'was-in': `was in ${where}`,
-    pulled: 'pulled from the Git repo', source: `from ${link ? linkLabel(link) : 'a source'}`, 'made-current': 'made current again', migrated: 'from before Central Knot kept versions' }[how];
+    pulled: 'pulled from the Git repo', source: `from ${link ? linkLabel(link) : 'a source'}`, merged: `merged with ${link ? linkLabel(link) : 'a source'}’s version`,
+    'made-current': 'made current again', migrated: 'from before Central Knot kept versions' }[how];
 }
 /** A version named in a sentence: "the version edited in Codex", "the version that was in Copilot CLI". */
 export const theVersion = (from: Origin) => `the version ${from.how === 'was-in' ? 'that ' : ''}${originWords(from)}`;
@@ -492,18 +520,18 @@ export function linkedTo(item: LibraryItem | undefined, { id, link }: { id: stri
 /**
  * The header's A SOURCE table's answer for one name, a row each: the item is made (`make`: Off; a deleted one brought back by
  * Add), linked (`link`), only `seen` moves on (`same`: S is the current version already), S becomes current (`update`; Replace's
- * too), S waits for the person (`wait`: the item was changed here), the item turns Off and is let go (`drop`), or `nothing`. A
- * name the library has that is not brought in says why: its content differs (`differs`), it is another source's (`another`),
- * or it is deleted (`deleted`).
+ * too), S waits for the person (`wait`: the item was changed here), S is merged into the current version (`merge`: Merge's
+ * answer alone, never a row's), the item turns Off and is let go (`drop`), or `nothing`. A name the library has that is not
+ * brought in says why: its content differs (`differs`), it is another source's (`another`), or it is deleted (`deleted`).
  */
-export type SourceAnswer = 'make' | 'link' | 'same' | 'update' | 'wait' | 'drop' | 'nothing' | 'differs' | 'another' | 'deleted';
+export type SourceAnswer = 'make' | 'link' | 'same' | 'update' | 'wait' | 'merge' | 'drop' | 'nothing' | 'differs' | 'another' | 'deleted';
 
 /**
  * What the table is told of one name besides the item and S: what each managed tool holds of the item now (librarypass.ts
- * copiesOf; none, for what the record alone says), and a click on the source's row for it, Add on a deleted one (`bringBack`)
- * or Replace on one whose version waits (`replace`).
+ * copiesOf; none, for what the record alone says), and a click on the source's row for it, Add on a deleted one (`bringBack`),
+ * or Replace or Merge on one whose version waits (`replace`, `merge`).
  */
-export interface SourceAsked { copies?: Copies; bringBack?: boolean; replace?: boolean }
+export interface SourceAsked { copies?: Copies; bringBack?: boolean; replace?: boolean; merge?: boolean }
 
 /** The header's A SOURCE table for one name: `item` is the library's for its key (deleted or not), `here` what the source holds. */
 export function fromSource(item: LibraryItem | undefined, here: AtSource, linked: LinkedTo, asked: SourceAsked = {}): SourceAnswer {
@@ -518,16 +546,21 @@ export function fromSource(item: LibraryItem | undefined, here: AtSource, linked
   if (linked === 'once') return here.hash === item.hash ? 'link' : changedHere(item, item.hash, copies) ? 'differs' : 'update';
   if (here.hash === item.seen) return 'nothing';
   if (here.hash === item.hash) return 'same';
-  return changedHere(item, item.seen, copies) && !asked.replace ? 'wait' : 'update';
+  if (!changedHere(item, item.seen, copies) || asked.replace) return 'update';
+  // Merge merges into the current version: a change a tool still holds (MERGE: a save landing, or settling) leaves it waiting.
+  return asked.merge && !toolHoldsChange(item, copies) ? 'merge' : 'wait';
 }
 
 /**
  * Whether an item was changed here since it took `since` from its source (the header's CHANGED HERE): its current version is
- * not `since`, or a managed tool's copy (`copies`, as the plan reads them) holds an edit no pass has taken in yet (pendingEdits),
- * or can't be seen for sure where Central Knot applied it.
+ * not `since`, or a managed tool's copy holds a change (toolHoldsChange).
  */
-export function changedHere(item: LibraryItem, since: string | undefined, copies: Copies): boolean {
-  if (item.hash !== since) return true;
+export const changedHere = (item: LibraryItem, since: string | undefined, copies: Copies) => item.hash !== since || toolHoldsChange(item, copies);
+/**
+ * Whether a managed tool's copy (`copies`, as the plan reads them) holds an edit no pass has taken in yet (pendingEdits), or
+ * can't be seen for sure where Central Knot applied it.
+ */
+function toolHoldsChange(item: LibraryItem, copies: Copies): boolean {
   const unseenWhereApplied = (Object.keys(copies) as HarnessId[]).some(tool => copies[tool]!.is === 'unseen' && item.applied[tool] !== undefined);
   return unseenWhereApplied || pendingEdits(plan(item, copies)).length > 0;
 }
@@ -542,19 +575,49 @@ export interface SourceSeen { id: string; link: string; commitAt: string; whole:
 /**
  * The table for one read, all at once: an answer for each name it holds and each item linked to the source (`items`: the
  * library's, deleted ones too), by key. `recorded`: the sources the home records now. `asked`: the keys a click on the source's
- * row asks for (Add on one held deleted, Replace on one whose version waits), and what the managed tools hold of an item now.
+ * row asks for (Add on one held deleted, Replace or Merge on one whose version waits), and what the managed tools hold of an item now.
  * The pass carries these out (librarypass.ts fromSourceStep), and the Sources page and each linked item's row say them
  * (sources.ts sourcesView, sourceFacts); their keys are the pass's scope.
  */
 export function sourceAnswers(items: Record<string, LibraryItem>, read: SourceSeen, recorded: ReadonlySet<string>,
-  asked: { bringBack?: ReadonlySet<string>; replace?: ReadonlySet<string>; copies?: (item: LibraryItem) => Copies } = {}): Map<string, SourceAnswer> {
+  asked: { bringBack?: ReadonlySet<string>; replace?: ReadonlySet<string>; merge?: ReadonlySet<string>; copies?: (item: LibraryItem) => Copies } = {}): Map<string, SourceAnswer> {
   const linked = Object.values(items).filter(item => linkedTo(item, read, recorded) === 'this').map(item => item.key);
   return new Map([...new Set([...read.names.keys(), ...linked])].map(key => {
     const entry = read.names.get(key), item = items[key];
     const here: AtSource = !entry ? (read.whole ? 'gone' : 'unreadable') : 'hash' in entry ? { hash: entry.hash } : 'unreadable';
-    const about: SourceAsked = { copies: item && asked.copies?.(item), bringBack: asked.bringBack?.has(key), replace: asked.replace?.has(key) };
+    const about: SourceAsked = { copies: item && asked.copies?.(item), bringBack: asked.bringBack?.has(key), replace: asked.replace?.has(key), merge: asked.merge?.has(key) };
     return [key, fromSource(item, here, linkedTo(item, read, recorded), about)];
   }));
+}
+
+/** One path in a folder as Merge compares it (the header's MERGE): a file, by its bytes' hash and its executable bit, or a folder. */
+export type PathIs = { sha256: string; exec: boolean } | 'folder';
+/** What the merged version has at one path: a folder, or a file with one side's bytes or the line merge's, and one side's mode. */
+export type Merged = 'folder' | { bytes: 'yours' | 'theirs' | 'line-merge'; mode: 'yours' | 'theirs' };
+
+/**
+ * The header's MERGE table, path by path, over three folders (each path to what is there): the base (`seen`), yours and the
+ * source's (`theirs`). Answers what the merged version has at each path it keeps, and the paths that conflict (sorted); a file
+ * both sides changed is `line-merge`, which the kind carries out and which is a conflict too where that fails.
+ */
+export function mergeFiles(base: Map<string, PathIs>, yours: Map<string, PathIs>, theirs: Map<string, PathIs>): { merged: Map<string, Merged>; conflicts: string[] } {
+  const merged = new Map<string, Merged>(), conflicts: string[] = [];
+  const same = (first?: PathIs, second?: PathIs) => JSON.stringify(first) === JSON.stringify(second);
+  for (const path of [...new Set([...base.keys(), ...yours.keys(), ...theirs.keys()])].sort()) {
+    const was = base.get(path), mine = yours.get(path), other = theirs.get(path);
+    // Changed on one side only, or alike: that side's whole (gone on that side: nothing).
+    if (same(mine, other) || same(mine, was) || same(other, was)) {
+      const from = same(mine, was) && !same(mine, other) ? 'theirs' : 'yours', at = from === 'yours' ? mine : other;
+      if (at) merged.set(path, at === 'folder' ? 'folder' : { bytes: from, mode: from });
+      continue;
+    }
+    // Both changed it, differently: only a file on all three sides merges, its bytes and its executable bit apart.
+    if (!was || was === 'folder' || !mine || mine === 'folder' || !other || other === 'folder') { conflicts.push(path); continue; }
+    const bytes = mine.sha256 === other.sha256 || other.sha256 === was.sha256 ? 'yours' : mine.sha256 === was.sha256 ? 'theirs' : 'line-merge';
+    merged.set(path, { bytes, mode: other.exec !== was.exec ? 'theirs' : 'yours' });
+  }
+  for (const path of [...merged.keys()]) for (let up = path.lastIndexOf('/'); up > 0; up = path.lastIndexOf('/', up - 1)) merged.set(path.slice(0, up), 'folder');
+  return { merged, conflicts };
 }
 
 // ---------- Found ----------
@@ -654,8 +717,8 @@ export async function keepVersion<Content>(shelf: Shelf<Content>, item: LibraryI
 }
 
 /**
- * The one way an item's current version changes: an edit taken in, a found copy taken in, Pull, or an earlier version made
- * current. The content is stored, the version recorded and the record saved before it returns: only then may any harness
+ * The one way an item's current version changes: an edit taken in, a found copy taken in, Pull, a source's update, Replace or
+ * Merge, or an earlier version made current. The content is stored, the version recorded and the record saved before it returns: only then may any harness
  * be written or removed. Always a new entry in `versions`, so the list says when each content was current.
  */
 export async function setCurrent<Content>(shelf: Shelf<Content>, item: LibraryItem, version: Version, content: Content): Promise<void> {

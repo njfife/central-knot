@@ -1,6 +1,6 @@
 // Skills on Central Knot's library: the adapter for one kind. Read library.ts first (the model, and the one rule for an item
 // in the library), then librarypass.ts (the pass, the same for every kind, and `Kind`, the contract a kind implements).
-// This module is the skills' Kind (skillKind) and nothing the pass does itself:
+// This module is the skills' Kind (skillKind; its Merge of a source's version is skillmerge.ts) and nothing the pass does itself:
 // - what a tool holds of a skill (readDisk): its own copy, a folder in its own skills folder (skillfiles.ts), which is
 //   Central Knot's to write and remove; and the ways it has a skill that are not Central Knot's (anotherWay): a link in its
 //   folder, a copy in a folder it reads but Central Knot doesn't own (~/.agents/skills), another tool's folder it reads
@@ -29,6 +29,7 @@ import { throughPlugins, type GivenByPlugin } from './plugins.ts';
 import { errorCode, itemKey, landingOf, libraryGate, partsIn, plainError, readTree, syncGate, targetFor, writeAccess, type ShareContext, type Tree } from './share.ts';
 import { alsoReads, lockedRoot, placeFolder, readCopy, readSkillsFolder, recoverFolders, removeFolder, rootOf, rootProblem, sharedFolder, swapFolder, type SkillCopy } from './skillfiles.ts';
 import { openLibrary, readVersion, recordedSkills, saveLibrary, storeVersion, type SkillContent } from './skillstore.ts';
+import { mergeSkill } from './skillmerge.ts';
 import { sourceFacts } from './sources.ts';
 import { isDisabled, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, type SwitchFile } from './skillswitch.ts';
 import { harnesses } from './harnesses.ts';
@@ -262,6 +263,7 @@ export const skillKind: Kind<SkillContent, SkillCopy, SkillDisk> = {
     catch (error) { if (!errorCode(error)) throw error; return errorCode(error) === 'CK_CHANGED' ? 'changed' : 'failed'; }
   },
   historyAction: libraryAction,
+  merge: mergeSkill,
 };
 
 /**

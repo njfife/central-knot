@@ -2502,12 +2502,29 @@ if (wanted('sources')) {
   deslop({ 'SKILL.md': skillMd('deslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice and their dialect.') }, 'Keep the dialect');
   await a.click('#nav-sources');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
-  await atEverySize('waiting', 'deslop was edited in Claude Code, then changed at the source; clicked Check now: the band says deslop changed at the source and yours stays current, since it was changed here or a tool’s copy can’t be read just now, and that Replace on its row takes the source’s; deslop’s line on the source’s row, under a warning mark, says yours stays current until you replace it, for the same reasons, that Replace makes the source’s current and keeps yours as a version, and ends with Replace', true, '.source-row');
+  await atEverySize('waiting', 'deslop was edited in Claude Code, then changed at the source; clicked Check now: the band says deslop changed at the source and yours stays current, since it was changed here or a tool’s copy can’t be read just now, and that on its row Merge puts the source’s changes into yours if they don’t clash, and Replace takes the source’s; deslop’s line on the source’s row, under a warning mark, says yours stays current until you merge or replace it, for the same reasons, what Merge and Replace do, and ends with Merge and Replace', true, '.source-row');
+  await a.size(860, 560); await show('.source-row'); await focusOn('.source-row button[id^="source-merge-"]'); await shot(a, 'waiting-merge-focus-860', 'Tabbed to Merge on deslop’s line at 860×560: its focus ring, with Replace beside it'); await a.run('document.activeElement?.blur()'); await a.size(1280, 800);
   await a.click('#nav-skills'); await openRow('deslop');
-  await atEverySize('waiting-skill', 'On Skills, deslop’s row says “update at its source” after its name, under a warning mark; opened, each tool has the current version (the edit made in Claude Code), and the line at the end says the source has a newer version, yours stays current since it was changed here or a tool’s copy of it can’t be read just now, and Replace on Sources makes the source’s current and keeps yours as a version', true, '.ov-row[data-key="deslop"]', 'start');
+  await atEverySize('waiting-skill', 'On Skills, deslop’s row says “update at its source” after its name, under a warning mark; opened, each tool has the current version (the edit made in Claude Code), and the line at the end says the source has a newer version, yours stays current since it was changed here or a tool’s copy of it can’t be read just now, and on Sources Merge puts its changes into yours if they don’t clash, and Replace takes it as it is, either keeping yours as a version', true, '.ov-row[data-key="deslop"]', 'start');
   await a.click('#nav-sources');
-  await a.click('.source-row .source-name[data-key="deslop"] button'); await busyDone(); await a.settle();
+  // Both changed the same line of SKILL.md: Merge names it and changes nothing.
+  await a.click('.source-row button[id^="source-merge-"]'); await busyDone(); await a.settle();
+  await atEverySize('merge-clash', 'Clicked Merge on deslop’s line: the edit in Claude Code and the source’s change are to the same line, so the band, under a warning mark, says Merge left deslop as it was, since SKILL.md changed both here and at the source in ways that can’t be merged, and that Replace takes the source’s version and keeps yours as a version, otherwise yours stays current and the update keeps waiting; no Undo, since nothing changed; deslop’s line still waits, with Merge and Replace', true, '.source-row');
+  await a.click('.source-row button[id^="source-replace-"]'); await busyDone(); await a.settle();
   await atEverySize('replaced', 'Clicked Replace on deslop’s line: the band says deslop has the source’s version, now in all 3 tools, and the one it had is kept as a version, with Undo the replace, Open Skills, and that each change can be seen or undone in History; deslop’s line says In Central Knot, On, with no Replace', false, '.source-row');
+  // A line added in Claude Code, and the source's description changed: lines apart, so Merge puts them together.
+  writeFileSync(deslopInClaude, `${readFileSync(deslopInClaude, 'utf8')}\nSay what you changed, in one line.\n`);
+  await a.click('#nav-skills');
+  await waitFor(a, `!!document.querySelector('.sync-notice')`, 15000);
+  deslop({ 'SKILL.md': skillMd('deslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice and their dialect.').replace('Find and remove the patterns', 'Find and take out the patterns') }, 'Reword the description');
+  await a.click('#nav-sources');
+  await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
+  await a.click('.source-row button[id^="source-merge-"]'); await busyDone(); await a.settle();
+  await atEverySize('merged', 'A line was added to deslop in Claude Code, and the source reworded its description; clicked Check now, then Merge on deslop’s line: the band says deslop now has your changes and the source’s, merged, in all 3 tools, and the version it had is kept, with Undo the merge, Open Skills, and that each change can be seen or undone in History; deslop’s line says In Central Knot, On, with no Merge or Replace', true, '.source-row');
+  await a.click('#nav-skills'); await openRow('deslop');
+  await atEverySize('merged-skill', 'On Skills, deslop’s opened row: each tool has the merged version; its newest versions say merged with the source’s version, and from the source; the line at the end says you changed it here, or a tool’s copy of it can’t be read just now, so the source’s next change will wait for you to Merge or Replace on Sources; no tag after its name, since nothing waits', false, '.ov-row[data-key="deslop"]', 'start');
+  await a.click('#nav-history');
+  await shot(a, 'merged-history', 'History: Merged github.com/stephenturner/skill-deslop (main)’s version into yours; that became the current version, in all 3 tools; the version it had and the source’s are kept, with Undo (1280×800)');
   deslop({ 'SKILL.md': skillMd('unslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice.') }, 'Rename to unslop');
   await a.click('#nav-sources');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
