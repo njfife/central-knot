@@ -63,7 +63,7 @@ function openUpdatesRow() {
 
 /**
  * Takes a new state from main. Download progress repaints only what shows it; anything else redraws. When the update is
- * ready the app restarts into it, unless something is unsaved: then the control asks, and the status bar says why. A newer
+ * ready the app restarts into it, unless unsavedWork holds it: then the control asks, and the status bar says why. A newer
  * release found by a check, the person's or the clock's, is told to screen readers: the control's new look says it to the eye.
  */
 export function takeUpdates(view: UpdateView) {
@@ -129,8 +129,9 @@ export async function checkNow(fromMenu = false) {
 export function startUpdate() {
   keepFocus();
   const next = updates.view?.available;
-  // Said at the click, for anyone who can't see the control's tooltip: the app is going to restart, or to wait for something unsaved.
-  if (next) announce(`Downloading ${tagWords(next.tag)}. ${unsavedWork() ? restartWaits : 'Central Knot restarts when it’s ready.'}`);
+  // Said at the click, for anyone who can't see the control's tooltip: the app is going to restart, or why it may wait.
+  const held = unsavedWork();
+  if (next) announce(`Downloading ${tagWords(next.tag)}. ${held ? restartWaits(held) : 'Central Knot restarts when it’s ready.'}`);
   void window.centralKnot.installUpdate().then(takeUpdates, () => { announce('Couldn’t start the update. Try again.'); returnFocus(); });
 }
 

@@ -2527,7 +2527,7 @@ async function updateFlow() {
     await typeDraft();
     await watchLooks();
     await press('update-control');
-    same('the click says it won’t restart by itself, with changes waiting', await a.run(`document.getElementById('announcement').dataset.text`), 'Downloading 0.5.0 preview 5. Something here isn’t saved yet, so Central Knot will wait for you to restart.');
+    same('the click says it won’t restart by itself, with changes waiting', await a.run(`document.getElementById('announcement').dataset.text`), 'Downloading 0.5.0 preview 5. Restarting now loses your unsaved instructions draft. If that still holds when it’s ready, Central Knot waits for you to restart.');
     same('downloaded and prepared, it waits to restart', await reaches('held'), 'held');
     const looks = await a.run('window.ckLooks');
     check('one click downloads, with progress on the control, then prepares', looks.filter(look => /^working Downloading… \d+%$/.test(look)).length >= 2 && looks.includes('working Preparing update…'), looks);

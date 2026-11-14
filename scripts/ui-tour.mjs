@@ -907,19 +907,25 @@ if (wanted('plugin-skills')) {
   const market = join(scratch, 'market');
   if (!existsSync(market)) writeMarket(market);
   // document-tools as each tool records it installed: Claude Code's installed_plugins.json, Codex's config.toml and plugin
-  // cache, Copilot CLI's config.json. A stand-in `copilot` keeps its skill switch in settings.json as the real one does.
+  // cache, Copilot CLI's config.json. Each has team-tools in its own list of marketplaces (Claude Code's known_marketplaces.json,
+  // Copilot CLI's settings.json), so the plugins record's first read finds it in all three. A stand-in `copilot` keeps its skill
+  // switch in settings.json as the real one does, beside that list.
   const copyTo = folder => { for (const name of ['pdf-reader', 'spreadsheet']) { mkdirSync(join(folder, 'skills', name), { recursive: true }); writeFileSync(join(folder, 'skills', name, 'SKILL.md'), readFileSync(join(market, 'plugins/document-tools/skills', name, 'SKILL.md'))); } return folder; };
   const claudeCopy = copyTo(join(practice, '.claude/plugins/cache/ck-tools/document-tools/1.2.0'));
   writeFileSync(join(practice, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'document-tools@team-tools': [{ scope: 'user', installPath: claudeCopy, version: '1.2.0' }] } }));
+  const known = JSON.stringify({ 'team-tools': { source: { source: 'git', url: market } } });
+  writeFileSync(join(practice, '.claude/plugins/known_marketplaces.json'), known);
   copyTo(join(practice, '.codex/plugins/cache/team-tools/document-tools/1.2.0'));
   edit(join(practice, '.codex/config.toml'), text => `${text}\n[marketplaces.team-tools]\nsource = ${JSON.stringify(market)}\n\n[plugins."document-tools@team-tools"]\nenabled = true\n`);
   const copilotCopy = copyTo(join(practice, '.copilot/installed-plugins/team-tools/document-tools'));
   mkdirSync(join(practice, '.copilot'), { recursive: true });
   writeFileSync(join(practice, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'document-tools', marketplace: 'team-tools', version: '1.2.0', cache_path: copilotCopy }] }));
+  const copilotSettings = disabledSkills => JSON.stringify({ extraKnownMarketplaces: JSON.parse(known), disabledSkills });
+  writeFileSync(join(practice, '.copilot/settings.json'), copilotSettings([]));
   mkdirSync(join(HOME, '.local/bin'), { recursive: true });
   // Codex's switch is its config.toml, so its CLI is only asked its version (the switch is offered from a tested build).
   writeFileSync(join(HOME, '.local/bin/codex'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli 0.167.0" && exit 0\nexit 9\n`, { mode: 0o755 });
-  writeFileSync(join(HOME, '.local/bin/copilot'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.108." && exit 0\nS="$HOME/.copilot/settings.json"\ncase "$1 $2" in\n  "skill disable") printf '{"disabledSkills":["%s"]}' "$3" > "$S" ;;\n  "skill enable") printf '{"disabledSkills":[]}' > "$S" ;;\n  *) exit 9 ;;\nesac\n`, { mode: 0o755 });
+  writeFileSync(join(HOME, '.local/bin/copilot'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.108." && exit 0\nS="$HOME/.copilot/settings.json"\ncase "$1 $2" in\n  "skill disable") printf '{"extraKnownMarketplaces":${known},"disabledSkills":["%s"]}' "$3" > "$S" ;;\n  "skill enable") printf '${copilotSettings([])}' > "$S" ;;\n  *) exit 9 ;;\nesac\n`, { mode: 0o755 });
   const at860 = async (name, caption) => {
     await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();
     await a.run(`document.querySelector('.plugin-skills')?.scrollIntoView({ block: 'start' })`); await wait(150);
@@ -952,7 +958,7 @@ if (wanted('plugin-skills')) {
   await flip('#plugins-undo');
   await shot(a, 'skill-undone', 'Clicked Undo: pdf-reader is on again in Copilot CLI, the last click’s tool; Codex’s click came before, so it is still off there.');
   await flip('#pskill-0-document-tools-pdf-reader-codex-cli');
-  writeFileSync(join(practice, '.copilot/settings.json'), JSON.stringify({ disabledSkills: ['spreadsheet'] }));
+  writeFileSync(join(practice, '.copilot/settings.json'), copilotSettings(['spreadsheet']));
   await a.click('#plugin-back'); await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#pcell-0-document-tools-copilot-cli')`, 15000); await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-skills')`);
   await shot(a, 'skill-held', 'Turned every skill named “spreadsheet” off in Copilot CLI outside Central Knot (`copilot skill disable spreadsheet`), then reopened the page: it shows off there, locked, and can’t be turned on for this plugin alone (its row says why).');
   await at860('skill-held-860', 'The held state at 860×560, scrolled to the skills.');

@@ -3,7 +3,8 @@
 // Every click acts at once, by one of two routes, split by whether the plugin's record changes: the switch and each tool's
 // links go through turnPlugin (main records first, marketplaces.ts turn); Update, Update all, Update parts, a skill's switch,
 // a part's switch and their Undo go through applyPluginOps. Both set market.lastRun, which the toolbar says with one Undo.
-// One page action at a time (app.ts busy): a click during a run lands on a disabled control and is dropped, never run twice.
+// One page action at a time: while app.ts busy has `app.busy` set, every plugin control is drawn disabled (a control added
+// here takes `disabled: !!app.busy` too), so a click during a run lands on a disabled control and is dropped, never run twice.
 // Steps that run by themselves (pluginupdates.ts) take their turn with the page's in main's one queue.
 import { announce, busy, rerender, setHome, state as app, tell } from './app.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';

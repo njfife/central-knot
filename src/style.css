@@ -63,7 +63,6 @@
   --switch-mixed: #9d9da8;
   --switch-on: #059669;
   --cell-on: rgb(5 150 105 / 20%);
-  --cell-wait: rgb(37 99 235 / 17%);
   --cell-warn: rgb(217 119 6 / 20%);
   --lift: 0 1px 2px rgb(0 0 0 / 5%);
   /* A small menu or tip floating over the page */
@@ -110,7 +109,6 @@
     --switch-mixed: rgb(255 255 255 / 38%);
     --switch-on: #10b981;
     --cell-on: rgb(52 211 153 / 20%);
-    --cell-wait: rgb(96 165 250 / 24%);
     --cell-warn: rgb(251 191 36 / 20%);
     --lift: inset 0 1px 0 rgb(255 255 255 / 6%);
   }
@@ -357,8 +355,8 @@ ul { list-style: none; }
 .apply-waiting { color: var(--warning); }
 button.apply-state.text-action { border: 0; background: transparent; padding: 0; font: inherit; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
 button.apply-state.apply-waiting.text-action { color: var(--warning); text-decoration-color: color-mix(in oklab, var(--warning) 50%, transparent); }
-/* A crowded toolbar first shortens its pending count ("2 changes"; the full summary is the tooltip) and its spacing;
-   if it still can't fit after its buttons go icon-only, its actions take a second line, at the right. */
+/* A crowded toolbar first tightens its spacing; if it still can't fit after its buttons go icon-only, its actions take a
+   second line, at the right. */
 .bar-short .toolbar-end { padding-left: 8px; }
 .bar-short .chip { padding: 0 8px; }
 .chip-icon { display: none; }
@@ -526,9 +524,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .cell-button.cell-on:hover:not(:disabled) { filter: brightness(1.15); }
 .cell-synced { color: var(--success); }
 .cell-synced.cell-on { background: var(--cell-on); }
-.cell-pending { color: var(--accent-ink); }
-.cell-pending.cell-on { background: var(--cell-wait); }
-.cell-button.cell-pending, .legend-cell.cell-pending { border-style: dashed; border-color: var(--accent); }
 .cell-differs { color: var(--warning); }
 .cell-differs.cell-on { background: var(--cell-warn); }
 .cell-waiting { color: var(--warning); border-style: dashed; border-color: var(--warning); }
@@ -1154,7 +1149,6 @@ span.ins-confirm { margin-top: 0; }
 }
 .cannot-dash { font-weight: 700; color: var(--ink-soft); }
 .plugin-add { border-color: color-mix(in oklab, var(--ink) 42%, transparent); color: var(--ink); }
-.cell-button.cell-pending-remove, .legend-cell.cell-pending-remove { border-style: dashed; border-color: var(--danger); color: var(--danger); background: color-mix(in oklab, var(--danger) 8%, transparent); }
 .plugin-legend { padding: 10px 16px 0; }
 /* The description repeated under About is for narrow content only, where the Plugins tab leaves it out. */
 .about-only-narrow { display: none; margin: 0 0 10px; }
@@ -1495,7 +1489,7 @@ span.ins-confirm { margin-top: 0; }
 /* Beside a plugin item's switch, where an own copy has Remove: the way to the plugin's page. */
 .text-action.tool-link { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; white-space: nowrap; }
 .tool-remove-slot { display: inline-block; }
-/* Focus always shows as focus: outside the small switch, and over a queued cell's dash. */
+/* Focus always shows as focus: outside the small switch. */
 .tool-switch .switch:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* Profiles page: the list of profiles beside the open one, and the open one's header (rename, Delete, its setup step) */

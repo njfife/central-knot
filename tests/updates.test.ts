@@ -154,9 +154,10 @@ test('what the Update button says at each step', () => {
   assert.deepEqual([held.label, held.busy], ['Restart to update', false]);
   assert.match(held.title, /loses your unsaved instructions draft\. Click to restart anyway\.$/, 'the button says what restarting loses');
   assert.equal(updateButton({ ...base, step: 'downloading' })!.busy, true);
-  // While it downloads the button says whether it will restart by itself: not with something unsaved open.
+  // While it downloads the button says whether it will restart by itself, or why it may wait: the hold's own reason.
   assert.equal(updateButton({ ...base, step: 'downloading' })!.title, 'Downloading 0.5.0 preview 5. Central Knot restarts into it when it’s ready.');
-  assert.equal(updateButton({ ...base, step: 'downloading' }, { held: 'Restarting now stops the plugin changes under way.' })!.title, 'Downloading 0.5.0 preview 5. Something here isn’t saved yet, so Central Knot will wait for you to restart.');
+  assert.equal(updateButton({ ...base, step: 'downloading' }, { held: 'Restarting now stops the plugin changes under way.' })!.title,
+    'Downloading 0.5.0 preview 5. Restarting now stops the plugin changes under way. If that still holds when it’s ready, Central Knot waits for you to restart.');
   assert.equal(label({ failed: 'The download didn’t finish.' }), 'Update to 0.5.0 preview 5', 'after a failure it can be tried again');
 });
 

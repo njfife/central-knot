@@ -165,3 +165,17 @@ test('An update the automatic check made first is made once: the click’s own u
   assert.deepEqual([click.done[0]?.report.changed, resultLines(click.done)[0]?.text, reverse(click.done)], [undefined, 'already up to date in Claude Code', []]);
   assert.deepEqual(calls, ['update claude-cli', 'update claude-cli']);
 });
+
+test('An Undo of a parts run says each tool once: its parts are back as they were, never "only some"', () => {
+  for (const partsUpdated of [false, true]) {
+    const undone: PluginDone[] = [{ ...op('kit', 'pi-cli', 'undo-parts'), run: 'r1', report: { tool: 'pi-cli', outcome: 'installed', message: '', runs: [], changed: true, ...(partsUpdated ? { partsUpdated } : {}) } }];
+    assert.equal(resultSentence(resultLines(undone, true), true), 'Undone: kit parts back as they were in Pi.', `partsUpdated ${partsUpdated}`);
+  }
+});
+
+test('A part’s switch that changed nothing says the part already was so, not that parts are up to date', () => {
+  const part = (name: string) => ({ kind: 'skill' as const, name });
+  const stale = (pick: { on: { kind: 'skill'; name: string }[]; off: { kind: 'skill'; name: string }[] }): PluginDone[] => [{ ...op('kit', 'pi-cli', 'pick-parts'), pick, report: { tool: 'pi-cli', outcome: 'installed', message: '', runs: [], changed: false } }];
+  assert.equal(resultSentence(resultLines(stale({ on: [], off: [part('gamma')] })), false), 'kit: skill gamma already out of Pi.');
+  assert.equal(resultSentence(resultLines(stale({ on: [part('gamma')], off: [] })), false), 'kit: skill gamma already in Pi.');
+});

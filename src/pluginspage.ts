@@ -183,7 +183,7 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
 
 /**
  * Update all's tooltip, before the click: each plugin with the tools it updates in (counted past five), the plugins the filter
- * hides, those whose differing copy it replaces, and that it can't be undone.
+ * hides, those whose differing copy it replaces, that an update can't be undone, and that parts it brings up to date can.
  */
 function updateAllTitle(view: PluginsView, entry: MarketplaceView, behind: PluginView[], shown: PluginView[]): string {
   const opsOf = (plugin: PluginView) => updateOps(view, entry, plugin);
@@ -195,9 +195,10 @@ function updateAllTitle(view: PluginsView, entry: MarketplaceView, behind: Plugi
     return view.tools.some(tool => copyStale(entry, plugin.name, tool, versionToCompare(plugin, detail), detail));
   };
   const replaced = behind.filter(differs).map(plugin => plugin.name);
+  const partsIn = tools(behind.flatMap(opsOf).filter(op => op.action === 'install-parts'));
   return [`Updates ${runs}.`, hidden ? `${plural(hidden, 'of them is', 'of them are')} hidden by the filter.` : '',
     replaced.length ? `It replaces the copies that differ from the marketplace’s: ${replaced.length > 5 ? plural(replaced.length, 'plugin') : andList(replaced)}.` : '',
-    'Runs now. An update can’t be undone.'].filter(Boolean).join(' ');
+    'Runs now. An update can’t be undone.', partsIn ? `Undo puts back the parts it brings up to date in ${partsIn}.` : ''].filter(Boolean).join(' ');
 }
 
 /** About a marketplace: every fact about it (who, where it comes from, when it was read), Remove, then its README. */

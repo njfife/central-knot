@@ -81,13 +81,13 @@ export const isWhole = (action?: PluginAction) => action === 'plugin-on' || acti
 /** Whether a plugin key (or a key made from one) belongs to this marketplace. */
 export const forSource = (key: string, source: string) => key.startsWith(`${source}\u0000`);
 
-/** The switch chosen for one skill of a plugin in a tool, if one is. */
-export const queued = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId, skill: string) => draft.get(opKey({ source, plugin, tool, skill }))?.action;
-/** The switch chosen for one MCP server or agent of a plugin in a tool, if one is. */
-export const queuedPart = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId, part: PartRef) => draft.get(opKey({ source, plugin, tool, part }))?.action;
-/** The whole plugin's switch chosen in a tool, if one is: the choice itself, and its action. */
+/** In an item-page click's draft: the switch chosen for one skill of a plugin in a tool, if one is. */
+export const chosenSkill = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId, skill: string) => draft.get(opKey({ source, plugin, tool, skill }))?.action;
+/** In an item-page click's draft: the switch chosen for one MCP server or agent of a plugin in a tool, if one is. */
+export const chosenPart = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId, part: PartRef) => draft.get(opKey({ source, plugin, tool, part }))?.action;
+/** In an item-page click's draft: the whole plugin's switch chosen in a tool, if one is: the choice itself, and its action. */
 export const wholeChoice = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId) => draft.get(opKey({ source, plugin, tool, action: 'plugin-on' }));
-export const queuedWhole = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId) => wholeChoice(draft, source, plugin, tool)?.action;
+export const chosenWhole = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId) => wholeChoice(draft, source, plugin, tool)?.action;
 
 /** Takes one choice back out of the draft. */
 export const clear = (draft: PluginDraft, op: OpSlot) => { draft.delete(opKey(op)); };
@@ -175,13 +175,14 @@ export function resultLines(ran: PluginDone[], undo = false, { after = false } =
     const item = part ? `${partWords[part.kind][0]} ${part.name}` : skill;
     const named = { ...(skill ? { skill } : {}), ...(part ? { part } : {}) };
     // Tools in the page's column order, so "Codex and Pi" never reads "Pi and Codex" the next time. An unchanged parts
-    // result is one group whatever kind of run it was: only a change tells an update from an install.
-    // A pick of single parts is said as such.
+    // result is one group whatever kind of run it was: only a change tells an update from an install. In an Undo every
+    // changed parts step is one group too: its parts are back as they were.
+    // A pick of single parts is said as such, changed or not (singleGroups).
     const picked = (entry: PluginDone) => entry.action === 'pick-parts';
     // A tool where a part was left alone (its note says which) got only some of them.
     const tools = (outcome: ActionReport['outcome'], changed: boolean, { parts = false, updated = false, single = false, some = false } = {}) => mine
       .filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed && isParts(entry.action) === parts
-        && (!parts || !changed || (picked(entry) === single && (single || (!!entry.report.partsUpdated === updated && (undo || !!entry.report.notes?.length === some))))))
+        && (!parts || (picked(entry) === single && (!changed || single || (undo ? !updated && !some : !!entry.report.partsUpdated === updated && !!entry.report.notes?.length === some)))))
       .sort((first, second) => byToolOrder(first.tool, second.tool)).map(entry => names[entry.tool]);
     const partsGroups: Group[] = [
       [tools('installed', true, { parts: true }), undo ? 'parts back as they were in' : 'parts installed in'],
@@ -189,6 +190,7 @@ export function resultLines(ran: PluginDone[], undo = false, { after = false } =
       [tools('installed', true, { parts: true, some: true }), 'only some parts installed in'],
       [tools('installed', true, { parts: true, updated: true, some: true }), 'only some parts updated in'],
       ...singleGroups(mine.filter(entry => picked(entry) && entry.report.changed && succeeded(entry.report)).sort((first, second) => byToolOrder(first.tool, second.tool))),
+      ...singleGroups(mine.filter(entry => picked(entry) && !entry.report.changed && succeeded(entry.report)).sort((first, second) => byToolOrder(first.tool, second.tool)), false),
       [tools('uninstalled', true, { parts: true }), 'parts removed from'],
       ...(undo
         ? [[[...tools('installed', false, { parts: true }), ...tools('uninstalled', false, { parts: true })], 'nothing left to undo in'] as [string[], string]]
@@ -225,12 +227,14 @@ export function resultLines(ran: PluginDone[], undo = false, { after = false } =
 
 /**
  * Single parts picked, tool by tool, in the parts' own names: "skill triage put into Pi", "MCP server issues taken out of
- * Codex". A run that left a part alone (its note says which) only says its parts changed.
+ * Codex", or for a pick that `changed` nothing, "skill triage already out of Pi". A run that left a part alone (its note
+ * says which) only says its parts changed.
  */
-function singleGroups(done: PluginDone[]): Group[] {
+function singleGroups(done: PluginDone[], changed = true): Group[] {
   const named = (parts: PartRef[]) => andList(parts.map(part => `${partWords[part.kind][0]} ${part.name}`));
-  return done.flatMap((entry): Group[] => (entry.report.notes?.length ? [[[names[entry.tool]], 'parts changed in']]
-    : [[entry.pick!.on.length ? [names[entry.tool]] : [], `${named(entry.pick!.on)} put into`], [entry.pick!.off.length ? [names[entry.tool]] : [], `${named(entry.pick!.off)} taken out of`]]));
+  const [into, outOf] = changed ? ['put into', 'taken out of'] : ['already in', 'already out of'];
+  return done.flatMap((entry): Group[] => (changed && entry.report.notes?.length ? [[[names[entry.tool]], 'parts changed in']]
+    : [[entry.pick!.on.length ? [names[entry.tool]] : [], `${named(entry.pick!.on)} ${into}`], [entry.pick!.off.length ? [names[entry.tool]] : [], `${named(entry.pick!.off)} ${outOf}`]]));
 }
 
 /** A result group: its tools, the words before them, and any after. */
