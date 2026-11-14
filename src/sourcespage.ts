@@ -2,7 +2,7 @@
 // follows is library.ts's A SOURCE). One field takes the link; Look reads it and shows, skill by skill, what Add would do and
 // what it won't bring in and why, before anything is kept; Add brings each skill into Central Knot, Off. Each source has a row:
 // its link, what it brought (On or Off), when it was last read, why it couldn't be read if so, Check now and Remove; a skill
-// there the library holds deleted has its own Add, and one whose version waits (library.ts changedHere) its own Replace. Every state
+// there the library holds deleted has its own Add, and one whose version waits (library.ts changedHere) its own Merge and Replace. Every state
 // a row says is the engine's (types.ts SourceNameState); this page only words it. Its own page rather than the Git repo's: that page is Pull and Push of the whole set, two-way and in Central
 // Knot's layout, while a source is read only, holds a few skills, and its rows grow one per link.
 import { announce, busy, rerender, showPage, state } from './app.ts';
@@ -11,7 +11,7 @@ import { dayAndTime, plural } from './model.ts';
 import { linkLabel } from './sourcelink.ts';
 import { andList, toolsPhrase } from './words.ts';
 import { outcomeBand } from './matrix.ts';
-import type { SourceFound, SourceName, SourcePreview, SourceResult, SourcesView, SourceView } from './types.ts';
+import type { MergeDone, SourceFound, SourceName, SourcePreview, SourceResult, SourcesView, SourceView } from './types.ts';
 
 const api = () => window.centralKnot;
 
@@ -89,6 +89,11 @@ const replace = (source: SourceView, name: SourceName) => busy(`Replacing ${name
   await settle(result, whatItDid(result, linkLabel(source.link), name.name ?? name.key));
 });
 
+const merge = (source: SourceView, name: SourceName) => busy(`Merging ${name.name ?? name.key}…`, async () => {
+  const result = await api().mergeFromSource(source.id, name.key, state.home!.home);
+  await settle(result, whatItDid(result, linkLabel(source.link)));
+});
+
 const remove = (source: SourceView) => busy('Removing the source…', async () => {
   const result = await api().removeSource(source.id, state.home!.home);
   await settle(result, { text: `Removed ${linkLabel(source.link)}. Its skills stay in Central Knot as they are, On or Off, with their versions; they are no longer from it.`, warns: false });
@@ -98,10 +103,10 @@ const remove = (source: SourceView) => busy('Removing the source…', async () =
 interface Said { text: string; warns: boolean; note?: string; undo?: { id: string; label: string }; skills?: boolean }
 
 /**
- * What a source's click did, from what the pass did (types.ts PassResult sourced: each item's answer and the History entry
- * that says it; and the pass's results: the tools each was written to or taken out of), and why the source wasn't read whole.
- * A skill its source dropped leads, with Turn on, and it or a read not whole is a warning; else the one update has Undo.
- * `replaced`: the name a click on Replace asked for, whose update says so.
+ * What a source's click did, from what the pass did (types.ts PassResult sourced: each item's answer, the History entry that
+ * says it, and what a Merge did; and the pass's results: the tools each was written to or taken out of), and why the source
+ * wasn't read whole. A skill its source dropped leads, with Turn on, and it, a read not whole or a Merge that changed nothing
+ * is a warning; else the one update or merge has Undo. `replaced`: the name a click on Replace asked for, whose update says so.
  */
 export function whatItDid(result: Pick<SourceResult, 'sourced' | 'results' | 'notWhole'>, label: string, replaced?: string): Said {
   const homeTools = state.home?.sync.managed ?? [];
@@ -109,27 +114,40 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'results' | 'no
   const of = (...answers: string[]) => (result.sourced ?? []).filter(entry => answers.includes(entry.answer));
   const names = (entries: { name: string }[]) => andList(entries.map(entry => entry.name));
   const are = (entries: unknown[]) => (entries.length === 1 ? 'is' : 'are');
-  const dropped = of('drop'), updated = of('update'), waiting = of('wait'), made = of('make'), linked = of('link'), left = of('differs', 'another', 'deleted');
+  const dropped = of('drop'), updated = of('update'), made = of('make'), linked = of('link'), left = of('differs', 'another', 'deleted');
+  const waiting = of('wait').filter(entry => !entry.merge), merges = (result.sourced ?? []).filter(entry => entry.merge), mergedIn = merges.filter(entry => entry.merge === 'merged');
+  const unmerged = merges.filter(entry => entry.merge !== 'merged' && entry.merge !== 'had');
   const said = [
     ...dropped.map(({ name }) => { const out = where(name, 'removed'); return `${name} is no longer at ${label}: it was turned off${out.length ? ` and taken out of ${toolsPhrase(out, homeTools)}` : ''}; Central Knot keeps it.`; }),
     ...updated.map(({ name }) => {
       const into = where(name, 'written'), now = into.length ? `, now in ${toolsPhrase(into, homeTools)}` : ', kept Off';
       return name === replaced ? `${name} has the source’s version${now}; the one it had is kept as a version.` : `${name} was updated from its source${now}.`;
     }),
-    waiting.length ? `${names(waiting)} changed at the source; yours ${waiting.length === 1 ? 'stays current, since it was' : 'stay current, since they were'} changed here or a tool’s copy can’t be read just now: Replace on ${waiting.length === 1 ? 'its row' : 'each one’s row'} takes the source’s.` : '',
+    waiting.length ? `${names(waiting)} changed at the source; yours ${waiting.length === 1 ? 'stays current, since it was' : 'stay current, since they were'} changed here or a tool’s copy can’t be read just now: on ${waiting.length === 1 ? 'its row' : 'each one’s row'}, Merge puts the source’s changes into yours if they don’t clash, and Replace takes the source’s.` : '',
+    ...merges.map(({ name, merge }) => mergeWords(name, merge!, where(name, 'written'), homeTools)),
     made.length ? `${names(made)} ${are(made)} in Central Knot, Off: turn ${made.length === 1 ? 'it' : 'them'} on in Skills.` : '',
     linked.length ? `${names(linked)} ${are(linked)} in Central Knot already, the same, and ${linked.length === 1 ? 'is' : 'are'} now from it.` : '',
     left.length ? `Not brought in: ${names(left)} (${left.length === 1 ? 'its row says' : 'their rows say'} why).` : '',
     result.notWhole ? `Not all of ${label} could be read (its row says why), so the source turned nothing off.` : '',
   ].filter(Boolean);
   const turnOn = dropped.length === 1 && dropped[0].history ? { id: dropped[0].history, label: `Turn ${dropped[0].name} on` } : undefined;
-  const undo = !turnOn && updated.length === 1 && updated[0].history ? { id: updated[0].history, label: updated[0].name === replaced ? 'Undo the replace' : 'Undo the update' } : undefined;
+  const changed = [...updated, ...mergedIn], one = changed.length === 1 ? changed[0] : undefined;
+  const undo = !turnOn && one?.history ? { id: one.history, label: one.merge ? 'Undo the merge' : one.name === replaced ? 'Undo the replace' : 'Undo the update' } : undefined;
   return {
-    text: said.length ? said.join(' ') : `Checked ${label}: nothing came in from it.`, warns: dropped.length > 0 || !!result.notWhole,
-    ...(updated.length ? { note: `See each change, or undo it, in History.` } : {}), ...(turnOn ?? undo ? { undo: turnOn ?? undo } : {}),
+    text: said.length ? said.join(' ') : `Checked ${label}: nothing came in from it.`, warns: dropped.length > 0 || !!result.notWhole || unmerged.length > 0,
+    ...(changed.length ? { note: `See each change, or undo it, in History.` } : {}), ...(turnOn ?? undo ? { undo: turnOn ?? undo } : {}),
     // Open Skills where something there changed: not for a read that only says what can't be read, or what waits.
-    skills: dropped.length + updated.length + made.length + linked.length > 0,
+    skills: dropped.length + changed.length + made.length + linked.length > 0,
   };
+}
+
+/** What a click on Merge did to one skill (types.ts MergeDone), said after it: `into`, the tools the merged version was written to. */
+function mergeWords(name: string, merge: MergeDone, into: string[], homeTools: string[]): string {
+  if (merge === 'merged') return `${name} now has your changes and the source’s, merged${into.length ? `, in ${toolsPhrase(into, homeTools)}` : ''}; the version it had is kept.`;
+  if (merge === 'had') return `${name} already had the source’s changes, so Merge changed nothing in it.`;
+  if (merge === 'unsettled') return `Merge left ${name} as it was, since a tool’s copy of it can’t be read just now (a save still landing, or a copy that can’t be read as it is). Merge can run once that copy can be read; on Skills, its row says which tool and why.`;
+  if ('conflicts' in merge) return `Merge left ${name} as it was: ${andList(merge.conflicts)} changed both here and at the source, in ways that can’t be merged. Replace takes the source’s version and keeps yours as a version; otherwise yours stays current and the update keeps waiting.`;
+  return `Merge couldn’t run, so ${name} is as it was: ${merge.couldNot}`;
 }
 
 // ---------- Words ----------
@@ -145,7 +163,8 @@ function stateWords(name: SourceName, preview: boolean): { text: string; warns?:
     case 'make': return { text: preview ? 'Comes in, Off: in no tool until you turn it on' : 'Comes in, Off, at the next Check now' };
     case 'link': return { text: `Already in Central Knot, the same: ${next} links it to this source` };
     case 'update': return { text: preview ? 'Came from this link before and is unchanged: Add links it again, and the source’s version becomes current' : `Changed at the source: ${next} makes that the current version` };
-    case 'wait': return { text: 'Changed at the source. Yours stays current until you replace it, since it was changed here or a tool’s copy can’t be read just now. Replace makes the source’s current and keeps yours as a version.', warns: true };
+    // The type check needs `merge` here: SourceNameState holds every SourceAnswer, and `merge` is a Merge's own, never a row's.
+    case 'wait': case 'merge': return { text: 'Changed at the source. Yours stays current until you merge or replace it, since it was changed here or a tool’s copy can’t be read just now. Merge puts the source’s changes into yours if they don’t clash; Replace takes the source’s and keeps yours as a version.', warns: true };
     case 'drop': return { text: `No longer at the source: ${next} turns it off`, warns: true };
     case 'differs': return { text: `Not brought in: Central Knot already has a different ${called}. To take this one instead, delete yours from Central Knot on Skills (that also takes it out of every tool it is on in), then ${preview ? 'once the source is added, Add on its row' : 'Add on this row'}.`, warns: true };
     case 'another': return { text: `Not brought in: Central Knot has ${called} from ${name.why ? linkLabel(name.why) : 'another source'}`, warns: true };
@@ -230,8 +249,11 @@ function sourceRow(source: SourceView) {
   const called = (name: SourceName) => name.name ?? name.key;
   const nameButton = (name: SourceName) => (name.state === 'deleted' ? button({ variant: 'link', size: 'micro', label: 'Add', id: `source-bring-${source.id}-${name.key}`, disabled: locked,
     attrs: { title: `Bring ${called(name)} back into Central Knot, Off, at this source’s version; its earlier versions come back with it` }, onclick: () => void bringBack(source, name) })
-    : name.state === 'wait' ? button({ variant: 'link', size: 'micro', label: 'Replace', id: `source-replace-${source.id}-${name.key}`, disabled: locked,
-      attrs: { title: `Make this source’s version of ${called(name)} current, in every tool it is on in; yours is kept as a version, and Undo puts it back` }, onclick: () => void replace(source, name) }) : null);
+    : name.state === 'wait' ? h('span.source-name-actions', {},
+      button({ variant: 'link', size: 'micro', label: 'Merge', id: `source-merge-${source.id}-${name.key}`, disabled: locked,
+        attrs: { title: `Put this source’s changes to ${called(name)} into yours, file by file, in every tool it is on in; if they clash with yours, nothing changes and the files are named. Yours is kept as a version, and Undo puts it back` }, onclick: () => void merge(source, name) }),
+      button({ variant: 'link', size: 'micro', label: 'Replace', id: `source-replace-${source.id}-${name.key}`, disabled: locked,
+        attrs: { title: `Make this source’s version of ${called(name)} current, in every tool it is on in; yours is kept as a version, and Undo puts it back` }, onclick: () => void replace(source, name) })) : null);
   return h('li.source-row', { id: `source-${source.id}`, 'data-source': source.id },
     h('div.source-row-head', {},
       h('span.source-row-title', {}, icon('link-2', 16, 'tone-muted'), h('strong.source-link', { title: source.link }, label)),

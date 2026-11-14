@@ -4,9 +4,10 @@
 // ~/.agents/skills (which Copilot CLI and Codex read) coming and going, Take over of it, a tool's own switch set by hand and
 // cleared, Automatic sync off and on, History's days passing, a folder that can't be written during a click, a crash at
 // each step of a write or a removal, a tool uninstalled or left out, the agent turned off and on, and a source (a made-up
-// repository standing in for a link: tests/sourcerepo.ts) holding a notes of its own: added, changed there, checked, dropped and
-// brought back there, its SKILL.md unparseable there for one check, Add on its row for a notes held deleted, Replace on its row
-// for a notes whose version waits there (changed here too), and removed. Odd
+// repository standing in for a link: tests/sourcerepo.ts) holding a notes of its own: added, changed there (its body, or its
+// description, a line apart from the body a hand edit rewrites), checked, dropped and
+// brought back there, its SKILL.md unparseable there for one check, Add on its row for a notes held deleted, Replace and Merge
+// on its row for a notes whose version waits there (changed here too), and removed. Odd
 // seeds start with notes made by hand in Claude Code (a folder with a script, a file of mode 0600 and an empty folder), so the
 // source's notes differs and is not brought in; even seeds start with notes from the source, turned On.
 // After every step:
@@ -42,7 +43,7 @@ import { setDisabled } from '../src/skillswitch.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import type { Change, HarnessId, HistoryDays, HistoryEvent, PassResult, SourceResult } from '../src/types.ts';
 import { bytes, folderOf, historyActions, put, roots, sandbox, seen, skillText, tools as allTools, trial, undo, type Tool } from './skillclicks.ts';
-import { addSource, bringBack, checkSource, previewSource, removeSource, replaceFromSource, sourcesView } from '../src/sources.ts';
+import { addSource, bringBack, checkSource, mergeFromSource, previewSource, removeSource, replaceFromSource, sourcesView } from '../src/sources.ts';
 import { repository, standInHosts } from './sourcerepo.ts';
 
 const hosts = await standInHosts();
@@ -60,8 +61,16 @@ const random = (seed: number) => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0
 /** An answer that means the page or History offered an action that is stale or does nothing. */
 const STALE = /nothing left to undo|no longer in Central Knot’s store|changed since the page was read|at that version already|No tool has a copy/;
 const same = (first: unknown, second: unknown) => JSON.stringify(first) === JSON.stringify(second);
-/** A source's click's answer (types.ts SourceResult) as a pass's, for the checks that read one: what stopped it, its results, and the History entries it made (each one's Undo). */
-const asPass = (done: SourceResult): PassResult => ({ ...(done.stopped ? { stopped: done.stopped } : {}), results: done.results ?? [], writes: 0, made: (done.sourced ?? []).flatMap(entry => (entry.history ? [entry.history] : [])) });
+/**
+ * A source's click's answer (types.ts SourceResult) as a pass's, for the checks that read one: what stopped it, its results, and
+ * the History entries it made (each one's Undo). A Merge that changed nothing (its files conflict, or a tool's copy still held a
+ * change) is a refusal, as an action the page offers may be: said, and changing nothing.
+ */
+const asPass = (done: SourceResult): PassResult => {
+  const unmerged = (done.sourced ?? []).filter(entry => entry.merge && entry.merge !== 'merged' && entry.merge !== 'had');
+  return { ...(done.stopped ? { stopped: done.stopped } : {}), writes: 0, made: (done.sourced ?? []).flatMap(entry => (entry.history ? [entry.history] : [])),
+    results: [...(done.results ?? []), ...unmerged.map(entry => ({ item: entry.name, outcome: 'held' as const, unchanged: true as const, message: `Merge changed nothing: ${JSON.stringify(entry.merge)}` }))] };
+};
 /** The skill's rich folder: a script that runs, a file of mode 0600, an empty folder. */
 const rich = (body = 'Take notes.') => ({ 'SKILL.md': skillText(body), 'scripts/run.sh': { text: '#!/bin/sh\necho hi\n', mode: 0o755 }, 'private.txt': { text: 'mine\n', mode: 0o600 } });
 /** The agent beside it, and its file in each tool. */
@@ -191,6 +200,7 @@ async function walk(seed: number): Promise<Finding[]> {
         add(1, { name: 'Remove the source', app: true, run: () => removeSource(context(), tools, recorded.id) });
         if (recorded.names.some(name => name.key === 'notes' && name.state === 'deleted')) add(4, { name: 'Add on the source’s row', app: true, run: () => bringBack(context(), tools, recorded.id, 'notes') });
         if (recorded.names.some(name => name.key === 'notes' && name.state === 'wait')) add(10, { name: 'Replace on the source’s row', app: true, click: true, run: async more => asPass(await replaceFromSource(context(more), tools, recorded.id, 'notes')) });
+        if (recorded.names.some(name => name.key === 'notes' && name.state === 'wait')) add(10, { name: 'Merge on the source’s row', app: true, click: true, run: async more => asPass(await mergeFromSource(context(more), tools, recorded.id, 'notes')) });
         // The source changes and the next read (the daily one, or Check now) comes at once: what a skill changed here meets most.
         if (sourceHasNotes) add(3, { name: 'the source changes notes, then Check now', app: true, run: async more => { await source.commit({ 'SKILL.md': skillText(`Source ${++marker}.`) }); return checkNow(recorded.id, more); } });
         // The source's SKILL.md stops parsing for one check: unreadable there, never gone, so the source turns nothing Off. From a
@@ -209,6 +219,11 @@ async function walk(seed: number): Promise<Finding[]> {
         } });
       }
       add(3, { name: 'the source changes notes', run: async () => { await source.commit({ 'SKILL.md': skillText(`Source ${++marker}.`, sourceHasNotes ? 'notes' : 'jottings') }); } });
+      // A line apart from the body a hand edit rewrites: what Merge's line merge puts together.
+      if (sourceHasNotes) add(2, { name: 'the source changes notes’s description', run: async () => {
+        const text = await readFile(join(source.dir, 'SKILL.md'), 'utf8');
+        await source.commit({ 'SKILL.md': text.replace(/^description: .*$/m, `description: Takes notes, the source’s way ${++marker}.`) });
+      } });
       add(2, { name: sourceHasNotes ? 'the source drops notes (renamed jottings)' : 'the source has notes again', run: async () => {
         sourceHasNotes = !sourceHasNotes;
         await source.commit({ 'SKILL.md': skillText(`Source ${++marker}.`, sourceHasNotes ? 'notes' : 'jottings') });
@@ -313,6 +328,7 @@ async function walk(seed: number): Promise<Finding[]> {
       for (const [tool, load] of Object.entries(now.fact?.loads ?? {})) if (load?.switchedOff) offered.push({ name: `the page’s Clear the switch in ${tool}`, run: () => clearSwitch(context(), tools, 'notes', tool as HarnessId) });
       const sourceRow = await sourceNow();
       if (sourceRow?.names.some(name => name.key === 'notes' && name.state === 'wait')) offered.push({ name: 'the Sources page’s Replace', run: async () => asPass(await replaceFromSource(context(), tools, sourceRow.id, 'notes')) });
+      if (sourceRow?.names.some(name => name.key === 'notes' && name.state === 'wait')) offered.push({ name: 'the Sources page’s Merge', run: async () => asPass(await mergeFromSource(context(), tools, sourceRow.id, 'notes')) });
       for (const action of offered) await trial(box, async () => {
         const record = await recordText(), switches = await switchesNow(), answers = [await action.run()].flat();
         const refusal = answers.map(answer => answer.stopped ?? answer.results.find(entry => entry.unchanged)?.message).find(Boolean);
