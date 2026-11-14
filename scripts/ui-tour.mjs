@@ -10,8 +10,8 @@
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
 // Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses, manage (a
 // tool's Manage switch, each state of the Harnesses list it changes, and the Skills page and Overview with tools left out), repo,
-// remove-build (another build of Central Knot on this Mac, as made-up bundles) and sources (a Git link read on a click, made-up
-// repositories standing in for GitHub).
+// remove-build (another build of Central Knot on this Mac, as made-up bundles), sources (a Git link read on a click, made-up
+// repositories standing in for GitHub) and sort (the item pages sorted by last updated).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -2540,6 +2540,40 @@ if (wanted('sources')) {
   await a.click('.source-row .source-actions button.ghost');
   await shot(a, 'remove-asked-860', 'Clicked Remove… at 860×560: the question in place, that its skills stay in Central Knot as they are, On or Off, with their versions, with Remove and Cancel');
   await a.size(1280, 800);
+  if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
+}
+
+// ---------- Sorted by last updated (matrix.ts orderChoice, itemrow.ts inOrder) ----------
+if (wanted('sort')) {
+  begin('sort');
+  await fresh();
+  if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
+  // Each skill's copies as last changed some days ago (its folder's and files' newest time: skillfiles.ts folderTime; a copy taken in
+  // keeps it as its version's), then standup edited now.
+  for (const [key, days] of Object.entries({ notes: 1, 'release-notes': 9, standup: 40, review: 75 })) {
+    const then = new Date(Date.now() - days * DAY), folders = ['.claude', '.copilot'].map(root => join(practice, root, 'skills', key)).filter(existsSync);
+    for (const path of folders.flatMap(folder => [join(folder, 'SKILL.md'), folder])) utimesSync(path, new Date(), then);
+  }
+  await refresh();
+  await a.click('#nav-skills');
+  for (const key of ['notes', 'release-notes', 'standup']) { await turnOnRow(key); await switchOn(key); }
+  edit(join(practice, '.claude/skills/standup/SKILL.md'), text => `${text}\nEdited in Claude Code.\n`);
+  await refresh();
+  await a.run(`(() => { const select = document.querySelector('#item-order'); select.value = 'updated'; select.dispatchEvent(new Event('change')); })()`);
+  await a.settle();
+  const caption = 'Chose Sort: Last updated. Under each heading the rows go newest first, each saying when: standup, just edited in Claude Code, leads On, then notes (yesterday) and release-notes (9 days ago); review, found, says when its newest copy changed (2 months ago)';
+  for (const theme of ['dark', 'light']) {
+    await a.theme(theme);
+    for (const [width, height] of [[860, 528], ...SIZES.slice(1)]) { await a.size(width, height); await shot(a, `skills-${theme}-${width}`, `${caption} (${width}×${height}, ${theme})`); }
+  }
+  await a.theme('dark'); await a.size(1440, 900);
+  await openRow('notes');
+  await shot(a, 'skills-docked-1440', 'Opened notes at 1440×900, about the narrowest window that docks a row’s details: beside them the table is at its narrowest, and its rows still say when');
+  await a.click('#files-notes');
+  await shot(a, 'skills-files-1440', 'Clicked Files and contents: the list beside the skill keeps the table’s headings and its order under each, without the times');
+  await a.size(1280, 800);
+  await a.click('#nav-mcp'); await shot(a, 'mcp', 'MCP servers, sorted the same way (one choice for the three pages): every server is found, and an MCP entry has no time of its own, so none says when and they go by name');
+  await a.click('#nav-agents'); await shot(a, 'agents', 'Agents, sorted the same way: every agent is found, each saying when its newest copy changed');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 

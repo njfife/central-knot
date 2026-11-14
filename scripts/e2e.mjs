@@ -838,6 +838,20 @@ async function practiceFlow() {
   await a.run(`document.querySelector('.sync-notice[data-kind="edit"] [id^="notice-undo-"]').click()`);
   await a.settle();
   same('Undo makes the version before it current again, everywhere', [readFileSync(standupPath('claude'), 'utf8'), readFileSync(standupPath('copilot'), 'utf8')], [standupBefore, standupBefore]);
+  // Sorted by last updated, the skill just made current again comes first under On, its row saying when, and the choice holds
+  // on the Agents page too; sorted by name again, the rows are as before. Nothing else in this run changes the order.
+  const onRows = async () => (await sectionsNow(a)).find(([role]) => role === 'on')?.[1] ?? [];
+  const sortBy = async value => { await a.run(`(() => { const select = document.querySelector('#item-order'); select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change')); })()`); await a.settle(); };
+  const byName = await onRows();
+  await sortBy('updated');
+  const byUpdated = await onRows(), standupWhen = await a.text('.ov-row[data-key="standup"] .ov-when');
+  await fitsAtMinimum(a, 'Skills sorted by last updated, each row saying when');
+  await a.click('#nav-agents');
+  const onAgents = await a.run(`document.querySelector('#item-order')?.value`);
+  await a.click('#nav-skills');
+  await sortBy('name');
+  same('sorted by last updated, the skill made current again comes first under On, saying when, and so sorted on Agents too; by name again, the rows are as before',
+    [byUpdated[0], [...byUpdated].sort(), standupWhen, onAgents, await onRows(), await a.exists('.ov-when')], ['standup', [...byName].sort(), 'just now', 'updated', byName, false]);
   const releaseNotesIn = () => ['claude', 'copilot', 'codex'].map(tool => existsSync(join(practice, `.${tool}/skills/release-notes/SKILL.md`)));
   const releaseNotesOn = folders('release-notes');
   rmSync(join(practice, '.copilot/skills/release-notes'), { recursive: true });
