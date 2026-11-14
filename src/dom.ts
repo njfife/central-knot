@@ -1,3 +1,6 @@
+// The page's element builder (h) and the small controls every page draws with: buttons, switches (toggle), checkboxes, icons,
+// empty states, section headings, shortened paths and file blocks, and the layout steps run after a render (afterLayout). No
+// words of the app's own: what a control says is its caller's, and the styles are style.css's.
 import { icons, type IconName } from './icons.ts';
 import { groupBy } from './model.ts';
 

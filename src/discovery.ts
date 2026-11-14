@@ -1,3 +1,7 @@
+// One tool in a home, read (discover): its skills as its folders hold them, its CLI and version, and its desktop app; what each
+// tool refuses in a skill (copilotProblem, codexProblem, piProblem, opencodeProblem); and the other apps here that start the
+// tools or read their files (findOtherApps). Read only: nothing here writes. Which tools are managed is presence.ts's; where
+// CLIs and apps are looked for is platform.ts's; the skills on the library are read by skillfiles.ts.
 import { constants } from 'node:fs';
 import { access, lstat, open, readFile, readdir, readlink, realpath, stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';

@@ -142,7 +142,7 @@ function stateWords(name: SourceName, preview: boolean): { text: string; warns?:
     case 'differs': return { text: `Not brought in: Central Knot already has a different ${called}. To take this one instead, delete yours from Central Knot on Skills (that also takes it out of every tool it is on in), then ${preview ? 'once the source is added, Add on its row' : 'Add on this row'}.`, warns: true };
     case 'another': return { text: `Not brought in: Central Knot has ${called} from ${name.why ? linkLabel(name.why) : 'another source'}`, warns: true };
     case 'deleted': return { text: `Not brought in: deleted from Central Knot.${preview ? ' Once the source is added, Add on its row brings it back, or Restore in History.' : ''}`, warns: true };
-    case 'unreadable': return { text: `Can’t be read: ${name.why}. Until it can, nothing from this source is turned off.`, warns: true };
+    case 'unreadable': return { text: `Can’t be read: ${name.why}. ${preview ? 'Add can’t bring it in.' : 'Until it can, nothing from this source is turned off.'}`, warns: true };
   }
 }
 

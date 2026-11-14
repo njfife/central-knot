@@ -136,7 +136,8 @@ test('Whose an entry is: an agent’s and a server’s by their prefix (a server
 test('A skill’s entries from before the library that no click can say again show as past: Remove, Disable, take-over, copies added', () => {
   const skill = { ...item(), key: 'notes', name: 'notes' };
   for (const kind of ['removed', 'switched', 'took-over', 'added'] as const) assert.equal(libraryAction(entry({ key: 'notes', kind, previous: 'a' }), skill, settled), undefined, kind);
-  // A skill's copies taken over now, and a tool's switch cleared, are said in the skill's words; neither has an Undo.
+  // A skill's copies taken over now, and a tool's switch cleared, are said in the skill's words. A take-over has no Undo; a
+  // cleared switch's Undo sets it again (tests/skills.test.ts, Clear the switch).
   assert.equal(librarySentence(entry({ key: 'notes', kind: 'switched', switched: [{ tool: 'codex-cli', disabled: false }] }), libraryWords.skills, tools)?.text, 'Codex’s own switch for it was cleared: Codex loads it again.');
   assert.equal(librarySentence(entry({ key: 'notes', kind: 'switched', switched: [{ tool: 'codex-cli', disabled: true }] }), libraryWords.skills, tools), undefined, 'a Disable from before the library keeps the general sentence');
   assert.match(librarySentence(entry({ key: 'notes', kind: 'took-over', losers: [{ tool: 'codex-cli', hash: 'x', path: '/h/.agents/skills/notes' }] }), libraryWords.skills, tools)!.text, /^Took over the copy at \/h\/\.agents\/skills\/notes: Codex has Central Knot’s copy now/);

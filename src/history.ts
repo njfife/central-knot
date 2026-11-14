@@ -1,8 +1,10 @@
-// History: the log of what changed in a home, kept in `.central-knot/history.json`, newest last. Every kind writes here (the
-// library's pass for skills, MCP servers and agents, profiles.ts, gitrepo.ts, instructions); what an entry says and offers is
-// each kind's own (historyactions.ts for the library's kinds, historypage.ts for the rest). History's days (Settings) are its
-// only retention rule, applied on every read; after a write, a deleted skill's versions older than those days go too
-// (skillstore.ts pruneDeleted), so nothing History can no longer restore is kept for it.
+// History: the log of what changed in a home, kept in `.central-knot/history.json`, newest last. Its writers: the library's
+// pass for skills, MCP servers and agents, and skills.ts's Clear the switch (and its Undo) and Take over; profiles.ts and
+// profilemigrate.ts; everything.ts; toolchoice.ts; gitrepo.ts (Pull, the base instructions' included). What an entry says and
+// offers is each kind's own (historyactions.ts for the library's kinds and Synchronize everything, historypage.ts for the
+// rest). History's days (Settings) are its only retention rule, applied on every read and by pruneHistory (main.ts, when the
+// days are shortened); after a write, a deleted skill's versions older than those days go too (skillstore.ts pruneDeleted), so
+// nothing History can no longer restore is kept for it.
 import { readFile, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DAY_MS, defaultHistoryDays } from './model.ts';

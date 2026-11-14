@@ -2,7 +2,7 @@
 // (servers.ts) and agents (agents.ts) use it. A kind is carried by the pass in librarypass.ts, whose `Kind` is the contract a kind implements; this file is only the model.
 //
 // Central Knot holds each item itself, with its versions. A harness (Claude Code, Codex, …) is not where an item lives: it is
-// somewhere an item is applied. Six ideas, and nothing else, describe an item:
+// somewhere an item is applied. Six ideas describe an item (what the pass adds about copies in harnesses is librarypass.ts's):
 //
 //   item     What Central Knot holds (LibraryItem): one current version, and On or Off. On: applied to every managed
 //            harness. Off: in no harness; the item, its versions and each harness's own part stay in Central Knot.
@@ -11,8 +11,9 @@
 //            harness that a person chose for one item.
 //   apply    Putting the current version into a harness, or taking its copy out. `applied` remembers which version
 //            Central Knot last put or saw in each harness.
-//   version  One content the item has had, with when it was made and where it came from. Every version is kept until the
-//            item is deleted. Only keepVersion and setCurrent add one.
+//   version  One content the item has had, with when it was made and where it came from. Every version is kept while the
+//            item is in Central Knot (a deleted skill's go after History's days: skillstore.ts pruneDeleted). After the
+//            migrations from before the library, which build an item's versions at once, only keepVersion and setCurrent add one.
 //   found    Something a managed harness has that the library doesn't. It is no item state: a click on Add takes it in, or
 //            the home's standing rule, Synchronize everything (FOUND, below).
 //   source   A place items are read from and never written: a Git link the person gave (sources.ts). What it holds comes in
@@ -57,12 +58,13 @@
 // every managed harness of one item at once and says what to keep, write and remove.
 //
 // "Held" has two reasons, both worked out at each look and never stored: it can't be given the item (a name it can't store, a
-// folder it can't write), or it has the item another way (`anotherWay`: through a plugin; for skills, OpenCode reading Claude
-// Code's folder while the item is wanted there, a link, or a copy in ~/.agents/skills that Central Knot doesn't own). Only the
-// second lets A go, since Central Knot's copy is not what the harness has. The kind answers (librarypass.ts Disk.held, told
-// where the item is wanted); tests/librarypass.test.ts has a reader on a toy kind. A harness can have the item another way
-// and hold a copy of its own as well (a copy in ~/.agents/skills beside one in its own folder): that copy is `present` with
-// `anotherWay` (the table's last row), and the harness is decided as one the item isn't wanted in (wantedHere).
+// folder it can't write), or it has the item another way (`anotherWay`, which only skills answer: through a plugin, OpenCode
+// reading Claude Code's folder while the item is wanted there, a link, or a copy in ~/.agents/skills that Central Knot doesn't
+// own; agents and MCP servers count a plugin that brings the item as a reason it can't be given it). Only the second lets A go,
+// since Central Knot's copy is not what the harness has. The kind answers (librarypass.ts Disk.held, told where the item is
+// wanted); tests/librarypass.test.ts has a reader on a toy kind. A harness can have the item another way and hold a copy of its
+// own as well (a copy in ~/.agents/skills beside one in its own folder): that copy is `present` with `anotherWay` (the table's
+// last row), and the harness is decided as one the item isn't wanted in (wantedHere).
 //
 // Other marks a harness's line can carry are a kind's own, worked out at each look from what it read and never stored, and
 // they change nothing a pass does: for skills, a tool's own switch that turns the skill off there (skills.ts toolFacts, `loads`).
@@ -129,7 +131,8 @@
 //
 // Two promises hold the model together:
 // - H unseen is never H gone. A copy the adapter can't see for sure (unreadable, half saved, inside the settle window,
-//   its folder away) is `unseen`, and nothing happens in that harness. Only a copy that is really gone turns an item Off.
+//   its folder away) is `unseen`, and nothing happens in that harness. Of what a harness holds, only a copy that is really
+//   gone turns an item Off.
 // - Version first, disk second. A content is stored and recorded as a version (keepVersion, setCurrent) before any harness
 //   file is written over or removed. A crash in between leaves a version too many, never a content too few, and the next
 //   pass finds H = A and finishes the write or the removal.
@@ -173,7 +176,8 @@
 // switching it on takes in everything found then. The page reads the same answers (each kind's view, through lookFor), with
 // the settle window passed.
 //
-// Worked examples, one per row of each table: tests/library.test.ts. The same on real files: tests/agents.test.ts and tests/skills.test.ts.
+// Worked examples, one per row of each table: tests/library.test.ts. The same on real files: tests/agents.test.ts,
+// tests/skills.test.ts, tests/servers.test.ts and, for A SOURCE, tests/sources.test.ts.
 import { linkLabel } from './sourcelink.ts';
 import type { HarnessId } from './types.ts';
 import { toolName } from './words.ts';

@@ -1,3 +1,8 @@
+// The Overview (overviewPage: the home's first sentence, first setup's question, another build's bands, a card per kind), and
+// the Skills, MCP servers and Agents pages around the tables matrix.ts draws (skillsPage, mcpPage, agentsPage), with their
+// empty states (kindEmpty). Every other page has a module of its own (harnesspage.ts, historypage.ts, profilespage.ts,
+// sourcespage.ts, repopage.ts, pluginspage.ts, instructionspage.ts, settingspage.ts); which page draws is renderer.ts
+// renderPage, and the page's state and actions are app.ts's.
 import { absentKinds, announce, noToolManaged, noToolManagedSentence, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type PageKind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, type Page } from './app.ts';
 import { afterLayout, button, cardGrid, emptyState, fileBlocks, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, syncOwner, toolName } from './model.ts';

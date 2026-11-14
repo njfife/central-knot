@@ -1,3 +1,7 @@
+// Small helpers both the main process and the page use: times in words (dayAndTime, timesApart), History's days (the choices
+// and the default: historyDayChoices, defaultHistoryDays), counts (plural), a tool's monogram, which build syncs a home
+// (syncOwner), a notice's names, the notices a view set aside brought, carried into the next view (withSetAside), and grouping.
+// Pure: no DOM, no files. Tools' and kinds' names and lists in words are words.ts's.
 import type { HarnessId, HistoryDays, HomeView, Snapshot, SyncGate, SyncNotice, SyncView } from './types.ts';
 
 const monograms: Record<HarnessId, string> = { 'claude-cli': 'Cc', 'copilot-cli': 'Cp', 'codex-cli': 'Cx', 'pi-cli': 'Pi', 'opencode-cli': 'Oc' };

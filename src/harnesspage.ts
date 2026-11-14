@@ -1,7 +1,8 @@
 // Harnesses: one place per tool. The list sums up what each one has, with its Manage switch (managecard.ts); a managed
-// harness's own page manages its items with the same tables and switches as the Skills, MCP servers and Agents pages, with
-// that tool first, plus its instruction file and its plugins. A tool left out has its card and switch here and is shown on no
-// other page. Nothing here has its own engine: every change goes through the pages it mirrors, or the switch's toolchoice.ts.
+// harness's own page manages its items with the same tables and switches as the Skills, MCP servers and Agents pages, with that
+// tool first, plus its instruction file and its plugins. A tool left out has its card and switch here, and no other page shows
+// it as a tool (History's entries and the Overview's first line still name it). Nothing here has its own engine: every change
+// goes through the pages it mirrors, or the switch's toolchoice.ts.
 import { KINDS, harnessManaged as managed, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type PageKind } from './app.ts';
 import { manageLocked, manageRow } from './managecard.ts';
 import { installsIn, type MarketPlugin } from './pluginstatus.ts';

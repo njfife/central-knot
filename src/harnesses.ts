@@ -1,3 +1,7 @@
+// Each tool's definition (HarnessDefinition): its name, binary, config folder and the variable that moves it, the folders it
+// loads skills from, the skill folder names it keeps for itself, and what its user does to use a copy. Facts only, for the
+// main process: which tools are in a home is discovery.ts and presence.ts, their names in words words.ts toolNames, and each
+// kind's reader and writer for a tool its own module's (MAP.md, "To add or change": a tool).
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { HarnessId } from './types.ts';

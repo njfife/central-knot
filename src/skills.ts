@@ -387,8 +387,8 @@ async function overrideBefore(context: ShareContext, key: string, tool: HarnessI
 /**
  * Takes over a copy outside Central Knot's own that a tool has a skill in the library through: a link in its skills folder,
  * or a copy in ~/.agents/skills (never a folder that is the only one a tool can have, nor another tool's own folder). Its
- * content becomes a version first if the library doesn't hold it ("was in Codex"); History is told; then the link, or the
- * shared copy, goes, and the pass gives each tool that read it the library's current version. A found skill is taken in
+ * content becomes a version first if the library doesn't hold it ("was in Codex"); then the link, or the shared copy, goes;
+ * then History is told, and the pass gives each tool that read it the library's current version. A found skill is taken in
  * first, by its switch. Nothing puts a link or a shared copy back, so there is no Undo; the content stays a version. Its own
  * refusals first; then the gate (share.ts libraryGate), entered only to write. `resume`: the click is a Resume, which the gate
  * remembers before the copy goes, so the closing pass is never refused after it.

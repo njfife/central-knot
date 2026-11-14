@@ -1,5 +1,8 @@
-// Preserving edits (FIL-02): change one entry in a config file and leave every other byte as it was.
-// JSON: a member of an object at a path. TOML: the [mcp_servers.<name>] table and its subtables.
+// Preserving edits (FIL-02): change one entry in a config file's text and leave every other byte as it was. JSON (and JSONC):
+// a member of an object at a path (setJsonMember). TOML: a table and its subtables (setTomlTable: an MCP server's
+// [mcp_servers.<name>]), or the tables of an array (editTomlArray: Codex's [[skills.config]]). Text only: which entry changes
+// is its caller's (mcp.ts, mcpswitch.ts, skillswitch.ts, partswitch.ts, plugins.ts, agentfiles.ts), and writing the file,
+// checked, is share.ts writeFileChecked.
 
 // ---------- JSON ----------
 

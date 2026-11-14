@@ -1,5 +1,11 @@
-// The page's state and most pages' actions (MAP.md: the app's shell). A sync notice lives across reads here, until its page
-// shows it (keepUnshown); on its page, matrix.ts toldNotices keeps or folds it.
+// The page's state and most pages' actions (MAP.md, "The app's shell and Settings"): the open home's view and each page's own
+// state (`state`), the page shown (showPage), what is said after a click (tell, announce) and the busy line (busy); a click on
+// an item page sent to its kind's engine (applyClick, through kindPages) and its result kept for the page (lastResult); History's
+// actions (restoreEvent); the reads of the home (loadHome, readAgain) and the Sync switch, Sync once and Synchronize everything's
+// row; and the Instructions, base instructions and Profiles pages' actions. A sync notice lives across reads here, until its
+// page shows it (keepUnshown); on its page, matrix.ts toldNotices keeps or folds it. Not here: drawing (renderer.ts and each
+// page's module), the Plugins page's state (pluginstate.ts), the Sources and Git repo pages' (sourcespage.ts, repopage.ts), and
+// every rule a page shows (the engines' answers in the view: libraryrow.ts, historyactions.ts, profileplan.ts).
 import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { forgetSourcePrompts, loadSources } from './sourcespage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
@@ -722,7 +728,8 @@ function sayEverything(past: HistoryEvent, result: ApplyResult, switchedOn: bool
 
 /**
  * A skill's two actions a click on its row can't carry (skills.ts clearSwitch, takeOver): a tool's own switch cleared, or a copy
- * outside Central Knot's taken over. What it did is said in the band; neither has an Undo (its History entry says so).
+ * outside Central Knot's taken over. What it did is said in the band, with no Undo there: Take over has none (the band and its
+ * History entry say so); a cleared switch's Undo is its History entry's action (skills.ts switchBack).
  */
 export const skillAction = (action: 'clear-switch' | 'take-over', key: string, tool: HarnessId, name: string) =>
   busy(action === 'take-over' ? 'Taking it over…' : 'Clearing the switch…', async () => {

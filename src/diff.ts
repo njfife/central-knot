@@ -1,4 +1,5 @@
-// Line diffs for reviewing a change: exact, small, with long unchanged runs folded.
+// Line and word diffs for reviewing a change: exact, small, with long unchanged runs folded. Pure: drawing them is the caller's
+// (the Instructions page's cards; an item's versions and copies: versionlist.ts, matrix.ts, copywords.ts).
 /** A line diff, small and exact: unchanged, removed and added lines in order (longest common subsequence). */
 export function lineDiff(before: string, after: string): { kind: 'same' | 'removed' | 'added'; text: string }[] {
   const a = before === '' ? [] : before.replace(/\n$/, '').split('\n');

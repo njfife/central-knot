@@ -2,10 +2,11 @@
 // what each says (librarySentence), what it still offers (libraryAction, versionChoices), and what its row shows once its
 // action was used (doneWords). Read by History's page (the row and its buttons), by app.ts (what is said after a click), by
 // librarypass.ts restore (the click an action runs, through each kind's Kind.historyAction) and by the tests. Pure: no
-// files, no DOM. The entries of profiles and instructions are historypage.ts's own.
+// files, no DOM. The entries of profiles, the base instructions and a tool's Manage switch are historypage.ts's own.
 //
-// Every action is decided from the entry and the item as the library holds it now (library.ts LibraryItem), so it is offered
-// exactly while it would change something and is always safe to click. Most are a click the item's page could send as well
+// Every action is decided from the entry, the item as the library holds it now (library.ts LibraryItem) and, for a take-in's
+// Undo and a cleared switch's, what the managed tools hold now (ItemNow; a skill row's `loads`), so it is offered exactly while
+// it would change something. Most are a click the item's page could send as well
 // (types.ts Change). Two are not: an Undo that gives tools their own copies back (Change giveBack, which the page never
 // sends), and a cleared switch's Undo, which sets that tool's own switch again (skills.ts switchBack, not a Change). An entry
 // from before an item was on the library (a skill's Remove, Disable or take-over by the earlier engine; an MCP server's Undo

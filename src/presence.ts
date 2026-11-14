@@ -1,7 +1,8 @@
 // Which tools are in a home (presentTools) and which of them Central Knot manages (managedTools): every installed tool but
 // the ones whose Manage switch is off (share.ts SyncRecord leftOut, changed only by toolchoice.ts chooseTools). Central Knot
-// writes only in managed tools, and every page but Harnesses (a left-out tool's card and switch) shows only those, so the
-// rule lives here, once, for the main process and the page alike.
+// writes only in managed tools, and every page but Harnesses (a left-out tool's card and switch) shows only those as tools,
+// so the rule lives here, once, for the main process and the page alike. Not here: turning the switch (toolchoice.ts), each
+// tool's definition (harnesses.ts) and what is read of it in a home (discovery.ts).
 import type { HarnessId, Snapshot } from './types.ts';
 
 /**
