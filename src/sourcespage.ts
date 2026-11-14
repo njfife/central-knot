@@ -261,7 +261,7 @@ function previewPanel(preview: SourcePreview) {
     h('div.source-preview-head', {}, h('strong.source-link', { title: preview.link }, label), h('span.source-where.tone-muted', {}, whereWords(preview))),
     preview.refused ? h('p.source-refused', {}, icon('circle-alert', 14, 'tone-danger'), h('span', {}, preview.refused)) : null,
     preview.names.length ? h('ul.source-names', {}, preview.names.map(name => nameRow(name, true))) : null,
-    preview.later ? h('p.source-note.tone-muted', {}, icon('info', 14, 'tone-muted'), h('span', {}, preview.later)) : null,
+    preview.later ? h('p.source-later', {}, icon('info', 14, 'tone-muted'), h('span', {}, preview.later)) : null,
     h('div.source-preview-actions', {},
       preview.refused ? null : button({ variant: 'primary', size: 'small', icon: 'plus', label: addLabel, id: 'source-add', disabled: !allowed || !!state.busy, onclick: () => void add(preview.token, label) }),
       cancel,

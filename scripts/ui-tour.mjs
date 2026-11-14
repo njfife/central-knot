@@ -11,7 +11,8 @@
 // Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses, manage (a
 // tool's Manage switch, each state of the Harnesses list it changes, and the Skills page and Overview with tools left out), repo,
 // remove-build (another build of Central Knot on this Mac, as made-up bundles), sources (a Git link read on a click, made-up
-// repositories standing in for GitHub) and sort (the item pages sorted by last updated).
+// repositories standing in for GitHub), source-agents (agents from a link, beside a skill) and sort (the item pages sorted by
+// last updated).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -2552,16 +2553,63 @@ if (wanted('sources')) {
   await a.click('#nav-skills'); await turnOnRow('notes'); await switchOn('notes');
   await a.click('#nav-sources');
   await lookAt('team/kit');
-  await atEverySize('already-has', 'notes is On in Central Knot (the Practice copy’s own), and looked at team/kit: release comes in, Off; notes is not brought in, since Central Knot already has a different notes, and the line says how to take this one instead (deleting yours also takes it out of every tool it is on in); each sits in the folder of its name', true, '#source-preview');
+  await atEverySize('already-has', 'notes is On in Central Knot (the Practice copy’s own), and looked at team/kit: release comes in, Off; notes is not brought in, since Central Knot already has a different notes, and the line says how to take this one instead (deleting yours also takes it out of every tool it is on in); each skill sits in the folder of its name; the agent writer, in the folder agents, comes in Off', true, '#source-preview');
   await a.click('#source-add'); await busyDone(); await a.settle();
-  await atEverySize('already-has-row', 'Clicked Add 1 skill: team/kit’s row lists notes, in the folder notes, not brought in, with how to take this one instead (delete yours, which also takes it out of every tool it is on in, then Add on this row), and release, In Central Knot, Off', false, '.source-row:last-child');
+  await atEverySize('already-has-row', 'Clicked Add 1 skill and 1 agent: team/kit’s row lists notes, in the folder notes, not brought in, with how to take this one instead (delete yours, which also takes it out of every tool it is on in, then Add on this row), release, In Central Knot, Off, and the agent writer, In Central Knot, Off', false, '.source-row:last-child');
   rmSync(join(hosts, 'github.com/stephenturner'), { recursive: true, force: true });
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
   await atEverySize('check-failed', 'The repository was taken away; clicked Check now: the band says why it couldn’t be read, and the row says it too, under the last read it keeps; what came from it stays as it is', false, '.source-row');
   await a.size(860, 560);
   await a.click('.source-row .source-actions button.ghost');
-  await shot(a, 'remove-asked-860', 'Clicked Remove… at 860×560: the question in place, that its skills stay in Central Knot as they are, On or Off, with their versions, with Remove and Cancel');
+  await shot(a, 'remove-asked-860', 'Clicked Remove… at 860×560: the question in place, that its skills and agents stay in Central Knot as they are, On or Off, with their versions, with Remove and Cancel');
   await a.size(1280, 800);
+  if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
+}
+
+// ---------- Agents from a link, beside a skill ----------
+if (wanted('source-agents')) {
+  begin('source-agents');
+  // git's own url.<base>.insteadOf sends https://github.com/<path> to folders here: nothing reaches the network.
+  const hosts = join(scratch, 'source-agent-hosts'), dir = join(hosts, 'github.com/team/review-kit.git');
+  const commit = (files, message = 'change') => {
+    for (const [file, text] of Object.entries(files)) { if (text === null) rmSync(join(dir, file), { recursive: true, force: true }); else { mkdirSync(join(dir, file, '..'), { recursive: true }); writeFileSync(join(dir, file), text); } }
+    for (const step of [['add', '--all'], ['commit', '--quiet', '-m', message]]) execFileSync('git', ['-C', dir, '-c', 'user.name=Team', '-c', 'user.email=team@example.com', '-c', 'commit.gpgsign=false', ...step]);
+  };
+  mkdirSync(dir, { recursive: true });
+  execFileSync('git', ['init', '--quiet', '--initial-branch=main', dir]);
+  const reviewer = (prompt, description = 'Reviews a change for what a reader would trip on.') => `---\nname: reviewer\ndescription: ${description}\ntools: Read, Grep\n---\n\n${prompt}\n`;
+  commit({
+    'notes/SKILL.md': '---\nname: notes\ndescription: Take notes the team’s way.\n---\n\nThe team’s notes.\n',
+    'agents/reviewer.md': reviewer('Read the change as a newcomer would.\nSay where you were lost.'),
+    '.claude/agents/release-notes-writer-for-the-whole-team.md': '---\nname: release-notes-writer-for-the-whole-team\ndescription: Writes the release notes from the merged pull requests, grouped by area, in plain words a user reads.\n---\n\nWrite the release notes.\n',
+    '.mcp.json': '{"mcpServers":{"docs":{"command":"docs-server"}}}',
+    'README.md': '# review-kit\n',
+  });
+  await fresh({ GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${join(hosts, 'github.com')}/.insteadOf`, GIT_CONFIG_VALUE_0: 'https://github.com/' });
+  const busyDone = () => waitFor(a, `document.body.dataset.busy !== 'true'`, 20000);
+  const checkNow = async () => { await a.click('#nav-sources'); await a.click('.source-row .source-actions button'); await busyDone(); await a.settle(); };
+  await a.click('#nav-sources');
+  await a.run(`(() => { const input = document.querySelector('#source-link'); input.value = 'https://github.com/team/review-kit'; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await a.click('#source-look'); await busyDone(); await a.settle();
+  await atEverySize('look', 'Looked at team/review-kit: one skill, notes, in the folder notes, and two agents, reviewer in the folder agents and release-notes-writer-for-the-whole-team in .claude/agents, each line saying its kind, where it sits and its file; each comes in Off; a note that its .mcp.json is not read, since MCP servers from a link come in a later version; Add 1 skill and 2 agents', true, '#source-preview');
+  await a.click('#source-add'); await busyDone(); await a.settle();
+  await atEverySize('source-row', 'Clicked Add 1 skill and 2 agents: the band says notes, reviewer and release-notes-writer-for-the-whole-team are in Central Knot, Off, to turn on in Skills and Agents, with Open Skills; the source’s row lists the skill and both agents, In Central Knot, Off', true, '.source-row');
+  await a.click('#nav-agents'); await openRow('reviewer');
+  await atEverySize('agent-row-source', 'On Agents, reviewer is Off, in Central Knot only; opened, its version says it came from github.com/team/review-kit, and the line at the end says it is from that source, and that what changes there comes in once a day while Automatic sync is on, and at Check now on Sources, unless you change it here', true, '.ov-row[data-key="reviewer"]', 'start');
+  await turnOnRow('reviewer'); await switchOn('reviewer');
+  const inClaude = join(practice, '.claude/agents/reviewer.md');
+  writeFileSync(inClaude, readFileSync(inClaude, 'utf8').replace('Say where you were lost.', 'Say where you were lost, and why.'));
+  await waitFor(a, `!!document.querySelector('.sync-notice')`, 15000);
+  commit({ 'agents/reviewer.md': reviewer('Read the change as a newcomer would.\nSay where you were lost.', 'Reviews a change for what a newcomer would trip on.') }, 'Reword the description');
+  await checkNow();
+  await atEverySize('agent-waiting', 'reviewer was turned On, edited in Claude Code, and its description changed at the source; clicked Check now: the band says reviewer changed at the source and yours stays current, and what Merge, Replace and Keep mine do; reviewer’s line, under a warning mark, says the same and ends with Merge, Replace and Keep mine', true, '.source-row');
+  await a.click('.source-row button[id^="source-merge-"]'); await busyDone(); await a.settle();
+  await atEverySize('agent-merged', 'Clicked Merge on reviewer’s line: its edit (the prompt) and the source’s change (the description) are apart, so the band says reviewer now has your changes and the source’s, merged, in the tools it is on in, with Undo the merge, Open Agents, and History’s note', false, '.source-row');
+  commit({ 'agents/reviewer.md': null }, 'Drop reviewer');
+  await checkNow();
+  await atEverySize('agent-removed', 'reviewer was taken out of the source; clicked Check now: the band leads, under a warning mark, with reviewer no longer at the source, turned off and taken out of the tools, Central Knot keeping it, with Turn reviewer on; the source’s row has reviewer’s line, an agent not in its last read: no longer at this source, Off, and no longer from it, with Turn on', true, '.source-row');
+  await a.click('#nav-agents'); await openRow('reviewer');
+  await atEverySize('agent-removed-agents', 'On Agents, reviewer is Off, out of every tool, with “removed at its source” after its name; opened, the line at the end says the source no longer has it, that it is Off and no longer from that source, to turn it on to use it again, and what happens should the source have it again', true, '.ov-row[data-key="reviewer"]', 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 
