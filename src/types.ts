@@ -132,7 +132,7 @@ export interface DesktopApi {
    * the tool (its results there), which the band after the click says.
    */
   manageTool(tool: HarnessId, on: boolean, resume: boolean, home: string): Promise<{ stopped?: string; view: HomeView | null; did: DestinationResult[] }>;
-  /** Makes this build the home's sync owner, in place of the build that syncs it now; every managed item and choice stays. */
+  /** Makes this build the home's sync owner, in place of the build that syncs it now; every item in Central Knot and every choice stays. */
   takeOverSync(home: string): Promise<{ stopped?: string; from?: string; view: HomeView | null }>;
   /**
    * Removes another build of Central Knot (otherbuilds.ts removeClick): its bundle at `path`, offered as `build`, quit and moved to
