@@ -61,7 +61,8 @@
 //
 // "Held" has two reasons, both worked out at each look and never stored: it can't be given the item (a name it can't store, a
 // folder it can't write, or for an agent in Pi, which keeps agents as skills, a skill of that name there, of which Pi would
-// load only one: agents.ts agentHeld), or it has the item another way (`anotherWay`, which only skills answer: through a plugin, OpenCode
+// load only one: a folder, a link to one, or a loose file Central Knot didn't put there; agents.ts agentHeld), or it has the
+// item another way (`anotherWay`, which only skills answer: through a plugin, OpenCode
 // reading Claude Code's folder while the item is wanted there, a link, or a copy in ~/.agents/skills that Central Knot doesn't
 // own; agents and MCP servers count a plugin that brings the item as a reason it can't be given it). Only the second lets A go,
 // since Central Knot's copy is not what the harness has. The kind answers (librarypass.ts Disk.held, told where the item is
@@ -210,8 +211,9 @@
 //
 // Not found at all, so in neither column: a copy of an item that is Off, or in a harness the item is kept out of (the table
 // above: "the harness's own copy: left alone"); a copy a harness has that can't be read (unseen); a copy in a harness not managed;
-// and a loose file in Pi's skills folder, where Pi keeps agents as skills, whose key the agents record doesn't hold there: it
-// is the person's own skill, never read as an agent (agentfiles.ts readAgents). A copy
+// and a loose file in Pi's skills folder, where Pi keeps agents as skills, that the agents record doesn't say Central Knot
+// applied there: it is the person's own skill, never read as an agent and never replaced, and it holds that agent out of Pi
+// (agentfiles.ts readAgents). A copy
 // a harness has another way (a skill's link or ~/.agents/skills copy) is one it can be taken in from; that place is not
 // written (Take over stays a click). Nothing about found copies is stored: the rule takes in what is found at each pass, so
 // switching it on takes in everything found then. The page reads the same answers (each kind's view, through lookFor), with

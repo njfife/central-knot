@@ -372,16 +372,21 @@ test('With Pi managed, the rule never takes Pi’s own skills in as agents, and 
     await writeFile(join(pi, 'loose.md'), skill('loose'));
     await writeFile(join(pi, 'plain.md'), 'No front matter.\n');
     await writeFile(join(pi, 'gone.md'), agent('claude-cli', 'gone'));
-    // And an agent that is On, which the first pass writes into Pi.
+    // And an agent that is On, which the first pass writes into Pi; and an agent found in Claude Code named like a loose skill
+    // of the person's own in Pi, which the rule takes in while that skill holds Pi.
     await putAgent(box, 'claude-cli', 'helper');
+    await writeFile(join(pi, 'deploy.md'), skill('deploy'));
+    await putAgent(box, 'claude-cli', 'deploy');
     await turnOn(box);
     await background(box, {}, withPi);
     const before = await readdir(pi);
     assert.ok(before.includes('helper.md'), 'helper is in Pi as a skill');
     for (let count = 0; count < 2; count++) assert.equal(wrote(await background(box, {}, withPi)), 0);
     const agents = await agentsView(box.context, withPi), skills = await skillsView(box.context, withPi);
-    assert.deepEqual([agents.items.map(item => item.key), agents.problems], [['helper'], []]);
-    assert.deepEqual([placeIn(skills, 'notes'), skills.items.some(item => ['helper', 'loose', 'plain', 'gone'].includes(item.key))], ['on', false]);
+    assert.deepEqual([agents.items.map(item => item.key), agents.problems], [['deploy', 'helper'], []]);
+    assert.deepEqual([placeIn(agents, 'deploy'), rowOf(agents, 'deploy')?.cannot['pi-cli'], await readFile(join(pi, 'deploy.md'), 'utf8')],
+      ['on', 'Pi has a skill named “deploy” and loads only one skill of a name. Delete or rename that skill to use this agent in Pi.', skill('deploy')]);
+    assert.deepEqual([placeIn(skills, 'notes'), skills.items.some(item => ['helper', 'loose', 'plain', 'gone', 'deploy'].includes(item.key))], ['on', false]);
     assert.deepEqual(await readdir(pi), before);
   } finally { await box.cleanup(); }
 });

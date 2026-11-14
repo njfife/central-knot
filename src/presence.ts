@@ -56,8 +56,9 @@ export type PluginTool = Exclude<HarnessId, 'pi-cli' | 'opencode-cli'>;
 export const pluginTools: PluginTool[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
 /**
  * Where each tool that holds agents keeps one: in an agents folder of its own, or, in Pi, which has no agents, in its skills
- * folder as a skill (a loose `<name>.md`, which Pi 1.5.0 loads as one; measured). The sentences that name the folder say these
- * words, and agentfiles.ts has the file's name and format in each.
+ * folder as a skill (a loose `<name>.md`, which Pi 1.5.0 loads as one; measured). There a loose file is the agent's copy only
+ * where Central Knot applied that agent; any other is the person's skill (agentfiles.ts). The sentences that name the folder
+ * say these words, and agentfiles.ts has the file's name and format in each.
  */
 export const agentsKeptIn = {
   'claude-cli': 'agents folder', 'copilot-cli': 'agents folder', 'codex-cli': 'agents folder', 'pi-cli': 'skills folder', 'opencode-cli': 'agents folder',

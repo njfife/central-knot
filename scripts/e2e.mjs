@@ -566,7 +566,7 @@ async function agentInPi(a, practice) {
   same('its row has a Pi mark and a Pi line with its switch', [await cellState(a, 'code-reviewer', 'pi-cli'), await a.exists('#enable-code-reviewer-pi-cli')], ['current', true]);
   const note = (await a.text('#as-skill-code-reviewer') ?? '').trim();
   check('the opened row says once what Pi gets, and that deleting its file there turns the agent off everywhere',
-    /^Pi holds no agents of its own, so there this agent is a skill[\s\S]*no isolated context of its own, tool restrictions and model selection[\s\S]*Deleting that file in Pi turns the agent off in every tool/.test(note), note);
+    /^Pi holds no agents of its own, so there an agent is a skill[\s\S]*no isolated context of its own, tool restrictions and model selection[\s\S]*Deleting that file in Pi turns the agent off in every tool/.test(note), note);
   await a.click('#open-code-reviewer');
   await a.click('#nav-harnesses'); await a.click('#harness-pi-cli'); await a.click('#harness-tab-about');
   check('Pi’s About says its agents are in its skills folder, each as a skill', /Agents\s*In its skills folder, each as a skill/.test(await a.text('#harness-body') ?? ''), await a.text('#harness-body'));

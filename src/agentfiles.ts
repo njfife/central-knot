@@ -33,10 +33,12 @@ export interface AgentEntry { name: string; key: string; tool: AgentTool; file: 
 
 /**
  * Where each tool keeps an agent: one file, its name the agent's and then this suffix, in its folder (agentsFolder: its own
- * agents folder, or Pi's skills folder: presence.ts agentsKeptIn). A skills folder is the skills kind's too, which reads only
- * the folders in it (skillfiles.ts), and a loose file there is an agent's copy only for a key the agents record holds there
- * (heldThere): every other one is the person's own skill, never read. The name is written exactly as the agent's, since it is
- * part of the shared hash; Pi loads the file under it, capitals and spaces too, with a warning (measured on 1.5.0).
+ * agents folder, or Pi's skills folder: presence.ts agentsKeptIn). A skills folder is the person's too, and the skills kind
+ * reads only the folders in it (skillfiles.ts): a loose file there is an agent's copy only when the agents record says Central
+ * Knot applied that agent there (appliedThere). Every other one is the person's own skill, never read; readAgents names it
+ * (`skills`), and it holds the agent out of that tool as a skill of its name does (agents.ts agentHeld). The name is written
+ * exactly as the agent's, since it is part of the shared hash; Pi loads the file under it, capitals and spaces too, with a
+ * warning (measured on 1.5.0).
  */
 const suffixes: Record<AgentTool, string> = { 'claude-cli': '.md', 'copilot-cli': '.agent.md', 'codex-cli': '.toml', 'pi-cli': '.md', 'opencode-cli': '.md' };
 /** A harness's folder for agents in this home: its agents folder, or its skills folder where it keeps agents as skills. */
@@ -68,7 +70,8 @@ const FRONT = /^(﻿?---\r?\n)((?:[^\n]*\n)*?)(---[ \t]*(?:\r?\n|$))([\s\S]*)$/;
 export function fromMarkdown(name: string, text: string): NeutralAgent | undefined {
   const match = FRONT.exec(text);
   if (!match) return undefined;
-  const document = parseDocument(match[2].replace(/\r?\n$/, ''));
+  // Its last newline is part of a `|+` value that ends the front matter: setFrontLines writes it so.
+  const document = parseDocument(match[2]);
   if (document.errors.length) return undefined;
   const front = (document.toJS() ?? {}) as Record<string, unknown>;
   if (typeof front !== 'object' || Array.isArray(front)) return undefined;
@@ -94,33 +97,36 @@ export function parseAgent(tool: AgentTool, name: string, text: string): Neutral
   try { return tool === 'codex-cli' ? fromToml(name, text) : fromMarkdown(name, text); } catch { return undefined; }
 }
 
-/** One harness's agents as read: `unreadable` has each file that is there but can't be read as an agent, by key (`*`: the whole folder). */
-export interface AgentsRead { entries: AgentEntry[]; problems: string[]; unreadable: Map<string, string> }
+/**
+ * One harness's agents as read: `unreadable` has each file that is there but can't be read as an agent, by key (`*`: the
+ * whole folder); `skills`, in a skills folder, the key of each loose file there that is no agent's copy: the person's own skill.
+ */
+export interface AgentsRead { entries: AgentEntry[]; problems: string[]; unreadable: Map<string, string>; skills: Set<string> }
 
-/** Whether the agents record holds a key in a tool: a live agent, or a deleted one with something applied there (still to go). */
-const heldThere = (record: Record<string, LibraryItem>, key: string, tool: AgentTool) =>
-  Object.hasOwn(record, key) && (!record[key].deleted || record[key].applied[tool] !== undefined);
+/** Whether the agents record says Central Knot applied this agent in the tool (LibraryItem applied), live or deleted. */
+const appliedThere = (record: Record<string, LibraryItem>, key: string, tool: AgentTool) =>
+  Object.hasOwn(record, key) && record[key].applied[tool] !== undefined;
 
 /**
  * Reads one tool's agents. A file that cannot be read as an agent is reported in `unreadable` and never written or deleted.
- * In a skills folder only the keys `record` (the agents record's items) holds there are read (`suffixes`, above).
+ * In a skills folder only the agents `record` (its items) says were applied there are read (`suffixes`, above).
  */
 export async function readAgents(context: ShareContext, tool: AgentTool, record: Record<string, LibraryItem> = {}): Promise<AgentsRead> {
   const entries: AgentEntry[] = [];
   const problems: string[] = [];
-  const unreadable = new Map<string, string>();
+  const unreadable = new Map<string, string>(), skills = new Set<string>();
   let names: string[];
   try { names = await readdir(agentsFolder(context, tool)); }
   catch (error) {
     const gone = errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR';
     // A folder that is there but can't be listed is not absent: its agents are all treated as unreadable (held, never deleted).
     if (!gone) { problems.push(`${agentsFolder(context, tool)} could not be read.`); unreadable.set('*', agentsFolder(context, tool)); }
-    return { entries, problems, unreadable };
+    return { entries, problems, unreadable, skills };
   }
   const suffix = suffixes[tool];
   for (const file of names.filter(entry => entry.endsWith(suffix) && !entry.startsWith('.') && !entry.includes('.ck-'))) {
     const name = file.slice(0, -suffix.length);
-    if (agentsKeptIn[tool] === 'skills folder' && !heldThere(record, itemKey(name), tool)) continue;
+    if (agentsKeptIn[tool] === 'skills folder' && !appliedThere(record, itemKey(name), tool)) { skills.add(itemKey(name)); continue; }
     const path = join(agentsFolder(context, tool), file);
     let text: string;
     try { text = await readFile(path, 'utf8'); } catch { problems.push(`${path} could not be read.`); unreadable.set(itemKey(name), path); continue; }
@@ -129,7 +135,7 @@ export async function readAgents(context: ShareContext, tool: AgentTool, record:
     const at = await stat(path).then(info => info.mtimeMs, () => 0);
     entries.push({ name, key: itemKey(name), tool, file: path, text, agent, hash: agentHash(agent), bytes: sha256(text), at });
   }
-  return { entries, problems, unreadable };
+  return { entries, problems, unreadable, skills };
 }
 
 const CONTROL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]|\r(?!\n)/;
@@ -142,7 +148,13 @@ function tomlPrompt(prompt: string) {
 /** One `key: value` entry of front matter, a value of several lines as a block indented under its key. */
 const yamlEntry = (key: string, value: string) => stringifyYaml({ [key]: value }, { lineWidth: 0 }).replace(/\n$/, '');
 
-/** Replaces top-level `key:` lines (with their indented continuation) in YAML frontmatter, or adds them first. Other lines stay byte for byte. */
+/** A `key:` line opening a block that keeps its trailing blank lines (`|+`, `>+`): those lines are its value, not separators. */
+const keepsBlanks = (line: string | undefined) => /:\s*[|>][1-9]?\+/.test(line ?? '');
+/**
+ * Replaces top-level `key:` lines (with their indented continuation) in YAML frontmatter, or adds them first. Other lines stay
+ * byte for byte. Blank lines after an entry are separators the person left, kept, unless the old or the new value is a `|+`
+ * block: then they are (or would become) its value, so they go with it, and the value reads back exactly as written.
+ */
 function setFrontLines(front: string, values: [string, string][]): string {
   const newline = front.includes('\r\n') ? '\r\n' : '\n';
   let lines = front.length ? front.split(/\r?\n/) : [];
@@ -153,6 +165,7 @@ function setFrontLines(front: string, values: [string, string][]): string {
     if (at < 0) { missing.push(...line); continue; }
     let end = at + 1;
     while (end < lines.length && (/^\s+\S/.test(lines[end]) || (lines[end].trim() === '' && end + 1 < lines.length && /^\s+\S/.test(lines[end + 1])))) end++;
+    if (keepsBlanks(lines[at]) || keepsBlanks(line[0])) while (end < lines.length && lines[end].trim() === '') end++;
     lines = [...lines.slice(0, at), ...line, ...lines.slice(end)];
   }
   return [...missing, ...lines].join(newline);

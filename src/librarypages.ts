@@ -68,7 +68,7 @@ function asSkillNote(agent: ItemRow) {
   const asSkills = (state.home?.sync.managed ?? []).filter(tool => agentsKeptIn[tool] === 'skills folder');
   if (!asSkills.length) return null;
   const there = andList(asSkills.map(toolName)), takes = andList(asSkills.filter(tool => !agent.cannot?.[tool]).map(toolName));
-  const lacks = `${there} holds no agents of its own, so there this agent is a skill, a file in its skills folder: it has no `
+  const lacks = `${there} holds no agents of its own, so there an agent is a skill, a file in its skills folder: it has no `
     + `${andList(['isolated context of its own', 'tool restrictions', 'model selection'])}, and it is invoked as a skill rather than picked as an agent.`;
   const deleting = takes ? ` Deleting that file in ${takes} turns the agent off in every tool; to keep it out of ${takes} only, use ${takes}’s switch above.` : '';
   return h('p.details-limits.details-note', { id: `as-skill-${agent.key}` }, icon('info', 12, 'tone-muted'), lacks + deleting);

@@ -303,7 +303,7 @@ test('Before any pass may write (a reader, or a home that can’t be written), t
   } finally { await box.cleanup(); }
 });
 
-test('Migrating the record from before the library reads no Pi file: a loose Pi skill named like the agent is no copy of it then; the first pass keeps it as a version and writes the agent into Pi', async () => {
+test('Migrating the record from before the library reads no Pi file: a loose Pi skill named like the agent is the person’s own then, and the first pass holds Pi and leaves it as it was', async () => {
   const box = await sandbox(true);
   try {
     const texts = { 'claude-cli': claudeAgent(), 'copilot-cli': copilotAgent(), 'codex-cli': codexAgent() };
@@ -315,9 +315,9 @@ test('Migrating the record from before the library reads no Pi file: a loose Pi 
     // The migration alone, as the page's look runs it (nothing saved): the item knows nothing of Pi.
     const migrated = (await agentsView(box.context, tools)).library.reviewer;
     assert.deepEqual([Object.keys(migrated.applied).sort(), migrated.except, await versions(box)], [['claude-cli', 'codex-cli', 'copilot-cli'], [], ['Be brief. (from before Central Knot kept versions) *']]);
-    // Then the first pass with Pi managed: the table's "a copy, no A" row there, as for any harness new to an item.
+    // Then the first pass with Pi managed: nothing of the agent was applied in Pi, so the file is the person's skill and holds Pi.
     await pass(box);
-    assert.deepEqual([await readOf(box, 'pi-cli'), await versions(box)], [claudeAgent(), ['Be brief. (from before Central Knot kept versions) *', 'Mine. (was in Pi)']]);
+    assert.deepEqual([await readOf(box, 'pi-cli'), await versions(box)], [mine, ['Be brief. (from before Central Knot kept versions) *']]);
     assert.equal((await pass(box)).writes, 0);
   } finally { await box.cleanup(); }
 });
