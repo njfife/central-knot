@@ -1485,7 +1485,8 @@ async function practiceFlow() {
   const newCopy = join(practice, '.claude/plugins/cache/ck-test-market/issue-tracker/2.0.0');
   writeFileSync(claudeStub, `#!/bin/sh\n[ "$*" = "plugin update issue-tracker@ck-test-market --scope user" ] || exit 9\nmkdir -p '${newCopy}/skills/triage' && cp '${join(market, 'plugins/issue-tracker/skills/triage/SKILL.md')}' '${newCopy}/skills/triage/'\nprintf '{"version":2,"plugins":{"issue-tracker@ck-test-market":[{"scope":"user","installPath":"${newCopy}","version":"2.0.0"}]}}' > "$HOME/.claude/plugins/installed_plugins.json"\necho 'Plugin "issue-tracker" updated from 1.9.0 to 2.0.0 for scope user.'\n`);
   await a.click('#pupdate-0-issue-tracker');
-  check('Update only chooses it', await a.run(`document.querySelector('#pcell-0-issue-tracker-claude-cli')?.dataset.state`) === 'update' && /1 update/.test(await a.text('.toolbar') ?? '') && /Will update to 2\.0\.0/.test(await a.text('.plugin-panel') ?? ''), await a.text('.plugin-panel'));
+  check('Update only chooses it', /1 update/.test(await a.text('.toolbar') ?? '') && /Will update to 2\.0\.0/.test(await a.text('.plugin-panel') ?? ''), await a.text('.plugin-panel'));
+  check('a crowded toolbar keeps a short count, with the full summary as its tooltip', await a.run(`(() => { const count = document.querySelector('.plugins-toolbar .apply-count'); return !!count && count.title.includes('1 update'); })()`));
   await a.click('#plugins-apply');
   for (let tries = 0; tries < 30 && !/Installed · 2\.0\.0/.test(await a.text('.plugin-panel') ?? ''); tries++) await wait(100);
   check('Apply all updates it, read back from Claude Code’s record, and says it can’t be undone', /Installed · 2\.0\.0/.test(await a.text('.plugin-panel') ?? '') && !/Marketplace has/.test(await a.text('.plugin-panel') ?? '')
@@ -1539,37 +1540,36 @@ async function practiceFlow() {
   same('Show more follows the description’s width with the same plugin open', [narrow[0], wide[0]], [true, false]);
   if (narrow[0] !== true || wide[0] !== false) console.error('description widths', narrow[1], wide[1]);
   await a.click('#sidebar-toggle'); await fullSize(a);
-  await a.click('#pinstall-0-document-tools');
-  same('Choose all only chooses: every box waits for Apply all', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].map(cell => cell.dataset.state)`), ['install', 'install', 'install']);
-  check('the change bar counts what will run', /1 change · 3 installs/.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
-  await fitsAtMinimum(a, 'a plugin page with changes waiting for Apply all');
+  // The plugin's switch acts at once: On asks each tool's own installer (stand-ins here that refuse). Each tool's line then
+  // says it isn't in that tool, with Install there and Keep out.
+  await a.click('#pswitch-page-0-document-tools');
+  for (let tries = 0; tries < 60 && !(await a.exists('.plugin-problems')); tries++) await wait(100);
+  check('a refused install is reported as such', /Could not add the marketplace\. It stopped with exit code 9/.test(await a.text('.plugin-problems')), await a.text('.bands'));
+  same('and nothing is claimed installed: the switch is on, and each tool’s line says it isn’t there, with Install there',
+    [await a.run(`document.querySelector('#pswitch-page-0-document-tools')?.getAttribute('aria-checked')`), await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].map(cell => cell.dataset.state)`), await a.exists('#pfix-0-document-tools-claude-cli'), await a.exists('#pkeep-0-document-tools-codex-cli')],
+    ['true', ['missing', 'missing', 'missing'], true, true]);
+  await a.shot('practice-plugins');
+  await fitsAtMinimum(a, 'a plugin page whose install didn’t finish, each tool’s line with Install there and Keep out');
   await a.click('#plugin-back');
-  await fitsAtMinimum(a, 'the plugin table with its tool labels and changes waiting');
-  check('a crowded toolbar keeps a short count, with the full summary as its tooltip', await a.run(`(() => { const count = document.querySelector('.plugins-toolbar .apply-count'); return !!count && count.title.includes('3 installs'); })()`));
+  await fitsAtMinimum(a, 'the plugin table with its switches, one on and in no tool');
   await a.click('#popen-0-document-tools');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme')); tries++) await wait(100);
-  await a.click('#pcell-0-document-tools-codex-cli');
-  same('clicking a chosen box takes it back', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].map(cell => cell.dataset.state)`), ['install', 'install', 'absent']);
-  await a.click('#pcell-0-document-tools-codex-cli');
-  await a.click('#plugins-apply');
-  check('a refused install is reported as such', /Could not add the marketplace\. It stopped with exit code 9/.test(await a.text('.plugin-problems')), await a.text('.bands'));
-  await a.shot('practice-plugins');
-  same('and nothing is claimed installed', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].filter(cell => cell.dataset.state === 'installed').length`), 0);
   // A plugin's parts in a tool without plugins (Pi): its skill and MCP server go in as ordinary items, marked as from it, and Undo takes them out.
   mkdirSync(join(practice, '.pi/agent'), { recursive: true });
   await a.run('window.centralKnot.refresh()');
   await a.click('#nav-skills');
   await a.click('#nav-plugins');
   await a.click('#plugin-back');
-  same('Pi is a column whose box offers the plugin’s parts', await a.run(`document.querySelector('#pcell-0-issue-tracker-pi-cli')?.dataset.state`), 'parts-offer');
+  same('Pi is a column; the plugin, off, is in none of the tools', await a.run(`document.querySelector('#pcell-0-issue-tracker-pi-cli')?.dataset.state`), 'absent');
   await a.click('#popen-0-issue-tracker');
   for (let tries = 0; tries < 40 && !/Can go in/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
   check('its page says what goes into Pi', /takes no plugins[\s\S]*Can go in: skill triage · MCP server issues/.test(await a.text('.plugin-parts-section') ?? ''), await a.text('.plugin-parts-section'));
-  await a.click('#pcell-0-issue-tracker-pi-cli');
-  await a.click('#plugins-apply');
+  // Its switch On: the plugin's parts go into Pi (the other tools' installers are stand-ins that refuse, and say so).
+  const turnIssueTracker = async () => { await a.click('#pswitch-page-0-issue-tracker'); for (let tries = 0; tries < 80 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  await turnIssueTracker();
   const piMcp = join(practice, '.pi/agent/mcp.json');
   check('the skill and MCP server are in Pi, values as they are', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && existsSync(piMcp) && JSON.parse(readFileSync(piMcp, 'utf8')).mcpServers?.issues?.args?.[1] === '@example/issues-mcp', existsSync(piMcp) ? readFileSync(piMcp, 'utf8') : await a.text('.bands'));
-  same('Pi’s box shows its parts', await a.run(`document.querySelector('#pcell-0-issue-tracker-pi-cli')?.dataset.state`), 'parts');
+  same('Pi’s mark shows its parts', await a.run(`document.querySelector('#pcell-0-issue-tracker-pi-cli')?.dataset.state`), 'parts');
   await a.shot('practice-plugin-parts');
   await a.click('#nav-skills');
   check('the skill says which plugin it came from', /from issue-tracker/.test(await a.text('[data-key="triage"]') ?? ''), await a.text('[data-key="triage"]'));
@@ -1688,8 +1688,7 @@ async function practiceFlow() {
   writeFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), '---\nname: triage\ndescription: Mine.\n---\nMine.\n');
   await a.click('#header-refresh');
   for (let tries = 0; tries < 40 && !/Can’t go in: skill triage/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
-  await a.click('#pcell-0-issue-tracker-pi-cli');
-  await a.click('#plugins-apply');
+  await turnIssueTracker();
   check('a taken name leaves that part out', readFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), 'utf8').includes('Mine.') && readFileSync(piMcp, 'utf8').includes('issues'), readFileSync(piMcp, 'utf8'));
   rmSync(join(practice, '.pi/agent/skills/triage'), { recursive: true, force: true });
   await a.click('#header-refresh');
@@ -1698,9 +1697,10 @@ async function practiceFlow() {
   await a.click('#pparts-issue-tracker');
   await a.click('#plugins-apply');
   check('Update parts adds it', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !readFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), 'utf8').includes('Mine.'), await a.text('.bands'));
-  await a.click('#punparts-issue-tracker');
-  await a.click('#plugins-apply');
-  // Single parts: a switch under Pi puts in that one skill alone, over a link there that leads nowhere; the rest stays out.
+  await turnIssueTracker();
+  check('Off takes its parts out of Pi', !existsSync(join(practice, '.pi/agent/skills/triage')) && !readFileSync(piMcp, 'utf8').includes('issues'), readFileSync(piMcp, 'utf8'));
+  // Single parts: On over a link in triage's place that leads nowhere puts the skill in its place; then a switch under Pi takes
+  // one part out alone.
   rmSync(join(practice, '.pi/agent/skills/triage'), { recursive: true, force: true });
   mkdirSync(join(practice, '.pi/agent/skills'), { recursive: true });
   symlinkSync(join(practice, 'gone/triage'), join(practice, '.pi/agent/skills/triage'));
@@ -1709,16 +1709,19 @@ async function practiceFlow() {
   check('a broken link in a part’s place is said, not a reason to leave the part out', /The skill triage: it would replace a broken link there, which led to .*gone\/triage/.test(await a.text('.plugin-parts-section') ?? ''), await a.text('.plugin-parts-section'));
   const partSwitch = part => `#ppart-0-issue-tracker-${part}-pi-cli`;
   const standOf = part => a.run(`(() => { const s = document.querySelector('${partSwitch(part)}'); return s ? s.closest('.skill-switch').dataset.state + ' ' + s.getAttribute('aria-checked') : 'missing'; })()`);
-  same('each part has a switch under Pi, off', [await standOf('skill-triage'), await standOf('mcp-issues')], ['out false', 'out false']);
-  await a.click(partSwitch('skill-triage'));
-  check('a part’s switch chooses it alone, and the page says what Apply all will do', await standOf('skill-triage') === 'part-on true' && /Will add 1 part/.test(await a.text('.plugin-panel') ?? '') && /1 part to add/.test(await a.text('.toolbar') ?? '')
-    && /Goes into Pi as a separate item/.test(await a.text('.plugin-skills') ?? ''), `${await standOf('skill-triage')} | ${await a.text('.plugin-panel')} | ${await a.text('.toolbar')}`);
-  await a.click('#plugins-apply');
-  check('only that part goes in, in place of the broken link', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !lstatSync(join(practice, '.pi/agent/skills/triage')).isSymbolicLink() && !readFileSync(piMcp, 'utf8').includes('issues')
-    && /skill triage put into Pi/i.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
+  same('Off, no part has a switch under Pi: picks are offered only where the switch wants the plugin', [await standOf('skill-triage'), await standOf('mcp-issues')], ['missing', 'missing']);
+  await turnIssueTracker();
+  check('On puts its parts in, the skill in place of the broken link', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !lstatSync(join(practice, '.pi/agent/skills/triage')).isSymbolicLink() && readFileSync(piMcp, 'utf8').includes('issues'), await a.text('.bands'));
   const logged = readFileSync(join(scratch, 'data', 'central-knot.log'), 'utf8');
-  check('the log file says what that change came to: the plugin, the parts picked, the tool, and the broken link replaced',
-    /plugins:parts issue-tracker@[\w-]+ \(on: skill triage\) in pi-cli: installed: .*A broken link named “triage” in Pi’s skills folder was replaced/.test(logged), logged.split('\n').filter(line => line.includes('plugins:parts')).slice(-3).join('\n'));
+  check('the log file says what that switch came to: the plugin, the step, the tool, and the broken link replaced',
+    /plugins:turn issue-tracker@[\w-]+ install-parts in pi-cli: installed: .*A broken link named “triage” in Pi’s skills folder was replaced/.test(logged), logged.split('\n').filter(line => line.includes('plugins:turn')).slice(-3).join('\n'));
+  for (let tries = 0; tries < 40 && await standOf('mcp-issues') === 'missing'; tries++) await wait(100);
+  same('each part has a switch under Pi, on', [await standOf('skill-triage'), await standOf('mcp-issues')], ['in true', 'in true']);
+  await a.click(partSwitch('mcp-issues'));
+  check('a part’s switch chooses it alone, and the page says what Apply all will do', await standOf('mcp-issues') === 'part-off false' && /Will take out 1 part/.test(await a.text('.plugin-panel') ?? '') && /1 part to take out/.test(await a.text('.toolbar') ?? '')
+    && /Comes out of Pi/.test(await a.text('.plugin-group:has(#ppart-0-issue-tracker-mcp-issues-pi-cli)') ?? ''), `${await standOf('mcp-issues')} | ${await a.text('.plugin-panel')} | ${await a.text('.toolbar')}`);
+  await a.click('#plugins-apply');
+  check('only that part comes out', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !readFileSync(piMcp, 'utf8').includes('issues') && /MCP server issues taken out of Pi/i.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
   for (let tries = 0; tries < 40 && !/Left out by you/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
   check('the part left out is said, with its switch off', /Installed[^:]*: skill triage/.test(await a.text('.plugin-parts-section') ?? '') && /Left out by you: MCP server issues/.test(await a.text('.plugin-parts-section') ?? '') && await standOf('mcp-issues') === 'out false' && await standOf('skill-triage') === 'in true', await a.text('.plugin-parts-section'));
   await a.click(partSwitch('skill-triage'));
@@ -1759,20 +1762,18 @@ async function practiceFlow() {
   check('About names who made the marketplace and where it comes from', /By Platform team[\s\S]*market/.test(await a.text('.market-about-head') ?? ''), await a.text('.market-about-head'));
   await a.click('#forget-0');
   check('Remove forgets it here only', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
-  // A marketplace with a long name and long facts, with a change waiting: nothing is cut off at the smallest window, and
+  // A marketplace with a long name and long facts: nothing is cut off at the smallest window, and
   // where the facts don't fit beside the name they drop whole rather than being cut mid-word.
   const longMarket = join(scratch, 'market-long');
   writeMarket(longMarket, 'platform-engineering-shared-developer-tools-marketplace', 'The Platform Engineering and Developer Experience Group');
   await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(longMarket)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#add-marketplace');
-  await a.click('#pcell-0-document-tools-claude-cli');
-  await fitsAtMinimum(a, 'a long-named marketplace with a change waiting');
+  await fitsAtMinimum(a, 'a long-named marketplace');
   await sizeTo(a, 1280, 800);
   const factsWhole = `(() => { const line = document.querySelector('.market-title-line'); if (!line) return 'no title line'; const box = line.getBoundingClientRect();
     return [...line.querySelectorAll('.market-fact')].every(fact => { const at = fact.getBoundingClientRect(); return at.top >= box.bottom - 1 || (at.right <= box.right + 1 && at.bottom <= box.bottom + 1); }); })()`;
   same('the long marketplace’s facts show whole or not at all', await a.run(factsWhole), true);
   await fullSize(a);
-  await a.click('#plugins-discard');
   await a.click('#market-tab-about');
   await a.click('#forget-0');
   // Instructions (INS-01, INS-02): each tool's own file, a diff before saving, the replaced version kept.
@@ -2837,11 +2838,12 @@ async function openCodeFlow() {
   await p.click('#nav-plugins');
   await p.click('#header-refresh');
   const box = plugin => `[id^="pcell-"][id$="-${plugin}-opencode-cli"]`;
+  const turnOn = async plugin => { await p.click(`.plugin-row[data-plugin="${plugin}"] .plugin-row-switch .switch`); for (let tries = 0; tries < 80 && await p.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); };
   for (let tries = 0; tries < 50 && !(await p.exists(box('issue-tracker'))); tries++) await wait(100);
-  same('OpenCode is a column whose boxes offer a plugin’s parts', [await p.run(`document.querySelector('${box('issue-tracker')}')?.dataset.state`), await p.run(`document.querySelector('${box('release-helper')}')?.dataset.state`)], ['parts-offer', 'parts-offer']);
-  await p.click(box('issue-tracker'));
-  await p.click(box('release-helper'));
-  await p.click('#plugins-apply');
+  same('OpenCode is a column; the plugins, off, are in none of the tools', [await p.run(`document.querySelector('${box('issue-tracker')}')?.dataset.state`), await p.run(`document.querySelector('${box('release-helper')}')?.dataset.state`)], ['absent', 'absent']);
+  // Each switch On: the plugin's parts go into OpenCode (Claude Code's installer, a stand-in, refuses, and says so).
+  await turnOn('issue-tracker');
+  await turnOn('release-helper');
   for (let tries = 0; tries < 50 && (await p.run(`document.querySelector('${box('release-helper')}')?.dataset.state`)) !== 'parts'; tries++) await wait(100);
   const withParts = readNow(join(mine, 'opencode.json'));
   check('the plugin’s skill and MCP server are in OpenCode, the server in OpenCode’s form', existsSync(join(mine, 'skills/triage/SKILL.md')) && /"issues": \{\s*"type": "local",\s*"command": \[\s*"npx",\s*"-y",\s*"@example\/issues-mcp"\s*\]\s*\}/.test(withParts) && withParts.includes('// mine'), withParts || await p.text('.bands'));
@@ -3622,6 +3624,121 @@ async function draftFlow() {
  * and the dropped plugin stays, marked. The note and the Settings row say so after a restart; a failure is said and tried
  * again; with the switch off, or Automatic sync off, nothing runs.
  */
+/**
+ * A plugin's one switch, on the list and on its page (pluginrecord.ts): On puts issue-tracker into Claude Code by its own
+ * installer (a stand-in that writes its record as the real one does) and into Pi as its parts; Keep out takes it out of Pi
+ * alone; Off uninstalls it, and Undo installs it again where it was. Each step reads what the page shows and the files.
+ */
+async function pluginSwitchFlow() {
+  const home = join(scratch, 'home-switch'), data = join(scratch, 'switch-data'), market = join(scratch, 'market-switch'), tools = join(scratch, 'tools-switch');
+  writeMarket(market, 'ck-test-market');
+  mkdirSync(join(home, '.claude'), { recursive: true });
+  mkdirSync(join(home, '.pi/agent'), { recursive: true });
+  const copy = join(home, '.claude/plugins/cache/ck-test-market/issue-tracker/2.0.0'), triage = join(market, 'plugins/issue-tracker/skills/triage/SKILL.md');
+  mkdirSync(join(tools, '.local/bin'), { recursive: true });
+  writeFileSync(join(tools, '.local/bin/claude'), `#!/bin/sh
+[ "$1" = "--version" ] && echo "2.1.322 (Claude Code)" && exit 0
+echo "$*" >> "$HOME/claude-calls.txt"
+case "$*" in
+  "plugin marketplace add ${market}") mkdir -p "$HOME/.claude/plugins" && printf '{"ck-test-market":{"source":{"source":"git","url":"${market}"}}}' > "$HOME/.claude/plugins/known_marketplaces.json" ;;
+  "plugin install issue-tracker@ck-test-market --scope user") mkdir -p '${copy}/skills/triage' && cp '${triage}' '${copy}/skills/triage/' && printf '{"version":2,"plugins":{"issue-tracker@ck-test-market":[{"scope":"user","installPath":"${copy}","version":"2.0.0"}]}}' > "$HOME/.claude/plugins/installed_plugins.json" ;;
+  "plugin uninstall issue-tracker@ck-test-market --scope user") printf '{"version":2,"plugins":{}}' > "$HOME/.claude/plugins/installed_plugins.json" ;;
+  *) exit 9 ;;
+esac
+`, { mode: 0o755 });
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
+  const calls = () => (existsSync(join(home, 'claude-calls.txt')) ? readFileSync(join(home, 'claude-calls.txt'), 'utf8').trim().split('\n').filter(call => call.startsWith('plugin ')) : []);
+  const installed = () => existsSync(join(home, '.claude/plugins/installed_plugins.json')) && !!JSON.parse(readFileSync(join(home, '.claude/plugins/installed_plugins.json'), 'utf8')).plugins['issue-tracker@ck-test-market'];
+  const inPi = () => [existsSync(join(home, '.pi/agent/skills/triage/SKILL.md')), (readNow(join(home, '.pi/agent/mcp.json')) ?? '').includes('issues')];
+  const entry = () => JSON.parse(readFileSync(join(home, '.central-knot/plugins.json'), 'utf8')).plugins.find(each => each.plugin === 'issue-tracker');
+  const a = await launch(data, [], tools);
+  same('the marketplace is added', await a.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)}).then(result => result.problem ?? 'added')`), 'added');
+  await a.click('#nav-plugins');
+  for (let tries = 0; tries < 50 && !(await a.exists('#pswitch-0-issue-tracker')); tries++) await wait(100);
+  const marks = () => a.run(`[...document.querySelectorAll('[data-plugin="issue-tracker"] .cell-button')].map(cell => cell.dataset.state)`);
+  const switchIs = selector => a.run(`(() => { const s = document.querySelector('${selector}'); return s ? s.getAttribute('aria-checked') + (s.classList.contains('switch-partial') ? ' partial' : '') : 'missing'; })()`);
+  const done = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
+  const pictures = async name => { if (!shots) return; for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); await a.shot(`${name}-${width}`); } await fullSize(a); };
+  same('off, it is in no tool: its switch is off and each tool’s mark empty', [await switchIs('#pswitch-0-issue-tracker'), await marks()], ['false', ['absent', 'absent']]);
+  // On, from the list: Claude Code by its own command, Pi by its parts, at once.
+  await a.click('#pswitch-0-issue-tracker');
+  await done();
+  same('On installs it in Claude Code with its own command and puts its parts in Pi', [calls(), installed(), inPi(), await marks(), await switchIs('#pswitch-0-issue-tracker')],
+    [['plugin marketplace add ' + market, 'plugin install issue-tracker@ck-test-market --scope user'], true, [true, true], ['installed', 'parts'], 'true']);
+  check('the result says what the switch did, with Undo', /issue-tracker: installed in Claude Code; parts installed in Pi\./.test(await a.text('#plugins-result') ?? '') && await a.exists('#plugins-undo'), await a.text('#plugins-result'));
+  same('the home records it On, kept out of nothing', [entry()?.on, entry()?.except], [true, []]);
+  await pictures('plugin-switch-list');
+  // Keep out, on its page: Pi alone, at once; the switch is then partial.
+  await a.click('#popen-0-issue-tracker');
+  for (let tries = 0; tries < 50 && !(await a.exists('#pkeep-0-issue-tracker-pi-cli')); tries++) await wait(100);
+  check('each tool’s line says what it has, with Keep out', /Installed · 2\.0\.0/.test(await a.text('.plugin-tool[data-tool="claude-cli"]') ?? '') && /Parts installed/.test(await a.text('.plugin-tool[data-tool="pi-cli"]') ?? '') && (await a.text('#pkeep-0-issue-tracker-pi-cli')) === 'Keep out', await a.text('.plugin-panel'));
+  await a.click('#pkeep-0-issue-tracker-pi-cli');
+  await done();
+  same('Keep out takes its parts out of Pi alone, records it, and the switch shows partial', [inPi(), installed(), entry()?.except, await a.text('#pkeep-0-issue-tracker-pi-cli'), await a.run(`document.querySelector('.plugin-tool[data-tool="pi-cli"] .cell-button')?.dataset.state`), await switchIs('#pswitch-page-0-issue-tracker')],
+    [[false, false], true, ['pi-cli'], 'Let in', 'kept-out', 'true partial']);
+  await pictures('plugin-switch-page');
+  await fitsAtMinimum(a, 'a plugin’s page with a tool kept out');
+  await a.click('#plugin-back');
+  same('the list’s switch is partial too', await switchIs('#pswitch-0-issue-tracker'), 'true partial');
+  await pictures('plugin-switch-list-partial');
+  await fitsAtMinimum(a, 'the plugin list with a partial switch');
+  // Off: out of every tool; the result says what its Undo can't put back.
+  await a.click('#pswitch-0-issue-tracker');
+  await done();
+  same('Off uninstalls it from Claude Code; Pi stays kept out; the record is Off', [installed(), calls().at(-1), entry()?.on, entry()?.except, await marks()], [false, 'plugin uninstall issue-tracker@ck-test-market --scope user', false, ['pi-cli'], ['absent', 'kept-out']]);
+  check('its result says Undo installs the marketplace’s copy as it is now', /uninstalled from Claude Code\..*Undo installs the marketplace’s copy as it is now\./.test(await a.text('#plugins-result') ?? ''), await a.text('#plugins-result'));
+  await pictures('plugin-switch-off-result');
+  await a.click('#plugins-undo');
+  await done();
+  same('Undo installs it again where it was, and the record is On, kept out of Pi', [installed(), calls().at(-1), entry()?.on, entry()?.except, await switchIs('#pswitch-0-issue-tracker')], [true, 'plugin install issue-tracker@ck-test-market --scope user', true, ['pi-cli'], 'true partial']);
+  // Taken out of Claude Code with its own command: nothing puts it back by itself; its line offers Install there, which does.
+  writeFileSync(join(home, '.claude/plugins/installed_plugins.json'), '{"version":2,"plugins":{}}');
+  const before = calls().length;
+  await a.click('#header-refresh');
+  await a.click('#popen-0-issue-tracker');
+  for (let tries = 0; tries < 50 && !(await a.exists('#pfix-0-issue-tracker-claude-cli')); tries++) await wait(100);
+  same('a plugin taken out by hand is said, not put back by itself', [calls().length, await a.run(`document.querySelector('.plugin-tool[data-tool="claude-cli"] .cell-button')?.dataset.state`), await a.text('#pfix-0-issue-tracker-claude-cli')], [before, 'missing', 'Install there']);
+  await pictures('plugin-switch-missing');
+  await a.click('#pfix-0-issue-tracker-claude-cli');
+  await done();
+  same('Install there puts it back', [installed(), await a.run(`document.querySelector('.plugin-tool[data-tool="claude-cli"] .cell-button')?.dataset.state`)], [true, 'installed']);
+  // Kept out of Claude Code, then put back there with its own command: its line says so, with Take out there.
+  await a.click('#pkeep-0-issue-tracker-claude-cli');
+  await done();
+  writeFileSync(join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'issue-tracker@ck-test-market': [{ scope: 'user', installPath: copy, version: '2.0.0' }] } }));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && (await a.text('#pfix-0-issue-tracker-claude-cli')) !== 'Take out there'; tries++) await wait(100);
+  same('a plugin kept out of a tool that has it again is said, with Take out there', [await a.run(`document.querySelector('.plugin-tool[data-tool="claude-cli"] .cell-button')?.dataset.state`), await a.text('#pfix-0-issue-tracker-claude-cli')], ['stays', 'Take out there']);
+  await pictures('plugin-switch-take-out');
+  await a.click('#pfix-0-issue-tracker-claude-cli');
+  await done();
+  same('Take out there uninstalls it there', [installed(), calls().at(-1)], [false, 'plugin uninstall issue-tracker@ck-test-market --scope user']);
+  // A plugin installed in Claude Code with its own command and no record here: its row offers Add.
+  const helper = join(home, '.claude/plugins/cache/ck-test-market/release-helper/0.4.1');
+  mkdirSync(join(helper, 'commands'), { recursive: true });
+  writeFileSync(join(helper, 'commands/release-notes.md'), readFileSync(join(market, 'plugins/release-helper/commands/release-notes.md')));
+  writeFileSync(join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'release-helper@ck-test-market': [{ scope: 'user', installPath: helper, version: '0.4.1' }] } }));
+  await a.click('#plugin-back');
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && !(await a.exists('#padd-0-release-helper')); tries++) await wait(100);
+  check('a plugin a tool has with no record here offers Add in its switch’s place', await a.exists('#padd-0-release-helper') && /installed outside Central Knot/.test(await a.run(`document.querySelector('#padd-0-release-helper')?.title`) ?? ''), await a.text('[data-plugin="release-helper"]'));
+  await pictures('plugin-switch-add');
+  await a.click('#popen-0-issue-tracker');
+  // An install Claude Code refuses (its stand-in knows only issue-tracker): said in the problem band and on Claude Code's line.
+  await a.click('#plugin-back');
+  await a.click('#popen-0-document-tools');
+  for (let tries = 0; tries < 50 && !(await a.exists('#pswitch-page-0-document-tools')); tries++) await wait(100);
+  await a.click('#pswitch-page-0-document-tools');
+  await done();
+  same('a refused install is said, its line offers Install there, and Pi has its parts', [/Could not add the marketplace|Not installed/.test(await a.text('.plugin-problems') ?? ''), await a.run(`document.querySelector('.plugin-tool[data-tool="claude-cli"] .cell-button')?.dataset.state`),
+    await a.exists('#pfix-0-document-tools-claude-cli'), existsSync(join(home, '.pi/agent/skills/pdf-reader/SKILL.md'))], [true, 'missing', true, true]);
+  await pictures('plugin-switch-failed');
+  await fitsAtMinimum(a, 'a plugin’s page with an install that failed');
+  same('no page errors, a plugin’s switch', a.pageErrors, []);
+  await a.quit();
+}
+
 async function pluginUpdatesFlow() {
   const home = join(scratch, 'home-auto'), data = join(scratch, 'auto-data'), market = join(scratch, 'market-auto'), tools = join(scratch, 'tools-auto'), stage = join(scratch, 'stage-auto');
   writeMarket(market, 'ck-test-market');
@@ -3706,9 +3823,9 @@ esac
   const note = await a.text('#plugin-updates-updated') ?? '';
   check('the Plugins page keeps a plain note: which plugins, which version, which tool', /Updated automatically\./.test(note) && /document-tools: updated to 1\.2\.0 in Claude Code · today at/.test(note) && /issue-tracker: updated to 2\.0\.0 in Claude Code · today at/.test(note) && !(await a.exists('#plugin-updates-failed')), note);
   check('the first note says once that plugins update by themselves now, and where that is turned off', (await a.text('#plugin-updates-new')) === 'Plugins now update by themselves. Settings turns that off.', note);
-  same('the plugins show as up to date, and the dropped one as no longer offered, still installed in Claude Code',
+  same('the plugins show as up to date, and the dropped one as no longer offered, still installed in Claude Code (and kept out of Codex, which never had it)',
     [await a.run(`document.querySelector('#pcell-0-issue-tracker-claude-cli')?.dataset.state`), await a.text('[data-plugin="release-helper"] .plugin-chip-gone'), await a.run(`document.querySelector('#pcell-0-release-helper-claude-cli')?.dataset.state`), await a.run(`document.querySelector('#pcell-0-release-helper-codex-cli')?.dataset.state`)],
-    ['installed', 'No longer offered', 'installed', 'cannot']);
+    ['installed', 'No longer offered', 'installed', 'kept-out']);
   await a.click('#plugin-updates-updated-0');
   check('a plugin named in the note opens its page', (await a.text('.crumb-here')) === 'document-tools', await a.text('.plugins-toolbar'));
   await a.click('#plugin-back');
@@ -3778,7 +3895,7 @@ const started = Date.now();
 try {
   seedHome();
   // Each flow's time is printed, so a run that grows slow says where.
-  const flows = [harnessFlow, manageFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, suggestedFlow, otherAppsFlow, otherBuildFlow, listDiffersFlow, pluginUpdatesFlow, repoBaseFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, firstSetupFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
+  const flows = [harnessFlow, manageFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, suggestedFlow, otherAppsFlow, otherBuildFlow, listDiffersFlow, pluginSwitchFlow, pluginUpdatesFlow, repoBaseFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, firstSetupFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
   const named = option('--flows')?.split(',');
   for (const flow of flows.filter(each => !named || named.includes(each.name))) {
     const from = Date.now();
