@@ -3,12 +3,13 @@
 // one worked example each. The table itself, row by row, is in tests/library.test.ts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readHistory } from '../src/history.ts';
 import { doneWords, libraryAction, librarySentence } from '../src/historyactions.ts';
 import { fromSourceWords, libraryWords } from '../src/libraryrow.ts';
-import { addSource, bringBack, checkDue, checkSource, previewSource, removeSource, replaceFromSource, SOURCE_CHECK_EVERY_MS, sourcesView } from '../src/sources.ts';
+import { addSource, bringBack, checkDue, checkSource, mergeFromSource, previewSource, removeSource, replaceFromSource, SOURCE_CHECK_EVERY_MS, sourcesView } from '../src/sources.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import type { SourcePreview } from '../src/types.ts';
 import { bytes, everywhere, folderOf, itemOf, put, sandbox, seen, skillText, type Box } from './skillclicks.ts';
@@ -281,7 +282,7 @@ test('A copy that can’t be read where the skill is applied: the source’s cha
     assert.deepEqual(await notices(box, 'notes'), ['wait', true], 'the page reads the tools as the pass does');
     // Nothing was changed here: its words say it waits for either reason, and claim neither.
     assert.equal(fromSourceWords((await seen(box, box.context, 'notes')).fact!.fromSource!).before,
-      'From github.com/team/notes, a source, which has a newer version. Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now; Replace on ');
+      'From github.com/team/notes, a source, which has a newer version. Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now. On ');
     const replaced = await replace(box, id, 'notes');
     assert.deepEqual([await toolBody(box, 'claude-cli', 'notes'), await toolBody(box, 'codex-cli', 'notes')], ['Theirs.', 'Half saved.']);
     await writeFile(codex, asWritten);
@@ -293,6 +294,189 @@ test('A copy that can’t be read where the skill is applied: the source’s cha
     await restoreSkill(box.context, box.tools, entry.id);
     assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'update' }]);
   } finally { await box.cleanup(); }
+});
+
+// ---------- Merge (library.ts MERGE), on real folders with this computer's git ----------
+
+/** A SKILL.md body of three lines apart, so a change to the first and one to the last merge line by line. */
+const lines = (first = 'First.', last = 'Last.') => `${first}\n\nThe middle.\n\n${last}`;
+const mergeIt = (box: Box, id: string, key = 'notes') => mergeFromSource(box.context, box.tools, id, key);
+/** What a click did to each item, with what Merge did. */
+const merged = (result: { sourced?: { name: string; answer: string; merge?: unknown }[] }) => result.sourced?.map(({ name, answer, merge }) => ({ name, answer, ...(merge ? { merge } : {}) }));
+/** Each managed tool's SKILL.md of the skill. */
+const toolTexts = async (box: Box, key = 'notes') => Promise.all(box.tools.map(tool => readFile(join(folderOf(box, tool as never, key), 'SKILL.md'), 'utf8').catch(() => undefined)));
+/** A skill changed here in its first line, whose source then changed its last: its version waits. */
+async function waitingToMerge(box: Box, theirs = lines('First.', 'Last, theirs.')) {
+  const { repo, id, link } = await oneSkill(box, 'notes', { on: true, body: lines() });
+  await editHere(box, 'notes', lines('First, mine.'));
+  await repo.commit({ 'SKILL.md': skillMd('notes', theirs) }, '2026-11-04T10:00:00Z');
+  assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'wait' }]);
+  return { repo, id, link, mine: (await itemOf(box, 'notes'))!.hash };
+}
+
+test('Merge: a change here and the source’s, in lines apart, become the current version in Central Knot and every tool; yours and the source’s stay among its versions, History says so, and its row says it is still changed here', async () => {
+  const box = await sandbox();
+  try {
+    const { id, link, mine } = await waitingToMerge(box);
+    const clicked = Date.now(), done = await mergeIt(box, id);
+    assert.deepEqual(merged(done), [{ name: 'notes', answer: 'merge', merge: 'merged' }]);
+    assert.deepEqual(await toolTexts(box), box.tools.map(() => skillMd('notes', lines('First, mine.', 'Last, theirs.'))));
+    const item = (await itemOf(box, 'notes'))!, source = item.versions.find(version => version.from.how === 'source' && version.from.replacedBy === item.hash);
+    assert.deepEqual(item.versions[0].from, { how: 'merged', link });
+    assert.ok(Date.parse(item.versions[0].at) >= clicked - 1000, 'dated by the click, not by the source’s commit');
+    assert.ok(item.versions.some(version => version.hash === mine), 'yours is a version');
+    assert.equal(item.seen, source?.hash, 'the source’s version is kept, and is what it last took');
+    assert.equal((await sentences(box, 'notes')).at(-1), 'Merged github.com/team/notes’s version into yours; that became the current version, in all 3 tools. The version it had and the source’s are kept.');
+    assert.equal(done.sourced?.[0].history, (await readHistory(box.context)).at(-1)!.id, 'the answer names its entry, whose Undo the band offers');
+    assert.deepEqual(await notices(box, 'notes'), ['nothing', false]);
+    const from = (await seen(box, box.context, 'notes')).fact!.fromSource!;
+    assert.deepEqual(from, { link, changedHere: true });
+    assert.equal(fromSourceWords(from).before, 'From github.com/team/notes, a source. Yours is not the source’s version it last took (it was changed or merged here), or a tool’s copy of it can’t be read just now, so a change there waits on ');
+  } finally { await box.cleanup(); }
+});
+
+test('Merge with a conflict changes nothing: no version, no tool written, no History entry, `seen` where it was and nothing of the merge left; its answer names the file, and the version still waits', async () => {
+  const box = await sandbox();
+  try {
+    const { id } = await waitingToMerge(box, lines('First, theirs.'));
+    const before = { item: await itemOf(box, 'notes'), history: (await readHistory(box.context)).length, tools: await everywhere(box) };
+    const done = await mergeIt(box, id);
+    assert.deepEqual(merged(done), [{ name: 'notes', answer: 'merge', merge: { conflicts: ['SKILL.md'] } }]);
+    assert.deepEqual({ item: await itemOf(box, 'notes'), history: (await readHistory(box.context)).length, tools: await everywhere(box) }, before);
+    assert.deepEqual((await readdir(join(box.home, '.central-knot'))).filter(name => name.startsWith('merging-')), []);
+    assert.deepEqual(await notices(box, 'notes'), ['wait', true]);
+  } finally { await box.cleanup(); }
+});
+
+test('Merge on real folders never loses a side: a script made runnable here and a file added here survive the source’s change; a file deleted here that the source changed is a conflict, not a deletion', async () => {
+  const box = await sandbox();
+  try {
+    const { repo, id } = await oneSkill(box, 'notes', { on: true, body: lines() });
+    await repo.commit({ 'SKILL.md': skillMd('notes', lines()), 'run.sh': '#!/bin/sh\necho one\n', 'notes.md': 'Notes.\n' }, '2026-11-02T10:00:00Z');
+    await check(box, id);
+    const claude = folderOf(box, 'claude-cli', 'notes');
+    await chmod(join(claude, 'run.sh'), 0o755);
+    await writeFile(join(claude, 'mine.md'), 'Mine.\n');
+    await applySkills(box.context, box.tools, []);
+    await repo.commit({ 'SKILL.md': skillMd('notes', lines('First.', 'Last, theirs.')) }, '2026-11-03T10:00:00Z');
+    await check(box, id);
+    assert.deepEqual(merged(await mergeIt(box, id)), [{ name: 'notes', answer: 'merge', merge: 'merged' }]);
+    for (const tool of box.tools) {
+      const folder = folderOf(box, tool as never, 'notes');
+      assert.deepEqual([(await stat(join(folder, 'run.sh'))).mode & 0o111, await readFile(join(folder, 'mine.md'), 'utf8'), await toolBody(box, tool, 'notes')], [0o111, 'Mine.\n', 'Last, theirs.']);
+    }
+    await rm(join(claude, 'notes.md'));
+    await applySkills(box.context, box.tools, []);
+    await repo.commit({ 'notes.md': 'Notes, changed at the source.\n' }, '2026-11-04T10:00:00Z');
+    await check(box, id);
+    assert.deepEqual(merged(await mergeIt(box, id)), [{ name: 'notes', answer: 'merge', merge: { conflicts: ['notes.md'] } }]);
+  } finally { await box.cleanup(); }
+});
+
+test('Undo of a Merge: yours is current again in every tool, and the source’s version waits again; the next check doesn’t take it', async () => {
+  const box = await sandbox();
+  try {
+    const { id } = await waitingToMerge(box);
+    await mergeIt(box, id);
+    const entry = (await readHistory(box.context)).at(-1)!;
+    const undo = libraryAction(entry, (await itemOf(box, 'notes'))!, { managed: box.tools, pending: [] })!;
+    assert.deepEqual([undo.label, undo.change.seen !== undefined], ['Undo', true]);
+    await restoreSkill(box.context, box.tools, entry.id);
+    assert.deepEqual(await toolTexts(box), box.tools.map(() => skillMd('notes', lines('First, mine.'))));
+    assert.deepEqual(await notices(box, 'notes'), ['wait', true]);
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'wait' }]);
+  } finally { await box.cleanup(); }
+});
+
+test('After a Merge nothing is stuck or written over: the source’s next change waits, with the version merged in as the base, so a second Merge takes it; edited back to exactly the source’s text it follows again; Replace after a Merge takes the source’s', async () => {
+  const box = await sandbox();
+  try {
+    const { repo, id } = await waitingToMerge(box);
+    await mergeIt(box, id);
+    // The source changes its last line again. Against the first base this would clash with the merged last line; against the
+    // version merged in, only the source changed it.
+    await repo.commit({ 'SKILL.md': skillMd('notes', lines('First.', 'Last, theirs again.')) }, '2026-11-05T10:00:00Z');
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'wait' }]);
+    assert.deepEqual(merged(await mergeIt(box, id)), [{ name: 'notes', answer: 'merge', merge: 'merged' }]);
+    assert.deepEqual(await toolTexts(box), box.tools.map(() => skillMd('notes', lines('First, mine.', 'Last, theirs again.'))));
+    // Edited back by hand to exactly the source's text: it follows the next change by itself.
+    await editHere(box, 'notes', lines('First.', 'Last, theirs again.'), '2026-11-06T10:00:00Z');
+    await repo.commit({ 'SKILL.md': skillMd('notes', lines('First.', 'Last, the third.')) }, '2026-11-07T10:00:00Z');
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'update' }]);
+    // Changed here and merged once more; then Replace takes the source's next change as it is.
+    await editHere(box, 'notes', lines('First, mine again.', 'Last, the third.'), '2026-11-08T10:00:00Z');
+    await repo.commit({ 'SKILL.md': skillMd('notes', lines('First.', 'Last, the fourth.')) }, '2026-11-09T10:00:00Z');
+    await check(box, id);
+    await mergeIt(box, id);
+    await repo.commit({ 'SKILL.md': skillMd('notes', lines('First.', 'Last, the fifth.')) }, '2026-11-10T10:00:00Z');
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'wait' }]);
+    assert.deepEqual(answered(await replace(box, id, 'notes')), [{ name: 'notes', answer: 'update' }]);
+    assert.deepEqual(await toolTexts(box), box.tools.map(() => skillMd('notes', lines('First.', 'Last, the fifth.'))));
+  } finally { await box.cleanup(); }
+});
+
+test('Merged to exactly yours (the source made a change you had made too): only the version it follows moves on, with no entry; merged to exactly the source’s, it follows its source again', async () => {
+  const box = await sandbox();
+  try {
+    const { repo, id } = await oneSkill(box, 'notes', { on: true, body: lines() });
+    await editHere(box, 'notes', lines('First, mine.', 'Last, both.'));
+    await repo.commit({ 'SKILL.md': skillMd('notes', lines('First.', 'Last, both.')) }, '2026-11-04T10:00:00Z');
+    await check(box, id);
+    const entries = (await readHistory(box.context)).length, current = (await itemOf(box, 'notes'))!.hash;
+    assert.deepEqual(merged(await mergeIt(box, id)), [{ name: 'notes', answer: 'merge', merge: 'had' }]);
+    assert.deepEqual([(await itemOf(box, 'notes'))!.hash, (await readHistory(box.context)).length, await notices(box, 'notes')], [current, entries, ['nothing', false]]);
+    // Now the source takes your first line too, and changes its middle: yours is in the source's, so the merge is the source's.
+    const theirs = lines('First, mine.', 'Last, both.').replace('The middle.', 'The middle, theirs.');
+    await repo.commit({ 'SKILL.md': skillMd('notes', theirs) }, '2026-11-05T10:00:00Z');
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'wait' }]);
+    assert.deepEqual(merged(await mergeIt(box, id)), [{ name: 'notes', answer: 'merge', merge: 'merged' }]);
+    assert.deepEqual(await toolTexts(box), box.tools.map(() => skillMd('notes', theirs)));
+    await repo.commit({ 'SKILL.md': skillMd('notes', theirs.replace('Last, both.', 'Last, the source’s alone.')) }, '2026-11-07T10:00:00Z');
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'update' }], 'at the source’s text, it follows by itself');
+  } finally { await box.cleanup(); }
+});
+
+test('Merge while a tool holds an edit no pass has taken in (Automatic sync off): the edit is taken in first and merged as yours; a copy still settling leaves Merge undone, said so, until it lands', async () => {
+  const box = await sandbox();
+  try {
+    const { id } = await waitingToMerge(box);
+    await editIn(box, 'codex-cli', 'notes', lines('First, mine, again in Codex.'), '2026-11-05T10:00:00Z');
+    assert.deepEqual(merged(await mergeIt(box, id)), [{ name: 'notes', answer: 'merge', merge: 'merged' }]);
+    assert.deepEqual(await toolTexts(box), box.tools.map(() => skillMd('notes', lines('First, mine, again in Codex.', 'Last, theirs.'))));
+    const told = (await readHistory(box.context)).filter(event => event.key === 'notes').slice(-2).map(event => [event.kind, event.cause ?? event.winner?.tool]);
+    assert.deepEqual(told, [['edit', 'codex-cli'], ['edit', 'source-merged']], 'Codex’s edit taken in, then merged');
+  } finally { await box.cleanup(); }
+  const settling = await sandbox();
+  try {
+    const { repo, id } = await waitingToMerge(settling);
+    await mergeIt(settling, id);
+    await repo.commit({ 'SKILL.md': skillMd('notes', lines('First.', 'Last, theirs again.')) }, '2026-11-05T10:00:00Z');
+    await check(settling, id);
+    // The editor's save has moved Codex's copy away, and the settle window has not passed.
+    await rm(folderOf(settling, 'codex-cli', 'notes'), { recursive: true });
+    const inWindow = { ...settling, context: { ...settling.context, settleMs: 60_000 } };
+    const before = { item: await itemOf(settling, 'notes'), history: (await readHistory(settling.context)).length };
+    assert.deepEqual(merged(await mergeIt(inWindow, id)), [{ name: 'notes', answer: 'wait', merge: 'unsettled' }]);
+    assert.deepEqual({ item: await itemOf(settling, 'notes'), history: (await readHistory(settling.context)).length }, before);
+    // The save lands; the next Merge has it as yours.
+    await editIn(settling, 'codex-cli', 'notes', lines('First, saved in Codex.', 'Last, theirs.'), '2026-11-06T10:00:00Z');
+    assert.deepEqual(merged(await mergeIt(inWindow, id)), [{ name: 'notes', answer: 'merge', merge: 'merged' }]);
+    assert.deepEqual(await toolTexts(settling), settling.tools.map(() => skillMd('notes', lines('First, saved in Codex.', 'Last, theirs again.'))));
+  } finally { await settling.cleanup(); }
+});
+
+test('Git missing: Merge says it couldn’t run and changes nothing', async () => {
+  const box = await sandbox(), path = process.env.PATH, nowhere = await mkdtemp(join(tmpdir(), 'ck-no-git-'));
+  try {
+    const { id } = await waitingToMerge(box);
+    const before = { item: await itemOf(box, 'notes'), history: (await readHistory(box.context)).length, tools: await everywhere(box) };
+    process.env.PATH = nowhere;
+    const done = await mergeIt(box, id);
+    process.env.PATH = path;
+    assert.deepEqual(merged(done), [{ name: 'notes', answer: 'merge', merge: { couldNot: 'Git is not installed, so the files both sides changed can’t be merged. Install Git, then try again.' } }]);
+    assert.deepEqual({ item: await itemOf(box, 'notes'), history: (await readHistory(box.context)).length, tools: await everywhere(box) }, before);
+    assert.deepEqual((await readdir(join(box.home, '.central-knot'))).filter(name => name.startsWith('merging-')), []);
+  } finally { process.env.PATH = path; await rm(nowhere, { recursive: true, force: true }); await box.cleanup(); }
 });
 
 test('Make current, as the item’s page offers: an older version made current waits on the source’s next change; its Undo makes the item follow again', async () => {

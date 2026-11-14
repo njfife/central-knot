@@ -73,7 +73,7 @@ import type { Copies, FoundCopy, FoundKey, HarnessCopy, ItemKind, LeftFound, Lib
 import { appendHistory, historyCutoff, readHistory, replaceHistory } from './history.ts';
 import { errorCode, libraryGate, stillOwned } from './share.ts';
 import type { ShareContext } from './share.ts';
-import type { Change, DestinationResult, HarnessId, HistoryEvent, ItemNotice, JoinCounts, PassResult, SyncNotice, TakenInNotice } from './types.ts';
+import type { Change, DestinationResult, HarnessId, HistoryEvent, ItemNotice, JoinCounts, MergeDone, PassResult, SyncNotice, TakenInNotice } from './types.ts';
 import { byToolOrder, notManagedHere, toolName } from './words.ts';
 
 const now = () => new Date().toISOString();
@@ -222,7 +222,16 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
    * managed tools hold of it now (historyactions.ts ItemNow); undefined when it has nothing left to do.
    */
   historyAction(entry: HistoryEvent, item: LibraryItem | undefined, now: ItemNow, version?: string): { change: Change } | undefined;
+  /**
+   * Merge (library.ts MERGE): the source's version (`theirs`) merged into `yours` against `base`, path by path as library.ts
+   * mergeFiles says, a file both sides changed by a line merge run here. Merged: the content, stored under the item already
+   * (as `store` stores one), and nothing else of the merge's left behind; else the conflicting paths, or why it couldn't run.
+   * A kind no source brings leaves it out (agents, MCP servers).
+   */
+  merge?(context: ShareContext, item: LibraryItem, three: { base: Content; yours: Content; theirs: Content }): Promise<MergeResult<Content>>;
 }
+/** What Kind.merge answers. */
+export type MergeResult<Content> = { merged: Content } | { conflicts: string[] } | { couldNot: string };
 
 // ---------- What the harnesses hold ----------
 
@@ -475,13 +484,15 @@ export type Pulled<Content> = { name: string; content: Content; own?: { harness:
 /**
  * One read of a source as the pass is given it (sources.ts readOf): the table's reading of it (library.ts SourceSeen), with each
  * readable name's own name and content. `recorded`: the sources the home records now. `bringBack`: keys held deleted that a
- * click on Add on the source's row brings back; `replace`: keys whose waiting version a click on Replace there makes current.
+ * click on Add on the source's row brings back; `replace`: keys whose waiting version a click on Replace there makes current;
+ * `merge`: keys whose waiting version a click on Merge there merges into the current one.
  */
 export interface SourceRead<Content> extends SourceSeen {
   names: Map<string, { name: string; hash: string; content: Content } | { unreadable: string }>;
   recorded: ReadonlySet<string>;
   bringBack?: ReadonlySet<string>;
   replace?: ReadonlySet<string>;
+  merge?: ReadonlySet<string>;
 }
 interface Pass extends AnyLook {
   shelf: Shelf<unknown>;
@@ -1024,18 +1035,21 @@ async function makeCurrent(pass: Pass, item: LibraryItem, version: string, refus
 /**
  * A source read on a click or by the daily check (library.ts A SOURCE: sourceAnswers, a fromSource answer for every name it holds
  * and every item linked to it, told what the managed tools hold of each item now: copiesOf), carried out: made Off (`make`),
- * linked (`link`; `same` only moves `seen` on), its content made current (`update`, Replace's dated by its click), or turned
- * Off with its link let go (`drop`); `wait` changes nothing. Each change a person sees is History's entry with the source's
- * `link`: an `off` (cause `source`) for one made, an `edit` for one made current (a Replace's with `seen` as it was), an `off`
- * (cause `source-dropped`) for one dropped. No harness is written here: the plan after it applies the current version where
- * the item is On, and takes in a tool's edit no pass had taken in. Answers the keys it answered for: the pass's scope.
+ * linked (`link`; `same` only moves `seen` on), its content made current (`update`, Replace's dated by its click), merged into
+ * the current version (`merge`: mergeIn), or turned Off with its link let go (`drop`); `wait` changes nothing. Each change a
+ * person sees is History's entry with the source's `link`: an `off` (cause `source`) for one made, an `edit` for one made
+ * current (a Replace's with `seen` as it was; a Merge's with cause `source-merged`), an `off` (cause `source-dropped`) for one
+ * dropped. No harness is written here: the plan after it applies the current version where the item is On, and takes in a
+ * tool's edit no pass had taken in. Answers the keys it answered for: the pass's scope.
  */
 async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Set<string>> {
-  const answers = sourceAnswers(pass.library.items, read, read.recorded, { bringBack: read.bringBack, replace: read.replace, copies: item => copiesOf(pass, item) });
+  const answers = sourceAnswers(pass.library.items, read, read.recorded, { bringBack: read.bringBack, replace: read.replace, merge: read.merge, copies: item => copiesOf(pass, item) });
   const origin: Origin = { how: 'source', link: read.link }, link = read.link;
   for (const [key, answer] of answers) {
     const item = pass.library.items[key], entry = read.names.get(key);
     if (answer !== 'nothing' && answer !== 'same') pass.sourced.set(key, { name: entry && 'name' in entry ? entry.name : item?.name ?? key, answer });
+    // Merge asked, and the table left it waiting: a tool's copy still holds a change (library.ts MERGE).
+    if (answer === 'wait' && read.merge?.has(key)) pass.sourced.get(key)!.merge = 'unsettled';
     if (answer === 'drop' && item) {
       item.on = false;
       delete item.source; delete item.seen;
@@ -1057,10 +1071,32 @@ async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Se
       Object.assign(item!, { source: read.id, seen: entry.hash } satisfies Partial<LibraryItem>);
       await setCurrent(pass.shelf, item!, { hash: entry.hash, at: replace ? now() : read.commitAt, from: origin }, entry.content);
       pass.asked.set(key, { kind: 'edit', cause: 'source', previous, version: entry.hash, link, fill: 'written', ...(replace ? { seen: before } : {}) });
-    }
+    } else if (answer === 'merge') pass.sourced.get(key)!.merge = await mergeIn(pass, item!, entry, read);
   }
   await saveIfChanged(pass);
   return new Set(answers.keys());
+}
+
+/**
+ * Merge (library.ts MERGE), for an item the table answered `merge`: the kind merges S into the current version against `seen`
+ * (Kind.merge). Merged: S is kept as a version (never current), the merged version becomes current dated by the click, and
+ * `seen` moves on to S; its entry is an `edit` (cause `source-merged`) with `seen` as it was, which its Undo puts back. Merged
+ * to exactly the current version, only `seen` moves on (S kept). A conflict, or a merge that couldn't run, changes nothing.
+ */
+async function mergeIn(pass: Pass, item: LibraryItem, there: { hash: string; content: unknown }, read: SourceRead<unknown>): Promise<MergeDone> {
+  const version = (hash: string | undefined) => (hash ? pass.kind.readVersion(pass.context, item.key, hash) : undefined);
+  const base = await version(item.seen), yours = await version(item.hash);
+  if (!pass.kind.merge) return { couldNot: `Merge is for skills; ${pass.kind.words.item}s don’t come from a source.` };
+  if (!base || !yours) return { couldNot: 'The version it took from the source, or its current one, is no longer in Central Knot’s store.' };
+  const done = await pass.kind.merge(pass.context, item, { base, yours, theirs: there.content });
+  if (!('merged' in done)) return done;
+  const hash = pass.kind.hashOf(done.merged), previous = item.hash, before = item.seen;
+  if (hash !== there.hash) await keepVersion(pass.shelf, item, { hash: there.hash, at: read.commitAt, from: { how: 'source', link: read.link, replacedBy: hash } }, there.content);
+  item.seen = there.hash;
+  if (hash === previous) { await saveIfChanged(pass); return 'had'; }
+  await setCurrent(pass.shelf, item, { hash, at: now(), from: { how: 'merged', link: read.link } }, done.merged);
+  pass.asked.set(item.key, { kind: 'edit', cause: 'source-merged', previous, version: hash, link: read.link, fill: 'written', seen: before });
+  return 'merged';
 }
 
 /**

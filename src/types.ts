@@ -243,6 +243,8 @@ export interface DesktopApi {
   bringBackFromSource(id: string, key: string, home: string): Promise<SourceResult>;
   /** Makes the version that waits at a source, from its last read, an item's current version; the one it had is kept (sources.ts replaceFromSource). */
   replaceFromSource(id: string, key: string, home: string): Promise<SourceResult>;
+  /** Merges the version that waits at a source, from its last read, into an item's current version (sources.ts mergeFromSource). */
+  mergeFromSource(id: string, key: string, home: string): Promise<SourceResult>;
   /** Forgets a source: its items stay as they are, On or Off, with their versions (sources.ts removeSource). */
   removeSource(id: string, home: string): Promise<SourceResult>;
   /** Adds or changes a profile's name and items (Central Knot's own file; no tool is written). */
@@ -475,18 +477,19 @@ export interface HistoryEvent {
    * a found item taken in by a click on Add ('on'; `winner`: where it was found). `sync-everything`: the same, taken in by the
    * home's standing rule, Synchronize everything, with no click. `pulled`: Pull did it ('on' for an item new here, 'edit',
    * 'deleted'). `source`: a source's read did it (`link`): 'off' for an item it brought in, Off; 'edit' for its content made
-   * current (by itself, or by Replace: `seen`). `source-dropped`: the source no longer
+   * current (by itself, or by Replace: `seen`). `source-merged`: Merge made the source's version merged into the current one
+   * current ('edit'; `link`, `seen`). `source-dropped`: the source no longer
    * has it, so it was turned Off and is no longer linked ('off'). `deleted-by-hand`: its copy was deleted by hand ('off'; `winner`: where). `tool-back`: a tool managed again held a
    * copy the item didn't have ('kept-edit'; `losers`: that copy), which gave way to the current version (library.ts managedAgain).
    * `own-copy`: a harness's own copy, which Central Knot had never put there and no click took over, gave way to the current
    * version ('kept-edit'; `losers`). `in-line`: a pass no click asked brought harnesses into line with the item: copies written
    * over ('on'; `losers`, each with what it held), or removed ('off', or 'deleted' for a deleted item) (librarypass.ts logItem).
    */
-  cause?: 'switch' | 'found' | 'sync-everything' | 'pulled' | 'source' | 'source-dropped' | 'deleted-by-hand' | 'tool-back' | 'own-copy' | 'in-line';
-  /** A source's entry (`cause` 'source' or 'source-dropped'): its link as the person gave it, kept here since the source may be removed later. */
+  cause?: 'switch' | 'found' | 'sync-everything' | 'pulled' | 'source' | 'source-merged' | 'source-dropped' | 'deleted-by-hand' | 'tool-back' | 'own-copy' | 'in-line';
+  /** A source's entry (`cause` 'source', 'source-merged' or 'source-dropped'): its link as the person gave it, kept here since the source may be removed later. */
   link?: string;
   /**
-   * A Replace's 'edit' (`cause` 'source'): the source's content the item had taken before it (library.ts LibraryItem seen),
+   * A Replace's or a Merge's 'edit' (`cause` 'source' or 'source-merged'): the source's content the item had taken before it (library.ts LibraryItem seen),
    * which its Undo puts back with the version before (Change seen), so where it had been changed here the source's version
    * waits again.
    */
@@ -839,7 +842,7 @@ export interface LibraryFacts {
    * In the library and linked to a source the home records (library.ts LibraryItem source): that source's link, as given, and
    * whether its last read has a version that waits because the item was changed here (`waits`: library.ts A SOURCE `wait`).
    */
-  fromSource?: { link: string; waits?: true };
+  fromSource?: { link: string; waits?: true; changedHere?: true };
 }
 
 /**
@@ -855,10 +858,17 @@ export interface PassResult {
   found?: string[];
   /**
    * A pass with a source's read (librarypass.ts fromSourceStep): the table's answer for each item, but `nothing` and `same`
-   * (which change nothing a person sees), with the History entry that says it.
+   * (which change nothing a person sees), with the History entry that says it, and for the item a click on Merge asked for,
+   * what Merge did (`merge`).
    */
-  sourced?: { name: string; answer: SourceAnswer; history?: string }[];
+  sourced?: { name: string; answer: SourceAnswer; history?: string; merge?: MergeDone }[];
 }
+/**
+ * What a click on Merge did (library.ts MERGE; librarypass.ts mergeIn): the merged version made current (`merged`); merged to
+ * exactly the version it had, so only the source's version it follows moved on (`had`); or nothing: a tool's copy still held a
+ * change (`unsettled`), files conflict (`conflicts`, their paths in the skill's folder), or it couldn't run (`couldNot`, why).
+ */
+export type MergeDone = 'merged' | 'had' | 'unsettled' | { conflicts: string[] } | { couldNot: string };
 
 // ---------- Instructions ----------
 

@@ -2293,19 +2293,51 @@ async function sourcesFlow() {
   commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('Remove slop.', 'Remove slop, firmly.') });
   await a.click(`#source-check-${id}`);
   await until(async () => await a.exists(`#source-replace-${id}-deslop`));
-  check('Check now leaves the edit current in every tool, says the source’s version waits, and its line offers Replace', /deslop changed at the source; yours stays current, since it was changed here or a tool’s copy can’t be read just now: Replace on its row takes the source’s\./.test(await a.text('.band-done .band-text') ?? '')
-    && /Changed at the source\. Yours stays current until you replace it, since it was changed here or a tool’s copy can’t be read just now\./.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '') && Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('my way')), [await a.text('.band-done'), await a.text('.source-row')]);
+  check('Check now leaves the edit current in every tool, says the source’s version waits, and its line offers Merge and Replace', /deslop changed at the source; yours stays current, since it was changed here or a tool’s copy can’t be read just now: on its row, Merge puts the source’s changes into yours if they don’t clash, and Replace takes the source’s\./.test(await a.text('.band-done .band-text') ?? '')
+    && /Changed at the source\. Yours stays current until you merge or replace it, since it was changed here or a tool’s copy can’t be read just now\./.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '') && await a.exists(`#source-merge-${id}-deslop`)
+    && Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('my way')), [await a.text('.band-done'), await a.text('.source-row')]);
   await a.shot('sources-waiting');
   await a.click('#nav-skills');
   const waitingRow = await a.text('.ov-row[data-key="deslop"]') ?? '';
   if (!(await a.exists('.details'))) await a.click('#open-deslop');
-  check('its row on Skills says the source has an update, and its opened row says Replace is on Sources', /update at its source/.test(waitingRow) && /which has a newer version\. Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now; Replace on Sources makes the source’s current and keeps yours as a version\./.test(await a.text('.details') ?? ''), [waitingRow, await a.text('.details')]);
+  check('its row on Skills says the source has an update, and its opened row says Merge and Replace are on Sources', /update at its source/.test(waitingRow) && /which has a newer version\. Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now\. On Sources, Merge puts its changes into yours if they don’t clash, and Replace takes it as it is; either keeps yours as a version\./.test(await a.text('.details') ?? ''), [waitingRow, await a.text('.details')]);
   await a.shot('skills-waiting');
   await a.click('#nav-sources');
   await a.click(`#source-replace-${id}-deslop`);
   check('Replace puts the source’s version in every tool, says the one it had is kept, and offers Undo the replace', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('firmly')))
     && /deslop has the source’s version, now in all 3 tools; the one it had is kept as a version\./.test(await a.text('.band-done .band-text') ?? '') && (await a.text('#outcome-undo')) === 'Undo the replace'
     && !(await a.exists(`#source-replace-${id}-deslop`)), await a.text('.band-done'));
+
+  // Merge: a line added in Claude Code and the source's new description, lines apart, become one version in every tool.
+  writeFileSync(inClaude, `${readNow(inClaude)}Use plain words.\n`);
+  check('a line added in Claude Code is taken in and reaches every tool', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('Use plain words.'))), Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))));
+  const described = files['SKILL.md'].replace('Remove slop.', 'Remove slop, firmly.').replace('Removes slop from prose.', 'Removes slop from any prose.');
+  commit(deslop, { 'SKILL.md': described });
+  await a.click(`#source-check-${id}`);
+  await until(async () => await a.exists(`#source-merge-${id}-deslop`));
+  const versionsBefore = record()?.versions.length;
+  await a.click(`#source-merge-${id}-deslop`);
+  const bothIn = described.replace(/\n$/, '\nUse plain words.\n');
+  check('Merge puts both changes in every tool’s SKILL.md, says so with Undo the merge, and the line no longer waits', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')) === bothIn))
+    && /deslop now has your changes and the source’s, merged, in all 3 tools; the version it had is kept\./.test(await a.text('.band-done .band-text') ?? '') && (await a.text('#outcome-undo')) === 'Undo the merge'
+    && !(await a.exists(`#source-merge-${id}-deslop`)) && record()?.versions.length === versionsBefore + 2, [await a.text('.band-done'), Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md')))]);
+  await a.shot('sources-merged');
+  await a.click('#nav-skills');
+  if (!(await a.exists('.details'))) await a.click('#open-deslop');
+  check('its opened row on Skills says it is still changed here, so the source’s next change waits for Merge or Replace', /Yours is not the source’s version it last took \(it was changed or merged here\), or a tool’s copy of it can’t be read just now, so a change there waits on Sources: Merge or Replace\./.test(await a.text('.details') ?? ''), await a.text('.details'));
+  // A clash: the same line changed in Claude Code and at the source. Merge names the file and changes nothing.
+  await a.click('#nav-sources');
+  writeFileSync(inClaude, readNow(inClaude).replace('Remove slop, firmly.', 'Remove slop, my way.'));
+  check('the clashing edit is taken in and reaches every tool', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('my way'))), Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))));
+  commit(deslop, { 'SKILL.md': described.replace('Remove slop, firmly.', 'Remove slop, kindly.') });
+  await a.click(`#source-check-${id}`);
+  await until(async () => await a.exists(`#source-merge-${id}-deslop`));
+  const clashBefore = { versions: record()?.versions.length, seen: record()?.seen, tools: Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))) };
+  await a.click(`#source-merge-${id}-deslop`);
+  check('a Merge that clashes names SKILL.md, as a warning, and changes nothing: every tool as it was, no version, the source’s version still waits', await until(async () => /Merge left deslop as it was: SKILL\.md changed both here and at the source, in ways that can’t be merged\. Replace takes the source’s; or keep yours, or edit it by hand\./.test(await a.text('.band-done .band-text') ?? ''))
+    && await a.exists('.band-done svg.tone-warning') && !(await a.exists('#outcome-undo')) && await a.exists(`#source-merge-${id}-deslop`)
+    && JSON.stringify({ versions: record()?.versions.length, seen: record()?.seen, tools: Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))) }) === JSON.stringify(clashBefore), [await a.text('.band-done'), clashBefore]);
+  await a.shot('sources-merge-clash');
 
   commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('name: deslop', 'name: unslop') });
   await a.click(`#source-check-${id}`);

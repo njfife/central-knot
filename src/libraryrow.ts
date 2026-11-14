@@ -110,15 +110,18 @@ export interface LibraryRow {
 
 /**
  * What an item's row says of the source it is linked to (types.ts LibraryFacts fromSource): while a version waits there (the
- * item changed here, or a tool's copy unreadable: library.ts changedHere), the tag after its name; and the opened row's line, written around its link to
- * Sources (`before`, the link, `after`).
+ * item changed here, or a tool's copy unreadable: library.ts changedHere), the tag after its name; and the opened row's line,
+ * written around its link to Sources (`before`, the link, `after`), which also says when it is changed here with nothing
+ * waiting yet (`changedHere`: edited, an older version made current, or a Merge's result), so a change there will wait.
  */
-export function fromSourceWords(from: { link: string; waits?: true }): { tag?: { text: string; title: string }; before: string; after: string } {
+export function fromSourceWords(from: { link: string; waits?: true; changedHere?: true }): { tag?: { text: string; title: string }; before: string; after: string } {
   const label = linkLabel(from.link);
+  if (from.changedHere) return { before: `From ${label}, a source. Yours is not the source’s version it last took (it was changed or merged here), or a tool’s copy of it can’t be read just now, so a change there waits on `, after: ': Merge or Replace.' };
   if (!from.waits) return { before: `From ${label}, a source. What changes there comes in once a day while Automatic sync is on, and at Check now on `, after: ', unless you change it here.' };
   const waits = 'Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now';
-  return { tag: { text: 'update at its source', title: `${label} has a newer version. ${waits}; Replace on Sources makes the source’s current and keeps yours as a version.` },
-    before: `From ${label}, a source, which has a newer version. ${waits}; Replace on `, after: ' makes the source’s current and keeps yours as a version.' };
+  const choose = 'Merge puts its changes into yours if they don’t clash, and Replace takes it as it is; either keeps yours as a version.';
+  return { tag: { text: 'update at its source', title: `${label} has a newer version. ${waits}. On Sources, ${choose}` },
+    before: `From ${label}, a source, which has a newer version. ${waits}. On `, after: `, ${choose}` };
 }
 
 /** A harness's own switch that turns the item off there, as its line and tag's tooltip say it: "switched off in Codex’s own settings". */
