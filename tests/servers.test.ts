@@ -12,7 +12,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readHistory } from '../src/history.ts';
-import { libraryAction } from '../src/historyactions.ts';
+import { libraryAction, librarySentence } from '../src/historyactions.ts';
 import { kindSource } from '../src/itemrow.ts';
 import { asItIs, canAdd, libraryWords, sentences, statusLine } from '../src/libraryrow.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
@@ -555,6 +555,20 @@ test('Claude Code’s copy waiting for Write to Claude Code, then edited in Clau
   assert.equal(view.items[0]!.description, 'Command · COPILOT-EDIT');
   assert.ok(item.versions.some(version => version.from.how === 'edited' && version.from.harness === 'claude-cli'), 'Claude Code’s edit is a version');
   assert.deepEqual(view.items[0]!.waits, ['claude-cli'], 'Claude Code still owes the write');
+}));
+
+test('Two tools’ entries edited between passes have no time to order them: History and the notice say the times can’t tell, never that the first tool’s was the latest', () => inBox(async box => {
+  await fs.writeFile(box.path('copilot-cli'), docsRuns('BASE'));
+  await applyServers(box.context, copilotAndCodex, [on('docs')]);
+  await fs.writeFile(box.path('copilot-cli'), docsRuns('COPILOT-EDIT'));
+  await fs.writeFile(box.path('codex-cli'), '[mcp_servers.docs]\ncommand = "CODEX-EDIT"\n');
+  const met = itemNotice((await applyServers(box.context, copilotAndCodex, [])).notices![0]);
+  // Copilot CLI's edit is the current version because Copilot CLI comes first among the tools, not because it was later.
+  assert.deepEqual([met.kind, met.winner, met.losers, met.orderProved, await commandIn(box, 'codex-cli')], ['conflict', 'copilot-cli', ['codex-cli'], false, 'COPILOT-EDIT']);
+  assert.equal(say.noticeWords(met).text, 'docs: Copilot CLI’s edit is the current version, though the times can’t tell which edit came last. Codex’s is kept as a version.');
+  const entry = (await readHistory(box.context)).find(event => event.kind === 'conflict')!;
+  assert.equal(entry.orderProved, false);
+  assert.equal(librarySentence(entry, libraryWords.mcp, copilotAndCodex)?.text, 'Copilot CLI’s edit became the current version, though the times can’t tell which edit came last. Codex’s is kept as a version.');
 }));
 
 test('A removal Claude Code owes goes to the file it was owed in, never to Claude Code’s settings moved somewhere else since', () => inBox(async box => {
