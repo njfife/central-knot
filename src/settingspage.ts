@@ -9,7 +9,7 @@ import { button, h, icon, toggle } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { DAY_MS, defaultHistoryDays, historyDayChoices } from './model.ts';
 import { openWalkthrough } from './firstsetup.ts';
-import { whatYesDoes } from './setupcounts.ts';
+import { whatYesDoes, takenOutEarlier } from './setupcounts.ts';
 import { plural } from './model.ts';
 import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, HistoryWindowSaved, SignInPlace } from './types.ts';
 import { libraryWords, sentences } from './libraryrow.ts';
@@ -375,7 +375,11 @@ function syncEverythingRow(): HTMLElement | null {
   const waiting = choosing ? `${plural(choosing, 'found item')} ${choosing === 1 ? 'has' : 'have'} copies that differ and ${choosing === 1 ? 'waits' : 'wait'} for your choice of copy.` : '';
   const adds = !on ? (takes ? `Turning it on adds the ${plural(takes, 'item')} found in your tools now.` : 'Nothing found in your tools now would be added.') : '';
   const later = on && !home.syncOn ? 'Automatic sync is off, so it takes items in at Sync once.' : '';
-  const text = [adds, waiting, later].filter(Boolean).join(' ');
+  // What it leaves for good, said beside what it would add: found items taken out of Central Knot earlier.
+  const out = takenOutEarlier(home);
+  const takenOut = out === 1 ? '1 found item was taken out of Central Knot earlier and isn’t added by itself again: Add on its row, or Restore in History, brings it back.'
+    : out ? `${out} found items were taken out of Central Knot earlier and aren’t added by themselves again: Add on a row, or Restore in History, brings one back.` : '';
+  const text = [adds, takenOut, waiting, later].filter(Boolean).join(' ');
   const notice: RowMessage | undefined = text ? { text, tone: 'info', action: choosing && !cannot ? { label: 'Choose copies', run: openWalkthrough } : undefined } : undefined;
   // What it took in, as each page's notice says it (until shown there), with History: Settings says what the switch did.
   const added = (['skills', 'mcp', 'agents'] as const).flatMap(kind => home[kind].notices.flatMap(told => (told.kind === 'taken-in' && !state.dismissed.has(told.history)

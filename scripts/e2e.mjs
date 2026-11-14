@@ -3177,7 +3177,7 @@ async function syncEverythingFlow() {
   await a.click('#nav-settings');
   await a.click('#sync-everything-on');
   for (let tries = 0; tries < 40 && await ruleOn() !== 'false'; tries++) await wait(100);
-  same('turned off, it says what it would add now: nothing, since what was undone stays out', [await ruleOn(), await ruleSays()], ['false', 'Nothing found in your tools now would be added. 2 found items have copies that differ and wait for your choice of copy.']);
+  same('turned off, it says what it would add now: nothing, since what was undone stays out', [await ruleOn(), await ruleSays()], ['false', 'Nothing found in your tools now would be added. 1 found item was taken out of Central Knot earlier and isn’t added by itself again: Add on its row, or Restore in History, brings it back. 2 found items have copies that differ and wait for your choice of copy.']);
   // Saved just before it is switched on again, with nothing else for that pass to write: the pass leaves it inside the settle
   // window, and nothing but the look again soon after (no watch event follows) takes it in before the 20 s poll.
   skill(claude, 'later', text('later', 'Saved just before.'));
