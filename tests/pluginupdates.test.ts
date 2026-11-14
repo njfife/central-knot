@@ -355,9 +355,23 @@ test('A managed tool turning up asks for a check now while plugins change by the
 
 test('The installs the version before waited to make for a tool new here are read from its saved record, for the plugins record’s first read', async () => {
   const { box, updates } = setup();
-  box.saved = [{ home: '/home/a', updated: [], failures: [], waiting: [{ source: '/market', marketName: 'team', plugin: 'spark', tool: 'codex-cli', action: 'install', tries: 1, at: 5 }, { nonsense: true }] } as UpdatesRecord];
-  assert.deepEqual(await updates.waitedBefore(), [{ source: '/market', marketName: 'team', plugin: 'spark', tool: 'codex-cli', action: 'install', tries: 1, at: 5 }]);
-  // Read once: the next time the file is written, those fields are not.
-  await updates.check();
-  assert.deepEqual([Object.keys(box.record() ?? {}).filter(key => ['waiting', 'seenTools', 'joins'].includes(key)), await updates.waitedBefore()], [[], []]);
+  const waiting = [{ source: '/market', marketName: 'team', plugin: 'spark', tool: 'codex-cli', action: 'install', tries: 1, at: 5 }];
+  box.saved = [{ home: '/home/a', updated: [], failures: [], waiting: [...waiting, { nonsense: true }] }, { home: '/home/b', updated: [], failures: [], waiting }] as unknown as UpdatesRecord[];
+  assert.deepEqual(await updates.waitedBefore(), waiting);
+  const left = (home: string) => Object.keys(box.saved?.find(saved => saved.home === home) ?? {}).filter(key => ['waiting', 'seenTools', 'joins'].includes(key));
+  // A check this home can't run (preview only, say) keeps them for the check that can.
+  box.stopped = 'Preview only.';
+  await updates.check(true);
+  assert.deepEqual([left('/home/a'), await updates.waitedBefore()], [['waiting'], [...waiting, { nonsense: true }].filter(wait => 'tool' in wait)]);
+  // Nor does a check whose updates stopped partway (Central Knot quitting).
+  box.stopped = undefined;
+  box.due = [due('document-tools', 'claude-cli')];
+  box.stops.add('document-tools');
+  await updates.check(true);
+  assert.deepEqual(left('/home/a'), ['waiting']);
+  // Read once: after a check of this home that ran through, they are not written again; another home's record keeps its own.
+  box.stops.clear();
+  box.due = [];
+  await updates.check(true);
+  assert.deepEqual([left('/home/a'), await updates.waitedBefore(), left('/home/b')], [[], [], ['waiting']]);
 });

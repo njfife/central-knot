@@ -800,7 +800,7 @@ test('Off reaches nothing it must not: a tool left out, Claude Code’s copy fro
   } finally { await box.cleanup(); }
 });
 
-test('A plugin turned off in a tool’s own settings is brought to no new tool by itself; the new tool’s line says why, and Install there still puts it in', async () => {
+test('A plugin turned off in a tool’s own settings is brought to no new tool by itself; the new tool’s line says why, and Install there still puts it in, also once it is on again', async () => {
   const tools: HarnessId[] = ['claude-cli'];
   const box = await switchHome({ tools });
   try {
@@ -815,9 +815,11 @@ test('A plugin turned off in a tool’s own settings is brought to no new tool b
     assert.deepEqual([due.ops.filter(op => op.newHere), due.newTools], [[], ['pi-cli']], 'nothing owed to Pi by itself');
     const pi = (await box.switchOf('pdf')).tools['pi-cli']!;
     assert.deepEqual([pi.act, pi.background, pi.offElsewhere], ['install-parts', undefined, true]);
-    // Turned on again in Claude Code: the next check brings it to Pi.
+    // That check made Pi no longer new. Turned on again in Claude Code later, it is still not brought to Pi by itself (Install there does it).
+    await box.markets.noteJoined(due.newTools!, box.home);
     await put(join(box.home, '.claude/settings.json'), '{}');
-    assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops.filter(op => op.newHere).map(op => [op.plugin, op.tool]), [['pdf', 'pi-cli']]);
+    assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops.filter(op => op.newHere), []);
+    assert.equal((await box.switchOf('pdf')).tools['pi-cli']!.act, 'install-parts', 'its line still offers Install there');
   } finally { await box.cleanup(); }
 });
 

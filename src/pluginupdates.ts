@@ -123,10 +123,6 @@ export function autoUpdates(host: AutoUpdateHost) {
   async function save(about?: UpdatesRecord, news?: 'updated' | 'failed') {
     const open = host.home();
     const kept = [...(records?.values() ?? [])].sort((first, second) => Number(second.home === open) - Number(first.home === open) || (second.checked?.at ?? 0) - (first.checked?.at ?? 0)).slice(0, HOMES_KEPT);
-    // The version before's selections that waited (`seenTools`, `waiting`, `joins`) were read by the plugins record's first
-    // read (waitedBefore, at the check before this save): they are not written again. Taken off the same objects, which a
-    // check under way holds.
-    for (const record of kept as (UpdatesRecord & Partial<Record<'seenTools' | 'waiting' | 'joins', unknown>>)[]) { delete record.seenTools; delete record.waiting; delete record.joins; }
     records = new Map(kept.map(saved => [saved.home, saved]));
     await host.save(kept).catch(error => host.log(`plugin updates: the record couldn’t be saved: ${error instanceof Error ? error.message : String(error)}`));
     host.changed(shown(), about && about.home === host.home() ? news : undefined);
@@ -185,6 +181,9 @@ export function autoUpdates(host: AutoUpdateHost) {
     // go in is said in the note, and on the plugin's page with Install there; nothing tries it again by itself.
     const joined = auto && !stopped ? due.newTools ?? [] : [];
     if (joined.length) await host.noteJoined(joined, home).catch(error => host.log(`plugin updates: the plugins record couldn’t be saved: ${error instanceof Error ? error.message : String(error)}`));
+    // The version before's selections that waited (`seenTools`, `waiting`, `joins`) were read by this check's plugins record
+    // (its first read: waitedBefore); once a check of this home has run through, they are not written again.
+    if (!stopped) { const old = mine as UpdatesRecord & Partial<Record<'seenTools' | 'waiting' | 'joins', unknown>>; delete old.seenTools; delete old.waiting; delete old.joins; }
     const news = keep(mine, ops, done, at);
     mine.checked = { at, updated: done.filter(entry => succeeded(entry.report) && entry.report.changed).length, failed: open(mine), unread: due.unread, ...(due.offline ? { offline: true as const } : {}), ...(stopped ? { stopped, partway: true as const } : {}) };
     await save(mine, news);

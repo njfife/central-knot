@@ -493,7 +493,7 @@ export function toolMark(view: PluginsView, entry: MarketplaceView, plugin: stri
     if (owed.background) return { mark: 'waits', words: `Not in ${name} yet: ${what} ${goes} in ${when}. Install there puts ${them} in now.` };
     const offIn = view.tools.filter(other => { const there = stateOf(entry, plugin, other); return there.state === 'installed' && !!there.off; }).map(other => names[other]);
     if (owed.offElsewhere) return { mark: 'not-brought', words: `Not in ${name}: the plugin is off in ${andList(offIn)}’s own settings, so it isn’t brought to a tool new here by itself. Install there puts ${them} in.` };
-    return { mark: 'missing', words: `Not in ${name}, though the plugin is on: it was taken out there, or its install didn’t go through. Install there puts ${what} in.` };
+    return { mark: 'missing', words: `Not in ${name}, though the plugin is on. Install there puts ${what} in.` };
   }
   if (kept) return { mark: 'kept-out', words: `Kept out of ${name}.` };
   const why = unavailable(view, entry, plugin, tool);
