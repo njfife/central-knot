@@ -441,7 +441,7 @@ test('Take over carries a tool’s own switch: a skill Codex had off where it re
     assert.equal((await takeOver(box.context, box.tools, 'notes', 'codex-cli')).stopped, undefined);
     const codex = await readSwitchFile(box.context, 'codex-cli');
     assert.equal(isDisabled(box.context, codex, { folder: 'notes', name: 'notes', skillFile: join(folderOf(box, 'codex-cli'), 'SKILL.md') }), true, 'still off in Codex');
-    assert.equal((await seen(box)).fact!.loads?.['codex-cli']?.off, true);
+    assert.equal((await seen(box)).fact!.loads?.['codex-cli']?.switchedOff, true);
   } finally { await box.cleanup(); }
 });
 
@@ -514,7 +514,7 @@ test('A switch set in a tool is left exactly as it is: the folder stays and the 
     await turnOn(box);
     assert.equal(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), config, 'Off and On never write a tool’s own switch');
     const { fact, item, row } = await seen(box);
-    assert.deepEqual(fact!.loads?.['codex-cli'], { ...target, off: true });
+    assert.deepEqual(fact!.loads?.['codex-cli'], { ...target, switchedOff: true });
     assert.deepEqual(fact!.switchedOff, ['codex-cli']);
     // The row as the page has it (matrix.ts fromFacts): switched off in Codex's own settings.
     const switched = { 'codex-cli': 'switched off in Codex’s own settings' };

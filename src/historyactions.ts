@@ -248,7 +248,7 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
   }
   // Clear the switch (a skill's): its Undo turns that tool's own switch off again (skills.ts restoreSkill does it, not a Change).
   // Offered while one of those tools still loads it (`loads`, the row's: each tool's own switch now; unknown, it is offered).
-  const stillCleared = !loads || event.switched?.some(entry => !loads[entry.tool]?.off);
+  const stillCleared = !loads || event.switched?.some(entry => !loads[entry.tool]?.switchedOff);
   if (isClearedSwitch(event) && stillCleared) return { label: 'Undo', help: `Turn ${name} off again in ${andList(event.switched!.map(entry => toolName(entry.tool)))}’s own settings`, change: now };
   // A found item taken in (by a click on Add, or by Synchronize everything), while it is still as that left it: its Undo takes it
   // out again (found once more, a tombstone the rule leaves for good), each tool it was found in keeping its own copy.

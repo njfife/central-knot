@@ -49,7 +49,7 @@ import { record } from './values.ts';
 interface Hold { kind: 'skill' | 'mcp'; key: string; name: string; row?: LibraryFacts; listed: HarnessId[] }
 
 /** Whether the tool's own switch has the held item off now, and which tools have it at all (their copy is read now). */
-const offIn = (hold: Hold, tool: HarnessId) => (hold.kind === 'skill' ? !!hold.row?.loads?.[tool]?.off : !!hold.row?.switchedOff?.includes(tool));
+const offIn = (hold: Hold, tool: HarnessId) => (hold.kind === 'skill' ? !!hold.row?.loads?.[tool]?.switchedOff : !!hold.row?.switchedOff?.includes(tool));
 const hasIt = (hold: Hold) => Object.keys((hold.kind === 'skill' ? hold.row?.loads : hold.row?.copies) ?? {}) as HarnessId[];
 /** Off in every tool that has it, by listed switches, with nothing about it unread. */
 const heldEverywhere = (hold: Hold) => !!hold.row && !hold.row.unseen && !hold.row.switchProblem && hasIt(hold).length > 0

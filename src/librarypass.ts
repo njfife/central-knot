@@ -443,7 +443,7 @@ export function foundKey(look: AnyLook, key: string, except: readonly HarnessId[
   const parts = look.disk.parts?.get(key) ?? [], switchedOff = look.disk.switchedOff?.get(key) ?? [];
   const tombstone = look.library.items[key]?.deleted ? look.library.items[key] : undefined;
   const copies = foundCopies(look, key, except).map((copy): FoundCopy => ({ harness: copy.tool, hash: copy.hash, at: copy.at,
-    ...(parts.includes(copy.tool) ? { part: true } : {}), ...(switchedOff.includes(copy.tool) ? { off: true } : {}) }));
+    ...(parts.includes(copy.tool) ? { part: true } : {}), ...(switchedOff.includes(copy.tool) ? { switchedOff: true } : {}) }));
   return { copies, deleted: !!tombstone, converted: !!look.disk.converted?.has(key), leaving: !!tombstone && leavingIn(look, tombstone).length > 0 };
 }
 

@@ -560,7 +560,7 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
       : { takeInAnswers: takeInAnswers(look, key), choiceBlocks: choiceBlocksOf(entries) }),
     ...some('plugin', facts.plugin), ...some('unseen', facts.unseen), ...some('anotherWay', facts.anotherWay), ...some('takeOver', facts.takeOver),
-    ...some('loads', facts.loads), ...some('switchedOff', Object.keys(facts.loads).filter(tool => facts.loads[tool as HarnessId]!.off)), ...some('switchProblem', switchProblem),
+    ...some('loads', facts.loads), ...some('switchedOff', Object.keys(facts.loads).filter(tool => facts.loads[tool as HarnessId]!.switchedOff)), ...some('switchProblem', switchProblem),
     ...(converted ? { converted: { agent: converted.agent, origin: converted.origin, losses: converted.losses } } : {}),
     ...fromSourceFact(item, links),
   };
@@ -602,7 +602,7 @@ function toolFacts(look: SkillLook, row: RowOf, tool: HarnessId, facts: ToolFact
   const outsideWay = disk.ways.get(key)?.[tool];
   if (item && !item.deleted && outsideWay?.take && outsideCopy) facts.takeOver[tool] = { kind: outsideWay.take, path: outsideWay.path };
   const target = given && !here ? undefined : loadTarget(look, key, name, tool);
-  if (target) facts.loads[tool] = { ...target, off: isDisabled(look.context, disk.switches.get(tool)!, target) };
+  if (target) facts.loads[tool] = { ...target, switchedOff: isDisabled(look.context, disk.switches.get(tool)!, target) };
 }
 
 /** A copy outside a tool's own folder that has moved on since the skill was taken in: neither its current version nor another of its versions. */

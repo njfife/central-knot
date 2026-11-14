@@ -413,7 +413,7 @@ test('Migration releases a profile’s switch on a copy that is not there now: i
     await writeToClaude(box.context, box.tools, ['docs']);
     const servers = await serversView(box.context, box.tools), skills = await skillsView(box.context, box.tools);
     assert.deepEqual(['docs', 'web'].map(key => servers.items.find(row => row.key === key)?.switchedOff ?? []), [[], []]);
-    assert.deepEqual(Object.values(skills.items.find(row => row.key === 'pager')?.loads ?? {}).map(at => at?.off), [false, false, false]);
+    assert.deepEqual(Object.values(skills.items.find(row => row.key === 'pager')?.loads ?? {}).map(at => at?.switchedOff), [false, false, false]);
     assert.match((await text(box, MCP['codex-cli']))!, /\[mcp_servers\.docs\]\ncommand = "docs"\nstartup_timeout_sec = 9\n/, 'Codex’s other own field stays');
   } finally { await box.cleanup(); }
 });
@@ -428,7 +428,7 @@ test('Migration with Automatic sync off leaves an item that stays On to the ordi
     const claudeCopy = await bytes(folderOf(box, 'claude-cli'));
     await writeFile(join(folderOf(box, 'codex-cli'), 'SKILL.md'), skillText('A hand edit, waiting while Automatic sync is off.'));
     await migrateProfiles(box.context, box.tools);
-    assert.deepEqual([await bytes(folderOf(box, 'claude-cli')), (await skillsView(box.context, box.tools)).items[0]?.loads?.['claude-cli']?.off], [claudeCopy, false]);
+    assert.deepEqual([await bytes(folderOf(box, 'claude-cli')), (await skillsView(box.context, box.tools)).items[0]?.loads?.['claude-cli']?.switchedOff], [claudeCopy, false]);
   } finally { await box.cleanup(); }
 });
 

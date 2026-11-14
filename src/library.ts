@@ -539,7 +539,7 @@ export interface FoundCopy {
   /** A plugin's part (parts.ts): the plugin put it in that harness. */
   part?: true;
   /** That harness's own switch turns it off there (skillswitch.ts, mcpswitch.ts). */
-  off?: true;
+  switchedOff?: true;
 }
 /** What the take-in table is told of a found key. */
 export interface FoundKey {
@@ -573,7 +573,7 @@ export function takeInAnswer(by: TakenBy, found: FoundKey, chosen?: { harness: H
   if (rule && found.deleted) return { leave: 'deleted' };
   if (rule && copies.some(copy => copy.part)) return { leave: 'part' };
   if (rule && found.converted) return { leave: 'converted' };
-  if (rule && copies.every(copy => copy.off)) return { leave: 'switched-off' };
+  if (rule && copies.every(copy => copy.switchedOff)) return { leave: 'switched-off' };
   if (rule && settle && copies.some(copy => copy.at !== undefined && Math.abs(settle.clock - copy.at) < settle.ms)) return { leave: 'settling' };
   const pick = chosen && copies.find(copy => copy.harness === chosen.harness);
   if (!rule && chosen && (!pick || (chosen.hash !== undefined && pick.hash !== chosen.hash))) return { leave: 'choice-changed' };
