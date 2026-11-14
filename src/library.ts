@@ -133,7 +133,7 @@
 // link's folder is there and is no plugin or marketplace, at least one item of any kind there can be read, and every item of
 // this kind there could be read (atlink.ts readOf decides it, the one place). A source that holds no item that can be read
 // (its one skill deleted there, every one unreadable, its folder gone, a plugin) is not read whole: no name is gone, and the
-// source turns nothing Off. Skills are the only kind a source brings in this version.
+// source turns nothing Off.
 //
 // REMOVED AT ITS SOURCE (`removedBy`, the one place it is decided; worked out at each look, never stored): an item that is Off,
 // linked to no source, has a version from a recorded source's link since it last came in from a tool (fromLinkSinceTakeIn; one

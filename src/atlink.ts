@@ -4,9 +4,7 @@
 //   own files (named, nothing read: a later version); else what each kind's reader finds there (`items`), or nothing of any
 //   kind (`empty`);
 // - which files there are an item of one kind, each one's key, name and content, or why it is unreadable: that kind's reader
-//   (sources.ts SourceKind `at`). Skills' is skillsAt: a SKILL.md in the link's own folder (one skill), else each folder inside
-//   it with one, else skills/<folder>/; a skill is its whole folder, byte for byte, without the repository's .git, named as
-//   its SKILL.md names it; two skills of one name are both unreadable;
+//   (sources.ts SourceKind `at`; skills' is skillsAt);
 // - one kind's read, and whether it was read whole (readOf, the one place; library.ts "Read whole");
 // - why a read holds nothing to bring in, in words (unreadWhy, nothingToAddWhy), each kind's part from its table entry.
 // An item there that can't be read is "unreadable", with why, and is never taken to be gone.
@@ -101,9 +99,8 @@ const readable = (found: Holds) => found.kinds.some(each => each.items.some(item
 
 /**
  * What was read at a source of one kind, as the pass and the table are given it (the one place that decides it): each item of
- * that kind there by key, with its content or why it is unreadable, and whether the source was read whole for this kind: the
- * link's folder is there and is no plugin or marketplace, at least one item of any kind there can be read, and every item of
- * this kind can be read (library.ts "Read whole"). `recorded`: the ids of the sources the home records.
+ * that kind there by key, with its content or why it is unreadable, and whether the source was read whole for this kind
+ * (library.ts "Read whole"). `recorded`: the ids of the sources the home records.
  */
 export function readOf(source: SourceRecord, found: Holds, entry: SourceKind, recorded: ReadonlySet<string>, clicked: RowClick = {}): SourceRead<unknown> {
   const there = itemsOf(found, entry), names: SourceRead<unknown>['names'] = new Map();

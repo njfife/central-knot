@@ -1,7 +1,6 @@
-// Merge for every kind a source brings (library.ts MERGE; the pass asks it through librarypass.ts Kind.merge, which a kind
-// in sources.ts's table must have): each kind's merge, and the line merge they share (`lineMerge`: git merge-file on one part
-// both sides changed, answering clean, conflict, Git missing or timeout). Skills are the only kind with one now (`mergeSkill`):
-// three versions' folders read (share.ts readTree), which side each path takes asked of library.ts mergeFiles, the merged
+// Merge for every kind a source brings (library.ts MERGE; the pass asks it through librarypass.ts Kind.merge): each kind's
+// merge, and the line merge they share (`lineMerge`: git merge-file on one part both sides changed, answering clean, conflict,
+// Git missing or timeout). Skills' (`mergeSkill`): three versions' folders read (share.ts readTree), which side each path takes asked of library.ts mergeFiles, the merged
 // folder made from those sides, a file both sides changed merged by lineMerge, and the result stored as a version of the
 // skill (skillstore.ts storeVersion). Everything it makes on the way is in one folder of its own in .central-knot/
 // (merging-…), removed before it returns (a crash midway can leave it). Bytes are copied as they are: nothing is normalised.

@@ -218,7 +218,7 @@ const whereAt = ({ folder, folderName }: NonNullable<SourceName['there']>) => (f
 /** One skill at a source: its name and where it sits there, what it is to the library, its files, and its own Add. */
 function nameRow(name: SourceName, preview: boolean, action?: HTMLElement | null) {
   const said = stateWords(name, preview);
-  return h('li.source-name', { 'data-key': name.key, 'data-state': name.state },
+  return h('li.source-name', { 'data-key': name.key, 'data-kind': name.kind, 'data-state': name.state },
     h('span.source-name-icon', {}, icon(said.warns ? 'triangle-alert' : name.state === 'nothing' && name.on ? 'circle-check' : 'wand-sparkles', 14, said.warns ? 'tone-warning' : 'tone-muted')),
     h('span.source-name-main', {},
       h('span.source-name-line', {}, h('strong.source-name-text', {}, name.name ?? name.there?.folderName ?? name.key),
@@ -232,7 +232,7 @@ function removedRow(fact: LibraryFacts, kind: ItemKind, locked: boolean) {
   const page = pageOfPart[kind];
   const turn = button({ variant: 'link', size: 'micro', label: 'Turn on', id: `source-turn-on-${kind}-${fact.key}`, disabled: locked,
     attrs: { title: `Turn ${fact.name} on in every tool it isn’t kept out of, as its switch on ${kindNouns[page].title} does. Undo turns it off again.` }, onclick: () => void turnOn(fact, page) });
-  return h('li.source-name', { 'data-key': fact.key, 'data-state': 'removed' },
+  return h('li.source-name', { 'data-key': fact.key, 'data-kind': kind, 'data-state': 'removed' },
     h('span.source-name-icon', {}, icon('triangle-alert', 14, 'tone-warning')),
     h('span.source-name-main', {},
       h('span.source-name-line', {}, h('strong.source-name-text', {}, fact.name), h('span.source-name-where.tone-muted', {}, 'not in its last read')),
