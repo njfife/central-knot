@@ -184,7 +184,7 @@ async function walk(seed: number): Promise<Finding[]> {
         add(6, { name: 'Check now', app: true, run: more => checkNow(recorded.id, more) });
         add(1, { name: 'Remove the source', app: true, run: () => removeSource(context(), recorded.id) });
         if (recorded.names.some(name => name.key === 'notes' && name.state === 'deleted')) add(4, { name: 'Add on the source’s row', app: true, run: () => bringBack(context(), tools, recorded.id, 'notes') });
-        // The source's SKILL.md stops parsing for one check: unseen there, never gone, so nothing turns Off or is removed.
+        // The source's SKILL.md stops parsing for one check: unreadable there, never gone, so nothing turns Off or is removed.
         if (held?.source === recorded.id && sourceHasNotes) add(2, { name: 'the source’s SKILL.md unparseable, then Check now', app: true, byHand: true, run: async () => {
           await source.commit({ 'SKILL.md': '---\nname: [notes\n---\nBroken.\n' });
           try {

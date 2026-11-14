@@ -866,8 +866,11 @@ export interface PassResult {
   settling?: boolean;
   /** A pass of the whole home (librarypass.ts PassOptions background): the found keys it left found; main.ts tells an open page when one is new (foundGained). */
   found?: string[];
-  /** A pass with a source's read (librarypass.ts fromSourceStep): what its table answered for each name, but `nothing`. */
-  sourced?: { name: string; answer: SourceAnswer }[];
+  /**
+   * A pass with a source's read (librarypass.ts fromSourceStep): what it did to each item, but `nothing`, as the table answered
+   * and the plan then did (a later edit in a tool keeps the source's version: `keep`), with the History entry that says it.
+   */
+  sourced?: { name: string; answer: SourceAnswer; history?: string }[];
 }
 
 // ---------- Instructions ----------
@@ -1013,23 +1016,24 @@ export interface ShownLog { selected: boolean; logged: boolean }
 // ---------- Sources ----------
 
 /**
- * What a name at a source is to the library now, as the Sources page says it: in Central Knot from this source (`in`), or what
- * the source's table does with it (library.ts SourceAnswer: `make`, `link`, or why it is not brought in: `differs`, `another`,
- * `deleted`), or a skill there that can't be used (`unusable`, with why).
+ * What a name at a source is to the library now, as the Sources page says it: the source's table's own answer for it (library.ts
+ * SourceAnswer, from sourceAnswers: `nothing` for one in Central Knot from this source as the source has it), or `unreadable`,
+ * a skill there that can't be read, with why.
  */
-export type SourceNameState = 'in' | 'make' | 'link' | 'differs' | 'another' | 'deleted' | 'unusable';
-/** One skill at a source, as its last read found it (sources.ts). */
+export type SourceNameState = SourceAnswer | 'unreadable';
+/** One skill at a source's read, or one item linked to the source that the read doesn't hold (sources.ts namesOf). */
 export interface SourceName {
   /** Its name, as its SKILL.md gives it (absent when that can't be read), and its key. */
   name?: string; key: string;
-  /** Its folder at the source, from the repository's root ('' for the root), and that folder's own name (the repository's, for the root). */
-  folder: string; folderName: string;
-  /** Every file in it, by path inside its folder. */
-  files: string[];
+  /**
+   * Where it is at the read: its folder from the repository's root ('' for the root), that folder's own name (the repository's,
+   * for the root), and every file in it by path inside the folder. Absent for an item linked to the source that the read doesn't hold.
+   */
+  there?: { folder: string; folderName: string; files: string[] };
   state: SourceNameState;
-  /** `unusable`: why. `another`: the other source's link. */
+  /** `unreadable`: why. `another`: the other source's link. */
   why?: string;
-  /** `in`: whether it is On. */
+  /** An item in Central Knot (not deleted): whether it is On. */
   on?: boolean;
 }
 /** What a link holds, read from its files (sources.ts holdsAt): skills, a plugin or a marketplace (a later version), no skill, or no folder there. */
@@ -1045,14 +1049,22 @@ export interface SourceFound {
   names: SourceName[];
   /** What else is there that this version doesn't read, in words ("2 agent files: agents come in a later version"). */
   later: string[];
+  /** Why the read is not whole (library.ts A SOURCE: nothing is taken to be gone), in words; absent when it is. */
+  unread?: string;
 }
-/** A source as the Sources page shows it: its last read (none when its copy is gone), when it was read, and why its last check failed. */
+/**
+ * A source as the Sources page shows it: its last read (sourcestore.ts: a cache; `copyGone` when it isn't kept, which a Check now
+ * puts back), when it was read, and why the last Check now couldn't fetch it (`problem`).
+ */
 export interface SourceView extends SourceFound { id: string; addedAt: string; readAt?: string; problem?: string; copyGone?: true }
 export interface SourcesView { sources: SourceView[]; access: WriteAccess; problem?: string }
 /** A link read before anything is kept: what Add would do (`token` names it for Add), or why it can't be added. */
 export type SourcePreview = (SourceFound & { token: string; refused?: string }) | { refused: string; link: string };
-/** What a source's click did: the pass's answers by name (PassResult sourced), why it stopped, and the page's view after. */
-export interface SourceResult { stopped?: string; sourced?: PassResult['sourced']; results?: DestinationResult[]; view: SourcesView | null }
+/**
+ * What a source's click did: the pass's answers by name (PassResult sourced), and its results; why it stopped; why the source
+ * wasn't read whole (`notWhole`: nothing was taken to be gone); and the page's view after.
+ */
+export interface SourceResult { stopped?: string; sourced?: PassResult['sourced']; results?: DestinationResult[]; notWhole?: string; view: SourcesView | null }
 
 // ---------- Git repo ----------
 

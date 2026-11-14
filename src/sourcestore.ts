@@ -1,15 +1,20 @@
 // Where a home's sources are kept, inside its `.central-knot/` (what a source is, and what reading one does: sources.ts):
 //
 //   sources.json                  the record: each source the person added (SourceRecord), in the order added
-//   sources/<id>/                 a source's last whole read: its repository one commit deep, swapped in only once whole
+//   sources/<id>/                 a source's last read: its repository one commit deep, swapped in by each Check now that
+//                                 fetched it, whole or not
 //   sources/.look-<token>/        a link looked at and not added yet (sources.ts previewSource), with what it resolved to
 //                                 beside it (.look-<token>.json); the next look drops it, Add moves it to sources/<id>/
 //   sources/.stage-<uuid>/        a Check now's fetch, until its turn swaps it in
 //
-// Which items came from a source is the items' own (library.ts LibraryItem `source`, `seen`), never this record's. This module
-// only reads and writes what it is given.
+// The last read is a cache, not a record: two things read it, the source's row on the Sources page (what each skill there is to
+// the library, and why the read isn't whole) and Add on a deleted name's row (which brings that name back from it, with no
+// fetch). A missing copy means only "look again": the row says so (types.ts SourceView copyGone), and the next Check now fetches
+// it. Which items came from a source is the items' own (library.ts LibraryItem `source`, `seen`), never this record's, and
+// whom an item is linked to is library.ts linkedTo's alone. This module only reads and writes what it is given.
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { sameSource } from './plugins.ts';
 import { NOTHING_CHANGED, errorCode, storeDirectory, writeDurably } from './share.ts';
 
 /** One source, as the home records it (sources.json). */
@@ -57,5 +62,11 @@ export async function readSources(home: string): Promise<{ sources: SourceRecord
 }
 export const saveSources = (home: string, sources: SourceRecord[]) => writeDurably(recordPath(home), `${JSON.stringify({ formatVersion: FORMAT_VERSION, sources }, null, 2)}\n`);
 
-/** Each recorded source's link, by its id: the one place an item's `source` is read as linked or not (an id not here is not linked). */
+/** Each recorded source's link, by its id: which ids are recorded, for library.ts linkedSource (whom an item is linked to is library.ts's alone). */
 export const sourceLinks = async (home: string) => new Map((await readSources(home)).sources.map(source => [source.id, source.link]));
+
+/**
+ * The source the home reads from `address`, if one (one repository however it is spelt): the Git repo's Connect refuses it
+ * (gitrepo.ts connectRepo), since Push would write to a source, as a source refuses the Git repo (sources.ts resolve).
+ */
+export const sourceAt = async (home: string, address: string) => (await readSources(home)).sources.find(source => sameSource(source.repository, address));

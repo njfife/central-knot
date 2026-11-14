@@ -14,10 +14,21 @@ test('The owner’s example and the other forms a link takes: owner/repo, a repo
   assert.deepEqual(readLink('ssh://git@host:2222/team/skills.git'), { repository: 'ssh://git@host:2222/team/skills.git' });
 });
 
+test('A link to a file, a skill’s own SKILL.md, reads the folder that holds it; a host and a path with no https:// is the address it plainly is', () => {
+  assert.deepEqual(readLink('https://github.com/stephenturner/skill-deslop/blob/main/SKILL.md'), { repository: 'https://github.com/stephenturner/skill-deslop.git', rest: ['main'] });
+  assert.deepEqual(readLink('https://github.com/team/kit/blob/feature/x/skills/notes/SKILL.md'), { repository: 'https://github.com/team/kit.git', rest: ['feature', 'x', 'skills', 'notes'] });
+  assert.deepEqual(readLink('https://gitlab.example.com/team/skills/-/blob/main/review/SKILL.md'), { repository: 'https://gitlab.example.com/team/skills.git', rest: ['main', 'review'] });
+  assert.deepEqual(readLink('github.com/stephenturner/skill-deslop'), { repository: 'https://github.com/stephenturner/skill-deslop.git' });
+  assert.deepEqual(readLink('github.com/stephenturner/skill-deslop/tree/main'), { repository: 'https://github.com/stephenturner/skill-deslop.git', rest: ['main'] });
+  assert.ok('refused' in readLink('github.com/stephenturner'), 'a host and an owner alone is no repository');
+  assert.ok('refused' in readLink('https://github.com/team/kit/blob/main'), 'a file link that names no file');
+});
+
 test('What is no link is refused in plain words: empty, an option, a page of a repository that is no folder, anything else', () => {
   assert.deepEqual(readLink(''), { refused: 'Paste a link first.' });
   for (const text of ['--upload-pack=x', 'just words', 'ftp://example.com/x', 'https://github.com/team', 'https://github.com/team/kit/tree']) assert.ok('refused' in readLink(text), text);
   assert.match((readLink('https://github.com/team/kit/issues/4') as { refused: string }).refused, /page of the repository/);
+  assert.match((readLink('just words') as { refused: string }).refused, /a SKILL\.md in one \(github\.com\/owner\/repo works without https:\/\/\)/, 'the words name the forms that work');
   assert.match((readLink('https://gitlab.example.com/team/kit/-/issues/4') as { refused: string }).refused, /page of the repository/);
 });
 

@@ -89,10 +89,10 @@
 // holds whichever pass comes first. History says each content that gave way there, and each copy removed there (librarypass.ts
 // cameBack and logItem); a harness managed for the first time is the table's "a copy, no A" row, told the same way.
 //
-// A SOURCE (sources.ts): a Git link the person gave, read on a click and never written. Each name read there meets the item
-// of that key in one step before the table, for every name at once (`fromSource`; librarypass.ts fromSourceStep carries it
-// out, as it carries out Pull). S is the content at the source now; an item linked to the source holds which source
-// (`source`) and the content last seen there (`seen`), and nothing else about it.
+// A SOURCE (sources.ts): a Git link the person gave, read on a click and never written. Each name read there, and each item
+// linked to the source, meets the table in one step before the plan, all at once (`sourceAnswers`, a `fromSource` answer per
+// name; librarypass.ts fromSourceStep carries them out, as it carries out Pull). S is the content at the source now; an item
+// linked to the source holds which source (`source`) and the content last seen there (`seen`), and nothing else about it.
 //
 //   at the source                        the item                    what happens
 //   a name the library has no item for   none                        the item is made, Off, its first version from the source
@@ -102,19 +102,26 @@
 //                                                                    version
 //   the name is gone, the source read    linked                      the item turns Off, once, and its link is let go, so a
 //     whole                                                          later read never turns Off what was turned On again
-//   the source, or that one skill,       linked                      nothing; the source's row says why
-//     can't be read
+//   that skill can't be read, or the     linked                      nothing; the source's row says why
+//     source wasn't read whole
 //   a name the library has               not linked, same content    it is linked; nothing else changes
+//   a name the library has               not linked, its current     linked again, and S becomes current: the link was removed
+//                                        version this same link's,   and added again, and the item is as it left it
+//                                        changed nothing since
 //   a name the library has               not linked and differs,     not brought in, said on the source's row; Add there
 //                                        linked to another source,   brings a deleted one back, Off, as a new one comes
 //                                        or deleted
 //
+// "Read whole": the source was fetched and holds at least one skill, and every skill there could be read (sources.ts readOf
+// decides it, the one place). A source that holds no skill that can be read (its one skill deleted there, every skill
+// unreadable, its folder gone, a plugin) is not read whole: no name is gone, and nothing turns Off.
+//
 // The step writes no harness: the plan after it applies the current version where the item is On, as for any new version, so
-// an edit a harness holds that no pass has taken in yet meets S there (latest wins). A source's time is its head commit's
-// (the copy is one commit deep): a later, unrelated commit there makes an older edit of the skill count as the latest. Within
-// a second of the current version's time (the tie latestCopy uses) the current version stays and the source's is kept.
-// "Read whole": every skill there could be read; one that can't (a SKILL.md that stops parsing) leaves no name gone that
-// time. An item linked to a source that is no longer recorded reads as not linked, so Remove lets go of every link at once.
+// an edit a harness holds that no pass has taken in yet meets S there (latest wins), and a dropped item's copies leave the
+// harnesses as any Off item's do. A source's time is its head commit's (`commitAt`: the copy is one commit deep): a later,
+// unrelated commit there makes an older edit of the skill count as the latest. Within a second of the current version's time
+// (the tie latestCopy uses) the current version stays and the source's is kept. Whether an item is linked is `linkedTo`'s
+// alone: one linked to a source that is no longer recorded reads as not linked, so Remove lets go of every link at once.
 //
 // Two promises hold the model together:
 // - H unseen is never H gone. A copy the adapter can't see for sure (unreadable, half saved, inside the settle window,
@@ -405,13 +412,24 @@ export const versionAt = (at: number | undefined) => new Date(at ?? Date.now()).
 
 // ---------- A source ----------
 
-/** What a source holds of one name now: its content and the source's time (its head commit's), gone (the source read whole), or unreadable. */
-export type AtSource = { hash: string; at: string } | 'gone' | 'unreadable';
-/** Whom an item is linked to, as the source being read sees it: that source, another one still recorded, or none. */
-export type LinkedTo = 'this' | 'another' | 'none';
-/** Whom an item is linked to, as source `id` sees it, among the sources the home records now: a source no longer recorded is none. */
-export const linkedTo = (item: Pick<LibraryItem, 'source'> | undefined, id: string, recorded: ReadonlySet<string>): LinkedTo =>
-  (!item?.source || !recorded.has(item.source) ? 'none' : item.source === id ? 'this' : 'another');
+/** What a source holds of one name now: its content and the source's head commit's time, gone (the source read whole), or unreadable. */
+export type AtSource = { hash: string; commitAt: string } | 'gone' | 'unreadable';
+/**
+ * Whom an item is linked to, as one source sees it: that source (`this`), another one still recorded (`another`), none; or
+ * none now, but its current version is one this same link gave and nothing has changed it since (`once`: the link was
+ * removed and added again).
+ */
+export type LinkedTo = 'this' | 'another' | 'once' | 'none';
+/** The source an item is linked to, among those the home records now (`recorded`, by id); none for one no longer recorded. */
+export const linkedSource = (item: Pick<LibraryItem, 'source'> | undefined, recorded: ReadonlySet<string>) =>
+  (item?.source && recorded.has(item.source) ? item.source : undefined);
+/** The one reader of whom an item is linked to (LinkedTo), as the source `id`, read from `link`, sees it. */
+export function linkedTo(item: LibraryItem | undefined, { id, link }: { id: string; link: string }, recorded: ReadonlySet<string>): LinkedTo {
+  const at = linkedSource(item, recorded);
+  if (at) return at === id ? 'this' : 'another';
+  const current = item?.versions[currentIndex(item)];
+  return current?.from.how === 'source' && current.from.link === link ? 'once' : 'none';
+}
 /**
  * The header's A SOURCE table's answer for one name, a row each: the item is made (`make`: Off; a deleted one brought back by
  * Add, `bringBack`), linked (`link`), S becomes current (`update`; already current, only `seen` moves on), S is kept as a version
@@ -428,11 +446,34 @@ export function fromSource(item: LibraryItem | undefined, here: AtSource, linked
   if (item.deleted) return bringBack ? 'make' : 'deleted';
   if (linked === 'another') return 'another';
   if (linked === 'none') return here.hash === item.hash ? 'link' : 'differs';
+  if (linked === 'once') return here.hash === item.hash ? 'link' : 'update';
   if (here.hash === item.seen) return 'nothing';
   if (item.hash === item.seen || here.hash === item.hash) return 'update';
   // Both changed: the later wins, the source's time being its head commit's; a tie keeps the current version.
   const current = Date.parse(item.versions[currentIndex(item)]?.at ?? '') || 0;
-  return Date.parse(here.at) - current >= TIE_MS ? 'update' : 'keep';
+  return Date.parse(here.commitAt) - current >= TIE_MS ? 'update' : 'keep';
+}
+
+/**
+ * One read of a source as its table reads it (sources.ts readOf makes it, the one place that decides what was read): the
+ * source, its head commit's time, each name there by key with its content's hash or why it can't be read, and whether it was
+ * read whole (the header).
+ */
+export interface SourceSeen { id: string; link: string; commitAt: string; whole: boolean; names: Map<string, { hash: string } | { unreadable: string }> }
+
+/**
+ * The table for one read, all at once: an answer for each name it holds and each item linked to the source (`items`: the
+ * library's, deleted ones too), by key. `recorded`: the sources the home records now. `bringBack`: keys held deleted that a
+ * click on Add on the source's row brings back. The pass carries these out (librarypass.ts fromSourceStep), and the Sources
+ * page says them (sources.ts sourcesView); their keys are the pass's scope.
+ */
+export function sourceAnswers(items: Record<string, LibraryItem>, read: SourceSeen, recorded: ReadonlySet<string>, bringBack?: ReadonlySet<string>): Map<string, SourceAnswer> {
+  const linked = Object.values(items).filter(item => linkedTo(item, read, recorded) === 'this').map(item => item.key);
+  return new Map([...new Set([...read.names.keys(), ...linked])].map(key => {
+    const entry = read.names.get(key);
+    const here: AtSource = !entry ? (read.whole ? 'gone' : 'unreadable') : 'hash' in entry ? { hash: entry.hash, commitAt: read.commitAt } : 'unreadable';
+    return [key, fromSource(items[key], here, linkedTo(items[key], read, recorded), bringBack?.has(key))];
+  }));
 }
 
 // ---------- Found ----------

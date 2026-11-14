@@ -21,7 +21,7 @@ import { readFile, unlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { appendHistory, readHistory, replaceHistory } from './history.ts';
 import { isClearedSwitch, libraryAction, libraryEntry } from './historyactions.ts';
-import { listed, pendingEdits, plan, wantedIn } from './library.ts';
+import { linkedSource, listed, pendingEdits, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, foundCopies, itemClick, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords } from './libraryrow.ts';
@@ -565,8 +565,14 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
     ...some('plugin', facts.plugin), ...some('unseen', facts.unseen), ...some('anotherWay', facts.anotherWay), ...some('takeOver', facts.takeOver),
     ...some('loads', facts.loads), ...some('switchedOff', Object.keys(facts.loads).filter(tool => facts.loads[tool as HarnessId]!.off)), ...some('switchProblem', switchProblem),
     ...(converted ? { converted: { agent: converted.agent, origin: converted.origin, losses: converted.losses } } : {}),
-    ...(item?.source && links.has(item.source) ? { fromSource: { link: links.get(item.source)! } } : {}),
+    ...fromSourceFact(item, links),
   };
+}
+
+/** The link of the source an item is linked to (library.ts linkedSource, among `links`: the recorded sources'), for its row. */
+function fromSourceFact(item: LibraryItem | undefined, links: Map<string, string>): Pick<LibraryFacts, 'fromSource'> {
+  const at = linkedSource(item, new Set(links.keys()));
+  return at ? { fromSource: { link: links.get(at)! } } : {};
 }
 
 /** What a row says of each tool, filled in by toolFacts: one map per kind of fact, by tool. */

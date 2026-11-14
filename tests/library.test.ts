@@ -3,7 +3,7 @@
 // applied there last. Contents are single letters: 'a' is older than 'b', and so on.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { carryOut, decide, fromSource, isLibraryItem, keepVersion, latestCopy, linkedTo, listed, managedAgain, newItem, plan, setCurrent, originWords, takeInAnswer, type HarnessCopy, type LibraryItem, type Shelf } from '../src/library.ts';
+import { carryOut, decide, fromSource, isLibraryItem, keepVersion, latestCopy, linkedTo, listed, managedAgain, newItem, plan, setCurrent, originWords, sourceAnswers, takeInAnswer, type HarnessCopy, type LibraryItem, type Shelf } from '../src/library.ts';
 
 const has = (hash: string, at = 0): HarnessCopy => ({ is: 'present', hash, at });
 /** A copy with no time of its own (an MCP entry: its time is its whole file's). */
@@ -399,7 +399,7 @@ test('Found otherwise: taken in from the one content (first harness), or from th
 /** An item linked to a source: its current version `hash` (made at `at`), and what was last seen there. */
 const linked = (hash: string, seen: string, at = '2026-11-02T10:00:00.000Z'): LibraryItem =>
   ({ ...newItem('skill', 'notes', 'notes'), hash, versions: [{ hash, at, from: { how: 'source', link: 'team/notes' } }], source: 'src', seen });
-const there = (hash: string, at = '2026-11-03T10:00:00.000Z') => ({ hash, at });
+const there = (hash: string, commitAt = '2026-11-03T10:00:00.000Z') => ({ hash, commitAt });
 
 test('A source: a name the library has no item for is made, Off; a deleted one is not, but Add on its row brings it back', () => {
   assert.equal(fromSource(undefined, there('s'), 'none'), 'make');
@@ -437,9 +437,24 @@ test('A source: a name the library has that isn’t linked is linked when its co
   assert.equal(fromSource(linked('l', 'l'), there('l'), 'another'), 'another');
 });
 
-test('Whom an item is linked to: a source no longer recorded is none', () => {
-  const recorded = new Set(['src', 'other']);
-  assert.deepEqual([linkedTo(linked('l', 'l'), 'src', recorded), linkedTo(linked('l', 'l'), 'other', recorded), linkedTo(linked('l', 'l'), 'src', new Set()), linkedTo(undefined, 'src', recorded)], ['this', 'another', 'none', 'none']);
+test('A source: an item whose current version this same link gave, unchanged since its source was removed, is linked again and follows the link’s change', () => {
+  assert.equal(fromSource(linked('l', 'l'), there('s'), 'once'), 'update');
+  assert.equal(fromSource(linked('l', 'l'), there('l'), 'once'), 'link');
+});
+
+test('Whom an item is linked to: a source no longer recorded is none, unless its current version is one that same link gave', () => {
+  const recorded = new Set(['src', 'other']), source = { id: 'src', link: 'team/notes' }, other = { id: 'other', link: 'team/other' };
+  const edited = { ...linked('l', 'l'), source: undefined, versions: [{ hash: 'l', at: '2026-11-04T10:00:00.000Z', from: { how: 'edited' as const, harness: 'codex-cli' as const } }] };
+  assert.deepEqual([linkedTo(linked('l', 'l'), source, recorded), linkedTo(linked('l', 'l'), other, recorded), linkedTo(linked('l', 'l'), { id: 'new', link: 'team/notes' }, new Set(['new'])),
+    linkedTo(linked('l', 'l'), { id: 'new', link: 'team/else' }, new Set(['new'])), linkedTo(edited, { id: 'new', link: 'team/notes' }, new Set(['new'])), linkedTo(undefined, source, recorded)],
+  ['this', 'another', 'once', 'none', 'none', 'none']);
+});
+
+test('A source’s read, all at once: every name and every item linked to it gets the table’s answer; a read not whole takes nothing to be gone', () => {
+  const items = { notes: linked('l', 'l'), other: { ...linked('o', 'o'), key: 'other', name: 'other' } };
+  const read = (whole: boolean) => ({ id: 'src', link: 'team/notes', commitAt: '2026-11-03T10:00:00.000Z', whole, names: new Map([['notes', { hash: 's' }], ['fresh', { hash: 'f' }]]) });
+  assert.deepEqual([...sourceAnswers(items, read(true), new Set(['src']))], [['notes', 'update'], ['fresh', 'make'], ['other', 'drop']]);
+  assert.deepEqual([...sourceAnswers(items, read(false), new Set(['src']))], [['notes', 'update'], ['fresh', 'make'], ['other', 'nothing']]);
 });
 
 test('A version read at a source says where, short; an item’s two source values are optional strings', () => {
