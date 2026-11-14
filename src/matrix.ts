@@ -6,14 +6,15 @@
 // kept or folded once its page shows it (toldNotices); until then it lives across reads in app.ts keepUnshown. First setup's
 // walkthrough (firstsetup.ts) is a band among a table's bands, given copyQuestion to hold the question of the item it is at.
 import { brandMark } from './brand.ts';
-import { caughtUpNames, defaultHistoryDays, groupBy, syncOwner } from './model.ts';
+import { caughtUpNames, dayAndTime, defaultHistoryDays, groupBy, syncOwner } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
 import { andList, byToolOrder, kindNouns, toolNames, toolsPhrase } from './words.ts';
 import { walkthroughBand } from './firstsetup.ts';
 import { leftOutTools, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
-import { kindSource, type ItemRow, type KindSource, type Tool } from './itemrow.ts';
+import { inOrder, kindSource, lastUpdated, type ItemRow, type KindSource, type RowOrder, type Tool } from './itemrow.ts';
+import { readFlag, writeFlag } from './flags.ts';
 import { addLabel, asksWhichCopy, canAdd, fromSourceWords, harnessIs, inLibrary, madeFrom, placeOf as libraryPlace, rowClicks, statusLine, switchLabel, versionClock, writesWait, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
@@ -288,8 +289,6 @@ const itemOf = (skill: ItemRow) => (state.home ? kindSource(state.home, kind).li
 const standingOf = (skill: ItemRow): 0 | 1 | 2 => ({ on: 0, found: 1, off: 2 } as const)[libraryPlace(itemOf(skill))];
 /** The headings, by place. */
 const placeNames = ['On', 'Found', 'Off'] as const;
-/** Rows under a heading go by name, a leading dot aside (".hidden" sorts with the h's). */
-const byKey = (first: { key: string }, second: { key: string }) => first.key.replace(/^\./, '').localeCompare(second.key.replace(/^\./, ''));
 /** Whether its copies differ so that its Add must ask which copy every tool uses: a found item's only (libraryrow.ts asksWhichCopy). */
 const differs = (skill: ItemRow) => asksWhichCopy(skill);
 /** Copies differ and need a choice, among the items this page is about: on a harness's page, the ones it has. */
@@ -1068,7 +1067,7 @@ export function itemsTable(which: PageKind, harness?: Tool) {
   const sections = [section('on', here.filter(skill => standingOf(skill) === 0)), section('found', here.filter(skill => standingOf(skill) === 1)), pluginSection(plugins),
     focus ? section('away', away) : null, section('off', idle)];
   const table = [
-    h('div.toolbar.fit-bar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(), h('div.toolbar-end', {}, toolbarState())),
+    h('div.toolbar.fit-bar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(), orderChoice(), h('div.toolbar-end', {}, toolbarState())),
     notices(),
     // A stable id per kind (and per harness), so a redraw (the dock's breakpoint crossed, say) keeps the table where it was
     // scrolled, and another harness's table opens at its own top.
@@ -1327,15 +1326,39 @@ function markLegend(list: ItemRow[], plugins: PluginRow[]) {
 
 /** One row: its switch, its name, a mark per tool, and the chevron that opens its details. */
 function row(skill: ItemRow) {
-  const open = view.comparing === skill.key;
+  const open = view.comparing === skill.key, when = dated();
   return [
-    h(`div.ov-row.ov-switch-row${takeFlash(skill.key) ? '.row-flash' : ''}${skill.on ? '' : '.unmanaged'}${open ? '.open' : ''}`, { role: 'row', 'data-key': skill.key, 'aria-expanded': String(open), onclick: () => openRow(skill.key) },
+    h(`div.ov-row.ov-switch-row${takeFlash(skill.key) ? '.row-flash' : ''}${skill.on ? '' : '.unmanaged'}${open ? '.open' : ''}${when ? '.ov-dated' : ''}`, { role: 'row', 'data-key': skill.key, 'aria-expanded': String(open), onclick: () => openRow(skill.key) },
       h('div.ov-managed', { role: 'cell' }, itemSwitch(skill)),
       nameCell(skill, differs(skill)),
+      when ? whenCell(skill) : null,
       h('div.ov-marks', { role: 'cell' }, rowMarks(skill)),
       h('div.ov-open', { role: 'cell' }, openButton(skill.key, nameOf(skill)))),
     open && underRow(skill.key) ? details(skill) : null,
   ];
+}
+
+// ---------- The order of the rows under each heading ----------
+
+/** The flag (flags.ts) that puts the rows of the Skills, MCP servers and Agents pages by last updated: one choice for the three. */
+const BY_UPDATED = 'ck-items-by-last-updated';
+/** The order of the rows under each heading (itemrow.ts inOrder): the one chosen, on a kind's own page; by name on a harness's. */
+const chosenOrder = (): RowOrder => (!focus && readFlag(BY_UPDATED) ? 'updated' : 'name');
+/** Whether each row says when it was last updated: while the rows go by it. */
+const dated = () => chosenOrder() === 'updated';
+/** The choice of order, after the filters on a kind's own page. */
+function orderChoice() {
+  if (focus) return null;
+  const choose = (event: Event) => { writeFlag(BY_UPDATED, (event.target as HTMLSelectElement).value === 'updated'); rerender(); };
+  const options = [h('option', { value: 'name', selected: !dated() }, 'Name'), h('option', { value: 'updated', selected: dated() }, 'Last updated')];
+  return h('span.order', { title: 'The order of the rows under each heading' }, h('label.order-word', { for: 'item-order' }, 'Sort'),
+    h('span.select.select-bar', {}, h('select', { id: 'item-order', 'aria-label': 'Sort by', title: 'Sort by', onchange: choose }, options), icon('chevrons-up-down', 14)));
+}
+/** A row's time while the rows go by it: how long ago (itemrow.ts lastUpdated), the day and time in its tooltip; empty with none. */
+function whenCell(skill: ItemRow) {
+  const at = lastUpdated(skill, itemOf(skill));
+  if (at === undefined) return h('div.ov-when', { role: 'cell' });
+  return h('div.ov-when', { role: 'cell', title: `Last updated ${dayAndTime(new Date(at).toISOString())}` }, sinceThen(at));
 }
 
 /** Rows under one heading: On, Found, Off, or (on a harness's page) the ones only other tools have. */
@@ -1346,7 +1369,7 @@ function section(role: 'on' | 'found' | 'off' | 'away', list: ItemRow[]) {
   return h('div', { role: 'rowgroup' },
     h(`div.ov-section${role === 'off' || role === 'away' ? '.ov-section-away' : ''}`, { role: 'row', 'data-section': role },
       h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(list.length)), note ? sectionNote(note) : null)),
-    [...list].sort(byKey).flatMap(row));
+    inOrder(list, chosenOrder(), itemOf).flatMap(row));
 }
 
 /**
@@ -1597,10 +1620,10 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
   // No skill at all (the last one just deleted): the table, which says so.
   if (!all.length) return itemsTable('skills');
   const needle = view.listFind.trim().toLowerCase();
-  // The table's order and headings: on, then found, then off.
+  const matches = all.filter(skill => !needle || skill.key.includes(needle) || (skill.name ?? '').toLowerCase().includes(needle) || skill.description.toLowerCase().includes(needle));
+  // The table's headings, on, then found, then off, and its order under each (inOrder's, which the stable sort keeps).
   const place = new Map(all.map(skill => [skill.key, standingOf(skill)]));
-  const shown = all.filter(skill => !needle || skill.key.includes(needle) || (skill.name ?? '').toLowerCase().includes(needle) || skill.description.toLowerCase().includes(needle))
-    .sort((first, second) => place.get(first.key)! - place.get(second.key)! || byKey(first, second));
+  const shown = inOrder(matches, chosenOrder(), itemOf).sort((first, second) => place.get(first.key)! - place.get(second.key)!);
   const chosen = all.find(skill => skill.key === state.item);
   // The detail always shows a skill: the chosen one, else the first listed. In narrow content it sits below the list.
   const shownDetail = chosen ?? shown[0] ?? all[0];

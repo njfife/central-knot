@@ -38,10 +38,10 @@ Which tools a home has, where each keeps its files, and which of them Central Kn
 
 ## The item pages: Overview, Skills, MCP servers, Agents, Harnesses
 One row per item with one On/Off switch, applied in every managed tool; a click's result comes with one Undo where History offers one (not for Take over, nor for a take-in from Claude Code's MCP settings: `historyactions.ts`'s header).
-- `pages.ts` Overview, and the Skills, MCP servers and Agents pages around their tables · `matrix.ts` the tables: rows, details, bands, the copy question, library rows (`librarySwitch`)
-- `harnesspage.ts` Harnesses: a card per tool (its Manage switch is managecard.ts, under The tools in a home), and a page per managed tool, the same tables with it first · `itemrow.ts` every kind's rows as the pages read them (`kindSource`)
+- `pages.ts` Overview, and the Skills, MCP servers and Agents pages around their tables · `matrix.ts` the tables: rows, details, bands, the copy question, library rows (`librarySwitch`), the choice of order (`orderChoice`)
+- `harnesspage.ts` Harnesses: a card per tool (its Manage switch is managecard.ts, under The tools in a home), and a page per managed tool, the same tables with it first · `itemrow.ts` every kind's rows as the pages read them (`kindSource`), and their order under a heading, by name or last updated (`inOrder`)
 - `clickplan.ts` which of a pass's results are a click's own (`clickResults`) · `copywords.ts` the copy question's words
-- **Start:** `matrix.ts itemsTable`; a click leaves through `app.ts applyClick`. **Examples:** `tests/clickplan.test.ts`, `tests/copywords.test.ts`; on screen, the flows in `scripts/e2e.mjs`.
+- **Start:** `matrix.ts itemsTable`; a click leaves through `app.ts applyClick`. **Examples:** `tests/clickplan.test.ts`, `tests/copywords.test.ts`, `tests/itemrow.test.ts` (the order); on screen, the flows in `scripts/e2e.mjs`.
 
 ## History
 What Central Knot did, on its own or on a click, newest first, with Undo or Restore while the kept content allows it.
