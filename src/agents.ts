@@ -92,8 +92,8 @@ function agentHeld(disk: AgentDisk, managed: HarnessId[], item: Wanted, tool: Ha
   if (given) return throughPlugin(tool, given, 'agent');
   // A harness that held the agent under this name (its own part is kept: LibraryItem own) can be given it back: the name was
   // that harness's own, so an agent only it can hold goes Off and On again there. Every other harness still can't store it.
-  // Only a name that is one file's name: Pull records an own part for Claude Code from the repo's file, under whatever name its
-  // front matter gives, and a name with a path in it is written nowhere.
+  // Only a name that is one file's name: an own part can be on record for a tool that never held the file (Pull records one for
+  // Claude Code from the repo's file), and a name with a path in it is written nowhere.
   const why = item.own?.[tool] === undefined || !oneFileName(item.name) ? nameProblem(item.name) : undefined;
   // Where to rename it: a tool that has it.
   const holder = managed.find(other => disk.byKey.get(item.key)?.[other]);

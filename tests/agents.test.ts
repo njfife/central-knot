@@ -924,7 +924,8 @@ test('A name that is not one file’s name (a path in it) is written nowhere, al
     const listing = async () => (await readdir(box.home, { recursive: true })).filter(path => !path.includes('.central-knot')).sort();
     const before = await listing();
     const text = '---\nname: ../../escaped\ndescription: d\n---\n\nP.\n';
-    // As Pull brings it (gitrepo.ts): the repo's file is Claude Code's own part, so the record has one for a tool that never held it.
+    // An own part on record for a tool that never held the file, as Pull's pass leaves one for Claude Code. (Pull itself names an
+    // agent by its repo file, which gitrepo.ts checks; this is the pass's own guard, asked directly.)
     await applyAgents(box.context, box.tools, [], { only: new Set(['helper']), pulled: new Map([['helper', { name: '../../escaped', agent: { name: '../../escaped', description: 'd', prompt: 'P.\n' }, claudeFile: text }]]) });
     await applyAgents(box.context, box.tools, [], { background: true });
     assert.deepEqual(await listing(), before, 'no file anywhere, inside the agents folders or outside them');
