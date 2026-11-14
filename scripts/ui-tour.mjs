@@ -5,7 +5,7 @@
 //   in well under a minute. It fails if a page doesn't open or throws. This is the run for every change.
 // - `--only a,b` runs the named feature sections: the ones a change touched.
 // - `--full` runs every feature section, hundreds of pictures over about ten minutes. For a new release only.
-// Features, in the order they run: shell, skills, sync, mcp, agents, plugins, profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
+// Features, in the order they run: shell, skills, sync, mcp, agents, agents-pi (an agent in Pi, as a skill), plugins, profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
 // plugin-versions, parts, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
 // Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses, manage (a
@@ -645,6 +645,30 @@ if (wanted('agents')) {
   for (const folder of Object.values(agentsFolder)) rmSync(join(practice, folder), { recursive: true, force: true });
   await a.click('#nav-agents'); await refresh();
   await atEverySize('agents-none', 'A Practice copy whose tools have no agents: the Agents page says so and what to do');
+}
+
+// ---------- An agent in Pi, as a skill ----------
+// Pi holds no agents of its own: an agent that is On is a skill there (src/presence.ts agentsKeptIn). Its opened row, Pi held by
+// a skill of the agent's name, and Pi's Agents and About tabs on Harnesses, at four sizes.
+if (wanted('agents-pi')) {
+  begin('agents-pi');
+  await fresh();
+  if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
+  // Pi joins the Practice copy, with a skill of its own named like the release-notes agent.
+  mkdirSync(join(practice, '.pi/agent/skills/release-notes'), { recursive: true });
+  writeFileSync(join(practice, '.pi/agent/skills/release-notes/SKILL.md'), '---\nname: release-notes\ndescription: Pi’s own skill for release notes.\n---\n\nWrite the release notes.\n');
+  await a.click('#nav-agents'); await refresh();
+  for (const key of ['code-reviewer', 'release-notes']) { await turnOnRow(key); await switchOn(key); }
+  await openRow('code-reviewer');
+  await atEverySize('agents-pi-open', 'Pi in the home, code-reviewer added: Pi has the current version (a skill, code-reviewer.md in its skills folder) with its own switch, and a note under the tools says once what Pi gets: no isolated context, tool restrictions or model selection, invoked as a skill; deleting the file in Pi turns the agent off everywhere', true, '#as-skill-code-reviewer');
+  await closeRow('code-reviewer');
+  await openRow('release-notes');
+  await atEverySize('agents-pi-held', 'release-notes added while Pi has a skill of its own named release-notes: nothing is written in Pi, and Pi’s line says why and how to use the agent there (delete or rename that skill)', true, '.details');
+  await closeRow('release-notes');
+  await a.click('#nav-harnesses'); await a.click('#harness-pi-cli'); await a.click('#harness-tab-agents'); await a.settle();
+  await atEverySize('agents-pi-harness', 'Harnesses › Pi › Agents: the same rows with Pi first, code-reviewer current there and release-notes held', true);
+  await a.click('#harness-tab-about'); await a.settle();
+  await atEverySize('agents-pi-about', 'Harnesses › Pi › About: under Files and folders, Agents says they are in its skills folder, each as a skill');
 }
 
 // ---------- Plugins ----------
@@ -1684,8 +1708,8 @@ if (wanted('missing')) {
   await wait(500);
   writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: piOnly } }));
   a = await launch();
-  await a.click('#nav-overview'); await shot(a, 'pi-only-overview', 'A folder whose only tool is Pi: the sidebar and the Overview leave out Agents and Plugins, which Pi can\'t hold, and the Overview names them once.');
-  await a.click('#nav-harnesses'); await shot(a, 'pi-only-harnesses', 'The same folder\'s Harnesses: Pi\'s card names only what Pi can hold (skills and MCP servers).');
+  await a.click('#nav-overview'); await shot(a, 'pi-only-overview', 'A folder whose only tool is Pi: the sidebar and the Overview leave out Plugins, which Pi can\'t hold, and the Overview names it once; Pi takes agents as skills.');
+  await a.click('#nav-harnesses'); await shot(a, 'pi-only-harnesses', 'The same folder\'s Harnesses: Pi\'s card, plugins the one kind it can\'t hold.');
   await a.size(2560, 1440); await a.click('#nav-overview'); await shot(a, 'pi-only-2560-overview', 'The Pi-only Overview at 2560×1440: two kind cards in two columns.'); await a.size(1280, 800);
   // A folder with no tools at all: every page stays, each saying so.
   const empty = join(scratch, 'no-tools');
@@ -2477,14 +2501,18 @@ if (wanted('sources')) {
   deslop({ 'SKILL.md': skillMd('deslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice and their dialect.') }, 'Keep the dialect');
   await a.click('#nav-sources');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
-  await atEverySize('waiting', 'deslop was edited in Claude Code, then changed at the source; clicked Check now: the band says deslop changed at the source and yours stays current, since it was changed here or a tool’s copy can’t be read just now, and that on its row Merge puts the source’s changes into yours if they don’t clash, and Replace takes the source’s; deslop’s line on the source’s row, under a warning mark, says yours stays current until you merge or replace it, for the same reasons, what Merge and Replace do, and ends with Merge and Replace', true, '.source-row');
+  await atEverySize('waiting', 'deslop was edited in Claude Code, then changed at the source; clicked Check now: the band says deslop changed at the source and yours stays current, since it was changed here or a tool’s copy can’t be read just now, and that on its row Merge puts the source’s changes into yours if they don’t clash, Replace takes the source’s, and Keep mine keeps yours; deslop’s line on the source’s row, under a warning mark, says yours stays current until you merge, replace or keep it, for the same reasons, what Merge, Replace and Keep mine do, and ends with Merge, Replace and Keep mine', true, '.source-row');
   await a.size(860, 560); await show('.source-row'); await focusOn('.source-row button[id^="source-merge-"]'); await shot(a, 'waiting-merge-focus-860', 'Tabbed to Merge on deslop’s line at 860×560: its focus ring, with Replace beside it'); await a.run('document.activeElement?.blur()'); await a.size(1280, 800);
   await a.click('#nav-skills'); await openRow('deslop');
-  await atEverySize('waiting-skill', 'On Skills, deslop’s row says “update at its source” after its name, under a warning mark; opened, each tool has the current version (the edit made in Claude Code), and the line at the end says the source has a newer version, yours stays current since it was changed here or a tool’s copy of it can’t be read just now, and on Sources Merge puts its changes into yours if they don’t clash, and Replace takes it as it is, either keeping yours as a version', true, '.ov-row[data-key="deslop"]', 'start');
+  await atEverySize('waiting-skill', 'On Skills, deslop’s row says “update at its source” after its name, under a warning mark; opened, each tool has the current version (the edit made in Claude Code), and the line at the end says the source has a newer version, yours stays current since it was changed here or a tool’s copy of it can’t be read just now, and on Sources Merge puts its changes into yours if they don’t clash, and Replace takes it as it is, either keeping yours as a version, and Keep mine keeps yours current and the source’s as a version, so it no longer waits', true, '.ov-row[data-key="deslop"]', 'start');
   await a.click('#nav-sources');
   // Both changed the same line of SKILL.md: Merge names it and changes nothing.
   await a.click('.source-row button[id^="source-merge-"]'); await busyDone(); await a.settle();
-  await atEverySize('merge-clash', 'Clicked Merge on deslop’s line: the edit in Claude Code and the source’s change are to the same line, so the band, under a warning mark, says Merge left deslop as it was, since SKILL.md changed both here and at the source in ways that can’t be merged, and that Replace takes the source’s version and keeps yours as a version, otherwise yours stays current and the update keeps waiting; no Undo, since nothing changed; deslop’s line still waits, with Merge and Replace', true, '.source-row');
+  await atEverySize('merge-clash', 'Clicked Merge on deslop’s line: the edit in Claude Code and the source’s change are to the same line, so the band, under a warning mark, says Merge left deslop as it was, since SKILL.md changed both here and at the source in ways that can’t be merged, and that Replace takes the source’s version and keeps yours as a version, or the source’s change can be made in yours by hand and then Keep mine, and until then yours stays current and the update keeps waiting; no Undo, since nothing changed; deslop’s line still waits, with Merge, Replace and Keep mine', true, '.source-row');
+  await a.click('.source-row button[id^="source-keep-"]'); await busyDone(); await a.settle();
+  await atEverySize('kept', 'Clicked Keep mine on deslop’s line: the band says deslop stays as you have it, and the source’s version no longer waits: it is kept as a version, and the source’s next change is compared with it, with Undo keep mine and that each change can be seen or undone in History; deslop’s line says In Central Knot, On, with no Merge, Replace or Keep mine', false, '.source-row');
+  await a.click('#outcome-undo'); await busyDone(); await a.settle();
+  await atEverySize('kept-undone', 'Clicked Undo keep mine: the status bar says deslop: undone: yours stays current; the source’s version is no longer marked as declined or taken, and the source’s row says whether an update waits; deslop’s line waits again, with Merge, Replace and Keep mine', false, '.source-row');
   await a.click('.source-row button[id^="source-replace-"]'); await busyDone(); await a.settle();
   await atEverySize('replaced', 'Clicked Replace on deslop’s line: the band says deslop has the source’s version, now in all 3 tools, and the one it had is kept as a version, with Undo the replace, Open Skills, and that each change can be seen or undone in History; deslop’s line says In Central Knot, On, with no Replace', false, '.source-row');
   // A line added in Claude Code, and the source's description changed: lines apart, so Merge puts them together.
@@ -2497,23 +2525,26 @@ if (wanted('sources')) {
   await a.click('.source-row button[id^="source-merge-"]'); await busyDone(); await a.settle();
   await atEverySize('merged', 'A line was added to deslop in Claude Code, and the source reworded its description; clicked Check now, then Merge on deslop’s line: the band says deslop now has your changes and the source’s, merged, in all 3 tools, and the version it had is kept, with Undo the merge, Open Skills, and that each change can be seen or undone in History; deslop’s line says In Central Knot, On, with no Merge or Replace', true, '.source-row');
   await a.click('#nav-skills'); await openRow('deslop');
-  await atEverySize('merged-skill', 'On Skills, deslop’s opened row: each tool has the merged version; its newest versions say merged with the source’s version, and from the source; the line at the end says you changed it here, or a tool’s copy of it can’t be read just now, so the source’s next change will wait for you to Merge or Replace on Sources; no tag after its name, since nothing waits', false, '.ov-row[data-key="deslop"]', 'start');
+  await atEverySize('merged-skill', 'On Skills, deslop’s opened row: each tool has the merged version; its newest versions say merged with the source’s version, and from the source; the line at the end says you changed it here, or a tool’s copy of it can’t be read just now, so the source’s next change will wait for you to Merge, Replace or Keep mine on Sources; no tag after its name, since nothing waits', false, '.ov-row[data-key="deslop"]', 'start');
   await a.click('#nav-history');
   await shot(a, 'merged-history', 'History: Merged github.com/stephenturner/skill-deslop (main)’s version into yours; that became the current version, in all 3 tools; the version it had and the source’s are kept, with Undo (1280×800)');
   deslop({ 'SKILL.md': skillMd('unslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice.') }, 'Rename to unslop');
   await a.click('#nav-sources');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
-  await atEverySize('dropped', 'The skill was renamed unslop at the source; clicked Check now: the band leads, under a warning mark, with deslop no longer at the source, turned off and taken out of all 3 tools, Central Knot keeping it, with Turn deslop on; then unslop in Central Knot, Off; the row lists unslop', true, '.source-row');
+  await atEverySize('dropped', 'The skill was renamed unslop at the source; clicked Check now: the band leads, under a warning mark, with deslop no longer at the source, turned off and taken out of all 3 tools, Central Knot keeping it, with Turn deslop on; then unslop in Central Knot, Off; the row lists unslop, and deslop, not in its last read, under a warning mark: no longer at this source, Off, and no longer from it, with Turn on', true, '.source-row');
   deslop({ 'SKILL.md': '---\nname: [unslop\n---\nBroken.\n' }, 'Break the front matter');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
-  await atEverySize('unreadable', 'Its SKILL.md stopped parsing at the source; clicked Check now: the band, under a warning mark and with no Open Skills, says not all of the source could be read, so the source turned nothing off, and that its row says why; the row has one line for the skill, unslop, at the root of skill-deslop, saying its SKILL.md can’t be read and why, and that until it can this source turns nothing off', false, '.source-row');
+  await atEverySize('unreadable', 'Its SKILL.md stopped parsing at the source; clicked Check now: the band, under a warning mark and with no Open Skills, says not all of the source could be read, so the source turned nothing off, and that its row says why; the row has one line for the skill, unslop, at the root of skill-deslop, saying its SKILL.md can’t be read and why, and that until it can this source turns nothing off; deslop’s line, no longer at this source, with Turn on, stays as it was', false, '.source-row');
   deslop({ 'SKILL.md': skillMd('unslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice.') }, 'Mend the front matter');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
   await a.click('#nav-skills'); await openRow('deslop');
-  await atEverySize('dropped-skill', 'On Skills, deslop is Off, out of every tool, kept in Central Knot with its versions; its opened row no longer has the line saying it is from a source, and its versions still say where each came from', false, '.ov-row[data-key="deslop"]', 'start');
+  await atEverySize('dropped-skill', 'On Skills, deslop is Off, out of every tool, kept in Central Knot with its versions, and “removed at its source” after its name, under a warning mark; its opened row’s line at the end says the source no longer has it, that it is Off and no longer from that source, to turn it on to use it again, and that should the source have it again, it follows the source if unchanged here and stays as you have it if you changed it; its versions still say where each came from', false, '.ov-row[data-key="deslop"]', 'start');
   await a.click('#nav-history');
   await shot(a, 'dropped-history', 'History: github.com/stephenturner/skill-deslop (main) no longer has it, so it is off and removed from all 3 tools, and no longer from that source, with Turn on; and unslop brought in, Off, with Turn on (1280×800)');
   await a.click('#nav-sources');
+  await a.size(860, 560); await show('.source-row'); await focusOn('#source-turn-on-deslop'); await shot(a, 'removed-focus-860', 'Tabbed to Turn on on deslop’s line at 860×560: its focus ring'); await a.run('document.activeElement?.blur()'); await a.size(1280, 800);
+  await a.click('#source-turn-on-deslop'); await busyDone(); await a.settle();
+  await atEverySize('turned-on', 'Clicked Turn on on deslop’s line: the band says deslop is on in all 3 tools, with Undo; deslop’s line is gone from the source’s row', false, '.source-row');
   await lookAt('https://github.com/team/plugin');
   await atEverySize('plugin', 'Looked at a link to a plugin: where it read, and that it holds a plugin, which a later version brings; nothing here is read, so there is no Add, only Cancel', false, '#source-preview');
   await lookAt('https://github.com/nobody/missing');

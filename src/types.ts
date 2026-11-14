@@ -188,8 +188,6 @@ export interface DesktopApi {
   instructions(readId?: number): Promise<InstructionFile[] | null>;
   /** One version of an agent as Central Knot's library holds it: its name, description and prompt; null when it is no longer kept. */
   agentVersion(key: string, hash: string): Promise<{ name: string; description: string; prompt: string } | null>;
-  /** Convert to skill (AGT-02): an agent as a Pi skill. `resume`: as a click's (app.ts clickResumes). */
-  convertAgent(key: string, resume: boolean, home: string): Promise<{ stopped?: string; skill?: string; origin?: HarnessId }>;
   /** A skill edit's SKILL.md before and after, for "See change". */
   eventChange(eventId: string): Promise<{ before: string; after: string } | undefined>;
   /** Shows a file in the system file manager (Finder, Explorer); nothing is opened or changed. */
@@ -251,6 +249,8 @@ export interface DesktopApi {
   replaceFromSource(id: string, key: string, home: string): Promise<SourceResult>;
   /** Merges the version that waits at a source, from its last read, into an item's current version (sources.ts mergeFromSource). */
   mergeFromSource(id: string, key: string, home: string): Promise<SourceResult>;
+  /** Keeps an item's current version over the one that waits at a source, which no longer waits (sources.ts keepFromSource). */
+  keepFromSource(id: string, key: string, home: string): Promise<SourceResult>;
   /** Forgets a source: its items stay as they are, On or Off, with their versions (sources.ts removeSource). */
   removeSource(id: string, home: string): Promise<SourceResult>;
   /** Adds or changes a profile's name and items (Central Knot's own file; no tool is written). */
@@ -488,20 +488,22 @@ export interface HistoryEvent {
    * home's standing rule, Synchronize everything, with no click. `pulled`: Pull did it ('on' for an item new here, 'edit',
    * 'deleted'). `source`: a source's read did it (`link`): 'off' for an item it brought in, Off; 'edit' for its content made
    * current (by itself, or by Replace: `seen`). `source-merged`: Merge made the source's version merged into the current one
-   * current ('edit'; `link`, `seen`). `source-dropped`: the source no longer
+   * current ('edit'; `link`, `seen`). `source-kept`: Keep mine, or a Merge whose result was exactly the current version, kept
+   * the source's version beside it and moved only `seen` on ('edit', `previous` = `version`; `link`, `seen`). `source-dropped`: the source no longer
    * has it, so it was turned Off and is no longer linked ('off'). `deleted-by-hand`: its copy was deleted by hand ('off'; `winner`: where). `tool-back`: a tool managed again held a
    * copy the item didn't have ('kept-edit'; `losers`: that copy), which gave way to the current version (library.ts managedAgain).
    * `own-copy`: a harness's own copy, which Central Knot had never put there and no click took over, gave way to the current
    * version ('kept-edit'; `losers`). `in-line`: a pass no click asked brought harnesses into line with the item: copies written
    * over ('on'; `losers`, each with what it held), or removed ('off', or 'deleted' for a deleted item) (librarypass.ts logItem).
    */
-  cause?: 'switch' | 'found' | 'sync-everything' | 'pulled' | 'source' | 'source-merged' | 'source-dropped' | 'deleted-by-hand' | 'tool-back' | 'own-copy' | 'in-line';
-  /** A source's entry (`cause` 'source', 'source-merged' or 'source-dropped'): its link as the person gave it, kept here since the source may be removed later. */
+  cause?: 'switch' | 'found' | 'sync-everything' | 'pulled' | 'source' | 'source-merged' | 'source-kept' | 'source-dropped' | 'deleted-by-hand' | 'tool-back' | 'own-copy' | 'in-line';
+  /** A source's entry (`cause` 'source', 'source-merged', 'source-kept' or 'source-dropped'): its link as the person gave it, kept here since the source may be removed later. */
   link?: string;
   /**
-   * A Replace's or a Merge's 'edit' (`cause` 'source' or 'source-merged'): the source's content the item had taken before it (library.ts LibraryItem seen),
-   * which its Undo puts back with the version before (Change seen), so where it had been changed here the source's version
-   * waits again. On the 'current' entry that Undo makes: the one it replaced, which the Undo of that Undo puts back.
+   * A Replace's, a Merge's or Keep mine's 'edit' (`cause` 'source', 'source-merged' or 'source-kept'): the source's content the
+   * item had taken before it (library.ts LibraryItem seen), which its Undo puts back (Change seen), with the version before it
+   * but for Keep mine's, which moves only `seen`; after a Replace's or a Merge's, where it had been changed here, the source's version waits again. On the 'current' entry that Undo
+   * makes: the one it replaced, which the Undo of that Undo puts back; an Undo's entry that moved only `seen` (`previous` = `version`) offers none.
    */
   seen?: string;
   /**
@@ -849,15 +851,13 @@ export interface LibraryFacts {
    * `waits`); a server deleted from Central Knot whose entry there is still to go is one too (its row is a found one).
    */
   waits?: HarnessId[];
-  /** Skills: made by Convert to skill from an agent: which, from which tool's, and what an agent had that a skill doesn't. */
-  converted?: { agent: string; origin: HarnessId; losses: string[] };
   /**
-   * In the library and linked to a source the home records (library.ts LibraryItem source): that source's link, as given, and
-   * whether its last read has a version that waits because the item was changed here (`waits`: library.ts A SOURCE `wait`).
-   * `nextWaits`: nothing waits now, but the item is changed here (library.ts changedHere), so the source's next change would
-   * wait; never set together with `waits`.
+   * In the library, from a source the home records: that source's link, as given. Linked to it (library.ts LibraryItem source):
+   * whether its last read has a version that waits because the item was changed here (`waits`: library.ts A SOURCE `wait`), or
+   * else, the item changed here, whether the source's next change would wait (`nextWaits`: library.ts changedHere). Or no longer
+   * linked, since that source removed it (`removed`: library.ts removedBy). At most one of the three is set.
    */
-  fromSource?: { link: string; waits?: true; nextWaits?: true };
+  fromSource?: { link: string; waits?: true; nextWaits?: true; removed?: true };
 }
 
 /**

@@ -551,6 +551,31 @@ async function copyQuestionFits(a, key, words) {
 }
 
 /**
+ * Pi holds no agents of its own: with a Pi folder, an agent that is On lands in Pi as a skill, `.pi/agent/skills/<name>.md`;
+ * its row has a Pi mark and line, the opened row says once what Pi gets, and Pi's About names where its agents are. The Pi
+ * folder is the check's own: it is taken out again.
+ */
+async function agentInPi(a, practice) {
+  mkdirSync(join(practice, '.pi/agent'), { recursive: true });
+  await a.click('#header-refresh');
+  const piFile = join(practice, '.pi/agent/skills/code-reviewer.md');
+  for (let tries = 0; tries < 30 && !existsSync(piFile); tries++) await wait(100);
+  check('an agent that is On lands in Pi as a skill, .pi/agent/skills/<name>.md, its name and description in front matter', existsSync(piFile) && /^---\nname: code-reviewer\ndescription: Reviews a change/.test(readFileSync(piFile, 'utf8')), existsSync(piFile) ? readFileSync(piFile, 'utf8').slice(0, 200) : 'no file');
+  for (let tries = 0; tries < 30 && await cellState(a, 'code-reviewer', 'pi-cli') !== 'current'; tries++) await wait(100);
+  await a.click('#open-code-reviewer');
+  same('its row has a Pi mark and a Pi line with its switch', [await cellState(a, 'code-reviewer', 'pi-cli'), await a.exists('#enable-code-reviewer-pi-cli')], ['current', true]);
+  const note = (await a.text('#as-skill-code-reviewer') ?? '').trim();
+  check('the opened row says once what Pi gets, and that deleting its file there turns the agent off everywhere',
+    /^Pi holds no agents of its own, so there an agent is a skill[\s\S]*no isolated context of its own, tool restrictions and model selection[\s\S]*Deleting that file in Pi turns the agent off in every tool/.test(note), note);
+  await a.click('#open-code-reviewer');
+  await a.click('#nav-harnesses'); await a.click('#harness-pi-cli'); await a.click('#harness-tab-about');
+  check('Pi’s About says its agents are in its skills folder, each as a skill', /Agents\s*In its skills folder, each as a skill/.test(await a.text('#harness-body') ?? ''), await a.text('#harness-body'));
+  await a.click('#nav-agents');
+  rmSync(join(practice, '.pi'), { recursive: true, force: true });
+  await a.click('#header-refresh');
+}
+
+/**
  * An agent's copy question, three copies of one long line: Claude Code's stops where Copilot CLI's and Codex's each add a
  * sentence of their own, and each was edited on a day of its own.
  *  - Its rows' words: every row quotes the same stretch of the line (so the copy that stops sooner is seen to), a copy's own
@@ -1173,6 +1198,7 @@ async function practiceFlow() {
   await a.click('#outcome-undo');
   same('Undo turns it on again: every harness’s file is back byte for byte', reviewerNow(), taken);
   await agentCopiesUnderTheList(a, practice);
+  await agentInPi(a, practice);
   // The opened row: each harness's line with what stays its own, and the agent's versions.
   await a.click('#open-code-reviewer');
   check('the opened row says which settings stay Claude Code’s own', /Its own settings stay in its file: tools and model/.test(await a.text('.details') ?? ''), await a.text('.details'));
@@ -2337,8 +2363,8 @@ async function sourcesFlow() {
   commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('Remove slop.', 'Remove slop, firmly.') });
   await a.click(`#source-check-${id}`);
   await until(async () => await a.exists(`#source-replace-${id}-deslop`));
-  check('Check now leaves the edit current in every tool, says the source’s version waits, and its line offers Merge and Replace', /deslop changed at the source; yours stays current, since it was changed here or a tool’s copy can’t be read just now: on its row, Merge puts the source’s changes into yours if they don’t clash, and Replace takes the source’s\./.test(await a.text('.band-done .band-text') ?? '')
-    && /Changed at the source\. Yours stays current until you merge or replace it, since it was changed here or a tool’s copy can’t be read just now\./.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '') && await a.exists(`#source-merge-${id}-deslop`)
+  check('Check now leaves the edit current in every tool, says the source’s version waits, and its line offers Merge, Replace and Keep mine', /deslop changed at the source; yours stays current, since it was changed here or a tool’s copy can’t be read just now: on its row, Merge puts the source’s changes into yours if they don’t clash, Replace takes the source’s, and Keep mine keeps yours\./.test(await a.text('.band-done .band-text') ?? '')
+    && /Changed at the source\. Yours stays current until you merge, replace or keep it, since it was changed here or a tool’s copy can’t be read just now\./.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '') && await a.exists(`#source-merge-${id}-deslop`) && await a.exists(`#source-keep-${id}-deslop`)
     && Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('my way')), [await a.text('.band-done'), await a.text('.source-row')]);
   await a.shot('sources-waiting');
   await a.click('#nav-skills');
@@ -2368,7 +2394,7 @@ async function sourcesFlow() {
   await a.shot('sources-merged');
   await a.click('#nav-skills');
   if (!(await a.exists('.details'))) await a.click('#open-deslop');
-  check('its opened row on Skills says it is still changed here, so the source’s next change will wait for Merge or Replace', /You changed it here, or a tool’s copy of it can’t be read just now, so the source’s next change will wait for you to Merge or Replace on Sources\./.test(await a.text('.details') ?? ''), await a.text('.details'));
+  check('its opened row on Skills says it is still changed here, so the source’s next change will wait for Merge, Replace or Keep mine', /You changed it here, or a tool’s copy of it can’t be read just now, so the source’s next change will wait for you to Merge, Replace or Keep mine on Sources\./.test(await a.text('.details') ?? ''), await a.text('.details'));
   // A clash: the same line changed in Claude Code and at the source. Merge names the file and changes nothing.
   await a.click('#nav-sources');
   writeFileSync(inClaude, readNow(inClaude).replace('Remove slop, firmly.', 'Remove slop, my way.'));
@@ -2378,10 +2404,29 @@ async function sourcesFlow() {
   await until(async () => await a.exists(`#source-merge-${id}-deslop`));
   const clashBefore = { versions: record()?.versions.length, seen: record()?.seen, tools: Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))) };
   await a.click(`#source-merge-${id}-deslop`);
-  check('a Merge that clashes names SKILL.md, as a warning, and changes nothing: every tool as it was, no version, the source’s version still waits', await until(async () => /Merge left deslop as it was: SKILL\.md changed both here and at the source, in ways that can’t be merged\. Replace takes the source’s version and keeps yours as a version; otherwise yours stays current and the update keeps waiting\./.test(await a.text('.band-done .band-text') ?? ''))
+  check('a Merge that clashes names SKILL.md, as a warning, says Keep mine is the way past a change made by hand, and changes nothing: every tool as it was, no version, the source’s version still waits', await until(async () => /Merge left deslop as it was: SKILL\.md changed both here and at the source, in ways that can’t be merged\. Replace takes the source’s version and keeps yours as a version; or make the source’s change in yours by hand, then Keep mine\. Until then, yours stays current and the update keeps waiting\./.test(await a.text('.band-done .band-text') ?? ''))
     && await a.exists('.band-done svg.tone-warning') && !(await a.exists('#outcome-undo')) && await a.exists(`#source-merge-${id}-deslop`)
     && JSON.stringify({ versions: record()?.versions.length, seen: record()?.seen, tools: Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))) }) === JSON.stringify(clashBefore), [await a.text('.band-done'), clashBefore]);
   await a.shot('sources-merge-clash');
+  // Keep mine: yours stays in every tool, and the source's version no longer waits; its Undo makes it wait again.
+  await a.click(`#source-keep-${id}-deslop`);
+  check('Keep mine leaves every tool as it was, keeps the source’s version as a version, says so with Undo keep mine, and the line no longer waits', await until(async () => /deslop stays as you have it, and the source’s version no longer waits: it is kept as a version, and the source’s next change is compared with it\./.test(await a.text('.band-done .band-text') ?? ''))
+    && (await a.text('#outcome-undo')) === 'Undo keep mine' && !(await a.exists(`#source-keep-${id}-deslop`)) && record()?.versions.length === clashBefore.versions + 1 && record()?.seen !== clashBefore.seen
+    && JSON.stringify(Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md')))) === JSON.stringify(clashBefore.tools), [await a.text('.band-done'), await a.text('.source-row')]);
+  await a.shot('sources-kept');
+  await a.click('#outcome-undo');
+  check('its Undo makes the source’s version wait again, with every tool as it was', await until(async () => await a.exists(`#source-keep-${id}-deslop`)) && record()?.seen === clashBefore.seen
+    && JSON.stringify(Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md')))) === JSON.stringify(clashBefore.tools), [await a.text('.band-done'), await a.text('.source-row')]);
+  // The source's change made by hand in Claude Code, with a change of its own lines apart: Merge's result is exactly yours,
+  // Keep mine's outcome, with its Undo and History's note.
+  writeFileSync(inClaude, described.replace('Remove slop, firmly.', 'Remove slop, kindly.').replace('Removes slop from any prose.', 'Removes slop from any prose, my way.'));
+  check('the source’s change made by hand is taken in and reaches every tool', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('any prose, my way.'))), Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))));
+  // The page is told of that edit by a refresh of its own, whose notice would take the band's place: it comes first.
+  await until(async () => /Sync changed deslop/.test(await a.text('#announcement') ?? ''));
+  await until(() => a.run(`document.body.dataset.busy !== 'true' && document.querySelector('#source-merge-${id}-deslop')?.disabled === false`));
+  await a.click(`#source-merge-${id}-deslop`);
+  check('a Merge that finds the source’s change in yours already says so, offers Undo the merge and History’s note, and the line no longer waits', await until(async () => /deslop already had the source’s changes, so Merge changed nothing in it; the source’s version no longer waits\./.test(await a.text('.band-done .band-text') ?? ''))
+    && (await a.text('#outcome-undo')) === 'Undo the merge' && await a.exists('#outcome-note-history') && !(await a.exists(`#source-merge-${id}-deslop`)), [await a.text('.band-done'), await a.text('.source-row .source-name[data-key="deslop"]')]);
 
   commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('name: deslop', 'name: unslop') });
   await a.click(`#source-check-${id}`);
@@ -2390,6 +2435,20 @@ async function sourcesFlow() {
     && await until(() => Object.values(roots).every(root => !existsSync(join(home, root, 'deslop')))) && record()?.on === false, await a.text('.band-done'));
   await a.click('#nav-history');
   check('History says the source dropped it', await until(async () => /github\.com\/stephenturner\/skill-deslop \(main\) no longer has it, so it is off and removed from all 3 tools/.test(await a.text('.page') ?? '')), await a.text('.page'));
+  // The notice that stays: deslop's line on the source's row, and its row on Skills, until it is turned on.
+  await a.click('#nav-sources');
+  check('the source’s row keeps a line for deslop, removed there, with Turn on', await until(async () => /No longer at this source: it is Off, and no longer from it\./.test(await a.text('.source-row .source-name[data-key="deslop"][data-state="removed"]') ?? '')) && await a.exists('#source-turn-on-deslop'), await a.text('.source-row'));
+  await a.shot('sources-removed');
+  await a.click('#nav-skills');
+  if (!(await a.exists('.details'))) await a.click('#open-deslop');
+  check('its row on Skills says “removed at its source”, and its opened row says it is Off and no longer from that source, and what happens if the source has it again', /removed at its source/.test(await a.text('.ov-row[data-key="deslop"]') ?? '')
+    && /github\.com\/stephenturner\/skill-deslop \(main\) no longer has it: it is Off, and no longer from that source\. Turn it on to use it again\. Should github\.com\/stephenturner\/skill-deslop \(main\) have it again, it follows the source if unchanged here, and stays as you have it if you changed it\./.test(await a.text('.details') ?? ''), [await a.text('.ov-row[data-key="deslop"]'), await a.text('.details')]);
+  await a.shot('skills-removed');
+  await a.click('#nav-sources');
+  await a.click('#source-turn-on-deslop');
+  check('Turn on puts deslop in every tool, says so with Undo, and its line goes', await until(() => Object.values(roots).every(root => existsSync(join(home, root, 'deslop/SKILL.md'))))
+    && await until(async () => /deslop is on in all 3 tools\./.test(await a.text('.band-done .band-text') ?? '')) && await a.exists('#outcome-undo') && !(await a.exists('#source-turn-on-deslop')) && record()?.on === true, [await a.text('.band-done'), await a.text('.source-row')]);
+  await a.shot('sources-turned-on');
 
   await a.click('#nav-sources');
   await type('https://github.com/team/plugin');
@@ -2402,7 +2461,7 @@ async function sourcesFlow() {
 
   await a.click(`#source-remove-${id}`);
   await a.click(`#source-remove-confirm-${id}`);
-  check('Remove takes the row away, and deslop stays in Central Knot as it was', await until(async () => !(await a.exists('.source-row'))) && record()?.on === false && !!record()?.versions.length, await a.text('.page'));
+  check('Remove takes the row away, and deslop stays in Central Knot as it was', await until(async () => !(await a.exists('.source-row'))) && record()?.on === true && !!record()?.versions.length, await a.text('.page'));
   same('no page errors on Sources', a.pageErrors, []);
   await a.quit();
 }
@@ -2619,8 +2678,8 @@ async function releasedStartupFlow() {
 
 /**
  * A home with no tools, then with Pi alone, then with Claude Code too. With no tools every page stays, each saying so; a
- * kind no tool here can hold (agents, plugins with Pi alone) is left out of the sidebar and the Overview, named once; a
- * tool that holds it brings it back.
+ * kind no tool here can hold (plugins with Pi alone, which takes agents as skills) is left out of the sidebar and the
+ * Overview, named once; a tool that holds it brings it back.
  */
 async function fewToolsFlow() {
   const home = join(scratch, 'home-few');
@@ -2658,9 +2717,9 @@ async function fewToolsFlow() {
   writeFileSync(join(home, '.pi/agent/skills/notes/SKILL.md'), text('notes'));
   cli('.pi/agent/bin/pi', 'pi 1.5.0');
   await a.click('#header-refresh');
-  // Codex, whose folder is still here, holds agents and plugins: were it counted, both pages would be back.
-  same('with Pi alone, Agents and Plugins are left out', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'instructions', 'profiles', 'history', 'sources', 'repo', 'settings']);
-  check('and the Overview names them once', (await a.text('#overview-absent') ?? '').includes('No tool here holds agents or plugins') && !(await a.exists('#overview-agents')), await a.text('#overview-absent'));
+  // Codex, whose folder is still here, holds plugins: were it counted, that page would be back.
+  same('with Pi alone, Plugins is left out, and Agents stays: Pi takes agents as skills', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'profiles', 'history', 'sources', 'repo', 'settings']);
+  check('and the Overview names it once', (await a.text('#overview-absent') ?? '').includes('No tool here holds plugins') && await a.exists('#overview-agents'), await a.text('#overview-absent'));
   await a.click('#nav-skills');
   check('the tool with only a folder has no mark', await a.exists('.tool-mark[data-tool="pi-cli"]') && !(await a.exists('[data-tool="codex-cli"], #tool-codex-cli')));
   await a.click('#nav-harnesses');
@@ -2673,7 +2732,7 @@ async function fewToolsFlow() {
   mkdirSync(join(home, '.claude'), { recursive: true });
   cli('.local/bin/claude', '2.1.309 (Claude Code)');
   await a.click('#header-refresh');
-  same('a tool that holds agents and plugins brings them back', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'sources', 'repo', 'settings']);
+  same('a tool that holds plugins brings them back', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'sources', 'repo', 'settings']);
   await a.click('#nav-harnesses');
   check('Claude Code’s CLI alone says nothing of Cowork', !(await a.text('#harness-claude-cli')).includes('Cowork'), await a.text('#harness-claude-cli'));
   // On Agents, its only tool goes away: the page it was on no longer exists here, so the Overview opens.

@@ -1,7 +1,7 @@
 // The gate for library writes (src/share.ts libraryGate), on real folders in a temp home. First its own table: each state a
 // home can be in, against each way of asking (only asking, `start`, `resume`, `ownFile`): what it answers, and what it made or
 // remembered. Then the clicks that write before their own pass runs (a skill's Take over, a tool's own switch cleared and its
-// Undo, Convert to a skill), in a home waiting for Resume (refused, unless the click is a Resume, which the gate remembers
+// Undo), in a home waiting for Resume (refused, unless the click is a Resume, which the gate remembers
 // before anything is written) and in another build's home (refused, and nothing written); and clicks refused for a reason of
 // their own, which make no record and resume no home. The pass's own gate: tests/agents.test.ts; a tool's Manage switch:
 // tests/managetool.test.ts; Synchronize everything: tests/firstsetup.test.ts; a profile switch: tests/profiles.test.ts.
@@ -9,15 +9,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { convertAgentToSkill } from '../src/agentskill.ts';
-import { discover } from '../src/discovery.ts';
+
 import { saveProfile, switchProfile } from '../src/profiles.ts';
 import { libraryGate, newRecord, remember, saveRecord, syncGate, type Entering, type ShareContext } from '../src/share.ts';
 import { applySkills, clearSwitch, restoreSkill, takeOver } from '../src/skills.ts';
 import { chooseTools } from '../src/toolchoice.ts';
-import { readConverted } from '../src/skillstore.ts';
 import { isDisabled, readSwitchFile, setDisabled } from '../src/skillswitch.ts';
-import type { HarnessId } from '../src/types.ts';
+
 import { bytes, folderOf, historyOf, put, sandbox, skillText, tools, turnOff, turnOn, type Box } from './skillclicks.ts';
 
 /** This app forgets the home: its settings file goes and the record stays, intact (share.ts syncGate `needs-resume`). */
@@ -134,36 +132,6 @@ inBox('Clearing a tool’s own switch in another build’s home is refused: the 
   assert.deepEqual([await offInCodex(box, target), (await historyOf(box)).filter(event => event.kind === 'switched')], [true, []]);
 });
 
-// ---------- Convert to a skill ----------
-
-/** An agent "reviewer" in Claude Code, Pi installed beside it, and a sync record (a skill taken in). The context and its tools. */
-async function agentAndPi(box: Box) {
-  await put(box, 'claude-cli');
-  assert.notEqual(await turnOn(box), 'choose');
-  await mkdir(join(box.home, '.claude/agents'), { recursive: true });
-  await mkdir(join(box.home, '.pi/agent'), { recursive: true });
-  await writeFile(join(box.home, '.claude/agents/reviewer.md'), '---\nname: reviewer\ndescription: Reviews code\n---\n\nYou review code.\n');
-  const withPi: HarnessId[] = ['claude-cli', 'pi-cli'];
-  return { withPi, context: { ...box.context, read: () => Promise.all(withPi.map(harness => discover({ home: box.home, mode: 'custom', harness }))) } };
-}
-const piSkill = (box: Box) => bytes(join(box.home, '.pi/agent/skills/reviewer'));
-
-inBox('Convert to a skill in a home waiting for Resume is refused unless the click is a Resume: then Pi has the skill and the home is resumed', async box => {
-  const { withPi, context } = await agentAndPi(box);
-  await forget(box);
-  assert.match((await convertAgentToSkill(context, withPi, 'reviewer')).stopped ?? '', /no memory of it/);
-  assert.deepEqual([await piSkill(box), (await readConverted(box.home)).reviewer], [undefined, undefined], 'nothing written, nothing recorded');
-  assert.equal((await convertAgentToSkill(context, withPi, 'reviewer', true)).stopped, undefined);
-  assert.ok(await piSkill(box));
-  assert.equal((await syncGate(box.context)).state, 'ready');
-});
-
-inBox('Convert to a skill in another build’s home is refused: Pi gets nothing, and nothing is recorded', async box => {
-  const { withPi, context } = await agentAndPi(box);
-  assert.match((await convertAgentToSkill({ ...context, ...otherBuild(box), read: context.read }, withPi, 'reviewer', true)).stopped ?? '', /syncs this home/);
-  assert.deepEqual([await piSkill(box), (await readConverted(box.home)).reviewer], [undefined, undefined]);
-});
-
 inBox('The Undo of Clearing a tool’s own switch is refused in another build’s home and while the home waits for Resume; after a Resume it sets the switch again', async box => {
   const target = await switchedOff(box);
   assert.equal((await clearSwitch(box.context, box.tools, 'notes', 'codex-cli')).stopped, undefined);
@@ -186,7 +154,6 @@ test('A click refused for a reason of its own, or that changes nothing, makes no
   const clicks: [string, (box: Box) => Promise<{ stopped?: string }>, RegExp | undefined][] = [
     ['Clear the switch, with no switch set', box => clearSwitch(box.context, box.tools, 'notes', 'codex-cli', true), /doesn’t turn notes off any more\. Nothing was changed\./],
     ['Take over, with no copy to take', box => takeOver(box.context, box.tools, 'notes', 'codex-cli', true), /Nothing was changed|Turn it on first/],
-    ['Convert, of an agent that is gone', box => convertAgentToSkill(box.context, [...box.tools, 'pi-cli'], 'nobody', true), /That agent is not there any more\./],
     ['a Manage switch that is so already', box => chooseTools(box.context, 'codex-cli', true, true), undefined],
     ['a profile switch that changes nothing', async box => { const { id } = await saveProfile(box.context, { name: 'None' }); return switchProfile(box.context, box.tools, id!); }, undefined],
   ];

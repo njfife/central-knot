@@ -20,7 +20,7 @@
 import { originWords, theVersion, wantedIn, type LibraryItem, type Plan, type TakeInAnswer, type Version, type VersionChange } from './library.ts';
 import { clockTimesApart, dayAndTime } from './model.ts';
 import { linkLabel } from './sourcelink.ts';
-import type { Change, HarnessId, ItemNotice, TakenInNotice } from './types.ts';
+import type { Change, HarnessId, ItemNotice, LibraryFacts, TakenInNotice } from './types.ts';
 import { andList, kindNouns, sentence, toolName, toolsPhrase } from './words.ts';
 
 // ---------- What a kind supplies ----------
@@ -109,17 +109,25 @@ export interface LibraryRow {
 }
 
 /**
- * What an item's row says of the source it is linked to (types.ts LibraryFacts fromSource): while a version waits there (the
- * item changed here, or a tool's copy unreadable: library.ts changedHere), the tag after its name; and the opened row's line,
- * written around its link to Sources (`before`, the link, `after`), which also says when nothing waits yet but the next change
- * would (`nextWaits`: edited here, an older version made current, or a Merge's result).
+ * What an item's row says of the source it is from (types.ts LibraryFacts fromSource): while a version waits there (the item
+ * changed here, or a tool's copy unreadable: library.ts changedHere), or once the source removed it (`removed`: library.ts
+ * REMOVED AT ITS SOURCE), the tag after its name; and the opened row's line, written around its link to Sources (`before`, the
+ * link, `after`), which also says when nothing waits yet but the next change would (`nextWaits`: edited here, an older version
+ * made current, or a Merge's result).
  */
-export function fromSourceWords(from: { link: string; waits?: true; nextWaits?: true }): { tag?: { text: string; title: string }; before: string; after: string } {
+export function fromSourceWords(from: NonNullable<LibraryFacts['fromSource']>): { tag?: { text: string; title: string }; before: string; after: string } {
   const label = linkLabel(from.link);
-  if (from.nextWaits) return { before: `From ${label}, a source. You changed it here, or a tool’s copy of it can’t be read just now, so the source’s next change will wait for you to Merge or Replace on `, after: '.' };
+  if (from.removed) {
+    const off = `${label} no longer has it: it is Off, and no longer from that source. Turn it on to use it again`;
+    return { tag: { text: 'removed at its source', title: `${off}.` },
+      before: `${off}. Should ${label} have it again, it follows the source if unchanged here, and stays as you have it if you changed it. See `, after: '.' };
+  }
+  const changed = 'You changed it here, or a tool’s copy of it can’t be read just now';
+  if (from.nextWaits) return { before: `From ${label}, a source. ${changed}, so the source’s next change will wait for you to Merge, Replace or Keep mine on `, after: '.' };
   if (!from.waits) return { before: `From ${label}, a source. What changes there comes in once a day while Automatic sync is on, and at Check now on `, after: ', unless you change it here.' };
   const waits = 'Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now';
-  const choose = 'Merge puts its changes into yours if they don’t clash, and Replace takes it as it is; either keeps yours as a version.';
+  const choose = 'Merge puts its changes into yours if they don’t clash, and Replace takes it as it is; either keeps yours as a version.'
+    + ' Keep mine keeps yours current, and the source’s version as a version, so it no longer waits.';
   return { tag: { text: 'update at its source', title: `${label} has a newer version. ${waits}. On Sources, ${choose}` },
     before: `From ${label}, a source, which has a newer version. ${waits}. On `, after: `, ${choose}` };
 }
@@ -362,7 +370,6 @@ export function ruleSays(answer: TakeInAnswer): string {
   if ('wait' in answer) return 'Synchronize everything leaves it for you to choose: its copies differ.';
   return { deleted: 'It was deleted from Central Knot, so it will not be added by itself again. Add, or Restore in History, brings it back.',
     part: 'Synchronize everything leaves it: it is a plugin’s part, so only Add takes it in.',
-    converted: 'Synchronize everything leaves it: Convert to skill made it from an agent, so only Add puts it in your other tools.',
     'switched-off': 'Synchronize everything leaves it: every tool that has it has it switched off in its own settings, so only Add takes it in.',
     settling: '', 'no-copy': '', leaving: '', 'choice-changed': '' }[answer.leave];
 }

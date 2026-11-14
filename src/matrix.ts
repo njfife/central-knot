@@ -246,7 +246,7 @@ const ago = (iso: string) => { const said = sinceThen(Date.parse(iso)); return s
 
 /** A kind's row in the shape the table works with (itemrow.ts ItemRow). */
 const fromFacts = (facts: LibraryFacts): ItemRow => ({
-  key: facts.key, name: facts.name, description: facts.description, converted: facts.converted, fromSource: facts.fromSource, unseen: facts.unseen, plan: facts.plan, takeInAnswers: facts.takeInAnswers, versionChanges: facts.versionChanges, on: facts.on, except: facts.except, cannot: facts.cannot, plugin: facts.plugin, edited: facts.edited, waits: facts.waits,
+  key: facts.key, name: facts.name, description: facts.description, fromSource: facts.fromSource, unseen: facts.unseen, plan: facts.plan, takeInAnswers: facts.takeInAnswers, versionChanges: facts.versionChanges, on: facts.on, except: facts.except, cannot: facts.cannot, plugin: facts.plugin, edited: facts.edited, waits: facts.waits,
   blocks: facts.choiceBlocks, hashes: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   copies: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   paths: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.directory])),
@@ -652,15 +652,15 @@ function libraryTag(skill: ItemRow) {
   const tag = library()?.say.placeTag(skill, itemOf(skill), toolList(), leftOutTools());
   return tag ? h('span.row-tag', { title: tag.title }, tag.text) : null;
 }
-/** The tag after an item's name while a version waits at the source it is linked to (libraryrow.ts fromSourceWords). */
+/** The tag after an item's name while a version waits at the source it is linked to, or once its source removed it (libraryrow.ts fromSourceWords). */
 function sourceTag(skill: ItemRow) {
   const tag = skill.fromSource && fromSourceWords(skill.fromSource).tag;
   return tag ? h('span.row-tag.row-tag-source', { title: tag.title }, icon('link-2', 12, 'tone-warning'), tag.text) : null;
 }
-/** The opened row's line saying which source an item is from, and whether a version waits there, with its link to Sources. */
+/** The opened row's line saying which source an item is from, and whether a version waits there or it removed the item, with its link to Sources. */
 function fromSourceLine(key: string, from: NonNullable<ItemRow['fromSource']>) {
   const said = fromSourceWords(from);
-  return h('p.details-limits.details-note', {}, icon('link-2', 12, from.waits ? 'tone-warning' : 'tone-muted'), h('span', {}, said.before,
+  return h('p.details-limits.details-note', {}, icon('link-2', 12, from.waits || from.removed ? 'tone-warning' : 'tone-muted'), h('span', {}, said.before,
     h('button.inline-link', { type: 'button', id: `from-source-${key}`, title: from.link, onclick: () => showPage('sources') }, 'Sources'), said.after));
 }
 
@@ -1528,7 +1528,6 @@ function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
     inFiles || kind === 'mcp' ? null : wherePaths(skill),
     lib.own?.(skill) ?? null,
     skill.fromSource ? fromSourceLine(skill.key, skill.fromSource) : null,
-    skill.converted ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), `Converted from ${names[skill.converted.origin] ?? skill.converted.origin}’s agent “${skill.converted.agent}”, as a one-time copy; ${names[skill.converted.origin] ?? skill.converted.origin} keeps the agent, and edits here never change it. As a skill it has no ${andList(skill.converted.losses)}.`) : null,
     remove ? h('div.details-actions.details-danger', {}, remove) : null);
 }
 

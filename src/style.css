@@ -619,7 +619,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* The tool's Enabled switch sits in its name's line, before Show in folder. */
 .details-mcp .details-tool-head > .details-tool-actions { grid-column: 2; grid-row: 1; justify-self: end; margin-left: 0; }
 .details-mcp .details-tool-head > .details-tool-line:empty { display: none; }
-.convert-block { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 /* A skill's own actions, together under its heading. */
 .details-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 6px; }
 .details-actions > .text-action { padding-left: 0; padding-right: 0; }

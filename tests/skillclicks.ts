@@ -97,7 +97,8 @@ export const restore = (box: Box, eventId: string, version?: string, context = b
 export async function historyActions(box: Box, context = box.context, key = 'notes') {
   const { item, fact } = await seen(box, context, key);
   return (await historyOf(box, context, key)).flatMap(event => {
-    const main = libraryAction(event, item, { managed: box.tools, pending: fact?.plan ? pendingChanges(fact.plan) : [] }, undefined, fact?.loads);
+    const linked = fact?.fromSource && !fact.fromSource.removed ? { linked: true as const } : {};
+    const main = libraryAction(event, item, { managed: box.tools, pending: fact?.plan ? pendingChanges(fact.plan) : [], ...linked }, undefined, fact?.loads);
     const run = (version?: string) => () => restoreSkill(context, box.tools, event.id, version);
     return [...(main ? [{ event, label: main.label, run: run() }] : []), ...versionChoices(event, item).map(choice => ({ event, label: `Use ${choice.tool}’s`, run: run(choice.hash) }))];
   });

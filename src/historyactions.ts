@@ -42,6 +42,10 @@
 //                                            (`seen`) puts back the
 //                                            source's version the
 //                                            item had taken
+//   Keep mine (edit, `source-kept`), at the  Undo: only `seen`      the item is linked to a source the home records
+//     version it kept (previous = version)   goes back              (ItemNow linked), at that version; an entry for an
+//                                                                   Undo that moved only `seen` (current, previous =
+//                                                                   version) offers nothing, at any version
 //   conflict, chosen, kept-edit (an edit     Use <harness>’s        that copy's version is not the current one
 //     not taken in that was written over,
 //     a copy a tool managed again held, or
@@ -136,6 +140,10 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
     case 'current': {
       // The version as it was first kept says where the content came from; the entry that made it current again doesn't.
       const made = item?.versions.findLast(version => version.hash === event.version), when = made && item && versionClock(item, made);
+      // An Undo that moved only `seen` back (Keep mine's, or a Replace's or Merge's at the version already current: librarypass.ts makeCurrent).
+      if (event.previous !== undefined && event.previous === event.version) {
+        return { glyph: 'undo-2', text: 'Undone: yours stays current; the source’s version is no longer marked as declined or taken, and the source’s row says whether an update waits.' };
+      }
       if (undid) return { glyph: 'undo-2', text: `Undone: ${when ? `the version from ${when}` : 'the version before'} is current again${also(', in')}.` };
       return { glyph: 'undo-2', text: `${made ? `T${theVersion(made.from).slice(1)} (${when})` : 'An earlier version'} was made current${also(', in')}.` };
     }
@@ -164,6 +172,10 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       if (event.cause === 'source' && event.seen !== undefined) return { glyph: 'link-2', text: `Replaced with ${source}’s version; that became the current version${tools ? `, in ${tools}` : ''}. The version it replaced is kept.` };
       if (event.cause === 'source') return { glyph: 'link-2', text: `Updated from ${source}; that became the current version${tools ? `, in ${tools}` : ''}.` };
       if (event.cause === 'source-merged') return { glyph: 'link-2', text: `Merged ${source}’s version into yours; that became the current version${tools ? `, in ${tools}` : ''}. The version it had and the source’s are kept.` };
+      // Keep mine, or a Merge whose result was exactly yours: no tool was written.
+      if (event.cause === 'source-kept') {
+        return { glyph: 'link-2', text: `Yours stays current over ${source}’s version, which no longer waits: it is kept as a version, and the source’s next change is compared with it.` };
+      }
       return { glyph: 'pencil-line', text: `Edited in ${from}; that became the current version${tools ? `, in ${tools} too` : ''}.` };
     case 'switched': {
       // Clear the switch's Undo turns the tool's switch off again (`cause` 'switch'); any other that turned a switch off is
@@ -268,6 +280,14 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
     const own = `${andList(tools)} ${tools.length === 1 ? 'has its own copy' : 'have their own copies'} back, as before`;
     return { label: 'Undo', help: `${action.help}; ${own}`, change: { ...action.change, giveBack: back } };
   }
+  // Keep mine moved only `seen` on: its Undo moves it back (librarypass.ts makeCurrent, asked for the current version), while
+  // the item is at the version it kept. The entry that Undo makes (previous = version) offers nothing: Keep mine is on the source's row.
+  if (event.cause === 'source-kept') {
+    const asLeft = !!itemNow.linked && event.version === item.hash && event.seen !== undefined;
+    const help = 'Take back Keep mine: yours stays current, and the source’s version is no longer marked as declined';
+    return asLeft ? { label: 'Undo', help, change: { ...now, version: item.hash, seen: event.seen } } : undefined;
+  }
+  if (event.kind === 'current' && event.previous !== undefined && event.previous === event.version) return undefined;
   // Copies an earlier engine added, removed, switched or took over: there is no earlier version to go back to.
   if (['added', 'removed', 'switched', 'took-over'].includes(event.kind) || !isVersion(item, event.previous)) return undefined;
   // Undo while what this entry made is still current; once later changes came, it says what it does instead.
@@ -282,15 +302,17 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
  * What the managed tools hold of an entry's item now, as a pass reads it (librarypass.ts itemsNow; on the page, the row's facts:
  * entriesNow): the tools Central Knot manages, and the tools whose copy holds a change no pass has taken in yet, an edit or the
  * copy deleted by hand (library.ts pendingChanges). A take-in's Undo is decided on it (takeInHeld), not on the library's record alone.
+ * `linked`: the item is linked to a source the home records (library.ts linkedSource), which Keep mine's Undo needs.
  */
-export interface ItemNow { managed: readonly HarnessId[]; pending: readonly HarnessId[] }
+export interface ItemNow { managed: readonly HarnessId[]; pending: readonly HarnessId[]; linked?: true }
 /** An entry's item as History decides its action: the library's record (deleted or not), and what the tools hold of it now. */
 export type EntryItem = (entry: HistoryEvent) => { item: LibraryItem | undefined; now: ItemNow };
 
 /** The page's EntryItem: each entry's item and its row as the open home's view gives them (types.ts HomeView). */
 export const entriesNow = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents' | 'sync'>): EntryItem => entry => {
   const at = libraryEntry(entry), row = at && home[at.kind].items.find(fact => fact.key === at.key);
-  return { item: at && home[at.kind].library[at.key], now: { managed: home.sync.managed, pending: row?.plan ? pendingChanges(row.plan) : [] } };
+  const linked = !!row?.fromSource && !row.fromSource.removed ? { linked: true as const } : {};
+  return { item: at && home[at.kind].library[at.key], now: { managed: home.sync.managed, pending: row?.plan ? pendingChanges(row.plan) : [], ...linked } };
 };
 
 /**

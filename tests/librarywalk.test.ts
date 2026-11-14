@@ -1,13 +1,15 @@
-// A seeded random walk over one skill ("notes") on real
-// folders in a temp home, with an agent on the library in the same home: every click the Skills page and History offer
+// A seeded random walk over one skill ("notes") on real folders in a temp home with Claude Code, Copilot CLI, Codex and Pi,
+// with an agent on the library in the same home (in Pi a loose file beside the skill's folder, in the same skills folder):
+// every click the Skills page and History offer
 // (tests/skillclicks.ts), edits, files added, modes changed and folders deleted by hand, copies made by hand, a copy in
 // ~/.agents/skills (which Copilot CLI and Codex read) coming and going, Take over of it, a tool's own switch set by hand and
 // cleared, Automatic sync off and on, History's days passing, a folder that can't be written during a click, a crash at
 // each step of a write or a removal, a tool uninstalled or left out, the agent turned off and on, and a source (a made-up
 // repository standing in for a link: tests/sourcerepo.ts) holding a notes of its own: added, changed there (its body, or its
 // description, a line apart from the body a hand edit rewrites), checked, dropped and
-// brought back there, its SKILL.md unparseable there for one check, Add on its row for a notes held deleted, Replace and Merge
-// on its row for a notes whose version waits there (changed here too), and removed. Odd
+// brought back there, its SKILL.md unparseable there for one check, Add on its row for a notes held deleted, Replace, Merge
+// and Keep mine on its row for a notes whose version waits there (changed here too), Turn on on its line for a notes it
+// removed (library.ts REMOVED AT ITS SOURCE: the Skills view's fromSource `removed`), and removed. Odd
 // seeds start with notes made by hand in Claude Code (a folder with a script, a file of mode 0600 and an empty folder), so the
 // source's notes differs and is not brought in; even seeds start with notes from the source, turned On.
 // After every step:
@@ -35,15 +37,15 @@ import { join } from 'node:path';
 import { applyAgents } from '../src/agents.ts';
 import { pruneHistory, readHistory } from '../src/history.ts';
 import { wantedIn } from '../src/library.ts';
-import { asksWhichCopy, harnessIs, placeOf, rowClicks } from '../src/libraryrow.ts';
+import { asItIs, asksWhichCopy, harnessIs, placeOf, rowClicks } from '../src/libraryrow.ts';
 import { DAY_MS } from '../src/model.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
 import { applySkills, clearSwitch, takeOver } from '../src/skills.ts';
 import { setDisabled } from '../src/skillswitch.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import type { Change, HarnessId, HistoryDays, HistoryEvent, PassResult, SourceResult } from '../src/types.ts';
-import { bytes, folderOf, historyActions, put, roots, sandbox, seen, skillText, tools as allTools, trial, undo, type Tool } from './skillclicks.ts';
-import { addSource, bringBack, checkSource, mergeFromSource, previewSource, removeSource, replaceFromSource, sourcesView } from '../src/sources.ts';
+import { bytes, folderOf, historyActions, put, roots, sandbox, seen, skillText, tools as clickTools, trial, undo, type Tool } from './skillclicks.ts';
+import { addSource, bringBack, checkSource, keepFromSource, mergeFromSource, previewSource, removeSource, replaceFromSource, sourcesView } from '../src/sources.ts';
 import { repository, standInHosts } from './sourcerepo.ts';
 
 const hosts = await standInHosts();
@@ -73,17 +75,17 @@ const asPass = (done: SourceResult): PassResult => {
 };
 /** The skill's rich folder: a script that runs, a file of mode 0600, an empty folder. */
 const rich = (body = 'Take notes.') => ({ 'SKILL.md': skillText(body), 'scripts/run.sh': { text: '#!/bin/sh\necho hi\n', mode: 0o755 }, 'private.txt': { text: 'mine\n', mode: 0o600 } });
-/** The agent beside it, and its file in each tool. */
-const agentFiles = { 'claude-cli': '.claude/agents/writer.md', 'copilot-cli': '.copilot/agents/writer.agent.md', 'codex-cli': '.codex/agents/writer.toml' } as const;
+/** The walk's tools: skillclicks.ts's three, and Pi. */
+const allTools: Tool[] = [...clickTools, 'pi-cli'];
+/** The agent beside it, and its file in each tool (in Pi, a skill in its skills folder). */
+const agentFiles = { 'claude-cli': '.claude/agents/writer.md', 'copilot-cli': '.copilot/agents/writer.agent.md', 'codex-cli': '.codex/agents/writer.toml', 'pi-cli': '.pi/agent/skills/writer.md' } as const;
 /** Each tool's own switch file, which only Clear the switch may write. */
-const switchFiles = { 'claude-cli': '.claude/settings.json', 'copilot-cli': '.copilot/settings.json', 'codex-cli': '.codex/config.toml' } as const;
-/** The walk's three tools (skillclicks.ts tools). */
-const three = allTools as (keyof typeof agentFiles)[];
+const switchFiles = { 'claude-cli': '.claude/settings.json', 'copilot-cli': '.copilot/settings.json', 'codex-cli': '.codex/config.toml', 'pi-cli': '.pi/agent/settings.json' } as const;
 
 interface Finding { kind: string; trace: string }
 async function walk(seed: number): Promise<Finding[]> {
   const next = random(seed), pick = <T>(list: T[]) => list[Math.floor(next() * list.length)];
-  const box = await sandbox(), tools = box.tools;
+  const box = await sandbox(allTools), tools = box.tools;
   const manage = (managed: HarnessId[]) => { tools.splice(0, tools.length, ...allTools.filter(tool => managed.includes(tool))); };
   const shared = join(box.home, '.agents/skills/notes');
   const recordText = () => readFile(join(box.home, '.central-knot', 'skills.json'), 'utf8').catch(() => '');
@@ -105,8 +107,8 @@ async function walk(seed: number): Promise<Finding[]> {
   };
   const contents = async () => Object.fromEntries(await Promise.all([...allTools.map(tool => [tool, folderOf(box, tool as Tool)]), ['shared', shared]].map(async ([where, path]) => [where, await contentAt(path)] as const)));
   const versionsNow = async () => new Set(((await seen(box, context())).item?.versions ?? []).map(version => version.hash));
-  const agentNow = async () => Object.fromEntries(await Promise.all(three.map(async tool => [tool, await readFile(join(box.home, agentFiles[tool]), 'utf8').catch(() => undefined)] as const)));
-  const switchesNow = async () => Object.fromEntries(await Promise.all(three.map(async tool => [tool, await readFile(join(box.home, switchFiles[tool]), 'utf8').catch(() => undefined)] as const)));
+  const agentNow = async () => Object.fromEntries(await Promise.all(allTools.map(async tool => [tool, await readFile(join(box.home, agentFiles[tool as keyof typeof agentFiles]), 'utf8').catch(() => undefined)] as const)));
+  const switchesNow = async () => Object.fromEntries(await Promise.all(allTools.map(async tool => [tool, await readFile(join(box.home, switchFiles[tool as keyof typeof switchFiles]), 'utf8').catch(() => undefined)] as const)));
   const historyCount = async () => (await readHistory(context())).filter(event => event.key === 'notes').length;
   const readOnly = (tool: Tool, on: boolean) => chmod(join(box.home, roots[tool]), on ? 0o555 : 0o755).catch(() => undefined);
   let agentAsWritten: Record<string, string | undefined> = {};
@@ -152,7 +154,7 @@ async function walk(seed: number): Promise<Finding[]> {
       await addSource(context(), tools, look.token);
       await send(rowClicks.on((await seen(box)).row, (await seen(box)).item));
     }
-    for (const tool of three) await mkdir(join(box.home, agentFiles[tool], '..'), { recursive: true });
+    for (const tool of allTools) await mkdir(join(box.home, agentFiles[tool as keyof typeof agentFiles], '..'), { recursive: true });
     await writeFile(join(box.home, agentFiles['claude-cli']), '---\nname: writer\ndescription: Writes docs\n---\n\nYou write docs.\n');
     await applyAgents(context(), tools, [{ key: 'writer', on: true, except: [], seenOn: false }]);
     agentAsWritten = await agentNow();
@@ -201,6 +203,9 @@ async function walk(seed: number): Promise<Finding[]> {
         if (recorded.names.some(name => name.key === 'notes' && name.state === 'deleted')) add(4, { name: 'Add on the source’s row', app: true, run: () => bringBack(context(), tools, recorded.id, 'notes') });
         if (recorded.names.some(name => name.key === 'notes' && name.state === 'wait')) add(10, { name: 'Replace on the source’s row', app: true, click: true, run: async more => asPass(await replaceFromSource(context(more), tools, recorded.id, 'notes')) });
         if (recorded.names.some(name => name.key === 'notes' && name.state === 'wait')) add(10, { name: 'Merge on the source’s row', app: true, click: true, run: async more => asPass(await mergeFromSource(context(more), tools, recorded.id, 'notes')) });
+        if (recorded.names.some(name => name.key === 'notes' && name.state === 'wait')) add(10, { name: 'Keep mine on the source’s row', app: true, click: true, run: async more => asPass(await keepFromSource(context(more), tools, recorded.id, 'notes')) });
+        // The source's line for a notes it removed: Turn on, the same click as the row's switch (sourcespage.ts turnOn).
+        if (fact?.fromSource?.removed && fact.fromSource.link === recorded.link) clicks(4, 'Turn on on the source’s line', { ...asItIs('notes', item), on: true, seenOn: false });
         // The source changes and the next read (the daily one, or Check now) comes at once: what a skill changed here meets most.
         if (sourceHasNotes) add(3, { name: 'the source changes notes, then Check now', app: true, run: async more => { await source.commit({ 'SKILL.md': skillText(`Source ${++marker}.`) }); return checkNow(recorded.id, more); } });
         // The source's SKILL.md stops parsing for one check: unreadable there, never gone, so the source turns nothing Off. From a
@@ -329,6 +334,8 @@ async function walk(seed: number): Promise<Finding[]> {
       const sourceRow = await sourceNow();
       if (sourceRow?.names.some(name => name.key === 'notes' && name.state === 'wait')) offered.push({ name: 'the Sources page’s Replace', run: async () => asPass(await replaceFromSource(context(), tools, sourceRow.id, 'notes')) });
       if (sourceRow?.names.some(name => name.key === 'notes' && name.state === 'wait')) offered.push({ name: 'the Sources page’s Merge', run: async () => asPass(await mergeFromSource(context(), tools, sourceRow.id, 'notes')) });
+      if (sourceRow?.names.some(name => name.key === 'notes' && name.state === 'wait')) offered.push({ name: 'the Sources page’s Keep mine', run: async () => asPass(await keepFromSource(context(), tools, sourceRow.id, 'notes')) });
+      if (now.fact?.fromSource?.removed) offered.push({ name: 'the Sources page’s Turn on', run: () => send({ ...asItIs('notes', now.item), on: true, seenOn: false }) });
       for (const action of offered) await trial(box, async () => {
         const record = await recordText(), switches = await switchesNow(), answers = [await action.run()].flat();
         const refusal = answers.map(answer => answer.stopped ?? answer.results.find(entry => entry.unchanged)?.message).find(Boolean);

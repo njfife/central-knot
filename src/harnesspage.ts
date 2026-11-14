@@ -11,7 +11,7 @@ import { pluginTitle } from './pluginparts.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural } from './model.ts';
 import { andList, coworkWords, fileName, kindNouns, toolNames as names } from './words.ts';
-import { hasCowork, takesPlugins } from './presence.ts';
+import { agentsKeptIn, hasCowork, takesPlugins } from './presence.ts';
 import { brandMark } from './brand.ts';
 import { shortBuild } from './values.ts';
 import type { DesktopApp, HarnessId, HomeView, InstructionFile, Snapshot } from './types.ts';
@@ -266,12 +266,9 @@ function switcher(home: HomeView, tool: HarnessId) {
   }, brandMark(other, 14), h('span.harness-switch-name', {}, names[other]))));
 }
 
-/** A kind the tool has no place for (Pi's agents): what it has instead. */
+/** A kind the tool has no place for: said in place of its table. */
 function unsupported(kind: PageKind, tool: HarnessId) {
-  const body = kind === 'agents' ? `On the Agents page, Convert to skill turns an agent into a skill that ${names[tool]} can use.`
-    : `Central Knot can’t read or write ${kindNouns[kind].many} for ${names[tool]}.`;
-  return h('div.page', {}, emptyState(kind === 'agents' ? 'bot' : 'plug', kindNotUsed(tool, kind), body,
-    kind === 'agents' ? button({ variant: 'outline', label: 'Open Agents', id: 'harness-open-agents', onclick: () => showPage('agents') }) : undefined));
+  return h('div.page', {}, emptyState('plug', kindNotUsed(tool, kind), `Central Knot can’t read or write ${kindNouns[kind].many} for ${names[tool]}.`));
 }
 
 function kindTab(home: HomeView, kind: PageKind, tool: HarnessId) {
@@ -349,7 +346,9 @@ function aboutTab(snapshot: Snapshot, home: HomeView) {
         ...(!roots.size && disclosed?.to && !disclosed.blocked ? fact('Skills folder', h('span.harness-path', {}, path(disclosed.to), h('span.tone-faint', {}, '(empty; new skills go here)'))) : []),
         ...(disclosed && roots.size && !(disclosed.to && roots.has(disclosed.to)) ? fact('New skills go to', disclosed.blocked ? h('span', {}, h('span.tone-warning', {}, 'Nowhere. '), disclosed.blocked) : path(disclosed.to)) : []),
         ...(supports(home, 'mcp', tool) ? fact('MCP servers file', mcpFile ? path(mcpFile) : h('span.tone-faint', {}, '— (no MCP servers found)')) : []),
-        ...(supports(home, 'agents', tool) ? fact('Agents folder', agentFile ? path(dirname(agentFile)) : h('span.tone-faint', {}, '— (no agents found)')) : []),
+        // Where it keeps agents (presence.ts agentsKeptIn): its agents folder, or (Pi) its skills folder, shown above.
+        ...(!supports(home, 'agents', tool) ? [] : agentsKeptIn[tool] === 'skills folder' ? fact('Agents', h('span.tone-faint', {}, 'In its skills folder, each as a skill'))
+          : fact('Agents folder', agentFile ? path(dirname(agentFile)) : h('span.tone-faint', {}, '— (no agents found)'))),
         ...(ins ? fact('Instructions', h('span.harness-path', {}, path(ins.path), ins.exists ? null : h('span.tone-faint', {}, '(no file yet)'))) : [])))))));
 }
 

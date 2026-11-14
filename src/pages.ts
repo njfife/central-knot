@@ -75,7 +75,7 @@ const noSkills = (id: string) => emptyKindPage('skills', id);
 
 /**
  * The Overview's first sentence: what Central Knot keeps the same, between this home's tools only, naming only the kinds
- * a tool here can hold. A kind only some of them hold says which ("agents in all but Pi").
+ * a tool here can hold. A kind not every tool here holds says which do, or which don't ("… in all but Codex").
  */
 function leadSentence(home: HomeView): string {
   const tools = homeTools();

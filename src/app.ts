@@ -318,7 +318,7 @@ export const lastResult = (kind: PageKind): PassResult | undefined => ({ skills:
 /**
  * Whether a click in this home is a Resume: the page shows it waiting for one (share.ts libraryGate `resume`). Sent with the
  * clicks that resume such a home, as Resume itself does: an item page's clicks (first setup's walkthrough's too), a tool's
- * Manage switch, Take over, Clear the switch and Convert to a skill. History's actions, a profile switch and Synchronize
+ * Manage switch, Take over and Clear the switch. History's actions, a profile switch and Synchronize
  * everything's switch send nothing, and are refused there until Resume.
  */
 export const clickResumes = (home: HomeView) => home.sync.gate.state === 'needs-resume';
@@ -666,6 +666,8 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const view = await api().refresh();
   setHome(view);
   await putHistory();
+  // A source's band offers its click's Undo (sourcespage.ts whatItDid): its rows say what waits there now.
+  if (state.page === 'sources') await loadSources();
   const restored = result.results.filter(entry => entry.outcome === 'written');
   const where = [...new Set(restored.map(entry => entry.harness ?? ''))].filter(Boolean);
   const past = state.history.data?.find(event => event.id === eventId);
@@ -744,21 +746,6 @@ export const skillAction = (action: 'clear-switch' | 'take-over', key: string, t
       act: entry ? { label: 'Undo', id: 'outcome-undo', title: `Turn ${name} off again in ${toolName(tool)}’s own settings`, run: () => void restoreEvent(entry) } : undefined });
     flashRow(name);
   });
-
-// ---------- Convert to skill ----------
-
-/** Converts an agent to a Pi skill, then takes that skill into Central Knot, On in Pi only: never the agent's own tool by itself. */
-export const convertAgent = (key: string, name: string) => busy('Converting…', async () => {
-  const home = state.home!;
-  const made = await api().convertAgent(key, clickResumes(home), home.home);
-  if (made.stopped || !made.skill) { announce(made.stopped ?? 'Nothing was converted.'); return; }
-  const others = home.sync.managed.filter(tool => tool !== 'pi-cli');
-  const applied = await api().applySkills([{ key: made.skill, on: true, except: others }], clickResumes(home), home.home);
-  const view = await api().refresh();
-  setHome(view);
-  const from = toolName(made.origin ?? 'claude-cli');
-  tell({ page: state.page, item: name, text: applied.stopped ? `Converted ${name} to a Pi skill, but it could not be taken into Central Knot: ${applied.stopped}` : `Converted ${name} to a skill for Pi. ${from} keeps the agent.` });
-});
 
 // ---------- Results ----------
 

@@ -64,7 +64,8 @@ export const harnesses: Record<HarnessId, HarnessDefinition> = {
     ],
   },
   // Pi (CD §2, Appendix A): its own skills folder, plus the shared .agents folder, which it reads as project scope in a non-Git
-  // folder under home, behind its trust prompt. No native agents; its plugins are Pi packages, not handled here.
+  // folder under home, behind its trust prompt. No native agents: it takes an agent as a skill (presence.ts agentsKeptIn). Its
+  // plugins are Pi packages, not handled here.
   'pi-cli': {
     id: 'pi-cli', name: 'Pi', surface: 'CLI', binary: 'pi',
     configEnv: 'PI_CODING_AGENT_DIR', defaultConfig: '.pi/agent', reservedSkills: [], loadsDotFolders: false,

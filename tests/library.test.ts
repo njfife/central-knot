@@ -3,7 +3,7 @@
 // applied there last. Contents are single letters: 'a' is older than 'b', and so on.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { carryOut, changedHere, decide, fromSource, isLibraryItem, keepVersion, latestCopy, linkedTo, listed, managedAgain, mergeFiles, newItem, noteAgainst, plan, setCurrent, originWords, sourceAnswers, takeInAnswer, type HarnessCopy, type LibraryItem, type PathIs, type Shelf, type Version } from '../src/library.ts';
+import { carryOut, changedHere, decide, fromSource, isLibraryItem, keepVersion, latestCopy, linkedTo, listed, managedAgain, mergeFiles, newItem, noteAgainst, plan, removedBy, setCurrent, originWords, sourceAnswers, takeInAnswer, type HarnessCopy, type LibraryItem, type PathIs, type Shelf, type Version } from '../src/library.ts';
 
 const has = (hash: string, at = 0): HarnessCopy => ({ is: 'present', hash, at });
 /** A copy with no time of its own (an MCP entry: its time is its whole file's). */
@@ -348,7 +348,7 @@ test('A record’s value is an item only with each field of the type it holds (w
 // ---------- takeInAnswer: the FOUND table, row by row, a click's column and Synchronize everything's ----------
 
 const copy = (harness: 'claude-cli' | 'codex-cli' | 'copilot-cli', hash: string, more: { at?: number; part?: true; switchedOff?: true } = {}) => ({ harness, hash, ...more });
-const found = (copies: ReturnType<typeof copy>[], more: { deleted?: boolean; leaving?: boolean; converted?: boolean } = {}) => ({ copies, deleted: false, leaving: false, converted: false, ...more });
+const found = (copies: ReturnType<typeof copy>[], more: { deleted?: boolean; leaving?: boolean } = {}) => ({ copies, deleted: false, leaving: false, ...more });
 /** Both columns' answers for one found key. */
 const both = (key: ReturnType<typeof found>, settle?: { clock: number; ms: number }) => [takeInAnswer('click', key), takeInAnswer('rule', key, undefined, settle)];
 
@@ -360,8 +360,6 @@ test('Found, the record holds it deleted: a click takes it in (the tombstone is 
   assert.deepEqual(both(found([copy('codex-cli', 'a')], { deleted: true })), [{ take: copy('codex-cli', 'a'), chosen: false }, { leave: 'deleted' }]));
 test('Found, a copy that is a plugin’s part: a click takes it in, the rule leaves it (its row keeps Add)', () =>
   assert.deepEqual(both(found([copy('codex-cli', 'a', { part: true }), copy('claude-cli', 'a')])), [{ take: copy('codex-cli', 'a', { part: true }), chosen: false }, { leave: 'part' }]));
-test('Found, a skill Convert to skill made from an agent: a click takes it in, the rule leaves it (it would reach the tools that hold the agent)', () =>
-  assert.deepEqual(both(found([copy('codex-cli', 'a')], { converted: true })), [{ take: copy('codex-cli', 'a'), chosen: false }, { leave: 'converted' }]));
 test('Found, every copy switched off by its tool’s own switch: a click takes it in, the rule leaves it; one copy on is enough for the rule', () => {
   assert.deepEqual(both(found([copy('codex-cli', 'a', { switchedOff: true })])), [{ take: copy('codex-cli', 'a', { switchedOff: true }), chosen: false }, { leave: 'switched-off' }]);
   assert.deepEqual(takeInAnswer('rule', found([copy('claude-cli', 'a'), copy('codex-cli', 'a', { switchedOff: true })])), { take: copy('claude-cli', 'a'), chosen: false });
@@ -510,6 +508,39 @@ test('A source: Merge on its row merges S into the current version where it was 
   assert.equal(fromSource(on, there('s'), 'this', { merge: true, copies: { 'claude-cli': unseen } }), 'wait', 'Claude Code’s copy settling where it was applied');
   assert.equal(fromSource(linked('l', 'l'), there('s'), 'this', { merge: true }), 'update', 'nothing of its own to merge');
   assert.equal(fromSource(linked('mine', 's'), there('s'), 'this', { merge: true }), 'nothing', 'nothing waits any more');
+});
+
+test('A source: Keep mine on its row keeps the current version, whatever a tool holds, and even where nothing was changed here; with nothing waiting it changes nothing', () => {
+  assert.equal(fromSource(linked('mine', 'old'), there('s'), 'this', { keep: true }), 'keep');
+  const on = { ...linked('mine', 'old'), on: true, applied: { 'claude-cli': 'mine' } } satisfies LibraryItem;
+  assert.equal(fromSource(on, there('s'), 'this', { keep: true, copies: { 'claude-cli': holds('saved just now') } }), 'keep', 'it writes nothing, so a tool’s edit doesn’t stop it');
+  assert.equal(fromSource(linked('l', 'l'), there('s'), 'this', { keep: true }), 'keep', 'the click is the person’s: the source’s version doesn’t come in over it');
+  assert.equal(fromSource(linked('mine', 's'), there('s'), 'this', { keep: true }), 'nothing', 'nothing waits any more');
+  assert.equal(fromSource(linked('s', 'old'), there('s'), 'this', { keep: true }), 'same', 'the source has yours: only seen moves on');
+});
+
+/** A source's last read as removedBy reads it: its id, its link and the names it holds. */
+const lastRead = (names: [string, { hash: string } | { unreadable: string }][], id = 'src', link = 'team/notes') => ({ id, link, names: new Map(names) });
+
+test('Removed at its source: Off, linked to none, a version from a recorded source’s link, and that source’s last read without its name; any of these not so, and nothing says it', () => {
+  const dropped = { ...linked('l', 'l'), source: undefined, seen: undefined };
+  const reads = [lastRead([['jottings', { hash: 'j' }]])];
+  assert.equal(removedBy(dropped, reads), reads[0]);
+  assert.equal(removedBy({ ...dropped, on: true }, reads), undefined, 'turned On: the revert');
+  assert.equal(removedBy({ ...dropped, deleted: { at: '2026-11-05T10:00:00.000Z' } }, reads), undefined, 'deleted');
+  assert.equal(removedBy({ ...dropped, source: 'src' }, reads), undefined, 'linked to it again');
+  assert.equal(removedBy({ ...dropped, source: 'gone' }, reads), reads[0], 'linked to a source no longer recorded is linked to none');
+  assert.equal(removedBy(dropped, []), undefined, 'its source removed');
+  assert.equal(removedBy(dropped, [lastRead([['notes', { hash: 's' }]])]), undefined, 'the name back');
+  assert.equal(removedBy(dropped, [lastRead([['notes', { unreadable: 'its SKILL.md can’t be read' }]])]), undefined, 'the name back, unreadable: that line says why');
+  const empty = [lastRead([])];
+  assert.equal(removedBy(dropped, empty), empty[0], 'a read with no skill at all, not whole, leaves it');
+  assert.equal(removedBy(dropped, [lastRead([['jottings', { hash: 'j' }]], 'src', 'team/other')]), undefined, 'no version from that link');
+  const merged = { ...dropped, versions: [{ hash: 'l', at: '2026-11-04T10:00:00.000Z', from: { how: 'merged' as const, link: 'team/notes' } }] };
+  assert.equal(removedBy(merged, reads), reads[0], 'a version Merge made, with that link, counts too');
+  const takenIn = { hash: 'own', at: '2026-11-06T10:00:00.000Z', from: { how: 'found' as const, harness: 'claude-cli' as const } };
+  assert.equal(removedBy({ ...dropped, hash: 'own', versions: [takenIn, ...dropped.versions] }, reads), undefined, 'taken in from a tool since: only versions after that count');
+  assert.equal(removedBy({ ...dropped, versions: [...dropped.versions, takenIn] }, reads), reads[0], 'taken in first, then from the source');
 });
 
 // ---------- Merge's table (library.ts's header, MERGE), one row each ----------
