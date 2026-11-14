@@ -1352,7 +1352,7 @@ function orderChoice() {
   const choose = (event: Event) => { writeFlag(BY_UPDATED, (event.target as HTMLSelectElement).value === 'updated'); rerender(); };
   const options = [h('option', { value: 'name', selected: !dated() }, 'Name'), h('option', { value: 'updated', selected: dated() }, 'Last updated')];
   return h('span.order', { title: 'The order of the rows under each heading' }, h('label.order-word', { for: 'item-order' }, 'Sort'),
-    h('span.select.select-bar', {}, h('select', { id: 'item-order', onchange: choose }, options), icon('chevrons-up-down', 14)));
+    h('span.select.select-bar', {}, h('select', { id: 'item-order', 'aria-label': 'Sort by', title: 'Sort by', onchange: choose }, options), icon('chevrons-up-down', 14)));
 }
 /** A row's time while the rows go by it: how long ago (itemrow.ts lastUpdated), the day and time in its tooltip; empty with none. */
 function whenCell(skill: ItemRow) {
@@ -1360,8 +1360,6 @@ function whenCell(skill: ItemRow) {
   if (at === undefined) return h('div.ov-when', { role: 'cell' });
   return h('div.ov-when', { role: 'cell', title: `Last updated ${dayAndTime(new Date(at).toISOString())}` }, sinceThen(at));
 }
-/** The kind's items as the library holds them, for the order. */
-const libraryNow = () => (state.home ? kindSource(state.home, kind).library : {});
 
 /** Rows under one heading: On, Found, Off, or (on a harness's page) the ones only other tools have. */
 function section(role: 'on' | 'found' | 'off' | 'away', list: ItemRow[]) {
@@ -1371,7 +1369,7 @@ function section(role: 'on' | 'found' | 'off' | 'away', list: ItemRow[]) {
   return h('div', { role: 'rowgroup' },
     h(`div.ov-section${role === 'off' || role === 'away' ? '.ov-section-away' : ''}`, { role: 'row', 'data-section': role },
       h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(list.length)), note ? sectionNote(note) : null)),
-    inOrder(list, chosenOrder(), libraryNow()).flatMap(row));
+    inOrder(list, chosenOrder(), itemOf).flatMap(row));
 }
 
 /**
@@ -1626,7 +1624,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
   const matches = all.filter(skill => !needle || skill.key.includes(needle) || (skill.name ?? '').toLowerCase().includes(needle) || skill.description.toLowerCase().includes(needle));
   // The table's headings, on, then found, then off, and its order under each (inOrder's, which the stable sort keeps).
   const place = new Map(all.map(skill => [skill.key, standingOf(skill)]));
-  const shown = inOrder(matches, chosenOrder(), libraryNow()).sort((first, second) => place.get(first.key)! - place.get(second.key)!);
+  const shown = inOrder(matches, chosenOrder(), itemOf).sort((first, second) => place.get(first.key)! - place.get(second.key)!);
   const chosen = all.find(skill => skill.key === state.item);
   // The detail always shows a skill: the chosen one, else the first listed. In narrow content it sits below the list.
   const shownDetail = chosen ?? shown[0] ?? all[0];

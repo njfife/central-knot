@@ -86,13 +86,14 @@ export const anyOn = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents'>) =>
 export type RowOrder = 'name' | 'updated';
 
 /** By name, a leading dot aside (".hidden" sorts with the h's). */
-export const byName = (first: { key: string }, second: { key: string }) => first.key.replace(/^\./, '').localeCompare(second.key.replace(/^\./, ''));
+const byName = (first: { key: string }, second: { key: string }) => first.key.replace(/^\./, '').localeCompare(second.key.replace(/^\./, ''));
 
 /**
- * When an item was last updated, in ms: when its current version became current (library.ts LibraryItem versions, the newest
- * entry with the current content: an edit here or in a tool, a source's update, Replace, Merge or Make current made it). On,
- * Off, a tool kept out or let in, and a write to a tool make no such entry, so they never change it. An item not in Central
- * Knot (found) has its newest copy's file time instead, where its copies carry one (an MCP entry's don't). Undefined: no time.
+ * When an item was last updated, in ms: its current version's own time (library.ts Version `at`, on the newest entry with the
+ * current content), which library.ts setCurrent sets (its comment says when; the migrations from before the library wrote the
+ * first ones): a copy taken in keeps its file's time, a source's update its commit's. On, Off, a tool kept out or let in, and a
+ * write to a tool set none, so they never change it. An item not in Central Knot (found) has its newest copy's file time
+ * instead, where its copies carry one (an MCP entry's don't). Undefined: no time.
  */
 export function lastUpdated(row: Pick<ItemRow, 'versions'>, item: LibraryItem | undefined): number | undefined {
   const kept = inLibrary(item), current = kept?.versions[currentIndex(kept)];
@@ -102,9 +103,9 @@ export function lastUpdated(row: Pick<ItemRow, 'versions'>, item: LibraryItem | 
 
 /**
  * The rows under one heading in the chosen order. Last updated: newest first, an item with no time after every one with a
- * time; equal times, or none, go by name, so every look gives the same order. `library`: the kind's items (KindSource library).
+ * time; equal times, or none, go by name, so every look gives the same order. `itemOf`: a row's item as the library holds it.
  */
-export function inOrder<Row extends Pick<ItemRow, 'key' | 'versions'>>(rows: readonly Row[], order: RowOrder, library: Record<string, LibraryItem>): Row[] {
-  const time = new Map(rows.map(row => [row.key, order === 'updated' ? lastUpdated(row, library[row.key]) ?? -Infinity : 0]));
+export function inOrder<Row extends Pick<ItemRow, 'key' | 'versions'>>(rows: readonly Row[], order: RowOrder, itemOf: (row: Row) => LibraryItem | undefined): Row[] {
+  const time = new Map(rows.map(row => [row.key, order === 'updated' ? lastUpdated(row, itemOf(row)) ?? -Infinity : 0]));
   return [...rows].sort((first, second) => (time.get(second.key)! - time.get(first.key)!) || byName(first, second));
 }

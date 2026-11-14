@@ -19,14 +19,16 @@ const edited = (item: LibraryItem, days: number) => setCurrent(shelf, item, { ha
 const row = (key: string, copyDays: Record<string, number> = {}): ItemRow => ({ key, description: '', copies: {}, on: true, except: [],
   versions: Object.fromEntries(Object.entries(copyDays).map(([tool, days]) => [tool, { lines: '3 lines', changed: '', text: '', at: daysAgo(days) }])) });
 const keys = (rows: ItemRow[]) => rows.map(each => each.key);
+/** Each row's item, as the page finds it in the kind's library (matrix.ts itemOf). */
+const from = (library: Record<string, LibraryItem>) => (each: ItemRow) => library[each.key];
 
 test('By last updated, a skill edited yesterday comes before one edited last week; by name, the order is as always', async () => {
   const releaseNotes = takenIn('release-notes', 30), standup = takenIn('standup', 30);
   await edited(releaseNotes, 7);
   await edited(standup, 1);
   const rows = [row('release-notes'), row('standup')], library = { 'release-notes': releaseNotes, standup };
-  assert.deepEqual(keys(inOrder(rows, 'updated', library)), ['standup', 'release-notes']);
-  assert.deepEqual(keys(inOrder(rows, 'name', library)), ['release-notes', 'standup']);
+  assert.deepEqual(keys(inOrder(rows, 'updated', from(library))), ['standup', 'release-notes']);
+  assert.deepEqual(keys(inOrder(rows, 'name', from(library))), ['release-notes', 'standup']);
 });
 
 test('Make current is an update: the version made current again today puts its item first', async () => {
@@ -34,19 +36,19 @@ test('Make current is an update: the version made current again today puts its i
   await edited(notes, 1);
   await edited(standup, 7);
   await setCurrent(shelf, standup, { hash: 'standup-1', at: daysAgo(0), from: { how: 'made-current' } }, null);
-  assert.deepEqual(keys(inOrder([row('notes'), row('standup')], 'updated', { notes, standup })), ['standup', 'notes']);
+  assert.deepEqual(keys(inOrder([row('notes'), row('standup')], 'updated', from({ notes, standup }))), ['standup', 'notes']);
 });
 
 test('Switching a skill Off and On again does not move it, though turning it on kept a tool’s own copy as a version today', async () => {
   const notes = takenIn('notes', 3), standup = takenIn('standup', 7);
   const rows = [row('standup'), row('notes')], library = { notes, standup };
-  const before = keys(inOrder(rows, 'updated', library));
+  const before = keys(inOrder(rows, 'updated', from(library)));
   // Off takes it out of every tool; On again finds Codex holding a copy of its own, written today, which is kept as a version
   // that was never current before the item is written there (library.ts, THE RULE: "a copy, no A").
   Object.assign(standup, { on: false, applied: {} });
   Object.assign(standup, { on: true, applied: { 'claude-cli': 'standup-1', 'codex-cli': 'standup-1' } });
   await keepVersion(shelf, standup, { hash: 'codex-own', at: daysAgo(0), from: { how: 'was-in', harness: 'codex-cli' } }, null);
-  assert.deepEqual([before, keys(inOrder(rows, 'updated', library))], [['notes', 'standup'], ['notes', 'standup']]);
+  assert.deepEqual([before, keys(inOrder(rows, 'updated', from(library)))], [['notes', 'standup'], ['notes', 'standup']]);
 });
 
 test('A found item goes by its newest copy’s time; one with no time goes last; equal times, or none, go by name on every look', () => {
@@ -55,11 +57,11 @@ test('A found item goes by its newest copy’s time; one with no time goes last;
   const found = row('found-skill', { 'claude-cli': 5, 'copilot-cli': 2 }), server = row('found-server'), another = row('another-server');
   const expected = ['gamma', 'found-skill', 'alpha', 'beta', 'another-server', 'found-server'];
   for (const rows of [[server, found, another, row('beta'), row('alpha'), row('gamma')], [row('gamma'), row('alpha'), row('beta'), another, found, server]]) {
-    assert.deepEqual(keys(inOrder(rows, 'updated', library)), expected);
+    assert.deepEqual(keys(inOrder(rows, 'updated', from(library))), expected);
   }
 });
 
 test('A deleted item, found again, goes by its copy’s time, not by the versions Central Knot still holds', () => {
   const notes = { ...takenIn('notes', 0), deleted: { at: daysAgo(0) } }, standup = takenIn('standup', 1);
-  assert.deepEqual(keys(inOrder([row('notes', { 'claude-cli': 9 }), row('standup')], 'updated', { notes, standup })), ['standup', 'notes']);
+  assert.deepEqual(keys(inOrder([row('notes', { 'claude-cli': 9 }), row('standup')], 'updated', from({ notes, standup }))), ['standup', 'notes']);
 });
