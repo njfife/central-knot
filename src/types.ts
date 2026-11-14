@@ -433,7 +433,7 @@ export interface ItemNotice {
   winner: HarnessId;
   /** Tools whose differing copies gave way, or still hold the item after a deletion lost. */
   losers: HarnessId[];
-  /** False when the order could not be proved and the fixed tool order decided (CON-04, D-04). */
+  /** On an 'edit' or 'conflict': whether times proved the edit taken in the latest (library.ts Plan orderProved); else true. */
   orderProved: boolean;
   /** The History event to Undo or Restore from. */
   history: string;
@@ -475,10 +475,10 @@ export interface HistoryEvent {
    * hold), 'restored', and 'took-over' with `tookOver`.
    * Library items (historyactions.ts has each one's action):
    * 'on' / 'off': it was turned On or Off (`cause` says why), in every harness or (`only`) in one; `losers` are the harnesses
-   *   to be written or removed, as planned when the entry was told, before the writes (a write the pass then held is listed too).
+   *   written or removed (one whose write or removal the pass held is taken out after the writes: librarypass.ts untell).
    * 'current': an earlier version (`version`) was made current; `previous` is the one before.
-   * 'edit' / 'conflict': an edit taken in (`winner`), or Pull's (`cause`); `losers` are the harnesses to be written, as planned,
-   *   each with what it held before, and on a 'conflict' the edits that gave way. 'kept-edit': edits not taken in that were written over (`losers`),
+   * 'edit' / 'conflict': an edit taken in (`winner`), or Pull's (`cause`); `losers` are the harnesses written, each with what
+   *   it held before, and on a 'conflict' the edits that gave way. 'kept-edit': edits not taken in that were written over (`losers`),
    *   or (`cause: 'tool-back'`) a copy a tool managed again held, which gave way to the current version.
    * 'deleted': it was deleted from Central Knot; with `cause: 'in-line'`, not a deletion: a copy of an item already deleted was
    *   removed from a harness (librarypass.ts logItem), so a reader counting deletions leaves that cause out. 'chosen': it was taken in with the `winner`'s copy, where the found copies differed.
@@ -537,7 +537,7 @@ export interface HistoryEvent {
   /** 'added', from before the library: copies for tools a synced item synced to again. */
   rejoined?: boolean;
   winner?: { tool: HarnessId; hash: string };
-  /** As `kind` says: the harnesses to be written or removed, each with what it held; content that gave way; or the copy taken over. */
+  /** As `kind` says: the harnesses written or removed, each with what it held; content that gave way; or the copy taken over. */
   losers: { tool: HarnessId; hash: string;
     /** 'took-over': the copy taken over was outside the tool's own folder (in ~/.agents/skills), at this path. */ path?: string;
     /** 'took-over': the copy was a link with this text. */ linkTo?: string }[];
@@ -550,6 +550,10 @@ export interface HistoryEvent {
   gaveBack?: HarnessId[];
   /** The synced content before this event, to put back on Undo. */
   previous?: string;
+  /**
+   * On a library item's 'edit' or 'conflict': whether times proved the edit taken in the latest (library.ts Plan orderProved);
+   * true on every other entry. An entry from before the library holds false where the fixed tool order decided.
+   */
   orderProved: boolean;
   /** Set once undone or restored, naming the event that did it (one from before the library may name none: 'already-as-it-was'). */
   undoneBy?: string;

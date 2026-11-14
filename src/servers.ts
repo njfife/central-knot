@@ -26,7 +26,7 @@
 // librarypages.ts; History's sentences and actions, historyactions.ts.
 import { readFile, stat } from 'node:fs/promises';
 import { libraryAction } from './historyactions.ts';
-import { listed, pendingEdits, plan, wantedIn } from './library.ts';
+import { listed, noteAgainst, pendingEdits, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, itemClick, leavingIn, lookFor, restore, runPass, sharedFileSeen, takeInAnswers, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords, writesWait } from './libraryrow.ts';
@@ -275,11 +275,10 @@ async function changesOf(context: ShareContext, item: LibraryItem): Promise<Vers
     return was && is ? changedParts(was, is) : undefined;
   };
   return Promise.all(listed(item).map(async (version): Promise<VersionChange> => {
-    if (version.from.replacedBy) { const parts = await compare(version, version.from.replacedBy); return parts ? { differs: parts } : 'unknown'; }
-    const before = item.versions.slice(item.versions.indexOf(version) + 1).find(older => older.from.how !== 'was-in');
-    if (before) { const parts = await compare(version, before.hash); return parts ? { changed: parts } : 'unknown'; }
-    const takenWith = version.from.how === 'chosen' || item.versions.some(other => other.from.replacedBy === version.hash);
-    return takenWith ? 'none' : 'first';
+    const basis = noteAgainst(item, version);
+    if (typeof basis === 'string') return basis;
+    const parts = await compare(version, basis.against);
+    return !parts ? 'unknown' : basis.how === 'differs' ? { differs: parts } : { changed: parts };
   }));
 }
 

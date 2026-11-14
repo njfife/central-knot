@@ -31,6 +31,12 @@ import { andList, kindNouns, sentence, toolName, toolsPhrase } from './words.ts'
  */
 export const writesWait = (kind: 'skills' | 'mcp' | 'agents', tool: string) => kind === 'mcp' && tool === 'claude-cli';
 
+/**
+ * Said of two edits where no time decided which became the current version (library.ts Plan orderProved), in History and the
+ * notice alike, in place of "the latest".
+ */
+export const noTimeTells = 'the times can’t tell which edit came last';
+
 /** A kind's words on its rows, where they differ from another kind's. */
 export interface RowWords {
   /** The item as a sentence names it ("agent"), with its article ("an agent"), and many of them ("agents"). */
@@ -195,7 +201,7 @@ export function versionChange(changed: VersionChange | undefined): string {
 /** What a version's note is compared with, for its tooltip. */
 export function versionChangeHelp(changed: VersionChange | undefined): string | undefined {
   if (changed === undefined || typeof changed === 'string') return undefined;
-  return 'differs' in changed ? 'Against the version written over this copy' : 'Against the version that was current before it';
+  return 'differs' in changed ? 'Against the version that took its place' : 'Against the version that was current before it';
 }
 
 /** When a version was made, said short: its time today, else its day and time. */
@@ -473,11 +479,11 @@ export function sentences(words: RowWords) {
   };
 
   /**
-   * What sync did to an item on its own, as its notice says it: an edit taken in as the current version, the latest of two
-   * edits, or a copy deleted by hand that turned the item off. `action`: the notice's button, which runs its History entry's
+   * What sync did to an item on its own, as its notice says it: an edit taken in as the current version, the one of two edits
+   * taken in (the latest, where times prove it), or a copy deleted by hand that turned the item off. `action`: the notice's button, which runs its History entry's
    * own action (historyactions.ts); `help`: what that does.
    */
-  function noticeWords(notice: Pick<ItemNotice, 'kind' | 'item' | 'winner' | 'losers'>): { text: string; action: 'undo' | 'turn-on'; help: string } {
+  function noticeWords(notice: Pick<ItemNotice, 'kind' | 'item' | 'winner' | 'losers' | 'orderProved'>): { text: string; action: 'undo' | 'turn-on'; help: string } {
     const who = toolName(notice.winner), others = andList(notice.losers.map(toolName)), name = notice.item;
     const earlier = `Make the version from before ${who}’s edit current again, in every tool ${name} is on in`;
     if (notice.kind === 'deleted') {
@@ -486,8 +492,8 @@ export function sentences(words: RowWords) {
       return { text, action: 'turn-on', help: `Put ${name} back in every tool, each ${copy} as it was` };
     }
     if (notice.kind === 'conflict') {
-      const text = `${name}: ${who}’s edit is the latest, so it is the current version. ${others}’s is kept as a version.`;
-      return { text, action: 'undo', help: earlier };
+      const chosen = notice.orderProved ? `${who}’s edit is the latest, so it is the current version` : `${who}’s edit is the current version, though ${noTimeTells}`;
+      return { text: `${name}: ${chosen}. ${others}’s is kept as a version.`, action: 'undo', help: earlier };
     }
     return { text: `${name} was edited in ${who}; that is its current version now${others ? `, in ${others} too` : ''}.`, action: 'undo', help: earlier };
   }

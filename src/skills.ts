@@ -21,7 +21,7 @@ import { readFile, unlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { appendHistory, readHistory, replaceHistory } from './history.ts';
 import { isClearedSwitch, libraryAction, libraryEntry } from './historyactions.ts';
-import { keepVersion, linkedSource, listed, pendingEdits, plan, wantedIn } from './library.ts';
+import { keepVersion, linkedSource, listed, noteAgainst, pendingEdits, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, foundCopies, itemClick, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords } from './libraryrow.ts';
@@ -492,11 +492,10 @@ async function changesOf(context: ShareContext, item: LibraryItem): Promise<Vers
     return was && is ? changedFiles(was, is) : undefined;
   };
   return Promise.all(listed(item).map(async (version): Promise<VersionChange> => {
-    if (version.from.replacedBy) { const files = await compare(version, version.from.replacedBy); return files ? { differs: files } : 'unknown'; }
-    const before = item.versions.slice(item.versions.indexOf(version) + 1).find(older => older.from.how !== 'was-in');
-    if (before) { const files = await compare(version, before.hash); return files ? { changed: files } : 'unknown'; }
-    const takenWith = version.from.how === 'chosen' || item.versions.some(other => other.from.replacedBy === version.hash);
-    return takenWith ? 'none' : 'first';
+    const basis = noteAgainst(item, version);
+    if (typeof basis === 'string') return basis;
+    const files = await compare(version, basis.against);
+    return !files ? 'unknown' : basis.how === 'differs' ? { differs: files } : { changed: files };
   }));
 }
 

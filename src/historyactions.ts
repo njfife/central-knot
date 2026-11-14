@@ -60,7 +60,7 @@
 import type { IconName } from './icons.ts';
 import { itemKey, pendingChanges, theVersion, type LibraryItem } from './library.ts';
 import { linkLabel } from './sourcelink.ts';
-import { asItIs, versionClock, writesWait, type RowWords } from './libraryrow.ts';
+import { asItIs, noTimeTells, versionClock, writesWait, type RowWords } from './libraryrow.ts';
 import type { Change, HarnessId, HistoryEvent, HomeView, LibraryFacts } from './types.ts';
 import { andList, sentence, toolName, toolsPhrase } from './words.ts';
 
@@ -100,14 +100,16 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
   // An Undo that gave tools their own copies back instead of removing what was there (types.ts HistoryEvent gaveBack).
   const gave = (event.gaveBack ?? []).map(toolName);
   const gaveSaid = gave.length ? ` ${andList(gave)} ${gave.length === 1 ? 'has its own copy' : 'have their own copies'} back, as before.` : '';
+  /** Whether the entry names this harness as written or removed (a write or removal held is not: librarypass.ts untell). */
+  const named = (tool: HarnessId) => event.losers.some(loser => loser.tool === tool);
   // A click that wrote over a copy a tool had of its own (tookFrom, and written: in `losers`), which is kept as a version.
-  const over = (event.tookFrom ?? []).filter(copy => event.losers.some(loser => loser.tool === copy.tool)).map(copy => toolName(copy.tool));
+  const over = (event.tookFrom ?? []).filter(copy => named(copy.tool)).map(copy => toolName(copy.tool));
   const overSaid = over.length ? ` ${andList(over)}’s own ${words.copy}${over.length === 1 ? ' was' : 's were'} written over and kept as a version.` : '';
   switch (event.kind) {
     case 'on': {
       // A pass no click asked wrote the current version over copies there (a tool managed again, a folder writable again).
       if (event.cause === 'in-line') return { glyph: 'circle-check', text: `Written over in ${tools} with the current version when sync reached ${event.losers.length === 1 ? 'it' : 'them'}; what was there is one of its versions.` };
-      if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}: its ${words.copy} there is back.${overSaid}${gaveSaid}` };
+      if (event.only) return { glyph: 'circle-check', text: `Turned on in ${where}${named(event.only) ? `: its ${words.copy} there is back` : ''}.${overSaid}${gaveSaid}` };
       const said = {
         switch: { glyph: 'circle-check', text: `Turned on${also(': put in')}.` },
         found: { glyph: 'plus', text: `Found in ${from} and taken into Central Knot${also('; put in')}.` },
@@ -122,7 +124,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
     }
     case 'off':
       if (event.only && event.gaveBack?.includes(event.only)) return { glyph: 'circle-off', text: `Kept out of ${where}: ${where} has its own copy back, as before. ${keeps}` };
-      if (event.only) return { glyph: 'circle-off', text: `Kept out of ${where}: its copy there was removed. ${keeps}${gaveSaid}` };
+      if (event.only) return { glyph: 'circle-off', text: `Kept out of ${where}${named(event.only) ? ': its copy there was removed' : ''}. ${keeps}${gaveSaid}` };
       if (event.cause === 'deleted-by-hand') return { glyph: 'trash-2', text: `Its copy was deleted in ${from}, so it was turned off${also(' and removed from')}. ${keeps}` };
       if (event.cause === 'source') return { glyph: 'link-2', text: `Brought in from ${source}: in Central Knot, Off, until you turn it on.` };
       if (event.cause === 'source-dropped') return { glyph: 'link-2-off', text: `${source} no longer has it, so it is off${also(' and removed from')}, and no longer from that source. ${keeps}` };
@@ -187,7 +189,9 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
     case 'conflict': {
       const gaveWay = event.losers.filter(loser => loser.hash !== event.previous && loser.hash !== event.winner?.hash);
       const others = andList([...new Set(gaveWay.map(loser => toolName(loser.tool)))]);
-      return { glyph: 'diff', text: `${from}’s edit was the latest, so it became the current version. ${others}’s is kept as a version.` };
+      // "The latest" only where times proved it (types.ts HistoryEvent orderProved); an entry stored before the library may say so too.
+      const chosen = event.orderProved ? `${from}’s edit was the latest, so it became the current version` : `${from}’s edit became the current version, though ${noTimeTells}`;
+      return { glyph: 'diff', text: `${chosen}. ${others}’s is kept as a version.` };
     }
     case 'chosen': {
       const gave = [...new Set(event.losers.map(loser => toolName(loser.tool)))];

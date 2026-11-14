@@ -17,7 +17,8 @@
 //   guardFolders   on the items as the clicks left them: a harness managed again (library.ts managedAgain, for every item at
 //                  once), a folder moved, made again or gone
 //   syncItem       the library's plan for the item (copiesOf, plan), carried out by carryOut: History first (logItem), then
-//                  versions and the record, then each harness's copy (writeCopy, removeCopy, through the kind)
+//                  versions and the record, then each harness's copy (writeCopy, removeCopy, through the kind); a write or
+//                  removal held is then taken out of what History was told (untell)
 //   keepFolders    the folder identities the next pass compares with
 //
 // Also here: the page's look (lookFor: the same reading, guards applied in memory, nothing saved), so a mark says what a pass
@@ -631,11 +632,15 @@ async function saveIfChanged(pass: Pass) {
   pass.saved = text;
 }
 
-/** Brings one item into line with its harnesses: the library's plan, carried out in the library's order (carryOut). */
+/**
+ * Brings one item into line with its harnesses: the library's plan, carried out in the library's order (carryOut), and History
+ * told what was done (logItem, then untell for a write or removal held).
+ */
 async function syncItem(pass: Pass, item: LibraryItem) {
   const { kind, context } = pass, slot = pass.disk.byKey.get(item.key) ?? {}, giveBack = pass.giveBack.get(item.key) ?? {};
   const copies = copiesOf(pass, item), made = plan(item, copies);
-  await carryOut(item, made, {
+  let told: Told = { events: [], named: new Map() };
+  const held = await carryOut(item, made, {
     ...pass.shelf,
     copy: harness => { const here = slot[harness]!; return { hash: here.hash, at: here.at, content: kind.contentOf(here) }; },
     // Each harness's copy as seen now holds its own part (the click on the item is recorded already).
@@ -645,12 +650,13 @@ async function syncItem(pass: Pass, item: LibraryItem) {
         if (text !== undefined) await kind.keepOwn(context, item, harness, text);
       }
     },
-    log: () => appendHistory(context, logItem(pass, item, made, slot)),
+    log: async () => { told = logItem(pass, item, made, slot); await appendHistory(context, told.events); },
     write: async harness => !waits(pass, item, harness) && writeCopy(pass, item, harness, slot[harness]),
     // An Undo gives a harness back the copy its click took over, as that harness's own, instead of removing what is there.
     remove: async harness => !waits(pass, item, harness)
       && (giveBack[harness] ? giveBackCopy(pass, item, slot[harness]!, giveBack[harness]!) : removeCopy(pass, item, slot[harness]!)),
   });
+  if (held.length) await untell(pass, told, held);
 }
 
 /**
@@ -735,39 +741,49 @@ async function deletionsTold(pass: Pass) {
  * in, and a copy deleted by hand that turned it Off (these two are also notices, since no one asked for them); edits not
  * taken in that gave way, and a harness's own copies that gave way (`own-copy`). Then one rule for the rest, by what the pass
  * does and never why: a write over a copy, or a removal, that nothing above told gets its entry (cause `in-line`), whichever
- * pass makes it (a tool managed again, a folder that could not be written, Write to Claude Code): an `on` for the copies
- * written over, and an `off` (a `deleted` for a deleted item) for the copies removed. A harness whose copy can't be changed this
- * time is said in the pass's results, and the next pass finishes it. A copy a harness managed again gives way with has its entry
- * from cameBack, which may concern an item outside this pass.
+ * pass makes it (a tool managed again, a write held in an earlier pass, Write to Claude Code): an `on` for the copies written
+ * over, and an `off` (a `deleted` for a deleted item) for the copies removed. Each names the harnesses the plan writes or
+ * removes; one whose write or removal is then held is taken out after (untell), said in the pass's results, and finished by a
+ * later pass (named then by the rule above where it writes over a copy or removes one; where it only adds, the entry of the
+ * click that asked for it covers it, Undo included). A copy a harness managed again gives way with has its entry from
+ * cameBack, which may concern an item outside this pass.
  */
-function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record<HarnessId, Seen>>): HistoryEvent[] {
+function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record<HarnessId, Seen>>): Told {
   // The item as it is before the plan is carried out: the edit taken in is current only after this is told.
   const taken = made.takeIn ? slot[made.takeIn]!.hash : item.hash;
-  const key = `${pass.kind.historyPrefix}${item.key}`, events: HistoryEvent[] = [];
-  // What the plan will change: not in a harness whose folder can't be written, so no entry or notice claims it.
-  const can = (tools: HarnessId[]) => tools.filter(tool => !pass.disk.locked.has(tool));
+  const key = `${pass.kind.historyPrefix}${item.key}`, events: HistoryEvent[] = [], named: Told['named'] = new Map();
   // An Undo gives a harness its own copy back instead of removing what is there (syncItem): not a removal.
   const giveBack = pass.giveBack.get(item.key) ?? {}, gaveBack = made.remove.filter(tool => giveBack[tool]);
+  // A harness whose folder can't be written, or whose writes wait for Write to Claude Code (Disk.locked), is held before anything
+  // is written, so no entry names it: told and taken out again, it would rewrite History in every pass while it stays so. Any
+  // other write or removal the pass then holds is taken out after (untell).
+  const can = (tools: HarnessId[]) => tools.filter(tool => !pass.disk.locked.has(tool));
   const did = { written: can(made.write), removed: can(made.remove.filter(tool => !giveBack[tool])) };
   // The copies a click takes over: each one Central Knot had not put there, which it writes over or counts as the item's.
   const tookFrom = [...made.current, ...made.write].filter(tool => slot[tool] && item.applied[tool] === undefined).map(tool => ({ tool, hash: slot[tool]!.hash }));
-  const log = (fields: Omit<HistoryEvent, 'id' | 'at' | 'key' | 'item' | 'orderProved'>) => {
+  /** An entry; `writes`: those of its losers it names as written or removed (Told). Only an edit taken in is chosen between edits (Plan orderProved). */
+  const log = (fields: Omit<HistoryEvent, 'id' | 'at' | 'key' | 'item' | 'orderProved'> & Partial<Pick<HistoryEvent, 'orderProved'>>, writes: HarnessId[] = []) => {
     const event: HistoryEvent = { id: randomUUID(), at: now(), key, item: item.name, orderProved: true, ...fields };
     events.push(event);
+    named.set(event, writes);
     return event.id;
   };
-  const notice = (kind: ItemNotice['kind'], winner: HarnessId, losers: HarnessId[], history: string) =>
-    pass.notices.push({ key, item: item.name, kind, winner, losers, orderProved: true, history });
+  const notice = (kind: ItemNotice['kind'], winner: HarnessId, losers: HarnessId[], history: string, writes: HarnessId[], orderProved = true) => {
+    const told: ItemNotice = { key, item: item.name, kind, winner, losers, orderProved, history };
+    pass.notices.push(told);
+    named.set(told, writes);
+  };
   /** Each of these harnesses with what it held before the pass. */
   const before = (tools: HarnessId[]) => tools.map(tool => ({ tool, hash: slot[tool]?.hash ?? '' }));
   const asked = pass.asked.get(item.key), clicked = !!asked;
   // A profile switch's clicks are told in its own entry (PassOptions told).
   if (asked && pass.told) pass.asked.delete(item.key);
   else if (asked) {
-    const { fill, ...entry } = asTold(pass, item.key, asked, made);
+    const { fill, ...entry } = asTold(pass, item, asked, made, taken);
     // A switch's entry says the version it left (`taken`, once this pass is carried out), so its Undo is offered only while it still is.
     const switched = (entry.kind === 'on' || entry.kind === 'off') && !entry.winner ? { version: taken } : {};
-    const id = log({ ...entry, ...switched, losers: entry.losers ?? (fill ? before(did[fill]) : []), ...(tookFrom.length ? { tookFrom } : {}), ...(gaveBack.length ? { gaveBack } : {}) });
+    const filled = !entry.losers && fill ? did[fill] : [];
+    const id = log({ ...entry, ...switched, losers: entry.losers ?? before(filled), ...(tookFrom.length ? { tookFrom } : {}), ...(gaveBack.length ? { gaveBack } : {}) }, filled);
     // What Synchronize everything took in is no click's: its notice says it, and no click's Undo undoes it.
     if (entry.cause === 'sync-everything') pass.takenIn.push({ name: item.name, foundIn: entry.foundIn ?? [], history: id });
     else pass.made.push(id);
@@ -780,13 +796,13 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
     // The copies edited as well, which gave way to the latest edit: each is a version, and History can make it current.
     const others = made.keep.filter(kept => kept.from.how === 'edited').map(kept => kept.harness);
     const kind = others.length ? 'conflict' : 'edit';
-    const losers = before([...new Set([...others, ...did.written])]);
-    const id = log({ kind, winner: { tool: made.takeIn, hash: taken }, previous: item.hash, losers });
-    notice(kind, made.takeIn, others.length ? others : did.written, id);
+    const written = did.written.filter(tool => !others.includes(tool));
+    const id = log({ kind, winner: { tool: made.takeIn, hash: taken }, previous: item.hash, losers: before([...others, ...written]), orderProved: made.orderProved }, written);
+    notice(kind, made.takeIn, others.length ? others : written, id, others.length ? [] : written, made.orderProved);
   }
   if (made.turnedOffBy) {
-    const id = log({ kind: 'off', cause: 'deleted-by-hand', winner: { tool: made.turnedOffBy, hash: taken }, losers: before(did.removed) });
-    notice('deleted', made.turnedOffBy, did.removed, id);
+    const id = log({ kind: 'off', cause: 'deleted-by-hand', winner: { tool: made.turnedOffBy, hash: taken }, losers: before(did.removed) }, did.removed);
+    notice('deleted', made.turnedOffBy, did.removed, id, did.removed);
   }
   // Edits no pass had taken in that give way to the current version (Pull, Make current): each is a version, offered back here.
   const gaveWay = made.takeIn ? [] : made.keep.filter(kept => kept.from.how === 'edited').map(kept => kept.harness);
@@ -797,24 +813,57 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
   if (theirs.length) log({ kind: 'kept-edit', cause: 'own-copy', losers: before(theirs) });
   // The rest of what this pass writes over or removes, which nothing above told: each copy written over or removed was a
   // version of the item (or was kept as one above), and the entry says where.
-  if (clicked) return events;
+  if (clicked) return { events, named };
   const told = new Set([...gaveWay, ...theirs, ...(pass.givingWay.get(item.key) ?? []).map(kept => kept.harness)]);
   const over = made.takeIn ? [] : did.written.filter(tool => slot[tool] && !told.has(tool));
-  if (over.length) log({ kind: 'on', cause: 'in-line', losers: before(over) });
+  if (over.length) log({ kind: 'on', cause: 'in-line', losers: before(over) }, over);
   const gone = made.turnedOffBy ? [] : did.removed;
-  if (gone.length) log({ kind: item.deleted ? 'deleted' : 'off', cause: 'in-line', losers: before(gone) });
-  return events;
+  if (gone.length) log({ kind: item.deleted ? 'deleted' : 'off', cause: 'in-line', losers: before(gone) }, gone);
+  return { events, named };
+}
+
+/**
+ * What logItem told for one item: its entries, and for each entry and notice, the harnesses it names as written or removed
+ * (`named`): the plan's, before the writes.
+ */
+interface Told { events: HistoryEvent[]; named: Map<HistoryEvent | ItemNotice, HarnessId[]> }
+
+/**
+ * Takes each harness whose write or removal was held (carryOut's answer) out of what History was told first for this item:
+ * out of each entry and notice that names it as written or removed, and out of an Undo's copies given back (`gaveBack`). An
+ * `in-line` entry left naming no harness told nothing that happened, and goes. The rest stays as told: the edits kept, the
+ * copies that gave way, and the copies a click took over (`tookFrom`: its Undo gives each back once the write has landed).
+ */
+async function untell(pass: Pass, told: Told, held: HarnessId[]) {
+  const before = JSON.stringify(told.events);
+  for (const [said, writes] of told.named) {
+    const out = writes.filter(tool => held.includes(tool));
+    if ('id' in said) said.losers = said.losers.filter(loser => !out.includes(loser.tool));
+    else said.losers = said.losers.filter(tool => !out.includes(tool));
+  }
+  for (const event of told.events) {
+    const gaveBack = event.gaveBack?.filter(tool => !held.includes(tool));
+    if (gaveBack?.length) event.gaveBack = gaveBack; else delete event.gaveBack;
+  }
+  const gone = new Set(told.events.filter(event => event.cause === 'in-line' && !event.losers.length).map(event => event.id));
+  if (JSON.stringify(told.events) === before) return;
+  const mine = new Map(told.events.map(event => [event.id, event]));
+  const history = await readHistory(pass.context);
+  await replaceHistory(pass.context, history.filter(event => !gone.has(event.id)).map(event => mine.get(event.id) ?? event));
 }
 
 /**
  * A source's update as History tells it, by what the plan does: where an edit in a harness wins over the source's content
- * (latest wins: the plan takes that edit in), the source's is kept as a version, so its entry is a `kept-edit` and the read's
- * answer (PassResult sourced) is `keep`. Recorded here, where the plan is known; anything else asked is told as asked.
+ * (latest wins: the plan takes that edit in, `taken`), the source's is kept as a version that was never current (library.ts
+ * Origin replacedBy), so its entry is a `kept-edit` and the read's answer (PassResult sourced) is `keep`. Recorded here, where
+ * the plan is known; anything else asked is told as asked.
  */
-function asTold(pass: Pass, key: string, asked: Asked, made: Plan): Asked {
+function asTold(pass: Pass, item: LibraryItem, asked: Asked, made: Plan, taken: string): Asked {
   if (asked.cause !== 'source' || asked.kind !== 'edit' || !made.takeIn) return asked;
-  const answered = pass.sourced.get(key);
+  const answered = pass.sourced.get(item.key), beaten = item.versions.find(version => version.hash === asked.version);
   if (answered) answered.answer = 'keep';
+  // A new `from`: fromSourceStep gives every version of one read the same object.
+  if (beaten) beaten.from = { ...beaten.from, replacedBy: taken };
   return { kind: 'kept-edit', cause: 'source', version: asked.version, link: asked.link };
 }
 
