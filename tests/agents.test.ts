@@ -13,7 +13,6 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { agentText, readAgents } from '../src/agentfiles.ts';
 import { agentVersion, agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
-import { convertAgentToSkill } from '../src/agentskill.ts';
 import { rowClicks, harnessIs, placeOf, libraryWords, sentences } from '../src/libraryrow.ts';
 import { librarySentence } from '../src/historyactions.ts';
 import { listed, originWords } from '../src/library.ts';
@@ -67,6 +66,58 @@ inBox('Writing a version changes only the name, description and prompt: a harnes
   assert.equal((await readAgents(box.context, 'codex-cli')).entries[0].agent.prompt, 'You review code.\nSay "hi" with a \\ and """quotes"""\ttab.\n');
   const claude = '---\n# keep me\nname: reviewer\ndescription: Reviews code\nhooks: {PreToolUse: [{matcher: Bash}]}\n---\n\nold\n';
   assert.equal(agentText('claude-cli', { name: 'reviewer', description: 'Reviews code', prompt: 'x' }, claude), '---\n# keep me\nname: reviewer\ndescription: Reviews code\nhooks: {PreToolUse: [{matcher: Bash}]}\n---\n\nx');
+});
+
+inBox('A description of several lines is written as a block indented under its key, so every tool reads it back as it was', async box => {
+  const description = 'Use this agent when a change needs a review.\n\nExamples: a pull request.';
+  await on(box, claudeAgent().replace('description: Reviews code', `description: ${JSON.stringify(description)}`));
+  assert.match((await readOf(box, 'copilot-cli'))!, /^---\nname: reviewer\ndescription: \|-\n {2}Use this agent when a change needs a review\.\n\n {2}Examples: a pull request\.\n---\n/);
+  for (const tool of tools as Tool[]) assert.equal((await readAgents(box.context, tool)).entries[0]?.agent.description, description, tool);
+  assert.equal((await pass(box)).writes, 0);
+});
+
+test('What is written for a description reads back as exactly that description, whatever its trailing newlines: the first pass makes no version nobody made, and the second writes nothing', async () => {
+  // Claude Code's front matter in each layout a person writes, and Codex's own form, each taken in and spread to the others, Pi too.
+  const claude = (description: string) => `---\nname: reviewer\n${description}---\n\nYou review code.\n`;
+  const shapes: [string, Tool, string][] = [
+    ['a | block, a blank line, a field', 'claude-cli', claude('description: |\n  Use this agent when code changes.\n\n  Examples: a PR.\n\ntools: Read\n')],
+    ['a | block, a blank line, the end', 'claude-cli', claude('description: |\n  Use this agent when code changes.\n\n  Examples: a PR.\n\n')],
+    ['a > block, a blank line, a field', 'claude-cli', claude('description: >\n  Use this agent\n  when code changes.\n\ntools: Read\n')],
+    ['a |- block, a blank line, a field', 'claude-cli', claude('description: |-\n  Use this agent.\n  Second.\n\ntools: Read\n')],
+    ['a |+ block, a field', 'claude-cli', claude('description: |+\n  Kept.\n\ntools: Read\n')],
+    ['a |+ block, two blank lines, a field', 'claude-cli', claude('description: |+\n  Kept.\n\n\ntools: Read\n')],
+    ['a quoted \\n\\n, a blank line, a field', 'claude-cli', claude('description: "Use this.\\n\\nExamples: a PR."\n\ntools: Read\n')],
+    ['a | block, a comment after', 'claude-cli', claude('description: |\n  Use this.\n  Second.\n# a comment\ntools: Read\n')],
+    ['a quoted \\n\\n\\n, a field', 'claude-cli', claude('description: "Three\\n\\n\\n"\ntools: Read\n')],
+    ['Codex, ending in a blank line', 'codex-cli', 'name = "reviewer"\ndescription = """\nUse this agent.\n\n"""\ndeveloper_instructions = """\nYou review code.\n"""\n'],
+    ['Codex, ending in two blank lines', 'codex-cli', 'name = "reviewer"\ndescription = """\nUse this agent.\n\n\n"""\ndeveloper_instructions = """\nYou review code.\n"""\n'],
+  ];
+  for (const [shape, tool, text] of shapes) {
+    const box = await sandbox(true);
+    try {
+      await write(box, tool, text);
+      await turnOn(box);
+      const first = await pass(box);
+      assert.deepEqual([(await itemOf(box))!.versions.length, first.notices ?? []], [1, []], `${shape}: the first pass made a version nobody made`);
+      assert.equal((await pass(box)).writes, 0, `${shape}: the second pass writes`);
+      assert.equal(await readOf(box, tool), text, `${shape}: the person’s own file changed`);
+    } finally { await box.cleanup(); }
+  }
+  // Written over a quoted value that only contains `|+`: the blank line after it is the person's separator, and stays.
+  assert.equal(agentText('claude-cli', { name: 'reviewer', description: 'Plain', prompt: 'You review code.\n' }, claude('description: "Run: |+ mode"\n\ntools: Read\n')), claude('description: Plain\n\ntools: Read\n'));
+  // Written over a file that has one: an edit in Pi to a description ending in blank lines reaches Claude Code's file, where
+  // the blank line the person left before `tools` would otherwise join that value; then an edit back to one line takes the
+  // block's blank lines with it.
+  const box = await sandbox(true);
+  try {
+    await on(box, claude('description: Reviews code\n\ntools: Read\n'));
+    for (const description of ['Reviews code.\n\n\n', 'Reviews code.']) {
+      await write(box, 'pi-cli', (await readOf(box, 'pi-cli'))!.replace(/description:[\s\S]*?(?=---\n)/, `description: ${JSON.stringify(description)}\n`));
+      await pass(box);
+      assert.deepEqual([(await readAgents(box.context, 'claude-cli')).entries[0]?.agent.description, (await pass(box)).writes], [description, 0], JSON.stringify(description));
+      assert.match((await readOf(box, 'claude-cli'))!, /\ntools: Read\n---\n/);
+    }
+  } finally { await box.cleanup(); }
 });
 
 inBox('The Agents page reads an agent as On or Off, with the tools it is kept out of', async box => {
@@ -623,12 +674,190 @@ inBox('An Off agent is in no tool, so no tool is named as one that can’t take 
   assert.deepEqual(tools.map(tool => harnessIs(fact, view.library!['réviseur'], tool)), ['none', 'none', 'none']);
 });
 
-inBox('Pi has no agents: with Pi among the tools Central Knot manages, an agent goes to the others and nothing is written for Pi', async box => {
+// ---------- Pi: an agent as a skill ----------
+// Pi holds no agents of its own: an agent is a loose `<name>.md` in its skills folder, the Markdown Claude Code's file has (presence.ts
+// agentsKeptIn, agentfiles.ts). Pi is then one more harness of the agents kind: every rule above holds there as anywhere.
+
+const inPiBox = (name: string, body: (box: Box) => Promise<void>) => test(name, async () => { const box = await sandbox(true); try { await body(box); } finally { await box.cleanup(); } });
+const piSkills = (box: Box) => join(box.home, '.pi/agent/skills');
+/** A skill folder of the person's own, in a skills folder (Pi's own, or ~/.agents/skills). */
+async function skillFolder(root: string, name: string) {
+  await mkdir(join(root, name), { recursive: true });
+  await writeFile(join(root, name, 'SKILL.md'), `---\nname: ${name}\ndescription: A skill of the person’s own.\n---\n\nDo it.\n`);
+}
+const piLine = async (box: Box) => { const { row, item } = await seen(box); return [harnessIs(row, item, 'pi-cli'), harnessLine(row, item, 'pi-cli', 'Pi')]; };
+
+inPiBox('An agent that is On is in Pi as <name>.md in its skills folder, the Markdown Claude Code’s file has; Pi has a line like any tool, and a second pass writes nothing', async box => {
+  await on(box);
+  assert.equal(await readOf(box, 'pi-cli'), '---\nname: reviewer\ndescription: Reviews code\n---\n\nYou review code.\nBe brief.\n');
+  const { row, item } = await seen(box);
+  assert.deepEqual([(await agentsView(box.context, box.tools)).tools.includes('pi-cli'), harnessIs(row, item, 'pi-cli')], [true, 'current']);
+  assert.equal((await pass(box)).writes, 0);
+});
+
+inPiBox('The first pass after the update, Pi new to agents, writes every agent that is On into Pi once, and none that is Off; the second writes nothing', async box => {
+  // The build before this one: Pi held no agents, so its passes ran over the other three.
+  const before: HarnessId[] = [...tools];
   await write(box, 'claude-cli', claudeAgent());
-  const withPi: HarnessId[] = [...tools, 'pi-cli'];
-  const done = await applyAgents(box.context, withPi, [{ key: 'reviewer', on: true, except: [], seenOn: false }]);
-  assert.deepEqual([done.writes, done.results.filter(entry => entry.harness === 'pi-cli')], [2, []]);
-  assert.deepEqual((await agentsView(box.context, withPi)).tools, tools);
+  await writeFile(join(box.home, '.claude/agents/helper.md'), claudeAgent('You help.\n').replace('name: reviewer', 'name: helper'));
+  await writeFile(join(box.home, '.claude/agents/quiet.md'), claudeAgent('Hush.\n').replace('name: reviewer', 'name: quiet'));
+  await applyAgents(box.context, before, ['reviewer', 'helper', 'quiet'].map(key => ({ key, on: true, except: [], seenOn: false })));
+  await applyAgents(box.context, before, [{ key: 'quiet', on: false, except: [], seenOn: true }]);
+  const first = await pass(box);
+  assert.deepEqual(first.results.filter(entry => entry.harness === 'pi-cli').map(entry => [entry.item, entry.outcome]).sort(), [['helper', 'written'], ['reviewer', 'written']]);
+  assert.deepEqual((await readdir(piSkills(box))).sort(), ['helper.md', 'reviewer.md']);
+  assert.equal((await pass(box)).writes, 0);
+});
+
+inPiBox('Pi’s own skills are never read as agents: a skill folder, loose files with and without front matter, and one named like an agent deleted with nothing applied in Pi', async box => {
+  // "gone": taken in and deleted while Pi was not managed, so nothing of it was ever applied in Pi.
+  await writeFile(join(box.home, '.claude/agents/gone.md'), claudeAgent('Gone.\n').replace('name: reviewer', 'name: gone'));
+  await applyAgents(box.context, tools, [{ key: 'gone', on: true, except: [], seenOn: false }]);
+  await applyAgents(box.context, tools, [{ key: 'gone', on: true, except: [], seenOn: true, deleted: true }]);
+  await skillFolder(piSkills(box), 'notes');
+  const own = {
+    'loose.md': '---\nname: loose\ndescription: A loose skill.\n---\n\nLoose.\n', 'plain.md': 'No front matter at all.\n', 'broken.md': '---\nname: [broken\n---\n',
+    'gone.md': claudeAgent('Mine.\n').replace('name: reviewer', 'name: gone'), 'constructor.md': '---\nname: constructor\ndescription: Named like a key every object has.\n---\n\nBuild.\n',
+  };
+  for (const [file, text] of Object.entries(own)) await writeFile(join(piSkills(box), file), text);
+  for (let count = 0; count < 2; count++) assert.deepEqual([(await pass(box)).writes, (await pass(box)).results], [0, []]);
+  const view = await agentsView(box.context, box.tools);
+  assert.deepEqual([view.items.map(item => item.key), view.problems], [[], []]);
+  for (const [file, text] of Object.entries(own)) assert.equal(await readFile(join(piSkills(box), file), 'utf8'), text);
+});
+
+inPiBox('A skill of the agent’s name holds Pi, in Pi’s skills folder or in ~/.agents/skills: nothing is written there and its line says how to use it; once that skill is gone, the next pass writes it', async box => {
+  const held = 'Pi has a skill named “reviewer” and loads only one skill of a name. Delete or rename that skill to use this agent in Pi.';
+  for (const root of [piSkills(box), join(box.home, '.agents/skills')]) {
+    await skillFolder(root, 'reviewer');
+    await on(box);
+    assert.deepEqual([await readOf(box, 'pi-cli'), await piLine(box), (await pass(box)).writes], [undefined, ['cannot', held], 0], root);
+    await rm(join(root, 'reviewer'), { recursive: true });
+    assert.equal((await pass(box)).writes, 1, root);
+    assert.ok(await readOf(box, 'pi-cli'));
+    await turnOff(box);
+  }
+  // A skill of that name that comes after the agent's file: nothing is removed, and the agent stays current there.
+  await turnOn(box);
+  await skillFolder(piSkills(box), 'reviewer');
+  assert.deepEqual([(await pass(box)).writes, !!(await readOf(box, 'pi-cli')), (await piLine(box))[0]], [0, true, 'current']);
+});
+
+inPiBox('Off then On, and Pi’s own switch off then on, give Pi’s file back byte for byte, a field added by hand in Pi included; no other tool gets that field', async box => {
+  await on(box);
+  await write(box, 'pi-cli', (await readOf(box, 'pi-cli'))!.replace('description: Reviews code\n', 'description: Reviews code\ndisable-model-invocation: true\n'));
+  assert.equal((await pass(box)).writes, 0, 'a field of Pi’s own is no edit of the agent');
+  const mine = (await readOf(box, 'pi-cli'))!;
+  await turnOff(box);
+  assert.equal(await readOf(box, 'pi-cli'), undefined);
+  await turnOn(box);
+  assert.equal(await readOf(box, 'pi-cli'), mine);
+  await keepOut(box, 'pi-cli');
+  assert.equal(await readOf(box, 'pi-cli'), undefined);
+  await keepOut(box, 'pi-cli', false);
+  assert.equal(await readOf(box, 'pi-cli'), mine);
+  assert.ok(Object.values(await filesOf(box)).every(text => text === mine || !text!.includes('disable-model-invocation')));
+});
+
+inPiBox('An edit to Pi’s file, its description and prompt, reaches every other tool as a version edited in Pi', async box => {
+  await on(box);
+  await write(box, 'pi-cli', (await readOf(box, 'pi-cli'))!.replace('description: Reviews code', 'description: Reviews code closely').replace('Be brief.', 'Be exact.'));
+  assert.equal((await pass(box)).writes, 3);
+  for (const tool of tools as Tool[]) assert.match((await readOf(box, tool))!, /Reviews code closely[\s\S]*Be exact\./, tool);
+  assert.deepEqual(await versions(box), ['Be exact. (edited in Pi) *', 'Be brief. (found in Claude Code)']);
+});
+
+inPiBox('An agent named with capitals and a space is in Pi under that very name, and two passes write nothing: no rename is read back', async box => {
+  await writeFile(join(box.home, '.claude/agents/Code Reviewer.md'), claudeAgent().replace('name: reviewer', 'name: Code Reviewer'));
+  await applyAgents(box.context, box.tools, [{ key: 'code reviewer', on: true, except: [], seenOn: false }]);
+  assert.match(await readFile(join(piSkills(box), 'Code Reviewer.md'), 'utf8'), /^---\nname: Code Reviewer\n/);
+  assert.deepEqual([(await pass(box)).writes, (await pass(box)).writes, await readdir(piSkills(box))], [0, 0, ['Code Reviewer.md']]);
+});
+
+inPiBox('A copy in Pi that can’t be seen is no copy gone: broken front matter, or Pi’s skills folder away inside the settle window, turns nothing Off and removes nothing', async box => {
+  await on(box);
+  const text = (await readOf(box, 'pi-cli'))!, others = await filesOf(box);
+  await write(box, 'pi-cli', '---\nname: rev');
+  const done = await pass(box);
+  assert.deepEqual([done.writes, (await itemOf(box))!.on, (await piLine(box))[0]], [0, true, 'unseen']);
+  await write(box, 'pi-cli', text);
+  await rename(piSkills(box), `${piSkills(box)}-away`);
+  const waiting = { ...box.context, settleMs: 2000 };
+  for (const now of [1000, 2500]) assert.deepEqual([(await applyAgents(waiting, box.tools, [], { now })).writes, (await itemOf(box))!.on], [0, true]);
+  await rename(`${piSkills(box)}-away`, piSkills(box));
+  assert.deepEqual([await filesOf(box), (await pass(box)).writes], [others, 0]);
+});
+
+inPiBox('Pi’s file deleted by hand while the agent is On turns it Off in every tool, as in any tool; History turns it on again, Pi’s file as it was', async box => {
+  await on(box);
+  const text = await readOf(box, 'pi-cli');
+  await rm(fileOf(box, 'pi-cli'));
+  await pass(box);
+  assert.deepEqual([placeOf(await itemOf(box)), Object.values(await filesOf(box))], ['off', [undefined, undefined, undefined, undefined]]);
+  const actions = await historyActions(box);
+  assert.deepEqual(actions.map(action => `${action.event.kind}: ${action.label}`), ['off: Turn on']);
+  await actions[0].run();
+  assert.equal(await readOf(box, 'pi-cli'), text);
+});
+
+inPiBox('Every sentence that names Pi’s folder for an agent calls it its skills folder: one that can’t be written, and one that is away', async box => {
+  await on(box);
+  await chmod(piSkills(box), 0o555);
+  try {
+    await edit(box, 'claude-cli', 'Be exact.');
+    await pass(box);
+    assert.deepEqual(await piLine(box), ['cannot', 'Pi’s skills folder can’t be written, so Central Knot can’t change the agent there. Once the folder’s permissions let it, Pi catches up when sync runs.']);
+  } finally { await chmod(piSkills(box), 0o755); }
+  await pass(box);
+  await rename(piSkills(box), `${piSkills(box)}-away`);
+  await turnOff(box);
+  assert.deepEqual(await piLine(box), ['unseen', 'Pi’s skills folder isn’t there. Its copy is removed once it is back.']);
+});
+
+inPiBox('A loose file in Pi named like an agent that Central Knot never applied there is the person’s own skill: whether the agent is turned On, taken in by Add, or met on the first pass after the update, Pi is held and the file stays as it was', async box => {
+  const mine = '---\nname: reviewer\ndescription: My own Pi skill\n---\n\nMine.\n';
+  const held = 'Pi has a skill named “reviewer” and loads only one skill of a name. Delete or rename that skill to use this agent in Pi.';
+  const stays = async (when: string, home = box) => {
+    assert.deepEqual([await readOf(home, 'pi-cli'), await piLine(home)], [mine, ['cannot', held]], when);
+    assert.deepEqual([(await pass(home)).writes, await readOf(home, 'pi-cli'), (await itemOf(home))!.versions.length], [0, mine, 1], `${when}, the next pass`);
+  };
+  // Taken in by Add while Pi has the file: the click says nothing untrue about Pi, and Pi's line says why.
+  await write(box, 'claude-cli', claudeAgent());
+  await write(box, 'pi-cli', mine);
+  const add = await applyAgents(box.context, box.tools, [{ key: 'reviewer', on: true, except: [], seenOn: false }]);
+  assert.deepEqual(add.results.filter(entry => entry.harness === 'pi-cli'), []);
+  await stays('after Add');
+  // Turned Off, then On again.
+  await turnOff(box);
+  await turnOn(box);
+  await stays('after Off and On');
+  // The first pass after the update, in a home of its own: Pi new to agents, the agent On in the others.
+  const updated = await sandbox(true);
+  try {
+    await write(updated, 'claude-cli', claudeAgent());
+    await write(updated, 'pi-cli', mine);
+    await applyAgents(updated.context, [...tools], [{ key: 'reviewer', on: true, except: [], seenOn: false }]);
+    await pass(updated);
+    await stays('after the update’s first pass', updated);
+  } finally { await updated.cleanup(); }
+  // Renamed, his skill no longer holds Pi: the next pass writes the agent there.
+  await rename(fileOf(box, 'pi-cli'), join(piSkills(box), 'my-reviewer.md'));
+  assert.equal((await pass(box)).writes, 1);
+  assert.deepEqual([await readOf(box, 'pi-cli'), await readFile(join(piSkills(box), 'my-reviewer.md'), 'utf8')], [claudeAgent(), mine]);
+});
+
+inPiBox('A skill an earlier version made for Pi from the agent (Convert to skill, now gone) holds the agent in Pi; that skill stays as it was, still only in Pi', async box => {
+  const { applySkills, skillsView } = await import('../src/skills.ts');
+  // As that click left it: the skill folder in Pi, taken into Central Knot On in Pi alone, and its record beside the others.
+  await skillFolder(piSkills(box), 'reviewer');
+  const skill = await readFile(join(piSkills(box), 'reviewer/SKILL.md'), 'utf8');
+  await applySkills(box.context, box.tools, [{ key: 'reviewer', on: true, except: [...tools] }]);
+  await writeFile(join(box.home, '.central-knot/converted.json'), '{"reviewer":{"agent":"reviewer","origin":"claude-cli","at":"2026-11-01T00:00:00.000Z","losses":[]}}\n');
+  await on(box);
+  assert.deepEqual([await readOf(box, 'pi-cli'), (await piLine(box))[0]], [undefined, 'cannot']);
+  await applySkills(box.context, box.tools, [], { background: true });
+  const row = (await skillsView(box.context, box.tools)).items.find(item => item.key === 'reviewer')!;
+  assert.deepEqual([await readFile(join(piSkills(box), 'reviewer/SKILL.md'), 'utf8'), Object.keys(row.copies)], [skill, ['pi-cli']]);
 });
 
 inBox('A tool whose agents folder can’t be written says why on its line, pass after pass, instead of promising the agent; once it can be, it gets it', async box => {
@@ -1206,22 +1435,3 @@ inBox('Every click is one History entry, and its Undo is that entry’s own acti
   assert.ok(await readOf(box, 'copilot-cli'));
 });
 
-test('Convert to skill: an agent becomes a Pi skill once, with where it came from recorded; it is never placed back in the agent’s tool', async () => {
-  const box = await sandbox();
-  try {
-    const { skillsView, applySkills } = await import('../src/skills.ts');
-    const { discover } = await import('../src/discovery.ts');
-    await mkdir(join(box.home, '.pi/agent'), { recursive: true });
-    await write(box, 'claude-cli', claudeAgent('You review code.\n', 'model: opus\n'));
-    const withPi: HarnessId[] = ['claude-cli', 'pi-cli'];
-    const context = { ...box.context, read: () => Promise.all(withPi.map(harness => discover({ home: box.home, mode: 'custom', harness }))) };
-    assert.equal((await convertAgentToSkill(context, withPi, 'reviewer')).stopped, undefined);
-    assert.match(await readFile(join(box.home, '.pi/agent/skills/reviewer/SKILL.md'), 'utf8'), /^---\nname: "reviewer"\ndescription: "Reviews code"\n---\n\nYou review code\.\n$/);
-    assert.match((await convertAgentToSkill(context, withPi, 'reviewer')).stopped ?? '', /already has a skill/);
-    await applySkills({ ...context, settleMs: 0 }, withPi, [{ key: 'reviewer', on: true, except: [] }]);
-    const facts = (await skillsView(context, withPi)).items.find(item => item.key === 'reviewer')!;
-    assert.match(facts.cannot['claude-cli'] ?? '', /Converted from Claude Code’s agent/);
-    assert.ok(facts.converted?.losses.some(loss => /model/.test(loss)));
-    assert.equal(await readOf(box, 'claude-cli'), claudeAgent('You review code.\n', 'model: opus\n'), 'the agent is unchanged');
-  } finally { await box.cleanup(); }
-});

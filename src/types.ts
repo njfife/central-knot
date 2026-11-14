@@ -188,8 +188,6 @@ export interface DesktopApi {
   instructions(readId?: number): Promise<InstructionFile[] | null>;
   /** One version of an agent as Central Knot's library holds it: its name, description and prompt; null when it is no longer kept. */
   agentVersion(key: string, hash: string): Promise<{ name: string; description: string; prompt: string } | null>;
-  /** Convert to skill (AGT-02): an agent as a Pi skill. `resume`: as a click's (app.ts clickResumes). */
-  convertAgent(key: string, resume: boolean, home: string): Promise<{ stopped?: string; skill?: string; origin?: HarnessId }>;
   /** A skill edit's SKILL.md before and after, for "See change". */
   eventChange(eventId: string): Promise<{ before: string; after: string } | undefined>;
   /** Shows a file in the system file manager (Finder, Explorer); nothing is opened or changed. */
@@ -856,8 +854,6 @@ export interface LibraryFacts {
    * `waits`); a server deleted from Central Knot whose entry there is still to go is one too (its row is a found one).
    */
   waits?: HarnessId[];
-  /** Skills: made by Convert to skill from an agent: which, from which tool's, and what an agent had that a skill doesn't. */
-  converted?: { agent: string; origin: HarnessId; losses: string[] };
   /**
    * In the library, from a source the home records: that source's link, as given. Linked to it (library.ts LibraryItem source):
    * whether its last read has a version that waits because the item was changed here (`waits`: library.ts A SOURCE `wait`), or

@@ -1,14 +1,15 @@
 // The kinds on Central Knot's library (library.ts) as the item pages show them, and what each supplies to its page besides
 // its words (libraryrow.ts libraryWords, pure, so the tests read them too): how Read gets one of its versions, whether it has
-// a Files view, what else its opened row shows of its own (an agent: Convert to a Pi skill), and what a tool's line adds
+// a Files view, what else its opened row shows of its own (an agent: what Pi gets of it), and what a tool's line adds
 // (a skill: clear that tool's own switch, take over a copy outside Central Knot's). The table is keyed by the page's name
 // for a kind (app.ts PageKind: 'agents'), not the library's (library.ts ItemKind: 'agent'). matrix.ts draws every row of a
 // kind here as a library row (librarySwitch, libraryMark, libraryVersions, libraryDelete, …). Every place a kind is wired in
 // is in librarypass.ts's recipe; this is one.
-import { convertAgent, rerender, shownPath, skillAction, state, type PageKind } from './app.ts';
+import { rerender, shownPath, skillAction, state, type PageKind } from './app.ts';
 import { h, icon } from './dom.ts';
 import type { ItemRow } from './itemrow.ts';
 import type { NeutralServer } from './mcp.ts';
+import { agentsKeptIn } from './presence.ts';
 import type { HarnessId } from './types.ts';
 import { libraryWords, sentences, type RowWords } from './libraryrow.ts';
 import type { VersionText } from './versionlist.ts';
@@ -43,7 +44,7 @@ export const libraryPages: Record<PageKind, LibraryPage> = {
     version: (key, hash) => window.centralKnot.serverVersion(key, hash).then(server => server && serverParts(server)),
   },
   agents: {
-    words: libraryWords.agents, say: sentences(libraryWords.agents), own: convertBlock,
+    words: libraryWords.agents, say: sentences(libraryWords.agents), own: asSkillNote,
     version: (key, hash) => window.centralKnot.agentVersion(key, hash)
       .then(agent => agent && [{ name: 'description', text: agent.description }, { name: 'prompt', text: agent.prompt, block: true as const }]),
   },
@@ -58,16 +59,19 @@ function serverParts(server: NeutralServer): { name: string; text: string; block
   return parts.flatMap(([name, text, block]) => (text ? [{ name, text, ...(block ? { block: true as const } : {}) }] : []));
 }
 
-/** Pi has no native agents (CD §5): an agent can reach it only as a skill, by an explicit, one-time Convert to skill (AGT-02). */
-function convertBlock(agent: ItemRow) {
-  if (!state.home?.sync.managed.includes('pi-cli')) return null;
-  const done = state.home.skills.items.find(entry => entry.converted?.agent.toLowerCase() === agent.key.toLowerCase());
-  if (done) return h('p.details-limits.details-note', {}, icon('check', 12, 'tone-muted'), `Converted to a Pi skill, “${done.name}”: see it on the Skills page.`);
-  const convert = (event: Event) => { event.stopPropagation(); void convertAgent(agent.key, agent.name ?? agent.key); };
-  return h('div.convert-block', {},
-    h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), `Pi has no agents. You can convert this one to a skill for Pi: a one-time copy of its name, description and prompt. A skill has no ${andList(['own isolated context', 'tool restrictions', 'model selection'])}, and it is invoked as a skill, not picked as an agent. The agent stays as it is.`),
-    // A quiet text action, as matrix.ts smallAction draws one.
-    h('button.text-action', { type: 'button', id: `convert-${agent.key}`, disabled: false, onclick: convert }, 'Convert to a Pi skill'));
+/**
+ * What a managed tool that keeps agents as skills (Pi: presence.ts agentsKeptIn) gets of an agent, said once in its opened row:
+ * what a skill lacks; and, where that tool can take the agent (its line has a switch), that deleting its file there turns the
+ * agent off everywhere (library.ts THE RULE), before it happens.
+ */
+function asSkillNote(agent: ItemRow) {
+  const asSkills = (state.home?.sync.managed ?? []).filter(tool => agentsKeptIn[tool] === 'skills folder');
+  if (!asSkills.length) return null;
+  const there = andList(asSkills.map(toolName)), takes = andList(asSkills.filter(tool => !agent.cannot?.[tool]).map(toolName));
+  const lacks = `${there} holds no agents of its own, so there an agent is a skill, a file in its skills folder: it has no `
+    + `${andList(['isolated context of its own', 'tool restrictions', 'model selection'])}, and it is invoked as a skill rather than picked as an agent.`;
+  const deleting = takes ? ` Deleting that file in ${takes} turns the agent off in every tool; to keep it out of ${takes} only, use ${takes}’s switch above.` : '';
+  return h('p.details-limits.details-note', { id: `as-skill-${agent.key}` }, icon('info', 12, 'tone-muted'), lacks + deleting);
 }
 
 /** A take-over that asks to be confirmed (it removes a copy other apps may read): its skill and tool, until another click. */

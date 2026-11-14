@@ -551,6 +551,31 @@ async function copyQuestionFits(a, key, words) {
 }
 
 /**
+ * Pi holds no agents of its own: with a Pi folder, an agent that is On lands in Pi as a skill, `.pi/agent/skills/<name>.md`;
+ * its row has a Pi mark and line, the opened row says once what Pi gets, and Pi's About names where its agents are. The Pi
+ * folder is the check's own: it is taken out again.
+ */
+async function agentInPi(a, practice) {
+  mkdirSync(join(practice, '.pi/agent'), { recursive: true });
+  await a.click('#header-refresh');
+  const piFile = join(practice, '.pi/agent/skills/code-reviewer.md');
+  for (let tries = 0; tries < 30 && !existsSync(piFile); tries++) await wait(100);
+  check('an agent that is On lands in Pi as a skill, .pi/agent/skills/<name>.md, its name and description in front matter', existsSync(piFile) && /^---\nname: code-reviewer\ndescription: Reviews a change/.test(readFileSync(piFile, 'utf8')), existsSync(piFile) ? readFileSync(piFile, 'utf8').slice(0, 200) : 'no file');
+  for (let tries = 0; tries < 30 && await cellState(a, 'code-reviewer', 'pi-cli') !== 'current'; tries++) await wait(100);
+  await a.click('#open-code-reviewer');
+  same('its row has a Pi mark and a Pi line with its switch', [await cellState(a, 'code-reviewer', 'pi-cli'), await a.exists('#enable-code-reviewer-pi-cli')], ['current', true]);
+  const note = (await a.text('#as-skill-code-reviewer') ?? '').trim();
+  check('the opened row says once what Pi gets, and that deleting its file there turns the agent off everywhere',
+    /^Pi holds no agents of its own, so there an agent is a skill[\s\S]*no isolated context of its own, tool restrictions and model selection[\s\S]*Deleting that file in Pi turns the agent off in every tool/.test(note), note);
+  await a.click('#open-code-reviewer');
+  await a.click('#nav-harnesses'); await a.click('#harness-pi-cli'); await a.click('#harness-tab-about');
+  check('Pi’s About says its agents are in its skills folder, each as a skill', /Agents\s*In its skills folder, each as a skill/.test(await a.text('#harness-body') ?? ''), await a.text('#harness-body'));
+  await a.click('#nav-agents');
+  rmSync(join(practice, '.pi'), { recursive: true, force: true });
+  await a.click('#header-refresh');
+}
+
+/**
  * An agent's copy question, three copies of one long line: Claude Code's stops where Copilot CLI's and Codex's each add a
  * sentence of their own, and each was edited on a day of its own.
  *  - Its rows' words: every row quotes the same stretch of the line (so the copy that stops sooner is seen to), a copy's own
@@ -1173,6 +1198,7 @@ async function practiceFlow() {
   await a.click('#outcome-undo');
   same('Undo turns it on again: every harness’s file is back byte for byte', reviewerNow(), taken);
   await agentCopiesUnderTheList(a, practice);
+  await agentInPi(a, practice);
   // The opened row: each harness's line with what stays its own, and the agent's versions.
   await a.click('#open-code-reviewer');
   check('the opened row says which settings stay Claude Code’s own', /Its own settings stay in its file: tools and model/.test(await a.text('.details') ?? ''), await a.text('.details'));
@@ -2623,8 +2649,8 @@ async function releasedStartupFlow() {
 
 /**
  * A home with no tools, then with Pi alone, then with Claude Code too. With no tools every page stays, each saying so; a
- * kind no tool here can hold (agents, plugins with Pi alone) is left out of the sidebar and the Overview, named once; a
- * tool that holds it brings it back.
+ * kind no tool here can hold (plugins with Pi alone, which takes agents as skills) is left out of the sidebar and the
+ * Overview, named once; a tool that holds it brings it back.
  */
 async function fewToolsFlow() {
   const home = join(scratch, 'home-few');
@@ -2662,9 +2688,9 @@ async function fewToolsFlow() {
   writeFileSync(join(home, '.pi/agent/skills/notes/SKILL.md'), text('notes'));
   cli('.pi/agent/bin/pi', 'pi 1.5.0');
   await a.click('#header-refresh');
-  // Codex, whose folder is still here, holds agents and plugins: were it counted, both pages would be back.
-  same('with Pi alone, Agents and Plugins are left out', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'instructions', 'profiles', 'history', 'sources', 'repo', 'settings']);
-  check('and the Overview names them once', (await a.text('#overview-absent') ?? '').includes('No tool here holds agents or plugins') && !(await a.exists('#overview-agents')), await a.text('#overview-absent'));
+  // Codex, whose folder is still here, holds plugins: were it counted, that page would be back.
+  same('with Pi alone, Plugins is left out, and Agents stays: Pi takes agents as skills', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'profiles', 'history', 'sources', 'repo', 'settings']);
+  check('and the Overview names it once', (await a.text('#overview-absent') ?? '').includes('No tool here holds plugins') && await a.exists('#overview-agents'), await a.text('#overview-absent'));
   await a.click('#nav-skills');
   check('the tool with only a folder has no mark', await a.exists('.tool-mark[data-tool="pi-cli"]') && !(await a.exists('[data-tool="codex-cli"], #tool-codex-cli')));
   await a.click('#nav-harnesses');
@@ -2677,7 +2703,7 @@ async function fewToolsFlow() {
   mkdirSync(join(home, '.claude'), { recursive: true });
   cli('.local/bin/claude', '2.1.309 (Claude Code)');
   await a.click('#header-refresh');
-  same('a tool that holds agents and plugins brings them back', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'sources', 'repo', 'settings']);
+  same('a tool that holds plugins brings them back', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'sources', 'repo', 'settings']);
   await a.click('#nav-harnesses');
   check('Claude Code’s CLI alone says nothing of Cowork', !(await a.text('#harness-claude-cli')).includes('Cowork'), await a.text('#harness-claude-cli'));
   // On Agents, its only tool goes away: the page it was on no longer exists here, so the Overview opens.

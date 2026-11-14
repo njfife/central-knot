@@ -1,9 +1,9 @@
 // Agents on Central Knot's library: the adapter for one kind. Read library.ts first (the model, and the one rule for an item
 // in the library), then librarypass.ts (the pass, the same for every kind, and `Kind`, the contract a kind implements).
 // This module is the agents' `Kind` (agentKind) and nothing the pass does itself: where each harness keeps its agents (one
-// file per agent in its agents folder), how a file is read and written in each harness's format (agentfiles.ts), a
-// harness's own part (the rest of its file: agentstore.ts keepOwn), and why a harness can't take an agent (agentHeld, and
-// cannotTake for the page).
+// file per agent in its agents folder; in Pi, which has no agents, a skill in its skills folder: presence.ts agentsKeptIn),
+// how a file is read and written in each harness's format (agentfiles.ts), a harness's own part (the rest of its file:
+// agentstore.ts keepOwn), and why a harness can't take an agent (agentHeld, and cannotTake for the page).
 // Writes and removals are checked (share.ts), so a save that lands meanwhile is never lost.
 //
 // Around the pass: applyAgents and restoreAgent run it for agents (the page's clicks);
@@ -11,19 +11,21 @@
 // do; agentsForRepo is what the Git repo's Push sends. Elsewhere: where each thing is kept on disk, agentstore.ts; the
 // harnesses' file formats, agentfiles.ts; an agent's row, the clicks its controls send and its words, libraryrow.ts (the
 // same row for every kind on the library) with librarypages.ts; History's sentences and actions for agents,
-// historyactions.ts; Convert to skill, agentskill.ts; the Git repo's Push and Pull, gitrepo.ts (agentsForRepo, and Pull
-// through applyAgents).
+// historyactions.ts; what the opened row says Pi gets, librarypages.ts; the Git repo's Push and Pull, gitrepo.ts (agentsForRepo,
+// and Pull through applyAgents).
 import { constants } from 'node:fs';
-import { access } from 'node:fs/promises';
+import { access, readdir, stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import { agentHash, agentText, agentsFolder, changedFields, fileFor, isAgentTool, nameProblem, oneFileName, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
 import { fileTextFor, keepOwn, openLibrary, readVersion, saveLibrary, storeVersion } from './agentstore.ts';
+import { harnesses, toolConfigRoot } from './harnesses.ts';
 import { libraryAction } from './historyactions.ts';
 import { itemKey, listed, noteAgainst, pendingEdits, plan } from './library.ts';
 import { libraryWords } from './libraryrow.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
-import { copiesOf, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
+import { copiesOf, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type KindLibrary, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { throughPlugins } from './plugins.ts';
-import type { AgentTool } from './presence.ts';
+import { agentsKeptIn, type AgentTool } from './presence.ts';
 import { errorCode, exists, partsIn, recoverParked, removeFileChecked, syncGate, writeAccess, writeFileChecked } from './share.ts';
 import type { ShareContext } from './share.ts';
 import type { Change, HarnessId, LibraryFacts, LibraryView, PassResult, SyncNotice, ThroughPlugin, ToolCopy } from './types.ts';
@@ -35,25 +37,33 @@ const nameOf = (tool: HarnessId) => toolName(tool);
 // ---------- What the harnesses hold ----------
 
 type ThroughPlugins = Map<HarnessId, Map<string, ThroughPlugin>>;
-/** The managed harnesses' agent files now (librarypass.ts Disk), and what each harness's plugins bring, which the page shows. */
-interface AgentDisk extends Disk<AgentEntry> { through: ThroughPlugins }
+/**
+ * The managed harnesses' agent files now (librarypass.ts Disk), what each harness's plugins bring, which the page shows, and
+ * (`skills`) the keys of the person's skills in a harness that keeps agents as skills, which hold the agent there (agentHeld).
+ */
+interface AgentDisk extends Disk<AgentEntry> { through: ThroughPlugins; skills: Map<HarnessId, Set<string>> }
 type AgentLook = Look<SharedAgent, AgentEntry, AgentDisk>;
 
-/** Reads each managed harness's agents folder (`managed`: the harnesses that hold agents, agentKind.harnesses). */
-async function readDisk(context: ShareContext, managed: HarnessId[]): Promise<AgentDisk> {
+/**
+ * Reads each managed harness's agents folder (`managed`: the harnesses that hold agents, agentKind.harnesses); in a skills
+ * folder only the agents the record (`library`) says were applied there, every other loose file there being the person's
+ * skill (agentfiles.ts readAgents).
+ */
+async function readDisk(context: ShareContext, managed: HarnessId[], library: KindLibrary): Promise<AgentDisk> {
   const disk: AgentDisk = {
     byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], through: await agentsThroughPlugins(context, managed),
-    parts: await partsIn(context.home, 'agent'),
+    parts: await partsIn(context.home, 'agent'), skills: await skillsLoaded(context, managed),
     held: (item, tool) => { const why = agentHeld(disk, managed, item, tool); return why ? { why } : undefined; },
   };
   for (const tool of managed as AgentTool[]) {
-    const read = await readAgents(context, tool), folder = agentsFolder(context, tool);
+    const read = await readAgents(context, tool, library.items), folder = agentsFolder(context, tool);
     disk.problems.push(...read.problems);
-    const locked = `${nameOf(tool)}’s agents folder can’t be written, so Central Knot can’t change the agent there. `
+    for (const key of read.skills) disk.skills.get(tool)?.add(key);
+    const locked = `${nameOf(tool)}’s ${agentsKeptIn[tool]} can’t be written, so Central Knot can’t change the agent there. `
       + `Once the folder’s permissions let it, ${nameOf(tool)} catches up when sync runs.`;
     if (await exists(folder) && await access(folder, constants.W_OK).then(() => false, () => true)) disk.locked.set(tool, { why: locked });
     for (const key of read.unreadable.keys()) {
-      const what = key === '*' ? 'agents folder' : 'file for this agent';
+      const what = key === '*' ? agentsKeptIn[tool] : 'file for this agent';
       disk.unseen.set(`${tool}:${key}`, `${nameOf(tool)}’s ${what} is there but could not be read. Nothing changes there until it reads again.`);
     }
     for (const entry of read.entries) {
@@ -66,6 +76,27 @@ async function readDisk(context: ShareContext, managed: HarnessId[]): Promise<Ag
     }
   }
   return disk;
+}
+
+/**
+ * The skill folders a harness that keeps agents as skills (Pi) reads, by key: in each skills folder it reads (its own and
+ * ~/.agents/skills: harnesses.ts skillRoots), links to folders too. readDisk adds the loose files in its own skills folder
+ * that are no agent's copy (agentfiles.ts readAgents `skills`). Of two skills with one name Pi loads only the first it finds
+ * (measured on Pi 1.5.0), so a skill of the agent's name holds the agent there (agentHeld).
+ */
+async function skillsLoaded(context: ShareContext, managed: HarnessId[]): Promise<Map<HarnessId, Set<string>>> {
+  const loaded = new Map<HarnessId, Set<string>>();
+  for (const tool of (managed as AgentTool[]).filter(tool => agentsKeptIn[tool] === 'skills folder')) {
+    const keys = new Set<string>();
+    for (const { path } of harnesses[tool].skillRoots(toolConfigRoot(context, tool), context.home)) {
+      for (const entry of await readdir(path, { withFileTypes: true }).catch(() => [])) {
+        const folder = entry.isDirectory() || (entry.isSymbolicLink() && await stat(join(path, entry.name)).then(info => info.isDirectory(), () => false));
+        if (folder) keys.add(itemKey(entry.name));
+      }
+    }
+    loaded.set(tool, keys);
+  }
+  return loaded;
 }
 
 /**
@@ -83,13 +114,17 @@ async function agentsThroughPlugins(context: ShareContext, tools: HarnessId[]): 
 
 /**
  * Why a harness with no copy can't be given the agent, for an agent's own reasons (Disk.held): a plugin brings the agent
- * there, or its name can't be stored there (unless that harness held it under that name before). Worked out at each look and
- * never stored. A plugin that brings the agent is "has
- * it another way" in the model's terms (library.ts); agents still hold it as can't-take, so nothing they do changes.
+ * there, a harness that keeps agents as skills has a skill of its name (a folder, a link to one, or a loose file Central Knot
+ * didn't put there: readDisk), or its name can't be stored there
+ * (unless that harness held it under that name before). Worked out at each look and never stored. A plugin that brings the
+ * agent is "has it another way" in the model's terms (library.ts); agents still hold it as can't-take, so nothing they do changes.
  */
 function agentHeld(disk: AgentDisk, managed: HarnessId[], item: Wanted, tool: HarnessId): string | undefined {
   const given = disk.through.get(tool)?.get(item.key);
   if (given) return throughPlugin(tool, given, 'agent');
+  if (disk.skills.get(tool)?.has(item.key)) {
+    return `${nameOf(tool)} has a skill named “${item.name}” and loads only one skill of a name. Delete or rename that skill to use this agent in ${nameOf(tool)}.`;
+  }
   // A harness that held the agent under this name (its own part is kept: LibraryItem own) can be given it back: the name was
   // that harness's own, so an agent only it can hold goes Off and On again there. Every other harness still can't store it.
   // Only a name that is one file's name: an own part can be on record for a tool that never held the file (Pull records one for
@@ -110,11 +145,11 @@ function cannotTake(disk: AgentDisk, managed: HarnessId[], item: Wanted, tool: H
 
 // ---------- The agents' Kind ----------
 
-/** Agents as a kind of item (librarypass.ts Kind): one file per agent in each harness's agents folder. */
+/** Agents as a kind of item (librarypass.ts Kind): one file per agent in each harness's agents folder (Pi's: its skills folder). */
 export const agentKind: Kind<SharedAgent, AgentEntry, AgentDisk> = {
   kind: 'agent',
   // The item and its copy as the page names them (libraryrow.ts libraryWords); a harness's folder of them only the pass says.
-  words: { item: libraryWords.agents.item, copy: libraryWords.agents.copy, folder: 'agents folder' },
+  words: { item: libraryWords.agents.item, copy: libraryWords.agents.copy, folder: tool => agentsKeptIn[tool as AgentTool] },
   historyPrefix: 'agent:',
   harnesses: tools => tools.filter(isAgentTool),
   folder: agentsFolder,
@@ -270,7 +305,7 @@ async function rowFacts(look: AgentLook, key: string, item: LibraryItem | undefi
     if (copiesNow) continue;
     // A found agent: what can't be seen there. One deleted from Central Knot whose copy there is still owed a removal says so.
     const owed = tombstone?.applied[tool] !== undefined && slot[tool] && look.disk.locked.get(tool);
-    const removedLater = `Central Knot removes this copy once it can write in ${nameOf(tool)}’s agents folder.`;
+    const removedLater = `Central Knot removes this copy once it can write in ${nameOf(tool)}’s ${agentsKeptIn[tool as AgentTool]}.`;
     const hidden = unseenIn(look.disk, tool, key) ?? (owed ? removedLater : undefined);
     if (hidden) unseen[tool] = hidden;
   }

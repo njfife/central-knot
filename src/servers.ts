@@ -144,7 +144,7 @@ function kindFor(writeClaude: boolean): Kind<NeutralServer, McpEntry, ServerDisk
   return {
     kind: 'mcp',
     // The item and its copy as the page names them (libraryrow.ts libraryWords); a tool's file of them only the pass says.
-    words: { item: libraryWords.mcp.item, copy: libraryWords.mcp.copy, folder: 'settings file' },
+    words: { item: libraryWords.mcp.item, copy: libraryWords.mcp.copy, folder: () => 'settings file' },
     // History's MCP entries were keyed `mcp:<name>` before the library, and still are (by the server's key now).
     historyPrefix: 'mcp:',
     harnesses: tools => tools.filter(tool => mcpTools.includes(tool)),
