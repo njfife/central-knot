@@ -9,9 +9,10 @@
 //
 // The last read is a cache, not a record: two things read it, the source's row on the Sources page (what each skill there is to
 // the library, and why the read isn't whole) and Add on a deleted name's row (which brings that name back from it, with no
-// fetch). A missing copy means only "look again": the row says so (types.ts SourceView copyGone), and the next Check now fetches
-// it. Which items came from a source is the items' own (library.ts LibraryItem `source`, `seen`), never this record's, and
-// whom an item is linked to is library.ts linkedTo's alone. This module only reads and writes what it is given.
+// fetch). A missing copy means only "look again": the row reads it as nothing at the link's folder (sources.ts notSkillsWhy),
+// and the next Check now fetches it. Which items came from a source is the items' own (library.ts LibraryItem `source`,
+// `seen`), never this record's, and whom an item is linked to is library.ts linkedTo's alone. This module only reads and
+// writes what it is given.
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { sameSource } from './plugins.ts';

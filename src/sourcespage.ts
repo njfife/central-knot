@@ -46,7 +46,7 @@ export async function loadSources(): Promise<void> {
 
 /**
  * After a click that may have changed the library: the home read again, so the Skills page and every count follow, then the
- * band (what the click did, from `said`, with its one action and Open Skills).
+ * band (what the click did, from `said`, with its one action, and Open Skills where something there changed).
  */
 async function settle(result: SourceResult, said: Said | undefined) {
   if (result.view) sources.view = result.view;
@@ -56,7 +56,7 @@ async function settle(result: SourceResult, said: Said | undefined) {
   if (home) state.home = home;
   if (said && !result.stopped) {
     state.outcome = { page: 'sources', text: said.text, band: true, warn: said.warns, ...(said.note ? { note: said.note } : {}), ...(said.undo ? { undo: said.undo } : {}),
-      next: { label: 'Open Skills', id: 'source-open-skills', run: () => showPage('skills') } };
+      ...(said.skills ? { next: { label: 'Open Skills', id: 'source-open-skills', run: () => showPage('skills') } } : {}) };
   }
   announce(result.stopped ?? said?.text ?? '', true);
 }
@@ -90,7 +90,7 @@ const remove = (source: SourceView) => busy('Removing the source…', async () =
 });
 
 /** A click's band: its sentences, whether it took a skill out of tools (a warning, not a tick), History's note, and its one action. */
-interface Said { text: string; warns: boolean; note?: string; undo?: { id: string; label: string } }
+interface Said { text: string; warns: boolean; note?: string; undo?: { id: string; label: string }; skills?: boolean }
 
 /**
  * What a source's click did, from what the pass did (types.ts PassResult sourced: each item's answer, corrected where a later
@@ -112,13 +112,15 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'results' | 'no
     made.length ? `${names(made)} ${are(made)} in Central Knot, Off: turn ${made.length === 1 ? 'it' : 'them'} on in Skills.` : '',
     linked.length ? `${names(linked)} ${are(linked)} in Central Knot already, the same, and ${linked.length === 1 ? 'is' : 'are'} now from it.` : '',
     left.length ? `Not brought in: ${names(left)} (${left.length === 1 ? 'its row says' : 'their rows say'} why).` : '',
-    result.notWhole ? `Not read whole, so nothing was taken to be gone. ${result.notWhole}` : '',
+    result.notWhole ? `Not all of ${label} could be read (its row says why), so nothing was turned off.` : '',
   ].filter(Boolean);
   const turnOn = dropped.length === 1 && dropped[0].history ? { id: dropped[0].history, label: `Turn ${dropped[0].name} on` } : undefined;
   const undo = !turnOn && updated.length === 1 && updated[0].history ? { id: updated[0].history, label: 'Undo the update' } : undefined;
   return {
     text: said.length ? said.join(' ') : `Checked ${label}: nothing changed there.`, warns: dropped.length > 0 || !!result.notWhole,
     ...(updated.length || kept.length ? { note: `See each change, or undo it, in History.` } : {}), ...(turnOn ?? undo ? { undo: turnOn ?? undo } : {}),
+    // Open Skills where something there changed: not for a read that only says what can't be read.
+    skills: dropped.length + updated.length + kept.length + made.length + linked.length > 0,
   };
 }
 
@@ -137,10 +139,10 @@ function stateWords(name: SourceName, preview: boolean): { text: string; warns?:
     case 'update': return { text: preview ? 'Came from this link before and is unchanged: Add links it again, and the source’s version becomes current' : `Changed at the source: ${next} makes that the current version` };
     case 'keep': return { text: `Changed at the source and here: yours is later, so ${next} keeps the source’s as a version` };
     case 'drop': return { text: `No longer at the source: ${next} turns it off`, warns: true };
-    case 'differs': return { text: `Not brought in: Central Knot already has a different ${called}. To take this one instead, delete yours from Central Knot (on Skills), then ${preview ? 'once the source is added, Add on its row' : 'Add on this row'}.`, warns: true };
+    case 'differs': return { text: `Not brought in: Central Knot already has a different ${called}. To take this one instead, delete yours from Central Knot on Skills (that also takes it out of every tool it is on in), then ${preview ? 'once the source is added, Add on its row' : 'Add on this row'}.`, warns: true };
     case 'another': return { text: `Not brought in: Central Knot has ${called} from ${name.why ? linkLabel(name.why) : 'another source'}`, warns: true };
     case 'deleted': return { text: `Not brought in: deleted from Central Knot.${preview ? ' Once the source is added, Add on its row brings it back, or Restore in History.' : ''}`, warns: true };
-    case 'unreadable': return { text: `Can’t be read: ${name.why}`, warns: true };
+    case 'unreadable': return { text: `Can’t be read: ${name.why}. Until it can, nothing from this source is turned off.`, warns: true };
   }
 }
 
@@ -157,7 +159,7 @@ function filesLine(files: string[]) {
     ...shown.flatMap((file, index) => [index ? ', ' : '', h('span.mono', {}, file)]), more ? `, and ${more} more…` : '');
 }
 /** Where a skill sits at the source: at the root of its repository, or in its folder. */
-const whereAt = ({ folder, folderName }: NonNullable<SourceName['there']>) => (folder ? `in ${folder}` : `at the root of ${folderName}`);
+const whereAt = ({ folder, folderName }: NonNullable<SourceName['there']>) => (folder ? `in the folder ${folder}` : `at the root of ${folderName}`);
 
 // ---------- Pieces ----------
 
@@ -173,10 +175,6 @@ function nameRow(name: SourceName, preview: boolean, action?: HTMLElement | null
       filesLine(name.there?.files ?? [])));
 }
 
-/** What else is there that this version doesn't read. */
-const laterLines = (found: SourceFound) => (found.later.length
-  ? h('p.source-later', {}, icon('info', 12, 'tone-muted'), h('span', {}, `Not read in this version: ${found.later.join('; ')}.`)) : null);
-
 /** The look's panel: where it read, what Add does with each skill, and Add, or why it can't be added. */
 function previewPanel(preview: SourcePreview) {
   const cancel = button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'source-cancel', disabled: !!state.busy, onclick: () => { sources.preview = undefined; rerender(); } });
@@ -189,7 +187,6 @@ function previewPanel(preview: SourcePreview) {
     h('div.source-preview-head', {}, h('strong.source-link', { title: preview.link }, label), h('span.source-where.tone-muted', {}, whereWords(preview))),
     preview.refused ? h('p.source-refused', {}, icon('circle-alert', 14, 'tone-danger'), h('span', {}, preview.refused)) : null,
     preview.names.length ? h('ul.source-names', {}, preview.names.map(name => nameRow(name, true))) : null,
-    laterLines(preview),
     h('div.source-preview-actions', {},
       preview.refused ? null : button({ variant: 'primary', size: 'small', icon: 'plus', label: addLabel, id: 'source-add', disabled: !allowed || !!state.busy, onclick: () => void add(preview.token, label) }),
       cancel,
@@ -222,7 +219,7 @@ function sourceRow(source: SourceView) {
   const actions = asking ? null : h('span.source-actions', {},
     button({ variant: 'outline', size: 'small', icon: 'refresh-cw', label: 'Check now', id: `source-check-${source.id}`, disabled: locked, attrs: { title: `Read ${label} again: what changed there comes into Central Knot, On or Off as each skill is` }, onclick: () => void checkNow(source) }),
     button({ variant: 'ghost', size: 'small', label: 'Remove…', id: `source-remove-${source.id}`, disabled: locked, onclick: () => { sources.confirmRemove = source.id; rerender(); document.getElementById(`source-remove-cancel-${source.id}`)?.focus(); } }));
-  const bringBackButton = (name: SourceName) => (name.state === 'deleted' && !source.copyGone ? button({ variant: 'link', size: 'micro', label: 'Add', id: `source-bring-${source.id}-${name.key}`, disabled: locked,
+  const bringBackButton = (name: SourceName) => (name.state === 'deleted' ? button({ variant: 'link', size: 'micro', label: 'Add', id: `source-bring-${source.id}-${name.key}`, disabled: locked,
     attrs: { title: `Bring ${name.name ?? name.key} back into Central Knot, Off, at this source’s version; its earlier versions come back with it` }, onclick: () => void bringBack(source, name) }) : null);
   return h('li.source-row', { id: `source-${source.id}`, 'data-source': source.id },
     h('div.source-row-head', {},
@@ -234,10 +231,8 @@ function sourceRow(source: SourceView) {
       button({ variant: 'outline', size: 'small', label: 'Remove', id: `source-remove-confirm-${source.id}`, disabled: !!state.busy, onclick: () => void remove(source) }),
       button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `source-remove-cancel-${source.id}`, onclick: () => { sources.confirmRemove = undefined; rerender(); } })) : null,
     source.problem ? h('p.source-refused', {}, icon('circle-alert', 14, 'tone-danger'), h('span', {}, `Couldn’t fetch it at the last check: ${source.problem} What came from it stays as it is; below is its last read.`)) : null,
-    source.unread ? h('p.source-refused', {}, icon('triangle-alert', 14, 'tone-warning'), h('span', {}, `Not read whole, so no skill is taken to be gone from it. ${source.unread}`)) : null,
-    source.copyGone ? h('p.source-later', {}, icon('info', 12, 'tone-muted'), h('span', {}, 'Its last read isn’t kept here any more. Check now reads it again.')) : null,
-    source.names.length ? h('ul.source-names', {}, source.names.map(name => nameRow(name, false, bringBackButton(name)))) : null,
-    laterLines(source));
+    source.unread ? h('p.source-refused', {}, icon('triangle-alert', 14, 'tone-warning'), h('span', {}, `${source.unread} Until it can be read, nothing from it is turned off.`)) : null,
+    source.names.length ? h('ul.source-names', {}, source.names.map(name => nameRow(name, false, bringBackButton(name)))) : null);
 }
 
 /** What stopped the last click, until dismissed. */

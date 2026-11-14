@@ -1047,24 +1047,25 @@ export interface SourceFound {
   commit?: string; commitAt?: string;
   holds: SourceHolds;
   names: SourceName[];
-  /** What else is there that this version doesn't read, in words ("2 agent files: agents come in a later version"). */
-  later: string[];
-  /** Why the read is not whole (library.ts A SOURCE: nothing is taken to be gone), in words; absent when it is. */
+  /**
+   * Why the read can't be read as skills (no folder there, a plugin, a marketplace, no SKILL.md), in words; absent when it can.
+   * A skill there that can't be read says why on its own line (SourceName `why`).
+   */
   unread?: string;
 }
 /**
- * A source as the Sources page shows it: its last read (sourcestore.ts: a cache; `copyGone` when it isn't kept, which a Check now
- * puts back), when it was read, and why the last Check now couldn't fetch it (`problem`).
+ * A source as the Sources page shows it: its last read (sourcestore.ts: a cache; none kept here reads as nothing at the link's
+ * folder), when it was read, and why the last Check now couldn't fetch it (`problem`).
  */
-export interface SourceView extends SourceFound { id: string; addedAt: string; readAt?: string; problem?: string; copyGone?: true }
+export interface SourceView extends SourceFound { id: string; addedAt: string; readAt?: string; problem?: string }
 export interface SourcesView { sources: SourceView[]; access: WriteAccess; problem?: string }
 /** A link read before anything is kept: what Add would do (`token` names it for Add), or why it can't be added. */
 export type SourcePreview = (SourceFound & { token: string; refused?: string }) | { refused: string; link: string };
 /**
- * What a source's click did: the pass's answers by name (PassResult sourced), and its results; why it stopped; why the source
- * wasn't read whole (`notWhole`: nothing was taken to be gone); and the page's view after.
+ * What a source's click did: the pass's answers by name (PassResult sourced), and its results; why it stopped; whether the source
+ * wasn't read whole (`notWhole`: nothing was turned off; the source's row says why); and the page's view after.
  */
-export interface SourceResult { stopped?: string; sourced?: PassResult['sourced']; results?: DestinationResult[]; notWhole?: string; view: SourcesView | null }
+export interface SourceResult { stopped?: string; sourced?: PassResult['sourced']; results?: DestinationResult[]; notWhole?: true; view: SourcesView | null }
 
 // ---------- Git repo ----------
 

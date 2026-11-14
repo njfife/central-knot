@@ -1946,9 +1946,8 @@ button.harness-card-main:focus-visible { outline: 0; }
 .source-preview-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .source-preview-actions .btn { flex: none; }
 .source-note { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
-.source-refused, .source-later { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 12px; line-height: 16px; }
-.source-later { color: var(--ink-soft); }
-.source-refused > svg, .source-later > svg { flex: none; align-self: flex-start; margin-top: 2px; }
+.source-refused { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 12px; line-height: 16px; }
+.source-refused > svg { flex: none; align-self: flex-start; margin-top: 2px; }
 .source-names { list-style: none; margin: 0; padding: 0; }
 .source-name { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 10px; align-items: start; padding: 8px 0; box-shadow: inset 0 -1px 0 var(--line); }
 .source-name:last-child { box-shadow: none; }

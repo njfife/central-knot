@@ -12,8 +12,8 @@
 //   the library holds deleted (bringBack) and Remove; and the Sources page's view (sourcesView).
 // Kept elsewhere: the page (sourcespage.ts); the words of a source's History entries (historyactions.ts) and of its versions
 // (library.ts originWords); the Git repo's refusal of a source (gitrepo.ts connectRepo, through sourcestore.ts sourceAt), as
-// a source refuses that repo here (resolve). Only skills come from a source in this version: other files there are named
-// (`later`), not read. A skill there that can't be read is "unreadable", with why, and is never taken to be gone.
+// a source refuses that repo here (theGitRepo, at Look and at Add). Only skills come from a source in this version: nothing
+// else there is read. A skill there that can't be read is "unreadable", with why, and is never taken to be gone.
 //
 // Each click's own refusals come first; then, where it writes, it enters the gate for library writes (share.ts libraryGate):
 // Add and Check now before they write the record and run the pass (which enters it too), Remove for Central Knot's own file
@@ -30,7 +30,6 @@ import { parseSkill } from './discovery.ts';
 import { connectedRepoAddress } from './gitrepo.ts';
 import { itemKey, linkedSource, sourceAnswers, type LibraryItem } from './library.ts';
 import type { SourceRead } from './librarypass.ts';
-import { plural } from './model.ts';
 import { copySource, gitFailure, runGit, sameSource } from './plugins.ts';
 import { exists, libraryGate, readTree, removeTree, writeAccess, writeDurably, type ShareContext } from './share.ts';
 import { applySkills, skillKind } from './skills.ts';
@@ -52,7 +51,7 @@ const recordedOf = (sources: SourceRecord[]) => new Set(sources.map(source => so
 /** One skill at a link, read from its folder (`folder`, from the repository's root): its content, or why it is unreadable. */
 type SkillThere = { folder: string; folderName: string; key: string; name: string; files: string[]; hash: string; directory: string }
   | { folder: string; folderName: string; key: string; name?: string; files: string[]; unreadable: string };
-interface Holds { holds: SourceHolds; skills: SkillThere[]; later: string[] }
+interface Holds { holds: SourceHolds; skills: SkillThere[] }
 
 const present = (path: string) => lstat(path).then(() => true, () => false);
 const isFolder = (path: string) => lstat(path).then(info => info.isDirectory(), () => false);
@@ -68,19 +67,18 @@ async function withSkill(root: string, folder: string): Promise<string[]> {
  * What is at the link's `folder` in a copy (`root`), from its files alone, in the order the brief's recogniser asks: no folder
  * there (`missing`); a marketplace's or a plugin's own files (named, nothing read); else one skill, the folders inside with a
  * SKILL.md, or skills/<folder>/; else no skill (`empty`). `rootName` names a skill at the repository's root that its SKILL.md
- * doesn't name. Two skills with one name are both unreadable. `later`: what else is there that this version doesn't read.
+ * doesn't name. Two skills with one name are both unreadable.
  */
 async function holdsAt(root: string, folder: string, rootName: string): Promise<Holds> {
   const at = join(root, folder);
-  if (!(await isFolder(at)) || !(await inside(root, at))) return { holds: 'missing', skills: [], later: [] };
-  const later = await laterThere(at);
-  if (await present(join(at, '.claude-plugin/marketplace.json')) || await present(join(at, '.agents/plugins/marketplace.json'))) return { holds: 'marketplace', skills: [], later };
-  if (await present(join(at, '.claude-plugin')) || await present(join(at, '.codex-plugin'))) return { holds: 'plugin', skills: [], later };
+  if (!(await isFolder(at)) || !(await inside(root, at))) return { holds: 'missing', skills: [] };
+  if (await present(join(at, '.claude-plugin/marketplace.json')) || await present(join(at, '.agents/plugins/marketplace.json'))) return { holds: 'marketplace', skills: [] };
+  if (await present(join(at, '.claude-plugin')) || await present(join(at, '.codex-plugin'))) return { holds: 'plugin', skills: [] };
   const folders = await present(join(at, 'SKILL.md')) ? [folder] : (await withSkill(root, folder)).length ? await withSkill(root, folder) : await withSkill(root, join(folder, 'skills'));
-  if (!folders.length) return { holds: 'empty', skills: [], later };
+  if (!folders.length) return { holds: 'empty', skills: [] };
   const skills = await Promise.all(folders.map(each => skillAt(root, each, each === '' ? rootName : basename(each))));
   const twice = new Set(skills.map(skill => skill.key).filter((key, index, keys) => keys.indexOf(key) !== index));
-  return { holds: 'skills', later, skills: skills.map(skill => (twice.has(skill.key) ? { ...skill, unreadable: `two skills here are named ${skill.name}, so neither is brought in` } : skill)) };
+  return { holds: 'skills', skills: skills.map(skill => (twice.has(skill.key) ? { ...skill, unreadable: `two skills here are named ${skill.name}, so neither is brought in` } : skill)) };
 }
 
 /** A name a skill's folder can take in every tool: no separator, not hidden, not too long. */
@@ -100,63 +98,62 @@ async function skillAt(root: string, folder: string, folderName: string): Promis
   return { folder, folderName, key: itemKey(name), name, files: [...tree.files.keys()].sort(), hash: tree.hash, directory };
 }
 
-/** What else a link's folder holds that this version doesn't read, in words. */
-async function laterThere(at: string): Promise<string[]> {
-  const later: string[] = [];
-  const agents = (await readdir(join(at, 'agents')).catch(() => [] as string[])).filter(name => name.endsWith('.md'));
-  if (agents.length) later.push(`${plural(agents.length, 'agent file')}: agents come in a later version`);
-  if (await present(join(at, '.mcp.json')) || (await readdir(join(at, 'mcp')).catch(() => [] as string[])).some(name => name.endsWith('.json'))) later.push('MCP servers: they come in a later version');
-  if (await present(join(at, 'instructions/base.md'))) later.push('base instructions: they come only from your own Git repo, by Pull');
-  return later;
-}
-
-/** Why a read of a link holds no skill that can be read, in words, each unreadable skill's reason with it; none when it holds one. Look refuses Add for it. */
-function noSkillWhy(found: Holds, where: Resolved): string | undefined {
-  if (found.holds === 'missing') return `The repository has no ${where.folder ? `folder ${where.folder}` : 'files'} on ${where.ref}: moved or deleted there.`;
+/**
+ * Why a read of a link can't be read as skills, in words, none when it can: the link's folder isn't in the read (moved or
+ * deleted there; or, for a source's row, no read of it is kept here), a plugin or a marketplace, or no SKILL.md. Look refuses
+ * Add for it, and a source's row says it; a skill there that can't be read says why on its own line (namesOf).
+ */
+function notSkillsWhy(found: Holds, where: Resolved): string | undefined {
+  if (found.holds === 'missing') return `Nothing at ${where.folder ? `the folder ${where.folder}` : 'its root'} on ${where.ref} to read: moved or deleted there, or not read here yet.`;
   if (found.holds === 'plugin') return 'The link holds a plugin (a .claude-plugin or .codex-plugin folder). Plugins from a link come in a later version; nothing here is read.';
   if (found.holds === 'marketplace') return 'The link holds a marketplace. Add it on the Plugins page; plugins from a link come in a later version, so nothing here is read.';
   if (found.holds === 'empty') return `No skill at ${where.folder ? `the folder ${where.folder}` : 'its root'}: no SKILL.md there, in a folder inside it, or in skills/.`;
-  const unread = found.skills.flatMap(skill => ('unreadable' in skill ? [`${skill.name ?? skill.folderName}: ${skill.unreadable}`] : []));
-  return unread.length < found.skills.length ? undefined : `No skill there can be read. ${unread.join('. ')}.`;
+  return undefined;
 }
-
-/**
- * Why a read is not whole (library.ts A SOURCE: no name is gone, nothing turns Off), in words; none when it is whole. The one
- * place that decides it: there is no skill there that can be read (noSkillWhy), or some skill there is unreadable.
- */
-function notWholeWhy(found: Holds, where: Resolved): string | undefined {
-  const unread = found.skills.filter(skill => 'unreadable' in skill).length;
-  return noSkillWhy(found, where) ?? (unread ? `${plural(unread, 'skill')} here can’t be read, so no skill is taken to be gone from it this time.` : undefined);
-}
+/** Whether a read holds a skill that can be read; Look refuses Add when it holds none, and says why (notSkillsWhy, or each skill's line). */
+const readable = (found: Holds) => found.skills.some(skill => !('unreadable' in skill));
+/** Why Look refuses Add: nothing there can be read as a skill. */
+const noSkillWhy = (found: Holds, where: Resolved) => notSkillsWhy(found, where) ?? (readable(found) ? undefined : 'No skill there can be read: each one’s line says why.');
 
 /**
  * What was read at a source, as the pass and the table are given it (the one place that decides it): each skill by key, with
- * its folder as its content or why it is unreadable, and whether the source was read whole (notWholeWhy).
+ * its folder as its content or why it is unreadable, and whether the source was read whole: it holds skills, and every one
+ * there can be read (library.ts A SOURCE).
  */
 function readOf(source: SourceRecord, found: Holds, sources: SourceRecord[], bringBack?: ReadonlySet<string>): SourceRead<SkillContent> {
   const names: SourceRead<SkillContent>['names'] = new Map();
   for (const skill of found.skills) names.set(skill.key, 'unreadable' in skill ? { unreadable: skill.unreadable } : { name: skill.name, hash: skill.hash, content: { directory: skill.directory, hash: skill.hash } });
-  return { id: source.id, link: source.link, commitAt: source.commitAt, whole: !notWholeWhy(found, source), names, recorded: recordedOf(sources), ...(bringBack ? { bringBack } : {}) };
+  return { id: source.id, link: source.link, commitAt: source.commitAt, whole: found.holds === 'skills' && found.skills.every(skill => !('unreadable' in skill)), names, recorded: recordedOf(sources), ...(bringBack ? { bringBack } : {}) };
 }
 
 /**
- * What each skill at a source, and each item linked to it, is to the library now: the table's own answer for it (library.ts
- * sourceAnswers, on the read as readOf gives it), or `unreadable` with why. The Sources page words each one.
+ * What each skill at a source, and each item in Central Knot linked to it, is to the library now: the table's own answer for it
+ * (library.ts sourceAnswers, on the read as readOf gives it), or `unreadable` with why. One skill there whose name can't be read
+ * and whose folder's name no item has, beside the one linked item the read doesn't hold, is that item (its SKILL.md stopped
+ * parsing): one line. A deleted item the
+ * read doesn't hold is none of the source's business, and has no line. The Sources page words each one.
  */
 function namesOf(found: Holds, read: SourceRead<SkillContent>, items: Record<string, LibraryItem>, sources: SourceRecord[]): SourceName[] {
-  return [...sourceAnswers(items, read, read.recorded)].map(([key, answer]): SourceName => {
-    const skill = found.skills.find(each => each.key === key), item = items[key];
-    const base = { key, ...(skill?.name ?? item?.name ? { name: skill?.name ?? item?.name } : {}), ...(skill ? { there: { folder: skill.folder, folderName: skill.folderName, files: skill.files } } : {}) };
-    if (skill && 'unreadable' in skill) return { ...base, state: 'unreadable', why: skill.unreadable };
+  const answers = [...sourceAnswers(items, read, read.recorded)].filter(([key]) => found.skills.some(skill => skill.key === key) || !items[key]?.deleted);
+  // A skill whose name can't be read is keyed by its folder's name; where no item has that name, it may be the one item missing.
+  const absent = answers.filter(([key]) => !found.skills.some(skill => skill.key === key)), nameless = found.skills.filter(skill => 'unreadable' in skill && !skill.name && !items[skill.key]);
+  const sameOne = absent.length === 1 && nameless.length === 1 ? { item: absent[0][0], skill: nameless[0].key } : undefined;
+  return answers.filter(([key]) => key !== sameOne?.skill).map(([key, answer]): SourceName => {
+    const skill = found.skills.find(each => each.key === (key === sameOne?.item ? sameOne.skill : key)), item = items[key];
+    const name = key === sameOne?.item ? item?.name : skill?.name ?? item?.name;
+    const base = { key, ...(name ? { name } : {}), ...(skill ? { there: { folder: skill.folder, folderName: skill.folderName, files: skill.files } } : {}) };
+    const on = item && !item.deleted ? { on: item.on } : {};
+    if (skill && 'unreadable' in skill) return { ...base, ...on, state: 'unreadable', why: skill.unreadable };
     const other = answer === 'another' ? sources.find(source => source.id === linkedSource(item, read.recorded))?.link : undefined;
-    return { ...base, state: answer, ...(item && !item.deleted ? { on: item.on } : {}), ...(other ? { why: other } : {}) };
+    return { ...base, ...on, state: answer, ...(other ? { why: other } : {}) };
   });
 }
 
 /** The pass for one source's read: its step, which also decides the pass's scope (librarypass.ts fromSourceStep). */
 async function runSource(context: ShareContext, tools: HarnessId[], source: SourceRecord, sources: SourceRecord[], bringBack?: ReadonlySet<string>) {
   const found = await holdsAt(copyOf(context.home, source.id), source.folder, repoName(source.repository));
-  return { ...(await applySkills(context, tools, [], { source: readOf(source, found, sources, bringBack) })), notWhole: notWholeWhy(found, source) };
+  const read = readOf(source, found, sources, bringBack);
+  return { ...(await applySkills(context, tools, [], { source: read })), ...(read.whole ? {} : { notWhole: true as const }) };
 }
 
 /** A repository's own name ("skill-deslop"), which names a skill at its root that its SKILL.md doesn't. */
@@ -176,6 +173,12 @@ async function refsOf(repository: string): Promise<{ refs: string[]; head?: stri
   return { refs, ...(head ? { head: head.slice('ref: refs/heads/'.length, -'\tHEAD'.length) } : {}) };
 }
 
+/** Why a repository can't be a source: it is the Git repo Pull and Push use here (asked at Look, and again at Add, since Connect may come between). */
+async function theGitRepo(context: ShareContext, repository: string): Promise<string | undefined> {
+  const repo = await connectedRepoAddress(context.home);
+  return repo && sameSource(repo, repository) ? 'That is the Git repo Pull and Push use here, so it can’t be a source too. A source is only ever read; that repo stays on the Git repo page.' : undefined;
+}
+
 /**
  * A link, read and resolved to a repository, a branch or tag (the one the link names, else the default branch's name) and a
  * folder. Refused when it is no link, is the Git repo Pull and Push use, names a branch the repository hasn't, or names none
@@ -184,8 +187,8 @@ async function refsOf(repository: string): Promise<{ refs: string[]; head?: stri
 async function resolve(context: ShareContext, link: string): Promise<Resolved | { refused: string }> {
   const read = readLink(link);
   if ('refused' in read) return read;
-  const repo = await connectedRepoAddress(context.home);
-  if (repo && sameSource(repo, read.repository)) return { refused: 'That is the Git repo Pull and Push use here, so it can’t be a source too. A source is only ever read; that repo stays on the Git repo page.' };
+  const isRepo = await theGitRepo(context, read.repository);
+  if (isRepo) return { refused: isRepo };
   const listed = await refsOf(read.repository);
   if ('problem' in listed) return { refused: listed.problem };
   if (!read.rest) return listed.head ? { link: link.trim(), repository: read.repository, ref: listed.head, folder: '' }
@@ -236,8 +239,8 @@ export async function previewSource(context: ShareContext, link: string): Promis
 }
 
 const foundOf = (source: Resolved & Partial<Pick<SourceRecord, 'commit' | 'commitAt'>>, found: Holds, names: SourceName[]): SourceFound => {
-  const unread = notWholeWhy(found, source);
-  return { link: source.link, repository: source.repository, ref: source.ref, folder: source.folder, commit: source.commit, commitAt: source.commitAt, holds: found.holds, names, later: found.later, ...(unread ? { unread } : {}) };
+  const unread = notSkillsWhy(found, source);
+  return { link: source.link, repository: source.repository, ref: source.ref, folder: source.folder, commit: source.commit, commitAt: source.commitAt, holds: found.holds, names, ...(unread ? { unread } : {}) };
 };
 
 /** A click's answer: why it stopped, what the pass did, why the source wasn't read whole, and the page's view after. */
@@ -254,6 +257,8 @@ export async function addSource(context: ShareContext, tools: HarnessId[], token
   const { sources, problem } = await readSources(context.home);
   if (problem) return answer(context, { stopped: problem });
   if (twinOf(sources, where)) return answer(context, { stopped: 'That link is a source already: its row is below.' });
+  const isRepo = await theGitRepo(context, where.repository);
+  if (isRepo) return answer(context, { stopped: isRepo });
   const refused = noSkillWhy(await holdsAt(look, where.folder, repoName(where.repository)), where);
   if (refused) return answer(context, { stopped: refused });
   const gate = await libraryGate(context, { start: true });
@@ -331,11 +336,9 @@ export async function sourcesView(context: ShareContext): Promise<SourcesView> {
   const views = await Promise.all(sources.map(async (source): Promise<SourceView> => {
     const { id, addedAt, readAt } = source, copy = copyOf(context.home, id);
     const there = await exists(copy);
-    const found = there ? await holdsAt(copy, source.folder, repoName(source.repository)) : { holds: 'missing' as const, skills: [], later: [] };
-    const { unread, ...read } = foundOf(source, found, namesOf(found, readOf(source, found, sources), library.items, sources));
-    // With no last read kept there is nothing to say of one: the row says the copy is gone instead.
-    const kept = there ? (unread ? { unread } : {}) : { copyGone: true as const };
-    return { ...read, id, addedAt, readAt, ...(source.problem ? { problem: source.problem } : {}), ...kept };
+    // A source with no last read kept here reads as a read with nothing at the link's folder: Check now reads it again.
+    const found = there ? await holdsAt(copy, source.folder, repoName(source.repository)) : { holds: 'missing' as const, skills: [] };
+    return { ...foundOf(source, found, namesOf(found, readOf(source, found, sources), library.items, sources)), id, addedAt, readAt, ...(source.problem ? { problem: source.problem } : {}) };
   }));
   return { sources: views, access, ...(problem ? { problem } : {}) };
 }

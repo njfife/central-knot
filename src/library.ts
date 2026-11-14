@@ -100,14 +100,16 @@
 //   S changed                            current = seen              S becomes the current version; On or Off stays as it is
 //   S changed                            current changed too         the later of the two is current, the other is kept as a
 //                                                                    version
-//   the name is gone, the source read    linked                      the item turns Off, once, and its link is let go, so a
-//     whole                                                          later read never turns Off what was turned On again
+//   the name is gone, the source read    linked                      the item turns Off and its link is let go, so later reads
+//     whole                                                          leave it as it is, turned back On or not, until the name
+//                                                                    comes back unchanged (re-linked: "its current version this
+//                                                                    same link's", below); then its going again turns it Off again
 //   that skill can't be read, or the     linked                      nothing; the source's row says why
 //     source wasn't read whole
 //   a name the library has               not linked, same content    it is linked; nothing else changes
 //   a name the library has               not linked, its current     linked again, and S becomes current: the link was removed
-//                                        version this same link's,   and added again, and the item is as it left it
-//                                        changed nothing since
+//                                        version this same link's,   and added again, or the name went and came back, and the
+//                                        changed nothing since       item is as the link left it, On or Off
 //   a name the library has               not linked and differs,     not brought in, said on the source's row; Add there
 //                                        linked to another source,   brings a deleted one back, Off, as a new one comes
 //                                        or deleted
@@ -118,8 +120,10 @@
 //
 // The step writes no harness: the plan after it applies the current version where the item is On, as for any new version, so
 // an edit a harness holds that no pass has taken in yet meets S there (latest wins), and a dropped item's copies leave the
-// harnesses as any Off item's do. A source's time is its head commit's (`commitAt`: the copy is one commit deep): a later,
-// unrelated commit there makes an older edit of the skill count as the latest. Within a second of the current version's time
+// harnesses as any Off item's do. Where that edit wins, S was kept, not made current: the table answered `update`, and the
+// pass, once its plan is known, tells History and the click `keep` (librarypass.ts asTold, the second place that decides it).
+// A source's time is its head commit's (`commitAt`: the copy is one commit deep): a later, unrelated commit there makes an
+// older edit of the skill count as the latest. Within a second of the current version's time
 // (the tie latestCopy uses) the current version stays and the source's is kept. Whether an item is linked is `linkedTo`'s
 // alone: one linked to a source that is no longer recorded reads as not linked, so Remove lets go of every link at once.
 //

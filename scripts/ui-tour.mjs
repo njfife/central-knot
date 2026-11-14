@@ -2476,7 +2476,7 @@ if (wanted('sources')) {
   await atEverySize('dropped', 'The skill was renamed unslop at the source; clicked Check now: the band leads, under a warning mark, with deslop no longer at the source, turned off and taken out of all 3 tools, Central Knot keeping it, with Turn deslop on; then unslop in Central Knot, Off; the row lists unslop', true, '.source-row');
   deslop({ 'SKILL.md': '---\nname: [unslop\n---\nBroken.\n' }, 'Break the front matter');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
-  await atEverySize('unreadable', 'Its SKILL.md stopped parsing at the source; clicked Check now: the band, under a warning mark, says it wasn’t read whole, so nothing was taken to be gone, and why; the row says the same, its skill line (named by its folder, skill-deslop, since its SKILL.md can’t be read) says why, and unslop is listed as not in its last read, still in Central Knot', false, '.source-row');
+  await atEverySize('unreadable', 'Its SKILL.md stopped parsing at the source; clicked Check now: the band, under a warning mark and with no Open Skills, says not all of the source could be read, so nothing was turned off, and that its row says why; the row has one line for the skill, unslop, at the root of skill-deslop, saying its SKILL.md can’t be read and why, and that until it can nothing from this source is turned off', false, '.source-row');
   deslop({ 'SKILL.md': skillMd('unslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice.') }, 'Mend the front matter');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
   await a.click('#nav-skills'); await openRow('deslop');
@@ -2492,9 +2492,9 @@ if (wanted('sources')) {
   await a.click('#nav-skills'); await turnOnRow('notes'); await switchOn('notes');
   await a.click('#nav-sources');
   await lookAt('team/kit');
-  await atEverySize('already-has', 'notes is On in Central Knot (the Practice copy’s own), and looked at team/kit: release comes in, Off; notes is not brought in, since Central Knot already has a different notes, and the line says how to take this one instead; the agent file there is named as coming in a later version', true, '#source-preview');
+  await atEverySize('already-has', 'notes is On in Central Knot (the Practice copy’s own), and looked at team/kit: release comes in, Off; notes is not brought in, since Central Knot already has a different notes, and the line says how to take this one instead (deleting yours also takes it out of every tool it is on in); each sits in the folder of its name', true, '#source-preview');
   await a.click('#source-add'); await busyDone(); await a.settle();
-  await atEverySize('already-has-row', 'Clicked Add 1 skill: team/kit’s row lists release, In Central Knot, Off, and notes, not brought in, with how to take this one instead (delete yours, then Add on this row)', false, '.source-row:last-child');
+  await atEverySize('already-has-row', 'Clicked Add 1 skill: team/kit’s row lists notes, in the folder notes, not brought in, with how to take this one instead (delete yours, which also takes it out of every tool it is on in, then Add on this row), and release, In Central Knot, Off', false, '.source-row:last-child');
   rmSync(join(hosts, 'github.com/stephenturner'), { recursive: true, force: true });
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
   await atEverySize('check-failed', 'The repository was taken away; clicked Check now: the band says why it couldn’t be read, and the row says it too, under the last read it keeps; what came from it stays as it is', false, '.source-row');
