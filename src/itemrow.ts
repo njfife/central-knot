@@ -27,7 +27,10 @@ export interface ItemRow {
   /** The harnesses it is kept out of. */
   except: Tool[];
   cannot?: Partial<Record<Tool, string>>;
-  /** Tools with no copy of their own that have it through a plugin installed there (each is in `cannot` too). */
+  /**
+   * Tools with no copy of their own that have it through a plugin installed there. For a skill, `anotherWay` says so too; for an
+   * agent or server, `cannot` does where its kind's rule puts the tool there (never while the item is Off or kept out of it).
+   */
   plugin?: Partial<Record<Tool, ThroughPlugin>>;
   /** A found skill whose copies differ: for each tool's copy, what stops every tool from using it, by the tool concerned. */
   blocks?: Partial<Record<Tool, { tool: Tool; reason: string }[]>>;

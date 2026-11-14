@@ -500,7 +500,10 @@ interface Pass extends AnyLook {
 }
 /** What may be asked of a pass besides its clicks. */
 export interface PassOptions<Content> {
-  /** With Automatic sync off, a click's pass concerns the items it names and nothing else spreads (SYN-03). */
+  /**
+   * The items this pass concerns, besides its clicks'; nothing else spreads. Given by a click with Automatic sync off (main.ts),
+   * and whatever Sync is set to by actions on named items, such as History's (restoreAll), a profile switch and Pull.
+   */
   only?: Set<string>;
   /** An explicit Resume, for a record this app has no memory of. */
   resume?: boolean;
@@ -552,7 +555,7 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
     const sourceScope = options.source ? await fromSourceStep(pass, options.source) : undefined;
     for (const asked of clicks) await click(pass, asked);
     if (options.background && gate.record.syncEverything === true) await takeInByRule(pass);
-    // A source's pass concerns what its table answered for; a click's, with Automatic sync off, the items it names (SYN-03).
+    // What this pass concerns: its clicks' items, and what a source's table answered for, else those in `only`, else every item.
     const inScope = (key: string) => (sourceScope ? sourceScope.has(key) : !options.only || options.only.has(key)) || clicks.some(asked => asked.key === key);
     const items = Object.values(library.items).filter(item => inScope(item.key));
     await guardFolders(pass, items, pass.shelf);
@@ -576,7 +579,7 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
 /**
  * The folder identities a pass leaves on the record (guardFolders reads them): those of harnesses no longer managed are let
  * go, so one managed again is told apart; one the record doesn't hold yet is noted by any pass (guardFolders has settled
- * every item there: cameBack); and a full pass moves every identity on. A click's pass with Sync off moves no known one on:
+ * every item there: cameBack); and a full pass moves every identity on. A pass given `only` or a source moves no known one on:
  * the items it leaves alone must still see a reset at the next full pass.
  */
 function keepFolders(library: KindLibrary, now: KindLibrary['folders'], managed: readonly HarnessId[], full: boolean) {

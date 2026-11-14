@@ -30,6 +30,7 @@ Keep the loop short. These are the checks; nothing else is required.
 - The end-to-end checks already open every page, fail on a page error and check that nothing is cut off at each window size. Add a check there, not a tour section, when behaviour needs covering.
 - No Linux or Windows run is required (see Platform focus).
 - A change that adds, renames or removes a file under `src/` or `scripts/` changes its entry in `MAP.md`; `tests/map.test.ts` (in `npm test`) fails until it does and says what to change.
+- `docs/SPEC.md` is history, as `LEDGER.md` is: written before the library and not kept true, so read `MAP.md` and the module headers for how the code works now. Its ids cited in comments (`SYN-03`, `MCP-02`, `D-36`) are historical.
 
 ## Mandatory subagent briefing
 
