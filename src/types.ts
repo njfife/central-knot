@@ -388,22 +388,21 @@ export interface SyncView {
 export interface JoinCounts { written: number; kept: number; removed: number; waits: number; found: number; takenIn: number }
 
 /**
- * One click on an item, as the page sends it to any kind's engine. `managed` and `off` always say how it should be managed
- * afterwards: a caller changing only switches or removals passes the item's current ones (from its row, SkillFacts), with
- * `seenManaged`, or it changes those too. A library kind's pass reads it as its own click (librarypass.ts ItemClick, made by
- * itemClick: `managed` is On, `off` the harnesses it is kept out of). A field added here reaches an engine only once main.ts's
- * `changes` sanitizer copies it.
+ * One click on an item, as the page and History send it to any kind's engine, and as the library's pass takes it. `on` and
+ * `except` always say how the item should be afterwards (On or Off, and the harnesses it is kept out of: library.ts
+ * LibraryItem): a caller changing only switches or removals passes the item's current ones, with `seenOn`, or it changes those
+ * too. A field added here reaches an engine only once main.ts's `changes` sanitizer copies it.
  */
 export interface Change {
   key: string;
-  managed: boolean;
-  off: HarnessId[];
+  on: boolean;
+  except: HarnessId[];
   /** A found item whose copies differ: the tool whose copy every tool should use. */
   use?: HarnessId;
   /** The content ID of the chosen copy as the person saw it. A copy changed since is not used. */
   useHash?: string;
-  /** Whether the page showed it managed: a change made from an older read is refused if that no longer holds. */
-  seenManaged?: boolean;
+  /** Whether the page showed it On: a change made from an older read is refused if that no longer holds. */
+  seenOn?: boolean;
   /** A library item: the version to make current (its hash), in every harness the item is on in. */
   version?: string;
   /** A library item: true deletes it from Central Knot (out of every harness; History can restore it); false restores a deleted one. */

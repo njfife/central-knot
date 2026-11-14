@@ -40,7 +40,7 @@ const exists = (path: string) => lstat(path).then(() => true, () => false);
 const apply = async (context: ShareContext, changes: Change[] = [], resume = false) => applySkills(context, await managedNow(context, await context.read()), changes, { resume });
 const view = async (context: ShareContext) => skillsView(context, await managedNow(context, await context.read()));
 const facts = async (box: Box, key: string) => (await view(ctx(box))).items.find(item => item.key === key)!;
-const manage = (key: string) => ({ key, managed: true, off: [] as HarnessId[] });
+const manage = (key: string) => ({ key, on: true, except: [] as HarnessId[] });
 
 async function snapshotTree(directory: string, skip: string[] = []): Promise<Record<string, string>> {
   const { createHash } = await import('node:crypto');
@@ -158,7 +158,7 @@ test('Odd valid names sync and are remembered: constructor, __proto__ and long n
     assert.equal(result.writes, 4, JSON.stringify(result.results));
     for (const name of names) assert.equal(await exists(join(box.home, COPILOT, name, 'SKILL.md')), true, name);
     for (const name of names) assert.equal((await facts(box, name)).on, true, `${name} is remembered as managed`);
-    await apply(ctx(box), [{ key: '__proto__', managed: false, off: [] }]);
+    await apply(ctx(box), [{ key: '__proto__', on: false, except: [] }]);
     assert.equal((await facts(box, '__proto__')).on, false);
     assert.equal((await facts(box, 'constructor')).on, true);
   } finally { await box.cleanup(); }

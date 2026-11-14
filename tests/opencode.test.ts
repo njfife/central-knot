@@ -62,11 +62,11 @@ test('OpenCode reads its own skills, Claude Code’s and the shared folder; a sk
     assert.match(view.items.find(item => item.key === 'shared')!.anotherWay?.['opencode-cli'] ?? '', /also reads a copy at .*\.agents\/skills, which is not Central Knot’s/);
 
     // Taken in, on in both: OpenCode already reads Claude Code's copy, so nothing is written for it.
-    const first = await applySkills(box.context, tools, [{ key: 'from-claude', managed: true, off: [] }]);
+    const first = await applySkills(box.context, tools, [{ key: 'from-claude', on: true, except: [] }]);
     assert.equal(first.writes, 0, JSON.stringify(first.results));
     assert.equal(await exists(join(box.home, OPENCODE, 'skills/from-claude')), false);
     // OpenCode's own skill reaches Claude Code, whose copy OpenCode then reads too; its own copy, never Central Knot's, stays.
-    const second = await applySkills(box.context, tools, [{ key: 'own', managed: true, off: [] }]);
+    const second = await applySkills(box.context, tools, [{ key: 'own', on: true, except: [] }]);
     assert.equal(second.writes, 1, JSON.stringify(second.results));
     assert.equal(await readFile(join(box.home, '.claude/skills/own/SKILL.md'), 'utf8'), text('own'));
     assert.equal(await readFile(join(box.home, OPENCODE, 'skills/own/SKILL.md'), 'utf8'), text('own'));
@@ -86,26 +86,26 @@ test('Kept out of Claude Code, a skill OpenCode read there becomes a copy of Ope
     await skill(box.home, '.claude/skills', 'review', text('review', 'Claude Code’s.'));
     await skill(box.home, '.copilot/skills', 'review', text('review', 'Copilot’s.'));
     assert.deepEqual((await skillsView(box.context, three)).items.find(item => item.key === 'review')!.takeInAnswers?.click, { wait: 'choice' });
-    await applySkills(box.context, three, [{ key: 'review', managed: true, off: [], use: 'copilot-cli' }]);
+    await applySkills(box.context, three, [{ key: 'review', on: true, except: [], use: 'copilot-cli' }]);
     assert.equal(await readFile(join(box.home, '.claude/skills/review/SKILL.md'), 'utf8'), text('review', 'Copilot’s.'));
     assert.equal(await exists(join(box.home, OPENCODE, 'skills/review')), false, 'no second copy for OpenCode');
 
     // Kept out of Claude Code: its copy goes, OpenCode gets its own, and an edit in Copilot CLI reaches it.
     await skill(box.home, '.claude/skills', 'notes');
-    await applySkills(box.context, three, [{ key: 'notes', managed: true, off: [] }]);
-    await applySkills(box.context, three, [{ key: 'notes', managed: true, off: ['claude-cli'] }]);
+    await applySkills(box.context, three, [{ key: 'notes', on: true, except: [] }]);
+    await applySkills(box.context, three, [{ key: 'notes', on: true, except: ['claude-cli'] }]);
     assert.deepEqual([await exists(join(box.home, '.claude/skills/notes')), await readFile(join(box.home, OPENCODE, 'skills/notes/SKILL.md'), 'utf8')], [false, text('notes')]);
     await writeFile(join(box.home, '.copilot/skills/notes/SKILL.md'), text('notes', 'Edited in Copilot.'));
     await applySkills(box.context, three, []);
     assert.equal(await readFile(join(box.home, OPENCODE, 'skills/notes/SKILL.md'), 'utf8'), text('notes', 'Edited in Copilot.'));
     // Let back in: Claude Code gets the current version, and OpenCode's own copy, Central Knot's, goes.
-    await applySkills(box.context, three, [{ key: 'notes', managed: true, off: [] }]);
+    await applySkills(box.context, three, [{ key: 'notes', on: true, except: [] }]);
     assert.deepEqual([await readFile(join(box.home, '.claude/skills/notes/SKILL.md'), 'utf8'), await exists(join(box.home, OPENCODE, 'skills/notes'))], [text('notes', 'Edited in Copilot.'), false]);
 
     // OpenCode's own copy, Central Knot's (Claude Code kept out), deleted by hand: the skill turns off everywhere.
     await skill(box.home, '.claude/skills', 'gone');
-    await applySkills(box.context, three, [{ key: 'gone', managed: true, off: [] }]);
-    await applySkills(box.context, three, [{ key: 'gone', managed: true, off: ['claude-cli'] }]);
+    await applySkills(box.context, three, [{ key: 'gone', on: true, except: [] }]);
+    await applySkills(box.context, three, [{ key: 'gone', on: true, except: ['claude-cli'] }]);
     assert.equal(await exists(join(box.home, OPENCODE, 'skills/gone/SKILL.md')), true);
     await rm(join(box.home, OPENCODE, 'skills/gone'), { recursive: true });
     await applySkills(box.context, three, []);
@@ -119,7 +119,7 @@ test('A skill new to both Claude Code and OpenCode goes to Claude Code’s folde
   const three: HarnessId[] = ['claude-cli', 'copilot-cli', 'opencode-cli'];
   try {
     await skill(box.home, '.copilot/skills', 'fresh');
-    const result = await applySkills(box.context, three, [{ key: 'fresh', managed: true, off: [] }]);
+    const result = await applySkills(box.context, three, [{ key: 'fresh', on: true, except: [] }]);
     assert.equal(result.writes, 1, JSON.stringify(result.results));
     assert.deepEqual([await exists(join(box.home, '.claude/skills/fresh/SKILL.md')), await exists(join(box.home, OPENCODE, 'skills/fresh'))], [true, false]);
     assert.match((await skillsView(box.context, three)).items.find(item => item.key === 'fresh')!.anotherWay?.['opencode-cli'] ?? '', /reads Claude Code’s copy/);
@@ -213,7 +213,7 @@ test('OpenCode’s servers are read from both places in its settings, written in
 
     // A Claude Code server reaches OpenCode in OpenCode's form, values as they are; the rest of the file stays.
     await writeFile(join(box.home, '.claude.json'), `${JSON.stringify({ mcpServers: { docs: { type: 'stdio', command: 'npx', args: ['-y', 'docs'], env: { DOCS_TOKEN: 'secret-value-123' }, cwd: '/work/docs' }, sse: { type: 'sse', url: 'https://example.com/sse' } } }, null, 2)}\n`);
-    const result = await applyServers(box.context, tools, [{ key: 'docs', managed: true, off: [] }]);
+    const result = await applyServers(box.context, tools, [{ key: 'docs', on: true, except: [] }]);
     assert.equal(result.writes, 1, JSON.stringify(result.results));
     const after = await readFile(settings(box.home), 'utf8');
     assert.deepEqual((readJsonc(after) as { mcp: Record<string, unknown> }).mcp.docs, { type: 'local', command: ['npx', '-y', 'docs'], environment: { DOCS_TOKEN: 'secret-value-123' }, cwd: '/work/docs' });
@@ -238,7 +238,7 @@ test('An agent goes to OpenCode as Markdown named by its file, with a mode both 
   try {
     await mkdir(join(box.home, '.claude/agents'), { recursive: true });
     await writeFile(join(box.home, '.claude/agents/reviewer.md'), '---\nname: reviewer\ndescription: Reviews code\n---\n\nYou review code.\n');
-    const result = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    const result = await applyAgents(box.context, tools, [{ key: 'reviewer', on: true, except: [] }]);
     assert.equal(result.writes, 1, JSON.stringify(result.results));
     const file = join(box.home, OPENCODE, 'agents/reviewer.md');
     assert.equal(await readFile(file, 'utf8'), '---\nname: reviewer\ndescription: Reviews code\nmode: all\n---\n\nYou review code.\n');

@@ -52,8 +52,8 @@ export async function seedServerAndAgent(context: ShareContext) {
   await writeFile(join(context.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { docs: { type: 'local', command: 'docs-server', args: ['--port', '7'], env: { TOKEN: 'abc' }, tools: ['*'] } } }));
   await mkdir(join(context.home, '.claude/agents'), { recursive: true });
   await writeFile(join(context.home, '.claude/agents/planner.md'), '---\nname: planner\ndescription: Plans work.\nmodel: opus\n---\n\nPlan carefully.\n');
-  assert.ok(!(await applyServers(context, tools, [{ key: 'docs', managed: true, off: [] }])).stopped);
-  assert.ok(!(await applyAgents(context, tools, [{ key: 'planner', managed: true, off: [] }])).stopped);
+  assert.ok(!(await applyServers(context, tools, [{ key: 'docs', on: true, except: [] }])).stopped);
+  assert.ok(!(await applyAgents(context, tools, [{ key: 'planner', on: true, except: [] }])).stopped);
 }
 
 /** Two computers on one repo: the first pushed a Managed MCP server and agent, and the second pulled them. */
@@ -70,10 +70,10 @@ export async function serverAndAgentOnTwo(box: Awaited<ReturnType<typeof world>>
 export const edit = async (path: string, from: string, to: string) => writeFile(path, (await readFile(path, 'utf8')).replace(from, to));
 
 /** A computer with one Managed skill in the repo, and a second clone of the repo to commit to it as someone else would. */
-export async function oneSkillAndAnAuthor(box: Awaited<ReturnType<typeof world>>, options: { off?: HarnessId[] } = {}) {
+export async function oneSkillAndAnAuthor(box: Awaited<ReturnType<typeof world>>, options: { except?: HarnessId[] } = {}) {
   const first = await box.home('first');
   await skill(first, '.claude/skills', 'solo', skillText('solo', 'Before.'));
-  await applySkillsIn(first, [{ key: 'solo', managed: true, off: options.off ?? [] }]);
+  await applySkillsIn(first, [{ key: 'solo', on: true, except: options.except ?? [] }]);
   await connectRepo(first, box.remote, '');
   await pushRepo(first);
   const author = join(box.base, 'author');

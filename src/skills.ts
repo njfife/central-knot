@@ -12,7 +12,7 @@
 //   Three actions write it: clearSwitch, its Undo switchBack, and takeOver, which carries it to the copy it makes (takeOver
 //   is also the one that makes a copy outside Central Knot's its own); and the profiles migration releases one an earlier
 //   profile set, once (profilemigrate.ts).
-// Around the pass: applySkills and restoreSkill run it for skills (the page's clicks through librarypass.ts itemClick);
+// Around the pass: applySkills and restoreSkill run it for skills (the page's clicks);
 // skillsView is the Skills page's reading (types.ts LibraryView); skillsForRepo is what the Git repo's Push sends. Elsewhere: the folders, skillfiles.ts; where things
 // are kept and the migration from the earlier record, skillstore.ts and skillmigrate.ts; the row and its words,
 // libraryrow.ts with librarypages.ts; History's sentences and actions, historyactions.ts.
@@ -23,7 +23,7 @@ import { appendHistory, readHistory, replaceHistory } from './history.ts';
 import { isClearedSwitch, libraryAction, libraryEntry } from './historyactions.ts';
 import { keepVersion, linkedSource, listed, noteAgainst, pendingEdits, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
-import { copiesOf, foundCopies, itemClick, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
+import { copiesOf, foundCopies, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords } from './libraryrow.ts';
 import { comparableText } from './pluginstatus.ts';
 import { throughPlugins, type GivenByPlugin } from './plugins.ts';
@@ -294,13 +294,13 @@ export type PulledSkill = { name: string; folder: string; hash: string } | { rem
 type SkillPassOptions = Omit<PassOptions<SkillContent>, 'pulled'> & { pulled?: Map<string, PulledSkill> };
 
 /**
- * One pass over the skills (librarypass.ts runPass): the page's clicks in `changes` (itemClick), then every skill brought into
+ * One pass over the skills (librarypass.ts runPass): the page's clicks in `changes`, then every skill brought into
  * line. A pass that can't finish (a copy changed while it was being kept) says so; the next pass reads again.
  */
 export async function applySkills(context: ShareContext, tools: HarnessId[], changes: Change[], options: SkillPassOptions = {}): Promise<PassResult> {
   const pulled = options.pulled && new Map([...options.pulled].map(([key, brought]) =>
     [key, 'removed' in brought ? brought : { name: brought.name, content: { directory: brought.folder, hash: brought.hash } }] as const));
-  try { return await runPass(skillKind, context, tools, changes.map(itemClick), { ...options, pulled }); }
+  try { return await runPass(skillKind, context, tools, changes, { ...options, pulled }); }
   catch (error) {
     if (!errorCode(error)) throw error;
     return { stopped: `That could not finish. ${errorCode(error) === 'CK_CHANGED' ? (error as Error).message : plainError(error)} Click Refresh to see where things stand.`, results: [], writes: 0 };

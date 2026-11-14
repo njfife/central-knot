@@ -139,7 +139,7 @@ async function walk(seed: number): Promise<Finding[]> {
     }
     for (const tool of three) await mkdir(join(box.home, agentFiles[tool], '..'), { recursive: true });
     await writeFile(join(box.home, agentFiles['claude-cli']), '---\nname: writer\ndescription: Writes docs\n---\n\nYou write docs.\n');
-    await applyAgents(context(), tools, [{ key: 'writer', managed: true, off: [], seenManaged: false }]);
+    await applyAgents(context(), tools, [{ key: 'writer', on: true, except: [], seenOn: false }]);
     agentAsWritten = await agentNow();
     for (let step = 0; step < STEPS && !found.length; step++) {
       const { row, item, fact } = await seen(box, context());
@@ -201,8 +201,8 @@ async function walk(seed: number): Promise<Finding[]> {
       } });
       add(1, { name: `Automatic sync ${syncOn ? 'off' : 'on'}`, run: async () => { syncOn = !syncOn; } });
       add(1, { name: 'the agent Off then On', app: true, writes: 'agent', run: async () => {
-        const off = await applyAgents(context(), tools, [{ key: 'writer', managed: false, off: [], seenManaged: true }]);
-        await applyAgents(context(), tools, [{ key: 'writer', managed: true, off: [], seenManaged: false }]);
+        const off = await applyAgents(context(), tools, [{ key: 'writer', on: false, except: [], seenOn: true }]);
+        await applyAgents(context(), tools, [{ key: 'writer', on: true, except: [], seenOn: false }]);
         if (!off.stopped && !same(await agentNow(), agentAsWritten)) fail('(h) the agent’s Off then On left a file other than it was');
       } });
       add(1, { name: 'age', run: async () => {

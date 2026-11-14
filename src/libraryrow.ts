@@ -158,29 +158,29 @@ const stillLeaving = (row: LibraryRow) => !!row.takeInAnswers && 'leave' in row.
 // ---------- The clicks ----------
 
 /**
- * The item as it is, as a click that changes nothing (a types.ts Change: `managed` is On, `off` the harnesses it is kept out
- * of): each click a row's controls or a History entry sends (historyactions.ts) changes one thing of it. `item` as the caller
- * means it: a row's, in the library or none (inLibrary); History's, deleted or not.
+ * The item as it is, as a click that changes nothing (a types.ts Change): each click a row's controls or a History entry sends
+ * (historyactions.ts) changes one thing of it. `item` as the caller means it: a row's, in the library or none (inLibrary);
+ * History's, deleted or not.
  */
-export const asItIs = (key: string, item: LibraryItem | undefined): Change => ({ key, managed: !!item?.on, off: item ? [...item.except] : [] });
-/** A row's item as it is, with whether the page showed it On (`seenManaged`): a click made from an older read is refused. */
+export const asItIs = (key: string, item: LibraryItem | undefined): Change => ({ key, on: !!item?.on, except: item ? [...item.except] : [] });
+/** A row's item as it is, with whether the page showed it On (`seenOn`): a click made from an older read is refused. */
 const rowAsItIs = (row: LibraryRow, item: LibraryItem | undefined): Change =>
-  ({ ...asItIs(row.key, inLibrary(item)), seenManaged: !!inLibrary(item)?.on });
+  ({ ...asItIs(row.key, inLibrary(item)), seenOn: !!inLibrary(item)?.on });
 
 /**
- * The clicks a row's controls send. Each is a types.ts Change, as every item page sends it. main.ts's `changes` sanitizer
- * passes it on field by field, and librarypass.ts itemClick makes it the library's click.
+ * The clicks a row's controls send. Each is a types.ts Change, as every item page sends it, which main.ts's `changes`
+ * sanitizer passes on field by field to the library's pass.
  */
 export const rowClicks = {
   /** The row's switch, On: a found item is taken in (`use`: the copy every harness takes, where they differ); one in the library is applied. */
   on: (row: LibraryRow, item: LibraryItem | undefined, use?: string): Change =>
-    ({ ...rowAsItIs(row, item), managed: true, ...(use ? { use: use as HarnessId, useHash: row.hashes?.[use] } : {}) }),
+    ({ ...rowAsItIs(row, item), on: true, ...(use ? { use: use as HarnessId, useHash: row.hashes?.[use] } : {}) }),
   /** The row's switch, Off: out of every harness; Central Knot keeps it. */
-  off: (row: LibraryRow, item: LibraryItem | undefined): Change => ({ ...rowAsItIs(row, item), managed: false }),
+  off: (row: LibraryRow, item: LibraryItem | undefined): Change => ({ ...rowAsItIs(row, item), on: false }),
   /** A harness's own switch in the opened row: kept out of it (`out`), or let in again. */
   inHarness: (row: LibraryRow, item: LibraryItem | undefined, tool: string, out: boolean): Change => {
     const now = rowAsItIs(row, item);
-    return { ...now, off: out ? [...now.off, tool as HarnessId] : now.off.filter(other => other !== tool) };
+    return { ...now, except: out ? [...now.except, tool as HarnessId] : now.except.filter(other => other !== tool) };
   },
   /** Make current, on an earlier version in the opened row. */
   makeCurrent: (row: LibraryRow, item: LibraryItem | undefined, version: string): Change => ({ ...rowAsItIs(row, item), version }),

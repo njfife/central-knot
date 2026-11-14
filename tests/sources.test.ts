@@ -60,7 +60,7 @@ test('The owner’s example: a link to a repository whose root is one skill offe
     assert.deepEqual((await seen(box, box.context, 'deslop')).fact?.fromSource, { link: DESLOP }, 'its row on Skills says where it is from');
 
     const { row } = await seen(box, box.context, 'deslop');
-    await applySkills(box.context, box.tools, [{ key: 'deslop', managed: true, off: [], seenManaged: false }]);
+    await applySkills(box.context, box.tools, [{ key: 'deslop', on: true, except: [], seenOn: false }]);
     const source = await bytes(repo.dir).then(files => Object.fromEntries(Object.entries(files!).filter(([path]) => !path.startsWith('.git/') && path !== '.git/')));
     for (const tool of box.tools) assert.deepEqual(await bytes(folderOf(box, tool as never, 'deslop')), source, `${tool} has every file, byte for byte`);
     assert.ok(row);
@@ -76,7 +76,7 @@ async function oneSkill(box: Box, name: string, { skill = name, body = 'First.',
   const link = `https://github.com/team/${name}`;
   const { added } = await add(box, link);
   assert.equal(added.stopped, undefined);
-  if (on) await applySkills(box.context, box.tools, [{ key: skill, managed: true, off: [], seenManaged: false }]);
+  if (on) await applySkills(box.context, box.tools, [{ key: skill, on: true, except: [], seenOn: false }]);
   return { repo, link, id: (await sourcesView(box.context)).sources.find(source => source.link === link)!.id };
 }
 const bodyOf = async (box: Box, key: string) => { const item = (await itemOf(box, key))!; return (await readFile(join(box.home, '.central-knot/items/skills', key, 'versions', item.hash, 'SKILL.md'), 'utf8')).trim().split('\n').at(-1); };
@@ -241,7 +241,7 @@ test('Turned Off, then the source updates it: it stays Off and the new content i
   const box = await sandbox();
   try {
     const { repo, id } = await oneSkill(box, 'notes', { on: true });
-    await applySkills(box.context, box.tools, [{ key: 'notes', managed: false, off: [], seenManaged: true }]);
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: false, except: [], seenOn: true }]);
     await repo.commit({ 'SKILL.md': skillMd('notes', 'Second.') }, '2026-11-02T10:00:00Z');
     await check(box, id);
     assert.deepEqual([(await itemOf(box, 'notes'))!.on, await bodyOf(box, 'notes')], [false, 'Second.']);
@@ -256,7 +256,7 @@ test('A name the library already has: the same content is linked and nothing els
   try {
     await put(box, 'claude-cli', { 'SKILL.md': skillMd('same', 'Same.') }, [], 'same');
     await put(box, 'claude-cli', { 'SKILL.md': skillMd('review', 'My own review.') }, [], 'review');
-    await applySkills(box.context, box.tools, ['same', 'review'].map(key => ({ key, managed: true, off: [], seenManaged: false })));
+    await applySkills(box.context, box.tools, ['same', 'review'].map(key => ({ key, on: true, except: [], seenOn: false })));
     const before = await everywhere(box, 'review');
     const repo = await repository(hosts, 'https://github.com/team/kit');
     await repo.commit({ 'same/SKILL.md': skillMd('same', 'Same.'), 'review/SKILL.md': skillMd('review', 'Their review.'), 'fresh/SKILL.md': skillMd('fresh') });
@@ -290,7 +290,7 @@ test('A skill deleted from Central Knot: the tombstone holds at Check now and at
   const box = await sandbox();
   try {
     const { repo, id } = await oneSkill(box, 'notes', { on: true });
-    await applySkills(box.context, box.tools, [{ key: 'notes', managed: true, off: [], seenManaged: true, deleted: true }]);
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [], seenOn: true, deleted: true }]);
     await repo.commit({ 'SKILL.md': skillMd('notes', 'Second.') });
     assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'deleted' }]);
     assert.ok((await itemOf(box, 'notes'))!.deleted, 'still deleted');
@@ -360,7 +360,7 @@ test('A SKILL.md that stops parsing at a later check can’t be read, and is not
     await repo.commit({ 'notes/SKILL.md': skillMd('notes'), 'other/SKILL.md': skillMd('other'), 'third/SKILL.md': skillMd('third') });
     await add(box, 'https://github.com/team/kit');
     const id = await sourceId(box);
-    await applySkills(box.context, box.tools, [{ key: 'notes', managed: true, off: [], seenManaged: false }]);
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [], seenOn: false }]);
     await repo.commit({ 'notes/SKILL.md': '---\nname: [notes\n---\nBroken.\n', 'other/SKILL.md': null });
     assert.deepEqual(answered(await check(box, id)), []);
     assert.deepEqual([(await itemOf(box, 'notes'))!.on, (await itemOf(box, 'other'))!.source], [true, id], 'not read whole: nothing is gone this time');
@@ -382,7 +382,7 @@ test('The link’s folder deleted or moved at the source: the whole source can�
     await repo.commit({ 'skills/notes/SKILL.md': skillMd('notes') });
     await add(box, 'https://github.com/team/kit/tree/main/skills/notes');
     const id = await sourceId(box);
-    await applySkills(box.context, box.tools, [{ key: 'notes', managed: true, off: [], seenManaged: false }]);
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [], seenOn: false }]);
     await repo.commit({ 'skills/notes': null, 'moved/notes/SKILL.md': skillMd('notes') });
     const done = await check(box, id), why = 'Nothing at the folder skills/notes on main to read: moved or deleted there, or not read here yet.';
     assert.deepEqual([done.stopped, done.notWhole, answered(done)], [undefined, true, []]);
@@ -540,7 +540,7 @@ test('A tool left out: a source’s skill turned On reaches the managed tools on
     const { repo, id } = await oneSkill(box, 'notes');
     await chooseTools(box.context, 'codex-cli', false);
     const managed = box.tools.filter(tool => tool !== 'codex-cli');
-    await applySkills(box.context, managed, [{ key: 'notes', managed: true, off: [], seenManaged: false }]);
+    await applySkills(box.context, managed, [{ key: 'notes', on: true, except: [], seenOn: false }]);
     await repo.commit({ 'SKILL.md': skillMd('notes', 'Second.') });
     await checkSource(box.context, async () => managed, id, inTurn);
     const there = await everywhere(box);
@@ -552,7 +552,7 @@ test('A home from before sources: nothing recorded, the Sources page is empty an
   const box = await sandbox();
   try {
     await put(box, 'claude-cli');
-    await applySkills(box.context, box.tools, [{ key: 'notes', managed: true, off: [], seenManaged: false }]);
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [], seenOn: false }]);
     assert.deepEqual([(await sourcesView(box.context)).sources, (await itemOf(box, 'notes'))!.source, (await seen(box)).fact?.fromSource], [[], undefined, undefined]);
     assert.equal(await readFile(join(box.home, '.central-knot/sources.json'), 'utf8').catch(() => 'none'), 'none', 'and nothing is written for sources');
   } finally { await box.cleanup(); }
@@ -649,7 +649,7 @@ test('Check now concerns its source’s skills and nothing else: an edit waiting
   const box = await sandbox();
   try {
     await put(box, 'claude-cli', { 'SKILL.md': skillMd('mine', 'Mine.') }, [], 'mine');
-    await applySkills(box.context, box.tools, [{ key: 'mine', managed: true, off: [], seenManaged: false }]);
+    await applySkills(box.context, box.tools, [{ key: 'mine', on: true, except: [], seenOn: false }]);
     const { repo, id } = await oneSkill(box, 'notes');
     await put(box, 'codex-cli', { 'SKILL.md': skillMd('mine', 'Edited in Codex, not taken in yet.') }, [], 'mine');
     await repo.commit({ 'SKILL.md': skillMd('notes', 'Second.') });

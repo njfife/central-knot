@@ -11,10 +11,10 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { wantedIn } from '../src/library.ts';
-import { copiesOf, lookFor, runPass, type Disk, type ItemClick, type Kind, type KindLibrary, type Seen } from '../src/librarypass.ts';
+import { copiesOf, lookFor, runPass, type Disk, type Kind, type KindLibrary, type Seen } from '../src/librarypass.ts';
 import { takeOverSync, type ShareContext } from '../src/share.ts';
 import { readHistory } from '../src/history.ts';
-import type { HarnessId } from '../src/types.ts';
+import type { Change, HarnessId } from '../src/types.ts';
 
 interface Note extends Seen { file: string; text: string }
 const tools: HarnessId[] = ['claude-cli', 'opencode-cli'];
@@ -71,7 +71,7 @@ async function sandbox() {
 }
 /** Each tool's own copy of the note, as its folder holds it. */
 const copies = (context: ShareContext) => Promise.all(tools.map(tool => readFile(join(folderOf(context, tool), 'plan.txt'), 'utf8').catch(() => undefined)));
-const click = (on: boolean, except: HarnessId[]): ItemClick => ({ key: 'plan', on, except });
+const click = (on: boolean, except: HarnessId[]): Change => ({ key: 'plan', on, except });
 
 test('A tool that reads another’s folder has the item another way only while the item is wanted there: On in both, then kept out of the first, and the reader gets exactly one copy of its own', async () => {
   const { context, cleanup } = await sandbox();

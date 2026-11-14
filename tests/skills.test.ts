@@ -200,7 +200,7 @@ test('A removal never takes content the library hasn’t: an edit made with Auto
     // Sync off: an edit no pass took in, then Off, a click on this skill alone. The edit is a version before the folder goes.
     await put(box, 'codex-cli', { 'SKILL.md': skillText('Not taken in yet.') });
     const offline: ShareContext = { ...box.context };
-    await (await import('../src/skills.ts')).applySkills(offline, box.tools, [{ key: 'notes', managed: false, off: [] }], { only: new Set(['notes']) });
+    await (await import('../src/skills.ts')).applySkills(offline, box.tools, [{ key: 'notes', on: false, except: [] }], { only: new Set(['notes']) });
     const edited = (await readTree(join(box.home, '.central-knot/items/skills/notes/versions', (await itemOf(box))!.hash))).files.get('SKILL.md');
     assert.ok(edited, 'the edit is the current version, kept in the store');
     assert.equal(await readFile(join(box.home, '.central-knot/items/skills/notes/versions', (await itemOf(box))!.hash, 'SKILL.md'), 'utf8'), skillText('Not taken in yet.'));
@@ -580,7 +580,7 @@ test('Delete from Central Knot takes it out of every tool, History restores it; 
     await turnOn(box, box.context, 'agents');
     assert.deepEqual(await readdir(join(box.home, '.central-knot/items')), ['skills']);
     assert.deepEqual(await readdir(join(box.home, '.central-knot/items/skills')), ['agents']);
-    await send(box, { key: 'agents', managed: true, off: [], deleted: true });
+    await send(box, { key: 'agents', on: true, except: [], deleted: true });
     assert.deepEqual(Object.values(await everywhere(box, 'agents')).filter(Boolean), []);
     const deleted = (await readHistory(box.context)).find(event => event.key === 'agents' && event.kind === 'deleted')!;
     await restore(box, deleted.id);

@@ -99,7 +99,7 @@ test('Switched on in a home with found items: each it may take is taken in and O
     // Deleted from Central Knot earlier, its copy put back by hand in Codex since: left found, for good.
     await putSkill(box, 'claude-cli', 'old');
     await applySkills(box.context, tools, [add((await views(box)).skills, 'old')]);
-    await applySkills(box.context, tools, [{ key: 'old', managed: true, off: [], seenManaged: true, deleted: true }]);
+    await applySkills(box.context, tools, [{ key: 'old', on: true, except: [], seenOn: true, deleted: true }]);
     await putSkill(box, 'codex-cli', 'old', 'Put back by hand.');
     await putAgent(box, 'copilot-cli', 'helper');
     // A server found only in Claude Code, and one found only in Codex.
@@ -191,8 +191,8 @@ test('Deleted from Central Knot, then its copy put back by hand: never taken in 
     await putAgent(box, 'claude-cli', 'helper');
     await turnOn(box);
     await background(box);
-    await applySkills(box.context, tools, [{ key: 'notes', managed: true, off: [], seenManaged: true, deleted: true }]);
-    await applyAgents(box.context, tools, [{ key: 'helper', managed: false, off: [], seenManaged: true }]);
+    await applySkills(box.context, tools, [{ key: 'notes', on: true, except: [], seenOn: true, deleted: true }]);
+    await applyAgents(box.context, tools, [{ key: 'helper', on: false, except: [], seenOn: true }]);
     await putSkill(box, 'codex-cli', 'notes', 'Put back by hand.');
     await putAgent(box, 'copilot-cli', 'helper', 'Put back by hand.');
     for (let run = 0; run < 10; run++) assert.equal(wrote(await background(box)), 0, `pass ${run + 1}`);

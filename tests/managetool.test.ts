@@ -49,7 +49,7 @@ async function box({ opencode = false } = {}) {
   const pass = async () => (await homePass({ ...context, reads: new Map() }, await managed(), true)).synced!;
   /** Turns notes, docs and reviewer On, as their Add does. */
   const turnOn = async () => {
-    const tools = await managed(), on = (key: string): Change[] => [{ key, managed: true, off: [] }];
+    const tools = await managed(), on = (key: string): Change[] => [{ key, on: true, except: [] }];
     const done = [await applySkills(context, tools, on('notes')), await applyServers(context, tools, on('docs')), await applyAgents(context, tools, on('reviewer'))];
     assert.deepEqual(done.map(result => result.stopped), [undefined, undefined, undefined]);
   };
@@ -189,12 +189,12 @@ test('With Automatic sync off, as the card says: a click on an item brings that 
     await b.turnOn();
     await mkdir(join(b.home, '.claude/skills/todo'), { recursive: true });
     await writeFile(join(b.home, '.claude/skills/todo/SKILL.md'), '---\nname: todo\ndescription: Todo.\n---\n\nDo things.\n');
-    await applySkills(b.context, await b.managed(), [{ key: 'todo', managed: true, off: [] }]);
+    await applySkills(b.context, await b.managed(), [{ key: 'todo', on: true, except: [] }]);
     await chooseTools(b.context, 'codex-cli', false);
     await writeFile(join(b.home, CODEX.skill), skillText('Edited in Codex while it was left out.'));
     await chooseTools(b.context, 'codex-cli', true);
     // A click on todo, as the page sends it with Automatic sync off: a pass about todo alone.
-    await applySkills(b.context, await b.managed(), [{ key: 'todo', managed: false, off: [], seenManaged: true }], { only: new Set(['todo']) });
+    await applySkills(b.context, await b.managed(), [{ key: 'todo', on: false, except: [], seenOn: true }], { only: new Set(['todo']) });
     assert.deepEqual([await b.read('.codex/skills/todo/SKILL.md'), await b.read(CODEX.skill)], [undefined, skillText('Edited in Codex while it was left out.')], 'todo is brought into line there; notes waits');
     await b.pass();
     assert.equal(await b.read(CODEX.skill), skillText(), 'Sync once brings the rest');
@@ -207,7 +207,7 @@ test('Off, the item turned Off meanwhile, On: its copy in the tool goes then, an
     await b.turnOn();
     await chooseTools(b.context, 'codex-cli', false);
     const tools = await b.managed(), view = await skillsView(b.context, tools);
-    await applySkills(b.context, tools, [{ key: 'notes', managed: false, off: [], seenManaged: true }]);
+    await applySkills(b.context, tools, [{ key: 'notes', on: false, except: [], seenOn: true }]);
     assert.equal(await b.read(CODEX.skill), skillText(), 'an item turned Off stays in the tool left out until it is back');
     // Its row and the result say no tool Central Knot manages has it, not that no tool has it: Codex still does.
     const off = await skillsView(b.context, tools), row = off.items.find(fact => fact.key === 'notes')!, say = sentences(libraryWords.skills);
@@ -242,7 +242,7 @@ test('An item deleted from Central Knot while a tool was left out: its copy ther
   try {
     await b.turnOn();
     await chooseTools(b.context, 'codex-cli', false);
-    await applySkills(b.context, await b.managed(), [{ key: 'notes', managed: true, off: [], deleted: true }]);
+    await applySkills(b.context, await b.managed(), [{ key: 'notes', on: true, except: [], deleted: true }]);
     const { said, did } = await turnCodexOn(b);
     assert.deepEqual([said, did], [counts({ removed: 1 }), counts({ removed: 1 })]);
   } finally { await b.cleanup(); }
@@ -308,7 +308,7 @@ test('With a tool left out, nothing Central Knot does writes there: a skill turn
     // A skill turned On: a found one, taken in by its Add.
     await mkdir(join(b.home, '.claude/skills/brief'), { recursive: true });
     await writeFile(join(b.home, '.claude/skills/brief/SKILL.md'), '---\nname: brief\ndescription: Brief.\n---\n\nBe brief.\n');
-    const added = await applySkills(b.context, tools, [{ key: 'brief', managed: true, off: [] }]);
+    const added = await applySkills(b.context, tools, [{ key: 'brief', on: true, except: [] }]);
     assert.deepEqual(await codex(), untouched, 'a skill turned On');
     // An Undo of reviewer's Add, which put it in Codex: it leaves Central Knot again, Codex keeps its copy, and the result says so.
     const reviewerOn = (await b.history()).find(event => event.key === 'agent:reviewer' && event.kind === 'on')!;
@@ -354,7 +354,7 @@ test('A Pull with a tool left out brings the repo’s skill, MCP server and agen
   try {
     const first = await repos.home('first');
     await skill(first, '.claude/skills', 'notes');
-    await applySkillsIn(first, [{ key: 'notes', managed: true, off: [] }]);
+    await applySkillsIn(first, [{ key: 'notes', on: true, except: [] }]);
     await seedServerAndAgent(first);
     await connectRepo(first, repos.remote, '');
     await pushRepo(first);
@@ -376,10 +376,10 @@ test('What a pass removes or writes over that no click of it asked for has its H
     await b.turnOn();
     await mkdir(join(b.home, '.claude/skills/todo'), { recursive: true });
     await writeFile(join(b.home, '.claude/skills/todo/SKILL.md'), '---\nname: todo\ndescription: Todo.\n---\n\nDo things.\n');
-    await applySkills(b.context, await b.managed(), [{ key: 'todo', managed: true, off: [] }]);
+    await applySkills(b.context, await b.managed(), [{ key: 'todo', on: true, except: [] }]);
     const todoOn = (await b.history()).find(event => event.key === 'todo' && event.kind === 'on')!;
     await chooseTools(b.context, 'codex-cli', false);
-    await applySkills(b.context, await b.managed(), [{ key: 'notes', managed: false, off: [], seenManaged: true }]);
+    await applySkills(b.context, await b.managed(), [{ key: 'notes', on: false, except: [], seenOn: true }]);
     await chooseTools(b.context, 'codex-cli', true);
     await restoreSkill(b.context, await b.managed(), todoOn.id);
     assert.ok(await b.read(CODEX.skill), 'the Undo’s pass was about todo alone');
@@ -411,7 +411,7 @@ test('A copy of a deleted item removed from a tool managed again: its entry says
   try {
     await b.turnOn();
     await chooseTools(b.context, 'codex-cli', false);
-    await applySkills(b.context, await b.managed(), [{ key: 'notes', managed: true, off: [], deleted: true }]);
+    await applySkills(b.context, await b.managed(), [{ key: 'notes', on: true, except: [], deleted: true }]);
     await turnCodexOn(b);
     const entry = (await b.history()).filter(event => event.key === 'notes').at(-1)!;
     const item = (await b.items()).skills.notes;

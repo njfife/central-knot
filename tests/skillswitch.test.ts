@@ -122,7 +122,7 @@ test('A switch set in two tools before a skill is taken in: each copy arrives wh
   try {
     // Copilot names a skill by its frontmatter name, which here differs from the folder.
     await skill(box.home, 'claude-cli', 'notes', text('Notes Helper'));
-    await applySkills(box.context, tools, [{ key: 'notes', managed: true, off: [] }]);
+    await applySkills(box.context, tools, [{ key: 'notes', on: true, except: [] }]);
     const copy = join(box.home, '.codex/skills/notes/SKILL.md');
     await setDisabled(box.context, 'codex-cli', { folder: 'notes', name: 'Notes Helper', skillFile: copy }, true);
     await setDisabled(box.context, 'copilot-cli', { folder: 'notes', name: 'Notes Helper', skillFile: join(box.home, '.copilot/skills/notes/SKILL.md') }, true);

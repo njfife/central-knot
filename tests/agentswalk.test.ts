@@ -102,7 +102,7 @@ async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
     if (ownParts) await write(box, 'codex-cli', codexAgent());
     await applyAgents(context(), tools, [rowClicks.on((await seen(box)).row, undefined)]);
     await writeFile(join(box.home, writerFiles['claude-cli']), claudeAgent('You write docs.\n').replace('name: reviewer', 'name: writer'));
-    await applyAgents(context(), tools, [{ key: 'writer', managed: true, off: [], seenManaged: false }]);
+    await applyAgents(context(), tools, [{ key: 'writer', on: true, except: [], seenOn: false }]);
     writerAsWritten = await writerNow();
     for (let step = 0; step < STEPS && !found.length; step++) {
       const { row, item, fact } = await seen(box, context());

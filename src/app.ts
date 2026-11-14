@@ -754,7 +754,7 @@ export const convertAgent = (key: string, name: string) => busy('Converting…',
   const made = await api().convertAgent(key, clickResumes(home), home.home);
   if (made.stopped || !made.skill) { announce(made.stopped ?? 'Nothing was converted.'); return; }
   const others = home.sync.managed.filter(tool => tool !== 'pi-cli');
-  const applied = await api().applySkills([{ key: made.skill, managed: true, off: others }], clickResumes(home), home.home);
+  const applied = await api().applySkills([{ key: made.skill, on: true, except: others }], clickResumes(home), home.home);
   const view = await api().refresh();
   setHome(view);
   const from = toolName(made.origin ?? 'claude-cli');

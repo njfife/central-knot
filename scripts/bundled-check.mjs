@@ -285,7 +285,7 @@ await wait(500);
 const standard = { home: HOME, mode: 'custom', read: () => Promise.all(harnessIds.map(harness => discover({ home: HOME, mode: 'custom', harness }))), build: 'com.centralknot.firstlook', buildName: 'Central Knot', settingsPath: join(scratch, 'standard-settings.json'), realHome: join(scratch, 'elsewhere') };
 mkdirSync(join(HOME, '.claude/skills/notes'), { recursive: true });
 writeFileSync(join(HOME, '.claude/skills/notes/SKILL.md'), '---\nname: notes\ndescription: Takes notes.\n---\n\nTake notes.\n');
-const managed = await applySkills(standard, await managedNow(standard, await standard.read()), [{ key: 'notes', managed: true, off: [] }]);
+const managed = await applySkills(standard, await managedNow(standard, await standard.read()), [{ key: 'notes', on: true, except: [] }]);
 const recordPath = join(HOME, '.central-knot/sync.json');
 const record = () => JSON.parse(readFileSync(recordPath, 'utf8'));
 check('the standard app syncs this home first', !managed.stopped && record().owner === 'com.centralknot.firstlook' && record().ownerName === 'Central Knot' && !!JSON.parse(readFileSync(join(HOME, '.central-knot/skills.json'), 'utf8')).items.notes, managed.stopped ?? record());

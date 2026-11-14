@@ -91,15 +91,15 @@ test('A found row’s Add says the take-in table’s answer for a click: it asks
 
 test('Each control sends the agent as it is with one thing changed', () => {
   const here = row({ 'claude-cli': 'b' }), agent = item({ except: ['copilot-cli'] });
-  const asIs = { key: 'reviewer', managed: true, off: ['copilot-cli'], seenManaged: true };
-  assert.deepEqual(rowClicks.off(here, agent), { ...asIs, managed: false });
-  assert.deepEqual(rowClicks.on(here, item({ on: false, except: ['copilot-cli'] })), { ...asIs, seenManaged: false });
-  assert.deepEqual(rowClicks.inHarness(here, agent, 'codex-cli', true), { ...asIs, off: ['copilot-cli', 'codex-cli'] });
-  assert.deepEqual(rowClicks.inHarness(here, agent, 'copilot-cli', false), { ...asIs, off: [] });
+  const asIs = { key: 'reviewer', on: true, except: ['copilot-cli'], seenOn: true };
+  assert.deepEqual(rowClicks.off(here, agent), { ...asIs, on: false });
+  assert.deepEqual(rowClicks.on(here, item({ on: false, except: ['copilot-cli'] })), { ...asIs, seenOn: false });
+  assert.deepEqual(rowClicks.inHarness(here, agent, 'codex-cli', true), { ...asIs, except: ['copilot-cli', 'codex-cli'] });
+  assert.deepEqual(rowClicks.inHarness(here, agent, 'copilot-cli', false), { ...asIs, except: [] });
   assert.deepEqual(rowClicks.makeCurrent(here, agent, 'a'), { ...asIs, version: 'a' });
   assert.deepEqual(rowClicks.remove(here, agent), { ...asIs, deleted: true });
   // A found agent: taken in, with the copy chosen where they differ, as it was seen.
-  assert.deepEqual(rowClicks.on(row({ 'claude-cli': 'a', 'codex-cli': 'x' }), undefined, 'codex-cli'), { key: 'reviewer', managed: true, off: [], seenManaged: false, use: 'codex-cli', useHash: 'x' });
+  assert.deepEqual(rowClicks.on(row({ 'claude-cli': 'a', 'codex-cli': 'x' }), undefined, 'codex-cli'), { key: 'reviewer', on: true, except: [], seenOn: false, use: 'codex-cli', useHash: 'x' });
 });
 
 test('While an edit waits in one tool, the others have the current version and get that edit; the status says so', () => {
