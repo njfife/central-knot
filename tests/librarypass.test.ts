@@ -1,7 +1,9 @@
 // The pass's contract (src/librarypass.ts Kind) on a toy kind and real files: what Disk.held is told, so a tool that reads
-// another tool's folder has an item another way only while the item is really in that tool. The toy is one text file per
-// item ("notes"); Claude Code keeps them in its folder, OpenCode in its own and it also reads Claude Code's, as it does for
-// skills. Agents use none of this.
+// another tool's folder has an item another way only while the item is really in that tool (as skills have it; agents and MCP
+// servers don't); and a pass that stops once another build takes over syncing the home. The toy is one text file per item
+// ("notes"); Claude Code keeps them in its folder, OpenCode in its own and it also reads Claude Code's, as it does for skills.
+// The pass's other rules (the folder guards, the settle window, the gate, a crash between two steps) are exampled on real
+// agents in tests/agents.test.ts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';

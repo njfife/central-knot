@@ -1,5 +1,6 @@
-// On/off flags kept per viewer in this window's local storage: the practice copy's note dismissed (app.ts). Storage that
-// can't be used reads as unset and drops writes, so at worst the note shows again.
+// On/off flags kept per viewer in this window's local storage: the practice copy's note dismissed (app.ts) and another build's
+// Overview band hidden (otherbuildview.ts). Storage that can't be used reads as unset and drops writes, so at worst a note
+// shows again. Nothing a home or the app's settings keep goes here (those are main.ts's and share.ts's).
 
 export const readFlag = (key: string): boolean => { try { return localStorage.getItem(key) === '1'; } catch { return false; } };
 

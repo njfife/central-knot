@@ -2,7 +2,8 @@
 // turning one on would do there (whatJoiningDoes), which its card says before the click. The choice is kept as the tools
 // left out (share.ts SyncRecord leftOut) and read by presence.ts managedTools. What a tool that leaves or comes back means for
 // each item is the model's (library.ts, "A HARNESS THAT LEAVES" and "A HARNESS MANAGED AGAIN"); main.ts runs the switch in its
-// queue and reads the home again after it, which is the pass that brings a tool turned on into line.
+// queue and reads the home again after it, which is the pass that brings a tool turned on into line. The card, its switch and
+// its words are managecard.ts's; the switch's History entry is worded by historypage.ts.
 import { randomUUID } from 'node:crypto';
 import { agentKind } from './agents.ts';
 import { harnessIds } from './harnesses.ts';

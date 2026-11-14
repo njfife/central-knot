@@ -1,3 +1,11 @@
+// The main process (MAP.md, "The app's shell and Settings"): the window, the menu bar icon, the app menu and the Dock; the app's
+// own settings (app-settings.json, AppSettings) and log; which home is open; watching its folders and polling; and the queue
+// each change takes its turn in (queued). It runs the pass of the whole home (pass, through homepass.ts homePass), builds the
+// view every page reads (syncThenView: types.ts HomeView), and registers every IPC channel the page calls through preload.ts
+// (the Plugins page's are marketplaces.ts's, registered with this module's handle). Each handler hands its request to an engine;
+// a click on an item page goes through the `changes` sanitizer, which must copy each field of types.ts Change. Not here: what a
+// change does (the engines: librarypass.ts and each kind, profiles.ts, sources.ts, gitrepo.ts, instructions.ts, plugins.ts) and
+// what a page shows (from renderer.ts).
 import { onlyAllowed, record, strings } from './values.ts';
 import { execFile } from 'node:child_process';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, shell, Tray, type MenuItemConstructorOptions } from 'electron';
@@ -480,7 +488,7 @@ let pendingServerNotices: SyncNotice[] = [], pendingAgentNotices: SyncNotice[] =
 let lastStopped: string | undefined;
 
 interface ServersAndAgentsResult { failures: DestinationResult[]; stopped: DestinationResult[]; serverNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean;
-  /** The servers' and agents' found keys the pass left found (librarypass.ts PassResult found), each with its kind's prefix. */ found: string[] }
+  /** The servers' and agents' found keys the pass left found (types.ts PassResult found), each with its kind's prefix. */ found: string[] }
 /** `done`: every result of the pass, all three kinds, for a caller that says what it did (a tool's Manage switch). */
 interface BackgroundPass { skills?: LibraryPass; serversAndAgents?: ServersAndAgentsResult; done?: DestinationResult[] }
 

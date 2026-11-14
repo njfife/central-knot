@@ -317,7 +317,7 @@ test('Versions are listed in the order they were taken, whatever their files’ 
   assert.equal(agent.versions.length, 4);
 });
 
-test('A record’s value is an item only with every field in its shape', () => {
+test('A record’s value is an item only with each field of the type it holds (which harnesses and origins it names are not checked)', () => {
   assert.equal(isLibraryItem(item()), true);
   assert.equal(isLibraryItem({ ...item(), deleted: { at: day(1) } }), true);
   for (const broken of [null, {}, { ...item(), own: undefined }, { ...item(), on: 'yes' }, { ...item(), versions: [{ hash: 'a' }] }, { ...item(), applied: { 'claude-cli': 3 } }, { name: 'reviewer', state: 'shared', off: [], copies: [] }]) assert.equal(isLibraryItem(broken), false);

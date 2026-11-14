@@ -2,7 +2,7 @@
 //
 //   skills.json                                the record: each skill as a LibraryItem, and each tool's skills folder as last seen
 //   sync.v1.json                               sync.json as it was before the library (skillmigrate.ts made skills.json from it)
-//   items/skills/<folder>/versions/<hash>/     one version: the skill's whole folder, byte for byte (skillfiles.ts readTree)
+//   items/skills/<folder>/versions/<hash>/     one version: the skill's whole folder, byte for byte (share.ts readTree)
 //   items/<folder>/<hash>/                     revisions kept before the library: read once by the migration, never deleted
 //                                              here (plugin parts still keep the skills they place there: parts.ts)
 //   converted.json                             skills made by Convert to skill (agentskill.ts), with the agent each came from
@@ -10,8 +10,9 @@
 // `<folder>` is the skill's key as share.ts storeFolder writes it, so a skill keyed `agents` or `mcp` never lands among the
 // agents' or MCP servers' files. Every version is named by its content, so a second never replaces a first. Versions are kept
 // until the skill is deleted from Central Knot; a deleted skill's versions go once its deletion is older than History's days
-// (pruneDeleted), and its tombstone stays. The pass (librarypass.ts, through skills.ts skillKind) is the only caller that
-// changes an item; this module only reads and writes what it is given.
+// (pruneDeleted), and its tombstone stays. The pass (librarypass.ts, through skills.ts skillKind) changes the items, and two
+// callers outside it: skills.ts takeOver keeps a version (library.ts keepVersion), and the profiles migration turns items Off,
+// once (profilemigrate.ts). This module only reads and writes what it is given.
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename } from 'node:fs/promises';
 import { dirname, join } from 'node:path';

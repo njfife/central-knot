@@ -1,3 +1,8 @@
+// The shapes main and the page share (MAP.md, "The app's shell and Settings"): what crosses preload.ts (DesktopApi), the view
+// every page reads (HomeView: SyncView, each kind's LibraryView), a click on an item (Change), a pass's answer (PassResult), a
+// History entry (HistoryEvent), and the views of plugins, instructions, sources, the Git repo and profiles. Types alone: nothing
+// here decides anything. Not here: the library's own shapes (library.ts LibraryItem, Plan), the pass's (librarypass.ts Kind,
+// Disk), and each store's record (kindstore.ts, sourcestore.ts, share.ts SyncRecord).
 import type { LeftIn } from './historyactions.ts';
 import type { LibraryItem, Plan, SourceAnswer, TakeInAnswer, VersionChange } from './library.ts';
 import type { NeutralServer } from './mcp.ts';
@@ -290,10 +295,13 @@ export interface ToolCopy {
   ownPart?: string[];
 }
 
-/** What is true now for one skill, across every tool. The page derives its marks from this. */
 /** The plugin a tool has an item through: its name, the marketplace as that tool added it, and the installed copy's version. `off`: turned off there. */
 export interface ThroughPlugin { plugin: string; marketplace: string; source?: string; version?: string; off?: true; /** The item's own name in the plugin (a skill's SKILL.md name), which the tool's switch goes by. */ name?: string }
 
+/**
+ * What is true now for one item, a skill, an MCP server or an agent, across every tool: each kind's row (LibraryFacts) as the
+ * pages read it (itemrow.ts kindSource, where On is `managed` and `except` is `off`). The page derives its marks from this.
+ */
 export interface SkillFacts {
   /** Made by Convert to skill from an agent (AGT-02): which agent, from which tool, and what an agent had that a skill does not. */
   converted?: { agent: string; origin: HarnessId; losses: string[] };
@@ -310,7 +318,7 @@ export interface SkillFacts {
    * words: no separate copy is placed beside a plugin's.
    */
   plugin?: Partial<Record<HarnessId, ThroughPlugin>>;
-  /** Tools whose copy of this managed skill was edited since the last sync and has not spread yet. */
+  /** Tools whose copy holds an edit the next pass takes in, or one that gives way to it (LibraryFacts edited). */
   edited?: HarnessId[];
   /**
    * For each tool's copy, what stops every tool from using it: a differing copy Central Knot does not change, or a tool that
@@ -381,7 +389,7 @@ export interface JoinCounts { written: number; kept: number; removed: number; wa
 
 /**
  * One click on an item, as the page sends it to any kind's engine. `managed` and `off` always say how it should be managed
- * afterwards: a caller changing only switches or removals passes the skill's current ones (from its SkillFacts), with
+ * afterwards: a caller changing only switches or removals passes the item's current ones (from its row, SkillFacts), with
  * `seenManaged`, or it changes those too. A library kind's pass reads it as its own click (librarypass.ts ItemClick, made by
  * itemClick: `managed` is On, `off` the harnesses it is kept out of). A field added here reaches an engine only once main.ts's
  * `changes` sanitizer copies it.
@@ -437,7 +445,6 @@ export interface ItemNotice {
  */
 export interface TakenInNotice { kind: 'taken-in'; items: string[]; from: HarnessId[]; history: string }
 
-/** One entry in History: what changed, which content won, and what is kept to Undo or Restore it. */
 /**
  * A skill's take-over from before the library (Replace with managed copies), as its History entry recorded it: links replaced
  * by real copies, shared copies removed, copies made for tools that read the shared one. Only read to tell such an entry
@@ -454,6 +461,7 @@ export interface TookOver {
   addedId?: string;
 }
 
+/** One entry in History: what changed, which content won, and what is kept to Undo or Restore it. */
 export interface HistoryEvent {
   id: string;
   at: string;
@@ -467,10 +475,10 @@ export interface HistoryEvent {
    * hold), 'restored', and 'took-over' with `tookOver`.
    * Library items (historyactions.ts has each one's action):
    * 'on' / 'off': it was turned On or Off (`cause` says why), in every harness or (`only`) in one; `losers` are the harnesses
-   *   written or removed.
+   *   to be written or removed, as planned when the entry was told, before the writes (a write the pass then held is listed too).
    * 'current': an earlier version (`version`) was made current; `previous` is the one before.
-   * 'edit' / 'conflict': an edit taken in (`winner`), or Pull's (`cause`); `losers` are the harnesses written, each with what it
-   *   held before, and on a 'conflict' the edits that gave way. 'kept-edit': edits not taken in that were written over (`losers`),
+   * 'edit' / 'conflict': an edit taken in (`winner`), or Pull's (`cause`); `losers` are the harnesses to be written, as planned,
+   *   each with what it held before, and on a 'conflict' the edits that gave way. 'kept-edit': edits not taken in that were written over (`losers`),
    *   or (`cause: 'tool-back'`) a copy a tool managed again held, which gave way to the current version.
    * 'deleted': it was deleted from Central Knot; with `cause: 'in-line'`, not a deletion: a copy of an item already deleted was
    *   removed from a harness (librarypass.ts logItem), so a reader counting deletions leaves that cause out. 'chosen': it was taken in with the `winner`'s copy, where the found copies differed.
@@ -529,7 +537,7 @@ export interface HistoryEvent {
   /** 'added', from before the library: copies for tools a synced item synced to again. */
   rejoined?: boolean;
   winner?: { tool: HarnessId; hash: string };
-  /** Content that gave way, kept in Central Knot's store. */
+  /** As `kind` says: the harnesses to be written or removed, each with what it held; content that gave way; or the copy taken over. */
   losers: { tool: HarnessId; hash: string;
     /** 'took-over': the copy taken over was outside the tool's own folder (in ~/.agents/skills), at this path. */ path?: string;
     /** 'took-over': the copy was a link with this text. */ linkTo?: string }[];

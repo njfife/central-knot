@@ -1,11 +1,14 @@
 // MCP servers on Central Knot's library, on real settings files in a temp home with all five tools (servers.ts): a found
 // server taken in, Off and On with each tool's own fields, Claude Code's file written only by Write to Claude Code, hand edits
 // and deletions, files that are missing, unreadable or rewritten, what is never taken in, what a tool can't hold, and a tool's
-// own switch left as it is. The model's rule is library.ts's; each case here is a worked example of it on entries.
+// own switch left as it is; at the end, saves that land while a pass writes, a crash inside a checked write, and entries in less
+// common forms. The model's rule is library.ts's; each case here is a worked example of it on entries.
 import { test } from 'node:test';
 import { itemNotice } from './notices.ts';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import fs, { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readHistory } from '../src/history.ts';
@@ -16,7 +19,8 @@ import { readTool, writeEntry } from '../src/mcp.ts';
 import { discover } from '../src/discovery.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { applyServers, restoreServer, serversView, writeToClaude } from '../src/servers.ts';
-import type { ShareContext } from '../src/share.ts';
+import { readRecord, saveRecord, type ShareContext } from '../src/share.ts';
+import { readTomlTables } from '../src/textedit.ts';
 import type { Change, HarnessId, HomeView, LibraryFacts } from '../src/types.ts';
 
 /** Nothing waits in the tools: no copy holds an edit not taken in, and these three are managed (historyactions.ts ItemNow). */
@@ -422,3 +426,221 @@ test('A damaged or newer MCP record stops every write and is never rewritten', a
     } finally { await box.cleanup(); }
   }
 });
+
+// ---------- Saves that land meanwhile, a crash in a write, and entries in less common forms ----------
+
+/** Runs `body` in a fresh home (sandbox), cleaned up after. */
+async function inBox(body: (box: Box) => Promise<void>) {
+  const box = await sandbox();
+  try { await body(box); } finally { await box.cleanup(); }
+}
+const three: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'], copilotAndCodex: HarnessId[] = ['copilot-cli', 'codex-cli'];
+/** A settings file whose one server, docs, runs `command`. */
+const docsRuns = (command: string) => JSON.stringify({ mcpServers: { docs: { command } } });
+/** Checks a TOML text with an independent parser (Python 3.11+); where none is installed (the Mac's Python 3.9), it is skipped. */
+function validToml(text: string) {
+  const parsed = spawnSync('python3', ['-c', 'import sys,tomllib; tomllib.loads(sys.stdin.read())'], { input: text, encoding: 'utf8' });
+  if (/No module named 'tomllib'|ENOENT/.test(`${parsed.stderr ?? ''}${parsed.error?.message ?? ''}`)) return;
+  assert.equal(parsed.status, 0, `${parsed.stderr}\n${text}`);
+}
+
+test('An edit saved in a tool while the pass writes its file is never written over: Codex’s own switch set meanwhile stays', () => inBox(async box => {
+  const target = box.path('codex-cli');
+  await fs.writeFile(box.path('copilot-cli'), docsRuns('BASE'));
+  await fs.writeFile(target, '[mcp_servers.docs]\ncommand="BASE"\nenabled=true\n');
+  await applyServers(box.context, copilotAndCodex, [on('docs')]);
+  await fs.writeFile(box.path('copilot-cli'), docsRuns('EDIT'));
+  const original = fs.readFile; let reads = 0;
+  fs.readFile = (async (path: unknown, ...rest: unknown[]) => {
+    if (String(path) === target && ++reads === 2) await fs.writeFile(target, '[mcp_servers.docs]\ncommand="BASE"\nenabled=false\n');
+    return (original as (...args: unknown[]) => Promise<unknown>)(path, ...rest);
+  }) as typeof fs.readFile; syncBuiltinESMExports();
+  try { await applyServers(box.context, copilotAndCodex, []); } finally { fs.readFile = original; syncBuiltinESMExports(); }
+  assert.match(await fs.readFile(target, 'utf8'), /enabled=false/, 'the switch set meanwhile is kept');
+}));
+
+test('An Undo whose file is saved again right after its write keeps that save: it is taken in, not overwritten', () => inBox(async box => {
+  const target = box.path('copilot-cli');
+  await fs.writeFile(target, docsRuns('BASE')); await applyServers(box.context, copilotAndCodex, [on('docs')]);
+  await fs.writeFile(target, docsRuns('EDIT')); await applyServers(box.context, copilotAndCodex, []);
+  const event = (await readHistory(box.context)).find(entry => entry.kind === 'edit')!;
+  const original = fs.link; let injected = false;
+  fs.link = async (from, to) => { await original(from, to); if (String(to) === target && !injected) { injected = true; await fs.writeFile(target, docsRuns('CONCURRENT')); } }; syncBuiltinESMExports();
+  try { await restoreServer(box.context, copilotAndCodex, event.id); } finally { fs.link = original; syncBuiltinESMExports(); }
+  await applyServers(box.context, copilotAndCodex, []);
+  assert.equal(await commandIn(box, 'copilot-cli'), 'CONCURRENT');
+}));
+
+test('A crash inside the checked write of a linked config.toml: the next passes put the file back behind its link', () => inBox(async box => {
+  const codex = box.path('codex-cli'), target = join(box.home, 'dotfiles/config.toml');
+  await fs.mkdir(join(box.home, 'dotfiles'));
+  await fs.writeFile(target, 'model="gpt-5"\n[mcp_servers.docs]\ncommand="BASE"\n');
+  await fs.symlink(target, codex);
+  await fs.writeFile(box.path('copilot-cli'), docsRuns('BASE'));
+  await applyServers(box.context, copilotAndCodex, [on('docs')]);
+  await fs.writeFile(box.path('copilot-cli'), docsRuns('EDIT'));
+  const script = `import fs from 'node:fs/promises';import {syncBuiltinESMExports} from 'node:module';import {applyServers} from './src/servers.ts';
+    const original=fs.link;fs.link=async(from,to)=>{if(String(to)===process.env.CK_TARGET)process.exit(73);return original(from,to);};syncBuiltinESMExports();
+    const context=JSON.parse(process.env.CK_CONTEXT);context.read=async()=>[];await applyServers(context,['copilot-cli','codex-cli'],[]);`;
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: process.cwd(), env: { ...process.env, CK_TARGET: await fs.realpath(target), CK_CONTEXT: JSON.stringify(box.context) }, encoding: 'utf8' });
+  assert.equal(child.status, 73, child.stderr);
+  await applyServers(box.context, copilotAndCodex, [], { now: 1000 });
+  await applyServers(box.context, copilotAndCodex, [], { now: 4000 });
+  assert.equal((await readTool(box.context, 'codex-cli')).exists, true, `the link leads nowhere; dotfiles holds ${await fs.readdir(join(box.home, 'dotfiles'))}`);
+  assert.ok((await fs.lstat(codex)).isSymbolicLink(), 'config.toml is still a link, not a file in its place');
+}));
+
+test('A pass that can’t write one tool’s file says so and goes on: it never throws', () => inBox(async box => {
+  await fs.writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { a: { type: 'local', command: 'A' }, b: { type: 'local', command: 'B' } } }));
+  await fs.writeFile(box.path('codex-cli'), '');
+  await applyServers(box.context, copilotAndCodex, [on('a'), on('b')]);
+  await fs.writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { a: { type: 'local', command: 'A2' }, b: { type: 'local', command: 'B2' } } }));
+  await fs.chmod(join(box.home, '.codex'), 0o555);
+  let threw: unknown;
+  try { await applyServers(box.context, copilotAndCodex, []); } catch (error) { threw = error; } finally { await fs.chmod(join(box.home, '.codex'), 0o755); }
+  assert.equal(threw, undefined, `the pass threw instead of reporting a held write: ${threw}`);
+}));
+
+test('An entry deleted by hand turns the server Off, sparing a same-named server Central Knot never had; Claude Code’s copy goes at Write to Claude Code', () => inBox(async box => {
+  await fs.writeFile(box.path('claude-cli'), docsRuns('BASE'));
+  await applyServers(box.context, three.slice(0, 2), [on('docs')]);
+  await fs.writeFile(box.path('codex-cli'), '[mcp_servers.docs]\ncommand="UNRELATED"\n');
+  await fs.writeFile(box.path('copilot-cli'), '{"mcpServers":{}}');
+  await applyServers(box.context, three, [], { settleMs: 0 });
+  assert.equal(await commandIn(box, 'codex-cli'), 'UNRELATED');
+  await writeToClaude(box.context, three, ['docs']);
+  assert.equal(await commandIn(box, 'claude-cli'), undefined);
+}));
+
+test('Turn on after an entry was deleted by hand in Codex gives it back with Codex’s own switch as it was (enabled = false)', () => inBox(async box => {
+  const codex = box.path('codex-cli');
+  await fs.writeFile(box.path('copilot-cli'), docsRuns('BASE'));
+  await applyServers(box.context, copilotAndCodex, [on('docs')]);
+  await fs.writeFile(codex, (await fs.readFile(codex, 'utf8')).replace('command = "BASE"\n', 'command = "BASE"\nenabled = false\n'));
+  await applyServers(box.context, copilotAndCodex, []);
+  await fs.writeFile(codex, '[mcp_servers.other]\ncommand = "true"\n');
+  await applyServers(box.context, copilotAndCodex, [], { settleMs: 0 });
+  await restoreServer(box.context, copilotAndCodex, (await readHistory(box.context)).find(entry => entry.kind === 'off' && entry.cause === 'deleted-by-hand')!.id);
+  assert.match(await fs.readFile(codex, 'utf8'), /enabled\s*=\s*false/);
+}));
+
+test('Claude Code making .claude.json again without its servers turns each Off everywhere: nothing is lost, and each is one click back on', () => inBox(async box => {
+  const claude = box.path('claude-cli');
+  const servers = { docs: { type: 'stdio', command: 'docs-mcp' }, web: { type: 'stdio', command: 'web-mcp' } };
+  await fs.writeFile(claude, JSON.stringify({ numStartups: 3, mcpServers: servers }));
+  await applyServers(box.context, three, [on('docs'), on('web')]);
+  assert.ok((await readTool(box.context, 'codex-cli')).entries.length === 2);
+  // Claude Code replaces its file (atomic write) with a fresh one: no missing window. A file that reads and no longer has an
+  // entry is a deletion by hand, in every format; there is no test for a "reset".
+  await fs.writeFile(`${claude}.new`, JSON.stringify({ numStartups: 1, firstStartTime: 'now' }));
+  await fs.rename(`${claude}.new`, claude);
+  await applyServers(box.context, three, [], { settleMs: 0 });
+  assert.deepEqual((await readTool(box.context, 'codex-cli')).entries.map(entry => entry.name), []);
+  const view = await serversView(box.context, three);
+  assert.deepEqual(view.items.map(item => [item.key, item.on]), [['docs', false], ['web', false]], 'each is Off, in Central Knot only');
+  await applyServers(box.context, three, [{ key: 'docs', managed: true, off: [], seenManaged: false }]);
+  await writeToClaude(box.context, three, ['docs']);
+  assert.deepEqual([(await readTool(box.context, 'codex-cli')).entries.map(entry => entry.server.command), (await readTool(box.context, 'claude-cli')).entries.map(entry => entry.server.command)], [['docs-mcp'], ['docs-mcp']]);
+}));
+
+test('Claude Code’s copy waiting for Write to Claude Code, then edited in Claude Code: the newer edit stays current, Claude Code’s is kept as a version', () => inBox(async box => {
+  const docs = (command: string) => JSON.stringify({ mcpServers: { docs: { type: 'stdio', command } } });
+  await fs.writeFile(box.path('claude-cli'), docs('BASE'));
+  await applyServers(box.context, three, [on('docs')]);
+  await fs.writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { docs: { type: 'local', command: 'COPILOT-EDIT', tools: ['*'] } } }));
+  await applyServers(box.context, three, []); // Codex gets it; Claude Code waits for Write to Claude Code
+  await fs.writeFile(box.path('claude-cli'), docs('CLAUDE-EDIT'));
+  await applyServers(box.context, three, []);
+  // An entry has no time of its own: an edit made where the current version had moved on loses to it, and is kept.
+  const view = await serversView(box.context, three), item = view.library.docs;
+  assert.equal(view.items[0]!.description, 'Command · COPILOT-EDIT');
+  assert.ok(item.versions.some(version => version.from.how === 'edited' && version.from.harness === 'claude-cli'), 'Claude Code’s edit is a version');
+  assert.deepEqual(view.items[0]!.waits, ['claude-cli'], 'Claude Code still owes the write');
+}));
+
+test('A removal Claude Code owes goes to the file it was owed in, never to Claude Code’s settings moved somewhere else since', () => inBox(async box => {
+  await fs.writeFile(box.path('claude-cli'), docsRuns('BASE'));
+  await applyServers(box.context, three, [on('docs')]);
+  await fs.writeFile(box.path('copilot-cli'), '{"mcpServers":{}}');
+  await applyServers(box.context, three, [], { settleMs: 0 });
+  const alternate = join(box.home, 'alternate-claude');
+  await fs.mkdir(alternate);
+  await fs.writeFile(join(alternate, '.claude.json'), docsRuns('BASE'));
+  await writeToClaude({ ...box.context, overrides: { 'claude-cli': alternate } }, three, ['docs']);
+  assert.equal((await readTool({ ...box.context, overrides: { 'claude-cli': alternate } }, 'claude-cli')).entries[0]?.server.command, 'BASE');
+}));
+
+test('Another build taking over syncing stops an MCP server’s Undo: nothing is written', () => inBox(async box => {
+  await fs.writeFile(box.path('copilot-cli'), docsRuns('BASE'));
+  await applyServers(box.context, copilotAndCodex, [on('docs')]);
+  await fs.writeFile(box.path('copilot-cli'), docsRuns('EDIT'));
+  await applyServers(box.context, copilotAndCodex, []);
+  const event = (await readHistory(box.context)).find(entry => entry.kind === 'edit')!;
+  const { record } = await readRecord(box.home); record!.owner = 'other'; await saveRecord(box.home, record!, true);
+  assert.equal((await restoreServer(box.context, copilotAndCodex, event.id)).writes, 0);
+  assert.equal(await commandIn(box, 'copilot-cli'), 'EDIT');
+}));
+
+for (const broken of ['{"mcpServers":null}', '{"mcpServers":{"docs":null}}']) test(`A settings file holding ${broken} deletes nothing elsewhere: the other copies stay`, () => inBox(async box => {
+  await fs.writeFile(box.path('copilot-cli'), docsRuns('BASE'));
+  await applyServers(box.context, copilotAndCodex, [on('docs')]);
+  await fs.writeFile(box.path('copilot-cli'), broken);
+  await applyServers(box.context, copilotAndCodex, [], { now: 1000 });
+  await applyServers(box.context, copilotAndCodex, [], { now: 4000 });
+  assert.equal((await readTool(box.context, 'codex-cli')).entries[0]?.server.command, 'BASE');
+}));
+
+for (const [name, initial] of [
+  ['docs', 'model="gpt-5"\nmcp_servers = { docs = { command = "BASE" } }\n'],
+  ['docs.v2', '[mcp_servers]\n"docs.v2" = { command = "BASE" }\n'],
+]) {
+  test(`A Codex server written inline (${name}) can’t be seen for sure there, so an edit never gives it a second definition`, () => inBox(async box => {
+    validToml(initial);
+    await fs.writeFile(box.path('codex-cli'), initial);
+    await fs.writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { [name]: { command: 'BASE' } } }));
+    await applyServers(box.context, copilotAndCodex, [on(name)]);
+    await fs.writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { [name]: { command: 'EDIT' } } }));
+    await applyServers(box.context, copilotAndCodex, []);
+    assert.equal(await fs.readFile(box.path('codex-cli'), 'utf8'), initial);
+    assert.match((await serversView(box.context, copilotAndCodex)).items[0]!.unseen?.['codex-cli'] ?? '', /not written in a form Central Knot edits/);
+  }));
+}
+
+test('Codex’s dotted env fields are read, spread, and written back as valid TOML', () => inBox(async box => {
+  await fs.writeFile(box.path('codex-cli'), '[mcp_servers.docs]\ncommand="BASE"\nenv.REGION="west"\n');
+  await applyServers(box.context, copilotAndCodex, [on('docs')]);
+  assert.deepEqual((await readTool(box.context, 'copilot-cli')).entries[0]?.server.env, { REGION: 'west' });
+  await fs.writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { docs: { command: 'BASE', env: { REGION: 'east' } } } }));
+  await applyServers(box.context, copilotAndCodex, []);
+  assert.equal(await fs.readFile(box.path('codex-cli'), 'utf8'), '[mcp_servers.docs]\ncommand = "BASE"\n\n[mcp_servers.docs.env]\nREGION = "east"\n');
+}));
+
+test('Codex’s headers written as a table (http_headers) are read and kept', () => inBox(async box => {
+  await fs.writeFile(box.path('codex-cli'), '[mcp_servers.docs]\nurl = "https://a.example/mcp"\n\n[mcp_servers.docs.http_headers]\nX-Team = "core"\n');
+  const entry = (await readTool(box.context, 'codex-cli')).entries.find(each => each.name === 'docs')!;
+  assert.deepEqual(entry.server.headers, { 'X-Team': 'core' }, 'headers in table form are read, so other tools get the server with them');
+}));
+
+test('An edit spread to Codex keeps the server’s own subtables there (env_http_headers, a tool’s approval)', () => inBox(async box => {
+  await fs.writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { docs: { type: 'http', url: 'https://a.example/mcp', tools: ['*'] } } }));
+  await fs.writeFile(box.path('codex-cli'), '[mcp_servers.docs]\nurl = "https://a.example/mcp"\nenabled = true\n\n[mcp_servers.docs.env_http_headers]\nX_REGION = "REGION_VAR"\n\n[mcp_servers.docs.tools.search]\napproval_mode = "approve"\n');
+  await applyServers(box.context, copilotAndCodex, [on('docs')]);
+  await fs.writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { docs: { type: 'http', url: 'https://b.example/mcp', tools: ['*'] } } }));
+  await applyServers(box.context, copilotAndCodex, []);
+  const text = await fs.readFile(box.path('codex-cli'), 'utf8');
+  assert.match(text, /b\.example/, 'the edit spread');
+  assert.match(text, /env_http_headers/, `Codex's own env_http_headers table is kept:\n${text}`);
+  assert.match(text, /approval_mode/, `Codex's own per-tool table is kept:\n${text}`);
+}));
+
+test('A comment before the next table stays with that table when the server is written again', () => inBox(async box => {
+  await fs.writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { docs: { type: 'local', command: 'A' } } }));
+  await fs.writeFile(box.path('codex-cli'), '[mcp_servers.docs]\ncommand = "A"\n\n# Work profile: keep this\n[profiles.work]\nmodel = "o3"\n');
+  await applyServers(box.context, copilotAndCodex, [on('docs')]);
+  await fs.writeFile(box.path('copilot-cli'), JSON.stringify({ mcpServers: { docs: { type: 'local', command: 'B' } } }));
+  await applyServers(box.context, copilotAndCodex, []);
+  const text = await fs.readFile(box.path('codex-cli'), 'utf8');
+  assert.match(text, /command = "B"/);
+  assert.match(text, /# Work profile/, `the comment belonging to the next table is kept:\n${text}`);
+  readTomlTables(text);
+}));

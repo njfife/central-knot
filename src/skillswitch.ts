@@ -1,12 +1,13 @@
-// A tool's own switch for one skill (capability data, Appendix B; ENB-01, ENB-02): the copy stays where it is and keeps receiving
-// updates; the tool just doesn't load it. Central Knot's Off never writes it (Off takes the folder out: library.ts). It is read
-// for the mark on that tool's line (skills.ts rowFacts), cleared by the one action that writes it for a skill (skills.ts
-// clearSwitch, and its Undo), released once by the profiles migration (profilemigrate.ts), and flipped for a plugin's skill (plugins.ts). Each tool keeps its switch in its own
-// user-wide settings file, which is edited in place: only the switch changes. Every other byte stays, apart from these: the JSON
-// list holding Copilot's or Pi's switches is written back as a list (same entries, JSON layout); a list or map Enable leaves empty
-// goes with its last entry (and a JSON settings file that wasn't there is left as `{}`); a config.toml without a final newline
-// gains one when a rule is added; a person's Codex rule with no `enabled` key keeps the `enabled` line a Disable gave it; a JSON
-// settings file with Windows line ends gets plain ones in the lines added while a skill is disabled (Enable takes them out again).
+// A tool's own switch for one skill (capability data, Appendix B; ENB-01, ENB-02): the copy stays where it is and keeps
+// receiving updates; the tool just doesn't load it. Central Knot's Off never writes it (Off takes the folder out: library.ts).
+// It is read for the mark on that tool's line (skills.ts rowFacts), cleared by skills.ts clearSwitch (and set again by its
+// Undo, switchBack), carried to Central Knot's copy by skills.ts takeOver, released once by the profiles migration
+// (profilemigrate.ts), and flipped for a plugin's skill (plugins.ts). Each tool keeps its switch in its own user-wide settings
+// file, which is edited in place: only the switch changes. Every other byte stays, apart from these: the JSON list holding
+// Copilot's or Pi's switches is written back as a list (same entries, JSON layout); a list or map Enable leaves empty goes with
+// its last entry (and a JSON settings file that wasn't there is left as `{}`); a config.toml without a final newline gains one
+// when a rule is added; a person's Codex rule with no `enabled` key keeps the `enabled` line a Disable gave it; a JSON settings
+// file with Windows line ends gets plain ones in the lines added while a skill is disabled (Enable takes them out again).
 //   Claude Code  settings.json   "skillOverrides": { "<folder>": "off" }   (keyed by folder: Claude names a skill after it)
 //   Copilot CLI  settings.json   "disabledSkills": ["<name>"]              (what `copilot skill disable` writes; by name)
 //   Codex        config.toml     [[skills.config]] path = "<…/SKILL.md>" enabled = false   (by path: a name rule would hit every same-name skill)

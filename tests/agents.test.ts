@@ -1,11 +1,14 @@
 // Agents on the library, as worked examples on real files in a temp home (src/agents.ts; the model is src/library.ts).
 // One agent, "reviewer", in Claude Code, Copilot CLI and Codex; every click is sent as the Agents page sends it
 // (tests/agentclicks.ts). In order: the harnesses' formats, Off and On, edits and deletions by hand, copies that can't be
-// seen, found agents, versions, Delete, and what a crash or a damaged record leaves.
+// seen, found agents, versions, Delete, and what a crash or a damaged record leaves. Agents are the pass's worked kind, so its
+// own rules (src/librarypass.ts: the folder guards, the settle window, the gate, the order of steps) are exampled here.
 import { test } from 'node:test';
 import { itemNotice } from './notices.ts';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, readFile, readdir, rename, rm, utimes, writeFile } from 'node:fs/promises';
+import fs, { chmod, mkdir, readFile, readdir, rename, rm, utimes, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { agentText, readAgents } from '../src/agentfiles.ts';
@@ -87,6 +90,13 @@ inBox('A harness with no agents folder yet gets the agent', async box => {
   await rm(join(box.home, '.codex/agents'), { recursive: true });
   await on(box);
   assert.match((await readOf(box, 'codex-cli'))!, /You review code/);
+});
+
+inBox('A description line in Claude Code’s front matter that ends in --- is not the end of it: nothing of the front matter reaches Codex’s prompt', async box => {
+  await writeFile(join(box.home, '.claude/agents/rev.md'), '---\nname: rev\ndescription: Reviews code ---\nmodel: sonnet\n---\n\nBody\n');
+  await applyAgents(box.context, box.tools, [{ key: 'rev', managed: true, off: [] }]);
+  const toml = await readFile(join(box.home, '.codex/agents/rev.toml'), 'utf8').catch(() => '');
+  assert.ok(!/model: sonnet/.test(toml), `Claude Code's front matter leaked into the prompt:\n${toml}`);
 });
 
 // ---------- Off and On ----------
@@ -791,6 +801,22 @@ inBox('A removal that finds the copy changed since it was read waits for the nex
   assert.deepEqual(off.results.filter(entry => entry.harness === 'codex-cli').map(entry => entry.outcome), ['held']);
 });
 
+inBox('An edit saved in another tool between the pass’s last read and the write that replaces its file is never lost: it stays on disk or is kept as a version', async box => {
+  await on(box, claudeAgent('BASE\n'));
+  await write(box, 'claude-cli', claudeAgent('UPSTREAM\n'));
+  // The concurrent save lands where the write now happens: after the old file is moved aside, before the new one is linked in.
+  const original = fs.link; let injected = false;
+  fs.link = async (from, to) => {
+    if (String(to) === fileOf(box, 'copilot-cli') && !injected) { injected = true; await write(box, 'copilot-cli', claudeAgent('CONCURRENT UNIQUE\n')); }
+    return original(from, to);
+  }; syncBuiltinESMExports();
+  try { await pass(box); } finally { fs.link = original; syncBuiltinESMExports(); }
+  assert.ok(injected);
+  const kept = join(box.home, '.central-knot/items/agents');
+  const stored = await Promise.all((await readdir(kept, { recursive: true })).map(path => readFile(join(kept, path), 'utf8').catch(() => '')));
+  assert.ok([await readOf(box, 'copilot-cli'), ...stored].some(text => text?.includes('CONCURRENT UNIQUE')), 'the concurrent edit is on disk or kept');
+});
+
 // ---------- A crash in the middle ----------
 
 const crashAt = (box: Box, step: string, nth = 1): ShareContext => { let seenTimes = 0; return { ...box.context, fault: at => { if (at === step && ++seenTimes === nth) throw new Error(`crash at ${step}`); } }; };
@@ -943,6 +969,41 @@ test('A pulled agent is named by its file in the repo, as a found one is by its 
     const view = await agentsView(box.context, box.tools);
     assert.deepEqual([view.items.map(item => item.key), view.library.reviewer?.on, (await readdir(join(box.home, '.claude/agents'))).sort()], [['reviewer'], true, ['reviewer.md']]);
   } finally { await box.cleanup(); }
+});
+
+inBox('Two edits, and a crash before the record is saved: after a restart, History names the edit that gave way, so it can be made current', async box => {
+  await on(box, claudeAgent('BASE\n'));
+  await write(box, 'claude-cli', claudeAgent('CLAUDE LOSER\n'));
+  await write(box, 'copilot-cli', claudeAgent('COPILOT WINNER\n'));
+  // The later edit wins: Copilot CLI's file is saved after Claude Code's.
+  await utimes(fileOf(box, 'copilot-cli'), new Date(), new Date(Date.now() + 5000));
+  const original = fs.rename;
+  fs.rename = async (from, to) => {
+    if (String(to) === join(box.home, '.central-knot/agents.json')) throw new Error('crash before the record is saved');
+    return original(from, to);
+  }; syncBuiltinESMExports();
+  try { await assert.rejects(pass(box), /crash before the record is saved/); } finally { fs.rename = original; syncBuiltinESMExports(); }
+  // A fresh copy of the module, as after a restart (nothing it kept in memory).
+  const fresh = '../src/agents.ts?restart=1';
+  const restarted = await import(fresh) as typeof import('../src/agents.ts');
+  await restarted.applyAgents(box.context, box.tools, []);
+  assert.ok((await historyOf(box)).some(event => event.losers.some(loser => loser.tool === 'claude-cli')), 'the edit that gave way has its History entry');
+});
+
+inBox('A process that dies during an agent’s Undo leaves it in every tool: the Undo was told before any file changed, and the next pass finishes it', async box => {
+  await on(box, claudeAgent('BASE\n'));
+  await write(box, 'claude-cli', claudeAgent('EDIT\n')); await pass(box);
+  const event = (await historyOf(box)).find(entry => entry.kind === 'edit')!;
+  const script = `import fs from 'node:fs/promises';import {syncBuiltinESMExports} from 'node:module';import {restoreAgent} from './src/agents.ts';
+    const original=fs.link;fs.link=async(from,to)=>{if(String(to)===process.env.CK_TARGET)process.exit(73);return original(from,to);};syncBuiltinESMExports();
+    const c=JSON.parse(process.env.CK_CONTEXT);c.read=async()=>[];await restoreAgent(c,['claude-cli','copilot-cli','codex-cli'],process.env.CK_EVENT);`;
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: process.cwd(), env: { ...process.env, CK_TARGET: fileOf(box, 'claude-cli'), CK_CONTEXT: JSON.stringify(box.context), CK_EVENT: event.id }, encoding: 'utf8' });
+  assert.equal(child.status, 73, child.stderr);
+  await applyAgents(box.context, box.tools, [], { now: 1000 });
+  await applyAgents(box.context, box.tools, [], { now: 4000 });
+  // The Undo was recorded (the earlier version made current) before any file changed, so the next pass finishes it.
+  assert.equal((await readAgents(box.context, 'copilot-cli')).entries[0]?.agent.prompt.trim(), 'BASE');
+  assert.equal((await readAgents(box.context, 'claude-cli')).entries[0]?.agent.prompt.trim(), 'BASE');
 });
 
 // ---------- The record, and the things around it ----------

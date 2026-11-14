@@ -1,5 +1,7 @@
-// Words shared by the pages and by what the engines say: each tool's display name (toolNames), each kind's (kindNouns), and
-// "a, b and c" lists.
+// Words shared by the pages and by what the engines say: each tool's display name (toolNames), each kind's (kindNouns), "a, b
+// and c" lists, and a few sentences more than one module says (a tool left out or not managed, through a plugin). A page's
+// own words are its module's; a library row's are libraryrow.ts libraryWords, a History entry's historyactions.ts and
+// historypage.ts.
 import type { HomeKind } from './presence.ts';
 import type { HarnessId, SwitchProblem } from './types.ts';
 

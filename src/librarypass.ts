@@ -1,10 +1,12 @@
 // The pass: the library's model (library.ts) carried out on real files, the same for every kind of item. A kind (skills.ts,
-// servers.ts, agents.ts) implements `Kind`, below, and nothing else: where a harness keeps it, how a copy is read, written and
-// removed in that harness's format, a harness's own part, and its record and store. Everything here is the same for every kind:
+// servers.ts, agents.ts) implements `Kind`, below, for the pass: where a harness keeps it, how a copy is read, written and
+// removed in that harness's format, a harness's own part, and its record and store; its clicks, its page's view and any action
+// of its own (skills' Clear the switch and Take over, servers' Write to Claude Code) are in its own module, whose header names
+// them. Everything here is the same for every kind:
 //
 //   lookAt         each managed harness's copies, read once through the kind (Disk); a copy that can't be read for sure is
 //                  unseen, never missing
-//   deletionsTold  a deleted item that History has no standing entry for gets one, so it always has its Restore
+//   deletionsTold  a deleted item that History has no standing entry for gets one, so it has its Restore for History's days
 //   pull, source   what Pull brings, and what a source holds (library.ts A SOURCE, through fromSourceStep), recorded on
 //                  the items before any click
 //   click          what the person asked (On, Off, a harness kept out, a version made current, Delete, Restore, a found item
@@ -46,8 +48,8 @@
 // itemClick makes it an ItemClick (`managed` is On); a kind's page view is a types.ts LibraryView, which the pages read through
 // itemrow.ts kindSource.
 //
-// To put another kind on the library, every place it is wired in (this is the one list; librarypages.ts and LEDGER point
-// here, and the compiler names a member `Kind` lacks):
+// To put another kind on the library, every place it is wired in (this is the one list; librarypages.ts points here, and the
+// compiler names a member `Kind` lacks):
 // - the contract: its name in library.ts ItemKind, and one object implementing `Kind`, like agents.ts agentKind (a kind with
 //   no part of its own per tool has `ownOf` answer undefined and `keepOwn` false; its read fills Disk.parts where a plugin's
 //   part is one of its found copies, as share.ts partsIn gives them);
@@ -711,7 +713,7 @@ async function giveBackCopy(pass: Pass, item: LibraryItem, here: Seen, hash: str
 // ---------- History ----------
 
 /**
- * A deleted item always has its Restore. carryOut tells History first for its own item, but a pass saves the whole record,
+ * A deleted item has its Restore for History's days. carryOut tells History first for its own item, but a pass saves the whole record,
  * so another item's save in the same pass can carry a Delete to disk before that Delete's entry is told; a crash then would
  * leave the item with no row and no Restore. So each pass, before any click, gives every item deleted within History's
  * days that has no standing `deleted` entry (one not undone) that entry, dated when it was deleted.

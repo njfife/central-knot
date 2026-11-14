@@ -1,3 +1,6 @@
+// Where this computer keeps things, for the main process: where a tool's CLI may be (executableCandidates, the login shell's
+// PATH), where its desktop app may be (appCandidates), and this Mac's Applications folders, running apps and Trash, which a
+// test stands in for (macPlaces). Places only: discovery.ts looks in them, and otherbuilds.ts uses macPlaces.
 import { execFile } from 'node:child_process';
 import { userInfo } from 'node:os';
 import { delimiter, dirname, isAbsolute, join, sep } from 'node:path';

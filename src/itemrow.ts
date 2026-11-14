@@ -8,7 +8,7 @@ import { toolName } from './words.ts';
 /** A tool, as a column. */
 export type Tool = string;
 
-/** One item's row: each tool's copy as a content id (same id = same bytes), or absent, and what else the row says. */
+/** One item's row: each tool's copy as a content id (same id = the same version: for agents and MCP servers, the shared part alone), or absent, and what else the row says. */
 export interface ItemRow {
   key: string;
   /** Made by Convert to skill from an agent. */

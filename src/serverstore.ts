@@ -9,8 +9,8 @@
 //                                             releaseKeptDenies clears each, and drops it here, once its server is wanted there)
 //
 // Every file under items/ is named by what it holds, so a second file never replaces a first, and nothing here is pruned.
-// The pass (librarypass.ts, through servers.ts serverKind) is the only caller that changes an item; this module only reads
-// and writes what it is given.
+// The pass (librarypass.ts, through servers.ts serverKind) changes the items, and so does the profiles migration, once: items
+// Off and kept own parts without their switch (profilemigrate.ts). This module only reads and writes what it is given.
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { emptyLibrary, keepOwnPart, readLibraryFile, saveLibraryFile, storeOnce, type RecordFile, type StoredLibrary } from './kindstore.ts';

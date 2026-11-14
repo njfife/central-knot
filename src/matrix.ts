@@ -1,6 +1,7 @@
 // The item pages (Skills, MCP servers, Agents, and a harness's tabs for them): one On/Off switch per item, applied at once
 // in every tool Central Knot manages. A row's marks only say what each tool has; each tool's own controls are in the item's
-// details, and every click's result comes with an Undo of the whole click. Every kind is on Central Knot's library: its row is a
+// details, and a click's result comes with an Undo of the whole click wherever History offers one (historyactions.ts says where
+// it doesn't: Take over, a take-in from Claude Code's MCP settings). Every kind is on Central Knot's library: its row is a
 // library row (`library()`): librarypages.ts says what each kind supplies, libraryrow.ts what such a row says. A sync notice is
 // kept or folded once its page shows it (toldNotices); until then it lives across reads in app.ts keepUnshown. First setup's
 // walkthrough (firstsetup.ts) is a band among a table's bands, given copyQuestion to hold the question of the item it is at.

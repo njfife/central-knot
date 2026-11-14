@@ -1,3 +1,6 @@
+// The page's entry: the window's frame around the page (the sidebar, the header, the status bar and the Sync switch), which page
+// draws (renderPage), and drawing again on a change. The page's state and actions are app.ts's; each page is drawn by its own
+// module (pages.ts and the *page.ts modules, matrix.ts for the item tables).
 import { settingsPage } from './settingspage.ts';
 import packageInfo from '../package.json' with { type: 'json' };
 import { absentKinds, noToolManaged, noToolManagedSentence, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';

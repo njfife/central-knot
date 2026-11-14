@@ -1,3 +1,5 @@
+// The page's calls into main: types.ts DesktopApi, each one an IPC channel main.ts answers. The only thing the page can reach of
+// the main process; nothing here decides anything. A call added here needs its type in DesktopApi and its handler in main.ts.
 import { contextBridge, ipcRenderer } from 'electron';
 import type { DesktopApi } from './types.ts';
 

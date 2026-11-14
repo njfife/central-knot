@@ -1,13 +1,29 @@
-// What every engine stands on (MAP.md, "The store and safe writes"). Among it, the gate for library writes (libraryGate), the
-// one answer to "may this write of the library happen now". A click that writes the library, the home's sync record or a tool's
-// own switch for a library item by its own hand (a profile switch, a Manage switch, Take over, Clear the switch, Convert, a
-// source's Add and Check now: sources.ts) enters
-// it once its own refusals are past. A pass enters it before it reads its clicks (librarypass.ts runPass), so an item page's
-// click that the pass then refuses has still made the record of a home with none, or resumed one that waited. What checks before
-// such a write starts (Pull, Push, a History action that runs no pass of its own, the profiles migration) only asks it; what
-// writes a file of Central Knot's own alone asks it for that (`ownFile`: profiles.json, a source's Look and Remove). It is not the gate for every write: reads, taking over syncing (takeOverSync, which
-// changes the owner), another build of the app, the Git repo's connection, instructions and plugins ask writeAccess alone;
-// syncsHere is whether this build syncs the home at all (the background pass, History kept tidy).
+// What every engine stands on (MAP.md, "The store and safe writes"):
+// - the home's store, `.central-knot/` (storeDirectory), and its sync record, sync.json (SyncRecord: which build syncs the
+//   home, the tools left out, Synchronize everything), read and saved (readRecord, saveRecord); only takeOverSync changes its
+//   owner, and work the build that owned it had under way stops at its next item or save (stillOwned);
+// - two gates: writeAccess, whether this window may write this home at all (the real home only when chosen), and the gate for
+//   library writes (libraryGate), the one answer to "may this write of the library happen now", which asks writeAccess and
+//   syncGate (which build syncs the home, and whether it waits for Resume). A write of the library asks libraryGate, never the
+//   two apart; the views read them apart, to say why on the page;
+// - checked writes: a tool's file written or removed only while it holds what was read (writeFileChecked, removeFileChecked,
+//   with a file moved aside put back: recoverParked), and Central Knot's own files written whole (writeDurably);
+// - a skill's folder read as one content (readTree), copied byte for byte (copyTree), staged beside its target and put in
+//   place (stagingFolder, placeCopy);
+// - plugin parts on record, read only (readParts, partsIn; parts.ts writes them).
+// Not here: a kind's record (kindstore.ts and each kind's store), History (history.ts), a tool's folders and files
+// (skillfiles.ts, mcp.ts, agentfiles.ts), and which tools are managed (presence.ts managedTools).
+//
+// Who enters the gate for library writes. A click that writes the library, the home's sync record or a tool's own switch for a
+// library item by its own hand (a profile switch and its Undo, a Manage switch, Synchronize everything's switch, Take over,
+// Clear the switch and its Undo, Convert, a source's Add and Check now: sources.ts) enters it once its own refusals are past. A
+// pass enters it before it reads its clicks (librarypass.ts runPass), so an item page's click that the pass then refuses has
+// still made the record of a home with none, or resumed one that waited. What checks before such a write starts (Pull, Push,
+// Synchronize everything's Undo and Restore, the Undo of a Pull's change to Claude Code's settings, the profiles migration)
+// only asks it; what writes a file of Central Knot's own alone asks it for that (`ownFile`: profiles.json, a source's Look and
+// Remove). Writes that are not the library's ask writeAccess alone: taking over syncing (takeOverSync, which changes the
+// owner), another build of the app, the Git repo's connection, instructions and plugins; syncsHere is whether this build syncs
+// the home at all (the background pass, History kept tidy).
 import { createHash, randomUUID } from 'node:crypto';
 import { STANDARD_BUILD, PRODUCT } from './values.ts';
 import { createReadStream } from 'node:fs';
