@@ -478,8 +478,8 @@ export interface HistoryEvent {
    *   written or removed (one whose write or removal the pass held is taken out after the writes: librarypass.ts untell).
    * 'current': an earlier version (`version`) was made current; `previous` is the one before.
    * 'edit' / 'conflict': an edit taken in (`winner`), or Pull's (`cause`); `losers` are the harnesses written, each with what
-   *   it held before, and on a 'conflict' the edits that gave way. 'kept-edit': edits not taken in that were written over (`losers`),
-   *   or (`cause: 'tool-back'`) a copy a tool managed again held, which gave way to the current version.
+   *   it held before, and on a 'conflict' the edits that gave way. 'kept-edit': edits not taken in that gave way to the current
+   *   version (`losers`), or (`cause: 'tool-back'`) a copy a tool managed again held, which gave way to it.
    * 'deleted': it was deleted from Central Knot; with `cause: 'in-line'`, not a deletion: a copy of an item already deleted was
    *   removed from a harness (librarypass.ts logItem), so a reader counting deletions leaves that cause out. 'chosen': it was taken in with the `winner`'s copy, where the found copies differed.
    * 'managing': a tool's Manage switch was turned (`managing`; key `tool:<id>`, item the tool's name), which has no Undo.
@@ -552,7 +552,8 @@ export interface HistoryEvent {
   previous?: string;
   /**
    * On a library item's 'edit' or 'conflict': whether times proved the edit taken in the latest (library.ts Plan orderProved);
-   * true on every other entry. An entry from before the library holds false where the fixed tool order decided.
+   * on a source's 'kept-edit', whether they proved the current version later than the source's (library.ts sourceTime); true on
+   * every other entry. An entry from before the library holds false where the fixed tool order decided.
    */
   orderProved: boolean;
   /** Set once undone or restored, naming the event that did it (one from before the library may name none: 'already-as-it-was'). */

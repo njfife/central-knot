@@ -127,9 +127,10 @@
 // harnesses as any Off item's do. Where that edit wins, S was kept, not made current: the table answered `update`, and the
 // pass, once its plan is known, tells History and the click `keep` (librarypass.ts asTold, the second place that decides it).
 // A source's time is its head commit's (`commitAt`: the copy is one commit deep): a later, unrelated commit there makes an
-// older edit of the skill count as the latest. Within a second of the current version's time
-// (the tie latestCopy uses) the current version stays and the source's is kept. Whether an item is linked is `linkedTo`'s
-// alone: one linked to a source that is no longer recorded reads as not linked, so Remove lets go of every link at once.
+// older edit of the skill count as the latest. Within a second of the current version's time (the tie latestCopy uses: sourceTime)
+// the current version stays and the source's is kept, and History doesn't call the current version later. A source's content
+// kept, either way, was never current (Origin replacedBy). Whether an item is linked is `linkedTo`'s alone: one linked to a
+// source that is no longer recorded reads as not linked, so Remove lets go of every link at once.
 //
 // Two promises hold the model together:
 // - H unseen is never H gone. A copy the adapter can't see for sure (unreadable, half saved, inside the settle window,
@@ -193,7 +194,8 @@ export type ItemKind = 'skill' | 'agent' | 'mcp';
  * at a source (`source`, with its `link` as given), an earlier version made current (`made-current`), or the record from
  * before the library (`migrated`). `replacedBy`: on a version that was never current, the version that took its place, which
  * its line on the page is compared with (noteAgainst): a `was-in` copy, an edit that lost to another (plan), or a source's
- * content an edit made here beat (librarypass.ts asTold). Absent in older records, where an edit that lost reads as current once.
+ * content the current version beat (librarypass.ts fromSourceStep, its `keep`) or an edit made here beat (librarypass.ts
+ * asTold). Absent in older records, where an edit that lost reads as current once.
  */
 export interface Origin { how: 'found' | 'chosen' | 'edited' | 'was-in' | 'pulled' | 'source' | 'made-current' | 'migrated'; harness?: HarnessId; replacedBy?: string; link?: string }
 
@@ -492,8 +494,17 @@ export function fromSource(item: LibraryItem | undefined, here: AtSource, linked
   if (here.hash === item.seen) return 'nothing';
   if (item.hash === item.seen || here.hash === item.hash) return 'update';
   // Both changed: the later wins, the source's time being its head commit's; a tie keeps the current version.
-  const current = Date.parse(item.versions[currentIndex(item)]?.at ?? '') || 0;
-  return Date.parse(here.commitAt) - current >= TIE_MS ? 'update' : 'keep';
+  return sourceTime(item, here.commitAt) === 'later' ? 'update' : 'keep';
+}
+
+/**
+ * A source's content, by its head commit's time, against the item's current version: later or earlier by the tie or more, or
+ * a `tie`. fromSource's `update` is only `later`; of its `keep`, only `earlier` is the current version proved later
+ * (librarypass.ts fromSourceStep records which, as History's orderProved).
+ */
+export function sourceTime(item: LibraryItem, commitAt: string): 'later' | 'earlier' | 'tie' {
+  const apart = Date.parse(commitAt) - (Date.parse(item.versions[currentIndex(item)]?.at ?? '') || 0);
+  return apart >= TIE_MS ? 'later' : apart <= -TIE_MS ? 'earlier' : 'tie';
 }
 
 /**
@@ -593,7 +604,7 @@ export function latestCopy(copies: readonly Pick<FoundCopy, 'hash' | 'at'>[]): s
   const [last, before] = [...made].sort(([, first], [, second]) => second - first);
   return last && before && last[1] - before[1] >= TIE_MS ? last[0] : undefined;
 }
-/** Two contents changed less than this apart are a tie for latestCopy (no latest) and for a source's version (fromSource: the current one stays). */
+/** Two contents changed less than this apart are a tie for latestCopy (no latest) and for a source's version (sourceTime: the current one stays). */
 const TIE_MS = 1000;
 
 // ---------- Versions ----------

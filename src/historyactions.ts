@@ -183,8 +183,10 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       const where = andList([...new Set(event.losers.map(loser => toolName(loser.tool)))]);
       if (event.cause === 'tool-back') return { glyph: 'diff', text: `${where}’s copy changed while Central Knot didn’t manage ${where}; it gave way to the current version and is kept as a version.` };
       if (event.cause === 'own-copy') return { glyph: 'diff', text: `${where} had a copy of its own, which Central Knot hadn’t put there; it gave way to the current version and is kept as a version.` };
-      if (event.cause === 'source') return { glyph: 'link-2', text: `${source} changed it too, but the current version is later, so the source’s is kept as a version.` };
-      return { glyph: 'diff', text: `Edited in ${where}, not taken in yet, and written over by the current version: the edit is kept as a version.` };
+      // "Later" only where times proved it (types.ts HistoryEvent orderProved): a source's change within the tie is no later.
+      if (event.cause === 'source') return { glyph: 'link-2', text: event.orderProved ? `${source} changed it too, but the current version is later, so the source’s is kept as a version.` : `${source} changed it too, though ${noTimeTells}: the current version stays, and the source’s is kept as a version.` };
+      // The write over it may wait (Write to Claude Code): the in-line entry names it when it happens.
+      return { glyph: 'diff', text: `Edited in ${where}, not taken in yet; it gave way to the current version and is kept as a version.` };
     }
     case 'conflict': {
       const gaveWay = event.losers.filter(loser => loser.hash !== event.previous && loser.hash !== event.winner?.hash);

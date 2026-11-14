@@ -68,7 +68,7 @@
 // - History's sentences and actions for its entries: historyactions.ts, in the kind's words (historypage.ts asks it).
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-import { carryOut, itemKey, keepVersion, managedAgain, newItem, pendingChanges, plan, setCurrent, sourceAnswers, takeInAnswer, versionAt, wantedIn } from './library.ts';
+import { carryOut, itemKey, keepVersion, managedAgain, newItem, pendingChanges, plan, setCurrent, sourceAnswers, sourceTime, takeInAnswer, versionAt, wantedIn } from './library.ts';
 import type { ItemNow } from './historyactions.ts';
 import type { Copies, FoundCopy, FoundKey, HarnessCopy, ItemKind, LeftFound, LibraryItem, Plan, Origin, Shelf, SourceSeen, TakenBy, Version } from './library.ts';
 import { appendHistory, historyCutoff, readHistory, replaceHistory } from './history.ts';
@@ -490,7 +490,7 @@ export const takeInAnswers = (look: AnyLook, key: string) => {
  * What was asked of a pass for one item (a click, what Pull brings, or what a source holds), as the History entry it becomes:
  * begun when it is recorded, finished with the harnesses its plan writes or removes (`fill`: which of them it names).
  */
-type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'version' | 'previous' | 'foundIn' | 'link'> & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed' };
+type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'version' | 'previous' | 'foundIn' | 'link'> & { losers?: HistoryEvent['losers']; orderProved?: boolean; fill?: 'written' | 'removed' };
 /**
  * What Pull brings for one item (gitrepo.ts): its name and content, and where the repo holds one harness's own part, that
  * part's text (Claude Code's file, for an agent); or its removal.
@@ -1085,8 +1085,9 @@ async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Se
       const previous = item!.hash;
       Object.assign(item!, { source: read.id, seen: entry.hash } satisfies Partial<LibraryItem>);
       if (answer === 'keep') {
-        await keepVersion(pass.shelf, item!, version, entry.content);
-        pass.asked.set(key, { kind: 'kept-edit', cause: 'source', version: entry.hash, link });
+        // Never current: the current version took its place, proved later by time unless the two are within the tie.
+        await keepVersion(pass.shelf, item!, { ...version, from: { ...origin, replacedBy: previous } }, entry.content);
+        pass.asked.set(key, { kind: 'kept-edit', cause: 'source', version: entry.hash, link, orderProved: sourceTime(item!, read.commitAt) === 'earlier' });
       } else if (answer === 'update' && entry.hash !== previous) {
         await setCurrent(pass.shelf, item!, version, entry.content);
         pass.asked.set(key, { kind: 'edit', cause: 'source', previous, version: entry.hash, link, fill: 'written' });
