@@ -3641,6 +3641,7 @@ esac
   await done();
   same('Off uninstalls it from Claude Code; Pi stays kept out; the record is Off', [installed(), calls().at(-1), entry()?.on, entry()?.except, await marks()], [false, 'plugin uninstall issue-tracker@ck-test-market --scope user', false, ['pi-cli'], ['absent', 'kept-out']]);
   check('its result says Undo installs the marketplace’s copy as it is now', /uninstalled from Claude Code\..*Undo installs the marketplace’s copy as it is now\./.test(await a.text('#plugins-result') ?? ''), await a.text('#plugins-result'));
+  await pictures('plugin-switch-off-result');
   await a.click('#plugins-undo');
   await done();
   same('Undo installs it again where it was, and the record is On, kept out of Pi', [installed(), calls().at(-1), entry()?.on, entry()?.except, await switchIs('#pswitch-0-issue-tracker')], [true, 'plugin install issue-tracker@ck-test-market --scope user', true, ['pi-cli'], 'true partial']);
@@ -3655,6 +3656,28 @@ esac
   await a.click('#pfix-0-issue-tracker-claude-cli');
   await done();
   same('Install there puts it back', [installed(), await a.run(`document.querySelector('.plugin-tool[data-tool="claude-cli"] .cell-button')?.dataset.state`)], [true, 'installed']);
+  // Kept out of Claude Code, then put back there with its own command: its line says so, with Take out there.
+  await a.click('#pkeep-0-issue-tracker-claude-cli');
+  await done();
+  writeFileSync(join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'issue-tracker@ck-test-market': [{ scope: 'user', installPath: copy, version: '2.0.0' }] } }));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && (await a.text('#pfix-0-issue-tracker-claude-cli')) !== 'Take out there'; tries++) await wait(100);
+  same('a plugin kept out of a tool that has it again is said, with Take out there', [await a.run(`document.querySelector('.plugin-tool[data-tool="claude-cli"] .cell-button')?.dataset.state`), await a.text('#pfix-0-issue-tracker-claude-cli')], ['stays', 'Take out there']);
+  await pictures('plugin-switch-take-out');
+  await a.click('#pfix-0-issue-tracker-claude-cli');
+  await done();
+  same('Take out there uninstalls it there', [installed(), calls().at(-1)], [false, 'plugin uninstall issue-tracker@ck-test-market --scope user']);
+  // A plugin installed in Claude Code with its own command and no record here: its row offers Add.
+  const helper = join(home, '.claude/plugins/cache/ck-test-market/release-helper/0.4.1');
+  mkdirSync(join(helper, 'commands'), { recursive: true });
+  writeFileSync(join(helper, 'commands/release-notes.md'), readFileSync(join(market, 'plugins/release-helper/commands/release-notes.md')));
+  writeFileSync(join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'release-helper@ck-test-market': [{ scope: 'user', installPath: helper, version: '0.4.1' }] } }));
+  await a.click('#plugin-back');
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && !(await a.exists('#padd-0-release-helper')); tries++) await wait(100);
+  check('a plugin a tool has with no record here offers Add in its switch’s place', await a.exists('#padd-0-release-helper') && /installed outside Central Knot/.test(await a.run(`document.querySelector('#padd-0-release-helper')?.title`) ?? ''), await a.text('[data-plugin="release-helper"]'));
+  await pictures('plugin-switch-add');
+  await a.click('#popen-0-issue-tracker');
   // An install Claude Code refuses (its stand-in knows only issue-tracker): said in the problem band and on Claude Code's line.
   await a.click('#plugin-back');
   await a.click('#popen-0-document-tools');

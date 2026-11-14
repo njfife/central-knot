@@ -2,8 +2,8 @@
 // marketplaces again and runs what Update all would choose on the Plugins page, through each tool's own command: the same
 // route as the button, so a plugin turned off stays off, one a tool no longer has is not put back, and one its marketplace
 // dropped is left as it is. It also makes the installs a plugin's table owes a tool new here (pluginrecord.ts `background`),
-// and then puts that tool on the plugins record's `tools`; it never uninstalls. What it did is kept for the page's note and
-// the Settings row; a failed update or install is tried again, less often each time. The steps are here, without Electron;
+// once: after that check the tool is on the plugins record's `tools`. It never uninstalls. What it did is kept for the page's
+// note and the Settings row; a failed update is tried again, less often each time. The steps are here, without Electron;
 // main.ts gives them the app's parts (AutoUpdateHost).
 import { resultLines, runPlan, succeeded, type PlanApi, type PluginDone, type PluginOp } from './pluginplan.ts';
 import type { WaitedBefore } from './pluginrecord.ts';
@@ -66,7 +66,7 @@ export interface AutoUpdateHost {
   pending(home: string): Promise<Pending>;
   /** The calls an update makes, as Apply all makes them (an update without the reinstall route: see plugins.update), and the install a tool new here is owed. */
   api: Required<Pick<PlanApi, 'update' | 'parts' | 'install'>>;
-  /** These tools have each On plugin now: on the plugins record's `tools` from now on (marketplaces.ts noteJoined). */
+  /** These tools are no longer new here: on the plugins record's `tools` from now on (marketplaces.ts noteJoined). */
   noteJoined(tools: HarnessId[], home: string): Promise<void>;
   /** Every home's record as last saved, if the file is there and can be read. */
   load(): Promise<UpdatesRecord[] | undefined>;
@@ -123,6 +123,10 @@ export function autoUpdates(host: AutoUpdateHost) {
   async function save(about?: UpdatesRecord, news?: 'updated' | 'failed') {
     const open = host.home();
     const kept = [...(records?.values() ?? [])].sort((first, second) => Number(second.home === open) - Number(first.home === open) || (second.checked?.at ?? 0) - (first.checked?.at ?? 0)).slice(0, HOMES_KEPT);
+    // The version before's selections that waited (`seenTools`, `waiting`, `joins`) were read by the plugins record's first
+    // read (waitedBefore, at the check before this save): they are not written again. Taken off the same objects, which a
+    // check under way holds.
+    for (const record of kept as (UpdatesRecord & Partial<Record<'seenTools' | 'waiting' | 'joins', unknown>>)[]) { delete record.seenTools; delete record.waiting; delete record.joins; }
     records = new Map(kept.map(saved => [saved.home, saved]));
     await host.save(kept).catch(error => host.log(`plugin updates: the record couldn’t be saved: ${error instanceof Error ? error.message : String(error)}`));
     host.changed(shown(), about && about.home === host.home() ? news : undefined);
@@ -177,9 +181,9 @@ export function autoUpdates(host: AutoUpdateHost) {
     host.log(`plugin updates: checked${due.unread.length ? ` (couldn’t read ${due.unread.join(', ')})` : ''}: ${due.ops.length} due${due.ops.length > ops.length ? `, ${due.ops.length - ops.length} waiting` : ''}`);
     const { done, stopped } = ops.length ? await runPlan(ops, api, home) : { done: [] as PluginDone[], stopped: undefined };
     if (stopped) host.log(`plugin updates: stopped: ${stopped}`);
-    // A tool new here is on the record's `tools` once each install it was owed is in: one still failing is tried again later.
-    const went = (op: DueUpdate) => done.some(entry => keyOf(entry) === keyOf(op) && entry.action === op.action && succeeded(entry.report));
-    const joined = auto && !stopped ? (due.newTools ?? []).filter(tool => due.ops.every(op => !op.newHere || op.tool !== tool || went(op))) : [];
+    // A tool new here is new for this one check: it joins the record's `tools` whatever its installs came to. One that didn't
+    // go in is said in the note, and on the plugin's page with Install there; nothing tries it again by itself.
+    const joined = auto && !stopped ? due.newTools ?? [] : [];
     if (joined.length) await host.noteJoined(joined, home).catch(error => host.log(`plugin updates: the plugins record couldn’t be saved: ${error instanceof Error ? error.message : String(error)}`));
     const news = keep(mine, ops, done, at);
     mine.checked = { at, updated: done.filter(entry => succeeded(entry.report) && entry.report.changed).length, failed: open(mine), unread: due.unread, ...(due.offline ? { offline: true as const } : {}), ...(stopped ? { stopped, partway: true as const } : {}) };
@@ -205,12 +209,14 @@ export function autoUpdates(host: AutoUpdateHost) {
       mine.failures = mine.failures.filter(failure => failure.key !== key);
       if (succeeded(entry.report)) continue;
       const offered = ops.find(op => keyOf(op) === key)?.offered;
-      // The tool's own words usually name it; where they don't, its name goes first.
-      const text = entry.report.message.includes(names[entry.tool]) ? entry.report.message : `${names[entry.tool]}: ${entry.report.message}`;
+      // The tool's own words usually name it; where they don't, its name goes first. A tool new here is new for one check only.
+      const once = ops.some(op => op.newHere && keyOf(op) === key && op.action === entry.action);
+      const said = entry.report.message.includes(names[entry.tool]) ? entry.report.message : `${names[entry.tool]}: ${entry.report.message}`;
+      const text = once ? `${said} It isn’t tried again by itself: Install there on the plugin’s page puts it in.` : said;
       // A note the person closed stays closed while the same update fails for the same reason.
       const closed = !!before?.closed && before.text === text && before.offered === offered;
       if (!closed) failedNew = true;
-      mine.failures.push({ key, source: entry.source, plugin: entry.plugin, tool: entry.tool, ...(offered ? { offered } : {}), text, at, tries: (before && before.offered === offered ? before.tries : 0) + 1, ...(closed ? { closed } : {}), ...(entry.report.kept ? { manual: true as const } : {}) });
+      mine.failures.push({ key, source: entry.source, plugin: entry.plugin, tool: entry.tool, ...(offered ? { offered } : {}), text, at, tries: (before && before.offered === offered ? before.tries : 0) + 1, ...(closed ? { closed } : {}), ...(entry.report.kept || once ? { manual: true as const } : {}) });
     }
     return lines.length ? 'updated' : failedNew ? 'failed' : undefined;
   }

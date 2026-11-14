@@ -57,14 +57,14 @@ function installedLine(version: string | undefined, offered: string | undefined,
 
 /** Each mark's short words on a tool's line (the whole sentence is its tooltip: pluginstatus.ts toolMark). */
 const MARK_WORDS: Record<ToolMark, string> = {
-  installed: 'Installed', outdated: 'Installed', parts: 'Parts installed', 'parts-changed': 'Parts out of date', stays: 'Still installed', waits: 'Goes in at the next check',
-  missing: 'Not installed', cannot: 'Not available', 'kept-out': 'Kept out', absent: 'Not installed', unknown: 'Can’t be read now', 'not-known': 'Unknown',
+  installed: 'Installed', outdated: 'Installed', parts: 'Parts installed', 'parts-changed': 'Parts out of date', stays: 'Still installed', waits: 'Goes in at the next check', 'not-brought': 'Not brought here: off in a tool’s own settings',
+  missing: 'Not in it, though on: taken out there, or its install didn’t go through', cannot: 'Not available', 'kept-out': 'Kept out', absent: 'Not installed', unknown: 'Can’t be read now', 'not-known': 'Unknown',
 };
 
 /**
  * Your tools: the plugin's switch at the heading, Update at its right where a copy or its parts are behind, and a line per
  * tool: its mark, what it has (always there; a tool on another version than the marketplace offers adds "Marketplace has …"),
- * and what can be done there, at once: Install there or Turn off there where the plugin's table owes that tool something,
+ * and what can be done there, at once: Install there or Take out there where the plugin's table owes that tool something,
  * Keep out or Let in for a plugin on record. `compareTo`: the version an installed copy is compared with (see versionToCompare).
  */
 function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, compareTo: string | undefined, components?: Components) {
@@ -99,9 +99,9 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     const owed = sw?.tools[tool], kept = !!sw?.entry?.except.includes(tool);
     const act = (label: string, what: PluginTurn, id: string, title: string) => button({ variant: 'link', size: 'micro', label, id: `${id}-${marketIndex}-${plugin.name}-${tool}`, disabled: !!app.busy || !!stopped,
       attrs: { title: stopped ?? title }, onclick: () => void turnPlugin(entry, plugin.name, what, tool) });
-    const fix = owed?.act && (mark === 'missing' || mark === 'waits' || mark === 'stays')
+    const fix = owed?.act && (mark === 'missing' || mark === 'waits' || mark === 'not-brought' || mark === 'stays')
       ? (owed.act === 'install' || owed.act === 'install-parts' ? act('Install there', 'fix', 'pfix', `Puts it in ${names[tool]} now${owed.act === 'install-parts' ? ', as separate items' : ''}. Undo takes it out again.`)
-        : act('Turn off there', 'fix', 'pfix', `Takes it out of ${names[tool]} now. Undo puts the marketplace’s copy back.`)) : null;
+        : act('Take out there', 'fix', 'pfix', `Takes it out of ${names[tool]} now; the result says what Undo can put back.`)) : null;
     const keep = !sw?.entry || !owed?.takes ? null : kept ? act('Let in', 'let-in', 'pkeep', `Lets it into ${names[tool]} again${sw.entry.on ? ', and puts it in there now' : ''}. Undo keeps it out again.`)
       : act('Keep out', 'keep-out', 'pkeep', `Keeps it out of ${names[tool]}${owed.has !== 'none' ? ', and takes it out there now' : ''}; the automatic updates leave it out too. Undo lets it back in.`);
     return fix || keep ? h('span.plugin-tool-actions', {}, fix, keep) : null;
@@ -113,7 +113,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
       updates.length ? updateButton(updates, `pupdate-${marketIndex}-${plugin.name}`) : null),
     // A plugin a bundled build doesn't include says why here, on the page, once for every tool.
     notIncluded ? h('p.plugin-panel-hint', { id: 'plugin-not-included' }, notIncluded)
-      : view.canWrite ? h('p.plugin-panel-hint', {}, 'The switch acts at once, in every tool that takes the plugin, and so does each tool’s line. Update only chooses: it runs on Apply all.') : null,
+      : view.canWrite ? h('p.plugin-panel-hint', {}, 'The switch and each tool’s links act at once. Update and the switches under What it holds only choose: Apply all runs them.') : null,
     withToolCount(h('div.plugin-tool-rows', {}, view.tools.map(tool => {
       const { mark, words } = markOf(view, entry, plugin, tool, compareTo);
       return h('div.plugin-tool', { 'data-tool': tool }, markCell(view, entry, plugin, tool, marketIndex, compareTo),
@@ -220,7 +220,7 @@ function partsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const behind = detail && !detail.problem ? pluginOnlyParts(detail) : [];
   return h('section.plugin-section.plugin-parts-section', { 'aria-label': 'Its parts' },
     h('div.plugin-section-head', {}, h('h3', {}, 'Its parts'), view.canWrite ? h('span.plugin-section-actions', {}, next) : null),
-    h('p.plugin-parts-about', {}, 'Where a tool can’t take this plugin, its skills, MCP servers and agents go in as separate items instead: with the plugin’s switch, all at once, and then one by one with the switches under What it holds.'),
+    h('p.plugin-parts-about', {}, 'Where a tool can’t take this plugin, its skills, MCP servers and agents go in as separate items instead, all at once with the plugin’s switch. The switches under What it holds then choose single parts, and Apply all puts them in or takes them out.'),
     h('ul.plugin-outcome-list.plugin-parts-list', {}, [...groups.values()].map(group => h('li.plugin-outcome-row', {},
       h('span.plugin-parts-tool', {}, h('span.plugin-outcome-tools', {}, group.map(tool => brandMark(tool, 14)), h('strong', {}, andList(group.map(tool => names[tool])))),
         partsWhy(view, entry, group[0]!)[0] ? h('span.plugin-parts-why', {}, partsWhy(view, entry, group[0]!)[group.length > 1 ? 1 : 0]) : null),

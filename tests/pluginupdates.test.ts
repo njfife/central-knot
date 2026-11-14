@@ -310,7 +310,7 @@ test('A failure whose marketplace was taken off the list is settled at the next 
 /** An install a plugin's table owes a tool new here (pluginrecord.ts `background`). */
 const owed = (plugin: string, tool: HarnessId, action: DueUpdate['action'] = 'install'): DueUpdate => ({ source: '/market', marketName: 'team', plugin, tool, action, newHere: true });
 
-test('A tool new here gets each install it is owed at the check, said with why; it joins the record’s tools once every one is in, and one that fails is tried again later', async () => {
+test('A tool new here gets each install it is owed at the check, said with why, and is new for that one check: an install that failed is said as not tried again by itself', async () => {
   const { box, updates } = setup();
   box.newTools = ['codex-cli', 'pi-cli'];
   box.due = [owed('issue-tracker', 'codex-cli'), owed('spark', 'codex-cli'), owed('issue-tracker', 'pi-cli', 'install-parts')];
@@ -318,19 +318,8 @@ test('A tool new here gets each install it is owed at the check, said with why; 
   const view = await updates.check();
   assert.deepEqual(box.calls, ['install issue-tracker codex-cli', 'parts install issue-tracker pi-cli', 'install spark codex-cli']);
   assert.deepEqual(view.updated.map(line => [line.plugin, line.text]), [['issue-tracker', 'installed in Codex; parts updated in Pi (new here; the plugin is on)']]);
-  assert.deepEqual(box.joined, [['pi-cli']], 'Pi has all it was owed; Codex waits for spark');
-  assert.deepEqual(view.failed.map(failure => [failure.plugin, failure.text]), [['spark', 'Codex is not signed in.']]);
-  // Tried again at the next check's time, not at once; once it goes in, Codex joins too.
-  box.calls.length = 0;
-  box.newTools = ['codex-cli'];
-  box.due = [owed('spark', 'codex-cli')];
-  box.clock += 1;
-  await updates.check();
-  assert.deepEqual([box.calls, box.joined.length], [[], 1], 'not yet');
-  box.answers.delete('spark codex-cli');
-  box.clock += 4 * HOUR;
-  await updates.check();
-  assert.deepEqual([box.calls, box.joined.at(-1)], [['install spark codex-cli'], ['codex-cli']]);
+  assert.deepEqual(box.joined, [['codex-cli', 'pi-cli']], 'both join, whatever each install came to');
+  assert.deepEqual(view.failed.map(failure => [failure.plugin, failure.text, failure.again]), [['spark', 'Codex is not signed in. It isn’t tried again by itself: Install there on the plugin’s page puts it in.', undefined]]);
 });
 
 test('The installs a tool new here is owed run only while plugins change by themselves: with the switch or Automatic sync off, nothing installs and the tool waits off the list', async () => {
@@ -368,4 +357,7 @@ test('The installs the version before waited to make for a tool new here are rea
   const { box, updates } = setup();
   box.saved = [{ home: '/home/a', updated: [], failures: [], waiting: [{ source: '/market', marketName: 'team', plugin: 'spark', tool: 'codex-cli', action: 'install', tries: 1, at: 5 }, { nonsense: true }] } as UpdatesRecord];
   assert.deepEqual(await updates.waitedBefore(), [{ source: '/market', marketName: 'team', plugin: 'spark', tool: 'codex-cli', action: 'install', tries: 1, at: 5 }]);
+  // Read once: the next time the file is written, those fields are not.
+  await updates.check();
+  assert.deepEqual([Object.keys(box.record() ?? {}).filter(key => ['waiting', 'seenTools', 'joins'].includes(key)), await updates.waitedBefore()], [[], []]);
 });

@@ -31,6 +31,7 @@ const MARK_LOOKS: Record<ToolMark, { look: string; glyph: () => Element }> = {
   'parts-changed': { look: 'cell-differs.cell-on', glyph: () => icon('refresh-cw', 14) },
   stays: { look: 'cell-differs.cell-on', glyph: () => icon('circle-alert', 14) },
   waits: { look: 'cell-waiting', glyph: () => icon('clock', 14) },
+  'not-brought': { look: 'cell-kept', glyph: () => icon('circle-off', 14) },
   missing: { look: 'cell-differs', glyph: () => icon('circle-alert', 14) },
   cannot: { look: 'cell-cannot', glyph: () => h('span.cannot-dash', { 'aria-hidden': 'true' }, '–') },
   'kept-out': { look: 'cell-kept', glyph: () => icon('circle-minus', 14) },

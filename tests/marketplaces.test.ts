@@ -659,7 +659,7 @@ test('Keep out takes it out of that tool alone and records it; the switch then s
     await box.markets.turn(box.root, 'pdf', 'let-in', 'pi-cli', box.home);
     assert.deepEqual([(await box.record()).plugins[0]!.except, await exists(box.piSkill('pdf'))], [[], true]);
     // Kept out again and turned off; then its parts put into Pi outside the switch. On puts it where it is wanted and takes
-    // nothing out: Pi's copy stays, shown with Turn off there.
+    // nothing out: Pi's copy stays, shown with Take out there.
     await box.markets.turn(box.root, 'pdf', 'keep-out', 'pi-cli', box.home);
     await box.markets.turn(box.root, 'pdf', 'off', undefined, box.home);
     await box.markets.parts(box.root, 'team', 'pdf', 'pi-cli', 'install', undefined, box.home);
@@ -797,5 +797,72 @@ test('Off reaches nothing it must not: a tool left out, Claude Code’s copy fro
       ['claude-cli', 'held', 'Claude Code has its copy from the Anthropic Directory: update or uninstall it in Claude Code (/plugin).'],
       ['copilot-cli', 'held', 'Copilot CLI has a different marketplace named “official” (https://example.com/other.git). Central Knot leaves it alone.']]);
     assert.equal(JSON.parse(await readFile(join(box.home, '.central-knot/plugins.json'), 'utf8')).plugins[0].on, false, 'the record is Off');
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin turned off in a tool’s own settings is brought to no new tool by itself; the new tool’s line says why, and Install there still puts it in', async () => {
+  const tools: HarnessId[] = ['claude-cli'];
+  const box = await switchHome({ tools });
+  try {
+    await box.markets.install(box.root, 'team', 'pdf', ['claude-cli'], box.home);
+    // Turned off in Claude Code with its own /plugin, then the upgrade: no plugins record yet, so the first read records it On.
+    await put(join(box.home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'pdf@team': false } }));
+    await rm(join(box.home, '.central-knot/plugins.json'));
+    await box.markets.view();
+    tools.push('pi-cli');
+    await mkdir(join(box.home, '.pi/agent'), { recursive: true });
+    const due = await box.markets.pendingUpdates(box.home);
+    assert.deepEqual([due.ops.filter(op => op.newHere), due.newTools], [[], ['pi-cli']], 'nothing owed to Pi by itself');
+    const pi = (await box.switchOf('pdf')).tools['pi-cli']!;
+    assert.deepEqual([pi.act, pi.background, pi.offElsewhere], ['install-parts', undefined, true]);
+    // Turned on again in Claude Code: the next check brings it to Pi.
+    await put(join(box.home, '.claude/settings.json'), '{}');
+    assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops.filter(op => op.newHere).map(op => [op.plugin, op.tool]), [['pdf', 'pi-cli']]);
+  } finally { await box.cleanup(); }
+});
+
+test('A tool new here is new for one check: a marketplace that can’t be read no longer keeps it new for good; a check that reached no marketplace doesn’t count', async () => {
+  const tools: HarnessId[] = ['claude-cli'];
+  const box = await switchHome({ tools });
+  try {
+    const old = join(box.base, 'old');
+    await marketplace(old, 'old', ['legacy']);
+    await box.markets.add(old);
+    await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'git', url: box.root } }, old: { source: { source: 'git', url: old } } }));
+    await box.markets.install(box.root, 'team', 'pdf', ['claude-cli'], box.home);
+    await box.markets.install(old, 'old', 'legacy', ['claude-cli'], box.home);
+    await rm(join(box.home, '.central-knot/plugins.json'));
+    await box.markets.view();
+    // legacy's marketplace goes away; Pi is installed later.
+    await rm(old, { recursive: true });
+    tools.push('pi-cli');
+    await mkdir(join(box.home, '.pi/agent'), { recursive: true });
+    const due = await box.markets.pendingUpdates(box.home);
+    assert.deepEqual([due.ops.filter(op => op.newHere).map(op => `${op.plugin}→${op.tool}`), due.newTools], [['pdf→pi-cli'], ['pi-cli']]);
+    await box.markets.noteJoined(due.newTools!, box.home);
+    assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops.filter(op => op.newHere), [], 'taken out of Pi later, it is not put back');
+    // Managed again while no marketplace can be read: that check doesn't count, and Pi stays new.
+    await box.markets.toolManaged('pi-cli', box.home);
+    await rm(box.root, { recursive: true });
+    assert.deepEqual((await box.markets.pendingUpdates(box.home)).newTools, []);
+  } finally { await box.cleanup(); }
+});
+
+test('A click’s record write keeps what a check wrote while the click was reading: each write changes the record as it is then', async () => {
+  const tools: HarnessId[] = ['claude-cli'];
+  const box = await switchHome({ tools });
+  try {
+    await box.markets.view();
+    tools.push('pi-cli');
+    await mkdir(join(box.home, '.pi/agent'), { recursive: true });
+    // The check notes Pi joined while the click is still reading the marketplaces: after the click has read the record (the
+    // view asks for the parts engine's context once before reading it, and again for each marketplace after).
+    const share = box.host.share!;
+    let asked = 0, joined: Promise<void> | undefined;
+    box.host.share = () => { if (++asked === 2) joined = box.markets.noteJoined(['pi-cli'], box.home); return share(); };
+    await box.markets.turn(box.root, 'pdf', 'on', undefined, box.home);
+    await joined;
+    const record = await box.record();
+    assert.deepEqual([record.tools, record.plugins.map(entry => [entry.plugin, entry.on])], [['claude-cli', 'pi-cli'], [['pdf', true]]]);
   } finally { await box.cleanup(); }
 });

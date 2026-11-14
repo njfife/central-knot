@@ -35,6 +35,8 @@ test('An install is owed to the automatic updates only in a tool not on the home
   assert.equal(codex(on, now('none'), ['claude-cli']).background, true, 'Codex is new here');
   assert.equal(codex(on, now('none'), ['claude-cli', 'codex-cli']).background, undefined, 'Codex has had it: taken out by hand since');
   assert.equal(codex({ on: true, except: ['codex-cli'] }, now('none'), ['claude-cli']).act, undefined, 'kept out of Codex: nothing at all');
+  // Off in some tool's own settings: not wanted everywhere, so a tool new here gets it only at a click.
+  assert.deepEqual(owedTo(on, 'codex-cli', now('none'), ['claude-cli'], true), { wanted: true, has: 'none', takes: true, act: 'install', offElsewhere: true });
 });
 
 test('Rows 7 to 10: not wanted (Off, or kept out): in line where it lacks it; uninstalled or its parts taken out where it has it; held where it can’t be taken out', () => {

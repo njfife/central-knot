@@ -1,9 +1,11 @@
 // A whole plugin's one switch: what the home records of it, and the one table that decides what each managed tool is owed.
 //
 //   .central-knot/plugins.json   per plugin: `id`, the marketplace as added (`source`, `marketName`), `plugin`, `on` and
-//                                `except` (the tools the person keeps it out of); per home: `tools`, the managed tools the
-//                                automatic updates have already brought each On plugin into. Nothing else: what each tool has
-//                                (installed or not, its version, its own switches, what its copy holds) is read at each look.
+//                                `except` (the tools the person keeps it out of); per home: `tools`, the managed tools that
+//                                are not new here (the first read puts every managed tool there but one an install waited
+//                                for; the automatic updates add a new tool after their first check for it; a tool managed
+//                                again leaves it). Nothing else: what each tool has (installed or not, its version, its own
+//                                switches, what its copy holds) is read at each look.
 //
 // THE TABLE (owedTo), per managed tool, from the plugin's entry and what that tool has now (ToolNow). "Wanted" is On and not
 // kept out of the tool. Rows, first match:
@@ -18,13 +20,16 @@
 //   9. not wanted, has it whole            → uninstall.                  Kept out of Codex, Codex has it: `codex plugin remove`.
 //  10. not wanted, has its parts           → remove-parts.               Off, Pi has its parts: they are taken out.
 // An install (rows 4, 5) is also owed to the automatic updates where the tool is not on the home's `tools` (it is new here,
-// or managed again): `background`. Nothing else is: an uninstall runs only at the plugin's own click (its switch, a tool kept
-// out, Turn off there), and an install in a tool already on `tools` (one that failed at a click, one removed there by hand)
-// waits for Install there on the plugin's page. "Has it" is installed whole or any parts on record, in that tool.
+// or managed again): `background`; but not while some tool has the plugin off by its own switch (`offElsewhere`: one turned
+// off somewhere is not wanted everywhere, read from the tools at each look). Nothing else is: an uninstall runs only at the
+// plugin's own click (its switch, a tool kept out, Take out there), and an install in a tool already on `tools` (one that
+// failed, one removed there by hand) waits for Install there on the plugin's page. "Has it" is installed whole or any parts
+// on record, in that tool.
 //
 // The first read (firstRecord) makes plugins.json for a home that has none, from what the tools hold now, writing nothing to
 // any tool: each plugin some managed tool has is On, kept out of every tool that lacks it while some managed tool lacks it.
-// Who reads what: marketplaces.ts gathers what the tools have (toolsNow) and carries out a click (turn, undoTurn); the
+// What a click runs of the table's answer is clickRuns (On only installs, Off only uninstalls), beside it.
+// Who reads what: marketplaces.ts gathers what the tools have (pluginstatus.ts toolNow) and carries out a click (turn, undoTurn); the
 // automatic updates carry out the background's installs (pluginupdates.ts); the pages and pluginstatus.ts say the answer.
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -32,8 +37,10 @@ import { join } from 'node:path';
 import { harnessIds } from './harnesses.ts';
 import { sameSource } from './plugins.ts';
 import { NOTHING_CHANGED, errorCode, partsRecordPath, storeDirectory, writeDurably } from './share.ts';
-import type { HarnessId } from './types.ts';
+import type { HarnessId, PluginTurn } from './types.ts';
 import { onlyAllowed } from './values.ts';
+// "Wanted" means what it means for a library item (On, and not kept out of the tool): one rule, library.ts's.
+import { wantedIn } from './library.ts';
 
 /** One plugin as the home records it. */
 export interface PluginEntry {
@@ -49,7 +56,7 @@ export interface PluginEntry {
 }
 /** plugins.json. */
 export interface PluginRecord {
-  /** The managed tools the automatic updates have already brought each On plugin into; one not here is owed them (`background`). */
+  /** The managed tools that are not new here (the header says who adds and takes away); one not here is owed each On plugin's install by the automatic updates (`background`). */
   tools: HarnessId[];
   plugins: PluginEntry[];
 }
@@ -75,6 +82,8 @@ export interface Owed {
   held?: string;
   /** The install is the automatic updates' to make too: the tool is not on the home's `tools`. */
   background?: true;
+  /** The tool is not on `tools`, but some tool has the plugin off by its own switch, so its install is a click's only. */
+  offElsewhere?: true;
 }
 
 /**
@@ -83,22 +92,32 @@ export interface Owed {
  */
 export interface PluginSwitch { entry?: Pick<PluginEntry, 'on' | 'except'>; tools: Partial<Record<HarnessId, Owed>> }
 
-/** Whether the person wants the plugin in this tool: On, and not kept out of it. */
-export const wantedIn = (entry: Pick<PluginEntry, 'on' | 'except'> | undefined, tool: HarnessId) => !!entry?.on && !entry.except.includes(tool);
 
-/** THE TABLE (the header's rows), for one tool. `seen`: the home's `tools`. */
-export function owedTo(entry: Pick<PluginEntry, 'on' | 'except'> | undefined, tool: HarnessId, now: ToolNow, seen: readonly HarnessId[]): Owed {
-  const is = { wanted: wantedIn(entry, tool), has: now.has, takes: typeof now.route !== 'object' };
+/** THE TABLE (the header's rows), for one tool. `seen`: the home's `tools`; `offSomewhere`: some tool has the plugin off by its own switch. */
+export function owedTo(entry: Pick<PluginEntry, 'on' | 'except'> | undefined, tool: HarnessId, now: ToolNow, seen: readonly HarnessId[], offSomewhere = false): Owed {
+  const is = { wanted: !!entry && wantedIn(entry, tool), has: now.has, takes: typeof now.route !== 'object' };
   if (is.has === 'unknown' || !entry) return is;
   if (is.wanted) {
     if (is.has !== 'none') return is;
     if (typeof now.route === 'object') return { ...is, held: now.route.cannot };
-    return { ...is, act: now.route === 'whole' ? 'install' : 'install-parts', ...(seen.includes(tool) ? {} : { background: true as const }) };
+    const owes = { ...is, act: now.route === 'whole' ? 'install' as const : 'install-parts' as const };
+    if (seen.includes(tool)) return owes;
+    return offSomewhere ? { ...owes, offElsewhere: true } : { ...owes, background: true };
   }
   if (is.has === 'none') return is;
   if (is.has === 'whole') return now.stuck ? { ...is, held: now.stuck } : { ...is, act: 'uninstall' };
   return { ...is, act: 'remove-parts' };
 }
+
+/** Which way a click on a plugin goes: On, Add and Let in put it in; Off and Keep out take it out; Install there and Take out there bring one tool into line either way. */
+export const clickGoes = (what: PluginTurn): 'in' | 'out' | 'any' => (what === 'on' || what === 'add' || what === 'let-in' ? 'in' : what === 'fix' ? 'any' : 'out');
+/** What a click runs in one tool: what the table owes there, only where it goes the click's way (On never uninstalls, Off never installs). */
+export function clickRuns(what: PluginTurn, owed: Owed): Owed['act'] {
+  const goes = clickGoes(what), inward = owed.act === 'install' || owed.act === 'install-parts';
+  return owed.act && (goes === 'any' || inward === (goes === 'in')) ? owed.act : undefined;
+}
+/** Why a click can do nothing in one tool, as the table holds it, where that hold is the click's way. */
+export const clickHeld = (what: PluginTurn, owed: Owed) => (owed.held && (clickGoes(what) === 'any' || owed.wanted === (clickGoes(what) === 'in')) ? owed.held : undefined);
 
 /** A plugin of the home's record by its marketplace (one address however it is spelt) and name. */
 export const entryOf = (record: PluginRecord | undefined, source: string, plugin: string) =>

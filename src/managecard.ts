@@ -7,6 +7,7 @@ import { busy, clickResumes, setHome, state, tell } from './app.ts';
 import { h, toggle } from './dom.ts';
 import { plural } from './model.ts';
 import { market } from './pluginstate.ts';
+import { wantedIn } from './library.ts';
 import { pluginUpdates } from './pluginupdateview.ts';
 import type { DestinationResult, HarnessId, HomeView } from './types.ts';
 import { toolNames as names } from './words.ts';
@@ -59,7 +60,7 @@ function onLine(home: HomeView, tool: HarnessId): string {
   const then = `On: ${changes.length ? listed(changes) : `no item in ${names[tool]} would change`}${besides.length ? `; ${listed(besides)}` : ''}.`;
   // A tool managed again gets each plugin that is on and not kept out of it, while the automatic updates run by themselves
   // (pluginrecord.ts, pluginupdates.ts): said only where such a plugin is listed, as the marketplaces were last read.
-  const bring = !!market.view?.marketplaces.some(entry => Object.values(entry.switches ?? {}).some(sw => !!sw.entry?.on && !sw.entry.except.includes(tool)));
+  const bring = !!market.view?.marketplaces.some(entry => Object.values(entry.switches ?? {}).some(sw => !!sw.entry && wantedIn(sw.entry, tool)));
   const auto = pluginUpdates.view?.on && !pluginUpdates.view.paused;
   const also = bring && auto ? ' It also gets each plugin that is on and not kept out of it, and its instruction file is back on Instructions.' : ' Its instruction file is back on Instructions.';
   return `${then}${also}${home.syncOn ? '' : ` ${SYNC_OFF}`}`;
