@@ -15,7 +15,7 @@
 // through applyAgents).
 import { constants } from 'node:fs';
 import { access } from 'node:fs/promises';
-import { agentHash, agentText, agentsFolder, changedFields, fileFor, isAgentTool, nameProblem, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
+import { agentHash, agentText, agentsFolder, changedFields, fileFor, isAgentTool, nameProblem, oneFileName, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
 import { fileTextFor, keepOwn, openLibrary, readVersion, saveLibrary, storeVersion } from './agentstore.ts';
 import { libraryAction } from './historyactions.ts';
 import { itemKey, listed, pendingEdits, plan } from './library.ts';
@@ -83,13 +83,18 @@ async function agentsThroughPlugins(context: ShareContext, tools: HarnessId[]): 
 
 /**
  * Why a harness with no copy can't be given the agent, for an agent's own reasons (Disk.held): a plugin brings the agent
- * there, or its name can't be stored there. Worked out at each look and never stored. A plugin that brings the agent is "has
+ * there, or its name can't be stored there (unless that harness held it under that name before). Worked out at each look and
+ * never stored. A plugin that brings the agent is "has
  * it another way" in the model's terms (library.ts); agents still hold it as can't-take, so nothing they do changes.
  */
 function agentHeld(disk: AgentDisk, managed: HarnessId[], item: Wanted, tool: HarnessId): string | undefined {
   const given = disk.through.get(tool)?.get(item.key);
   if (given) return throughPlugin(tool, given, 'agent');
-  const why = nameProblem(item.name);
+  // A harness that held the agent under this name (its own part is kept: LibraryItem own) can be given it back: the name was
+  // that harness's own, so an agent only it can hold goes Off and On again there. Every other harness still can't store it.
+  // Only a name that is one file's name: an own part can be on record for a tool that never held the file (Pull records one for
+  // Claude Code from the repo's file), and a name with a path in it is written nowhere.
+  const why = item.own?.[tool] === undefined || !oneFileName(item.name) ? nameProblem(item.name) : undefined;
   // Where to rename it: a tool that has it.
   const holder = managed.find(other => disk.byKey.get(item.key)?.[other]);
   return why && `${nameOf(tool)} can’t store this name (${why}). Rename it ${holder ? `in ${nameOf(holder)} ` : ''}to use it there.`;
@@ -153,8 +158,11 @@ async function writeAgent(context: ShareContext, item: LibraryItem, harness: Har
 
 // ---------- The pass, for agents ----------
 
-/** What Pull brings for one agent (gitrepo.ts): its shared part and the repo's whole file (Claude Code's own part), or its removal. */
-export type PulledAgent = { agent: SharedAgent; claudeFile: string } | { removed: true };
+/**
+ * What Pull brings for one agent (gitrepo.ts): the name of its file in the repo, which names the item as a found agent's file
+ * names it (whatever its front matter says), its shared part and the repo's whole file (Claude Code's own part); or its removal.
+ */
+export type PulledAgent = { name: string; agent: SharedAgent; claudeFile: string } | { removed: true };
 type AgentPassOptions = Omit<PassOptions<SharedAgent>, 'pulled'> & { pulled?: Map<string, PulledAgent> };
 
 /** One pass over the agents (librarypass.ts runPass): the page's clicks in `changes` (itemClick), then every agent brought into line. */
@@ -162,7 +170,7 @@ export function applyAgents(context: ShareContext, tools: HarnessId[], changes: 
   // The repo's file is Claude Code's own part of the agent.
   const own = (claudeFile: string) => ({ harness: 'claude-cli' as const, text: claudeFile });
   const pulled = options.pulled && new Map([...options.pulled].map(([key, brought]) =>
-    [key, 'removed' in brought ? brought : { name: brought.agent.name, content: brought.agent, own: own(brought.claudeFile) }] as const));
+    [key, 'removed' in brought ? brought : { name: brought.name, content: brought.agent, own: own(brought.claudeFile) }] as const));
   return runPass(agentKind, context, tools, changes.map(itemClick), { ...options, pulled });
 }
 

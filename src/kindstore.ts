@@ -16,7 +16,7 @@ export interface RecordFile { file: string; format: number; said: string }
 
 /**
  * The empty record. No prototype on `items`, so a key such as constructor or __proto__ is only ever an item's. Whether a tool
- * can hold such a name is the kind's own rule (an agent's must start with a letter or digit: agentfiles.ts nameProblem).
+ * can hold such a name is the kind's own rule (an agent's must start with a letter or digit, except in a tool that held it under that name: agentfiles.ts nameProblem, agents.ts agentHeld).
  */
 export const emptyLibrary = (record: RecordFile): StoredLibrary => ({ formatVersion: record.format, items: Object.create(null), folders: {} });
 

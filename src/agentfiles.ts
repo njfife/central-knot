@@ -45,6 +45,8 @@ export function nameProblem(name: string): string | undefined {
   return name.includes('..') ? 'has “..”' : undefined;
 }
 export const safeName = (name: string) => !nameProblem(name);
+/** Whether a name is one file's name at all: no path in it. A name that is not is written nowhere, whatever else is on record. */
+export const oneFileName = (name: string) => !/[\\/\0]/.test(name) && name !== '.' && name !== '..';
 
 /** The shared part's identity: a harness's own fields never make two copies differ. */
 export const agentHash = (agent: SharedAgent) => sha256(JSON.stringify([agent.name, agent.description, agent.prompt.replace(/\s+$/, '')]));
