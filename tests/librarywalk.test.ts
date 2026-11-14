@@ -1,15 +1,17 @@
 // A seeded random walk over one skill ("notes") on real folders in a temp home with Claude Code, Copilot CLI, Codex and Pi,
-// with an agent on the library in the same home (in Pi a loose file beside the skill's folder, in the same skills folder):
+// with an agent on the library in the same home ("writer"; in Pi a loose file beside the skill's folder, in the same skills folder):
 // every click the Skills page and History offer
 // (tests/skillclicks.ts), edits, files added, modes changed and folders deleted by hand, copies made by hand, a copy in
 // ~/.agents/skills (which Copilot CLI and Codex read) coming and going, Take over of it, a tool's own switch set by hand and
 // cleared, Automatic sync off and on, History's days passing, a folder that can't be written during a click, a crash at
 // each step of a write or a removal, a tool uninstalled or left out, the agent turned off and on, and a source (a made-up
-// repository standing in for a link: tests/sourcerepo.ts) holding a notes of its own: added, changed there (its body, or its
-// description, a line apart from the body a hand edit rewrites), checked, dropped and
+// repository standing in for a link: tests/sourcerepo.ts) holding a notes of its own in its notes/ folder: added, changed
+// there (its body, or its description, a line apart from the body a hand edit rewrites), checked, dropped and
 // brought back there, its SKILL.md unparseable there for one check, Add on its row for a notes held deleted, Replace, Merge
 // and Keep mine on its row for a notes whose version waits there (changed here too), Turn on on its line for a notes it
-// removed (library.ts REMOVED AT ITS SOURCE: the Skills view's fromSource `removed`), and removed. Odd
+// removed (library.ts REMOVED AT ITS SOURCE: the Skills view's fromSource `removed`), and removed. The source holds an agent
+// too, "critic" in its agents/ folder: changed there (its prompt, or its description), dropped and back there, turned On and
+// Off, deleted, edited by hand in Claude Code, and Add, Merge, Replace and Keep mine on its line. Odd
 // seeds start with notes made by hand in Claude Code (a folder with a script, a file of mode 0600 and an empty folder), so the
 // source's notes differs and is not brought in; even seeds start with notes from the source, turned On.
 // After every step:
@@ -22,7 +24,10 @@
 //   (e) a tool Central Knot doesn't manage, the shared folder (but for Take over) and each tool's own switch (but for Clear
 //       the switch) are never written;
 //   (f) every click made a History entry, after a crash too, and from a settled home its Undo puts every folder back as it was;
-//   (h) the agent's files are as they were in every managed tool, but for its own Off and On, which puts them back byte for byte.
+//   (h) the agent's files are as they were in every managed tool, but for its own Off and On, which puts them back byte for byte;
+//   (i) the source's agent: each file of it Central Knot wrote over or removed held a version of it, or is still in a tool;
+//       and in a copy of the home put back after, a second plain pass over the agents writes nothing, then an On critic is
+//       current in every managed tool, an Off or deleted one has nothing applied. Its line's clicks are among (c)'s.
 // A step that makes a copy unseeable (a link inside, a SKILL.md that can't be parsed, its tool's folder made again) is made
 // from a settled home, and asserts that the pass turns nothing Off and removes nothing; one more deletes a folder by hand and
 // runs passes inside a settle window of 2 s, which must change nothing; and one makes the source's SKILL.md unparseable for a
@@ -34,12 +39,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, lstat, mkdir, readFile, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { applyAgents } from '../src/agents.ts';
+import { agentHash, parseAgent } from '../src/agentfiles.ts';
+import { agentsView, applyAgents } from '../src/agents.ts';
+import type { AgentTool } from '../src/presence.ts';
 import { pruneHistory, readHistory } from '../src/history.ts';
 import { wantedIn } from '../src/library.ts';
 import { asItIs, asksWhichCopy, harnessIs, placeOf, rowClicks } from '../src/libraryrow.ts';
 import { DAY_MS } from '../src/model.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
+import type { LibraryItem } from '../src/library.ts';
 import { applySkills, clearSwitch, takeOver } from '../src/skills.ts';
 import { setDisabled } from '../src/skillswitch.ts';
 import { chooseTools } from '../src/toolchoice.ts';
@@ -52,10 +60,10 @@ const hosts = await standInHosts();
 test.after(() => hosts.cleanup());
 
 /**
- * The walks every `npm test` runs (more, from any seed: CK_WALKS and CK_SEED). 51317 ends by deleting by hand a copy the person
- * made in Codex, which Central Knot never took in: their own deletion, which the checker must not count as a loss. 81060 and
- * 91036 delete a copy by hand that no pass sees before the source's SKILL.md stops parsing (Automatic sync off; inside the
- * settle window): the Check now after turns the skill Off for that deletion, which the checker must not blame on the source.
+ * The walks every `npm test` runs (more, from any seed: CK_WALKS and CK_SEED). 51317, 81060 and 91036 once found the checker
+ * wrong, in a form of the walk before the source held an agent (a deletion by hand counted as a loss; one no pass had seen,
+ * before the source's SKILL.md stopped parsing, blamed on the source); the walk has more steps since, so they no longer replay
+ * those paths, and the checks they taught stay (`taken` and `byHand`; the unparseable step's own checks).
  */
 const SEEDS = [1, 2, 3, 4, 51317, 81060, 91036];
 const STEPS = 16;
@@ -79,6 +87,10 @@ const rich = (body = 'Take notes.') => ({ 'SKILL.md': skillText(body), 'scripts/
 const allTools: Tool[] = [...clickTools, 'pi-cli'];
 /** The agent beside it, and its file in each tool (in Pi, a skill in its skills folder). */
 const agentFiles = { 'claude-cli': '.claude/agents/writer.md', 'copilot-cli': '.copilot/agents/writer.agent.md', 'codex-cli': '.codex/agents/writer.toml', 'pi-cli': '.pi/agent/skills/writer.md' } as const;
+/** The source's agent, critic (in its agents/ folder, beside its notes/ skill), its file in each tool, and its shared part's hash as a tool reads it. */
+const criticFiles = { 'claude-cli': '.claude/agents/critic.md', 'copilot-cli': '.copilot/agents/critic.agent.md', 'codex-cli': '.codex/agents/critic.toml', 'pi-cli': '.pi/agent/skills/critic.md' } as const;
+const criticMd = (prompt: string, description = 'Critiques.') => `---\nname: critic\ndescription: ${description}\n---\n\n${prompt}\n`;
+const sharedHash = (tool: string, text: string | undefined) => { const read = text === undefined ? undefined : parseAgent(tool as AgentTool, 'critic', text); return read && agentHash(read); };
 /** Each tool's own switch file, which only Clear the switch may write. */
 const switchFiles = { 'claude-cli': '.claude/settings.json', 'copilot-cli': '.copilot/settings.json', 'codex-cli': '.codex/config.toml', 'pi-cli': '.pi/agent/settings.json' } as const;
 
@@ -88,7 +100,8 @@ async function walk(seed: number): Promise<Finding[]> {
   const box = await sandbox(allTools), tools = box.tools;
   const manage = (managed: HarnessId[]) => { tools.splice(0, tools.length, ...allTools.filter(tool => managed.includes(tool))); };
   const shared = join(box.home, '.agents/skills/notes');
-  const recordText = () => readFile(join(box.home, '.central-knot', 'skills.json'), 'utf8').catch(() => '');
+  /** The skills' record and the agents' (the source's agent is one), as text. */
+  const recordText = async () => (await Promise.all(['skills.json', 'agents.json'].map(file => readFile(join(box.home, '.central-knot', file), 'utf8').catch(() => '')))).join('\n');
   let days: HistoryDays = 30, marker = 0, syncOn = true, settled = true, last: PassResult | undefined;
   const context = (more: Partial<ShareContext> = {}): ShareContext => ({ ...box.context, historyDays: days, ...more });
   const trace = [`seed ${seed}`];
@@ -115,8 +128,22 @@ async function walk(seed: number): Promise<Finding[]> {
   let clock = Date.now() + 1e9;
   // The source: a repository of this walk's own, whose root is a notes skill until it drops it (renamed jottings there).
   const sourceLink = `https://github.com/walk/notes-${seed}`, source = await repository(hosts, sourceLink);
-  await source.commit({ 'SKILL.md': skillText('From the source.') });
-  let sourceHasNotes = true;
+  await source.commit({ 'notes/SKILL.md': skillText('From the source.'), 'agents/critic.md': criticMd('You critique.') });
+  let sourceHasNotes = true, sourceHasCritic = true;
+  const criticTaken = new Set<string>();
+  const critic = async () => (await agentsView(context(), tools)).library.critic as LibraryItem | undefined;
+  const criticNow = async () => Object.fromEntries(await Promise.all(allTools.map(async tool => [tool, await readFile(join(box.home, criticFiles[tool as keyof typeof criticFiles]), 'utf8').catch(() => undefined)] as const)));
+  /** (i) on the home as it is, in a trial: two plain passes over the agents, the second writing nothing; then the source's agent, On, is current in every managed tool, and Off or deleted has nothing applied. */
+  const agentsSettle = () => trial(box, async () => {
+    await applyAgents(context(), tools, []);
+    const second = await applyAgents(context(), tools, []);
+    if (second.writes) fail(`(i) a second plain pass over the agents writes: ${second.results.map(entry => entry.message).join(' | ').slice(0, 120)}`);
+    const item = await critic(), files = await criticNow();
+    for (const tool of item ? tools : []) {
+      if (item!.on && !item!.deleted && sharedHash(tool, files[tool]) !== item!.hash) fail(`(i) after quiet passes the source’s agent, On, is not current in ${tool}`);
+      if ((!item!.on || item!.deleted) && item!.applied[tool] !== undefined) fail(`(i) after quiet passes the source’s agent, Off, still has a copy applied in ${tool}`);
+    }
+  });
   const sourceNow = async () => (await sourcesView(context(), tools)).sources[0];
   const checkNow = (id: string, more: Partial<ShareContext> = {}) => checkSource(context(more), async () => tools, id, work => work());
 
@@ -146,8 +173,8 @@ async function walk(seed: number): Promise<Finding[]> {
     } else {
       // Even seeds: notes comes from the source (its own runnable script), added, then turned On, so every source step reaches it.
       const { chmod } = await import('node:fs/promises');
-      await source.commit({ 'SKILL.md': skillText('Take notes.'), 'scripts/run.sh': '#!/bin/sh\necho hi\n' });
-      await chmod(join(source.dir, 'scripts/run.sh'), 0o755);
+      await source.commit({ 'notes/SKILL.md': skillText('Take notes.'), 'notes/scripts/run.sh': '#!/bin/sh\necho hi\n' });
+      await chmod(join(source.dir, 'notes/scripts/run.sh'), 0o755);
       await source.commit({});
       const look = await previewSource(context(), tools, sourceLink);
       if (!('token' in look) || look.refused) throw new Error(`the walk's source can't be added: ${look.refused}`);
@@ -207,12 +234,12 @@ async function walk(seed: number): Promise<Finding[]> {
         // The source's line for a notes it removed: Turn on, the same click as the row's switch (sourcespage.ts turnOn).
         if (fact?.fromSource?.removed && fact.fromSource.link === recorded.link) clicks(4, 'Turn on on the source’s line', { ...asItIs('notes', item), on: true, seenOn: false });
         // The source changes and the next read (the daily one, or Check now) comes at once: what a skill changed here meets most.
-        if (sourceHasNotes) add(3, { name: 'the source changes notes, then Check now', app: true, run: async more => { await source.commit({ 'SKILL.md': skillText(`Source ${++marker}.`) }); return checkNow(recorded.id, more); } });
+        if (sourceHasNotes) add(3, { name: 'the source changes notes, then Check now', app: true, run: async more => { await source.commit({ 'notes/SKILL.md': skillText(`Source ${++marker}.`) }); return checkNow(recorded.id, more); } });
         // The source's SKILL.md stops parsing for one check: unreadable there, never gone, so the source turns nothing Off. From a
         // settled home nothing turns Off or is removed; otherwise a copy deleted by hand that no pass has seen yet is the check's
         // pass to carry out, as any pass's (library.ts THE RULE), and History must say the deletion did it.
         if (held?.source === recorded.id && sourceHasNotes) add(2, { name: 'the source’s SKILL.md unparseable, then Check now', app: true, byHand: true, run: async () => {
-          await source.commit({ 'SKILL.md': '---\nname: [notes\n---\nBroken.\n' });
+          await source.commit({ 'notes/SKILL.md': '---\nname: [notes\n---\nBroken.\n' });
           try {
             const quiet = settled, before = (await seen(box, context())).item?.on, entries = await historyCount(), done = await checkNow(recorded.id);
             const told = (await readHistory(context())).filter(event => event.key === 'notes').slice(entries);
@@ -220,19 +247,43 @@ async function walk(seed: number): Promise<Finding[]> {
             if (told.some(event => event.cause === 'source-dropped')) fail('a source’s SKILL.md that stopped parsing was read as the skill gone');
             if ((await seen(box, context())).item?.on !== before && (quiet || !byHand)) fail('a source’s SKILL.md that stopped parsing turned the skill Off');
             if (quiet && done.results?.some(entry => entry.outcome === 'removed')) fail('a source’s SKILL.md that stopped parsing had a copy removed');
-          } finally { await source.commit({ 'SKILL.md': skillText(`Source ${++marker}.`) }); }
+          } finally { await source.commit({ 'notes/SKILL.md': skillText(`Source ${++marker}.`) }); }
         } });
       }
-      add(3, { name: 'the source changes notes', run: async () => { await source.commit({ 'SKILL.md': skillText(`Source ${++marker}.`, sourceHasNotes ? 'notes' : 'jottings') }); } });
+      add(3, { name: 'the source changes notes', run: async () => { await source.commit({ 'notes/SKILL.md': skillText(`Source ${++marker}.`, sourceHasNotes ? 'notes' : 'jottings') }); } });
       // A line apart from the body a hand edit rewrites: what Merge's line merge puts together.
       if (sourceHasNotes) add(2, { name: 'the source changes notes’s description', run: async () => {
-        const text = await readFile(join(source.dir, 'SKILL.md'), 'utf8');
-        await source.commit({ 'SKILL.md': text.replace(/^description: .*$/m, `description: Takes notes, the source’s way ${++marker}.`) });
+        const text = await readFile(join(source.dir, 'notes/SKILL.md'), 'utf8');
+        await source.commit({ 'notes/SKILL.md': text.replace(/^description: .*$/m, `description: Takes notes, the source’s way ${++marker}.`) });
       } });
       add(2, { name: sourceHasNotes ? 'the source drops notes (renamed jottings)' : 'the source has notes again', run: async () => {
         sourceHasNotes = !sourceHasNotes;
-        await source.commit({ 'SKILL.md': skillText(`Source ${++marker}.`, sourceHasNotes ? 'notes' : 'jottings') });
+        await source.commit({ 'notes/SKILL.md': skillText(`Source ${++marker}.`, sourceHasNotes ? 'notes' : 'jottings') });
       } });
+      // The source's agent: changed there (its prompt, or its description, a line apart from the prompt a hand edit rewrites),
+      // dropped and back there; On, Off, Delete, edited by hand in Claude Code; and its line's Add, Merge, Replace and Keep mine.
+      const critItem = await critic(), critLive = critItem && !critItem.deleted ? critItem : undefined;
+      const critLine = recorded?.names.find(name => name.kind === 'agent' && name.key === 'critic');
+      if (sourceHasCritic) add(2, { name: 'the source changes critic’s prompt', run: () => source.commit({ 'agents/critic.md': criticMd(`Critique ${++marker}.`) }) });
+      if (sourceHasCritic) add(1, { name: 'the source changes critic’s description', run: async () => {
+        const text = await readFile(join(source.dir, 'agents/critic.md'), 'utf8');
+        await source.commit({ 'agents/critic.md': text.replace(/^description: .*$/m, `description: Critiques ${++marker}.`) });
+      } });
+      add(1, { name: sourceHasCritic ? 'the source drops critic' : 'the source has critic again', run: async () => {
+        sourceHasCritic = !sourceHasCritic;
+        await source.commit({ 'agents/critic.md': sourceHasCritic ? criticMd(`Critique ${++marker}.`) : null });
+      } });
+      if (critLive) add(2, { name: `critic ${critLive.on ? 'Off' : 'On'}`, app: true, run: more => applyAgents(context(more), tools, [{ key: 'critic', on: !critLive.on, except: [], seenOn: critLive.on }]) });
+      if (critLive) add(1, { name: 'critic deleted', app: true, run: more => applyAgents(context(more), tools, [{ key: 'critic', on: critLive.on, except: [], seenOn: critLive.on, deleted: true }]) });
+      const inClaude = join(box.home, criticFiles['claude-cli']);
+      if (critLive?.on && tools.includes('claude-cli')) add(2, { name: 'hand edit critic in Claude Code', run: async () => {
+        const text = await readFile(inClaude, 'utf8').catch(() => undefined);
+        if (text) await writeFile(inClaude, text.replace(/\n\n[\s\S]*$/, `\n\nMine ${++marker}.\n`));
+      } });
+      if (recorded && critLine?.state === 'deleted') add(3, { name: 'Add on critic’s line', app: true, run: more => rowClick(context(more), tools, recorded.id, 'agent', 'critic', 'bringBack') });
+      if (recorded && critLine?.state === 'wait') for (const click of ['merge', 'replace', 'keep'] as const) {
+        add(4, { name: `${click} on critic’s line`, app: true, run: async more => asPass(await rowClick(context(more), tools, recorded.id, 'agent', 'critic', click)) });
+      }
       add(1, { name: `Automatic sync ${syncOn ? 'off' : 'on'}`, run: async () => { syncOn = !syncOn; } });
       add(1, { name: 'the agent Off then On', app: true, writes: 'agent', run: async () => {
         const off = await applyAgents(context(), tools, [{ key: 'writer', on: false, except: [], seenOn: true }]);
@@ -282,7 +333,7 @@ async function walk(seed: number): Promise<Finding[]> {
       const crash = act.app && !act.byHand && !blocked && next() < 0.1 ? pick(['before-remove', 'before-rename', 'mid-replace'] as const) : undefined;
       trace.push(`${act.name}${blocked ? ` [${blocked} read-only]` : ''}${crash ? ` [crash ${crash}]` : ''}`);
       const before = await folders(), contentsBefore = await contents(), managedBefore = [...tools], entriesBefore = await historyCount(), settledBefore = settled;
-      const switchesBefore = await switchesNow();
+      const switchesBefore = await switchesNow(), criticBefore = await criticNow();
       let done: unknown, crashed = false;
       if (blocked) await readOnly(blocked, true);
       try { done = await act.run(crash ? { fault: at => { if (at === crash) throw new Error('crash'); } } : {}); }
@@ -307,6 +358,11 @@ async function walk(seed: number): Promise<Finding[]> {
       if (act.app && act.writes !== 'switch' && !same(await switchesNow(), switchesBefore)) fail(`(e) ${act.name} wrote a tool’s own switch`);
       for (const content of taken) if (!versions.has(content) && !here.has(content)) { taken.delete(content); fail('(a) a content Central Knot wrote over or removed is neither a version nor in any folder'); }
       if (act.writes !== 'agent') { const agent = await agentNow(); for (const tool of managedBefore) if (agent[tool] !== agentAsWritten[tool]) fail(`(h) ${act.name} changed the agent’s file in ${tool}`); }
+      // (i) A file of the source's agent that Central Knot wrote over or removed held a version of it, or is still in a tool.
+      const criticAfter = await criticNow();
+      if (act.app && !act.byHand) for (const tool of managedBefore) if (criticBefore[tool] !== undefined && criticBefore[tool] !== criticAfter[tool]) criticTaken.add(sharedHash(tool, criticBefore[tool]) ?? '');
+      const criticVersions = new Set((await critic())?.versions.map(version => version.hash)), criticHere = new Set(allTools.map(tool => sharedHash(tool, criticAfter[tool])));
+      for (const hash of criticTaken) if (hash && !criticVersions.has(hash) && !criticHere.has(hash)) { criticTaken.delete(hash); fail('(i) a file of the source’s agent Central Knot wrote over or removed is neither a version nor in any tool'); }
       // (f) Every click has its History entry, a crashed one too.
       const answer = act.click && !crashed ? done as PassResult : undefined;
       const refused = !!answer && (!!answer.stopped || answer.results.some(entry => entry.unchanged || entry.differs));
@@ -321,6 +377,7 @@ async function walk(seed: number): Promise<Finding[]> {
         });
       }
       settled = await settles();
+      await agentsSettle();
       // (c) Every action offered now does something.
       const offered: { name: string; run: () => Promise<PassResult | PassResult[]> }[] = (await historyActions(box, context())).map(action => ({ name: `History’s ${action.label} on ${action.event.kind}`, run: action.run }));
       const now = await seen(box, context()), live = now.item && !now.item.deleted ? now.item : undefined;
@@ -336,6 +393,9 @@ async function walk(seed: number): Promise<Finding[]> {
       if (sourceRow?.names.some(name => name.key === 'notes' && name.state === 'wait')) offered.push({ name: 'the Sources page’s Merge', run: async () => asPass(await rowClick(context(), tools, sourceRow.id, 'skill', 'notes', 'merge')) });
       if (sourceRow?.names.some(name => name.key === 'notes' && name.state === 'wait')) offered.push({ name: 'the Sources page’s Keep mine', run: async () => asPass(await rowClick(context(), tools, sourceRow.id, 'skill', 'notes', 'keep')) });
       if (now.fact?.fromSource?.removed) offered.push({ name: 'the Sources page’s Turn on', run: () => send({ ...asItIs('notes', now.item), on: true, seenOn: false }) });
+      const criticLine = sourceRow?.names.find(name => name.kind === 'agent' && name.key === 'critic');
+      if (criticLine?.state === 'wait') for (const click of ['merge', 'replace', 'keep'] as const) offered.push({ name: `the Sources page’s ${click} on critic`, run: async () => asPass(await rowClick(context(), tools, sourceRow!.id, 'agent', 'critic', click)) });
+      if (criticLine?.state === 'deleted') offered.push({ name: 'the Sources page’s Add on critic', run: async () => asPass(await rowClick(context(), tools, sourceRow!.id, 'agent', 'critic', 'bringBack')) });
       for (const action of offered) await trial(box, async () => {
         const record = await recordText(), switches = await switchesNow(), answers = [await action.run()].flat();
         const refusal = answers.map(answer => answer.stopped ?? answer.results.find(entry => entry.unchanged)?.message).find(Boolean);

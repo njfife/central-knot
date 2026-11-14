@@ -91,6 +91,9 @@ test('What at a link is an agent: a file in an agents folder of each tool’s fo
       ['agent', 'writer', '', ['writer.md'], 'make'],
     ]);
     assert.equal(look.later, 'Its .mcp.json is not read: MCP servers from a link come in a later version.');
+    // A link straight at the agents folder: each Markdown file there with front matter is an agent, no field asked.
+    const folder = await previewSource(box.context, box.tools, 'https://github.com/team/kit/tree/main/agents') as Extract<SourcePreview, { token: string }>;
+    assert.deepEqual(linesOf(folder), ['agent reviewer: make']);
   } finally { await box.cleanup(); }
 });
 
@@ -402,6 +405,19 @@ test('Merge for an agent: the prompt changed on different lines merges, a descri
 });
 
 // ---------- The rows ----------
+
+test('Each source is read once per build of the home view: the Skills and the Agents views share one read of it', async () => {
+  const repo = await repository(hosts, 'https://github.com/team/once');
+  await repo.commit({ 'notes/SKILL.md': skillMd('notes'), 'agents/reviewer.md': agentMd('reviewer') });
+  const box = await sandbox();
+  try {
+    await add(box, 'https://github.com/team/once');
+    const { id, commit } = await sourceOf(box), reads = new Map<string, Promise<unknown>>(), context = { ...box.context, reads };
+    const skillRow = (await skillsView(context, box.tools)).items.find(fact => fact.key === 'notes'), agentRow = (await agentsView(context, box.tools)).items.find(fact => fact.key === 'reviewer');
+    assert.deepEqual([skillRow?.fromSource?.link, agentRow?.fromSource?.link], ['https://github.com/team/once', 'https://github.com/team/once']);
+    assert.deepEqual([...reads.keys()].filter(key => key.startsWith('source:')), [`source:${id}:${commit}`], 'one read, kept for the view');
+  } finally { await box.cleanup(); }
+});
 
 test('An agent’s row on Agents carries its source line, and once the source removed it, the removed notice; the source’s row says so too', async () => {
   const repo = await repository(hosts, 'https://github.com/team/rows');
