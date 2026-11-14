@@ -148,8 +148,11 @@ function tomlPrompt(prompt: string) {
 /** One `key: value` entry of front matter, a value of several lines as a block indented under its key. */
 const yamlEntry = (key: string, value: string) => stringifyYaml({ [key]: value }, { lineWidth: 0 }).replace(/\n$/, '');
 
-/** A `key:` line opening a block that keeps its trailing blank lines (`|+`, `>+`): those lines are its value, not separators. */
-const keepsBlanks = (line: string | undefined) => /:\s*[|>][1-9]?\+/.test(line ?? '');
+/**
+ * A `key:` line whose value is a block that keeps its trailing blank lines (`|+`, `>+`, the value's first characters): those
+ * lines are its value, not separators. A quoted value that only contains `|+` is no such block.
+ */
+const keepsBlanks = (line: string | undefined) => /^[^:]*:\s*[|>](?:[1-9]?\+|\+[1-9])\s*(?:#.*)?$/.test(line ?? '');
 /**
  * Replaces top-level `key:` lines (with their indented continuation) in YAML frontmatter, or adds them first. Other lines stay
  * byte for byte. Blank lines after an entry are separators the person left, kept, unless the old or the new value is a `|+`

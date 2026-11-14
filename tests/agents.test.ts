@@ -103,6 +103,8 @@ test('What is written for a description reads back as exactly that description, 
       assert.equal(await readOf(box, tool), text, `${shape}: the person’s own file changed`);
     } finally { await box.cleanup(); }
   }
+  // Written over a quoted value that only contains `|+`: the blank line after it is the person's separator, and stays.
+  assert.equal(agentText('claude-cli', { name: 'reviewer', description: 'Plain', prompt: 'You review code.\n' }, claude('description: "Run: |+ mode"\n\ntools: Read\n')), claude('description: Plain\n\ntools: Read\n'));
   // Written over a file that has one: an edit in Pi to a description ending in blank lines reaches Claude Code's file, where
   // the blank line the person left before `tools` would otherwise join that value; then an edit back to one line takes the
   // block's blank lines with it.
