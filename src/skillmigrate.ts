@@ -32,7 +32,7 @@
 import { readdir, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { harnessIds, harnesses } from './harnesses.ts';
-import { newItem, type LibraryItem, type Source } from './library.ts';
+import { newItem, type LibraryItem, type Origin } from './library.ts';
 import type { FolderSeen, KindLibrary, Wanted } from './librarypass.ts';
 import { managedTools } from './presence.ts';
 import { readTree, storeDirectory, storeFolder, type ShareContext, type SyncRecord } from './share.ts';
@@ -78,7 +78,7 @@ export function migrateItem(key: string, old: OldSkill, kept: Kept[], onDisk: Pa
   managed: readonly HarnessId[], anotherWay: (item: Wanted, tool: HarnessId) => boolean): LibraryItem | undefined {
   const synced = old.state === 'shared';
   if (!synced && !old.deleted) return undefined;
-  const contents = new Map<string, { at: number; from: Source }>(kept.map(content => [content.hash, { at: content.at, from: { how: 'migrated' } }]));
+  const contents = new Map<string, { at: number; from: Origin }>(kept.map(content => [content.hash, { at: content.at, from: { how: 'migrated' } }]));
   for (const copy of Object.values(onDisk)) if (copy && !contents.has(copy.hash)) contents.set(copy.hash, { at: copy.at, from: { how: 'was-in', harness: copy.tool } });
   const chosen = synced && old.use && contents.has(old.use.hash) ? old.use.hash : undefined;
   const lastSynced = synced ? old.hash : old.deleted!.hash;

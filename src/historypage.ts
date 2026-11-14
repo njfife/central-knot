@@ -171,7 +171,7 @@ export function historyPage() {
   const reread = rereadBand(state.history);
   // A refused Undo made here is a warning band, as on the other pages; other results here are in the status bar.
   const refused = state.outcome?.page === 'history' && state.outcome.warn ? outcomeBand(false) : null;
-  return h('div.page', {}, reread || refused ? h('div.bands', {}, reread, refused) : null, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, `What sync, your switches, Pull and profile switches changed in your tools, newest first. Undo puts the earlier version back; Restore brings back what was deleted or removed.`, ...keptFor()), h('ul.history-list', {}, ordered.flatMap((event, index) => {
+  return h('div.page', {}, reread || refused ? h('div.bands', {}, reread, refused) : null, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, `What sync, your switches, Pull, sources and profile switches changed, newest first. Undo puts the earlier version back; Restore brings back what was deleted or removed.`, ...keptFor()), h('ul.history-list', {}, ordered.flatMap((event, index) => {
     const about = describe(event);
     const heading = index === 0 || day(ordered[index - 1].at) !== day(event.at) ? h('li.history-day', { role: 'presentation' }, day(event.at)) : null;
     // The newest row, made by a click just now, gets the same brief highlight the tables use.

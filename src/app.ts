@@ -1,6 +1,7 @@
 // The page's state and most pages' actions (MAP.md: the app's shell). A sync notice lives across reads here, until its page
 // shows it (keepUnshown); on its page, matrix.ts toldNotices keeps or folds it.
 import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
+import { forgetSourcePrompts, loadSources } from './sourcespage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
@@ -27,7 +28,7 @@ declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
 /** Every page, in the sidebar's order. */
-export const pages = ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'repo', 'settings'] as const;
+export const pages = ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'sources', 'repo', 'settings'] as const;
 export type Page = typeof pages[number];
 
 /** This computer's names, and what its platform offers (machine.ts). */
@@ -264,6 +265,8 @@ function accept(view: HomeView) {
   void loadPageData(state.page, { readId: view.readId });
   // The sidebar counts what waits each way for the repo, so it is read with the home (no fetch: that waits for the page).
   if (state.page !== 'repo') void loadRepo(false);
+  // The sidebar counts the sources too (their last reads: no network).
+  if (state.page !== 'sources') void loadSources();
 }
 
 /** A row to flash on its next draw (set by Undo and Restore; the matrix reads it). */
@@ -477,7 +480,7 @@ function askBeforeLeaving(): Promise<void> {
 const openHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mode === 'fixture' ? 'the practice copy' : mode === 'actual' ? 'your real tools' : 'that folder'}…`, async () => {
   const previous = state.home;
   const view = await api().selectHome(mode);
-  if (view && view.home !== previous?.home) forgetRepoPrompts(true);
+  if (view && view.home !== previous?.home) { forgetRepoPrompts(true); forgetSourcePrompts(true); }
   // Sync follows the open home: leaving one with managed items stops its syncing, so the band says so and offers the way back.
   const left = previous && view && previous.home !== view.home && anyManaged(previous) ? previous : undefined;
   const leftText = left ? ` ${left.label} is not syncing while another home is open.` : '';
@@ -531,6 +534,7 @@ function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; 
   if (page === 'harnesses') return Promise.all([loadInstructions(readId), absentKinds().includes('plugins') ? undefined : loadPlugins(false, readId)]).then(() => undefined);
   if (page === 'plugins') return loadPlugins(fresh, readId);
   if (page === 'repo') return loadRepo(true);
+  if (page === 'sources') return loadSources();
   return Promise.resolve();
 }
 
@@ -587,7 +591,7 @@ export function showPage(page: Page) {
   const leavingHarness = page === 'harnesses' && !state.busy && !!state.harness;
   // A new page starts clean: the last action's message and results belong to the page they happened on.
   if (page !== state.page || leavingHarness) leaveResults(page);
-  if (page !== state.page) { state.skillsView = 'table'; state.visit += 1; forgetRepoPrompts(); }
+  if (page !== state.page) { state.skillsView = 'table'; state.visit += 1; forgetRepoPrompts(); forgetSourcePrompts(); }
   if (leavingHarness) state.harness = undefined;
   // Settings opens fresh (what its rows said last visit belongs to that visit); every other page reads its own data.
   state.page = page;

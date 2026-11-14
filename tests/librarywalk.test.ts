@@ -1,9 +1,13 @@
-// A seeded random walk over one skill ("notes", a folder with a script, a file of mode 0600 and an empty folder) on real
+// A seeded random walk over one skill ("notes") on real
 // folders in a temp home, with an agent on the library in the same home: every click the Skills page and History offer
 // (tests/skillclicks.ts), edits, files added, modes changed and folders deleted by hand, copies made by hand, a copy in
 // ~/.agents/skills (which Copilot CLI and Codex read) coming and going, Take over of it, a tool's own switch set by hand and
 // cleared, Automatic sync off and on, History's days passing, a folder that can't be written during a click, a crash at
-// each step of a write or a removal, a tool uninstalled or left out, and the agent turned off and on.
+// each step of a write or a removal, a tool uninstalled or left out, the agent turned off and on, and a source (a made-up
+// repository standing in for a link: tests/sourcerepo.ts) holding a notes of its own: added, changed there, checked, dropped and
+// brought back there, its SKILL.md unparseable there for one check, Add on its row for a notes held deleted, and removed. Odd
+// seeds start with notes made by hand in Claude Code (a folder with a script, a file of mode 0600 and an empty folder), so the
+// source's notes differs and is not brought in; even seeds start with notes from the source, turned On.
 // After every step:
 //   (a) nothing is lost: each folder Central Knot wrote over or removed held a content that is a version of the skill, or is
 //       still in a tool or the shared folder. Checked for the step, and for every such content since the walk began;
@@ -17,7 +21,8 @@
 //   (h) the agent's files are as they were in every managed tool, but for its own Off and On, which puts them back byte for byte.
 // A step that makes a copy unseeable (a link inside, a SKILL.md that can't be parsed, its tool's folder made again) is made
 // from a settled home, and asserts that the pass turns nothing Off and removes nothing; one more deletes a folder by hand and
-// runs passes inside a settle window of 2 s, which must change nothing.
+// runs passes inside a settle window of 2 s, which must change nothing; and one makes the source's SKILL.md unparseable for a
+// Check now, which must turn nothing Off and remove nothing.
 // The walks in SEEDS run in `npm test`. CK_WALKS=<n> runs n more seeds from CK_SEED=<n>; CK_ONLY=<seed> replays one walk,
 // with CK_TRACE=1 step by step.
 import { test } from 'node:test';
@@ -35,6 +40,11 @@ import { setDisabled } from '../src/skillswitch.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import type { Change, HarnessId, HistoryDays, HistoryEvent, PassResult } from '../src/types.ts';
 import { bytes, folderOf, historyActions, put, roots, sandbox, seen, skillText, tools as allTools, trial, undo, type Tool } from './skillclicks.ts';
+import { addSource, bringBack, checkSource, previewSource, removeSource, sourcesView } from '../src/sources.ts';
+import { repository, standInHosts } from './sourcerepo.ts';
+
+const hosts = await standInHosts();
+test.after(() => hosts.cleanup());
 
 /**
  * The walks every `npm test` runs (more, from any seed: CK_WALKS and CK_SEED). 51317 ends by deleting by hand a copy the person
@@ -86,6 +96,12 @@ async function walk(seed: number): Promise<Finding[]> {
   const readOnly = (tool: Tool, on: boolean) => chmod(join(box.home, roots[tool]), on ? 0o555 : 0o755).catch(() => undefined);
   let agentAsWritten: Record<string, string | undefined> = {};
   let clock = Date.now() + 1e9;
+  // The source: a repository of this walk's own, whose root is a notes skill until it drops it (renamed jottings there).
+  const sourceLink = `https://github.com/walk/notes-${seed}`, source = await repository(hosts, sourceLink);
+  await source.commit({ 'SKILL.md': skillText('From the source.') });
+  let sourceHasNotes = true;
+  const sourceNow = async () => (await sourcesView(context())).sources[0];
+  const checkNow = (id: string, more: Partial<ShareContext> = {}) => checkSource(context(more), async () => tools, id, work => work());
 
   /** (b) on the home as it is, in a trial: two passes; whether the first found nothing to do. */
   const settles = async () => trial(box, async () => {
@@ -107,8 +123,20 @@ async function walk(seed: number): Promise<Finding[]> {
   });
 
   try {
-    await put(box, 'claude-cli', rich(), ['empty']);
-    await send(rowClicks.on((await seen(box)).row, undefined));
+    if (seed % 2) {
+      await put(box, 'claude-cli', rich(), ['empty']);
+      await send(rowClicks.on((await seen(box)).row, undefined));
+    } else {
+      // Even seeds: notes comes from the source (its own runnable script), added, then turned On, so every source step reaches it.
+      const { chmod } = await import('node:fs/promises');
+      await source.commit({ 'SKILL.md': skillText('Take notes.'), 'scripts/run.sh': '#!/bin/sh\necho hi\n' });
+      await chmod(join(source.dir, 'scripts/run.sh'), 0o755);
+      await source.commit({});
+      const look = await previewSource(context(), sourceLink);
+      if (!('token' in look) || look.refused) throw new Error(`the walk's source can't be added: ${look.refused}`);
+      await addSource(context(), tools, look.token);
+      await send(rowClicks.on((await seen(box)).row, (await seen(box)).item));
+    }
     for (const tool of three) await mkdir(join(box.home, agentFiles[tool], '..'), { recursive: true });
     await writeFile(join(box.home, agentFiles['claude-cli']), '---\nname: writer\ndescription: Writes docs\n---\n\nYou write docs.\n');
     await applyAgents(context(), tools, [{ key: 'writer', managed: true, off: [], seenManaged: false }]);
@@ -150,6 +178,27 @@ async function walk(seed: number): Promise<Finding[]> {
       if (await bytes(shared)) add(1, { name: 'the installer removes the shared copy', run: () => rm(shared, { recursive: true }) });
       else add(1, { name: 'the installer puts a copy in ~/.agents/skills', run: async () => { await mkdir(shared, { recursive: true }); await writeFile(join(shared, 'SKILL.md'), skillText(pick(['Take notes.', `Installed ${marker + 1}.`]))); } });
       add(2, { name: 'pass', app: true, run: more => pass(more) });
+      const recorded = await sourceNow();
+      if (!recorded) add(5, { name: 'add the source', app: true, run: async () => { const look = await previewSource(context(), sourceLink); if ('token' in look && !look.refused) await addSource(context(), tools, look.token); } });
+      else {
+        add(6, { name: 'Check now', app: true, run: more => checkNow(recorded.id, more) });
+        add(1, { name: 'Remove the source', app: true, run: () => removeSource(context(), recorded.id) });
+        if (recorded.names.some(name => name.key === 'notes' && name.state === 'deleted')) add(4, { name: 'Add on the source’s row', app: true, run: () => bringBack(context(), tools, recorded.id, 'notes') });
+        // The source's SKILL.md stops parsing for one check: unreadable there, never gone, so nothing turns Off or is removed.
+        if (held?.source === recorded.id && sourceHasNotes) add(2, { name: 'the source’s SKILL.md unparseable, then Check now', app: true, byHand: true, run: async () => {
+          await source.commit({ 'SKILL.md': '---\nname: [notes\n---\nBroken.\n' });
+          try {
+            const before = (await seen(box, context())).item?.on, done = await checkNow(recorded.id);
+            if ((await seen(box, context())).item?.on !== before) fail('a source’s SKILL.md that stopped parsing turned the skill Off');
+            if (done.results?.some(entry => entry.outcome === 'removed')) fail('a source’s SKILL.md that stopped parsing had a copy removed');
+          } finally { await source.commit({ 'SKILL.md': skillText(`Source ${++marker}.`) }); }
+        } });
+      }
+      add(3, { name: 'the source changes notes', run: async () => { await source.commit({ 'SKILL.md': skillText(`Source ${++marker}.`, sourceHasNotes ? 'notes' : 'jottings') }); } });
+      add(2, { name: sourceHasNotes ? 'the source drops notes (renamed jottings)' : 'the source has notes again', run: async () => {
+        sourceHasNotes = !sourceHasNotes;
+        await source.commit({ 'SKILL.md': skillText(`Source ${++marker}.`, sourceHasNotes ? 'notes' : 'jottings') });
+      } });
       add(1, { name: `Automatic sync ${syncOn ? 'off' : 'on'}`, run: async () => { syncOn = !syncOn; } });
       add(1, { name: 'the agent Off then On', app: true, writes: 'agent', run: async () => {
         const off = await applyAgents(context(), tools, [{ key: 'writer', managed: false, off: [], seenManaged: true }]);

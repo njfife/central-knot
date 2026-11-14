@@ -1,10 +1,11 @@
 // What every engine stands on (MAP.md, "The store and safe writes"). Among it, the gate for library writes (libraryGate), the
 // one answer to "may this write of the library happen now". A click that writes the library, the home's sync record or a tool's
-// own switch for a library item by its own hand (a profile switch, a Manage switch, Take over, Clear the switch, Convert) enters
+// own switch for a library item by its own hand (a profile switch, a Manage switch, Take over, Clear the switch, Convert, a
+// source's Add and Check now: sources.ts) enters
 // it once its own refusals are past. A pass enters it before it reads its clicks (librarypass.ts runPass), so an item page's
 // click that the pass then refuses has still made the record of a home with none, or resumed one that waited. What checks before
 // such a write starts (Pull, Push, a History action that runs no pass of its own, the profiles migration) only asks it; what
-// writes a file of Central Knot's own alone asks it for that (`ownFile`). It is not the gate for every write: reads, taking over syncing (takeOverSync, which
+// writes a file of Central Knot's own alone asks it for that (`ownFile`: profiles.json, a source's Look and Remove). It is not the gate for every write: reads, taking over syncing (takeOverSync, which
 // changes the owner), another build of the app, the Git repo's connection, instructions and plugins ask writeAccess alone;
 // syncsHere is whether this build syncs the home at all (the background pass, History kept tidy).
 import { createHash, randomUUID } from 'node:crypto';

@@ -1,5 +1,5 @@
 import type { LeftIn } from './historyactions.ts';
-import type { LibraryItem, Plan, TakeInAnswer, VersionChange } from './library.ts';
+import type { LibraryItem, Plan, SourceAnswer, TakeInAnswer, VersionChange } from './library.ts';
 import type { NeutralServer } from './mcp.ts';
 
 export type HomeMode = 'fixture' | 'custom' | 'actual';
@@ -226,6 +226,18 @@ export interface DesktopApi {
   pullRepo(home: string): Promise<RepoResult>;
   pushRepo(home: string): Promise<RepoResult>;
   disconnectRepo(home: string): Promise<RepoResult>;
+  /** The home's sources, each as its last read found it (sources.ts sourcesView). */
+  sources(): Promise<SourcesView | null>;
+  /** Reads a link and says what Add would do, name by name; nothing is kept (sources.ts previewSource). */
+  previewSource(link: string, home: string): Promise<SourcePreview>;
+  /** Adds the source a preview read (`token`): what it holds comes into Central Knot, Off (sources.ts addSource). */
+  addSource(token: string, home: string): Promise<SourceResult>;
+  /** Reads a source again and carries out its table (sources.ts checkSource). */
+  checkSource(id: string, home: string): Promise<SourceResult>;
+  /** Brings back one name the library holds deleted, from a source's last read, Off (sources.ts bringBack). */
+  bringBackFromSource(id: string, key: string, home: string): Promise<SourceResult>;
+  /** Forgets a source: its items stay as they are, On or Off, with their versions (sources.ts removeSource). */
+  removeSource(id: string, home: string): Promise<SourceResult>;
   /** Adds or changes a profile's name and items (Central Knot's own file; no tool is written). */
   saveProfile(profile: ProfileEdit, home: string): Promise<{ problem?: string; id?: string; profiles?: ProfilesView }>;
   deleteProfile(id: string, home: string): Promise<{ problem?: string; profiles?: ProfilesView }>;
@@ -306,11 +318,12 @@ export interface SkillFacts {
    * sentence naming that tool as the page does (copywords.ts cantUse makes it a row's or a result's sentence).
    */
   choiceBlocks: Partial<Record<HarnessId, { tool: HarnessId; reason: string }[]>>;
-  /** A library kind's row (LibraryFacts, as itemrow.ts kindSource gives the page): its `unseen`, `plan`, `takeInAnswers` and `versionChanges`. */
+  /** A library kind's row (LibraryFacts, as itemrow.ts kindSource gives the page): its `unseen`, `plan`, `takeInAnswers`, `versionChanges` and `fromSource`. */
   unseen?: LibraryFacts['unseen'];
   plan?: LibraryFacts['plan'];
   takeInAnswers?: LibraryFacts['takeInAnswers'];
   versionChanges?: LibraryFacts['versionChanges'];
+  fromSource?: LibraryFacts['fromSource'];
   /** MCP servers: tools whose write or removal waits for Write to Claude Code (types.ts LibraryFacts waits). */
   waits?: HarnessId[];
   /** Skills and MCP servers: why a tool's switch can't be used at all: its settings file can't be read or is in a form Central Knot doesn't edit. */
@@ -487,13 +500,17 @@ export interface HistoryEvent {
    * A library item's: what made it happen, read by historyactions.ts alone. `switch`: the person's switch ('on' / 'off'). `found`:
    * a found item taken in by a click on Add ('on'; `winner`: where it was found). `sync-everything`: the same, taken in by the
    * home's standing rule, Synchronize everything, with no click. `pulled`: Pull did it ('on' for an item new here, 'edit',
-   * 'deleted'). `deleted-by-hand`: its copy was deleted by hand ('off'; `winner`: where). `tool-back`: a tool managed again held a
+   * 'deleted'). `source`: a source read on a click did it (`link`): 'off' for an item it brought in, Off; 'edit' for its content
+   * made current; 'kept-edit' for its content kept as a version, the current one being later. `source-dropped`: the source no longer
+   * has it, so it was turned Off and is no longer linked ('off'). `deleted-by-hand`: its copy was deleted by hand ('off'; `winner`: where). `tool-back`: a tool managed again held a
    * copy the item didn't have ('kept-edit'; `losers`: that copy), which gave way to the current version (library.ts managedAgain).
    * `own-copy`: a harness's own copy, which Central Knot had never put there and no click took over, gave way to the current
    * version ('kept-edit'; `losers`). `in-line`: a pass no click asked brought harnesses into line with the item: copies written
    * over ('on'; `losers`, each with what it held), or removed ('off', or 'deleted' for a deleted item) (librarypass.ts logItem).
    */
-  cause?: 'switch' | 'found' | 'sync-everything' | 'pulled' | 'deleted-by-hand' | 'tool-back' | 'own-copy' | 'in-line';
+  cause?: 'switch' | 'found' | 'sync-everything' | 'pulled' | 'source' | 'source-dropped' | 'deleted-by-hand' | 'tool-back' | 'own-copy' | 'in-line';
+  /** A source's entry (`cause` 'source' or 'source-dropped'): its link as the person gave it, kept here since the source may be removed later. */
+  link?: string;
   /**
    * The version current once this entry's change was made: 'current', the version made current; an 'edit' Pull made, the
    * version pulled; 'on' / 'off' by a switch, the version it was at (historyactions.ts asTheClickLeftIt).
@@ -834,6 +851,8 @@ export interface LibraryFacts {
   waits?: HarnessId[];
   /** Skills: made by Convert to skill from an agent: which, from which tool's, and what an agent had that a skill doesn't. */
   converted?: { agent: string; origin: HarnessId; losses: string[] };
+  /** In the library and linked to a source the home records (library.ts LibraryItem source): that source's link, as given. */
+  fromSource?: { link: string };
 }
 
 /**
@@ -847,6 +866,11 @@ export interface PassResult {
   settling?: boolean;
   /** A pass of the whole home (librarypass.ts PassOptions background): the found keys it left found; main.ts tells an open page when one is new (foundGained). */
   found?: string[];
+  /**
+   * A pass with a source's read (librarypass.ts fromSourceStep): what it did to each item, but `nothing`, as the table answered
+   * and the plan then did (a later edit in a tool keeps the source's version: `keep`), with the History entry that says it.
+   */
+  sourced?: { name: string; answer: SourceAnswer; history?: string }[];
 }
 
 // ---------- Instructions ----------
@@ -988,6 +1012,60 @@ export interface HistoryWindowSaved { settings: AppPreferences; pruned?: History
 /** What Show log file did: selected the log in the file manager, or opened its folder (and whether anything is logged yet). */
 export interface ShownLog { selected: boolean; logged: boolean }
 
+
+// ---------- Sources ----------
+
+/**
+ * What a name at a source is to the library now, as the Sources page says it: the source's table's own answer for it (library.ts
+ * SourceAnswer, from sourceAnswers: `nothing` for one in Central Knot from this source as the source has it), or `unreadable`,
+ * a skill there that can't be read, with why.
+ */
+export type SourceNameState = SourceAnswer | 'unreadable';
+/** One skill at a source's read, or one item linked to the source that the read doesn't hold (sources.ts namesOf). */
+export interface SourceName {
+  /** Its name, as its SKILL.md gives it (absent when that can't be read), and its key. */
+  name?: string; key: string;
+  /**
+   * Where it is at the read: its folder from the repository's root ('' for the root), that folder's own name (the repository's,
+   * for the root), and every file in it by path inside the folder. Absent for an item linked to the source that the read doesn't hold.
+   */
+  there?: { folder: string; folderName: string; files: string[] };
+  state: SourceNameState;
+  /** `unreadable`: why. `another`: the other source's link. */
+  why?: string;
+  /** An item in Central Knot (not deleted): whether it is On. */
+  on?: boolean;
+}
+/** What a link holds, read from its files (sources.ts holdsAt): skills, a plugin or a marketplace (a later version), no skill, or no folder there. */
+export type SourceHolds = 'skills' | 'plugin' | 'marketplace' | 'empty' | 'missing';
+/** One read of a link, as a preview and a source's row show it. */
+export interface SourceFound {
+  link: string;
+  /** What it resolves to: the address git fetches, the branch or tag, and the folder ('' for the repository's root). */
+  repository: string; ref: string; folder: string;
+  /** The commit read and its time (the source's time: library.ts A SOURCE). */
+  commit?: string; commitAt?: string;
+  holds: SourceHolds;
+  names: SourceName[];
+  /**
+   * Why the read can't be read as skills (no folder there, a plugin, a marketplace, no SKILL.md), in words; absent when it can.
+   * A skill there that can't be read says why on its own line (SourceName `why`).
+   */
+  unread?: string;
+}
+/**
+ * A source as the Sources page shows it: its last read (sourcestore.ts: a cache; none kept here reads as nothing at the link's
+ * folder), when it was read, and why the last Check now couldn't fetch it (`problem`).
+ */
+export interface SourceView extends SourceFound { id: string; addedAt: string; readAt?: string; problem?: string }
+export interface SourcesView { sources: SourceView[]; access: WriteAccess; problem?: string }
+/** A link read before anything is kept: what Add would do (`token` names it for Add), or why it can't be added. */
+export type SourcePreview = (SourceFound & { token: string; refused?: string }) | { refused: string; link: string };
+/**
+ * What a source's click did: the pass's answers by name (PassResult sourced), and its results; why it stopped; whether the source
+ * wasn't read whole (`notWhole`: nothing was turned off; the source's row says why); and the page's view after.
+ */
+export interface SourceResult { stopped?: string; sourced?: PassResult['sourced']; results?: DestinationResult[]; notWhole?: true; view: SourcesView | null }
 
 // ---------- Git repo ----------
 

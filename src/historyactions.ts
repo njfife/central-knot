@@ -12,8 +12,10 @@
 // write, Undo add or Finish undo) offers only what can still be said as one of these; otherwise it shows as past, with no action.
 //
 //   entry (HistoryEvent.kind, `cause`)       action                 offered while
-//   off: the switch, or a copy deleted       Turn on                the item is Off
-//     by hand (`winner`: where)
+//   off: the switch, a copy deleted by       Turn on                the item is Off
+//     hand (`winner`: where), or a source
+//     (`source`: brought in, Off;
+//     `source-dropped`: no longer there)
 //   on, off or deleted by a pass no click    none: nothing was asked (a deleted item's Restore is its Delete's
 //     asked (`in-line`)                      entry's; what an `on` wrote over is kept among the item's versions)
 //   off in one harness (`only`)              Turn on in <harness>   the item is On and kept out of that harness
@@ -34,6 +36,9 @@
 //     current, and any entry from before     changes came, "Make    current one
 //     the library that names `previous`      the version before
 //                                            this current"
+//   kept-edit from a source (`source`):      Use it                 the source's version (`version`) is not the
+//     its version kept, the current one                               current one
+//     being later
 //   conflict, chosen, kept-edit (an edit     Use <harness>’s        that copy's version is not the current one
 //     not taken in that was written over,
 //     a copy a tool managed again held, or
@@ -53,6 +58,7 @@
 // in libraryAction, the entry librarypass.ts logItem makes for it, and its case in historypage.ts describe.
 import type { IconName } from './icons.ts';
 import { itemKey, pendingChanges, theVersion, type LibraryItem } from './library.ts';
+import { linkLabel } from './sourcelink.ts';
 import { asItIs, versionClock, writesWait, type RowWords } from './libraryrow.ts';
 import type { Change, HarnessId, HistoryEvent, HomeView, LibraryFacts } from './types.ts';
 import { andList, sentence, toolName, toolsPhrase } from './words.ts';
@@ -89,7 +95,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
   const also = (words: string) => (tools ? `${words} ${tools}` : '');
   const where = event.only ? toolName(event.only) : '', from = event.winner ? toolName(event.winner.tool) : '';
   // What made it happen is the entry's `cause` alone (types.ts HistoryEvent); none is the person's own switch or click.
-  const pulled = event.cause === 'pulled', keeps = 'Central Knot keeps it.';
+  const pulled = event.cause === 'pulled', keeps = 'Central Knot keeps it.', source = event.link ? linkLabel(event.link) : 'Its source';
   // An Undo that gave tools their own copies back instead of removing what was there (types.ts HistoryEvent gaveBack).
   const gave = (event.gaveBack ?? []).map(toolName);
   const gaveSaid = gave.length ? ` ${andList(gave)} ${gave.length === 1 ? 'has its own copy' : 'have their own copies'} back, as before.` : '';
@@ -117,6 +123,8 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       if (event.only && event.gaveBack?.includes(event.only)) return { glyph: 'circle-off', text: `Kept out of ${where}: ${where} has its own copy back, as before. ${keeps}` };
       if (event.only) return { glyph: 'circle-off', text: `Kept out of ${where}: its copy there was removed. ${keeps}${gaveSaid}` };
       if (event.cause === 'deleted-by-hand') return { glyph: 'trash-2', text: `Its copy was deleted in ${from}, so it was turned off${also(' and removed from')}. ${keeps}` };
+      if (event.cause === 'source') return { glyph: 'link-2', text: `Brought in from ${source}: in Central Knot, Off, until you turn it on.` };
+      if (event.cause === 'source-dropped') return { glyph: 'link-2-off', text: `${source} no longer has it, so it is off${also(' and removed from')}, and no longer from that source. ${keeps}` };
       // A pass no click asked took its copies out where it is off (or kept out): a tool managed again, a folder writable again.
       if (event.cause === 'in-line') return { glyph: 'circle-off', text: `Off in ${tools}, so its ${words.copy} there was removed when sync reached ${event.losers.length === 1 ? 'it' : 'them'}. ${keeps}` };
       return { glyph: 'circle-off', text: `Turned off${also(': removed from')}.${gaveSaid} ${keeps}` };
@@ -147,6 +155,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       // Pull's own entry names no harness. With no version before it, only Claude Code's own settings came, for later.
       if (pulled && !event.previous) return { glyph: 'git-branch', text: 'Pulled from the Git repo: Claude Code’s own settings for it, which Claude Code gets when it has the agent.' };
       if (pulled) return { glyph: 'git-branch', text: `Pulled from the Git repo; that became the current version${tools ? `, in ${tools}` : ''}.` };
+      if (event.cause === 'source') return { glyph: 'link-2', text: `Updated from ${source}; that became the current version${tools ? `, in ${tools}` : ''}.` };
       return { glyph: 'pencil-line', text: `Edited in ${from}; that became the current version${tools ? `, in ${tools} too` : ''}.` };
     case 'switched': {
       // Clear the switch's Undo turns the tool's switch off again (`cause` 'switch'); any other that turned a switch off is
@@ -171,6 +180,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       const where = andList([...new Set(event.losers.map(loser => toolName(loser.tool)))]);
       if (event.cause === 'tool-back') return { glyph: 'diff', text: `${where}’s copy changed while Central Knot didn’t manage ${where}; it gave way to the current version and is kept as a version.` };
       if (event.cause === 'own-copy') return { glyph: 'diff', text: `${where} had a copy of its own, which Central Knot hadn’t put there; it gave way to the current version and is kept as a version.` };
+      if (event.cause === 'source') return { glyph: 'link-2', text: `${source} changed it too, but the current version is later, so the source’s is kept as a version.` };
       return { glyph: 'diff', text: `Edited in ${where}, not taken in yet, and written over by the current version: the edit is kept as a version.` };
     }
     case 'conflict': {
@@ -189,6 +199,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
 /** What an entry's row shows in place of its action once that action was used (a found item taken in: its Undo). */
 export function doneWords(event: HistoryEvent): string {
   if (tookIn(event)) return 'Undone';
+  if (event.kind === 'kept-edit' && event.cause === 'source') return 'Made current';
   return event.kind === 'off' ? 'Turned on since' : event.kind === 'on' ? 'Turned off since' : event.kind === 'deleted' ? 'Restored' : 'Undone';
 }
 
@@ -239,6 +250,10 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
     const held = takeInHeld(event, item, itemNow);
     if (!held) return { label: 'Undo', help: `Take ${name} out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own`, change: { ...now, deleted: true, ...givenBack(event, item) } };
     return held !== 'claude-code' && event.kind === 'on' ? switchAction(false, undefined, item) : undefined;
+  }
+  // A source's version kept, the current one being later: made current on a click.
+  if (event.kind === 'kept-edit' && event.cause === 'source') {
+    return isVersion(item, event.version) ? { label: 'Use it', help: `Make the source’s version of ${name} the current one${everywhere}`, change: { ...now, version: event.version } } : undefined;
   }
   if (event.kind === 'off' || event.kind === 'on') {
     const action = switchAction(event.kind === 'off', event.only, item), back = givenBack(event, item).giveBack;

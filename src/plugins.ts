@@ -112,6 +112,7 @@ export function gitFailure(code: number | 'timeout' | 'missing', output: string,
   if (code === 'timeout' || /could not resolve host|timed out|connection refused|could not connect to server|network is unreachable|no route to host|failed to connect/.test(text)) return { state: 'network', message: `Can’t reach the ${place}. Check your connection; a company ${place} may need its network or VPN.` };
   if (/host key verification failed/.test(text)) return { state: 'unknown-host', message: 'This SSH host is not known on this computer yet. Connect to it once in a terminal (for example `ssh -T git@host`) and compare its fingerprint; Central Knot never changes known_hosts.' };
   if (/passphrase/.test(text)) return { state: 'passphrase', message: 'Your SSH key needs its passphrase. Add it to your SSH agent, then try again.' };
+  if (/remote branch .* not found/.test(text)) return { state: 'no-access', message: `The ${place} has no branch or tag by that name now.` };
   if (/authentication failed|could not read username|terminal prompts disabled|\b40[13]\b|permission denied \(publickey/.test(text)) return { state: 'sign-in', message: 'Sign-in needed, or no repository there: the server doesn’t say which. Check the address, and use credentials that already work for Git on this computer, then try again.' };
   if (/repository not found|not found|\b404\b|does not appear to be a git repository|access denied/.test(text)) return { state: 'no-access', message: 'No access, or no repository there: the server doesn’t say which. Check the address and that your account can read it.' };
   return { state: 'unclassified', message: output.split('\n').slice(-3).join(' ').slice(0, 400) || 'Git failed without saying why.' };
@@ -173,11 +174,19 @@ function shallowClone(context: PluginContext, url: string, target: string, want:
 
 /**
  * What a copy must be: on a branch or tag (`ref`), at a pinned commit (`sha`), and passing `check` (given the new copy's
- * folder, it returns a problem or undefined). A copy that fails any of them never replaces the one already there.
+ * folder, it returns a problem or undefined). A copy that fails any of them never replaces the one already there. `place`:
+ * what a failure calls the repository ("marketplace", the default; "source").
  */
-interface CloneWant { ref?: string; sha?: string; check?: (folder: string) => Promise<string | undefined> }
+interface CloneWant { ref?: string; sha?: string; check?: (folder: string) => Promise<string | undefined>; place?: string }
 
-async function cloneInto(context: PluginContext, url: string, target: string, { ref, sha, check }: CloneWant): Promise<string | undefined> {
+/**
+ * A source's copy (sources.ts): the same shallow copy a marketplace gets, hooks, submodules and prompts off, put at `target` only
+ * once whole, on `ref` when one is given. Returns why Git failed, in words a person can act on, or undefined when it is there.
+ */
+export const copySource = (url: string, target: string, ref?: string, timeoutMs?: number) =>
+  shallowClone({ home: '', dataDir: '', binaries: {}, timeoutMs }, url, target, { ref, place: 'source' });
+
+async function cloneInto(context: PluginContext, url: string, target: string, { ref, sha, check, place }: CloneWant): Promise<string | undefined> {
   const stage = `${target}.${randomUUID()}`;
   await mkdir(dirname(target), { recursive: true });
   await dropStages(target);
@@ -185,7 +194,7 @@ async function cloneInto(context: PluginContext, url: string, target: string, { 
   const cloned = await git(['clone', '--depth', '1', '--no-recurse-submodules', '--quiet', ...(ref ? ['--branch', ref] : []), '--', url, stage], timeoutMs);
   if (cloned.code !== 0) {
     await rm(stage, { recursive: true, force: true });
-    return whyGitFailed(cloned.code, cloned.output);
+    return whyGitFailed(cloned.code, cloned.output, place);
   }
   // A pinned commit is checked out in the stage too: the copy takes its place only when it is exactly what was asked for.
   if (sha) {

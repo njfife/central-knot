@@ -21,7 +21,7 @@ import { readFile, unlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { appendHistory, readHistory, replaceHistory } from './history.ts';
 import { isClearedSwitch, libraryAction, libraryEntry } from './historyactions.ts';
-import { keepVersion, listed, pendingEdits, plan, wantedIn } from './library.ts';
+import { keepVersion, linkedSource, listed, pendingEdits, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, foundCopies, itemClick, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords } from './libraryrow.ts';
@@ -30,6 +30,7 @@ import { throughPlugins, type GivenByPlugin } from './plugins.ts';
 import { errorCode, itemKey, landingOf, libraryGate, partsIn, plainError, readTree, syncGate, targetFor, writeAccess, type ShareContext, type Tree } from './share.ts';
 import { alsoReads, lockedRoot, placeFolder, readCopy, readSkillsFolder, recoverFolders, removeFolder, rootOf, rootProblem, sharedFolder, swapFolder, type SkillCopy } from './skillfiles.ts';
 import { openLibrary, readConverted, readVersion, recordedSkills, saveLibrary, storeVersion, type ConvertedFrom, type SkillContent } from './skillstore.ts';
+import { sourceLinks } from './sourcestore.ts';
 import { isDisabled, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, type SwitchFile } from './skillswitch.ts';
 import { harnesses } from './harnesses.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, Skill, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy } from './types.ts';
@@ -519,8 +520,8 @@ export async function skillsView(context: ShareContext, tools: HarnessId[], noti
   const { library, managed } = look;
   // A skill whose folder can't be copied as it is (a link inside, a file it can't read) is a row too, which says why.
   const keys = [...new Set([...look.disk.byKey.keys(), ...look.disk.outside.keys(), ...look.disk.uncopied, ...live.map(item => item.key)])].sort((first, second) => first.localeCompare(second));
-  const items: LibraryFacts[] = [];
-  for (const key of keys) items.push(await rowFacts(look, key, live.find(item => item.key === key)));
+  const items: LibraryFacts[] = [], links = await sourceLinks(context.home);
+  for (const key of keys) items.push(await rowFacts(look, key, live.find(item => item.key === key), links));
   const gate = problem ? { state: 'stopped' as const, reason: problem } : await syncGate(context);
   const problems = problem ? [problem, ...look.disk.problems] : look.disk.problems;
   return { tools: managed, items, library: library.items, access: await writeAccess(context), gate, problems, notices };
@@ -535,9 +536,10 @@ const toolCopy = (copy: SkillCopy): ToolCopy => ({
 /**
  * One skill's row: what each managed tool holds and, for a skill in the library, what the next pass does in each (`plan`, from
  * the same reading a pass makes: copiesOf) and why nothing can happen in one (`unseen`, `cannot`). Besides, what only skills
- * have: how a tool has it another way, which copies outside Central Knot's can be taken over, and each tool's own switch.
+ * have: how a tool has it another way, which copies outside Central Knot's can be taken over, and each tool's own switch. `links`:
+ * the sources the home records, by id (sourcestore.ts sourceLinks), so an item linked to one says it.
  */
-async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefined): Promise<LibraryFacts> {
+async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefined, links: Map<string, string>): Promise<LibraryFacts> {
   const disk = look.disk, slot = disk.byKey.get(key) ?? {}, outside = disk.outside.get(key) ?? {};
   const entries = look.managed.flatMap(tool => (slot[tool] ? [slot[tool]!] : []));
   // A found skill has a copy somewhere: its own folder's, else one a tool has another way, else one that can't be read for sure.
@@ -561,7 +563,14 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
     ...some('plugin', facts.plugin), ...some('unseen', facts.unseen), ...some('anotherWay', facts.anotherWay), ...some('takeOver', facts.takeOver),
     ...some('loads', facts.loads), ...some('switchedOff', Object.keys(facts.loads).filter(tool => facts.loads[tool as HarnessId]!.off)), ...some('switchProblem', switchProblem),
     ...(converted ? { converted: { agent: converted.agent, origin: converted.origin, losses: converted.losses } } : {}),
+    ...fromSourceFact(item, links),
   };
+}
+
+/** The link of the source an item is linked to (library.ts linkedSource, among `links`: the recorded sources'), for its row. */
+function fromSourceFact(item: LibraryItem | undefined, links: Map<string, string>): Pick<LibraryFacts, 'fromSource'> {
+  const at = linkedSource(item, new Set(links.keys()));
+  return at ? { fromSource: { link: links.get(at)! } } : {};
 }
 
 /** What a row says of each tool, filled in by toolFacts: one map per kind of fact, by tool. */

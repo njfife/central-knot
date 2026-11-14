@@ -436,7 +436,7 @@ function connectedPage(view: ConnectedRepoView) {
           changeList({ id: 'repo-outgoing', title: 'From this computer', changes: view.outgoing, side: 'out', action: pushControl,
             empty: 'Nothing here that the repo doesn’t have.', stuck: words.stuckOut,
             note: counts.push && !view.problem && view.pushBlocked ? { id: 'repo-outgoing-blocked', text: view.pushBlocked, warns: true } : undefined })),
-      h('p.repo-aside', {}, `Only Managed ${carried} go to the repo; other files there stay as they are.`)));
+      h('p.repo-aside', {}, `Only Managed ${carried} go to the repo; other files there stay as they are. A skill from a source is sent like any other, without its link.`)));
 }
 
 /** Turns Automatic sync on, beside the words that ask for it (none while it is already on). */

@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { agentHash, parseAgent } from '../src/agentfiles.ts';
 import { agentVersion, agentsView } from '../src/agents.ts';
 import { placeOf } from '../src/libraryrow.ts';
-import { sourceWords } from '../src/library.ts';
+import { originWords } from '../src/library.ts';
 import { readHistory } from '../src/history.ts';
 import { sha256, type ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
@@ -50,7 +50,7 @@ async function oldFiles(box: Box) {
 async function versions(box: Box) {
   const item = (await itemOf(box))!;
   const line = async (hash: string) => (await agentVersion(box.context, 'reviewer', hash))?.prompt.trim().split('\n').at(-1);
-  return (await Promise.all(item.versions.map(async version => `${await line(version.hash)} (${sourceWords(version.from)})${version.hash === item.hash ? ' *' : ''}`))).sort();
+  return (await Promise.all(item.versions.map(async version => `${await line(version.hash)} (${originWords(version.from)})${version.hash === item.hash ? ' *' : ''}`))).sort();
 }
 
 interface Fixture { name: string; build(box: Box): Promise<void>; /** What the migrated item is: its place, the harnesses kept out, those applied to, and its versions. */ expect: { place: string; except?: Tool[]; applied?: Tool[]; versions: string[]; deleted?: true } | 'found' }

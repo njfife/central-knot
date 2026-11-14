@@ -12,16 +12,17 @@ import { pluginsPage } from './pluginspage.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
 import { repo, repoPage, waitingCounts, waitingWords } from './repopage.ts';
+import { sources, sourcesPage } from './sourcespage.ts';
 import { profilesPage, profileStatus } from './profilespage.ts';
 import type { HomeMode, HomeView, SyncView } from './types.ts';
-import { noticeNames } from './model.ts';
+import { noticeNames, plural } from './model.ts';
 import { anyManaged } from './itemrow.ts';
 import { followUpdates, sidebarEnd, statusEnd } from './updateview.ts';
 import { followPluginUpdates } from './pluginupdateview.ts';
 
 const region = (id: string) => document.getElementById(id)!;
 /** Each page's title, in the header and the sidebar: a kind's page by its kind's title (words.ts kindNouns). */
-const titles: Record<Page, string> = { overview: 'Overview', ...Object.fromEntries(Object.entries(kindNouns).map(([kind, nouns]) => [kind, nouns.title])) as Record<HomeKind, string>, profiles: 'Profiles', history: 'History', repo: 'Git repo', harnesses: 'Harnesses', settings: 'Settings' };
+const titles: Record<Page, string> = { overview: 'Overview', ...Object.fromEntries(Object.entries(kindNouns).map(([kind, nouns]) => [kind, nouns.title])) as Record<HomeKind, string>, profiles: 'Profiles', history: 'History', sources: 'Sources', repo: 'Git repo', harnesses: 'Harnesses', settings: 'Settings' };
 /** Below this window width the sidebar folds to its icon rail, unless the person chose a shape with the toggle. */
 const RAIL_BELOW = 968;
 /** From this content width (laptop full screen and up), an open row's details dock beside its table instead of under the row. */
@@ -108,6 +109,8 @@ function renderSidebar() {
     !noToolManaged() ? navRow('profiles', titles.profiles, 'sliders-horizontal') : null,
     !noToolManaged() ? h('div.nav-divider', { role: 'separator' }) : null,
     navRow('history', titles.history, 'history'),
+    // Sources: how many links are added, once there is one.
+    navRow('sources', titles.sources, 'link-2', sources.view?.sources.length || undefined, sources.view?.sources.length ? plural(sources.view.sources.length, 'source') : undefined),
     repoRow(),
     navRow('settings', titles.settings, 'settings'),
   ].filter((entry): entry is HTMLElement => !!entry));
@@ -138,7 +141,7 @@ function renderHeader(rail: boolean) {
 
 function renderPage() {
   document.body.classList.toggle('page-harnesses', state.page === 'harnesses');
-  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'profiles' ? profilesPage() : state.page === 'history' ? historyPage() : state.page === 'repo' ? repoPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : harnessesPage());
+  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'profiles' ? profilesPage() : state.page === 'history' ? historyPage() : state.page === 'repo' ? repoPage() : state.page === 'sources' ? sourcesPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : harnessesPage());
 }
 
 /** What the home lets Central Knot write, said in the status bar; `short` stands in when the bar is narrow (style.css). */

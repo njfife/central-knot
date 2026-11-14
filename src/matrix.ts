@@ -17,6 +17,7 @@ import { addLabel, asksWhichCopy, canAdd, harnessIs, inLibrary, madeFrom, placeO
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
+import { linkLabel } from './sourcelink.ts';
 import type { Change, DestinationResult, ItemNotice, SkillFacts, SyncNotice, SyncView, HarnessId, PartsInstall, TakenInNotice, ThroughPlugin } from './types.ts';
 import { market } from './pluginstate.ts';
 import { pluginKey, type PluginDraft } from './pluginplan.ts';
@@ -244,7 +245,7 @@ const ago = (iso: string) => { const said = sinceThen(Date.parse(iso)); return s
 
 /** The real home's facts in the shape the page works with. */
 const fromFacts = (facts: SkillFacts): ItemRow => ({
-  key: facts.key, name: facts.name, description: facts.description, converted: facts.converted, unseen: facts.unseen, plan: facts.plan, takeInAnswers: facts.takeInAnswers, versionChanges: facts.versionChanges, managed: facts.managed, off: facts.off, cannot: facts.cannot, plugin: facts.plugin, edited: facts.edited, waits: facts.waits,
+  key: facts.key, name: facts.name, description: facts.description, converted: facts.converted, fromSource: facts.fromSource, unseen: facts.unseen, plan: facts.plan, takeInAnswers: facts.takeInAnswers, versionChanges: facts.versionChanges, managed: facts.managed, off: facts.off, cannot: facts.cannot, plugin: facts.plugin, edited: facts.edited, waits: facts.waits,
   blocks: facts.choiceBlocks, hashes: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   copies: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   paths: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.directory])),
@@ -1491,6 +1492,8 @@ function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
     libraryVersions(lib, skill),
     inFiles || kind === 'mcp' ? null : wherePaths(skill),
     lib.own?.(skill) ?? null,
+    skill.fromSource ? h('p.details-limits.details-note', {}, icon('link-2', 12, 'tone-muted'), h('span', {}, `From ${linkLabel(skill.fromSource.link)}, a source. Check now on `,
+      h('button.inline-link', { type: 'button', id: `from-source-${skill.key}`, title: skill.fromSource.link, onclick: () => showPage('sources') }, 'Sources'), ' brings in what changes there.')) : null,
     skill.converted ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), `Converted from ${names[skill.converted.origin] ?? skill.converted.origin}’s agent “${skill.converted.agent}”, as a one-time copy; ${names[skill.converted.origin] ?? skill.converted.origin} keeps the agent, and edits here never change it. As a skill it has no ${andList(skill.converted.losses)}.`) : null,
     remove ? h('div.details-actions.details-danger', {}, remove) : null);
 }

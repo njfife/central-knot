@@ -367,7 +367,7 @@ async function manageFlow() {
   await a.click('#sync-switch');
   // Every tool left out: the pages say so and point to Harnesses, not that no tool was found.
   for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#manage-${tool}`);
-  same('with every tool left out, the sidebar holds only the pages that need no tool', await a.all('#nav [id^="nav-"]', 'e.id.slice(4)'), ['overview', 'harnesses', 'history', 'repo', 'settings']);
+  same('with every tool left out, the sidebar holds only the pages that need no tool', await a.all('#nav [id^="nav-"]', 'e.id.slice(4)'), ['overview', 'harnesses', 'history', 'sources', 'repo', 'settings']);
   await a.click('#nav-overview');
   same('its Overview names the tools left out and opens Harnesses', [await a.text('.overview-lead'), await a.exists('#overview-open-harnesses'), await a.exists('#overview-choose-home')],
     ['Central Knot manages none of the tools here: Claude Code, Copilot CLI and Codex are left out.', true, false]);
@@ -1947,7 +1947,7 @@ async function practiceFlow() {
     const listedMeanwhile = await a.text('#history-scroll') ?? '';
     same('while main is busy the row says it is updating and takes no other change; the newest request wins, the overtaken shorter ones remove nothing, and History opened meanwhile agrees with the window that won',
       [during, savedSettings().historyDays, agedOnFile(), [overtaken.pruned ?? 'none', newest.pruned], listedMeanwhile.includes('aged-20-days'), listedMeanwhile.includes('aged-60-days'), await a.text('.history-intro')],
-      [[true, 'Updating History…', false, false, 90, true], 30, ['aged-20', 'aged-5'], ['none', 'done'], true, false, 'What sync, your switches, Pull and profile switches changed in your tools, newest first. Undo puts the earlier version back; Restore brings back what was deleted or removed. Kept for 30 days. Change in Settings.']);
+      [[true, 'Updating History…', false, false, 90, true], 30, ['aged-20', 'aged-5'], ['none', 'done'], true, false, 'What sync, your switches, Pull, sources and profile switches changed, newest first. Undo puts the earlier version back; Restore brings back what was deleted or removed. Kept for 30 days. Change in Settings.']);
     await a.click('#nav-settings');
     same('the row then shows the window that won and takes changes again', [await a.run(`document.querySelector('#history-days').value`), await a.run(`document.querySelector('#history-days').disabled`)], ['30', false]);
     await a.click('#appearance-system');
@@ -1980,7 +1980,7 @@ async function practiceFlow() {
   await a.click('#history-intro-settings');
   same('Shorten saves, removes the older History from this home’s file, says from when (even after a re-read while it waited), and History shows only what is left, how long it keeps it, and the way to Settings',
     [savedSettings().historyDays, agedOnFile(), /^Saved\. History before .+ was removed\.$/.test(removedNote), noteAfterOtherRow, listed.includes('aged-5-days'), listed.includes('aged-20-days'), intro, await a.exists('#history-days')],
-    [7, ['aged-5'], true, false, true, false, 'What sync, your switches, Pull and profile switches changed in your tools, newest first. Undo puts the earlier version back; Restore brings back what was deleted or removed. Kept for 7 days. Change in Settings.', true]);
+    [7, ['aged-5'], true, false, true, false, 'What sync, your switches, Pull, sources and profile switches changed, newest first. Undo puts the earlier version back; Restore brings back what was deleted or removed. Kept for 7 days. Change in Settings.', true]);
   // Start at sign-in: only an installed app can register a login item, so here the row is off, can't be changed, and says why
   // in its hint's place. Main refuses a change too, and nothing about it is saved.
   const signInReason = flag('--electron') ? 'Only the installed app can start at sign-in.' : 'Move Central Knot to the Applications folder first.';
@@ -2199,6 +2199,92 @@ async function repoBaseFlow() {
   check('and the row reads as undone', await until(() => undoneSays(second, 'Pull emptied the base instructions')), await second.text('.history-list'));
   await second.quit();
   await first.quit();
+}
+
+/**
+ * Sources (src/sources.ts): the owner's link pasted as it is, https://github.com/stephenturner/skill-deslop/tree/main, with a
+ * made-up local repository standing in for GitHub (git's own url.<base>.insteadOf, given to the app's git: nothing reaches the
+ * network). Look offers one skill, deslop, with its files; Add puts it in Central Knot, Off, in no tool; its opened row on Skills
+ * and its versions say where it is from; On gives every tool all of it, byte for byte; a change there comes in at Check now; a
+ * rename there turns it Off with an entry in History; a link that is a plugin is refused; the page fits at the smallest window;
+ * Remove leaves the skill as it is.
+ */
+async function sourcesFlow() {
+  const git = (cwd, ...rest) => spawnSync('git', ['-C', cwd, '-c', 'user.name=Tester', '-c', 'user.email=tester@example.com', '-c', 'commit.gpgsign=false', ...rest], { encoding: 'utf8' });
+  if (spawnSync('git', ['--version']).status !== 0) { console.log('sources: skipped, no git on this machine'); return; }
+  const hosts = join(scratch, 'source-hosts'), deslop = join(hosts, 'github.com/stephenturner/skill-deslop.git');
+  const files = { 'SKILL.md': '---\nname: deslop\ndescription: Removes slop from prose.\n---\n\nRemove slop.\n', 'references/phrases.md': 'Phrases.\n', 'references/structures.md': 'Structures.\n', 'references/examples.md': 'Examples.\n', 'references/checklist.md': 'Checklist.\n', 'README.md': '# skill-deslop\n', 'LICENSE': 'MIT\n', '.gitignore': '.DS_Store\n' };
+  const commit = (dir, change) => { for (const [path, text] of Object.entries(change)) { if (text === null) rmSync(join(dir, path), { recursive: true, force: true }); else { mkdirSync(join(dir, path, '..'), { recursive: true }); writeFileSync(join(dir, path), text); } } git(dir, 'add', '--all'); git(dir, 'commit', '--quiet', '-m', 'change'); };
+  mkdirSync(deslop, { recursive: true });
+  spawnSync('git', ['init', '--quiet', '--initial-branch=main', deslop]);
+  commit(deslop, files);
+  const plugin = join(hosts, 'github.com/team/plugin.git');
+  mkdirSync(plugin, { recursive: true });
+  spawnSync('git', ['init', '--quiet', '--initial-branch=main', plugin]);
+  commit(plugin, { '.claude-plugin/plugin.json': '{"name":"plugin"}', 'skills/pdf/SKILL.md': '---\nname: pdf\ndescription: PDFs.\n---\nPDFs.\n' });
+  const home = join(scratch, 'sources-home'), data = join(scratch, 'sources-data');
+  const roots = { 'claude-cli': '.claude/skills', 'copilot-cli': '.copilot/skills', 'codex-cli': '.codex/skills' };
+  for (const root of Object.values(roots)) mkdirSync(join(home, root), { recursive: true });
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  const a = await launch(data, [], join(scratch, 'sources-real'), { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${join(hosts, 'github.com')}/.insteadOf`, GIT_CONFIG_VALUE_0: 'https://github.com/' });
+  const record = () => JSON.parse(readNow(join(home, '.central-knot/skills.json')) || '{"items":{}}').items.deslop;
+  const until = async (test, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await test()) return true; await wait(100); } return false; };
+  const type = async (text) => a.run(`(() => { const input = document.querySelector('#source-link'); input.value = ${JSON.stringify(text)}; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+
+  await a.click('#nav-sources');
+  check('the Sources page opens empty, with its field', await a.exists('#source-link') && /No sources yet/.test(await a.text('.page') ?? ''), await a.text('.page'));
+  await type('https://github.com/stephenturner/skill-deslop/tree/main');
+  await a.click('#source-look');
+  await until(() => a.exists('#source-preview'));
+  const offered = await a.text('.source-name[data-key="deslop"]') ?? '';
+  check('Look offers one skill, deslop, at the root of skill-deslop, coming in Off, with the files beside its SKILL.md', (await a.all('#source-preview .source-name', 'e.dataset.key')).join() === 'deslop' && /deslop\s*at the root of skill-deslop/.test(offered) && /Comes in, Off/.test(offered) && /8 files/.test(offered) && /references\/checklist\.md/.test(offered), offered);
+  same('a look keeps nothing and writes no tool', [record(), existsSync(join(home, roots['claude-cli'], 'deslop'))], [undefined, false]);
+  await a.shot('sources-look');
+  await a.click('#source-add');
+  await until(() => a.exists('.source-row'));
+  check('Add says deslop is in Central Knot, Off', /Added github\.com\/stephenturner\/skill-deslop \(main\)\. deslop is in Central Knot, Off: turn it on in Skills\./.test(await a.text('.band-done .band-text') ?? ''), await a.text('.band-done'));
+  same('in Central Knot, Off, in no tool', [record()?.on, Object.values(roots).some(root => existsSync(join(home, root, 'deslop')))], [false, false]);
+  check('its row says it is in Central Knot, Off, and says beforehand that Check now can change skills in the tools', /In Central Knot, Off/.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '')
+    && /Check now reads the link again: a skill changed there is updated in the tools it is on in; one no longer there is turned off and taken out of them\./.test(await a.text('.source-row') ?? ''), await a.text('.source-row'));
+  const id = await a.run(`document.querySelector('.source-row').dataset.source`);
+
+  await a.click('#nav-skills');
+  await a.click('#open-deslop');
+  const opened = await a.text('.details') ?? '';
+  check('its opened row on Skills says which source it is from, and its version says so too', /From github\.com\/stephenturner\/skill-deslop \(main\), a source\. Check now on Sources brings in what changes there\./.test(opened) && /from github\.com\/stephenturner\/skill-deslop \(main\)/.test(opened), opened);
+  await a.click('#switch-deslop');
+  const asGiven = Object.fromEntries(Object.entries(files).map(([path, text]) => [path, text]));
+  const inTool = root => Object.fromEntries(Object.keys(files).map(path => [path, readNow(join(home, root, 'deslop', path))]));
+  check('turned On, every tool gets SKILL.md and all four reference files, byte for byte', await until(() => Object.values(roots).every(root => JSON.stringify(inTool(root)) === JSON.stringify(asGiven))), Object.values(roots).map(inTool));
+
+  commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('Remove slop.', 'Remove slop, gently.') });
+  await a.click('#nav-sources');
+  await a.click(`#source-check-${id}`);
+  check('Check now brings the change in, and the band says it was updated and where it went, with its Undo', /deslop was updated from its source, now in all 3 tools\./.test(await a.text('.band-done .band-text') ?? '') && await a.exists('#outcome-undo') && await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('gently'))), await a.text('.band-done'));
+
+  commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('name: deslop', 'name: unslop') });
+  await a.click(`#source-check-${id}`);
+  check('renamed there, Check now turns deslop Off and takes it out of every tool, said first, as a warning, with Turn on; unslop comes in Off', /^deslop is no longer at github\.com\/stephenturner\/skill-deslop \(main\): it was turned off and taken out of all 3 tools; Central Knot keeps it\./.test(await a.text('.band-done .band-text') ?? '')
+    && /unslop is in Central Knot, Off/.test(await a.text('.band-done .band-text') ?? '') && await a.exists('.band-done svg.tone-warning') && (await a.text('#outcome-undo')) === 'Turn deslop on'
+    && await until(() => Object.values(roots).every(root => !existsSync(join(home, root, 'deslop')))) && record()?.on === false, await a.text('.band-done'));
+  await a.click('#nav-history');
+  check('History says the source dropped it', await until(async () => /github\.com\/stephenturner\/skill-deslop \(main\) no longer has it, so it is off and removed from all 3 tools/.test(await a.text('.page') ?? '')), await a.text('.page'));
+
+  await a.click('#nav-sources');
+  await type('https://github.com/team/plugin');
+  await a.click('#source-look');
+  await until(() => a.exists('#source-preview'));
+  check('a link that is a plugin is named as one, and nothing there is added', /The link holds a plugin/.test(await a.text('#source-preview') ?? '') && !(await a.exists('#source-add')), await a.text('#source-preview'));
+  await fitsAtMinimum(a, 'Sources, with a source and a look open');
+  for (const [width, height] of [[1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); same(`nothing cut off on Sources at ${width}×${height}`, await a.run(CUT_OFF), []); }
+  await fullSize(a);
+
+  await a.click(`#source-remove-${id}`);
+  await a.click(`#source-remove-confirm-${id}`);
+  check('Remove takes the row away, and deslop stays in Central Knot as it was', await until(async () => !(await a.exists('.source-row'))) && record()?.on === false && !!record()?.versions.length, await a.text('.page'));
+  same('no page errors on Sources', a.pageErrors, []);
+  await a.quit();
 }
 
 /**
@@ -2429,7 +2515,7 @@ async function fewToolsFlow() {
     await a.quit();
     return;
   }
-  same('a home with no tools shows only the pages that hold no kind', await pages(), ['overview', 'harnesses', 'history', 'repo', 'settings']);
+  same('a home with no tools shows only the pages that hold no kind', await pages(), ['overview', 'harnesses', 'history', 'sources', 'repo', 'settings']);
   same('its Overview says no tools were found, once, with another home to choose, and no "Also here"', [await a.text('.overview-lead'), await a.exists('#overview-choose-home'), await a.exists('#overview-instructions')], ['No tools were found in this home.', true, false]);
   check('its status bar says only that the home opened', /^Opened [^.]+\.$/.test(await a.run(`document.querySelector('#announcement').dataset.text`) ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`));
   same('with nothing to sync, the switch is shown, not offered', await a.run(`[document.querySelector('#sync-switch').getAttribute('aria-disabled'), document.querySelector('#sync-switch .sync-state').textContent]`), ['true', 'Nothing to sync']);
@@ -2447,13 +2533,13 @@ async function fewToolsFlow() {
   mkdirSync(join(home, '.codex/skills/notes'), { recursive: true });
   writeFileSync(join(home, '.codex/skills/notes/SKILL.md'), text('notes'));
   await a.click('#header-refresh');
-  same('a tool’s folder alone, with no CLI or app, makes no tool', await pages(), ['overview', 'harnesses', 'history', 'repo', 'settings']);
+  same('a tool’s folder alone, with no CLI or app, makes no tool', await pages(), ['overview', 'harnesses', 'history', 'sources', 'repo', 'settings']);
   mkdirSync(join(home, '.pi/agent/skills/notes'), { recursive: true });
   writeFileSync(join(home, '.pi/agent/skills/notes/SKILL.md'), text('notes'));
   cli('.pi/agent/bin/pi', 'pi 1.5.0');
   await a.click('#header-refresh');
   // Codex, whose folder is still here, holds agents and plugins: were it counted, both pages would be back.
-  same('with Pi alone, Agents and Plugins are left out', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'instructions', 'profiles', 'history', 'repo', 'settings']);
+  same('with Pi alone, Agents and Plugins are left out', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'instructions', 'profiles', 'history', 'sources', 'repo', 'settings']);
   check('and the Overview names them once', (await a.text('#overview-absent') ?? '').includes('No tool here holds agents or plugins') && !(await a.exists('#overview-agents')), await a.text('#overview-absent'));
   await a.click('#nav-skills');
   check('the tool with only a folder has no mark', await a.exists('.tool-mark[data-tool="pi-cli"]') && !(await a.exists('[data-tool="codex-cli"], #tool-codex-cli')));
@@ -2467,7 +2553,7 @@ async function fewToolsFlow() {
   mkdirSync(join(home, '.claude'), { recursive: true });
   cli('.local/bin/claude', '2.1.309 (Claude Code)');
   await a.click('#header-refresh');
-  same('a tool that holds agents and plugins brings them back', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'repo', 'settings']);
+  same('a tool that holds agents and plugins brings them back', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'sources', 'repo', 'settings']);
   await a.click('#nav-harnesses');
   check('Claude Code’s CLI alone says nothing of Cowork', !(await a.text('#harness-claude-cli')).includes('Cowork'), await a.text('#harness-claude-cli'));
   // On Agents, its only tool goes away: the page it was on no longer exists here, so the Overview opens.
@@ -2475,7 +2561,7 @@ async function fewToolsFlow() {
   rmSync(join(home, '.claude'), { recursive: true, force: true });
   rmSync(join(home, '.local/bin/claude'));
   await a.click('#header-refresh');
-  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'harnesses', 'skills', 'mcp', 'instructions', 'profiles', 'history', 'repo', 'settings']]);
+  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'harnesses', 'skills', 'mcp', 'instructions', 'profiles', 'history', 'sources', 'repo', 'settings']]);
   const moved = await a.run(`document.querySelector('#announcement').dataset.text`);
   check('and the status bar says what was read and why the page moved', /^Read .*No tool here holds agents now\.$/.test(moved ?? ''), moved);
   // Claude desktop alone, with no CLI and no .claude folder yet: Claude Code is here, said so with both versions.
@@ -3560,7 +3646,7 @@ const started = Date.now();
 try {
   seedHome();
   // Each flow's time is printed, so a run that grows slow says where.
-  const flows = [harnessFlow, manageFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, suggestedFlow, otherAppsFlow, otherBuildFlow, listDiffersFlow, pluginUpdatesFlow, repoBaseFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, firstSetupFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
+  const flows = [harnessFlow, manageFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, openCodeFlow, suggestedFlow, otherAppsFlow, otherBuildFlow, listDiffersFlow, pluginUpdatesFlow, repoBaseFlow, sourcesFlow, draftFlow, sharedCopiesFlow, syncEverythingFlow, firstSetupFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])];
   const named = option('--flows')?.split(',');
   for (const flow of flows.filter(each => !named || named.includes(each.name))) {
     const from = Date.now();

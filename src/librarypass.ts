@@ -5,8 +5,10 @@
 //   lookAt         each managed harness's copies, read once through the kind (Disk); a copy that can't be read for sure is
 //                  unseen, never missing
 //   deletionsTold  a deleted item that History has no standing entry for gets one, so it always has its Restore
-//   pull, click    what Pull brings, and what the person asked (On, Off, a harness kept out, a version made current, Delete,
-//                  Restore, a found item taken in by Add), recorded on the item
+//   pull, source   what Pull brings, and what a source holds (library.ts A SOURCE, through fromSourceStep), recorded on
+//                  the items before any click
+//   click          what the person asked (On, Off, a harness kept out, a version made current, Delete, Restore, a found item
+//                  taken in by Add), recorded on the item
 //   takeInByRule   in main.ts's pass of the whole home only (PassOptions background), with the home's Synchronize everything
 //                  on: each found item the take-in table lets it take (library.ts takeInAnswer, through foundKey), taken in as
 //                  Add takes it (takeIn); History's entry is an Add's, and the pass's one notice says what it took in
@@ -63,9 +65,9 @@
 // - History's sentences and actions for its entries: historyactions.ts, in the kind's words (historypage.ts asks it).
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-import { carryOut, itemKey, keepVersion, managedAgain, newItem, pendingChanges, plan, setCurrent, takeInAnswer, versionAt, wantedIn } from './library.ts';
+import { carryOut, itemKey, keepVersion, managedAgain, newItem, pendingChanges, plan, setCurrent, sourceAnswers, takeInAnswer, versionAt, wantedIn } from './library.ts';
 import type { ItemNow } from './historyactions.ts';
-import type { Copies, FoundCopy, FoundKey, HarnessCopy, ItemKind, LeftFound, LibraryItem, Plan, Shelf, Source, TakenBy, Version } from './library.ts';
+import type { Copies, FoundCopy, FoundKey, HarnessCopy, ItemKind, LeftFound, LibraryItem, Plan, Origin, Shelf, SourceSeen, TakenBy, Version } from './library.ts';
 import { appendHistory, historyCutoff, readHistory, replaceHistory } from './history.ts';
 import { errorCode, libraryGate, stillOwned } from './share.ts';
 import type { ShareContext } from './share.ts';
@@ -482,15 +484,25 @@ export const takeInAnswers = (look: AnyLook, key: string) => {
 // ---------- A pass ----------
 
 /**
- * What was asked of a pass for one item (a click, or what Pull brings), as the History entry it becomes: begun when it is
- * recorded, finished with the harnesses its plan writes or removes (`fill`: which of them it names).
+ * What was asked of a pass for one item (a click, what Pull brings, or what a source holds), as the History entry it becomes:
+ * begun when it is recorded, finished with the harnesses its plan writes or removes (`fill`: which of them it names).
  */
-type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'version' | 'previous' | 'foundIn'> & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed' };
+type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'version' | 'previous' | 'foundIn' | 'link'> & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed' };
 /**
  * What Pull brings for one item (gitrepo.ts): its name and content, and where the repo holds one harness's own part, that
  * part's text (Claude Code's file, for an agent); or its removal.
  */
 export type Pulled<Content> = { name: string; content: Content; own?: { harness: HarnessId; text: string } } | { removed: true };
+/**
+ * One read of a source as the pass is given it (sources.ts readOf): the table's reading of it (library.ts SourceSeen), with each
+ * readable name's own name and content. `recorded`: the sources the home records now. `bringBack`: keys held deleted that a
+ * click on Add on the source's row brings back.
+ */
+export interface SourceRead<Content> extends SourceSeen {
+  names: Map<string, { name: string; hash: string; content: Content } | { unreadable: string }>;
+  recorded: ReadonlySet<string>;
+  bringBack?: ReadonlySet<string>;
+}
 interface Pass extends AnyLook {
   shelf: Shelf<unknown>;
   /** The record as last saved, to save it again only when it changed. */
@@ -503,6 +515,8 @@ interface Pass extends AnyLook {
   told: boolean;
   /** What Synchronize everything took in, as History told it (logItem): its one notice, made when the pass ends. */
   takenIn: { name: string; foundIn: HarnessId[]; history: string }[];
+  /** What a source's read did to each item, by key, but `nothing` (fromSourceStep, corrected by logItem): PassResult sourced. */
+  sourced: Map<string, NonNullable<PassResult['sourced']>[number]>;
   results: DestinationResult[]; notices: SyncNotice[]; writes: number; made: string[];
 }
 /** What may be asked of a pass besides its clicks. */
@@ -513,6 +527,11 @@ export interface PassOptions<Content> {
   resume?: boolean;
   /** What Pull brings, by item (gitrepo.ts): each becomes that item's current version before the pass (pull). */
   pulled?: Map<string, Pulled<Content>>;
+  /**
+   * What a source holds now, read on a click (sources.ts): its table is carried out before the pass (fromSourceStep), and the
+   * pass then concerns the items the table answered for, and nothing else.
+   */
+  source?: SourceRead<Content>;
   /**
    * The clicks are told to History in one entry the caller wrote first (a profile switch: profiles.ts), so their own On and
    * Off entries are not written (logItem). What else the pass finds (an edit taken in, a copy deleted by hand) is told as ever.
@@ -534,9 +553,9 @@ export interface PassOptions<Content> {
 export async function runPass<C, E extends Seen, D extends Disk<E>>(
   kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[], clicks: ItemClick[], options: PassOptions<C> = {},
 ): Promise<PassResult> {
-  const gate = await libraryGate(context, { start: clicks.length > 0 || !!options.pulled?.size, resume: options.resume });
+  const gate = await libraryGate(context, { start: clicks.length > 0 || !!options.pulled?.size || !!options.source, resume: options.resume });
   if ('refused' in gate) return { stopped: gate.refused, results: [], writes: 0 };
-  // A home with no sync record gets one only when something is asked of the pass (a click, or what Pull brings).
+  // A home with no sync record gets one only when something is asked of the pass (a click, what Pull brings, or what a source holds).
   if (!gate.record) return { results: [], writes: 0 };
   const { library, problem } = await kind.open(context, true);
   if (problem) return { stopped: problem, results: [], writes: 0 };
@@ -544,16 +563,18 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   // A write or removal a crash interrupted is finished first, so a copy moved aside is never read as deleted.
   for (const tool of managed) await kind.recover(context, tool);
   const saved = JSON.stringify(library);
-  const inScope = (key: string) => !options.only || options.only.has(key) || clicks.some(asked => asked.key === key);
   const settle = { clock: options.now ?? Date.now(), ms: options.settleMs ?? context.settleMs ?? 2000, settling: false };
   const look: AnyLook = await lookAt(kind, context, managed, library, settle);
   const store = (item: LibraryItem, hash: string, content: unknown) => kind.store(context, item, hash, content as C);
-  const pass: Pass = { ...look, shelf: { store, save: () => saveIfChanged(pass) }, saved, asked: new Map(), giveBack: new Map(), told: !!options.told, takenIn: [], results: [], notices: [], writes: 0, made: [] };
+  const pass: Pass = { ...look, shelf: { store, save: () => saveIfChanged(pass) }, saved, asked: new Map(), giveBack: new Map(), told: !!options.told, takenIn: [], sourced: new Map(), results: [], notices: [], writes: 0, made: [] };
   try {
     await deletionsTold(pass);
     for (const [key, brought] of options.pulled ?? []) await pull(pass, key, brought);
+    const sourceScope = options.source ? await fromSourceStep(pass, options.source) : undefined;
     for (const asked of clicks) await click(pass, asked);
     if (options.background && gate.record.syncEverything === true) await takeInByRule(pass);
+    // A source's pass concerns what its table answered for; a click's, with Automatic sync off, the items it names (SYN-03).
+    const inScope = (key: string) => (sourceScope ? sourceScope.has(key) : !options.only || options.only.has(key)) || clicks.some(asked => asked.key === key);
     const items = Object.values(library.items).filter(item => inScope(item.key));
     await guardFolders(pass, items, pass.shelf);
     for (const item of items) { await stillOwned(context.home, context.build); await syncItem(pass, item); }
@@ -561,7 +582,7 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
     // A file noted away that this pass made (a kind of files: Kind.folderSeen) is noted as it is now, so the next pass doesn't
     // take Central Knot's own write for a file made again (keepFolders: a click's pass still moves no known identity on).
     if (kind.folderSeen) for (const tool of managed) if (pass.foldersNow[tool] && 'away' in pass.foldersNow[tool]) pass.foldersNow[tool] = await kind.folderSeen(context, tool);
-    keepFolders(library, pass.foldersNow, managed, !options.only);
+    keepFolders(library, pass.foldersNow, managed, !options.only && !sourceScope);
     await saveIfChanged(pass);
   } catch (error) {
     // Another build took over syncing this home meanwhile (share.ts stillOwned, asked before each item and each save): the
@@ -569,7 +590,8 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
     if (errorCode(error) !== 'CK_TAKEN') throw error;
     return { stopped: (error as Error).message, results: pass.results, writes: pass.writes, notices: pass.notices, made: pass.made };
   }
-  return { results: pass.results, writes: pass.writes, notices: pass.notices, settling: settle.settling, made: pass.made, ...(options.background ? { found: foundKeys(pass) } : {}) };
+  return { results: pass.results, writes: pass.writes, notices: pass.notices, settling: settle.settling, made: pass.made,
+    ...(options.background ? { found: foundKeys(pass) } : {}), ...(options.source ? { sourced: [...pass.sourced.values()] } : {}) };
 }
 
 /**
@@ -740,13 +762,16 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
   // A profile switch's clicks are told in its own entry (PassOptions told).
   if (asked && pass.told) pass.asked.delete(item.key);
   else if (asked) {
-    const { fill, ...entry } = asked;
+    const { fill, ...entry } = asTold(pass, item.key, asked, made);
     // A switch's entry says the version it left (`taken`, once this pass is carried out), so its Undo is offered only while it still is.
     const switched = (entry.kind === 'on' || entry.kind === 'off') && !entry.winner ? { version: taken } : {};
     const id = log({ ...entry, ...switched, losers: entry.losers ?? (fill ? before(did[fill]) : []), ...(tookFrom.length ? { tookFrom } : {}), ...(gaveBack.length ? { gaveBack } : {}) });
     // What Synchronize everything took in is no click's: its notice says it, and no click's Undo undoes it.
     if (entry.cause === 'sync-everything') pass.takenIn.push({ name: item.name, foundIn: entry.foundIn ?? [], history: id });
     else pass.made.push(id);
+    // A source's read names the entry that tells what it did to the item (PassResult sourced).
+    const answered = pass.sourced.get(item.key);
+    if (answered) answered.history = id;
     pass.asked.delete(item.key);
   }
   if (made.takeIn) {
@@ -777,6 +802,18 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
   const gone = made.turnedOffBy ? [] : did.removed;
   if (gone.length) log({ kind: item.deleted ? 'deleted' : 'off', cause: 'in-line', losers: before(gone) });
   return events;
+}
+
+/**
+ * A source's update as History tells it, by what the plan does: where an edit in a harness wins over the source's content
+ * (latest wins: the plan takes that edit in), the source's is kept as a version, so its entry is a `kept-edit` and the read's
+ * answer (PassResult sourced) is `keep`. Recorded here, where the plan is known; anything else asked is told as asked.
+ */
+function asTold(pass: Pass, key: string, asked: Asked, made: Plan): Asked {
+  if (asked.cause !== 'source' || asked.kind !== 'edit' || !made.takeIn) return asked;
+  const answered = pass.sourced.get(key);
+  if (answered) answered.answer = 'keep';
+  return { kind: 'kept-edit', cause: 'source', version: asked.version, link: asked.link };
 }
 
 /**
@@ -936,7 +973,7 @@ async function takeIn(pass: Pass, key: string, answer: { take: FoundCopy; chosen
   Object.assign(item, { on: true, except: [...except], name: source.name } satisfies Partial<LibraryItem>);
   delete item.deleted;
   pass.library.items[key] = item;
-  const from: Source = { how: answer.chosen ? 'chosen' : 'found', harness: source.tool };
+  const from: Origin = { how: answer.chosen ? 'chosen' : 'found', harness: source.tool };
   await setCurrent(pass.shelf, item, { hash: source.hash, at: versionAt(source.at), from }, pass.kind.contentOf(source));
   const winner = { tool: source.tool, hash: source.hash };
   const gaveWay = found.filter(entry => entry.hash !== source.hash).map(entry => ({ tool: entry.tool, hash: entry.hash }));
@@ -959,6 +996,51 @@ async function makeCurrent(pass: Pass, item: LibraryItem, version: string, refus
   const previous = item.hash;
   await setCurrent(pass.shelf, item, { hash: version, at: now(), from: { how: 'made-current' } }, content);
   pass.asked.set(item.key, { kind: 'current', previous, version, fill: 'written' });
+}
+
+/**
+ * A source read on a click (library.ts A SOURCE: sourceAnswers, a fromSource answer for every name it holds and every item
+ * linked to it), carried out: made Off (`make`), linked, its content made current or kept as a version, or turned Off with its
+ * link let go (`drop`). Each but a link is History's entry with the source's `link`: an `off` (cause `source`) for one made, an
+ * `edit` for one made current, a `kept-edit` for one kept, an `off` (cause `source-dropped`) for one dropped. No harness is
+ * written here: the plan after it applies the current version where the item is On. Answers the keys it answered for: the
+ * pass's scope.
+ */
+async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Set<string>> {
+  const answers = sourceAnswers(pass.library.items, read, read.recorded, read.bringBack);
+  const origin: Origin = { how: 'source', link: read.link }, link = read.link;
+  for (const [key, answer] of answers) {
+    const item = pass.library.items[key], entry = read.names.get(key);
+    if (answer !== 'nothing') pass.sourced.set(key, { name: entry && 'name' in entry ? entry.name : item?.name ?? key, answer });
+    if (answer === 'drop' && item) {
+      item.on = false;
+      delete item.source; delete item.seen;
+      pass.asked.set(key, { kind: 'off', cause: 'source-dropped', link, fill: 'removed' });
+    }
+    // Only a name with content is made, linked, made current or kept.
+    if (!entry || !('hash' in entry)) continue;
+    const version: Version = { hash: entry.hash, at: read.commitAt, from: origin };
+    if (answer === 'make') {
+      const made = item ?? newItem(key, entry.name);
+      Object.assign(made, { on: false, name: entry.name, source: read.id, seen: entry.hash } satisfies Partial<LibraryItem>);
+      delete made.deleted;
+      pass.library.items[key] = made;
+      if (made.hash !== entry.hash) await setCurrent(pass.shelf, made, version, entry.content);
+      pass.asked.set(key, { kind: 'off', cause: 'source', link });
+    } else if (answer === 'link' || answer === 'update' || answer === 'keep') {
+      const previous = item!.hash;
+      Object.assign(item!, { source: read.id, seen: entry.hash } satisfies Partial<LibraryItem>);
+      if (answer === 'keep') {
+        await keepVersion(pass.shelf, item!, version, entry.content);
+        pass.asked.set(key, { kind: 'kept-edit', cause: 'source', version: entry.hash, link });
+      } else if (answer === 'update' && entry.hash !== previous) {
+        await setCurrent(pass.shelf, item!, version, entry.content);
+        pass.asked.set(key, { kind: 'edit', cause: 'source', previous, version: entry.hash, link, fill: 'written' });
+      }
+    }
+  }
+  await saveIfChanged(pass);
+  return new Set(answers.keys());
 }
 
 /**

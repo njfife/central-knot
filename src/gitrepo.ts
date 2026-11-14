@@ -32,6 +32,7 @@ import { PRODUCT } from './values.ts';
 import { leftOutSentence } from './words.ts';
 import { copyTree, errorCode, exists, itemKey, libraryGate, managedNow, notCopied, sha256 as sha, plainError, readTree, removeTree, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext, type Tree } from './share.ts';
 import { undoBase } from './instructions.ts';
+import { sourceAt } from './sourcestore.ts';
 import type { BaseUndo, DestinationResult, HarnessId, HistoryEvent, RepoChange, RepoCommit, RepoKind, RepoResult, RepoView, Snapshot } from './types.ts';
 
 /** The base instructions (instructions.ts repoBase): read for Push, applied on Pull. Without it, instructions/ is left alone. */
@@ -74,6 +75,8 @@ async function readState(home: string): Promise<RepoState | undefined> {
   } catch { return undefined; }
 }
 const saveState = (home: string, state: RepoState) => writeDurably(statePath(home), `${JSON.stringify(state, null, 2)}\n`);
+/** The address of the repo Pull and Push use in this home, if one is connected: a source refuses it (sources.ts). */
+export const connectedRepoAddress = async (home: string) => (await readState(home))?.url;
 
 /** One repo action at a time, whichever window or request asks: they share one clone. */
 let chain: Promise<unknown> = Promise.resolve();
@@ -572,6 +575,7 @@ export function connectRepo(context: ShareContext, url: string, branch: string, 
     if (address.startsWith('-')) return refusal(context, 'That isn’t a repo address.', options);
     if (wanted && (wanted.startsWith('-') || (await runGit(['check-ref-format', '--branch', wanted], 10_000)).code !== 0)) return { ...await refusal(context, `“${wanted}” isn’t a branch name git accepts.`, options), field: 'branch' };
     if (await openClone(context)) return refusal(context, 'A repo is already connected. Disconnect it first.', options);
+    if (await sourceAt(context.home, address)) return refusal(context, 'That repo is a source here, so it can’t be the Git repo Pull and Push use too. A source is only ever read; that repo stays on the Sources page.', options);
     const dir = cloneFolder(context.home);
     const stage = `${dir}.${randomUUID()}`;
     await mkdir(storeDirectory(context.home), { recursive: true });
