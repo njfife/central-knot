@@ -918,6 +918,19 @@ test('An agent whose name only its own tool can hold (it starts with “_”) go
   } finally { await box.cleanup(); }
 });
 
+test('A name that is not one file’s name (a path in it) is written nowhere, also where the tool has an own part on record: a Pull of such an agent leaves every folder as it was', async () => {
+  const box = await sandbox();
+  try {
+    const listing = async () => (await readdir(box.home, { recursive: true })).filter(path => !path.includes('.central-knot')).sort();
+    const before = await listing();
+    const text = '---\nname: ../../escaped\ndescription: d\n---\n\nP.\n';
+    // As Pull brings it (gitrepo.ts): the repo's file is Claude Code's own part, so the record has one for a tool that never held it.
+    await applyAgents(box.context, box.tools, [], { only: new Set(['helper']), pulled: new Map([['helper', { agent: { name: '../../escaped', description: 'd', prompt: 'P.\n' }, claudeFile: text }]]) });
+    await applyAgents(box.context, box.tools, [], { background: true });
+    assert.deepEqual(await listing(), before, 'no file anywhere, inside the agents folders or outside them');
+  } finally { await box.cleanup(); }
+});
+
 // ---------- The record, and the things around it ----------
 
 inBox('A damaged, unreadable or newer agents record stops every write and is never rewritten; a missing one is a first run', async box => {

@@ -15,7 +15,7 @@
 // through applyAgents).
 import { constants } from 'node:fs';
 import { access } from 'node:fs/promises';
-import { agentHash, agentText, agentsFolder, changedFields, fileFor, isAgentTool, nameProblem, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
+import { agentHash, agentText, agentsFolder, changedFields, fileFor, isAgentTool, nameProblem, oneFileName, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
 import { fileTextFor, keepOwn, openLibrary, readVersion, saveLibrary, storeVersion } from './agentstore.ts';
 import { libraryAction } from './historyactions.ts';
 import { itemKey, listed, pendingEdits, plan } from './library.ts';
@@ -92,7 +92,9 @@ function agentHeld(disk: AgentDisk, managed: HarnessId[], item: Wanted, tool: Ha
   if (given) return throughPlugin(tool, given, 'agent');
   // A harness that held the agent under this name (its own part is kept: LibraryItem own) can be given it back: the name was
   // that harness's own, so an agent only it can hold goes Off and On again there. Every other harness still can't store it.
-  const why = item.own?.[tool] === undefined ? nameProblem(item.name) : undefined;
+  // Only a name that is one file's name: Pull records an own part for Claude Code from the repo's file, under whatever name its
+  // front matter gives, and a name with a path in it is written nowhere.
+  const why = item.own?.[tool] === undefined || !oneFileName(item.name) ? nameProblem(item.name) : undefined;
   // Where to rename it: a tool that has it.
   const holder = managed.find(other => disk.byKey.get(item.key)?.[other]);
   return why && `${nameOf(tool)} can’t store this name (${why}). Rename it ${holder ? `in ${nameOf(holder)} ` : ''}to use it there.`;
