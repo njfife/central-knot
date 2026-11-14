@@ -298,51 +298,6 @@ export interface ToolCopy {
 /** The plugin a tool has an item through: its name, the marketplace as that tool added it, and the installed copy's version. `off`: turned off there. */
 export interface ThroughPlugin { plugin: string; marketplace: string; source?: string; version?: string; off?: true; /** The item's own name in the plugin (a skill's SKILL.md name), which the tool's switch goes by. */ name?: string }
 
-/**
- * What is true now for one item, a skill, an MCP server or an agent, across every tool: each kind's row (LibraryFacts) as the
- * pages read it (itemrow.ts kindSource, where On is `managed` and `except` is `off`). The page derives its marks from this.
- */
-export interface SkillFacts {
-  /** Made by Convert to skill from an agent (AGT-02): which agent, from which tool, and what an agent had that a skill does not. */
-  converted?: { agent: string; origin: HarnessId; losses: string[] };
-  key: string;
-  name: string;
-  description: string;
-  copies: Partial<Record<HarnessId, ToolCopy>>;
-  managed: boolean;
-  off: HarnessId[];
-  /** Why a tool that lacks the skill could not load a copy. */
-  cannot: Partial<Record<HarnessId, string>>;
-  /**
-   * Tools with no copy of their own that have the skill through a plugin installed there. Each is in `cannot` too, in
-   * words: no separate copy is placed beside a plugin's.
-   */
-  plugin?: Partial<Record<HarnessId, ThroughPlugin>>;
-  /** Tools whose copy holds an edit the next pass takes in, or one that gives way to it (LibraryFacts edited). */
-  edited?: HarnessId[];
-  /**
-   * For each tool's copy, what stops every tool from using it: a differing copy Central Knot does not change, or a tool that
-   * cannot load it. Each has the tool it concerns, so a tool turned off no longer counts, and `reason`: the cause alone, a
-   * sentence naming that tool as the page does (copywords.ts cantUse makes it a row's or a result's sentence).
-   */
-  choiceBlocks: Partial<Record<HarnessId, { tool: HarnessId; reason: string }[]>>;
-  /** A library kind's row (LibraryFacts, as itemrow.ts kindSource gives the page): its `unseen`, `plan`, `takeInAnswers`, `versionChanges` and `fromSource`. */
-  unseen?: LibraryFacts['unseen'];
-  plan?: LibraryFacts['plan'];
-  takeInAnswers?: LibraryFacts['takeInAnswers'];
-  versionChanges?: LibraryFacts['versionChanges'];
-  fromSource?: LibraryFacts['fromSource'];
-  /** MCP servers: tools whose write or removal waits for Write to Claude Code (types.ts LibraryFacts waits). */
-  waits?: HarnessId[];
-  /** Skills and MCP servers: why a tool's switch can't be used at all: its settings file can't be read or is in a form Central Knot doesn't edit. */
-  switchProblem?: Partial<Record<HarnessId, SwitchProblem>>;
-  /** A library kind's row (LibraryFacts, as itemrow.ts kindSource gives the page): how a tool has it another way, and which copies Take over can make Central Knot's. */
-  anotherWay?: LibraryFacts['anotherWay'];
-  takeOver?: LibraryFacts['takeOver'];
-  /** Skills: a tool whose own switch turns it off there, said as its mark says it ("switched off in Codex’s own settings"); itemrow.ts kindSource words it. */
-  switched?: Partial<Record<HarnessId, string>>;
-}
-
 /** Why a tool's skill switch can't be used: its settings file, and what is wrong with it ("isn’t valid JSON."). */
 export interface SwitchProblem { file: string; reason: string }
 

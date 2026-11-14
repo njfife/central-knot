@@ -515,16 +515,15 @@ test('A switch set in a tool is left exactly as it is: the folder stays and the 
     assert.equal(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), config, 'Off and On never write a tool’s own switch');
     const { fact, item, row } = await seen(box);
     assert.deepEqual(fact!.loads?.['codex-cli'], { ...target, off: true });
-    const view = await skillsView(box.context, box.tools);
-    const { kindSource } = await import('../src/itemrow.ts');
-    const facts = kindSource({ skills: view, mcp: { tools: [], items: [], library: {} } as never, agents: view }, 'skills').facts.find(entry => entry.key === 'notes')!;
-    assert.deepEqual(facts.switched, { 'codex-cli': 'switched off in Codex’s own settings' });
-    assert.match(say.harnessLine({ ...row, switched: facts.switched }, item, 'codex-cli', 'Codex'), /It is switched off in Codex’s own settings: Codex doesn’t load it/);
-    assert.equal(say.placeTag({ ...row, switched: facts.switched }, item, tools)?.text, 'switched off in Codex');
+    assert.deepEqual(fact!.switchedOff, ['codex-cli']);
+    // The row as the page has it (matrix.ts fromFacts): switched off in Codex's own settings.
+    const switched = { 'codex-cli': 'switched off in Codex’s own settings' };
+    assert.match(say.harnessLine({ ...row, switched }, item, 'codex-cli', 'Codex'), /It is switched off in Codex’s own settings: Codex doesn’t load it/);
+    assert.equal(say.placeTag({ ...row, switched }, item, tools)?.text, 'switched off in Codex');
     // Never on and off at once: Codex is not counted as on, and the switch is drawn partial with what it says.
-    assert.equal(statusLine({ ...row, switched: facts.switched }, item, tools), 'On in Claude Code and Copilot CLI · switched off in Codex');
-    assert.equal(isPartial(item, tools, { ...row, switched: facts.switched }), true);
-    assert.match(switchLabel({ ...row, switched: facts.switched }, item, tools), /^notes: on in 2 of 3 tools\./);
+    assert.equal(statusLine({ ...row, switched }, item, tools), 'On in Claude Code and Copilot CLI · switched off in Codex');
+    assert.equal(isPartial(item, tools, { ...row, switched }), true);
+    assert.match(switchLabel({ ...row, switched }, item, tools), /^notes: on in 2 of 3 tools\./);
     // Switched off in every tool: never plain on.
     for (const tool of ['claude-cli', 'copilot-cli'] as Tool[]) await setDisabled(box.context, tool, { ...target, skillFile: join(folderOf(box, tool), 'SKILL.md') }, true);
     const everyTool = Object.fromEntries(tools.map(tool => [tool, 'off']));

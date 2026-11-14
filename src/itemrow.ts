@@ -2,13 +2,16 @@
 // page reads them (kindSource). Pure: no DOM. Every kind is on Central Knot's library: what a row and each tool's mark say is
 // libraryrow.ts's, from the kind's view (types.ts LibraryView).
 import type { LibraryItem, Plan, VersionChange } from './library.ts';
-import type { HarnessId, HomeView, LibraryFacts, LibraryView, SkillFacts, ThroughPlugin } from './types.ts';
-import { toolName } from './words.ts';
+import type { HarnessId, HomeView, LibraryFacts, ThroughPlugin } from './types.ts';
 
 /** A tool, as a column. */
 export type Tool = string;
 
-/** One item's row: each tool's copy as a content id (same id = the same version: for agents and MCP servers, the shared part alone), or absent, and what else the row says. */
+/**
+ * One item's row as the table draws it (matrix.ts fromFacts, from the kind's row, types.ts LibraryFacts): what it adds is each
+ * tool's copy as a content id (same id = the same version: for agents and MCP servers, the shared part alone), its path and the
+ * lines the compare view quotes.
+ */
 export interface ItemRow {
   key: string;
   /** Made by Convert to skill from an agent. */
@@ -19,8 +22,10 @@ export interface ItemRow {
   name?: string;
   description: string;
   copies: Partial<Record<Tool, string>>;
-  managed: boolean;
-  off: Tool[];
+  /** On (library.ts LibraryItem `on`); false for an item that is Off and for one only found. */
+  on: boolean;
+  /** The harnesses it is kept out of. */
+  except: Tool[];
   cannot?: Partial<Record<Tool, string>>;
   /** Tools with no copy of their own that have it through a plugin installed there (each is in `cannot` too). */
   plugin?: Partial<Record<Tool, ThroughPlugin>>;
@@ -39,7 +44,7 @@ export interface ItemRow {
   /** A library kind, in the library: what the next pass does in each harness (types.ts LibraryFacts plan). */
   plan?: Plan;
   /** A library kind, found in a harness: what a click on its Add does, and Synchronize everything (types.ts LibraryFacts takeInAnswers). */
-  takeInAnswers?: SkillFacts['takeInAnswers'];
+  takeInAnswers?: LibraryFacts['takeInAnswers'];
   /** A library kind, in the library: what each listed version changed (types.ts LibraryFacts versionChanges). */
   versionChanges?: VersionChange[];
   /** A library kind: the names in each harness's own part of its copy (types.ts ToolCopy ownPart). */
@@ -55,33 +60,17 @@ export interface ItemRow {
 // ---------- Each kind in a home, as the pages read it ----------
 
 /** What the pages read of one kind in a home: the tools that can hold it, its rows, and its items as the library holds them, deleted ones too. */
-export interface KindSource { tools: HarnessId[]; facts: SkillFacts[]; library: Record<string, LibraryItem> }
+export interface KindSource { tools: HarnessId[]; facts: LibraryFacts[]; library: Record<string, LibraryItem> }
 
 /**
  * One kind in a home, as every page that lists or counts its items reads it: its rows, the tools that can hold it (Pi has no
- * agents), and its items. The one place a kind's view (types.ts LibraryView) meets the rows the pages draw (SkillFacts):
- * there, On is `managed` and the harnesses it is kept out of are `off`.
+ * agents), and its items, all as the kind's view (types.ts LibraryView) has them.
  */
 export function kindSource(home: Pick<HomeView, 'skills' | 'mcp' | 'agents'>, which: 'skills' | 'mcp' | 'agents'): KindSource {
   const view = home[which];
-  return { tools: view.tools, facts: libraryRows(view), library: view.library };
-}
-
-/**
- * A library view's rows as SkillFacts, made once per view read, so a page that caches by them redraws only on a new read.
- * A tool whose own switch turns the item off (`switchedOff`) is said as its mark says it: in that tool's own settings.
- */
-const rowsOf = new WeakMap<LibraryView, SkillFacts[]>();
-function libraryRows(view: LibraryView): SkillFacts[] {
-  const switchedOff = (row: LibraryFacts) => Object.fromEntries((row.switchedOff ?? []).map(tool => [tool, `switched off in ${toolName(tool)}’s own settings`]));
-  const made = rowsOf.get(view) ?? view.items.map((row): SkillFacts => {
-    const { on, except, loads: _loads, switchedOff: _off, switchProblem: _problem, ...facts } = row, switched = switchedOff(row);
-    return { ...facts, managed: on, off: except, choiceBlocks: facts.choiceBlocks ?? {}, ...(Object.keys(switched).length ? { switched } : {}) };
-  });
-  rowsOf.set(view, made);
-  return made;
+  return { tools: view.tools, facts: view.items, library: view.library };
 }
 
 /** Whether anything in the home is On in the library. */
-export const anyManaged = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents'>) =>
-  (['skills', 'mcp', 'agents'] as const).some(which => kindSource(home, which).facts.some(fact => fact.managed));
+export const anyOn = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents'>) =>
+  (['skills', 'mcp', 'agents'] as const).some(which => kindSource(home, which).facts.some(fact => fact.on));

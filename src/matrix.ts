@@ -8,7 +8,7 @@
 import { brandMark } from './brand.ts';
 import { caughtUpNames, defaultHistoryDays, groupBy, noticeNames, syncOwner } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
-import { andList, byToolOrder, kindNouns, toolNames, toolsPhrase } from './words.ts';
+import { andList, byToolOrder, kindNouns, toolName, toolNames, toolsPhrase } from './words.ts';
 import { walkthroughBand } from './firstsetup.ts';
 import { leftOutTools, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
@@ -19,7 +19,7 @@ import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
 import { linkLabel } from './sourcelink.ts';
-import type { Change, DestinationResult, ItemNotice, SkillFacts, SyncNotice, SyncView, HarnessId, PartsInstall, TakenInNotice, ThroughPlugin } from './types.ts';
+import type { Change, DestinationResult, ItemNotice, LibraryFacts, SyncNotice, SyncView, HarnessId, PartsInstall, TakenInNotice, ThroughPlugin } from './types.ts';
 import { market } from './pluginstate.ts';
 import { pluginKey, type PluginDraft } from './pluginplan.ts';
 import { alongWords, cantSwitch, click as clickPluginItem, clickWords, itemSaid, onNow as itemOn, switchWords, turnEvery, type PluginItemAt } from './pluginswitch.ts';
@@ -244,16 +244,20 @@ const sinceThen = (at: number) => {
 };
 const ago = (iso: string) => { const said = sinceThen(Date.parse(iso)); return said && `edited ${said}`; };
 
-/** The real home's facts in the shape the page works with. */
-const fromFacts = (facts: SkillFacts): ItemRow => ({
-  key: facts.key, name: facts.name, description: facts.description, converted: facts.converted, fromSource: facts.fromSource, unseen: facts.unseen, plan: facts.plan, takeInAnswers: facts.takeInAnswers, versionChanges: facts.versionChanges, managed: facts.managed, off: facts.off, cannot: facts.cannot, plugin: facts.plugin, edited: facts.edited, waits: facts.waits,
+/**
+ * A kind's row in the shape the table works with (itemrow.ts ItemRow). A tool whose own switch turns the item off
+ * (`switchedOff`) is said as its mark says it: in that tool's own settings (`switched`).
+ */
+const fromFacts = (facts: LibraryFacts): ItemRow => ({
+  key: facts.key, name: facts.name, description: facts.description, converted: facts.converted, fromSource: facts.fromSource, unseen: facts.unseen, plan: facts.plan, takeInAnswers: facts.takeInAnswers, versionChanges: facts.versionChanges, on: facts.on, except: facts.except, cannot: facts.cannot, plugin: facts.plugin, edited: facts.edited, waits: facts.waits,
   blocks: facts.choiceBlocks, hashes: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   copies: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   paths: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.directory])),
   // An MCP entry has no lines or edit time of its own: the copy question quotes its summary alone.
   versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.lines ? { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), at: copy!.modified, text: copy!.summary || facts.description, ...(copy!.body !== undefined ? { body: copy!.body } : {}) } : { lines: '', changed: '', text: copy!.summary }])),
   ownPart: Object.fromEntries(Object.entries(facts.copies).flatMap(([tool, copy]) => (copy!.ownPart?.length ? [[tool, copy!.ownPart]] : []))),
-  anotherWay: facts.anotherWay, takeOver: facts.takeOver, switched: facts.switched,
+  anotherWay: facts.anotherWay, takeOver: facts.takeOver,
+  ...(facts.switchedOff?.length ? { switched: Object.fromEntries(facts.switchedOff.map(tool => [tool, `switched off in ${toolName(tool)}’s own settings`])) } : {}),
 });
 
 /** The view behind the table, whose bands are listNotices'. */
@@ -565,7 +569,7 @@ function compareChoices(skill: ItemRow, inFiles = false, then?: () => void) {
     // A row's columns: whose copy (and what tells it apart), what it says (and what choosing it does), then Use this copy.
     const who = h('span.version-who', {}, h('span.version-head', {}, ...group.map(entry => brandMark(entry, 14)), h('strong', {}, group.length > 1 ? `${tools} (same copy)` : `${tools}’s copy`)), about(group));
     // A block counts only for a tool it syncs to that can load the skill.
-    const block = skill.blocks?.[tool]?.find(entry => !skill.off.includes(entry.tool) && !skill.cannot?.[entry.tool]);
+    const block = skill.blocks?.[tool]?.find(entry => !skill.except.includes(entry.tool) && !skill.cannot?.[entry.tool]);
     // A copy that can't be chosen keeps its row: why, where its quote would be, and no Use this copy.
     if (block) return h('button.version.version-blocked', { type: 'button', id: `use-${skill.key}-${tool}`, disabled: true, title: block.reason },
       who, h('span.version-says', {}, h('span.version-effect.version-why', {}, icon('circle-alert', 12, 'tone-warning'), cantUse(block.reason))));
@@ -738,7 +742,7 @@ export function outcomeBand(table = state.page === 'skills' || state.page === 'm
 /** Sync off: what waits, and the two ways on. Shown on every managed page, since the switch covers all of them. */
 function syncOffBand(): HTMLElement | null {
   if (!state.home || state.home.syncOn) return null;
-  const waiting = committedList().filter(skill => skill.managed && skill.edited?.length);
+  const waiting = committedList().filter(skill => skill.on && skill.edited?.length);
   const what = waiting.slice(0, 3).flatMap((skill, index) => [index ? ', ' : '', h('strong.item-name', {}, skill.name ?? skill.key), `, edited in ${andList((skill.edited ?? []).map(tool => names[tool]))}`]).concat(waiting.length > 3 ? [` and ${waiting.length - 3} more`] : []);
   // Right after a sync, its notice says what spread; the idle banner comes back once that is dismissed.
   if (!waiting.length && visibleNotices().length) return null;
@@ -1109,7 +1113,7 @@ function turnOn(skill: ItemRow, use?: Tool): Promise<void> {
   const name = nameOf(skill), lib = library(), found = !inLibrary(itemOf(skill));
   const plugins = turnEvery(throughItems(skill), true);
   const said = (notIn: HarnessId[]) => {
-    const left = [...plugins.leftIn, ...notIn, ...skill.off];
+    const left = [...plugins.leftIn, ...notIn, ...skill.except];
     const using = canHave(skill).filter(tool => !left.includes(tool));
     // A tool that has it another way gets nothing of Central Knot's: said apart, never as on (a plugin's item is on through it).
     const another = using.filter(tool => skill.anotherWay?.[tool] && skill.copies[tool] === undefined && !throughPluginHere(skill, tool));
@@ -1318,7 +1322,7 @@ function markLegend(list: ItemRow[], plugins: PluginRow[]) {
 function row(skill: ItemRow) {
   const open = view.comparing === skill.key;
   return [
-    h(`div.ov-row.ov-switch-row${takeFlash(skill.key) ? '.row-flash' : ''}${skill.managed ? '' : '.unmanaged'}${open ? '.open' : ''}`, { role: 'row', 'data-key': skill.key, 'aria-expanded': String(open), onclick: () => openRow(skill.key) },
+    h(`div.ov-row.ov-switch-row${takeFlash(skill.key) ? '.row-flash' : ''}${skill.on ? '' : '.unmanaged'}${open ? '.open' : ''}`, { role: 'row', 'data-key': skill.key, 'aria-expanded': String(open), onclick: () => openRow(skill.key) },
       h('div.ov-managed', { role: 'cell' }, itemSwitch(skill)),
       nameCell(skill, differs(skill)),
       h('div.ov-marks', { role: 'cell' }, rowMarks(skill)),
@@ -1432,7 +1436,7 @@ function libraryVersions(lib: LibraryPage, skill: ItemRow) {
     rerender();
   };
   const textOf = (hash: string) => versionTexts.get(textKey(hash)) ?? 'reading';
-  const on = (notIn: HarnessId[]) => (item.on ? canHave(skill).filter(tool => !notIn.includes(tool as HarnessId) && !skill.off.includes(tool)) : undefined);
+  const on = (notIn: HarnessId[]) => (item.on ? canHave(skill).filter(tool => !notIn.includes(tool as HarnessId) && !skill.except.includes(tool)) : undefined);
   const makeCurrent = (version: Version) => click({ kind, items: [name], changes: [rowClicks.makeCurrent(skill, item, version.hash)],
     // A version that was itself made current again is named by the one it came from.
     said: notIn => { const source = (version.from.how === 'made-current' && madeFrom(item, version)) || version;
@@ -1501,7 +1505,7 @@ function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
 
 /** What waits, in the toolbar: edits waiting for sync, or that sync is off. */
 function toolbarState() {
-  const edits = committedList().filter(skill => skill.managed && skill.edited?.length).length;
+  const edits = committedList().filter(skill => skill.on && skill.edited?.length).length;
   if (edits) return h('span.apply-state.apply-waiting', {}, icon('clock', 14, 'tone-warning'), `${edits} ${edits === 1 ? 'change' : 'changes'} waiting`);
   // A server waiting for Claude Code is said once, by the band that carries Write to Claude Code, and by its row's mark.
   if (state.home && !state.home.syncOn) return h('span.apply-state.apply-quiet', {}, icon('circle-minus', 14, 'tone-muted'), 'Nothing waiting · sync off');

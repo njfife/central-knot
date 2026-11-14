@@ -12,7 +12,7 @@ import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
 import type { ApplyResult, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SyncNotice } from './types.ts';
-import { anyManaged, kindSource } from './itemrow.ts';
+import { anyOn, kindSource } from './itemrow.ts';
 import { caughtUpNames, noticeNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
@@ -488,7 +488,7 @@ const openHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mod
   const view = await api().selectHome(mode);
   if (view && view.home !== previous?.home) { forgetRepoPrompts(true); forgetSourcePrompts(true); }
   // Sync follows the open home: leaving one with managed items stops its syncing, so the band says so and offers the way back.
-  const left = previous && view && previous.home !== view.home && anyManaged(previous) ? previous : undefined;
+  const left = previous && view && previous.home !== view.home && anyOn(previous) ? previous : undefined;
   const leftText = left ? ` ${left.label} is not syncing while another home is open.` : '';
   if (!view) { announce(''); return; }
   accept(view);

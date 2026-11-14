@@ -13,7 +13,6 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readHistory } from '../src/history.ts';
 import { libraryAction, librarySentence } from '../src/historyactions.ts';
-import { kindSource } from '../src/itemrow.ts';
 import { asItIs, canAdd, libraryWords, sentences, statusLine } from '../src/libraryrow.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { discover } from '../src/discovery.ts';
@@ -315,8 +314,6 @@ test('A tool’s own switch is left as it is: set in each tool by hand, then Off
     for (const tool of tools) await writeFile(mcpSwitchPath(box.context, tool), withMcpSwitch(tool, await readFile(mcpSwitchPath(box.context, tool), 'utf8'), 'docs', true));
     let view = await serversView(box.context, tools);
     assert.deepEqual(view.items[0]?.switchedOff, ['claude-cli', 'codex-cli', 'opencode-cli']);
-    const home = { skills: { tools, items: [], library: {} }, mcp: view, agents: { tools, items: [], library: {} } } as unknown as HomeView;
-    assert.deepEqual(kindSource(home, 'mcp').facts[0]?.switched, { 'claude-cli': 'switched off in Claude Code’s own settings', 'codex-cli': 'switched off in Codex’s own settings', 'opencode-cli': 'switched off in OpenCode’s own settings' });
     assert.match(say.harnessLine({ key: 'docs', hashes: { 'codex-cli': 'x' }, plan: { orderProved: true, current: ['codex-cli'], write: [], remove: [], forget: [], found: [], keep: [] }, switched: { 'codex-cli': 'switched off in Codex’s own settings' } }, view.library.docs, 'codex-cli', 'Codex'),
       /It is switched off in Codex’s own settings: Codex doesn’t start it\. Central Knot leaves that switch as it is, so it is still off there after Off and On\./);
     // Off: out of Codex (its own fields kept, the switch with them); Claude Code waits.

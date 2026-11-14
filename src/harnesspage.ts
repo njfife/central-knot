@@ -40,14 +40,14 @@ const supports = (home: HomeView, kind: PageKind, tool: HarnessId) => kindSource
 const kindNotUsed = (tool: HarnessId, kind: PageKind) => `${names[tool]} doesn’t use ${kindNouns[kind].many}`;
 
 /**
- * What one tool has of one kind: every item with a copy there, how many of those are managed, and how many have copies that
+ * What one tool has of one kind: every item with a copy there, how many of those are On, and how many have copies that
  * differ and need a choice (the same count as that tool's "Copies differ" chip). `supported`: the tool can hold this kind.
  */
 function tally(home: HomeView, kind: PageKind, tool: HarnessId) {
   const source = kindSource(home, kind);
   const here = source.facts.filter(item => inTool(item, tool));
   const plugins = pluginItemCount(home, kind, tool);
-  return { kind, supported: source.tools.includes(tool), total: here.length + plugins, plugins, managed: here.filter(item => item.managed).length, differing: differingIn(source, tool) };
+  return { kind, supported: source.tools.includes(tool), total: here.length + plugins, plugins, on: here.filter(item => item.on).length, differing: differingIn(source, tool) };
 }
 
 const instructionOf = (tool: HarnessId): InstructionFile | undefined => state.instructions.data?.find(file => file.tool === tool);
@@ -95,13 +95,13 @@ function countRow(label: string, { value, note, faint = false }: Count) {
   return h('div.harness-count', {}, h('span.harness-count-label', {}, label), h(`span.harness-count-value${faint ? '.tone-faint' : ''}`, {}, value), h('span.harness-count-note', {}, note ?? ''));
 }
 
-function kindCount({ kind, supported, total, plugins, managed }: ReturnType<typeof tally>, tool: HarnessId): Count {
+function kindCount({ kind, supported, total, plugins, on }: ReturnType<typeof tally>, tool: HarnessId): Count {
   if (!supported) return { value: '—', note: kindNotUsed(tool, kind), faint: true };
   // None: the words say it, without a 0 beside them.
   if (!total) return { value: '', note: 'none yet', faint: true };
   // A plugin's items are counted and said apart: they are never synced.
   const own = total - plugins;
-  const mine = !own ? '' : managed === own ? (plugins ? `${own} synced` : 'all synced') : !managed ? (plugins ? `${own} not synced` : 'none synced') : `${managed} synced · ${own - managed} not synced`;
+  const mine = !own ? '' : on === own ? (plugins ? `${own} synced` : 'all synced') : !on ? (plugins ? `${own} not synced` : 'none synced') : `${on} synced · ${own - on} not synced`;
   return { value: String(total), note: [mine, plugins ? `${plugins} from plugins` : ''].filter(Boolean).join(' · ') };
 }
 

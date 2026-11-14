@@ -23,7 +23,7 @@ export interface VersionListView {
   canWrite: boolean;
   /** Whether the whole list shows (else its newest few: libraryrow.ts foldVersions). */
   unfolded: boolean;
-  /** Each listed version's note (types.ts SkillFacts versionChanges). */
+  /** Each listed version's note (types.ts LibraryFacts versionChanges). */
   changes?: VersionChange[];
   /** The version being read (its place in the list), its text, and the current version's, against which what differs is marked. */
   reading?: { index: number; text: VersionText; current: VersionText };

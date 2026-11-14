@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { FOLDED_VERSIONS, addLabel, asksWhichCopy, canAdd, rowClicks, foldVersions, harnessIs, madeFrom, placeOf, libraryWords, ruleSays, sentences, statusLine, switchLabel, versionChange, versionOrigin, type LibraryRow } from '../src/libraryrow.ts';
 import { readAgainst, wordDiff } from '../src/diff.ts';
 import { newItem, plan, takeInAnswer, type Copies, type FoundKey, type LibraryItem } from '../src/library.ts';
-import { anyManaged, kindSource } from '../src/itemrow.ts';
+import { anyOn, kindSource } from '../src/itemrow.ts';
 import type { HarnessId, HomeView, LibraryFacts } from '../src/types.ts';
 
 const { harnessLine, noticeWords, placeTag, said } = sentences(libraryWords.agents);
@@ -209,16 +209,16 @@ test('A long versions list folds to its newest four, and says how many more ther
   assert.deepEqual([foldVersions(versions(9), true).rest, foldVersions(versions(9), true).shown.length, foldVersions([], false).rest], [0, 9, 0]);
 });
 
-test('A library kind’s rows reach the item pages through itemrow.ts kindSource: On is `managed`, kept out is `off`, once per read', () => {
+test('A library kind’s rows reach the item pages through itemrow.ts kindSource as the view has them, the same rows for the same read', () => {
   const facts = (key: string, on: boolean, except: LibraryFacts['except'] = []): LibraryFacts => ({ key, name: key, description: '', copies: {}, on, except, cannot: {}, edited: [] });
   const home = (items: LibraryFacts[]) => ({ skills: { tools, items: [], library: {} }, mcp: { tools, items: [], library: {} },
     agents: { tools, items, library: { reviewer: item() } } }) as unknown as HomeView;
   const read = home([facts('reviewer', true, ['codex-cli']), facts('writer', false)]);
   const source = kindSource(read, 'agents');
-  assert.deepEqual(source.facts.map(fact => [fact.key, fact.managed, fact.off]), [['reviewer', true, ['codex-cli']], ['writer', false, []]]);
+  assert.deepEqual(source.facts.map(fact => [fact.key, fact.on, fact.except]), [['reviewer', true, ['codex-cli']], ['writer', false, []]]);
   assert.equal(source.library.reviewer.on, true);
   assert.equal(kindSource(read, 'agents').facts, source.facts, 'the same rows for the same read, so a page that caches by them keeps them');
-  assert.deepEqual([anyManaged(read), anyManaged(home([facts('writer', false)]))], [true, false], 'an item On in the library is something the home manages; one Off is not');
+  assert.deepEqual([anyOn(read), anyOn(home([facts('writer', false)]))], [true, false], 'an item On in the library counts; one Off does not');
 });
 
 test('The sentences that name the item or its copies are in the kind’s words: an agent, and its file', () => {
