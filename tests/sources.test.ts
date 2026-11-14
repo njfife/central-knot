@@ -624,3 +624,18 @@ test('The link forms people paste: a link to the skill’s own SKILL.md reads th
     }
   } finally { await box.cleanup(); }
 });
+
+test('Check now concerns its source’s skills and nothing else: an edit waiting in another skill (Automatic sync off) stays waiting', async () => {
+  const box = await sandbox();
+  try {
+    await put(box, 'claude-cli', { 'SKILL.md': skillMd('mine', 'Mine.') }, [], 'mine');
+    await applySkills(box.context, box.tools, [{ key: 'mine', managed: true, off: [], seenManaged: false }]);
+    const { repo, id } = await oneSkill(box, 'notes');
+    await put(box, 'codex-cli', { 'SKILL.md': skillMd('mine', 'Edited in Codex, not taken in yet.') }, [], 'mine');
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'Second.') });
+    await check(box, id);
+    assert.equal(await bodyOf(box, 'notes'), 'Second.');
+    assert.equal(await bodyOf(box, 'mine'), 'Mine.', 'the other skill’s edit is not taken in by the source’s pass');
+    assert.equal(await toolBody(box, 'claude-cli', 'mine'), 'Mine.');
+  } finally { await box.cleanup(); }
+});
