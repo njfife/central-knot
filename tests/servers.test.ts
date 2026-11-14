@@ -593,6 +593,23 @@ test('Claude Code’s write waiting while its entry is edited by hand and Copilo
   assert.equal(await commandIn(box, 'claude-cli'), 'COPILOT-2');
 }));
 
+test('Claude Code’s entry edited by hand while its write waits gives way to the current version: History says so, not that it was written over; Write to Claude Code names the write, once', () => inBox(async box => {
+  const docs = (command: string) => JSON.stringify({ mcpServers: { docs: { type: 'stdio', command } } });
+  await fs.writeFile(box.path('claude-cli'), docs('BASE'));
+  await applyServers(box.context, three, [on('docs')]);
+  await fs.writeFile(box.path('copilot-cli'), docsRuns('COPILOT-1'));
+  await applyServers(box.context, three, []); // Codex gets it; Claude Code waits for Write to Claude Code
+  await fs.writeFile(box.path('claude-cli'), docs('CLAUDE-EDIT'));
+  const told = (await readHistory(box.context)).length;
+  await applyServers(box.context, three, []);
+  const kept = (await readHistory(box.context)).slice(told);
+  assert.deepEqual([kept.map(event => [event.kind, event.losers.map(loser => loser.tool)]), await commandIn(box, 'claude-cli')], [[['kept-edit', ['claude-cli']]], 'CLAUDE-EDIT']);
+  assert.equal(librarySentence(kept[0], libraryWords.mcp, three)?.text, 'Edited in Claude Code, not taken in yet; it gave way to the current version and is kept as a version.');
+  await writeToClaude(box.context, three, ['docs']);
+  const written = (await readHistory(box.context)).slice(told + 1);
+  assert.deepEqual([written.map(event => [event.kind, event.cause, event.losers.map(loser => loser.tool)]), await commandIn(box, 'claude-cli')], [[['on', 'in-line', ['claude-cli']]], 'COPILOT-1']);
+}));
+
 test('A removal Claude Code owes goes to the file it was owed in, never to Claude Code’s settings moved somewhere else since', () => inBox(async box => {
   await fs.writeFile(box.path('claude-cli'), docsRuns('BASE'));
   await applyServers(box.context, three, [on('docs')]);
