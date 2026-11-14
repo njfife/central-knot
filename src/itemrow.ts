@@ -51,10 +51,10 @@ export interface ItemRow {
   ownPart?: Partial<Record<Tool, string[]>>;
   /** MCP servers: tools whose write or removal waits for Write to Claude Code (types.ts LibraryFacts waits). */
   waits?: Tool[];
-  /** A library kind: how a tool has it another way, which copies Take over can make Central Knot's, and (skills, MCP servers) a tool whose own switch has it off, in words. */
+  /** A library kind: how a tool has it another way, in words, which copies Take over can make Central Knot's, and (skills, MCP servers) the tools whose own switch has it off (types.ts LibraryFacts). */
   anotherWay?: Partial<Record<Tool, string>>;
   takeOver?: Partial<Record<Tool, { kind: 'link' | 'shared'; path: string }>>;
-  switched?: Partial<Record<Tool, string>>;
+  switchedOff?: Tool[];
 }
 
 // ---------- Each kind in a home, as the pages read it ----------

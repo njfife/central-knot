@@ -12,7 +12,7 @@
 //   found  in a managed harness, not in the library; its Add takes it in, and so does Synchronize everything where it may
 //          (the kind's view gives both answers of library.ts takeInAnswer: `takeInAnswers`; this file only says them)
 // A harness's line can say three more things the kind's view works out at each look and that change nothing a pass does: how
-// the harness has the item another way (`anotherWay`), that its own switch turns it off there (`switched`, skills and MCP
+// the harness has the item another way (`anotherWay`), that its own switch turns it off there (`switchedOff`, skills and MCP
 // servers), and that a write or removal there waits for Write to Claude Code (`waits`, MCP servers).
 // What each harness's mark says is the library's plan for the item (library.ts plan), worked out by the kind's view
 // (agents.ts agentsView) from the same reading a pass makes (copiesOf), so a mark says what the next pass will do there and
@@ -53,7 +53,7 @@ export interface RowWords {
    */
   body?: string;
   /**
-   * A kind with a tool's own switch for an item (skills, MCP servers; `switched`): what a tool's line says after "It is switched
+   * A kind with a tool's own switch for an item (skills, MCP servers; LibraryRow `switchedOff`): what a tool's line says after "It is switched
    * off in Codex’s own settings:" (`line`, `where` the tool's name), and what the tag's tooltip adds.
    */
   switchedOff?: { line(where: string): string; tag: string };
@@ -101,11 +101,14 @@ export interface LibraryRow {
   takeInAnswers?: { click: TakeInAnswer; rule: TakeInAnswer };
   /** How a harness has it another way (a link, a folder Central Knot doesn't own, another tool's folder, a plugin), in words. */
   anotherWay?: Partial<Record<string, string>>;
-  /** A harness whose own switch turns it off there, as its mark says it ("switched off in Codex’s own settings"). */
-  switched?: Partial<Record<string, string>>;
+  /** Harnesses whose own switch turns it off there (types.ts LibraryFacts switchedOff), said as offInOwnSettings says it. */
+  switchedOff?: readonly string[];
   /** Harnesses where the next pass's write or removal waits for Write to Claude Code (types.ts LibraryFacts waits). */
   waits?: readonly string[];
 }
+
+/** A harness's own switch that turns the item off there, as its line and tag's tooltip say it: "switched off in Codex’s own settings". */
+const offInOwnSettings = (tool: string) => `switched off in ${toolName(tool)}’s own settings`;
 
 export type Place = 'on' | 'off' | 'found';
 /** The item when it is in the library (a deleted one is not: what a harness holds of it is found). */
@@ -116,7 +119,7 @@ export const placeOf = (item: LibraryItem | undefined): Place => { const inLib =
  * their own settings: partial, which the row and its switch say.
  */
 export const isPartial = (item: LibraryItem | undefined, tools: readonly string[], row?: LibraryRow) =>
-  placeOf(item) === 'on' && (item!.except.some(tool => tools.includes(tool)) || (!!row && tools.some(tool => row.switched?.[tool])));
+  placeOf(item) === 'on' && (item!.except.some(tool => tools.includes(tool)) || (!!row && tools.some(tool => row.switchedOff?.includes(tool))));
 
 /**
  * What one harness has of an item, as its mark and its line say it, from the plan:
@@ -274,10 +277,10 @@ export function statusLine(row: LibraryRow, item: LibraryItem | undefined, tools
   // A harness holding the current version that only waits for an edit made elsewhere has it on.
   const waitsForEdit = (tool: string) => row.hashes?.[tool] === item!.hash;
   const gets = where('gets-it').filter(tool => !waitsForEdit(tool)), out = where('kept-out', 'leaving'), cannot = where('cannot');
-  const switched = tools.filter(tool => row.switched?.[tool] && !out.includes(tool));
+  const switched = tools.filter(tool => row.switchedOff?.includes(tool) && !out.includes(tool));
   const another = where('another-way').filter(tool => wantedIn(item!, tool as HarnessId));
   // A tool whose own switch has it off doesn't load it: it is no tool it is on in (the parts below say it).
-  const onIn = tools.filter(tool => !row.switched?.[tool] && (['current', 'edited'].includes(harnessIs(row, item, tool)) || (harnessIs(row, item, tool) === 'gets-it' && waitsForEdit(tool))));
+  const onIn = tools.filter(tool => !row.switchedOff?.includes(tool) && (['current', 'edited'].includes(harnessIs(row, item, tool)) || (harnessIs(row, item, tool) === 'gets-it' && waitsForEdit(tool))));
   const edit = row.plan?.takeIn;
   const parts = [`On in ${named(onIn, tools)}${cannot.length ? ' only' : ''}`,
     edit ? `${toolName(edit)}’s edit becomes the current version when sync runs` : '',
@@ -330,7 +333,7 @@ export function whereAdded(row: LibraryRow, item: LibraryItem | undefined, tools
 
 /** The home's harnesses an item that is On doesn't load in: kept out of, or switched off in that harness's own settings. */
 export const notOnIn = (row: LibraryRow, item: LibraryItem | undefined, tools: readonly string[]) =>
-  tools.filter(tool => item?.except.includes(tool as HarnessId) || !!row.switched?.[tool]);
+  tools.filter(tool => item?.except.includes(tool as HarnessId) || !!row.switchedOff?.includes(tool));
 
 /**
  * What Synchronize everything does with a found item, as its row says it while the rule is on (the take-in table's answer for
@@ -366,8 +369,7 @@ export function sentences(words: RowWords) {
    * `where` is the harness's name.
    */
   function harnessLine(row: LibraryRow, item: LibraryItem | undefined, tool: string, where: string): string {
-    const switched = row.switched?.[tool];
-    const off = switched && words.switchedOff ? ` It is ${switched}: ${words.switchedOff.line(where)}` : '';
+    const off = row.switchedOff?.includes(tool) && words.switchedOff ? ` It is ${offInOwnSettings(tool)}: ${words.switchedOff.line(where)}` : '';
     return `${hasLine(row, item, tool, where)}${off}`;
   }
   function hasLine(row: LibraryRow, item: LibraryItem | undefined, tool: string, where: string): string {
@@ -440,9 +442,9 @@ export function sentences(words: RowWords) {
       : cannot.length ? (can.length ? `${andList(can.map(toolName))} only` : 'in no tool') : '';
     const whereTitle = [...cannot.map(tool => row.cannot![tool]!), out.length ? keptOut : ''].filter(Boolean).join(' ');
     // A tool's own switch that turns it off: said too, so an item switched off everywhere never reads as plainly on.
-    const switched = tools.filter(tool => row.switched?.[tool] && !out.includes(tool as HarnessId));
+    const switched = tools.filter(tool => row.switchedOff?.includes(tool) && !out.includes(tool as HarnessId));
     const off = !switched.length ? '' : switched.length === tools.length && switched.length > 1 ? `switched off in all ${switched.length} tools` : `switched off in ${andList(switched.map(toolName))}`;
-    const whose = sentence(andList(switched.map(tool => row.switched![tool]!)));
+    const whose = sentence(andList(switched.map(offInOwnSettings)));
     const offTitle = switched.length ? `${whose}: each tool’s own switch, which Central Knot leaves as it is. ${words.switchedOff?.tag ?? ''}`.trim() : '';
     const text = [where, off].filter(Boolean).join(' · ');
     return text ? { text, title: [whereTitle, offTitle].filter(Boolean).join(' ') } : undefined;

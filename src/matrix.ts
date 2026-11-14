@@ -8,7 +8,7 @@
 import { brandMark } from './brand.ts';
 import { caughtUpNames, defaultHistoryDays, groupBy, noticeNames, syncOwner } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
-import { andList, byToolOrder, kindNouns, toolName, toolNames, toolsPhrase } from './words.ts';
+import { andList, byToolOrder, kindNouns, toolNames, toolsPhrase } from './words.ts';
 import { walkthroughBand } from './firstsetup.ts';
 import { leftOutTools, whyReadOnly, saidInStatusBar, tell, type Click, type Outcome, type PageKind, harnessKindShown, lastResult, flashRequests, showSkillsTable, applyClick, applyPluginSwitches, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
@@ -244,10 +244,7 @@ const sinceThen = (at: number) => {
 };
 const ago = (iso: string) => { const said = sinceThen(Date.parse(iso)); return said && `edited ${said}`; };
 
-/**
- * A kind's row in the shape the table works with (itemrow.ts ItemRow). A tool whose own switch turns the item off
- * (`switchedOff`) is said as its mark says it: in that tool's own settings (`switched`).
- */
+/** A kind's row in the shape the table works with (itemrow.ts ItemRow). */
 const fromFacts = (facts: LibraryFacts): ItemRow => ({
   key: facts.key, name: facts.name, description: facts.description, converted: facts.converted, fromSource: facts.fromSource, unseen: facts.unseen, plan: facts.plan, takeInAnswers: facts.takeInAnswers, versionChanges: facts.versionChanges, on: facts.on, except: facts.except, cannot: facts.cannot, plugin: facts.plugin, edited: facts.edited, waits: facts.waits,
   blocks: facts.choiceBlocks, hashes: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
@@ -256,8 +253,7 @@ const fromFacts = (facts: LibraryFacts): ItemRow => ({
   // An MCP entry has no lines or edit time of its own: the copy question quotes its summary alone.
   versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.lines ? { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), at: copy!.modified, text: copy!.summary || facts.description, ...(copy!.body !== undefined ? { body: copy!.body } : {}) } : { lines: '', changed: '', text: copy!.summary }])),
   ownPart: Object.fromEntries(Object.entries(facts.copies).flatMap(([tool, copy]) => (copy!.ownPart?.length ? [[tool, copy!.ownPart]] : []))),
-  anotherWay: facts.anotherWay, takeOver: facts.takeOver,
-  ...(facts.switchedOff?.length ? { switched: Object.fromEntries(facts.switchedOff.map(tool => [tool, `switched off in ${toolName(tool)}’s own settings`])) } : {}),
+  anotherWay: facts.anotherWay, takeOver: facts.takeOver, switchedOff: facts.switchedOff,
 });
 
 /** The view behind the table, whose bands are listNotices'. */
@@ -1280,8 +1276,8 @@ function libraryMark(lib: LibraryPage, skill: ItemRow, tool: Tool): ReturnType<t
   const words = `${names[tool]}: ${lib.say.harnessLine(skill, item, tool, names[tool]).replace(/^./, first => first.toLowerCase())}`;
   // Off, or found: a harness with no copy while Central Knot keeps the item is off there; a found item's own copy is simply on.
   const drawn = is === 'none' && inLibrary(item) ? { look: 'off' as const, key: 'off-in-ck' as const } : is === 'own-copy' && !inLibrary(item) ? { look: 'on' as const, key: 'has' as const } : libraryMarks[is];
-  // Loaded there, but that tool's own switch turns it off: a mark of its own, whoever set the switch (libraryrow.ts `switched`).
-  const switched = skill.switched?.[tool] && drawn.look === 'on' ? { look: 'held' as const, key: 'switched' as const, glyph: 'circle-off' as IconName } : undefined;
+  // Loaded there, but that tool's own switch turns it off: a mark of its own, whoever set the switch (libraryrow.ts `switchedOff`).
+  const switched = skill.switchedOff?.includes(tool) && drawn.look === 'on' ? { look: 'held' as const, key: 'switched' as const, glyph: 'circle-off' as IconName } : undefined;
   return { ...(switched ?? drawn), state: is, words };
 }
 
@@ -1381,7 +1377,7 @@ function libraryHarnessSwitch(lib: LibraryPage, skill: ItemRow, tool: Tool) {
   const name = nameOf(skill), where = names[tool], out = item.except.includes(tool as HarnessId);
   // A state of the tool's own, said in its own word in place of Central Knot's switch: its own switch has it off (the kind's
   // action there lets it load it again), or it has it another way, where nothing of Central Knot's goes.
-  const ownState = out ? undefined : skill.switched?.[tool] ? 'Switched off' : harnessIs(skill, item, tool) === 'another-way' ? 'Another way' : undefined;
+  const ownState = out ? undefined : skill.switchedOff?.includes(tool) ? 'Switched off' : harnessIs(skill, item, tool) === 'another-way' ? 'Another way' : undefined;
   if (ownState) return h('span.details-tool-actions', {}, own, h('span.tool-switch', {}, h('span.tool-switch-word.tool-switch-word-own', {}, ownState)));
   const said = (notIn: HarnessId[]) => lib.say.said.inHarness(name, tool, !out, notIn.includes(tool as HarnessId));
   const does = out ? `Click to put it in ${where} again, its ${lib.words.copy} as it was.` : `Click to keep it out of ${where}: its copy there goes, and Central Knot keeps it.`;
