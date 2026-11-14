@@ -856,11 +856,17 @@ inBox('A removal held twice: the pass that holds it again adds no entry naming i
   assert.deepEqual(removed.map(event => [event.kind, event.losers.map(loser => loser.tool)]), [['off', ['claude-cli']]]);
 });
 
-inBox('Kept out of Codex while Codex’s file changes just as it is removed: History doesn’t say its copy there was removed', async box => {
+inBox('Kept out of Codex, then let back in, each time as a file is saved there just then: History says neither that its copy was removed nor that it is back', async box => {
   await on(box);
-  const racing: ShareContext = { ...box.context, fault: step => { if (step === 'before-remove') writeFileSync(fileOf(box, 'codex-cli'), codexAgent('You review code.\nEdit late.\n')); } };
-  await keepOut(box, 'codex-cli', true, racing);
+  /** A context whose first step `at` finds a file saved in Codex just before it. */
+  const savedThen = (at: 'before-remove' | 'before-rename', prompt: string): ShareContext => { let saved = false; return { ...box.context, fault: step => { if (step === at && !saved) { saved = true; writeFileSync(fileOf(box, 'codex-cli'), codexAgent(prompt)); } } }; };
+  await keepOut(box, 'codex-cli', true, savedThen('before-remove', 'You review code.\nEdit late.\n'));
   assert.equal(librarySentence((await historyOf(box)).at(-1)!, libraryWords.agents, tools)?.text, 'Kept out of Codex. Central Knot keeps it.');
+  await pass(box); // the edit saved there is taken in, and Codex's copy goes
+  assert.equal(await readOf(box, 'codex-cli'), undefined);
+  await keepOut(box, 'codex-cli', false, savedThen('before-rename', 'You review code.\nMine.\n'));
+  assert.equal(librarySentence((await historyOf(box)).at(-1)!, libraryWords.agents, tools)?.text, 'Turned on in Codex.');
+  assert.match((await readOf(box, 'codex-cli'))!, /Mine\./, 'the file saved there stays');
 });
 
 inBox('An Undo whose own file to give back changes just as it is given back: History doesn’t say Codex has its own file back', async box => {
