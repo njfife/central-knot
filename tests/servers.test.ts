@@ -471,7 +471,7 @@ test('An Undo whose file is saved again right after its write keeps that save: i
   assert.equal(await commandIn(box, 'copilot-cli'), 'CONCURRENT');
 }));
 
-test('A crash inside the checked write of a linked config.toml: the next passes put the file back behind its link', () => inBox(async box => {
+test('A crash inside the checked write of a linked config.toml: the next pass puts the file back behind its link', () => inBox(async box => {
   const codex = box.path('codex-cli'), target = join(box.home, 'dotfiles/config.toml');
   await fs.mkdir(join(box.home, 'dotfiles'));
   await fs.writeFile(target, 'model="gpt-5"\n[mcp_servers.docs]\ncommand="BASE"\n');
@@ -484,8 +484,7 @@ test('A crash inside the checked write of a linked config.toml: the next passes 
     const context=JSON.parse(process.env.CK_CONTEXT);context.read=async()=>[];await applyServers(context,['copilot-cli','codex-cli'],[]);`;
   const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: process.cwd(), env: { ...process.env, CK_TARGET: await fs.realpath(target), CK_CONTEXT: JSON.stringify(box.context) }, encoding: 'utf8' });
   assert.equal(child.status, 73, child.stderr);
-  await applyServers(box.context, copilotAndCodex, [], { now: 1000 });
-  await applyServers(box.context, copilotAndCodex, [], { now: 4000 });
+  await applyServers(box.context, copilotAndCodex, []);
   assert.equal((await readTool(box.context, 'codex-cli')).exists, true, `the link leads nowhere; dotfiles holds ${await fs.readdir(join(box.home, 'dotfiles'))}`);
   assert.ok((await fs.lstat(codex)).isSymbolicLink(), 'config.toml is still a link, not a file in its place');
 }));
@@ -585,8 +584,7 @@ for (const broken of ['{"mcpServers":null}', '{"mcpServers":{"docs":null}}']) te
   await fs.writeFile(box.path('copilot-cli'), docsRuns('BASE'));
   await applyServers(box.context, copilotAndCodex, [on('docs')]);
   await fs.writeFile(box.path('copilot-cli'), broken);
-  await applyServers(box.context, copilotAndCodex, [], { now: 1000 });
-  await applyServers(box.context, copilotAndCodex, [], { now: 4000 });
+  await applyServers(box.context, copilotAndCodex, []);
   assert.equal((await readTool(box.context, 'codex-cli')).entries[0]?.server.command, 'BASE');
 }));
 

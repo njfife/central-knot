@@ -147,6 +147,6 @@ How each is run: `AGENTS.md` ("Checking a change") and README ("For developers")
 - **A field on a click (`types.ts Change`):** `main.ts changes` must copy it too, or the packaged app drops it while the unit tests pass.
 - **A History entry or action:** for skills, MCP servers and agents (the library's kinds), the recipe at the end of `historyactions.ts`'s header; for profiles, instructions and a tool's Manage switch, a case in `historypage.ts describe`.
 - **A skill folder name a tool keeps for itself:** `harnesses.ts HarnessDefinition.reservedSkills` (that tool's definition); its three readers are `discovery.ts`, `skillfiles.ts readSkillsFolder` and `skills.ts cannotTake`; tests in `tests/skills.test.ts` (a name a tool keeps for itself) and `tests/discovery.test.ts`.
-- **A call from the page to main:** `types.ts DesktopApi`, `preload.ts`, and its handler in `main.ts`.
+- **A call from the page to main:** `types.ts DesktopApi`, `preload.ts`, and its handler in `main.ts` (the Plugins page's: `marketplaces.ts registerMarketplaces`).
 - **A page:** `app.ts pages` and `renderer.ts renderPage`. **A Settings row:** a section or row in `settingspage.ts settingsPage`; its value saved by `main.ts saveAppSettings` (`main.ts AppSettings`) and sent to the page as `types.ts AppPreferences`; a home's own setting (Synchronize everything) is kept in its sync record instead (`share.ts SyncRecord`) and reaches the page in `types.ts SyncView`.
 - **A file added, renamed or removed:** its entry here; `tests/map.test.ts` names what to change.

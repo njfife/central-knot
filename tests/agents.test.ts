@@ -999,8 +999,7 @@ inBox('A process that dies during an agent’s Undo leaves it in every tool: the
     const c=JSON.parse(process.env.CK_CONTEXT);c.read=async()=>[];await restoreAgent(c,['claude-cli','copilot-cli','codex-cli'],process.env.CK_EVENT);`;
   const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: process.cwd(), env: { ...process.env, CK_TARGET: fileOf(box, 'claude-cli'), CK_CONTEXT: JSON.stringify(box.context), CK_EVENT: event.id }, encoding: 'utf8' });
   assert.equal(child.status, 73, child.stderr);
-  await applyAgents(box.context, box.tools, [], { now: 1000 });
-  await applyAgents(box.context, box.tools, [], { now: 4000 });
+  await applyAgents(box.context, box.tools, []);
   // The Undo was recorded (the earlier version made current) before any file changed, so the next pass finishes it.
   assert.equal((await readAgents(box.context, 'copilot-cli')).entries[0]?.agent.prompt.trim(), 'BASE');
   assert.equal((await readAgents(box.context, 'claude-cli')).entries[0]?.agent.prompt.trim(), 'BASE');
