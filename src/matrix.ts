@@ -976,7 +976,7 @@ function syncNotice(notice: Told) {
   const off = !!state.home && !state.home.syncOn;
   const history = !off ? smallAction('History', `notice-history-${notice.history}`, () => showPage('history')) : null;
   return h('p.sync-notice', { 'data-kind': notice.kind }, icon(glyph, 14, tone),
-    h('span.notice-text', {}, offNow && notice.kind !== 'deleted' ? 'Synced once: ' : '', ...said.map(part => typeof part === 'string' && !/\.\s/.test(part) ? part.replace(/\.$/, '') : part), '', h('span.notice-age', {}, ` · ${age(notice.history)}`)),
+    h('span.notice-text', {}, offNow && notice.kind !== 'deleted-by-hand' ? 'Synced once: ' : '', ...said.map(part => typeof part === 'string' && !/\.\s/.test(part) ? part.replace(/\.$/, '') : part), '', h('span.notice-age', {}, ` · ${age(notice.history)}`)),
     h('span.notice-actions', {},
       notice.kind === 'edit' || notice.kind === 'conflict' ? seeChangeLink(notice.history, notice.key) : null,
       action, history, off ? smallAction('Turn sync on', `notice-sync-on-${notice.history}`, () => void setSync(true)) : null),
@@ -1241,7 +1241,7 @@ type MarkLook = 'on' | 'off' | 'none' | 'differs' | 'waits' | 'held';
 const keyWords = {
   on: 'On there', 'plugin-off': 'Off there', none: 'No copy',
   'will-sync': 'Gets a copy when sync runs next', 'write-now': 'Waits for Write to Claude Code',
-  taken: 'Edited, becomes the current version', deleted: 'Deleted there; turns off when sync runs', leaving: 'Removed when sync runs', own: 'Its own copy, not from Central Knot',
+  taken: 'Edited, becomes the current version', 'deleted-by-hand': 'Deleted there; turns off when sync runs', leaving: 'Removed when sync runs', own: 'Its own copy, not from Central Knot',
   current: 'Has the current version', has: 'Has it', 'kept-out': 'Kept out', 'off-in-ck': 'Off: Central Knot keeps it', unseen: 'Left as it is (its line says why)', 'cannot-take': 'Can’t take it',
   'another-way': 'Has it another way, not from Central Knot', switched: 'Switched off in its own settings',
 } as const;
@@ -1269,7 +1269,7 @@ const libraryMarks: Record<HarnessIs, { look: MarkLook; key: keyof typeof keyWor
   cannot: { look: 'held', key: 'cannot-take', glyph: 'circle-slash-2' },
   'gets-it': { look: 'waits', key: 'will-sync', glyph: 'clock' },
   edited: { look: 'waits', key: 'taken', glyph: 'pencil-line' },
-  deleted: { look: 'waits', key: 'deleted', glyph: 'trash-2' },
+  'deleted-by-hand': { look: 'waits', key: 'deleted-by-hand', glyph: 'trash-2' },
   leaving: { look: 'waits', key: 'leaving', glyph: 'clock' },
   unseen: { look: 'differs', key: 'unseen', glyph: 'circle-alert' },
   'another-way': { look: 'on', key: 'another-way', glyph: 'link-2' },

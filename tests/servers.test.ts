@@ -163,7 +163,7 @@ test('`codex mcp remove` of Codex’s only server turns it Off everywhere; Centr
     // What `codex mcp remove docs` leaves: no servers table at all.
     await writeFile(box.path('codex-cli'), 'model = "gpt-6"\n');
     const pass = await applyServers(box.context, all, []);
-    assert.deepEqual(pass.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner]), [['deleted', 'codex-cli']]);
+    assert.deepEqual(pass.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner]), [['deleted-by-hand', 'codex-cli']]);
     for (const tool of all.slice(1)) assert.equal(await commandIn(box, tool), undefined, `${tool}: Off everywhere`);
     const view = await box.view();
     assert.deepEqual([view.items[0]?.on, view.library.docs.versions.length], [false, 1]);

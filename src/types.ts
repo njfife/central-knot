@@ -382,7 +382,7 @@ export type SyncNotice = ItemNotice | TakenInNotice;
 export interface ItemNotice {
   key: string;
   item: string;
-  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit';
+  kind: 'edit' | 'conflict' | 'deleted-by-hand' | 'kept-edit';
   /** The tool whose edit or deletion won. */
   winner: HarnessId;
   /** Tools whose differing copies gave way, or still hold the item after a deletion lost. */

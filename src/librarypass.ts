@@ -781,7 +781,7 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
   }
   if (made.turnedOffBy) {
     const id = log({ kind: 'off', cause: 'deleted-by-hand', winner: { tool: made.turnedOffBy, hash: taken }, losers: before(did.removed) }, did.removed);
-    notice('deleted', made.turnedOffBy, did.removed, id, did.removed);
+    notice('deleted-by-hand', made.turnedOffBy, did.removed, id, did.removed);
   }
   // Edits no pass had taken in that give way to the current version (Pull, Make current): each is a version, offered back here.
   const gaveWay = made.takeIn ? [] : made.keep.filter(kept => kept.from.how === 'edited').map(kept => kept.harness);

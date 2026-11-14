@@ -153,7 +153,7 @@ test('A folder really deleted by hand in one tool turns the skill Off everywhere
     const before = await everywhere(box);
     await rm(folderOf(box, 'copilot-cli'), { recursive: true });
     const done = await pass(box);
-    assert.deepEqual(done.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner]), [['deleted', 'copilot-cli']]);
+    assert.deepEqual(done.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner]), [['deleted-by-hand', 'copilot-cli']]);
     assert.deepEqual(Object.values(await everywhere(box)).filter(Boolean), []);
     assert.equal((await itemOf(box))!.on, false);
     const off = (await historyOf(box)).find(event => event.kind === 'off')!;

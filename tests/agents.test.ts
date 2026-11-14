@@ -424,7 +424,7 @@ inBox('A copy deleted by hand turns the agent Off everywhere, once it has stayed
   const first = await applyAgents(waiting, tools, [], { now: 1000 });
   assert.deepEqual([first.writes, first.settling, (await itemOf(box))!.on], [0, true, true], 'inside the window nothing happens');
   const second = await applyAgents(waiting, tools, [], { now: 3500 });
-  assert.deepEqual(second.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner, notice.losers]), [['deleted', 'copilot-cli', ['claude-cli', 'codex-cli']]]);
+  assert.deepEqual(second.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner, notice.losers]), [['deleted-by-hand', 'copilot-cli', ['claude-cli', 'codex-cli']]]);
   assert.deepEqual((await historyOf(box)).map(event => event.cause).at(-1), 'deleted-by-hand');
   assert.deepEqual(await filesOf(box), { 'claude-cli': undefined, 'copilot-cli': undefined, 'codex-cli': undefined });
   assert.equal(placeOf(await itemOf(box)), 'off');

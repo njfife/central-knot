@@ -121,7 +121,7 @@ export const isPartial = (item: LibraryItem | undefined, tools: readonly string[
 /**
  * What one harness has of an item, as its mark and its line say it, from the plan:
  * - `current`: the current version; `gets-it`: it is written there at the next pass; `edited`: its copy was edited there and
- *   becomes the current version at the next pass; `deleted`: its copy was deleted there by hand, which turns the item Off at
+ *   becomes the current version at the next pass; `deleted-by-hand`: its copy was deleted there by hand, which turns the item Off at
  *   the next pass; `leaving`: its copy is removed at the next pass;
  * - `own-copy`: a copy Central Knot didn't put there (a found item's, or one that turned up while the item is Off or kept
  *   out of that harness); `kept-out`: the person keeps the item out of this harness; `none`: no copy;
@@ -129,7 +129,7 @@ export const isPartial = (item: LibraryItem | undefined, tools: readonly string[
  * - `cannot`: it can't be given a copy (the row says why); `unseen`: its copy can't be read for sure, so nothing happens there;
  * - `waits`: the next pass's write or removal there waits for Write to Claude Code (`waits`).
  */
-export type HarnessIs = 'current' | 'gets-it' | 'edited' | 'deleted' | 'leaving' | 'own-copy' | 'kept-out' | 'none' | 'another-way' | 'cannot' | 'unseen' | 'waits';
+export type HarnessIs = 'current' | 'gets-it' | 'edited' | 'deleted-by-hand' | 'leaving' | 'own-copy' | 'kept-out' | 'none' | 'another-way' | 'cannot' | 'unseen' | 'waits';
 
 export function harnessIs(row: LibraryRow, item: LibraryItem | undefined, tool: string): HarnessIs {
   const inLib = inLibrary(item), made = row.plan, harness = tool as HarnessId;
@@ -140,7 +140,7 @@ export function harnessIs(row: LibraryRow, item: LibraryItem | undefined, tool: 
   if (!inLib || !made) return row.hashes?.[tool] !== undefined ? 'own-copy' : row.cannot?.[tool] ? 'cannot' : 'none';
   if (row.cannot?.[tool]) return 'cannot';
   if (made.takeIn === harness) return 'edited';
-  if (made.turnedOffBy === harness) return 'deleted';
+  if (made.turnedOffBy === harness) return 'deleted-by-hand';
   const step = (['write', 'remove', 'ownCopy', 'current'] as const).find(list => made[list].includes(harness));
   if (step) return ({ write: 'gets-it', remove: 'leaving', ownCopy: 'own-copy', current: 'current' } as const)[step];
   return inLib.on && inLib.except.includes(harness) ? 'kept-out' : 'none';
@@ -397,7 +397,7 @@ export function sentences(words: RowWords) {
         const gone = inLib!.on ? `the ${noun} is kept out of this tool` : `the ${noun} is off`;
         return `Edited in ${where}. When sync runs it becomes the current version${reaches}, then its copy here is removed: ${gone}.`;
       }
-      case 'deleted': return `Its copy was deleted in ${where}. When sync runs, the ${noun} turns off; Central Knot keeps it.`;
+      case 'deleted-by-hand': return `Its copy was deleted in ${where}. When sync runs, the ${noun} turns off; Central Knot keeps it.`;
       case 'leaving': {
         const kept = row.plan?.keep.some(entry => entry.harness === tool);
         return kept ? 'Has a copy Central Knot doesn’t have yet. When sync runs it is kept as a version, then removed.' : 'Its copy is removed when sync runs. Central Knot keeps it.';
@@ -486,7 +486,7 @@ export function sentences(words: RowWords) {
   function noticeWords(notice: Pick<ItemNotice, 'kind' | 'item' | 'winner' | 'losers' | 'orderProved'>): { text: string; action: 'undo' | 'turn-on'; help: string } {
     const who = toolName(notice.winner), others = andList(notice.losers.map(toolName)), name = notice.item;
     const earlier = `Make the version from before ${who}’s edit current again, in every tool ${name} is on in`;
-    if (notice.kind === 'deleted') {
+    if (notice.kind === 'deleted-by-hand') {
       // The tools it was taken out of (one whose removal waits for Write to Claude Code is not among them: the band says it).
       const text = `${name} was deleted in ${who}, so it is off${others ? ` and was taken out of ${others}` : ''}. Central Knot keeps it.`;
       return { text, action: 'turn-on', help: `Put ${name} back in every tool, each ${copy} as it was` };
