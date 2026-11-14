@@ -588,6 +588,19 @@ test('A one-skill source whose SKILL.md stops parsing: Check now keeps that read
   } finally { await box.cleanup(); }
 });
 
+test('A copy deleted by hand that no pass has seen yet (Automatic sync off), then Check now on a source whose SKILL.md stopped parsing: the check’s pass turns the skill Off for the deletion, as any pass would; the source answers nothing, and History names the deletion', async () => {
+  const box = await sandbox();
+  try {
+    // Named apart from its repository, so its broken SKILL.md is a nameless skill there and notes is missing: not read whole.
+    const { repo, id } = await oneSkill(box, 'team-notes', { skill: 'notes', on: true });
+    await rm(folderOf(box, 'codex-cli'), { recursive: true });
+    await repo.commit({ 'SKILL.md': '---\nname: [notes\n---\nBroken.\n' }, '2026-11-07T10:00:00Z');
+    const done = await check(box, id);
+    assert.deepEqual([answered(done), done.notWhole, (await itemOf(box, 'notes'))!.on], [[], true, false]);
+    assert.deepEqual((await sentences(box, 'notes')).at(-1), 'Its copy was deleted in Codex, so it was turned off and removed from Claude Code and Copilot CLI. Central Knot keeps it.');
+  } finally { await box.cleanup(); }
+});
+
 test('Automatic sync off, an edit in Codex later than the source’s change, Check now: the edit stays current, and the click and History say the source’s version was kept', async () => {
   const box = await sandbox();
   try {

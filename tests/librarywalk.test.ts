@@ -22,7 +22,8 @@
 // A step that makes a copy unseeable (a link inside, a SKILL.md that can't be parsed, its tool's folder made again) is made
 // from a settled home, and asserts that the pass turns nothing Off and removes nothing; one more deletes a folder by hand and
 // runs passes inside a settle window of 2 s, which must change nothing; and one makes the source's SKILL.md unparseable for a
-// Check now, which must turn nothing Off and remove nothing.
+// Check now, which must never read the skill as gone there: from a settled home it turns nothing Off and removes nothing, and
+// otherwise anything it turns Off is a copy deleted by hand that no pass had seen, which History says.
 // The walks in SEEDS run in `npm test`. CK_WALKS=<n> runs n more seeds from CK_SEED=<n>; CK_ONLY=<seed> replays one walk,
 // with CK_TRACE=1 step by step.
 import { test } from 'node:test';
@@ -48,9 +49,11 @@ test.after(() => hosts.cleanup());
 
 /**
  * The walks every `npm test` runs (more, from any seed: CK_WALKS and CK_SEED). 51317 ends by deleting by hand a copy the person
- * made in Codex, which Central Knot never took in: their own deletion, which the checker must not count as a loss.
+ * made in Codex, which Central Knot never took in: their own deletion, which the checker must not count as a loss. 81060 and
+ * 91036 delete a copy by hand that no pass sees before the source's SKILL.md stops parsing (Automatic sync off; inside the
+ * settle window): the Check now after turns the skill Off for that deletion, which the checker must not blame on the source.
  */
-const SEEDS = [1, 2, 3, 4, 51317];
+const SEEDS = [1, 2, 3, 4, 51317, 81060, 91036];
 const STEPS = 16;
 const random = (seed: number) => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 /** An answer that means the page or History offered an action that is stale or does nothing. */
@@ -184,13 +187,18 @@ async function walk(seed: number): Promise<Finding[]> {
         add(6, { name: 'Check now', app: true, run: more => checkNow(recorded.id, more) });
         add(1, { name: 'Remove the source', app: true, run: () => removeSource(context(), recorded.id) });
         if (recorded.names.some(name => name.key === 'notes' && name.state === 'deleted')) add(4, { name: 'Add on the source’s row', app: true, run: () => bringBack(context(), tools, recorded.id, 'notes') });
-        // The source's SKILL.md stops parsing for one check: unreadable there, never gone, so nothing turns Off or is removed.
+        // The source's SKILL.md stops parsing for one check: unreadable there, never gone, so the source turns nothing Off. From a
+        // settled home nothing turns Off or is removed; otherwise a copy deleted by hand that no pass has seen yet is the check's
+        // pass to carry out, as any pass's (library.ts THE RULE), and History must say the deletion did it.
         if (held?.source === recorded.id && sourceHasNotes) add(2, { name: 'the source’s SKILL.md unparseable, then Check now', app: true, byHand: true, run: async () => {
           await source.commit({ 'SKILL.md': '---\nname: [notes\n---\nBroken.\n' });
           try {
-            const before = (await seen(box, context())).item?.on, done = await checkNow(recorded.id);
-            if ((await seen(box, context())).item?.on !== before) fail('a source’s SKILL.md that stopped parsing turned the skill Off');
-            if (done.results?.some(entry => entry.outcome === 'removed')) fail('a source’s SKILL.md that stopped parsing had a copy removed');
+            const quiet = settled, before = (await seen(box, context())).item?.on, entries = await historyCount(), done = await checkNow(recorded.id);
+            const told = (await readHistory(context())).filter(event => event.key === 'notes').slice(entries);
+            const byHand = told.some(event => event.cause === 'deleted-by-hand');
+            if (told.some(event => event.cause === 'source-dropped')) fail('a source’s SKILL.md that stopped parsing was read as the skill gone');
+            if ((await seen(box, context())).item?.on !== before && (quiet || !byHand)) fail('a source’s SKILL.md that stopped parsing turned the skill Off');
+            if (quiet && done.results?.some(entry => entry.outcome === 'removed')) fail('a source’s SKILL.md that stopped parsing had a copy removed');
           } finally { await source.commit({ 'SKILL.md': skillText(`Source ${++marker}.`) }); }
         } });
       }
