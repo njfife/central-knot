@@ -14,6 +14,7 @@ export function itemNotice(notice: SyncNotice): ItemNotice {
 /**
  * What the Caught up band names after one pass of the whole home, from the view main.ts builds next (main.ts syncAndView): the
  * pass's results as homepass.ts passTells gives them, and each kind's notices on its own page.
+ * It repeats syncAndView's assembly by hand, since tests can't reach main.ts: a change to main.ts keepPass fails no test here.
  */
 export function bandAfter(synced: NonNullable<HomePass['synced']>) {
   const told = passTells(synced);

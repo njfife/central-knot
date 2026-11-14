@@ -751,11 +751,11 @@ function syncOffBand(): HTMLElement | null {
 /**
  * What the background passes copied where it was missing, every kind's items, and where (model.ts caughtUpNames): shown on the
  * Harnesses list with the view that brought it (the next read brings only what passes did since), until dismissed; once
- * dismissed, it comes back only for a different catch-up. Null when there is none, or once dismissed.
+ * dismissed, it comes back only for a different catch-up (other items, or other tools). Null when there is none, or once dismissed.
  */
 export function caughtUpBand(home: HomeView): HTMLElement | null {
   const { items, tools } = caughtUpNames(home);
-  const key = `caught-up:${items.join(',')}`;
+  const key = `caught-up:${items.join(',')}:${tools.join(',')}`;
   if (!items.length || state.dismissed.has(key)) return null;
   return h('div.band', { role: 'status' }, icon('check', 14, 'tone-success'),
     h('span.band-text', {}, `Caught up: copied ${items.length > 4 ? `${items.slice(0, 4).join(', ')} and ${items.length - 4} more` : andList(items)} to ${tools.length ? andList(tools.map(tool => names[tool])) : 'the tools that were missing them'}, because ${items.length === 1 ? 'it is' : 'they are'} on.`),
