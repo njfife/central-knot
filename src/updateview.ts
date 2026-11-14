@@ -4,13 +4,12 @@
 //   failures on it;
 // - the status bar's end (statusEnd): the build's name and version, nothing more;
 // - what Settings' Updates row needs: its Update button (settingUpdateButton) and Check now (checkNow).
-// Restarting is held while something typed isn't saved or changes wait for Apply all: the control then opens Settings, whose
+// Restarting is held while something typed isn't saved or a plugin run is under way: the control then opens Settings, whose
 // Updates row says what restarting would lose beside its own Restart button.
 import { announce, baseDraftTyped, rerender, showPage, state, toolDraftTyped } from './app.ts';
 import { h, icon } from './dom.ts';
 import { market } from './pluginstate.ts';
 import { buildWords, restartWaits, tagWords, updateButton, updateIndicator, updateStatus } from './updates.ts';
-import { plural } from './model.ts';
 import type { UpdateView } from './types.ts';
 
 /** The update state as main last told it (undefined until read); a check or a restart the page asked for and awaits. */
@@ -38,13 +37,12 @@ function returnFocus() {
   if (document.activeElement === document.body) target?.focus();
 }
 
-/** Why restarting now would lose something typed or chosen, or nothing. Read when it matters: typing doesn't redraw the page. */
+/** Why restarting now would lose something typed or a plugin run under way, or nothing. Read when it matters: typing doesn't redraw the page. */
 export function unsavedWork(): string | undefined {
   if (toolDraftTyped()) return 'Restarting now loses your unsaved instructions draft.';
   if (baseDraftTyped()) return 'Restarting now loses your unsaved base instructions draft.';
-  // Only plugins still wait for Apply all: every other click applies at once.
-  const waiting = market.draft.size;
-  if (waiting) return `Restarting now loses ${plural(waiting, 'change')} waiting for Apply all.`;
+  // A plugin run sends its steps one at a time: a restart between two would stop the rest and lose its result and Undo.
+  if (market.activity === 'applying' || market.activity === 'undoing') return 'Restarting now stops the plugin changes under way.';
   return undefined;
 }
 

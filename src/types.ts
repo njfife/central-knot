@@ -651,11 +651,8 @@ export interface PartsInstall { source: string; marketName: string; plugin: stri
 export interface PartPlan { kind: PartKind; name: string; why?: string; /** `why` holds for every part of this kind in this tool (Pi has no agents). */ wholeKind?: true; limit?: string; out?: true; /** It is in and can stay, but can't be taken out or rewritten there now, and why. */ fixed?: string }
 /** A part by kind and name. */
 export type PartRef = Pick<PartItem, 'kind' | 'name'>;
-/**
- * Single parts chosen for one tool: those to put in and those to take out and leave out. `rest`: the tool's other parts
- * are installed or brought up to date in the same run (an install or update of all its parts, with these exceptions).
- */
-export interface PartsPick { on: PartRef[]; off: PartRef[]; rest?: boolean }
+/** Single parts chosen for one tool: those to put in and those to take out and leave out. The tool's other parts stay as they are. */
+export interface PartsPick { on: PartRef[]; off: PartRef[] }
 /** A plugin's parts in one tool, as the Plugins page shows them. `changed`: the plugin's parts differ now from what went in. */
 export interface PartsState { version?: string; at: string; items: Pick<PartItem, 'kind' | 'name'>[]; changed?: boolean; /** The catalog's version now, when it differs. */ now?: string }
 

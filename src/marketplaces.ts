@@ -846,7 +846,7 @@ const isSource = (value: unknown): value is string => value === '' || isText(val
 /** Single parts picked for a tool, each a kind and a name (a name is only ever matched against the plugin's own parts). */
 const isPick = (value: unknown): value is PartsPick => {
   const refs = (list: unknown) => Array.isArray(list) && list.length <= 500 && list.every(ref => ['skill', 'mcp', 'agent'].includes(ref?.kind) && isText(ref?.name, 300));
-  return !!value && typeof value === 'object' && refs((value as PartsPick).on) && refs((value as PartsPick).off) && ['undefined', 'boolean'].includes(typeof (value as PartsPick).rest);
+  return !!value && typeof value === 'object' && refs((value as PartsPick).on) && refs((value as PartsPick).off);
 };
 /** A marketplace or plugin name as the tools accept it; anything else never reaches a command line. */
 const isName = (value: unknown): value is string => typeof value === 'string' && engine.SAFE_NAME.test(value);
@@ -868,7 +868,7 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
   handle('plugins:decline', async (source, again) => (open() && isText(source) ? markets.decline(source, again === true) : null));
   handle('plugins:pick-folder', async () => (await host.pickFolder()) ?? null);
   handle('plugins:add-carried', async (tool, home) => { const ids = toolIds([tool]); return open() && ids.length ? markets.addCarriedTo(ids[0]!, home) : { stopped: 'That request was malformed, so nothing ran.' }; });
-  // A malformed step fails for its tools, so it never stops (and then blocks) every later Apply all.
+  // A malformed step fails for its tools, so it never stops the rest of a run (an Update all, say).
   const refused = (tools: unknown) => ({ reports: failedFor(toolIds(Array.isArray(tools) ? tools : [tools]), 'That request was malformed, so nothing ran.') });
   handle('plugins:install', async (source, marketName, plugin, tools, home) => (open() && isText(source) && isName(marketName) && isName(plugin) ? markets.install(source, marketName, plugin, toolIds(tools), home) : refused(tools)));
   handle('plugins:update', async (source, marketName, plugin, tools, home) => (open() && isText(source) && isName(marketName) && isName(plugin) ? markets.update(source, marketName, plugin, toolIds(tools), home) : refused(tools)));

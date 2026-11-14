@@ -909,16 +909,15 @@ if (wanted('plugin-skills')) {
   await shot(a, 'plugins-installed', 'document-tools is installed in Claude Code, Copilot CLI and Codex (by each tool’s own record). Clicked Refresh on team-tools.');
   await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-skills')`);
   await shot(a, 'skills-switches', 'Opened document-tools. Its skills each have a switch in Copilot CLI and Codex; Claude Code has no switch for one skill of a plugin.');
-  await a.click('#pskill-0-document-tools-pdf-reader-codex-cli');
-  await a.click('#pskill-0-document-tools-pdf-reader-copilot-cli');
-  await shot(a, 'skill-chosen', 'Clicked pdf-reader’s switches under Codex and Copilot CLI. Nothing has changed yet: both wait for Apply all.');
+  const flip = async id => { await a.click(id); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle(); };
+  await flip('#pskill-0-document-tools-pdf-reader-codex-cli');
+  await flip('#pskill-0-document-tools-pdf-reader-copilot-cli');
+  await shot(a, 'skill-off', 'Clicked pdf-reader’s switch under Codex, then under Copilot CLI: each acted at once. Codex’s config.toml now names document-tools:pdf-reader with enabled = false, and Copilot CLI ran `copilot skill disable document-tools:pdf-reader`. The toolbar has the last click’s result, with its Undo.');
   await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').focus({ focusVisible: true })`);
-  await shot(a, 'skill-focus', 'Moved keyboard focus to pdf-reader’s chosen Codex switch (as Tab would): focus ring and waiting ring together.');
+  await shot(a, 'skill-focus', 'Moved keyboard focus to pdf-reader’s Codex switch (as Tab would): the focus ring.');
   await a.theme('light'); await shot(a, 'skill-focus-light', 'The same, in the light appearance.'); await a.theme('dark');
   await a.run(`document.activeElement?.blur()`);
-  await at860('skill-chosen-860', 'The chosen state at 860×560, scrolled to the skills.');
-  await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle();
-  await shot(a, 'skill-off', 'Clicked Apply all. Codex’s config.toml now names document-tools:pdf-reader with enabled = false, and Copilot CLI ran `copilot skill disable document-tools:pdf-reader`.');
+  await at860('skill-off-860-skills', 'The same at 860×560, scrolled to the skills.');
   await a.theme('light'); await shot(a, 'skill-off-light', 'The same, in the light appearance.'); await a.theme('dark');
   for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
     await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: width > 2000 ? 1 : 2, mobile: false }); await a.settle();
@@ -926,8 +925,9 @@ if (wanted('plugin-skills')) {
     await a.theme('light'); await shot(a, `skill-off-${width}-light`, `The same at ${width}×${height}, light.`); await a.theme('dark');
   }
   await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
-  await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle();
-  await shot(a, 'skill-undone', 'Clicked Undo: pdf-reader is on again in both tools.');
+  await flip('#plugins-undo');
+  await shot(a, 'skill-undone', 'Clicked Undo: pdf-reader is on again in Copilot CLI, the last click’s tool; Codex’s click came before, so it is still off there.');
+  await flip('#pskill-0-document-tools-pdf-reader-codex-cli');
   writeFileSync(join(practice, '.copilot/settings.json'), JSON.stringify({ disabledSkills: ['spreadsheet'] }));
   await a.click('#plugin-back'); await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#pcell-0-document-tools-copilot-cli')`, 15000); await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-skills')`);
   await shot(a, 'skill-held', 'Turned every skill named “spreadsheet” off in Copilot CLI outside Central Knot (`copilot skill disable spreadsheet`), then reopened the page: it shows off there, locked, and can’t be turned on for this plugin alone (its row says why).');
@@ -938,12 +938,12 @@ if (wanted('plugin-skills')) {
   mkdirSync(join(practice, '.pi/agent'), { recursive: true });
   await a.click('#plugin-back'); await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#pcell-0-document-tools-pi-cli')`, 15000);
   await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('#ppart-0-document-tools-skill-pdf-reader-pi-cli')`, 15000);
-  await a.click('#ppart-0-document-tools-skill-pdf-reader-pi-cli');
+  await flip('#ppart-0-document-tools-skill-pdf-reader-pi-cli');
   await a.run(`document.querySelector('.plugin-skills')?.scrollIntoView({ block: 'start' })`); await wait(150);
-  await shot(a, 'mixed-switches', 'Pi was added to the home. One list now has both kinds of switch, each column saying which: the installed plugin’s skill switches under Copilot CLI and Codex, and under Pi a switch that puts one skill in as a separate item (pdf-reader chosen).');
+  await shot(a, 'mixed-switches', 'Pi was added to the home. One list now has both kinds of switch, each column saying which: the installed plugin’s skill switches under Copilot CLI and Codex, and under Pi a switch that puts one skill in as a separate item (clicked for pdf-reader, which went in at once).');
   await at860('mixed-switches-860', 'The same at 860×560.');
   await a.theme('light'); await shot(a, 'mixed-switches-light', 'The same, in the light appearance.'); await a.theme('dark');
-  await a.click('#ppart-0-document-tools-skill-pdf-reader-pi-cli');
+  await flip('#ppart-0-document-tools-skill-pdf-reader-pi-cli');
 }
 
 // ---------- Plugin updates that arrive by themselves ----------
@@ -1062,18 +1062,26 @@ if (wanted('plugin-versions')) {
   await shot(a, 'list-860', 'Back to the marketplace list at 860×560, scrolled to issue-tracker, which two tools have at another version.');
   await a.theme('light'); await shot(a, 'list-860-light', 'The same, light.'); await a.theme('dark');
   await size(2560, 1440); await a.theme('light'); await shot(a, 'list-2560-light', 'The marketplace list at 2560×1440, light.');
-  // Update: each row behind offers it for every tool behind, and the marketplace for all of them; a click only chooses.
+  // Update: each row behind offers it for every tool behind, and the marketplace for all of them; a click runs at once.
   await a.theme('dark');
   for (const [width, height] of [[860, 560], [1728, 1117]]) {
     await size(width, height); await a.run(`document.querySelector('#plugins-scroll')?.scrollTo(0, 0)`); await a.settle();
     await shot(a, `update-offered-${width}`, `At ${width}×${height}: document-tools and issue-tracker are behind in some tools, so their rows offer Update, and the marketplace "Update all".`);
-    await a.click('#pupdate-0-issue-tracker');
-    await a.run(`document.querySelector('[data-plugin="issue-tracker"]').scrollIntoView({ block: 'center' })`); await a.settle();
-    await shot(a, `update-chosen-${width}`, `Clicked "Update in Claude Code and Codex" on issue-tracker: both boxes wait for Apply all, and the toolbar counts 2 updates.`);
-    await a.click('#popen-0-issue-tracker'); await waitFor(a, `!!document.querySelector('.plugin-panel')`);
-    await shot(a, `update-page-${width}`, `Opened issue-tracker with its update chosen: each tool says "Will update to 2.0.0", and the button takes it back.`);
-    await a.click('#plugin-back'); await a.click('#plugins-discard');
   }
+  // Update all, with stand-ins for Claude Code and Codex that take six seconds and then refuse: the band while it runs, then the failures.
+  const stubs = [['claude', '2.1.322 (Claude Code)'], ['codex', 'codex-cli 0.167.0']].map(([name, version]) => ({ file: join(HOME, '.local/bin', name), version }));
+  const kept = stubs.map(({ file }) => (existsSync(file) ? readFileSync(file) : undefined));
+  mkdirSync(join(HOME, '.local/bin'), { recursive: true });
+  for (const { file, version } of stubs) writeFileSync(file, `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nsleep 6\necho "The plugin cache is in use by another session."\nexit 1\n`, { mode: 0o755 });
+  await size(1280, 800); await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('[id^="market-update-all-"]')`, 30000); await a.settle();
+  await a.run(`document.querySelector('[id^="market-update-all-"]').click()`); await waitFor(a, `!!document.querySelector('.cell-working')`, 15000);
+  await shot(a, 'update-all-running', 'Clicked "Update all": every update it names runs in one run. The band says each change runs that tool’s own command and that an update can take a minute or more; the marks of the step under way spin.');
+  await size(860, 560); await shot(a, 'update-all-running-860', 'The same at 860×560.');
+  await waitFor(a, `document.body.dataset.busy !== 'true'`, 90000); await a.settle();
+  await shot(a, 'update-all-failed-860', 'The run ended. The stand-ins refused, so each failure is in the problem band with its plugin named, and nothing is offered to undo.');
+  for (const [width, height] of [[1280, 800], [1728, 1117], [2560, 1440]]) { await size(width, height); await shot(a, `update-all-failed-${width}`, `The same at ${width}×${height}.`); }
+  stubs.forEach(({ file }, at) => (kept[at] ? writeFileSync(file, kept[at]) : rmSync(file, { force: true })));
+  if (await a.has('.plugin-problems .band-dismiss')) await a.click('.plugin-problems .band-dismiss');
   // Codex's copy of document-tools changes by hand at the marketplace's version (1.2.0): its page says so and offers Update.
   edit(join(practice, '.codex/plugins/cache/team-tools/document-tools/1.2.0/skills/spreadsheet/SKILL.md'), text => `${text}\nAlso sort every sheet by its first column.\n`);
   await a.click('#header-refresh'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000);
@@ -1087,9 +1095,6 @@ if (wanted('plugin-versions')) {
   for (const [width, height] of [[860, 560], [1728, 1117]]) {
     await size(width, height); await a.run(`document.querySelector('.plugin-page')?.closest('.scroll')?.scrollTo(0, 0)`); await a.settle();
     await shot(a, `copy-differs-${width}`, `At ${width}×${height}: Codex's document-tools is 1.2.0, the marketplace's version, but its spreadsheet skill was changed by hand: "Installed · 1.2.0 · differs from the marketplace’s copy", and Update is offered for Codex (with Claude Code, which is behind).`);
-    await a.click('#pupdate-0-document-tools');
-    await shot(a, `copy-differs-chosen-${width}`, `Clicked Update: Codex "Will update to the marketplace’s copy", Claude Code "Will update to 1.2.0".`);
-    await a.click('#pupdate-0-document-tools');
   }
   await a.click('#plugin-back');
   await size(1280, 800); await a.theme('dark');
@@ -1121,17 +1126,15 @@ if (wanted('parts')) {
   await waitFor(a, `!!document.querySelector('#ppart-0-issue-tracker-skill-triage-pi-cli')`);
   await atParts('pick-switches', 'Scrolled to "What it holds": each skill and MCP server has a switch under each tool holding the plugin’s parts.');
   const codexToo = await a.has('#ppart-0-issue-tracker-mcp-issues-codex-cli');
-  await a.click('#ppart-0-issue-tracker-skill-triage-pi-cli'); if (codexToo) await a.click('#ppart-0-issue-tracker-mcp-issues-codex-cli');
-  await atParts('pick-chosen', `Clicked triage’s switch under Pi${codexToo ? ' and the issues server’s under Codex: both come out' : ': it comes out'} on Apply all.`);
-  await a.theme('light'); await atParts('pick-chosen-light', 'The same, in the light appearance.'); await a.theme('dark');
-  await size(860, 560); await atParts('pick-chosen-860', 'The same at 860×560.');
-  await a.run(`document.querySelector('.plugin-head')?.scrollIntoView({ block: 'start' })`); await wait(150); await shot(a, 'pick-chosen-860-top', 'The top of the page at 860×560: each chosen tool’s line says what will change.');
-  await size(1728, 1117); await atParts('pick-chosen-1728', 'The same at 1728×1117.');
+  await a.click('#ppart-0-issue-tracker-skill-triage-pi-cli'); await settled(); if (codexToo) { await a.click('#ppart-0-issue-tracker-mcp-issues-codex-cli'); await settled(); }
+  await atParts('pick-done', `Clicked triage’s switch under Pi${codexToo ? ', then the issues server’s under Codex: each came out at once' : ': it came out at once'}.`);
+  await a.theme('light'); await atParts('pick-done-light', 'The same, in the light appearance.'); await a.theme('dark');
+  await size(860, 560); await atParts('pick-done-860', 'The same at 860×560.');
+  await a.run(`document.querySelector('.plugin-head')?.scrollIntoView({ block: 'start' })`); await wait(150); await shot(a, 'pick-done-860-top', 'The top of the page at 860×560: the last click’s result with its Undo, and each tool’s line.');
+  await size(1728, 1117); await atParts('pick-done-1728', 'The same at 1728×1117.');
   await size(1280, 800);
-  await a.click('#plugins-apply'); await settled();
-  await shot(a, 'pick-applied', `Clicked Apply all: Pi no longer has the triage skill${codexToo ? ', nor Codex the issues server' : ''}; each tool’s row says what was left out.`);
-  await atParts('pick-applied-switches', 'The switches after Apply all.');
-  await a.click('#plugins-undo'); await settled();
+  await shot(a, 'pick-applied', `Pi no longer has the triage skill${codexToo ? ', nor Codex the issues server' : ''}; each tool’s row says what was left out.`);
+  await a.click('#plugins-undo'); await settled(); if (codexToo) { await a.click('#ppart-0-issue-tracker-skill-triage-pi-cli'); await settled(); }
   // What is in a part's place when it can't go in: a file there is named, with what to do; a link that leads nowhere is replaced.
   await turn();
   mkdirSync(join(practice, '.pi/agent/skills'), { recursive: true });
@@ -1157,7 +1160,7 @@ if (wanted('parts')) {
   rmSync(join(practice, '.pi/agent/skills/triage'), { recursive: true, force: true });
   await a.click('#header-refresh'); await waitFor(a, `/Can go in now/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
   await shot(a, 'page-can-go-in-now', 'Removed Pi’s own triage skill and clicked Refresh: the plugin’s triage can go in now, with Update parts.');
-  await a.click('#pparts-issue-tracker'); await a.click('#plugins-apply'); await settled();
+  await a.click('#pparts-issue-tracker'); await settled();
   await a.click('#plugin-back');
   await a.click('#popen-0-release-helper'); await waitFor(a, `/(Can go in|Nothing in it)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
   await shot(a, 'page-left-behind', 'Opened release-helper (a command, an agent and hooks): what goes in where, and what stays with the plugin.');
@@ -1174,8 +1177,9 @@ if (wanted('parts')) {
   await shot(a, 'list-out-of-date', 'The marketplace published 2.1.0 and Refresh read it again: the parts show as out of date.');
   await a.click('#popen-0-issue-tracker'); await waitFor(a, `/(Can go in|Installed|Out of date)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
   await shot(a, 'page-out-of-date', 'issue-tracker’s page: "Parts out of date" with Update parts.');
-  await a.click('#pparts-issue-tracker'); await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
-  await shot(a, 'page-updated', 'Clicked Update parts, then Apply all.');
+  await a.click('#pparts-issue-tracker'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await shot(a, 'page-updated', `Clicked Update parts: the parts were brought up to date at once. Undo’s tooltip: “${await a.run(`document.querySelector('#plugins-undo')?.title ?? 'no Undo'`)}”`);
+  await size(860, 560); await shot(a, 'page-updated-860', 'The same at 860×560.'); await size(1280, 800);
   await a.click('#pkeep-0-issue-tracker-pi-cli'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
   await shot(a, 'page-removed', 'Clicked Keep out on Pi’s line: Pi’s parts were taken out together, at once, and Pi stays out.');
   if (await a.has('#plugins-undo')) { await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); await shot(a, 'page-undone', 'Clicked Undo: Pi’s parts are back, and Pi is let in again.'); }
@@ -1507,12 +1511,9 @@ if (wanted('sizes')) {
   await a.click('#open-add-marketplace');
   await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(longMarket)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#add-marketplace'); await waitFor(a, `document.querySelectorAll('.market-item').length > 1`, 30000);
-  const box = await a.run(`document.querySelector('.plugin-row .cell-button:not([disabled])')?.id ?? ''`);
-  if (box) await a.click(`#${box}`);
-  await shot(a, '860-long-marketplace', 'Added a marketplace with a long name and a long maker\'s name, and chose one install, at 860×560.');
-  await a.click('#sidebar-toggle'); await shot(a, '860-sidebar-open-long-marketplace', 'The same with the sidebar open: the change waiting for Apply all keeps the toolbar\'s right end.'); await a.click('#sidebar-toggle');
+  await shot(a, '860-long-marketplace', 'Added a marketplace with a long name and a long maker\'s name, at 860×560.');
+  await a.click('#sidebar-toggle'); await shot(a, '860-sidebar-open-long-marketplace', 'The same with the sidebar open.'); await a.click('#sidebar-toggle');
   await a.size(1280, 800); await shot(a, '1280-long-marketplace', 'The same at 1280×800: the facts that don\'t fit beside the name drop whole.');
-  if (await a.has('#plugins-discard')) await a.click('#plugins-discard');
   await a.click('#market-tab-about'); await shot(a, '1280-long-marketplace-about', 'Its About tab: every fact, where it comes from, and Remove.');
   if (await a.has('[id^="forget-"]')) await a.click('[id^="forget-"]');
   await a.size(1280, 800);
@@ -2119,10 +2120,10 @@ if (wanted('harnesses')) {
   for (const id of ['#ins-back-claude-cli', '#ins-cancel-claude-cli', '#ins-discard-claude-cli']) if (await a.has(id)) await a.click(id);
   await a.click('#ins-edit-claude-cli');
   await size(2560, 1440); await shot(a, 'claude-instructions-editing-2560', 'Editing at 2560×1440: the editor keeps a reading measure.'); await size(1280, 800); if (await a.has('#ins-cancel-claude-cli')) await a.click('#ins-cancel-claude-cli');
-  // With the Plugins tour in this run, install document-tools from team-tools so this tab has something to show.
+  // With the Plugins tour in this run, turn document-tools on from team-tools so this tab has something to show.
   if (wanted('plugins')) {
     await ensureMarket(); await waitFor(a, `!!document.querySelector('#popen-0-document-tools')`); await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-group')`);
-    if (await a.has('#pinstall-0-document-tools:not([disabled])')) { await a.click('#pinstall-0-document-tools'); await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); }
+    if (await a.has('#pswitch-page-0-document-tools[aria-checked="false"]:not([disabled])')) { await a.click('#pswitch-page-0-document-tools'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); }
     await a.click('#nav-harnesses'); await a.click('#harness-claude-cli');
   }
   await a.click('#harness-tab-plugins'); await waitFor(a, `!/Reading/.test(document.querySelector('#harness-body')?.textContent ?? '')`); await shot(a, 'claude-plugins', 'Clicked the "Plugins" tab: plugins installed in Claude Code, each opening its page on Plugins.');

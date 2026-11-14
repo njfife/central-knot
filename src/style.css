@@ -353,18 +353,12 @@ ul { list-style: none; }
 .order { display: inline-flex; flex: none; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-soft); }
 .select.select-bar select { height: 28px; font-size: 12.5px; }
 .bar-icons .order-word { display: none; }
-.apply { display: flex; align-items: center; gap: 6px; }
-.apply-count { font-size: 12.5px; color: var(--accent-ink); font-weight: 500; white-space: nowrap; }
-.apply-count.apply-quiet { color: var(--ink-soft); }
 .apply-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
 .apply-waiting { color: var(--warning); }
 button.apply-state.text-action { border: 0; background: transparent; padding: 0; font: inherit; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
 button.apply-state.apply-waiting.text-action { color: var(--warning); text-decoration-color: color-mix(in oklab, var(--warning) 50%, transparent); }
 /* A crowded toolbar first shortens its pending count ("2 changes"; the full summary is the tooltip) and its spacing;
    if it still can't fit after its buttons go icon-only, its actions take a second line, at the right. */
-.count-short { display: none; }
-.bar-short .count-full { display: none; }
-.bar-short .count-short { display: inline; }
 .bar-short .toolbar-end { padding-left: 8px; }
 .bar-short .chip { padding: 0 8px; }
 .chip-icon { display: none; }
@@ -547,9 +541,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 
 .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; padding: 14px 16px 18px; font-size: 11.5px; color: var(--ink-soft); }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.legend-lead { font-size: 12px; color: var(--ink-soft); }
-/* "On Apply all:" and what follows it: kept together on one line, wrapping inside only when wider than the whole key. */
-.legend-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; max-width: 100%; }
 
 .brand-mark { flex: none; display: block; }
 .mono-mark { display: inline-grid; place-items: center; flex: none; border-radius: 4px; background: var(--ink); color: var(--surface); font-weight: 700; letter-spacing: -0.3px; }
@@ -1020,7 +1011,6 @@ span.ins-confirm { margin-top: 0; }
 .market-not-carried p > svg { flex: none; margin-top: 2px; }
 .market-not-carried ul { margin: 4px 0 0; padding-left: 36px; }
 .market-not-carried li { overflow-wrap: anywhere; }
-.apply-hint, .hint-plain { display: none; }
 .market-add { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding: 10px 0 0; border-top: 1px solid var(--line); }
 .market-add > .btn { align-self: flex-start; }
 .market-add.market-add-open { padding-left: 6px; padding-right: 6px; }
@@ -1157,7 +1147,7 @@ span.ins-confirm { margin-top: 0; }
   /* A long note (a copy that differs, several versions) wraps beside the line rather than pushing what it holds out of view. */
   .plugin-row-update { flex: 0 1 auto; margin-left: 14px; }
 }
-/* The header's hint keeps to whole lines: a narrow table says only that nothing runs until Apply all. */
+/* The header's hint keeps to whole lines: a narrow table says it shorter. */
 .hint-short { display: none; }
 @container table (width < 700px) {
   .plugin-row-about, .plugin-row-sep, .hint-long { display: none; }
@@ -1165,7 +1155,6 @@ span.ins-confirm { margin-top: 0; }
 }
 .cannot-dash { font-weight: 700; color: var(--ink-soft); }
 .plugin-add { border-color: color-mix(in oklab, var(--ink) 42%, transparent); color: var(--ink); }
-.cell-button.cell-chosen, .legend-cell.cell-chosen { background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--accent-ink); }
 .cell-button.cell-pending-remove, .legend-cell.cell-pending-remove { border-style: dashed; border-color: var(--danger); color: var(--danger); background: color-mix(in oklab, var(--danger) 8%, transparent); }
 .plugin-legend { padding: 10px 16px 0; }
 /* The description repeated under About is for narrow content only, where the Plugins tab leaves it out. */
@@ -1241,13 +1230,7 @@ span.ins-confirm { margin-top: 0; }
 .skill-switch-kind { font-size: 10.5px; color: var(--ink-soft); }
 .skill-switch { position: relative; height: 22px; }
 /* An off switch keeps a visible edge on the dark page; a held one stays readable (its row says why it can't change). */
-.skill-switch:not(.skill-switch-chosen) .switch[aria-checked="false"] { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 22%, transparent); }
-/* Chosen for Apply all: the accent fill a waiting switch has elsewhere, and a dashed ring like a chosen install box. */
-.skill-switch-chosen .switch[aria-checked="true"] { background: var(--accent); }
-.skill-switch-chosen .switch[aria-checked="true"] .switch-knob { background: #fff; }
-/* The dashed ring, like a chosen install box. Focus is the app's solid ring just outside it, so a
-   switch can show both and the two never look alike. */
-.skill-switch-chosen .switch::after { content: ''; position: absolute; inset: -4px; border: 2px dashed var(--accent); border-radius: 999px; }
+.skill-switch .switch[aria-checked="false"] { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 22%, transparent); }
 .skill-switch .switch:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
 /* One that can't change here: full strength, a lock beside it, and its reason on the row or above the list. */
 .skill-switch-stuck .switch { cursor: not-allowed; }
@@ -1319,12 +1302,6 @@ span.ins-confirm { margin-top: 0; }
   /* A tab short of room shortens its counts first, then its name; both are whole in its tooltip. */
   .market-item-name { flex: 0 1 auto; min-width: 0; }
   .market-item-meta { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* Changes waiting: the toolbar's left holds the hint, so the row isn't half empty, and the table's header says only "Plugin". */
-  .plugins-toolbar:has(> .apply) > .toolbar-spacer { display: none; }
-  .plugins-toolbar > .apply { flex: 1 1 auto; }
-  .apply-hint { display: inline; margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-soft); }
-  .plugins-page:has(.apply-hint) .plugin-hint > .hint-long, .plugins-page:has(.apply-hint) .plugin-hint > .hint-short { display: none; }
-  .plugins-page:has(.apply-hint) .plugin-hint > .hint-plain { display: inline; }
 }
 
 /* README text: a reading measure inside a page that spans the window. */
@@ -1519,12 +1496,6 @@ span.ins-confirm { margin-top: 0; }
 /* Beside a plugin item's switch, where an own copy has Remove: the way to the plugin's page. */
 .text-action.tool-link { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; white-space: nowrap; }
 .tool-remove-slot { display: inline-block; }
-/* Queued changes never shrink out of sight: when the change bar doesn't fit beside the filters, it takes its own line. */
-.ov-page > .toolbar:has(.apply-count) { flex-wrap: wrap; }
-/* On its own line the breakdown may still be long: it wraps within the bar rather than run past the edge. */
-.toolbar-end > .apply { min-width: 0; }
-.toolbar-end .apply-count { white-space: normal; min-width: 0; }
-.ov-page > .toolbar:has(.apply-count) > .toolbar-end { flex-shrink: 1; min-width: 0; }
 /* Focus always shows as focus: outside the small switch, and over a queued cell's dash. */
 .tool-switch .switch:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 

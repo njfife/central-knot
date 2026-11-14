@@ -1,12 +1,12 @@
 // Pieces the marketplace and plugin pages draw alike: a plugin's one switch, a tool's mark, Update, a README, and "a · b · c"
-// lines. The switch acts at once (pluginstate.ts turnPlugin); Update only chooses, and Apply all runs it (pluginplan.ts). What
-// the marks and the switch say comes from pluginstatus.ts.
-import { rerender, state as app } from './app.ts';
+// lines. The switch acts at once (pluginstate.ts turnPlugin), and so does Update (pluginstate.ts applyPluginOps). What the
+// marks and the switch say comes from pluginstatus.ts.
+import { state as app } from './app.ts';
 import { button, h, icon, toggle } from './dom.ts';
 import { markdown } from './markdown.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
-import { allQueued, pluginKey, toggleMany, type PluginOp } from './pluginplan.ts';
-import { clearNotice, market, openLink, shownDetail, turnPlugin } from './pluginstate.ts';
+import { pluginKey, type PluginOp } from './pluginplan.ts';
+import { applyPluginOps, market, openLink, shownDetail, turnPlugin } from './pluginstate.ts';
 import { PREVIEW_ONLY, addWords, cantUninstall, copyStale, foundIn, outdated, switchPartial, switchWords, toolMark, updateTools, versionToCompare, type ToolMark } from './pluginstatus.ts';
 import { pluginUpdates } from './pluginupdateview.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, PluginView, PluginsView } from './types.ts';
@@ -86,7 +86,7 @@ export function pluginSwitch(view: PluginsView, entry: MarketplaceView, plugin: 
 }
 
 /**
- * What Update chooses for one plugin: an update in each tool whose installed copy is older than the marketplace's or
+ * What Update runs for one plugin: an update in each tool whose installed copy is older than the marketplace's or
  * differs from it at the same version (pluginstatus.outdated), and
  * its parts brought up to date in each tool holding them out of date. Empty when nothing is out of date.
  */
@@ -97,15 +97,16 @@ export function updateOps(view: PluginsView, entry: MarketplaceView, plugin: Plu
   return [...tools.map(tool => op(tool, 'update')), ...parts.map(tool => op(tool, 'install-parts'))];
 }
 
-/** "Update in Claude Code and Codex" (or in 3 tools) for these ops, or once they are all chosen, the way to take them back. `row`: on a list row. */
+/** "Update in Claude Code and Codex" (or in 3 tools) for these ops; a click runs them at once. `row`: on a list row. */
 export function updateButton(ops: PluginOp[], id: string, { row = false } = {}) {
   const tools = [...new Set(ops.map(op => op.tool))];
-  const chosen = allQueued(market.draft, ops);
+  const named = (action: PluginOp['action']) => andList(ops.filter(op => op.action === action).map(op => names[op.tool]));
+  const title = [named('update') && `Updates it in ${named('update')} now. An update can’t be undone.`,
+    named('install-parts') && `Brings its parts up to date in ${named('install-parts')} now; Undo puts them back.`];
   // On a list row it is a link, so the row keeps its height, and a click on it doesn't open the plugin.
-  return button({ variant: row ? 'link' : chosen ? 'ghost' : 'outline', size: row ? 'micro' : 'small', icon: chosen || row ? undefined : 'refresh-cw', id, disabled: !!app.busy,
-    label: chosen ? 'Don’t update' : `Update in ${tools.length > 2 ? `${tools.length} tools` : andList(tools.map(tool => names[tool]))}`,
-    attrs: { title: chosen ? 'Leaves it as it is.' : `Chooses the update for ${andList(tools.map(tool => names[tool]))}; it runs on Apply all, and an update can’t be undone.` },
-    onclick: (event: Event) => { if (row) event.stopPropagation(); toggleMany(market.draft, ops); clearNotice(); rerender(); } });
+  return button({ variant: row ? 'link' : 'outline', size: row ? 'micro' : 'small', icon: row ? undefined : 'refresh-cw', id, disabled: !!app.busy,
+    label: `Update in ${tools.length > 2 ? `${tools.length} tools` : andList(tools.map(tool => names[tool]))}`, attrs: { title: title.filter(Boolean).join(' ') },
+    onclick: (event: Event) => { if (row) event.stopPropagation(); void applyPluginOps(ops); } });
 }
 
 /** Rendered READMEs by text and context: a redraw (every click) reuses the built nodes instead of parsing again. */

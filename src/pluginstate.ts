@@ -1,13 +1,18 @@
-// Plugins: the page's state and actions. Marketplaces, what is chosen, what the last Apply all did, and where the person
-// is browsing all live here, apart from the other features; app.ts only routes to it and resets it when the home changes.
+// Plugins: the page's state and actions. Marketplaces, what the last run did, and where the person is browsing all live
+// here, apart from the other features; app.ts only routes to it and resets it when the home changes.
+// Every click acts at once, by one of two routes, split by whether the plugin's record changes: the switch and each tool's
+// links go through turnPlugin (main records first, marketplaces.ts turn); Update, Update all, Update parts, a skill's switch,
+// a part's switch and their Undo go through applyPluginOps. Both set market.lastRun, which the toolbar says with one Undo.
+// One page action at a time (app.ts busy): a click during a run lands on a disabled control and is dropped, never run twice.
+// Steps that run by themselves (pluginupdates.ts) take their turn with the page's in main's one queue.
 import { announce, busy, rerender, setHome, state as app, tell } from './app.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { plural } from './model.ts';
-import { notUndone, resultLines, forSource, pluginKey, prune, recordRun, resultSentence, reverse, runPlan, type LastRun, type PluginDone, type PluginDraft, type PluginOp } from './pluginplan.ts';
+import { notUndone, resultLines, forSource, pluginKey, resultSentence, reverse, runPlan, type LastRun, type PluginDone, type PluginOp } from './pluginplan.ts';
 import { FIND_FROM, categoriesOf, copiesToCompare, marketTitle, matches, partsTools, pluginPlace, undoLimits } from './pluginstatus.ts';
 import { readInTurn, readInto, type Read } from './reads.ts';
 import type { HarnessId, MarketplaceView, PartPlan, PluginDetail, PluginTurn, PluginsView } from './types.ts';
-import { toolNames } from './words.ts';
+import { andList, toolNames } from './words.ts';
 
 const api = () => window.centralKnot;
 
@@ -21,7 +26,7 @@ export type MarketActivity = 'adding' | 'removing' | 'applying' | 'undoing' | 'l
 export const ACTIVITIES: Record<MarketActivity, { label: string; band: string }> = {
   adding: { label: 'Reading the marketplace…', band: 'Reading the marketplace… Nothing is installed by this.' },
   removing: { label: 'Removing from the list…', band: 'Removing from the list…' },
-  applying: { label: 'Applying…', band: 'Applying… Each change runs that tool’s own command and can take a few seconds.' },
+  applying: { label: 'Applying…', band: 'Applying… Each change runs that tool’s own command. An update can take a minute or more.' },
   undoing: { label: 'Undoing…', band: 'Undoing… Each change runs that tool’s own command and can take a few seconds.' },
   checking: { label: 'Checking for newer plugins…', band: 'Checking for newer plugins… Nothing is installed by this.' },
   listing: { label: 'Listing the marketplace…', band: 'Listing the marketplace in the tool’s own plugin list… Nothing is installed by this.' },
@@ -34,12 +39,10 @@ export const market = {
   /** Marketplaces and what each tool has installed: read when the page opens or the home changes (pagedata.ts). */
   read: pageData<PluginsView>(),
   get view(): PluginsView | undefined { return this.read.data; },
-  /** Why a marketplace could not be added, or why an Apply all stopped. */
+  /** Why a marketplace could not be added, or why a run stopped. */
   problem: undefined as string | undefined,
   activity: undefined as MarketActivity | undefined,
-  /** Changes chosen but not applied (pluginplan.ts): nothing runs until Apply all. */
-  draft: new Map() as PluginDraft,
-  /** The last Apply all (or Undo), so the toolbar can say what happened and offer the way back, in that home only. */
+  /** The last run (a click or its Undo), so the toolbar can say what happened and offer the way back, in that home only. */
   lastRun: undefined as LastRun | undefined,
   /** The plugin and tools a command is running for, so their marks show it is working. */
   working: undefined as { source: string; plugin: string; tools: HarnessId[] } | undefined,
@@ -67,9 +70,9 @@ export function toggleOpened(key: string): void {
   rerender();
 }
 
-/** A different home has other tools and other installs: nothing chosen, done or read in the last one carries over. */
+/** A different home has other tools and other installs: nothing done or read in the last one carries over. */
 export function resetMarket(): void {
-  resetPageData(market.read); market.problem = undefined; market.draft.clear(); market.lastRun = undefined; market.working = undefined; market.addOpen = false;
+  resetPageData(market.read); market.problem = undefined; market.lastRun = undefined; market.working = undefined; market.addOpen = false;
   market.readmes.clear(); forgetDetails(); market.partsPlans.clear(); market.opened.clear(); market.nav = startNav();
 }
 
@@ -81,7 +84,7 @@ export function current(): { entry: MarketplaceView; index: number } | undefined
   return list[index] ? { entry: list[index]!, index } : undefined;
 }
 
-/** The toolbar's notice ("… added", "… refreshed") has done its job once the person moves on or chooses something. */
+/** The toolbar's notice ("… added", "… refreshed") has done its job once the person moves on. */
 export function clearNotice(): void { if (app.outcome?.page === 'plugins') app.outcome = undefined; }
 
 /** How many of a marketplace's plugins kept elsewhere are read ahead (each is a small Git copy), so a large catalog stays cheap. */
@@ -90,7 +93,6 @@ const REMOTE_READ_AHEAD = 8;
 /**
  * The plugins the marketplace on screen lists under the current find text and category: those every tool that can take
  * them has first, then those some tool has, then those no tool has, by name within each (pluginstatus.ts pluginPlace).
- * Pending choices move nothing until Apply all.
  */
 export function shownPlugins(entry: MarketplaceView) {
   const view = market.view;
@@ -146,18 +148,17 @@ function readShown(): void {
 
 /**
  * Every new view of the marketplaces ends here. An action's view replaces the page's data (and a read still on its way
- * is dropped as older); a missing view keeps what was there. Then choices it made stale are dropped, where the person is
- * is checked against it, and what the place on screen shows is read.
+ * is dropped as older); a missing view keeps what was there. Then where the person is is checked against it, and what the
+ * place on screen shows is read.
  */
 function showView(view?: PluginsView | null): void {
   if (view) putPageData(market.read, view);
   settleView();
 }
 
-/** After a new view: stale choices go, the place on screen is checked against it, and what it shows is read. */
+/** After a new view: the place on screen is checked against it, and what it shows is read. */
 function settleView(): void {
   markDetailsStale();
-  prune(market.draft, market.view);
   settleNav();
   readShown();
 }
@@ -320,7 +321,11 @@ export const pickMarketplaceFolder = () => api().pickMarketplaceFolder();
 /** Opens an https link in the browser. */
 export const openLink = (url: string) => void api().openExternal(url);
 
-/** Runs plugin changes through each tool's own command and keeps what each one did; choices not reached stay chosen. */
+/**
+ * One click's plugin steps (Update, Update all, Update parts, a skill's or a part's switch), or the Undo of one, run at once
+ * through each tool's own command. The run replaces market.lastRun. A run that stops leaves the rest unrun; the page, read
+ * again, still offers their buttons.
+ */
 export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'undoing' : 'applying', async () => {
   const home = app.home!.home;
   market.problem = undefined;
@@ -330,8 +335,10 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
     result = await runPlan(ops, planApi, home, step => { market.working = { source: step.source, plugin: step.plugin, tools: step.tools }; rerender(); });
   } finally {
     market.working = undefined;
-    market.lastRun = recordRun(market.draft, ops, result.done, undo, home);
-    market.problem = result.stopped;
+    market.lastRun = { done: result.done, undo, home, ...(undo ? { rest: notUndone(ops, result.done) } : {}) };
+    // A run that stopped after some steps names the plugins it didn't reach; the toolbar says what did run.
+    const unrun = [...new Set(ops.filter(op => !result.done.some(entry => entry.source === op.source && entry.plugin === op.plugin)).map(op => op.plugin))];
+    market.problem = result.stopped && result.done.length && unrun.length ? `Stopped before ${andList(unrun)}: ${result.stopped}` : result.stopped;
     await readAgain();
   }
   // A result that offers Undo is said in the toolbar, with its Undo; one that only tells (an Undo done) in the status bar.
@@ -392,7 +399,7 @@ const undoTurn = (last: LastRun & { turn: NonNullable<LastRun['turn']> }) => act
   announce(market.problem ?? (resultSentence(resultLines(done, true), true) || 'Nothing changed.'));
 });
 
-/** Undo, or "Undo the rest": the last run's way back, by the route that made it (a plugin's switch, or Apply all). */
+/** Undo, or "Undo the rest": the last run's way back, by the route that made it (turnPlugin or applyPluginOps). */
 export function undoLast(): void {
   const last = market.lastRun;
   if (last?.turn) void undoTurn({ ...last, turn: last.turn });

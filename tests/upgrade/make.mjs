@@ -57,17 +57,17 @@ async function previewNine() {
   await put('.copilot/agents/helper.agent.md', agent('helper', 'Found only in Copilot CLI.'));
   const all = await tools();
   assert.deepEqual(all, ['claude-cli', 'copilot-cli', 'codex-cli']);
-  // 2. Skills page, Apply all: notes everywhere; style everywhere but Codex (which keeps its own); clash, whose copies differ,
+  // 2. Skills page: notes everywhere; style everywhere but Codex (which keeps its own); clash, whose copies differ,
   //    with no copy chosen (held: nothing written); drafts in Claude Code alone. scratch is left as found.
   assert.deepEqual(did(await applyChanges(context, [
     { key: 'notes', managed: true, off: [] }, { key: 'style', managed: true, off: ['codex-cli'] },
     { key: 'clash', managed: true, off: [] }, { key: 'drafts', managed: true, off: ['copilot-cli', 'codex-cli'] },
   ])), ['clash - held', 'notes codex-cli written', 'notes copilot-cli written', 'style copilot-cli written']);
-  // 3. MCP servers page, Apply all, with Write to Claude Code: docs (Copilot CLI's) everywhere; search in Claude Code alone.
+  // 3. MCP servers page, with Write to Claude Code: docs (Copilot CLI's) everywhere; search in Claude Code alone.
   //    local-db is left as found.
   const servers = [{ key: 'docs', managed: true, off: [] }, { key: 'search', managed: true, off: ['copilot-cli', 'codex-cli'] }];
   assert.deepEqual(did(await applyMcp(context, all, servers, { claudeNow: ['docs', 'search'] })), ['docs claude-cli written', 'docs codex-cli written']);
-  // 4. Agents page, Apply all: reviewer everywhere; planner, whose model field only Claude Code has, one-way to the others.
+  // 4. Agents page: reviewer everywhere; planner, whose model field only Claude Code has, one-way to the others.
   //    helper is left as found.
   const agents = [{ key: 'reviewer', managed: true, off: [] }, { key: 'planner', managed: true, off: [] }];
   assert.deepEqual(did(await applyAgents(context, all, agents)), ['planner codex-cli written', 'planner copilot-cli written', 'reviewer codex-cli written', 'reviewer copilot-cli written']);
