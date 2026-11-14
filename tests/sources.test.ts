@@ -6,12 +6,12 @@ import assert from 'node:assert/strict';
 import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readHistory } from '../src/history.ts';
-import { libraryAction, librarySentence } from '../src/historyactions.ts';
+import { doneWords, libraryAction, librarySentence } from '../src/historyactions.ts';
 import { libraryWords } from '../src/libraryrow.ts';
 import { addSource, bringBack, checkSource, previewSource, removeSource, sourcesView } from '../src/sources.ts';
 import type { SourcePreview } from '../src/types.ts';
 import { bytes, everywhere, folderOf, itemOf, put, sandbox, seen, skillText, type Box } from './skillclicks.ts';
-import { applySkills } from '../src/skills.ts';
+import { applySkills, restoreSkill } from '../src/skills.ts';
 import { deslopFiles, repository, skillMd, standInHosts } from './sourcerepo.ts';
 
 const hosts = await standInHosts();
@@ -55,6 +55,7 @@ test('The owner’s example: a link to a repository whose root is one skill offe
     assert.deepEqual(await sentences(box), ['Brought in from github.com/stephenturner/skill-deslop (main): in Central Knot, Off, until you turn it on.']);
     const view = (await sourcesView(box.context)).sources[0];
     assert.deepEqual([view.link, view.names.map(name => [name.name, name.state, name.on])], [DESLOP, [['deslop', 'in', false]]]);
+    assert.deepEqual((await seen(box, box.context, 'deslop')).fact?.fromSource, { link: DESLOP }, 'its row on Skills says where it is from');
 
     const { row } = await seen(box, box.context, 'deslop');
     await applySkills(box.context, box.tools, [{ key: 'deslop', managed: true, off: [], seenManaged: false }]);
@@ -155,8 +156,11 @@ test('Both changed, the edit here later: it stays current, the source’s is kep
     const kept = (await readHistory(box.context)).at(-1)!, item = (await itemOf(box, 'notes'))!;
     const use = libraryAction(kept, item, { managed: box.tools, pending: [] })!;
     assert.equal(use.label, 'Use it');
-    await applySkills(box.context, box.tools, [use.change]);
+    // As History's button runs it: the source's version is current in every tool, and the entry says it was used.
+    await restoreSkill(box.context, box.tools, kept.id);
     for (const tool of box.tools) assert.equal(await toolBody(box, tool, 'notes'), 'Theirs.');
+    const used = (await readHistory(box.context)).find(event => event.id === kept.id)!;
+    assert.deepEqual([!!used.undoneBy, doneWords(used)], [true, 'Made current']);
 
     await editHere(box, 'notes', 'Mine again.', '2026-11-06T10:00:00Z');
     await repo.commit({ 'SKILL.md': skillMd('notes', 'Theirs again.') }, '2026-11-06T10:00:00.500Z');
@@ -441,7 +445,7 @@ test('Remove: each item it brought stays as it is, On or Off, with its versions,
     const before = [await itemOf(box, 'notes'), await everywhere(box)];
     await removeSource(box.context, id);
     assert.deepEqual([await itemOf(box, 'notes'), await everywhere(box)], before, 'nothing about the item is written');
-    assert.deepEqual((await sourcesView(box.context)).sources, []);
+    assert.deepEqual([(await sourcesView(box.context)).sources, (await seen(box)).fact?.fromSource], [[], undefined], 'and its row no longer names a source');
     // Linked to a source that is no longer recorded: a new source with the same name and content links it again.
     const { added } = await add(box, 'https://github.com/team/notes');
     assert.deepEqual(added.sourced, [{ name: 'notes', answer: 'link' }]);

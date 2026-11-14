@@ -412,6 +412,8 @@ test('A source: S = seen is nothing; S changed with current = seen updates it; S
   assert.equal(fromSource(linked('l', 's'), there('s'), 'this'), 'nothing');
   assert.equal(fromSource(linked('l', 'l'), there('s'), 'this'), 'update');
   assert.equal(fromSource(linked('l', 'old'), there('l'), 'this'), 'update');
+  // Nothing changed here since the last read, so the source's content is taken whatever its commit's time says (a rebase there).
+  assert.equal(fromSource(linked('l', 'l', '2026-11-05T10:00:00.000Z'), there('s', '2026-11-03T10:00:00.000Z'), 'this'), 'update');
 });
 
 test('A source: both changed, the later wins by the source’s head commit; a tie, under a second, keeps the current version', () => {

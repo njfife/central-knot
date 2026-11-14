@@ -198,6 +198,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
 /** What an entry's row shows in place of its action once that action was used (a found item taken in: its Undo). */
 export function doneWords(event: HistoryEvent): string {
   if (tookIn(event)) return 'Undone';
+  if (event.kind === 'kept-edit' && event.cause === 'source') return 'Made current';
   return event.kind === 'off' ? 'Turned on since' : event.kind === 'on' ? 'Turned off since' : event.kind === 'deleted' ? 'Restored' : 'Undone';
 }
 
