@@ -207,8 +207,8 @@ function otherApps(home: HomeView) {
 function everyHarness(home: HomeView) {
   const done = outcomeBand();
   const cards = listed(home);
-  // What the read's catch-up copied is news here too, not only on the Skills tables.
-  const caught = caughtUpBand(home.sync, home.skills.notices);
+  // What the passes since the last read copied where it was missing, every kind's: news on this list.
+  const caught = caughtUpBand(home);
   // A home with no tools says so as every page does, with another home to choose; on this computer, which tools were looked for.
   // (A home whose tools are all left out lists them, each with its switch.)
   if (!home.sync.present.length) {

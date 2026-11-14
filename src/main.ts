@@ -39,7 +39,7 @@ import { addSource, bringBack, checkSource, previewSource, removeSource, sources
 import { readParts } from './parts.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
-import { homePass } from './homepass.ts';
+import { homePass, passTells } from './homepass.ts';
 import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from './profiles.ts';
 import { homeItems, inUse, inUseName, switchable, type LiveItem } from './profileplan.ts';
 import { defaultHistoryDays, historyDayChoices, syncOwner } from './model.ts';
@@ -435,7 +435,7 @@ function refreshTray() {
   if (process.platform === 'darwin') tray.setTitle(`${unseen || unseenPlugins ? '•' : ''}${short ? ` ${short}` : ''}`.trim());
 }
 /** Sync once, from either menu: one pass that writes, with Automatic sync left off. */
-const syncOnce = () => fromTray(async () => { keepServersAndAgents((await pass(await read(), true)).serversAndAgents); });
+const syncOnce = () => fromTray(async () => { keepPass(await pass(await read(), true)); });
 /** Menu bar actions take their turn like the page's, then tell the page. */
 async function fromTray(work: () => Promise<void>) {
   await queued(work).catch(() => undefined);
@@ -485,12 +485,16 @@ function makeTray() {
 /** What passes did since the page last read, so no notice is lost between reads. */
 let pendingResults: DestinationResult[] = [], pendingNotices: SyncNotice[] = [];
 let pendingServerNotices: SyncNotice[] = [], pendingAgentNotices: SyncNotice[] = [];
-let lastStopped: string | undefined;
+/** Why the last background pass's kinds stopped (homepass.ts passTells `stopped`), so only a new reason tells an open page at once. */
+let lastStopped = '';
 
-interface ServersAndAgentsResult { failures: DestinationResult[]; stopped: DestinationResult[]; serverNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean;
+interface ServersAndAgentsResult { serverNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean;
   /** The servers' and agents' found keys the pass left found (types.ts PassResult found), each with its kind's prefix. */ found: string[] }
-/** `done`: every result of the pass, all three kinds, for a caller that says what it did (a tool's Manage switch). */
-interface BackgroundPass { skills?: LibraryPass; serversAndAgents?: ServersAndAgentsResult; done?: DestinationResult[] }
+/**
+ * `told`: what the page is told of the pass, every kind alike (homepass.ts passTells); `done`: every result of the pass, all
+ * three kinds, for a caller that says what it did (a tool's Manage switch).
+ */
+interface BackgroundPass { skills?: LibraryPass; serversAndAgents?: ServersAndAgentsResult; told?: ReturnType<typeof passTells>; done?: DestinationResult[] }
 
 /**
  * One pass on the open home: writes only with Sync on (or when asked explicitly); with Sync off nothing is done in the
@@ -504,22 +508,23 @@ async function pass(snapshots: Snapshot[], explicit = false): Promise<Background
   const { synced, profilesFailed } = await homePass(shared, await managedNow(shared, snapshots), syncOn || explicit);
   if (profilesFailed !== undefined) logFailure('moving profiles', profilesFailed);
   if (!synced) return {};
-  const { skills, servers, agents, crashes } = synced;
-  return { skills: skills ?? { results: [], writes: 0 }, done: [skills, servers, agents].flatMap(kind => kind?.results ?? []), serversAndAgents: {
-    failures: [...crashes, ...[...(servers?.results ?? []), ...(agents?.results ?? [])].filter(entry => entry.outcome === 'failed')],
-    stopped: ([['MCP sync', servers?.stopped], ['Agents sync', agents?.stopped]] as const).filter(([, why]) => why).map(([item, why]) => ({ item, outcome: 'failed' as const, message: why! })),
+  const { skills, servers, agents } = synced;
+  return { skills: skills ?? { results: [], writes: 0 }, done: [skills, servers, agents].flatMap(kind => kind?.results ?? []), told: passTells(synced), serversAndAgents: {
     serverNotices: servers?.notices ?? [], agentNotices: agents?.notices ?? [], settling: !!(servers?.settling || agents?.settling),
     found: [...(servers?.found ?? []).map(key => `mcp:${key}`), ...(agents?.found ?? []).map(key => `agent:${key}`)],
     changed: !!(servers?.writes || servers?.notices?.length || agents?.writes || agents?.notices?.length) } };
 }
 
-/** A failed servers or agents pass, or a copy it could not write, is told on the page, never dropped. */
-function keepServersAndAgents(outcome: ServersAndAgentsResult | undefined) {
-  if (!outcome) return;
-  for (const failure of outcome.failures) if (!pendingResults.some(known => known.item === failure.item && known.harness === failure.harness && known.message === failure.message)) pendingResults.push(failure);
-  for (const stop of outcome.stopped) if (!pendingResults.some(known => known.message === stop.message)) pendingResults.push(stop);
-  pendingServerNotices.push(...outcome.serverNotices);
-  pendingAgentNotices.push(...outcome.agentNotices);
+/**
+ * What a pass tells the page, kept until it reads: every kind's results (homepass.ts passTells), each kept once, so a pass that
+ * finds the same failure again adds nothing; and each kind's notices, for its own page.
+ */
+function keepPass({ told, skills, serversAndAgents }: BackgroundPass) {
+  const same = (one: DestinationResult, other: DestinationResult) => one.item === other.item && one.harness === other.harness && one.outcome === other.outcome && one.message === other.message;
+  for (const result of [...(told?.stopped ?? []), ...(told?.copies ?? [])]) if (!pendingResults.some(known => same(known, result))) pendingResults.push(result);
+  pendingNotices.push(...(skills?.notices ?? []));
+  pendingServerNotices.push(...(serversAndAgents?.serverNotices ?? []));
+  pendingAgentNotices.push(...(serversAndAgents?.agentNotices ?? []));
 }
 
 async function syncThenView(explicit = false): Promise<HomeView> {
@@ -530,13 +535,11 @@ async function syncThenView(explicit = false): Promise<HomeView> {
 async function syncAndView(explicit = false): Promise<{ view: HomeView; passed: BackgroundPass }> {
   const shared: ShareContext = { ...context(), reads: new Map() };
   const before = await read();
-  const passed = await pass(before, explicit), { skills, serversAndAgents } = passed;
-  keepServersAndAgents(serversAndAgents);
+  const passed = await pass(before, explicit), { skills } = passed;
+  keepPass(passed);
   lookAgainSoon(passed);
   foundGained(passed);
-  // A pass that could not finish says so on the page instead of failing quietly.
-  const caughtUp = [...pendingResults.splice(0), ...(skills?.results ?? []), ...(skills?.stopped ? [{ item: 'Sync', outcome: 'failed' as const, message: skills.stopped }] : [])];
-  const notices = [...pendingNotices.splice(0), ...(skills?.notices ?? [])];
+  const caughtUp = pendingResults.splice(0), notices = pendingNotices.splice(0);
   const profiles = await readProfiles(current!.home);
   // The home is read again after a pass that may have written (Sync on, or Sync once): a pass that stopped part-way reports
   // no writes, yet may have made some. An observe-only pass, or one that couldn't run, wrote nothing.
@@ -550,8 +553,7 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passed: 
     // Apps that run the tools or read their files are looked for only on this computer, like the tools' own apps.
     ...(current!.mode === 'actual' ? { otherApps: await findOtherApps(current!.home) } : {}),
     sync: { managed, present, joining: await joiningCounts(shared, managed, present, syncEverything === true), writes: await skillFolders(shared, managed), access: await writeAccess(shared), gate: await syncGate(shared),
-      caughtUp: caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain),
-      syncEverything },
+      caughtUp, syncEverything },
     skills: await skillsView(shared, managed, notices),
     mcp: await serversView(shared, managed, pendingServerNotices.splice(0)),
     agents: await agentsView(shared, managed, pendingAgentNotices.splice(0)),
@@ -758,25 +760,22 @@ async function backgroundPass() {
   const snapshots = await read();
   // A tool installed or removed changes every page's columns.
   let changed = toolsChangedHere(snapshots);
-  const { skills, serversAndAgents } = await pass(snapshots);
-  keepServersAndAgents(serversAndAgents);
+  const passed = await pass(snapshots), { skills, serversAndAgents, told } = passed;
+  keepPass(passed);
   // The page reads again whether or not the pass wrote: with Sync off an edit or deletion is only noted (it shows as waiting,
   // not as Synced), and a tool's own switch turned in its settings changes no content, only that tool's mark.
   if ((fromEvent && !syncOn) || fromSettings) changed = true;
   // A new found item left as it is (copies that differ, say) writes nothing: the page hears of it all the same.
-  if (foundGained({ skills, serversAndAgents })) changed = true;
-  lookAgainSoon({ skills, serversAndAgents });
-  if (skills?.stopped && skills.stopped !== lastStopped) {
-    pendingResults.push({ item: 'Sync', outcome: 'failed', message: skills.stopped });
-    changed = true;
-  }
-  lastStopped = skills?.stopped;
+  if (foundGained(passed)) changed = true;
+  lookAgainSoon(passed);
+  // A kind's pass that could not finish says so on the page at once, instead of failing quietly; the same reason again waits for a read.
+  const stopped = (told?.stopped ?? []).map(stop => `${stop.item}: ${stop.message}`).join('\n');
+  if (stopped && stopped !== lastStopped) changed = true;
+  lastStopped = stopped;
   const wrote = !!skills && !!(skills.writes || skills.notices?.length || serversAndAgents?.changed);
-  // An item the pass turned On or Off (a copy deleted by hand, one taken in) may change which profile is in use.
-  if (wrote) followProfiles(lastProfiles, await liveNow(context()));
   if (wrote) {
-    pendingResults.push(...skills!.results);
-    pendingNotices.push(...(skills!.notices ?? []));
+    // An item the pass turned On or Off (a copy deleted by hand, one taken in) may change which profile is in use.
+    followProfiles(lastProfiles, await liveNow(context()));
     // Nobody saw it: the window is closed, gone or behind other windows (D-36).
     if (window.isDestroyed() || !window.isVisible() || !window.isFocused()) { unseen = true; refreshTray(); }
   }

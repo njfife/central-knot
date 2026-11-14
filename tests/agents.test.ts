@@ -4,7 +4,7 @@
 // seen, found agents, versions, Delete, and what a crash or a damaged record leaves. Agents are the pass's worked kind, so its
 // own rules (src/librarypass.ts: the folder guards, the settle window, the gate, the order of steps) are exampled here.
 import { test } from 'node:test';
-import { itemNotice } from './notices.ts';
+import { bandAfter, itemNotice } from './notices.ts';
 import assert from 'node:assert/strict';
 import fs, { chmod, mkdir, readFile, readdir, rename, rm, utimes, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -18,6 +18,7 @@ import { rowClicks, harnessIs, placeOf, libraryWords, sentences } from '../src/l
 import { librarySentence } from '../src/historyactions.ts';
 import { listed, originWords } from '../src/library.ts';
 import { readHistory } from '../src/history.ts';
+import { homePass, passTells } from '../src/homepass.ts';
 import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
 import { readTomlTables } from '../src/textedit.ts';
 import { chooseTools } from '../src/toolchoice.ts';
@@ -362,6 +363,24 @@ inBox('A harness uninstalled changes nothing: its copy deleted meanwhile, instal
   assert.deepEqual([back.writes, (await itemOf(box))!.on, back.notices], [1, true, []]);
   assert.match((await readOf(box, 'copilot-cli'))!, /Be brief/);
   assert.match((await readOf(box, 'codex-cli'))!, /Be brief/);
+});
+
+inBox('A harness installed later gets an On agent from the pass of the whole home, and the Caught up band names the agent and that harness alone, once; an edit spread is its notice’s to tell', async box => {
+  // Codex uninstalled while reviewer is turned on: the click writes it into Copilot CLI.
+  box.tools = ['claude-cli', 'copilot-cli'];
+  await on(box);
+  // Codex is installed again: the next pass writes reviewer there by itself, and the band names Codex alone.
+  box.tools = [...tools];
+  const wholeHome = async () => (await homePass(box.context, box.tools, true)).synced!;
+  assert.deepEqual(bandAfter(await wholeHome()), { items: ['reviewer'], tools: ['codex-cli'] });
+  assert.match((await readOf(box, 'codex-cli'))!, /Be brief/);
+  // A pass with nothing to write tells nothing: the next view has no band.
+  assert.deepEqual(bandAfter(await wholeHome()), { items: [], tools: [] });
+  // An edit in Claude Code spreads: the Agents page's notice says so, so the band leaves reviewer out.
+  await edit(box, 'claude-cli', 'Be thorough.');
+  const edited = await wholeHome();
+  assert.deepEqual([edited.agents?.notices?.map(itemNotice).map(notice => notice.kind), edited.agents?.writes], [['edit'], 2]);
+  assert.deepEqual(bandAfter(edited), { items: [], tools: [] });
 });
 
 // ---------- Edits and deletions by hand ----------
@@ -1137,6 +1156,14 @@ inBox('A damaged, unreadable or newer agents record stops every write and is nev
   await writeFile(recordFile, good);
   assert.equal((await pass(box)).stopped, undefined);
   assert.match((await readOf(box, 'copilot-cli'))!, /Be thorough\./, 'with the record back, the edit spreads');
+});
+
+inBox('A damaged agents record stops the agents’ part of the pass of the whole home: the page is told why, under Agents sync', async box => {
+  await on(box);
+  await writeFile(join(box.home, '.central-knot/agents.json'), '{"formatVersion": 3, "items": {');
+  const told = passTells((await homePass(box.context, box.tools, true)).synced!);
+  assert.deepEqual(told.stopped.map(stop => [stop.item, stop.outcome]), [['Agents sync', 'failed']]);
+  assert.match(told.stopped[0].message, /^The agents record is damaged\./);
 });
 
 inBox('With an intact record this app has no memory of, a click stops until an explicit Resume, which keeps the record and remembers it', async box => {

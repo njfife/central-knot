@@ -6,7 +6,7 @@
 // kept or folded once its page shows it (toldNotices); until then it lives across reads in app.ts keepUnshown. First setup's
 // walkthrough (firstsetup.ts) is a band among a table's bands, given copyQuestion to hold the question of the item it is at.
 import { brandMark } from './brand.ts';
-import { caughtUpNames, defaultHistoryDays, groupBy, noticeNames, syncOwner } from './model.ts';
+import { caughtUpNames, defaultHistoryDays, groupBy, syncOwner } from './model.ts';
 import { cantUse, choiceEffect, nearestLine, shortQuote } from './copywords.ts';
 import { andList, byToolOrder, kindNouns, toolNames, toolsPhrase } from './words.ts';
 import { walkthroughBand } from './firstsetup.ts';
@@ -19,7 +19,7 @@ import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
 import { linkLabel } from './sourcelink.ts';
-import type { Change, DestinationResult, ItemNotice, LibraryFacts, SyncNotice, SyncView, HarnessId, PartsInstall, TakenInNotice, ThroughPlugin } from './types.ts';
+import type { Change, DestinationResult, HomeView, ItemNotice, LibraryFacts, SyncNotice, HarnessId, PartsInstall, TakenInNotice, ThroughPlugin } from './types.ts';
 import { market } from './pluginstate.ts';
 import { pluginKey, type PluginDraft } from './pluginplan.ts';
 import { alongWords, cantSwitch, click as clickPluginItem, clickWords, itemSaid, onNow as itemOn, switchWords, turnEvery, type PluginItemAt } from './pluginswitch.ts';
@@ -749,16 +749,16 @@ function syncOffBand(): HTMLElement | null {
 }
 
 /**
- * What the background passes copied where it was missing, and where: shown on the Harnesses list until dismissed (it comes back
- * only for a different catch-up). `told`: the notices that already say an item's change. Null once dismissed.
+ * What the background passes copied where it was missing, every kind's items, and where (model.ts caughtUpNames): shown on the
+ * Harnesses list with the view that brought it (the next read brings only what passes did since), until dismissed; once
+ * dismissed, it comes back only for a different catch-up. Null when there is none, or once dismissed.
  */
-export function caughtUpBand(sync: SyncView, told: SyncNotice[]): HTMLElement | null {
-  const items = caughtUpNames(sync, new Set(told.flatMap(noticeNames)));
+export function caughtUpBand(home: HomeView): HTMLElement | null {
+  const { items, tools } = caughtUpNames(home);
   const key = `caught-up:${items.join(',')}`;
   if (!items.length || state.dismissed.has(key)) return null;
-  const tools = [...new Set(sync.caughtUp.filter(result => items.includes(result.item) && result.outcome === 'written' && result.harness).map(result => names[result.harness!]))];
   return h('div.band', { role: 'status' }, icon('check', 14, 'tone-success'),
-    h('span.band-text', {}, `Caught up: copied ${items.length > 4 ? `${items.slice(0, 4).join(', ')} and ${items.length - 4} more` : andList(items)} to ${tools.length ? andList(tools) : 'the tools that were missing them'}, because ${items.length === 1 ? 'it is' : 'they are'} on.`),
+    h('span.band-text', {}, `Caught up: copied ${items.length > 4 ? `${items.slice(0, 4).join(', ')} and ${items.length - 4} more` : andList(items)} to ${tools.length ? andList(tools.map(tool => names[tool])) : 'the tools that were missing them'}, because ${items.length === 1 ? 'it is' : 'they are'} on.`),
     closeButton(() => { state.dismissed.add(key); rerender(); }, { id: 'caught-up-dismiss' }));
 }
 
