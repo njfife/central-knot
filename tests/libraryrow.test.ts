@@ -12,7 +12,7 @@ const { harnessLine, noticeWords, placeTag, said } = sentences(libraryWords.agen
 
 const tools = ['claude-cli', 'copilot-cli', 'codex-cli'];
 /** "reviewer" On at version 'b', applied to all three harnesses. */
-const item = (changes: Partial<LibraryItem> = {}): LibraryItem => ({ ...newItem('agent', 'reviewer', 'reviewer'), on: true, hash: 'b',
+const item = (changes: Partial<LibraryItem> = {}): LibraryItem => ({ ...newItem('reviewer', 'reviewer'), on: true, hash: 'b',
   versions: [{ hash: 'b', at: '2026-11-08T09:20:00.000Z', from: { how: 'found', harness: 'claude-cli' } }], applied: { 'claude-cli': 'b', 'copilot-cli': 'b', 'codex-cli': 'b' }, ...changes });
 /**
  * The row agents.ts gives the page for `agent` when the harnesses hold `hashes`: for an agent in the library, its plan from

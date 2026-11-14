@@ -203,7 +203,6 @@ export type VersionChange = { changed: string[] } | { differs: string[] } | 'fir
 
 /** One item as Central Knot holds it. The same shape for every kind. */
 export interface LibraryItem {
-  kind: ItemKind;
   /** Its name as one key across harnesses (lower case, as macOS compares file names). */
   key: string;
   /** Its name as written, which its files in the harnesses take. */
@@ -234,8 +233,8 @@ export interface LibraryItem {
 /** An item's key, from its name as a harness writes it: one key across harnesses, compared as macOS compares file names (LibraryItem key). */
 export const itemKey = (name: string) => name.normalize('NFC').toLowerCase();
 
-export const newItem = (kind: ItemKind, key: string, name: string): LibraryItem =>
-  ({ kind, key, name, on: false, hash: '', versions: [], except: [], applied: {}, own: {} });
+export const newItem = (key: string, name: string): LibraryItem =>
+  ({ key, name, on: false, hash: '', versions: [], except: [], applied: {}, own: {} });
 
 /** Whether a record's value has an item's shape (a record is read from disk, so nothing about it is taken on trust). */
 export function isLibraryItem(value: unknown): value is LibraryItem {

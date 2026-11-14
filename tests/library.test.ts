@@ -63,7 +63,7 @@ test('Off, and the copy a removal was owed for is gone already: only forgotten',
 const day = (number: number) => new Date(Date.UTC(2026, 10, number)).toISOString();
 const time = (number: number) => Date.parse(day(number));
 /** An agent On at version 'a' (made on the 1st), applied to Claude Code, Copilot CLI and Codex. */
-const item = (changes: Partial<LibraryItem> = {}): LibraryItem => ({ ...newItem('agent', 'reviewer', 'reviewer'), on: true, hash: 'a',
+const item = (changes: Partial<LibraryItem> = {}): LibraryItem => ({ ...newItem('reviewer', 'reviewer'), on: true, hash: 'a',
   versions: [{ hash: 'a', at: day(1), from: { how: 'found', harness: 'claude-cli' } }], applied: { 'claude-cli': 'a', 'copilot-cli': 'a', 'codex-cli': 'a' }, ...changes });
 const quiet = { takeIn: undefined, turnedOffBy: undefined, keep: [], write: [], remove: [], forget: [], found: [] };
 
@@ -398,7 +398,7 @@ test('Found otherwise: taken in from the one content (first harness), or from th
 
 /** An item linked to a source: its current version `hash` (made at `at`), and what was last seen there. */
 const linked = (hash: string, seen: string, at = '2026-11-02T10:00:00.000Z'): LibraryItem =>
-  ({ ...newItem('skill', 'notes', 'notes'), hash, versions: [{ hash, at, from: { how: 'source', link: 'team/notes' } }], source: 'src', seen });
+  ({ ...newItem('notes', 'notes'), hash, versions: [{ hash, at, from: { how: 'source', link: 'team/notes' } }], source: 'src', seen });
 const there = (hash: string, commitAt = '2026-11-03T10:00:00.000Z') => ({ hash, commitAt });
 
 test('A source: a name the library has no item for is made, Off; a deleted one is not, but Add on its row brings it back', () => {
@@ -431,7 +431,7 @@ test('A source: a name gone, read whole, drops an item linked to it; one that ca
 });
 
 test('A source: a name the library has that isn’t linked is linked when its content is the same, else not brought in; one linked to another source is never taken over', () => {
-  const own = { ...newItem('skill', 'notes', 'notes'), hash: 'l' };
+  const own = { ...newItem('notes', 'notes'), hash: 'l' };
   assert.equal(fromSource(own, there('l'), 'none'), 'link');
   assert.equal(fromSource(own, there('s'), 'none'), 'differs');
   assert.equal(fromSource(linked('l', 'l'), there('l'), 'another'), 'another');

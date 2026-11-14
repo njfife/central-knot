@@ -99,10 +99,10 @@ export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
   refresh(): Promise<HomeView | null>;
   applySkills(changes: Change[], resume: boolean, home: string): Promise<PassResult>;
-  /** Clears a tool's own switch that turns a skill off there (skills.ts clearSwitch). */
-  clearSkillSwitch(key: string, tool: HarnessId, home: string): Promise<PassResult>;
-  /** Makes a copy outside Central Knot's own (a link, a copy in ~/.agents/skills) Central Knot's (skills.ts takeOver). */
-  takeOverSkill(key: string, tool: HarnessId, home: string): Promise<PassResult>;
+  /** Clears a tool's own switch that turns a skill off there (skills.ts clearSwitch). `resume`: as a click's (app.ts clickResumes). */
+  clearSkillSwitch(key: string, tool: HarnessId, resume: boolean, home: string): Promise<PassResult>;
+  /** Makes a copy outside Central Knot's own (a link, a copy in ~/.agents/skills) Central Knot's (skills.ts takeOver). `resume`: as a click's. */
+  takeOverSkill(key: string, tool: HarnessId, resume: boolean, home: string): Promise<PassResult>;
   /** One version of a skill: its SKILL.md and the names of its other files (skills.ts skillVersion). */
   skillVersion(key: string, hash: string): Promise<{ skill: string; files: string[] } | null>;
   history(): Promise<HistoryList>;
@@ -176,13 +176,13 @@ export interface DesktopApi {
   /** Main's update state changed (a check, download progress, ready, failed). */
   onUpdatesChanged(callback: (view: UpdateView) => void): void;
   /** `choice`: which overwritten edit to put back, for an event with several. */
-  restore(eventId: string, resume: boolean, home: string, choice?: string): Promise<ApplyResult>;
+  restore(eventId: string, home: string, choice?: string): Promise<ApplyResult>;
   /** Each tool's own instruction file (INS-01). */
   instructions(readId?: number): Promise<InstructionFile[] | null>;
   /** One version of an agent as Central Knot's library holds it: its name, description and prompt; null when it is no longer kept. */
   agentVersion(key: string, hash: string): Promise<{ name: string; description: string; prompt: string } | null>;
-  /** Convert to skill (AGT-02): an agent as a Pi skill. */
-  convertAgent(key: string, home: string): Promise<{ stopped?: string; skill?: string; origin?: HarnessId }>;
+  /** Convert to skill (AGT-02): an agent as a Pi skill. `resume`: as a click's (app.ts clickResumes). */
+  convertAgent(key: string, resume: boolean, home: string): Promise<{ stopped?: string; skill?: string; origin?: HarnessId }>;
   /** A skill edit's SKILL.md before and after, for "See change". */
   eventChange(eventId: string): Promise<{ before: string; after: string } | undefined>;
   /** Shows a file in the system file manager (Finder, Explorer); nothing is opened or changed. */

@@ -15,6 +15,10 @@
 // a source refuses that repo here (resolve). Only skills come from a source in this version: other files there are named
 // (`later`), not read. A skill there that can't be read is "unreadable", with why, and is never taken to be gone.
 //
+// Each click's own refusals come first; then, where it writes, it enters the gate for library writes (share.ts libraryGate):
+// Add and Check now before they write the record and run the pass (which enters it too), Remove for Central Knot's own file
+// alone (`ownFile`); Look, which writes only its own folder, asks it for that; Add on a row writes nothing itself (its pass enters).
+//
 // A fetch can take a while, so it runs outside the queue main.ts keeps for every change: Look writes only its own folder
 // (sources/.look-<token>); Check now fetches into a stage of its own and only in its turn (`turn`) swaps it in for the source's
 // copy and runs the pass, so a source removed meanwhile, or another check, never meets a half-swapped copy.
@@ -28,7 +32,7 @@ import { itemKey, linkedSource, sourceAnswers, type LibraryItem } from './librar
 import type { SourceRead } from './librarypass.ts';
 import { plural } from './model.ts';
 import { copySource, gitFailure, runGit, sameSource } from './plugins.ts';
-import { exists, readTree, removeTree, writeAccess, writeDurably, type ShareContext } from './share.ts';
+import { exists, libraryGate, readTree, removeTree, writeAccess, writeDurably, type ShareContext } from './share.ts';
 import { applySkills, skillKind } from './skills.ts';
 import type { SkillContent } from './skillstore.ts';
 import { copyOf, lookOf, readSources, saveSources, sourcesFolder, stageOf, type SourceRecord } from './sourcestore.ts';
@@ -209,8 +213,8 @@ async function fetchInto(where: Resolved, target: string): Promise<{ commit: str
  */
 export async function previewSource(context: ShareContext, link: string): Promise<SourcePreview> {
   const refuse = (refused: string): SourcePreview => ({ refused, link });
-  const access = await writeAccess(context);
-  if (!access.allowed) return refuse(access.reason);
+  const gate = await libraryGate(context, { ownFile: true });
+  if ('refused' in gate) return refuse(gate.refused);
   const { sources, problem } = await readSources(context.home);
   if (problem) return refuse(problem);
   const where = await resolve(context, link);
@@ -244,8 +248,6 @@ async function answer(context: ShareContext, done: Omit<SourceResult, 'view'> = 
 
 /** Add: the look `token` read becomes a source, recorded first, then carried out by the pass: each skill there comes in Off. */
 export async function addSource(context: ShareContext, tools: HarnessId[], token: string): Promise<SourceResult> {
-  const access = await writeAccess(context);
-  if (!access.allowed) return answer(context, { stopped: access.reason });
   const look = /^[0-9a-f-]{36}$/.test(token) ? lookOf(context.home, token) : '';
   const where = look && await readFile(`${look}.json`, 'utf8').then(text => JSON.parse(text) as Resolved & { commit: string; commitAt: string }, () => undefined);
   if (!where || !(await exists(look))) return answer(context, { stopped: 'That look at the link is no longer kept. Look at it again.' });
@@ -254,6 +256,8 @@ export async function addSource(context: ShareContext, tools: HarnessId[], token
   if (twinOf(sources, where)) return answer(context, { stopped: 'That link is a source already: its row is below.' });
   const refused = noSkillWhy(await holdsAt(look, where.folder, repoName(where.repository)), where);
   if (refused) return answer(context, { stopped: refused });
+  const gate = await libraryGate(context, { start: true });
+  if ('refused' in gate) return answer(context, { stopped: gate.refused });
   const now = new Date().toISOString();
   const source: SourceRecord = { id: randomUUID(), link: where.link, repository: where.repository, ref: where.ref, folder: where.folder, commit: where.commit, commitAt: where.commitAt, readAt: now, addedAt: now };
   await rename(look, copyOf(context.home, source.id));
@@ -268,8 +272,9 @@ export async function addSource(context: ShareContext, tools: HarnessId[], token
  * source's row (`problem`); any read fetched takes the last one's place, whole or not, so its row says why it isn't.
  */
 export async function checkSource(context: ShareContext, toolsNow: () => Promise<HarnessId[]>, id: string, turn: <T>(work: () => Promise<T>) => Promise<T>): Promise<SourceResult> {
-  const access = await writeAccess(context);
-  if (!access.allowed) return answer(context, { stopped: access.reason });
+  // Asked before the fetch, so a home that can't be written fetches nothing; entered in its turn, before anything is written.
+  const asked = await libraryGate(context);
+  if ('refused' in asked) return answer(context, { stopped: asked.refused });
   const before = (await readSources(context.home)).sources.find(source => source.id === id);
   if (!before) return answer(context, { stopped: 'That source is no longer recorded. Nothing was changed.' });
   const stage = stageOf(context.home, randomUUID());
@@ -277,6 +282,8 @@ export async function checkSource(context: ShareContext, toolsNow: () => Promise
   return turn(async () => {
     const { sources, problem } = await readSources(context.home), source = sources.find(each => each.id === id);
     if (problem || !source) { await removeTree(stage); return answer(context, { stopped: problem ?? 'That source was removed meanwhile. Nothing was changed.' }); }
+    const gate = await libraryGate(context, { start: true });
+    if ('refused' in gate) { await removeTree(stage); return answer(context, { stopped: gate.refused }); }
     if ('problem' in fetched) {
       await saveSources(context.home, sources.map(each => (each.id === id ? { ...each, problem: fetched.problem } : each)));
       return answer(context, { stopped: `Couldn’t read ${linkLabel(source.link)}. ${fetched.problem}` });
@@ -293,8 +300,6 @@ export async function checkSource(context: ShareContext, toolsNow: () => Promise
 
 /** Add on one name the library holds deleted, at a source's row: it comes back Off, from the source's last read (no fetch). */
 export async function bringBack(context: ShareContext, tools: HarnessId[], id: string, key: string): Promise<SourceResult> {
-  const access = await writeAccess(context);
-  if (!access.allowed) return answer(context, { stopped: access.reason });
   const { sources, problem } = await readSources(context.home), source = sources.find(each => each.id === id);
   if (problem || !source) return answer(context, { stopped: problem ?? 'That source is no longer recorded. Nothing was changed.' });
   if (!(await exists(copyOf(context.home, id)))) return answer(context, { stopped: 'Its last read is no longer kept. Check it now first.' });
@@ -303,11 +308,11 @@ export async function bringBack(context: ShareContext, tools: HarnessId[], id: s
 
 /** Remove: the source is forgotten, with its last read. Each item it brought stays as it is, On or Off, with its versions, no longer linked. */
 export async function removeSource(context: ShareContext, id: string): Promise<SourceResult> {
-  const access = await writeAccess(context);
-  if (!access.allowed) return answer(context, { stopped: access.reason });
   const { sources, problem } = await readSources(context.home);
   if (problem) return answer(context, { stopped: problem });
   if (!sources.some(source => source.id === id)) return answer(context, { stopped: 'That source is no longer recorded. Nothing was changed.' });
+  const gate = await libraryGate(context, { ownFile: true });
+  if ('refused' in gate) return answer(context, { stopped: gate.refused });
   await saveSources(context.home, sources.filter(source => source.id !== id));
   await removeTree(copyOf(context.home, id));
   return answer(context);

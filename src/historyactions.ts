@@ -64,15 +64,16 @@ import type { Change, HarnessId, HistoryEvent, HomeView, LibraryFacts } from './
 import { andList, sentence, toolName, toolsPhrase } from './words.ts';
 
 /**
- * Whose a History entry is among the library's kinds, by the page's name for the kind (app.ts PageKind), with the item's key:
- * an agent's is keyed `agent:<key>` (not a Pull's change to Claude Code's own settings alone, which is gitrepo.ts's); an MCP
- * server's `mcp:<key>` (before the library, `mcp:<name>` as written, whose key is share.ts itemKey of it); a skill's by its key
- * alone, as before the library (no other kind's key is without a `kind:` prefix). Undefined for any other entry.
+ * Whose a History entry is among the library's kinds, by the page's name for the kind (app.ts PageKind), with the item's key.
+ * No library item's: a profile's, a tool's Manage switch's and Synchronize everything's entries (by their kind), a Pull's
+ * change to the base instructions (`base`) or to an agent's Claude Code settings alone (`settingsFile`), both gitrepo.ts's.
+ * Of the rest, an agent's is keyed `agent:<key>`; an MCP server's `mcp:<key>` (before the library, `mcp:<name>` as written,
+ * whose key is share.ts itemKey of it); and a skill's by its key alone, whatever characters its folder's name holds.
  */
 export function libraryEntry(event: HistoryEvent): { kind: 'agents' | 'skills' | 'mcp'; key: string } | undefined {
-  if (event.key.startsWith('agent:')) return event.settingsFile ? undefined : { kind: 'agents', key: event.key.slice('agent:'.length) };
+  if (!event.key || event.base || event.settingsFile || ['profile', 'managing', 'everything'].includes(event.kind)) return undefined;
+  if (event.key.startsWith('agent:')) return { kind: 'agents', key: event.key.slice('agent:'.length) };
   if (event.key.startsWith('mcp:')) return { kind: 'mcp', key: itemKey(event.key.slice('mcp:'.length)) };
-  if (!event.key || event.key.includes(':') || event.base || event.kind === 'profile') return undefined;
   return { kind: 'skills', key: event.key };
 }
 

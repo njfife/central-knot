@@ -129,7 +129,7 @@ const cannotTake = (disk: ServerDisk, item: Wanted, tool: HarnessId) => {
  * Only a server Central Knot installed elsewhere as that plugin's part counts: a name alone could be another server.
  */
 async function serversThroughPlugins(context: ShareContext, tools: HarnessId[]): Promise<ServerDisk['through']> {
-  const all = await throughPlugins(context, tools, 'mcp', itemKey);
+  const all = await throughPlugins(context, tools, 'mcp');
   return new Map([...all].map(([tool, given]) => [tool, new Map([...given].flatMap(([key, { asParts, text: _text, ...plugin }]) => (asParts ? [[key, plugin] as const] : [])))]));
 }
 

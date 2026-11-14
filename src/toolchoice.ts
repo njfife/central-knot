@@ -9,7 +9,7 @@ import { harnessIds } from './harnesses.ts';
 import { appendHistory } from './history.ts';
 import { forgetFolders, joinCounts } from './librarypass.ts';
 import { serverKind } from './servers.ts';
-import { newRecord, readRecord, remember, saveRecord, syncGate, writeAccess, type ShareContext } from './share.ts';
+import { leftOutNow, libraryGate, saveRecord, type ShareContext } from './share.ts';
 import { skillKind } from './skills.ts';
 import type { HarnessId, HistoryEvent, JoinCounts } from './types.ts';
 import { toolName } from './words.ts';
@@ -20,17 +20,15 @@ import { toolName } from './words.ts';
  * guardFolders); its copies stay as they are and every item stays as it is. On: it is managed again, and the next pass brings it
  * into line. Refused, as a click is, where nothing may be written (preview only, another build's home, a damaged record); in a
  * home that waits for Resume it resumes, as a click does, only when asked (`resume`: the page showed that state). The first act
- * in a home with no record makes the record (Synchronize everything is left unanswered). One History entry says it; it has no
+ * in a home with no record makes the record (Synchronize everything is left unanswered); a switch that is so already makes no record and resumes nothing. One History entry says it; it has no
  * Undo, since the switch is the way back. Run between passes, like any other write to the records.
  */
 export async function chooseTools(context: ShareContext, tool: HarnessId, on: boolean, resume = false): Promise<{ stopped?: string }> {
-  const access = await writeAccess(context);
-  if (!access.allowed) return { stopped: access.reason };
-  const gate = await syncGate(context);
-  if (gate.state === 'stopped' || (gate.state === 'needs-resume' && !resume)) return { stopped: gate.reason };
-  const record = (await readRecord(context.home)).record ?? newRecord(context);
-  const leftOut = record.leftOut ?? [];
-  if (leftOut.includes(tool) !== on) return {};
+  // A switch that is so already changes nothing, so it enters no gate: no record made, no home resumed.
+  if ((await leftOutNow(context)).includes(tool) !== on) return {};
+  const gate = await libraryGate(context, { start: true, resume });
+  if ('refused' in gate) return { stopped: gate.refused };
+  const { record } = gate, leftOut = record.leftOut ?? [];
   const next = on ? leftOut.filter(other => other !== tool) : [...leftOut, tool];
   // The records let go first: if a write here fails, the record is unchanged and nothing is half left out.
   if (!on) {
@@ -41,7 +39,6 @@ export async function chooseTools(context: ShareContext, tool: HarnessId, on: bo
   }
   if (next.length) record.leftOut = next; else delete record.leftOut;
   await saveRecord(context.home, record);
-  if (gate.state !== 'ready') await remember(context, record.generation);
   await appendHistory(context, [managingEntry(context, tool, on)]);
   return {};
 }
