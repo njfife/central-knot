@@ -3,7 +3,7 @@
 // applied there last. Contents are single letters: 'a' is older than 'b', and so on.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { carryOut, changedHere, decide, fromSource, isLibraryItem, keepVersion, latestCopy, linkedTo, listed, managedAgain, newItem, noteAgainst, plan, setCurrent, originWords, sourceAnswers, takeInAnswer, type HarnessCopy, type LibraryItem, type Shelf, type Version } from '../src/library.ts';
+import { carryOut, changedHere, decide, fromSource, isLibraryItem, keepVersion, latestCopy, linkedTo, listed, managedAgain, mergeFiles, newItem, noteAgainst, plan, setCurrent, originWords, sourceAnswers, takeInAnswer, type HarnessCopy, type LibraryItem, type PathIs, type Shelf, type Version } from '../src/library.ts';
 
 const has = (hash: string, at = 0): HarnessCopy => ({ is: 'present', hash, at });
 /** A copy with no time of its own (an MCP entry: its time is its whole file's). */
@@ -503,8 +503,73 @@ test('A source’s read, all at once: every name and every item linked to it get
   assert.deepEqual(sourceAnswers({ notes: { ...items.notes, on: true, applied: { 'claude-cli': 'l' } } }, read(true), new Set(['src']), { copies }).get('notes'), 'wait');
 });
 
-test('A version read at a source says where, short; an item’s two source values are optional strings', () => {
+test('A source: Merge on its row merges S into the current version where it was changed here; a tool still holding a change leaves it waiting; with nothing changed here, S simply comes in', () => {
+  assert.equal(fromSource(linked('mine', 'old'), there('s'), 'this', { merge: true }), 'merge');
+  const on = { ...linked('mine', 'old'), on: true, applied: { 'claude-cli': 'mine' } } satisfies LibraryItem;
+  assert.equal(fromSource(on, there('s'), 'this', { merge: true, copies: { 'claude-cli': holds('saved just now') } }), 'wait', 'an edit in Claude Code no pass has taken in');
+  assert.equal(fromSource(on, there('s'), 'this', { merge: true, copies: { 'claude-cli': unseen } }), 'wait', 'Claude Code’s copy settling where it was applied');
+  assert.equal(fromSource(linked('l', 'l'), there('s'), 'this', { merge: true }), 'update', 'nothing of its own to merge');
+  assert.equal(fromSource(linked('mine', 's'), there('s'), 'this', { merge: true }), 'nothing', 'nothing waits any more');
+});
+
+// ---------- Merge's table (library.ts's header, MERGE), one row each ----------
+
+/** A file by its bytes' hash and its executable bit, and a folder's paths: single letters for contents. */
+const file = (sha256: string, exec = false): PathIs => ({ sha256, exec });
+const paths = (entries: Record<string, PathIs> = {}) => new Map(Object.entries(entries));
+/** What the merged version has at each path, by path, and the conflicts. */
+const merging = (base: Record<string, PathIs>, yours: Record<string, PathIs>, theirs: Record<string, PathIs>) => {
+  const { merged, conflicts } = mergeFiles(paths(base), paths(yours), paths(theirs));
+  return { merged: Object.fromEntries([...merged].sort(([first], [second]) => first.localeCompare(second))), conflicts };
+};
+const yoursWhole = { bytes: 'yours', mode: 'yours' } as const, theirsWhole = { bytes: 'theirs', mode: 'theirs' } as const;
+
+test('Merge: a path the same on both sides is that, whether unchanged, changed alike or gone on both', () => {
+  assert.deepEqual(merging({ 'SKILL.md': file('b') }, { 'SKILL.md': file('b') }, { 'SKILL.md': file('b') }), { merged: { 'SKILL.md': yoursWhole }, conflicts: [] });
+  assert.deepEqual(merging({ 'SKILL.md': file('b') }, { 'SKILL.md': file('n') }, { 'SKILL.md': file('n') }), { merged: { 'SKILL.md': yoursWhole }, conflicts: [] });
+  assert.deepEqual(merging({ 'old.md': file('o') }, {}, {}), { merged: {}, conflicts: [] });
+  assert.deepEqual(merging({}, { 'new.md': file('n') }, { 'new.md': file('n') }), { merged: { 'new.md': yoursWhole }, conflicts: [] }, 'added alike on both sides');
+});
+
+test('Merge: a path changed on one side only takes that side’s: its bytes, its executable bit, added or deleted', () => {
+  const base = { 'SKILL.md': file('b'), 'run.sh': file('r') };
+  assert.deepEqual(merging(base, { ...base, 'SKILL.md': file('mine') }, base).merged, { 'SKILL.md': yoursWhole, 'run.sh': yoursWhole });
+  assert.deepEqual(merging(base, base, { ...base, 'SKILL.md': file('theirs') }).merged, { 'SKILL.md': theirsWhole, 'run.sh': yoursWhole });
+  assert.deepEqual(merging(base, { ...base, 'run.sh': file('r', true) }, base).merged['run.sh'], yoursWhole, 'made runnable here');
+  assert.deepEqual(merging(base, base, { ...base, 'run.sh': file('r', true) }).merged['run.sh'], theirsWhole, 'made runnable at the source');
+  assert.deepEqual(merging(base, { ...base, 'added.md': file('a') }, base).merged['added.md'], yoursWhole, 'a file added here only survives');
+  assert.deepEqual(merging(base, base, { ...base, 'added.md': file('a') }).merged['added.md'], theirsWhole);
+  assert.deepEqual(Object.keys(merging(base, { 'SKILL.md': file('b') }, base).merged), ['SKILL.md'], 'deleted here');
+  assert.deepEqual(Object.keys(merging(base, base, { 'SKILL.md': file('b') }).merged), ['SKILL.md'], 'deleted at the source');
+});
+
+test('Merge: a file whose bytes both sides changed is a line merge; its executable bit changed on one side goes with it, as does a change of bit against a change of bytes', () => {
+  assert.deepEqual(merging({ 'SKILL.md': file('b') }, { 'SKILL.md': file('mine') }, { 'SKILL.md': file('theirs') }), { merged: { 'SKILL.md': { bytes: 'line-merge', mode: 'yours' } }, conflicts: [] });
+  assert.deepEqual(merging({ 'run.sh': file('b') }, { 'run.sh': file('mine') }, { 'run.sh': file('theirs', true) }).merged['run.sh'], { bytes: 'line-merge', mode: 'theirs' });
+  assert.deepEqual(merging({ 'run.sh': file('b') }, { 'run.sh': file('b', true) }, { 'run.sh': file('theirs') }).merged['run.sh'], { bytes: 'theirs', mode: 'yours' }, 'runnable here, rewritten at the source');
+  assert.deepEqual(merging({ 'run.sh': file('b') }, { 'run.sh': file('mine') }, { 'run.sh': file('b', true) }).merged['run.sh'], { bytes: 'yours', mode: 'theirs' }, 'rewritten here, runnable at the source');
+  assert.deepEqual(merging({ 'run.sh': file('b') }, { 'run.sh': file('n', true) }, { 'run.sh': file('n') }).merged['run.sh'], { bytes: 'yours', mode: 'yours' }, 'the same bytes, made runnable here only');
+});
+
+test('Merge: deleted on one side and changed on the other, added on both sides differently, or a file against a folder, is a conflict, never a deletion', () => {
+  const base = { 'SKILL.md': file('b'), 'notes.md': file('n') };
+  assert.deepEqual(merging(base, { 'SKILL.md': file('b') }, { ...base, 'notes.md': file('theirs') }).conflicts, ['notes.md'], 'deleted here, changed at the source');
+  assert.deepEqual(merging(base, { ...base, 'notes.md': file('mine') }, { 'SKILL.md': file('b') }).conflicts, ['notes.md'], 'changed here, deleted at the source');
+  assert.deepEqual(merging(base, { ...base, 'notes.md': file('n', true) }, { 'SKILL.md': file('b') }).conflicts, ['notes.md'], 'made runnable here, deleted at the source');
+  assert.deepEqual(merging(base, { ...base, 'new.md': file('mine') }, { ...base, 'new.md': file('theirs') }).conflicts, ['new.md'], 'added on both sides, differently');
+  assert.deepEqual(merging(base, { ...base, 'notes.md': 'folder', 'notes.md/a': file('a') }, { ...base, 'notes.md': file('theirs') }).conflicts, ['notes.md'], 'a folder here, a changed file at the source');
+});
+
+test('Merge: a folder that holds a file the merge keeps is kept, though one side deleted it; an empty folder follows the table', () => {
+  const base = { refs: 'folder', 'refs/a.md': file('a') } as const;
+  assert.deepEqual(merging(base, {}, { ...base, 'refs/b.md': file('b') }).merged, { refs: 'folder', 'refs/b.md': theirsWhole });
+  assert.deepEqual(merging({}, { empty: 'folder' }, {}).merged, { empty: 'folder' });
+  assert.deepEqual(merging({ empty: 'folder' }, {}, { empty: 'folder' }).merged, {});
+});
+
+test('A version read at a source says where, short; one Merge made, what it was merged with; an item’s two source values are optional strings', () => {
   assert.equal(originWords({ how: 'source', link: 'https://github.com/stephenturner/skill-deslop/tree/main' }), 'from github.com/stephenturner/skill-deslop (main)');
+  assert.equal(originWords({ how: 'merged', link: 'https://github.com/stephenturner/skill-deslop/tree/main' }), 'merged with github.com/stephenturner/skill-deslop (main)’s version');
   assert.equal(isLibraryItem(linked('l', 'l')), true);
   assert.equal(isLibraryItem({ ...linked('l', 'l'), seen: 4 }), false);
 });
