@@ -2,7 +2,7 @@
   "name": "central-knot",
   "version": "0.6.0",
   "private": true,
-  "description": "Sees and shares user-wide Claude Code and Copilot CLI skills",
+  "description": "Shows the skills, MCP servers, agents, instructions and plugins each AI coding tool on your computer has, and keeps the ones you choose the same across those tools",
   "type": "module",
   "main": "dist/main.cjs",
   "engines": {
