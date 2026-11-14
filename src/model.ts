@@ -1,8 +1,9 @@
 // Small helpers both the main process and the page use: times in words (dayAndTime, timesApart), History's days (the choices
 // and the default: historyDayChoices, defaultHistoryDays), counts (plural), a tool's monogram, which build syncs a home
-// (syncOwner), a notice's names, the notices a view set aside brought, carried into the next view (withSetAside), and grouping.
+// (syncOwner), a notice's names, what the Caught up band names (caughtUpNames), the notices a view set aside brought, carried
+// into the next view (withSetAside), and grouping.
 // Pure: no DOM, no files. Tools' and kinds' names and lists in words are words.ts's.
-import type { HarnessId, HistoryDays, HomeView, Snapshot, SyncGate, SyncNotice, SyncView } from './types.ts';
+import type { HarnessId, HistoryDays, HomeView, Snapshot, SyncGate, SyncNotice } from './types.ts';
 
 const monograms: Record<HarnessId, string> = { 'claude-cli': 'Cc', 'copilot-cli': 'Cp', 'codex-cli': 'Cx', 'pi-cli': 'Pi', 'opencode-cli': 'Oc' };
 export { toolName } from './words.ts';
@@ -15,9 +16,16 @@ export const syncOwner = (gate: SyncGate) => (gate.state === 'stopped' ? gate.ow
 
 /** The items a sync notice names: its one item, or every item Synchronize everything took in. */
 export const noticeNames = (notice: SyncNotice) => (notice.kind === 'taken-in' ? notice.items : [notice.item]);
-/** Items the background passes wrote where they were missing, leaving out those a sync notice already tells (`told`: their names). */
-export const caughtUpNames = (sync: SyncView, told: Set<string>) =>
-  [...new Set(sync.caughtUp.filter(result => result.outcome === 'written' && !told.has(result.item)).map(result => result.item))];
+/**
+ * What the Caught up band names (matrix.ts caughtUpBand): the items of every kind the passes since the last read wrote where
+ * they were missing (types.ts SyncView caughtUp), and the tools they were written to, leaving out an item a sync notice on any
+ * kind's page already tells.
+ */
+export function caughtUpNames(view: Pick<HomeView, 'sync' | 'skills' | 'mcp' | 'agents'>): { items: string[]; tools: HarnessId[] } {
+  const told = new Set([view.skills, view.mcp, view.agents].flatMap(kind => kind.notices.flatMap(noticeNames)));
+  const written = view.sync.caughtUp.filter(result => result.outcome === 'written' && !told.has(result.item));
+  return { items: [...new Set(written.map(result => result.item))], tools: [...new Set(written.flatMap(result => (result.harness ? [result.harness] : [])))] };
+}
 /**
  * A view the page set aside (it arrived while an action ran) gave main's pending notices and caught-up results to the page,
  * so they go into the next view taken of the same home rather than being lost. Each is told once.

@@ -2747,9 +2747,18 @@ async function openCodeFlow() {
   const partAgent = readNow(join(mine, 'agents/release-reviewer.md'));
   check('and a plugin’s agent is an OpenCode agent', partAgent.includes('description: Reviews a release branch before it ships.') && partAgent.includes('mode: all') && partAgent.includes('Review it.'), partAgent || await p.text('.bands'));
   await pictures(p, 'opencode-parts-four-tools');
-  // Five tools is the widest table: nothing is cut off at the smallest window.
+  // Five tools is the widest table: nothing is cut off at the smallest window. Pi is installed with Harnesses open, whose
+  // Refresh is the one read that finds it (Plugins' own read would find it first and start a second).
+  await p.click('#nav-harnesses');
   mkdirSync(join(practice, '.pi/agent'), { recursive: true });
   await p.click('#header-refresh');
+  // That read wrote the On items there by itself, the server among them: the Caught up band says so, naming Pi alone (what
+  // the clicks above wrote is theirs), once: the next read, which writes nothing, has no band.
+  const caught = await p.text('.bands') ?? '';
+  check('the Caught up band names the server the read wrote in Pi, and Pi alone', /^Caught up: copied .*oc-docs.* to Pi, because they are on\./.test(caught), caught);
+  await pictures(p, 'caught-up-server');
+  await p.click('#header-refresh');
+  check('and the next read, which writes nothing, has no band', !(await p.text('.bands') ?? '').includes('Caught up'), await p.text('.bands'));
   await p.click('#nav-skills');
   const marksPerRow = () => p.run(`[...(document.querySelector('.ov-row[data-key] .tool-marks')?.children ?? [])].map(mark => mark.dataset.tool)`);
   check('with Pi too, each row has five tool marks', (await marksPerRow()).length === 5, await marksPerRow());
