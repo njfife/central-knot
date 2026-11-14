@@ -326,8 +326,9 @@ export interface SyncView {
   access: WriteAccess;
   gate: SyncGate;
   /**
-   * What the background passes did since the page last read: skills' copies written or removed and what failed; of servers,
-   * agents and a switch from the Profile menu, only what failed (main.ts syncAndView).
+   * What the passes of the whole home did since the page last read, every kind alike (homepass.ts passTells): copies written or
+   * removed, what failed, and each kind's pass that stopped part-way; and what a switch from the Profile menu could not do
+   * (main.ts syncAndView).
    */
   caughtUp: DestinationResult[];
   /**

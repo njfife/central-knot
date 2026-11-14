@@ -1,10 +1,11 @@
 // MCP servers on Central Knot's library, on real settings files in a temp home with all five tools (servers.ts): a found
-// server taken in, Off and On with each tool's own fields, Claude Code's file written only by Write to Claude Code, hand edits
-// and deletions, files that are missing, unreadable or rewritten, what is never taken in, what a tool can't hold, and a tool's
-// own switch left as it is; at the end, saves that land while a pass writes, a crash inside a checked write, and entries in less
-// common forms. The model's rule is library.ts's; each case here is a worked example of it on entries.
+// server taken in, Off and On with each tool's own fields, a tool installed later and what the Caught up band says of it,
+// Claude Code's file written only by Write to Claude Code, hand edits and deletions, files that are missing, unreadable or
+// rewritten, what is never taken in, what a tool can't hold, and a tool's own switch left as it is; at the end, saves that land
+// while a pass writes, a crash inside a checked write, and entries in less common forms. The model's rule is library.ts's; each
+// case here is a worked example of it on entries.
 import { test } from 'node:test';
-import { itemNotice } from './notices.ts';
+import { bandAfter, itemNotice } from './notices.ts';
 import assert from 'node:assert/strict';
 import fs, { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -16,6 +17,7 @@ import { libraryAction, librarySentence } from '../src/historyactions.ts';
 import { asItIs, canAdd, libraryWords, sentences, statusLine } from '../src/libraryrow.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { discover } from '../src/discovery.ts';
+import { homePass, passTells } from '../src/homepass.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { applyServers, restoreServer, serversView, writeToClaude } from '../src/servers.ts';
 import { readRecord, saveRecord, type ShareContext } from '../src/share.ts';
@@ -111,6 +113,30 @@ test('Off takes the entry out of every tool, Claude Code’s once Write to Claud
       assert.deepEqual(await entry(tool), was, `${tool}: the same values and own fields`);
     }
     for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli'] as const) assert.equal(after[tool], before[tool], `${tool}: byte for byte`);
+  } finally { await box.cleanup(); }
+});
+
+test('A tool installed later gets an On server from the pass of the whole home, and the Caught up band names the server and that tool alone, once; an edit spread is its notice’s to tell', async () => {
+  const box = await sandbox();
+  try {
+    const before: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'], withPi: HarnessId[] = [...before, 'pi-cli'];
+    await writeFile(box.path('copilot-cli'), `${JSON.stringify({ mcpServers: { docs: { type: 'local', command: 'npx', args: ['-y', 'docs'] } } }, null, 2)}\n`);
+    // Add: the click writes docs into Codex; Claude Code's copy waits for Write to Claude Code.
+    await box.send(on('docs'), before);
+    // Pi is installed: the next pass writes docs there by itself. The band names Pi, not Codex (the click's own write) nor
+    // Claude Code (still waiting: held, never written).
+    const pass = async () => (await homePass(box.context, withPi, true)).synced!;
+    const installed = await pass();
+    assert.deepEqual(bandAfter(installed), { items: ['docs'], tools: ['pi-cli'] });
+    assert.deepEqual(passTells(installed).copies.map(result => [result.harness, result.outcome]), [['pi-cli', 'written']], 'Claude Code’s wait is no problem to tell either');
+    assert.equal(await commandIn(box, 'pi-cli'), 'npx');
+    // A pass with nothing to write tells nothing: the next view has no band.
+    assert.deepEqual(bandAfter(await pass()), { items: [], tools: [] });
+    // An edit in Copilot CLI spreads to Codex and Pi: the MCP servers page's notice says so, so the band leaves docs out.
+    await writeFile(box.path('copilot-cli'), (await box.files())['copilot-cli']!.replace('"docs"\n', '"docs",\n        "--v2"\n'));
+    const edited = await pass();
+    assert.deepEqual([edited.servers?.notices?.map(itemNotice).map(notice => notice.kind), await argsIn(box, 'pi-cli')], [['edit'], ['-y', 'docs', '--v2']]);
+    assert.deepEqual(bandAfter(edited), { items: [], tools: [] });
   } finally { await box.cleanup(); }
 });
 
