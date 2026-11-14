@@ -13,7 +13,7 @@ import { DAY_MS } from '../src/model.ts';
 import { addSource, bringBack, checkDue, checkSource, keepFromSource, mergeFromSource, previewSource, removeSource, replaceFromSource, SOURCE_CHECK_EVERY_MS, sourcesView } from '../src/sources.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import type { SourcePreview } from '../src/types.ts';
-import { bytes, everywhere, folderOf, itemOf, put, sandbox, seen, skillText, type Box } from './skillclicks.ts';
+import { bytes, everywhere, folderOf, historyActions, itemOf, put, sandbox, seen, skillText, type Box } from './skillclicks.ts';
 import { applySkills, restoreSkill } from '../src/skills.ts';
 import { deslopFiles, repository, skillMd, standInHosts } from './sourcerepo.ts';
 
@@ -497,6 +497,8 @@ test('Git missing: Merge says it couldn’t run and changes nothing', async () =
 // ---------- Keep mine (library.ts KEEP MINE) ----------
 
 const keepIt = (box: Box, id: string, key = 'notes') => keepFromSource(box.context, box.tools, id, key);
+/** What History is told of an item linked to a source the home records, with no tool holding a change (historyactions.ts ItemNow). */
+const linkedNow = (box: Box) => ({ managed: box.tools, pending: [], linked: true as const });
 
 test('Keep mine: yours stays current and no tool is written; the source’s version is kept as a version that was never current, no longer waits, and History says so with an Undo', async () => {
   const box = await sandbox();
@@ -528,7 +530,7 @@ test('Keep mine, then the source changes again: it waits against the version kep
     assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'wait' }]);
     assert.deepEqual(merged(await mergeIt(box, id)), [{ name: 'notes', answer: 'merge', merge: 'merged' }]);
     assert.deepEqual(await toolTexts(box), box.tools.map(() => skillMd('notes', lines('First, mine.').replace('The middle.', 'The middle, theirs.'))));
-    assert.equal(libraryAction(kept, (await itemOf(box, 'notes'))!, { managed: box.tools, pending: [] }), undefined, 'Keep mine’s Undo is gone once another version is current');
+    assert.equal(libraryAction(kept, (await itemOf(box, 'notes'))!, linkedNow(box)), undefined, 'Keep mine’s Undo is gone once another version is current');
   } finally { await box.cleanup(); }
 });
 
@@ -538,18 +540,31 @@ test('Keep mine, its Undo, then Merge: the Undo moves only the source’s versio
     const { id, mine } = await waitingToMerge(box);
     await keepIt(box, id);
     const before = await toolTexts(box), entry = (await readHistory(box.context)).at(-1)!;
-    const undo = libraryAction(entry, (await itemOf(box, 'notes'))!, { managed: box.tools, pending: [] })!;
-    assert.deepEqual([undo.label, undo.help, undo.change.version], ['Undo', 'Make the source’s version wait again; yours stays current', mine]);
+    const undo = libraryAction(entry, (await itemOf(box, 'notes'))!, linkedNow(box))!;
+    assert.deepEqual([undo.label, undo.help, undo.change.version], ['Undo', 'Take back Keep mine: yours stays current, and the source’s version is no longer marked as declined', mine]);
     const undone = await restoreSkill(box.context, box.tools, entry.id);
     assert.deepEqual([undone.stopped, (await itemOf(box, 'notes'))!.hash, await toolTexts(box), await notices(box, 'notes')], [undefined, mine, before, ['wait', true]]);
-    assert.equal((await sentences(box, 'notes')).at(-1), 'Undone: yours stays current, and the source’s version it was kept over waits again.');
+    assert.equal((await sentences(box, 'notes')).at(-1), 'Undone: yours stays current; the source’s version is no longer marked as declined or taken, and the source’s row says whether an update waits.');
     assert.equal(doneWords(entry), 'Undone');
     // Neither entry offers anything now: Keep mine's Undo is used, and its own entry's way back is Keep mine on the row.
     const [kept, back] = (await readHistory(box.context)).slice(-2), item = (await itemOf(box, 'notes'))!;
-    assert.deepEqual([libraryAction(kept, item, { managed: box.tools, pending: [] }), libraryAction(back, item, { managed: box.tools, pending: [] })], [undefined, undefined]);
+    assert.deepEqual([libraryAction(kept, item, linkedNow(box)), libraryAction(back, item, linkedNow(box))], [undefined, undefined]);
     assert.deepEqual(merged(await mergeIt(box, id)), [{ name: 'notes', answer: 'merge', merge: 'merged' }]);
     assert.deepEqual(await toolTexts(box), box.tools.map(() => skillMd('notes', lines('First, mine.', 'Last, theirs.'))));
-    assert.equal(libraryAction(back, (await itemOf(box, 'notes'))!, { managed: box.tools, pending: [] }), undefined, 'the Undo’s entry offers nothing at the merged version either');
+    assert.equal(libraryAction(back, (await itemOf(box, 'notes'))!, linkedNow(box)), undefined, 'the Undo’s entry offers nothing at the merged version either');
+  } finally { await box.cleanup(); }
+});
+
+test('Keep mine, then its source removed: History no longer offers its Undo, on the page or in main, since no source is left to compare with', async () => {
+  const box = await sandbox();
+  try {
+    const { id } = await waitingToMerge(box);
+    await keepIt(box, id);
+    const kept = (await readHistory(box.context)).at(-1)!;
+    assert.deepEqual((await historyActions(box)).filter(action => action.event.id === kept.id).map(action => action.label), ['Undo']);
+    await removeSource(box.context, box.tools, id);
+    assert.deepEqual((await historyActions(box)).filter(action => action.event.id === kept.id), [], 'the page offers nothing');
+    assert.equal((await restoreSkill(box.context, box.tools, kept.id)).stopped, 'That change has nothing left to undo: the skill is as that would leave it.', 'and main refuses it');
   } finally { await box.cleanup(); }
 });
 
@@ -728,8 +743,8 @@ test('The check once a day drops a skill with the window closed: its row says th
     assert.deepEqual(answered(checked.done), [{ name: 'jottings', answer: 'make' }, { name: 'notes', answer: 'drop' }]);
     assert.deepEqual(await fromSourceOf(box), { link, removed: true });
     assert.deepEqual(fromSourceWords({ link, removed: true }), {
-      tag: { text: 'removed at its source', title: 'github.com/team/notes no longer has it: it is Off, in Central Knot only, and no longer from that source. Turn it on to use it again.' },
-      before: 'github.com/team/notes no longer has it: it is Off, in Central Knot only, and no longer from that source. Turn it on to use it again. Should github.com/team/notes have it again, it follows the source if unchanged here, and stays as you have it if you changed it. See ',
+      tag: { text: 'removed at its source', title: 'github.com/team/notes no longer has it: it is Off, and no longer from that source. Turn it on to use it again.' },
+      before: 'github.com/team/notes no longer has it: it is Off, and no longer from that source. Turn it on to use it again. Should github.com/team/notes have it again, it follows the source if unchanged here, and stays as you have it if you changed it. See ',
       after: '.' });
     // A hundred days on, History holds nothing of it; nothing else was kept about it, and a fresh look says the same.
     await pruneHistory({ ...box.context, now: () => Date.now() + 100 * DAY_MS });
@@ -817,6 +832,35 @@ test('A source that can’t be read whole after the drop is no reason to think t
     await check(box, id);
     assert.equal(await fromSourceOf(box), undefined);
     assert.deepEqual((await sourcesView(box.context, box.tools)).sources[0].names.find(name => name.key === 'notes')?.state, 'unreadable');
+  } finally { await box.cleanup(); }
+});
+
+test('A skill that was here already, the same, when the source was added: linked, its content recorded as a version from the source too; removed there, it turns Off and both pages say so', async () => {
+  const box = await sandbox();
+  try {
+    await put(box, 'claude-cli', { 'SKILL.md': skillMd('notes', 'Mine and theirs.') });
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [], seenOn: false }]);
+    const repo = await repository(hosts, 'https://github.com/team/notes'), link = 'https://github.com/team/notes';
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'Mine and theirs.') }, '2026-11-01T10:00:00Z');
+    assert.deepEqual(answered((await add(box, link)).added), [{ name: 'notes', answer: 'link' }]);
+    const item = (await itemOf(box, 'notes'))!;
+    assert.deepEqual([item.versions[0].hash, item.versions[0].from], [item.hash, { how: 'source', link }], 'the same content, as the source has it');
+    await dropNotes(box, repo, await sourceId(box));
+    assert.deepEqual([(await itemOf(box, 'notes'))!.on, await fromSourceOf(box)], [false, { link, removed: true }]);
+  } finally { await box.cleanup(); }
+});
+
+test('Deleted after its source removed it, then written by hand and taken in again: his own skill, so turned Off nothing calls it removed at its source', async () => {
+  const box = await sandbox();
+  try {
+    const { repo, id } = await oneSkill(box, 'notes', { on: true });
+    await dropNotes(box, repo, id);
+    await applySkills(box.context, box.tools, [{ ...asItIs('notes', await itemOf(box, 'notes')), deleted: true }]);
+    await put(box, 'claude-cli', { 'SKILL.md': skillMd('notes', 'My very own notes.') });
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [], seenOn: false }]);
+    await applySkills(box.context, box.tools, [{ ...asItIs('notes', await itemOf(box, 'notes')), on: false, seenOn: true }]);
+    assert.deepEqual([(await itemOf(box, 'notes'))!.on, (await itemOf(box, 'notes'))!.versions.some(version => version.from.link), await fromSourceOf(box)], [false, true, undefined],
+      'its versions from before the Delete are kept, and say nothing about the skill taken in since');
   } finally { await box.cleanup(); }
 });
 

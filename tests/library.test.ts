@@ -540,6 +540,9 @@ test('Removed at its source: Off, linked to none, a version from a recorded sour
   assert.equal(removedBy(dropped, [lastRead([['jottings', { hash: 'j' }]], 'src', 'team/other')]), undefined, 'no version from that link');
   const merged = { ...dropped, versions: [{ hash: 'l', at: '2026-11-04T10:00:00.000Z', from: { how: 'merged' as const, link: 'team/notes' } }] };
   assert.equal(removedBy(merged, reads), reads[0], 'a version Merge made, with that link, counts too');
+  const takenIn = { hash: 'own', at: '2026-11-06T10:00:00.000Z', from: { how: 'found' as const, harness: 'claude-cli' as const } };
+  assert.equal(removedBy({ ...dropped, hash: 'own', versions: [takenIn, ...dropped.versions] }, reads), undefined, 'taken in from a tool since: only versions after that count');
+  assert.equal(removedBy({ ...dropped, versions: [...dropped.versions, takenIn] }, reads), reads[0], 'taken in first, then from the source');
 });
 
 // ---------- Merge's table (library.ts's header, MERGE), one row each ----------

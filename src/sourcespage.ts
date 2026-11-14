@@ -148,13 +148,15 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'results' | 'no
     result.notWhole ? `Not all of ${label} could be read (its row says why), so the source turned nothing off.` : '',
   ].filter(Boolean);
   const turnOn = dropped.length === 1 && dropped[0].history ? { id: dropped[0].history, label: `Turn ${dropped[0].name} on` } : undefined;
-  const changed = [...updated, ...mergedIn], one = changed.length + kept.length === 1 ? [...changed, ...kept][0] : undefined;
+  // Merge's result exactly yours is Keep mine's outcome, with its entry (librarypass.ts keepMine).
+  const keptAll = [...kept, ...merges.filter(entry => entry.merge === 'had')];
+  const changed = [...updated, ...mergedIn], one = changed.length + keptAll.length === 1 ? [...changed, ...keptAll][0] : undefined;
   const undoLabel = (entry: NonNullable<typeof one>) =>
     (entry.answer === 'keep' ? 'Undo keep mine' : entry.merge ? 'Undo the merge' : entry.name === replaced ? 'Undo the replace' : 'Undo the update');
   const undo = !turnOn && one?.history ? { id: one.history, label: undoLabel(one) } : undefined;
   return {
     text: said.length ? said.join(' ') : `Checked ${label}: nothing came in from it.`, warns: dropped.length > 0 || !!result.notWhole || unmerged.length > 0,
-    ...(changed.length + kept.length ? { note: `See each change, or undo it, in History.` } : {}), ...(turnOn ?? undo ? { undo: turnOn ?? undo } : {}),
+    ...(changed.length + keptAll.length ? { note: `See each change, or undo it, in History.` } : {}), ...(turnOn ?? undo ? { undo: turnOn ?? undo } : {}),
     // Open Skills where something there changed: not for a read that only says what can't be read, or what waits.
     skills: dropped.length + changed.length + made.length + linked.length > 0,
   };
@@ -163,7 +165,7 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'results' | 'no
 /** What a click on Merge did to one skill (types.ts MergeDone), said after it: `into`, the tools the merged version was written to. */
 function mergeWords(name: string, merge: MergeDone, into: string[], homeTools: string[]): string {
   if (merge === 'merged') return `${name} now has your changes and the source’s, merged${into.length ? `, in ${toolsPhrase(into, homeTools)}` : ''}; the version it had is kept.`;
-  if (merge === 'had') return `${name} already had the source’s changes, so Merge changed nothing in it.`;
+  if (merge === 'had') return `${name} already had the source’s changes, so Merge changed nothing in it; the source’s version no longer waits.`;
   if (merge === 'unsettled') return `Merge left ${name} as it was, since a tool’s copy of it can’t be read just now (a save still landing, or a copy that can’t be read as it is). Merge can run once that copy can be read; on Skills, its row says which tool and why.`;
   if ('conflicts' in merge) {
     return `Merge left ${name} as it was: ${andList(merge.conflicts)} changed both here and at the source, in ways that can’t be merged.`
@@ -236,7 +238,7 @@ function removedRow(fact: LibraryFacts, locked: boolean) {
     h('span.source-name-main', {},
       h('span.source-name-line', {}, h('strong.source-name-text', {}, fact.name), h('span.source-name-where.tone-muted', {}, 'not in its last read')),
       h('span.source-name-state', { title: 'Should this source have it again: unchanged here since, it follows the source again; changed here, it stays as you have it.' },
-        'No longer at this source: it is Off, in Central Knot only, and no longer from it.', ' ', turn)));
+        'No longer at this source: it is Off, and no longer from it.', ' ', turn)));
 }
 
 /** The look's panel: where it read, what Add does with each skill, and Add, or why it can't be added. */
@@ -293,7 +295,7 @@ function sourceRow(source: SourceView) {
         attrs: { title: `Make this source’s version of ${called(name)} current, in every tool it is on in; yours is kept as a version, and Undo puts it back` }, onclick: () => void replace(source, name) }),
       button({ variant: 'link', size: 'micro', label: 'Keep mine', id: `source-keep-${source.id}-${name.key}`, disabled: locked,
         attrs: { title: `Keep your ${called(name)} current: this source’s version no longer waits and is kept as a version, and the source’s next change`
-          + ' is compared with it. Nothing is written to a tool, and Undo makes it wait again' }, onclick: () => void keep(source, name) })) : null);
+          + ' is compared with it. Nothing is written to a tool, and Undo takes it back' }, onclick: () => void keep(source, name) })) : null);
   // Each skill this source removed, as the Skills view says it.
   const removed = (state.home?.skills.items ?? []).filter(fact => fact.fromSource?.removed && fact.fromSource.link === source.link);
   return h('li.source-row', { id: `source-${source.id}`, 'data-source': source.id },

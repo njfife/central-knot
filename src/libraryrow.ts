@@ -118,7 +118,7 @@ export interface LibraryRow {
 export function fromSourceWords(from: NonNullable<LibraryFacts['fromSource']>): { tag?: { text: string; title: string }; before: string; after: string } {
   const label = linkLabel(from.link);
   if (from.removed) {
-    const off = `${label} no longer has it: it is Off, in Central Knot only, and no longer from that source. Turn it on to use it again`;
+    const off = `${label} no longer has it: it is Off, and no longer from that source. Turn it on to use it again`;
     return { tag: { text: 'removed at its source', title: `${off}.` },
       before: `${off}. Should ${label} have it again, it follows the source if unchanged here, and stays as you have it if you changed it. See `, after: '.' };
   }

@@ -494,8 +494,8 @@ export interface HistoryEvent {
   /**
    * A Replace's, a Merge's or Keep mine's 'edit' (`cause` 'source', 'source-merged' or 'source-kept'): the source's content the
    * item had taken before it (library.ts LibraryItem seen), which its Undo puts back (Change seen), with the version before it
-   * but for Keep mine's, so where it had been changed here the source's version waits again. On the 'current' entry that Undo
-   * makes: the one it replaced, which the Undo of that Undo puts back; Keep mine's Undo's entry (`previous` = `version`) offers none.
+   * but for Keep mine's, which moves only `seen`; after a Replace's or a Merge's, where it had been changed here, the source's version waits again. On the 'current' entry that Undo
+   * makes: the one it replaced, which the Undo of that Undo puts back; an Undo's entry that moved only `seen` (`previous` = `version`) offers none.
    */
   seen?: string;
   /**

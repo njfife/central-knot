@@ -538,7 +538,7 @@ const toolCopy = (copy: SkillCopy): ToolCopy => ({
  * One skill's row: what each managed tool holds and, for a skill in the library, what the next pass does in each (`plan`, from
  * the same reading a pass makes: copiesOf) and why nothing can happen in one (`unseen`, `cannot`). Besides, what only skills
  * have: how a tool has it another way, which copies outside Central Knot's can be taken over, and each tool's own switch.
- * `fromSource`: the source it is linked to, as sources.ts sourceFacts says it.
+ * `fromSource`: the source it is from, as sources.ts sourceFacts says it.
  */
 async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefined, fromSource: LibraryFacts['fromSource']): Promise<LibraryFacts> {
   const disk = look.disk, slot = disk.byKey.get(key) ?? {}, outside = disk.outside.get(key) ?? {};

@@ -2361,6 +2361,16 @@ async function sourcesFlow() {
   await a.click('#outcome-undo');
   check('its Undo makes the source’s version wait again, with every tool as it was', await until(async () => await a.exists(`#source-keep-${id}-deslop`)) && record()?.seen === clashBefore.seen
     && JSON.stringify(Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md')))) === JSON.stringify(clashBefore.tools), [await a.text('.band-done'), await a.text('.source-row')]);
+  // The source's change made by hand in Claude Code, with a change of its own lines apart: Merge's result is exactly yours,
+  // Keep mine's outcome, with its Undo and History's note.
+  writeFileSync(inClaude, described.replace('Remove slop, firmly.', 'Remove slop, kindly.').replace('Removes slop from any prose.', 'Removes slop from any prose, my way.'));
+  check('the source’s change made by hand is taken in and reaches every tool', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('any prose, my way.'))), Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))));
+  // The page is told of that edit by a refresh of its own, whose notice would take the band's place: it comes first.
+  await until(async () => /Sync changed deslop/.test(await a.text('#announcement') ?? ''));
+  await until(() => a.run(`document.body.dataset.busy !== 'true' && document.querySelector('#source-merge-${id}-deslop')?.disabled === false`));
+  await a.click(`#source-merge-${id}-deslop`);
+  check('a Merge that finds the source’s change in yours already says so, offers Undo the merge and History’s note, and the line no longer waits', await until(async () => /deslop already had the source’s changes, so Merge changed nothing in it; the source’s version no longer waits\./.test(await a.text('.band-done .band-text') ?? ''))
+    && (await a.text('#outcome-undo')) === 'Undo the merge' && await a.exists('#outcome-note-history') && !(await a.exists(`#source-merge-${id}-deslop`)), [await a.text('.band-done'), await a.text('.source-row .source-name[data-key="deslop"]')]);
 
   commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('name: deslop', 'name: unslop') });
   await a.click(`#source-check-${id}`);
@@ -2371,12 +2381,12 @@ async function sourcesFlow() {
   check('History says the source dropped it', await until(async () => /github\.com\/stephenturner\/skill-deslop \(main\) no longer has it, so it is off and removed from all 3 tools/.test(await a.text('.page') ?? '')), await a.text('.page'));
   // The notice that stays: deslop's line on the source's row, and its row on Skills, until it is turned on.
   await a.click('#nav-sources');
-  check('the source’s row keeps a line for deslop, removed there, with Turn on', await until(async () => /No longer at this source: it is Off, in Central Knot only, and no longer from it\./.test(await a.text('.source-row .source-name[data-key="deslop"][data-state="removed"]') ?? '')) && await a.exists('#source-turn-on-deslop'), await a.text('.source-row'));
+  check('the source’s row keeps a line for deslop, removed there, with Turn on', await until(async () => /No longer at this source: it is Off, and no longer from it\./.test(await a.text('.source-row .source-name[data-key="deslop"][data-state="removed"]') ?? '')) && await a.exists('#source-turn-on-deslop'), await a.text('.source-row'));
   await a.shot('sources-removed');
   await a.click('#nav-skills');
   if (!(await a.exists('.details'))) await a.click('#open-deslop');
-  check('its row on Skills says “removed at its source”, and its opened row says it is Off, no longer from that source, and what happens if the source has it again', /removed at its source/.test(await a.text('.ov-row[data-key="deslop"]') ?? '')
-    && /github\.com\/stephenturner\/skill-deslop \(main\) no longer has it: it is Off, in Central Knot only, and no longer from that source\. Turn it on to use it again\. Should github\.com\/stephenturner\/skill-deslop \(main\) have it again, it follows the source if unchanged here, and stays as you have it if you changed it\./.test(await a.text('.details') ?? ''), [await a.text('.ov-row[data-key="deslop"]'), await a.text('.details')]);
+  check('its row on Skills says “removed at its source”, and its opened row says it is Off and no longer from that source, and what happens if the source has it again', /removed at its source/.test(await a.text('.ov-row[data-key="deslop"]') ?? '')
+    && /github\.com\/stephenturner\/skill-deslop \(main\) no longer has it: it is Off, and no longer from that source\. Turn it on to use it again\. Should github\.com\/stephenturner\/skill-deslop \(main\) have it again, it follows the source if unchanged here, and stays as you have it if you changed it\./.test(await a.text('.details') ?? ''), [await a.text('.ov-row[data-key="deslop"]'), await a.text('.details')]);
   await a.shot('skills-removed');
   await a.click('#nav-sources');
   await a.click('#source-turn-on-deslop');

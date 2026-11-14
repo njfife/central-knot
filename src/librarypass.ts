@@ -67,11 +67,12 @@
 // - History's sentences and actions for its entries: historyactions.ts, in the kind's words (historypage.ts asks it).
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-import { carryOut, itemKey, keepVersion, managedAgain, newItem, pendingChanges, plan, setCurrent, sourceAnswers, takeInAnswer, versionAt, wantedIn } from './library.ts';
+import { carryOut, itemKey, keepVersion, linkedSource, managedAgain, newItem, pendingChanges, plan, setCurrent, sourceAnswers, takeInAnswer, versionAt, wantedIn } from './library.ts';
 import type { ItemNow } from './historyactions.ts';
 import type { Copies, FoundCopy, FoundKey, HarnessCopy, ItemKind, LeftFound, LibraryItem, Plan, Origin, Shelf, SourceSeen, TakenBy, Version } from './library.ts';
 import { appendHistory, historyCutoff, readHistory, replaceHistory } from './history.ts';
 import { errorCode, libraryGate, stillOwned } from './share.ts';
+import { readSources } from './sourcestore.ts';
 import type { ShareContext } from './share.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, ItemNotice, JoinCounts, MergeDone, PassResult, SyncNotice, TakenInNotice } from './types.ts';
 import { byToolOrder, notManagedHere, toolName } from './words.ts';
@@ -854,10 +855,11 @@ async function untell(pass: Pass, told: Told, held: HarnessId[]) {
  * pendingEdits). A History entry names its item by key (an MCP server's entries from before the library: its name as written).
  */
 export async function itemsNow<C, E extends Seen, D extends Disk<E>>(kind: Kind<C, E, D>, context: ShareContext, tools: readonly HarnessId[]) {
-  const { look, problem } = await lookFor(kind, context, tools);
+  const { look, problem } = await lookFor(kind, context, tools), recorded = new Set((await readSources(context.home)).sources.map(source => source.id));
   const of = (entry: HistoryEvent) => {
     const item = look.library.items[itemKey(entry.key.slice(kind.historyPrefix.length))];
-    return { item, now: { managed: tools, pending: item && !item.deleted ? pendingChanges(plan(item, copiesOf(look, item))) : [] } };
+    const linked = linkedSource(item, recorded) ? { linked: true as const } : {};
+    return { item, now: { managed: tools, pending: item && !item.deleted ? pendingChanges(plan(item, copiesOf(look, item))) : [], ...linked } };
   };
   return { of, problem };
 }
@@ -1023,8 +1025,9 @@ function takenInNotice(taken: Pass['takenIn']): TakenInNotice {
 /**
  * Makes an earlier version current: a new version (library.ts setCurrent), which the pass then applies like any other. `seen`:
  * History's Undo of a Replace or a Merge puts back the source's version the item had taken before it (types.ts Change seen);
- * its entry records the one it replaced, so the Undo of that Undo puts it back in turn. The Undo of Keep mine asks for the
- * current version itself: only `seen` goes back (library.ts KEEP MINE), and its entry says so (previous = version).
+ * its entry records the one it replaced, so the Undo of that Undo puts it back in turn. Any Undo that carries `seen` and asks
+ * for the version already current (Keep mine's; a Replace's or a Merge's once that version is current again) moves only `seen`
+ * back (library.ts KEEP MINE), and its entry says so (previous = version).
  */
 async function makeCurrent(pass: Pass, item: LibraryItem, version: string, refuse: Refuse, seen?: string) {
   const previous = item.hash, before = item.seen, puts = seen !== undefined && !!item.source;
@@ -1044,9 +1047,9 @@ async function makeCurrent(pass: Pass, item: LibraryItem, version: string, refus
 /**
  * A source read on a click or by the daily check (library.ts A SOURCE: sourceAnswers, a fromSource answer for every name it holds
  * and every item linked to it, told what the managed tools hold of each item now: copiesOf), carried out: made Off (`make`),
- * linked (`link`; `same` only moves `seen` on), its content made current (`update`, Replace's dated by its click), merged into
- * the current version (`merge`: mergeIn), S kept beside the current version (`keep`: keepMine), or turned Off with its link
- * let go (`drop`); `wait` changes nothing. Each change a person sees is History's entry with the source's `link`: an `off`
+ * linked (`link`, its content recorded as a version from the source where it has none; `same` only moves `seen` on), its
+ * content made current (`update`, Replace's dated by its click), merged into the current version (`merge`: mergeIn), S kept
+ * beside the current version (`keep`: keepMine), or turned Off with its link let go (`drop`); `wait` changes nothing. Each change a person sees is History's entry with the source's `link`: an `off`
  * (cause `source`) for one made, an `edit` for one made current (a Replace's with `seen` as it was; a Merge's with cause
  * `source-merged`), an `edit` for one kept (cause `source-kept`), an `off` (cause `source-dropped`) for one dropped. No
  * harness is written here: the plan after it applies the current version where the item is On, and takes in a tool's edit no
@@ -1077,6 +1080,9 @@ async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Se
       pass.asked.set(key, { kind: 'off', cause: 'source', link });
     } else if (answer === 'link' || answer === 'same') {
       Object.assign(item!, { source: read.id, seen: entry.hash } satisfies Partial<LibraryItem>);
+      // Linked as the same content: recorded as a version from the source, so its row can say when the source removes it (library.ts removedBy).
+      const fromHere = item!.versions.some(version => version.from.link === read.link);
+      if (answer === 'link' && !fromHere) await setCurrent(pass.shelf, item!, { hash: entry.hash, at: read.commitAt, from: origin }, entry.content);
     } else if (answer === 'update') {
       const previous = item!.hash, before = item!.seen, replace = !!read.replace?.has(key);
       Object.assign(item!, { source: read.id, seen: entry.hash } satisfies Partial<LibraryItem>);

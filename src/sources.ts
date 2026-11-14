@@ -23,7 +23,7 @@
 //
 // Each click's own refusals come first; then, where it writes, it enters the gate for library writes (share.ts libraryGate):
 // Add and Check now before they write the record and run the pass (which enters it too), Remove for Central Knot's own file
-// alone (`ownFile`); Look, which writes only its own folder, asks it for that; Add, Replace and Merge on a row write nothing
+// alone (`ownFile`); Look, which writes only its own folder, asks it for that; Add, Replace, Merge and Keep mine on a row write nothing
 // themselves (their passes enter).
 //
 // A fetch can take a while, so it runs outside the queue main.ts keeps for every change: Look writes only its own folder
