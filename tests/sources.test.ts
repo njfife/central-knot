@@ -1001,7 +1001,7 @@ test('A skill deleted from Central Knot: the tombstone holds at Check now and at
 
 // ---------- What is at a link ----------
 
-test('A link to a plugin, or a marketplace, is named as that and nothing there is read; a folder of loose skills beside agent files brings the skills alone', async () => {
+test('A link to a plugin, or a marketplace, is named as that and nothing there is read; a folder of loose skills beside an agents folder and a commands folder brings the skills and the agent, never a command', async () => {
   const box = await sandbox();
   try {
     const plugin = await repository(hosts, 'https://github.com/team/plugin');
@@ -1015,17 +1015,17 @@ test('A link to a plugin, or a marketplace, is named as that and nothing there i
     const loose = await repository(hosts, 'https://github.com/team/loose');
     await loose.commit({ 'pdf/SKILL.md': skillMd('pdf'), 'docx/SKILL.md': skillMd('docx'), 'agents/writer.md': '---\nname: writer\n---\nWrite.\n', 'commands/go.md': 'Go.\n' });
     const look = await previewSource(box.context, box.tools, 'https://github.com/team/loose') as Extract<SourcePreview, { token: string }>;
-    assert.deepEqual([look.refused, look.names.map(name => name.name)], [undefined, ['docx', 'pdf']]);
+    assert.deepEqual([look.refused, look.names.map(name => `${name.kind} ${name.name}`)], [undefined, ['skill docx', 'skill pdf', 'agent writer']]);
   } finally { await box.cleanup(); }
 });
 
-test('Central Knot’s own layout given as a link: its skills come in, Off; its agents, MCP servers and base instructions are not read', async () => {
+test('Central Knot’s own layout given as a link: its skills and agents come in, Off; its MCP servers and base instructions are not read', async () => {
   const box = await sandbox();
   try {
     const repo = await repository(hosts, 'https://github.com/me/agent-config');
     await repo.commit({ 'skills/notes/SKILL.md': skillMd('notes'), 'mcp/github.json': '{"command":"gh"}', 'agents/writer.md': '---\nname: writer\n---\nWrite.\n', 'instructions/base.md': 'Be brief.\n' });
     const look = await previewSource(box.context, box.tools, 'me/agent-config') as Extract<SourcePreview, { token: string }>;
-    assert.deepEqual(look.names.map(name => [name.name, name.there?.folder]), [['notes', 'skills/notes']]);
+    assert.deepEqual(look.names.map(name => [name.kind, name.name, name.there?.folder]), [['skill', 'notes', 'skills/notes'], ['agent', 'writer', 'agents']]);
   } finally { await box.cleanup(); }
 });
 

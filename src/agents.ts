@@ -3,7 +3,8 @@
 // This module is the agents' `Kind` (agentKind) and nothing the pass does itself: where each harness keeps its agents (one
 // file per agent in its agents folder; in Pi, which has no agents, a skill in its skills folder: presence.ts agentsKeptIn),
 // how a file is read and written in each harness's format (agentfiles.ts), a harness's own part (the rest of its file:
-// agentstore.ts keepOwn), and why a harness can't take an agent (agentHeld, and cannotTake for the page).
+// agentstore.ts keepOwn), why a harness can't take an agent (agentHeld, and cannotTake for the page), and its Merge of a
+// source's version (merge.ts mergeAgent). What at a source's link is an agent is atlink.ts agentsAt's.
 // Writes and removals are checked (share.ts), so a save that lands meanwhile is never lost.
 //
 // Around the pass: applyAgents and restoreAgent run it for agents (the page's clicks);
@@ -23,10 +24,12 @@ import { libraryAction } from './historyactions.ts';
 import { itemKey, listed, noteAgainst, pendingEdits, plan } from './library.ts';
 import { libraryWords } from './libraryrow.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
-import { copiesOf, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type KindLibrary, type Look, type PassOptions, type Wanted } from './librarypass.ts';
+import { copiesOf, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type KindLibrary, type Look, type PassOptions, type SourcedKind, type Wanted } from './librarypass.ts';
+import { mergeAgent } from './merge.ts';
 import { throughPlugins } from './plugins.ts';
 import { agentsKeptIn, type AgentTool } from './presence.ts';
 import { errorCode, exists, partsIn, recoverParked, removeFileChecked, syncGate, writeAccess, writeFileChecked } from './share.ts';
+import { sourceFacts } from './sources.ts';
 import type { ShareContext } from './share.ts';
 import type { Change, HarnessId, LibraryFacts, LibraryView, PassResult, SyncNotice, ThroughPlugin, ToolCopy } from './types.ts';
 import { throughPlugin, toolName } from './words.ts';
@@ -146,7 +149,7 @@ function cannotTake(disk: AgentDisk, managed: HarnessId[], item: Wanted, tool: H
 // ---------- The agents' Kind ----------
 
 /** Agents as a kind of item (librarypass.ts Kind): one file per agent in each harness's agents folder (Pi's: its skills folder). */
-export const agentKind: Kind<SharedAgent, AgentEntry, AgentDisk> = {
+export const agentKind: SourcedKind<SharedAgent, AgentEntry, AgentDisk> = {
   kind: 'agent',
   // The item and its copy as the page names them (libraryrow.ts libraryWords); a harness's folder of them only the pass says.
   words: { item: libraryWords.agents.item, copy: libraryWords.agents.copy, folder: tool => agentsKeptIn[tool as AgentTool] },
@@ -172,6 +175,7 @@ export const agentKind: Kind<SharedAgent, AgentEntry, AgentDisk> = {
     catch (error) { return errorCode(error) === 'CK_CHANGED' ? 'changed' : 'failed'; }
   },
   historyAction: libraryAction,
+  merge: mergeAgent,
 };
 
 /**
@@ -266,8 +270,8 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
   const { look, live, problem } = await lookFor(agentKind, context, tools);
   const { library, managed } = look;
   const keys = [...new Set([...look.disk.byKey.keys(), ...live.map(item => item.key)])].sort((first, second) => first.localeCompare(second));
-  const items: LibraryFacts[] = [];
-  for (const key of keys) items.push(await rowFacts(look, key, live.find(item => item.key === key)));
+  const items: LibraryFacts[] = [], fromSource = await sourceFacts(context, 'agent', library.items, item => copiesOf(look, item));
+  for (const key of keys) items.push(await rowFacts(look, key, live.find(item => item.key === key), fromSource.get(key)));
   const gate = problem ? { state: 'stopped' as const, reason: problem } : await syncGate(context);
   const problems = problem ? [problem, ...look.disk.problems] : look.disk.problems;
   return { tools: managed, items, library: library.items, access: await writeAccess(context), gate, problems, notices };
@@ -276,9 +280,10 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
 /**
  * One agent's row: what each managed harness holds and, for an agent in the library, what the next pass does in each
  * (`plan`, from the same reading a pass makes: copiesOf) and why nothing can happen in one (`unseen`, `cannot`). A found
- * agent's row says whether its copies differ, so its switch asks which one to take in.
+ * agent's row says whether its copies differ, so its switch asks which one to take in. `fromSource`: the source it is from,
+ * as sources.ts sourceFacts says it.
  */
-async function rowFacts(look: AgentLook, key: string, item: LibraryItem | undefined): Promise<LibraryFacts> {
+async function rowFacts(look: AgentLook, key: string, item: LibraryItem | undefined, fromSource: LibraryFacts['fromSource']): Promise<LibraryFacts> {
   const slot = look.disk.byKey.get(key) ?? {};
   const entries = look.managed.flatMap(tool => (slot[tool] ? [slot[tool]!] : []));
   const name = item?.name ?? entries[0].name;
@@ -316,6 +321,6 @@ async function rowFacts(look: AgentLook, key: string, item: LibraryItem | undefi
     // The copies a harness managed again gives way with are kept before the plan, by the pass (librarypass.ts cameBack): said with it.
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
       : { takeInAnswers: takeInAnswers(look, key) }),
-    ...(Object.keys(plugin).length ? { plugin } : {}), ...(Object.keys(unseen).length ? { unseen } : {}),
+    ...(Object.keys(plugin).length ? { plugin } : {}), ...(Object.keys(unseen).length ? { unseen } : {}), ...(fromSource ? { fromSource } : {}),
   };
 }

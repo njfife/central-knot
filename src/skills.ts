@@ -30,7 +30,7 @@ import { errorCode, itemKey, landingOf, libraryGate, partsIn, plainError, readTr
 import { alsoReads, lockedRoot, placeFolder, readCopy, readSkillsFolder, recoverFolders, removeFolder, rootOf, rootProblem, sharedFolder, swapFolder, type SkillCopy } from './skillfiles.ts';
 import { openLibrary, readVersion, recordedSkills, saveLibrary, storeVersion, type SkillContent } from './skillstore.ts';
 import { mergeSkill } from './merge.ts';
-import { skillSource, sourceFacts } from './sources.ts';
+import { sourceFacts } from './sources.ts';
 import { isDisabled, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, type SwitchFile } from './skillswitch.ts';
 import { harnesses } from './harnesses.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, Skill, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy } from './types.ts';
@@ -515,7 +515,7 @@ export async function skillsView(context: ShareContext, tools: HarnessId[], noti
   const { library, managed } = look;
   // A skill whose folder can't be copied as it is (a link inside, a file it can't read) is a row too, which says why.
   const keys = [...new Set([...look.disk.byKey.keys(), ...look.disk.outside.keys(), ...look.disk.uncopied, ...live.map(item => item.key)])].sort((first, second) => first.localeCompare(second));
-  const items: LibraryFacts[] = [], fromSource = await sourceFacts(context, skillSource(), library.items, item => copiesOf(look, item));
+  const items: LibraryFacts[] = [], fromSource = await sourceFacts(context, 'skill', library.items, item => copiesOf(look, item));
   for (const key of keys) items.push(await rowFacts(look, key, live.find(item => item.key === key), fromSource.get(key)));
   const gate = problem ? { state: 'stopped' as const, reason: problem } : await syncGate(context);
   const problems = problem ? [problem, ...look.disk.problems] : look.disk.problems;

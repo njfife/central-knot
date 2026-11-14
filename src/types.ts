@@ -878,7 +878,8 @@ export interface PassResult {
 /**
  * What a click on Merge did (library.ts MERGE; librarypass.ts mergeIn): the merged version made current (`merged`); merged to
  * exactly the version it had, so only the source's version it follows moved on (`had`); or nothing: a tool's copy still held a
- * change (`unsettled`), files conflict (`conflicts`, their paths in the skill's folder), or it couldn't run (`couldNot`, why).
+ * change (`unsettled`), parts conflict (`conflicts`, in the kind's words: a skill's file by its path in the skill's folder, an
+ * agent's part as "the prompt": merge.ts), or it couldn't run (`couldNot`, why).
  */
 export type MergeDone = 'merged' | 'had' | 'unsettled' | { conflicts: string[] } | { couldNot: string };
 
@@ -1027,16 +1028,17 @@ export interface ShownLog { selected: boolean; logged: boolean }
 /**
  * What a name at a source is to the library now, as the Sources page says it: the source's table's own answer for it (library.ts
  * SourceAnswer, from sourceAnswers: `nothing` for one in Central Knot from this source as the source has it), or `unreadable`,
- * a skill there that can't be read, with why.
+ * an item there that can't be read, with why.
  */
 export type SourceNameState = SourceAnswer | 'unreadable';
 /** One item at a source's read, or one item linked to the source that the read doesn't hold (sources.ts namesOf). */
 export interface SourceName {
-  /** Its kind; its name, as its own file gives it (a skill's SKILL.md; absent when that can't be read); and its key in its kind. */
+  /** Its kind; its name (a skill's as its SKILL.md gives it, absent when that can't be read; an agent's its file's base name); and its key in its kind. */
   kind: ItemKind; name?: string; key: string;
   /**
-   * Where it is at the read: its folder from the repository's root ('' for the root), that folder's own name (the repository's,
-   * for the root), and every file in it by path inside the folder. Absent for an item linked to the source that the read doesn't hold.
+   * Where it is at the read (atlink.ts ItemThere): its folder from the repository's root ('' for the root: a skill's own
+   * folder, or the folder that holds an agent's files), that folder's own name (the repository's, for the root), and its files
+   * by path inside the folder (every file of a skill; an agent's files). Absent for an item linked to the source that the read doesn't hold.
    */
   there?: { folder: string; folderName: string; files: string[] };
   state: SourceNameState;
@@ -1061,13 +1063,16 @@ export interface SourceFound {
    * can. An item there that can't be read says why on its own line (SourceName `why`).
    */
   unread?: string;
+  /** What is there that a later version reads, in words (atlink.ts laterWhy: a .mcp.json); absent when nothing is. */
+  later?: string;
 }
 /**
  * A source as the Sources page shows it: its last read (sourcestore.ts: a cache; none kept here reads as nothing at the link's
  * folder), when it was read, and why the last Check now couldn't fetch it (`problem`).
  */
 export interface SourceView extends SourceFound { id: string; addedAt: string; readAt?: string; problem?: string }
-export interface SourcesView { sources: SourceView[]; access: WriteAccess; problem?: string }
+/** The Sources page: each source, and the kinds a source brings in this version (sources.ts's table, in its order), which its sentences about every source name. */
+export interface SourcesView { sources: SourceView[]; kinds: ItemKind[]; access: WriteAccess; problem?: string }
 /** A link read before anything is kept: what Add would do (`token` names it for Add), or why it can't be added. */
 export type SourcePreview = (SourceFound & { token: string; refused?: string }) | { refused: string; link: string };
 /** A click on one name's line at a source (sources.ts rowClick): Add on one held deleted, Replace, Merge or Keep mine on one whose version waits. */

@@ -3,19 +3,22 @@
 // out in one step before its clicks (librarypass.ts fromSourceStep), one pass per kind a source brings. This module owns what
 // is around that step:
 // - the kinds a source brings, one table (sourceKinds: a SourceKind each, its Kind with Merge, its pass and its reader at a
-//   link). Skills are its only entry in this version (skillSource). Every run, click and view goes through it: runSource,
+//   link). Skills and agents are its entries in this version. Every run, click and view goes through it: runSource,
 //   rowClick, namesOf, libraryNow, sourcesView and sourceFacts. To add a kind: its entry in sourceKinds, its reader in
-//   atlink.ts, its Merge in merge.ts (the compiler names what an entry lacks), and its view's one call to sourceFacts;
+//   atlink.ts (given what the kinds before it found), its Merge in merge.ts (the compiler names what an entry lacks), its view's
+//   one call to sourceFacts, and the Sources page's words (sourcespage.ts, which words a line by its kind and a sentence about
+//   every source by the kinds the view names, SourcesView `kinds`; its aside names the kinds still to come);
 // - a link resolved (sourcelink.ts readLink; its branch, named or the default one, found among the repository's own: refsOf),
 //   and fetched (plugins.ts copySource: the shallow copy marketplaces get, this computer's git and its sign-in, nothing asked
-//   or kept); each source's last read is kept with its record (sourcestore.ts); what is at it, and each kind's read of it, is
-//   atlink.ts's (holdsAt, readOf: whether it was read whole is decided there);
+//   or kept); each source's last read is kept with its record (sourcestore.ts), and read once per click, and once per build
+//   of the home's view (lastFound); what is at it, and each kind's read of it, is atlink.ts's (holdsAt, readOf: whether it was
+//   read whole is decided there);
 // - the clicks: Look (previewSource: what Add would do, name by name, before anything is kept), Add, Check now, a click on one
 //   name's line in its kind (rowClick: Add on one the library holds deleted; Replace, Merge and Keep mine on one whose version
 //   waits) and Remove;
 // - the check once a day (checkDue: the rhythm is here, main.ts only calls it on its schedule's turn, with Automatic sync on);
 // - what the table says, as the page shows it: the Sources page's view (sourcesView) and each linked item's row on its kind's
-//   page (sourceFacts, which skills.ts skillsView asks), both from the same answers the pass carries out, with the tools read
+//   page (sourceFacts, which each kind's view asks), both from the same answers the pass carries out, with the tools read
 //   now; and each item a source removed (sourceFacts `removed`: library.ts removedBy), which both pages read from its kind's view.
 // Kept elsewhere: the page (sourcespage.ts); the words of a source's History entries (historyactions.ts) and of its versions
 // (library.ts originWords); the Git repo's refusal of a source (gitrepo.ts connectRepo, through sourcestore.ts sourceAt), as
@@ -32,7 +35,9 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { holdsAt, itemsOf, nothingToAddWhy, readOf, skillsAt, unreadWhy, type Holds, type ReaderAt, type RowClick } from './atlink.ts';
+import { agentsAt, holdsAt, itemsOf, laterWhy, nothingToAddWhy, readOf, skillsAt, unreadWhy, type Holds, type ReaderAt, type RowClick } from './atlink.ts';
+import type { SharedAgent } from './agentfiles.ts';
+import { agentKind, applyAgents } from './agents.ts';
 import { connectedRepoAddress } from './gitrepo.ts';
 import { changedHere, itemKey, linkedSource, removedBy, sourceAnswers, type Copies, type ItemKind, type LibraryItem } from './library.ts';
 import { copiesOf, lookFor, type PassOptions, type SourcedKind } from './librarypass.ts';
@@ -66,19 +71,30 @@ export interface SourceKind<Content = unknown> {
   at: ReaderAt<Content>;
   noneThere: string;
 }
-/** Skills, as a source brings them: the table's one entry in this version. */
-export const skillSource = (): SourceKind<SkillContent> =>
-  ({ kind: skillKind, apply: applySkills, at: skillsAt, noneThere: 'no SKILL.md there, in a folder inside it, or in skills/' });
 /**
- * Every kind a source brings, in the order a source's lines list them. Made when asked, not as the module loads: a kind's
- * module imports this one back (its view asks sourceFacts), so its Kind may not be made yet then.
+ * Every kind a source brings, in the order a source's lines list them and its readers read (an agent's reader is given the
+ * skills found). Made when asked, not as the module loads: a kind's module imports this one back (its view asks sourceFacts),
+ * so its Kind may not be made yet then.
  */
-const sourceKinds = (): readonly SourceKind[] => [skillSource()];
+const sourceKinds = (): readonly SourceKind[] => [skillSource(), agentSource()];
+const skillSource = (): SourceKind<SkillContent> =>
+  ({ kind: skillKind, apply: applySkills, at: skillsAt, noneThere: 'no SKILL.md there, in a folder inside it, or in skills/' });
+const agentSource = (): SourceKind<SharedAgent> =>
+  ({ kind: agentKind, apply: applyAgents, at: agentsAt, noneThere: 'no agent’s file there or in an agents folder' });
 
-/** A source's last read as kept here, what is at its link (none kept reads as nothing at the link's folder: sourcestore.ts). */
-async function lastFound(context: ShareContext, source: SourceRecord): Promise<Holds> {
-  const copy = copyOf(context.home, source.id);
-  return await exists(copy) ? holdsAt(copy, source.folder, source.repository, sourceKinds()) : { holds: 'missing', kinds: [] };
+/**
+ * A source's last read as kept here, what is at its link (none kept reads as nothing at the link's folder: sourcestore.ts):
+ * read once per context that keeps its reads (ShareContext `reads`: one build of the home's view, where every kind's view asks).
+ */
+function lastFound(context: ShareContext, source: SourceRecord): Promise<Holds> {
+  const read = async (): Promise<Holds> => {
+    const copy = copyOf(context.home, source.id);
+    return await exists(copy) ? holdsAt(copy, source.folder, source.repository, sourceKinds()) : { holds: 'missing', kinds: [] };
+  };
+  const key = `source:${source.id}:${source.commit}`;
+  if (!context.reads) return read();
+  if (!context.reads.has(key)) context.reads.set(key, read());
+  return context.reads.get(key) as Promise<Holds>;
 }
 
 /**
@@ -221,8 +237,9 @@ export async function previewSource(context: ShareContext, tools: HarnessId[], l
 }
 
 const foundOf = (source: Resolved & Partial<Pick<SourceRecord, 'commit' | 'commitAt'>>, found: Holds, names: SourceName[]): SourceFound => {
-  const unread = unreadWhy(found, source);
-  return { link: source.link, repository: source.repository, ref: source.ref, folder: source.folder, commit: source.commit, commitAt: source.commitAt, holds: found.holds, names, ...(unread ? { unread } : {}) };
+  const unread = unreadWhy(found, source), later = laterWhy(found);
+  return { link: source.link, repository: source.repository, ref: source.ref, folder: source.folder, commit: source.commit, commitAt: source.commitAt, holds: found.holds, names,
+    ...(unread ? { unread } : {}), ...(later ? { later } : {}) };
 };
 
 /**
@@ -372,18 +389,21 @@ export async function sourcesView(context: ShareContext, tools: HarnessId[]): Pr
     const { id, addedAt, readAt } = source, found = await lastFound(context, source);
     return { ...foundOf(source, found, linesOf(source, found, libraries, sources)), id, addedAt, readAt, ...(source.problem ? { problem: source.problem } : {}) };
   }));
-  return { sources: views, access, ...(problem ? { problem } : {}) };
+  return { sources: views, kinds: sourceKinds().map(entry => entry.kind.kind), access, ...(problem ? { problem } : {}) };
 }
 
 /**
- * Each item of one kind (`entry`) linked to a source the home records, as its row on its kind's page says it (types.ts
- * LibraryFacts fromSource): the source's link, and whether that source's last read has a version that waits (the table's
- * `wait`, from the same answers as the Sources page), or else whether it is changed here (library.ts changedHere), so the
- * source's next change will meet it; and each item a source removed (`removed`: library.ts removedBy), with that source's
- * link. `items` and `copies`: the kind's view's own look (skills.ts skillsView asks it, with skillSource).
+ * Each item of one kind linked to a source the home records, as its row on its kind's page says it (types.ts LibraryFacts
+ * fromSource): the source's link, and whether that source's last read has a version that waits (the table's `wait`, from the
+ * same answers as the Sources page), or else whether it is changed here (library.ts changedHere), so the source's next change
+ * will meet it; and each item a source removed (`removed`: library.ts removedBy), with that source's link. `items` and
+ * `copies`: the kind's view's own look (skills.ts skillsView and agents.ts agentsView ask it). A kind the table has no entry
+ * for has no source.
  */
-export async function sourceFacts(context: ShareContext, entry: SourceKind, items: Record<string, LibraryItem>, copies: (item: LibraryItem) => Copies) {
-  const { sources } = await readSources(context.home), facts = new Map<string, NonNullable<LibraryFacts['fromSource']>>(), recorded = recordedOf(sources);
+export async function sourceFacts(context: ShareContext, kind: ItemKind, items: Record<string, LibraryItem>, copies: (item: LibraryItem) => Copies) {
+  const facts = new Map<string, NonNullable<LibraryFacts['fromSource']>>(), entry = sourceKinds().find(each => each.kind.kind === kind);
+  if (!entry) return facts;
+  const { sources } = await readSources(context.home), recorded = recordedOf(sources);
   const reads = await Promise.all(sources.map(async source => readOf(source, await lastFound(context, source), entry, recorded)));
   for (const [index, source] of sources.entries()) {
     const linked = Object.values(items).filter(item => !item.deleted && linkedSource(item, recorded) === source.id);

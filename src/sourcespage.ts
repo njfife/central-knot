@@ -1,26 +1,31 @@
 // Sources: the page where a Git link is given as a source for the library (sources.ts, in main, is the engine; the table it
-// follows is library.ts's A SOURCE). One field takes the link; Look reads it and shows, skill by skill, what Add would do and
-// what it won't bring in and why, before anything is kept; Add brings each skill into Central Knot, Off. Each source has a row:
-// its link, what it brought (On or Off), when it was last read, why it couldn't be read if so, Check now and Remove; a skill
+// follows is library.ts's A SOURCE). One field takes the link; Look reads it and shows, item by item, what Add would do and
+// what it won't bring in and why, before anything is kept; Add brings each item into Central Knot, Off. Each source has a row:
+// its link, what it brought (On or Off), when it was last read, why it couldn't be read if so, Check now and Remove; an item
 // there the library holds deleted has its own Add, and one whose version waits (library.ts changedHere) its own Merge, Replace
-// and Keep mine; a skill the source removed (library.ts REMOVED AT ITS SOURCE, which its kind's view says: types.ts LibraryFacts
+// and Keep mine; an item the source removed (library.ts REMOVED AT ITS SOURCE, which its kind's view says: types.ts LibraryFacts
 // fromSource) has a line with Turn on, its switch on its kind's page. Every line and click carries its item's kind (types.ts SourceName
-// `kind`; ids too: source-merge-<id>-skill-<key>), which pluginstatus.ts pageOfPart maps to its page; skills are the only kind
-// a source brings in this version, so the words say skill. Every state a row says is the engine's (types.ts SourceNameState,
-// and that fromSource); this page only words it. Its own page rather than the Git repo's: that page is Pull and Push of the
-// whole set, two-way and in Central Knot's layout, while a source is read only, holds a few skills, and its rows grow one per link.
+// `kind`; ids too: source-merge-<id>-skill-<key>), which pluginstatus.ts pageOfPart maps to its page, and whose words
+// (words.ts kindNouns) the line says; a sentence about every source names the kinds a source brings (SourcesView `kinds`), and
+// the aside the kinds still to come. Every state a row says is the engine's (types.ts SourceNameState, and that fromSource);
+// this page only words it. Its own page rather than the Git repo's: that page is Pull and Push of the whole set, two-way and in
+// Central Knot's layout, while a source is read only, holds a few items, and its rows grow one per link.
 import { announce, applyClick, busy, rerender, showPage, state, type PageKind } from './app.ts';
 import { button, closeButton, h, icon } from './dom.ts';
 import { asItIs } from './libraryrow.ts';
 import { dayAndTime, plural } from './model.ts';
 import { linkLabel } from './sourcelink.ts';
-import { andList, kindNouns, toolsPhrase } from './words.ts';
+import { andList, kindNouns, orList, toolsPhrase } from './words.ts';
 import { outcomeBand } from './matrix.ts';
 import { pageOfPart } from './pluginstatus.ts';
 import type { ItemKind } from './library.ts';
 import type { HarnessId, LibraryFacts, MergeDone, SourceFound, SourceName, SourcePreview, SourceResult, SourceRowClick, SourcesView, SourceView } from './types.ts';
 
 const api = () => window.centralKnot;
+/** A kind's words on this page ("skill", "Skills"), from its page's (words.ts kindNouns). */
+const nouns = (kind: ItemKind) => kindNouns[pageOfPart[kind]];
+/** The kinds a source brings (the view's: types.ts SourcesView `kinds`), as a sentence names many of them ("skills and agents"). */
+const broughtNames = () => andList((sources.view?.kinds ?? []).map(kind => nouns(kind).many));
 
 export const sources = {
   /** The sources as last read; undefined until the page first loads them. */
@@ -52,7 +57,7 @@ export async function loadSources(): Promise<void> {
 // ---------- The clicks ----------
 
 /**
- * After a click that may have changed the library: the home read again, so the Skills page and every count follow, then the
+ * After a click that may have changed the library: the home read again, so each kind's page and every count follow, then the
  * band (what the click did, from `said`, with its one action, and Open on the page of the kind where something changed).
  */
 async function settle(result: SourceResult, said: Said | undefined) {
@@ -103,9 +108,12 @@ const turnOn = (fact: LibraryFacts, page: PageKind) => {
     said: (_notIn, wrote) => `${fact.name} is on${wrote.length ? ` in ${toolsPhrase(wrote, homeTools)}` : ''}.` });
 };
 
+/** What Remove keeps, said before it and after it. */
+const removeWords = () => `Its ${broughtNames()} stay in Central Knot as they are, On or Off, with their versions; they are no longer from it.`;
+
 const remove = (source: SourceView) => busy('Removing the source…', async () => {
   const result = await api().removeSource(source.id, state.home!.home);
-  await settle(result, { text: `Removed ${linkLabel(source.link)}. Its skills stay in Central Knot as they are, On or Off, with their versions; they are no longer from it.`, warns: false });
+  await settle(result, { text: `Removed ${linkLabel(source.link)}. ${removeWords()}`, warns: false });
 });
 
 /**
@@ -137,9 +145,9 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'notWhole'>, la
       return isReplaced(entry) ? `${entry.name} has the source’s version${now}; the one it had is kept as a version.` : `${entry.name} was updated from its source${now}.`;
     }),
     waiting.length ? `${names(waiting)} changed at the source; yours ${waiting.length === 1 ? 'stays current, since it was' : 'stay current, since they were'} changed here or a tool’s copy can’t be read just now: on ${waiting.length === 1 ? 'its row' : 'each one’s row'}, ${choices}.` : '',
-    ...merges.map(({ name, merge, written }) => mergeWords(name, merge!, written, homeTools)),
+    ...merges.map(({ kind, name, merge, written }) => mergeWords(kind, name, merge!, written, homeTools)),
     ...kept.map(({ name }) => `${name} stays as you have it, and the source’s version no longer waits: it is kept as a version, and the source’s next change is compared with it.`),
-    made.length ? `${names(made)} ${are(made)} in Central Knot, Off: turn ${made.length === 1 ? 'it' : 'them'} on in Skills.` : '',
+    made.length ? `${names(made)} ${are(made)} in Central Knot, Off: turn ${made.length === 1 ? 'it' : 'them'} on in ${andList([...new Set(made.map(entry => nouns(entry.kind).title))])}.` : '',
     linked.length ? `${names(linked)} ${are(linked)} in Central Knot already, the same, and ${linked.length === 1 ? 'is' : 'are'} now from it.` : '',
     left.length ? `Not brought in: ${names(left)} (${left.length === 1 ? 'its row says' : 'their rows say'} why).` : '',
     result.notWhole ? `Not all of ${label} could be read (its row says why), so the source turned nothing off.` : '',
@@ -160,11 +168,11 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'notWhole'>, la
   };
 }
 
-/** What a click on Merge did to one skill (types.ts MergeDone), said after it: `into`, the tools the merged version was written to. */
-function mergeWords(name: string, merge: MergeDone, into: HarnessId[], homeTools: string[]): string {
+/** What a click on Merge did to one item (types.ts MergeDone), said after it: `into`, the tools the merged version was written to. */
+function mergeWords(kind: ItemKind, name: string, merge: MergeDone, into: HarnessId[], homeTools: string[]): string {
   if (merge === 'merged') return `${name} now has your changes and the source’s, merged${into.length ? `, in ${toolsPhrase(into, homeTools)}` : ''}; the version it had is kept.`;
   if (merge === 'had') return `${name} already had the source’s changes, so Merge changed nothing in it; the source’s version no longer waits.`;
-  if (merge === 'unsettled') return `Merge left ${name} as it was, since a tool’s copy of it can’t be read just now (a save still landing, or a copy that can’t be read as it is). Merge can run once that copy can be read; on Skills, its row says which tool and why.`;
+  if (merge === 'unsettled') return `Merge left ${name} as it was, since a tool’s copy of it can’t be read just now (a save still landing, or a copy that can’t be read as it is). Merge can run once that copy can be read; on ${nouns(kind).title}, its row says which tool and why.`;
   if ('conflicts' in merge) {
     return `Merge left ${name} as it was: ${andList(merge.conflicts)} changed both here and at the source, in ways that can’t be merged.`
       + ' Replace takes the source’s version and keeps yours as a version; or make the source’s change in yours by hand, then Keep mine.'
@@ -176,7 +184,7 @@ function mergeWords(name: string, merge: MergeDone, into: HarnessId[], homeTools
 // ---------- Words ----------
 
 /**
- * What one skill at a source, or one item linked to it, is to the library, as its line says it: the source's table's own answer
+ * What one item at a source, or one item linked to it, is to the library, as its line says it: the source's table's own answer
  * (types.ts SourceNameState), in a look (`preview`: what Add does) or on a source's row (what the next Check now does).
  */
 function stateWords(name: SourceName, preview: boolean): { text: string; warns?: boolean } {
@@ -191,7 +199,7 @@ function stateWords(name: SourceName, preview: boolean): { text: string; warns?:
       + ' since it was changed here or a tool’s copy can’t be read just now. Merge puts the source’s changes into yours if they don’t clash;'
       + ' Replace takes the source’s and keeps yours as a version; Keep mine keeps yours current, and the source’s as a version, so it no longer waits.' };
     case 'drop': return { text: `No longer at the source: ${next} turns it off`, warns: true };
-    case 'differs': return { text: `Not brought in: Central Knot already has a different ${called}. To take this one instead, delete yours from Central Knot on Skills (that also takes it out of every tool it is on in), then ${preview ? 'once the source is added, Add on its row' : 'Add on this row'}.`, warns: true };
+    case 'differs': return { text: `Not brought in: Central Knot already has a different ${called}. To take this one instead, delete yours from Central Knot on ${nouns(name.kind).title} (that also takes it out of every tool it is on in), then ${preview ? 'once the source is added, Add on its row' : 'Add on this row'}.`, warns: true };
     case 'another': return { text: `Not brought in: Central Knot has ${called} from ${name.why ? linkLabel(name.why) : 'another source'}`, warns: true };
     case 'deleted': return { text: `Not brought in: deleted from Central Knot.${preview ? ' Once the source is added, Add on its row brings it back, or Restore in History.' : ''}`, warns: true };
     case 'unreadable': return { text: `Can’t be read: ${name.why}. ${preview ? 'Add can’t bring it in.' : 'Until it can, this source turns nothing off.'}`, warns: true };
@@ -202,7 +210,7 @@ function stateWords(name: SourceName, preview: boolean): { text: string; warns?:
 const whereWords = (found: SourceFound) => [`Branch ${found.ref}`, found.folder ? `folder ${found.folder}` : 'its root folder',
   found.commit ? `commit ${found.commit.slice(0, 7)}${found.commitAt ? ` of ${dayAndTime(found.commitAt)}` : ''}` : ''].filter(Boolean).join(' · ');
 
-/** A skill's files, the first few by path; every one in the tooltip. */
+/** An item's files, the first few by path; every one in the tooltip. */
 const FILES_SHOWN = 10;
 function filesLine(files: string[]) {
   if (!files.length) return null;
@@ -210,19 +218,19 @@ function filesLine(files: string[]) {
   return h('span.source-files', { title: files.join('\n') }, h('span.source-files-count', {}, `${plural(files.length, 'file')}:`), ' ',
     ...shown.flatMap((file, index) => [index ? ', ' : '', h('span.mono', {}, file)]), more ? `, and ${more} more…` : '');
 }
-/** Where a skill sits at the source: at the root of its repository, or in its folder. */
+/** Where an item sits at the source: at the root of its repository, or in its folder. */
 const whereAt = ({ folder, folderName }: NonNullable<SourceName['there']>) => (folder ? `in the folder ${folder}` : `at the root of ${folderName}`);
 
 // ---------- Pieces ----------
 
-/** One skill at a source: its name and where it sits there, what it is to the library, its files, and its own Add. */
+/** One item at a source: its name, its kind and where it sits there, what it is to the library, its files, and its own Add. */
 function nameRow(name: SourceName, preview: boolean, action?: HTMLElement | null) {
   const said = stateWords(name, preview);
-  return h('li.source-name', { 'data-key': name.key, 'data-state': name.state },
+  return h('li.source-name', { 'data-key': name.key, 'data-kind': name.kind, 'data-state': name.state },
     h('span.source-name-icon', {}, icon(said.warns ? 'triangle-alert' : name.state === 'nothing' && name.on ? 'circle-check' : 'wand-sparkles', 14, said.warns ? 'tone-warning' : 'tone-muted')),
     h('span.source-name-main', {},
       h('span.source-name-line', {}, h('strong.source-name-text', {}, name.name ?? name.there?.folderName ?? name.key),
-        h('span.source-name-where.tone-muted', {}, name.there ? whereAt(name.there) : 'not in its last read')),
+        h('span.source-name-where.tone-muted', {}, `${nouns(name.kind).one}, ${name.there ? whereAt(name.there) : 'not in its last read'}`)),
       h('span.source-name-state', {}, said.text, action ? [' ', action] : null),
       filesLine(name.there?.files ?? [])));
 }
@@ -232,26 +240,28 @@ function removedRow(fact: LibraryFacts, kind: ItemKind, locked: boolean) {
   const page = pageOfPart[kind];
   const turn = button({ variant: 'link', size: 'micro', label: 'Turn on', id: `source-turn-on-${kind}-${fact.key}`, disabled: locked,
     attrs: { title: `Turn ${fact.name} on in every tool it isn’t kept out of, as its switch on ${kindNouns[page].title} does. Undo turns it off again.` }, onclick: () => void turnOn(fact, page) });
-  return h('li.source-name', { 'data-key': fact.key, 'data-state': 'removed' },
+  return h('li.source-name', { 'data-key': fact.key, 'data-kind': kind, 'data-state': 'removed' },
     h('span.source-name-icon', {}, icon('triangle-alert', 14, 'tone-warning')),
     h('span.source-name-main', {},
-      h('span.source-name-line', {}, h('strong.source-name-text', {}, fact.name), h('span.source-name-where.tone-muted', {}, 'not in its last read')),
+      h('span.source-name-line', {}, h('strong.source-name-text', {}, fact.name), h('span.source-name-where.tone-muted', {}, `${nouns(kind).one}, not in its last read`)),
       h('span.source-name-state', { title: 'Should this source have it again: unchanged here since, it follows the source again; changed here, it stays as you have it.' },
         'No longer at this source: it is Off, and no longer from it.', ' ', turn)));
 }
 
-/** The look's panel: where it read, what Add does with each skill, and Add, or why it can't be added. */
+/** The look's panel: where it read, what Add does with each item, and Add, or why it can't be added. */
 function previewPanel(preview: SourcePreview) {
   const cancel = button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'source-cancel', disabled: !!state.busy, onclick: () => { sources.preview = undefined; rerender(); } });
   if (!('token' in preview)) return h('div.source-preview', { id: 'source-preview', role: 'region', 'aria-label': 'What the link holds' },
     h('p.source-refused', {}, icon('circle-alert', 14, 'tone-danger'), h('span', {}, preview.refused)), h('div.source-preview-actions', {}, cancel));
   const label = linkLabel(preview.link), coming = preview.names.filter(name => name.state === 'make' || name.state === 'link');
   const allowed = !preview.refused && !!state.home?.sync.access.allowed;
-  const addLabel = coming.length ? `Add ${plural(coming.length, 'skill')}` : 'Add the source';
+  const counts = [...new Set(coming.map(name => name.kind))].map(kind => plural(coming.filter(name => name.kind === kind).length, nouns(kind).one, nouns(kind).many));
+  const addLabel = coming.length ? `Add ${andList(counts)}` : 'Add the source';
   return h('div.source-preview', { id: 'source-preview', role: 'region', 'aria-label': `What ${label} holds` },
     h('div.source-preview-head', {}, h('strong.source-link', { title: preview.link }, label), h('span.source-where.tone-muted', {}, whereWords(preview))),
     preview.refused ? h('p.source-refused', {}, icon('circle-alert', 14, 'tone-danger'), h('span', {}, preview.refused)) : null,
     preview.names.length ? h('ul.source-names', {}, preview.names.map(name => nameRow(name, true))) : null,
+    preview.later ? h('p.source-note.tone-muted', {}, icon('info', 14, 'tone-muted'), h('span', {}, preview.later)) : null,
     h('div.source-preview-actions', {},
       preview.refused ? null : button({ variant: 'primary', size: 'small', icon: 'plus', label: addLabel, id: 'source-add', disabled: !allowed || !!state.busy, onclick: () => void add(preview.token, label) }),
       cancel,
@@ -263,26 +273,26 @@ function addForm(allowed: boolean) {
   const ready = () => !state.busy && allowed && !!sources.draft.trim();
   const go = () => { if (ready()) void look(); };
   return h('section.source-add', { 'aria-labelledby': 'source-add-title' },
-    h('h2.eyebrow', { id: 'source-add-title' }, 'Add skills from a link'),
+    h('h2.eyebrow', { id: 'source-add-title' }, `Add ${broughtNames()} from a link`),
     h('div.source-field', {},
       h('label.market-add-label', { for: 'source-link' }, 'GitHub or GitLab link'),
       h('div.source-field-row', {},
-        h('input.market-add-input', { id: 'source-link', type: 'text', placeholder: 'github.com/owner/repo, or a link to a folder or a SKILL.md in it', value: sources.draft, spellcheck: 'false', autocomplete: 'off',
+        h('input.market-add-input', { id: 'source-link', type: 'text', placeholder: 'github.com/owner/repo, or a link to a folder or a file in it', value: sources.draft, spellcheck: 'false', autocomplete: 'off',
           disabled: !!state.busy || !allowed, 'aria-describedby': 'source-link-below',
           oninput: (event: Event) => { sources.draft = (event.target as HTMLInputElement).value; const control = document.getElementById('source-look') as HTMLButtonElement | null; if (control) control.disabled = !ready(); },
           onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') go(); } }),
         button({ variant: 'outline', size: 'small', icon: 'search', label: 'Look', id: 'source-look', disabled: !ready(), onclick: go })),
-      h('span.repo-field-below', { id: 'source-link-below' }, 'A GitHub or GitLab link to a repository, a branch, a folder or a SKILL.md in one; owner/repo, github.com/owner/repo, or an address you would give git clone, works too. Central Knot uses this computer’s git and its sign-in.')),
+      h('span.repo-field-below', { id: 'source-link-below' }, 'A GitHub or GitLab link to a repository, a branch, a folder or a file in one; owner/repo, github.com/owner/repo, or an address you would give git clone, works too. Central Knot uses this computer’s git and its sign-in.')),
     sources.preview ? previewPanel(sources.preview) : null);
 }
 
-/** One source's row: its link and where it reads, why its last check failed, each skill there, Check now and Remove. */
+/** One source's row: its link and where it reads, why its last check failed, each item there, Check now and Remove. */
 function sourceRow(source: SourceView) {
   const label = linkLabel(source.link), locked = !!state.busy || !state.home?.sync.access.allowed;
   const asking = sources.confirmRemove === source.id;
   const read = source.readAt ? `read ${dayAndTime(source.readAt)}` : '';
   const actions = asking ? null : h('span.source-actions', {},
-    button({ variant: 'outline', size: 'small', icon: 'refresh-cw', label: 'Check now', id: `source-check-${source.id}`, disabled: locked, attrs: { title: `Read ${label} again: what changed there comes into Central Knot, On or Off as each skill is, unless you changed it here` }, onclick: () => void checkNow(source) }),
+    button({ variant: 'outline', size: 'small', icon: 'refresh-cw', label: 'Check now', id: `source-check-${source.id}`, disabled: locked, attrs: { title: `Read ${label} again: what changed there comes into Central Knot, On or Off as each one is, unless you changed it here` }, onclick: () => void checkNow(source) }),
     button({ variant: 'ghost', size: 'small', label: 'Remove…', id: `source-remove-${source.id}`, disabled: locked, onclick: () => { sources.confirmRemove = source.id; rerender(); document.getElementById(`source-remove-cancel-${source.id}`)?.focus(); } }));
   const called = (name: SourceName) => name.name ?? name.key;
   const idOf = (click: string, name: SourceName) => `source-${click}-${source.id}-${name.kind}-${name.key}`;
@@ -290,7 +300,7 @@ function sourceRow(source: SourceView) {
     attrs: { title: `Bring ${called(name)} back into Central Knot, Off, at this source’s version; its earlier versions come back with it` }, onclick: () => void onLine(source, name, 'bringBack') })
     : name.state === 'wait' ? h('span.source-name-actions', {},
       button({ variant: 'link', size: 'micro', label: 'Merge', id: idOf('merge', name), disabled: locked,
-        attrs: { title: `Put this source’s changes to ${called(name)} into yours, file by file, in every tool it is on in; if they clash with yours, nothing changes and the files are named. Yours is kept as a version, and Undo puts it back` }, onclick: () => void onLine(source, name, 'merge') }),
+        attrs: { title: `Put this source’s changes to ${called(name)} into yours, in every tool it is on in; if they clash with yours, nothing changes and what clashes is named. Yours is kept as a version, and Undo puts it back` }, onclick: () => void onLine(source, name, 'merge') }),
       button({ variant: 'link', size: 'micro', label: 'Replace', id: idOf('replace', name), disabled: locked,
         attrs: { title: `Make this source’s version of ${called(name)} current, in every tool it is on in; yours is kept as a version, and Undo puts it back` }, onclick: () => void onLine(source, name, 'replace') }),
       button({ variant: 'link', size: 'micro', label: 'Keep mine', id: idOf('keep', name), disabled: locked,
@@ -304,8 +314,8 @@ function sourceRow(source: SourceView) {
       h('span.source-row-title', {}, icon('link-2', 16, 'tone-muted'), h('strong.source-link', { title: source.link }, label)),
       actions),
     h('span.source-where.tone-muted', {}, [whereWords(source), read].filter(Boolean).join(' · ')),
-    h('span.source-does.tone-muted', {}, 'Check now reads the link again, as Central Knot does once a day while Automatic sync is on: a skill changed there is updated in the tools it is on in, unless you changed it here (then it waits for you); one no longer there is turned off and taken out of them.'),
-    asking ? h('div.band.source-confirm', { role: 'alert' }, h('span.band-text', {}, 'Remove this source? Its skills stay in Central Knot as they are, On or Off, with their versions; they are no longer from it.'),
+    h('span.source-does.tone-muted', {}, `Check now reads the link again, as Central Knot does once a day while Automatic sync is on: ${orList((sources.view?.kinds ?? []).map(kind => nouns(kind).a))} changed there is updated in the tools it is on in, unless you changed it here (then it waits for you); one no longer there is turned off and taken out of them.`),
+    asking ? h('div.band.source-confirm', { role: 'alert' }, h('span.band-text', {}, `Remove this source? ${removeWords()}`),
       button({ variant: 'outline', size: 'small', label: 'Remove', id: `source-remove-confirm-${source.id}`, disabled: !!state.busy, onclick: () => void remove(source) }),
       button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `source-remove-cancel-${source.id}`, onclick: () => { sources.confirmRemove = undefined; rerender(); } })) : null,
     source.problem ? h('p.source-refused', {}, icon('circle-alert', 14, 'tone-danger'), h('span', {}, `Couldn’t fetch it at the last check: ${source.problem} What came from it stays as it is; below is its last read.`)) : null,
@@ -330,6 +340,6 @@ export function sourcesPage(): HTMLElement {
       view.sources.length ? h('section.source-list', { 'aria-labelledby': 'source-list-title' },
         h('h2.eyebrow', { id: 'source-list-title' }, `Sources · ${view.sources.length}`),
         h('ul.source-rows', {}, view.sources.map(sourceRow)))
-        : h('p.source-empty', {}, h('strong', {}, 'No sources yet. '), 'A source is a GitHub or GitLab link that skills are read from. Each skill there comes into Central Knot Off, and the link is read again once a day and on Check now for what changed there. Central Knot never writes to a source.'),
-      h('p.repo-aside', {}, 'Only skills come from a link in this version; agents, MCP servers and plugins from a link come later.')));
+        : h('p.source-empty', {}, h('strong', {}, 'No sources yet. '), `A source is a GitHub or GitLab link that ${broughtNames()} are read from. Each one there comes into Central Knot Off, and the link is read again once a day and on Check now for what changed there. Central Knot never writes to a source.`),
+      h('p.repo-aside', {}, 'MCP servers and plugins from a link come in a later version.')));
 }
