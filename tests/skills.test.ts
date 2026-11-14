@@ -153,7 +153,7 @@ test('A folder really deleted by hand in one tool turns the skill Off everywhere
     const before = await everywhere(box);
     await rm(folderOf(box, 'copilot-cli'), { recursive: true });
     const done = await pass(box);
-    assert.deepEqual(done.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner]), [['deleted', 'copilot-cli']]);
+    assert.deepEqual(done.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner]), [['deleted-by-hand', 'copilot-cli']]);
     assert.deepEqual(Object.values(await everywhere(box)).filter(Boolean), []);
     assert.equal((await itemOf(box))!.on, false);
     const off = (await historyOf(box)).find(event => event.kind === 'off')!;
@@ -200,7 +200,7 @@ test('A removal never takes content the library hasn’t: an edit made with Auto
     // Sync off: an edit no pass took in, then Off, a click on this skill alone. The edit is a version before the folder goes.
     await put(box, 'codex-cli', { 'SKILL.md': skillText('Not taken in yet.') });
     const offline: ShareContext = { ...box.context };
-    await (await import('../src/skills.ts')).applySkills(offline, box.tools, [{ key: 'notes', managed: false, off: [] }], { only: new Set(['notes']) });
+    await (await import('../src/skills.ts')).applySkills(offline, box.tools, [{ key: 'notes', on: false, except: [] }], { only: new Set(['notes']) });
     const edited = (await readTree(join(box.home, '.central-knot/items/skills/notes/versions', (await itemOf(box))!.hash))).files.get('SKILL.md');
     assert.ok(edited, 'the edit is the current version, kept in the store');
     assert.equal(await readFile(join(box.home, '.central-knot/items/skills/notes/versions', (await itemOf(box))!.hash, 'SKILL.md'), 'utf8'), skillText('Not taken in yet.'));
@@ -441,7 +441,7 @@ test('Take over carries a tool’s own switch: a skill Codex had off where it re
     assert.equal((await takeOver(box.context, box.tools, 'notes', 'codex-cli')).stopped, undefined);
     const codex = await readSwitchFile(box.context, 'codex-cli');
     assert.equal(isDisabled(box.context, codex, { folder: 'notes', name: 'notes', skillFile: join(folderOf(box, 'codex-cli'), 'SKILL.md') }), true, 'still off in Codex');
-    assert.equal((await seen(box)).fact!.loads?.['codex-cli']?.off, true);
+    assert.equal((await seen(box)).fact!.loads?.['codex-cli']?.switchedOff, true);
   } finally { await box.cleanup(); }
 });
 
@@ -514,21 +514,20 @@ test('A switch set in a tool is left exactly as it is: the folder stays and the 
     await turnOn(box);
     assert.equal(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), config, 'Off and On never write a tool’s own switch');
     const { fact, item, row } = await seen(box);
-    assert.deepEqual(fact!.loads?.['codex-cli'], { ...target, off: true });
-    const view = await skillsView(box.context, box.tools);
-    const { kindSource } = await import('../src/itemrow.ts');
-    const facts = kindSource({ skills: view, mcp: { tools: [], items: [], library: {} } as never, agents: view }, 'skills').facts.find(entry => entry.key === 'notes')!;
-    assert.deepEqual(facts.switched, { 'codex-cli': 'switched off in Codex’s own settings' });
-    assert.match(say.harnessLine({ ...row, switched: facts.switched }, item, 'codex-cli', 'Codex'), /It is switched off in Codex’s own settings: Codex doesn’t load it/);
-    assert.equal(say.placeTag({ ...row, switched: facts.switched }, item, tools)?.text, 'switched off in Codex');
+    assert.deepEqual(fact!.loads?.['codex-cli'], { ...target, switchedOff: true });
+    // The row as the page has it: the view's switchedOff (matrix.ts fromFacts copies it), said in Codex's own settings.
+    const switchedOff = fact!.switchedOff;
+    assert.deepEqual(switchedOff, ['codex-cli']);
+    assert.match(say.harnessLine({ ...row, switchedOff }, item, 'codex-cli', 'Codex'), /It is switched off in Codex’s own settings: Codex doesn’t load it/);
+    assert.deepEqual(say.placeTag({ ...row, switchedOff }, item, tools), { text: 'switched off in Codex', title: 'Switched off in Codex’s own settings: each tool’s own switch, which Central Knot leaves as it is. The opened row can clear it.' });
     // Never on and off at once: Codex is not counted as on, and the switch is drawn partial with what it says.
-    assert.equal(statusLine({ ...row, switched: facts.switched }, item, tools), 'On in Claude Code and Copilot CLI · switched off in Codex');
-    assert.equal(isPartial(item, tools, { ...row, switched: facts.switched }), true);
-    assert.match(switchLabel({ ...row, switched: facts.switched }, item, tools), /^notes: on in 2 of 3 tools\./);
+    assert.equal(statusLine({ ...row, switchedOff }, item, tools), 'On in Claude Code and Copilot CLI · switched off in Codex');
+    assert.equal(isPartial(item, tools, { ...row, switchedOff }), true);
+    assert.match(switchLabel({ ...row, switchedOff }, item, tools), /^notes: on in 2 of 3 tools\./);
     // Switched off in every tool: never plain on.
     for (const tool of ['claude-cli', 'copilot-cli'] as Tool[]) await setDisabled(box.context, tool, { ...target, skillFile: join(folderOf(box, tool), 'SKILL.md') }, true);
-    const everyTool = Object.fromEntries(tools.map(tool => [tool, 'off']));
-    assert.equal(say.placeTag({ ...row, switched: everyTool }, item, tools)?.text, 'switched off in all 3 tools');
+    const everyTool = (await seen(box)).fact!.switchedOff;
+    assert.equal(say.placeTag({ ...row, switchedOff: everyTool }, item, tools)?.text, 'switched off in all 3 tools');
     const cleared = await clearSwitch(box.context, box.tools, 'notes', 'codex-cli');
     assert.equal(cleared.stopped, undefined);
     assert.equal(isDisabled(box.context, await readSwitchFile(box.context, 'codex-cli'), target), false);
@@ -580,7 +579,7 @@ test('Delete from Central Knot takes it out of every tool, History restores it; 
     await turnOn(box, box.context, 'agents');
     assert.deepEqual(await readdir(join(box.home, '.central-knot/items')), ['skills']);
     assert.deepEqual(await readdir(join(box.home, '.central-knot/items/skills')), ['agents']);
-    await send(box, { key: 'agents', managed: true, off: [], deleted: true });
+    await send(box, { key: 'agents', on: true, except: [], deleted: true });
     assert.deepEqual(Object.values(await everywhere(box, 'agents')).filter(Boolean), []);
     const deleted = (await readHistory(box.context)).find(event => event.key === 'agents' && event.kind === 'deleted')!;
     await restore(box, deleted.id);

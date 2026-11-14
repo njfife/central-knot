@@ -12,7 +12,7 @@ import { brandMark, itemsTable, outcomeBand, showFiltered, skillsBrowser, wrappi
 import { andList, kindNames, kindNouns, noToolsSentence, orList, toolList } from './words.ts';
 import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { asksWhichCopy } from './libraryrow.ts';
-import { anyManaged, kindSource } from './itemrow.ts';
+import { anyOn, kindSource } from './itemrow.ts';
 import { setupLead } from './firstsetup.ts';
 import { otherBuildBands, takeOverChoices } from './otherbuildview.ts';
 
@@ -115,12 +115,12 @@ function practiceBanner() {
     button({ variant: 'ghost', size: 'small', icon: 'x', name: 'Hide this note', id: 'intro-dismiss', onclick: () => { setPracticeNote(false); rerender(); } }));
 }
 
-/** What a kind card needs from one item: whether it is managed, has edits waiting or differs, and which tools hold a copy. */
+/** What a kind card needs from one item: whether it is On, has edits waiting or differs, and which tools hold a copy. */
 /** `waits`: a write or removal in Claude Code waits for Write to Claude Code (MCP servers). */
-interface KindFact { managed: boolean; edited?: unknown[]; differs: boolean; copies: Record<string, unknown>; plugin?: Record<string, unknown>; waits?: boolean }
+interface KindFact { on: boolean; edited?: unknown[]; differs: boolean; copies: Record<string, unknown>; plugin?: Record<string, unknown>; waits?: boolean }
 
 /**
- * One kind on the Overview: how many there are and how many are managed, then what needs attention in short words
+ * One kind on the Overview: how many there are and how many are On, then what needs attention in short words
  * ("1 differs"), on one summary line; under it, each tool here that holds this kind with its count, the entries wrapping
  * whole. The card opens the kind's page; "differs" is its own link, to the page narrowed to those.
  */
@@ -130,15 +130,15 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof ic
   const home = state.home;
   const fromPlugins = home ? pluginItemCount(home, page) : 0;
   const total = facts.length + fromPlugins;
-  const managed = facts.filter(fact => fact.managed).length;
+  const on = facts.filter(fact => fact.on).length;
   const differs = facts.filter(fact => fact.differs).length;
-  const edits = facts.filter(fact => fact.managed && fact.edited?.length).length;
+  const edits = facts.filter(fact => fact.on && fact.edited?.length).length;
   const waitsForClaude = facts.filter(fact => fact.waits).length;
   const attention = differs ? { tone: 'tone-warning', glyph: 'diff' as const, text: `${differs} ${differs === 1 ? 'differs' : 'differ'}`, title: `${differs} ${differs === 1 ? 'has' : 'have'} different copies. Show only these.` }
     : edits ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${edits} waiting`, title: `${plural(edits, 'change')} waiting to sync` }
       : waitsForClaude ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${waitsForClaude} for Claude Code`, title: `${waitsForClaude} ${waitsForClaude === 1 ? 'waits' : 'wait'} for Write to Claude Code` }
         // Not said of a home another build syncs: whether it is in sync is that build's to say.
-        : managed && !(home?.sync.gate.state === 'stopped' && home.sync.gate.owner) ? { tone: 'tone-success', glyph: 'check' as const, text: 'All in sync', title: 'Every synced one is the same in every tool it syncs to' }
+        : on && !(home?.sync.gate.state === 'stopped' && home.sync.gate.owner) ? { tone: 'tone-success', glyph: 'check' as const, text: 'All in sync', title: 'Every synced one is the same in every tool it syncs to' }
           : undefined;
   const status = !attention ? null : differs
     ? h(`button.kind-card-state.kind-card-link.${attention.tone}`, { type: 'button', id: `overview-${page}-differ`, title: attention.title, onclick: () => { showFiltered(page, 'attention'); showPage(page); } }, icon(attention.glyph, 13), attention.text)
@@ -152,7 +152,7 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof ic
   return h('div.kind-card', {},
     h('button.kind-card-main', { type: 'button', id: `overview-${page}`, onclick: () => showPage(page) },
       h('span.kind-card-head', {}, icon(glyph, 16), h('strong', {}, title), icon('arrow-right', 14, 'tone-faint'))),
-    h('div.kind-card-summary', {}, h('span', {}, total ? `${plural(total, noun[0], noun[1])} · ${managed ? `${managed} synced` : 'none synced'}${fromPlugins ? ` · ${fromPlugins} from plugins` : ''}` : `No ${noun[1]}`),
+    h('div.kind-card-summary', {}, h('span', {}, total ? `${plural(total, noun[0], noun[1])} · ${on ? `${on} synced` : 'none synced'}${fromPlugins ? ` · ${fromPlugins} from plugins` : ''}` : `No ${noun[1]}`),
       // The "·" goes with the status; a narrow card puts the status on a line of its own, without it (markWrappedStatus).
       status ? h('span.kind-card-status', {}, h('span.kind-card-dot', { 'aria-hidden': 'true' }, '·'), status) : null),
     total ? h('div.kind-card-tools', {}, tools) : null);
@@ -189,15 +189,15 @@ function settleToolCounts(): void {
 afterLayout(settleToolCounts);
 
 /**
- * The lead's next step, only where it can be taken: with two tools or more and something unmanaged, manage it (where first
+ * The lead's next step, only where it can be taken: with two tools or more and nothing On, turn something on (where first
  * setup's question isn't asking: `asking`); with one tool there is nothing to keep in step, so it says how a second one joins.
  */
-function nextStep(home: HomeView, nothingManaged: boolean, asking: boolean): string {
+function nextStep(home: HomeView, nothingOn: boolean, asking: boolean): string {
   if (noToolManaged()) return '';
   if (!home.skills.items.length && !home.mcp.items.length && !home.agents.items.length) return ' Nothing found in this home yet.';
   // With a tool left out, the lead has said where its switch is.
   if (homeTools().length === 1) return home.sync.present.length > 1 ? '' : ' When a second tool is installed, or its folder appears here, Central Knot finds it on its own; then manage what you want the same in both.';
-  return nothingManaged && home.sync.access.allowed && !asking ? ' Open one below and turn on what you want the same in every tool.' : '';
+  return nothingOn && home.sync.access.allowed && !asking ? ' Open one below and turn on what you want the same in every tool.' : '';
 }
 
 /** The Overview's line where another build syncs this home: who, and Take over syncing or the two choices (otherbuildview.ts takeOverChoices). */
@@ -212,12 +212,12 @@ export function overviewPage() {
   // An item's copies need a choice only while it is found: one in Central Knot's library never asks (libraryrow.ts asksWhichCopy).
   const libraryFacts = (which: 'skills' | 'mcp' | 'agents'): KindFact[] => {
     const source = kindSource(home, which);
-    return source.facts.map(fact => ({ managed: fact.managed, edited: fact.edited, copies: fact.copies, differs: asksWhichCopy(fact), waits: !!fact.waits?.length }));
+    return source.facts.map(fact => ({ on: fact.on, edited: fact.edited, copies: fact.copies, differs: asksWhichCopy(fact), waits: !!fact.waits?.length }));
   };
   // Kinds no tool here can hold have no card (app.ts absentKinds); they are named once, below.
   const absent = absentKinds();
   const empty = noToolManaged();
-  const nothingManaged = !anyManaged(home);
+  const nothingOn = !anyOn(home);
   // A click's result, then another build of Central Knot found on this Mac (otherbuildview.ts).
   const bands = [outcomeBand(), ...otherBuildBands(home)].filter(band => !!band);
   // First setup's one place: its question, or the way into its walkthrough (firstsetup.ts).
@@ -229,7 +229,7 @@ export function overviewPage() {
       // A home with no tools has nothing to count: the way forward is another home.
       empty ? noToolsLead('overview') : h('p.overview-lead', {}, leadSentence(home),
         // The next step only where it can be taken: something to manage, and a home that can be written.
-        nextStep(home, nothingManaged, setup?.id === 'setup-question')),
+        nextStep(home, nothingOn, setup?.id === 'setup-question')),
       setup,
       empty ? null : h('div.kind-cards', { 'data-count': String(heldKinds(home).length) },
         kindCard('skills', 'wand-sparkles', libraryFacts('skills'), homeTools()),
@@ -242,7 +242,7 @@ export function overviewPage() {
         : syncOwner(home.sync.gate) ? ownerLine(home)
         // Green only once something syncs; before that, sync is on and waiting, in the status bar's grey. With no tool managed
         // nothing syncs at all (the status bar says so).
-        : empty || (home.syncOn && nothingManaged) ? null : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingManaged ? 'tone-muted' : 'tone-success') : 'tone-warning'),
+        : empty || (home.syncOn && nothingOn) ? null : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingOn ? 'tone-muted' : 'tone-success') : 'tone-warning'),
           ...(home.syncOn ? [`Automatic sync is on: edits spread between tools in seconds${home.sync.syncEverything ? ', and what turns up in a tool is taken in by Synchronize everything' : ''}, with a notice and Undo.`]
             : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync once', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
         // Not a build of Central Knot removed to the Trash: that is in the Trash until the Trash is emptied (otherbuildview.ts).

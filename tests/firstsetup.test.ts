@@ -583,10 +583,10 @@ test('The Restore passes over an item added, changed or deleted since the Undo, 
     const [yes] = await switchesOn(box);
     const undone = await everythingEntryAction(box.context, tools, yes.id);
     // notes is added again by hand, edited, and deleted from Central Knot.
-    await applySkills(box.context, tools, [{ key: 'notes', managed: true, off: [] }]);
+    await applySkills(box.context, tools, [{ key: 'notes', on: true, except: [] }]);
     await putSkill(box, skillRoot['claude-cli'], 'notes', 'New incarnation.');
     await background(box);
-    await applySkills(box.context, tools, [{ key: 'notes', managed: true, off: [], deleted: true }]);
+    await applySkills(box.context, tools, [{ key: 'notes', on: true, except: [], deleted: true }]);
     const undo = (await history(box)).find(event => event.id === undone.made![0])!;
     assert.match(everythingAction(undo, await history(box), await entryItems(box))?.help ?? '', /put back the 1 item this took out of Central Knot.*; notes was added, changed or deleted since, and stays as it is$/);
     const restored = await everythingEntryAction(box.context, tools, undo.id);

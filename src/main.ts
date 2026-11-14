@@ -1113,9 +1113,9 @@ app.whenReady().then(async () => {
   handle('discovery:refresh', async () => (current ? syncThenView() : null));
   // Writes act only on the home the window says it is showing.
   const changes = (value: unknown): Change[] => (Array.isArray(value) ? value : []).filter((change): change is Change =>
-    typeof change?.key === 'string' && typeof change.managed === 'boolean' && Array.isArray(change.off)
-    && (change.use === undefined || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenManaged === undefined || typeof change.seenManaged === 'boolean')
-  ).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged,
+    typeof change?.key === 'string' && typeof change.on === 'boolean' && Array.isArray(change.except)
+    && (change.use === undefined || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenOn === undefined || typeof change.seenOn === 'boolean')
+  ).map(change => ({ key: change.key, on: change.on, except: ids(change.except), use: change.use, useHash: change.useHash, seenOn: change.seenOn,
     ...(typeof change.version === 'string' ? { version: change.version } : {}), ...(typeof change.deleted === 'boolean' ? { deleted: change.deleted } : {}),
     ...(change.giveBack && typeof change.giveBack === 'object' ? { giveBack: Object.fromEntries(Object.entries(change.giveBack).filter(([tool, hash]) => harnessIds.includes(tool as HarnessId) && typeof hash === 'string')) } : {}) }));
   // Marketplaces and plugins: their own module, given only what it needs from here.

@@ -84,7 +84,7 @@ function skillToolActions(row: ItemRow, tool: HarnessId): HTMLElement | null {
     const control = h(`button.text-action${danger ? '.text-danger' : ''}`, { type: 'button', id, title, disabled: !!state.busy, onclick: (event: Event) => { event.stopPropagation(); run(); } }, label);
     return control;
   };
-  const clear = row.switched?.[tool] ? action(`Let ${where} load it`, `clear-switch-${row.key}-${tool}`,
+  const clear = row.switchedOff?.includes(tool) ? action(`Let ${where} load it`, `clear-switch-${row.key}-${tool}`,
     `Clear ${where}’s own switch for ${name}, so ${where} loads it again from its next session. History can undo it.`,
     () => void skillAction('clear-switch', row.key, tool, name)) : null;
   // Only a skill in Central Knot takes a copy over: a found one is taken in first, by its switch.

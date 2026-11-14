@@ -20,7 +20,7 @@
 //   pass. Where it lives inside the entry (Codex, Pi, OpenCode) it is that tool's own field, so it comes back with the entry.
 //   One write follows a pass: Claude Code's deny of a server the profiles migration turned Off was kept, so the server doesn't
 //   start there before Write to Claude Code takes its entry out, and is cleared once the server is wanted there (releaseKeptDenies).
-// Around the pass: applyServers, writeToClaude and restoreServer run it (the page's clicks through librarypass.ts itemClick);
+// Around the pass: applyServers, writeToClaude and restoreServer run it (the page's clicks);
 // serversView is the MCP servers page's reading (types.ts LibraryView); serversForRepo is what the Git repo's Push sends. Elsewhere: the formats, mcp.ts; where things are kept and
 // the migration from the earlier record, serverstore.ts and servermigrate.ts; the row and its words, libraryrow.ts with
 // librarypages.ts; History's sentences and actions, historyactions.ts.
@@ -28,7 +28,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { libraryAction } from './historyactions.ts';
 import { listed, noteAgainst, pendingEdits, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
-import { copiesOf, itemClick, leavingIn, lookFor, restore, runPass, sharedFileSeen, takeInAnswers, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
+import { copiesOf, leavingIn, lookFor, restore, runPass, sharedFileSeen, takeInAnswers, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords, writesWait } from './libraryrow.ts';
 import { cannotHold, editEntry, mcpFile, ownText, readTool, recoverSettings, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, readMcpSwitches, withMcpSwitch } from './mcpswitch.ts';
@@ -194,11 +194,11 @@ async function writeServer(context: ShareContext, item: LibraryItem, tool: Harne
 export type PulledServer = { name: string; server: NeutralServer } | { removed: true };
 type ServerPassOptions = Omit<PassOptions<NeutralServer>, 'pulled'> & { pulled?: Map<string, PulledServer> };
 
-/** One pass over the servers (librarypass.ts runPass): the page's clicks in `changes` (itemClick), then every server brought into line. */
+/** One pass over the servers (librarypass.ts runPass): the page's clicks in `changes`, then every server brought into line. */
 export async function applyServers(context: ShareContext, tools: HarnessId[], changes: Change[], options: ServerPassOptions = {}): Promise<PassResult> {
   const pulled = options.pulled && new Map([...options.pulled].map(([key, brought]) =>
     [key, 'removed' in brought ? brought : { name: brought.name, content: brought.server }] as const));
-  return releaseKeptDenies(context, tools, await runPass(serverKind, context, tools, changes.map(itemClick), { ...options, pulled }));
+  return releaseKeptDenies(context, tools, await runPass(serverKind, context, tools, changes, { ...options, pulled }));
 }
 
 /**

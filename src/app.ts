@@ -12,7 +12,7 @@ import { loadSettings, openSettings } from './settingspage.ts';
 import { checkNow } from './updateview.ts';
 import { loadPluginUpdates } from './pluginupdateview.ts';
 import type { ApplyResult, ProfileEdit, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, PassResult, SyncNotice } from './types.ts';
-import { anyManaged, kindSource } from './itemrow.ts';
+import { anyOn, kindSource } from './itemrow.ts';
 import { caughtUpNames, noticeNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
 import { readFlag, writeFlag } from './flags.ts';
@@ -487,8 +487,8 @@ const openHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mod
   const previous = state.home;
   const view = await api().selectHome(mode);
   if (view && view.home !== previous?.home) { forgetRepoPrompts(true); forgetSourcePrompts(true); }
-  // Sync follows the open home: leaving one with managed items stops its syncing, so the band says so and offers the way back.
-  const left = previous && view && previous.home !== view.home && anyManaged(previous) ? previous : undefined;
+  // Sync follows the open home: leaving one with items On stops its syncing, so the band says so and offers the way back.
+  const left = previous && view && previous.home !== view.home && anyOn(previous) ? previous : undefined;
   const leftText = left ? ` ${left.label} is not syncing while another home is open.` : '';
   if (!view) { announce(''); return; }
   accept(view);
@@ -754,7 +754,7 @@ export const convertAgent = (key: string, name: string) => busy('Converting…',
   const made = await api().convertAgent(key, clickResumes(home), home.home);
   if (made.stopped || !made.skill) { announce(made.stopped ?? 'Nothing was converted.'); return; }
   const others = home.sync.managed.filter(tool => tool !== 'pi-cli');
-  const applied = await api().applySkills([{ key: made.skill, managed: true, off: others }], clickResumes(home), home.home);
+  const applied = await api().applySkills([{ key: made.skill, on: true, except: others }], clickResumes(home), home.home);
   const view = await api().refresh();
   setHome(view);
   const from = toolName(made.origin ?? 'claude-cli');

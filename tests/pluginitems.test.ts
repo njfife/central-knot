@@ -7,7 +7,7 @@ import { readItemTexts, readPluginItems } from '../src/pluginitems.ts';
 import { inTool, cellWords, handledWhere, offIn, pageRows, pluginItemCount, rowCount, toolWords } from '../src/pluginrows.ts';
 import type { PluginContext } from '../src/plugins.ts';
 import { kindSource } from '../src/itemrow.ts';
-import type { HarnessId, HomeView, InstalledPlugin, PartsInstall, SkillFacts } from '../src/types.ts';
+import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, PartsInstall } from '../src/types.ts';
 
 const put = async (path: string, text: string) => { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, text); };
 
@@ -102,12 +102,12 @@ test('a copy that can’t be read is said, and neither it nor broken records sto
 
 // ---------- Rows ----------
 
-const fact = (key: string, copies: Partial<Record<HarnessId, true>>, extra: Partial<SkillFacts> = {}): SkillFacts => ({ key, name: key, description: '', copies: Object.fromEntries(Object.keys(copies).map(tool => [tool, { hash: 'h', directory: '', rootLabel: '', lines: 1, modified: '', summary: '', writable: true, folder: key }])), managed: false, off: [], cannot: {}, choiceBlocks: {}, ...extra });
+const fact = (key: string, copies: Partial<Record<HarnessId, true>>, extra: Partial<LibraryFacts> = {}): LibraryFacts => ({ key, name: key, description: '', copies: Object.fromEntries(Object.keys(copies).map(tool => [tool, { hash: 'h', directory: '', rootLabel: '', lines: 1, modified: '', summary: '', writable: true, folder: key }])), on: false, except: [], cannot: {}, edited: [], ...extra });
 const install = (tool: HarnessId, extra: Partial<InstalledPlugin> = {}): InstalledPlugin => ({ tool, plugin: 'issue-tracker', marketName: 'm', version: '2.0.0', listed: true, items: [{ kind: 'skill', name: 'triage', description: 'Sorts issues.' }, { kind: 'mcp', name: 'issues', description: '', runs: 'npx -y issues' }], ...extra });
 const piPart: PartsInstall = { source: '/m', marketName: 'm', plugin: 'issue-tracker', tool: 'pi-cli', at: '', digest: '', items: [{ kind: 'skill', name: 'triage', hash: '' }] };
-/** A home's view with these skills (as the Skills page's view gives them: types.ts LibraryFacts, `on` for managed). */
-const homeOf = (skills: SkillFacts[], pluginItems: InstalledPlugin[], parts: PartsInstall[] = []) => ({
-  skills: { tools: [], items: skills.map(({ managed, off, ...facts }) => ({ ...facts, on: managed, except: off, edited: [] })), library: {} },
+/** A home's view with these skills (as the Skills page's view gives them: types.ts LibraryFacts). */
+const homeOf = (skills: LibraryFacts[], pluginItems: InstalledPlugin[], parts: PartsInstall[] = []) => ({
+  skills: { tools: [], items: skills, library: {} },
   mcp: { items: [], library: {} }, agents: { items: [], library: {} }, parts, pluginItems }) as unknown as HomeView;
 
 test('a plugin’s skill the person also has (its part in Pi, shown there as through the plugin elsewhere) is that one row, not a second', () => {

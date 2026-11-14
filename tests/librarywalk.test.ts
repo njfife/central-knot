@@ -139,7 +139,7 @@ async function walk(seed: number): Promise<Finding[]> {
     }
     for (const tool of three) await mkdir(join(box.home, agentFiles[tool], '..'), { recursive: true });
     await writeFile(join(box.home, agentFiles['claude-cli']), '---\nname: writer\ndescription: Writes docs\n---\n\nYou write docs.\n');
-    await applyAgents(context(), tools, [{ key: 'writer', managed: true, off: [], seenManaged: false }]);
+    await applyAgents(context(), tools, [{ key: 'writer', on: true, except: [], seenOn: false }]);
     agentAsWritten = await agentNow();
     for (let step = 0; step < STEPS && !found.length; step++) {
       const { row, item, fact } = await seen(box, context());
@@ -163,7 +163,7 @@ async function walk(seed: number): Promise<Finding[]> {
       for (const action of await historyActions(box, context())) add(2, { name: `History: ${action.label} (${action.event.kind})`, app: true, writes: action.event.kind === 'switched' ? 'switch' : undefined, run: () => action.run() });
       if (last?.made?.length) { const click = last; add(2, { name: 'Undo', app: true, run: () => undo(box, click, context()) }); }
       for (const [tool, take] of Object.entries(fact?.takeOver ?? {})) add(2, { name: `Take over (${take!.kind}) in ${tool}`, app: true, writes: 'shared', run: () => takeOver(context(), tools, 'notes', tool as HarnessId) });
-      for (const [tool, load] of Object.entries(fact?.loads ?? {})) if (load?.off) add(2, { name: `Clear the switch in ${tool}`, app: true, writes: 'switch', run: () => clearSwitch(context(), tools, 'notes', tool as HarnessId) });
+      for (const [tool, load] of Object.entries(fact?.loads ?? {})) if (load?.switchedOff) add(2, { name: `Clear the switch in ${tool}`, app: true, writes: 'switch', run: () => clearSwitch(context(), tools, 'notes', tool as HarnessId) });
       for (const tool of allTools as Tool[]) {
         const folder = folderOf(box, tool), there = await bytes(folder);
         const touch = async () => { const when = new Date(Date.now() + ++marker * 1000); for (const name of ['', 'SKILL.md']) await utimes(join(folder, name), when, when).catch(() => undefined); };
@@ -201,8 +201,8 @@ async function walk(seed: number): Promise<Finding[]> {
       } });
       add(1, { name: `Automatic sync ${syncOn ? 'off' : 'on'}`, run: async () => { syncOn = !syncOn; } });
       add(1, { name: 'the agent Off then On', app: true, writes: 'agent', run: async () => {
-        const off = await applyAgents(context(), tools, [{ key: 'writer', managed: false, off: [], seenManaged: true }]);
-        await applyAgents(context(), tools, [{ key: 'writer', managed: true, off: [], seenManaged: false }]);
+        const off = await applyAgents(context(), tools, [{ key: 'writer', on: false, except: [], seenOn: true }]);
+        await applyAgents(context(), tools, [{ key: 'writer', on: true, except: [], seenOn: false }]);
         if (!off.stopped && !same(await agentNow(), agentAsWritten)) fail('(h) the agent’s Off then On left a file other than it was');
       } });
       add(1, { name: 'age', run: async () => {
@@ -296,7 +296,7 @@ async function walk(seed: number): Promise<Finding[]> {
       if (live?.on) for (const tool of tools) page(`switch in ${tool}`, rowClicks.inHarness(now.row, live, tool, !live.except.includes(tool)));
       for (const [index, version] of (live?.versions ?? []).entries()) if (version.hash !== live!.hash) page(`Make current #${index}`, rowClicks.makeCurrent(now.row, live, version.hash));
       for (const tool of Object.keys(now.fact?.takeOver ?? {})) offered.push({ name: `the page’s Take over in ${tool}`, run: () => takeOver(context(), tools, 'notes', tool as HarnessId) });
-      for (const [tool, load] of Object.entries(now.fact?.loads ?? {})) if (load?.off) offered.push({ name: `the page’s Clear the switch in ${tool}`, run: () => clearSwitch(context(), tools, 'notes', tool as HarnessId) });
+      for (const [tool, load] of Object.entries(now.fact?.loads ?? {})) if (load?.switchedOff) offered.push({ name: `the page’s Clear the switch in ${tool}`, run: () => clearSwitch(context(), tools, 'notes', tool as HarnessId) });
       for (const action of offered) await trial(box, async () => {
         const record = await recordText(), switches = await switchesNow(), answers = [await action.run()].flat();
         const refusal = answers.map(answer => answer.stopped ?? answer.results.find(entry => entry.unchanged)?.message).find(Boolean);

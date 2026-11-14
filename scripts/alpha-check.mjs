@@ -98,7 +98,7 @@ chmodSync(join(HOME, '.local/bin/claude'), 0o755);
 const standardSettings = join(appData, 'central-knot', 'sharing-settings.json');
 mkdirSync(join(appData, 'central-knot'), { recursive: true });
 const standard = { home: HOME, mode: 'custom', read: () => Promise.all(harnessIds.map(harness => discover({ home: HOME, mode: 'custom', harness }))), build: STANDARD_BUILD, buildName: STANDARD, settingsPath: standardSettings, realHome: join(scratch, 'elsewhere') };
-const managed = await applySkills(standard, await managedNow(standard, await standard.read()), [{ key: 'notes', managed: true, off: [] }]);
+const managed = await applySkills(standard, await managedNow(standard, await standard.read()), [{ key: 'notes', on: true, except: [] }]);
 check('the standard app syncs the home first', !managed.stopped && (await readRecord(HOME)).record?.owner === STANDARD_BUILD, managed.stopped);
 
 // Each app's releases hold a newer release of the other line, which it must pass over.

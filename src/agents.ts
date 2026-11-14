@@ -6,7 +6,7 @@
 // cannotTake for the page).
 // Writes and removals are checked (share.ts), so a save that lands meanwhile is never lost.
 //
-// Around the pass: applyAgents and restoreAgent run it for agents (the page's clicks through librarypass.ts itemClick);
+// Around the pass: applyAgents and restoreAgent run it for agents (the page's clicks);
 // agentsView is the Agents page's reading (types.ts LibraryView: lookFor, copiesOf, plan), so a mark says what a pass will
 // do; agentsForRepo is what the Git repo's Push sends. Elsewhere: where each thing is kept on disk, agentstore.ts; the
 // harnesses' file formats, agentfiles.ts; an agent's row, the clicks its controls send and its words, libraryrow.ts (the
@@ -21,7 +21,7 @@ import { libraryAction } from './historyactions.ts';
 import { itemKey, listed, noteAgainst, pendingEdits, plan } from './library.ts';
 import { libraryWords } from './libraryrow.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
-import { copiesOf, itemClick, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
+import { copiesOf, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { throughPlugins } from './plugins.ts';
 import type { AgentTool } from './presence.ts';
 import { errorCode, exists, partsIn, recoverParked, removeFileChecked, syncGate, writeAccess, writeFileChecked } from './share.ts';
@@ -165,13 +165,13 @@ async function writeAgent(context: ShareContext, item: LibraryItem, harness: Har
 export type PulledAgent = { name: string; agent: SharedAgent; claudeFile: string } | { removed: true };
 type AgentPassOptions = Omit<PassOptions<SharedAgent>, 'pulled'> & { pulled?: Map<string, PulledAgent> };
 
-/** One pass over the agents (librarypass.ts runPass): the page's clicks in `changes` (itemClick), then every agent brought into line. */
+/** One pass over the agents (librarypass.ts runPass): the page's clicks in `changes`, then every agent brought into line. */
 export function applyAgents(context: ShareContext, tools: HarnessId[], changes: Change[], options: AgentPassOptions = {}): Promise<PassResult> {
   // The repo's file is Claude Code's own part of the agent.
   const own = (claudeFile: string) => ({ harness: 'claude-cli' as const, text: claudeFile });
   const pulled = options.pulled && new Map([...options.pulled].map(([key, brought]) =>
     [key, 'removed' in brought ? brought : { name: brought.name, content: brought.agent, own: own(brought.claudeFile) }] as const));
-  return runPass(agentKind, context, tools, changes.map(itemClick), { ...options, pulled });
+  return runPass(agentKind, context, tools, changes, { ...options, pulled });
 }
 
 /** A History entry's action on an agent (librarypass.ts restore; historyactions.ts says which click it is). */

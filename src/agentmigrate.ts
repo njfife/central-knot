@@ -5,9 +5,9 @@
 // - Synced, every copy the synced content: On at that content, each recorded copy `applied`.
 // - A copy the old engine left alone on purpose (one it had stopped updating, a receive-only copy edited or deleted in its
 //   harness, a copy that differs and was never on record): that harness is `except`, with nothing applied there, so the
-//   copy is a found copy and stays as it is (a deleted one stays deleted); its content is a version ("was in Codex").
+//   copy is the harness's own and stays as it is (a deleted one stays deleted); its content is a version ("was in Codex").
 // - Not synced (turned off, or copies kept separate): Off, at the content it last synced (never synced: its latest copy), with
-//   nothing applied, so every copy is a found copy and stays.
+//   nothing applied, so every copy is the harness's own and stays.
 // - Deleted everywhere: a tombstone, at the content it had; a copy the deletion still owed a removal stays `applied`, so it
 //   still goes once it can.
 // - Every content kept under `items/agents/<key>/<hash>/` is a version, and each harness's kept file of the current content is

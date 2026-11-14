@@ -146,10 +146,10 @@ async function walk(seed: number): Promise<Finding[]> {
     await send(rowClicks.on((await seen()).row, undefined));
     await write();
     await put(box, 'claude-cli');
-    await applySkills(context(), tools, [{ key: 'notes', managed: true, off: [] }]);
+    await applySkills(context(), tools, [{ key: 'notes', on: true, except: [] }]);
     for (const tool of three) await mkdir(join(box.home, agentFiles[tool], '..'), { recursive: true });
     await writeFile(join(box.home, agentFiles['claude-cli']), '---\nname: writer\ndescription: Writes docs\n---\n\nYou write docs.\n');
-    await applyAgents(context(), tools, [{ key: 'writer', managed: true, off: [] }]);
+    await applyAgents(context(), tools, [{ key: 'writer', on: true, except: [] }]);
     for (const [name, items] of [['Everything', ['mcp:docs', 'skill:notes', 'agent:writer']], ['No docs', ['skill:notes', 'agent:writer']], ['Docs alone', ['mcp:docs']]] as const) await saveProfile(context(), { name, items: [...items] });
     await setSyncEverything(context(), yes, true);
     trace.push(yes ? 'first setup: Yes' : 'first setup: No');

@@ -58,7 +58,7 @@ test('skills in the shared .agents folder make no tool present, and the home sim
 test('Apply writes only to present tools, never creating a folder for a missing one', async () => {
   const box = await home({ '.claude/skills': ['brief'], '.agents/skills': ['shared'] }, ['.codex']);
   try {
-    const result = await box.apply([{ key: 'brief', managed: true, off: [] }]);
+    const result = await box.apply([{ key: 'brief', on: true, except: [] }]);
     assert.equal(result.stopped, undefined);
     assert.ok(await exists(join(box.path, '.codex/skills/brief/SKILL.md')));
     assert.deepEqual([await exists(join(box.path, '.copilot')), await exists(join(box.path, '.pi'))], [false, false]);
@@ -69,7 +69,7 @@ test('Apply writes only to present tools, never creating a folder for a missing 
 test('a tool that appears gets the skills that are on; when it disappears again, nothing reads as a deletion', async () => {
   const box = await home({ '.claude/skills': ['brief'] });
   try {
-    await box.apply([{ key: 'brief', managed: true, off: [] }]);
+    await box.apply([{ key: 'brief', on: true, except: [] }]);
     // Codex's folder appears: a read finds the tool, and the next pass brings it the skill.
     await mkdir(join(box.path, '.codex'), { recursive: true });
     assert.deepEqual((await box.view()).tools, ['claude-cli', 'codex-cli']);
@@ -92,7 +92,7 @@ test('a present tool the record leaves out is not managed: no row shows it, and 
     assert.deepEqual(managedTools(snapshots), ['claude-cli', 'codex-cli'], 'a record that leaves no tool out manages every present one');
     assert.deepEqual(managedTools(snapshots, ['claude-cli', 'pi-cli']), ['codex-cli'], 'only present tools not left out, in discovery order');
     assert.deepEqual(managedTools(snapshots, ['claude-cli', 'codex-cli']), [], 'every present tool left out manages none');
-    await box.apply([{ key: 'brief', managed: true, off: [] }]);
+    await box.apply([{ key: 'brief', on: true, except: [] }]);
     // Codex is left out from now on: a new skill turned on in Claude Code goes nowhere else, and Codex's own copy is left as it is.
     assert.deepEqual(await chooseTools(box.context, 'codex-cli', false), {});
     await mkdir(join(box.path, '.claude/skills/later'), { recursive: true });
@@ -101,7 +101,7 @@ test('a present tool the record leaves out is not managed: no row shows it, and 
     const view = await box.view();
     assert.deepEqual(view.tools, ['claude-cli']);
     assert.equal(view.items.find(skill => skill.key === 'brief')?.copies['codex-cli'], undefined);
-    await box.apply([{ key: 'later', managed: true, off: [] }]);
+    await box.apply([{ key: 'later', on: true, except: [] }]);
     assert.equal(await exists(join(box.path, '.codex/skills/later')), false);
     assert.equal(await readFile(join(box.path, '.claude/skills/brief/SKILL.md'), 'utf8'), text('brief'), 'an edit in a tool left out does not spread');
   } finally { await box.cleanup(); }
@@ -120,7 +120,7 @@ test('a record whose tools left out name an unknown tool reads as damaged', asyn
 test('a tool managed again: what was deleted there meanwhile does not spread, and the library wins over what was edited there, kept as a version', async () => {
   const box = await home({ '.claude/skills': ['gone', 'edited'] }, ['.codex']);
   try {
-    await box.apply([{ key: 'gone', managed: true, off: [] }, { key: 'edited', managed: true, off: [] }]);
+    await box.apply([{ key: 'gone', on: true, except: [] }, { key: 'edited', on: true, except: [] }]);
     await chooseTools(box.context, 'codex-cli', false);
     await rm(join(box.path, '.codex/skills/gone'), { recursive: true });
     await writeFile(join(box.path, '.codex/skills/edited/SKILL.md'), text('edited in Codex while left out'));
@@ -140,7 +140,7 @@ test('a tool managed again: what was deleted there meanwhile does not spread, an
 test('with Claude Code left out by the tool choice, OpenCode has the skill another way while Claude Code’s folder holds it, and Claude Code’s folder is left alone', async () => {
   const box = await home({ '.claude/skills': ['brief'] }, ['.config/opencode']);
   try {
-    await box.apply([{ key: 'brief', managed: true, off: [] }]);
+    await box.apply([{ key: 'brief', on: true, except: [] }]);
     await chooseTools(box.context, 'claude-cli', false);
     await box.apply();
     assert.equal(await exists(join(box.path, '.config/opencode/skills/brief')), false, 'OpenCode reads the copy in ~/.claude/skills: no second one');

@@ -19,7 +19,7 @@ import { sources, sourcesPage } from './sourcespage.ts';
 import { profilesPage, profileStatus } from './profilespage.ts';
 import type { HomeMode, HomeView, SyncView } from './types.ts';
 import { noticeNames, plural } from './model.ts';
-import { anyManaged } from './itemrow.ts';
+import { anyOn } from './itemrow.ts';
 import { followUpdates, sidebarEnd, statusEnd } from './updateview.ts';
 import { followPluginUpdates } from './pluginupdateview.ts';
 
@@ -56,7 +56,7 @@ function navRow(page: Page, label: string, glyph: IconName, count?: number | str
     !current && unseen(page) ? h('span.nav-unseen', { title: unseenText(page) }) : null);
 }
 
-const homeManages = () => !!state.home && anyManaged(state.home);
+const anythingOn = () => !!state.home && anyOn(state.home);
 const noticesFor = (page: Page) => !state.home ? [] : page === 'skills' ? state.home.skills.notices : page === 'mcp' ? state.home.mcp.notices : page === 'agents' ? state.home.agents.notices : [];
 const unseen = (page: Page) => noticesFor(page).filter(notice => !state.dismissed.has(notice.history) && !state.seenNotices.has(notice.history)).length;
 const unseenText = (page: Page) => { const list = noticesFor(page).filter(notice => !state.dismissed.has(notice.history)); return `${list.length} automatic ${list.length === 1 ? 'change' : 'changes'}: ${list.flatMap(noticeNames).slice(0, 3).join(', ')}`; };
@@ -180,7 +180,7 @@ function syncSwitch(home: HomeView) {
     return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: `${home.sync.gate.owner.name} syncs this home. Take over syncing, on Skills, MCP servers or Agents, to have Central Knot sync it instead.` },
       label, h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, home.sync.gate.owner.running === false ? `${home.sync.gate.owner.name}’s, not open` : `By ${home.sync.gate.owner.name}`));
   }
-  const idle = home.syncOn && !homeManages();
+  const idle = home.syncOn && !anythingOn();
   const title = idle ? `Automatic sync is on: it starts once ${home.sync.syncEverything ? 'something turns up in one of your tools (Synchronize everything takes it in)' : 'you turn something on'}. Click to turn it off.`
     : home.syncOn ? 'Automatic sync is on: an edit to a managed item spreads to the other tools on its own, even with this window closed. Click to turn it off.'
     : 'Automatic sync is off: edits wait until you turn it on or use Sync once. Click to turn it on.';

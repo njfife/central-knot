@@ -143,7 +143,7 @@ async function turnTogether(context: ShareContext, tools: HarnessId[], turns: Tu
   for (const { kind, pass } of KINDS) {
     const asked = [...turns.on.filter(item => item.kind === kind).map(item => [item, true] as const), ...turns.off.filter(item => item.kind === kind).map(item => [item, false] as const)];
     if (!asked.length) continue;
-    const clicks = asked.map(([item, on]): Change => ({ key: item.key, managed: on, off: [...item.except], seenManaged: !on }));
+    const clicks = asked.map(([item, on]): Change => ({ key: item.key, on, except: [...item.except], seenOn: !on }));
     const done = await pass(context, tools, clicks, { only: new Set(asked.map(([item]) => item.key)), told });
     results.push(...done.results, ...(done.stopped ? [{ item: asked.map(([item]) => item.name).join(', '), outcome: 'failed' as const, message: done.stopped }] : []));
     made.push(...(done.made ?? []));

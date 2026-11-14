@@ -16,7 +16,7 @@ test('Edits cross both ways; when both sides changed, the repo’s edit wins on 
   try {
     const first = await box.home('first');
     await skill(first, '.claude/skills', 'review');
-    await applySkillsIn(first, [{ key: 'review', managed: true, off: [] }]);
+    await applySkillsIn(first, [{ key: 'review', on: true, except: [] }]);
     await connectRepo(first, box.remote, '');
     await pushRepo(first);
     const second = await box.home('second');
@@ -59,7 +59,7 @@ test('A deletion in the repo deletes the skill here, with Restore; an edit here 
   try {
     const first = await box.home('first');
     for (const name of ['gone', 'edited']) await skill(first, '.claude/skills', name);
-    await applySkillsIn(first, ['gone', 'edited'].map(key => ({ key, managed: true, off: [] })));
+    await applySkillsIn(first, ['gone', 'edited'].map(key => ({ key, on: true, except: [] })));
     await connectRepo(first, box.remote, '');
     await pushRepo(first);
     const second = await box.home('second');
@@ -71,7 +71,7 @@ test('A deletion in the repo deletes the skill here, with Restore; an edit here 
     assert.equal((await skillRows(second)).find(item => item.key === 'gone')?.on, false);
     assert.deepEqual(rows(live(await repoView(second)).outgoing), []);
     // Only Delete from Central Knot takes a skill out of the repo.
-    await applySkillsIn(second, ['gone', 'edited'].map(key => ({ key, managed: key === 'edited', off: [], deleted: true })));
+    await applySkillsIn(second, ['gone', 'edited'].map(key => ({ key, on: key === 'edited', except: [], deleted: true })));
     assert.deepEqual(rows(live(await repoView(second)).outgoing), ['edited:removed', 'gone:removed']);
     await pushRepo(second);
 
@@ -117,7 +117,7 @@ test('Only the layout is Central Knot’s: other files stay, a file the repo ign
     // A skill in Central Knot of the same name as the repo's held one, with a file the repo's doesn't have: it never leaks into the repo's.
     await skill(here, '.claude/skills', 'linked');
     await writeFile(join(here.home, '.claude/skills/linked/extra.md'), 'only here\n');
-    await applySkillsIn(here, [{ key: 'mine', managed: true, off: [] }, { key: 'linked', managed: true, off: [] }]);
+    await applySkillsIn(here, [{ key: 'mine', on: true, except: [] }, { key: 'linked', on: true, except: [] }]);
     let view = live((await connectRepo(here, box.remote, 'main')).view);
     assert.deepEqual(view.incoming.map(row => [row.name, !!row.held]), [['notes', false], ['linked', true], ['tidy', false], ['vendored', true]]);
     await pullRepo(here);
@@ -209,7 +209,7 @@ test('Over HTTP: a read-only repo connects and pulls, and refuses a push in plai
     const url = await new Promise<string>(resolve => server.stdout.on('data', chunk => resolve(String(chunk).trim().split('\n')[0])));
     const first = await box.home('first');
     await skill(first, '.claude/skills', 'review');
-    await applySkillsIn(first, [{ key: 'review', managed: true, off: [] }]);
+    await applySkillsIn(first, [{ key: 'review', on: true, except: [] }]);
     await connectRepo(first, box.remote, '');
     await pushRepo(first);
 

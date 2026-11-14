@@ -248,7 +248,7 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
   }
   // Clear the switch (a skill's): its Undo turns that tool's own switch off again (skills.ts restoreSkill does it, not a Change).
   // Offered while one of those tools still loads it (`loads`, the row's: each tool's own switch now; unknown, it is offered).
-  const stillCleared = !loads || event.switched?.some(entry => !loads[entry.tool]?.off);
+  const stillCleared = !loads || event.switched?.some(entry => !loads[entry.tool]?.switchedOff);
   if (isClearedSwitch(event) && stillCleared) return { label: 'Undo', help: `Turn ${name} off again in ${andList(event.switched!.map(entry => toolName(entry.tool)))}’s own settings`, change: now };
   // A found item taken in (by a click on Add, or by Synchronize everything), while it is still as that left it: its Undo takes it
   // out again (found once more, a tombstone the rule leaves for good), each tool it was found in keeping its own copy.
@@ -347,13 +347,13 @@ function switchAction(turnOn: boolean, only: HarnessId | undefined, item: Librar
   const name = item.name, now = asItIs(item.key, item);
   if (!only) {
     if (item.on === turnOn) return undefined;
-    return turnOn ? { label: 'Turn on', help: `Put ${name} back in every tool it is not kept out of, each file as it was`, change: { ...now, managed: true } }
-      : { label: 'Turn off', help: `Take ${name} out of every tool; Central Knot keeps it`, change: { ...now, managed: false } };
+    return turnOn ? { label: 'Turn on', help: `Put ${name} back in every tool it is not kept out of, each file as it was`, change: { ...now, on: true } }
+      : { label: 'Turn off', help: `Take ${name} out of every tool; Central Knot keeps it`, change: { ...now, on: false } };
   }
   const there = toolName(only), out = item.except.includes(only);
   if (!item.on || out !== turnOn) return undefined;
-  return turnOn ? { label: `Turn on in ${there}`, help: `Put ${name} back in ${there}, as it was`, change: { ...now, off: item.except.filter(tool => tool !== only) } }
-    : { label: `Turn off in ${there}`, help: `Take ${name} out of ${there}; Central Knot keeps it`, change: { ...now, off: [...item.except, only] } };
+  return turnOn ? { label: `Turn on in ${there}`, help: `Put ${name} back in ${there}, as it was`, change: { ...now, except: item.except.filter(tool => tool !== only) } }
+    : { label: `Turn off in ${there}`, help: `Take ${name} out of ${there}; Central Knot keeps it`, change: { ...now, except: [...item.except, only] } };
 }
 
 /** The copies an entry says gave way, each of which is a version that can be made current now: one "Use <harness>’s" each. */

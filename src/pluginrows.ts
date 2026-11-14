@@ -1,12 +1,12 @@
 // What plugins installed whole bring, as rows of the Skills, MCP servers and Agents pages (no DOM): one row per item of a
 // plugin across every tool that has the plugin. An item the person also has as their own (the same skill, or the plugin's
-// part in another tool) stays on that row, whose box says "Through a plugin" (SkillFacts.plugin); one that only shares a
+// part in another tool) stays on that row, whose box says "Through a plugin" (types.ts LibraryFacts plugin); one that only shares a
 // name is a row of its own here. These rows are never managed: no sync, no profile, no repo; a box turns the item on or
 // off in that tool (pluginswitch.ts), and the plugin's page is where the plugin itself is handled.
 import { DIRECTORY, partOfPage, samePart, versionWord } from './pluginstatus.ts';
 import { takesPlugins } from './presence.ts';
 import { andList, byToolOrder, toolNames as names } from './words.ts';
-import type { HarnessId, HomeView, InstalledPlugin, PartKind, PluginItem, SkillFacts } from './types.ts';
+import type { HarnessId, HomeView, InstalledPlugin, LibraryFacts, PartKind, PluginItem } from './types.ts';
 import { kindSource } from './itemrow.ts';
 
 type Page = keyof typeof partOfPage;
@@ -39,7 +39,7 @@ export function offIn(row: PluginRow, tool: HarnessId): 'plugin' | 'item' | unde
 }
 
 /** Whether a tool has an item of the person's: a copy of its own there, or through a plugin installed there (its box says so). The tables and every count ask this. */
-export const inTool = (fact: Pick<SkillFacts, 'copies' | 'plugin'>, tool: HarnessId) => fact.copies[tool] !== undefined || !!fact.plugin?.[tool];
+export const inTool = (fact: Pick<LibraryFacts, 'copies' | 'plugin'>, tool: HarnessId) => fact.copies[tool] !== undefined || !!fact.plugin?.[tool];
 
 /**
  * Whether a row of the person's own is this plugin's item already: some tool has that row's item through this plugin (its
@@ -47,7 +47,7 @@ export const inTool = (fact: Pick<SkillFacts, 'copies' | 'plugin'>, tool: Harnes
  * Pi, which no box shows as through the plugin, since Codex may not start a plugin's servers). An MCP server's part is no
  * copy of the row's: its line says it is the plugin's (`unseen`, servers.ts), so it counts too.
  */
-const onOwnRow = (home: HomeView, fact: SkillFacts, row: PluginRow) => [fact.key, fact.name].some(name => !!name && samePart(row, { kind: row.kind, name }))
+const onOwnRow = (home: HomeView, fact: LibraryFacts, row: PluginRow) => [fact.key, fact.name].some(name => !!name && samePart(row, { kind: row.kind, name }))
   && (Object.values(fact.plugin ?? {}).some(given => given.plugin === row.plugin && given.marketplace === row.marketName)
     || (home.parts ?? []).some(install => install.plugin === row.plugin && install.marketName === row.marketName && (fact.copies[install.tool] !== undefined || fact.unseen?.[install.tool] !== undefined)
       && install.items.some(item => !item.removed && samePart(item, row))));

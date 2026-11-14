@@ -14,7 +14,7 @@ test('Push puts the Managed set in the repo’s layout; another computer pulls i
     const first = await box.home('first');
     await skill(first, '.claude/skills', 'review');
     await writeFile(join(first.home, '.claude/skills/review/notes.log'), 'kept as-is\n');
-    assert.ok(!(await applySkillsIn(first, [{ key: 'review', managed: true, off: [] }])).stopped);
+    assert.ok(!(await applySkillsIn(first, [{ key: 'review', on: true, except: [] }])).stopped);
     await seedServerAndAgent(first);
     let view = live((await connectRepo(first, box.remote, '')).view);
     assert.equal(view.branch, 'main');
@@ -122,8 +122,8 @@ test('Push sends every server in Central Knot, On or Off, with Claude Code’s o
     const first = await box.home('first');
     await writeFile(join(first.home, '.claude.json'), JSON.stringify({ mcpServers: { docs: { type: 'stdio', command: 'docs-server', timeout: 30 }, found: { type: 'stdio', command: 'found-server' } } }));
     await writeFile(join(first.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { off: { type: 'local', command: 'off-server', tools: ['*'] } } }));
-    assert.ok(!(await applyServers(first, tools, [{ key: 'docs', managed: true, off: [] }, { key: 'off', managed: true, off: [] }])).stopped);
-    assert.ok(!(await applyServers(first, tools, [{ key: 'off', managed: false, off: [], seenManaged: true }])).stopped);
+    assert.ok(!(await applyServers(first, tools, [{ key: 'docs', on: true, except: [] }, { key: 'off', on: true, except: [] }])).stopped);
+    assert.ok(!(await applyServers(first, tools, [{ key: 'off', on: false, except: [], seenOn: true }])).stopped);
     await connectRepo(first, box.remote, '');
     await pushRepo(first);
     assert.deepEqual(git(box.remote, 'ls-tree', '-r', '--name-only', 'main').split('\n').filter(path => path.startsWith('mcp/')), ['mcp/docs.json', 'mcp/off.json']);

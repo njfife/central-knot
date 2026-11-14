@@ -38,7 +38,7 @@
 //   Off, or kept out    H = A, or H = L                            removed
 //   Off, or kept out    H changed, L = A                           H becomes the current version, then it is removed
 //   Off, or kept out    H changed and L moved on                   the latest wins, the other is kept as a version; then removed
-//   Off, or kept out    a copy, no A                               a found copy: left alone
+//   Off, or kept out    a copy, no A                               the harness's own copy: left alone
 //   Off, or kept out    no copy, after A                           nothing is applied there any more (forgotten)
 //   either              held: it can't be given the item           nothing (its mark says why)
 //   either              held: it has the item another way          nothing of Central Knot's goes there, and A is let go: when
@@ -82,12 +82,12 @@
 //   item there          the copy went meanwhile                    the copy was edited meanwhile, or is another item of that name
 //   On                  L is written                               kept as a version ("was in Codex"), then L is written
 //   Off, or kept out    nothing                                    kept as a version, then removed
-//   deleted             nothing                                    a found copy: left alone
+//   deleted             nothing                                    the harness's own copy: left alone
 //
 // Nothing turns Off because a tool was away, and a copy as Central Knot left it (a content the item holds) is written over
 // or removed as any other, a deleted item's too. This is one step before the table (`managedAgain`): for every item that had
 // something applied there, A becomes what the harness holds now (no copy: nothing), its content kept as a version first;
-// a deleted item keeps no new content, so a copy it never had is left with nothing applied, which the table calls found.
+// a deleted item keeps no new content, so a copy it never had is left with nothing applied: the table's harness's own copy.
 // The table then does the rest, and later edits and deletions there count as any other. The pass takes that step once, for
 // every item at once, the first time it sees the harness back with its folder there (librarypass.ts guardFolders), so it
 // holds whichever pass comes first. History says each content that gave way there, and each copy removed there (librarypass.ts
@@ -173,7 +173,7 @@
 //   otherwise                                        taken in from the one content, or the copy chosen
 //
 // Not found at all, so in neither column: a copy of an item that is Off, or in a harness the item is kept out of (the table
-// above: "a found copy, left alone"); a copy a harness has that can't be read (unseen); a copy in a harness not managed. A copy
+// above: "the harness's own copy: left alone"); a copy a harness has that can't be read (unseen); a copy in a harness not managed. A copy
 // a harness has another way (a skill's link or ~/.agents/skills copy) is one it can be taken in from; that place is not
 // written (Take over stays a click). Nothing about found copies is stored: the rule takes in what is found at each pass, so
 // switching it on takes in everything found then. The page reads the same answers (each kind's view, through lookFor), with
@@ -330,7 +330,7 @@ export const wantedHere = (wanted: boolean, copy: HarnessCopy) => wanted && !(co
  * gone already, or a harness that has the item another way), so A is let go. `take-in` (L = A) and `latest-wins` (L moved on
  * too) are both an edit in that harness; they differ only in when the edit counts (latestEdit).
  */
-export type Verdict = 'nothing' | 'write' | 'take-in' | 'latest-wins' | 'keep-then-write' | 'turn-off' | 'remove' | 'found' | 'forget';
+export type Verdict = 'nothing' | 'write' | 'take-in' | 'latest-wins' | 'keep-then-write' | 'turn-off' | 'remove' | 'own-copy' | 'forget';
 
 /**
  * The rule for one harness (the table above). `wanted`: the item is On and this harness is not excepted (wantedIn).
@@ -341,7 +341,7 @@ export function decide(wanted: boolean, current: string, copy: HarnessCopy, appl
   if (copy.is === 'unseen' || copy.is === 'held') return 'nothing';
   if (!wantedHere(wanted, copy)) {
     if (copy.is === 'absent') return applied === undefined ? 'nothing' : 'forget';
-    if (applied === undefined) return 'found';
+    if (applied === undefined) return 'own-copy';
     if (copy.hash === applied || copy.hash === current) return 'remove';
     return applied === current ? 'take-in' : 'latest-wins';
   }
@@ -374,8 +374,8 @@ export interface Plan {
   forget: HarnessId[];
   /** Harnesses that hold the current version already. */
   current: HarnessId[];
-  /** Harnesses with a copy Central Knot never applied, while the item is Off or kept out of them: left alone. */
-  found: HarnessId[];
+  /** Harnesses with a copy of their own, which Central Knot never applied, while the item is Off or kept out of them: left alone. */
+  ownCopy: HarnessId[];
 }
 
 export type Copies = Partial<Record<HarnessId, HarnessCopy>>;
@@ -393,7 +393,7 @@ export function plan(item: LibraryItem, copies: Copies): Plan {
   const turnedOffBy = harnesses.find(harness => verdict(item, harness) === 'turn-off');
   const taken = takeIn ? (copies[takeIn] as { hash: string }).hash : item.hash;
   const after: LibraryItem = { ...item, on: item.on && !turnedOffBy, hash: taken };
-  const made: Plan = { takeIn, orderProved, turnedOffBy, keep: [], write: [], remove: [], forget: [], current: [], found: [] };
+  const made: Plan = { takeIn, orderProved, turnedOffBy, keep: [], write: [], remove: [], forget: [], current: [], ownCopy: [] };
   const known = new Set(item.versions.map(version => version.hash));
   for (const harness of harnesses) {
     const copy = copies[harness]!, does = verdict(after, harness), wanted = wantedHere(wantedIn(after, harness), copy);
@@ -406,7 +406,8 @@ export function plan(item: LibraryItem, copies: Copies): Plan {
     }
     if (does === 'write' || does === 'keep-then-write' || (lost && wanted)) made.write.push(harness);
     else if (does === 'remove' || lost) made.remove.push(harness);
-    else if (does === 'forget' || does === 'found') made[does].push(harness);
+    else if (does === 'forget') made.forget.push(harness);
+    else if (does === 'own-copy') made.ownCopy.push(harness);
     else if (does === 'nothing' && copy.is === 'present' && copy.hash === after.hash && wanted) made.current.push(harness);
   }
   return made;
@@ -441,7 +442,7 @@ function latestEdit(item: LibraryItem, copies: Copies, verdicts: Map<HarnessId, 
  * A becomes what the harness holds now: its copy's content, or nothing where it has no copy of its own. Returns the version
  * to keep first when that content is not one of the item's ("was in Codex", given way to the current version); the caller
  * keeps it (keepVersion) before any harness file changes. A deleted item keeps no new content: a copy it never had is left
- * with nothing applied (a found copy). A copy that can't be seen leaves A as it is.
+ * with nothing applied (the harness's own copy). A copy that can't be seen leaves A as it is.
  */
 export function managedAgain(item: LibraryItem, harness: HarnessId, copy: HarnessCopy): Version | undefined {
   if (item.applied[harness] === undefined || copy.is === 'unseen') return undefined;
@@ -539,7 +540,7 @@ export interface FoundCopy {
   /** A plugin's part (parts.ts): the plugin put it in that harness. */
   part?: true;
   /** That harness's own switch turns it off there (skillswitch.ts, mcpswitch.ts). */
-  off?: true;
+  switchedOff?: true;
 }
 /** What the take-in table is told of a found key. */
 export interface FoundKey {
@@ -573,7 +574,7 @@ export function takeInAnswer(by: TakenBy, found: FoundKey, chosen?: { harness: H
   if (rule && found.deleted) return { leave: 'deleted' };
   if (rule && copies.some(copy => copy.part)) return { leave: 'part' };
   if (rule && found.converted) return { leave: 'converted' };
-  if (rule && copies.every(copy => copy.off)) return { leave: 'switched-off' };
+  if (rule && copies.every(copy => copy.switchedOff)) return { leave: 'switched-off' };
   if (rule && settle && copies.some(copy => copy.at !== undefined && Math.abs(settle.clock - copy.at) < settle.ms)) return { leave: 'settling' };
   const pick = chosen && copies.find(copy => copy.harness === chosen.harness);
   if (!rule && chosen && (!pick || (chosen.hash !== undefined && pick.hash !== chosen.hash))) return { leave: 'choice-changed' };

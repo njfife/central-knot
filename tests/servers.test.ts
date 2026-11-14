@@ -13,7 +13,6 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readHistory } from '../src/history.ts';
 import { libraryAction, librarySentence } from '../src/historyactions.ts';
-import { kindSource } from '../src/itemrow.ts';
 import { asItIs, canAdd, libraryWords, sentences, statusLine } from '../src/libraryrow.ts';
 import { readTool, writeEntry } from '../src/mcp.ts';
 import { discover } from '../src/discovery.ts';
@@ -44,8 +43,8 @@ async function sandbox() {
   return { home, context, path, files, view, row, send, cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 type Box = Awaited<ReturnType<typeof sandbox>>;
-const on = (key: string): Change => ({ key, managed: true, off: [] });
-const off = (key: string): Change => ({ key, managed: false, off: [], seenManaged: true });
+const on = (key: string): Change => ({ key, on: true, except: [] });
+const off = (key: string): Change => ({ key, on: false, except: [], seenOn: true });
 const commandIn = async (box: Box, tool: HarnessId, name = 'docs') => (await readTool(box.context, tool)).entries.find(entry => entry.name === name)?.server.command;
 const argsIn = async (box: Box, tool: HarnessId, name = 'docs') => (await readTool(box.context, tool)).entries.find(entry => entry.name === name)?.server.args;
 
@@ -98,7 +97,7 @@ test('Off takes the entry out of every tool, Claude Code’s once Write to Claud
     assert.equal(await commandIn(box, 'claude-cli'), undefined);
     assert.deepEqual((await box.row('docs'))?.waits, undefined, 'nothing is owed any more');
 
-    const onDone = await box.send({ ...on('docs'), seenManaged: false });
+    const onDone = await box.send({ ...on('docs'), seenOn: false });
     assert.deepEqual(onDone.results.filter(entry => entry.waits).map(entry => entry.harness), ['claude-cli']);
     await writeToClaude(box.context, all, ['docs']);
     // The same: the same values and own fields, and every other byte of each file; the entry's place and key order are
@@ -131,13 +130,13 @@ test('Off with Claude Code open, then On again, then Off and Delete from Central
     const offEntry = (await readHistory(box.context)).at(-1)!;
     assert.deepEqual([offEntry.kind, offEntry.losers.map(loser => loser.tool)], ['off', ['copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli']], 'History names only the tools it was taken out of');
     // On again before the write: Claude Code has the current version still, so nothing is owed there.
-    await box.send({ ...on('docs'), seenManaged: false });
+    await box.send({ ...on('docs'), seenOn: false });
     row = (await box.row('docs'))!;
     assert.deepEqual([row.on, row.waits, (await box.files())['claude-cli']], [true, undefined, claude]);
     // Off and Delete from Central Knot before the write: a deleted server whose entry is still in Claude Code is a found row
     // that says so, and the band writes its removal.
     await box.send(off('docs'));
-    await box.send({ key: 'docs', managed: false, off: [], seenManaged: false, deleted: true });
+    await box.send({ key: 'docs', on: false, except: [], seenOn: false, deleted: true });
     view = await box.view();
     row = view.items.find(item => item.key === 'docs')!;
     assert.deepEqual([row.on, row.waits, view.library.docs.deleted !== undefined], [false, ['claude-cli'], true]);
@@ -164,7 +163,7 @@ test('`codex mcp remove` of Codex’s only server turns it Off everywhere; Centr
     // What `codex mcp remove docs` leaves: no servers table at all.
     await writeFile(box.path('codex-cli'), 'model = "gpt-6"\n');
     const pass = await applyServers(box.context, all, []);
-    assert.deepEqual(pass.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner]), [['deleted', 'codex-cli']]);
+    assert.deepEqual(pass.notices?.map(itemNotice).map(notice => [notice.kind, notice.winner]), [['deleted-by-hand', 'codex-cli']]);
     for (const tool of all.slice(1)) assert.equal(await commandIn(box, tool), undefined, `${tool}: Off everywhere`);
     const view = await box.view();
     assert.deepEqual([view.items[0]?.on, view.library.docs.versions.length], [false, 1]);
@@ -198,9 +197,9 @@ test('A settings file that can’t be seen is no set of deletions: missing is aw
     assert.deepEqual(clocks.items.filter(item => item.key !== 'node_repl').map(item => [item.key, item.on]), [['docs', true], ['more', true]], 'both still inside their windows');
     await applyServers(slow, all, [], { now: at + 6100 });
     assert.deepEqual((await box.view()).items.map(item => [item.key, item.on]), [['docs', false], ['more', true]], 'docs’s window has passed, more’s has not');
-    await box.send({ ...on('docs'), seenManaged: false });
+    await box.send({ ...on('docs'), seenOn: false });
     await applyServers(slow, all, [], { now: at + 9000 });
-    await box.send({ ...on('more'), seenManaged: false });
+    await box.send({ ...on('more'), seenOn: false });
     // An entry missing for less than the window: nothing; past it, deleted by hand.
     const pi = (await box.files())['pi-cli']!;
     await writeFile(box.path('pi-cli'), '{ "mcpServers": {} }\n');
@@ -315,16 +314,17 @@ test('A tool’s own switch is left as it is: set in each tool by hand, then Off
     for (const tool of tools) await writeFile(mcpSwitchPath(box.context, tool), withMcpSwitch(tool, await readFile(mcpSwitchPath(box.context, tool), 'utf8'), 'docs', true));
     let view = await serversView(box.context, tools);
     assert.deepEqual(view.items[0]?.switchedOff, ['claude-cli', 'codex-cli', 'opencode-cli']);
-    const home = { skills: { tools, items: [], library: {} }, mcp: view, agents: { tools, items: [], library: {} } } as unknown as HomeView;
-    assert.deepEqual(kindSource(home, 'mcp').facts[0]?.switched, { 'claude-cli': 'switched off in Claude Code’s own settings', 'codex-cli': 'switched off in Codex’s own settings', 'opencode-cli': 'switched off in OpenCode’s own settings' });
-    assert.match(say.harnessLine({ key: 'docs', hashes: { 'codex-cli': 'x' }, plan: { orderProved: true, current: ['codex-cli'], write: [], remove: [], forget: [], found: [], keep: [] }, switched: { 'codex-cli': 'switched off in Codex’s own settings' } }, view.library.docs, 'codex-cli', 'Codex'),
+    const switchedOff = view.items[0]?.switchedOff;
+    assert.match(say.harnessLine({ key: 'docs', hashes: { 'codex-cli': 'x' }, plan: { orderProved: true, current: ['codex-cli'], write: [], remove: [], forget: [], ownCopy: [], keep: [] }, switchedOff }, view.library.docs, 'codex-cli', 'Codex'),
       /It is switched off in Codex’s own settings: Codex doesn’t start it\. Central Knot leaves that switch as it is, so it is still off there after Off and On\./);
+    assert.equal(say.placeTag({ key: 'docs', switchedOff }, view.library.docs, tools)?.title,
+      'Switched off in Claude Code’s own settings, switched off in Codex’s own settings and switched off in OpenCode’s own settings: each tool’s own switch, which Central Knot leaves as it is. Turn it back on in that tool’s own settings.');
     // Off: out of Codex (its own fields kept, the switch with them); Claude Code waits.
     await box.send(off('docs'), tools);
     assert.equal(await commandIn(box, 'codex-cli'), undefined);
     // On: Codex's and OpenCode's entries come back as they were, each where it was and switched off in its own fields; the row
     // says so. Claude Code's switch was never touched.
-    await box.send({ ...on('docs'), seenManaged: false }, tools);
+    await box.send({ ...on('docs'), seenOn: false }, tools);
     assert.match((await box.files())['codex-cli']!, /\[mcp_servers\.docs\]\ncommand = "npx"\nenabled = false\n/);
     assert.deepEqual(JSON.parse((await box.files())['opencode-cli']!).mcp, { servers: { docs: { type: 'local', command: ['npx'], disabled: true } } });
     assert.match(await readFile(join(box.home, '.claude/settings.json'), 'utf8'), /"serverName": "docs"/);
@@ -388,7 +388,7 @@ test('Names that differ only by case in two tools are one server; each tool’s 
     // Off, then On: each tool's entry is back under the name it had there, so Codex's own subtable is still its, and
     // Copilot's own switch (by name, in its settings) still matches.
     await box.send(off('github'));
-    await box.send({ ...on('github'), seenManaged: false });
+    await box.send({ ...on('github'), seenOn: false });
     assert.equal((await box.files())['codex-cli'], '[mcp_servers.github]\ncommand = "gh-mcp"\nargs = ["--v2"]\n\n[mcp_servers.github.tools.search]\napproval_mode = "approve"\n');
     assert.deepEqual([await argsIn(box, 'copilot-cli', 'GitHub'), (await box.row('github'))?.switchedOff], [['--v2'], ['copilot-cli']]);
   } finally { await box.cleanup(); }
@@ -403,7 +403,7 @@ test('Off then On gives Codex’s table back with its comment lines, among its o
     await box.send(on('docs'), tools);
     assert.equal((await box.files())['codex-cli'], codex, 'taking it in writes nothing there');
     await box.send(off('docs'), tools);
-    await box.send({ ...on('docs'), seenManaged: false }, tools);
+    await box.send({ ...on('docs'), seenOn: false }, tools);
     assert.equal((await box.files())['codex-cli'], 'model = "gpt-6"\n\n[mcp_servers.docs]\ncommand = "npx"\nargs = ["docs"]\n# Start it from the team folder.\nstartup_timeout_sec = 31 # the network is slow\n');
     // An edit in another tool, written over Codex's entry, keeps them too.
     await writeFile(box.path('pi-cli'), JSON.stringify({ mcpServers: { docs: { command: 'npx', args: ['docs', '--v2'] } } }));
@@ -537,7 +537,7 @@ test('Claude Code making .claude.json again without its servers turns each Off e
   assert.deepEqual((await readTool(box.context, 'codex-cli')).entries.map(entry => entry.name), []);
   const view = await serversView(box.context, three);
   assert.deepEqual(view.items.map(item => [item.key, item.on]), [['docs', false], ['web', false]], 'each is Off, in Central Knot only');
-  await applyServers(box.context, three, [{ key: 'docs', managed: true, off: [], seenManaged: false }]);
+  await applyServers(box.context, three, [{ key: 'docs', on: true, except: [], seenOn: false }]);
   await writeToClaude(box.context, three, ['docs']);
   assert.deepEqual([(await readTool(box.context, 'codex-cli')).entries.map(entry => entry.server.command), (await readTool(box.context, 'claude-cli')).entries.map(entry => entry.server.command)], [['docs-mcp'], ['docs-mcp']]);
 }));

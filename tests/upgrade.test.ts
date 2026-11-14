@@ -257,7 +257,7 @@ for (const old of homes) for (const sync of ['off', 'on'] as const) {
     // item's version and each tool's own part (a server's own fields, an agent's whole file), as the migrations carried them.
     if (sync === 'on') test('gives every tool its file back byte for byte when notes, docs and planner are turned Off and On again', async () => {
       const context = appContext(box.home, box.appData), tools = await managedNow(context, await context.read());
-      const click = (key: string, on: boolean) => [{ key, managed: on, off: [] }];
+      const click = (key: string, on: boolean) => [{ key, on: on, except: [] }];
       const was = await filesIn(box.home);
       const turned = async (on: boolean) => {
         await applySkills(context, tools, click('notes', on));

@@ -1616,10 +1616,10 @@ async function practiceFlow() {
   same('its one Undo puts both back', [codexItemOff(), existsSync(piTriage), await cellState(a, 'triage', 'codex-cli'), await switchOn(a, 'triage')], [false, true, 'plugin', true]);
   // The same Off from a page read before triage was turned off elsewhere is refused as a whole: the plugin's skill in Codex
   // is never switched beside the refusal. On again after, as it was.
-  await a.run(`(async () => { const view = await window.centralKnot.refresh(); await window.centralKnot.applySkills([{ key: 'triage', managed: false, off: [], seenManaged: true }], false, view.home); document.querySelector('.ov-row[data-key="triage"] .switch').click(); })()`);
+  await a.run(`(async () => { const view = await window.centralKnot.refresh(); await window.centralKnot.applySkills([{ key: 'triage', on: false, except: [], seenOn: true }], false, view.home); document.querySelector('.ov-row[data-key="triage"] .switch').click(); })()`);
   for (let tries = 0; tries < 60 && !/changed since the page was read/.test(await a.text('.bands') ?? ''); tries++) await wait(100);
   check('an Off from a stale page is refused, and the plugin’s skill in Codex stays on', !codexItemOff() && /triage changed since the page was read/.test(await a.text('.bands') ?? ''), [await a.text('.bands'), readNow(codexToml)]);
-  await a.run(`(async () => { const view = await window.centralKnot.refresh(); await window.centralKnot.applySkills([{ key: 'triage', managed: true, off: [], seenManaged: false }], false, view.home); })()`);
+  await a.run(`(async () => { const view = await window.centralKnot.refresh(); await window.centralKnot.applySkills([{ key: 'triage', on: true, except: [], seenOn: false }], false, view.home); })()`);
   await a.click('#header-refresh');
   for (let tries = 0; tries < 40 && !(await switchOn(a, 'triage')); tries++) await wait(100);
   rmSync(join(practice, '.codex/plugins'), { recursive: true, force: true });
@@ -2951,7 +2951,7 @@ async function realHomeFlow() {
   await a.shot('real-overview');
   if (!canWriteRealHome) {
     same('the switches and Add are off here', await a.run(`[...document.querySelectorAll('.ov-row[data-key] :is(.switch, .add-item)')].every(item => item.disabled)`), true);
-    const refused = await a.run(`window.centralKnot.applySkills([{ key: 'rich', managed: true, off: [] }], false, document.querySelector('.status-home').title)`);
+    const refused = await a.run(`window.centralKnot.applySkills([{ key: 'rich', on: true, except: [] }], false, document.querySelector('.status-home').title)`);
     same('main process refuses too', refused.writes, 0);
     check('with a reason', /Preview only/.test(refused.stopped ?? ''), refused);
     check('no copy and no store', !existsSync(join(COPILOT, 'rich')) && !existsSync(join(HOME, '.central-knot')));
@@ -2975,7 +2975,7 @@ async function realHomeFlow() {
     await a.quit();
     return;
   }
-  const wrongHome = await a.run(`window.centralKnot.applySkills([{ key: 'rich', managed: true, off: [] }], false, '/somewhere/else')`);
+  const wrongHome = await a.run(`window.centralKnot.applySkills([{ key: 'rich', on: true, except: [] }], false, '/somewhere/else')`);
   check('an apply for another home is refused', wrongHome.writes === 0 && /not the one open/.test(wrongHome.stopped ?? ''), wrongHome);
   // Every skill turned on, one switch at a time, but private-one and those whose copies differ (each needs its own choice).
   const turnOn = await a.run(`[...document.querySelectorAll('.ov-row[data-key]')].filter(row => row.querySelector(':is(.add-item, .switch:not([aria-checked="true"])):not([disabled])') && !row.querySelector('[id^="decide-"]') && row.dataset.key !== 'private-one').map(row => row.dataset.key)`);
@@ -3376,7 +3376,7 @@ async function crashFlow() {
     // (opening catches their copies up) and the rest still found: those are taken in again, in one request (no bulk switch on
     // the page), not waited for, so the kill lands while it copies.
     const record = join(HOME, '.central-knot/skills.json');
-    await a.run(`(() => { const found = [...document.querySelectorAll('.ov-row[data-key^="bulk-"]')].filter(row => row.querySelector('.add-item')).map(row => ({ key: row.dataset.key, managed: true, off: [] }));
+    await a.run(`(() => { const found = [...document.querySelectorAll('.ov-row[data-key^="bulk-"]')].filter(row => row.querySelector('.add-item')).map(row => ({ key: row.dataset.key, on: true, except: [] }));
       if (found.length) window.centralKnot.applySkills(found, false, document.querySelector('.status-home').title); else document.querySelector('#header-refresh').click(); return true; })()`);
     await wait(30 + Math.round(round * 700 / Math.max(1, crashRounds - 1)) + randomInt(40));
     await a.crash();

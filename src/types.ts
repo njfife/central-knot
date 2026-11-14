@@ -132,7 +132,7 @@ export interface DesktopApi {
    * the tool (its results there), which the band after the click says.
    */
   manageTool(tool: HarnessId, on: boolean, resume: boolean, home: string): Promise<{ stopped?: string; view: HomeView | null; did: DestinationResult[] }>;
-  /** Makes this build the home's sync owner, in place of the build that syncs it now; every managed item and choice stays. */
+  /** Makes this build the home's sync owner, in place of the build that syncs it now; every item in Central Knot and every choice stays. */
   takeOverSync(home: string): Promise<{ stopped?: string; from?: string; view: HomeView | null }>;
   /**
    * Removes another build of Central Knot (otherbuilds.ts removeClick): its bundle at `path`, offered as `build`, quit and moved to
@@ -298,51 +298,6 @@ export interface ToolCopy {
 /** The plugin a tool has an item through: its name, the marketplace as that tool added it, and the installed copy's version. `off`: turned off there. */
 export interface ThroughPlugin { plugin: string; marketplace: string; source?: string; version?: string; off?: true; /** The item's own name in the plugin (a skill's SKILL.md name), which the tool's switch goes by. */ name?: string }
 
-/**
- * What is true now for one item, a skill, an MCP server or an agent, across every tool: each kind's row (LibraryFacts) as the
- * pages read it (itemrow.ts kindSource, where On is `managed` and `except` is `off`). The page derives its marks from this.
- */
-export interface SkillFacts {
-  /** Made by Convert to skill from an agent (AGT-02): which agent, from which tool, and what an agent had that a skill does not. */
-  converted?: { agent: string; origin: HarnessId; losses: string[] };
-  key: string;
-  name: string;
-  description: string;
-  copies: Partial<Record<HarnessId, ToolCopy>>;
-  managed: boolean;
-  off: HarnessId[];
-  /** Why a tool that lacks the skill could not load a copy. */
-  cannot: Partial<Record<HarnessId, string>>;
-  /**
-   * Tools with no copy of their own that have the skill through a plugin installed there. Each is in `cannot` too, in
-   * words: no separate copy is placed beside a plugin's.
-   */
-  plugin?: Partial<Record<HarnessId, ThroughPlugin>>;
-  /** Tools whose copy holds an edit the next pass takes in, or one that gives way to it (LibraryFacts edited). */
-  edited?: HarnessId[];
-  /**
-   * For each tool's copy, what stops every tool from using it: a differing copy Central Knot does not change, or a tool that
-   * cannot load it. Each has the tool it concerns, so a tool turned off no longer counts, and `reason`: the cause alone, a
-   * sentence naming that tool as the page does (copywords.ts cantUse makes it a row's or a result's sentence).
-   */
-  choiceBlocks: Partial<Record<HarnessId, { tool: HarnessId; reason: string }[]>>;
-  /** A library kind's row (LibraryFacts, as itemrow.ts kindSource gives the page): its `unseen`, `plan`, `takeInAnswers`, `versionChanges` and `fromSource`. */
-  unseen?: LibraryFacts['unseen'];
-  plan?: LibraryFacts['plan'];
-  takeInAnswers?: LibraryFacts['takeInAnswers'];
-  versionChanges?: LibraryFacts['versionChanges'];
-  fromSource?: LibraryFacts['fromSource'];
-  /** MCP servers: tools whose write or removal waits for Write to Claude Code (types.ts LibraryFacts waits). */
-  waits?: HarnessId[];
-  /** Skills and MCP servers: why a tool's switch can't be used at all: its settings file can't be read or is in a form Central Knot doesn't edit. */
-  switchProblem?: Partial<Record<HarnessId, SwitchProblem>>;
-  /** A library kind's row (LibraryFacts, as itemrow.ts kindSource gives the page): how a tool has it another way, and which copies Take over can make Central Knot's. */
-  anotherWay?: LibraryFacts['anotherWay'];
-  takeOver?: LibraryFacts['takeOver'];
-  /** Skills: a tool whose own switch turns it off there, said as its mark says it ("switched off in Codex’s own settings"); itemrow.ts kindSource words it. */
-  switched?: Partial<Record<HarnessId, string>>;
-}
-
 /** Why a tool's skill switch can't be used: its settings file, and what is wrong with it ("isn’t valid JSON."). */
 export interface SwitchProblem { file: string; reason: string }
 
@@ -388,22 +343,21 @@ export interface SyncView {
 export interface JoinCounts { written: number; kept: number; removed: number; waits: number; found: number; takenIn: number }
 
 /**
- * One click on an item, as the page sends it to any kind's engine. `managed` and `off` always say how it should be managed
- * afterwards: a caller changing only switches or removals passes the item's current ones (from its row, SkillFacts), with
- * `seenManaged`, or it changes those too. A library kind's pass reads it as its own click (librarypass.ts ItemClick, made by
- * itemClick: `managed` is On, `off` the harnesses it is kept out of). A field added here reaches an engine only once main.ts's
- * `changes` sanitizer copies it.
+ * One click on an item, as the page and History send it to any kind's engine, and as the library's pass takes it. `on` and
+ * `except` always say how the item should be afterwards (On or Off, and the harnesses it is kept out of: library.ts
+ * LibraryItem): a caller changing only switches or removals passes the item's current ones, with `seenOn`, or it changes those
+ * too. A field added here reaches an engine only once main.ts's `changes` sanitizer copies it.
  */
 export interface Change {
   key: string;
-  managed: boolean;
-  off: HarnessId[];
+  on: boolean;
+  except: HarnessId[];
   /** A found item whose copies differ: the tool whose copy every tool should use. */
   use?: HarnessId;
   /** The content ID of the chosen copy as the person saw it. A copy changed since is not used. */
   useHash?: string;
-  /** Whether the page showed it managed: a change made from an older read is refused if that no longer holds. */
-  seenManaged?: boolean;
+  /** Whether the page showed it On: a change made from an older read is refused if that no longer holds. */
+  seenOn?: boolean;
   /** A library item: the version to make current (its hash), in every harness the item is on in. */
   version?: string;
   /** A library item: true deletes it from Central Knot (out of every harness; History can restore it); false restores a deleted one. */
@@ -428,7 +382,7 @@ export type SyncNotice = ItemNotice | TakenInNotice;
 export interface ItemNotice {
   key: string;
   item: string;
-  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit';
+  kind: 'edit' | 'conflict' | 'deleted-by-hand' | 'kept-edit';
   /** The tool whose edit or deletion won. */
   winner: HarnessId;
   /** Tools whose differing copies gave way, or still hold the item after a deletion lost. */
@@ -850,9 +804,9 @@ export interface LibraryFacts {
   takeOver?: Partial<Record<HarnessId, { kind: 'link' | 'shared'; path: string }>>;
   /**
    * Skills: the copy each tool loads (its own, or one it has another way; not a plugin's), as its own switch names it, and
-   * whether that switch turns it off there (`off`): the copy stays, and the tool doesn't load it. Read at each look.
+   * whether that switch turns it off there (`switchedOff`): the copy stays, and the tool doesn't load it. Read at each look.
    */
-  loads?: Partial<Record<HarnessId, SwitchTarget & { off: boolean }>>;
+  loads?: Partial<Record<HarnessId, SwitchTarget & { switchedOff: boolean }>>;
   /** Skills and MCP servers: why a tool's own switch can't be read (its settings file), for the tools that have a copy. */
   switchProblem?: Partial<Record<HarnessId, SwitchProblem>>;
   /** MCP servers: tools whose own switch turns it off there (mcpswitch.ts), read at each look: the entry stays, and the tool doesn't start it. */

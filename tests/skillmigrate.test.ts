@@ -6,7 +6,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { kindSource } from '../src/itemrow.ts';
 import type { LibraryItem } from '../src/library.ts';
 import { libraryWords, sentences } from '../src/libraryrow.ts';
 import { pushRepo, connectRepo, pullRepo } from '../src/gitrepo.ts';
@@ -173,14 +172,15 @@ test('Migration: a switch set before is left as it is: Codex still doesn’t loa
     const quiet = { folder: 'quiet', name: 'quiet', skillFile: join(folderOf(box, 'codex-cli', 'quiet'), 'SKILL.md') };
     assert.equal(isDisabled(box.context, await readSwitchFile(box.context, 'codex-cli'), quiet), true);
     const view = await skillsView(box.context, box.tools);
-    const home = { skills: view, mcp: { tools: [], items: [], library: {} }, agents: view } as unknown as HomeView;
-    const facts = kindSource(home, 'skills').facts;
+    const fact = (key: string) => view.items.find(entry => entry.key === key)!;
     const say = sentences(libraryWords.skills), tools = all;
-    const tag = (key: string) => { const fact = facts.find(entry => entry.key === key)!; return say.placeTag({ key, hashes: {}, switched: fact.switched, cannot: fact.cannot }, view.library[key], tools)?.text; };
+    const placeTag = (key: string) => say.placeTag({ key, hashes: {}, switchedOff: fact(key).switchedOff, cannot: fact(key).cannot }, view.library[key], tools);
+    const tag = (key: string) => placeTag(key)?.text;
     assert.equal(tag('quiet'), 'switched off in Codex');
+    assert.match(placeTag('quiet')?.title ?? '', /^Switched off in Codex’s own settings: each tool’s own switch/);
     assert.match(tag('silent') ?? '', /^switched off in (all 3 tools|Claude Code, Copilot CLI and Codex)/);
     // A switch an earlier profile set is a switch like any other here (the profiles migration clears it: profiles.test.ts).
-    assert.deepEqual(facts.find(entry => entry.key === 'steady')!.switched, { 'codex-cli': 'switched off in Codex’s own settings' });
+    assert.deepEqual(fact('steady').switchedOff, ['codex-cli']);
   } finally { await box.cleanup(); }
 });
 

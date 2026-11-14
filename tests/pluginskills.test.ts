@@ -49,12 +49,12 @@ test('a tool that has a skill through an installed plugin has it another way, an
     assert.deepEqual([standup.plugin, standup.anotherWay?.['claude-cli']], [undefined, undefined]);
 
     // Taken in: the tool without it gets a copy; the tool with the plugin gets none beside it.
-    const result = await applySkills(context, tools, [{ key: 'triage', managed: true, off: [] }]);
+    const result = await applySkills(context, tools, [{ key: 'triage', on: true, except: [] }]);
     assert.equal(result.stopped, undefined);
     assert.deepEqual([await exists(join(home, '.copilot/skills/triage/SKILL.md')), await exists(join(home, '.claude/skills/triage'))], [true, false]);
     assert.equal((await applySkills({ ...context, settleMs: 0 }, tools, [])).writes, 0, 'and it stays so');
     // Taken in where a tool has it through the plugin and a copy of its own: that copy, never Central Knot's, stays (both ways).
-    await applySkills(context, tools, [{ key: 'notes', managed: true, off: [] }]);
+    await applySkills(context, tools, [{ key: 'notes', on: true, except: [] }]);
     assert.equal(await readFile(join(home, '.claude/skills/notes/SKILL.md'), 'utf8'), text('notes'));
 
     // The plugin turned off in Claude Code still holds the skill there: said so, and still no separate copy.
@@ -96,14 +96,14 @@ test('an MCP server or agent a tool has through a plugin gets no entry or file o
     // Codex's entry is the plugin's part there: never found or taken in, and said why.
     assert.deepEqual([Object.keys(server.copies), server.unseen?.['codex-cli']], [['copilot-cli'], 'Codex has it as part of a plugin Central Knot installed there, so it is the plugin’s.']);
     const codexBefore = await readFile(join(home, '.codex/config.toml'), 'utf8');
-    const served = await applyServers(context, tools, [{ key: 'issues', managed: true, off: [] }]);
+    const served = await applyServers(context, tools, [{ key: 'issues', on: true, except: [] }]);
     assert.equal(served.stopped, undefined);
     assert.equal(await readFile(join(home, '.claude.json'), 'utf8'), '{}\n', 'Claude Code, which has it through the plugin, is not written');
     assert.equal(await readFile(join(home, '.codex/config.toml'), 'utf8'), codexBefore, 'the part’s entry is left as it is');
 
     const agent = (await agentsView(context, tools)).items.find(item => item.key === 'triager')!;
     assert.deepEqual([agent.plugin, agent.cannot['claude-cli']], [{ 'claude-cli': { ...from, name: 'triager' } }, 'Claude Code has this agent through the plugin issue-tracker (version 1.2.0), so no separate copy is placed there.']);
-    const sorted = await applyAgents(context, tools, [{ key: 'triager', managed: true, off: [] }]);
+    const sorted = await applyAgents(context, tools, [{ key: 'triager', on: true, except: [] }]);
     assert.equal(sorted.stopped, undefined);
     assert.deepEqual([await exists(join(home, '.copilot/agents/triager.agent.md')), await exists(join(home, '.claude/agents/triager.md'))], [true, false]);
     // Settled: a later pass neither writes there nor reads the missing copy as a deletion.

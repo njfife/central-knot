@@ -122,13 +122,13 @@ test('A switch set in two tools before a skill is taken in: each copy arrives wh
   try {
     // Copilot names a skill by its frontmatter name, which here differs from the folder.
     await skill(box.home, 'claude-cli', 'notes', text('Notes Helper'));
-    await applySkills(box.context, tools, [{ key: 'notes', managed: true, off: [] }]);
+    await applySkills(box.context, tools, [{ key: 'notes', on: true, except: [] }]);
     const copy = join(box.home, '.codex/skills/notes/SKILL.md');
     await setDisabled(box.context, 'codex-cli', { folder: 'notes', name: 'Notes Helper', skillFile: copy }, true);
     await setDisabled(box.context, 'copilot-cli', { folder: 'notes', name: 'Notes Helper', skillFile: join(box.home, '.copilot/skills/notes/SKILL.md') }, true);
     assert.ok((await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes(`path = ${JSON.stringify(copy)}\nenabled = false`));
     assert.deepEqual(JSON.parse(await readFile(join(box.home, '.copilot/settings.json'), 'utf8')).disabledSkills, ['Notes Helper']);
-    const loads = async () => Object.entries((await skillsView(box.context, tools)).items.find(item => item.key === 'notes')!.loads ?? {}).filter(([, at]) => at?.off).map(([tool]) => tool).sort();
+    const loads = async () => Object.entries((await skillsView(box.context, tools)).items.find(item => item.key === 'notes')!.loads ?? {}).filter(([, at]) => at?.switchedOff).map(([tool]) => tool).sort();
     assert.deepEqual(await loads(), ['codex-cli', 'copilot-cli']);
     // A switch is not exclusion: an edit still reaches the copy switched off, and the switch stays.
     await writeFile(join(box.home, '.claude/skills/notes/SKILL.md'), text('Notes Helper', 'Edited.'));
