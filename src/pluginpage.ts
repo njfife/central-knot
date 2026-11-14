@@ -1,17 +1,18 @@
-// One plugin's page: what it is and which version each tool has, where to install it, what it holds (each skill, command
-// and agent's file as written), what each tool does with it, and its README.
+// One plugin's page: what it is, its one switch and each tool's line (what that tool has, kept out or let in, brought into
+// line there: pluginrecord.ts), what it holds (each skill, command and agent's file as written), what each tool does with
+// it, and its README.
 import { rerender, state as app } from './app.ts';
 import { afterLayout, button, fileBlocks, h, icon, toggle as switchToggle, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { groupBy } from './model.ts';
 import { componentsFrom, outcomes } from './pluginoutcomes.ts';
-import { changedWords, componentsOf, dotted, pluginTitle, readme, toolBox, updateButton, updateOps, versionNote } from './pluginparts.ts';
+import { componentsOf, dotted, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
-import { allQueued, clickPart, partStand, pickOf, pluginKey, queued, skillChoices, toggle, toggleMany, type PluginAction, type PluginOp } from './pluginplan.ts';
-import { cantSwitchSkill, comparableText, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partsEligible, partsFit, partsMark, partsOf, partsOffer, partsPickable, partStillIn, partsWhy, partWords, pickWords, PREVIEW_ONLY, removableTools, samePart, skillOff, stateOf, toolsWithoutPlugin, unavailable, untestedBuild, versionToCompare, versionWord, whyNotCarried } from './pluginstatus.ts';
+import { clickPart, partStand, pickOf, pluginKey, queued, skillChoices, toggle, toggleMany, type PluginOp } from './pluginplan.ts';
+import { cantSwitchSkill, comparableText, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partsEligible, partsFit, partsOf, partsOffer, partsPickable, partStillIn, partsWhy, partWords, pickWords, PREVIEW_ONLY, samePart, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, versionWord, whyNotCarried, changedPartsWords, type ToolMark } from './pluginstatus.ts';
 import { hasCowork, takesPlugins } from './presence.ts';
-import { clearNotice, market, openLink, shownDetail, toggleOpened } from './pluginstate.ts';
-import type { Components, HarnessId, MarketplaceView, Outcome, PartKind, PartPlan, PartRef, PartsPick, PartsState, PluginDetail, PluginView, PluginsView } from './types.ts';
+import { clearNotice, market, openLink, shownDetail, toggleOpened, turnPlugin } from './pluginstate.ts';
+import type { Components, HarnessId, MarketplaceView, Outcome, PartKind, PartPlan, PartRef, PartsPick, PartsState, PluginDetail, PluginTurn, PluginView, PluginsView } from './types.ts';
 import { plural } from './model.ts';
 import { andList, byToolOrder, coworkWords, toolNames as names } from './words.ts';
 import { openItem } from './matrix.ts';
@@ -54,70 +55,73 @@ function installedLine(version: string | undefined, offered: string | undefined,
   return other ? [line, versionNote(other)] : line;
 }
 
+/** Each mark's short words on a tool's line (the whole sentence is its tooltip: pluginstatus.ts toolMark). */
+const MARK_WORDS: Record<ToolMark, string> = {
+  installed: 'Installed', outdated: 'Installed', parts: 'Parts installed', 'parts-changed': 'Parts out of date', stays: 'Still installed', waits: 'Goes in at the next check', 'not-brought': 'Not brought here: off in a tool’s own settings',
+  missing: 'Not in it, though on', cannot: 'Not available', 'kept-out': 'Kept out', absent: 'Not installed', unknown: 'Can’t be read now', 'not-known': 'Unknown',
+};
+
 /**
- * Where to install it: a box per tool with a status line that is always there (a tool on another version than the
- * marketplace offers adds a second, "Marketplace has …"), and at the right of the heading row (always the same height)
- * one button: Update, where any tool's copy or parts are out of date; else choose it for every tool still without it,
- * or, once every tool has it, choose to uninstall it from all of them. An installed tool's line names its version, compared with `compareTo` (see versionToCompare).
+ * Your tools: the plugin's switch at the heading, Update at its right where a copy or its parts are behind, and a line per
+ * tool: its mark, what it has (always there; a tool on another version than the marketplace offers adds "Marketplace has …"),
+ * and what can be done there, at once: Install there or Take out there where the plugin's table owes that tool something,
+ * Keep out or Let in for a plugin on record. `compareTo`: the version an installed copy is compared with (see versionToCompare).
  */
 function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, compareTo: string | undefined, components?: Components) {
-  const missing = toolsWithoutPlugin(view, entry, plugin.name);
-  const ops: PluginOp[] = missing.map(tool => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action: 'install' }));
-  // A tool where some part won't fully work names it under its box, where the choice is made; "In each tool" has the detail.
+  const sw = entry.switches?.[plugin.name];
+  const stopped = !view.canWrite ? PREVIEW_ONLY : view.switchProblem;
+  // A tool where some part won't fully work names it under its mark; "In each tool" has the detail.
   const limits = (tool: HarnessId) => (components ? outcomes(tool, components).filter(outcome => outcome.result !== 'works') : []);
-  const status = (tool: HarnessId) => {
+  const status = (tool: HarnessId, mark: ToolMark) => {
     const chosen = queued(market.draft, entry.source, plugin.name, tool);
     const parts = partsOf(entry, plugin.name, tool);
-    const stale = copyStale(entry, plugin.name, tool, compareTo, shownDetail(pluginKey(entry.source, plugin.name)));
     const pick = pickOf(market.draft, entry.source, plugin.name, tool);
     if (pick) return [chosen === 'install-parts' ? 'Will update its parts' : '', pickWords(pick)].filter(Boolean).join(' · ');
-    if (chosen) return ({ install: 'Will install', update: stale ? 'Will update to the marketplace’s copy' : compareTo ? `Will update to ${compareTo}` : 'Will update', remove: 'Will uninstall', 'install-parts': parts ? 'Will update its parts' : 'Will install its parts', 'remove-parts': 'Will remove its parts' } as Partial<Record<PluginAction, string>>)[chosen] ?? '';
+    const stale = copyStale(entry, plugin.name, tool, compareTo, shownDetail(pluginKey(entry.source, plugin.name)));
+    if (chosen === 'update') return stale || !compareTo ? 'Will update to the marketplace’s copy' : `Will update to ${compareTo}`;
+    if (chosen === 'install-parts') return 'Will update its parts';
     const state = stateOf(entry, plugin.name, tool);
-    if (state.state === 'installed') {
+    if (state.state === 'installed' && mark !== 'stays') {
       const switching = (action: PluginOp['action']) => skillChoices(market.draft, entry.source, plugin.name, { tool }).filter(op => op.action === action).length;
       const willOff = switching('skill-off'), willOn = switching('skill-on');
-      return installedLine(state.version, compareTo, [state.directory ? 'from the Anthropic Directory' : '', stale ? 'differs from the marketplace’s copy' : '', state.skillsOff?.length ? `${plural(state.skillsOff.length, 'skill')} off` : '',
-        willOff ? `${plural(willOff, 'skill')} will turn off` : '', willOn ? `${plural(willOn, 'skill')} will turn on` : '']);
+      return installedLine(state.version, compareTo, [state.directory ? 'from the Anthropic Directory' : '', stale ? 'differs from the marketplace’s copy' : '', state.off ? 'off in its own settings' : '',
+        state.skillsOff?.length ? `${plural(state.skillsOff.length, 'skill')} off` : '', willOff ? `${plural(willOff, 'skill')} will turn off` : '', willOn ? `${plural(willOn, 'skill')} will turn on` : '']);
     }
-    const mark = partsMark(view, entry, plugin.name, tool, components);
     // Fewer parts in than the plugin has for this tool (left out by choice, or refused): said, so a few never read as all.
     const all = plansFor(entry, plugin)?.[tool]?.filter(part => !part.wholeKind).length ?? 0;
-    if (mark === 'installed' && parts && parts.items.length < all) return `${parts.items.length} of ${all} parts installed`;
-    if (mark) return ({ changed: 'Parts out of date', installed: 'Parts installed', offer: 'Can take its parts' } as const)[mark];
-    if (takesNoneOf(view, entry, plugin, tool)) return 'None of its parts fit';
-    if (unavailable(view, entry, plugin.name, tool)) return 'Not available';
-    return ['Plugin not installed', limitNote(limits(tool))].filter(Boolean).join(' · ');
+    if (mark === 'parts' && parts && parts.items.length < all) return `${parts.items.length} of ${all} parts installed`;
+    if (mark === 'waits' && !updatesRun()) return 'Waits for automatic updates';
+    if (mark === 'cannot' && takesNoneOf(view, entry, plugin, tool)) return 'None of its parts fit';
+    return [MARK_WORDS[mark], mark === 'absent' || mark === 'missing' ? limitNote(limits(tool)) : ''].filter(Boolean).join(' · ');
   };
-  const why = (tool: HarnessId) => {
-    const parts = partsOf(entry, plugin.name, tool);
-    if (parts?.changed) return `${changedWords(parts)}.`;
-    if (parts) return `Installed as separate items${parts.version ? `, from ${versionWord(parts.version)}` : ''}.`;
-    return unavailable(view, entry, plugin.name, tool) ?? limits(tool).map(outcome => `${outcome.component} ${outcome.text}`).join('; ');
+  // At most two actions on a line: bring it into line there, and keep it out or let it in.
+  const actions = (tool: HarnessId, mark: ToolMark) => {
+    const owed = sw?.tools[tool], kept = !!sw?.entry?.except.includes(tool);
+    const act = (label: string, what: PluginTurn, id: string, title: string) => button({ variant: 'link', size: 'micro', label, id: `${id}-${marketIndex}-${plugin.name}-${tool}`, disabled: !!app.busy || !!stopped,
+      attrs: { title: stopped ?? title }, onclick: () => void turnPlugin(entry, plugin.name, what, tool) });
+    const fix = owed?.act && (mark === 'missing' || mark === 'waits' || mark === 'not-brought' || mark === 'stays')
+      ? (owed.act === 'install' || owed.act === 'install-parts' ? act('Install there', 'fix', 'pfix', `Puts it in ${names[tool]} now${owed.act === 'install-parts' ? ', as separate items' : ''}. Undo takes it out again.`)
+        : act('Take out there', 'fix', 'pfix', `Takes it out of ${names[tool]} now; the result says what Undo can put back.`)) : null;
+    const keep = !sw?.entry || !owed?.takes ? null : kept ? act('Let in', 'let-in', 'pkeep', `Lets it into ${names[tool]} again${sw.entry.on ? ', and puts it in there now' : ''}. Undo keeps it out again.`)
+      : act('Keep out', 'keep-out', 'pkeep', `Keeps it out of ${names[tool]}${owed.has !== 'none' ? ', and takes it out there now' : ''}; the automatic updates leave it out too. Undo lets it back in.`);
+    return fix || keep ? h('span.plugin-tool-actions', {}, fix, keep) : null;
   };
-  // Once no tool is missing it, the same button chooses its uninstall everywhere it can be uninstalled.
-  const removals: PluginOp[] = removableTools(view, entry, plugin.name).map(tool => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action: 'remove' }));
-  const batch = ops.length ? ops : removals;
   const updates = view.canWrite ? updateOps(view, entry, plugin) : [];
-  const allButton = updates.length ? updateButton(updates, `pupdate-${marketIndex}-${plugin.name}`) : batch.length && view.canWrite ? button({
-    variant: 'outline', size: 'small', id: `pinstall-${marketIndex}-${plugin.name}`, disabled: !!app.busy,
-    // An uninstall only chooses (the ellipsis says more is to come: Apply all); the boxes then read "Will uninstall".
-    label: allQueued(market.draft, batch) ? 'Choose none'
-      : ops.length ? `Choose ${batch.length > 1 ? `all ${batch.length}` : names[batch[0]!.tool]}`
-      : `Uninstall ${batch.length > 1 ? `all ${batch.length}` : `from ${names[batch[0]!.tool]}`}…`,
-    onclick: () => { toggleMany(market.draft, batch); clearNotice(); rerender(); },
-  }) : null;
   const notIncluded = whyNotCarried(entry, plugin.name);
   return h('section.plugin-panel', { 'aria-label': 'Your tools' },
-    h('div.plugin-panel-head', {}, h('h3', {}, 'Your tools')),
+    h('div.plugin-panel-head', {}, h('span.plugin-panel-switch', {}, pluginSwitch(view, entry, plugin, `pswitch-page-${marketIndex}-${plugin.name}`), h('h3', {}, 'Your tools')),
+      updates.length ? updateButton(updates, `pupdate-${marketIndex}-${plugin.name}`) : null),
     // A plugin a bundled build doesn't include says why here, on the page, once for every tool.
     notIncluded ? h('p.plugin-panel-hint', { id: 'plugin-not-included' }, notIncluded)
-      : view.canWrite ? h('p.plugin-panel-hint', {}, 'A box or button only chooses; nothing changes until Apply all.') : null,
-    // The tools from the left under the heading, each in a column of capped width, and the button for all of them at the
-    // right end; a box too narrow for that puts them in a row that wraps (settlePluginTools).
-    withToolCount(h('div.plugin-tool-rows', {}, view.tools.map(tool => h('div.plugin-tool', {}, toolBox(view, entry, plugin, tool, marketIndex, compareTo),
-      h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]), h('span.plugin-tool-state', { title: why(tool) }, status(tool)),
-        // With no CLI, its plugin commands run through the copy its desktop app carries: said so, never as the CLI.
-        view.via?.[tool] ? h('span.plugin-tool-state.plugin-tool-via', { title: `${names[tool]}’s command-line tool wasn’t found, so its plugin commands run through ${view.via[tool]}.` }, `Through ${view.via[tool]}`) : null))), allButton), view.tools.length),
+      : view.canWrite ? h('p.plugin-panel-hint', {}, 'The switch and each tool’s links act at once. Update and the switches under What it holds only choose: Apply all runs them.') : null,
+    withToolCount(h('div.plugin-tool-rows', {}, view.tools.map(tool => {
+      const { mark, words } = markOf(view, entry, plugin, tool, compareTo);
+      return h('div.plugin-tool', { 'data-tool': tool }, markCell(view, entry, plugin, tool, marketIndex, compareTo),
+        h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]), h('span.plugin-tool-state', { title: words }, status(tool, mark)),
+          // With no CLI, its plugin commands run through the copy its desktop app carries: said so, never as the CLI.
+          view.via?.[tool] ? h('span.plugin-tool-state.plugin-tool-via', { title: `${names[tool]}’s command-line tool wasn’t found, so its plugin commands run through ${view.via[tool]}.` }, `Through ${view.via[tool]}`) : null,
+          actions(tool, mark)));
+    })), view.tools.length),
     // Cowork has no box: with Claude desktop here, one line says which plugins it uses instead.
     hasCowork(app.home?.snapshots ?? []) ? h('p.plugin-panel-note', { id: 'plugin-cowork-note' }, coworkWords.plugin) : null);
 }
@@ -146,16 +150,15 @@ function partNames(parts: Pick<PartPlan, 'kind' | 'name'>[], linked = false): (s
 const newParts = (parts: PartsState, plan: PartPlan[] | undefined) => (plan ?? []).filter(part => !part.why && !part.out && !parts.items.some(item => samePart(item, part)));
 
 /**
- * One tool's line in a plugin's parts table, in words: what Apply all will do (`pending`, and `pick` for single parts),
- * what is there and from which version, that the plugin has changed since, what the person left out, or what can go in
- * and what can't (`plan`, undefined while it is read: `reading`, or when the plugin's files couldn't be read).
+ * One tool's line in a plugin's parts table, in words: what Apply all will do (`updating`: Update parts is chosen, and `pick`
+ * for single parts), what is there and from which version, that the plugin has changed since, what the person left out, or
+ * what can go in and what can't (`plan`, undefined while it is read: `reading`, or when the plugin's files couldn't be read).
  */
-function partsLine(parts: PartsState | undefined, plan: PartPlan[] | undefined, pending: PluginAction | undefined, pick: PartsPick | undefined, reading: boolean): (string | HTMLElement)[] {
+function partsLine(parts: PartsState | undefined, plan: PartPlan[] | undefined, updating: boolean, pick: PartsPick | undefined, reading: boolean): (string | HTMLElement)[] {
   const going = (plan ?? []).filter(part => !part.why && !part.out);
   const picked = pick ? [pick.on.length ? h('span.plugin-outcome-item', {}, h('span.tone-accent', {}, 'Will put in on Apply all:'), ' ', ...partNames(pick.on)) : null,
     pick.off.length ? h('span.plugin-outcome-item', {}, h('span.tone-danger', {}, 'Will take out on Apply all:'), ' ', ...partNames(pick.off)) : null].filter((line): line is HTMLElement => !!line) : [];
-  if (pending === 'remove-parts' && parts) return [h('span.plugin-outcome-item', {}, h('span.tone-danger', {}, 'Will remove on Apply all:'), ' ', ...partNames(parts.items))];
-  if (pending === 'install-parts') return [h('span.plugin-outcome-item', {}, h('span.tone-accent', {}, `Will ${parts ? 'update' : 'install'} on Apply all:`), ' ',
+  if (updating) return [h('span.plugin-outcome-item', {}, h('span.tone-accent', {}, 'Will update on Apply all:'), ' ',
     ...(going.length ? partNames(going) : ['nothing it can change: each part was changed, removed or managed since'])), ...picked];
   const named = (part: PartPlan) => [`${partWords[part.kind][0]} `, h('code.plugin-name', {}, part.name)];
   // Which parts can't go in; why is said once, at each one's switch under "What it holds".
@@ -166,7 +169,7 @@ function partsLine(parts: PartsState | undefined, plan: PartPlan[] | undefined, 
   const outs = (plan ?? []).filter(part => part.out);
   const left = outs.length ? [h('span.plugin-outcome-item', {}, icon('circle-minus', 12, 'tone-faint'), 'Left out by you: ', ...partNames(outs))] : [];
   // With parts there, what an update would leave out (changed since, the folder) is said under them.
-  if (parts?.changed) return [h('span.plugin-outcome-item', {}, icon('refresh-cw', 12, 'tone-warning'), `Out of date. ${changedWords(parts)}.`), h('span.plugin-outcome-item', {}, 'Installed: ', ...partNames(parts.items, true)), ...picked, ...left, ...limited, ...missing];
+  if (parts?.changed) return [h('span.plugin-outcome-item', {}, icon('refresh-cw', 12, 'tone-warning'), `Out of date. ${changedPartsWords(parts)}.`), h('span.plugin-outcome-item', {}, 'Installed: ', ...partNames(parts.items, true)), ...picked, ...left, ...limited, ...missing];
   // A part left out earlier (its name was taken) that can go in now: Update parts adds it.
   const addable = parts ? newParts(parts, plan) : [];
   const adds = addable.length ? [h('span.plugin-outcome-item', {}, icon('plus', 12, 'tone-accent'), 'Can go in now: ', ...partNames(addable))] : [];
@@ -189,10 +192,11 @@ function plansFor(entry: MarketplaceView, plugin: PluginView): Partial<Record<Ha
 }
 
 /**
- * Tools that can't take the plugin can take its parts: each skill, MCP server and agent as a separate item. One row per
- * tool (tools alike share one until anything is installed or chosen), saying why the plugin can't go there and what Apply
- * all will do, what is there and from which version, what changed, or what can go in. Its buttons choose for the tools
- * not chosen yet: update parts that are out of date, else install them where they aren't; a quieter one removes them.
+ * Tools that can't take the plugin can take its parts: each skill, MCP server and agent as a separate item, put in and taken
+ * out by the plugin's switch (pluginrecord.ts). One row per tool (tools alike share one until anything is installed or
+ * chosen), saying why the plugin can't go there and what Apply all will do, what is there and from which version, what
+ * changed, or what can go in. Its button chooses Update parts for the tools whose parts are out of date (or can take one
+ * left out before), not chosen yet.
  */
 function partsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginView, components: Components | undefined, detail: PluginDetail | null | undefined) {
   const tools = view.tools.filter(tool => partsOffer(view, entry, plugin.name, tool, components));
@@ -201,33 +205,26 @@ function partsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   if (!tools.length && !empty.length) return null;
   const read = market.partsPlans.get(pluginKey(entry.source, plugin.name));
   const plans = plansFor(entry, plugin);
-  const op = (tool: HarnessId, action: PluginAction): PluginOp => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action });
+  const op = (tool: HarnessId): PluginOp => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action: 'install-parts' });
   const partsIn = (tool: HarnessId) => partsStill(entry, plugin.name, tool);
   const chosen = (tool: HarnessId) => queued(market.draft, entry.source, plugin.name, tool);
   const picked = (tool: HarnessId) => pickOf(market.draft, entry.source, plugin.name, tool);
-  // The buttons choose for the tools not chosen yet; the boxes take a choice back.
-  const open = tools.filter(tool => !chosen(tool));
-  // Out of date, or with a part left out before that can go in now: Update parts brings either in.
-  const changed = open.filter(tool => { const parts = partsIn(tool); return !!parts && (!!parts.changed || newParts(parts, plans?.[tool]).length > 0); });
-  const without = open.filter(tool => !partsIn(tool));
-  const holding = open.filter(tool => partsIn(tool));
-  const choose = (batch: PluginOp[], label: string, id: string, variant: 'outline' | 'ghost', glyph?: Parameters<typeof icon>[0]) => button({ variant, size: 'small', id, disabled: !!app.busy, icon: glyph,
-    label, onclick: () => { toggleMany(market.draft, batch); clearNotice(); rerender(); } });
+  // Out of date, or with a part left out before that can go in now, where the plugin is wanted: Update parts brings either in.
+  const changed = tools.filter(tool => { const parts = partsIn(tool); return !chosen(tool) && !!entry.switches?.[plugin.name]?.tools[tool]?.wanted && !!parts && (!!parts.changed || newParts(parts, plans?.[tool]).length > 0); });
   const which = (list: HarnessId[]) => (list.length > 2 ? `all ${list.length} tools` : andList(list.map(tool => names[tool])));
-  const next = changed.length ? choose(changed.map(tool => op(tool, 'install-parts')), `Update parts in ${which(changed)}`, `pparts-${plugin.name}`, 'outline')
-    : without.length ? choose(without.map(tool => op(tool, 'install-parts')), `Install parts in ${which(without)}`, `pparts-${plugin.name}`, 'outline') : null;
-  const removal = holding.length ? choose(holding.map(tool => op(tool, 'remove-parts')), `Remove parts from ${which(holding)}`, `punparts-${plugin.name}`, next ? 'ghost' : 'outline', 'circle-minus') : null;
+  const next = changed.length ? button({ variant: 'outline', size: 'small', id: `pparts-${plugin.name}`, disabled: !!app.busy, label: `Update parts in ${which(changed)}`,
+    onclick: () => { toggleMany(market.draft, changed.map(op)); clearNotice(); rerender(); } }) : null;
   // Before anything is installed or chosen, tools alike share a row; after, each tool has its own, in column order.
   const settled = tools.every(tool => !partsIn(tool) && !chosen(tool) && !picked(tool));
   const groups = groupBy([...tools, ...empty].sort(byToolOrder), tool => (settled ? JSON.stringify([partsWhy(view, entry, tool)[0], plans?.[tool] ?? null]) : tool));
   const behind = detail && !detail.problem ? pluginOnlyParts(detail) : [];
   return h('section.plugin-section.plugin-parts-section', { 'aria-label': 'Its parts' },
-    h('div.plugin-section-head', {}, h('h3', {}, 'Its parts'), view.canWrite ? h('span.plugin-section-actions', {}, removal, next) : null),
-    h('p.plugin-parts-about', {}, 'Where a tool can’t take this plugin, its skills, MCP servers and agents can go in as separate items instead: all at once with the tool’s box or a button here, or one by one with the switches under What it holds.'),
+    h('div.plugin-section-head', {}, h('h3', {}, 'Its parts'), view.canWrite ? h('span.plugin-section-actions', {}, next) : null),
+    h('p.plugin-parts-about', {}, 'Where a tool can’t take this plugin, its skills, MCP servers and agents go in as separate items instead, all at once with the plugin’s switch. The switches under What it holds then choose single parts, and Apply all puts them in or takes them out.'),
     h('ul.plugin-outcome-list.plugin-parts-list', {}, [...groups.values()].map(group => h('li.plugin-outcome-row', {},
       h('span.plugin-parts-tool', {}, h('span.plugin-outcome-tools', {}, group.map(tool => brandMark(tool, 14)), h('strong', {}, andList(group.map(tool => names[tool])))),
         partsWhy(view, entry, group[0]!)[0] ? h('span.plugin-parts-why', {}, partsWhy(view, entry, group[0]!)[group.length > 1 ? 1 : 0]) : null),
-      h('span.plugin-outcome-what', {}, partsLine(partsIn(group[0]!), plans?.[group[0]!], chosen(group[0]!), picked(group[0]!), !read || read.reading || (!!read.value && !plans?.[group[0]!])))))),
+      h('span.plugin-outcome-what', {}, partsLine(partsIn(group[0]!), plans?.[group[0]!], chosen(group[0]!) === 'install-parts', picked(group[0]!), !read || read.reading || (!!read.value && !plans?.[group[0]!])))))),
     behind.length ? h('p.plugin-muted', {}, `Stays with the plugin: ${andList(behind)}.`) : null);
 }
 
@@ -402,19 +399,15 @@ const fileKinds: Record<FileKind, { title: string; file: string }> = {
 };
 
 /**
- * Lays out "Your tools" by the box's width, decided here once (data-layout, which style.css keys off). With room for a
- * column per tool and the button, each tool gets one from the left, and "Choose all" sits at the right end. Otherwise
- * they wrap in a row, and a "Choose all" that wraps onto a line of its own moves to the right edge, where a lone button
- * reads as belonging to the whole row (.choice-wrapped). Run after layout (dom.ts afterLayout), before the page is painted.
+ * Lays out "Your tools" by the box's width, decided here once (data-layout, which style.css keys off): with room for a
+ * column per tool, each tool gets one from the left; otherwise they wrap in a row. Run after layout (dom.ts afterLayout),
+ * before the page is painted.
  */
 function settlePluginTools(): void {
-  const rows = document.querySelector<HTMLElement>('.plugin-tool-rows'), all = rows?.querySelector<HTMLElement>(':scope > .btn');
-  const first = rows?.firstElementChild as HTMLElement | null;
-  if (!rows || !first) return;
+  const rows = document.querySelector<HTMLElement>('.plugin-tool-rows');
+  if (!rows?.firstElementChild) return;
   const tools = Number(rows.dataset.tools ?? 1), style = getComputedStyle(rows), px = (name: string) => parseFloat(style.getPropertyValue(name));
-  const columns = rows.clientWidth >= tools * (px('--tool-min') + px('--tool-gap')) + (all?.offsetWidth ?? 0);
-  rows.dataset.layout = columns ? 'columns' : 'wrap';
-  all?.classList.toggle('choice-wrapped', !columns && all.offsetTop > first.offsetTop + first.offsetHeight / 2);
+  rows.dataset.layout = rows.clientWidth >= tools * (px('--tool-min') + px('--tool-gap')) ? 'columns' : 'wrap';
 }
 
 // What depends on width, once the page is drawn and whenever the content changes width: which descriptions are cut, and

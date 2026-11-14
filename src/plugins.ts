@@ -382,6 +382,20 @@ export async function registeredMarketplaces(context: PluginContext, tool: Plugi
 
 const hasFiles = async (path: string) => { try { return (await readdir(path)).length > 0; } catch { return false; } };
 
+/**
+ * Whether a tool's own records of its plugins can be read: each file it keeps them in is absent (nothing installed) or reads.
+ * One there that doesn't read (half written, say) makes what the tool has unknown, never "nothing" (pluginrecord.ts row 1).
+ */
+export async function recordReadable(context: PluginContext, tool: PluginTool): Promise<boolean> {
+  const reads = await Promise.all(touched(context, tool).map(async path => {
+    let text: string;
+    try { text = await readFile(path, 'utf8'); } catch (error) { return errorCode(error) === 'ENOENT'; }
+    if (tool !== 'codex-cli') return !!parseObject(withoutBom(text).replace(/^\s*\/\/.*$/gm, ''));
+    try { readTomlTables(text); return true; } catch { return false; }
+  }));
+  return reads.every(Boolean);
+}
+
 /** The marketplace a tool has under a name, as the source it was added from. */
 async function registeredSource(context: PluginContext, tool: PluginTool, marketplace: string): Promise<string | undefined> {
   return (await registeredMarketplaces(context, tool)).find(entry => entry.name === marketplace)?.source;

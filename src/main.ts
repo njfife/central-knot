@@ -51,6 +51,7 @@ import { joinedWords, toolList } from './words.ts';
 import { buildTag, startUpdater, type PendingUpdate } from './updater.ts';
 import { lineApp, releaseLine } from './updates.ts';
 import { autoUpdates, CHECK_EVERY_MS, PLUGIN_UPDATES_DEFAULT, type UpdatesRecord } from './pluginupdates.ts';
+import type { PluginDone } from './pluginplan.ts';
 import { CARRIED_FOLDER, STANDARD_BUILD, aboutBuild, openBundle, readCustomBuildSync, releaseDate, releaseLabel, type ActiveBundle } from './bundle.ts';
 
 const smoke = process.argv.includes('--smoke-test');
@@ -744,8 +745,8 @@ function toolsChangedHere(snapshots: Snapshot[]): boolean {
   void leftOutNow(shared).then(leftOut => {
     const managing = joined.filter(tool => !leftOut.includes(tool));
     if (managing.length) send('said', joinedWords(managing));
-    // A managed tool that is new here gets the plugins the others have (selections that wait), soon after it is first seen.
-    if (pluginChecksRun) return pluginUpdates?.present(presentTools(snapshots).filter(tool => !leftOut.includes(tool)));
+    // A managed tool new here gets each On plugin not kept out of it at a check made now (pluginupdates.ts toolJoined).
+    if (managing.length && pluginChecksRun) return pluginUpdates?.toolJoined();
   }).catch(error => logFailure('plugin updates', error));
   return changed;
 }
@@ -900,7 +901,7 @@ function logOutcome(channel: string, args: unknown[], result: unknown) {
 }
 function logged(channel: string, args: unknown[], result: unknown) {
   if (!result || typeof result !== 'object') return;
-  const { stopped, reports, results } = result as { stopped?: unknown; reports?: unknown; results?: unknown };
+  const { stopped, reports, results, done } = result as { stopped?: unknown; reports?: unknown; results?: unknown; done?: unknown };
   if (typeof stopped === 'string') log(`${channel} stopped: ${stopped}`);
   // A plugin step's request names the marketplace and the plugin second and third; a pick of single parts names them last.
   const pick = channel === 'plugins:parts' ? args[7] as PartsPick | null : null;
@@ -915,6 +916,11 @@ function logged(channel: string, args: unknown[], result: unknown) {
   }
   for (const item of Array.isArray(results) ? results as DestinationResult[] : []) {
     if (item.outcome === 'failed' || item.outcome === 'held') log(`${channel} ${item.item}${item.harness ? ` in ${item.harness}` : ''}: ${item.outcome}: ${item.message}`);
+  }
+  // A plugin's switch and its Undo (plugins:turn, plugins:undo-turn): each step it ran names its own plugin, action and tool.
+  for (const step of Array.isArray(done) ? done as PluginDone[] : []) {
+    log(`${channel} ${step.plugin}@${step.marketName} ${step.action} in ${step.tool}: ${step.report.outcome}${step.report.changed ? '' : ', nothing changed'}: ${[step.report.message, ...(step.report.notes ?? [])].join(' ')}`);
+    for (const run of step.report.runs.filter(run => !run.ok)) log(`${channel} ${step.plugin}@${step.marketName} in ${step.tool}: \`${run.command}\` failed: ${run.output.trim().slice(0, 2000)}`);
   }
 }
 
@@ -1130,6 +1136,7 @@ app.whenReady().then(async () => {
     share: () => context(),
     // A change to a plugin that worked (an update, an uninstall, its parts) settles what failed there by itself before.
     changed: (source, plugin, tools) => void pluginUpdates?.settled(source, plugin, tools).catch(error => logFailure('plugin updates', error)),
+    waitedBefore: async () => pluginUpdates?.waitedBefore() ?? [],
     bundled: () => (bundle && custom ? { source: bundle.folder, view: {
       app: custom.name, displayName: custom.marketplace?.displayName, logo: custom.marketplace?.logo && `${CARRIED_FOLDER}/${custom.marketplace.logo}`,
       release: releaseDate(bundle.release, true), from: bundle.release.from || undefined, unpackaged: bundle.release.unpackaged, kept: bundle.release.kept,
@@ -1173,6 +1180,7 @@ app.whenReady().then(async () => {
         update: (source, marketName, plugin, tools, home) => step('plugins:update', [source, marketName, plugin, tools, home], () => markets.update(source, marketName, plugin, onlyAllowed(tools, pluginTools), home, { reinstall: false })),
         parts: (source, marketName, plugin, tool, mode, run, home, pick) => step('plugins:parts', [source, marketName, plugin, tool, mode, run, home, pick], () => markets.parts(source, marketName, plugin, tool, mode, run, home, pick)),
       },
+      noteJoined: (tools, home) => queued(() => markets.noteJoined(tools, home)),
       load: async () => { const saved: unknown = JSON.parse(await readFile(recordPath, 'utf8')); return Array.isArray(saved) ? saved as UpdatesRecord[] : undefined; },
       save: async saved => { await mkdir(app.getPath('userData'), { recursive: true }); await writeFile(recordPath, `${JSON.stringify(saved, null, 2)}\n`); },
       changed: (view, news) => {
@@ -1302,14 +1310,15 @@ app.whenReady().then(async () => {
     return { ...quit, view: await syncThenView() };
   });
   // A tool's Manage switch (toolchoice.ts chooseTools), then the home read again: with Automatic sync on, that pass brings a tool
-  // turned on into line, and what it did there (`did`) is what the page's band says. A tool turned off is forgotten by the plugin
-  // updates, so it is new to them when it is managed again.
+  // turned on into line, and what it did there (`did`) is what the page's band says. A tool turned on is new to the plugins
+  // record (marketplaces.ts toolManaged), and gets each On plugin not kept out of it at a check made now.
   handle('tools:manage', async (tool, on, resume, home) => {
     if (home !== current?.home || !isTool(tool) || typeof on !== 'boolean') return { stopped: elsewhere, view: null, did: [] };
     const chosen = await chooseTools(context(), tool, on, resume === true);
     if (!chosen.stopped) {
       log(`sync: ${tool} ${on ? 'managed' : 'left out'} in ${home}`);
-      if (!on) await pluginUpdates?.forgetTool(tool).catch(error => logFailure('plugin updates', error));
+      if (on) await markets.toolManaged(tool, home).catch(error => logFailure('plugins record', error));
+      if (on && pluginChecksRun) void pluginUpdates?.toolJoined().catch(error => logFailure('plugin updates', error));
     }
     const { view, passed } = await syncAndView();
     return { ...chosen, view, did: (passed.done ?? []).filter(result => result.harness === tool) };
