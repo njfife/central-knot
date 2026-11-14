@@ -3,18 +3,22 @@
 // what it won't bring in and why, before anything is kept; Add brings each skill into Central Knot, Off. Each source has a row:
 // its link, what it brought (On or Off), when it was last read, why it couldn't be read if so, Check now and Remove; a skill
 // there the library holds deleted has its own Add, and one whose version waits (library.ts changedHere) its own Merge, Replace
-// and Keep mine; a skill the source removed (library.ts REMOVED AT ITS SOURCE, which the Skills view says: types.ts LibraryFacts
-// fromSource) has a line with Turn on, its switch on Skills. Every state a row says is the engine's (types.ts SourceNameState,
-// and that fromSource); this page only words it. Its own page rather than the Git repo's: that page is Pull and Push of the whole set, two-way and in Central
-// Knot's layout, while a source is read only, holds a few skills, and its rows grow one per link.
-import { announce, applyClick, busy, rerender, showPage, state } from './app.ts';
+// and Keep mine; a skill the source removed (library.ts REMOVED AT ITS SOURCE, which its kind's view says: types.ts LibraryFacts
+// fromSource) has a line with Turn on, its switch on its kind's page. Every line and click carries its item's kind (types.ts SourceName
+// `kind`; ids too: source-merge-<id>-skill-<key>), which pluginstatus.ts pageOfPart maps to its page; skills are the only kind
+// a source brings in this version, so the words say skill. Every state a row says is the engine's (types.ts SourceNameState,
+// and that fromSource); this page only words it. Its own page rather than the Git repo's: that page is Pull and Push of the
+// whole set, two-way and in Central Knot's layout, while a source is read only, holds a few skills, and its rows grow one per link.
+import { announce, applyClick, busy, rerender, showPage, state, type PageKind } from './app.ts';
 import { button, closeButton, h, icon } from './dom.ts';
 import { asItIs } from './libraryrow.ts';
 import { dayAndTime, plural } from './model.ts';
 import { linkLabel } from './sourcelink.ts';
-import { andList, toolsPhrase } from './words.ts';
+import { andList, kindNouns, toolsPhrase } from './words.ts';
 import { outcomeBand } from './matrix.ts';
-import type { LibraryFacts, MergeDone, SourceFound, SourceName, SourcePreview, SourceResult, SourcesView, SourceView } from './types.ts';
+import { pageOfPart } from './pluginstatus.ts';
+import type { ItemKind } from './library.ts';
+import type { HarnessId, LibraryFacts, MergeDone, SourceFound, SourceName, SourcePreview, SourceResult, SourceRowClick, SourcesView, SourceView } from './types.ts';
 
 const api = () => window.centralKnot;
 
@@ -49,7 +53,7 @@ export async function loadSources(): Promise<void> {
 
 /**
  * After a click that may have changed the library: the home read again, so the Skills page and every count follow, then the
- * band (what the click did, from `said`, with its one action, and Open Skills where something there changed).
+ * band (what the click did, from `said`, with its one action, and Open on the page of the kind where something changed).
  */
 async function settle(result: SourceResult, said: Said | undefined) {
   if (result.view) sources.view = result.view;
@@ -59,7 +63,7 @@ async function settle(result: SourceResult, said: Said | undefined) {
   if (home) state.home = home;
   if (said && !result.stopped) {
     state.outcome = { page: 'sources', text: said.text, band: true, warn: said.warns, ...(said.note ? { note: said.note } : {}), ...(said.undo ? { undo: said.undo } : {}),
-      ...(said.skills ? { next: { label: 'Open Skills', id: 'source-open-skills', run: () => showPage('skills') } } : {}) };
+      ...(said.open ? { next: { label: `Open ${kindNouns[said.open].title}`, id: `source-open-${said.open}`, run: () => showPage(said.open!) } } : {}) };
   }
   announce(result.stopped ?? said?.text ?? '', true);
 }
@@ -82,30 +86,20 @@ const checkNow = (source: SourceView) => busy(`Checking ${linkLabel(source.link)
   await settle(result, whatItDid(result, linkLabel(source.link)));
 });
 
-const bringBack = (source: SourceView, name: SourceName) => busy(`Bringing ${name.name} back…`, async () => {
-  const result = await api().bringBackFromSource(source.id, name.key, state.home!.home);
-  await settle(result, whatItDid(result, linkLabel(source.link)));
+/** What the page says while each click on a name's line runs. */
+const running: Record<SourceRowClick, (called: string) => string> = {
+  bringBack: called => `Bringing ${called} back…`, replace: called => `Replacing ${called}…`, merge: called => `Merging ${called}…`, keep: called => `Keeping ${called} as it is…`,
+};
+/** A click on one name's line (sources.ts rowClick), in its kind. A Replace's band says that name has the source's version. */
+const onLine = (source: SourceView, name: SourceName, click: SourceRowClick) => busy(running[click](name.name ?? name.key), async () => {
+  const result = await api().rowClick(source.id, name.kind, name.key, click, state.home!.home);
+  await settle(result, whatItDid(result, linkLabel(source.link), click === 'replace' ? { kind: name.kind, name: name.name ?? name.key } : undefined));
 });
 
-const replace = (source: SourceView, name: SourceName) => busy(`Replacing ${name.name ?? name.key}…`, async () => {
-  const result = await api().replaceFromSource(source.id, name.key, state.home!.home);
-  await settle(result, whatItDid(result, linkLabel(source.link), name.name ?? name.key));
-});
-
-const merge = (source: SourceView, name: SourceName) => busy(`Merging ${name.name ?? name.key}…`, async () => {
-  const result = await api().mergeFromSource(source.id, name.key, state.home!.home);
-  await settle(result, whatItDid(result, linkLabel(source.link)));
-});
-
-const keep = (source: SourceView, name: SourceName) => busy(`Keeping ${name.name ?? name.key} as it is…`, async () => {
-  const result = await api().keepFromSource(source.id, name.key, state.home!.home);
-  await settle(result, whatItDid(result, linkLabel(source.link)));
-});
-
-/** Turn on, on the line of a skill its source removed: the same click as its switch on Skills, On (the revert: library.ts REMOVED AT ITS SOURCE). */
-const turnOn = (fact: LibraryFacts) => {
+/** Turn on, on the line of an item its source removed: the same click as its switch on its kind's page, On (the revert: library.ts REMOVED AT ITS SOURCE). */
+const turnOn = (fact: LibraryFacts, page: PageKind) => {
   const homeTools = state.home?.sync.managed ?? [];
-  return applyClick({ kind: 'skills', items: [fact.name], changes: [{ ...asItIs(fact.key, state.home?.skills.library[fact.key]), on: true, seenOn: false }],
+  return applyClick({ kind: page, items: [fact.name], changes: [{ ...asItIs(fact.key, state.home?.[page].library[fact.key]), on: true, seenOn: false }],
     said: (_notIn, wrote) => `${fact.name} is on${wrote.length ? ` in ${toolsPhrase(wrote, homeTools)}` : ''}.` });
 };
 
@@ -114,18 +108,21 @@ const remove = (source: SourceView) => busy('Removing the source…', async () =
   await settle(result, { text: `Removed ${linkLabel(source.link)}. Its skills stay in Central Knot as they are, On or Off, with their versions; they are no longer from it.`, warns: false });
 });
 
-/** A click's band: its sentences, whether it took a skill out of tools (a warning, not a tick), History's note, and its one action. */
-interface Said { text: string; warns: boolean; note?: string; undo?: { id: string; label: string }; skills?: boolean }
+/**
+ * A click's band: its sentences, whether it took an item out of tools (a warning, not a tick), History's note, its one action,
+ * and the page it offers to open (`open`: that of the first kind where something changed).
+ */
+interface Said { text: string; warns: boolean; note?: string; undo?: { id: string; label: string }; open?: PageKind }
 
 /**
- * What a source's click did, from what the pass did (types.ts PassResult sourced: each item's answer, the History entry that
- * says it, and what a Merge did; and the pass's results: the tools each was written to or taken out of), and why the source
- * wasn't read whole. A skill its source dropped leads, with Turn on, and it, a read not whole or a Merge that changed nothing
- * is a warning; else the one update or merge has Undo. `replaced`: the name a click on Replace asked for, whose update says so.
+ * What a source's click did, from what its passes did (types.ts SourcedItem: each item's kind and answer, the History entry that
+ * says it, what a Merge did, and the tools it was written to or taken out of), and why the source wasn't read whole. An item
+ * its source dropped leads, with Turn on, and it, a read not whole or a Merge that changed nothing is a warning; else the one
+ * update or merge has Undo. `replaced`: the item a click on Replace asked for, by kind and name, whose update says so.
  */
-export function whatItDid(result: Pick<SourceResult, 'sourced' | 'results' | 'notWhole'>, label: string, replaced?: string): Said {
+export function whatItDid(result: Pick<SourceResult, 'sourced' | 'notWhole'>, label: string, replaced?: { kind: ItemKind; name: string }): Said {
   const homeTools = state.home?.sync.managed ?? [];
-  const where = (name: string, outcome: 'written' | 'removed') => (result.results ?? []).filter(entry => entry.item === name && entry.outcome === outcome && entry.harness).map(entry => entry.harness!);
+  const isReplaced = (entry: { kind: ItemKind; name: string }) => entry.kind === replaced?.kind && entry.name === replaced.name;
   const of = (...answers: string[]) => (result.sourced ?? []).filter(entry => answers.includes(entry.answer));
   const names = (entries: { name: string }[]) => andList(entries.map(entry => entry.name));
   const are = (entries: unknown[]) => (entries.length === 1 ? 'is' : 'are');
@@ -134,13 +131,13 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'results' | 'no
   const unmerged = merges.filter(entry => entry.merge !== 'merged' && entry.merge !== 'had');
   const choices = 'Merge puts the source’s changes into yours if they don’t clash, Replace takes the source’s, and Keep mine keeps yours';
   const said = [
-    ...dropped.map(({ name }) => { const out = where(name, 'removed'); return `${name} is no longer at ${label}: it was turned off${out.length ? ` and taken out of ${toolsPhrase(out, homeTools)}` : ''}; Central Knot keeps it.`; }),
-    ...updated.map(({ name }) => {
-      const into = where(name, 'written'), now = into.length ? `, now in ${toolsPhrase(into, homeTools)}` : ', kept Off';
-      return name === replaced ? `${name} has the source’s version${now}; the one it had is kept as a version.` : `${name} was updated from its source${now}.`;
+    ...dropped.map(({ name, removed: out }) => `${name} is no longer at ${label}: it was turned off${out.length ? ` and taken out of ${toolsPhrase(out, homeTools)}` : ''}; Central Knot keeps it.`),
+    ...updated.map(entry => {
+      const now = entry.written.length ? `, now in ${toolsPhrase(entry.written, homeTools)}` : ', kept Off';
+      return isReplaced(entry) ? `${entry.name} has the source’s version${now}; the one it had is kept as a version.` : `${entry.name} was updated from its source${now}.`;
     }),
     waiting.length ? `${names(waiting)} changed at the source; yours ${waiting.length === 1 ? 'stays current, since it was' : 'stay current, since they were'} changed here or a tool’s copy can’t be read just now: on ${waiting.length === 1 ? 'its row' : 'each one’s row'}, ${choices}.` : '',
-    ...merges.map(({ name, merge }) => mergeWords(name, merge!, where(name, 'written'), homeTools)),
+    ...merges.map(({ name, merge, written }) => mergeWords(name, merge!, written, homeTools)),
     ...kept.map(({ name }) => `${name} stays as you have it, and the source’s version no longer waits: it is kept as a version, and the source’s next change is compared with it.`),
     made.length ? `${names(made)} ${are(made)} in Central Knot, Off: turn ${made.length === 1 ? 'it' : 'them'} on in Skills.` : '',
     linked.length ? `${names(linked)} ${are(linked)} in Central Knot already, the same, and ${linked.length === 1 ? 'is' : 'are'} now from it.` : '',
@@ -152,18 +149,19 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'results' | 'no
   const keptAll = [...kept, ...merges.filter(entry => entry.merge === 'had')];
   const changed = [...updated, ...mergedIn], one = changed.length + keptAll.length === 1 ? [...changed, ...keptAll][0] : undefined;
   const undoLabel = (entry: NonNullable<typeof one>) =>
-    (entry.answer === 'keep' ? 'Undo keep mine' : entry.merge ? 'Undo the merge' : entry.name === replaced ? 'Undo the replace' : 'Undo the update');
+    (entry.answer === 'keep' ? 'Undo keep mine' : entry.merge ? 'Undo the merge' : isReplaced(entry) ? 'Undo the replace' : 'Undo the update');
   const undo = !turnOn && one?.history ? { id: one.history, label: undoLabel(one) } : undefined;
+  const opens = [...dropped, ...changed, ...made, ...linked][0];
   return {
     text: said.length ? said.join(' ') : `Checked ${label}: nothing came in from it.`, warns: dropped.length > 0 || !!result.notWhole || unmerged.length > 0,
     ...(changed.length + keptAll.length ? { note: `See each change, or undo it, in History.` } : {}), ...(turnOn ?? undo ? { undo: turnOn ?? undo } : {}),
-    // Open Skills where something there changed: not for a read that only says what can't be read, or what waits.
-    skills: dropped.length + changed.length + made.length + linked.length > 0,
+    // Open the page where something changed: not for a read that only says what can't be read, or what waits.
+    ...(opens ? { open: pageOfPart[opens.kind] } : {}),
   };
 }
 
 /** What a click on Merge did to one skill (types.ts MergeDone), said after it: `into`, the tools the merged version was written to. */
-function mergeWords(name: string, merge: MergeDone, into: string[], homeTools: string[]): string {
+function mergeWords(name: string, merge: MergeDone, into: HarnessId[], homeTools: string[]): string {
   if (merge === 'merged') return `${name} now has your changes and the source’s, merged${into.length ? `, in ${toolsPhrase(into, homeTools)}` : ''}; the version it had is kept.`;
   if (merge === 'had') return `${name} already had the source’s changes, so Merge changed nothing in it; the source’s version no longer waits.`;
   if (merge === 'unsettled') return `Merge left ${name} as it was, since a tool’s copy of it can’t be read just now (a save still landing, or a copy that can’t be read as it is). Merge can run once that copy can be read; on Skills, its row says which tool and why.`;
@@ -220,7 +218,7 @@ const whereAt = ({ folder, folderName }: NonNullable<SourceName['there']>) => (f
 /** One skill at a source: its name and where it sits there, what it is to the library, its files, and its own Add. */
 function nameRow(name: SourceName, preview: boolean, action?: HTMLElement | null) {
   const said = stateWords(name, preview);
-  return h('li.source-name', { 'data-key': name.key, 'data-state': name.state },
+  return h('li.source-name', { 'data-key': name.key, 'data-kind': name.kind, 'data-state': name.state },
     h('span.source-name-icon', {}, icon(said.warns ? 'triangle-alert' : name.state === 'nothing' && name.on ? 'circle-check' : 'wand-sparkles', 14, said.warns ? 'tone-warning' : 'tone-muted')),
     h('span.source-name-main', {},
       h('span.source-name-line', {}, h('strong.source-name-text', {}, name.name ?? name.there?.folderName ?? name.key),
@@ -229,11 +227,12 @@ function nameRow(name: SourceName, preview: boolean, action?: HTMLElement | null
       filesLine(name.there?.files ?? [])));
 }
 
-/** A skill this source removed (types.ts LibraryFacts fromSource `removed`): what it is now, and Turn on, its revert. */
-function removedRow(fact: LibraryFacts, locked: boolean) {
-  const turn = button({ variant: 'link', size: 'micro', label: 'Turn on', id: `source-turn-on-${fact.key}`, disabled: locked,
-    attrs: { title: `Turn ${fact.name} on in every tool it isn’t kept out of, as its switch on Skills does. Undo turns it off again.` }, onclick: () => void turnOn(fact) });
-  return h('li.source-name', { 'data-key': fact.key, 'data-state': 'removed' },
+/** An item this source removed (types.ts LibraryFacts fromSource `removed`), from its kind's page: what it is now, and Turn on, its revert. */
+function removedRow(fact: LibraryFacts, kind: ItemKind, locked: boolean) {
+  const page = pageOfPart[kind];
+  const turn = button({ variant: 'link', size: 'micro', label: 'Turn on', id: `source-turn-on-${kind}-${fact.key}`, disabled: locked,
+    attrs: { title: `Turn ${fact.name} on in every tool it isn’t kept out of, as its switch on ${kindNouns[page].title} does. Undo turns it off again.` }, onclick: () => void turnOn(fact, page) });
+  return h('li.source-name', { 'data-key': fact.key, 'data-kind': kind, 'data-state': 'removed' },
     h('span.source-name-icon', {}, icon('triangle-alert', 14, 'tone-warning')),
     h('span.source-name-main', {},
       h('span.source-name-line', {}, h('strong.source-name-text', {}, fact.name), h('span.source-name-where.tone-muted', {}, 'not in its last read')),
@@ -286,18 +285,20 @@ function sourceRow(source: SourceView) {
     button({ variant: 'outline', size: 'small', icon: 'refresh-cw', label: 'Check now', id: `source-check-${source.id}`, disabled: locked, attrs: { title: `Read ${label} again: what changed there comes into Central Knot, On or Off as each skill is, unless you changed it here` }, onclick: () => void checkNow(source) }),
     button({ variant: 'ghost', size: 'small', label: 'Remove…', id: `source-remove-${source.id}`, disabled: locked, onclick: () => { sources.confirmRemove = source.id; rerender(); document.getElementById(`source-remove-cancel-${source.id}`)?.focus(); } }));
   const called = (name: SourceName) => name.name ?? name.key;
-  const nameButton = (name: SourceName) => (name.state === 'deleted' ? button({ variant: 'link', size: 'micro', label: 'Add', id: `source-bring-${source.id}-${name.key}`, disabled: locked,
-    attrs: { title: `Bring ${called(name)} back into Central Knot, Off, at this source’s version; its earlier versions come back with it` }, onclick: () => void bringBack(source, name) })
+  const idOf = (click: string, name: SourceName) => `source-${click}-${source.id}-${name.kind}-${name.key}`;
+  const nameButton = (name: SourceName) => (name.state === 'deleted' ? button({ variant: 'link', size: 'micro', label: 'Add', id: idOf('bring', name), disabled: locked,
+    attrs: { title: `Bring ${called(name)} back into Central Knot, Off, at this source’s version; its earlier versions come back with it` }, onclick: () => void onLine(source, name, 'bringBack') })
     : name.state === 'wait' ? h('span.source-name-actions', {},
-      button({ variant: 'link', size: 'micro', label: 'Merge', id: `source-merge-${source.id}-${name.key}`, disabled: locked,
-        attrs: { title: `Put this source’s changes to ${called(name)} into yours, file by file, in every tool it is on in; if they clash with yours, nothing changes and the files are named. Yours is kept as a version, and Undo puts it back` }, onclick: () => void merge(source, name) }),
-      button({ variant: 'link', size: 'micro', label: 'Replace', id: `source-replace-${source.id}-${name.key}`, disabled: locked,
-        attrs: { title: `Make this source’s version of ${called(name)} current, in every tool it is on in; yours is kept as a version, and Undo puts it back` }, onclick: () => void replace(source, name) }),
-      button({ variant: 'link', size: 'micro', label: 'Keep mine', id: `source-keep-${source.id}-${name.key}`, disabled: locked,
+      button({ variant: 'link', size: 'micro', label: 'Merge', id: idOf('merge', name), disabled: locked,
+        attrs: { title: `Put this source’s changes to ${called(name)} into yours, file by file, in every tool it is on in; if they clash with yours, nothing changes and the files are named. Yours is kept as a version, and Undo puts it back` }, onclick: () => void onLine(source, name, 'merge') }),
+      button({ variant: 'link', size: 'micro', label: 'Replace', id: idOf('replace', name), disabled: locked,
+        attrs: { title: `Make this source’s version of ${called(name)} current, in every tool it is on in; yours is kept as a version, and Undo puts it back` }, onclick: () => void onLine(source, name, 'replace') }),
+      button({ variant: 'link', size: 'micro', label: 'Keep mine', id: idOf('keep', name), disabled: locked,
         attrs: { title: `Keep your ${called(name)} current: this source’s version no longer waits and is kept as a version, and the source’s next change`
-          + ' is compared with it. Nothing is written to a tool, and Undo takes it back' }, onclick: () => void keep(source, name) })) : null);
-  // Each skill this source removed, as the Skills view says it.
-  const removed = (state.home?.skills.items ?? []).filter(fact => fact.fromSource?.removed && fact.fromSource.link === source.link);
+          + ' is compared with it. Nothing is written to a tool, and Undo takes it back' }, onclick: () => void onLine(source, name, 'keep') })) : null);
+  // Each item this source removed, as its kind's view says it.
+  const removed = (Object.entries(pageOfPart) as [ItemKind, PageKind][]).flatMap(([kind, page]) => (state.home?.[page].items ?? [])
+    .filter(fact => fact.fromSource?.removed && fact.fromSource.link === source.link).map(fact => ({ fact, kind })));
   return h('li.source-row', { id: `source-${source.id}`, 'data-source': source.id },
     h('div.source-row-head', {},
       h('span.source-row-title', {}, icon('link-2', 16, 'tone-muted'), h('strong.source-link', { title: source.link }, label)),
@@ -309,7 +310,7 @@ function sourceRow(source: SourceView) {
       button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `source-remove-cancel-${source.id}`, onclick: () => { sources.confirmRemove = undefined; rerender(); } })) : null,
     source.problem ? h('p.source-refused', {}, icon('circle-alert', 14, 'tone-danger'), h('span', {}, `Couldn’t fetch it at the last check: ${source.problem} What came from it stays as it is; below is its last read.`)) : null,
     source.unread ? h('p.source-refused', {}, icon('triangle-alert', 14, 'tone-warning'), h('span', {}, `${source.unread} Until it can be read, this source turns nothing off.`)) : null,
-    source.names.length || removed.length ? h('ul.source-names', {}, source.names.map(name => nameRow(name, false, nameButton(name))), removed.map(fact => removedRow(fact, locked))) : null);
+    source.names.length || removed.length ? h('ul.source-names', {}, source.names.map(name => nameRow(name, false, nameButton(name))), removed.map(({ fact, kind }) => removedRow(fact, kind, locked))) : null);
 }
 
 /** What stopped the last click, until dismissed. */

@@ -45,7 +45,7 @@ import { setDisabled } from '../src/skillswitch.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import type { Change, HarnessId, HistoryDays, HistoryEvent, PassResult, SourceResult } from '../src/types.ts';
 import { bytes, folderOf, historyActions, put, roots, sandbox, seen, skillText, tools as clickTools, trial, undo, type Tool } from './skillclicks.ts';
-import { addSource, bringBack, checkSource, keepFromSource, mergeFromSource, previewSource, removeSource, replaceFromSource, sourcesView } from '../src/sources.ts';
+import { addSource, checkSource, previewSource, removeSource, rowClick, sourcesView } from '../src/sources.ts';
 import { repository, standInHosts } from './sourcerepo.ts';
 
 const hosts = await standInHosts();
@@ -200,10 +200,10 @@ async function walk(seed: number): Promise<Finding[]> {
       else {
         add(6, { name: 'Check now', app: true, run: more => checkNow(recorded.id, more) });
         add(1, { name: 'Remove the source', app: true, run: () => removeSource(context(), tools, recorded.id) });
-        if (recorded.names.some(name => name.key === 'notes' && name.state === 'deleted')) add(4, { name: 'Add on the source’s row', app: true, run: () => bringBack(context(), tools, recorded.id, 'notes') });
-        if (recorded.names.some(name => name.key === 'notes' && name.state === 'wait')) add(10, { name: 'Replace on the source’s row', app: true, click: true, run: async more => asPass(await replaceFromSource(context(more), tools, recorded.id, 'notes')) });
-        if (recorded.names.some(name => name.key === 'notes' && name.state === 'wait')) add(10, { name: 'Merge on the source’s row', app: true, click: true, run: async more => asPass(await mergeFromSource(context(more), tools, recorded.id, 'notes')) });
-        if (recorded.names.some(name => name.key === 'notes' && name.state === 'wait')) add(10, { name: 'Keep mine on the source’s row', app: true, click: true, run: async more => asPass(await keepFromSource(context(more), tools, recorded.id, 'notes')) });
+        if (recorded.names.some(name => name.key === 'notes' && name.state === 'deleted')) add(4, { name: 'Add on the source’s row', app: true, run: () => rowClick(context(), tools, recorded.id, 'skill', 'notes', 'bringBack') });
+        if (recorded.names.some(name => name.key === 'notes' && name.state === 'wait')) add(10, { name: 'Replace on the source’s row', app: true, click: true, run: async more => asPass(await rowClick(context(more), tools, recorded.id, 'skill', 'notes', 'replace')) });
+        if (recorded.names.some(name => name.key === 'notes' && name.state === 'wait')) add(10, { name: 'Merge on the source’s row', app: true, click: true, run: async more => asPass(await rowClick(context(more), tools, recorded.id, 'skill', 'notes', 'merge')) });
+        if (recorded.names.some(name => name.key === 'notes' && name.state === 'wait')) add(10, { name: 'Keep mine on the source’s row', app: true, click: true, run: async more => asPass(await rowClick(context(more), tools, recorded.id, 'skill', 'notes', 'keep')) });
         // The source's line for a notes it removed: Turn on, the same click as the row's switch (sourcespage.ts turnOn).
         if (fact?.fromSource?.removed && fact.fromSource.link === recorded.link) clicks(4, 'Turn on on the source’s line', { ...asItIs('notes', item), on: true, seenOn: false });
         // The source changes and the next read (the daily one, or Check now) comes at once: what a skill changed here meets most.
@@ -332,9 +332,9 @@ async function walk(seed: number): Promise<Finding[]> {
       for (const tool of Object.keys(now.fact?.takeOver ?? {})) offered.push({ name: `the page’s Take over in ${tool}`, run: () => takeOver(context(), tools, 'notes', tool as HarnessId) });
       for (const [tool, load] of Object.entries(now.fact?.loads ?? {})) if (load?.switchedOff) offered.push({ name: `the page’s Clear the switch in ${tool}`, run: () => clearSwitch(context(), tools, 'notes', tool as HarnessId) });
       const sourceRow = await sourceNow();
-      if (sourceRow?.names.some(name => name.key === 'notes' && name.state === 'wait')) offered.push({ name: 'the Sources page’s Replace', run: async () => asPass(await replaceFromSource(context(), tools, sourceRow.id, 'notes')) });
-      if (sourceRow?.names.some(name => name.key === 'notes' && name.state === 'wait')) offered.push({ name: 'the Sources page’s Merge', run: async () => asPass(await mergeFromSource(context(), tools, sourceRow.id, 'notes')) });
-      if (sourceRow?.names.some(name => name.key === 'notes' && name.state === 'wait')) offered.push({ name: 'the Sources page’s Keep mine', run: async () => asPass(await keepFromSource(context(), tools, sourceRow.id, 'notes')) });
+      if (sourceRow?.names.some(name => name.key === 'notes' && name.state === 'wait')) offered.push({ name: 'the Sources page’s Replace', run: async () => asPass(await rowClick(context(), tools, sourceRow.id, 'skill', 'notes', 'replace')) });
+      if (sourceRow?.names.some(name => name.key === 'notes' && name.state === 'wait')) offered.push({ name: 'the Sources page’s Merge', run: async () => asPass(await rowClick(context(), tools, sourceRow.id, 'skill', 'notes', 'merge')) });
+      if (sourceRow?.names.some(name => name.key === 'notes' && name.state === 'wait')) offered.push({ name: 'the Sources page’s Keep mine', run: async () => asPass(await rowClick(context(), tools, sourceRow.id, 'skill', 'notes', 'keep')) });
       if (now.fact?.fromSource?.removed) offered.push({ name: 'the Sources page’s Turn on', run: () => send({ ...asItIs('notes', now.item), on: true, seenOn: false }) });
       for (const action of offered) await trial(box, async () => {
         const record = await recordText(), switches = await switchesNow(), answers = [await action.run()].flat();

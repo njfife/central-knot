@@ -2541,8 +2541,8 @@ if (wanted('sources')) {
   await a.click('#nav-history');
   await shot(a, 'dropped-history', 'History: github.com/stephenturner/skill-deslop (main) no longer has it, so it is off and removed from all 3 tools, and no longer from that source, with Turn on; and unslop brought in, Off, with Turn on (1280×800)');
   await a.click('#nav-sources');
-  await a.size(860, 560); await show('.source-row'); await focusOn('#source-turn-on-deslop'); await shot(a, 'removed-focus-860', 'Tabbed to Turn on on deslop’s line at 860×560: its focus ring'); await a.run('document.activeElement?.blur()'); await a.size(1280, 800);
-  await a.click('#source-turn-on-deslop'); await busyDone(); await a.settle();
+  await a.size(860, 560); await show('.source-row'); await focusOn('#source-turn-on-skill-deslop'); await shot(a, 'removed-focus-860', 'Tabbed to Turn on on deslop’s line at 860×560: its focus ring'); await a.run('document.activeElement?.blur()'); await a.size(1280, 800);
+  await a.click('#source-turn-on-skill-deslop'); await busyDone(); await a.settle();
   await atEverySize('turned-on', 'Clicked Turn on on deslop’s line: the band says deslop is on in all 3 tools, with Undo; deslop’s line is gone from the source’s row', false, '.source-row');
   await lookAt('https://github.com/team/plugin');
   await atEverySize('plugin', 'Looked at a link to a plugin: where it read, and that it holds a plugin, which a later version brings; nothing here is read, so there is no Add, only Cancel', false, '#source-preview');

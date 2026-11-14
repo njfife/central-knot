@@ -64,7 +64,8 @@
 // - the app's wiring: app.ts kindPages (how its clicks are sent; where its last result is kept, which lastResult reads),
 //   main.ts (its passes, in the background and on a click through the `changes` sanitizer; its view; a History action
 //   sent on by its key's prefix), preload.ts (the page's calls);
-// - History's sentences and actions for its entries: historyactions.ts, in the kind's words (historypage.ts asks it).
+// - History's sentences and actions for its entries: historyactions.ts, in the kind's words (historypage.ts asks it);
+// - to come from a source too: its entry in sources.ts's table (that module's header has the recipe), with `merge`.
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { carryOut, fromLinkSinceTakeIn, itemKey, keepVersion, linkedSource, managedAgain, newItem, pendingChanges, plan, setCurrent, sourceAnswers, takeInAnswer, versionAt, wantedIn } from './library.ts';
@@ -229,12 +230,16 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
    * Merge (library.ts MERGE): the source's version (`theirs`) merged into `yours` against `base`, path by path as library.ts
    * mergeFiles says, a file both sides changed by a line merge run here. Merged: the content, stored under the item already
    * (as `store` stores one), and nothing else of the merge's left behind; else the conflicting paths, or why it couldn't run.
-   * A kind no source brings leaves it out (agents, MCP servers).
+   * A kind no source brings leaves it out (agents, MCP servers): see SourcedKind.
    */
   merge?(context: ShareContext, item: LibraryItem, three: { base: Content; yours: Content; theirs: Content }): Promise<MergeResult<Content>>;
 }
 /** What Kind.merge answers. */
 export type MergeResult<Content> = { merged: Content } | { conflicts: string[] } | { couldNot: string };
+/** A kind a source brings (sources.ts SourceKind): a Kind with Merge, which a click on Merge on a source's line runs. */
+export interface SourcedKind<Content, Entry extends Seen = Seen, D extends Disk<Entry> = Disk<Entry>> extends Kind<Content, Entry, D> {
+  merge(context: ShareContext, item: LibraryItem, three: { base: Content; yours: Content; theirs: Content }): Promise<MergeResult<Content>>;
+}
 
 // ---------- What the harnesses hold ----------
 
@@ -485,13 +490,16 @@ type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'version'
  */
 export type Pulled<Content> = { name: string; content: Content; own?: { harness: HarnessId; text: string } } | { removed: true };
 /**
- * One read of a source as the pass is given it (sources.ts readOf): the table's reading of it (library.ts SourceSeen), with each
- * readable name's own name and content. `recorded`: the sources the home records now. `bringBack`: keys held deleted that a
+ * One read of a source as the pass is given it (atlink.ts readOf): the table's reading of it (library.ts SourceSeen), of one
+ * kind (`kind`), with each readable name's own name and content, and that kind's Merge (`mergeWith`: SourcedKind merge, which
+ * mergeIn runs). `recorded`: the sources the home records now. `bringBack`: keys held deleted that a
  * click on Add on the source's row brings back; `replace`: keys whose waiting version a click on Replace there makes current;
  * `merge`: keys whose waiting version a click on Merge there merges into the current one; `keep`: keys whose waiting version a
  * click on Keep mine there keeps as a version, the current one staying.
  */
 export interface SourceRead<Content> extends SourceSeen {
+  kind: ItemKind;
+  mergeWith(context: ShareContext, item: LibraryItem, three: { base: Content; yours: Content; theirs: Content }): Promise<MergeResult<Content>>;
   names: Map<string, { name: string; hash: string; content: Content } | { unreadable: string }>;
   recorded: ReadonlySet<string>;
   bringBack?: ReadonlySet<string>;
@@ -527,7 +535,7 @@ export interface PassOptions<Content> {
   /** What Pull brings, by item (gitrepo.ts): each becomes that item's current version before the pass (pull). */
   pulled?: Map<string, Pulled<Content>>;
   /**
-   * What a source holds now, read on a click or by the daily check (sources.ts): its table is carried out before the pass
+   * What a source holds now of this kind, read on a click or by the daily check (sources.ts): its table is carried out before the pass
    * (fromSourceStep), and the pass then concerns the items the table answered for, and nothing else.
    */
   source?: SourceRead<Content>;
@@ -1100,7 +1108,7 @@ async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Se
 
 /**
  * Merge (library.ts MERGE), for an item the table answered `merge`: the kind merges S into the current version against `seen`
- * (Kind.merge). Merged: S is kept as a version (never current), the merged version becomes current dated by the click, and
+ * (the read's `mergeWith`, its kind's Merge). Merged: S is kept as a version (never current), the merged version becomes current dated by the click, and
  * `seen` moves on to S; its entry is an `edit` (cause `source-merged`) with `seen` as it was, which its Undo puts back. Merged
  * to exactly the current version, it is Keep mine (keepMine). A conflict, or a merge that couldn't run, changes nothing.
  */
@@ -1108,8 +1116,7 @@ async function mergeIn(pass: Pass, item: LibraryItem, there: { hash: string; con
   const version = (hash: string | undefined) => (hash ? pass.kind.readVersion(pass.context, item.key, hash) : undefined);
   const base = await version(item.seen), yours = await version(item.hash);
   if (!base || !yours) return { couldNot: 'The version it took from the source, or its current one, is no longer in Central Knot’s store.' };
-  // Only skills come from a source, and skills implement merge.
-  const done = await pass.kind.merge!(pass.context, item, { base, yours, theirs: there.content });
+  const done = await read.mergeWith(pass.context, item, { base, yours, theirs: there.content });
   if (!('merged' in done)) return done;
   const hash = pass.kind.hashOf(done.merged), previous = item.hash, before = item.seen;
   if (hash === previous) { await keepMine(pass, item, there, read); return 'had'; }

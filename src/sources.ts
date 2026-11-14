@@ -1,49 +1,49 @@
-// Sources: a Git link the person gave, which skills are read from and which is never written. The model's table for it is
+// Sources: a Git link the person gave, which items are read from and which is never written. The model's table for it is
 // library.ts's header (A SOURCE: sourceAnswers and fromSource; what counts as changed here: changedHere); the pass carries it
-// out in one step before its clicks (librarypass.ts fromSourceStep), through the skills' kind (skills.ts applySkills). This
-// module owns what is around that step:
-// - what was read at a source, decided in one place (readOf): each skill there and whether the source was read whole, from
-//   what is at the link (holdsAt), by its files alone: a plugin or a marketplace (named and left for a later version), else a
-//   SKILL.md in the link's own folder (one skill), else each folder inside it with one, else skills/<folder>/. Each skill is
-//   its whole folder, byte for byte, without the repository's .git, named as its SKILL.md names it;
+// out in one step before its clicks (librarypass.ts fromSourceStep), one pass per kind a source brings. This module owns what
+// is around that step:
+// - the kinds a source brings, one table (sourceKinds: a SourceKind each, its Kind, its pass and its reader at a link).
+//   Skills are its only entry in this version (skillSource). Every run, click and view goes through it: runSource, rowClick,
+//   namesOf, libraryNow, sourcesView and sourceFacts. To add a kind: its entry in sourceKinds, its reader in atlink.ts, its
+//   Merge in merge.ts (the compiler names what an entry lacks), its view's one call to sourceFacts, and the Sources page's
+//   words, which say skill today (sourcespage.ts's header);
 // - a link resolved (sourcelink.ts readLink; its branch, named or the default one, found among the repository's own: refsOf),
 //   and fetched (plugins.ts copySource: the shallow copy marketplaces get, this computer's git and its sign-in, nothing asked
-//   or kept); each source's last read is kept with its record (sourcestore.ts);
-// - the clicks: Look (previewSource: what Add would do, name by name, before anything is kept), Add, Check now, Add on one name
-//   the library holds deleted (bringBack), Replace, Merge and Keep mine on one whose version waits (replaceFromSource,
-//   mergeFromSource, keepFromSource) and Remove;
+//   or kept); each source's last read is kept with its record (sourcestore.ts); what is at it, and each kind's read of it, is
+//   atlink.ts's (holdsAt, readOf: whether it was read whole is decided there);
+// - the clicks: Look (previewSource: what Add would do, name by name, before anything is kept), Add, Check now, a click on one
+//   name's line in its kind (rowClick: Add on one the library holds deleted; Replace, Merge and Keep mine on one whose version
+//   waits) and Remove;
 // - the check once a day (checkDue: the rhythm is here, main.ts only calls it on its schedule's turn, with Automatic sync on);
-// - what the table says, as the page shows it: the Sources page's view (sourcesView) and each linked item's row on Skills
-//   (sourceFacts, which skills.ts skillsView asks), both from the same answers the pass carries out, with the tools read now;
-//   and each item a source removed (sourceFacts `removed`: library.ts removedBy), which both pages read from the Skills view.
+// - what the table says, as the pages show it: the Sources page's view (sourcesView) and each linked or removed item's row on
+//   its kind's page (sourceFacts), both from the same answers the pass carries out, with the tools read now.
 // Kept elsewhere: the page (sourcespage.ts); the words of a source's History entries (historyactions.ts) and of its versions
 // (library.ts originWords); the Git repo's refusal of a source (gitrepo.ts connectRepo, through sourcestore.ts sourceAt), as
-// a source refuses that repo here (theGitRepo, at Look and at Add). Only skills come from a source in this version: nothing
-// else there is read. A skill there that can't be read is "unreadable", with why, and is never taken to be gone.
+// a source refuses that repo here (theGitRepo, at Look and at Add).
 //
 // Each click's own refusals come first; then, where it writes, it enters the gate for library writes (share.ts libraryGate):
 // Add and Check now before they write the record and run the pass (which enters it too), Remove for Central Knot's own file
-// alone (`ownFile`); Look, which writes only its own folder, asks it for that; Add, Replace, Merge and Keep mine on a row write nothing
-// themselves (their passes enter).
+// alone (`ownFile`); Look, which writes only its own folder, asks it for that; Add, Replace, Merge and Keep mine on a line write
+// nothing themselves (their passes enter).
 //
 // A fetch can take a while, so it runs outside the queue main.ts keeps for every change: Look writes only its own folder
 // (sources/.look-<token>); Check now fetches into a stage of its own and only in its turn (`turn`) swaps it in for the source's
 // copy and runs the pass, so a source removed meanwhile, or another check, never meets a half-swapped copy.
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, readFile, readdir, rename, rm } from 'node:fs/promises';
-import { basename, join } from 'node:path';
-import { inside } from './catalogdetail.ts';
-import { parseSkill } from './discovery.ts';
+import { mkdir, readFile, readdir, rename, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { holdsAt, itemsOf, nothingToAddWhy, readOf, skillsAt, unreadWhy, type Holds, type ReaderAt, type RowClick } from './atlink.ts';
 import { connectedRepoAddress } from './gitrepo.ts';
-import { changedHere, itemKey, linkedSource, removedBy, sourceAnswers, type Copies, type LibraryItem } from './library.ts';
-import { copiesOf, lookFor, type SourceRead } from './librarypass.ts';
+import { changedHere, itemKey, linkedSource, removedBy, sourceAnswers, type Copies, type ItemKind, type LibraryItem } from './library.ts';
+import { copiesOf, lookFor, type PassOptions, type SourcedKind } from './librarypass.ts';
 import { copySource, gitFailure, runGit, sameSource } from './plugins.ts';
-import { exists, libraryGate, readTree, removeTree, writeAccess, writeDurably, type ShareContext } from './share.ts';
+import { itemId } from './profileplan.ts';
+import { exists, libraryGate, removeTree, writeAccess, writeDurably, type ShareContext } from './share.ts';
 import { applySkills, skillKind } from './skills.ts';
 import type { SkillContent } from './skillstore.ts';
 import { copyOf, lookOf, readSources, saveSources, sourcesFolder, stageOf, type SourceRecord } from './sourcestore.ts';
 import { linkLabel, readLink, splitRef } from './sourcelink.ts';
-import type { HarnessId, LibraryFacts, SourceFound, SourceHolds, SourceName, SourcePreview, SourceResult, SourcesView, SourceView } from './types.ts';
+import type { Change, DestinationResult, HarnessId, LibraryFacts, PassResult, SourceFound, SourceName, SourcePreview, SourceResult, SourceRowClick, SourcesView, SourceView } from './types.ts';
 
 /** A link as resolved before it is fetched: what a source records of where it reads (its `ref` always a branch or tag's name). */
 type Resolved = Pick<SourceRecord, 'link' | 'repository' | 'ref' | 'folder'>;
@@ -53,135 +53,94 @@ const twinOf = (sources: SourceRecord[], where: Resolved) =>
 /** The ids of the sources the home records: the set library.ts linkedTo reads links against. */
 const recordedOf = (sources: SourceRecord[]) => new Set(sources.map(source => source.id));
 
-// ---------- What is at a link ----------
-
-/** One skill at a link, read from its folder (`folder`, from the repository's root): its content, or why it is unreadable. */
-type SkillThere = { folder: string; folderName: string; key: string; name: string; files: string[]; hash: string; directory: string }
-  | { folder: string; folderName: string; key: string; name?: string; files: string[]; unreadable: string };
-interface Holds { holds: SourceHolds; skills: SkillThere[] }
-
-const present = (path: string) => lstat(path).then(() => true, () => false);
-const isFolder = (path: string) => lstat(path).then(info => info.isDirectory(), () => false);
-/** The folders in `folder` (none hidden, none a link) that hold a SKILL.md, from the repository's root. */
-async function withSkill(root: string, folder: string): Promise<string[]> {
-  const names = (await readdir(join(root, folder), { withFileTypes: true }).catch(() => [])).filter(entry => entry.isDirectory() && !entry.name.startsWith('.'));
-  const found: string[] = [];
-  for (const entry of names.sort((first, second) => first.name.localeCompare(second.name))) if (await present(join(root, folder, entry.name, 'SKILL.md'))) found.push(join(folder, entry.name));
-  return found;
-}
+// ---------- The kinds a source brings ----------
 
 /**
- * What is at the link's `folder` in a copy (`root`), from its files alone, in the order the brief's recogniser asks: no folder
- * there (`missing`); a marketplace's or a plugin's own files (named, nothing read); else one skill, the folders inside with a
- * SKILL.md, or skills/<folder>/; else no skill (`empty`). `rootName` names a skill at the repository's root that its SKILL.md
- * doesn't name. Two skills with one name are both unreadable.
+ * One kind a source brings, as the table holds it: its Kind (librarypass.ts SourcedKind); its pass (`apply`, the one its
+ * page's clicks run), given one read of the source or the items a Merge asks for first; its reader at a link (atlink.ts
+ * ReaderAt); and what a read with none of it says it found there (`noneThere`, after "No skill at its root:").
  */
-async function holdsAt(root: string, folder: string, rootName: string): Promise<Holds> {
-  const at = join(root, folder);
-  if (!(await isFolder(at)) || !(await inside(root, at))) return { holds: 'missing', skills: [] };
-  if (await present(join(at, '.claude-plugin/marketplace.json')) || await present(join(at, '.agents/plugins/marketplace.json'))) return { holds: 'marketplace', skills: [] };
-  if (await present(join(at, '.claude-plugin')) || await present(join(at, '.codex-plugin'))) return { holds: 'plugin', skills: [] };
-  const folders = await present(join(at, 'SKILL.md')) ? [folder] : (await withSkill(root, folder)).length ? await withSkill(root, folder) : await withSkill(root, join(folder, 'skills'));
-  if (!folders.length) return { holds: 'empty', skills: [] };
-  const skills = await Promise.all(folders.map(each => skillAt(root, each, each === '' ? rootName : basename(each))));
-  const twice = new Set(skills.map(skill => skill.key).filter((key, index, keys) => keys.indexOf(key) !== index));
-  return { holds: 'skills', skills: skills.map(skill => (twice.has(skill.key) ? { ...skill, unreadable: `two skills here are named ${skill.name}, so neither is brought in` } : skill)) };
+export interface SourceKind<Content = unknown> {
+  kind: SourcedKind<Content>;
+  apply(context: ShareContext, tools: HarnessId[], changes: Change[], options: Pick<PassOptions<Content>, 'source' | 'only'>): Promise<PassResult>;
+  at: ReaderAt<Content>;
+  noneThere: string;
 }
-
-/** A name a skill's folder can take in every tool: no separator, not hidden, not too long. */
-const usableName = (name: string) => !!name && name.length <= 200 && !/[/\\:\0]/.test(name) && !name.startsWith('.');
-
-/** One skill's folder at a link: its name (its SKILL.md's, else its folder's, `folderName`), its files and its content, or why it is unreadable. */
-async function skillAt(root: string, folder: string, folderName: string): Promise<SkillThere> {
-  const directory = join(root, folder), file = join(directory, 'SKILL.md');
-  const unreadable = (why: string, name?: string): SkillThere => ({ folder, folderName, key: itemKey(name ?? folderName), ...(name ? { name } : {}), files: [], unreadable: why });
-  if (!(await lstat(file).then(info => info.isFile(), () => false))) return unreadable('its SKILL.md is not a plain file');
-  let name: string;
-  try { name = parseSkill(await readFile(file, 'utf8'), folderName).name.trim(); }
-  catch (error) { return unreadable(`its SKILL.md can’t be read as a skill (${error instanceof Error ? error.message.replace(/\.$/, '') : 'its frontmatter'})`); }
-  if (!usableName(name)) return unreadable(`its name “${name}” can’t be a folder’s name`, name);
-  const tree = await readTree(directory);
-  if (tree.held) return unreadable(`it can’t be copied as it is: ${tree.held.split('. ')[0].replace(/^It /, 'it ')}`, name);
-  return { folder, folderName, key: itemKey(name), name, files: [...tree.files.keys()].sort(), hash: tree.hash, directory };
-}
-
+/** Skills, as a source brings them. */
+export const skillSource = (): SourceKind<SkillContent> =>
+  ({ kind: skillKind, apply: applySkills, at: skillsAt, noneThere: 'no SKILL.md there, in a folder inside it, or in skills/' });
 /**
- * Why a read of a link can't be read as skills, in words, none when it can: the link's folder isn't in the read (moved or
- * deleted there; or, for a source's row, no read of it is kept here), a plugin or a marketplace, or no SKILL.md. Look refuses
- * Add for it, and a source's row says it; a skill there that can't be read says why on its own line (namesOf).
+ * Every kind a source brings, in the order a source's lines list them. Made when asked, not as the module loads: a kind's
+ * module imports this one back (its view asks sourceFacts), so its Kind may not be made yet then.
  */
-function notSkillsWhy(found: Holds, where: Resolved): string | undefined {
-  if (found.holds === 'missing') return `Nothing at ${where.folder ? `the folder ${where.folder}` : 'its root'} on ${where.ref} to read: moved or deleted there, or not read here yet.`;
-  if (found.holds === 'plugin') return 'The link holds a plugin (a .claude-plugin or .codex-plugin folder). Plugins from a link come in a later version; nothing here is read.';
-  if (found.holds === 'marketplace') return 'The link holds a marketplace. Add it on the Plugins page; plugins from a link come in a later version, so nothing here is read.';
-  if (found.holds === 'empty') return `No skill at ${where.folder ? `the folder ${where.folder}` : 'its root'}: no SKILL.md there, in a folder inside it, or in skills/.`;
-  return undefined;
-}
-/** Whether a read holds a skill that can be read; Look refuses Add when it holds none, and says why (notSkillsWhy, or each skill's line). */
-const readable = (found: Holds) => found.skills.some(skill => !('unreadable' in skill));
-/** Why Look refuses Add: nothing there can be read as a skill. */
-const noSkillWhy = (found: Holds, where: Resolved) => notSkillsWhy(found, where) ?? (readable(found) ? undefined : 'No skill there can be read: each one’s line says why.');
+const sourceKinds = (): readonly SourceKind[] => [skillSource()];
 
-/**
- * What was read at a source, as the pass and the table are given it (the one place that decides it): each skill by key, with
- * its folder as its content or why it is unreadable, and whether the source was read whole: it holds skills, and every one
- * there can be read (library.ts A SOURCE).
- */
-function readOf(source: SourceRecord, found: Holds, sources: SourceRecord[], clicked: RowClick = {}): SourceRead<SkillContent> {
-  const names: SourceRead<SkillContent>['names'] = new Map();
-  for (const skill of found.skills) names.set(skill.key, 'unreadable' in skill ? { unreadable: skill.unreadable } : { name: skill.name, hash: skill.hash, content: { directory: skill.directory, hash: skill.hash } });
-  return { id: source.id, link: source.link, commitAt: source.commitAt, whole: found.holds === 'skills' && found.skills.every(skill => !('unreadable' in skill)), names, recorded: recordedOf(sources), ...clicked };
-}
-/** A click on one name's row at a source: Add on one held deleted (`bringBack`), or Replace, Merge or Keep mine on one whose version waits (`replace`, `merge`, `keep`). */
-type RowClick = Pick<SourceRead<SkillContent>, 'bringBack' | 'replace' | 'merge' | 'keep'>;
-
-/** A source's last read as kept here (none kept reads as nothing at the link's folder: sourcestore.ts), and as the table reads it. */
-async function lastRead(context: ShareContext, source: SourceRecord, sources: SourceRecord[], clicked?: RowClick) {
+/** A source's last read as kept here, what is at its link (none kept reads as nothing at the link's folder: sourcestore.ts). */
+async function lastFound(context: ShareContext, source: SourceRecord): Promise<Holds> {
   const copy = copyOf(context.home, source.id);
-  const found: Holds = await exists(copy) ? await holdsAt(copy, source.folder, repoName(source.repository)) : { holds: 'missing', skills: [] };
-  return { found, read: readOf(source, found, sources, clicked) };
+  return await exists(copy) ? holdsAt(copy, source.folder, source.repository, sourceKinds()) : { holds: 'missing', kinds: [] };
 }
 
 /**
- * The library's skills as the table reads them on the page: each item, and what each managed tool holds of it now, from the
- * look a pass makes (librarypass.ts lookFor, copiesOf), so a page says what the pass will answer.
+ * One kind's library as the table reads it on the page: each item, and what each managed tool holds of it now, from the look
+ * a pass makes (librarypass.ts lookFor, copiesOf), so a page says what the pass will answer.
  */
-async function libraryNow(context: ShareContext, tools: readonly HarnessId[]) {
-  const { look } = await lookFor(skillKind, context, tools);
+async function libraryNow(context: ShareContext, entry: SourceKind, tools: readonly HarnessId[]) {
+  const { look } = await lookFor(entry.kind, context, tools);
   return { items: look.library.items, copies: (item: LibraryItem) => copiesOf(look, item) };
 }
+/** Every kind's library as the page reads it (libraryNow), in the table's order. */
+const librariesNow = (context: ShareContext, tools: readonly HarnessId[]) =>
+  Promise.all(sourceKinds().map(async entry => ({ entry, library: await libraryNow(context, entry, tools) })));
 
 /**
- * What each skill at a source, and each item in Central Knot linked to it, is to the library now: the table's own answer for it
- * (library.ts sourceAnswers, on the read as readOf gives it), or `unreadable` with why. One skill there whose name can't be read
- * and whose folder's name no item has, beside the one linked item the read doesn't hold, is that item (its SKILL.md stopped
- * parsing): one line. A deleted item the
- * read doesn't hold is none of the source's business, and has no line. The Sources page words each one.
+ * What each item of one kind at a source, and each item of that kind in Central Knot linked to it, is to the library now: the
+ * table's own answer for it (library.ts sourceAnswers, on the read as atlink.ts readOf gives it), or `unreadable` with why.
+ * One item there whose name can't be read and whose folder's name no item has, beside the one linked item the read doesn't
+ * hold, is that item (its file stopped parsing): one line. A deleted item the read doesn't hold is none of the source's
+ * business, and has no line. The Sources page words each one.
  */
-function namesOf(found: Holds, read: SourceRead<SkillContent>, { items, copies }: Awaited<ReturnType<typeof libraryNow>>, sources: SourceRecord[]): SourceName[] {
-  const answers = [...sourceAnswers(items, read, read.recorded, { copies })].filter(([key]) => found.skills.some(skill => skill.key === key) || !items[key]?.deleted);
-  // A skill whose name can't be read is keyed by its folder's name; where no item has that name, it may be the one item missing.
-  const absent = answers.filter(([key]) => !found.skills.some(skill => skill.key === key)), nameless = found.skills.filter(skill => 'unreadable' in skill && !skill.name && !items[skill.key]);
-  const sameOne = absent.length === 1 && nameless.length === 1 ? { item: absent[0][0], skill: nameless[0].key } : undefined;
-  return answers.filter(([key]) => key !== sameOne?.skill).map(([key, answer]): SourceName => {
-    const skill = found.skills.find(each => each.key === (key === sameOne?.item ? sameOne.skill : key)), item = items[key];
-    const name = key === sameOne?.item ? item?.name : skill?.name ?? item?.name;
-    const base = { key, ...(name ? { name } : {}), ...(skill ? { there: { folder: skill.folder, folderName: skill.folderName, files: skill.files } } : {}) };
+function namesOf(source: SourceRecord, found: Holds, entry: SourceKind, { items, copies }: Awaited<ReturnType<typeof libraryNow>>, sources: SourceRecord[]): SourceName[] {
+  const there = itemsOf(found, entry), read = readOf(source, found, entry, recordedOf(sources)), kind = entry.kind.kind;
+  const answers = [...sourceAnswers(items, read, read.recorded, { copies })].filter(([key]) => there.some(one => one.key === key) || !items[key]?.deleted);
+  // An item whose name can't be read is keyed by its folder's name; where no item has that name, it may be the one item missing.
+  const absent = answers.filter(([key]) => !there.some(one => one.key === key)), nameless = there.filter(one => 'unreadable' in one && !one.name && !items[one.key]);
+  const sameOne = absent.length === 1 && nameless.length === 1 ? { item: absent[0][0], there: nameless[0].key } : undefined;
+  return answers.filter(([key]) => key !== sameOne?.there).map(([key, answer]): SourceName => {
+    const one = there.find(each => each.key === (key === sameOne?.item ? sameOne.there : key)), item = items[key];
+    const name = key === sameOne?.item ? item?.name : one?.name ?? item?.name;
+    const base = { kind, key, ...(name ? { name } : {}), ...(one ? { there: { folder: one.folder, folderName: one.folderName, files: one.files } } : {}) };
     const on = item && !item.deleted ? { on: item.on } : {};
-    if (skill && 'unreadable' in skill) return { ...base, ...on, state: 'unreadable', why: skill.unreadable };
-    const other = answer === 'another' ? sources.find(source => source.id === linkedSource(item, read.recorded))?.link : undefined;
+    if (one && 'unreadable' in one) return { ...base, ...on, state: 'unreadable', why: one.unreadable };
+    const other = answer === 'another' ? sources.find(each => each.id === linkedSource(item, read.recorded))?.link : undefined;
     return { ...base, ...on, state: answer, ...(other ? { why: other } : {}) };
   });
 }
+/** Every line of what is at a source, kind by kind in the table's order (namesOf). */
+const linesOf = (source: SourceRecord, found: Holds, libraries: Awaited<ReturnType<typeof librariesNow>>, sources: SourceRecord[]) =>
+  libraries.flatMap(({ entry, library }) => namesOf(source, found, entry, library, sources));
 
-/** The pass for one source's read: its step, which also decides the pass's scope (librarypass.ts fromSourceStep). */
-async function runSource(context: ShareContext, tools: HarnessId[], source: SourceRecord, sources: SourceRecord[], clicked?: RowClick) {
-  const { read } = await lastRead(context, source, sources, clicked);
-  return { ...(await applySkills(context, tools, [], { source: read })), ...(read.whole ? {} : { notWhole: true as const }) };
+/**
+ * The pass for one source's last read: one per kind in the table, each given its kind's read (a row's click only to its own
+ * kind's), whose step also decides that pass's scope (librarypass.ts fromSourceStep). Answers what they did: each item a step
+ * answered for, with its kind and the tools it was written to and taken out of (from that kind's own results, by its name),
+ * every result, and whether any kind's read wasn't whole. A pass that stops stops the rest.
+ */
+async function runSource(context: ShareContext, tools: HarnessId[], source: SourceRecord, sources: SourceRecord[], clicked?: { kind: ItemKind; asked: RowClick }) {
+  const found = await lastFound(context, source), done: Omit<SourceResult, 'view'> & { results: DestinationResult[] } = { results: [] };
+  for (const entry of sourceKinds()) {
+    const read = readOf(source, found, entry, recordedOf(sources), clicked?.kind === entry.kind.kind ? clicked.asked : {});
+    const passed = await entry.apply(context, tools, [], { source: read });
+    const toolsOf = (name: string, outcome: 'written' | 'removed') =>
+      passed.results.filter(each => each.item === name && each.outcome === outcome && each.harness).map(each => each.harness!);
+    const sourced = passed.sourced?.map(each => ({ ...each, kind: read.kind, written: toolsOf(each.name, 'written'), removed: toolsOf(each.name, 'removed') }));
+    done.results.push(...passed.results);
+    if (sourced) done.sourced = [...done.sourced ?? [], ...sourced];
+    if (!read.whole) done.notWhole = true;
+    if (passed.stopped) return { ...done, stopped: passed.stopped };
+  }
+  return done;
 }
-
-/** A repository's own name ("skill-deslop"), which names a skill at its root that its SKILL.md doesn't. */
-const repoName = (repository: string) => basename(repository.replace(/\/+$/, '')).replace(/\.git$/, '') || 'skill';
 
 // ---------- Fetching ----------
 
@@ -235,7 +194,7 @@ async function fetchInto(where: Resolved, target: string): Promise<{ commit: str
 // ---------- The clicks ----------
 
 /**
- * Look: reads a link and says what Add would do with each skill there, by the source's table, and what it won't bring in and
+ * Look: reads a link and says what Add would do with each item there, by the source's table, and what it won't bring in and
  * why; nothing is kept but the look's own copy, which Add takes (`token`) and the next look drops.
  */
 export async function previewSource(context: ShareContext, tools: HarnessId[], link: string): Promise<SourcePreview> {
@@ -254,31 +213,31 @@ export async function previewSource(context: ShareContext, tools: HarnessId[], l
   if ('problem' in fetched) return refuse(fetched.problem);
   const resolved = { ...where, ...fetched };
   await writeDurably(`${look}.json`, JSON.stringify(resolved));
-  const found = await holdsAt(look, resolved.folder, repoName(resolved.repository));
+  const found = await holdsAt(look, resolved.folder, resolved.repository, sourceKinds());
   // Read as Add will record it: a source of this look's own id, among those the home records.
-  const read = readOf({ ...resolved, id: token, readAt: '', addedAt: '' }, found, sources);
-  const refused = noSkillWhy(found, resolved);
-  return { ...foundOf(resolved, found, namesOf(found, read, await libraryNow(context, tools), sources)), token, ...(refused ? { refused } : {}) };
+  const names = linesOf({ ...resolved, id: token, readAt: '', addedAt: '' }, found, await librariesNow(context, tools), sources);
+  const refused = nothingToAddWhy(found, resolved);
+  return { ...foundOf(resolved, found, names), token, ...(refused ? { refused } : {}) };
 }
 
 const foundOf = (source: Resolved & Partial<Pick<SourceRecord, 'commit' | 'commitAt'>>, found: Holds, names: SourceName[]): SourceFound => {
-  const unread = notSkillsWhy(found, source);
+  const unread = unreadWhy(found, source);
   return { link: source.link, repository: source.repository, ref: source.ref, folder: source.folder, commit: source.commit, commitAt: source.commitAt, holds: found.holds, names, ...(unread ? { unread } : {}) };
 };
 
 /**
  * A click's answer: why it stopped, what the pass did, why the source wasn't read whole, and the page's view after. A `wait`
- * is told only where the source's row still says it once the pass is done: the plan after the step may give a tool's copy way
- * (a tool managed again) or take in the source's own text, and then nothing waits.
+ * is told only where the source's row still says it, of that kind and key, once the pass is done: the plan after the step may
+ * give a tool's copy way (a tool managed again) or take in the source's own text, and then nothing waits.
  */
 async function answer(context: ShareContext, tools: HarnessId[], done: Omit<SourceResult, 'view'> = {}): Promise<SourceResult> {
   const { stopped, results, notWhole } = done, view = await sourcesView(context, tools);
-  const waitsNow = new Set(view.sources.flatMap(source => source.names.filter(name => name.state === 'wait').map(name => name.key)));
-  const sourced = done.sourced?.filter(entry => entry.answer !== 'wait' || waitsNow.has(itemKey(entry.name)));
+  const waitsNow = new Set(view.sources.flatMap(source => source.names.filter(name => name.state === 'wait').map(name => itemId(name.kind, name.key))));
+  const sourced = done.sourced?.filter(entry => entry.answer !== 'wait' || waitsNow.has(itemId(entry.kind, itemKey(entry.name))));
   return { ...(stopped ? { stopped } : {}), ...(sourced ? { sourced } : {}), ...(results ? { results } : {}), ...(notWhole ? { notWhole } : {}), view };
 }
 
-/** Add: the look `token` read becomes a source, recorded first, then carried out by the pass: each skill there comes in Off. */
+/** Add: the look `token` read becomes a source, recorded first, then carried out by the pass: each item there comes in Off. */
 export async function addSource(context: ShareContext, tools: HarnessId[], token: string): Promise<SourceResult> {
   const look = /^[0-9a-f-]{36}$/.test(token) ? lookOf(context.home, token) : '';
   const where = look && await readFile(`${look}.json`, 'utf8').then(text => JSON.parse(text) as Resolved & { commit: string; commitAt: string }, () => undefined);
@@ -288,7 +247,7 @@ export async function addSource(context: ShareContext, tools: HarnessId[], token
   if (twinOf(sources, where)) return answer(context, tools, { stopped: 'That link is a source already: its row is below.' });
   const isRepo = await theGitRepo(context, where.repository);
   if (isRepo) return answer(context, tools, { stopped: isRepo });
-  const refused = noSkillWhy(await holdsAt(look, where.folder, repoName(where.repository)), where);
+  const refused = nothingToAddWhy(await holdsAt(look, where.folder, where.repository, sourceKinds()), where);
   if (refused) return answer(context, tools, { stopped: refused });
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return answer(context, tools, { stopped: gate.refused });
@@ -334,28 +293,27 @@ export async function checkSource(context: ShareContext, toolsNow: () => Promise
 }
 
 /**
- * A click on one name's row at a source, from the source's last read (no fetch): Add on a name the library holds deleted
- * brings it back Off (`bringBack`); Replace on one whose version waits makes the source's version current and keeps the one
- * the item had as a version (`replace`); Merge merges it into the current version (`merge`, library.ts MERGE), after a pass for
- * that item alone, which takes in an edit a tool holds: it is yours; Keep mine keeps the current version and the source's
- * as a version (`keep`, library.ts KEEP MINE). Each is then the table's own answer (library.ts fromSource), carried out by the pass.
+ * A click on one name's line at a source, from the source's last read (no fetch), in its kind (types.ts SourceRowClick): Add
+ * on a name the library holds deleted brings it back Off (`bringBack`); Replace on one whose version waits makes the source's
+ * version current and keeps the one the item had as a version (`replace`); Merge merges it into the current version
+ * (`merge`, library.ts MERGE), after a pass of its kind for that item alone, which takes in an edit a tool holds: it is yours;
+ * Keep mine keeps the current version and the source's as a version (`keep`, library.ts KEEP MINE). Each is then the table's
+ * own answer (library.ts fromSource), carried out by the source's passes (runSource). A kind no entry of the table has, or a
+ * click no line has, as main.ts passes on whatever the page sent, is refused and changes nothing.
  */
-async function fromRow(context: ShareContext, tools: HarnessId[], id: string, clicked: RowClick): Promise<SourceResult> {
+export async function rowClick(context: ShareContext, tools: HarnessId[], id: string, kind: string, key: string, click: string): Promise<SourceResult> {
+  const entry = sourceKinds().find(each => each.kind.kind === kind);
+  const known = entry && ROW_CLICKS.includes(click as SourceRowClick);
+  if (!known) return answer(context, tools, { stopped: `A source’s line has no click “${click}” for a “${kind}”, so nothing was changed.` });
   const { sources, problem } = await readSources(context.home), source = sources.find(each => each.id === id);
   if (problem || !source) return answer(context, tools, { stopped: problem ?? 'That source is no longer recorded. Nothing was changed.' });
   if (!(await exists(copyOf(context.home, id)))) return answer(context, tools, { stopped: 'Its last read is no longer kept. Check it now first.' });
-  const first = clicked.merge && await applySkills(context, tools, [], { only: new Set(clicked.merge) });
+  const first = click === 'merge' && await entry.apply(context, tools, [], { only: new Set([key]) });
   if (first && first.stopped) return answer(context, tools, { stopped: first.stopped });
-  return answer(context, tools, await runSource(context, tools, source, sources, clicked));
+  return answer(context, tools, await runSource(context, tools, source, sources, { kind: entry.kind.kind, asked: { [click]: new Set([key]) } }));
 }
-/** Add on one name the library holds deleted, at a source's row: it comes back Off, at the source's last read. */
-export const bringBack = (context: ShareContext, tools: HarnessId[], id: string, key: string) => fromRow(context, tools, id, { bringBack: new Set([key]) });
-/** Replace on one name whose version waits at a source's row: the source's version, as last read, becomes current. */
-export const replaceFromSource = (context: ShareContext, tools: HarnessId[], id: string, key: string) => fromRow(context, tools, id, { replace: new Set([key]) });
-/** Merge on one name whose version waits at a source's row: the source's version, as last read, merged into the current one. */
-export const mergeFromSource = (context: ShareContext, tools: HarnessId[], id: string, key: string) => fromRow(context, tools, id, { merge: new Set([key]) });
-/** Keep mine on one name whose version waits at a source's row: the current version stays, and the source's, as last read, no longer waits. */
-export const keepFromSource = (context: ShareContext, tools: HarnessId[], id: string, key: string) => fromRow(context, tools, id, { keep: new Set([key]) });
+/** The clicks a source's line has (types.ts SourceRowClick), each a key set its kind's read carries (atlink.ts RowClick). */
+const ROW_CLICKS: readonly SourceRowClick[] = ['bringBack', 'replace', 'merge', 'keep'];
 
 /** Remove: the source is forgotten, with its last read. Each item it brought stays as it is, On or Off, with its versions, no longer linked. */
 export async function removeSource(context: ShareContext, tools: HarnessId[], id: string): Promise<SourceResult> {
@@ -401,31 +359,30 @@ export async function checkDue(context: ShareContext, toolsNow: () => Promise<Ha
 // ---------- The page's view ----------
 
 /**
- * The Sources page: each source with its last read, why that read isn't whole if it isn't, what the table says of each skill
- * there and of each item linked to it (namesOf), and why the last Check now couldn't fetch it, if it couldn't. Each item a
- * source removed is not here: the page reads it from the Skills view (sourceFacts), which every refresh of the home reads again.
+ * The Sources page: each source with its last read, why that read isn't whole if it isn't, what the table says of each item
+ * there and of each item linked to it, kind by kind (namesOf), and why the last Check now couldn't fetch it, if it couldn't.
  */
 export async function sourcesView(context: ShareContext, tools: HarnessId[]): Promise<SourcesView> {
   const access = await writeAccess(context);
   const { sources, problem } = await readSources(context.home);
-  const library = await libraryNow(context, tools);
+  const libraries = await librariesNow(context, tools);
   const views = await Promise.all(sources.map(async (source): Promise<SourceView> => {
-    const { id, addedAt, readAt } = source, { found, read } = await lastRead(context, source, sources);
-    return { ...foundOf(source, found, namesOf(found, read, library, sources)), id, addedAt, readAt, ...(source.problem ? { problem: source.problem } : {}) };
+    const { id, addedAt, readAt } = source, found = await lastFound(context, source);
+    return { ...foundOf(source, found, linesOf(source, found, libraries, sources)), id, addedAt, readAt, ...(source.problem ? { problem: source.problem } : {}) };
   }));
   return { sources: views, access, ...(problem ? { problem } : {}) };
 }
 
 /**
- * Each item linked to a source the home records, as its row on Skills says it (types.ts LibraryFacts fromSource): the source's
- * link, and whether that source's last read has a version that waits (the table's `wait`, from the same answers as the Sources
- * page), or else whether it is changed here (library.ts changedHere), so the source's next change will meet it; and each item
- * a source removed (`removed`: library.ts removedBy), with that source's link. `items` and `copies`: the Skills view's own look
- * (skills.ts skillsView).
+ * Each item of one kind (`entry`) linked to a source the home records, as its row on its kind's page says it (types.ts
+ * LibraryFacts fromSource): the source's link, and whether that source's last read has a version that waits (the table's
+ * `wait`, from the same answers as the Sources page), or else whether it is changed here (library.ts changedHere), so the
+ * source's next change will meet it; and each item a source removed (`removed`: library.ts removedBy), with that source's
+ * link, which the Sources page reads too. `items` and `copies`: the kind's view's own look (skills.ts skillsView asks it).
  */
-export async function sourceFacts(context: ShareContext, items: Record<string, LibraryItem>, copies: (item: LibraryItem) => Copies): Promise<Map<string, NonNullable<LibraryFacts['fromSource']>>> {
-  const { sources } = await readSources(context.home), facts = new Map<string, NonNullable<LibraryFacts['fromSource']>>();
-  const recorded = recordedOf(sources), reads = await Promise.all(sources.map(async source => (await lastRead(context, source, sources)).read));
+export async function sourceFacts(context: ShareContext, entry: SourceKind, items: Record<string, LibraryItem>, copies: (item: LibraryItem) => Copies) {
+  const { sources } = await readSources(context.home), facts = new Map<string, NonNullable<LibraryFacts['fromSource']>>(), recorded = recordedOf(sources);
+  const reads = await Promise.all(sources.map(async source => readOf(source, await lastFound(context, source), entry, recorded)));
   for (const [index, source] of sources.entries()) {
     const linked = Object.values(items).filter(item => !item.deleted && linkedSource(item, recorded) === source.id);
     if (!linked.length) continue;
@@ -436,7 +393,7 @@ export async function sourceFacts(context: ShareContext, items: Record<string, L
     }
   }
   for (const item of Object.values(items)) {
-    const by = removedBy(item, reads);
+    const by = removedBy(item, entry.kind.kind, reads);
     if (by) facts.set(item.key, { link: by.link, removed: true });
   }
   return facts;

@@ -35,7 +35,7 @@ import { applyBase, baseView, instructionsView, instructionVersion, repoBase, sa
 import { clearDraftFolders, draftSources, draftTools, writeDraft } from './draftbase.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoPulledBase, undoSettingsChange } from './gitrepo.ts';
-import { addSource, bringBack, checkDue, checkSource, keepFromSource, mergeFromSource, previewSource, removeSource, replaceFromSource, sourcesView } from './sources.ts';
+import { addSource, checkDue, checkSource, previewSource, removeSource, rowClick, sourcesView } from './sources.ts';
 import { linkLabel } from './sourcelink.ts';
 import { readParts } from './parts.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
@@ -1372,11 +1372,9 @@ app.whenReady().then(async () => {
   handleNow('sources:preview', async (link, home) => (home === current?.home && typeof link === 'string' ? previewSource(context(), await toolsNow(), link) : { refused: elsewhere, link: String(link ?? '') }));
   handle('sources:add', async (token, home) => (home === current?.home && typeof token === 'string' ? addSource(context(), await toolsNow(), token) : sourceElsewhere));
   handleNow('sources:check', async (id, home) => (home === current?.home && typeof id === 'string' ? checkSource(context(), toolsNow, id, queued) : sourceElsewhere));
-  handle('sources:bring-back', async (id, key, home) => (home === current?.home && typeof id === 'string' && typeof key === 'string' ? bringBack(context(), await toolsNow(), id, key) : sourceElsewhere));
-  handle('sources:replace', async (id, key, home) => (home === current?.home && typeof id === 'string' && typeof key === 'string' ? replaceFromSource(context(), await toolsNow(), id, key) : sourceElsewhere));
-  handle('sources:merge', async (id, key, home) => (home === current?.home && typeof id === 'string' && typeof key === 'string' ? mergeFromSource(context(), await toolsNow(), id, key) : sourceElsewhere));
-  handle('sources:keep', async (id, key, home) => (home === current?.home && typeof id === 'string' && typeof key === 'string'
-    ? keepFromSource(context(), await toolsNow(), id, key) : sourceElsewhere));
+  // A click on a name's line: its kind and click passed on as sent (as text), and refused there unless both are known.
+  handle('sources:row', async (id, kind, key, click, home) => (home === current?.home && typeof id === 'string' && typeof key === 'string'
+    ? rowClick(context(), await toolsNow(), id, String(kind), key, String(click)) : sourceElsewhere));
   handle('sources:remove', async (id, home) => (home === current?.home && typeof id === 'string' ? removeSource(context(), await toolsNow(), id) : sourceElsewhere));
   await loading;
   if (smoke) {

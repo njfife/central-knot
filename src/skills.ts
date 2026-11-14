@@ -1,6 +1,6 @@
 // Skills on Central Knot's library: the adapter for one kind. Read library.ts first (the model, and the one rule for an item
 // in the library), then librarypass.ts (the pass, the same for every kind, and `Kind`, the contract a kind implements).
-// This module is the skills' Kind (skillKind; its Merge of a source's version is skillmerge.ts) and nothing the pass does itself:
+// This module is the skills' Kind (skillKind; its Merge of a source's version is merge.ts mergeSkill) and nothing the pass does itself:
 // - what a tool holds of a skill (readDisk): its own copy, a folder in its own skills folder (skillfiles.ts), which is
 //   Central Knot's to write and remove; and the ways it has a skill that are not Central Knot's (anotherWay): a link in its
 //   folder, a copy in a folder it reads but Central Knot doesn't own (~/.agents/skills), another tool's folder it reads
@@ -22,15 +22,15 @@ import { appendHistory, readHistory, replaceHistory } from './history.ts';
 import { isClearedSwitch, libraryAction, libraryEntry } from './historyactions.ts';
 import { keepVersion, listed, noteAgainst, pendingEdits, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
-import { copiesOf, foundCopies, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
+import { copiesOf, foundCopies, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Look, type PassOptions, type SourcedKind, type Wanted } from './librarypass.ts';
 import { libraryWords } from './libraryrow.ts';
 import { comparableText } from './pluginstatus.ts';
 import { throughPlugins, type GivenByPlugin } from './plugins.ts';
 import { errorCode, itemKey, landingOf, libraryGate, partsIn, plainError, readTree, syncGate, targetFor, writeAccess, type ShareContext, type Tree } from './share.ts';
 import { alsoReads, lockedRoot, placeFolder, readCopy, readSkillsFolder, recoverFolders, removeFolder, rootOf, rootProblem, sharedFolder, swapFolder, type SkillCopy } from './skillfiles.ts';
 import { openLibrary, readVersion, recordedSkills, saveLibrary, storeVersion, type SkillContent } from './skillstore.ts';
-import { mergeSkill } from './skillmerge.ts';
-import { sourceFacts } from './sources.ts';
+import { mergeSkill } from './merge.ts';
+import { skillSource, sourceFacts } from './sources.ts';
 import { isDisabled, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, type SwitchFile } from './skillswitch.ts';
 import { harnesses } from './harnesses.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, LibraryFacts, LibraryView, PassResult, Skill, SwitchTarget, SyncNotice, SyncView, ThroughPlugin, ToolCopy } from './types.ts';
@@ -233,7 +233,7 @@ function wontLoad(context: ShareContext, tool: HarnessId, name: string, shape: S
 // ---------- The skills' Kind ----------
 
 /** Skills as a kind of item (librarypass.ts Kind): one folder per skill in each tool's own skills folder. */
-export const skillKind: Kind<SkillContent, SkillCopy, SkillDisk> = {
+export const skillKind: SourcedKind<SkillContent, SkillCopy, SkillDisk> = {
   kind: 'skill',
   // The item and its copy as the page names them (libraryrow.ts libraryWords); a tool's folder of them only the pass says.
   words: { item: libraryWords.skills.item, copy: libraryWords.skills.copy, folder: () => 'skills folder' },
@@ -515,7 +515,7 @@ export async function skillsView(context: ShareContext, tools: HarnessId[], noti
   const { library, managed } = look;
   // A skill whose folder can't be copied as it is (a link inside, a file it can't read) is a row too, which says why.
   const keys = [...new Set([...look.disk.byKey.keys(), ...look.disk.outside.keys(), ...look.disk.uncopied, ...live.map(item => item.key)])].sort((first, second) => first.localeCompare(second));
-  const items: LibraryFacts[] = [], fromSource = await sourceFacts(context, library.items, item => copiesOf(look, item));
+  const items: LibraryFacts[] = [], fromSource = await sourceFacts(context, skillSource(), library.items, item => copiesOf(look, item));
   for (const key of keys) items.push(await rowFacts(look, key, live.find(item => item.key === key), fromSource.get(key)));
   const gate = problem ? { state: 'stopped' as const, reason: problem } : await syncGate(context);
   const problems = problem ? [problem, ...look.disk.problems] : look.disk.problems;
