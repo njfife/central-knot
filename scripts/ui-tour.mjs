@@ -2470,6 +2470,20 @@ if (wanted('sources')) {
   await atEverySize('updated-skill', 'On Skills, deslop’s opened row: two versions, the current one from the source, the earlier one too, each saying where it came from', false, '.ov-row[data-key="deslop"]', 'start');
   await a.click('#nav-history');
   await shot(a, 'updated-history', 'History: Updated from github.com/stephenturner/skill-deslop (main); that became the current version, in all 3 tools, with Undo (1280×800)');
+  // Edited in Claude Code (Automatic sync takes it in), then changed at the source: the source's version waits.
+  const deslopInClaude = join(practice, '.claude/skills/deslop/SKILL.md');
+  await a.click('#nav-skills');
+  writeFileSync(deslopInClaude, readFileSync(deslopInClaude, 'utf8').replace('Keep the author’s voice.', 'Keep the author’s voice, and their jokes.'));
+  await waitFor(a, `!!document.querySelector('.sync-notice')`, 15000);
+  deslop({ 'SKILL.md': skillMd('deslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice and their dialect.') }, 'Keep the dialect');
+  await a.click('#nav-sources');
+  await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
+  await atEverySize('waiting', 'deslop was edited in Claude Code, then changed at the source; clicked Check now: the band says deslop changed at the source and was changed here too, so yours stays current, and that Replace on its row takes the source’s; deslop’s line on the source’s row, under a warning mark, says yours stays current until you replace it, that Replace makes the source’s current and keeps yours as a version, and ends with Replace', true, '.source-row');
+  await a.click('#nav-skills'); await openRow('deslop');
+  await atEverySize('waiting-skill', 'On Skills, deslop’s row says “update at its source” after its name, under a warning mark; opened, each tool has the current version (the edit made in Claude Code), and the line at the end says the source has a newer version, yours stays current since it was changed here too, and Replace on Sources makes the source’s current and keeps yours as a version', true, '.ov-row[data-key="deslop"]', 'start');
+  await a.click('#nav-sources');
+  await a.click('.source-row .source-name[data-key="deslop"] button'); await busyDone(); await a.settle();
+  await atEverySize('replaced', 'Clicked Replace on deslop’s line: the band says deslop has the source’s version, now in all 3 tools, and the one it had is kept as a version, with Undo the replace, Open Skills, and that each change can be seen or undone in History; deslop’s line says In Central Knot, On, with no Replace', false, '.source-row');
   deslop({ 'SKILL.md': skillMd('unslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice.') }, 'Rename to unslop');
   await a.click('#nav-sources');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();

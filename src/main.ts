@@ -35,7 +35,8 @@ import { applyBase, baseView, instructionsView, instructionVersion, repoBase, sa
 import { clearDraftFolders, draftSources, draftTools, writeDraft } from './draftbase.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoPulledBase, undoSettingsChange } from './gitrepo.ts';
-import { addSource, bringBack, checkSource, previewSource, removeSource, sourcesView } from './sources.ts';
+import { addSource, bringBack, checkDue, checkSource, previewSource, removeSource, replaceFromSource, sourcesView } from './sources.ts';
+import { linkLabel } from './sourcelink.ts';
 import { readParts } from './parts.ts';
 import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
@@ -1136,6 +1137,19 @@ app.whenReady().then(async () => {
       ...(custom.feed ? { feed: feedSeen ? { checked: new Date(feedSeen.checked).toISOString(), outcome: feedSeen.outcome, message: feedSeen.message } : {} } : {}),
     } } : undefined),
   });
+  // Sources read again by themselves once a day, on the plugin updates' schedule turn below (sources.ts checkDue holds the
+  // rhythm, and pauses with Automatic sync); each check is Check now's, its pass taking its turn in the queue.
+  let checkingSources = false;
+  async function sourcesTurn() {
+    if (!current || checkingSources) return;
+    checkingSources = true;
+    try {
+      for (const { link, done } of await checkDue(context(), toolsNow, queued, { syncOn })) {
+        logOutcome(`sources:check ${linkLabel(link)} (by itself)`, [], done);
+        if (done.sourced?.length || done.results?.length) send('sync:changed');
+      }
+    } catch (error) { logFailure('sources (by itself)', error); } finally { checkingSources = false; }
+  }
   // Plugin updates that arrive by themselves (pluginupdates.ts): each step takes its turn in the queue, like the page's own
   // Apply all, and is logged as one; none starts once the app is quitting (one already running is waited for: see before-quit).
   const noPluginUpdates: PluginUpdatesView = { on: false, paused: false, checking: false, updated: [], failed: [], first: false };
@@ -1147,8 +1161,8 @@ app.whenReady().then(async () => {
       try { const result = await running; logOutcome(`${channel} (by itself)`, args, result); return result; }
       finally { if (pluginStep === running) pluginStep = undefined; }
     });
-    // Test-only, read only when set: the time between checks in milliseconds, or `never` for no checks but those asked for
-    // (the end-to-end run's other flows, which a check a minute after start would walk into).
+    // Test-only, read only when set: the time between plugin checks in milliseconds, or `never` for no checks but those asked
+    // for, plugins' or sources' (the end-to-end run's other flows, which a check a minute after start would walk into).
     const paced = process.env.CK_PLUGIN_UPDATES_EVERY_MS;
     const every = Number(paced) || CHECK_EVERY_MS;
     pluginUpdates = autoUpdates({
@@ -1174,7 +1188,7 @@ app.whenReady().then(async () => {
     if (paced !== 'never') {
       pluginChecksRun = true;
       const updates = pluginUpdates;
-      const turn = () => void updates.tick().catch(error => logFailure('plugin updates', error));
+      const turn = () => { void updates.tick().catch(error => logFailure('plugin updates', error)); void sourcesTurn(); };
       const pace = Math.min(5 * 60_000, Math.max(1_000, every / 4));
       // The first look comes a minute after start, so opening the app is never slowed by it; then every few minutes it asks whether a check is due.
       setTimeout(turn, Math.min(60_000, pace)).unref();
@@ -1349,12 +1363,13 @@ app.whenReady().then(async () => {
   // Sources (sources.ts): a Git link read on a click, never written. Look and Check now fetch outside the queue, so a slow
   // network never holds a sync pass up; what a check brings takes its turn with every other change (`queued`).
   const sourceElsewhere = { stopped: elsewhere, view: null };
-  handleNow('sources:view', async () => (current ? sourcesView(context()) : null));
-  handleNow('sources:preview', async (link, home) => (home === current?.home && typeof link === 'string' ? previewSource(context(), link) : { refused: elsewhere, link: String(link ?? '') }));
+  handleNow('sources:view', async () => (current ? sourcesView(context(), await toolsNow()) : null));
+  handleNow('sources:preview', async (link, home) => (home === current?.home && typeof link === 'string' ? previewSource(context(), await toolsNow(), link) : { refused: elsewhere, link: String(link ?? '') }));
   handle('sources:add', async (token, home) => (home === current?.home && typeof token === 'string' ? addSource(context(), await toolsNow(), token) : sourceElsewhere));
   handleNow('sources:check', async (id, home) => (home === current?.home && typeof id === 'string' ? checkSource(context(), toolsNow, id, queued) : sourceElsewhere));
   handle('sources:bring-back', async (id, key, home) => (home === current?.home && typeof id === 'string' && typeof key === 'string' ? bringBack(context(), await toolsNow(), id, key) : sourceElsewhere));
-  handle('sources:remove', async (id, home) => (home === current?.home && typeof id === 'string' ? removeSource(context(), id) : sourceElsewhere));
+  handle('sources:replace', async (id, key, home) => (home === current?.home && typeof id === 'string' && typeof key === 'string' ? replaceFromSource(context(), await toolsNow(), id, key) : sourceElsewhere));
+  handle('sources:remove', async (id, home) => (home === current?.home && typeof id === 'string' ? removeSource(context(), await toolsNow(), id) : sourceElsewhere));
   await loading;
   if (smoke) {
     try {

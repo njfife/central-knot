@@ -3,12 +3,13 @@
 // one worked example each. The table itself, row by row, is in tests/library.test.ts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, rm } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readHistory } from '../src/history.ts';
 import { doneWords, libraryAction, librarySentence } from '../src/historyactions.ts';
 import { libraryWords } from '../src/libraryrow.ts';
-import { addSource, bringBack, checkSource, previewSource, removeSource, sourcesView } from '../src/sources.ts';
+import { addSource, bringBack, checkDue, checkSource, previewSource, removeSource, replaceFromSource, SOURCE_CHECK_EVERY_MS, sourcesView } from '../src/sources.ts';
+import { chooseTools } from '../src/toolchoice.ts';
 import type { SourcePreview } from '../src/types.ts';
 import { bytes, everywhere, folderOf, itemOf, put, sandbox, seen, skillText, type Box } from './skillclicks.ts';
 import { applySkills, restoreSkill } from '../src/skills.ts';
@@ -22,14 +23,14 @@ const now = (box: Box) => async () => box.tools;
 const inTurn = <T>(work: () => Promise<T>) => work();
 /** Looks at a link, then adds it: what the page's Look then Add do. */
 async function add(box: Box, link: string) {
-  const look = await previewSource(box.context, link);
+  const look = await previewSource(box.context, box.tools, link);
   assert.ok('token' in look && !look.refused, `the look is refused: ${look.refused}`);
   return { look, added: await addSource(box.context, box.tools, look.token) };
 }
 const check = (box: Box, id: string) => checkSource(box.context, now(box), id, inTurn);
 /** What a click did to each item, by name (the History entry each names is left out). */
 const answered = (result: { sourced?: { name: string; answer: string }[] }) => result.sourced?.map(({ name, answer }) => ({ name, answer }));
-const sourceId = async (box: Box) => (await sourcesView(box.context)).sources[0].id;
+const sourceId = async (box: Box) => (await sourcesView(box.context, box.tools)).sources[0].id;
 const sentences = async (box: Box, key = 'deslop') => {
   const item = await itemOf(box, key);
   return (await readHistory(box.context)).filter(event => event.key === key).map(event => librarySentence(event, libraryWords.skills, box.tools, item)?.text);
@@ -40,7 +41,7 @@ test('The owner’s example: a link to a repository whose root is one skill offe
   await repo.commit(deslopFiles(), '2026-11-01T10:00:00Z');
   const box = await sandbox();
   try {
-    const look = await previewSource(box.context, DESLOP) as Extract<SourcePreview, { token: string }>;
+    const look = await previewSource(box.context, box.tools, DESLOP) as Extract<SourcePreview, { token: string }>;
     assert.equal(look.refused, undefined);
     assert.deepEqual([look.holds, look.ref, look.folder], ['skills', 'main', '']);
     assert.deepEqual(look.names.map(name => [name.name, name.there?.folder, name.there?.folderName, name.state]), [['deslop', '', 'skill-deslop', 'make']], 'named as its SKILL.md names it, at the root of skill-deslop');
@@ -55,7 +56,7 @@ test('The owner’s example: a link to a repository whose root is one skill offe
     assert.deepEqual([item.on, item.versions.map(version => [version.from.how, version.from.link, version.at])], [false, [['source', DESLOP, '2026-11-01T10:00:00.000Z']]]);
     assert.deepEqual(Object.values(await everywhere(box, 'deslop')).filter(Boolean), [], 'Off: in no tool');
     assert.deepEqual(await sentences(box), ['Brought in from github.com/stephenturner/skill-deslop (main): in Central Knot, Off, until you turn it on.']);
-    const view = (await sourcesView(box.context)).sources[0];
+    const view = (await sourcesView(box.context, box.tools)).sources[0];
     assert.deepEqual([view.link, view.names.map(name => [name.name, name.state, name.on])], [DESLOP, [['deslop', 'nothing', false]]]);
     assert.deepEqual((await seen(box, box.context, 'deslop')).fact?.fromSource, { link: DESLOP }, 'its row on Skills says where it is from');
 
@@ -77,7 +78,7 @@ async function oneSkill(box: Box, name: string, { skill = name, body = 'First.',
   const { added } = await add(box, link);
   assert.equal(added.stopped, undefined);
   if (on) await applySkills(box.context, box.tools, [{ key: skill, on: true, except: [], seenOn: false }]);
-  return { repo, link, id: (await sourcesView(box.context)).sources.find(source => source.link === link)!.id };
+  return { repo, link, id: (await sourcesView(box.context, box.tools)).sources.find(source => source.link === link)!.id };
 }
 const bodyOf = async (box: Box, key: string) => { const item = (await itemOf(box, key))!; return (await readFile(join(box.home, '.central-knot/items/skills', key, 'versions', item.hash, 'SKILL.md'), 'utf8')).trim().split('\n').at(-1); };
 const toolBody = async (box: Box, tool: string, key: string) => (await readFile(join(folderOf(box, tool as never, key), 'SKILL.md'), 'utf8').catch(() => undefined))?.trim().split('\n').at(-1);
@@ -125,95 +126,247 @@ test('S changed while On: every tool gets the source’s content', async () => {
 });
 
 /** An edit made in Claude Code at `when` and taken in by a pass: the current version, no longer what the source last had. */
-async function editHere(box: Box, key: string, body: string, when: string) {
-  const folder = folderOf(box, 'claude-cli', key);
-  await put(box, 'claude-cli', { 'SKILL.md': skillMd(key, body) }, [], key);
-  const { utimes } = await import('node:fs/promises');
-  for (const path of [join(folder, 'SKILL.md'), folder]) await utimes(path, new Date(when), new Date(when));
+async function editHere(box: Box, key: string, body: string, when = '2026-11-03T10:00:00Z') {
+  await editIn(box, 'claude-cli', key, body, when);
   await applySkills(box.context, box.tools, []);
 }
+/** An edit made in one tool at `when`, which no pass has taken in yet (Automatic sync off). */
+async function editIn(box: Box, tool: 'claude-cli' | 'codex-cli', key: string, body: string, when: string) {
+  const folder = folderOf(box, tool, key);
+  await put(box, tool, { 'SKILL.md': skillMd(key, body) }, [], key);
+  const { utimes } = await import('node:fs/promises');
+  for (const path of [join(folder, 'SKILL.md'), folder]) await utimes(path, new Date(when), new Date(when));
+}
+/** What a skill is to its source on the Sources page, and on its row on Skills. */
+const notices = async (box: Box, key: string) => [(await sourcesView(box.context, box.tools)).sources[0].names.find(name => name.key === key)?.state, (await seen(box, box.context, key)).fact?.fromSource?.waits ?? false];
+const replace = (box: Box, id: string, key: string) => replaceFromSource(box.context, box.tools, id, key);
 
-test('Both changed, the source later: its content is current and the edit made here is kept as a version', async () => {
+test('Changed here, then the source changes: its version waits, whatever the times say; the edit stays current in Central Knot and every tool, both rows say so, and nothing is stored', async () => {
   const box = await sandbox();
   try {
     const { repo, id } = await oneSkill(box, 'notes', { on: true });
+    // The edit here is a day older than the source's change, which a clock would have let win.
     await editHere(box, 'notes', 'Mine.', '2026-11-03T10:00:00Z');
     await repo.commit({ 'SKILL.md': skillMd('notes', 'Theirs.') }, '2026-11-04T10:00:00Z');
-    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'update' }]);
-    assert.equal(await bodyOf(box, 'notes'), 'Theirs.');
-    assert.ok((await itemOf(box, 'notes'))!.versions.some(version => version.from.how === 'edited'), 'the edit is a version');
-    for (const tool of box.tools) assert.equal(await toolBody(box, tool, 'notes'), 'Theirs.');
+    const before = { item: await itemOf(box, 'notes'), history: (await readHistory(box.context)).length };
+    const done = await check(box, id);
+    assert.deepEqual(answered(done), [{ name: 'notes', answer: 'wait' }]);
+    for (const tool of box.tools) assert.equal(await toolBody(box, tool, 'notes'), 'Mine.');
+    assert.deepEqual([await itemOf(box, 'notes'), (await readHistory(box.context)).length], [before.item, before.history], 'no version, no `seen` moved, no entry');
+    assert.deepEqual(await notices(box, 'notes'), ['wait', true]);
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'wait' }], 'the next check, the daily one too, leaves it waiting');
   } finally { await box.cleanup(); }
 });
 
-test('Both changed, the edit here later: it stays current, the source’s is kept as a version with its own Use it; a tie keeps the current one too', async () => {
+test('Replace: the source’s version becomes current in every tool, the edit is kept as a version and History says so; then the item follows its source again', async () => {
   const box = await sandbox();
   try {
     const { repo, id } = await oneSkill(box, 'notes', { on: true });
-    await editHere(box, 'notes', 'Mine.', '2026-11-05T10:00:00Z');
+    await editHere(box, 'notes', 'Mine.');
     await repo.commit({ 'SKILL.md': skillMd('notes', 'Theirs.') }, '2026-11-04T10:00:00Z');
-    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'keep' }]);
-    assert.equal(await bodyOf(box, 'notes'), 'Mine.');
-    assert.equal((await sentences(box, 'notes')).at(-1), 'github.com/team/notes changed it too, but the current version is later, so the source’s is kept as a version.');
-    const kept = (await readHistory(box.context)).at(-1)!, item = (await itemOf(box, 'notes'))!;
-    const use = libraryAction(kept, item, { managed: box.tools, pending: [] })!;
-    assert.equal(use.label, 'Use it');
-    // As History's button runs it: the source's version is current in every tool, and the entry says it was used.
-    await restoreSkill(box.context, box.tools, kept.id);
-    for (const tool of box.tools) assert.equal(await toolBody(box, tool, 'notes'), 'Theirs.');
-    const used = (await readHistory(box.context)).find(event => event.id === kept.id)!;
-    assert.deepEqual([!!used.undoneBy, doneWords(used)], [true, 'Made current']);
-
-    await editHere(box, 'notes', 'Mine again.', '2026-11-06T10:00:00Z');
-    await repo.commit({ 'SKILL.md': skillMd('notes', 'Theirs again.') }, '2026-11-06T10:00:00.500Z');
-    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'keep' }], 'half a second apart is a tie: the current one stays');
-    assert.equal(await bodyOf(box, 'notes'), 'Mine again.');
-    // The source's commit is half a second later: History doesn't call the current version later.
-    assert.equal((await sentences(box, 'notes')).at(-1), 'github.com/team/notes changed it too, though the times can’t tell which edit came last: the current version stays, and the source’s is kept as a version.');
-  } finally { await box.cleanup(); }
-});
-
-test('A source’s change Check now keeps, the current version being later, was never current: the next edit here is noted against the version current before it', async () => {
-  const box = await sandbox();
-  try {
-    const { repo, id } = await oneSkill(box, 'notes', { on: true });
-    await editHere(box, 'notes', 'Mine.', '2026-11-05T10:00:00Z');
-    // An earlier change at the source, which also adds a file, so a note against it reads apart from one against "Mine.".
-    await repo.commit({ 'SKILL.md': skillMd('notes', 'Theirs.'), 'extra.md': 'From the source.\n' }, '2026-11-04T10:00:00Z');
-    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'keep' }]);
-    await editHere(box, 'notes', 'Mine again.', '2026-11-07T10:00:00Z');
-    // "Mine again." changed only SKILL.md from "Mine."; the source's version is noted against "Mine.", which took its place.
-    assert.deepEqual((await seen(box, box.context, 'notes')).fact?.versionChanges, [{ changed: ['SKILL.md'] }, { differs: ['SKILL.md', 'extra.md'] }, { changed: ['SKILL.md'] }, 'first']);
-  } finally { await box.cleanup(); }
-});
-
-test('The named weakness: an edit here on Tuesday, the source’s edit of the skill on Monday, then an unrelated commit there on Wednesday: the source’s Monday edit counts as the latest', async () => {
-  const box = await sandbox();
-  try {
-    const { repo, id } = await oneSkill(box, 'notes', { on: true });
-    await repo.commit({ 'SKILL.md': skillMd('notes', 'Monday’s.') }, '2026-11-09T10:00:00Z');
-    await editHere(box, 'notes', 'Tuesday’s.', '2026-11-10T10:00:00Z');
-    await repo.commit({ 'README.md': 'Unrelated.\n' }, '2026-11-11T10:00:00Z');
-    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'update' }]);
-    assert.equal(await bodyOf(box, 'notes'), 'Monday’s.', 'the source’s time is its head commit’s, Wednesday');
-    assert.ok((await itemOf(box, 'notes'))!.versions.some(version => version.from.how === 'edited'), 'Tuesday’s edit is kept as a version, one click from current');
-  } finally { await box.cleanup(); }
-});
-
-test('Edited in a tool with Automatic sync off, then Check now: the later of the edit and the source’s content wins, and the other is kept', async () => {
-  const box = await sandbox();
-  try {
-    const { repo, id } = await oneSkill(box, 'notes', { on: true });
-    // Sync off: nothing takes the edit in before the check.
-    await put(box, 'codex-cli', { 'SKILL.md': skillMd('notes', 'Edited in Codex.') });
-    const { utimes } = await import('node:fs/promises');
-    for (const path of [join(folderOf(box, 'codex-cli'), 'SKILL.md'), folderOf(box, 'codex-cli')]) await utimes(path, new Date('2026-11-08T10:00:00Z'), new Date('2026-11-08T10:00:00Z'));
-    await repo.commit({ 'SKILL.md': skillMd('notes', 'From the source.') }, '2026-11-07T10:00:00Z');
     await check(box, id);
-    assert.equal(await bodyOf(box, 'notes'), 'Edited in Codex.', 'the edit was later');
+    const done = await replace(box, id, 'notes');
+    assert.deepEqual(answered(done), [{ name: 'notes', answer: 'update' }]);
+    assert.equal(await bodyOf(box, 'notes'), 'Theirs.');
+    for (const tool of box.tools) assert.equal(await toolBody(box, tool, 'notes'), 'Theirs.');
+    assert.ok((await itemOf(box, 'notes'))!.versions.some(version => version.from.how === 'edited'), 'the edit is a version');
+    assert.equal((await sentences(box, 'notes')).at(-1), 'Replaced with github.com/team/notes’s version; that became the current version, in all 3 tools. The version it replaced is kept.');
+    assert.equal(done.sourced?.[0].history, (await readHistory(box.context)).at(-1)!.id, 'the answer names its entry, whose Undo the band offers');
+    assert.deepEqual(await notices(box, 'notes'), ['nothing', false]);
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'Theirs again.') }, '2026-11-05T10:00:00Z');
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'update' }], 'unchanged here since, it follows by itself');
+    for (const tool of box.tools) assert.equal(await toolBody(box, tool, 'notes'), 'Theirs again.');
+  } finally { await box.cleanup(); }
+});
+
+test('Undo of a Replace: the edit is current again in every tool, and the source’s version waits again; the next check doesn’t take it', async () => {
+  const box = await sandbox();
+  try {
+    const { repo, id } = await oneSkill(box, 'notes', { on: true });
+    await editHere(box, 'notes', 'Mine.');
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'Theirs.') }, '2026-11-04T10:00:00Z');
+    await check(box, id);
+    await replace(box, id, 'notes');
+    const entry = (await readHistory(box.context)).at(-1)!, item = (await itemOf(box, 'notes'))!;
+    const undo = libraryAction(entry, item, { managed: box.tools, pending: [] })!;
+    assert.deepEqual([undo.label, undo.help], ['Undo', 'Make the version from before this change current again, in every tool it is on in; the source’s version waits again']);
+    await restoreSkill(box.context, box.tools, entry.id);
+    for (const tool of box.tools) assert.equal(await toolBody(box, tool, 'notes'), 'Mine.');
+    assert.deepEqual(await notices(box, 'notes'), ['wait', true]);
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'wait' }]);
+    assert.equal(await bodyOf(box, 'notes'), 'Mine.');
+  } finally { await box.cleanup(); }
+});
+
+test('An edit in a tool that no pass has taken in (Automatic sync off), then Check now: the edit is taken in first and the source’s version waits; it is never written over', async () => {
+  const box = await sandbox();
+  try {
+    const { repo, id } = await oneSkill(box, 'notes', { on: true });
+    // Older than the source's change: by time, the source would have won.
+    await editIn(box, 'codex-cli', 'notes', 'Edited in Codex.', '2026-11-06T10:00:00Z');
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'From the source.') }, '2026-11-07T10:00:00Z');
+    const done = await check(box, id);
+    assert.deepEqual([answered(done), await bodyOf(box, 'notes')], [[{ name: 'notes', answer: 'wait' }], 'Edited in Codex.']);
     for (const tool of box.tools) assert.equal(await toolBody(box, tool, 'notes'), 'Edited in Codex.');
-    const how = (await itemOf(box, 'notes'))!.versions.map(version => version.from.how);
-    assert.ok(how.includes('source') && how.includes('edited'), JSON.stringify(how));
+    assert.deepEqual((await readHistory(box.context)).filter(event => event.key === 'notes').slice(-1).map(event => [event.kind, event.winner?.tool]), [['edit', 'codex-cli']]);
+    assert.deepEqual(await notices(box, 'notes'), ['wait', true]);
+  } finally { await box.cleanup(); }
+});
+
+test('A tool’s edit still settling when the check runs (its copy moved away by the editor’s save): the source’s version waits, and the edit, once back, is taken in with no clock deciding', async () => {
+  const box = await sandbox();
+  try {
+    const { repo, id } = await oneSkill(box, 'notes', { on: true });
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'From the source.') }, '2026-11-07T10:00:00Z');
+    await rm(folderOf(box, 'codex-cli', 'notes'), { recursive: true });
+    const settling = { ...box.context, settleMs: 60_000 };
+    assert.deepEqual(answered(await checkSource(settling, now(box), id, inTurn)), [{ name: 'notes', answer: 'wait' }]);
+    assert.equal(await bodyOf(box, 'notes'), 'First.');
+    // The save lands, older than the source's commit.
+    await editIn(box, 'codex-cli', 'notes', 'Saved in Codex.', '2026-11-06T10:00:00Z');
+    await applySkills(settling, box.tools, []);
+    assert.equal(await bodyOf(box, 'notes'), 'Saved in Codex.');
+    for (const tool of box.tools) assert.equal(await toolBody(box, tool, 'notes'), 'Saved in Codex.');
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'wait' }]);
+  } finally { await box.cleanup(); }
+});
+
+test('Replace while a tool holds an edit no pass has taken in (Automatic sync off): Replace comes after that edit, so the source’s version is current in every tool and the edit is kept as a version', async () => {
+  const box = await sandbox();
+  try {
+    const { repo, id } = await oneSkill(box, 'notes', { on: true });
+    await editHere(box, 'notes', 'Mine.');
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'Theirs.') }, '2026-11-04T10:00:00Z');
+    await check(box, id);
+    // Saved in Codex after the source's commit, before the click.
+    await editIn(box, 'codex-cli', 'notes', 'Mine, again in Codex.', '2026-11-05T10:00:00Z');
+    assert.deepEqual(answered(await replace(box, id, 'notes')), [{ name: 'notes', answer: 'update' }]);
+    assert.equal(await bodyOf(box, 'notes'), 'Theirs.');
+    for (const tool of box.tools) assert.equal(await toolBody(box, tool, 'notes'), 'Theirs.');
+    const kept = (await itemOf(box, 'notes'))!.versions.filter(version => version.from.how === 'edited').map(version => version.from.harness);
+    assert.deepEqual(kept.sort(), ['claude-cli', 'codex-cli']);
+  } finally { await box.cleanup(); }
+});
+
+test('A copy that can’t be read where the skill is applied: the source’s change waits, and both rows say so before any check, until it can be read; Replace still takes it, and the copy gets it once readable', async () => {
+  const box = await sandbox();
+  try {
+    const { repo, id } = await oneSkill(box, 'notes', { on: true });
+    const codex = join(folderOf(box, 'codex-cli', 'notes'), 'SKILL.md'), asWritten = await readFile(codex, 'utf8');
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'Theirs.') }, '2026-11-04T10:00:00Z');
+    await writeFile(codex, '---\nname: [notes\n---\nHalf saved.\n');
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'wait' }]);
+    assert.deepEqual(await notices(box, 'notes'), ['wait', true], 'the page reads the tools as the pass does');
+    await replace(box, id, 'notes');
+    assert.deepEqual([await toolBody(box, 'claude-cli', 'notes'), await toolBody(box, 'codex-cli', 'notes')], ['Theirs.', 'Half saved.']);
+    await writeFile(codex, asWritten);
+    await applySkills(box.context, box.tools, []);
+    assert.equal(await toolBody(box, 'codex-cli', 'notes'), 'Theirs.');
+  } finally { await box.cleanup(); }
+});
+
+test('Make current, as the item’s page offers: an older version made current waits on the source’s next change; its Undo makes the item follow again', async () => {
+  const box = await sandbox();
+  try {
+    const { repo, id } = await oneSkill(box, 'notes', { on: true });
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'Second.') }, '2026-11-02T10:00:00Z');
+    await check(box, id);
+    const first = (await itemOf(box, 'notes'))!.versions.find(version => version.at.startsWith('2026-11-01'))!.hash;
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [], version: first }]);
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'Third.') }, '2026-11-03T10:00:00Z');
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'wait' }]);
+    assert.equal(await bodyOf(box, 'notes'), 'First.');
+    await restoreSkill(box.context, box.tools, (await readHistory(box.context)).filter(event => event.key === 'notes' && event.kind === 'current').at(-1)!.id);
+    assert.equal(await bodyOf(box, 'notes'), 'Second.', 'back at the version it last took from the source');
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'update' }]);
+    assert.equal(await bodyOf(box, 'notes'), 'Third.');
+  } finally { await box.cleanup(); }
+});
+
+test('Edited back by hand to exactly what it took from the source: it follows the next change without a click; edited to exactly the source’s new text, Check now only notes it, and says nothing was updated', async () => {
+  const box = await sandbox();
+  try {
+    const { repo, id } = await oneSkill(box, 'notes', { on: true });
+    await editHere(box, 'notes', 'Mine.');
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'Second.') }, '2026-11-04T10:00:00Z');
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'wait' }]);
+    await editHere(box, 'notes', 'First.', '2026-11-05T10:00:00Z');
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'update' }]);
+    assert.equal(await bodyOf(box, 'notes'), 'Second.');
+
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'Third.') }, '2026-11-06T10:00:00Z');
+    await editHere(box, 'notes', 'Third.', '2026-11-07T10:00:00Z');
+    const entries = (await readHistory(box.context)).length, done = await check(box, id);
+    // Nothing a person sees changed: no answer to word (the page's band then says there was nothing to bring in), no entry.
+    assert.deepEqual([answered(done), (await readHistory(box.context)).length], [[], entries]);
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'Fourth.') }, '2026-11-08T10:00:00Z');
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'update' }], 'it took the source’s text by hand, so it follows');
+  } finally { await box.cleanup(); }
+});
+
+test('Turned Off and On, and written to a tool managed for the first time: neither is a change made here, so the item follows the source’s next change', async () => {
+  const box = await sandbox();
+  try {
+    const { repo, id } = await oneSkill(box, 'notes', { on: true });
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: false, except: [], seenOn: true }]);
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [], seenOn: false }]);
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'Second.') }, '2026-11-02T10:00:00Z');
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'update' }]);
+    // Codex left out, then managed again: the pass writes the current version there.
+    await chooseTools(box.context, 'codex-cli', false);
+    await applySkills(box.context, ['claude-cli', 'copilot-cli'], []);
+    await rm(folderOf(box, 'codex-cli', 'notes'), { recursive: true });
+    await chooseTools(box.context, 'codex-cli', true);
+    await applySkills(box.context, box.tools, []);
+    assert.equal(await toolBody(box, 'codex-cli', 'notes'), 'Second.');
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'Third.') }, '2026-11-03T10:00:00Z');
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'update' }]);
+  } finally { await box.cleanup(); }
+});
+
+test('While its version waits, the source drops the skill: it turns Off and the notice goes; its SKILL.md unparseable there instead: nothing turns Off, no notice while there is nothing to take, and it is back once it can be read', async () => {
+  const box = await sandbox();
+  try {
+    const { repo, id } = await oneSkill(box, 'notes', { on: true });
+    await editHere(box, 'notes', 'Mine.');
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'Theirs.') }, '2026-11-04T10:00:00Z');
+    await check(box, id);
+    await repo.commit({ 'SKILL.md': '---\nname: [notes\n---\nBroken.\n' }, '2026-11-05T10:00:00Z');
+    const unread = await check(box, id);
+    assert.deepEqual([answered(unread), unread.notWhole, (await itemOf(box, 'notes'))!.on, await bodyOf(box, 'notes')], [[], true, true, 'Mine.']);
+    assert.deepEqual(await notices(box, 'notes'), ['unreadable', false]);
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'Theirs.') }, '2026-11-06T10:00:00Z');
+    await check(box, id);
+    assert.deepEqual(await notices(box, 'notes'), ['wait', true]);
+
+    await repo.commit({ 'SKILL.md': skillMd('jottings', 'Renamed.') }, '2026-11-07T10:00:00Z');
+    assert.deepEqual(answered(await check(box, id)), [{ name: 'jottings', answer: 'make' }, { name: 'notes', answer: 'drop' }]);
+    assert.deepEqual([(await itemOf(box, 'notes'))!.on, await bodyOf(box, 'notes'), (await seen(box, box.context, 'notes')).fact?.fromSource], [false, 'Mine.', undefined]);
+  } finally { await box.cleanup(); }
+});
+
+test('Once a day: a source whose last read is a day old is checked by itself, as Check now checks it, never with Automatic sync off; one read within the day is not; a failed fetch is tried again an hour later, not at every turn', async () => {
+  const box = await sandbox();
+  try {
+    const { repo, id } = await oneSkill(box, 'notes', { on: true });
+    const readAt = async () => Date.parse((await sourcesView(box.context, box.tools)).sources.find(source => source.id === id)!.readAt!);
+    const due = (at: number, syncOn = true) => checkDue(box.context, now(box), inTurn, { syncOn, now: at });
+    const first = await readAt();
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'Second.') }, '2026-11-02T10:00:00Z');
+    assert.deepEqual(await due(first + SOURCE_CHECK_EVERY_MS - 1), [], 'read within the day');
+    assert.deepEqual(await due(first + SOURCE_CHECK_EVERY_MS, false), [], 'Automatic sync off');
+    const [checked, ...more] = await due(first + SOURCE_CHECK_EVERY_MS);
+    assert.deepEqual([answered(checked.done), more], [[{ name: 'notes', answer: 'update' }], []]);
+    for (const tool of box.tools) assert.equal(await toolBody(box, tool, 'notes'), 'Second.');
+    const second = await readAt();
+    assert.deepEqual(await due(second + SOURCE_CHECK_EVERY_MS - 1), [], 'a day from the read it just made');
+    // A day later the repository is gone: the fetch fails, the last read and its time stay, and the turns within the hour fetch nothing.
+    await rm(repo.dir, { recursive: true });
+    const dayLater = second + 2 * SOURCE_CHECK_EVERY_MS, [failed] = await due(dayLater);
+    assert.match(failed.done.stopped ?? '', /^Couldn’t read github\.com\/team\/notes\./);
+    assert.equal(await readAt(), second);
+    assert.deepEqual(await due(dayLater + 59 * 60_000), []);
+    assert.equal((await due(dayLater + 60 * 60_000)).length, 1);
   } finally { await box.cleanup(); }
 });
 
@@ -260,14 +413,14 @@ test('A name the library already has: the same content is linked and nothing els
     const before = await everywhere(box, 'review');
     const repo = await repository(hosts, 'https://github.com/team/kit');
     await repo.commit({ 'same/SKILL.md': skillMd('same', 'Same.'), 'review/SKILL.md': skillMd('review', 'Their review.'), 'fresh/SKILL.md': skillMd('fresh') });
-    const look = await previewSource(box.context, 'https://github.com/team/kit') as Extract<SourcePreview, { token: string }>;
+    const look = await previewSource(box.context, box.tools, 'https://github.com/team/kit') as Extract<SourcePreview, { token: string }>;
     assert.deepEqual(look.names.map(name => [name.name, name.state]), [['fresh', 'make'], ['review', 'differs'], ['same', 'link']]);
     const { added } = { added: await addSource(box.context, box.tools, look.token) };
     assert.deepEqual(answered(added), [{ name: 'fresh', answer: 'make' }, { name: 'review', answer: 'differs' }, { name: 'same', answer: 'link' }]);
     const id = await sourceId(box);
     assert.deepEqual([(await itemOf(box, 'same'))!.source, (await itemOf(box, 'same'))!.on, (await itemOf(box, 'review'))!.source], [id, true, undefined]);
     assert.deepEqual(await everywhere(box, 'review'), before, 'the person’s own review is as it was in every tool');
-    assert.deepEqual((await sourcesView(box.context)).sources[0].names.map(name => [name.name, name.state]), [['fresh', 'nothing'], ['review', 'differs'], ['same', 'nothing']]);
+    assert.deepEqual((await sourcesView(box.context, box.tools)).sources[0].names.map(name => [name.name, name.state]), [['fresh', 'nothing'], ['review', 'differs'], ['same', 'nothing']]);
     // Its source changing it later never reaches the person's own review.
     await repo.commit({ 'review/SKILL.md': skillMd('review', 'Their newer review.') });
     await check(box, id);
@@ -281,7 +434,7 @@ test('A second source with a name the first brought: not brought in, said with t
     const { link } = await oneSkill(box, 'notes');
     const other = await repository(hosts, 'https://github.com/other/notes');
     await other.commit({ 'SKILL.md': skillMd('notes', 'First.') });
-    const look = await previewSource(box.context, 'https://github.com/other/notes') as Extract<SourcePreview, { token: string }>;
+    const look = await previewSource(box.context, box.tools, 'https://github.com/other/notes') as Extract<SourcePreview, { token: string }>;
     assert.deepEqual(look.names.map(name => [name.state, name.why]), [['another', link]]);
   } finally { await box.cleanup(); }
 });
@@ -294,7 +447,7 @@ test('A skill deleted from Central Knot: the tombstone holds at Check now and at
     await repo.commit({ 'SKILL.md': skillMd('notes', 'Second.') });
     assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'deleted' }]);
     assert.ok((await itemOf(box, 'notes'))!.deleted, 'still deleted');
-    assert.deepEqual((await sourcesView(box.context)).sources[0].names.map(name => name.state), ['deleted']);
+    assert.deepEqual((await sourcesView(box.context, box.tools)).sources[0].names.map(name => name.state), ['deleted']);
     const back = await bringBack(box.context, box.tools, id, 'notes');
     assert.deepEqual(answered(back), [{ name: 'notes', answer: 'make' }]);
     const item = (await itemOf(box, 'notes'))!;
@@ -310,15 +463,15 @@ test('A link to a plugin, or a marketplace, is named as that and nothing there i
   try {
     const plugin = await repository(hosts, 'https://github.com/team/plugin');
     await plugin.commit({ '.claude-plugin/plugin.json': '{"name":"plugin"}', 'skills/pdf/SKILL.md': skillMd('pdf') });
-    const said = await previewSource(box.context, 'https://github.com/team/plugin');
+    const said = await previewSource(box.context, box.tools, 'https://github.com/team/plugin');
     assert.deepEqual(['holds' in said && said.holds, said.refused], ['plugin', 'The link holds a plugin (a .claude-plugin or .codex-plugin folder). Plugins from a link come in a later version; nothing here is read.']);
     const market = await repository(hosts, 'https://github.com/team/market');
     await market.commit({ '.agents/plugins/marketplace.json': '{}' });
-    assert.match((await previewSource(box.context, 'https://github.com/team/market')).refused ?? '', /holds a marketplace/);
+    assert.match((await previewSource(box.context, box.tools, 'https://github.com/team/market')).refused ?? '', /holds a marketplace/);
 
     const loose = await repository(hosts, 'https://github.com/team/loose');
     await loose.commit({ 'pdf/SKILL.md': skillMd('pdf'), 'docx/SKILL.md': skillMd('docx'), 'agents/writer.md': '---\nname: writer\n---\nWrite.\n', 'commands/go.md': 'Go.\n' });
-    const look = await previewSource(box.context, 'https://github.com/team/loose') as Extract<SourcePreview, { token: string }>;
+    const look = await previewSource(box.context, box.tools, 'https://github.com/team/loose') as Extract<SourcePreview, { token: string }>;
     assert.deepEqual([look.refused, look.names.map(name => name.name)], [undefined, ['docx', 'pdf']]);
   } finally { await box.cleanup(); }
 });
@@ -328,7 +481,7 @@ test('Central Knot’s own layout given as a link: its skills come in, Off; its 
   try {
     const repo = await repository(hosts, 'https://github.com/me/agent-config');
     await repo.commit({ 'skills/notes/SKILL.md': skillMd('notes'), 'mcp/github.json': '{"command":"gh"}', 'agents/writer.md': '---\nname: writer\n---\nWrite.\n', 'instructions/base.md': 'Be brief.\n' });
-    const look = await previewSource(box.context, 'me/agent-config') as Extract<SourcePreview, { token: string }>;
+    const look = await previewSource(box.context, box.tools, 'me/agent-config') as Extract<SourcePreview, { token: string }>;
     assert.deepEqual(look.names.map(name => [name.name, name.there?.folder]), [['notes', 'skills/notes']]);
   } finally { await box.cleanup(); }
 });
@@ -342,14 +495,14 @@ test('A branch whose name holds a slash, and a GitLab folder link in a group of 
     await repo.commit({ 'skills/notes/SKILL.md': skillMd('notes', 'On the feature branch.') });
     // A tag named `feature` too: the link's branch is the longest name the repository has that the link starts with.
     repo.git('tag', 'feature');
-    const look = await previewSource(box.context, 'https://github.com/team/kit/tree/feature/x/skills/notes') as Extract<SourcePreview, { token: string }>;
+    const look = await previewSource(box.context, box.tools, 'https://github.com/team/kit/tree/feature/x/skills/notes') as Extract<SourcePreview, { token: string }>;
     assert.deepEqual([look.ref, look.folder, look.names.map(name => name.name)], ['feature/x', 'skills/notes', ['notes']]);
 
     const lab = await repository(hosts, 'https://gitlab.example.com/team/tools/skills');
     await lab.commit({ 'review/SKILL.md': skillMd('review') });
-    const there = await previewSource(box.context, 'https://gitlab.example.com/team/tools/skills/-/tree/main/review') as Extract<SourcePreview, { token: string }>;
+    const there = await previewSource(box.context, box.tools, 'https://gitlab.example.com/team/tools/skills/-/tree/main/review') as Extract<SourcePreview, { token: string }>;
     assert.deepEqual([there.repository, there.ref, there.folder, there.names.map(name => name.name)], ['https://gitlab.example.com/team/tools/skills.git', 'main', 'review', ['review']]);
-    assert.equal((await previewSource(box.context, 'https://github.com/team/kit/tree/nope/skills')).refused, 'The repository has no branch or tag named nope, or by any longer name this link starts with.');
+    assert.equal((await previewSource(box.context, box.tools, 'https://github.com/team/kit/tree/nope/skills')).refused, 'The repository has no branch or tag named nope, or by any longer name this link starts with.');
   } finally { await box.cleanup(); }
 });
 
@@ -364,7 +517,7 @@ test('A SKILL.md that stops parsing at a later check can’t be read, and is not
     await repo.commit({ 'notes/SKILL.md': '---\nname: [notes\n---\nBroken.\n', 'other/SKILL.md': null });
     assert.deepEqual(answered(await check(box, id)), []);
     assert.deepEqual([(await itemOf(box, 'notes'))!.on, (await itemOf(box, 'other'))!.source], [true, id], 'not read whole: nothing is gone this time');
-    const row = (await sourcesView(box.context)).sources[0];
+    const row = (await sourcesView(box.context, box.tools)).sources[0];
     assert.deepEqual([row.unread, row.names.map(name => [name.key, name.state, name.why])], [undefined,
       [['notes', 'unreadable', 'its SKILL.md can’t be read as a skill (Malformed YAML frontmatter)'], ['third', 'nothing', undefined], ['other', 'nothing', undefined]]], 'the skill’s own line says why, once');
     // No skill there that can be read: still a read, not whole; nothing turns Off, and each reason is said.
@@ -387,7 +540,7 @@ test('The link’s folder deleted or moved at the source: the whole source can�
     const done = await check(box, id), why = 'Nothing at the folder skills/notes on main to read: moved or deleted there, or not read here yet.';
     assert.deepEqual([done.stopped, done.notWhole, answered(done)], [undefined, true, []]);
     assert.deepEqual([(await itemOf(box, 'notes'))!.on, (await itemOf(box, 'notes'))!.source], [true, id]);
-    const row = (await sourcesView(box.context)).sources[0];
+    const row = (await sourcesView(box.context, box.tools)).sources[0];
     assert.deepEqual([row.unread, row.problem, row.names.map(name => [name.key, name.state, !!name.there])], [why, undefined, [['notes', 'nothing', false]]], 'its row says why, and still names what came from it');
   } finally { await box.cleanup(); }
 });
@@ -400,10 +553,10 @@ test('The repo Pull and Push use is refused as a source, and so is a link that i
     const { mkdir, writeFile } = await import('node:fs/promises');
     await mkdir(join(box.home, '.central-knot'), { recursive: true });
     await writeFile(join(box.home, '.central-knot/repo.json'), JSON.stringify({ url: 'git@github.com:me/config.git', branch: 'main' }));
-    assert.equal((await previewSource(box.context, 'https://github.com/me/config/tree/main/skills/notes')).refused, 'That is the Git repo Pull and Push use here, so it can’t be a source too. A source is only ever read; that repo stays on the Git repo page.');
+    assert.equal((await previewSource(box.context, box.tools, 'https://github.com/me/config/tree/main/skills/notes')).refused, 'That is the Git repo Pull and Push use here, so it can’t be a source too. A source is only ever read; that repo stays on the Git repo page.');
     await rm(join(box.home, '.central-knot/repo.json'));
     await add(box, 'me/config');
-    assert.equal((await previewSource(box.context, 'https://github.com/me/config.git')).refused, 'That link is a source already: its row is below.');
+    assert.equal((await previewSource(box.context, box.tools, 'https://github.com/me/config.git')).refused, 'That link is a source already: its row is below.');
   } finally { await box.cleanup(); }
 });
 
@@ -412,7 +565,7 @@ test('The repo Pull and Push use is refused as a source, and so is a link that i
 test('The fetch fails: no repository there, or its branch deleted later: the look is refused, a check changes nothing and its row says why', async () => {
   const box = await sandbox();
   try {
-    assert.match((await previewSource(box.context, 'https://github.com/nobody/nothing')).refused ?? '', /No access, or no repository there|Can’t reach the source/);
+    assert.match((await previewSource(box.context, box.tools, 'https://github.com/nobody/nothing')).refused ?? '', /No access, or no repository there|Can’t reach the source/);
     const repo = await repository(hosts, 'https://github.com/team/kit');
     await repo.commit({ 'notes/SKILL.md': skillMd('notes') });
     repo.branch('topic');
@@ -422,7 +575,7 @@ test('The fetch fails: no repository there, or its branch deleted later: the loo
     repo.git('branch', '-D', 'topic');
     const done = await check(box, id);
     assert.equal(done.stopped, 'Couldn’t read github.com/team/kit (topic). The source has no branch or tag by that name now.');
-    assert.deepEqual([(await itemOf(box, 'notes'))!.source, (await sourcesView(box.context)).sources[0].problem], [id, 'The source has no branch or tag by that name now.']);
+    assert.deepEqual([(await itemOf(box, 'notes'))!.source, (await sourcesView(box.context, box.tools)).sources[0].problem], [id, 'The source has no branch or tag by that name now.']);
   } finally { await box.cleanup(); }
 });
 
@@ -443,15 +596,15 @@ test('Two checks at once, and Remove during a check: each check’s fetch waits 
     queue = new Promise<void>(done => { release = done; });
     const checking = checkSource(box.context, now(box), id, turn);
     await new Promise(done => setTimeout(done, 300));
-    const removed = turn(() => removeSource(box.context, id));
+    const removed = turn(() => removeSource(box.context, box.tools, id));
     release();
     assert.equal((await checking).stopped, undefined, 'the check took its turn first');
     await removed;
-    assert.deepEqual([(await sourcesView(box.context)).sources, await bodyOf(box, 'notes')], [[], 'Third.']);
+    assert.deepEqual([(await sourcesView(box.context, box.tools)).sources, await bodyOf(box, 'notes')], [[], 'Third.']);
 
     const { id: again } = await oneSkill(box, 'other');
     queue = new Promise<void>(done => { release = done; });
-    const removing = turn(() => removeSource(box.context, again));
+    const removing = turn(() => removeSource(box.context, box.tools, again));
     const late = checkSource(box.context, now(box), again, turn);
     release();
     await removing;
@@ -464,9 +617,9 @@ test('Remove: each item it brought stays as it is, On or Off, with its versions,
   try {
     const { id } = await oneSkill(box, 'notes', { on: true });
     const before = [await itemOf(box, 'notes'), await everywhere(box)];
-    await removeSource(box.context, id);
+    await removeSource(box.context, box.tools, id);
     assert.deepEqual([await itemOf(box, 'notes'), await everywhere(box)], before, 'nothing about the item is written');
-    assert.deepEqual([(await sourcesView(box.context)).sources, (await seen(box)).fact?.fromSource], [[], undefined], 'and its row no longer names a source');
+    assert.deepEqual([(await sourcesView(box.context, box.tools)).sources, (await seen(box)).fact?.fromSource], [[], undefined], 'and its row no longer names a source');
     // Linked to a source that is no longer recorded: a new source with the same name and content links it again.
     const { added } = await add(box, 'https://github.com/team/notes');
     assert.deepEqual(answered(added), [{ name: 'notes', answer: 'link' }]);
@@ -483,7 +636,7 @@ test('Push sends a skill from a source like any other, Off or On, without its li
     const first = await box.home('first');
     const repo = await repository(hosts, 'https://github.com/team/notes');
     await repo.commit({ 'SKILL.md': skillMd('notes') });
-    const look = await previewSource(first, 'team/notes') as Extract<SourcePreview, { token: string }>;
+    const look = await previewSource(first, ['claude-cli', 'copilot-cli'], 'team/notes') as Extract<SourcePreview, { token: string }>;
     await addSource(first, ['claude-cli', 'copilot-cli'], look.token);
     await connectRepo(first, box.remote, '');
     assert.equal((await pushRepo(first)).stopped, undefined);
@@ -553,7 +706,7 @@ test('A home from before sources: nothing recorded, the Sources page is empty an
   try {
     await put(box, 'claude-cli');
     await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [], seenOn: false }]);
-    assert.deepEqual([(await sourcesView(box.context)).sources, (await itemOf(box, 'notes'))!.source, (await seen(box)).fact?.fromSource], [[], undefined, undefined]);
+    assert.deepEqual([(await sourcesView(box.context, box.tools)).sources, (await itemOf(box, 'notes'))!.source, (await seen(box)).fact?.fromSource], [[], undefined, undefined]);
     assert.equal(await readFile(join(box.home, '.central-knot/sources.json'), 'utf8').catch(() => 'none'), 'none', 'and nothing is written for sources');
   } finally { await box.cleanup(); }
 });
@@ -564,14 +717,14 @@ test('A source removed and added again: a skill unchanged since that link gave i
   const box = await sandbox();
   try {
     const { repo, id, link } = await oneSkill(box, 'notes', { on: true });
-    await removeSource(box.context, id);
+    await removeSource(box.context, box.tools, id);
     await repo.commit({ 'SKILL.md': skillMd('notes', 'Second.') }, '2026-11-02T10:00:00Z');
-    const look = await previewSource(box.context, link) as Extract<SourcePreview, { token: string }>;
+    const look = await previewSource(box.context, box.tools, link) as Extract<SourcePreview, { token: string }>;
     assert.deepEqual(look.names.map(name => [name.name, name.state]), [['notes', 'update']], 'Add links it again, and the source’s version becomes current');
     assert.deepEqual(answered(await addSource(box.context, box.tools, look.token)), [{ name: 'notes', answer: 'update' }]);
     assert.equal(await bodyOf(box, 'notes'), 'Second.');
     for (const tool of box.tools) assert.equal(await toolBody(box, tool, 'notes'), 'Second.');
-    assert.deepEqual((await sourcesView(box.context)).sources[0].names.map(name => [name.name, name.state]), [['notes', 'nothing']]);
+    assert.deepEqual((await sourcesView(box.context, box.tools)).sources[0].names.map(name => [name.name, name.state]), [['notes', 'nothing']]);
   } finally { await box.cleanup(); }
 });
 
@@ -580,7 +733,7 @@ test('A one-skill source whose SKILL.md stops parsing: Check now keeps that read
   try {
     const { repo, id } = await oneSkill(box, 'notes', { on: true });
     await repo.commit({ 'SKILL.md': '---\nname: [notes\n---\nBroken.\n' }, '2026-11-07T10:00:00Z');
-    const done = await check(box, id), row = (await sourcesView(box.context)).sources[0];
+    const done = await check(box, id), row = (await sourcesView(box.context, box.tools)).sources[0];
     const why = 'its SKILL.md can’t be read as a skill (Malformed YAML frontmatter)';
     assert.deepEqual([done.stopped, done.notWhole, row.unread], [undefined, true, undefined]);
     assert.deepEqual(row.names.map(name => [name.key, name.state, name.why]), [['notes', 'unreadable', why]], 'said once, on the skill’s own line');
@@ -601,26 +754,6 @@ test('A copy deleted by hand that no pass has seen yet (Automatic sync off), the
   } finally { await box.cleanup(); }
 });
 
-test('Automatic sync off, an edit in Codex later than the source’s change, Check now: the edit stays current, and the click and History say the source’s version was kept', async () => {
-  const box = await sandbox();
-  try {
-    const { repo, id } = await oneSkill(box, 'notes', { on: true });
-    await repo.commit({ 'SKILL.md': skillMd('notes', 'From the source.') }, '2026-11-07T10:00:00Z');
-    await put(box, 'codex-cli', { 'SKILL.md': skillMd('notes', 'Edited in Codex.') });
-    const { utimes } = await import('node:fs/promises');
-    for (const path of [join(folderOf(box, 'codex-cli'), 'SKILL.md'), folderOf(box, 'codex-cli')]) await utimes(path, new Date('2026-11-08T10:00:00Z'), new Date('2026-11-08T10:00:00Z'));
-    const done = await check(box, id);
-    assert.deepEqual([answered(done), await bodyOf(box, 'notes')], [[{ name: 'notes', answer: 'keep' }], 'Edited in Codex.']);
-    const told = (await readHistory(box.context)).filter(event => event.key === 'notes').slice(-2).map(event => [event.kind, event.cause ?? event.winner?.tool]);
-    assert.deepEqual(told, [['kept-edit', 'source'], ['edit', 'codex-cli']]);
-    // The source's version was never current: the edit's note is against the one before it, and its own against the edit.
-    const item = (await itemOf(box, 'notes'))!;
-    assert.deepEqual(item.versions.map(version => [version.from.how, version.from.replacedBy === item.hash]), [['edited', false], ['source', true], ['source', false]]);
-    assert.deepEqual((await seen(box, box.context, 'notes')).fact?.versionChanges, [{ changed: ['SKILL.md'] }, { differs: ['SKILL.md'] }, 'first']);
-    assert.equal(done.sourced?.[0].history, (await readHistory(box.context)).find(event => event.kind === 'kept-edit' && event.cause === 'source')?.id, 'the answer names the entry that says it');
-  } finally { await box.cleanup(); }
-});
-
 test('A source can’t also be the Git repo Pull and Push use, either way round, in words that match', async () => {
   const { connectRepo } = await import('../src/gitrepo.ts');
   const box = await sandbox();
@@ -637,12 +770,12 @@ test('A link that names no branch reads the repository’s default branch, recor
   try {
     const repo = await repository(hosts, 'https://github.com/team/trunk', 'trunk');
     await repo.commit({ 'SKILL.md': skillMd('trunk') });
-    const look = await previewSource(box.context, 'team/trunk') as Extract<SourcePreview, { token: string }>;
+    const look = await previewSource(box.context, box.tools, 'team/trunk') as Extract<SourcePreview, { token: string }>;
     assert.equal(look.ref, 'trunk');
     await addSource(box.context, box.tools, look.token);
-    assert.equal((await sourcesView(box.context)).sources[0].ref, 'trunk');
+    assert.equal((await sourcesView(box.context, box.tools)).sources[0].ref, 'trunk');
     repo.git('checkout', '--quiet', '--detach');
-    assert.equal((await previewSource(box.context, 'https://github.com/team/trunk.git/')).refused, 'The repository doesn’t say which branch is its default. Paste a link to the branch (…/tree/<branch>).');
+    assert.equal((await previewSource(box.context, box.tools, 'https://github.com/team/trunk.git/')).refused, 'The repository doesn’t say which branch is its default. Paste a link to the branch (…/tree/<branch>).');
   } finally { await box.cleanup(); }
 });
 
@@ -652,7 +785,7 @@ test('The link forms people paste: a link to the skill’s own SKILL.md reads th
   const box = await sandbox();
   try {
     for (const link of ['https://github.com/stephenturner/skill-deslop/blob/main/SKILL.md', 'github.com/stephenturner/skill-deslop']) {
-      const look = await previewSource(box.context, link) as Extract<SourcePreview, { token: string }>;
+      const look = await previewSource(box.context, box.tools, link) as Extract<SourcePreview, { token: string }>;
       assert.deepEqual([look.refused, look.ref, look.folder, look.names.map(name => name.name)], [undefined, 'main', '', ['deslop']], link);
     }
   } finally { await box.cleanup(); }
@@ -680,9 +813,9 @@ test('In a home another build of Central Knot syncs, a source’s Look, Check no
     const { id } = await oneSkill(box, 'notes');
     const { record } = await readRecord(box.home);
     await saveRecord(box.home, { ...record!, owner: 'com.example.another-build', ownerName: 'Another build' }, true);
-    const refused = [(await previewSource(box.context, 'team/notes')).refused, (await check(box, id)).stopped, (await removeSource(box.context, id)).stopped];
+    const refused = [(await previewSource(box.context, box.tools, 'team/notes')).refused, (await check(box, id)).stopped, (await removeSource(box.context, box.tools, id)).stopped];
     assert.ok(refused.every(said => /Another build/.test(said ?? '')), JSON.stringify(refused));
-    assert.equal((await sourcesView(box.context)).sources.length, 1, 'the source is still recorded');
+    assert.equal((await sourcesView(box.context, box.tools)).sources.length, 1, 'the source is still recorded');
   } finally { await box.cleanup(); }
 });
 
@@ -692,11 +825,11 @@ test('Look at a repository, connect it as the Git repo, then Add: Add refuses it
   try {
     const repo = await repository(hosts, 'https://github.com/me/config');
     await repo.commit({ 'skills/notes/SKILL.md': skillMd('notes') });
-    const look = await previewSource(box.context, 'me/config') as Extract<SourcePreview, { token: string }>;
+    const look = await previewSource(box.context, box.tools, 'me/config') as Extract<SourcePreview, { token: string }>;
     assert.equal((await connectRepo(box.context, 'https://github.com/me/config.git', '')).stopped, undefined);
     const added = await addSource(box.context, box.tools, look.token);
     assert.equal(added.stopped, 'That is the Git repo Pull and Push use here, so it can’t be a source too. A source is only ever read; that repo stays on the Git repo page.');
-    assert.deepEqual([(await sourcesView(box.context)).sources, await itemOf(box, 'notes')], [[], undefined]);
+    assert.deepEqual([(await sourcesView(box.context, box.tools)).sources, await itemOf(box, 'notes')], [[], undefined]);
   } finally { await box.cleanup(); }
 });
 
@@ -708,7 +841,7 @@ test('The owner’s example, its SKILL.md stopped parsing at the source: one lin
     await add(box, DESLOP);
     await repo.commit({ 'SKILL.md': '---\nname: [deslop\n---\nBroken.\n' });
     await check(box, await sourceId(box));
-    const row = (await sourcesView(box.context)).sources[0];
+    const row = (await sourcesView(box.context, box.tools)).sources[0];
     assert.deepEqual(row.names.map(name => [name.name, name.there?.folderName, name.state]), [['deslop', 'skill-deslop', 'unreadable']]);
   } finally { await box.cleanup(); }
 });

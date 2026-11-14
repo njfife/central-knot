@@ -5,7 +5,8 @@
 // cleared, Automatic sync off and on, History's days passing, a folder that can't be written during a click, a crash at
 // each step of a write or a removal, a tool uninstalled or left out, the agent turned off and on, and a source (a made-up
 // repository standing in for a link: tests/sourcerepo.ts) holding a notes of its own: added, changed there, checked, dropped and
-// brought back there, its SKILL.md unparseable there for one check, Add on its row for a notes held deleted, and removed. Odd
+// brought back there, its SKILL.md unparseable there for one check, Add on its row for a notes held deleted, Replace on its row
+// for a notes whose version waits there (changed here too), and removed. Odd
 // seeds start with notes made by hand in Claude Code (a folder with a script, a file of mode 0600 and an empty folder), so the
 // source's notes differs and is not brought in; even seeds start with notes from the source, turned On.
 // After every step:
@@ -39,9 +40,9 @@ import { readTree, type ShareContext } from '../src/share.ts';
 import { applySkills, clearSwitch, takeOver } from '../src/skills.ts';
 import { setDisabled } from '../src/skillswitch.ts';
 import { chooseTools } from '../src/toolchoice.ts';
-import type { Change, HarnessId, HistoryDays, HistoryEvent, PassResult } from '../src/types.ts';
+import type { Change, HarnessId, HistoryDays, HistoryEvent, PassResult, SourceResult } from '../src/types.ts';
 import { bytes, folderOf, historyActions, put, roots, sandbox, seen, skillText, tools as allTools, trial, undo, type Tool } from './skillclicks.ts';
-import { addSource, bringBack, checkSource, previewSource, removeSource, sourcesView } from '../src/sources.ts';
+import { addSource, bringBack, checkSource, previewSource, removeSource, replaceFromSource, sourcesView } from '../src/sources.ts';
 import { repository, standInHosts } from './sourcerepo.ts';
 
 const hosts = await standInHosts();
@@ -59,6 +60,8 @@ const random = (seed: number) => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0
 /** An answer that means the page or History offered an action that is stale or does nothing. */
 const STALE = /nothing left to undo|no longer in Central Knot’s store|changed since the page was read|at that version already|No tool has a copy/;
 const same = (first: unknown, second: unknown) => JSON.stringify(first) === JSON.stringify(second);
+/** A source's click's answer (types.ts SourceResult) as a pass's, for the checks that read one: what stopped it, its results, and the History entries it made (each one's Undo). */
+const asPass = (done: SourceResult): PassResult => ({ ...(done.stopped ? { stopped: done.stopped } : {}), results: done.results ?? [], writes: 0, made: (done.sourced ?? []).flatMap(entry => (entry.history ? [entry.history] : [])) });
 /** The skill's rich folder: a script that runs, a file of mode 0600, an empty folder. */
 const rich = (body = 'Take notes.') => ({ 'SKILL.md': skillText(body), 'scripts/run.sh': { text: '#!/bin/sh\necho hi\n', mode: 0o755 }, 'private.txt': { text: 'mine\n', mode: 0o600 } });
 /** The agent beside it, and its file in each tool. */
@@ -103,7 +106,7 @@ async function walk(seed: number): Promise<Finding[]> {
   const sourceLink = `https://github.com/walk/notes-${seed}`, source = await repository(hosts, sourceLink);
   await source.commit({ 'SKILL.md': skillText('From the source.') });
   let sourceHasNotes = true;
-  const sourceNow = async () => (await sourcesView(context())).sources[0];
+  const sourceNow = async () => (await sourcesView(context(), tools)).sources[0];
   const checkNow = (id: string, more: Partial<ShareContext> = {}) => checkSource(context(more), async () => tools, id, work => work());
 
   /** (b) on the home as it is, in a trial: two passes; whether the first found nothing to do. */
@@ -135,7 +138,7 @@ async function walk(seed: number): Promise<Finding[]> {
       await source.commit({ 'SKILL.md': skillText('Take notes.'), 'scripts/run.sh': '#!/bin/sh\necho hi\n' });
       await chmod(join(source.dir, 'scripts/run.sh'), 0o755);
       await source.commit({});
-      const look = await previewSource(context(), sourceLink);
+      const look = await previewSource(context(), tools, sourceLink);
       if (!('token' in look) || look.refused) throw new Error(`the walk's source can't be added: ${look.refused}`);
       await addSource(context(), tools, look.token);
       await send(rowClicks.on((await seen(box)).row, (await seen(box)).item));
@@ -182,11 +185,14 @@ async function walk(seed: number): Promise<Finding[]> {
       else add(1, { name: 'the installer puts a copy in ~/.agents/skills', run: async () => { await mkdir(shared, { recursive: true }); await writeFile(join(shared, 'SKILL.md'), skillText(pick(['Take notes.', `Installed ${marker + 1}.`]))); } });
       add(2, { name: 'pass', app: true, run: more => pass(more) });
       const recorded = await sourceNow();
-      if (!recorded) add(5, { name: 'add the source', app: true, run: async () => { const look = await previewSource(context(), sourceLink); if ('token' in look && !look.refused) await addSource(context(), tools, look.token); } });
+      if (!recorded) add(5, { name: 'add the source', app: true, run: async () => { const look = await previewSource(context(), tools, sourceLink); if ('token' in look && !look.refused) await addSource(context(), tools, look.token); } });
       else {
         add(6, { name: 'Check now', app: true, run: more => checkNow(recorded.id, more) });
-        add(1, { name: 'Remove the source', app: true, run: () => removeSource(context(), recorded.id) });
+        add(1, { name: 'Remove the source', app: true, run: () => removeSource(context(), tools, recorded.id) });
         if (recorded.names.some(name => name.key === 'notes' && name.state === 'deleted')) add(4, { name: 'Add on the source’s row', app: true, run: () => bringBack(context(), tools, recorded.id, 'notes') });
+        if (recorded.names.some(name => name.key === 'notes' && name.state === 'wait')) add(10, { name: 'Replace on the source’s row', app: true, click: true, run: async more => asPass(await replaceFromSource(context(more), tools, recorded.id, 'notes')) });
+        // The source changes and the next read (the daily one, or Check now) comes at once: what a skill changed here meets most.
+        if (sourceHasNotes) add(3, { name: 'the source changes notes, then Check now', app: true, run: async more => { await source.commit({ 'SKILL.md': skillText(`Source ${++marker}.`) }); return checkNow(recorded.id, more); } });
         // The source's SKILL.md stops parsing for one check: unreadable there, never gone, so the source turns nothing Off. From a
         // settled home nothing turns Off or is removed; otherwise a copy deleted by hand that no pass has seen yet is the check's
         // pass to carry out, as any pass's (library.ts THE RULE), and History must say the deletion did it.
@@ -305,6 +311,8 @@ async function walk(seed: number): Promise<Finding[]> {
       for (const [index, version] of (live?.versions ?? []).entries()) if (version.hash !== live!.hash) page(`Make current #${index}`, rowClicks.makeCurrent(now.row, live, version.hash));
       for (const tool of Object.keys(now.fact?.takeOver ?? {})) offered.push({ name: `the page’s Take over in ${tool}`, run: () => takeOver(context(), tools, 'notes', tool as HarnessId) });
       for (const [tool, load] of Object.entries(now.fact?.loads ?? {})) if (load?.switchedOff) offered.push({ name: `the page’s Clear the switch in ${tool}`, run: () => clearSwitch(context(), tools, 'notes', tool as HarnessId) });
+      const sourceRow = await sourceNow();
+      if (sourceRow?.names.some(name => name.key === 'notes' && name.state === 'wait')) offered.push({ name: 'the Sources page’s Replace', run: async () => asPass(await replaceFromSource(context(), tools, sourceRow.id, 'notes')) });
       for (const action of offered) await trial(box, async () => {
         const record = await recordText(), switches = await switchesNow(), answers = [await action.run()].flat();
         const refusal = answers.map(answer => answer.stopped ?? answer.results.find(entry => entry.unchanged)?.message).find(Boolean);

@@ -3,7 +3,7 @@
 // applied there last. Contents are single letters: 'a' is older than 'b', and so on.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { carryOut, decide, fromSource, isLibraryItem, keepVersion, latestCopy, linkedTo, listed, managedAgain, newItem, noteAgainst, plan, setCurrent, originWords, sourceAnswers, takeInAnswer, type HarnessCopy, type LibraryItem, type Shelf, type Version } from '../src/library.ts';
+import { carryOut, changedHere, decide, fromSource, isLibraryItem, keepVersion, latestCopy, linkedTo, listed, managedAgain, newItem, noteAgainst, plan, setCurrent, originWords, sourceAnswers, takeInAnswer, type HarnessCopy, type LibraryItem, type Shelf, type Version } from '../src/library.ts';
 
 const has = (hash: string, at = 0): HarnessCopy => ({ is: 'present', hash, at });
 /** A copy with no time of its own (an MCP entry: its time is its whole file's). */
@@ -418,31 +418,49 @@ test('Found otherwise: taken in from the one content (first harness), or from th
 
 // ---------- A source's table (library.ts's header, A SOURCE), one row each ----------
 
-/** An item linked to a source: its current version `hash` (made at `at`), and what was last seen there. */
-const linked = (hash: string, seen: string, at = '2026-11-02T10:00:00.000Z'): LibraryItem =>
-  ({ ...newItem('notes', 'notes'), hash, versions: [{ hash, at, from: { how: 'source', link: 'team/notes' } }], source: 'src', seen });
-const there = (hash: string, commitAt = '2026-11-03T10:00:00.000Z') => ({ hash, commitAt });
+/** An item linked to a source: its current version `hash`, and the source's content it last took (`seen`). */
+const linked = (hash: string, seen: string): LibraryItem =>
+  ({ ...newItem('notes', 'notes'), hash, versions: [{ hash, at: '2026-11-02T10:00:00.000Z', from: { how: 'source', link: 'team/notes' } }], source: 'src', seen });
+const there = (hash: string) => ({ hash });
 
 test('A source: a name the library has no item for is made, Off; a deleted one is not, but Add on its row brings it back', () => {
   assert.equal(fromSource(undefined, there('s'), 'none'), 'make');
   const tombstone = { ...linked('l', 'l'), deleted: { at: '2026-11-01T00:00:00.000Z' } };
   assert.equal(fromSource(tombstone, there('s'), 'this'), 'deleted');
-  assert.equal(fromSource(tombstone, there('s'), 'this', true), 'make');
+  assert.equal(fromSource(tombstone, there('s'), 'this', { bringBack: true }), 'make');
 });
 
-test('A source: S = seen is nothing; S changed with current = seen updates it; S changed to what is current already only moves seen on (update)', () => {
+test('A source: S = seen is nothing; S changed with nothing changed here updates it; S changed to what is current already only moves seen on (same)', () => {
   assert.equal(fromSource(linked('l', 's'), there('s'), 'this'), 'nothing');
   assert.equal(fromSource(linked('l', 'l'), there('s'), 'this'), 'update');
-  assert.equal(fromSource(linked('l', 'old'), there('l'), 'this'), 'update');
-  // Nothing changed here since the last read, so the source's content is taken whatever its commit's time says (a rebase there).
-  assert.equal(fromSource(linked('l', 'l', '2026-11-05T10:00:00.000Z'), there('s', '2026-11-03T10:00:00.000Z'), 'this'), 'update');
+  assert.equal(fromSource(linked('l', 'old'), there('l'), 'this'), 'same');
 });
 
-test('A source: both changed, the later wins by the source’s head commit; a tie, under a second, keeps the current version', () => {
-  assert.equal(fromSource(linked('l', 'old', '2026-11-02T10:00:00.000Z'), there('s', '2026-11-03T10:00:00.000Z'), 'this'), 'update');
-  assert.equal(fromSource(linked('l', 'old', '2026-11-04T10:00:00.000Z'), there('s', '2026-11-03T10:00:00.000Z'), 'this'), 'keep');
-  assert.equal(fromSource(linked('l', 'old', '2026-11-03T10:00:00.000Z'), there('s', '2026-11-03T10:00:00.900Z'), 'this'), 'keep');
-  assert.equal(fromSource(linked('l', 'old', '2026-11-03T10:00:00.000Z'), there('s', '2026-11-03T10:00:01.000Z'), 'this'), 'update');
+test('A source: changed here, S waits whatever the times say; Replace on its row makes S current', () => {
+  // The current version is not the one it last took there: an edit here, however old, against a source's change, however new.
+  assert.equal(fromSource(linked('mine', 'old'), there('s'), 'this'), 'wait');
+  assert.equal(fromSource(linked('mine', 'old'), there('s'), 'this', { replace: true }), 'update');
+  // Replace on a name that no longer waits changes nothing it wouldn't.
+  assert.equal(fromSource(linked('l', 's'), there('s'), 'this', { replace: true }), 'nothing');
+});
+
+/** One managed tool's copy, for changedHere's examples (`unseen`, above: one that can't be seen for sure). */
+const holds = (hash: string): HarnessCopy => ({ is: 'present', hash, at: Date.parse('2026-11-03T10:00:00.000Z') });
+
+test('Changed here: the current version is not what it took from the source, or a tool holds an edit no pass has taken in, or a copy it applied can’t be seen for sure', () => {
+  const on = { ...linked('l', 'l'), on: true, applied: { 'claude-cli': 'l', 'codex-cli': 'l' } } satisfies LibraryItem;
+  assert.equal(changedHere(on, on.seen, { 'claude-cli': holds('l'), 'codex-cli': holds('l') }), false, 'as it took it, everywhere');
+  assert.equal(changedHere({ ...on, hash: 'mine' }, on.seen, {}), true, 'an edit taken in');
+  assert.equal(changedHere(on, on.seen, { 'claude-cli': holds('l'), 'codex-cli': holds('e') }), true, 'an edit in Codex no pass has taken in');
+  assert.equal(changedHere(on, on.seen, { 'claude-cli': holds('l'), 'codex-cli': unseen }), true, 'Codex’s copy settling where it was applied');
+  // Only content counts: none of these is an edit against the source.
+  assert.equal(changedHere(on, on.seen, { 'claude-cli': holds('l'), 'codex-cli': holds('l'), 'copilot-cli': none }), false, 'a tool managed for the first time, written at the next pass');
+  const off = { ...on, on: false, applied: {} };
+  assert.equal(changedHere(off, off.seen, { 'claude-cli': none, 'codex-cli': none }), false, 'Off, out of every tool');
+  assert.equal(changedHere({ ...off, on: true }, off.seen, { 'claude-cli': none, 'codex-cli': none }), false, 'turned On again');
+  assert.equal(changedHere({ ...on, except: ['codex-cli'], applied: { 'claude-cli': 'l' } }, on.seen, { 'claude-cli': holds('l'), 'codex-cli': holds('theirs') }), false, 'a tool it is kept out of, with a copy of its own');
+  assert.equal(changedHere({ ...on, hash: 'older' }, on.seen, {}), true, 'an older version made current, from the source or not');
+  assert.equal(changedHere({ ...on, seen: 'l', hash: 'l' }, 'l', {}), false, 'made current again at what it took, or edited back to it by hand');
 });
 
 test('A source: a name gone, read whole, drops an item linked to it; one that can’t be read, or isn’t linked, changes nothing', () => {
@@ -459,9 +477,12 @@ test('A source: a name the library has that isn’t linked is linked when its co
   assert.equal(fromSource(linked('l', 'l'), there('l'), 'another'), 'another');
 });
 
-test('A source: an item whose current version this same link gave, unchanged since its source was removed, is linked again and follows the link’s change', () => {
+test('A source: an item whose current version this same link gave, unchanged since its source was removed, is linked again and follows the link’s change; one a tool has edited since differs', () => {
   assert.equal(fromSource(linked('l', 'l'), there('s'), 'once'), 'update');
   assert.equal(fromSource(linked('l', 'l'), there('l'), 'once'), 'link');
+  const inCodex = { ...linked('l', 'gone-source-seen'), on: true, applied: { 'codex-cli': 'l' } } satisfies LibraryItem;
+  assert.equal(fromSource(inCodex, there('s'), 'once'), 'update', 'its `seen` is the removed source’s and says nothing');
+  assert.equal(fromSource(inCodex, there('s'), 'once', { copies: { 'codex-cli': holds('e') } }), 'differs');
 });
 
 test('Whom an item is linked to: a source no longer recorded is none, unless its current version is one that same link gave', () => {
@@ -477,6 +498,9 @@ test('A source’s read, all at once: every name and every item linked to it get
   const read = (whole: boolean) => ({ id: 'src', link: 'team/notes', commitAt: '2026-11-03T10:00:00.000Z', whole, names: new Map([['notes', { hash: 's' }], ['fresh', { hash: 'f' }]]) });
   assert.deepEqual([...sourceAnswers(items, read(true), new Set(['src']))], [['notes', 'update'], ['fresh', 'make'], ['other', 'drop']]);
   assert.deepEqual([...sourceAnswers(items, read(false), new Set(['src']))], [['notes', 'update'], ['fresh', 'make'], ['other', 'nothing']]);
+  // Each item's copies, as the pass reads them: an edit in a tool no pass has taken in makes notes wait.
+  const copies = (item: LibraryItem) => (item.key === 'notes' ? { 'claude-cli': holds('e') } : {});
+  assert.deepEqual(sourceAnswers({ notes: { ...items.notes, on: true, applied: { 'claude-cli': 'l' } } }, read(true), new Set(['src']), { copies }).get('notes'), 'wait');
 });
 
 test('A version read at a source says where, short; an item’s two source values are optional strings', () => {

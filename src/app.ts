@@ -1207,7 +1207,8 @@ api().onNavigate(page => {
 api().onSettingsChanged(() => { if (state.page === 'settings') void loadSettings(); });
 
 // A background pass may change what differs from the git repo too: its page and sidebar count read again soon (no fetch).
-api().onSyncChanged(() => { loadRepoSoon(); void backgroundRefresh(); });
+// The Sources page reads its view again too: a read by itself (the daily check) changes what each name there is to the library.
+api().onSyncChanged(() => { loadRepoSoon(); void backgroundRefresh(); if (state.page === 'sources') void loadSources(); });
 api().onSaid(text => announce(text));
 
 /** Each page's sync notices in a view: what changed on its own, with its History event. */
