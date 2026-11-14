@@ -243,7 +243,7 @@ test('A deleted agent from before the library is restored by its old History ent
   try {
     await write(box, {});
     const texts = { 'claude-cli': claudeAgent(undefined, claudeOwn), 'copilot-cli': copilotAgent(), 'codex-cli': codexAgent() };
-    for (const tool of tools) await oldKept(box, tool as Tool, texts[tool as Tool]);
+    for (const tool of tools) await oldKept(box, tool as Tool, texts[tool as keyof typeof texts]);
     await oldRecord(box, { state: 'dont-share', hash: BRIEF, deleted: { at: new Date().toISOString(), tool: 'copilot-cli', hash: BRIEF }, copies: [] });
     const deletion = { id: 'old-deletion', at: new Date().toISOString(), key: 'agent:reviewer', item: 'reviewer', kind: 'deleted', winner: { tool: 'copilot-cli' as HarnessId, hash: BRIEF }, losers: [], orderProved: true, previous: BRIEF };
     await writeFile(join(box.home, '.central-knot/history.json'), JSON.stringify({ events: [deletion] }));
@@ -300,5 +300,24 @@ test('Before any pass may write (a reader, or a home that can’t be written), t
     assert.deepEqual([view.items[0].description, (await agentVersion(box.context, 'reviewer', item.hash))?.prompt], ['Reviews code', 'You review code.\nBe brief.\n']);
     assert.ok(await Promise.all(item.versions.map(version => agentVersion(box.context, 'reviewer', version.hash))).then(texts => texts.every(Boolean)));
     assert.equal(JSON.parse(await readFile(join(box.home, '.central-knot/agents.json'), 'utf8')).formatVersion, 2, 'nothing was written');
+  } finally { await box.cleanup(); }
+});
+
+test('Migrating the record from before the library reads no Pi file: a loose Pi skill named like the agent is the person’s own then, and the first pass holds Pi and leaves it as it was', async () => {
+  const box = await sandbox(true);
+  try {
+    const texts = { 'claude-cli': claudeAgent(), 'copilot-cli': copilotAgent(), 'codex-cli': codexAgent() };
+    await write(box, texts);
+    await oldKept(box, 'claude-cli', texts['claude-cli']);
+    await oldRecord(box, { ...synced, copies: [copy(box, 'claude-cli', texts['claude-cli']), copy(box, 'copilot-cli', texts['copilot-cli'], { oneWay: true }), copy(box, 'codex-cli', texts['codex-cli'], { oneWay: true })] });
+    const mine = '---\nname: reviewer\ndescription: My own Pi skill\n---\n\nMine.\n';
+    await writeFile(fileOf(box, 'pi-cli'), mine);
+    // The migration alone, as the page's look runs it (nothing saved): the item knows nothing of Pi.
+    const migrated = (await agentsView(box.context, tools)).library.reviewer;
+    assert.deepEqual([Object.keys(migrated.applied).sort(), migrated.except, await versions(box)], [['claude-cli', 'codex-cli', 'copilot-cli'], [], ['Be brief. (from before Central Knot kept versions) *']]);
+    // Then the first pass with Pi managed: nothing of the agent was applied in Pi, so the file is the person's skill and holds Pi.
+    await pass(box);
+    assert.deepEqual([await readOf(box, 'pi-cli'), await versions(box)], [mine, ['Be brief. (from before Central Knot kept versions) *']]);
+    assert.equal((await pass(box)).writes, 0);
   } finally { await box.cleanup(); }
 });

@@ -18,7 +18,6 @@ import { applyServers, serversView } from '../src/servers.ts';
 import { setSyncEverything } from '../src/everything.ts';
 import { partsRecordPath, readRecord, readTree, saveRecord, syncGate, type ShareContext } from '../src/share.ts';
 import { applySkills, restoreSkill, skillKind, skillsView, takeOver } from '../src/skills.ts';
-import { convertAgentToSkill } from '../src/agentskill.ts';
 import { setDisabled } from '../src/skillswitch.ts';
 import type { Change, HarnessId, LibraryFacts, LibraryView, PassResult } from '../src/types.ts';
 
@@ -360,20 +359,35 @@ test('An agent whose only copy is two files differing by case gets no Add, and t
 
 // ---------- What the rule leaves to a click, and how it keeps its word ----------
 
-test('A skill Convert to a Pi skill made is left found by the rule, so it never spreads to the tools that hold the agent; Add still takes it', async () => {
-  const box = await sandbox(), four: HarnessId[] = [...tools, 'pi-cli'];
+test('With Pi managed, the rule never takes Pi’s own skills in as agents, and an agent’s file in Pi is never a skill: no found agent from Pi, no write, no problem line', async () => {
+  const box = await sandbox(), withPi: HarnessId[] = [...tools, 'pi-cli'], pi = join(box.home, '.pi/agent/skills');
   try {
-    await mkdir(join(box.home, '.pi/agent/skills'), { recursive: true });
+    // "gone": an agent taken in and deleted while Pi was not managed, so nothing of it was ever applied in Pi.
+    await putAgent(box, 'claude-cli', 'gone');
+    await applyAgents(box.context, tools, [{ key: 'gone', on: true, except: [], seenOn: false }]);
+    await applyAgents(box.context, tools, [{ key: 'gone', on: true, except: [], seenOn: true, deleted: true }]);
+    // Pi's own skills: a folder, and loose files with and without front matter, one an agent's file named like "gone".
+    await mkdir(join(pi, 'notes'), { recursive: true });
+    await writeFile(join(pi, 'notes/SKILL.md'), skill('notes'));
+    await writeFile(join(pi, 'loose.md'), skill('loose'));
+    await writeFile(join(pi, 'plain.md'), 'No front matter.\n');
+    await writeFile(join(pi, 'gone.md'), agent('claude-cli', 'gone'));
+    // And an agent that is On, which the first pass writes into Pi; and an agent found in Claude Code named like a loose skill
+    // of the person's own in Pi, which the rule takes in while that skill holds Pi.
     await putAgent(box, 'claude-cli', 'helper');
+    await writeFile(join(pi, 'deploy.md'), skill('deploy'));
+    await putAgent(box, 'claude-cli', 'deploy');
     await turnOn(box);
-    await background(box, {}, four);
-    assert.equal((await convertAgentToSkill(box.context, four, 'helper')).stopped, undefined);
-    await background(box, {}, four);
-    const view = await skillsView(box.context, four);
-    assert.deepEqual([placeIn(view, 'helper'), rowOf(view, 'helper')?.takeInAnswers?.rule, await skillIn(box, 'codex-cli', 'helper'), await skillIn(box, 'copilot-cli', 'helper')],
-      ['found', { leave: 'converted' }, undefined, undefined]);
-    await applySkills(box.context, four, [add(view, 'helper')]);
-    assert.equal(placeIn(await skillsView(box.context, four), 'helper'), 'on');
+    await background(box, {}, withPi);
+    const before = await readdir(pi);
+    assert.ok(before.includes('helper.md'), 'helper is in Pi as a skill');
+    for (let count = 0; count < 2; count++) assert.equal(wrote(await background(box, {}, withPi)), 0);
+    const agents = await agentsView(box.context, withPi), skills = await skillsView(box.context, withPi);
+    assert.deepEqual([agents.items.map(item => item.key), agents.problems], [['deploy', 'helper'], []]);
+    assert.deepEqual([placeIn(agents, 'deploy'), rowOf(agents, 'deploy')?.cannot['pi-cli'], await readFile(join(pi, 'deploy.md'), 'utf8')],
+      ['on', 'Pi has a skill named “deploy” and loads only one skill of a name. Delete or rename that skill to use this agent in Pi.', skill('deploy')]);
+    assert.deepEqual([placeIn(skills, 'notes'), skills.items.some(item => ['helper', 'loose', 'plain', 'gone', 'deploy'].includes(item.key))], ['on', false]);
+    assert.deepEqual(await readdir(pi), before);
   } finally { await box.cleanup(); }
 });
 

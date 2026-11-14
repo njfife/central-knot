@@ -60,7 +60,9 @@
 // and says what to keep, write and remove.
 //
 // "Held" has two reasons, both worked out at each look and never stored: it can't be given the item (a name it can't store, a
-// folder it can't write), or it has the item another way (`anotherWay`, which only skills answer: through a plugin, OpenCode
+// folder it can't write, or for an agent in Pi, which keeps agents as skills, a skill of that name there, of which Pi would
+// load only one: a folder, a link to one, or a loose file Central Knot didn't put there; agents.ts agentHeld), or it has the
+// item another way (`anotherWay`, which only skills answer: through a plugin, OpenCode
 // reading Claude Code's folder while the item is wanted there, a link, or a copy in ~/.agents/skills that Central Knot doesn't
 // own; agents and MCP servers count a plugin that brings the item as a reason it can't be given it). Only the second lets A go,
 // since Central Knot's copy is not what the harness has. The kind answers (librarypass.ts Disk.held, told where the item is
@@ -117,7 +119,9 @@
 //   that item can't be read, or the      linked                      nothing; the source's row says why
 //     source wasn't read whole
 //   a name the library has               not linked, same content    it is linked, and that content is recorded as a version from
-//                                                                    the source where it has none from that link (REMOVED, below)
+//                                                                    the source where it has none from that link since its latest
+//                                                                    take-in (REMOVED, below); one deleted and taken in again from
+//                                                                    a tool is not linked (librarypass.ts takeIn), so it comes here
 //   a name the library has               not linked, its current     linked again, and S becomes current: the link was removed
 //                                        version this same link's,   and added again, or the name went and came back, and the
 //                                        not changed here since      item is as the link left it, On or Off
@@ -132,10 +136,10 @@
 // source turns nothing Off. Skills are the only kind a source brings in this version.
 //
 // REMOVED AT ITS SOURCE (`removedBy`, the one place it is decided; worked out at each look, never stored): an item that is Off,
-// linked to no source, has a version from a recorded source's link since it last came in from a tool (a take-in: `found` or
-// `chosen`; one deleted and written again by hand is not the source's), and that source's last read of its kind doesn't hold
-// its name (a skill of that name there is no agent). That source's row on Sources and the item's row on its kind's page say
-// so (sources.ts sourceFacts, which the Sources page reads too). The drop let the link go, so turning it On (its switch,
+// linked to no source, has a version from a recorded source's link since it last came in from a tool (fromLinkSinceTakeIn; one
+// deleted and written again by hand is not the source's), and that source's last read of its kind doesn't hold its name (a
+// skill of that name there is no agent). That source's row on Sources and the item's row on its kind's page say so
+// (sources.ts sourceFacts, which the Sources page reads too). The drop let the link go, so turning it On (its switch,
 // History's Turn on, a profile) is the revert: it is no longer Off, and nothing says it any more.
 // Nor once the item is deleted, the source removed, or a read holds the name again, readable or not: unchanged here since, the
 // item is linked again and follows the source (`once`); changed here, it is not brought in and never written over
@@ -220,7 +224,6 @@
 //     at a step of the person's own (Write to Claude Code)
 //   the record holds it deleted                      on: its tombstone is lifted          left found, for good
 //   a copy that is a plugin's part                   on                                   left found: its row keeps Add
-//   a skill Convert to skill made from an agent      on                                   left found: its row keeps Add
 //   every copy switched off by its tool's own switch on                                   left found: its row keeps Add
 //   a copy whose own time is inside the settle       on                                   left for the next pass
 //     window of the pass's clock
@@ -230,7 +233,10 @@
 //   otherwise                                        taken in from the one content, or the copy chosen
 //
 // Not found at all, so in neither column: a copy of an item that is Off, or in a harness the item is kept out of (the table
-// above: "the harness's own copy: left alone"); a copy a harness has that can't be read (unseen); a copy in a harness not managed. A copy
+// above: "the harness's own copy: left alone"); a copy a harness has that can't be read (unseen); a copy in a harness not managed;
+// and a loose file in Pi's skills folder, where Pi keeps agents as skills, that the agents record doesn't say Central Knot
+// applied there: it is the person's own skill, never read as an agent and never replaced, and it holds that agent out of Pi
+// (agentfiles.ts readAgents). A copy
 // a harness has another way (a skill's link or ~/.agents/skills copy) is one it can be taken in from; that place is not
 // written (Take over stays a click). Nothing about found copies is stored: the rule takes in what is found at each pass, so
 // switching it on takes in everything found then. The page reads the same answers (each kind's view, through lookFor), with
@@ -616,16 +622,23 @@ export function sourceAnswers(items: Record<string, LibraryItem>, read: SourceSe
 
 /**
  * The recorded source that removed an item of `kind`, if one did (the header's REMOVED AT ITS SOURCE): the item is Off and
- * linked to none, one of its versions since it last came in from a tool came from that source's link, and that source's last
- * read of its kind doesn't hold its name. `reads`: every source the home records, each with its last read's names and its
- * kind (a read of another kind is never one of the item's).
+ * linked to none, it has a version from that source's link since it last came in from a tool (fromLinkSinceTakeIn), and that
+ * source's last read of its kind doesn't hold its name. `reads`: every source the home records, each with its last read's
+ * names and its kind (a read of another kind is never one of the item's).
  */
 export function removedBy<Read extends Pick<SourceSeen, 'id' | 'link' | 'names'> & { kind: ItemKind }>(item: LibraryItem, kind: ItemKind, reads: readonly Read[]) {
   if (item.on || item.deleted || linkedSource(item, new Set(reads.map(read => read.id)))) return undefined;
+  return reads.find(read => read.kind === kind && !read.names.has(item.key) && fromLinkSinceTakeIn(item, read.link));
+}
+
+/**
+ * Whether one of an item's versions since it last came in from a tool (a take-in: `found` or `chosen`) came from this link: the
+ * one place it is decided, for REMOVED AT ITS SOURCE (removedBy) and for the version a `link` records (librarypass.ts fromSourceStep).
+ */
+export function fromLinkSinceTakeIn(item: Pick<LibraryItem, 'versions'>, link: string): boolean {
   // `versions` is newest first: only those taken since the latest take-in count.
   const takenIn = item.versions.findIndex(version => version.from.how === 'found' || version.from.how === 'chosen');
-  const since = takenIn < 0 ? item.versions : item.versions.slice(0, takenIn);
-  return reads.find(read => read.kind === kind && !read.names.has(item.key) && since.some(version => version.from.link === read.link));
+  return (takenIn < 0 ? item.versions : item.versions.slice(0, takenIn)).some(version => version.from.link === link);
 }
 
 /** One path in a folder as Merge compares it (the header's MERGE): a file, by its bytes' hash and its executable bit, or a folder. */
@@ -676,15 +689,13 @@ export interface FoundKey {
   copies: FoundCopy[];
   /** The record holds it deleted (a tombstone). */
   deleted: boolean;
-  /** Convert to skill made it from an agent (agentskill.ts): spread, it would reach the tools that hold the agent. */
-  converted: boolean;
   /** A deleted item's copy still waits to leave a harness, at a step of the person's own (Write to Claude Code). */
   leaving: boolean;
 }
 /** Who asks to take a found key in: a click on its Add, or Synchronize everything. */
 export type TakenBy = 'click' | 'rule';
 /** Why a found key is left found (the header's FOUND table, one per row). */
-export type LeftFound = 'no-copy' | 'leaving' | 'deleted' | 'part' | 'converted' | 'switched-off' | 'settling' | 'choice-changed';
+export type LeftFound = 'no-copy' | 'leaving' | 'deleted' | 'part' | 'switched-off' | 'settling' | 'choice-changed';
 /**
  * The table's answer: take it in from this copy (`chosen`: the person chose it among copies that differ), wait for a choice of
  * copy (`latest`: the content changed last, which the question preselects: latestCopy), or leave it found.
@@ -701,7 +712,6 @@ export function takeInAnswer(by: TakenBy, found: FoundKey, chosen?: { harness: H
   if (found.leaving) return { leave: 'leaving' };
   if (rule && found.deleted) return { leave: 'deleted' };
   if (rule && copies.some(copy => copy.part)) return { leave: 'part' };
-  if (rule && found.converted) return { leave: 'converted' };
   if (rule && copies.every(copy => copy.switchedOff)) return { leave: 'switched-off' };
   if (rule && settle && copies.some(copy => copy.at !== undefined && Math.abs(settle.clock - copy.at) < settle.ms)) return { leave: 'settling' };
   const pick = chosen && copies.find(copy => copy.harness === chosen.harness);

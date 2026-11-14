@@ -27,7 +27,7 @@ function noteKind(): Kind<string, Note> {
   const record = (home: string) => join(home, 'notes.json');
   return {
     // A toy in the shape skills will take: the kind's name only marks its items.
-    kind: 'skill', words: { item: 'note', copy: 'file', folder: 'notes folder' }, historyPrefix: 'note:',
+    kind: 'skill', words: { item: 'note', copy: 'file', folder: () => 'notes folder' }, historyPrefix: 'note:',
     harnesses: managed => managed.filter(tool => tools.includes(tool)),
     folder: folderOf,
     pathOf: (context, tool, name) => join(folderOf(context, tool), `${name}.txt`),
@@ -117,7 +117,7 @@ test('A pass whose home another build takes over during its first item writes no
     const toy = noteKind(), read = toy.read;
     const writes: string[] = [];
     const kind: Kind<string, Note> = {
-      ...toy, read: async (at, managed) => ({ ...await read(at, managed), held: () => undefined }),
+      ...toy, read: async (at, managed, library) => ({ ...await read(at, managed, library), held: () => undefined }),
       write: async (at, item, tool, here, text) => {
         // The other build takes over while the first item is being written.
         if (!writes.length) await takeOverSync({ ...context, build: 'other', buildName: 'The other build' });

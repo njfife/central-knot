@@ -13,7 +13,6 @@ const api: DesktopApi = {
   skillVersion: (key, hash) => ipcRenderer.invoke('skills:version', key, hash),
   history: () => ipcRenderer.invoke('history:list'),
   instructions: readId => ipcRenderer.invoke('instructions:view', readId),
-  convertAgent: (key, resume, home) => ipcRenderer.invoke('agents:convert', key, resume, home),
   agentVersion: (key, hash) => ipcRenderer.invoke('agents:version', key, hash),
   eventChange: eventId => ipcRenderer.invoke('history:change', eventId),
   showFile: path => ipcRenderer.invoke('file:show', path),

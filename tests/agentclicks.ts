@@ -13,18 +13,22 @@ import { readHistory } from '../src/history.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { Change, HarnessId, LibraryFacts, PassResult } from '../src/types.ts';
 
-/** The harnesses of a test home. Which of them Central Knot manages there is the home's own `tools` (sandbox). */
+/** The harnesses of a test home, and Pi beside them in a home made `withPi`. Which of them Central Knot manages there is the home's own `tools` (sandbox). */
 export const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
-export const files = { 'claude-cli': '.claude/agents/reviewer.md', 'copilot-cli': '.copilot/agents/reviewer.agent.md', 'codex-cli': '.codex/agents/reviewer.toml' } as const;
+/** The agent's file in each harness: in Pi, which has no agents, a skill in its skills folder. */
+export const files = {
+  'claude-cli': '.claude/agents/reviewer.md', 'copilot-cli': '.copilot/agents/reviewer.agent.md', 'codex-cli': '.codex/agents/reviewer.toml', 'pi-cli': '.pi/agent/skills/reviewer.md',
+} as const;
 export type Tool = keyof typeof files;
 
-export async function sandbox() {
+export async function sandbox(withPi = false) {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-agent-clicks-')));
   const home = join(base, 'home');
-  for (const folder of ['.claude/agents', '.copilot/agents', '.codex/agents']) await mkdir(join(home, folder), { recursive: true });
+  const installed: HarnessId[] = withPi ? [...tools, 'pi-cli'] : [...tools];
+  for (const tool of installed) await mkdir(join(home, dirname(files[tool as Tool])), { recursive: true });
   const context: ShareContext = { home, mode: 'custom', read: async () => [], build: 'test', settingsPath: join(base, 'settings.json'), realHome: join(base, 'real'), settleMs: 0 };
-  /** `tools`: the harnesses Central Knot manages here; a test takes one out to uninstall it or leave it out. */
-  return { base, home, context, tools: [...tools], cleanup: () => rm(base, { recursive: true, force: true }) };
+  /** `installed`: the harnesses in this home; `tools`: those Central Knot manages here; a test takes one out to uninstall it or leave it out. */
+  return { base, home, context, installed, tools: [...installed], cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 export type Box = Awaited<ReturnType<typeof sandbox>>;
 
@@ -36,7 +40,7 @@ export const codexAgent = (prompt = 'You review code.\nBe brief.\n') => `# mine\
 export const fileOf = (box: Box, tool: Tool) => join(box.home, files[tool]);
 export const readOf = (box: Box, tool: Tool) => readFile(fileOf(box, tool), 'utf8').catch(() => undefined);
 export const write = (box: Box, tool: Tool, text: string) => writeFile(fileOf(box, tool), text);
-export const filesOf = async (box: Box) => Object.fromEntries(await Promise.all(tools.map(async tool => [tool, await readOf(box, tool as Tool)] as const))) as Record<Tool, string | undefined>;
+export const filesOf = async (box: Box) => Object.fromEntries(await Promise.all(box.installed.map(async tool => [tool, await readOf(box, tool as Tool)] as const))) as Record<Tool, string | undefined>;
 export const historyOf = async (box: Box, context = box.context) => (await readHistory(context)).filter(event => event.key === 'agent:reviewer');
 /** A plain pass, as the background runs it. */
 export const pass = (box: Box, context = box.context) => applyAgents(context, box.tools, [], { background: true });

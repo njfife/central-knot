@@ -5,7 +5,7 @@
 //   in well under a minute. It fails if a page doesn't open or throws. This is the run for every change.
 // - `--only a,b` runs the named feature sections: the ones a change touched.
 // - `--full` runs every feature section, hundreds of pictures over about ten minutes. For a new release only.
-// Features, in the order they run: shell, skills, sync, mcp, agents, plugins, profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
+// Features, in the order they run: shell, skills, sync, mcp, agents, agents-pi (an agent in Pi, as a skill), plugins, profiles, first-setup, sync-everything, plugin-skills, plugin-updates,
 // plugin-versions, parts, plugin-items, instructions, sizes (four tools; every page at 860×560 with the sidebar as a rail and
 // open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light), shared-copies, missing (a folder home with only
 // Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses, manage (a
@@ -645,6 +645,30 @@ if (wanted('agents')) {
   for (const folder of Object.values(agentsFolder)) rmSync(join(practice, folder), { recursive: true, force: true });
   await a.click('#nav-agents'); await refresh();
   await atEverySize('agents-none', 'A Practice copy whose tools have no agents: the Agents page says so and what to do');
+}
+
+// ---------- An agent in Pi, as a skill ----------
+// Pi holds no agents of its own: an agent that is On is a skill there (src/presence.ts agentsKeptIn). Its opened row, Pi held by
+// a skill of the agent's name, and Pi's Agents and About tabs on Harnesses, at four sizes.
+if (wanted('agents-pi')) {
+  begin('agents-pi');
+  await fresh();
+  if (await a.has('#intro-dismiss')) await a.click('#intro-dismiss');
+  // Pi joins the Practice copy, with a skill of its own named like the release-notes agent.
+  mkdirSync(join(practice, '.pi/agent/skills/release-notes'), { recursive: true });
+  writeFileSync(join(practice, '.pi/agent/skills/release-notes/SKILL.md'), '---\nname: release-notes\ndescription: Pi’s own skill for release notes.\n---\n\nWrite the release notes.\n');
+  await a.click('#nav-agents'); await refresh();
+  for (const key of ['code-reviewer', 'release-notes']) { await turnOnRow(key); await switchOn(key); }
+  await openRow('code-reviewer');
+  await atEverySize('agents-pi-open', 'Pi in the home, code-reviewer added: Pi has the current version (a skill, code-reviewer.md in its skills folder) with its own switch, and a note under the tools says once what Pi gets: no isolated context, tool restrictions or model selection, invoked as a skill; deleting the file in Pi turns the agent off everywhere', true, '#as-skill-code-reviewer');
+  await closeRow('code-reviewer');
+  await openRow('release-notes');
+  await atEverySize('agents-pi-held', 'release-notes added while Pi has a skill of its own named release-notes: nothing is written in Pi, and Pi’s line says why and how to use the agent there (delete or rename that skill)', true, '.details');
+  await closeRow('release-notes');
+  await a.click('#nav-harnesses'); await a.click('#harness-pi-cli'); await a.click('#harness-tab-agents'); await a.settle();
+  await atEverySize('agents-pi-harness', 'Harnesses › Pi › Agents: the same rows with Pi first, code-reviewer current there and release-notes held', true);
+  await a.click('#harness-tab-about'); await a.settle();
+  await atEverySize('agents-pi-about', 'Harnesses › Pi › About: under Files and folders, Agents says they are in its skills folder, each as a skill');
 }
 
 // ---------- Plugins ----------
@@ -1683,8 +1707,8 @@ if (wanted('missing')) {
   await wait(500);
   writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: piOnly } }));
   a = await launch();
-  await a.click('#nav-overview'); await shot(a, 'pi-only-overview', 'A folder whose only tool is Pi: the sidebar and the Overview leave out Agents and Plugins, which Pi can\'t hold, and the Overview names them once.');
-  await a.click('#nav-harnesses'); await shot(a, 'pi-only-harnesses', 'The same folder\'s Harnesses: Pi\'s card names only what Pi can hold (skills and MCP servers).');
+  await a.click('#nav-overview'); await shot(a, 'pi-only-overview', 'A folder whose only tool is Pi: the sidebar and the Overview leave out Plugins, which Pi can\'t hold, and the Overview names it once; Pi takes agents as skills.');
+  await a.click('#nav-harnesses'); await shot(a, 'pi-only-harnesses', 'The same folder\'s Harnesses: Pi\'s card, plugins the one kind it can\'t hold.');
   await a.size(2560, 1440); await a.click('#nav-overview'); await shot(a, 'pi-only-2560-overview', 'The Pi-only Overview at 2560×1440: two kind cards in two columns.'); await a.size(1280, 800);
   // A folder with no tools at all: every page stays, each saying so.
   const empty = join(scratch, 'no-tools');
