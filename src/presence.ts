@@ -50,12 +50,20 @@ export function noteTools(last: NotedTools, home: string, snapshots: Snapshot[])
 
 /**
  * The tools that hold each kind besides skills: plugins in Claude Code, Copilot CLI and Codex (Pi and OpenCode take a plugin's
- * parts instead); agents in every tool but Pi; MCP servers in every tool.
+ * parts instead); agents and MCP servers in every tool.
  */
 export type PluginTool = Exclude<HarnessId, 'pi-cli' | 'opencode-cli'>;
 export const pluginTools: PluginTool[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
-export type AgentTool = Exclude<HarnessId, 'pi-cli'>;
-export const agentTools: AgentTool[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'opencode-cli'];
+/**
+ * Where each tool that holds agents keeps one: in an agents folder of its own, or, in Pi, which has no agents, in its skills
+ * folder as a skill (a loose `<name>.md`, which Pi 1.5.0 loads as one; measured). The sentences that name the folder say these
+ * words, and agentfiles.ts has the file's name and format in each.
+ */
+export const agentsKeptIn = {
+  'claude-cli': 'agents folder', 'copilot-cli': 'agents folder', 'codex-cli': 'agents folder', 'pi-cli': 'skills folder', 'opencode-cli': 'agents folder',
+} as const satisfies Partial<Record<HarnessId, 'agents folder' | 'skills folder'>>;
+export type AgentTool = keyof typeof agentsKeptIn;
+export const agentTools = Object.keys(agentsKeptIn) as AgentTool[];
 export const mcpTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
 
 /** Whether a tool (or a value from the page) is one that installs plugins. */

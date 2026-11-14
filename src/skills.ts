@@ -5,8 +5,7 @@
 //   Central Knot's to write and remove; and the ways it has a skill that are not Central Knot's (anotherWay): a link in its
 //   folder, a copy in a folder it reads but Central Knot doesn't own (~/.agents/skills), another tool's folder it reads
 //   (OpenCode reads Claude Code's) while the skill is really there, or a plugin;
-// - why a tool can't be given a skill (cannotTake): a name it reserves, a shape it won't load (share.ts targetFor), or a
-//   skill converted from one of its agents;
+// - why a tool can't be given a skill (cannotTake): a name it reserves, or a shape it won't load (share.ts targetFor);
 // - a tool's own switch for a skill (toolFacts, `loads`): read at each look and never written by a pass. A switch set in a tool,
 //   by a person or by Central Knot before the library, is left as it is and shown as a mark on that tool's line.
 //   Three actions write it: clearSwitch, its Undo switchBack, and takeOver, which carries it to the copy it makes (takeOver
@@ -29,7 +28,7 @@ import { comparableText } from './pluginstatus.ts';
 import { throughPlugins, type GivenByPlugin } from './plugins.ts';
 import { errorCode, itemKey, landingOf, libraryGate, partsIn, plainError, readTree, syncGate, targetFor, writeAccess, type ShareContext, type Tree } from './share.ts';
 import { alsoReads, lockedRoot, placeFolder, readCopy, readSkillsFolder, recoverFolders, removeFolder, rootOf, rootProblem, sharedFolder, swapFolder, type SkillCopy } from './skillfiles.ts';
-import { openLibrary, readConverted, readVersion, recordedSkills, saveLibrary, storeVersion, type ConvertedFrom, type SkillContent } from './skillstore.ts';
+import { openLibrary, readVersion, recordedSkills, saveLibrary, storeVersion, type SkillContent } from './skillstore.ts';
 import { sourceFacts } from './sources.ts';
 import { isDisabled, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, type SwitchFile } from './skillswitch.ts';
 import { harnesses } from './harnesses.ts';
@@ -65,8 +64,6 @@ export interface SkillDisk extends Disk<SkillCopy> {
   shapes: Map<string, Skill>;
   /** Each tool's switch file, read once (skillswitch.ts). */
   switches: Map<HarnessId, SwitchFile>;
-  /** Skills Convert to skill made, by key: the agent each came from, and its tool, which never gets it back by itself. */
-  converted: Map<string, ConvertedFrom>;
   switchedOff: Map<string, HarnessId[]>;
   /** How a tool has the skill another way, if it does (library.ts held `anotherWay`), On or Off. */
   anotherWay(item: Wanted, tool: HarnessId): string | undefined;
@@ -82,7 +79,7 @@ const ownLabel = (tool: HarnessId) => harnesses[tool].skillRoots('', '')[0].labe
 export async function readDisk(context: ShareContext, managed: HarnessId[]): Promise<SkillDisk> {
   const disk: SkillDisk = {
     byKey: new Map(), unseen: new Map(), uncopied: new Set(), locked: new Map(), problems: [], outside: new Map(), ways: new Map(), readsFrom: {},
-    through: await throughPlugins(context, managed, 'skill'), parts: await partsIn(context.home, 'skill'), shapes: new Map(), switches: new Map(), converted: new Map(), switchedOff: new Map(),
+    through: await throughPlugins(context, managed, 'skill'), parts: await partsIn(context.home, 'skill'), shapes: new Map(), switches: new Map(), switchedOff: new Map(),
     anotherWay: (item, tool) => anotherWay(disk, managed, item, tool),
     cannotTake: (item, tool) => cannotTake(context, disk, item, tool),
     held: (item, tool) => {
@@ -91,13 +88,12 @@ export async function readDisk(context: ShareContext, managed: HarnessId[]): Pro
       const why = disk.cannotTake(item, tool);
       return why ? { why } : undefined;
     },
-    // A tool that won't take the skill (its shape, a name it reserves, the agent it was converted from) keeps any copy it has.
+    // A tool that won't take the skill (its shape, a name it reserves) keeps any copy it has.
     refuses: (item, tool) => disk.cannotTake(item, tool),
   };
   const sound: HarnessId[] = [];
   for (const tool of managed) if (await readOwnFolder(context, disk, tool)) sound.push(tool);
   await readAlsoRead(context, disk, managed, sound);
-  for (const [key, from] of Object.entries(await readConverted(context.home))) disk.converted.set(key, from);
   // A skill's shape: its current version's SKILL.md where the library has it, else a copy's.
   for (const item of Object.values(await recordedSkills(context.home))) {
     const version = item.deleted ? undefined : await readVersion(context, item.key, item.hash);
@@ -216,11 +212,9 @@ function pluginFor(disk: SkillDisk, key: string, tool: HarnessId): ThroughPlugin
   return plugin;
 }
 
-/** Why a tool can't be given a skill (librarypass.ts Disk.held, without `anotherWay`): its name, its shape, or where it came from. */
+/** Why a tool can't be given a skill (librarypass.ts Disk.held, without `anotherWay`): its name, or its shape. */
 function cannotTake(context: ShareContext, disk: SkillDisk, item: Wanted, tool: HarnessId): string | undefined {
   if (harnesses[tool].reservedSkills.includes(item.name)) return `${nameOf(tool)} reserves the name “${item.name}”.`;
-  const converted = disk.converted.get(item.key);
-  if (converted?.origin === tool) return `Converted from ${nameOf(tool)}’s agent “${converted.agent}”, so it is not placed back there; ${nameOf(tool)} keeps the agent.`;
   const shape = disk.shapes.get(item.key);
   return shape ? wontLoad(context, tool, item.name, shape) : undefined;
 }
@@ -241,7 +235,7 @@ function wontLoad(context: ShareContext, tool: HarnessId, name: string, shape: S
 export const skillKind: Kind<SkillContent, SkillCopy, SkillDisk> = {
   kind: 'skill',
   // The item and its copy as the page names them (libraryrow.ts libraryWords); a tool's folder of them only the pass says.
-  words: { item: libraryWords.skills.item, copy: libraryWords.skills.copy, folder: 'skills folder' },
+  words: { item: libraryWords.skills.item, copy: libraryWords.skills.copy, folder: () => 'skills folder' },
   // History's skill entries were keyed by the skill's key alone before the library, and still are.
   historyPrefix: '',
   harnesses: tools => [...tools],
@@ -553,7 +547,6 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
   // Its description is the current version's, else a copy's (readDisk's shapes).
   const description = disk.shapes.get(key)?.description ?? first?.skill.description ?? '';
   const edited = made ? pendingEdits(made) : [];
-  const converted = disk.converted.get(key);
   const some = <T extends object>(field: string, value: T) => (Object.keys(value).length ? { [field]: value } : {});
   return {
     key, name, description, copies, on: !!item?.on, except: item?.except ?? [], cannot: facts.cannot, edited,
@@ -561,7 +554,6 @@ async function rowFacts(look: SkillLook, key: string, item: LibraryItem | undefi
       : { takeInAnswers: takeInAnswers(look, key), choiceBlocks: choiceBlocksOf(entries) }),
     ...some('plugin', facts.plugin), ...some('unseen', facts.unseen), ...some('anotherWay', facts.anotherWay), ...some('takeOver', facts.takeOver),
     ...some('loads', facts.loads), ...some('switchedOff', Object.keys(facts.loads).filter(tool => facts.loads[tool as HarnessId]!.switchedOff)), ...some('switchProblem', switchProblem),
-    ...(converted ? { converted: { agent: converted.agent, origin: converted.origin, losses: converted.losses } } : {}),
     ...(fromSource ? { fromSource } : {}),
   };
 }

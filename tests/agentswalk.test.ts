@@ -1,4 +1,5 @@
-// A seeded random walk over one agent on real files in a temp home: every click the Agents page and History offer
+// A seeded random walk over one agent on real files in a temp home with Claude Code, Copilot CLI, Codex and Pi (where the
+// agent is a skill, a loose file in its skills folder): every click the Agents page and History offer
 // (tests/agentclicks.ts), edits, copies and deletions made by hand, Automatic sync off and on, History's days passing, a
 // folder that can't be written during a click, a crash before a write or a removal, a harness uninstalled or left out, and
 // copies that can't be seen, and passes inside a settle window that is not zero. Walked twice: a plain agent, and one with
@@ -33,7 +34,10 @@ import { DAY_MS } from '../src/model.ts';
 import type { ShareContext } from '../src/share.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import type { Change, HarnessId, HistoryDays, HistoryEvent, PassResult } from '../src/types.ts';
-import { claudeAgent, claudeOwn, codexAgent, fileOf, files, filesOf, historyActions, pass, sandbox, seen, tools as allTools, trial, undo, write, type Tool } from './agentclicks.ts';
+import { claudeAgent, claudeOwn, codexAgent, fileOf, files, filesOf, historyActions, pass, sandbox, seen, tools as clickTools, trial, undo, write, type Tool } from './agentclicks.ts';
+
+/** The harnesses of the walk's home: the click tests' three, and Pi. */
+const allTools: HarnessId[] = [...clickTools, 'pi-cli'];
 
 /** The walks every `npm test` runs: [seed, with own parts]. */
 const SEEDS: [number, boolean][] = [[1, false], [2, true], [3, false], [4, true], [5, false], [6, true], [7, false], [8, true]];
@@ -48,12 +52,12 @@ const contentsOf = (texts: Record<Tool, string | undefined>) => Object.fromEntri
 /** A file's own part: the file with its shared part (name, description, prompt) written over by one fixed agent. */
 const ownOf = (tool: Tool, text: string | undefined) => { try { return text === undefined || !contentOf(tool, text) ? undefined : agentText(tool, { name: 'x', description: 'x', prompt: 'x' }, text); } catch { return undefined; } };
 /** The second agent, which no step touches: its file in each harness. */
-const writerFiles = { 'claude-cli': '.claude/agents/writer.md', 'copilot-cli': '.copilot/agents/writer.agent.md', 'codex-cli': '.codex/agents/writer.toml' } as const;
+const writerFiles = { 'claude-cli': '.claude/agents/writer.md', 'copilot-cli': '.copilot/agents/writer.agent.md', 'codex-cli': '.codex/agents/writer.toml', 'pi-cli': '.pi/agent/skills/writer.md' } as const;
 
 interface Finding { kind: string; trace: string }
 async function walk(seed: number, ownParts: boolean): Promise<Finding[]> {
   const next = random(seed), pick = <T>(list: T[]) => list[Math.floor(next() * list.length)];
-  const box = await sandbox(), tools = box.tools;
+  const box = await sandbox(true), tools = box.tools;
   /** Makes `managed` the harnesses Central Knot manages here (the rest uninstalled, or left out by the tool choice). */
   const manage = (managed: HarnessId[]) => { tools.splice(0, tools.length, ...allTools.filter(tool => managed.includes(tool))); };
   /** The agent as the record has it, as text: what a click or a pass changed besides files. */

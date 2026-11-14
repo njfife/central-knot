@@ -14,7 +14,7 @@ import { basename, dirname, isAbsolute, join } from 'node:path';
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover, findOtherApps } from './discovery.ts';
-import { configRoot, envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
+import { envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { CLAUDE_PROCESS, appCandidates, executableCandidates, macPlaces, searchPath } from './platform.ts';
 import { intoFolder, isRunning, knownBuilds, lookForBuilds, quitBuild, removeClick, type BuildsContext } from './otherbuilds.ts';
 import { leftOutNow, managedNow, readRecord, syncGate, takeOverSync, writeAccess, type ShareContext } from './share.ts';
@@ -29,8 +29,8 @@ import { mcpFile } from './mcp.ts';
 import { switchPath } from './skillswitch.ts';
 import { applyServers, restoreServer, serversView, serverVersion, writeToClaude } from './servers.ts';
 import { agentVersion, agentsView, applyAgents, restoreAgent } from './agents.ts';
+import { agentsFolder } from './agentfiles.ts';
 import { libraryEntry } from './historyactions.ts';
-import { convertAgentToSkill } from './agentskill.ts';
 import { applyBase, baseView, instructionsView, instructionVersion, repoBase, saveInstruction, undoBase } from './instructions.ts';
 import { clearDraftFolders, draftSources, draftTools, writeDraft } from './draftbase.ts';
 import { registerMarketplaces } from './marketplaces.ts';
@@ -805,8 +805,8 @@ async function startWatching() {
   if (!current || smoke) return;
   const roots = new Set<string>(harnessIds.map(id => writeRoot(harnesses[id], current!.home, overrideFor(id))));
   roots.add(join(current.home, '.agents/skills'));
-  // Agents folders too: an agent edited in one tool spreads like a skill (D-32).
-  for (const id of agentTools) roots.add(join(configRoot(harnesses[id], current.home, overrideFor(id)), 'agents'));
+  // Agents folders too (Pi's is its skills folder, above): an agent edited in one tool spreads like a skill (D-32).
+  for (const id of agentTools) roots.add(agentsFolder(context(), id));
   // MCP settings files and each tool's switch file (skillswitch.ts switchPath; a server's is one or the other): their folders are
   // watched without recursion, and only an event for one of those files prompts a read. Claude Code's MCP file holds no switch
   // (mcpswitch.ts) and Claude Code rewrites it while it runs, so its events are not settings events: the page isn't redrawn for them.
@@ -1206,9 +1206,6 @@ app.whenReady().then(async () => {
   // Reveal only: the file manager selects it; nothing is opened, run or written.
   handle('file:show', async path => { if (typeof path === 'string' && isAbsolute(path)) shell.showItemInFolder(path); });
   handle('history:change', async eventId => (current && typeof eventId === 'string' ? skillChange(context(), eventId) : undefined));
-  handle('agents:convert', async (key, resume, home) => (home === current?.home && typeof key === 'string'
-    ? convertAgentToSkill(context(), await toolsNow(), key, resume === true)
-    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.' }));
   handleNow('agents:version', async (key, hash) => (current && typeof key === 'string' && typeof hash === 'string' ? (await agentVersion(context(), key, hash)) ?? null : null));
   handle('instructions:view', async readId => (current ? instructionsView(context(), await readFor(readId as number | undefined)) : null));
   handle('instructions:save', async (tool, text, expected, home, restoring) => (home === current?.home && isTool(tool) && typeof text === 'string' && typeof expected === 'string'

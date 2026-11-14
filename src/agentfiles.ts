@@ -1,5 +1,6 @@
 // An agent as each harness's own file holds it: Claude Code Markdown, Copilot `.agent.md`, Codex TOML, OpenCode Markdown
-// (AGT-01). This module reads those files and writes them; what is synced, and when, is agents.ts.
+// (AGT-01), and in Pi, which has no agents, the same Markdown as a skill in its skills folder (`suffixes`, below). This module
+// reads those files and writes them; what is synced, and when, is agents.ts.
 // An agent has two parts. The shared part is its name, description and prompt: every harness can hold it, and `agentHash`
 // names it. Its own part is everything else in one harness's file (tools, model, hooks, Codex keys and tables, comments):
 // no equivalent is recorded across harnesses, so it stays in that harness's file. `agentText` writes the shared part into a
@@ -7,8 +8,9 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseDocument, stringify as stringifyYaml } from 'yaml';
-import { configRoot, harnesses } from './harnesses.ts';
-import { agentTools, type AgentTool } from './presence.ts';
+import { configRoot, harnesses, writeRoot } from './harnesses.ts';
+import type { LibraryItem } from './library.ts';
+import { agentTools, agentsKeptIn, type AgentTool } from './presence.ts';
 import { errorCode, itemKey, sha256, type ShareContext } from './share.ts';
 import { readTomlTables, tomlValue } from './textedit.ts';
 import type { HarnessId } from './types.ts';
@@ -29,9 +31,18 @@ export interface NeutralAgent extends SharedAgent { fields: Record<string, unkno
  */
 export interface AgentEntry { name: string; key: string; tool: AgentTool; file: string; text: string; agent: NeutralAgent; hash: string; bytes: string; at: number }
 
-const suffixes: Record<AgentTool, string> = { 'claude-cli': '.md', 'copilot-cli': '.agent.md', 'codex-cli': '.toml', 'opencode-cli': '.md' };
-/** A harness's agents folder in this home. */
-export const agentsFolder = (context: ShareContext, tool: HarnessId) => join(configRoot(harnesses[tool], context.home, context.overrides?.[tool]), 'agents');
+/**
+ * Where each tool keeps an agent: one file, its name the agent's and then this suffix, in its folder (agentsFolder: its own
+ * agents folder, or Pi's skills folder: presence.ts agentsKeptIn). A skills folder is the skills kind's too, which reads only
+ * the folders in it (skillfiles.ts), and a loose file there is an agent's copy only for a key the agents record holds there
+ * (heldThere): every other one is the person's own skill, never read. The name is written exactly as the agent's, since it is
+ * part of the shared hash; Pi loads the file under it, capitals and spaces too, with a warning (measured on 1.5.0).
+ */
+const suffixes: Record<AgentTool, string> = { 'claude-cli': '.md', 'copilot-cli': '.agent.md', 'codex-cli': '.toml', 'pi-cli': '.md', 'opencode-cli': '.md' };
+/** A harness's folder for agents in this home: its agents folder, or its skills folder where it keeps agents as skills. */
+export const agentsFolder = (context: ShareContext, tool: AgentTool) => (agentsKeptIn[tool] === 'skills folder'
+  ? writeRoot(harnesses[tool], context.home, context.overrides?.[tool])
+  : join(configRoot(harnesses[tool], context.home, context.overrides?.[tool]), 'agents'));
 export const fileFor = (context: ShareContext, tool: AgentTool, name: string) => join(agentsFolder(context, tool), `${name}${suffixes[tool]}`);
 /**
  * Why an agent's name can't become a file name in a harness, in a few words ("é", "starts with “.”"); none when it can.
@@ -86,8 +97,15 @@ export function parseAgent(tool: AgentTool, name: string, text: string): Neutral
 /** One harness's agents as read: `unreadable` has each file that is there but can't be read as an agent, by key (`*`: the whole folder). */
 export interface AgentsRead { entries: AgentEntry[]; problems: string[]; unreadable: Map<string, string> }
 
-/** Reads one tool's agents. A file that cannot be read as an agent is reported in `unreadable` and never written or deleted. */
-export async function readAgents(context: ShareContext, tool: AgentTool): Promise<AgentsRead> {
+/** Whether the agents record holds a key in a tool: a live agent, or a deleted one with something applied there (still to go). */
+const heldThere = (record: Record<string, LibraryItem>, key: string, tool: AgentTool) =>
+  Object.hasOwn(record, key) && (!record[key].deleted || record[key].applied[tool] !== undefined);
+
+/**
+ * Reads one tool's agents. A file that cannot be read as an agent is reported in `unreadable` and never written or deleted.
+ * In a skills folder only the keys `record` (the agents record's items) holds there are read (`suffixes`, above).
+ */
+export async function readAgents(context: ShareContext, tool: AgentTool, record: Record<string, LibraryItem> = {}): Promise<AgentsRead> {
   const entries: AgentEntry[] = [];
   const problems: string[] = [];
   const unreadable = new Map<string, string>();
@@ -102,6 +120,7 @@ export async function readAgents(context: ShareContext, tool: AgentTool): Promis
   const suffix = suffixes[tool];
   for (const file of names.filter(entry => entry.endsWith(suffix) && !entry.startsWith('.') && !entry.includes('.ck-'))) {
     const name = file.slice(0, -suffix.length);
+    if (agentsKeptIn[tool] === 'skills folder' && !heldThere(record, itemKey(name), tool)) continue;
     const path = join(agentsFolder(context, tool), file);
     let text: string;
     try { text = await readFile(path, 'utf8'); } catch { problems.push(`${path} could not be read.`); unreadable.set(itemKey(name), path); continue; }
@@ -120,7 +139,8 @@ function tomlPrompt(prompt: string) {
   const body = prompt.replace(/\\/g, '\\\\').replace(/"(?="")/g, '\\"');
   return `"""\n${body}${body.endsWith('\n') ? '' : '\n'}"""`;
 }
-const yamlScalar = (value: string) => stringifyYaml(value, { lineWidth: 0 }).replace(/\n$/, '');
+/** One `key: value` entry of front matter, a value of several lines as a block indented under its key. */
+const yamlEntry = (key: string, value: string) => stringifyYaml({ [key]: value }, { lineWidth: 0 }).replace(/\n$/, '');
 
 /** Replaces top-level `key:` lines (with their indented continuation) in YAML frontmatter, or adds them first. Other lines stay byte for byte. */
 function setFrontLines(front: string, values: [string, string][]): string {
@@ -128,7 +148,7 @@ function setFrontLines(front: string, values: [string, string][]): string {
   let lines = front.length ? front.split(/\r?\n/) : [];
   const missing: string[] = [];
   for (const [key, value] of values) {
-    const line = `${key}: ${yamlScalar(value)}`.split('\n');
+    const line = yamlEntry(key, value).split('\n');
     const at = lines.findIndex(candidate => new RegExp(`^(["']?)${key}\\1\\s*:`).test(candidate));
     if (at < 0) { missing.push(...line); continue; }
     let end = at + 1;
@@ -164,7 +184,7 @@ export function agentText(tool: HarnessId, agent: SharedAgent, existing?: string
   // A new OpenCode agent says `mode: all`: with no mode, 1.19.5 offers it both to choose and to hand work to, while 2.2.5
   // makes it one to choose only (measured), and an agent from another tool is one work is handed to there.
   const mode = tool === 'opencode-cli' ? 'mode: all\n' : '';
-  if (!match) return `---\nname: ${yamlScalar(agent.name)}\ndescription: ${yamlScalar(agent.description)}\n${mode}---\n\n${agent.prompt}`;
+  if (!match) return `---\n${yamlEntry('name', agent.name)}\n${yamlEntry('description', agent.description)}\n${mode}---\n\n${agent.prompt}`;
   const newline = match[1].endsWith('\r\n') ? '\r\n' : '\n';
   const front = setFrontLines(match[2].replace(/\r?\n$/, ''), [['name', agent.name], ['description', agent.description]]);
   const gap = /^\r?\n/.exec(match[4])?.[0] ?? '\n';

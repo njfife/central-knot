@@ -5,7 +5,6 @@
 //   items/skills/<folder>/versions/<hash>/     one version: the skill's whole folder, byte for byte (share.ts readTree)
 //   items/<folder>/<hash>/                     revisions kept before the library: read once by the migration, never deleted
 //                                              here (plugin parts still keep the skills they place there: parts.ts)
-//   converted.json                             skills made by Convert to skill (agentskill.ts), with the agent each came from
 //
 // `<folder>` is the skill's key as share.ts storeFolder writes it, so a skill keyed `agents` or `mcp` never lands among the
 // agents' or MCP servers' files. Every version is named by its content, so a second never replaces a first. Versions are kept
@@ -14,7 +13,7 @@
 // callers outside it: skills.ts takeOver keeps a version (library.ts keepVersion), and the profiles migration turns items Off,
 // once (profilemigrate.ts). This module only reads and writes what it is given.
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename } from 'node:fs/promises';
+import { mkdir, rename } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { emptyLibrary, readLibraryFile, saveLibraryFile, type RecordFile, type StoredLibrary } from './kindstore.ts';
 import type { LibraryItem } from './library.ts';
@@ -126,19 +125,4 @@ export async function pruneDeleted(context: ShareContext, cutoff: number): Promi
   for (const item of Object.values(read.library.items)) {
     if (item.deleted && Date.parse(item.deleted.at) < cutoff) await removeTree(join(itemFolder(context, item.key), 'versions')).catch(() => undefined);
   }
-}
-
-// ---------- Skills made by Convert to skill ----------
-
-/** A skill Convert to skill made from an agent (agentskill.ts): which agent, from which tool, and what an agent had that a skill does not. */
-export interface ConvertedFrom { agent: string; origin: HarnessId; at: string; losses: string[] }
-const convertedPath = (home: string) => join(storeDirectory(home), 'converted.json');
-export async function readConverted(home: string): Promise<Record<string, ConvertedFrom>> {
-  // A null-prototype map: a skill named "constructor" or "__proto__" is a key like any other, never a built-in.
-  try { return Object.assign(Object.create(null), JSON.parse(await readFile(convertedPath(home), 'utf8'))); } catch { return Object.create(null); }
-}
-export async function recordConverted(home: string, key: string, from: ConvertedFrom) {
-  const all = await readConverted(home);
-  all[key] = from;
-  await writeDurably(convertedPath(home), `${JSON.stringify(all, null, 2)}\n`);
 }

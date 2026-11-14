@@ -21,9 +21,15 @@ import { join } from 'node:path';
 import { agentHash, agentsFolder, readAgents, type AgentEntry, type SharedAgent } from './agentfiles.ts';
 import { newItem, type LibraryItem, type Origin } from './library.ts';
 import type { KindLibrary } from './librarypass.ts';
-import { agentTools } from './presence.ts';
+import type { AgentTool } from './presence.ts';
 import { sha256, storeDirectory, type ShareContext } from './share.ts';
 import type { HarnessId } from './types.ts';
+
+/**
+ * The tools the record from before the library knew agents in. Pi took agents only later, as skills (presence.ts agentsKeptIn):
+ * none of its files is read here, and the first pass meets Pi as a harness new to agents.
+ */
+const recordedTools: AgentTool[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'opencode-cli'];
 
 /**
  * A copy on the old record: `stopped`, no longer updated after an edit there; `oneWay`, receive-only; `removing`, a removal a
@@ -97,7 +103,7 @@ async function readKept(context: ShareContext, key: string): Promise<KeptContent
     const whole = typeof agent?.name === 'string' && typeof agent.description === 'string' && typeof agent.prompt === 'string';
     if (!whole || agentHash(agent) !== hash) continue;
     const files: KeptContent['files'] = {};
-    for (const tool of agentTools) {
+    for (const tool of recordedTools) {
       const text = await readFile(join(base, hash, `${tool}.txt`), 'utf8').catch(() => undefined);
       if (text !== undefined) files[tool] = text;
     }
@@ -120,7 +126,7 @@ export async function migrateAgents(context: ShareContext, old: OldAgentRecord):
   // Format 1 is from before agents were rewritten: nothing in it is carried over.
   if (old.formatVersion < 2) return { items, folders, versions, own };
   const reset = new Set<HarnessId>();
-  for (const tool of agentTools) {
+  for (const tool of recordedTools) {
     const path = agentsFolder(context, tool), root = old.roots?.[tool], info = await stat(path).catch(() => undefined);
     const away = Object.values(old.items).some(item => item.copies.some(copy => copy.tool === tool && copy.away));
     if (away) folders[tool] = { path, away: true };
@@ -129,7 +135,7 @@ export async function migrateAgents(context: ShareContext, old: OldAgentRecord):
   }
   // Every harness's folder in this home is looked at, managed or not: a copy is left alone wherever it is.
   const onDisk: AgentEntry[] = [];
-  for (const tool of agentTools) onDisk.push(...(await readAgents(context, tool)).entries);
+  for (const tool of recordedTools) onDisk.push(...(await readAgents(context, tool)).entries);
   for (const [key, was] of Object.entries(old.items)) {
     const kept = await readKept(context, key), here = onDisk.filter(entry => entry.key === key);
     const item = migrateItem(key, was, kept, here, reset);
