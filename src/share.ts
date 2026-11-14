@@ -1,8 +1,10 @@
 // What every engine stands on (MAP.md, "The store and safe writes"). Among it, the gate for library writes (libraryGate), the
-// one answer to "may this write of the library happen now". Every pass, and every click that writes the library, the home's
-// sync record or a tool's own switch for a library item, enters it, once its own refusals are past; what checks before such a
-// write starts (Pull, Push, a History action that runs no pass of its own) only asks it; what writes a file of Central Knot's
-// own alone asks it for that (`ownFile`). It is not the gate for every write: reads, taking over syncing (takeOverSync, which
+// one answer to "may this write of the library happen now". A click that writes the library, the home's sync record or a tool's
+// own switch for a library item by its own hand (a profile switch, a Manage switch, Take over, Clear the switch, Convert) enters
+// it once its own refusals are past. A pass enters it before it reads its clicks (librarypass.ts runPass), so an item page's
+// click that the pass then refuses has still made the record of a home with none, or resumed one that waited. What checks before
+// such a write starts (Pull, Push, a History action that runs no pass of its own, the profiles migration) only asks it; what
+// writes a file of Central Knot's own alone asks it for that (`ownFile`). It is not the gate for every write: reads, taking over syncing (takeOverSync, which
 // changes the owner), another build of the app, the Git repo's connection, instructions and plugins ask writeAccess alone;
 // syncsHere is whether this build syncs the home at all (the background pass, History kept tidy).
 import { createHash, randomUUID } from 'node:crypto';
@@ -426,7 +428,8 @@ export interface Entering {
  * another build's record or one that can't be read (syncGate `stopped`), or one waiting for Resume (unless `resume` or
  * `ownFile`). Let in, it has already done what entering needs before anything is written: the record made (`start`), the
  * home remembered (`start`, `resume`), so a click that writes before its own pass never finds that pass refused. Answers the
- * home's record, where it has one (with `start`, always). A click's own refusals come before it: it is entered only to write.
+ * home's record, where it has one (with `start`, always). A click that writes by its own hand runs its own refusals before it,
+ * and enters it only to write; a pass enters it first (this file's header).
  */
 export async function libraryGate(context: ShareContext, asked: Entering & { start: true }): Promise<{ refused: string } | { record: SyncRecord }>;
 export async function libraryGate(context: ShareContext, asked?: Entering): Promise<{ refused: string } | { record?: SyncRecord }>;

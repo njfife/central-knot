@@ -20,7 +20,7 @@ import { toolName } from './words.ts';
  * guardFolders); its copies stay as they are and every item stays as it is. On: it is managed again, and the next pass brings it
  * into line. Refused, as a click is, where nothing may be written (preview only, another build's home, a damaged record); in a
  * home that waits for Resume it resumes, as a click does, only when asked (`resume`: the page showed that state). The first act
- * in a home with no record makes the record (Synchronize everything is left unanswered); a switch that is so already does neither. One History entry says it; it has no
+ * in a home with no record makes the record (Synchronize everything is left unanswered); a switch that is so already makes no record and resumes nothing. One History entry says it; it has no
  * Undo, since the switch is the way back. Run between passes, like any other write to the records.
  */
 export async function chooseTools(context: ShareContext, tool: HarnessId, on: boolean, resume = false): Promise<{ stopped?: string }> {
