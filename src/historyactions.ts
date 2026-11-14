@@ -36,10 +36,10 @@
 //   a content change: edit, conflict,        Undo; once later       the version from before it (`previous`) is not the
 //     current, and any entry from before     changes came, "Make    current one
 //     the library that names `previous`      the version before
-//                                            this current"
-//   kept-edit from a source (`source`):      Use it                 the source's version (`version`) is not the
-//     its version kept, the current one                               current one
-//     being later
+//                                            this current"; a
+//                                            Replace's (`seen`) puts
+//                                            back the source's
+//                                            version it had taken
 //   conflict, chosen, kept-edit (an edit     Use <harness>’s        that copy's version is not the current one
 //     not taken in that was written over,
 //     a copy a tool managed again held, or
@@ -158,6 +158,8 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       // Pull's own entry names no harness. With no version before it, only Claude Code's own settings came, for later.
       if (pulled && !event.previous) return { glyph: 'git-branch', text: 'Pulled from the Git repo: Claude Code’s own settings for it, which Claude Code gets when it has the agent.' };
       if (pulled) return { glyph: 'git-branch', text: `Pulled from the Git repo; that became the current version${tools ? `, in ${tools}` : ''}.` };
+      // A Replace (`seen`): the person took the source's version over the one changed here.
+      if (event.cause === 'source' && event.seen !== undefined) return { glyph: 'link-2', text: `Replaced with ${source}’s version; that became the current version${tools ? `, in ${tools}` : ''}. The version it replaced is kept.` };
       if (event.cause === 'source') return { glyph: 'link-2', text: `Updated from ${source}; that became the current version${tools ? `, in ${tools}` : ''}.` };
       return { glyph: 'pencil-line', text: `Edited in ${from}; that became the current version${tools ? `, in ${tools} too` : ''}.` };
     case 'switched': {
@@ -183,8 +185,6 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       const where = andList([...new Set(event.losers.map(loser => toolName(loser.tool)))]);
       if (event.cause === 'tool-back') return { glyph: 'diff', text: `${where}’s copy changed while Central Knot didn’t manage ${where}; it gave way to the current version and is kept as a version.` };
       if (event.cause === 'own-copy') return { glyph: 'diff', text: `${where} had a copy of its own, which Central Knot hadn’t put there; it gave way to the current version and is kept as a version.` };
-      // "Later" only where times proved it (types.ts HistoryEvent orderProved): a source's change within the tie is no later.
-      if (event.cause === 'source') return { glyph: 'link-2', text: event.orderProved ? `${source} changed it too, but the current version is later, so the source’s is kept as a version.` : `${source} changed it too, though ${noTimeTells}: the current version stays, and the source’s is kept as a version.` };
       // The write over it may wait (Write to Claude Code): the in-line entry names it when it happens.
       return { glyph: 'diff', text: `Edited in ${where}, not taken in yet; it gave way to the current version and is kept as a version.` };
     }
@@ -206,7 +206,6 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
 /** What an entry's row shows in place of its action once that action was used (a found item taken in: its Undo). */
 export function doneWords(event: HistoryEvent): string {
   if (tookIn(event)) return 'Undone';
-  if (event.kind === 'kept-edit' && event.cause === 'source') return 'Made current';
   return event.kind === 'off' ? 'Turned on since' : event.kind === 'on' ? 'Turned off since' : event.kind === 'deleted' ? 'Restored' : 'Undone';
 }
 
@@ -258,10 +257,6 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
     if (!held) return { label: 'Undo', help: `Take ${name} out of Central Knot again: the copies it put in tools go, and each tool it was found in keeps its own`, change: { ...now, deleted: true, ...givenBack(event, item) } };
     return held !== 'claude-code' && event.kind === 'on' ? switchAction(false, undefined, item) : undefined;
   }
-  // A source's version kept, the current one being later: made current on a click.
-  if (event.kind === 'kept-edit' && event.cause === 'source') {
-    return isVersion(item, event.version) ? { label: 'Use it', help: `Make the source’s version of ${name} the current one${everywhere}`, change: { ...now, version: event.version } } : undefined;
-  }
   if (event.kind === 'off' || event.kind === 'on') {
     const action = switchAction(event.kind === 'off', event.only, item), back = givenBack(event, item).giveBack;
     // Copies go back only with an Undo, while the item is as the click left it; a plain Turn off or Turn on gives none back.
@@ -274,7 +269,9 @@ export function libraryAction(event: HistoryEvent, item: LibraryItem | undefined
   if (['added', 'removed', 'switched', 'took-over'].includes(event.kind) || !isVersion(item, event.previous)) return undefined;
   // Undo while what this entry made is still current; once later changes came, it says what it does instead.
   const latest = (event.version ?? event.winner?.hash) === item.hash;
-  return { label: latest ? 'Undo' : 'Go back before this', help: `Make the version from before this change current again${everywhere}`, change: { ...now, version: event.previous } };
+  // A Replace's Undo puts back the source's version the item had taken (`seen`), so where it had been changed here, that waits again.
+  const replaced = event.seen !== undefined ? { seen: event.seen } : {};
+  return { label: latest ? 'Undo' : 'Go back before this', help: `Make the version from before this change current again${everywhere}`, change: { ...now, version: event.previous, ...replaced } };
 }
 
 /**

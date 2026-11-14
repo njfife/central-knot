@@ -80,6 +80,7 @@ const api: DesktopApi = {
   addSource: (token, home) => ipcRenderer.invoke('sources:add', token, home),
   checkSource: (id, home) => ipcRenderer.invoke('sources:check', id, home),
   bringBackFromSource: (id, key, home) => ipcRenderer.invoke('sources:bring-back', id, key, home),
+  replaceFromSource: (id, key, home) => ipcRenderer.invoke('sources:replace', id, key, home),
   removeSource: (id, home) => ipcRenderer.invoke('sources:remove', id, home),
   saveProfile: (profile, home) => ipcRenderer.invoke('profiles:save', profile, home),
   deleteProfile: (id, home) => ipcRenderer.invoke('profiles:delete', id, home),

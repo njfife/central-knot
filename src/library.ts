@@ -93,17 +93,20 @@
 // holds whichever pass comes first. History says each content that gave way there, and each copy removed there (librarypass.ts
 // cameBack and logItem); a harness managed for the first time is the table's "a copy, no A" row, told the same way.
 //
-// A SOURCE (sources.ts): a Git link the person gave, read on a click and never written. Each name read there, and each item
-// linked to the source, meets the table in one step before the plan, all at once (`sourceAnswers`, a `fromSource` answer per
-// name; librarypass.ts fromSourceStep carries them out, as it carries out Pull). S is the content at the source now; an item
-// linked to the source holds which source (`source`) and the content last seen there (`seen`), and nothing else about it.
+// A SOURCE (sources.ts): a Git link the person gave, read on a click and once a day (sources.ts checkDue), and never written.
+// Each name read there, and each item linked to the source, meets the table in one step before the plan, all at once
+// (`sourceAnswers`, a `fromSource` answer per name; librarypass.ts fromSourceStep carries them out, as it carries out Pull). S
+// is the content at the source now; an item linked to the source holds which source (`source`) and the source's content it
+// last took (`seen`), and nothing else about it.
 //
 //   at the source                        the item                    what happens
 //   a name the library has no item for   none                        the item is made, Off, its first version from the source
 //   S = seen                             linked                      nothing
-//   S changed                            current = seen              S becomes the current version; On or Off stays as it is
-//   S changed                            current changed too         the later of the two is current, the other is kept as a
-//                                                                    version
+//   S = the current version, not seen    linked                      `seen` moves on to S, and nothing else changes (`same`)
+//   S changed                            linked, not changed here    S becomes the current version; On or Off stays as it is
+//   S changed                            linked, changed here        nothing: the current version stays, in Central Knot and in
+//                                                                    every tool, and S waits (`wait`), said on the item's row
+//                                                                    and the source's; Replace there makes S current (`update`)
 //   the name is gone, the source read    linked                      the item turns Off and its link is let go, so later reads
 //     whole                                                          leave it as it is, turned back On or not, until the name
 //                                                                    comes back unchanged (re-linked: "its current version this
@@ -113,7 +116,7 @@
 //   a name the library has               not linked, same content    it is linked; nothing else changes
 //   a name the library has               not linked, its current     linked again, and S becomes current: the link was removed
 //                                        version this same link's,   and added again, or the name went and came back, and the
-//                                        changed nothing since       item is as the link left it, On or Off
+//                                        not changed here since      item is as the link left it, On or Off
 //   a name the library has               not linked and differs,     not brought in, said on the source's row; Add there
 //                                        linked to another source,   brings a deleted one back, Off, as a new one comes
 //                                        or deleted
@@ -122,15 +125,21 @@
 // decides it, the one place). A source that holds no skill that can be read (its one skill deleted there, every skill
 // unreadable, its folder gone, a plugin) is not read whole: no name is gone, and the source turns nothing Off.
 //
+// CHANGED HERE (`changedHere`, the one place it is decided): the current version is not `seen`, or a managed tool's copy holds
+// an edit no pass has taken in yet, or can't be seen for sure where Central Knot applied it (a save may still be settling).
+// Only content counts. The item follows its source after Off and On, a tool kept out or let in, a tool managed for the first
+// time, Make current of `seen`, or an edit by hand back to exactly `seen`; it waits after Make current of any other version (an
+// older one from the source too). While S waits nothing is stored: `seen` stays (the source's version the edit started from,
+// one of its versions), and S is the source's last read, which every view reads again. No time decides between the source and
+// an edit here: a tool's edit no pass has taken in is taken in by the plan after the step, and S waits. Replace (a key handed
+// to the step, read from the last read) makes S current dated by its click, so an edit a tool saved before the click gives way
+// to it and is kept as a version (THE RULE); its Undo puts back the version before and `seen` as it was (types.ts Change
+// seen), so where it had been changed here S waits again. The step reads the tools before the guards (librarypass.ts guardFolders): a tool managed again in
+// that same pass can read as changed here, and S then waits one read more; nothing reads as unchanged that is not.
+//
 // The step writes no harness: the plan after it applies the current version where the item is On, as for any new version, so
-// an edit a harness holds that no pass has taken in yet meets S there (latest wins), a copy deleted by hand that no pass has
-// seen yet turns the item Off whatever the source answered (THE RULE), and a dropped item's copies leave the harnesses as any
-// Off item's do. Where that edit wins, S was kept, not made current: the table answered `update`, and the
-// pass, once its plan is known, tells History and the click `keep` (librarypass.ts asTold, the second place that decides it).
-// A source's time is its head commit's (`commitAt`: the copy is one commit deep): a later, unrelated commit there makes an
-// older edit of the skill count as the latest. Within a second of the current version's time (the tie latestCopy uses: sourceTime)
-// the current version stays and the source's is kept, and History doesn't call the current version later. A source's content
-// kept, either way, was never current (Origin replacedBy). Whether an item is linked is `linkedTo`'s alone: one linked to a
+// a copy deleted by hand that no pass has seen yet turns the item Off whatever the source answered (THE RULE), and a dropped
+// item's copies leave the harnesses as any Off item's do. Whether an item is linked is `linkedTo`'s alone: one linked to a
 // source that is no longer recorded reads as not linked, so Remove lets go of every link at once.
 //
 // Two promises hold the model together:
@@ -194,15 +203,14 @@ export type ItemKind = 'skill' | 'agent' | 'mcp';
  * by hand in a harness (`edited`), a harness's copy that gave way to the current version (`was-in`), Pull (`pulled`), read
  * at a source (`source`, with its `link` as given), an earlier version made current (`made-current`), or the record from
  * before the library (`migrated`). `replacedBy`: on a version that was never current, the version that took its place, which
- * its line on the page is compared with (noteAgainst): a `was-in` copy, an edit that lost to another (plan), or a source's
- * content the current version beat (librarypass.ts fromSourceStep, its `keep`) or an edit made here beat (librarypass.ts
- * asTold). Absent in older records, where an edit that lost reads as current once.
+ * its line on the page is compared with (noteAgainst): a `was-in` copy, or an edit that gave way (plan). Absent in older
+ * records, where an edit that lost reads as current once.
  */
 export interface Origin { how: 'found' | 'chosen' | 'edited' | 'was-in' | 'pulled' | 'source' | 'made-current' | 'migrated'; harness?: HarnessId; replacedBy?: string; link?: string }
 
 /**
  * One content an item has had. `at`: when it was made (a harness file's own time for a copy taken in; a source's head commit's
- * for one read there; else the click's), shown beside it.
+ * for one a source's read made current, but Replace's, which is its click's (A SOURCE); else the click's), shown beside it.
  */
 export interface Version { hash: string; at: string; from: Origin }
 
@@ -240,7 +248,10 @@ export interface LibraryItem {
   deleted?: { at: string };
   /** The source it is linked to (sources.ts SourceRecord `id`): linked only while that source is recorded (the header's A SOURCE). */
   source?: string;
-  /** The content last seen at that source, which the next read compares with. Set and let go with `source`. */
+  /**
+   * The source's content this item last took (made current, or found current already); it stays while a version waits there,
+   * as the base of the change made here (the header's CHANGED HERE). Set and let go with `source`.
+   */
   seen?: string;
 }
 
@@ -458,8 +469,8 @@ export const versionAt = (at: number | undefined) => new Date(at ?? Date.now()).
 
 // ---------- A source ----------
 
-/** What a source holds of one name now: its content and the source's head commit's time, gone (the source read whole), or unreadable. */
-export type AtSource = { hash: string; commitAt: string } | 'gone' | 'unreadable';
+/** What a source holds of one name now: its content, gone (the source read whole), or unreadable. */
+export type AtSource = { hash: string } | 'gone' | 'unreadable';
 /**
  * Whom an item is linked to, as one source sees it: that source (`this`), another one still recorded (`another`), none; or
  * none now, but its current version is one this same link gave and nothing has changed it since (`once`: the link was
@@ -478,56 +489,69 @@ export function linkedTo(item: LibraryItem | undefined, { id, link }: { id: stri
 }
 /**
  * The header's A SOURCE table's answer for one name, a row each: the item is made (`make`: Off; a deleted one brought back by
- * Add, `bringBack`), linked (`link`), S becomes current (`update`; already current, only `seen` moves on), S is kept as a version
- * (`keep`), the item turns Off and is let go (`drop`), or `nothing`. A name the library has that is not brought in says why:
- * its content differs (`differs`), it is another source's (`another`), or it is deleted (`deleted`).
+ * Add), linked (`link`), only `seen` moves on (`same`: S is the current version already), S becomes current (`update`; Replace's
+ * too), S waits for the person (`wait`: the item was changed here), the item turns Off and is let go (`drop`), or `nothing`. A
+ * name the library has that is not brought in says why: its content differs (`differs`), it is another source's (`another`),
+ * or it is deleted (`deleted`).
  */
-export type SourceAnswer = 'make' | 'link' | 'update' | 'keep' | 'drop' | 'nothing' | 'differs' | 'another' | 'deleted';
+export type SourceAnswer = 'make' | 'link' | 'same' | 'update' | 'wait' | 'drop' | 'nothing' | 'differs' | 'another' | 'deleted';
+
+/**
+ * What the table is told of one name besides the item and S: what each managed tool holds of the item now (librarypass.ts
+ * copiesOf; none, for what the record alone says), and a click on the source's row for it, Add on a deleted one (`bringBack`)
+ * or Replace on one whose version waits (`replace`).
+ */
+export interface SourceAsked { copies?: Copies; bringBack?: boolean; replace?: boolean }
 
 /** The header's A SOURCE table for one name: `item` is the library's for its key (deleted or not), `here` what the source holds. */
-export function fromSource(item: LibraryItem | undefined, here: AtSource, linked: LinkedTo, bringBack = false): SourceAnswer {
+export function fromSource(item: LibraryItem | undefined, here: AtSource, linked: LinkedTo, asked: SourceAsked = {}): SourceAnswer {
   if (here === 'unreadable') return 'nothing';
   if (here === 'gone') return item && !item.deleted && linked === 'this' ? 'drop' : 'nothing';
   if (!item) return 'make';
-  if (item.deleted) return bringBack ? 'make' : 'deleted';
+  if (item.deleted) return asked.bringBack ? 'make' : 'deleted';
   if (linked === 'another') return 'another';
   if (linked === 'none') return here.hash === item.hash ? 'link' : 'differs';
-  if (linked === 'once') return here.hash === item.hash ? 'link' : 'update';
+  const copies = asked.copies ?? {};
+  // Its current version is the one this same link gave, so only an edit a tool holds can have changed it since: then it differs.
+  if (linked === 'once') return here.hash === item.hash ? 'link' : changedHere(item, item.hash, copies) ? 'differs' : 'update';
   if (here.hash === item.seen) return 'nothing';
-  if (item.hash === item.seen || here.hash === item.hash) return 'update';
-  // Both changed: the later wins, the source's time being its head commit's; a tie keeps the current version.
-  return sourceTime(item, here.commitAt) === 'later' ? 'update' : 'keep';
+  if (here.hash === item.hash) return 'same';
+  return changedHere(item, item.seen, copies) && !asked.replace ? 'wait' : 'update';
 }
 
 /**
- * A source's content, by its head commit's time, against the item's current version: later or earlier by the tie or more, or
- * a `tie`. fromSource's `update` is only `later`; of its `keep`, only `earlier` is the current version proved later
- * (librarypass.ts fromSourceStep records which, as History's orderProved).
+ * Whether an item was changed here since it took `since` from its source (the header's CHANGED HERE): its current version is
+ * not `since`, or a managed tool's copy (`copies`, as the plan reads them) holds an edit no pass has taken in yet (pendingEdits),
+ * or can't be seen for sure where Central Knot applied it.
  */
-export function sourceTime(item: LibraryItem, commitAt: string): 'later' | 'earlier' | 'tie' {
-  const apart = Date.parse(commitAt) - (Date.parse(item.versions[currentIndex(item)]?.at ?? '') || 0);
-  return apart >= TIE_MS ? 'later' : apart <= -TIE_MS ? 'earlier' : 'tie';
+export function changedHere(item: LibraryItem, since: string | undefined, copies: Copies): boolean {
+  if (item.hash !== since) return true;
+  const unseenWhereApplied = (Object.keys(copies) as HarnessId[]).some(tool => copies[tool]!.is === 'unseen' && item.applied[tool] !== undefined);
+  return unseenWhereApplied || pendingEdits(plan(item, copies)).length > 0;
 }
 
 /**
  * One read of a source as its table reads it (sources.ts readOf makes it, the one place that decides what was read): the
- * source, its head commit's time, each name there by key with its content's hash or why it can't be read, and whether it was
- * read whole (the header).
+ * source, its head commit's time (which a version it makes current is dated by), each name there by key with its content's
+ * hash or why it can't be read, and whether it was read whole (the header).
  */
 export interface SourceSeen { id: string; link: string; commitAt: string; whole: boolean; names: Map<string, { hash: string } | { unreadable: string }> }
 
 /**
  * The table for one read, all at once: an answer for each name it holds and each item linked to the source (`items`: the
- * library's, deleted ones too), by key. `recorded`: the sources the home records now. `bringBack`: keys held deleted that a
- * click on Add on the source's row brings back. The pass carries these out (librarypass.ts fromSourceStep), and the Sources
- * page says them (sources.ts sourcesView); their keys are the pass's scope.
+ * library's, deleted ones too), by key. `recorded`: the sources the home records now. `asked`: the keys a click on the source's
+ * row asks for (Add on one held deleted, Replace on one whose version waits), and what the managed tools hold of an item now.
+ * The pass carries these out (librarypass.ts fromSourceStep), and the Sources page and each linked item's row say them
+ * (sources.ts sourcesView, sourceFacts); their keys are the pass's scope.
  */
-export function sourceAnswers(items: Record<string, LibraryItem>, read: SourceSeen, recorded: ReadonlySet<string>, bringBack?: ReadonlySet<string>): Map<string, SourceAnswer> {
+export function sourceAnswers(items: Record<string, LibraryItem>, read: SourceSeen, recorded: ReadonlySet<string>,
+  asked: { bringBack?: ReadonlySet<string>; replace?: ReadonlySet<string>; copies?: (item: LibraryItem) => Copies } = {}): Map<string, SourceAnswer> {
   const linked = Object.values(items).filter(item => linkedTo(item, read, recorded) === 'this').map(item => item.key);
   return new Map([...new Set([...read.names.keys(), ...linked])].map(key => {
-    const entry = read.names.get(key);
-    const here: AtSource = !entry ? (read.whole ? 'gone' : 'unreadable') : 'hash' in entry ? { hash: entry.hash, commitAt: read.commitAt } : 'unreadable';
-    return [key, fromSource(items[key], here, linkedTo(items[key], read, recorded), bringBack?.has(key))];
+    const entry = read.names.get(key), item = items[key];
+    const here: AtSource = !entry ? (read.whole ? 'gone' : 'unreadable') : 'hash' in entry ? { hash: entry.hash } : 'unreadable';
+    const about: SourceAsked = { copies: item && asked.copies?.(item), bringBack: asked.bringBack?.has(key), replace: asked.replace?.has(key) };
+    return [key, fromSource(item, here, linkedTo(item, read, recorded), about)];
   }));
 }
 
@@ -606,7 +630,7 @@ export function latestCopy(copies: readonly Pick<FoundCopy, 'hash' | 'at'>[]): s
   const [last, before] = [...made].sort(([, first], [, second]) => second - first);
   return last && before && last[1] - before[1] >= TIE_MS ? last[0] : undefined;
 }
-/** Two contents changed less than this apart are a tie for latestCopy (no latest) and for a source's version (sourceTime: the current one stays). */
+/** Two contents changed less than this apart are a tie for latestCopy: no latest. */
 const TIE_MS = 1000;
 
 // ---------- Versions ----------

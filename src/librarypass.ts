@@ -67,7 +67,7 @@
 // - History's sentences and actions for its entries: historyactions.ts, in the kind's words (historypage.ts asks it).
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-import { carryOut, itemKey, keepVersion, managedAgain, newItem, pendingChanges, plan, setCurrent, sourceAnswers, sourceTime, takeInAnswer, versionAt, wantedIn } from './library.ts';
+import { carryOut, itemKey, keepVersion, managedAgain, newItem, pendingChanges, plan, setCurrent, sourceAnswers, takeInAnswer, versionAt, wantedIn } from './library.ts';
 import type { ItemNow } from './historyactions.ts';
 import type { Copies, FoundCopy, FoundKey, HarnessCopy, ItemKind, LeftFound, LibraryItem, Plan, Origin, Shelf, SourceSeen, TakenBy, Version } from './library.ts';
 import { appendHistory, historyCutoff, readHistory, replaceHistory } from './history.ts';
@@ -466,7 +466,7 @@ export const takeInAnswers = (look: AnyLook, key: string) => {
  * What was asked of a pass for one item (a click, what Pull brings, or what a source holds), as the History entry it becomes:
  * begun when it is recorded, finished with the harnesses its plan writes or removes (`fill`: which of them it names).
  */
-type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'version' | 'previous' | 'foundIn' | 'link'> & { losers?: HistoryEvent['losers']; orderProved?: boolean; fill?: 'written' | 'removed' };
+type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'version' | 'previous' | 'foundIn' | 'link' | 'seen'> & { losers?: HistoryEvent['losers']; fill?: 'written' | 'removed' };
 /**
  * What Pull brings for one item (gitrepo.ts): its name and content, and where the repo holds one harness's own part, that
  * part's text (Claude Code's file, for an agent); or its removal.
@@ -475,12 +475,13 @@ export type Pulled<Content> = { name: string; content: Content; own?: { harness:
 /**
  * One read of a source as the pass is given it (sources.ts readOf): the table's reading of it (library.ts SourceSeen), with each
  * readable name's own name and content. `recorded`: the sources the home records now. `bringBack`: keys held deleted that a
- * click on Add on the source's row brings back.
+ * click on Add on the source's row brings back; `replace`: keys whose waiting version a click on Replace there makes current.
  */
 export interface SourceRead<Content> extends SourceSeen {
   names: Map<string, { name: string; hash: string; content: Content } | { unreadable: string }>;
   recorded: ReadonlySet<string>;
   bringBack?: ReadonlySet<string>;
+  replace?: ReadonlySet<string>;
 }
 interface Pass extends AnyLook {
   shelf: Shelf<unknown>;
@@ -494,7 +495,7 @@ interface Pass extends AnyLook {
   told: boolean;
   /** What Synchronize everything took in, as History told it (logItem): its one notice, made when the pass ends. */
   takenIn: { name: string; foundIn: HarnessId[]; history: string }[];
-  /** What a source's read did to each item, by key, but `nothing` (fromSourceStep, corrected by logItem): PassResult sourced. */
+  /** What a source's read did to each item, by key, but `nothing` and `same` (fromSourceStep; logItem names its entry): PassResult sourced. */
   sourced: Map<string, NonNullable<PassResult['sourced']>[number]>;
   results: DestinationResult[]; notices: SyncNotice[]; writes: number; made: string[];
 }
@@ -510,8 +511,8 @@ export interface PassOptions<Content> {
   /** What Pull brings, by item (gitrepo.ts): each becomes that item's current version before the pass (pull). */
   pulled?: Map<string, Pulled<Content>>;
   /**
-   * What a source holds now, read on a click (sources.ts): its table is carried out before the pass (fromSourceStep), and the
-   * pass then concerns the items the table answered for, and nothing else.
+   * What a source holds now, read on a click or by the daily check (sources.ts): its table is carried out before the pass
+   * (fromSourceStep), and the pass then concerns the items the table answered for, and nothing else.
    */
   source?: SourceRead<Content>;
   /**
@@ -761,7 +762,7 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
   // A profile switch's clicks are told in its own entry (PassOptions told).
   if (asked && pass.told) pass.asked.delete(item.key);
   else if (asked) {
-    const { fill, ...entry } = asTold(pass, item, asked, made, taken);
+    const { fill, ...entry } = asked;
     // A switch's entry says the version it left (`taken`, once this pass is carried out), so its Undo is offered only while it still is.
     const switched = (entry.kind === 'on' || entry.kind === 'off') && !entry.winner ? { version: taken } : {};
     const filled = !entry.losers && fill ? did[fill] : [];
@@ -832,21 +833,6 @@ async function untell(pass: Pass, told: Told, held: HarnessId[]) {
   const mine = new Map(told.events.map(event => [event.id, event]));
   const history = await readHistory(pass.context);
   await replaceHistory(pass.context, history.filter(event => !gone.has(event.id)).map(event => mine.get(event.id) ?? event));
-}
-
-/**
- * A source's update as History tells it, by what the plan does: where an edit in a harness wins over the source's content
- * (latest wins: the plan takes that edit in, `taken`), the source's is kept as a version that was never current (library.ts
- * Origin replacedBy), so its entry is a `kept-edit` and the read's answer (PassResult sourced) is `keep`. Recorded here, where
- * the plan is known; anything else asked is told as asked.
- */
-function asTold(pass: Pass, item: LibraryItem, asked: Asked, made: Plan, taken: string): Asked {
-  if (asked.cause !== 'source' || asked.kind !== 'edit' || !made.takeIn) return asked;
-  const answered = pass.sourced.get(item.key), beaten = item.versions.find(version => version.hash === asked.version);
-  if (answered) answered.answer = 'keep';
-  // A new `from`: fromSourceStep gives every version of one read the same object.
-  if (beaten) beaten.from = { ...beaten.from, replacedBy: taken };
-  return { kind: 'kept-edit', cause: 'source', version: asked.version, link: asked.link };
 }
 
 /**
@@ -930,7 +916,7 @@ async function click(pass: Pass, asked: Change) {
   } else if (asked.deleted) {
     item.deleted = { at: now() };
     pass.asked.set(item.key, { kind: 'deleted', fill: 'removed' });
-  } else if (asked.version) await makeCurrent(pass, item, asked.version, refuse);
+  } else if (asked.version) await makeCurrent(pass, item, asked.version, refuse, asked.seen);
   // A copy is chosen only when a found item is taken in: one in the library is at its current version in every harness.
   else if (asked.use) refuse(`${name} is in Central Knot already, so there is no copy to choose. Make one of its versions current instead.`);
   else turn(pass, item, asked);
@@ -1021,56 +1007,56 @@ function takenInNotice(taken: Pass['takenIn']): TakenInNotice {
   return { kind: 'taken-in', items: taken.map(entry => entry.name), from, history: taken[0].history };
 }
 
-/** Makes an earlier version current: a new version (library.ts setCurrent), which the pass then applies like any other. */
-async function makeCurrent(pass: Pass, item: LibraryItem, version: string, refuse: Refuse) {
+/**
+ * Makes an earlier version current: a new version (library.ts setCurrent), which the pass then applies like any other. `seen`:
+ * History's Undo of a Replace puts back the source's version the item had taken before it (types.ts Change seen).
+ */
+async function makeCurrent(pass: Pass, item: LibraryItem, version: string, refuse: Refuse, seen?: string) {
   const content = item.versions.some(known => known.hash === version) ? await pass.kind.readVersion(pass.context, item.key, version) : undefined;
   if (!content) return refuse('That version is no longer in Central Knot’s store, so it can’t be made current.');
   if (version === item.hash) return refuse(`${item.name} is at that version already.`);
   const previous = item.hash;
+  if (seen !== undefined && item.source) item.seen = seen;
   await setCurrent(pass.shelf, item, { hash: version, at: now(), from: { how: 'made-current' } }, content);
   pass.asked.set(item.key, { kind: 'current', previous, version, fill: 'written' });
 }
 
 /**
- * A source read on a click (library.ts A SOURCE: sourceAnswers, a fromSource answer for every name it holds and every item
- * linked to it), carried out: made Off (`make`), linked, its content made current or kept as a version, or turned Off with its
- * link let go (`drop`). Each but a link is History's entry with the source's `link`: an `off` (cause `source`) for one made, an
- * `edit` for one made current, a `kept-edit` for one kept, an `off` (cause `source-dropped`) for one dropped. No harness is
- * written here: the plan after it applies the current version where the item is On. Answers the keys it answered for: the
- * pass's scope.
+ * A source read on a click or by the daily check (library.ts A SOURCE: sourceAnswers, a fromSource answer for every name it holds
+ * and every item linked to it, told what the managed tools hold of each item now: copiesOf), carried out: made Off (`make`),
+ * linked (`link`; `same` only moves `seen` on), its content made current (`update`, Replace's dated by its click), or turned
+ * Off with its link let go (`drop`); `wait` changes nothing. Each change a person sees is History's entry with the source's
+ * `link`: an `off` (cause `source`) for one made, an `edit` for one made current (a Replace's with `seen` as it was), an `off`
+ * (cause `source-dropped`) for one dropped. No harness is written here: the plan after it applies the current version where
+ * the item is On, and takes in a tool's edit no pass had taken in. Answers the keys it answered for: the pass's scope.
  */
 async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Set<string>> {
-  const answers = sourceAnswers(pass.library.items, read, read.recorded, read.bringBack);
+  const answers = sourceAnswers(pass.library.items, read, read.recorded, { bringBack: read.bringBack, replace: read.replace, copies: item => copiesOf(pass, item) });
   const origin: Origin = { how: 'source', link: read.link }, link = read.link;
   for (const [key, answer] of answers) {
     const item = pass.library.items[key], entry = read.names.get(key);
-    if (answer !== 'nothing') pass.sourced.set(key, { name: entry && 'name' in entry ? entry.name : item?.name ?? key, answer });
+    if (answer !== 'nothing' && answer !== 'same') pass.sourced.set(key, { name: entry && 'name' in entry ? entry.name : item?.name ?? key, answer });
     if (answer === 'drop' && item) {
       item.on = false;
       delete item.source; delete item.seen;
       pass.asked.set(key, { kind: 'off', cause: 'source-dropped', link, fill: 'removed' });
     }
-    // Only a name with content is made, linked, made current or kept.
+    // Only a name with content is made, linked or made current.
     if (!entry || !('hash' in entry)) continue;
-    const version: Version = { hash: entry.hash, at: read.commitAt, from: origin };
     if (answer === 'make') {
       const made = item ?? newItem(key, entry.name);
       Object.assign(made, { on: false, name: entry.name, source: read.id, seen: entry.hash } satisfies Partial<LibraryItem>);
       delete made.deleted;
       pass.library.items[key] = made;
-      if (made.hash !== entry.hash) await setCurrent(pass.shelf, made, version, entry.content);
+      if (made.hash !== entry.hash) await setCurrent(pass.shelf, made, { hash: entry.hash, at: read.commitAt, from: origin }, entry.content);
       pass.asked.set(key, { kind: 'off', cause: 'source', link });
-    } else if (answer === 'link' || answer === 'update' || answer === 'keep') {
-      const previous = item!.hash;
+    } else if (answer === 'link' || answer === 'same') {
       Object.assign(item!, { source: read.id, seen: entry.hash } satisfies Partial<LibraryItem>);
-      if (answer === 'keep') {
-        // Never current: the current version took its place, proved later by time unless the two are within the tie.
-        await keepVersion(pass.shelf, item!, { ...version, from: { ...origin, replacedBy: previous } }, entry.content);
-        pass.asked.set(key, { kind: 'kept-edit', cause: 'source', version: entry.hash, link, orderProved: sourceTime(item!, read.commitAt) === 'earlier' });
-      } else if (answer === 'update' && entry.hash !== previous) {
-        await setCurrent(pass.shelf, item!, version, entry.content);
-        pass.asked.set(key, { kind: 'edit', cause: 'source', previous, version: entry.hash, link, fill: 'written' });
-      }
+    } else if (answer === 'update') {
+      const previous = item!.hash, before = item!.seen, replace = !!read.replace?.has(key);
+      Object.assign(item!, { source: read.id, seen: entry.hash } satisfies Partial<LibraryItem>);
+      await setCurrent(pass.shelf, item!, { hash: entry.hash, at: replace ? now() : read.commitAt, from: origin }, entry.content);
+      pass.asked.set(key, { kind: 'edit', cause: 'source', previous, version: entry.hash, link, fill: 'written', ...(replace ? { seen: before } : {}) });
     }
   }
   await saveIfChanged(pass);

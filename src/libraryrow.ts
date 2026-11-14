@@ -19,6 +19,7 @@
 // never something of its own.
 import { originWords, theVersion, wantedIn, type LibraryItem, type Plan, type TakeInAnswer, type Version, type VersionChange } from './library.ts';
 import { clockTimesApart, dayAndTime } from './model.ts';
+import { linkLabel } from './sourcelink.ts';
 import type { Change, HarnessId, ItemNotice, TakenInNotice } from './types.ts';
 import { andList, kindNouns, sentence, toolName, toolsPhrase } from './words.ts';
 
@@ -105,6 +106,19 @@ export interface LibraryRow {
   switchedOff?: readonly string[];
   /** Harnesses where the next pass's write or removal waits for Write to Claude Code (types.ts LibraryFacts waits). */
   waits?: readonly string[];
+}
+
+/**
+ * What an item's row says of the source it is linked to (types.ts LibraryFacts fromSource): while a version waits there (the
+ * item changed here, or a tool's copy unreadable: library.ts changedHere), the tag after its name; and the opened row's line, written around its link to
+ * Sources (`before`, the link, `after`).
+ */
+export function fromSourceWords(from: { link: string; waits?: true }): { tag?: { text: string; title: string }; before: string; after: string } {
+  const label = linkLabel(from.link);
+  if (!from.waits) return { before: `From ${label}, a source. What changes there comes in once a day while Automatic sync is on, and at Check now on `, after: ', unless you change it here.' };
+  const waits = 'Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now';
+  return { tag: { text: 'update at its source', title: `${label} has a newer version. ${waits}; Replace on Sources makes the source’s current and keeps yours as a version.` },
+    before: `From ${label}, a source, which has a newer version. ${waits}; Replace on `, after: ' makes the source’s current and keeps yours as a version.' };
 }
 
 /** A harness's own switch that turns the item off there, as its line and tag's tooltip say it: "switched off in Codex’s own settings". */

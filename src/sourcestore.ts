@@ -7,10 +7,11 @@
 //                                 beside it (.look-<token>.json); the next look drops it, Add moves it to sources/<id>/
 //   sources/.stage-<uuid>/        a Check now's fetch, until its turn swaps it in
 //
-// The last read is a cache, not a record: two things read it, the source's row on the Sources page (what each skill there is to
-// the library, and why the read isn't whole) and Add on a deleted name's row (which brings that name back from it, with no
-// fetch). A missing copy means only "look again": the row reads it as nothing at the link's folder (sources.ts notSkillsWhy),
-// and the next Check now fetches it. Which items came from a source is the items' own (library.ts LibraryItem `source`,
+// The last read is a cache, not a record: what reads it are the source's row on the Sources page (what each skill there is to
+// the library, and why the read isn't whole), each linked item's row on Skills (whether a version waits there: sources.ts
+// sourceFacts), and Add on a deleted name's row and Replace on a waiting one's (each takes that name from it, with no fetch).
+// A missing copy means only "look again": the row reads it as nothing at the link's folder (sources.ts notSkillsWhy), and the
+// next Check now fetches it. Which items came from a source is the items' own (library.ts LibraryItem `source`,
 // `seen`), never this record's, and whom an item is linked to is library.ts linkedTo's alone. This module only reads and
 // writes what it is given.
 import { readFile } from 'node:fs/promises';
@@ -26,7 +27,7 @@ export interface SourceRecord {
   link: string;
   /** What the link resolves to: the address git fetches; the branch or tag (when the link named none, the default branch as it was at Add); the folder ('' for the root). */
   repository: string; ref: string; folder: string;
-  /** The commit last read and its time (the source's time: library.ts A SOURCE), and when it was read. */
+  /** The commit last read and its time (a version its read makes current is dated by it), and when it was read (the daily check counts from then: sources.ts checkDue). */
   commit: string; commitAt: string; readAt: string;
   addedAt: string;
   /** Why the last Check now couldn't read it, until a read succeeds. */
@@ -62,9 +63,6 @@ export async function readSources(home: string): Promise<{ sources: SourceRecord
   return { sources: [], problem: `The sources record is damaged. ${NOTHING_CHANGED}` };
 }
 export const saveSources = (home: string, sources: SourceRecord[]) => writeDurably(recordPath(home), `${JSON.stringify({ formatVersion: FORMAT_VERSION, sources }, null, 2)}\n`);
-
-/** Each recorded source's link, by its id: which ids are recorded, for library.ts linkedSource (whom an item is linked to is library.ts's alone). */
-export const sourceLinks = async (home: string) => new Map((await readSources(home)).sources.map(source => [source.id, source.link]));
 
 /**
  * The source the home reads from `address`, if one (one repository however it is spelt): the Git repo's Connect refuses it

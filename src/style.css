@@ -1890,6 +1890,7 @@ button.harness-card-main:focus-visible { outline: 0; }
 .tool-mark.mark-off::after { content: ""; position: absolute; left: 3px; right: 3px; top: calc(50% - 0.75px); height: 1.5px; border-radius: 1px; background: var(--ink-soft); transform: rotate(-40deg); }
 .tool-mark.mark-differs, .tool-mark.mark-waits { color: var(--warning); }
 .row-tag.row-tag-differs { color: var(--warning); }
+.row-tag.row-tag-source { display: inline-flex; align-items: center; gap: 4px; color: var(--warning); }
 .details-actions.details-danger { margin-top: 0; }
 
 /* An agent's versions in its opened row (versionlist.ts): one line each, newest first, in the look of the tools' rows above

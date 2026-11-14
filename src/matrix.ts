@@ -14,11 +14,10 @@ import { leftOutTools, whyReadOnly, saidInStatusBar, tell, type Click, type Outc
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, h, icon, middle, pathText, toggle, withToolCount, type Child } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { kindSource, type ItemRow, type KindSource, type Tool } from './itemrow.ts';
-import { addLabel, asksWhichCopy, canAdd, harnessIs, inLibrary, madeFrom, placeOf as libraryPlace, rowClicks, statusLine, switchLabel, versionClock, writesWait, type HarnessIs, isPartial } from './libraryrow.ts';
+import { addLabel, asksWhichCopy, canAdd, fromSourceWords, harnessIs, inLibrary, madeFrom, placeOf as libraryPlace, rowClicks, statusLine, switchLabel, versionClock, writesWait, type HarnessIs, isPartial } from './libraryrow.ts';
 import { libraryPages, type LibraryPage } from './librarypages.ts';
 import { versionList, type VersionText } from './versionlist.ts';
 import { listed, type Version } from './library.ts';
-import { linkLabel } from './sourcelink.ts';
 import type { Change, DestinationResult, HomeView, ItemNotice, LibraryFacts, SyncNotice, HarnessId, PartsInstall, TakenInNotice, ThroughPlugin } from './types.ts';
 import { market } from './pluginstate.ts';
 import { pluginKey, type PluginDraft } from './pluginplan.ts';
@@ -654,6 +653,17 @@ function libraryTag(skill: ItemRow) {
   const tag = library()?.say.placeTag(skill, itemOf(skill), toolList(), leftOutTools());
   return tag ? h('span.row-tag', { title: tag.title }, tag.text) : null;
 }
+/** The tag after an item's name while a version waits at the source it is linked to (libraryrow.ts fromSourceWords). */
+function sourceTag(skill: ItemRow) {
+  const tag = skill.fromSource && fromSourceWords(skill.fromSource).tag;
+  return tag ? h('span.row-tag.row-tag-source', { title: tag.title }, icon('link-2', 12, 'tone-warning'), tag.text) : null;
+}
+/** The opened row's line saying which source an item is from, and whether a version waits there, with its link to Sources. */
+function fromSourceLine(key: string, from: NonNullable<ItemRow['fromSource']>) {
+  const said = fromSourceWords(from);
+  return h('p.details-limits.details-note', {}, icon('link-2', 12, from.waits ? 'tone-warning' : 'tone-muted'), h('span', {}, said.before,
+    h('button.inline-link', { type: 'button', id: `from-source-${key}`, title: from.link, onclick: () => showPage('sources') }, 'Sources'), said.after));
+}
 
 /**
  * An item's name cell. The name gives way last: as the column narrows, the description shortens (and in every row at
@@ -668,6 +678,7 @@ function nameCell(skill: ItemRow, attention: boolean) {
       h('span.ov-name-text', {}, name),
       attention ? h('span.row-tag.row-tag-differs', { id: `decide-${skill.key}` }, 'Copies differ') : null),
     libraryTag(skill),
+    sourceTag(skill),
     partTags(skill),
     skill.description ? h('span.ov-name-about', { title: skill.description }, skill.description) : null);
 }
@@ -1493,8 +1504,7 @@ function details(skill: ItemRow, placement: Placement = 'row'): HTMLElement {
     libraryVersions(lib, skill),
     inFiles || kind === 'mcp' ? null : wherePaths(skill),
     lib.own?.(skill) ?? null,
-    skill.fromSource ? h('p.details-limits.details-note', {}, icon('link-2', 12, 'tone-muted'), h('span', {}, `From ${linkLabel(skill.fromSource.link)}, a source. Check now on `,
-      h('button.inline-link', { type: 'button', id: `from-source-${skill.key}`, title: skill.fromSource.link, onclick: () => showPage('sources') }, 'Sources'), ' brings in what changes there.')) : null,
+    skill.fromSource ? fromSourceLine(skill.key, skill.fromSource) : null,
     skill.converted ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), `Converted from ${names[skill.converted.origin] ?? skill.converted.origin}’s agent “${skill.converted.agent}”, as a one-time copy; ${names[skill.converted.origin] ?? skill.converted.origin} keeps the agent, and edits here never change it. As a skill it has no ${andList(skill.converted.losses)}.`) : null,
     remove ? h('div.details-actions.details-danger', {}, remove) : null);
 }

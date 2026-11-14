@@ -241,6 +241,8 @@ export interface DesktopApi {
   checkSource(id: string, home: string): Promise<SourceResult>;
   /** Brings back one name the library holds deleted, from a source's last read, Off (sources.ts bringBack). */
   bringBackFromSource(id: string, key: string, home: string): Promise<SourceResult>;
+  /** Makes the version that waits at a source, from its last read, an item's current version; the one it had is kept (sources.ts replaceFromSource). */
+  replaceFromSource(id: string, key: string, home: string): Promise<SourceResult>;
   /** Forgets a source: its items stay as they are, On or Off, with their versions (sources.ts removeSource). */
   removeSource(id: string, home: string): Promise<SourceResult>;
   /** Adds or changes a profile's name and items (Central Knot's own file; no tool is written). */
@@ -372,6 +374,12 @@ export interface Change {
    * harness's own instead of being removed.
    */
   giveBack?: Partial<Record<HarnessId, string>>;
+  /**
+   * With `version`, History's Undo of a Replace (HistoryEvent seen): the source's content the item had taken before it, which
+   * becomes its `seen` again (library.ts LibraryItem seen), so where the item had been changed here the source's version waits
+   * again. Made by History's action in main alone (librarypass.ts restoreAll), never sent by the page.
+   */
+  seen?: string;
 }
 
 export interface ApplyResult { stopped?: string; /** An Undo refused before it wrote anything: why, without "so nothing was undone", for a band that also says what else was undone. */ refused?: string; results: DestinationResult[]; harnessWrites: number; /** The History events the asked changes made (copies added, switches flipped, copies removed, a copy chosen, copies taken over), for their one Undo; never what sync did alongside. */ made?: string[]; /** An Undo of a profile switch (profiles.ts undoSwitch): as types.ts ProfileSwitchResult says them, what it turned On and Off, what is not as it asked, and the MCP servers that wait for Write to Claude Code. */ switched?: Pick<ProfileSwitchResult, 'on' | 'off' | 'left' | 'waits'>; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
@@ -466,8 +474,8 @@ export interface HistoryEvent {
    * A library item's: what made it happen, read by historyactions.ts alone. `switch`: the person's switch ('on' / 'off'). `found`:
    * a found item taken in by a click on Add ('on'; `winner`: where it was found). `sync-everything`: the same, taken in by the
    * home's standing rule, Synchronize everything, with no click. `pulled`: Pull did it ('on' for an item new here, 'edit',
-   * 'deleted'). `source`: a source read on a click did it (`link`): 'off' for an item it brought in, Off; 'edit' for its content
-   * made current; 'kept-edit' for its content kept as a version, the current one being later. `source-dropped`: the source no longer
+   * 'deleted'). `source`: a source's read did it (`link`): 'off' for an item it brought in, Off; 'edit' for its content made
+   * current (by itself, or by Replace: `seen`). `source-dropped`: the source no longer
    * has it, so it was turned Off and is no longer linked ('off'). `deleted-by-hand`: its copy was deleted by hand ('off'; `winner`: where). `tool-back`: a tool managed again held a
    * copy the item didn't have ('kept-edit'; `losers`: that copy), which gave way to the current version (library.ts managedAgain).
    * `own-copy`: a harness's own copy, which Central Knot had never put there and no click took over, gave way to the current
@@ -477,6 +485,12 @@ export interface HistoryEvent {
   cause?: 'switch' | 'found' | 'sync-everything' | 'pulled' | 'source' | 'source-dropped' | 'deleted-by-hand' | 'tool-back' | 'own-copy' | 'in-line';
   /** A source's entry (`cause` 'source' or 'source-dropped'): its link as the person gave it, kept here since the source may be removed later. */
   link?: string;
+  /**
+   * A Replace's 'edit' (`cause` 'source'): the source's content the item had taken before it (library.ts LibraryItem seen),
+   * which its Undo puts back with the version before (Change seen), so where it had been changed here the source's version
+   * waits again.
+   */
+  seen?: string;
   /**
    * The version current once this entry's change was made: 'current', the version made current; an 'edit' Pull made, the
    * version pulled; 'on' / 'off' by a switch, the version it was at (historyactions.ts asTheClickLeftIt).
@@ -510,8 +524,7 @@ export interface HistoryEvent {
   previous?: string;
   /**
    * On a library item's 'edit' or 'conflict': whether times proved the edit taken in the latest (library.ts Plan orderProved);
-   * on a source's 'kept-edit', whether they proved the current version later than the source's (library.ts sourceTime); true on
-   * every other entry. An entry from before the library holds false where the fixed tool order decided.
+   * true on every other entry. An entry from before the library holds false where the fixed tool order decided.
    */
   orderProved: boolean;
   /** Set once undone or restored, naming the event that did it (one from before the library may name none: 'already-as-it-was'). */
@@ -822,8 +835,11 @@ export interface LibraryFacts {
   waits?: HarnessId[];
   /** Skills: made by Convert to skill from an agent: which, from which tool's, and what an agent had that a skill doesn't. */
   converted?: { agent: string; origin: HarnessId; losses: string[] };
-  /** In the library and linked to a source the home records (library.ts LibraryItem source): that source's link, as given. */
-  fromSource?: { link: string };
+  /**
+   * In the library and linked to a source the home records (library.ts LibraryItem source): that source's link, as given, and
+   * whether its last read has a version that waits because the item was changed here (`waits`: library.ts A SOURCE `wait`).
+   */
+  fromSource?: { link: string; waits?: true };
 }
 
 /**
@@ -838,8 +854,8 @@ export interface PassResult {
   /** A pass of the whole home (librarypass.ts PassOptions background): the found keys it left found; main.ts tells an open page when one is new (foundGained). */
   found?: string[];
   /**
-   * A pass with a source's read (librarypass.ts fromSourceStep): what it did to each item, but `nothing`, as the table answered
-   * and the plan then did (a later edit in a tool keeps the source's version: `keep`), with the History entry that says it.
+   * A pass with a source's read (librarypass.ts fromSourceStep): the table's answer for each item, but `nothing` and `same`
+   * (which change nothing a person sees), with the History entry that says it.
    */
   sourced?: { name: string; answer: SourceAnswer; history?: string }[];
 }
@@ -1014,7 +1030,7 @@ export interface SourceFound {
   link: string;
   /** What it resolves to: the address git fetches, the branch or tag, and the folder ('' for the repository's root). */
   repository: string; ref: string; folder: string;
-  /** The commit read and its time (the source's time: library.ts A SOURCE). */
+  /** The commit read and its time. */
   commit?: string; commitAt?: string;
   holds: SourceHolds;
   names: SourceName[];
@@ -1033,7 +1049,8 @@ export interface SourcesView { sources: SourceView[]; access: WriteAccess; probl
 /** A link read before anything is kept: what Add would do (`token` names it for Add), or why it can't be added. */
 export type SourcePreview = (SourceFound & { token: string; refused?: string }) | { refused: string; link: string };
 /**
- * What a source's click did: the pass's answers by name (PassResult sourced), and its results; why it stopped; whether the source
+ * What a source's click did: the pass's answers by name (PassResult sourced, but a `wait` the source's row no longer says once
+ * the pass is done: sources.ts answer), and its results; why it stopped; whether the source
  * wasn't read whole (`notWhole`: the source turned nothing off, though the pass may have, for a copy deleted by hand; the
  * source's row says why); and the page's view after.
  */

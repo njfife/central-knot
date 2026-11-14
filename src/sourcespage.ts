@@ -2,8 +2,8 @@
 // follows is library.ts's A SOURCE). One field takes the link; Look reads it and shows, skill by skill, what Add would do and
 // what it won't bring in and why, before anything is kept; Add brings each skill into Central Knot, Off. Each source has a row:
 // its link, what it brought (On or Off), when it was last read, why it couldn't be read if so, Check now and Remove; a skill
-// there the library holds deleted has its own Add. Every state a row says is the engine's (types.ts SourceNameState); this page
-// only words it. Its own page rather than the Git repo's: that page is Pull and Push of the whole set, two-way and in Central
+// there the library holds deleted has its own Add, and one whose version waits (library.ts changedHere) its own Replace. Every state
+// a row says is the engine's (types.ts SourceNameState); this page only words it. Its own page rather than the Git repo's: that page is Pull and Push of the whole set, two-way and in Central
 // Knot's layout, while a source is read only, holds a few skills, and its rows grow one per link.
 import { announce, busy, rerender, showPage, state } from './app.ts';
 import { button, closeButton, h, icon } from './dom.ts';
@@ -84,6 +84,11 @@ const bringBack = (source: SourceView, name: SourceName) => busy(`Bringing ${nam
   await settle(result, whatItDid(result, linkLabel(source.link)));
 });
 
+const replace = (source: SourceView, name: SourceName) => busy(`Replacing ${name.name ?? name.key}…`, async () => {
+  const result = await api().replaceFromSource(source.id, name.key, state.home!.home);
+  await settle(result, whatItDid(result, linkLabel(source.link), name.name ?? name.key));
+});
+
 const remove = (source: SourceView) => busy('Removing the source…', async () => {
   const result = await api().removeSource(source.id, state.home!.home);
   await settle(result, { text: `Removed ${linkLabel(source.link)}. Its skills stay in Central Knot as they are, On or Off, with their versions; they are no longer from it.`, warns: false });
@@ -93,34 +98,37 @@ const remove = (source: SourceView) => busy('Removing the source…', async () =
 interface Said { text: string; warns: boolean; note?: string; undo?: { id: string; label: string }; skills?: boolean }
 
 /**
- * What a source's click did, from what the pass did (types.ts PassResult sourced: each item's answer, corrected where a later
- * edit won, and the History entry that says it; and the pass's results: the tools each was written to or taken out of), and
- * why the source wasn't read whole. A skill its source dropped leads, with Turn on, and it or a read not whole is a warning; else
- * the one update has Undo.
+ * What a source's click did, from what the pass did (types.ts PassResult sourced: each item's answer and the History entry
+ * that says it; and the pass's results: the tools each was written to or taken out of), and why the source wasn't read whole.
+ * A skill its source dropped leads, with Turn on, and it or a read not whole is a warning; else the one update has Undo.
+ * `replaced`: the name a click on Replace asked for, whose update says so.
  */
-export function whatItDid(result: Pick<SourceResult, 'sourced' | 'results' | 'notWhole'>, label: string): Said {
+export function whatItDid(result: Pick<SourceResult, 'sourced' | 'results' | 'notWhole'>, label: string, replaced?: string): Said {
   const homeTools = state.home?.sync.managed ?? [];
   const where = (name: string, outcome: 'written' | 'removed') => (result.results ?? []).filter(entry => entry.item === name && entry.outcome === outcome && entry.harness).map(entry => entry.harness!);
   const of = (...answers: string[]) => (result.sourced ?? []).filter(entry => answers.includes(entry.answer));
   const names = (entries: { name: string }[]) => andList(entries.map(entry => entry.name));
   const are = (entries: unknown[]) => (entries.length === 1 ? 'is' : 'are');
-  const dropped = of('drop'), updated = of('update'), kept = of('keep'), made = of('make'), linked = of('link'), left = of('differs', 'another', 'deleted');
+  const dropped = of('drop'), updated = of('update'), waiting = of('wait'), made = of('make'), linked = of('link'), left = of('differs', 'another', 'deleted');
   const said = [
     ...dropped.map(({ name }) => { const out = where(name, 'removed'); return `${name} is no longer at ${label}: it was turned off${out.length ? ` and taken out of ${toolsPhrase(out, homeTools)}` : ''}; Central Knot keeps it.`; }),
-    ...updated.map(({ name }) => { const into = where(name, 'written'); return `${name} was updated from its source${into.length ? `, now in ${toolsPhrase(into, homeTools)}` : ', kept Off'}.`; }),
-    kept.length ? `${names(kept)}: your version is later and stays current; the source’s is kept as a version.` : '',
+    ...updated.map(({ name }) => {
+      const into = where(name, 'written'), now = into.length ? `, now in ${toolsPhrase(into, homeTools)}` : ', kept Off';
+      return name === replaced ? `${name} has the source’s version${now}; the one it had is kept as a version.` : `${name} was updated from its source${now}.`;
+    }),
+    waiting.length ? `${names(waiting)} changed at the source; yours ${waiting.length === 1 ? 'stays current, since it was' : 'stay current, since they were'} changed here or a tool’s copy can’t be read just now: Replace on ${waiting.length === 1 ? 'its row' : 'each one’s row'} takes the source’s.` : '',
     made.length ? `${names(made)} ${are(made)} in Central Knot, Off: turn ${made.length === 1 ? 'it' : 'them'} on in Skills.` : '',
     linked.length ? `${names(linked)} ${are(linked)} in Central Knot already, the same, and ${linked.length === 1 ? 'is' : 'are'} now from it.` : '',
     left.length ? `Not brought in: ${names(left)} (${left.length === 1 ? 'its row says' : 'their rows say'} why).` : '',
     result.notWhole ? `Not all of ${label} could be read (its row says why), so the source turned nothing off.` : '',
   ].filter(Boolean);
   const turnOn = dropped.length === 1 && dropped[0].history ? { id: dropped[0].history, label: `Turn ${dropped[0].name} on` } : undefined;
-  const undo = !turnOn && updated.length === 1 && updated[0].history ? { id: updated[0].history, label: 'Undo the update' } : undefined;
+  const undo = !turnOn && updated.length === 1 && updated[0].history ? { id: updated[0].history, label: updated[0].name === replaced ? 'Undo the replace' : 'Undo the update' } : undefined;
   return {
-    text: said.length ? said.join(' ') : `Checked ${label}: nothing changed there.`, warns: dropped.length > 0 || !!result.notWhole,
-    ...(updated.length || kept.length ? { note: `See each change, or undo it, in History.` } : {}), ...(turnOn ?? undo ? { undo: turnOn ?? undo } : {}),
-    // Open Skills where something there changed: not for a read that only says what can't be read.
-    skills: dropped.length + updated.length + kept.length + made.length + linked.length > 0,
+    text: said.length ? said.join(' ') : `Checked ${label}: nothing came in from it.`, warns: dropped.length > 0 || !!result.notWhole,
+    ...(updated.length ? { note: `See each change, or undo it, in History.` } : {}), ...(turnOn ?? undo ? { undo: turnOn ?? undo } : {}),
+    // Open Skills where something there changed: not for a read that only says what can't be read, or what waits.
+    skills: dropped.length + updated.length + made.length + linked.length > 0,
   };
 }
 
@@ -133,11 +141,11 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'results' | 'no
 function stateWords(name: SourceName, preview: boolean): { text: string; warns?: boolean } {
   const called = name.name ?? name.key, next = preview ? 'Add' : 'the next Check now';
   switch (name.state) {
-    case 'nothing': return { text: name.on ? 'In Central Knot, On' : 'In Central Knot, Off' };
+    case 'nothing': case 'same': return { text: name.on ? 'In Central Knot, On' : 'In Central Knot, Off' };
     case 'make': return { text: preview ? 'Comes in, Off: in no tool until you turn it on' : 'Comes in, Off, at the next Check now' };
     case 'link': return { text: `Already in Central Knot, the same: ${next} links it to this source` };
     case 'update': return { text: preview ? 'Came from this link before and is unchanged: Add links it again, and the source’s version becomes current' : `Changed at the source: ${next} makes that the current version` };
-    case 'keep': return { text: `Changed at the source and here: yours is later, so ${next} keeps the source’s as a version` };
+    case 'wait': return { text: 'Changed at the source. Yours stays current until you replace it, since it was changed here or a tool’s copy can’t be read just now. Replace makes the source’s current and keeps yours as a version.', warns: true };
     case 'drop': return { text: `No longer at the source: ${next} turns it off`, warns: true };
     case 'differs': return { text: `Not brought in: Central Knot already has a different ${called}. To take this one instead, delete yours from Central Knot on Skills (that also takes it out of every tool it is on in), then ${preview ? 'once the source is added, Add on its row' : 'Add on this row'}.`, warns: true };
     case 'another': return { text: `Not brought in: Central Knot has ${called} from ${name.why ? linkLabel(name.why) : 'another source'}`, warns: true };
@@ -217,22 +225,25 @@ function sourceRow(source: SourceView) {
   const asking = sources.confirmRemove === source.id;
   const read = source.readAt ? `read ${dayAndTime(source.readAt)}` : '';
   const actions = asking ? null : h('span.source-actions', {},
-    button({ variant: 'outline', size: 'small', icon: 'refresh-cw', label: 'Check now', id: `source-check-${source.id}`, disabled: locked, attrs: { title: `Read ${label} again: what changed there comes into Central Knot, On or Off as each skill is` }, onclick: () => void checkNow(source) }),
+    button({ variant: 'outline', size: 'small', icon: 'refresh-cw', label: 'Check now', id: `source-check-${source.id}`, disabled: locked, attrs: { title: `Read ${label} again: what changed there comes into Central Knot, On or Off as each skill is, unless you changed it here` }, onclick: () => void checkNow(source) }),
     button({ variant: 'ghost', size: 'small', label: 'Remove…', id: `source-remove-${source.id}`, disabled: locked, onclick: () => { sources.confirmRemove = source.id; rerender(); document.getElementById(`source-remove-cancel-${source.id}`)?.focus(); } }));
-  const bringBackButton = (name: SourceName) => (name.state === 'deleted' ? button({ variant: 'link', size: 'micro', label: 'Add', id: `source-bring-${source.id}-${name.key}`, disabled: locked,
-    attrs: { title: `Bring ${name.name ?? name.key} back into Central Knot, Off, at this source’s version; its earlier versions come back with it` }, onclick: () => void bringBack(source, name) }) : null);
+  const called = (name: SourceName) => name.name ?? name.key;
+  const nameButton = (name: SourceName) => (name.state === 'deleted' ? button({ variant: 'link', size: 'micro', label: 'Add', id: `source-bring-${source.id}-${name.key}`, disabled: locked,
+    attrs: { title: `Bring ${called(name)} back into Central Knot, Off, at this source’s version; its earlier versions come back with it` }, onclick: () => void bringBack(source, name) })
+    : name.state === 'wait' ? button({ variant: 'link', size: 'micro', label: 'Replace', id: `source-replace-${source.id}-${name.key}`, disabled: locked,
+      attrs: { title: `Make this source’s version of ${called(name)} current, in every tool it is on in; yours is kept as a version, and Undo puts it back` }, onclick: () => void replace(source, name) }) : null);
   return h('li.source-row', { id: `source-${source.id}`, 'data-source': source.id },
     h('div.source-row-head', {},
       h('span.source-row-title', {}, icon('link-2', 16, 'tone-muted'), h('strong.source-link', { title: source.link }, label)),
       actions),
     h('span.source-where.tone-muted', {}, [whereWords(source), read].filter(Boolean).join(' · ')),
-    h('span.source-does.tone-muted', {}, 'Check now reads the link again: a skill changed there is updated in the tools it is on in; one no longer there is turned off and taken out of them.'),
+    h('span.source-does.tone-muted', {}, 'Check now reads the link again, as Central Knot does once a day while Automatic sync is on: a skill changed there is updated in the tools it is on in, unless you changed it here (then it waits for you); one no longer there is turned off and taken out of them.'),
     asking ? h('div.band.source-confirm', { role: 'alert' }, h('span.band-text', {}, 'Remove this source? Its skills stay in Central Knot as they are, On or Off, with their versions; they are no longer from it.'),
       button({ variant: 'outline', size: 'small', label: 'Remove', id: `source-remove-confirm-${source.id}`, disabled: !!state.busy, onclick: () => void remove(source) }),
       button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `source-remove-cancel-${source.id}`, onclick: () => { sources.confirmRemove = undefined; rerender(); } })) : null,
     source.problem ? h('p.source-refused', {}, icon('circle-alert', 14, 'tone-danger'), h('span', {}, `Couldn’t fetch it at the last check: ${source.problem} What came from it stays as it is; below is its last read.`)) : null,
     source.unread ? h('p.source-refused', {}, icon('triangle-alert', 14, 'tone-warning'), h('span', {}, `${source.unread} Until it can be read, this source turns nothing off.`)) : null,
-    source.names.length ? h('ul.source-names', {}, source.names.map(name => nameRow(name, false, bringBackButton(name)))) : null);
+    source.names.length ? h('ul.source-names', {}, source.names.map(name => nameRow(name, false, nameButton(name)))) : null);
 }
 
 /** What stopped the last click, until dismissed. */
@@ -252,6 +263,6 @@ export function sourcesPage(): HTMLElement {
       view.sources.length ? h('section.source-list', { 'aria-labelledby': 'source-list-title' },
         h('h2.eyebrow', { id: 'source-list-title' }, `Sources · ${view.sources.length}`),
         h('ul.source-rows', {}, view.sources.map(sourceRow)))
-        : h('p.source-empty', {}, h('strong', {}, 'No sources yet. '), 'A source is a GitHub or GitLab link that skills are read from. Each skill there comes into Central Knot Off, and Check now reads the link again for what changed there. Central Knot never writes to a source.'),
+        : h('p.source-empty', {}, h('strong', {}, 'No sources yet. '), 'A source is a GitHub or GitLab link that skills are read from. Each skill there comes into Central Knot Off, and the link is read again once a day and on Check now for what changed there. Central Knot never writes to a source.'),
       h('p.repo-aside', {}, 'Only skills come from a link in this version; agents, MCP servers and plugins from a link come later.')));
 }

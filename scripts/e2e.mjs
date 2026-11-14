@@ -2227,9 +2227,10 @@ async function repoBaseFlow() {
  * Sources (src/sources.ts): the owner's link pasted as it is, https://github.com/stephenturner/skill-deslop/tree/main, with a
  * made-up local repository standing in for GitHub (git's own url.<base>.insteadOf, given to the app's git: nothing reaches the
  * network). Look offers one skill, deslop, with its files; Add puts it in Central Knot, Off, in no tool; its opened row on Skills
- * and its versions say where it is from; On gives every tool all of it, byte for byte; a change there comes in at Check now; a
- * rename there turns it Off with an entry in History; a link that is a plugin is refused; the page fits at the smallest window;
- * Remove leaves the skill as it is.
+ * and its versions say where it is from; On gives every tool all of it, byte for byte; a change there comes in at Check now; edited
+ * in a tool, its next change there waits, said on Sources and on its Skills row, and Replace takes it; a rename there turns it Off
+ * with an entry in History; a link that is a plugin is refused; the page fits at the smallest window; Remove leaves the skill as
+ * it is.
  */
 async function sourcesFlow() {
   const git = (cwd, ...rest) => spawnSync('git', ['-C', cwd, '-c', 'user.name=Tester', '-c', 'user.email=tester@example.com', '-c', 'commit.gpgsign=false', ...rest], { encoding: 'utf8' });
@@ -2268,13 +2269,13 @@ async function sourcesFlow() {
   check('Add says deslop is in Central Knot, Off', /Added github\.com\/stephenturner\/skill-deslop \(main\)\. deslop is in Central Knot, Off: turn it on in Skills\./.test(await a.text('.band-done .band-text') ?? ''), await a.text('.band-done'));
   same('in Central Knot, Off, in no tool', [record()?.on, Object.values(roots).some(root => existsSync(join(home, root, 'deslop')))], [false, false]);
   check('its row says it is in Central Knot, Off, and says beforehand that Check now can change skills in the tools', /In Central Knot, Off/.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '')
-    && /Check now reads the link again: a skill changed there is updated in the tools it is on in; one no longer there is turned off and taken out of them\./.test(await a.text('.source-row') ?? ''), await a.text('.source-row'));
+    && /Check now reads the link again, as Central Knot does once a day while Automatic sync is on: a skill changed there is updated in the tools it is on in, unless you changed it here \(then it waits for you\); one no longer there is turned off and taken out of them\./.test(await a.text('.source-row') ?? ''), await a.text('.source-row'));
   const id = await a.run(`document.querySelector('.source-row').dataset.source`);
 
   await a.click('#nav-skills');
   await a.click('#open-deslop');
   const opened = await a.text('.details') ?? '';
-  check('its opened row on Skills says which source it is from, and its version says so too', /From github\.com\/stephenturner\/skill-deslop \(main\), a source\. Check now on Sources brings in what changes there\./.test(opened) && /from github\.com\/stephenturner\/skill-deslop \(main\)/.test(opened), opened);
+  check('its opened row on Skills says which source it is from, and its version says so too', /From github\.com\/stephenturner\/skill-deslop \(main\), a source\. What changes there comes in once a day while Automatic sync is on, and at Check now on Sources, unless you change it here\./.test(opened) && /from github\.com\/stephenturner\/skill-deslop \(main\)/.test(opened), opened);
   await a.click('#switch-deslop');
   const asGiven = Object.fromEntries(Object.entries(files).map(([path, text]) => [path, text]));
   const inTool = root => Object.fromEntries(Object.keys(files).map(path => [path, readNow(join(home, root, 'deslop', path))]));
@@ -2284,6 +2285,27 @@ async function sourcesFlow() {
   await a.click('#nav-sources');
   await a.click(`#source-check-${id}`);
   check('Check now brings the change in, and the band says it was updated and where it went, with its Undo', /deslop was updated from its source, now in all 3 tools\./.test(await a.text('.band-done .band-text') ?? '') && await a.exists('#outcome-undo') && await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('gently'))), await a.text('.band-done'));
+
+  // Edited in Claude Code (sync takes it in), then changed at the source: the source's version waits; Replace takes it.
+  const inClaude = join(home, roots['claude-cli'], 'deslop/SKILL.md');
+  writeFileSync(inClaude, readNow(inClaude).replace('gently', 'my way'));
+  check('an edit in Claude Code is taken in and reaches every tool', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('my way'))), Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))));
+  commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('Remove slop.', 'Remove slop, firmly.') });
+  await a.click(`#source-check-${id}`);
+  await until(async () => await a.exists(`#source-replace-${id}-deslop`));
+  check('Check now leaves the edit current in every tool, says the source’s version waits, and its line offers Replace', /deslop changed at the source; yours stays current, since it was changed here or a tool’s copy can’t be read just now: Replace on its row takes the source’s\./.test(await a.text('.band-done .band-text') ?? '')
+    && /Changed at the source\. Yours stays current until you replace it, since it was changed here or a tool’s copy can’t be read just now\./.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '') && Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('my way')), [await a.text('.band-done'), await a.text('.source-row')]);
+  await a.shot('sources-waiting');
+  await a.click('#nav-skills');
+  const waitingRow = await a.text('.ov-row[data-key="deslop"]') ?? '';
+  if (!(await a.exists('.details'))) await a.click('#open-deslop');
+  check('its row on Skills says the source has an update, and its opened row says Replace is on Sources', /update at its source/.test(waitingRow) && /which has a newer version\. Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now; Replace on Sources makes the source’s current and keeps yours as a version\./.test(await a.text('.details') ?? ''), [waitingRow, await a.text('.details')]);
+  await a.shot('skills-waiting');
+  await a.click('#nav-sources');
+  await a.click(`#source-replace-${id}-deslop`);
+  check('Replace puts the source’s version in every tool, says the one it had is kept, and offers Undo the replace', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('firmly')))
+    && /deslop has the source’s version, now in all 3 tools; the one it had is kept as a version\./.test(await a.text('.band-done .band-text') ?? '') && (await a.text('#outcome-undo')) === 'Undo the replace'
+    && !(await a.exists(`#source-replace-${id}-deslop`)), await a.text('.band-done'));
 
   commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('name: deslop', 'name: unslop') });
   await a.click(`#source-check-${id}`);
