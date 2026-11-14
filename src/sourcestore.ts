@@ -11,7 +11,7 @@
 // the library, and why the read isn't whole), each linked item's row on Skills (whether a version waits there: sources.ts
 // sourceFacts, which also says each item a source removed: library.ts removedBy), and Add on a deleted name's row and Replace, Merge
 // and Keep mine on a waiting one's (each takes that name from it, with no fetch).
-// A missing copy means only "look again": the row reads it as nothing at the link's folder (sources.ts notSkillsWhy), and the
+// A missing copy means only "look again": the row reads it as nothing at the link's folder (atlink.ts unreadWhy), and the
 // next Check now fetches it. Which items came from a source is the items' own (library.ts LibraryItem `source`,
 // `seen`), never this record's, and whom an item is linked to is library.ts linkedTo's alone. This module only reads and
 // writes what it is given.

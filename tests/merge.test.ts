@@ -1,4 +1,4 @@
-// Merge for a skill on real folders (src/skillmerge.ts mergeSkill), with this computer's real git merge-file: what the merged
+// Merge for a skill on real folders (src/merge.ts mergeSkill), with this computer's real git merge-file: what the merged
 // folder holds, byte for byte and mode for mode, where both sides changed a file; a conflict; and what is left behind. Which
 // side each path takes is library.ts mergeFiles, row by row in tests/library.test.ts; Merge on a source's row, end to end on
 // real tools' folders, is in tests/sources.test.ts.
@@ -8,7 +8,7 @@ import { chmod, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promis
 import { join } from 'node:path';
 import { newItem } from '../src/library.ts';
 import { readTree } from '../src/share.ts';
-import { mergeSkill } from '../src/skillmerge.ts';
+import { mergeSkill } from '../src/merge.ts';
 import { readVersion } from '../src/skillstore.ts';
 import { sandbox, type Box } from './skillclicks.ts';
 

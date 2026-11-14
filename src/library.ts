@@ -114,7 +114,7 @@
 //                                                                    the source's say so while it is Off (REMOVED, below); the
 //                                                                    name back unchanged links it again ("its current version
 //                                                                    this same link's", below), and its going again turns it Off
-//   that skill can't be read, or the     linked                      nothing; the source's row says why
+//   that item can't be read, or the      linked                      nothing; the source's row says why
 //     source wasn't read whole
 //   a name the library has               not linked, same content    it is linked, and that content is recorded as a version from
 //                                                                    the source where it has none from that link (REMOVED, below)
@@ -125,15 +125,18 @@
 //                                        linked to another source,   brings a deleted one back, Off, as a new one comes
 //                                        or deleted
 //
-// "Read whole": the source was fetched and holds at least one skill, and every skill there could be read (sources.ts readOf
-// decides it, the one place). A source that holds no skill that can be read (its one skill deleted there, every skill
-// unreadable, its folder gone, a plugin) is not read whole: no name is gone, and the source turns nothing Off.
+// "Read whole", for one kind (each kind a source brings has a read of its own, by its own keys): the source was fetched, the
+// link's folder is there and is no plugin or marketplace, at least one item of any kind there can be read, and every item of
+// this kind there could be read (atlink.ts readOf decides it, the one place). A source that holds no item that can be read
+// (its one skill deleted there, every one unreadable, its folder gone, a plugin) is not read whole: no name is gone, and the
+// source turns nothing Off. Skills are the only kind a source brings in this version.
 //
 // REMOVED AT ITS SOURCE (`removedBy`, the one place it is decided; worked out at each look, never stored): an item that is Off,
 // linked to no source, has a version from a recorded source's link since it last came in from a tool (a take-in: `found` or
-// `chosen`; one deleted and written again by hand is not the source's), and that source's last read doesn't hold its name. That
-// source's row on Sources and the item's row on Skills say so (sources.ts sourcesView, sourceFacts). The drop let the link go,
-// so turning it On (its switch, History's Turn on, a profile) is the revert: it is no longer Off, and nothing says it any more.
+// `chosen`; one deleted and written again by hand is not the source's), and that source's last read of its kind doesn't hold
+// its name (a skill of that name there is no agent). That source's row on Sources and the item's row on its kind's page say
+// so (sources.ts sourceFacts, which the Sources page reads too). The drop let the link go, so turning it On (its switch,
+// History's Turn on, a profile) is the revert: it is no longer Off, and nothing says it any more.
 // Nor once the item is deleted, the source removed, or a read holds the name again, readable or not: unchanged here since, the
 // item is linked again and follows the source (`once`); changed here, it is not brought in and never written over
 // (`differs`). A read that doesn't hold the name, whole or not, leaves it.
@@ -172,7 +175,7 @@
 // Replace's, puts back the version before and `seen` as it was. Merged to exactly yours, it is Keep mine's outcome (below); to
 // exactly S, the item follows its source again. Any conflict, or a line merge that can't run, changes nothing, and the answer
 // names the conflicting files, or why. Yours is the current version with every tool's edit in it: Merge's click first runs a pass for
-// the item alone (sources.ts mergeFromSource), which takes in an edit a tool holds as any pass does; a tool's copy that still
+// the item alone (sources.ts rowClick), which takes in an edit a tool holds as any pass does; a tool's copy that still
 // holds a change then (a save landing between the two, or one settling) leaves Merge undone (`wait`), and it says so.
 //
 // KEEP MINE (`keep`, a key handed to the step as Replace's is): the current version stays, and nothing is written to a tool; S
@@ -585,7 +588,7 @@ function toolHoldsChange(item: LibraryItem, copies: Copies): boolean {
 }
 
 /**
- * One read of a source as its table reads it (sources.ts readOf makes it, the one place that decides what was read): the
+ * One read of a source as its table reads it (atlink.ts readOf makes it, the one place that decides what was read): the
  * source, its head commit's time (which a version it makes current is dated by), each name there by key with its content's
  * hash or why it can't be read, and whether it was read whole (the header).
  */
@@ -612,16 +615,17 @@ export function sourceAnswers(items: Record<string, LibraryItem>, read: SourceSe
 }
 
 /**
- * The recorded source that removed an item, if one did (the header's REMOVED AT ITS SOURCE): the item is Off and linked to
- * none, one of its versions since it last came in from a tool came from that source's link, and that source's last read
- * doesn't hold its name. `reads`: every source the home records, each with its last read's names.
+ * The recorded source that removed an item of `kind`, if one did (the header's REMOVED AT ITS SOURCE): the item is Off and
+ * linked to none, one of its versions since it last came in from a tool came from that source's link, and that source's last
+ * read of its kind doesn't hold its name. `reads`: every source the home records, each with its last read's names and its
+ * kind (a read of another kind is never one of the item's).
  */
-export function removedBy<Read extends Pick<SourceSeen, 'id' | 'link' | 'names'>>(item: LibraryItem, reads: readonly Read[]): Read | undefined {
+export function removedBy<Read extends Pick<SourceSeen, 'id' | 'link' | 'names'> & { kind: ItemKind }>(item: LibraryItem, kind: ItemKind, reads: readonly Read[]) {
   if (item.on || item.deleted || linkedSource(item, new Set(reads.map(read => read.id)))) return undefined;
   // `versions` is newest first: only those taken since the latest take-in count.
   const takenIn = item.versions.findIndex(version => version.from.how === 'found' || version.from.how === 'chosen');
   const since = takenIn < 0 ? item.versions : item.versions.slice(0, takenIn);
-  return reads.find(read => !read.names.has(item.key) && since.some(version => version.from.link === read.link));
+  return reads.find(read => read.kind === kind && !read.names.has(item.key) && since.some(version => version.from.link === read.link));
 }
 
 /** One path in a folder as Merge compares it (the header's MERGE): a file, by its bytes' hash and its executable bit, or a folder. */

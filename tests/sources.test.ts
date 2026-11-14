@@ -10,7 +10,7 @@ import { pruneHistory, readHistory } from '../src/history.ts';
 import { doneWords, libraryAction, librarySentence } from '../src/historyactions.ts';
 import { asItIs, fromSourceWords, libraryWords } from '../src/libraryrow.ts';
 import { DAY_MS } from '../src/model.ts';
-import { addSource, bringBack, checkDue, checkSource, keepFromSource, mergeFromSource, previewSource, removeSource, replaceFromSource, SOURCE_CHECK_EVERY_MS, sourcesView } from '../src/sources.ts';
+import { addSource, checkDue, checkSource, previewSource, removeSource, rowClick, SOURCE_CHECK_EVERY_MS, sourcesView } from '../src/sources.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import type { SourcePreview } from '../src/types.ts';
 import { bytes, everywhere, folderOf, historyActions, itemOf, put, sandbox, seen, skillText, type Box } from './skillclicks.ts';
@@ -45,7 +45,7 @@ test('The owner’s example: a link to a repository whose root is one skill offe
   try {
     const look = await previewSource(box.context, box.tools, DESLOP) as Extract<SourcePreview, { token: string }>;
     assert.equal(look.refused, undefined);
-    assert.deepEqual([look.holds, look.ref, look.folder], ['skills', 'main', '']);
+    assert.deepEqual([look.holds, look.ref, look.folder], ['items', 'main', '']);
     assert.deepEqual(look.names.map(name => [name.name, name.there?.folder, name.there?.folderName, name.state]), [['deslop', '', 'skill-deslop', 'make']], 'named as its SKILL.md names it, at the root of skill-deslop');
     assert.deepEqual(look.names[0].there?.files, ['.gitignore', 'LICENSE', 'README.md', 'SKILL.md', 'references/checklist.md', 'references/examples.md', 'references/phrases.md', 'references/structures.md']);
     assert.deepEqual(await everywhere(box, 'deslop'), { 'claude-cli': undefined, 'copilot-cli': undefined, 'codex-cli': undefined, 'opencode-cli': undefined, 'pi-cli': undefined }, 'a look writes no tool');
@@ -141,7 +141,7 @@ async function editIn(box: Box, tool: 'claude-cli' | 'codex-cli', key: string, b
 }
 /** What a skill is to its source on the Sources page, and on its row on Skills. */
 const notices = async (box: Box, key: string) => [(await sourcesView(box.context, box.tools)).sources[0].names.find(name => name.key === key)?.state, (await seen(box, box.context, key)).fact?.fromSource?.waits ?? false];
-const replace = (box: Box, id: string, key: string) => replaceFromSource(box.context, box.tools, id, key);
+const replace = (box: Box, id: string, key: string) => rowClick(box.context, box.tools, id, 'skill', key, 'replace');
 
 test('Changed here, then the source changes: its version waits, whatever the times say; the edit stays current in Central Knot and every tool, both rows say so, and nothing is stored', async () => {
   const box = await sandbox();
@@ -301,7 +301,7 @@ test('A copy that can’t be read where the skill is applied: the source’s cha
 
 /** A SKILL.md body of three lines apart, so a change to the first and one to the last merge line by line. */
 const lines = (first = 'First.', last = 'Last.') => `${first}\n\nThe middle.\n\n${last}`;
-const mergeIt = (box: Box, id: string, key = 'notes') => mergeFromSource(box.context, box.tools, id, key);
+const mergeIt = (box: Box, id: string, key = 'notes') => rowClick(box.context, box.tools, id, 'skill', key, 'merge');
 /** What a click did to each item, with what Merge did. */
 const merged = (result: { sourced?: { name: string; answer: string; merge?: unknown }[] }) => result.sourced?.map(({ name, answer, merge }) => ({ name, answer, ...(merge ? { merge } : {}) }));
 /** Each managed tool's SKILL.md of the skill. */
@@ -496,7 +496,7 @@ test('Git missing: Merge says it couldn’t run and changes nothing', async () =
 
 // ---------- Keep mine (library.ts KEEP MINE) ----------
 
-const keepIt = (box: Box, id: string, key = 'notes') => keepFromSource(box.context, box.tools, id, key);
+const keepIt = (box: Box, id: string, key = 'notes') => rowClick(box.context, box.tools, id, 'skill', key, 'keep');
 /** What History is told of an item linked to a source the home records, with no tool holding a change (historyactions.ts ItemNow). */
 const linkedNow = (box: Box) => ({ managed: box.tools, pending: [], linked: true as const });
 
@@ -721,6 +721,24 @@ test('Gone, read whole: a skill renamed at the source turns Off once, said in Hi
   } finally { await box.cleanup(); }
 });
 
+// ---------- A click on a name's line, as main.ts passes it on ----------
+
+test('A click on a source’s line in a kind no source brings, or a click no line has, is refused in plain words and changes nothing; the same line in its own kind and click does its work', async () => {
+  const box = await sandbox();
+  try {
+    const { id } = await waitingToMerge(box);
+    // main.ts passes on whatever the page sent, as text: here a kind and a click this version has no line for.
+    const before = [await bytes(box.home), (await readHistory(box.context)).length];
+    const wrongKind = await rowClick(box.context, box.tools, id, 'plugin', 'notes', 'replace');
+    const wrongClick = await rowClick(box.context, box.tools, id, 'skill', 'notes', 'replaceAll');
+    assert.deepEqual([wrongKind.stopped, wrongKind.sourced], ['A source’s line has no click “replace” for a “plugin”, so nothing was changed.', undefined]);
+    assert.deepEqual([wrongClick.stopped, wrongClick.sourced], ['A source’s line has no click “replaceAll” for a “skill”, so nothing was changed.', undefined]);
+    assert.deepEqual([await bytes(box.home), (await readHistory(box.context)).length], before, 'every file in the home, and History, as they were');
+    assert.equal(wrongKind.view?.sources[0].names.find(name => name.key === 'notes')?.state, 'wait', 'the source’s version still waits');
+    assert.deepEqual(answered(await rowClick(box.context, box.tools, id, 'skill', 'notes', 'replace')), [{ name: 'notes', answer: 'update' }], 'its own kind and click: Replace');
+  } finally { await box.cleanup(); }
+});
+
 // ---------- A skill its source removed (library.ts REMOVED AT ITS SOURCE) ----------
 
 /** What a skill's row on Skills says of its source (types.ts LibraryFacts fromSource), which the Sources page reads too. */
@@ -936,7 +954,7 @@ test('A skill deleted from Central Knot: the tombstone holds at Check now and at
     assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'deleted' }]);
     assert.ok((await itemOf(box, 'notes'))!.deleted, 'still deleted');
     assert.deepEqual((await sourcesView(box.context, box.tools)).sources[0].names.map(name => name.state), ['deleted']);
-    const back = await bringBack(box.context, box.tools, id, 'notes');
+    const back = await rowClick(box.context, box.tools, id, 'skill', 'notes', 'bringBack');
     assert.deepEqual(answered(back), [{ name: 'notes', answer: 'make' }]);
     const item = (await itemOf(box, 'notes'))!;
     assert.deepEqual([item.deleted, item.on, item.source, await bodyOf(box, 'notes')], [undefined, false, id, 'Second.']);

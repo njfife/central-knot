@@ -4,7 +4,7 @@
 // here decides anything. Not here: the library's own shapes (library.ts LibraryItem, Plan), the pass's (librarypass.ts Kind,
 // Disk), and each store's record (kindstore.ts, sourcestore.ts, share.ts SyncRecord).
 import type { LeftIn } from './historyactions.ts';
-import type { LibraryItem, Plan, SourceAnswer, TakeInAnswer, VersionChange } from './library.ts';
+import type { ItemKind, LibraryItem, Plan, SourceAnswer, TakeInAnswer, VersionChange } from './library.ts';
 import type { NeutralServer } from './mcp.ts';
 import type { PluginDone, PluginOp } from './pluginplan.ts';
 import type { PluginEntry, PluginSwitch } from './pluginrecord.ts';
@@ -245,14 +245,8 @@ export interface DesktopApi {
   addSource(token: string, home: string): Promise<SourceResult>;
   /** Reads a source again and carries out its table (sources.ts checkSource). */
   checkSource(id: string, home: string): Promise<SourceResult>;
-  /** Brings back one name the library holds deleted, from a source's last read, Off (sources.ts bringBack). */
-  bringBackFromSource(id: string, key: string, home: string): Promise<SourceResult>;
-  /** Makes the version that waits at a source, from its last read, an item's current version; the one it had is kept (sources.ts replaceFromSource). */
-  replaceFromSource(id: string, key: string, home: string): Promise<SourceResult>;
-  /** Merges the version that waits at a source, from its last read, into an item's current version (sources.ts mergeFromSource). */
-  mergeFromSource(id: string, key: string, home: string): Promise<SourceResult>;
-  /** Keeps an item's current version over the one that waits at a source, which no longer waits (sources.ts keepFromSource). */
-  keepFromSource(id: string, key: string, home: string): Promise<SourceResult>;
+  /** A click on one name's line at a source, from its last read, in that name's kind: Add, Replace, Merge or Keep mine (sources.ts rowClick). */
+  rowClick(id: string, kind: ItemKind, key: string, click: SourceRowClick, home: string): Promise<SourceResult>;
   /** Forgets a source: its items stay as they are, On or Off, with their versions (sources.ts removeSource). */
   removeSource(id: string, home: string): Promise<SourceResult>;
   /** Adds or changes a profile's name and items (Central Knot's own file; no tool is written). */
@@ -1040,10 +1034,10 @@ export interface ShownLog { selected: boolean; logged: boolean }
  * a skill there that can't be read, with why.
  */
 export type SourceNameState = SourceAnswer | 'unreadable';
-/** One skill at a source's read, or one item linked to the source that the read doesn't hold (sources.ts namesOf). */
+/** One item at a source's read, or one item linked to the source that the read doesn't hold (sources.ts namesOf). */
 export interface SourceName {
-  /** Its name, as its SKILL.md gives it (absent when that can't be read), and its key. */
-  name?: string; key: string;
+  /** Its kind; its name, as its own file gives it (a skill's SKILL.md; absent when that can't be read); and its key in its kind. */
+  kind: ItemKind; name?: string; key: string;
   /**
    * Where it is at the read: its folder from the repository's root ('' for the root), that folder's own name (the repository's,
    * for the root), and every file in it by path inside the folder. Absent for an item linked to the source that the read doesn't hold.
@@ -1055,8 +1049,8 @@ export interface SourceName {
   /** An item in Central Knot (not deleted): whether it is On. */
   on?: boolean;
 }
-/** What a link holds, read from its files (sources.ts holdsAt): skills, a plugin or a marketplace (a later version), no skill, or no folder there. */
-export type SourceHolds = 'skills' | 'plugin' | 'marketplace' | 'empty' | 'missing';
+/** What a link holds, read from its files (atlink.ts holdsAt): items of a kind a source brings, a plugin or a marketplace (a later version), none, or no folder there. */
+export type SourceHolds = 'items' | 'plugin' | 'marketplace' | 'empty' | 'missing';
 /** One read of a link, as a preview and a source's row show it. */
 export interface SourceFound {
   link: string;
@@ -1067,8 +1061,8 @@ export interface SourceFound {
   holds: SourceHolds;
   names: SourceName[];
   /**
-   * Why the read can't be read as skills (no folder there, a plugin, a marketplace, no SKILL.md), in words; absent when it can.
-   * A skill there that can't be read says why on its own line (SourceName `why`).
+   * Why the read can't be read (no folder there, a plugin, a marketplace, nothing of any kind there), in words; absent when it
+   * can. An item there that can't be read says why on its own line (SourceName `why`).
    */
   unread?: string;
 }
@@ -1080,13 +1074,20 @@ export interface SourceView extends SourceFound { id: string; addedAt: string; r
 export interface SourcesView { sources: SourceView[]; access: WriteAccess; problem?: string }
 /** A link read before anything is kept: what Add would do (`token` names it for Add), or why it can't be added. */
 export type SourcePreview = (SourceFound & { token: string; refused?: string }) | { refused: string; link: string };
+/** A click on one name's line at a source (sources.ts rowClick): Add on one held deleted, Replace, Merge or Keep mine on one whose version waits. */
+export type SourceRowClick = 'bringBack' | 'replace' | 'merge' | 'keep';
 /**
- * What a source's click did: the pass's answers by name (PassResult sourced, but a `wait` the source's row no longer says once
- * the pass is done: sources.ts answer), and its results; why it stopped; whether the source
- * wasn't read whole (`notWhole`: the source turned nothing off, though the pass may have, for a copy deleted by hand; the
- * source's row says why); and the page's view after.
+ * One item a source's click did something to: its pass's answer (PassResult sourced), its kind, and the tools it was written to
+ * and taken out of (`written`, `removed`: that pass's results for it).
  */
-export interface SourceResult { stopped?: string; sourced?: PassResult['sourced']; results?: DestinationResult[]; notWhole?: true; view: SourcesView | null }
+export type SourcedItem = NonNullable<PassResult['sourced']>[number] & { kind: ItemKind; written: HarnessId[]; removed: HarnessId[] };
+/**
+ * What a source's click did: each kind's pass's answers (SourcedItem, but a `wait` the source's row no longer says once the
+ * passes are done: sources.ts answer), and their results; why it stopped; whether the source wasn't read whole for a kind
+ * (`notWhole`: the source turned nothing of that kind off, though a pass may have, for a copy deleted by hand; the source's row
+ * says why); and the page's view after.
+ */
+export interface SourceResult { stopped?: string; sourced?: SourcedItem[]; results?: DestinationResult[]; notWhole?: true; view: SourcesView | null }
 
 // ---------- Git repo ----------
 

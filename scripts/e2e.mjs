@@ -2307,9 +2307,9 @@ async function sourcesFlow() {
   check('an edit in Claude Code is taken in and reaches every tool', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('my way'))), Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))));
   commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('Remove slop.', 'Remove slop, firmly.') });
   await a.click(`#source-check-${id}`);
-  await until(async () => await a.exists(`#source-replace-${id}-deslop`));
+  await until(async () => await a.exists(`#source-replace-${id}-skill-deslop`));
   check('Check now leaves the edit current in every tool, says the source’s version waits, and its line offers Merge, Replace and Keep mine', /deslop changed at the source; yours stays current, since it was changed here or a tool’s copy can’t be read just now: on its row, Merge puts the source’s changes into yours if they don’t clash, Replace takes the source’s, and Keep mine keeps yours\./.test(await a.text('.band-done .band-text') ?? '')
-    && /Changed at the source\. Yours stays current until you merge, replace or keep it, since it was changed here or a tool’s copy can’t be read just now\./.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '') && await a.exists(`#source-merge-${id}-deslop`) && await a.exists(`#source-keep-${id}-deslop`)
+    && /Changed at the source\. Yours stays current until you merge, replace or keep it, since it was changed here or a tool’s copy can’t be read just now\./.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '') && await a.exists(`#source-merge-${id}-skill-deslop`) && await a.exists(`#source-keep-${id}-skill-deslop`)
     && Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('my way')), [await a.text('.band-done'), await a.text('.source-row')]);
   await a.shot('sources-waiting');
   await a.click('#nav-skills');
@@ -2318,10 +2318,10 @@ async function sourcesFlow() {
   check('its row on Skills says the source has an update, and its opened row says Merge and Replace are on Sources', /update at its source/.test(waitingRow) && /which has a newer version\. Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now\. On Sources, Merge puts its changes into yours if they don’t clash, and Replace takes it as it is; either keeps yours as a version\./.test(await a.text('.details') ?? ''), [waitingRow, await a.text('.details')]);
   await a.shot('skills-waiting');
   await a.click('#nav-sources');
-  await a.click(`#source-replace-${id}-deslop`);
+  await a.click(`#source-replace-${id}-skill-deslop`);
   check('Replace puts the source’s version in every tool, says the one it had is kept, and offers Undo the replace', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('firmly')))
     && /deslop has the source’s version, now in all 3 tools; the one it had is kept as a version\./.test(await a.text('.band-done .band-text') ?? '') && (await a.text('#outcome-undo')) === 'Undo the replace'
-    && !(await a.exists(`#source-replace-${id}-deslop`)), await a.text('.band-done'));
+    && !(await a.exists(`#source-replace-${id}-skill-deslop`)), await a.text('.band-done'));
 
   // Merge: a line added in Claude Code and the source's new description, lines apart, become one version in every tool.
   writeFileSync(inClaude, `${readNow(inClaude)}Use plain words.\n`);
@@ -2329,13 +2329,13 @@ async function sourcesFlow() {
   const described = files['SKILL.md'].replace('Remove slop.', 'Remove slop, firmly.').replace('Removes slop from prose.', 'Removes slop from any prose.');
   commit(deslop, { 'SKILL.md': described });
   await a.click(`#source-check-${id}`);
-  await until(async () => await a.exists(`#source-merge-${id}-deslop`));
+  await until(async () => await a.exists(`#source-merge-${id}-skill-deslop`));
   const versionsBefore = record()?.versions.length;
-  await a.click(`#source-merge-${id}-deslop`);
+  await a.click(`#source-merge-${id}-skill-deslop`);
   const bothIn = described.replace(/\n$/, '\nUse plain words.\n');
   check('Merge puts both changes in every tool’s SKILL.md, says so with Undo the merge, and the line no longer waits', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')) === bothIn))
     && /deslop now has your changes and the source’s, merged, in all 3 tools; the version it had is kept\./.test(await a.text('.band-done .band-text') ?? '') && (await a.text('#outcome-undo')) === 'Undo the merge'
-    && !(await a.exists(`#source-merge-${id}-deslop`)) && record()?.versions.length === versionsBefore + 2, [await a.text('.band-done'), Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md')))]);
+    && !(await a.exists(`#source-merge-${id}-skill-deslop`)) && record()?.versions.length === versionsBefore + 2, [await a.text('.band-done'), Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md')))]);
   await a.shot('sources-merged');
   await a.click('#nav-skills');
   if (!(await a.exists('.details'))) await a.click('#open-deslop');
@@ -2346,21 +2346,21 @@ async function sourcesFlow() {
   check('the clashing edit is taken in and reaches every tool', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('my way'))), Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))));
   commit(deslop, { 'SKILL.md': described.replace('Remove slop, firmly.', 'Remove slop, kindly.') });
   await a.click(`#source-check-${id}`);
-  await until(async () => await a.exists(`#source-merge-${id}-deslop`));
+  await until(async () => await a.exists(`#source-merge-${id}-skill-deslop`));
   const clashBefore = { versions: record()?.versions.length, seen: record()?.seen, tools: Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))) };
-  await a.click(`#source-merge-${id}-deslop`);
+  await a.click(`#source-merge-${id}-skill-deslop`);
   check('a Merge that clashes names SKILL.md, as a warning, says Keep mine is the way past a change made by hand, and changes nothing: every tool as it was, no version, the source’s version still waits', await until(async () => /Merge left deslop as it was: SKILL\.md changed both here and at the source, in ways that can’t be merged\. Replace takes the source’s version and keeps yours as a version; or make the source’s change in yours by hand, then Keep mine\. Until then, yours stays current and the update keeps waiting\./.test(await a.text('.band-done .band-text') ?? ''))
-    && await a.exists('.band-done svg.tone-warning') && !(await a.exists('#outcome-undo')) && await a.exists(`#source-merge-${id}-deslop`)
+    && await a.exists('.band-done svg.tone-warning') && !(await a.exists('#outcome-undo')) && await a.exists(`#source-merge-${id}-skill-deslop`)
     && JSON.stringify({ versions: record()?.versions.length, seen: record()?.seen, tools: Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))) }) === JSON.stringify(clashBefore), [await a.text('.band-done'), clashBefore]);
   await a.shot('sources-merge-clash');
   // Keep mine: yours stays in every tool, and the source's version no longer waits; its Undo makes it wait again.
-  await a.click(`#source-keep-${id}-deslop`);
+  await a.click(`#source-keep-${id}-skill-deslop`);
   check('Keep mine leaves every tool as it was, keeps the source’s version as a version, says so with Undo keep mine, and the line no longer waits', await until(async () => /deslop stays as you have it, and the source’s version no longer waits: it is kept as a version, and the source’s next change is compared with it\./.test(await a.text('.band-done .band-text') ?? ''))
-    && (await a.text('#outcome-undo')) === 'Undo keep mine' && !(await a.exists(`#source-keep-${id}-deslop`)) && record()?.versions.length === clashBefore.versions + 1 && record()?.seen !== clashBefore.seen
+    && (await a.text('#outcome-undo')) === 'Undo keep mine' && !(await a.exists(`#source-keep-${id}-skill-deslop`)) && record()?.versions.length === clashBefore.versions + 1 && record()?.seen !== clashBefore.seen
     && JSON.stringify(Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md')))) === JSON.stringify(clashBefore.tools), [await a.text('.band-done'), await a.text('.source-row')]);
   await a.shot('sources-kept');
   await a.click('#outcome-undo');
-  check('its Undo makes the source’s version wait again, with every tool as it was', await until(async () => await a.exists(`#source-keep-${id}-deslop`)) && record()?.seen === clashBefore.seen
+  check('its Undo makes the source’s version wait again, with every tool as it was', await until(async () => await a.exists(`#source-keep-${id}-skill-deslop`)) && record()?.seen === clashBefore.seen
     && JSON.stringify(Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md')))) === JSON.stringify(clashBefore.tools), [await a.text('.band-done'), await a.text('.source-row')]);
   // The source's change made by hand in Claude Code, with a change of its own lines apart: Merge's result is exactly yours,
   // Keep mine's outcome, with its Undo and History's note.
@@ -2368,10 +2368,10 @@ async function sourcesFlow() {
   check('the source’s change made by hand is taken in and reaches every tool', await until(() => Object.values(roots).every(root => readNow(join(home, root, 'deslop/SKILL.md')).includes('any prose, my way.'))), Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))));
   // The page is told of that edit by a refresh of its own, whose notice would take the band's place: it comes first.
   await until(async () => /Sync changed deslop/.test(await a.text('#announcement') ?? ''));
-  await until(() => a.run(`document.body.dataset.busy !== 'true' && document.querySelector('#source-merge-${id}-deslop')?.disabled === false`));
-  await a.click(`#source-merge-${id}-deslop`);
+  await until(() => a.run(`document.body.dataset.busy !== 'true' && document.querySelector('#source-merge-${id}-skill-deslop')?.disabled === false`));
+  await a.click(`#source-merge-${id}-skill-deslop`);
   check('a Merge that finds the source’s change in yours already says so, offers Undo the merge and History’s note, and the line no longer waits', await until(async () => /deslop already had the source’s changes, so Merge changed nothing in it; the source’s version no longer waits\./.test(await a.text('.band-done .band-text') ?? ''))
-    && (await a.text('#outcome-undo')) === 'Undo the merge' && await a.exists('#outcome-note-history') && !(await a.exists(`#source-merge-${id}-deslop`)), [await a.text('.band-done'), await a.text('.source-row .source-name[data-key="deslop"]')]);
+    && (await a.text('#outcome-undo')) === 'Undo the merge' && await a.exists('#outcome-note-history') && !(await a.exists(`#source-merge-${id}-skill-deslop`)), [await a.text('.band-done'), await a.text('.source-row .source-name[data-key="deslop"]')]);
 
   commit(deslop, { 'SKILL.md': files['SKILL.md'].replace('name: deslop', 'name: unslop') });
   await a.click(`#source-check-${id}`);
@@ -2382,7 +2382,7 @@ async function sourcesFlow() {
   check('History says the source dropped it', await until(async () => /github\.com\/stephenturner\/skill-deslop \(main\) no longer has it, so it is off and removed from all 3 tools/.test(await a.text('.page') ?? '')), await a.text('.page'));
   // The notice that stays: deslop's line on the source's row, and its row on Skills, until it is turned on.
   await a.click('#nav-sources');
-  check('the source’s row keeps a line for deslop, removed there, with Turn on', await until(async () => /No longer at this source: it is Off, and no longer from it\./.test(await a.text('.source-row .source-name[data-key="deslop"][data-state="removed"]') ?? '')) && await a.exists('#source-turn-on-deslop'), await a.text('.source-row'));
+  check('the source’s row keeps a line for deslop, removed there, with Turn on', await until(async () => /No longer at this source: it is Off, and no longer from it\./.test(await a.text('.source-row .source-name[data-key="deslop"][data-state="removed"]') ?? '')) && await a.exists('#source-turn-on-skill-deslop'), await a.text('.source-row'));
   await a.shot('sources-removed');
   await a.click('#nav-skills');
   if (!(await a.exists('.details'))) await a.click('#open-deslop');
@@ -2390,10 +2390,23 @@ async function sourcesFlow() {
     && /github\.com\/stephenturner\/skill-deslop \(main\) no longer has it: it is Off, and no longer from that source\. Turn it on to use it again\. Should github\.com\/stephenturner\/skill-deslop \(main\) have it again, it follows the source if unchanged here, and stays as you have it if you changed it\./.test(await a.text('.details') ?? ''), [await a.text('.ov-row[data-key="deslop"]'), await a.text('.details')]);
   await a.shot('skills-removed');
   await a.click('#nav-sources');
-  await a.click('#source-turn-on-deslop');
+  await a.click('#source-turn-on-skill-deslop');
   check('Turn on puts deslop in every tool, says so with Undo, and its line goes', await until(() => Object.values(roots).every(root => existsSync(join(home, root, 'deslop/SKILL.md'))))
-    && await until(async () => /deslop is on in all 3 tools\./.test(await a.text('.band-done .band-text') ?? '')) && await a.exists('#outcome-undo') && !(await a.exists('#source-turn-on-deslop')) && record()?.on === true, [await a.text('.band-done'), await a.text('.source-row')]);
+    && await until(async () => /deslop is on in all 3 tools\./.test(await a.text('.band-done .band-text') ?? '')) && await a.exists('#outcome-undo') && !(await a.exists('#source-turn-on-skill-deslop')) && record()?.on === true, [await a.text('.band-done'), await a.text('.source-row')]);
   await a.shot('sources-turned-on');
+  // Add on a name the library holds deleted: unslop, deleted from Central Knot on Skills, comes back Off from its line.
+  const unslop = () => JSON.parse(readNow(join(home, '.central-knot/skills.json')) || '{"items":{}}').items.unslop;
+  await a.click('#nav-skills');
+  if (!(await a.exists('#delete-unslop'))) await a.click('#open-unslop');
+  await until(() => a.exists('#delete-unslop'));
+  await a.click('#delete-unslop');
+  await a.click('#delete-confirm-unslop');
+  check('unslop, deleted from Central Knot on Skills', await until(() => !!unslop()?.deleted), unslop());
+  await a.click('#nav-sources');
+  check('its line on the source’s row says it is deleted, with Add', await until(async () => await a.exists(`#source-bring-${id}-skill-unslop`)) && /Not brought in: deleted from Central Knot\./.test(await a.text('.source-row .source-name[data-key="unslop"]') ?? ''), await a.text('.source-row'));
+  await a.click(`#source-bring-${id}-skill-unslop`);
+  check('Add on its line brings unslop back into Central Knot, Off, and says so', await until(async () => /unslop is in Central Knot, Off: turn it on in Skills\./.test(await a.text('.band-done .band-text') ?? ''))
+    && !unslop()?.deleted && unslop()?.on === false && !(await a.exists(`#source-bring-${id}-skill-unslop`)), [await a.text('.band-done'), unslop()]);
 
   await a.click('#nav-sources');
   await type('https://github.com/team/plugin');
