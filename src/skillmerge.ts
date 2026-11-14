@@ -2,7 +2,8 @@
 // three versions' folders read (share.ts readTree), which side each path takes asked of library.ts mergeFiles, the merged
 // folder made from those sides, a file both sides changed merged by git merge-file, and the result stored as a version of the
 // skill (skillstore.ts storeVersion). Everything it makes on the way is in one folder of its own in .central-knot/
-// (merging-…), removed before it returns, whatever happens. Bytes are copied as they are: nothing is normalised.
+// (merging-…), removed before it returns (a crash midway can leave it). Bytes are copied as they are: nothing is normalised.
+// A conflict found by comparing the folders still lets the line merges run, so one answer names every conflicting file.
 // Not here: which side a path takes (mergeFiles), what Merge changes in the library and History (librarypass.ts mergeIn), and
 // any tool's folder (the plan writes the merged version where the skill is On).
 import { chmod, copyFile, mkdir, mkdtemp } from 'node:fs/promises';
@@ -21,7 +22,6 @@ const pathsOf = (tree: Tree) => new Map<string, PathIs>([...tree.directories.map
 export async function mergeSkill(context: ShareContext, item: LibraryItem, folders: Record<'base' | 'yours' | 'theirs', SkillContent>): Promise<MergeResult<SkillContent>> {
   const trees = { base: await readTree(folders.base.directory), yours: await readTree(folders.yours.directory), theirs: await readTree(folders.theirs.directory) };
   const { merged, conflicts } = mergeFiles(pathsOf(trees.base), pathsOf(trees.yours), pathsOf(trees.theirs));
-  if (conflicts.length) return { conflicts };
   const work = await mkdtemp(join(storeDirectory(context.home), 'merging-')), out = join(work, 'skill');
   try {
     await mkdir(out);
@@ -41,7 +41,7 @@ export async function mergeSkill(context: ShareContext, item: LibraryItem, folde
       if (done.code === 'timeout') return { couldNot: 'Git took too long to merge the files both sides changed.' };
       if (done.code !== 0) conflicts.push(path);
     }
-    if (conflicts.length) return { conflicts };
+    if (conflicts.length) return { conflicts: conflicts.sort() };
     const hash = (await readTree(out)).hash;
     await storeVersion(context, item.key, { directory: out, hash });
     return { merged: (await readVersion(context, item.key, hash))! };

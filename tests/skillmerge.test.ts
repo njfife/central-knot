@@ -54,6 +54,16 @@ test('Both sides changed the same line: a conflict naming SKILL.md, nothing stor
   assert.deepEqual([stored, left], [0, []]);
 });
 
+test('One Merge names every conflicting file: those the folders’ comparison finds (deleted against changed, added differently) and those the line merge finds (lines next to each other, a binary file)', async () => {
+  const png = (byte: number) => Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, byte, 0, 1, 2, 3]);
+  const base = { 'SKILL.md': skill('Takes notes.', 'Write.'), 'adj.md': 'A\nB\nC\nD\n', 'del.md': 'Del.\n', 'img.png': png(1) };
+  const { done, stored, left } = await merge(base,
+    { 'SKILL.md': skill('Takes notes.', 'Write.'), 'adj.md': 'A\nB mine\nC\nD\n', 'img.png': png(2), 'both.md': 'Mine.\n' },
+    { ...base, 'adj.md': 'A\nB\nC theirs\nD\n', 'del.md': 'Del, changed.\n', 'img.png': png(3), 'both.md': 'Theirs.\n' });
+  assert.deepEqual(done, { conflicts: ['adj.md', 'both.md', 'del.md', 'img.png'] });
+  assert.deepEqual([stored, left], [0, []]);
+});
+
 test('A binary file both sides changed is a conflict, though its bytes are far apart', async () => {
   const bytes = (at: number) => { const buffer = Buffer.alloc(4000, 0); buffer[at] = 1; return buffer; };
   const { done } = await merge({ 'SKILL.md': skill('Takes notes.', 'Write.'), 'logo.png': bytes(0) }, { 'SKILL.md': skill('Takes notes.', 'Write.'), 'logo.png': bytes(10) }, { 'SKILL.md': skill('Takes notes.', 'Write.'), 'logo.png': bytes(3990) });

@@ -426,8 +426,8 @@ export async function sourceFacts(context: ShareContext, items: Record<string, L
     if (!linked.length) continue;
     const answers = sourceAnswers(items, (await lastRead(context, source, sources)).read, recorded, { copies });
     for (const item of linked) {
-      const waits = answers.get(item.key) === 'wait', changed = !waits && changedHere(item, item.seen, copies(item));
-      facts.set(item.key, { link: source.link, ...(waits ? { waits: true as const } : {}), ...(changed ? { changedHere: true as const } : {}) });
+      const waits = answers.get(item.key) === 'wait', nextWaits = !waits && changedHere(item, item.seen, copies(item));
+      facts.set(item.key, { link: source.link, ...(waits ? { waits: true as const } : {}), ...(nextWaits ? { nextWaits: true as const } : {}) });
     }
   }
   return facts;

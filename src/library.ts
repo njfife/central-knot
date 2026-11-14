@@ -718,8 +718,8 @@ export async function keepVersion<Content>(shelf: Shelf<Content>, item: LibraryI
 }
 
 /**
- * The one way an item's current version changes: an edit taken in, a found copy taken in, Pull, or an earlier version made
- * current. The content is stored, the version recorded and the record saved before it returns: only then may any harness
+ * The one way an item's current version changes: an edit taken in, a found copy taken in, Pull, a source's update, Replace or
+ * Merge, or an earlier version made current. The content is stored, the version recorded and the record saved before it returns: only then may any harness
  * be written or removed. Always a new entry in `versions`, so the list says when each content was current.
  */
 export async function setCurrent<Content>(shelf: Shelf<Content>, item: LibraryItem, version: Version, content: Content): Promise<void> {

@@ -1020,16 +1020,17 @@ function takenInNotice(taken: Pass['takenIn']): TakenInNotice {
 
 /**
  * Makes an earlier version current: a new version (library.ts setCurrent), which the pass then applies like any other. `seen`:
- * History's Undo of a Replace puts back the source's version the item had taken before it (types.ts Change seen).
+ * History's Undo of a Replace or a Merge puts back the source's version the item had taken before it (types.ts Change seen);
+ * its entry records the one it replaced, so the Undo of that Undo puts it back in turn.
  */
 async function makeCurrent(pass: Pass, item: LibraryItem, version: string, refuse: Refuse, seen?: string) {
   const content = item.versions.some(known => known.hash === version) ? await pass.kind.readVersion(pass.context, item.key, version) : undefined;
   if (!content) return refuse('That version is no longer in Central Knot’s store, so it can’t be made current.');
   if (version === item.hash) return refuse(`${item.name} is at that version already.`);
-  const previous = item.hash;
-  if (seen !== undefined && item.source) item.seen = seen;
+  const previous = item.hash, before = item.seen, puts = seen !== undefined && !!item.source;
+  if (puts) item.seen = seen;
   await setCurrent(pass.shelf, item, { hash: version, at: now(), from: { how: 'made-current' } }, content);
-  pass.asked.set(item.key, { kind: 'current', previous, version, fill: 'written' });
+  pass.asked.set(item.key, { kind: 'current', previous, version, fill: 'written', ...(puts && before !== undefined ? { seen: before } : {}) });
 }
 
 /**
@@ -1086,9 +1087,9 @@ async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Se
 async function mergeIn(pass: Pass, item: LibraryItem, there: { hash: string; content: unknown }, read: SourceRead<unknown>): Promise<MergeDone> {
   const version = (hash: string | undefined) => (hash ? pass.kind.readVersion(pass.context, item.key, hash) : undefined);
   const base = await version(item.seen), yours = await version(item.hash);
-  if (!pass.kind.merge) return { couldNot: `Merge is for skills; ${pass.kind.words.item}s don’t come from a source.` };
   if (!base || !yours) return { couldNot: 'The version it took from the source, or its current one, is no longer in Central Knot’s store.' };
-  const done = await pass.kind.merge(pass.context, item, { base, yours, theirs: there.content });
+  // Only skills come from a source, and skills implement merge.
+  const done = await pass.kind.merge!(pass.context, item, { base, yours, theirs: there.content });
   if (!('merged' in done)) return done;
   const hash = pass.kind.hashOf(done.merged), previous = item.hash, before = item.seen;
   if (hash !== there.hash) await keepVersion(pass.shelf, item, { hash: there.hash, at: read.commitAt, from: { how: 'source', link: read.link, replacedBy: hash } }, there.content);

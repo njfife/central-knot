@@ -16,8 +16,8 @@ export interface ItemRow {
   key: string;
   /** Made by Convert to skill from an agent. */
   converted?: { agent: string; origin: string; losses: string[] };
-  /** A library item linked to a source the home records: its link, and whether a version waits there or it is changed here (types.ts LibraryFacts fromSource). */
-  fromSource?: { link: string; waits?: true; changedHere?: true };
+  /** A library item linked to a source the home records: its link, and whether a version waits there, or else the next one would (types.ts LibraryFacts fromSource). */
+  fromSource?: { link: string; waits?: true; nextWaits?: true };
   /** Shown name, with its case. */
   name?: string;
   description: string;

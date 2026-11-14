@@ -491,7 +491,7 @@ export interface HistoryEvent {
   /**
    * A Replace's or a Merge's 'edit' (`cause` 'source' or 'source-merged'): the source's content the item had taken before it (library.ts LibraryItem seen),
    * which its Undo puts back with the version before (Change seen), so where it had been changed here the source's version
-   * waits again.
+   * waits again. On the 'current' entry that Undo makes: the one it replaced, which the Undo of that Undo puts back.
    */
   seen?: string;
   /**
@@ -841,8 +841,10 @@ export interface LibraryFacts {
   /**
    * In the library and linked to a source the home records (library.ts LibraryItem source): that source's link, as given, and
    * whether its last read has a version that waits because the item was changed here (`waits`: library.ts A SOURCE `wait`).
+   * `nextWaits`: nothing waits now, but the item is changed here (library.ts changedHere), so the source's next change would
+   * wait; never set together with `waits`.
    */
-  fromSource?: { link: string; waits?: true; changedHere?: true };
+  fromSource?: { link: string; waits?: true; nextWaits?: true };
 }
 
 /**

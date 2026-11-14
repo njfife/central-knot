@@ -145,8 +145,8 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'results' | 'no
 function mergeWords(name: string, merge: MergeDone, into: string[], homeTools: string[]): string {
   if (merge === 'merged') return `${name} now has your changes and the source’s, merged${into.length ? `, in ${toolsPhrase(into, homeTools)}` : ''}; the version it had is kept.`;
   if (merge === 'had') return `${name} already had the source’s changes, so Merge changed nothing in it.`;
-  if (merge === 'unsettled') return `Merge left ${name} as it was, since a tool’s copy of it changed just now or can’t be read for sure: try Merge again in a moment.`;
-  if ('conflicts' in merge) return `Merge left ${name} as it was: ${andList(merge.conflicts)} changed both here and at the source, in ways that can’t be merged. Replace takes the source’s; or keep yours, or edit it by hand.`;
+  if (merge === 'unsettled') return `Merge left ${name} as it was, since a tool’s copy of it can’t be read just now (a save still landing, or a copy that can’t be read as it is). Merge can run once that copy can be read; on Skills, its row says which tool and why.`;
+  if ('conflicts' in merge) return `Merge left ${name} as it was: ${andList(merge.conflicts)} changed both here and at the source, in ways that can’t be merged. Replace takes the source’s version and keeps yours as a version; otherwise yours stays current and the update keeps waiting.`;
   return `Merge couldn’t run, so ${name} is as it was: ${merge.couldNot}`;
 }
 
@@ -163,7 +163,7 @@ function stateWords(name: SourceName, preview: boolean): { text: string; warns?:
     case 'make': return { text: preview ? 'Comes in, Off: in no tool until you turn it on' : 'Comes in, Off, at the next Check now' };
     case 'link': return { text: `Already in Central Knot, the same: ${next} links it to this source` };
     case 'update': return { text: preview ? 'Came from this link before and is unchanged: Add links it again, and the source’s version becomes current' : `Changed at the source: ${next} makes that the current version` };
-    // `merge` is a Merge's own answer, never a row's (library.ts SourceAnswer).
+    // The type check needs `merge` here: SourceNameState holds every SourceAnswer, and `merge` is a Merge's own, never a row's.
     case 'wait': case 'merge': return { text: 'Changed at the source. Yours stays current until you merge or replace it, since it was changed here or a tool’s copy can’t be read just now. Merge puts the source’s changes into yours if they don’t clash; Replace takes the source’s and keeps yours as a version.', warns: true };
     case 'drop': return { text: `No longer at the source: ${next} turns it off`, warns: true };
     case 'differs': return { text: `Not brought in: Central Knot already has a different ${called}. To take this one instead, delete yours from Central Knot on Skills (that also takes it out of every tool it is on in), then ${preview ? 'once the source is added, Add on its row' : 'Add on this row'}.`, warns: true };

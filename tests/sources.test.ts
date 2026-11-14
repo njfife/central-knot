@@ -330,8 +330,8 @@ test('Merge: a change here and the source’s, in lines apart, become the curren
     assert.equal(done.sourced?.[0].history, (await readHistory(box.context)).at(-1)!.id, 'the answer names its entry, whose Undo the band offers');
     assert.deepEqual(await notices(box, 'notes'), ['nothing', false]);
     const from = (await seen(box, box.context, 'notes')).fact!.fromSource!;
-    assert.deepEqual(from, { link, changedHere: true });
-    assert.equal(fromSourceWords(from).before, 'From github.com/team/notes, a source. Yours is not the source’s version it last took (it was changed or merged here), or a tool’s copy of it can’t be read just now, so a change there waits on ');
+    assert.deepEqual(from, { link, nextWaits: true });
+    assert.equal(fromSourceWords(from).before, 'From github.com/team/notes, a source. You changed it here, or a tool’s copy of it can’t be read just now, so the source’s next change will wait for you to Merge or Replace on ');
   } finally { await box.cleanup(); }
 });
 
@@ -385,6 +385,19 @@ test('Undo of a Merge: yours is current again in every tool, and the source’s 
     assert.deepEqual(await toolTexts(box), box.tools.map(() => skillMd('notes', lines('First, mine.'))));
     assert.deepEqual(await notices(box, 'notes'), ['wait', true]);
     assert.deepEqual(answered(await check(box, id)), [{ name: 'notes', answer: 'wait' }]);
+  } finally { await box.cleanup(); }
+});
+
+test('Merge, its Undo, then the Undo of that Undo: the merged version is current again, and the source’s version it took no longer waits', async () => {
+  const box = await sandbox();
+  try {
+    const { id } = await waitingToMerge(box);
+    await mergeIt(box, id);
+    await restoreSkill(box.context, box.tools, (await readHistory(box.context)).at(-1)!.id);
+    assert.deepEqual(await notices(box, 'notes'), ['wait', true]);
+    await restoreSkill(box.context, box.tools, (await readHistory(box.context)).at(-1)!.id);
+    assert.deepEqual(await toolTexts(box), box.tools.map(() => skillMd('notes', lines('First, mine.', 'Last, theirs.'))));
+    assert.deepEqual(await notices(box, 'notes'), ['nothing', false]);
   } finally { await box.cleanup(); }
 });
 

@@ -2324,7 +2324,7 @@ async function sourcesFlow() {
   await a.shot('sources-merged');
   await a.click('#nav-skills');
   if (!(await a.exists('.details'))) await a.click('#open-deslop');
-  check('its opened row on Skills says it is still changed here, so the source’s next change waits for Merge or Replace', /Yours is not the source’s version it last took \(it was changed or merged here\), or a tool’s copy of it can’t be read just now, so a change there waits on Sources: Merge or Replace\./.test(await a.text('.details') ?? ''), await a.text('.details'));
+  check('its opened row on Skills says it is still changed here, so the source’s next change will wait for Merge or Replace', /You changed it here, or a tool’s copy of it can’t be read just now, so the source’s next change will wait for you to Merge or Replace on Sources\./.test(await a.text('.details') ?? ''), await a.text('.details'));
   // A clash: the same line changed in Claude Code and at the source. Merge names the file and changes nothing.
   await a.click('#nav-sources');
   writeFileSync(inClaude, readNow(inClaude).replace('Remove slop, firmly.', 'Remove slop, my way.'));
@@ -2334,7 +2334,7 @@ async function sourcesFlow() {
   await until(async () => await a.exists(`#source-merge-${id}-deslop`));
   const clashBefore = { versions: record()?.versions.length, seen: record()?.seen, tools: Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))) };
   await a.click(`#source-merge-${id}-deslop`);
-  check('a Merge that clashes names SKILL.md, as a warning, and changes nothing: every tool as it was, no version, the source’s version still waits', await until(async () => /Merge left deslop as it was: SKILL\.md changed both here and at the source, in ways that can’t be merged\. Replace takes the source’s; or keep yours, or edit it by hand\./.test(await a.text('.band-done .band-text') ?? ''))
+  check('a Merge that clashes names SKILL.md, as a warning, and changes nothing: every tool as it was, no version, the source’s version still waits', await until(async () => /Merge left deslop as it was: SKILL\.md changed both here and at the source, in ways that can’t be merged\. Replace takes the source’s version and keeps yours as a version; otherwise yours stays current and the update keeps waiting\./.test(await a.text('.band-done .band-text') ?? ''))
     && await a.exists('.band-done svg.tone-warning') && !(await a.exists('#outcome-undo')) && await a.exists(`#source-merge-${id}-deslop`)
     && JSON.stringify({ versions: record()?.versions.length, seen: record()?.seen, tools: Object.values(roots).map(root => readNow(join(home, root, 'deslop/SKILL.md'))) }) === JSON.stringify(clashBefore), [await a.text('.band-done'), clashBefore]);
   await a.shot('sources-merge-clash');
