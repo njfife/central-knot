@@ -274,8 +274,8 @@ export function listed(item: Pick<LibraryItem, 'hash' | 'versions'>): Version[] 
 }
 
 /**
- * Whether a version was never the item's current version: a copy that gave way (`was-in`), or one the version that took its
- * place beat (`replacedBy`). The one place this is decided.
+ * Whether a version was never the item's current version: a copy that gave way (`was-in`), or one beaten by the version that
+ * took its place (`replacedBy`). The one place this is decided.
  */
 export const neverCurrent = (from: Origin) => from.how === 'was-in' || from.replacedBy !== undefined;
 
@@ -655,8 +655,9 @@ export interface Hands<Content> extends Shelf<Content> {
 /**
  * Carries out one item's plan in the model's order; the pass calls this for every item of every kind, and nothing else orders
  * these steps. Answers the harnesses whose write or removal was held (left undone this time: the next pass tries again), so
- * the pass can take them out of what History was told first (librarypass.ts untell). The order holds for this item: a pass that carries out several saves the whole record each time (Shelf.save),
- * so another item's save can carry this one's click to disk before this item's History is told. The pass covers what that
+ * the pass can take them out of what History was told first (librarypass.ts untell). The order holds for this item: a pass
+ * that carries out several saves the whole record each time (Shelf.save), so another item's save can carry this one's click
+ * to disk before this item's History is told. The pass covers what that
  * leaves (librarypass.ts deletionsTold: a deleted item with no entry gets one).
  * - History first: an entry whose change never lands offers nothing (every action is worked out from the item as it is),
  *   while a change on record with no entry could leave a deleted item with no Restore.

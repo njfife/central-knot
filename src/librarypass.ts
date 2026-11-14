@@ -761,8 +761,11 @@ function logItem(pass: Pass, item: LibraryItem, made: Plan, slot: Partial<Record
   const did = { written: can(made.write), removed: can(made.remove.filter(tool => !giveBack[tool])) };
   // The copies a click takes over: each one Central Knot had not put there, which it writes over or counts as the item's.
   const tookFrom = [...made.current, ...made.write].filter(tool => slot[tool] && item.applied[tool] === undefined).map(tool => ({ tool, hash: slot[tool]!.hash }));
-  /** An entry; `writes`: those of its losers it names as written or removed (Told). Only an edit taken in is chosen between edits (Plan orderProved). */
-  const log = (fields: Omit<HistoryEvent, 'id' | 'at' | 'key' | 'item' | 'orderProved'> & Partial<Pick<HistoryEvent, 'orderProved'>>, writes: HarnessId[] = []) => {
+  /**
+   * An entry; `writes`: those of its losers it names as written or removed (Told). `orderProved` is true but where an entry
+   * says otherwise: the edit taken in, the one entry that chooses between edits (Plan orderProved).
+   */
+  const log = (fields: Omit<HistoryEvent, 'id' | 'at' | 'key' | 'item' | 'orderProved'> & { orderProved?: boolean }, writes: HarnessId[] = []) => {
     const event: HistoryEvent = { id: randomUUID(), at: now(), key, item: item.name, orderProved: true, ...fields };
     events.push(event);
     named.set(event, writes);
@@ -845,8 +848,8 @@ async function untell(pass: Pass, told: Told, held: HarnessId[]) {
     const gaveBack = event.gaveBack?.filter(tool => !held.includes(tool));
     if (gaveBack?.length) event.gaveBack = gaveBack; else delete event.gaveBack;
   }
-  const gone = new Set(told.events.filter(event => event.cause === 'in-line' && !event.losers.length).map(event => event.id));
   if (JSON.stringify(told.events) === before) return;
+  const gone = new Set(told.events.filter(event => event.cause === 'in-line' && !event.losers.length).map(event => event.id));
   const mine = new Map(told.events.map(event => [event.id, event]));
   const history = await readHistory(pass.context);
   await replaceHistory(pass.context, history.filter(event => !gone.has(event.id)).map(event => mine.get(event.id) ?? event));
