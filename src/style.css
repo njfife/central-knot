@@ -227,11 +227,11 @@ ul { list-style: none; }
 .rail .nav-row { position: relative; }
 .rail .nav-unseen { position: absolute; top: 5px; left: calc(50% + 4px); margin: 0; }
 
-/* A short window: tighter rows, and each home on one line, so nothing in the sidebar scrolls (860×560 with the Practice copy's
-   three homes leaves about 5px to spare). */
+/* A short window: tighter rows, and each home on one line, so nothing in the sidebar scrolls (#nav's own scroll is for a
+   sidebar taller still). The smallest window, 860×560, leaves the page 528px under the Mac's title bar: every page, the
+   Practice copy's three homes and the update control fit there with about 17px to spare. */
 @media (max-height: 680px) {
-  .nav-row { height: 26px; }
-  .home-row, .update-control { height: 28px; }
+  .nav-row, .home-row, .update-control { height: 22px; }
   .home-sub { display: none; }
   #nav, #homes { padding-top: 4px; padding-bottom: 4px; }
   .homes-title { padding-bottom: 4px; }
