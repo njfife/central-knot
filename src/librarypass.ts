@@ -67,7 +67,7 @@
 // - History's sentences and actions for its entries: historyactions.ts, in the kind's words (historypage.ts asks it).
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-import { carryOut, itemKey, keepVersion, linkedSource, managedAgain, newItem, pendingChanges, plan, setCurrent, sourceAnswers, takeInAnswer, versionAt, wantedIn } from './library.ts';
+import { carryOut, fromLinkSinceTakeIn, itemKey, keepVersion, linkedSource, managedAgain, newItem, pendingChanges, plan, setCurrent, sourceAnswers, takeInAnswer, versionAt, wantedIn } from './library.ts';
 import type { ItemNow } from './historyactions.ts';
 import type { Copies, FoundCopy, FoundKey, HarnessCopy, ItemKind, LeftFound, LibraryItem, Plan, Origin, Shelf, SourceSeen, TakenBy, Version } from './library.ts';
 import { appendHistory, historyCutoff, readHistory, replaceHistory } from './history.ts';
@@ -997,7 +997,7 @@ const foundKeys = (pass: Pass) => [...new Set([...pass.disk.byKey.keys(), ...(pa
 /**
  * Takes a found item into the library, On, from the copy the take-in table answered: the one content every harness holds, or
  * the copy the person chose. The other copies become versions as the pass writes over them. An item deleted from Central Knot
- * before is the same item again, its earlier versions with it (only a click comes here for one). `except`: harnesses a click
+ * before is the same item again, its earlier versions with it but linked to no source (only a click comes here for one). `except`: harnesses a click
  * keeps it out of. History's entry is an Add's (the rule's says so), with the harnesses it was found in (`foundIn`: its Undo is
  * offered only while each still holds its copy, historyactions.ts takeInHeld; the rule's notice names them).
  */
@@ -1006,6 +1006,8 @@ async function takeIn(pass: Pass, key: string, answer: { take: FoundCopy; chosen
   const item = pass.library.items[key] ?? newItem(key, source.name);
   Object.assign(item, { on: true, except: [...except], name: source.name } satisfies Partial<LibraryItem>);
   delete item.deleted;
+  // Taken in from a tool, it is no longer a source's: the next read links it again only as a name the library has (library.ts A SOURCE).
+  delete item.source; delete item.seen;
   pass.library.items[key] = item;
   const from: Origin = { how: answer.chosen ? 'chosen' : 'found', harness: source.tool };
   await setCurrent(pass.shelf, item, { hash: source.hash, at: versionAt(source.at), from }, pass.kind.contentOf(source));
@@ -1081,8 +1083,7 @@ async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Se
     } else if (answer === 'link' || answer === 'same') {
       Object.assign(item!, { source: read.id, seen: entry.hash } satisfies Partial<LibraryItem>);
       // Linked as the same content: recorded as a version from the source, so its row can say when the source removes it (library.ts removedBy).
-      const fromHere = item!.versions.some(version => version.from.link === read.link);
-      if (answer === 'link' && !fromHere) await setCurrent(pass.shelf, item!, { hash: entry.hash, at: read.commitAt, from: origin }, entry.content);
+      if (answer === 'link' && !fromLinkSinceTakeIn(item!, read.link)) await setCurrent(pass.shelf, item!, { hash: entry.hash, at: read.commitAt, from: origin }, entry.content);
     } else if (answer === 'update') {
       const previous = item!.hash, before = item!.seen, replace = !!read.replace?.has(key);
       Object.assign(item!, { source: read.id, seen: entry.hash } satisfies Partial<LibraryItem>);

@@ -117,7 +117,9 @@
 //   that skill can't be read, or the     linked                      nothing; the source's row says why
 //     source wasn't read whole
 //   a name the library has               not linked, same content    it is linked, and that content is recorded as a version from
-//                                                                    the source where it has none from that link (REMOVED, below)
+//                                                                    the source where it has none from that link since its latest
+//                                                                    take-in (REMOVED, below); one deleted and taken in again from
+//                                                                    a tool is not linked (librarypass.ts takeIn), so it comes here
 //   a name the library has               not linked, its current     linked again, and S becomes current: the link was removed
 //                                        version this same link's,   and added again, or the name went and came back, and the
 //                                        not changed here since      item is as the link left it, On or Off
@@ -130,8 +132,8 @@
 // unreadable, its folder gone, a plugin) is not read whole: no name is gone, and the source turns nothing Off.
 //
 // REMOVED AT ITS SOURCE (`removedBy`, the one place it is decided; worked out at each look, never stored): an item that is Off,
-// linked to no source, has a version from a recorded source's link since it last came in from a tool (a take-in: `found` or
-// `chosen`; one deleted and written again by hand is not the source's), and that source's last read doesn't hold its name. That
+// linked to no source, has a version from a recorded source's link since it last came in from a tool (fromLinkSinceTakeIn; one
+// deleted and written again by hand is not the source's), and that source's last read doesn't hold its name. That
 // source's row on Sources and the item's row on Skills say so (sources.ts sourcesView, sourceFacts). The drop let the link go,
 // so turning it On (its switch, History's Turn on, a profile) is the revert: it is no longer Off, and nothing says it any more.
 // Nor once the item is deleted, the source removed, or a read holds the name again, readable or not: unchanged here since, the
@@ -613,15 +615,22 @@ export function sourceAnswers(items: Record<string, LibraryItem>, read: SourceSe
 
 /**
  * The recorded source that removed an item, if one did (the header's REMOVED AT ITS SOURCE): the item is Off and linked to
- * none, one of its versions since it last came in from a tool came from that source's link, and that source's last read
- * doesn't hold its name. `reads`: every source the home records, each with its last read's names.
+ * none, it has a version from that source's link since it last came in from a tool (fromLinkSinceTakeIn), and that source's
+ * last read doesn't hold its name. `reads`: every source the home records, each with its last read's names.
  */
 export function removedBy<Read extends Pick<SourceSeen, 'id' | 'link' | 'names'>>(item: LibraryItem, reads: readonly Read[]): Read | undefined {
   if (item.on || item.deleted || linkedSource(item, new Set(reads.map(read => read.id)))) return undefined;
+  return reads.find(read => !read.names.has(item.key) && fromLinkSinceTakeIn(item, read.link));
+}
+
+/**
+ * Whether one of an item's versions since it last came in from a tool (a take-in: `found` or `chosen`) came from this link: the
+ * one place it is decided, for REMOVED AT ITS SOURCE (removedBy) and for the version a `link` records (librarypass.ts fromSourceStep).
+ */
+export function fromLinkSinceTakeIn(item: Pick<LibraryItem, 'versions'>, link: string): boolean {
   // `versions` is newest first: only those taken since the latest take-in count.
   const takenIn = item.versions.findIndex(version => version.from.how === 'found' || version.from.how === 'chosen');
-  const since = takenIn < 0 ? item.versions : item.versions.slice(0, takenIn);
-  return reads.find(read => !read.names.has(item.key) && since.some(version => version.from.link === read.link));
+  return (takenIn < 0 ? item.versions : item.versions.slice(0, takenIn)).some(version => version.from.link === link);
 }
 
 /** One path in a folder as Merge compares it (the header's MERGE): a file, by its bytes' hash and its executable bit, or a folder. */

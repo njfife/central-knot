@@ -864,6 +864,43 @@ test('Deleted after its source removed it, then written by hand and taken in aga
   } finally { await box.cleanup(); }
 });
 
+test('Removed, deleted, written again by hand the same and added, then back at the source the same: linked again with a version from the source since that take-in, so a second removal shows the notice', async () => {
+  const box = await sandbox();
+  try {
+    const { repo, id, link } = await oneSkill(box, 'notes', { on: true });
+    await dropNotes(box, repo, id);
+    await applySkills(box.context, box.tools, [{ ...asItIs('notes', await itemOf(box, 'notes')), deleted: true }]);
+    await put(box, 'claude-cli', { 'SKILL.md': skillMd('notes', 'First.') });
+    await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [], seenOn: false }]);
+    await repo.commit({ 'SKILL.md': skillMd('notes', 'First.') }, '2026-11-03T10:00:00Z');
+    assert.deepEqual((await check(box, id)).sourced?.find(entry => entry.name === 'notes')?.answer, 'link');
+    await applySkills(box.context, box.tools, [{ ...asItIs('notes', await itemOf(box, 'notes')), on: false, seenOn: true }]);
+    await repo.commit({ 'SKILL.md': skillMd('jottings', 'First.') }, '2026-11-04T10:00:00Z');
+    await check(box, id);
+    assert.deepEqual(await fromSourceOf(box), { link, removed: true });
+  } finally { await box.cleanup(); }
+});
+
+test('Deleted while still at its source, then written again by hand and added: no longer linked; differing, the next read doesn’t bring it in; the same, the next read links it again, and a removal then shows the notice', async () => {
+  const box = await sandbox();
+  try {
+    const { repo, id, link } = await oneSkill(box, 'notes', { on: true });
+    const writtenAgain = async (body: string) => {
+      await applySkills(box.context, box.tools, [{ ...asItIs('notes', await itemOf(box, 'notes')), deleted: true }]);
+      await put(box, 'claude-cli', { 'SKILL.md': skillMd('notes', body) });
+      await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [], seenOn: false }]);
+    };
+    await writtenAgain('Mine.');
+    assert.deepEqual([(await itemOf(box, 'notes'))!.source, await fromSourceOf(box)], [undefined, undefined], 'taken in again, it is his: no longer linked');
+    assert.deepEqual((await check(box, id)).sourced?.find(entry => entry.name === 'notes')?.answer, 'differs');
+    await writtenAgain('First.');
+    assert.deepEqual((await check(box, id)).sourced?.find(entry => entry.name === 'notes')?.answer, 'link');
+    await applySkills(box.context, box.tools, [{ ...asItIs('notes', await itemOf(box, 'notes')), on: false, seenOn: true }]);
+    await dropNotes(box, repo, id);
+    assert.deepEqual(await fromSourceOf(box), { link, removed: true });
+  } finally { await box.cleanup(); }
+});
+
 test('Deleted, or its source removed, while the notice shows: it goes, since nothing it would say is so any more; Restore brings it back', async () => {
   const box = await sandbox();
   try {
