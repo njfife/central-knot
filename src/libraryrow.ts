@@ -141,8 +141,8 @@ export function harnessIs(row: LibraryRow, item: LibraryItem | undefined, tool: 
   if (row.cannot?.[tool]) return 'cannot';
   if (made.takeIn === harness) return 'edited';
   if (made.turnedOffBy === harness) return 'deleted';
-  const step = (['write', 'remove', 'found', 'current'] as const).find(list => made[list].includes(harness));
-  if (step) return ({ write: 'gets-it', remove: 'leaving', found: 'own-copy', current: 'current' } as const)[step];
+  const step = (['write', 'remove', 'ownCopy', 'current'] as const).find(list => made[list].includes(harness));
+  if (step) return ({ write: 'gets-it', remove: 'leaving', ownCopy: 'own-copy', current: 'current' } as const)[step];
   return inLib.on && inLib.except.includes(harness) ? 'kept-out' : 'none';
 }
 

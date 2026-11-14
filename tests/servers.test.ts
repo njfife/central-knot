@@ -314,7 +314,7 @@ test('A tool’s own switch is left as it is: set in each tool by hand, then Off
     for (const tool of tools) await writeFile(mcpSwitchPath(box.context, tool), withMcpSwitch(tool, await readFile(mcpSwitchPath(box.context, tool), 'utf8'), 'docs', true));
     let view = await serversView(box.context, tools);
     assert.deepEqual(view.items[0]?.switchedOff, ['claude-cli', 'codex-cli', 'opencode-cli']);
-    assert.match(say.harnessLine({ key: 'docs', hashes: { 'codex-cli': 'x' }, plan: { orderProved: true, current: ['codex-cli'], write: [], remove: [], forget: [], found: [], keep: [] }, switched: { 'codex-cli': 'switched off in Codex’s own settings' } }, view.library.docs, 'codex-cli', 'Codex'),
+    assert.match(say.harnessLine({ key: 'docs', hashes: { 'codex-cli': 'x' }, plan: { orderProved: true, current: ['codex-cli'], write: [], remove: [], forget: [], ownCopy: [], keep: [] }, switched: { 'codex-cli': 'switched off in Codex’s own settings' } }, view.library.docs, 'codex-cli', 'Codex'),
       /It is switched off in Codex’s own settings: Codex doesn’t start it\. Central Knot leaves that switch as it is, so it is still off there after Off and On\./);
     // Off: out of Codex (its own fields kept, the switch with them); Claude Code waits.
     await box.send(off('docs'), tools);

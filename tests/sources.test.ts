@@ -511,7 +511,7 @@ test('Synchronize everything finding a copy of a source’s Off skill in a tool:
     await setSyncEverything(box.context, true, true);
     await applySkills(box.context, box.tools, [], { background: true });
     const item = (await itemOf(box, 'notes'))!;
-    assert.deepEqual([item.on, item.versions.length, (await seen(box)).fact?.takeInAnswers], [false, 1, undefined], 'not found: the item is Off, its copy in Claude Code a found copy left alone');
+    assert.deepEqual([item.on, item.versions.length, (await seen(box)).fact?.takeInAnswers], [false, 1, undefined], 'not found: the item is Off, its copy in Claude Code its own, left alone');
     const switchOn = (await readHistory(box.context)).find(event => event.kind === 'everything')!;
     await everythingEntryAction(box.context, box.tools, switchOn.id);
     assert.deepEqual([(await itemOf(box, 'notes'))!.deleted, (await itemOf(box, 'notes'))!.source !== undefined], [undefined, true], 'the one Undo takes back only what the rule took in');

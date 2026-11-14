@@ -25,7 +25,7 @@ test('Off or kept out, H = A: removed', () => assert.equal(decide(OFF, 'b', has(
 test('Off or kept out, H = L though A is older: removed (it holds the current version: nothing to take in)', () => assert.equal(decide(OFF, 'b', has('b'), 'a'), 'remove'));
 test('Off or kept out, H changed while L = A: H becomes the current version, then it is removed', () => assert.equal(decide(OFF, 'b', has('c'), 'b'), 'take-in'));
 test('Off or kept out, H changed and L moved on too: the latest wins, then it is removed', () => assert.equal(decide(OFF, 'c', has('b'), 'a'), 'latest-wins'));
-test('Off or kept out, a copy where nothing was applied: a found copy, left alone', () => assert.equal(decide(OFF, 'b', has('x'), undefined), 'found'));
+test('Off or kept out, a copy where nothing was applied: the harness’s own copy, left alone', () => assert.equal(decide(OFF, 'b', has('x'), undefined), 'own-copy'));
 
 test('H unseen is never H gone: nothing happens there, On or Off, whatever was applied', () => {
   for (const wanted of [ON, OFF]) for (const applied of ['b', 'a', undefined]) assert.equal(decide(wanted, 'b', unseen, applied), 'nothing');
@@ -50,8 +50,8 @@ test('A copy of its own where the harness has the item another way too, edited t
   assert.equal(decide(ON, 'c', bothWays('b'), 'a'), 'latest-wins');
 });
 test('A copy of its own that Central Knot never put there, where the harness has the item another way too: left alone (both ways)', () => {
-  assert.equal(decide(ON, 'b', bothWays('x'), undefined), 'found');
-  assert.equal(decide(ON, 'b', bothWays('b'), undefined), 'found');
+  assert.equal(decide(ON, 'b', bothWays('x'), undefined), 'own-copy');
+  assert.equal(decide(ON, 'b', bothWays('b'), undefined), 'own-copy');
 });
 test('Off, and the copy a removal was owed for is gone already: only forgotten', () => {
   assert.equal(decide(OFF, 'b', none, 'b'), 'forget');
@@ -65,7 +65,7 @@ const time = (number: number) => Date.parse(day(number));
 /** An agent On at version 'a' (made on the 1st), applied to Claude Code, Copilot CLI and Codex. */
 const item = (changes: Partial<LibraryItem> = {}): LibraryItem => ({ ...newItem('reviewer', 'reviewer'), on: true, hash: 'a',
   versions: [{ hash: 'a', at: day(1), from: { how: 'found', harness: 'claude-cli' } }], applied: { 'claude-cli': 'a', 'copilot-cli': 'a', 'codex-cli': 'a' }, ...changes });
-const quiet = { takeIn: undefined, orderProved: true, turnedOffBy: undefined, keep: [], write: [], remove: [], forget: [], found: [] };
+const quiet = { takeIn: undefined, orderProved: true, turnedOffBy: undefined, keep: [], write: [], remove: [], forget: [], ownCopy: [] };
 
 test('Every harness holds the current version: nothing to do', () => {
   assert.deepEqual(plan(item(), { 'claude-cli': has('a'), 'copilot-cli': has('a'), 'codex-cli': has('a') }), { ...quiet, current: ['claude-cli', 'copilot-cli', 'codex-cli'] });
@@ -112,10 +112,10 @@ test('A copy deleted in one harness and edited in another: the edit becomes the 
     { ...quiet, takeIn: 'claude-cli', turnedOffBy: 'copilot-cli', remove: ['claude-cli', 'codex-cli'], forget: ['copilot-cli'], current: [] });
 });
 
-test('Off: copies as applied are removed; an edit no pass took in becomes the current version first; one never applied is a found copy', () => {
+test('Off: copies as applied are removed; an edit no pass took in becomes the current version first; one never applied is the harness’s own copy', () => {
   const off = item({ on: false, applied: { 'claude-cli': 'a', 'copilot-cli': 'a' } });
   assert.deepEqual(plan(off, { 'claude-cli': has('a'), 'copilot-cli': has('b', time(2)), 'codex-cli': has('x') }),
-    { ...quiet, takeIn: 'copilot-cli', remove: ['claude-cli', 'copilot-cli'], found: ['codex-cli'], current: [] });
+    { ...quiet, takeIn: 'copilot-cli', remove: ['claude-cli', 'copilot-cli'], ownCopy: ['codex-cli'], current: [] });
 });
 
 test('Off with two edits no pass took in: the latest becomes the current version, the other is kept, and both copies are removed', () => {
@@ -241,14 +241,14 @@ test('Managed again, Off: a copy that went meanwhile leaves nothing applied ther
   assert.deepEqual(plan({ ...off, on: true }, { 'claude-cli': has('a'), 'copilot-cli': has('a'), 'codex-cli': none }).write, ['codex-cli']);
 });
 
-test('Managed again, deleted: a copy whose content is one of its versions is still Central Knot’s to remove; any other is a found copy, left alone', () => {
+test('Managed again, deleted: a copy whose content is one of its versions is still Central Knot’s to remove; any other is the harness’s own copy, left alone', () => {
   const ownCopy = item({ deleted: { at: day(5) } });
   assert.equal(managedAgain(ownCopy, 'codex-cli', has('a')), undefined);
   assert.deepEqual(plan(ownCopy, { 'codex-cli': has('a') }).remove, ['codex-cli']);
   const another = item({ deleted: { at: day(5) } });
   assert.equal(managedAgain(another, 'codex-cli', has('x', time(6))), undefined, 'nothing is kept: the content was never the item’s');
   assert.equal(another.applied['codex-cli'], undefined);
-  assert.deepEqual(plan(another, { 'codex-cli': has('x', time(6)) }), { ...quiet, found: ['codex-cli'], current: [] });
+  assert.deepEqual(plan(another, { 'codex-cli': has('x', time(6)) }), { ...quiet, ownCopy: ['codex-cli'], current: [] });
 });
 
 test('Managed again changes nothing where nothing was applied, or where the copy can’t be seen; a harness with no copy of its own has nothing applied', () => {
@@ -272,7 +272,7 @@ test('A copy whose content is a version already is written over without being ke
 
 test('A deleted item is wanted nowhere: applied copies go, and a copy that turns up is found', () => {
   const gone = item({ deleted: { at: day(5) }, applied: { 'claude-cli': 'a' } });
-  assert.deepEqual(plan(gone, { 'claude-cli': has('a'), 'codex-cli': has('a') }), { ...quiet, remove: ['claude-cli'], found: ['codex-cli'], current: [] });
+  assert.deepEqual(plan(gone, { 'claude-cli': has('a'), 'codex-cli': has('a') }), { ...quiet, remove: ['claude-cli'], ownCopy: ['codex-cli'], current: [] });
 });
 
 // ---------- Versions: stored and recorded before anything else ----------
