@@ -2331,15 +2331,15 @@ async function sourcesFlow() {
   await a.click('#source-look');
   await until(() => a.exists('#source-preview'));
   const offered = await a.text('.source-name[data-key="deslop"]') ?? '';
-  check('Look offers one skill, deslop, at the root of skill-deslop, coming in Off, with the files beside its SKILL.md', (await a.all('#source-preview .source-name', 'e.dataset.key')).join() === 'deslop' && /deslop\s*at the root of skill-deslop/.test(offered) && /Comes in, Off/.test(offered) && /8 files/.test(offered) && /references\/checklist\.md/.test(offered), offered);
+  check('Look offers one skill, deslop, at the root of skill-deslop, coming in Off, with the files beside its SKILL.md', (await a.all('#source-preview .source-name', 'e.dataset.key')).join() === 'deslop' && /deslop\s*skill, at the root of skill-deslop/.test(offered) && /Comes in, Off/.test(offered) && /8 files/.test(offered) && /references\/checklist\.md/.test(offered), offered);
   same('a look keeps nothing and writes no tool', [record(), existsSync(join(home, roots['claude-cli'], 'deslop'))], [undefined, false]);
   await a.shot('sources-look');
   await a.click('#source-add');
   await until(() => a.exists('.source-row'));
   check('Add says deslop is in Central Knot, Off', /Added github\.com\/stephenturner\/skill-deslop \(main\)\. deslop is in Central Knot, Off: turn it on in Skills\./.test(await a.text('.band-done .band-text') ?? ''), await a.text('.band-done'));
   same('in Central Knot, Off, in no tool', [record()?.on, Object.values(roots).some(root => existsSync(join(home, root, 'deslop')))], [false, false]);
-  check('its row says it is in Central Knot, Off, and says beforehand that Check now can change skills in the tools', /In Central Knot, Off/.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '')
-    && /Check now reads the link again, as Central Knot does once a day while Automatic sync is on: a skill changed there is updated in the tools it is on in, unless you changed it here \(then it waits for you\); one no longer there is turned off and taken out of them\./.test(await a.text('.source-row') ?? ''), await a.text('.source-row'));
+  check('its row says it is in Central Knot, Off, and says beforehand that Check now can change skills and agents in the tools', /In Central Knot, Off/.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '')
+    && /Check now reads the link again, as Central Knot does once a day while Automatic sync is on: a skill or an agent changed there is updated in the tools it is on in, unless you changed it here \(then it waits for you\); one no longer there is turned off and taken out of them\./.test(await a.text('.source-row') ?? ''), await a.text('.source-row'));
   const id = await a.run(`document.querySelector('.source-row').dataset.source`);
 
   await a.click('#nav-skills');
@@ -2463,6 +2463,54 @@ async function sourcesFlow() {
   check('Add on its line brings unslop back into Central Knot, Off, and says so', await until(async () => /unslop is in Central Knot, Off: turn it on in Skills\./.test(await a.text('.band-done .band-text') ?? ''))
     && !unslop()?.deleted && unslop()?.on === false && !(await a.exists(`#source-bring-${id}-skill-unslop`)), [await a.text('.band-done'), unslop()]);
 
+  // A source with a skill and an agent: the look lists both, Add brings both in Off, the agent turned On on Agents gets the
+  // source's file in Claude Code byte for byte, a change at the source alone updates it (Open Agents), and Merge puts a change
+  // made in Claude Code and one made at the source together.
+  const kit = join(hosts, 'github.com/team/kit.git'), reviewerMd = '---\nname: reviewer\ndescription: Reviews code.\ntools: Read, Grep\n---\n\nYou review code.\nThe middle.\nMore middle.\nBe brief.\n';
+  mkdirSync(kit, { recursive: true });
+  spawnSync('git', ['init', '--quiet', '--initial-branch=main', kit]);
+  commit(kit, { 'notes/SKILL.md': '---\nname: notes\ndescription: Takes notes.\n---\n\nTake notes.\n', 'agents/reviewer.md': reviewerMd });
+  const agentFile = tool => join(home, { 'claude-cli': '.claude/agents/reviewer.md', 'copilot-cli': '.copilot/agents/reviewer.agent.md', 'codex-cli': '.codex/agents/reviewer.toml' }[tool]);
+  const agentRecord = () => JSON.parse(readNow(join(home, '.central-knot/agents.json')) || '{"items":{}}').items.reviewer;
+  await a.click('#nav-sources');
+  await type('https://github.com/team/kit');
+  await a.click('#source-look');
+  await until(() => a.exists('#source-preview'));
+  const kitLook = await a.text('#source-preview') ?? '';
+  check('Look lists the skill and the agent, each with its kind and where it sits, coming in Off, and Add says both', (await a.all('#source-preview .source-name', 'e.dataset.kind + " " + e.dataset.key')).join() === 'skill notes,agent reviewer'
+    && /reviewer\s*agent, in the folder agents/.test(await a.text('#source-preview .source-name[data-kind="agent"]') ?? '') && /1 file: reviewer\.md/.test(await a.text('#source-preview .source-name[data-kind="agent"]') ?? '')
+    && (await a.text('#source-add'))?.trim() === 'Add 1 skill and 1 agent', kitLook);
+  await a.shot('sources-look-agent');
+  await a.click('#source-add');
+  await until(async () => (await a.all('.source-row')).length === 2);
+  check('Add says notes and reviewer are in Central Knot, Off, to turn on in Skills and Agents', /notes and reviewer are in Central Knot, Off: turn them on in Skills and Agents\./.test(await a.text('.band-done .band-text') ?? '') && agentRecord()?.on === false, await a.text('.band-done'));
+  const kitId = await a.run(`[...document.querySelectorAll('.source-row')].find(row => row.textContent.includes('team/kit')).dataset.source`);
+  await a.click('#nav-agents');
+  await until(() => a.exists('#open-reviewer'));
+  await a.click('#open-reviewer');
+  check('its opened row on Agents says which source it is from', /From github\.com\/team\/kit, a source\./.test(await a.text('.details') ?? ''), await a.text('.details'));
+  await a.shot('agents-from-source');
+  await a.click('#switch-reviewer');
+  check('turned On, Claude Code gets the source’s file byte for byte, and every tool has the agent', await until(() => readNow(agentFile('claude-cli')) === reviewerMd && ['copilot-cli', 'codex-cli'].every(tool => existsSync(agentFile(tool)))), ['claude-cli', 'copilot-cli', 'codex-cli'].map(tool => readNow(agentFile(tool))));
+  await a.click('#nav-sources');
+  commit(kit, { 'agents/reviewer.md': reviewerMd.replace('Be brief.', 'Be brief and kind.') });
+  await a.click(`#source-check-${kitId}`);
+  check('a change at the source updates the agent in every tool, and the band opens Agents', await until(async () => /reviewer was updated from its source, now in all 3 tools\./.test(await a.text('.band-done .band-text') ?? ''))
+    && await a.exists('#source-open-agents') && await until(() => ['claude-cli', 'copilot-cli', 'codex-cli'].every(tool => readNow(agentFile(tool)).includes('Be brief and kind.'))), await a.text('.band-done'));
+  writeFileSync(agentFile('claude-cli'), readNow(agentFile('claude-cli')).replace('You review code.', 'You review code, mine.'));
+  check('an edit in Claude Code is taken in and reaches every tool', await until(() => ['copilot-cli', 'codex-cli'].every(tool => readNow(agentFile(tool)).includes('You review code, mine.'))), ['copilot-cli', 'codex-cli'].map(tool => readNow(agentFile(tool))));
+  commit(kit, { 'agents/reviewer.md': reviewerMd.replace('Be brief.', 'Be brief, kind and exact.') });
+  await a.click(`#source-check-${kitId}`);
+  await until(async () => await a.exists(`#source-merge-${kitId}-agent-reviewer`));
+  check('changed both here and at the source, the agent’s line waits with Merge, Replace and Keep mine', await a.exists(`#source-replace-${kitId}-agent-reviewer`) && await a.exists(`#source-keep-${kitId}-agent-reviewer`)
+    && /Changed at the source\./.test(await a.text(`.source-row[data-source="${kitId}"] .source-name[data-kind="agent"]`) ?? ''), await a.text(`.source-row[data-source="${kitId}"]`));
+  await a.shot('sources-agent-waiting');
+  await until(() => a.run(`document.body.dataset.busy !== 'true' && document.querySelector('#source-merge-${kitId}-agent-reviewer')?.disabled === false`));
+  await a.click(`#source-merge-${kitId}-agent-reviewer`);
+  check('Merge puts both changes in every tool, keeps Claude Code’s own fields, and says so with Undo the merge', await until(async () => /reviewer now has your changes and the source’s, merged, in all 3 tools; the version it had is kept\./.test(await a.text('.band-done .band-text') ?? ''))
+    && (await a.text('#outcome-undo')) === 'Undo the merge'
+    && await until(() => ['claude-cli', 'copilot-cli', 'codex-cli'].every(tool => /You review code, mine\.[\s\S]*Be brief, kind and exact\./.test(readNow(agentFile(tool))))) && readNow(agentFile('claude-cli')).includes('tools: Read, Grep'), [await a.text('.band-done'), readNow(agentFile('claude-cli'))]);
+
   await a.click('#nav-sources');
   await type('https://github.com/team/plugin');
   await a.click('#source-look');
@@ -2474,7 +2522,7 @@ async function sourcesFlow() {
 
   await a.click(`#source-remove-${id}`);
   await a.click(`#source-remove-confirm-${id}`);
-  check('Remove takes the row away, and deslop stays in Central Knot as it was', await until(async () => !(await a.exists('.source-row'))) && record()?.on === true && !!record()?.versions.length, await a.text('.page'));
+  check('Remove takes the row away, and deslop stays in Central Knot as it was', await until(async () => !(await a.exists(`#source-${id}`))) && record()?.on === true && !!record()?.versions.length, await a.text('.page'));
   same('no page errors on Sources', a.pageErrors, []);
   await a.quit();
 }

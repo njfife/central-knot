@@ -230,7 +230,7 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
    * Merge (library.ts MERGE): the source's version (`theirs`) merged into `yours` against `base`, path by path as library.ts
    * mergeFiles says, a file both sides changed by a line merge run here. Merged: the content, stored under the item already
    * (as `store` stores one), and nothing else of the merge's left behind; else the conflicting paths, or why it couldn't run.
-   * A kind no source brings leaves it out (agents, MCP servers): see SourcedKind.
+   * A kind no source brings leaves it out (MCP servers): see SourcedKind.
    */
   merge?(context: ShareContext, item: LibraryItem, three: { base: Content; yours: Content; theirs: Content }): Promise<MergeResult<Content>>;
 }
@@ -491,8 +491,8 @@ type Asked = Pick<HistoryEvent, 'kind' | 'cause' | 'winner' | 'only' | 'version'
 export type Pulled<Content> = { name: string; content: Content; own?: { harness: HarnessId; text: string } } | { removed: true };
 /**
  * One read of a source as the pass is given it (atlink.ts readOf): the table's reading of it (library.ts SourceSeen), of one
- * kind (`kind`), with each readable name's own name and content, and that kind's Merge (`mergeWith`: SourcedKind merge, which
- * mergeIn runs). `recorded`: the sources the home records now. `bringBack`: keys held deleted that a
+ * kind (`kind`), with each readable name's own name and content, and each tool's own part where a file of it is in that tool's
+ * form (`own`: an agent's), and that kind's Merge (`mergeWith`: SourcedKind merge, which mergeIn runs). `recorded`: the sources the home records now. `bringBack`: keys held deleted that a
  * click on Add on the source's row brings back; `replace`: keys whose waiting version a click on Replace there makes current;
  * `merge`: keys whose waiting version a click on Merge there merges into the current one; `keep`: keys whose waiting version a
  * click on Keep mine there keeps as a version, the current one staying.
@@ -500,7 +500,7 @@ export type Pulled<Content> = { name: string; content: Content; own?: { harness:
 export interface SourceRead<Content> extends SourceSeen {
   kind: ItemKind;
   mergeWith(context: ShareContext, item: LibraryItem, three: { base: Content; yours: Content; theirs: Content }): Promise<MergeResult<Content>>;
-  names: Map<string, { name: string; hash: string; content: Content } | { unreadable: string }>;
+  names: Map<string, { name: string; hash: string; content: Content; own?: Partial<Record<HarnessId, string>> } | { unreadable: string }>;
   recorded: ReadonlySet<string>;
   bringBack?: ReadonlySet<string>;
   replace?: ReadonlySet<string>;
@@ -1061,7 +1061,9 @@ async function makeCurrent(pass: Pass, item: LibraryItem, version: string, refus
  * and every item linked to it, told what the managed tools hold of each item now: copiesOf), carried out: made Off (`make`),
  * linked (`link`, its content recorded as a version from the source where it has none; `same` only moves `seen` on), its
  * content made current (`update`, Replace's dated by its click), merged into the current version (`merge`: mergeIn), S kept
- * beside the current version (`keep`: keepMine), or turned Off with its link let go (`drop`); `wait` changes nothing. Each change a person sees is History's entry with the source's `link`: an `off`
+ * beside the current version (`keep`: keepMine), or turned Off with its link let go (`drop`); `wait` changes nothing. Where it is
+ * made, linked or made current, a tool's own part the source's read holds is kept for each tool the item keeps none for
+ * (library.ts A SOURCE, each tool's own fields). Each change a person sees is History's entry with the source's `link`: an `off`
  * (cause `source`) for one made, an `edit` for one made current (a Replace's with `seen` as it was; a Merge's with cause
  * `source-merged`), an `edit` for one kept (cause `source-kept`), an `off` (cause `source-dropped`) for one dropped. No
  * harness is written here: the plan after it applies the current version where the item is On, and takes in a tool's edit no
@@ -1090,20 +1092,31 @@ async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Se
       pass.library.items[key] = made;
       if (made.hash !== entry.hash) await setCurrent(pass.shelf, made, { hash: entry.hash, at: read.commitAt, from: origin }, entry.content);
       pass.asked.set(key, { kind: 'off', cause: 'source', link });
+      await keepSourceOwn(pass, made, entry);
     } else if (answer === 'link' || answer === 'same') {
       Object.assign(item!, { source: read.id, seen: entry.hash } satisfies Partial<LibraryItem>);
       // Linked as the same content: recorded as a version from the source, so its row can say when the source removes it (library.ts removedBy).
       if (answer === 'link' && !fromLinkSinceTakeIn(item!, read.link)) await setCurrent(pass.shelf, item!, { hash: entry.hash, at: read.commitAt, from: origin }, entry.content);
+      await keepSourceOwn(pass, item!, entry);
     } else if (answer === 'update') {
       const previous = item!.hash, before = item!.seen, replace = !!read.replace?.has(key);
       Object.assign(item!, { source: read.id, seen: entry.hash } satisfies Partial<LibraryItem>);
       await setCurrent(pass.shelf, item!, { hash: entry.hash, at: replace ? now() : read.commitAt, from: origin }, entry.content);
       pass.asked.set(key, { kind: 'edit', cause: 'source', previous, version: entry.hash, link, fill: 'written', ...(replace ? { seen: before } : {}) });
+      await keepSourceOwn(pass, item!, entry);
     } else if (answer === 'merge') pass.sourced.get(key)!.merge = await mergeIn(pass, item!, entry, read);
     else if (answer === 'keep') await keepMine(pass, item!, entry, read);
   }
   await saveIfChanged(pass);
   return new Set(answers.keys());
+}
+
+/**
+ * A source's file kept as the own part of the tool whose form it is in, for each tool the item keeps none for (library.ts A
+ * SOURCE, each tool's own fields): an own part kept already, a person's or a source's earlier one, is never replaced.
+ */
+async function keepSourceOwn(pass: Pass, item: LibraryItem, there: { own?: Partial<Record<HarnessId, string>> }) {
+  for (const [tool, text] of Object.entries(there.own ?? {}) as [HarnessId, string][]) if (item.own[tool] === undefined) await pass.kind.keepOwn(pass.context, item, tool, text);
 }
 
 /**

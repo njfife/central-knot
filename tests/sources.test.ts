@@ -664,7 +664,7 @@ test('While its version waits, the source drops the skill: it turns Off, and its
     await check(box, id);
     await repo.commit({ 'SKILL.md': '---\nname: [notes\n---\nBroken.\n' }, '2026-11-05T10:00:00Z');
     const unread = await check(box, id);
-    assert.deepEqual([answered(unread), unread.notWhole, (await itemOf(box, 'notes'))!.on, await bodyOf(box, 'notes')], [[], true, true, 'Mine.']);
+    assert.deepEqual([answered(unread), unread.notWhole, (await itemOf(box, 'notes'))!.on, await bodyOf(box, 'notes')], [[], ['skill', 'agent'], true, 'Mine.']);
     assert.deepEqual(await notices(box, 'notes'), ['unreadable', false]);
     await repo.commit({ 'SKILL.md': skillMd('notes', 'Theirs.') }, '2026-11-06T10:00:00Z');
     await check(box, id);
@@ -837,10 +837,10 @@ test('A source that can’t be read whole after the drop is no reason to think t
     const { repo, id, link } = await oneSkill(box, 'notes', { on: true });
     await dropNotes(box, repo, id);
     await repo.commit({ 'SKILL.md': null, 'jottings/SKILL.md': skillMd('jottings', 'First.'), 'broken/SKILL.md': '---\nname: [broken\n---\nBroken.\n' }, '2026-11-03T10:00:00Z');
-    assert.equal((await check(box, id)).notWhole, true);
+    assert.deepEqual((await check(box, id)).notWhole, ['skill']);
     assert.deepEqual(await fromSourceOf(box), { link, removed: true }, 'a skill there unreadable: not read whole');
     await repo.commit({ 'jottings': null, 'broken': null, 'README.md': '# Nothing here now\n' }, '2026-11-03T11:00:00Z');
-    assert.equal((await check(box, id)).notWhole, true);
+    assert.deepEqual((await check(box, id)).notWhole, ['skill', 'agent']);
     assert.deepEqual(await fromSourceOf(box), { link, removed: true }, 'no skill there at all: not read whole');
     await rm(repo.dir, { recursive: true });
     assert.match((await check(box, id)).stopped ?? '', /^Couldn’t read/);
@@ -1001,7 +1001,7 @@ test('A skill deleted from Central Knot: the tombstone holds at Check now and at
 
 // ---------- What is at a link ----------
 
-test('A link to a plugin, or a marketplace, is named as that and nothing there is read; a folder of loose skills beside agent files brings the skills alone', async () => {
+test('A link to a plugin, or a marketplace, is named as that and nothing there is read; a folder of loose skills beside an agents folder and a commands folder brings the skills and the agent, never a command', async () => {
   const box = await sandbox();
   try {
     const plugin = await repository(hosts, 'https://github.com/team/plugin');
@@ -1015,17 +1015,17 @@ test('A link to a plugin, or a marketplace, is named as that and nothing there i
     const loose = await repository(hosts, 'https://github.com/team/loose');
     await loose.commit({ 'pdf/SKILL.md': skillMd('pdf'), 'docx/SKILL.md': skillMd('docx'), 'agents/writer.md': '---\nname: writer\n---\nWrite.\n', 'commands/go.md': 'Go.\n' });
     const look = await previewSource(box.context, box.tools, 'https://github.com/team/loose') as Extract<SourcePreview, { token: string }>;
-    assert.deepEqual([look.refused, look.names.map(name => name.name)], [undefined, ['docx', 'pdf']]);
+    assert.deepEqual([look.refused, look.names.map(name => `${name.kind} ${name.name}`)], [undefined, ['skill docx', 'skill pdf', 'agent writer']]);
   } finally { await box.cleanup(); }
 });
 
-test('Central Knot’s own layout given as a link: its skills come in, Off; its agents, MCP servers and base instructions are not read', async () => {
+test('Central Knot’s own layout given as a link: its skills and agents come in, Off; its MCP servers and base instructions are not read', async () => {
   const box = await sandbox();
   try {
     const repo = await repository(hosts, 'https://github.com/me/agent-config');
     await repo.commit({ 'skills/notes/SKILL.md': skillMd('notes'), 'mcp/github.json': '{"command":"gh"}', 'agents/writer.md': '---\nname: writer\n---\nWrite.\n', 'instructions/base.md': 'Be brief.\n' });
     const look = await previewSource(box.context, box.tools, 'me/agent-config') as Extract<SourcePreview, { token: string }>;
-    assert.deepEqual(look.names.map(name => [name.name, name.there?.folder]), [['notes', 'skills/notes']]);
+    assert.deepEqual(look.names.map(name => [name.kind, name.name, name.there?.folder]), [['skill', 'notes', 'skills/notes'], ['agent', 'writer', 'agents']]);
   } finally { await box.cleanup(); }
 });
 
@@ -1066,7 +1066,7 @@ test('A SKILL.md that stops parsing at a later check can’t be read, and is not
     // No skill there that can be read: still a read, not whole; nothing turns Off, and each reason is said.
     await repo.commit({ 'third/SKILL.md': null });
     const done = await check(box, id);
-    assert.deepEqual([done.stopped, done.notWhole], [undefined, true]);
+    assert.deepEqual([done.stopped, done.notWhole], [undefined, ['skill', 'agent']]);
     assert.deepEqual([(await itemOf(box, 'notes'))!.on, (await itemOf(box, 'third'))!.source], [true, id]);
   } finally { await box.cleanup(); }
 });
@@ -1081,7 +1081,7 @@ test('The link’s folder deleted or moved at the source: the whole source can�
     await applySkills(box.context, box.tools, [{ key: 'notes', on: true, except: [], seenOn: false }]);
     await repo.commit({ 'skills/notes': null, 'moved/notes/SKILL.md': skillMd('notes') });
     const done = await check(box, id), why = 'Nothing at the folder skills/notes on main to read: moved or deleted there, or not read here yet.';
-    assert.deepEqual([done.stopped, done.notWhole, answered(done)], [undefined, true, []]);
+    assert.deepEqual([done.stopped, done.notWhole, answered(done)], [undefined, ['skill', 'agent'], []]);
     assert.deepEqual([(await itemOf(box, 'notes'))!.on, (await itemOf(box, 'notes'))!.source], [true, id]);
     const row = (await sourcesView(box.context, box.tools)).sources[0];
     assert.deepEqual([row.unread, row.problem, row.names.map(name => [name.key, name.state, !!name.there])], [why, undefined, [['notes', 'nothing', false]]], 'its row says why, and still names what came from it');
@@ -1278,7 +1278,7 @@ test('A one-skill source whose SKILL.md stops parsing: Check now keeps that read
     await repo.commit({ 'SKILL.md': '---\nname: [notes\n---\nBroken.\n' }, '2026-11-07T10:00:00Z');
     const done = await check(box, id), row = (await sourcesView(box.context, box.tools)).sources[0];
     const why = 'its SKILL.md can’t be read as a skill (Malformed YAML frontmatter)';
-    assert.deepEqual([done.stopped, done.notWhole, row.unread], [undefined, true, undefined]);
+    assert.deepEqual([done.stopped, done.notWhole, row.unread], [undefined, ['skill', 'agent'], undefined]);
     assert.deepEqual(row.names.map(name => [name.key, name.state, name.why]), [['notes', 'unreadable', why]], 'said once, on the skill’s own line');
     assert.equal((await itemOf(box, 'notes'))!.on, true);
   } finally { await box.cleanup(); }
@@ -1292,7 +1292,7 @@ test('A copy deleted by hand that no pass has seen yet (Automatic sync off), the
     await rm(folderOf(box, 'codex-cli'), { recursive: true });
     await repo.commit({ 'SKILL.md': '---\nname: [notes\n---\nBroken.\n' }, '2026-11-07T10:00:00Z');
     const done = await check(box, id);
-    assert.deepEqual([answered(done), done.notWhole, (await itemOf(box, 'notes'))!.on], [[], true, false]);
+    assert.deepEqual([answered(done), done.notWhole, (await itemOf(box, 'notes'))!.on], [[], ['skill', 'agent'], false]);
     assert.deepEqual((await sentences(box, 'notes')).at(-1), 'Its copy was deleted in Codex, so it was turned off and removed from Claude Code and Copilot CLI. Central Knot keeps it.');
   } finally { await box.cleanup(); }
 });

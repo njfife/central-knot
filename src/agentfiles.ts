@@ -67,16 +67,28 @@ export const agentHash = (agent: SharedAgent) => sha256(JSON.stringify([agent.na
 /** Frontmatter: `---` on its own first line, then up to the next line that is `---` (at a line start, as Claude Code reads it). */
 const FRONT = /^(﻿?---\r?\n)((?:[^\n]*\n)*?)(---[ \t]*(?:\r?\n|$))([\s\S]*)$/;
 
-export function fromMarkdown(name: string, text: string): NeutralAgent | undefined {
+/**
+ * A Markdown file's front matter: none (`none`: its first line is not `---`), its fields and the text after it, or why it is
+ * there and can't be read as fields (`broken`: no closing `---`, YAML that doesn't parse, or a value that is no mapping).
+ */
+export function frontMatter(text: string): { fields: Record<string, unknown>; rest: string } | 'none' | { broken: string } {
+  if (!/^﻿?---\r?\n/.test(text)) return 'none';
   const match = FRONT.exec(text);
-  if (!match) return undefined;
+  if (!match) return { broken: 'its front matter has no closing ---' };
   // Its last newline is part of a `|+` value that ends the front matter: setFrontLines writes it so.
   const document = parseDocument(match[2]);
-  if (document.errors.length) return undefined;
-  const front = (document.toJS() ?? {}) as Record<string, unknown>;
-  if (typeof front !== 'object' || Array.isArray(front)) return undefined;
-  const { name: named, description, ...fields } = front;
-  const prompt = match[4].replace(/^\r?\n/, '');
+  if (document.errors.length) return { broken: document.errors[0].message.split('\n')[0].replace(/[.:]$/, '') };
+  let fields: Record<string, unknown>;
+  try { fields = (document.toJS() ?? {}) as Record<string, unknown>; } catch (error) { return { broken: (error as Error).message.split('\n')[0] }; }
+  if (typeof fields !== 'object' || Array.isArray(fields)) return { broken: 'its front matter is no list of fields' };
+  return { fields, rest: match[4] };
+}
+
+export function fromMarkdown(name: string, text: string): NeutralAgent | undefined {
+  const read = frontMatter(text);
+  if (read === 'none' || 'broken' in read) return undefined;
+  const { name: named, description, ...fields } = read.fields;
+  const prompt = read.rest.replace(/^\r?\n/, '');
   return { name: typeof named === 'string' && named ? named : name, description: typeof description === 'string' ? description : '', prompt, fields };
 }
 

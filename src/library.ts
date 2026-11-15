@@ -133,7 +133,20 @@
 // link's folder is there and is no plugin or marketplace, at least one item of any kind there can be read, and every item of
 // this kind there could be read (atlink.ts readOf decides it, the one place). A source that holds no item that can be read
 // (its one skill deleted there, every one unreadable, its folder gone, a plugin) is not read whole: no name is gone, and the
-// source turns nothing Off.
+// source turns nothing Off. So a source that drops every agent and keeps a skill turns its agents Off, and one agent there
+// that can't be read holds back only the agents' drops. Skills and agents are the kinds a source brings in this version.
+//
+// EACH TOOL'S OWN FIELDS FROM A SOURCE (an agent's `tools` or `model`; a version holds the shared part only). Each file at the
+// link is in one tool's form (atlink.ts agentsAt). Where the step makes, links or updates the item, it keeps that file as that
+// tool's own part only where the item keeps none for that tool (librarypass.ts keepSourceOwn): a first On there writes the
+// source's file byte for byte, and nothing set in a tool is written over. A tool with a copy keeps its own part at every pass,
+// so the rule decides only for a tool with none. It is a second rule beside Pull's, which always keeps the repo's file as
+// Claude Code's own part (librarypass.ts pull). Nothing records which own part is a source's and which a person's, so it has
+// two costs, and is the default until the owner decides otherwise:
+// - own fields changed alone at the source never arrive: the shared part's hash is as it was, so the table answers `nothing`;
+//   the item's row stays as it was, and Check now says nothing came in;
+// - the prompt and own fields changed together bring the prompt only: the own fields stay as that tool's own part has them,
+//   which on an item never turned On is the source's first read's, for good.
 //
 // REMOVED AT ITS SOURCE (`removedBy`, the one place it is decided; worked out at each look, never stored): an item that is Off,
 // linked to no source, has a version from a recorded source's link since it last came in from a tool (fromLinkSinceTakeIn; one
@@ -159,8 +172,8 @@
 //
 // MERGE (`mergeFiles`, a key handed to the step as Replace's is; the kind runs the line merge: librarypass.ts Kind.merge). Three
 // folders: the base (`seen`), yours (the current version) and S, compared path by path, each path a file (its bytes and its
-// executable bit, apart) or a folder. Nothing is normalised: a file that differs only in its line endings or its last newline
-// differs.
+// executable bit, apart) or a folder; an agent's paths are its three parts, its name, description and prompt, each a file
+// (merge.ts mergeAgent). Nothing is normalised: a file that differs only in its line endings or its last newline differs.
 //
 //   the path                                                        the merged version has
 //   the same on both sides (unchanged, changed alike, or gone on    that
@@ -178,7 +191,7 @@
 // still differs from S, so it is still changed here and the source's next change waits with S as its base. Its Undo, as
 // Replace's, puts back the version before and `seen` as it was. Merged to exactly yours, it is Keep mine's outcome (below); to
 // exactly S, the item follows its source again. Any conflict, or a line merge that can't run, changes nothing, and the answer
-// names the conflicting files, or why. Yours is the current version with every tool's edit in it: Merge's click first runs a pass for
+// names the conflicting files (an agent's parts), or why. Yours is the current version with every tool's edit in it: Merge's click first runs a pass for
 // the item alone (sources.ts rowClick), which takes in an edit a tool holds as any pass does; a tool's copy that still
 // holds a change then (a save landing between the two, or one settling) leaves Merge undone (`wait`), and it says so.
 //
@@ -243,7 +256,7 @@
 // the settle window passed.
 //
 // Worked examples, one per row of each table: tests/library.test.ts. The same on real files: tests/agents.test.ts,
-// tests/skills.test.ts, tests/servers.test.ts and, for A SOURCE, tests/sources.test.ts.
+// tests/skills.test.ts, tests/servers.test.ts and, for A SOURCE, tests/sources.test.ts and tests/sourceagents.test.ts.
 import { linkLabel } from './sourcelink.ts';
 import type { HarnessId } from './types.ts';
 import { toolName } from './words.ts';
