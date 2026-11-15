@@ -2693,6 +2693,11 @@ if (wanted('plugin-library')) {
   await openRow('spreadsheet'); await a.click('#delete-spreadsheet'); await a.click('#delete-confirm-spreadsheet'); await a.settle();
   await a.click('#nav-plugins'); await refresh(); await waitFor(a, `/you deleted it/.test(document.querySelector('.plugin-items-section')?.textContent ?? '')`, 15000);
   await atEverySize('own-and-deleted', 'document-tools’ page: Its items lists skill charts (plain: on in Pi), skill pdf-reader “Not brought in: you have your own”, and skill spreadsheet, deleted from Central Knot, “Not brought in: you deleted it; History’s Restore, or the plugin’s next On, brings it back”', true, '.plugin-items-section');
+  // charts deleted too: nothing of document-tools is linked any more, and its page still says why each isn't brought in.
+  await a.click('#nav-skills'); await openRow('charts'); await a.click('#delete-charts'); await a.click('#delete-confirm-charts'); await a.settle();
+  await a.click('#nav-plugins'); await refresh(); await waitFor(a, `(document.querySelector('.plugin-items-section')?.textContent.match(/Not brought in/g) ?? []).length === 3`, 15000);
+  await show('.plugin-items-section');
+  await shot(a, 'none-linked-1280', 'charts deleted too, so no item of document-tools is linked any more: its page still lists all three under Its items (charts and spreadsheet deleted, pdf-reader your own), and Pi’s line says “Not in it, though on” with Install there, which brings back the two you deleted (1280×800)');
   await a.click('#nav-mcp'); await openRow('issues');
   await atEverySize('item-row', 'On MCP servers, issues is on in Pi with “from the plugin issue-tracker” after its name; opened, Claude Code’s, Copilot CLI’s and Codex’s lines say it comes only with the plugin, which isn’t installed there, and the line at the end says it is from the plugin issue-tracker, follows it in the tools that take no plugins, and that a change made here makes it yours, with a link to Plugins', true, '.ov-row[data-key="issues"]', 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);

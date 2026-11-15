@@ -227,13 +227,13 @@
 //     for                               linked (his own, let go)    the plugin is not in now (`outOf`) and of each managed tool
 //                                                                   with a copy of that name (librarypass.ts fromSourceStep), so
 //                                                                   arriving On writes over nothing
-//   a name of its own he deleted        deleted, linked             stays deleted (`deleted`) but at a click that brings the
-//                                                                   plugin in (`bringBack`: its On, Add, Install there, Update)
+//   a name of its own he deleted        deleted, linked             stays deleted (`deleted`) but at a click that turns its
+//                                                                   items On (`bringBack`: its On, Add, Install there, Update)
 //   a name the library has              not linked, same content    never linked (`differs`: Central Knot has its own)
 //                                       or not
 //   anything, read or not               linked, changed here        let go (`let-go`): unlinked, the person's own item from then on,
-//                                                                   kept where it is (out of each managed tool with no copy of it
-//                                                                   then); never linked again or written over while it differs.
+//                                                                   kept where it is (On, out of each managed tool with no copy
+//                                                                   of it then); never linked again or written over while it differs.
 //                                                                   Before every other row, so the plugin's drop never turns it Off
 //   S changed                           linked, a tool's copy       nothing, until a read where it can be seen: no version of a
 //                                       can't be seen for sure      plugin ever waits, and no Merge, Replace or Keep mine is asked

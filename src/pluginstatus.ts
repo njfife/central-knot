@@ -106,9 +106,12 @@ export function toolNow(view: PluginsView, entry: MarketplaceView, plugin: strin
   // A tool with no installer (Pi) is held back only by what it can't hold of the plugin, unless the plugin can go nowhere new at all.
   const elsewhere = takesPlugins(tool) || why !== blocked(view, entry, tool) ? why : undefined;
   const items = !takesPlugins(tool) && (!components || !!(components.skills || components.agents || components.mcp));
+  // Read, and every name it has is his own, another source's, removed or unreadable: nothing a click could bring in.
+  const brings = entry.items?.[plugin]?.lines.some(line => line.state !== 'not-brought' && line.state !== 'removed') ?? true;
   const route: ToolNow['route'] = takesPlugins(tool) && !why ? 'whole'
     : routeOf(entry, plugin) === 'parts' ? (partsOffer(view, entry, plugin, tool, components) ? 'parts' : { cannot: elsewhere ?? noPartsFit(tool) })
-    : items && !elsewhere ? 'items' : { cannot: elsewhere ?? `${names[tool]} takes no plugins, and this one has no skill, agent or MCP server to put there.` };
+    : items && !elsewhere && brings ? 'items'
+    : { cannot: elsewhere ?? (items ? `${names[tool]} gets none of its items: Its items, below, says why each isn’t brought in.` : `${names[tool]} takes no plugins, and this one has no skill, agent or MCP server to put there.`) };
   // What is installed whole is known from the tool's own record; parts and items only from the parts record.
   if (unknown && !(whole && takesPlugins(tool))) return { has: 'unknown', route };
   return { has: whole ? 'whole' : partsOf(entry, plugin, tool) ? 'parts' : itemsIn(entry, plugin, tool) ? 'items' : 'none', route, ...(whole ? { stuck: cantUninstall(view, entry, plugin, tool) } : {}) };

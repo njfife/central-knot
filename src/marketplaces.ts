@@ -12,7 +12,7 @@ import { findBinary, probeVersion } from './discovery.ts';
 import * as engine from './plugins.ts';
 import { installParts, partsCurrent, planParts, readParts, removeParts, undoParts } from './parts.ts';
 import { suggestedMarketplaces, type SuggestedMarketplace } from './suggested.ts';
-import { itemTools, itemsBack, itemsView, linkedIds, readPlugin, runItems, type ItemsAsk, type ItemState } from './pluginlibrary.ts';
+import { itemTools, itemsBack, itemsView, readPlugin, runItems, withItemsOf, type ItemsAsk, type ItemState } from './pluginlibrary.ts';
 import { recordedIds } from './sourcestore.ts';
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
 import type { ItemKind } from './library.ts';
@@ -378,15 +378,14 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   }
 
   /**
-   * Each listed plugin with an item linked to it, read from its marketplace's copy as the table reads it (pluginlibrary.ts
-   * itemsView): its page's "Its items", and what Pi and OpenCode have of it (pluginstatus.ts toolNow). A plugin with parts on
+   * Each listed plugin with items (pluginlibrary.ts withItemsOf), read from its marketplace's copy as the table reads it (itemsView): its page's "Its items", and what Pi and OpenCode have of it (pluginstatus.ts toolNow). A plugin with parts on
    * record keeps its parts (routeOf) and is not read.
    */
   async function withItems(ctx: engine.PluginContext, share: ShareContext, tools: HarnessId[], marketplaces: MarketplaceView[], entries: PluginEntry[]) {
-    const linked = await linkedIds(share), recorded = (await recordedIds(share.home)).ids;
+    const read = await withItemsOf(share, entries), recorded = (await recordedIds(share.home)).ids;
     for (const market of marketplaces) for (const plugin of market.plugins) {
-      const entry = entryOf({ tools: [], plugins: entries }, market.source, plugin.name);
-      if (!entry || !linked.has(entry.id) || routeOf(market, plugin.name) === 'parts') continue;
+      const entry = entryOf({ tools: [], plugins: read }, market.source, plugin.name);
+      if (!entry || routeOf(market, plugin.name) === 'parts') continue;
       const at: Awaited<ReturnType<typeof itemFiles>> = plugin.gone ? { commitAt: '', problem: MARKET_UNREAD } : await itemFiles(ctx, market.source, plugin.name);
       const reads = at.files && await readPlugin(at.files, entry, at.commitAt, recorded, []);
       (market.items ??= {})[plugin.name] = await itemsView(share, tools, entry, reads || undefined, at.problem);

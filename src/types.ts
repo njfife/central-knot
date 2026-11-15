@@ -736,9 +736,9 @@ export interface MarketplaceView {
 /**
  * One line of a plugin's "Its items" (pluginlibrary.ts itemsView): an item linked to it (`linked`; its update ready: `update`;
  * no longer in the plugin, so its Update turns it Off: `going`), a name Update brings in (`new`), one its update removed, Off
- * and no longer linked (`removed`), or one not brought in, with why (`not-brought`).
+ * and no longer linked (`removed`), one of its own he deleted (`deleted`), or one not brought in, with why (`not-brought`).
  */
-export interface PluginItemLine { kind: ItemKind; key: string; name: string; state: 'linked' | 'update' | 'going' | 'new' | 'removed' | 'not-brought'; on?: boolean; except?: HarnessId[]; why?: string }
+export interface PluginItemLine { kind: ItemKind; key: string; name: string; state: 'linked' | 'update' | 'going' | 'new' | 'removed' | 'deleted' | 'not-brought'; on?: boolean; except?: HarnessId[]; why?: string }
 /**
  * A plugin's items as its page shows them: its lines, how many of its `of` items linked to it are on in each tool with no installer
  * (`on`), whether Update has something to do, and why the plugin can't be read now.

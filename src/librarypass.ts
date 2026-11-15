@@ -1107,8 +1107,8 @@ async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Se
     // Told here, not by the item's own pass: an item let go may be outside this pass's scope (letGo), and nothing is written.
     if (answer === 'let-go' && item) {
       delete item.source; delete item.seen;
-      // Kept where it is: out of each managed tool with no copy of it now (library.ts A PLUGIN); its row lets it in elsewhere.
-      item.except = [...new Set([...item.except, ...pass.managed.filter(tool => !pass.disk.byKey.get(key)?.[tool] && !unseenIn(pass.disk, tool, key))])].sort(byToolOrder);
+      // On, it is kept where it is: out of each managed tool with no copy of it now (library.ts A PLUGIN); Off, its except stays.
+      if (item.on) item.except = [...new Set([...item.except, ...pass.managed.filter(tool => !pass.disk.byKey.get(key)?.[tool] && !unseenIn(pass.disk, tool, key))])].sort(byToolOrder);
       const history = randomUUID();
       await appendHistory(pass.context, [{ id: history, at: now(), key: `${pass.kind.historyPrefix}${key}`, item: item.name, kind: 'edit', cause: 'own-now', previous: item.hash, version: item.hash, link, losers: [], orderProved: true }]);
       pass.notices.push({ kind: 'let-go', key, item: item.name, link, history });

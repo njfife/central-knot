@@ -62,6 +62,9 @@ const MARK_WORDS: Record<ToolMark, string> = {
   missing: 'Not in it, though on', cannot: 'Not available', 'kept-out': 'Kept out', absent: 'Not installed', unknown: 'Can’t be read now', 'not-known': 'Unknown',
 };
 
+/** Install there's words for a plugin's items: an item's On is one switch for every tool it isn't kept out of. */
+const itemsInstall = (tool: HarnessId) => `Turns its items on and puts them in ${names[tool]} now. An item’s On is for every tool it isn’t kept out of, so they come on in those too, and items of its you deleted come back. Undo puts them back as they were.`;
+
 /**
  * Your tools: the plugin's switch at the heading, Update at its right where a copy or its parts are behind, and a line per
  * tool: its mark, what it has (always there; a tool on another version than the marketplace offers adds "Marketplace has …"),
@@ -95,7 +98,8 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     const act = (label: string, what: PluginTurn, id: string, title: string) => button({ variant: 'link', size: 'micro', label, id: `${id}-${marketIndex}-${plugin.name}-${tool}`, disabled: !!app.busy || !!stopped,
       attrs: { title: stopped ?? title }, onclick: () => void turnPlugin(entry, plugin.name, what, tool) });
     const fix = owed?.act && (mark === 'missing' || mark === 'waits' || mark === 'not-brought' || mark === 'stays')
-      ? (owed.act === 'install' || owed.act === 'install-parts' || owed.act === 'install-items' ? act('Install there', 'fix', 'pfix', `Puts it in ${names[tool]} now${owed.act === 'install' ? '' : ', as separate items'}. Undo takes it out again.`)
+      ? (owed.act === 'install' || owed.act === 'install-parts' || owed.act === 'install-items' ? act('Install there', 'fix', 'pfix', owed.act === 'install-items' ? itemsInstall(tool)
+        : `Puts it in ${names[tool]} now${owed.act === 'install' ? '' : ', as separate items'}. Undo takes it out again.`)
         : act('Take out there', 'fix', 'pfix', `Takes it out of ${names[tool]} now; the result says what Undo can put back.`)) : null;
     const keep = !sw?.entry || !owed?.takes ? null : kept ? act('Let in', 'let-in', 'pkeep', `Lets it into ${names[tool]} again${sw.entry.on ? ', and puts it in there now' : ''}. Undo keeps it out again.`)
       : act('Keep out', 'keep-out', 'pkeep', `Keeps it out of ${names[tool]}${owed.has !== 'none' ? ', and takes it out there now' : ''}; the automatic updates leave it out too. Undo lets it back in.`);
@@ -227,10 +231,11 @@ function itemsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     const out = tools.filter(tool => line.except?.includes(tool)).map(tool => names[tool]);
     const where = line.on === false ? 'Off' : out.length ? `Kept out of ${andList(out)}` : '';
     const said = { linked: where, update: 'An update is ready: Update brings it in', going: 'No longer in the plugin: Update turns it off', new: 'New in the plugin: Update brings it in',
-      removed: 'Removed by the plugin’s update, so it is off. Turning it on keeps it as yours', 'not-brought': `Not brought in: ${line.why ?? ''}` }[line.state];
+      removed: 'Removed by the plugin’s update, so it is off. Turning it on keeps it as yours', deleted: 'Not brought in: you deleted it; History’s Restore, or the plugin’s next On, brings it back',
+      'not-brought': `Not brought in: ${line.why ?? ''}` }[line.state];
     return [said, line.state === 'update' ? where : ''].filter(Boolean).join(' · ');
   };
-  const linked = (line: PluginItemLine) => line.state !== 'new' && line.state !== 'not-brought';
+  const linked = (line: PluginItemLine) => line.state !== 'new' && line.state !== 'not-brought' && line.state !== 'deleted';
   const lines = (['skill', 'agent', 'mcp'] as const).flatMap(kind => items.lines.filter(line => line.kind === kind));
   return h('section.plugin-section.plugin-items-section', { 'aria-label': 'Its items' },
     h('div.plugin-section-head', {}, h('h3', {}, 'Its items')),

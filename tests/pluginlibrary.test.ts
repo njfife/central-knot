@@ -439,7 +439,7 @@ test('A plugin’s item he deleted stays deleted through the automatic check, an
     assert.deepEqual(due.ops.filter(op => op.action === 'update-items'), [], 'nothing for the check to read');
     await box.update();
     assert.deepEqual([(await box.library()).skill.review!.deleted !== undefined, await exists(box.pi('skills/review'))], [true, false], 'a read that is no click leaves it deleted');
-    assert.equal((await box.lines())['skill:review'], 'not-brought');
+    assert.equal((await box.lines())['skill:review'], 'deleted');
     await box.turn('off');
     await box.turn('on');
     assert.deepEqual([(await box.library()).skill.review!.deleted, await exists(box.pi('skills/review/SKILL.md'))], [undefined, true], 'the plugin’s On brings it back');
@@ -481,5 +481,51 @@ test('An edit in Pi lets notes go, kept where it is: nothing of it reaches Claud
     assert.deepEqual([notes.source, notes.except, await exists(join(box.home, '.claude/skills/notes'))], [undefined, ['claude-cli'], false]);
     await applySkills(box.share, box.tools, [{ key: 'notes', on: true, except: [] }]);
     assert.equal(await readFile(join(box.home, '.claude/skills/notes/SKILL.md'), 'utf8'), skill('notes', 'edited in Pi'));
+  } finally { await box.cleanup(); }
+});
+
+// ---------- Found by the confirming read ----------
+
+test('Let in brings back no name he deleted: only a click that turns the items On does', async () => {
+  const box = await kitHome();
+  try {
+    await box.turn('on');
+    await box.turn('keep-out', 'pi-cli');
+    await applySkills(box.share, box.tools, [{ key: 'review', on: false, except: [], deleted: true }]);
+    await box.turn('let-in', 'pi-cli');
+    assert.deepEqual([(await box.library()).skill.review!.deleted !== undefined, await exists(box.pi('skills/review'))], [true, false]);
+  } finally { await box.cleanup(); }
+});
+
+test('Every item of a plugin let go: its page still lists them, Pi says why none goes in, and offers no Install there; the check finds nothing', async () => {
+  const box = await kitHome();
+  try {
+    // kit holding one skill, notes, alone.
+    for (const path of ['skills/review', 'extra', 'agents', '.mcp.json']) await rm(join(box.kit, path), { recursive: true, force: true });
+    await box.turn('on');
+    await put(box.pi('skills/notes/SKILL.md'), skill('notes', 'edited in Pi'));
+    await applySkills(box.share, box.tools, []);
+    assert.deepEqual(await box.lines(), { 'skill:notes': 'not-brought' });
+    const pi = (await box.view()).switches!.kit!.tools['pi-cli']!;
+    assert.deepEqual([pi.act, /Its items, below, says why/.test(pi.held ?? '')], [undefined, true]);
+    assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops, []);
+  } finally { await box.cleanup(); }
+});
+
+test('An item that is Off when it is let go keeps its except as it was: turned On, it goes where it is wanted', async () => {
+  const box = await kitHome();
+  try {
+    await box.turn('on');
+    const first = (await box.library()).skill.notes!.hash;
+    await put(join(box.kit, 'skills/notes/SKILL.md'), skill('notes', 'v2'));
+    await box.update();
+    await applySkills(box.share, box.tools, [{ key: 'notes', on: false, except: [] }]);
+    await applySkills(box.share, box.tools, [{ key: 'notes', on: false, except: [], version: first }]);
+    await applySkills(box.share, box.tools, []);
+    const notes = (await box.library()).skill.notes!;
+    assert.deepEqual([notes.source, notes.except], [undefined, []]);
+    // Claude Code has the same SKILL.md through the installed plugin, so it gets no copy of its own beside it (skills.ts anotherWay).
+    await applySkills(box.share, box.tools, [{ key: 'notes', on: true, except: [] }]);
+    assert.equal(await exists(box.pi('skills/notes/SKILL.md')), true);
   } finally { await box.cleanup(); }
 });
