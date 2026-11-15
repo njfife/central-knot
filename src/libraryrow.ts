@@ -516,7 +516,7 @@ export function sentences(words: RowWords) {
    */
   function noticeWords(notice: Pick<ItemNotice, 'kind' | 'item' | 'winner' | 'losers' | 'orderProved'> | PluginItemNotice): { text: string; action?: 'undo' | 'turn-on'; help: string } {
     // A plugin's item (library.ts A PLUGIN): let go as the person's own, said with no button (History has the entry), or dropped.
-    if ('link' in notice) return notice.kind === 'let-go' ? { text: `${notice.item} is your own now: you changed it here, so it no longer follows ${linkLabel(notice.link)}.`, help: '' }
+    if ('link' in notice) return notice.kind === 'let-go' ? { text: `${notice.item} is your own now: you changed it here, so it no longer follows ${linkLabel(notice.link)}. It stays in the tools that have it; its row lets it into the others.`, help: '' }
       : { text: `${notice.item}: ${linkLabel(notice.link)} no longer has it, so it is off. Central Knot keeps it.`, action: 'turn-on', help: `Put ${notice.item} back in every tool, as your own: it no longer follows the plugin` };
     const who = toolName(notice.winner), others = andList(notice.losers.map(toolName)), name = notice.item;
     const earlier = `Make the version from before ${who}’s edit current again, in every tool ${name} is on in`;

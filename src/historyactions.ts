@@ -180,7 +180,7 @@ export function librarySentence(event: HistoryEvent, words: RowWords, homeTools:
       if (event.cause === 'source-kept') {
         return { glyph: 'link-2', text: `Yours stays current over ${source}’s version, which no longer waits: it is kept as a version, and the source’s next change is compared with it.` };
       }
-      if (event.cause === 'own-now') return { glyph: 'link-2-off', text: `Yours now: it was changed here, so it no longer follows ${source}, which never writes over it. Its versions stay.` };
+      if (event.cause === 'own-now') return { glyph: 'link-2-off', text: `Yours now: it was changed here, so it no longer follows ${source}, which never writes over it. It stays in the tools that had it, and its row lets it into the others. Its versions stay.` };
       return { glyph: 'pencil-line', text: `Edited in ${from}; that became the current version${tools ? `, in ${tools} too` : ''}.` };
     case 'switched': {
       // Clear the switch's Undo turns the tool's switch off again (`cause` 'switch'); any other that turned a switch off is

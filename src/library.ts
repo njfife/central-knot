@@ -227,16 +227,18 @@
 // `plugin`) meets the table above but for these rows, each decided in fromSource by that one field:
 //
 //   at the plugin                       the item                    what happens
-//   a name the library has no item      none, or deleted            the item is made with the plugin's On, kept out of each tool
-//     for                                                           the plugin is not in now (`outOf`) and of each managed tool
+//   a name the library has no item      none, or deleted and not    the item is made with the plugin's On, kept out of each tool
+//     for                               linked (his own, let go)    the plugin is not in now (`outOf`) and of each managed tool
 //                                                                   with a copy of that name (librarypass.ts fromSourceStep), so
-//                                                                   arriving On writes over nothing; a deleted name never blocks it
+//                                                                   arriving On writes over nothing
+//   a name of its own he deleted        deleted, linked             stays deleted (`deleted`) but at a click that brings the
+//                                                                   plugin in (`bringBack`: its On, Add, Install there, Update)
 //   a name the library has              not linked, same content    never linked (`differs`: Central Knot has its own)
 //                                       or not
 //   anything, read or not               linked, changed here        let go (`let-go`): unlinked, the person's own item from then on,
-//                                                                   kept as it is; never linked again or written over while it
-//                                                                   differs. Before every other row, so the plugin's drop never
-//                                                                   turns it Off
+//                                                                   kept where it is (out of each managed tool with no copy of it
+//                                                                   then); never linked again or written over while it differs.
+//                                                                   Before every other row, so the plugin's drop never turns it Off
 //   S changed                           linked, a tool's copy       nothing, until a read where it can be seen: no version of a
 //                                       can't be seen for sure      plugin ever waits, and no Merge, Replace or Keep mine is asked
 //
@@ -625,7 +627,7 @@ export function fromSource(item: LibraryItem | undefined, here: AtSource, linked
   if (here === 'unreadable') return 'nothing';
   if (here === 'gone') return item && !item.deleted && linked === 'this' ? 'drop' : 'nothing';
   if (!item) return 'make';
-  if (item.deleted) return asked.bringBack || plugin ? 'make' : 'deleted';
+  if (item.deleted) return asked.bringBack || (plugin && linked !== 'this') ? 'make' : 'deleted';
   if (linked === 'another') return 'another';
   if (linked === 'none') return here.hash === item.hash && !plugin ? 'link' : 'differs';
   // Its current version is the one this same link gave, so only an edit a tool holds can have changed it since: then it differs.

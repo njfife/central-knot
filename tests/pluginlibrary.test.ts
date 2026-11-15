@@ -425,3 +425,59 @@ test('A plugin’s agent and server are held in Claude Code too: no agent file o
     assert.equal(await exists(box.pi('skills/helper.md')), true, 'Pi has the agent, as a skill');
   } finally { await box.cleanup(); }
 });
+
+// ---------- Found by the break-it pass and the code read ----------
+
+test('A plugin’s item he deleted stays deleted through the automatic check, and its page says he deleted it; a click that brings the plugin in brings it back', async () => {
+  const box = await kitHome();
+  try {
+    await box.turn('on');
+    await applySkills(box.share, box.tools, [{ key: 'review', on: false, except: [], deleted: true }]);
+    const due = await box.markets.pendingUpdates(box.home);
+    assert.deepEqual(due.ops.filter(op => op.action === 'update-items'), [], 'nothing for the check to read');
+    await box.update();
+    assert.deepEqual([(await box.library()).skill.review!.deleted !== undefined, await exists(box.pi('skills/review'))], [true, false], 'a read that is no click leaves it deleted');
+    assert.equal((await box.lines())['skill:review'], 'not-brought');
+    await box.turn('off');
+    await box.turn('on');
+    assert.deepEqual([(await box.library()).skill.review!.deleted, await exists(box.pi('skills/review/SKILL.md'))], [undefined, true], 'the plugin’s On brings it back');
+  } finally { await box.cleanup(); }
+});
+
+test('On, its Undo, then On again: every item is On in Pi again', async () => {
+  const box = await kitHome();
+  try {
+    const on = await box.turn('on');
+    await box.undo(on);
+    assert.equal(await exists(box.pi('skills/notes')), false);
+    const again = await box.turn('on');
+    assert.deepEqual([again.done.find(step => step.tool === 'pi-cli')?.report.outcome, await exists(box.pi('skills/notes/SKILL.md')), Object.values((await box.library()).skill).every(item => item.on)], ['installed', true, true]);
+  } finally { await box.cleanup(); }
+});
+
+test('Every item switched off on its own row: Install there on Pi turns them on there', async () => {
+  const box = await kitHome();
+  try {
+    await box.turn('on');
+    const { applyAgents } = await import('../src/agents.ts'), { applyServers } = await import('../src/servers.ts');
+    await applySkills(box.share, box.tools, ['notes', 'review', 'tools'].map(key => ({ key, on: false, except: [] })));
+    await applyAgents(box.share, box.tools, [{ key: 'helper', on: false, except: [] }]);
+    await applyServers(box.share, box.tools, [{ key: 'relay', on: false, except: [] }]);
+    assert.equal((await box.view()).switches?.kit?.tools['pi-cli']?.act, 'install-items', 'its line offers Install there');
+    const fix = await box.turn('fix', 'pi-cli');
+    assert.deepEqual([fix.done.map(step => step.report.outcome), await exists(box.pi('skills/notes/SKILL.md'))], [['installed'], true]);
+  } finally { await box.cleanup(); }
+});
+
+test('An edit in Pi lets notes go, kept where it is: nothing of it reaches Claude Code by itself, and its row lets it in there', async () => {
+  const box = await kitHome();
+  try {
+    await box.turn('on');
+    await put(box.pi('skills/notes/SKILL.md'), skill('notes', 'edited in Pi'));
+    for (let look = 0; look < 3; look++) await applySkills(box.share, box.tools, []);
+    const notes = (await box.library()).skill.notes!;
+    assert.deepEqual([notes.source, notes.except, await exists(join(box.home, '.claude/skills/notes'))], [undefined, ['claude-cli'], false]);
+    await applySkills(box.share, box.tools, [{ key: 'notes', on: true, except: [] }]);
+    assert.equal(await readFile(join(box.home, '.claude/skills/notes/SKILL.md'), 'utf8'), skill('notes', 'edited in Pi'));
+  } finally { await box.cleanup(); }
+});

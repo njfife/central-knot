@@ -660,16 +660,15 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   }
 
   /**
-   * A plugin read from its marketplace's copy and its items brought up to date (pluginlibrary.ts runItems, a read alone), `tools`
-   * counted as where it is now: Update and Update all for a plugin with items, and the automatic updates' check, where a tool new
-   * here (`bring`: the install it is owed) gets the items the library lacks (what it has already reaches it by the library's own rule).
+   * A plugin read and its items brought up to date (pluginlibrary.ts runItems, ItemsAsk `read`): the page's Update and Update all
+   * (`click`), the automatic updates' check, and its install in a tool new here (`bring`).
    */
-  async function items(source: string, marketName: string, plugin: string, tools: HarnessId[], home: unknown, bring = false): Promise<PluginActionResult> {
+  async function items(source: string, marketName: string, plugin: string, tools: HarnessId[], home: unknown, bring = false, click = false): Promise<PluginActionResult> {
     const stopped = await guard(home, tools);
     if (stopped) return { stopped, reports: [] };
     const share = host.share?.(), entry = entryOf((await readPluginRecord(String(home))).record, source, plugin);
     if (!share || !entry) return { reports: failedFor(tools, 'It has no entry in the plugins record here, so its items aren’t read.') };
-    const ran = await runItems(share, (await host.read()).tools, entry, { read: tools, ...(bring ? { bring: true as const } : {}) }, await itemFiles(await context(), source, plugin), { source, marketName, plugin, action: bring ? 'install-items' : 'update-items' });
+    const ran = await runItems(share, (await host.read()).tools, entry, { read: tools, ...(bring ? { bring: true as const } : {}), ...(click ? { click: true as const } : {}) }, await itemFiles(await context(), source, plugin), { source, marketName, plugin, action: bring ? 'install-items' : 'update-items' });
     for (const told of ran.notices) host.notices?.(told.kind, told.notices);
     return { ...(ran.stopped ? { stopped: ran.stopped } : {}), reports: ran.done.map(done => done.report) };
   }
@@ -741,15 +740,15 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   }
 
   /**
-   * A turn's part in the tools that take no plugins (`tools`, owed install-items or remove-items there): On and Add turn each item
-   * On, Off each Off, the others change those tools in each item's `except` (pluginlibrary.ts ItemsAsk); a click that brings the
-   * plugin in (`wanted` there, for Install there and Take out there) reads it first. Its notices go to their pages.
+   * A turn's part in the tools that take no plugins (`tools`), as pluginlibrary.ts ItemsAsk says; `wanted`: a `fix` there is
+   * Install there, not Take out there. Its notices go to their pages.
    */
   async function turnItems(source: string, marketName: string, entry: PluginEntry, what: PluginTurn, tools: HarnessId[], wanted: boolean) {
     const share = host.share?.();
     if (!share) return undefined;
     const goes = clickGoes(what) === 'in' || (what === 'fix' && wanted), op = { source, marketName, plugin: entry.plugin, action: goes ? 'install-items' as const : 'remove-items' as const };
-    const ask: ItemsAsk = goes ? { into: tools, ...(what === 'on' || what === 'add' ? { on: true as const } : {}) } : { outOf: tools, ...(what === 'off' ? { off: true as const } : {}) };
+    const ask: ItemsAsk = goes ? { into: tools, ...(what === 'let-in' ? {} : { on: true as const }), ...(what === 'let-in' || what === 'fix' ? { letIn: true as const } : {}) }
+      : { outOf: tools, ...(what === 'off' ? { off: true as const } : {}) };
     const ran = await runItems(share, (await host.read()).tools, entry, ask, goes ? await itemFiles(await context(), source, entry.plugin) : { commitAt: '' }, op);
     for (const told of ran.notices) host.notices?.(told.kind, told.notices);
     return ran;
@@ -962,7 +961,7 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
   });
   handle('plugins:items', async (source, marketName, plugin, tools, home) => {
     const ids = itemTools(onlyAllowed(tools, harnessIds));
-    return open() && isText(source) && isName(marketName) && isName(plugin) && ids.length ? markets.items(source, marketName, plugin, ids, home) : { reports: failedFor(ids, 'That request was malformed, so nothing ran.') };
+    return open() && isText(source) && isName(marketName) && isName(plugin) && ids.length ? markets.items(source, marketName, plugin, ids, home, false, true) : { reports: failedFor(ids, 'That request was malformed, so nothing ran.') };
   });
   handle('plugins:uninstall', async (source, marketplace, plugin, tool, home) => {
     const ids = toolIds([tool]);
