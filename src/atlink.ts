@@ -11,7 +11,8 @@
 // - why a read holds nothing to bring in, in words (unreadWhy, nothingToAddWhy), each kind's part from its table entry.
 // An item there that can't be read is "unreadable", with why, and is never taken to be gone. One that was read and is not
 // brought in by a rule (two of one name, a name no tool can store, a skill that can't be copied as it is, a server that runs
-// files from the repository) is `leftOut` as well: said as not brought in, it holds back no drop (readOf).
+// files from the repository) is `leftOut` as well: it counts as read (readOf), so it holds back no other item's drop, and an
+// item it stands for in Central Knot stays as it is.
 // Not here: fetching a link (sources.ts fetchInto), the kinds' table (sources.ts sourceKinds), and the table each read meets
 // (library.ts sourceAnswers).
 import { lstat, readFile, readdir } from 'node:fs/promises';
@@ -267,8 +268,10 @@ export async function serverAt(where: { folder: string; folderName: string; file
 /** A click on one name's line at a source, as its kind's read carries it: Add on one held deleted (`bringBack`), or Replace, Merge or Keep mine on one whose version waits (`replace`, `merge`, `keep`). */
 export type RowClick = Pick<SourceRead<unknown>, 'bringBack' | 'replace' | 'merge' | 'keep'>;
 
-/** Whether what is at a link holds an item of any kind that can be read. */
-const readable = (found: Holds) => found.kinds.some(each => each.items.some(item => !('unreadable' in item)));
+/** Whether an item at a link was read: it can be brought in, or it is left out by a rule. Only one that couldn't be read wasn't. */
+const wasRead = (item: ItemThere<unknown>) => !('unreadable' in item) || !!item.leftOut;
+/** Whether what is at a link holds an item of any kind that can be brought in: what Look's Add asks. */
+const canBringIn = (found: Holds) => found.kinds.some(each => each.items.some(item => !('unreadable' in item)));
 
 /**
  * What was read at a source of one kind, as the pass and the table are given it (the one place that decides it): each item of
@@ -278,8 +281,7 @@ const readable = (found: Holds) => found.kinds.some(each => each.items.some(item
 export function readOf(source: SourceRecord, found: Holds, entry: SourceKind, recorded: ReadonlySet<string>, clicked: RowClick = {}): SourceRead<unknown> {
   const there = itemsOf(found, entry), names: SourceRead<unknown>['names'] = new Map();
   for (const item of there) names.set(item.key, 'unreadable' in item ? { unreadable: item.unreadable } : { name: item.name, hash: item.hash, content: item.content, ...(item.own ? { own: item.own } : {}) });
-  // An item left out was read: only one that could not be read holds back this kind's drops.
-  const whole = found.holds === 'items' && readable(found) && there.every(item => !('unreadable' in item) || item.leftOut);
+  const whole = found.holds === 'items' && found.kinds.some(each => each.items.some(wasRead)) && there.every(wasRead);
   return { id: source.id, link: source.link, commitAt: source.commitAt, kind: entry.kind.kind, mergeWith: entry.kind.merge, whole, names, recorded, ...clicked };
 }
 
@@ -300,6 +302,6 @@ export function unreadWhy(found: Holds, where: Pick<SourceRecord, 'ref' | 'folde
   if (found.holds === 'empty') return `No ${anyItem(found)} at ${at}: ${found.kinds.map(each => each.entry.noneThere).join('; ')}.`;
   return undefined;
 }
-/** Why Look refuses Add: nothing there can be read (unreadWhy, or each item's line says why). */
+/** Why Look refuses Add: nothing there can be read (unreadWhy), or nothing there can be brought in (each item's line says why). */
 export const nothingToAddWhy = (found: Holds, where: Pick<SourceRecord, 'ref' | 'folder'>) =>
-  unreadWhy(found, where) ?? (readable(found) ? undefined : `No ${anyItem(found)} there can be read: each one’s line says why.`);
+  unreadWhy(found, where) ?? (canBringIn(found) ? undefined : `No ${anyItem(found)} there can be brought in: each one’s line says why.`);

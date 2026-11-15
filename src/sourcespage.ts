@@ -213,7 +213,9 @@ function stateWords(name: SourceName, preview: boolean): { text: string; warns?:
     case 'another': return { text: `Not brought in: Central Knot has ${called} from ${name.why ? linkLabel(name.why) : 'another source'}`, warns: true };
     case 'deleted': return { text: `Not brought in: deleted from Central Knot.${preview ? ' Once the source is added, Add on its row brings it back, or Restore in History.' : ''}`, warns: true };
     case 'unreadable': return { text: `Can’t be read: ${name.why}. ${preview ? 'Add can’t bring it in.' : `Until it can, this source turns no ${nouns(name.kind).one} off.`}`, warns: true };
-    case 'leftOut': return { text: `Not brought in: ${name.why}.`, warns: true };
+    // Left out at the source, it changes nothing here: an item Central Knot has of that name stays as it is.
+    case 'leftOut': return { warns: true, text: name.on === undefined ? `Not brought in: ${name.why}.`
+      : `In Central Knot, ${name.on ? 'On' : 'Off'}, as it was: what the source has now is not brought in, since ${name.why}.` };
   }
 }
 

@@ -196,6 +196,48 @@ test('Left out is not unreadable: a server that runs files from the repository, 
   } finally { await box.cleanup(); }
 });
 
+test('An entry left out was read: a server removed at its source turns Off when the only other entry there is left out; a link holding only left-out items can’t be added, since nothing there can be brought in', async () => {
+  const box = await sandbox(['copilot-cli', 'codex-cli']);
+  try {
+    const project = await repository(hosts, 'https://github.com/team/only-local');
+    await project.commit({ '.mcp.json': mcpJson({ docs: { command: 'npx', args: ['-y', 'docs-mcp'] }, local: { command: 'node', args: ['./server.js'] } }) });
+    const { id } = await add(box, 'https://github.com/team/only-local');
+    await turn(box, 'docs', true);
+    await project.commit({ '.mcp.json': mcpJson({ local: { command: 'node', args: ['./server.js'] } }) });
+    const dropped = await check(box, id);
+    assert.deepEqual([answered(dropped), dropped.notWhole, (await server(box, 'docs')).item?.on, await entryIn(box, 'copilot-cli', 'docs')], [['mcp docs: drop'], undefined, false, undefined]);
+    const leftOnly = await repository(hosts, 'https://github.com/team/just-local');
+    await leftOnly.commit({ '.mcp.json': mcpJson({ local: { command: 'node', args: ['./server.js'] } }), 'b1/SKILL.md': skillMd('beta'), 'b2/SKILL.md': skillMd('beta', 'Another beta.') });
+    assert.equal((await previewSource(box.context, box.tools, 'https://github.com/team/just-local')).refused, 'No skill, agent or MCP server there can be brought in: each one’s line says why.');
+  } finally { await box.cleanup(); }
+});
+
+test('The same for skills: a skill removed at its source turns Off when the only others there are two skills of one name', async () => {
+  const box = await sandbox(['copilot-cli', 'codex-cli']);
+  try {
+    const skills = await repository(hosts, 'https://github.com/team/twin-skills');
+    await skills.commit({ 'a/SKILL.md': skillMd('alpha'), 'b1/SKILL.md': skillMd('beta'), 'b2/SKILL.md': skillMd('beta', 'Another beta.') });
+    const { id: skillsId } = await add(box, 'https://github.com/team/twin-skills');
+    await skills.commit({ 'a/SKILL.md': null });
+    const gone = await check(box, skillsId);
+    assert.deepEqual([answered(gone), gone.notWhole], [['skill alpha: drop'], undefined]);
+  } finally { await box.cleanup(); }
+});
+
+test('A linked server whose entry at the source becomes left out stays as it is, On and in its tools, and its line is left out with the item On, which the page words as staying as it was', async () => {
+  const repo = await repository(hosts, 'https://github.com/team/becomes');
+  await repo.commit({ '.mcp.json': mcpJson({ docs: { command: 'npx', args: ['docs'] } }), 'notes/SKILL.md': skillMd('notes') });
+  const box = await sandbox(['copilot-cli', 'codex-cli']);
+  try {
+    const { id } = await add(box, 'https://github.com/team/becomes');
+    await turn(box, 'docs', true);
+    await repo.commit({ '.mcp.json': mcpJson({ docs: { command: './bin/serve' } }) });
+    assert.deepEqual(answered(await check(box, id)), []);
+    const line = (await sourcesView(box.context, box.tools)).sources[0].names.find(name => name.key === 'docs');
+    assert.deepEqual([line?.state, line?.on, (await server(box, 'docs')).fact?.fromSource, (await entryIn(box, 'copilot-cli', 'docs'))?.server.args], ['leftOut', true, { link: 'https://github.com/team/becomes' }, ['docs']]);
+  } finally { await box.cleanup(); }
+});
+
 // ---------- No false change once it is On ----------
 
 test('No false change after On: an empty argument list, numbers, streamable-http, Copilot’s local, a name Codex must quote and an SSE server read back at their versions in every tool; the next update arrives everywhere, Claude Code at Write', async () => {

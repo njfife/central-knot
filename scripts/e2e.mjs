@@ -2544,6 +2544,11 @@ async function sourcesFlow() {
   await a.click(`#source-merge-${kitId}-mcp-relay`);
   check('Merge puts both changes in Copilot CLI and Codex, says Claude Code gets it at Write to Claude Code, and offers Undo the merge', await until(async () => /relay now has your changes and the source’s, merged, in Copilot CLI and Codex; the version it had is kept\. Claude Code gets it when you click Write to Claude Code, on MCP servers\./.test(await a.text('.band-done .band-text') ?? ''))
     && (await a.text('#outcome-undo')) === 'Undo the merge' && JSON.stringify(relayIn('copilot-cli')?.env) === '{"A":"mine","B":"3"}', [await a.text('.band-done'), readNow(mcpFile('copilot-cli'))]);
+  // Its entry at the source now runs a file of the repository: left out there, so the server here stays as it was, and its line says so.
+  commit(kit, { '.mcp.json': `${JSON.stringify({ mcpServers: { relay: { command: './bin/relay' } } }, null, 2)}\n` });
+  await a.click(`#source-check-${kitId}`);
+  check('an entry the source now leaves out says the server here stays as it was, On, and it stays in Copilot CLI', await until(async () => /In Central Knot, On, as it was: what the source has now is not brought in, since it runs files from the repository, which aren’t copied\./.test(await a.text(`.source-row[data-source="${kitId}"] .source-name[data-kind="mcp"]`) ?? ''))
+    && relayIn('copilot-cli')?.command === 'relay-mcp', [await a.text(`.source-row[data-source="${kitId}"]`), readNow(mcpFile('copilot-cli'))]);
 
   await a.click('#nav-sources');
   await type('https://github.com/team/plugin');
