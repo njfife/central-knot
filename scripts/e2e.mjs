@@ -3198,6 +3198,8 @@ async function freedOtherWaysFlow() {
   const held = await alphaSyncedHome('two-builds');
   held.mac.bundle(held.mac.applications, 'Zed Knot', 'com.centralknot.custom.zed');
   const a = await held.open();
+  same('two builds: the alpha’s screen promises its History days alone, since the look that frees this build will be Zed Knot’s', [(await a.text('#held-title') ?? '').startsWith('Central Knot Alpha'), await a.text('#held > p:nth-of-type(3)')],
+    [true, 'Central Knot Alpha syncs this home, but Replace keeps Central Knot’s own choices here: whether Automatic sync is on and whether plugins update by themselves stay as they are, and History is kept for the longer of the two builds’ days. Its other settings, and any marketplace added only in it, don’t carry over.']);
   await a.click('#held-replace');
   same('two builds: after the alpha is replaced, the next screen names Zed Knot and says what came of the alpha', [await a.text('#held-title'), (await a.text('#held-said') ?? '').startsWith('Central Knot Alpha is in the Trash')], [`Zed Knot is installed in ${held.mac.applications}`, true]);
   await a.click('#held-replace');
@@ -3250,6 +3252,18 @@ async function freedOtherWaysFlow() {
     [known.owner(), await e.exists('#resume'), readFileSync(known.notes('.copilot'), 'utf8') === known.edited, known.aged(), known.settings()], ['com.centralknot.firstlook', false, true, true, [undefined, 90]]);
   same('no page errors, a folder remembered', e.pageErrors, []);
   await e.quit();
+  // A folder this build synced once, set up afresh by the alpha since (a new generation of its record): the take-over lets go of
+  // the memory of the older record, so the folder waits for Resume instead of stopping for good, and Resume carries on.
+  const afresh = await alphaSyncedHome('set-up-afresh');
+  rmSync(afresh.alphaPath, { recursive: true });
+  writeFileSync(join(afresh.data, 'sharing-settings.json'), JSON.stringify({ homes: { [afresh.home]: { generation: 'an-older-record-this-build-made' } } }));
+  const fresh = await afresh.open();
+  await fresh.click('#nav-skills');
+  check('a folder this build remembers by an older record: the page offers Resume, not a stop', await fresh.exists('#resume'), await fresh.text('.bands'));
+  if (await fresh.exists('#resume')) await fresh.click('#resume');
+  check('and Resume spreads the waiting edit', readFileSync(afresh.notes('.copilot'), 'utf8') === afresh.edited);
+  same('no page errors, a folder set up afresh', fresh.pageErrors, []);
+  await fresh.quit();
   // A record that can't be written (its folder read-only): the page shows as it would have, the record stays, and the log says why.
   const locked = await alphaSyncedHome('read-only');
   rmSync(locked.alphaPath, { recursive: true });
@@ -3321,6 +3335,16 @@ async function thisMacTakeOverFlow() {
     [again.owner(), readFileSync(again.notes('.copilot'), 'utf8') === again.edited, again.aged(), again.settings()], ['com.centralknot.firstlook', true, true, [true, 90]]);
   same('no page errors, reinstalled', c.pageErrors, []);
   await c.quit();
+  // A record that can't be written, on this Mac's home: History's days are kept first, and the other choices only once the record
+  // is taken over, so this build's Automatic sync stays its own.
+  const locked = await asThisMac('this-mac-read-only', {}), store = join(locked.home, '.central-knot');
+  chmodSync(store, 0o555);
+  const d = await locked.open(true);
+  const after = [locked.owner(), locked.settings()];
+  chmodSync(store, 0o755);
+  same('this Mac’s home whose record can’t be written: the record stays, History’s days are the longer, and Automatic sync is this build’s own', after, ['com.centralknot.alpha', [undefined, 90]]);
+  same('no page errors, a record that can’t be written here', d.pageErrors, []);
+  await d.quit();
 }
 
 /**
@@ -3472,8 +3496,8 @@ async function realHomeFlow() {
     await a.click('#history-shorten');
     for (let tries = 0; tries < 30 && !(await a.exists('#setting-history-message')); tries++) await wait(100);
     const previewNote = (await a.text('#setting-history-message') ?? '').trim();
-    same('the History window survives a restart; shortening it never writes a preview-only home, whose History still shows only the window, and the row says the older History goes at the home’s next change rather than that it was removed',
-      [restarted, readFileSync(previewHistory, 'utf8') === before, (await a.run('window.centralKnot.history()')).events.length, (await a.run('window.centralKnot.getSettings()')).historyDays, previewNote.startsWith('Saved. History before ') && previewNote.endsWith(' will be removed the next time this home records a change.')],
+    same('the History window survives a restart; shortening it never writes a preview-only home, whose History still shows only the window, and the row says the older History no longer shows and goes at Central Knot’s next change there, rather than that it was removed',
+      [restarted, readFileSync(previewHistory, 'utf8') === before, (await a.run('window.centralKnot.history()')).events.length, (await a.run('window.centralKnot.getSettings()')).historyDays, previewNote.startsWith('Saved. History before ') && previewNote.endsWith(' no longer shows, and Central Knot removes it the next time it records a change in this home.')],
       [7, true, 0, 7, true]);
     await a.run('window.centralKnot.setHistoryDays(30)');
     rmSync(join(HOME, '.central-knot'), { recursive: true });

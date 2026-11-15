@@ -418,6 +418,17 @@ export async function remember(context: ShareContext, generation: string) {
   settings.homes = { ...settings.homes, [context.home]: { generation } };
   await writeDurably(context.settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
 }
+/**
+ * Lets go of this build's memory of a home it remembers by another generation of its record than `generation` (a folder it
+ * synced before it was set up afresh elsewhere), so the home waits for Resume instead of stopping for good: main.ts
+ * takeOverHome, where a take-over isn't carried. A memory of `generation` itself stays.
+ */
+export async function forgetStale(context: ShareContext, generation: string) {
+  const settings = await readSettings(context.settingsPath), remembered = settings.homes?.[context.home]?.generation;
+  if (!remembered || remembered === generation) return;
+  const { [context.home]: _stale, ...homes } = settings.homes!;
+  await writeDurably(context.settingsPath, `${JSON.stringify({ ...settings, homes }, null, 2)}\n`);
+}
 
 export const NOTHING_CHANGED = 'Nothing was written or deleted. Put the record back, then try again.';
 

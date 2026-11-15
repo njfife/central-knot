@@ -53,8 +53,8 @@ function offer(home: HomeView, other: OtherBuild): { act?: 'replace' | 'quit'; l
 }
 
 /**
- * What becomes of the other build's settings: kept where the home's record names it and its settings folder was found
- * (types.ts OtherBuild ownsRecord, settingsFound), else not (main.ts takeOverHome).
+ * What becomes of the other build's settings, as the look says it (types.ts OtherBuild ownsRecord, settingsFound, carries;
+ * main.ts takeOverHome): its choices kept where it carries them, else History's days alone, else none.
  */
 function settingsWords(other: OtherBuild, verb: string): string {
   const name = other.name;
@@ -62,6 +62,10 @@ function settingsWords(other: OtherBuild, verb: string): string {
   if (!other.settingsFound) {
     return `${name} syncs this home, but its settings folder isn’t on this Mac, so Central Knot will use its own settings, among them how many days of History `
       + `are kept: anything older is dropped at its next change. Any marketplace added only in ${name} doesn’t carry over.`;
+  }
+  if (!other.carries) {
+    return `${name} syncs this home, but ${verb} keeps Central Knot’s own choices here: whether Automatic sync is on and whether plugins update by themselves `
+      + `stay as they are, and History is kept for the longer of the two builds’ days. Its other settings, and any marketplace added only in it, don’t carry over.`;
   }
   return `${name} syncs this home, so ${verb} keeps its choices here: whether Automatic sync is on, whether plugins update by themselves and how many days `
     + `of History are kept (the longer of the two). Its other settings, and any marketplace added only in it, don’t carry over.`;

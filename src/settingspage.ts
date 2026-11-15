@@ -213,7 +213,9 @@ const shortenQuestion = (days: HistoryDays) =>
  */
 const pruneNotes: Record<HistoryPrune, (before: string) => Pick<RowMessage, 'text' | 'detail' | 'tone'>> = {
   done: before => ({ text: `Saved. History before ${before} was removed.`, tone: 'done' }),
-  later: before => ({ text: `Saved. History before ${before} will be removed the next time this home records a change.`, tone: 'info' }),
+  // This build doesn't sync the home now (preview only, held, waiting for Resume, no record yet): History already shows only the
+  // window, and nothing is removed until this build next records a change there, if it ever does.
+  later: before => ({ text: `Saved. History before ${before} no longer shows, and Central Knot removes it the next time it records a change in this home.`, tone: 'info' }),
   'no-home': () => ({ text: 'Saved.', tone: 'info' }),
   failed: before => ({ text: `Saved, but History before ${before} couldn’t be removed.`, detail: 'Central Knot will try again the next time this home records a change. The log file says why.', tone: 'failure' }),
 };

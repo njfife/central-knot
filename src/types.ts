@@ -39,9 +39,10 @@ export interface OtherApp { name: string; version?: string; says: string }
  * build with none there, the build running from somewhere else (no `installed`: Quit). `running`: where each running copy of
  * that build runs from (otherbuilds.ts runningCopies, every copy by its bundle id); empty when none runs, unset when that can't
  * be told. `settingsFound`: its settings folder is there, so its settings are kept when the home's record passes from it.
- * `ownsRecord`: the open home's sync record names it, so Replace or Quit carries its choices (main.ts takeOverHome).
+ * `ownsRecord`: the open home's sync record names it. `carries`: Replace or Quit of it carries its Automatic sync and plugin
+ * updates here (main.ts carriesChoices, asked ahead by the look); History's days are kept, the longer of the two, either way.
  */
-export interface OtherBuild { build: string; name: string; installed?: string; running?: string[]; settingsFound?: true; ownsRecord?: true }
+export interface OtherBuild { build: string; name: string; installed?: string; running?: string[]; settingsFound?: true; ownsRecord?: true; carries?: true }
 
 /**
  * What a click on another build came to (otherbuilds.ts removeBuild and quitBuild, then main.ts carryOn): its words, whether it

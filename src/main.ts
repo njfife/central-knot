@@ -20,7 +20,7 @@ import { discover, findOtherApps } from './discovery.ts';
 import { envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { CLAUDE_PROCESS, appCandidates, executableCandidates, macPlaces, searchPath } from './platform.ts';
 import { intoFolder, lookForBuilds, quitBuild, removeBuild, runsOutside, type BuildsContext } from './otherbuilds.ts';
-import { leftOutNow, managedNow, readRecord, remember, syncGate, takeOverSync, writeAccess, type ShareContext } from './share.ts';
+import { forgetStale, leftOutNow, managedNow, readRecord, remember, syncGate, takeOverSync, writeAccess, type ShareContext } from './share.ts';
 import { everythingEntryAction, setSyncEverything } from './everything.ts';
 import { chooseTools, whatJoiningDoes } from './toolchoice.ts';
 import { pruneHistory, readHistory } from './history.ts';
@@ -677,24 +677,33 @@ function heldReason(): string | undefined {
   return holder && `${holder.name} is also ${holder.installed ? 'installed' : 'running'} on this Mac, and only one build of ${PRODUCT} works at a time, so ${own.name} changes nothing in this home or your tools ${holdsUntil(holder)}.`;
 }
 /**
+ * Whether taking over the open home's record carries the Automatic sync and plugin updates of the build it names, `named`
+ * (takeOverHome): only from the build this build was just freed from, `freedFrom`, or on this Mac's own home. The look asks it
+ * at the take-over, and asks it ahead for the held screen (OtherBuild carries): Replace or Quit of a found build frees this
+ * build from it where no other build is found.
+ */
+const carriesChoices = (named: string, freedFrom: string | undefined) => named === freedFrom || current!.mode === 'actual';
+/**
  * The look (syncAndView's first step), and what follows from it: held, the window is shown, even after a start at sign-in.
  * Not held, where the look could answer, a home's record that names another build is taken over (takeOverHome): at launch, at
- * each view and switch of home, and at the look that frees this build. That build's choices come with it only from the build
- * this look freed this build from, or on this Mac's own home. Then, at the first look or freed, what waits for a build that
- * isn't held (freed). Answers what the take-over said for the page, where it said anything.
+ * each view and switch of home, and at the look that frees this build, carrying that build's choices where carriesChoices says
+ * so. Then, at the first look or freed, what waits for a build that isn't held (freed). Answers what the take-over said for the
+ * page, where it said anything.
  */
 async function lookForOthers(): Promise<string | undefined> {
   const builds = buildsContext();
   if (!builds) return undefined;
   const before = holdingBuild(others), owner = (await readRecord(current!.home)).record?.owner;
-  others = await lookForBuilds(builds, owner);
+  const found = await lookForBuilds(builds, owner), alone = (build: string) => !!found?.every(other => other.build === build);
+  // The held screen's promise, asked ahead: Replace or Quit of the build the record names frees this build from it where it is alone.
+  others = found?.map(each => (each.ownsRecord && carriesChoices(each.build, alone(each.build) ? each.build : undefined) ? { ...each, carries: true as const } : each));
   if (others === undefined) log('other builds: an Applications folder can’t be read, so whether another build is here isn’t known; not held');
   if (heldReason() && (window.isDestroyed() || !window.isVisible())) showWindow();
   if (!!heldReason() !== !!before) refreshTray();
   if (heldReason()) return undefined;
   // A look that couldn't answer takes nothing over: whether another build is here isn't known.
   const freedFrom = before === 'unlooked' ? undefined : before?.build;
-  const said = Array.isArray(others) && owner && owner !== BUILD ? await takeOverHome(owner === freedFrom || current!.mode === 'actual') : undefined;
+  const said = Array.isArray(others) && owner && owner !== BUILD ? await takeOverHome(carriesChoices(owner, freedFrom)) : undefined;
   if (before) await freed();
   return said;
 }
@@ -714,26 +723,31 @@ async function carryOn(other: OtherBuild, outcome: BuildOutcome): Promise<BuildO
 }
 /**
  * Takes the open home's record over from the build it names (share.ts takeOverSync), the one place a record changes hands; only
- * the look calls it (lookForOthers). First that build's settings, where its folder is found and the home may be written
- * (keepSettingsOf): History's days, the longer of the two, so no take-over shortens History; and with `carry`, Automatic sync
- * and automatic plugin updates too, and then the record is remembered as this build's (share.ts remember), so it needn't
- * Resume. Not carried, a home this build has no memory of waits for Resume (share.ts syncGate), and only the log says what
- * happened. A take-over that can't be made (a home that can't be written, a record that can't be written) is logged, and the
- * record stays as it was, though settings kept first stay kept. Answers what the page says with the view.
+ * the look calls it (lookForOthers). First, where that build's settings folder is found and the home may be written, History's
+ * days, the longer of the two, so no take-over shortens History (keepSettingsOf). Then the record. Then, with `carry`, that
+ * build's Automatic sync and automatic plugin updates too, and the record is remembered as this build's (share.ts remember), so
+ * it needn't Resume. Not carried, the home waits for Resume where this build has no memory of this record (an older one's is
+ * let go: share.ts forgetStale), and only the log says what happened. A take-over that can't be made (a home that can't be
+ * written, a record that can't be written) is logged, and the record and the other choices stay as they were. Answers what the
+ * page says with the view.
  */
 async function takeOverHome(carry: boolean): Promise<string | undefined> {
   const shared = context(), named = (await readRecord(current!.home)).record;
   if (!named) return undefined;
-  const kept = (await writeAccess(shared)).allowed && await keepSettingsOf(named.owner, carry);
+  const found = (await writeAccess(shared)).allowed && await keepSettingsOf(named.owner, false);
   // A record that can't be written (a read-only folder) fails here: logged, and the view is built as it would have been.
   const taken = await takeOverSync(shared).catch((error: unknown) => ({ stopped: error instanceof Error ? error.message : String(error), from: undefined }));
   if (!taken.from) {
-    log(`sync: ${current!.home}’s record names ${named.owner}, and it wasn’t taken over: ${taken.stopped}${kept ? ` ${named.owner}’s settings were kept first.` : ''}`);
+    log(`sync: ${current!.home}’s record names ${named.owner}, and it wasn’t taken over: ${taken.stopped}${found ? ' History’s days were kept first (the longer of the two).' : ''}`);
     return undefined;
   }
-  log(`sync: took over ${current!.home}’s record from ${taken.from}${!kept ? ' (its settings folder wasn’t found)' : carry ? ', keeping its settings' : ', keeping the longer History days'}`);
-  // Remembered only where carried: elsewhere a home this build has no memory of waits for Resume.
-  if (!carry) return undefined;
+  if (!carry) {
+    await forgetStale(shared, named.generation);
+    log(`sync: took over ${current!.home}’s record from ${taken.from}${found ? ', keeping the longer History days' : ' (its settings folder wasn’t found)'}`);
+    return undefined;
+  }
+  const kept = found && await keepSettingsOf(named.owner, true);
+  log(`sync: took over ${current!.home}’s record from ${taken.from}${kept ? ', keeping its settings' : ' (its settings folder wasn’t found)'}`);
   await remember(shared, named.generation);
   const choices = 'whether Automatic sync is on, whether plugins update by themselves and how many days of History are kept (the longer of the two)';
   return kept ? `${own.name} syncs this home now, and keeps ${taken.from}’s choices: ${choices}.`
