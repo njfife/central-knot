@@ -23,7 +23,7 @@ import { noticeNames, plural } from './model.ts';
 import { anyOn } from './itemrow.ts';
 import { followUpdates, sidebarEnd, statusEnd } from './updateview.ts';
 import { followPluginUpdates } from './pluginupdateview.ts';
-import { heldBy, heldScreen } from './otherbuildview.ts';
+import { forgetHeldResult, heldBy, heldScreen } from './otherbuildview.ts';
 
 const region = (id: string) => document.getElementById(id)!;
 /** Each page's title, in the header and the sidebar: a kind's page by its kind's title (words.ts kindNouns). */
@@ -150,6 +150,7 @@ function renderPage() {
   document.body.classList.toggle('page-harnesses', state.page === 'harnesses');
   const held = heldBy(state.home);
   if (held) { region('page').replaceChildren(heldScreen(state.home!, held)); return; }
+  forgetHeldResult();
   region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'profiles' ? profilesPage() : state.page === 'history' ? historyPage() : state.page === 'repo' ? repoPage() : state.page === 'sources' ? sourcesPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : harnessesPage());
 }
 

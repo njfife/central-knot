@@ -721,7 +721,7 @@ async function takeOverHome(): Promise<{ stopped?: string; from?: string; said?:
   const taken = await takeOverSync(context());
   if (!taken.from) return taken;
   log(`sync: took over syncing ${current!.home} from ${taken.from}${kept ? ', keeping its settings' : ''}`);
-  const choices = 'whether Automatic sync is on, whether plugins update by themselves, how many days of History are kept and which folder it opens when it starts';
+  const choices = 'whether Automatic sync is on, whether plugins update by themselves, how many days of History are kept (the longer of the two) and which folder it opens when it starts';
   return { ...taken, said: kept ? `${own.name} syncs this home now, and keeps ${taken.from}’s choices: ${choices}.`
     : `${own.name} syncs this home now, with its own settings: ${taken.from}’s settings folder wasn’t found, so History is kept for as many days `
       + `as ${own.name} keeps it, and anything older is dropped at its next change.` };
@@ -731,14 +731,16 @@ const settingsFolderOf = (build: string) => join(dirname(app.getPath('userData')
 /**
  * Another build's own choices that decide what is written (Automatic sync, automatic plugin updates, History's days and the
  * home it opens at start), saved as this build's. Read from its settings folder as that build reads them: a value it never
- * saved is its default. False, and nothing saved, where that folder isn't there.
+ * saved is its default. History's days are this build's for every home it opens, so the longer of the two is kept: a take-over
+ * never shortens History. False, and nothing saved, where that folder isn't there.
  */
 async function keepSettingsOf(build: string): Promise<boolean> {
   const folder = settingsFolderOf(build);
   if (!await access(folder).then(() => true, () => false)) return false;
   const read = (name: string) => readFile(join(folder, name), 'utf8').then(text => record(JSON.parse(text))).catch(() => undefined);
   const theirs = (await read('app-settings.json') ?? {}) as AppSettings, sync = await read('sync-settings.json');
-  await saveAppSettings({ home: theirs.home, historyDays: theirs.historyDays, pluginUpdates: theirs.pluginUpdates });
+  const days = Math.max(historyDays(), isHistoryDays(theirs.historyDays) ? theirs.historyDays : defaultHistoryDays) as HistoryDays;
+  await saveAppSettings({ home: theirs.home, historyDays: days, pluginUpdates: theirs.pluginUpdates });
   await saveSyncSetting(sync?.syncOn !== false);
   return true;
 }
@@ -1394,7 +1396,7 @@ app.whenReady().then(async () => {
   // runs; then this build carries on (carryOn). On a click alone.
   const notHere = { said: 'Another build is replaced or quit only by the installed app on a Mac.', done: false, view: null };
   const named = (build: unknown, path?: unknown) => (Array.isArray(others) ? others : []).find(each => each.build === build && (path === undefined || each.installed === path));
-  const gone = async () => ({ said: 'That build isn’t found here any more. Nothing was changed.', done: false, view: await syncThenView() });
+  const gone = async () => ({ said: 'That build isn’t found here any more, so nothing was removed or asked to quit.', done: false, view: await syncThenView() });
   handle('builds:replace', async (path, build) => {
     const builds = buildsContext(), other = named(build, path);
     return !builds || !current ? notHere : other ? carryOn(other, await removeBuild(builds, other)) : gone();

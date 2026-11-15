@@ -3179,6 +3179,19 @@ async function freedOtherWaysFlow() {
   same('Take over syncing keeps the alpha’s Automatic sync (off) and History days (90), and says so first', [before.owner(), before.settings(), (await c.text('#announcement') ?? '').startsWith('Central Knot syncs this home now, and keeps Central Knot Alpha’s choices')], ['com.centralknot.firstlook', [false, 90], true]);
   same('no page errors, Take over syncing', c.pageErrors, []);
   await c.quit();
+  // History's days are this build's for every home it opens: a take-over keeps the longer of the two, never a shorter one.
+  const longer = await alphaSyncedHome('longer');
+  rmSync(longer.alphaPath, { recursive: true });
+  writeFileSync(join(dirname(longer.data), 'com.centralknot.alpha', 'app-settings.json'), JSON.stringify({ historyDays: 30 }));
+  writeFileSync(join(longer.data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: longer.home }, historyDays: 90 }));
+  const d = await longer.open();
+  await d.click('#nav-skills');
+  await d.click('#take-over-sync');
+  same('this build at 90 days, the alpha at 30: after Take over syncing, still 90', [longer.owner(), longer.settings()[1]], ['com.centralknot.firstlook', 90]);
+  await d.run(`window.centralKnot.syncNow(${JSON.stringify(longer.home)})`);
+  check('and a History write after it keeps the entry from 60 days ago', readFileSync(longer.notes('.copilot'), 'utf8') === longer.edited && longer.aged());
+  same('no page errors, the longer of the two', d.pageErrors, []);
+  await d.quit();
 }
 
 /**
@@ -3200,7 +3213,7 @@ async function otherBuildFlow() {
     'Only one build of Central Knot works at a time, so Central Knot changes nothing in this home or your tools until one of the two is gone: Replace moves Central Knot Alpha to the Trash and Central Knot carries on, and Quit Central Knot closes this app and leaves both installed.',
     'Replace Central Knot AlphaQuit Central Knot',
     'Your skills, MCP servers and agents, which of them are kept in step, and History stay whichever build you keep: they’re saved in this home, not in an app.',
-    'Central Knot Alpha syncs this home, so Replace keeps its choices here: whether Automatic sync is on, whether plugins update by themselves, how many days of History are kept and which folder it opens when it starts. Its other settings don’t carry over. Any marketplace added only in Central Knot Alpha doesn’t carry over.',
+    'Central Knot Alpha syncs this home, so Replace keeps its choices here: whether Automatic sync is on, whether plugins update by themselves, how many days of History are kept (the longer of the two) and which folder it opens when it starts. Its other settings, and any marketplace added only in it, don’t carry over.',
     `Replace asks every running copy of Central Knot Alpha to quit and waits up to 20 seconds, then moves ${alphaPath} to the Trash, where it stays until you empty the Trash. Central Knot Alpha’s own settings folder stays.`,
     'To keep Central Knot Alpha instead, quit Central Knot and move it to the Trash.',
   ]);
@@ -3214,7 +3227,7 @@ async function otherBuildFlow() {
   await a.click('#held-replace');
   const said = await a.text('[data-outcome] .band-text') ?? '';
   check('Replace: the alpha is in the stand-in Trash, the held screen is gone and the pages are back', !existsSync(alphaPath) && inTrash().join() === 'Central Knot Alpha.app' && !(await a.exists('#held')) && await a.exists('#nav-skills'), inTrash());
-  check('the band says first that this build syncs the home now and keeps the alpha’s choices, then where the alpha went', said.startsWith('Central Knot syncs this home now, and keeps Central Knot Alpha’s choices: whether Automatic sync is on, whether plugins update by themselves, how many days of History are kept and which folder it opens when it starts. Central Knot Alpha is in the Trash, where it stays until you empty the Trash.'), said);
+  check('the band says first that this build syncs the home now and keeps the alpha’s choices, then where the alpha went', said.startsWith('Central Knot syncs this home now, and keeps Central Knot Alpha’s choices: whether Automatic sync is on, whether plugins update by themselves, how many days of History are kept (the longer of the two) and which folder it opens when it starts. Central Knot Alpha is in the Trash, where it stays until you empty the Trash.'), said);
   same('the record is this build’s now', JSON.parse(readFileSync(join(home, '.central-knot/sync.json'), 'utf8')).owner, 'com.centralknot.firstlook');
   same('the alpha’s Automatic sync (off) and History’s days (90) are this build’s', [JSON.parse(readFileSync(join(data, 'sync-settings.json'), 'utf8')).syncOn, JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).historyDays, await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`)], [false, 90, 'false']);
   check('with Automatic sync off, no pass wrote: the edit waits in Claude Code', readFileSync(notes('.claude'), 'utf8') === edited && readFileSync(notes('.copilot'), 'utf8') !== edited);
@@ -3236,16 +3249,18 @@ async function otherBuildFlow() {
   await a.click('#held-replace');
   chmodSync(mac.trash, 0o755);
   check('a refusal leaves the build held, says why, and offers Show in Finder', await a.exists('#held') && (await a.text('#held-said') ?? '').startsWith(`macOS didn’t let Central Knot move Acme Knot to the Trash, so it is still in ${mac.applications}.`) && await a.text('#held-show') === 'Show in Finder', await a.text('#held-said'));
-  await a.click('#held-replace');
-  check('then Replace takes it: in the Trash, the pages back', !existsSync(acme) && inTrash().includes('Acme Knot.app') && !(await a.exists('#held')), inTrash());
+  // Moved to the Trash by hand, as the refusal says, then Refresh: the pages are back.
+  renameSync(acme, join(mac.trash, 'Acme Knot.app'));
+  await a.click('#header-refresh');
+  check('then moved by hand and Refresh: the pages are back', inTrash().includes('Acme Knot.app') && !(await a.exists('#held')), inTrash());
 
   // A build running only from Downloads: Quit it in place of Replace.
   const stray = await standInApp(true);
   const downloaded = mac.bundle(join(HOME, 'Downloads'), 'Central Knot Alpha', ALPHA_ID);
   mac.running([{ bundleId: ALPHA_ID, pid: stray.pid, path: downloaded }]);
   await a.click('#header-refresh');
-  same('a build running only from Downloads is said so, with Quit in place of Replace', [await a.text('#held-title'), await a.text('#held-quit-other'), await a.exists('#held-replace')],
-    [`Central Knot Alpha is running from ${downloaded}, not from an Applications folder`, 'Quit Central Knot Alpha', false]);
+  same('a build running only from Downloads is said so, with Quit in place of Replace, and the old refusal is not under its buttons', [await a.text('#held-title'), await a.text('#held-quit-other'), await a.exists('#held-replace'), await a.exists('#held-said')],
+    [`Central Knot Alpha is running from ${downloaded}, not from an Applications folder`, 'Quit Central Knot Alpha', false, false]);
   await a.click('#held-quit-other');
   await wait(100);
   check('Quit: it quit, and the pages are back', (stray.exitCode !== null || stray.signalCode !== null) && !(await a.exists('#held')), { exit: stray.exitCode, signal: stray.signalCode });

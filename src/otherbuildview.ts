@@ -23,6 +23,8 @@ const whereWords = (found: OtherBuild) => (found.installed ? `installed in ${fol
 
 /** What the last click on this screen came to, while a build still holds this one (the same one, or the next): said under the buttons. */
 let said: BuildOutcome | undefined;
+/** A view that isn't held drops it (renderer.ts renderPage), so a held screen later in the session never shows an old result. */
+export const forgetHeldResult = () => { said = undefined; };
 
 /**
  * What this copy offers for the build that holds it: Replace only from an Applications folder (HomeView runsOutside unset),
@@ -52,14 +54,14 @@ function offer(home: HomeView, other: OtherBuild): { act?: 'replace' | 'quit'; l
 
 /** What becomes of the other build's settings: kept where it syncs this home and its settings folder was found (types.ts OtherBuild settingsFound), else not. */
 function settingsWords(home: HomeView, other: OtherBuild, verb: string): string {
-  const name = other.name, notCarried = `Any marketplace added only in ${name} doesn’t carry over.`;
+  const name = other.name;
   if (syncOwner(home.sync.gate)?.build !== other.build) return `${name}’s own settings, and any marketplace added only in it, don’t carry over.`;
   if (!other.settingsFound) {
     return `${name} syncs this home, but its settings folder isn’t on this Mac, so Central Knot will use its own settings, among them how many days of History `
-      + `are kept: anything older is dropped at its next change. ${notCarried}`;
+      + `are kept: anything older is dropped at its next change. Any marketplace added only in ${name} doesn’t carry over.`;
   }
   return `${name} syncs this home, so ${verb} keeps its choices here: whether Automatic sync is on, whether plugins update by themselves, how many days of History `
-    + `are kept and which folder it opens when it starts. Its other settings don’t carry over. ${notCarried}`;
+    + `are kept (the longer of the two) and which folder it opens when it starts. Its other settings, and any marketplace added only in it, don’t carry over.`;
 }
 
 /** The screen that stands in for every page while `other` holds this build: what is going on and the buttons first, then the detail. */
