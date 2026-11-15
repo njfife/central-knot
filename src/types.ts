@@ -708,7 +708,7 @@ export interface MarketplaceView {
   codexOnly?: string;
   /**
    * The plugins of this marketplace with a part on the record of the parts written before the library, while that record waits to
-   * be moved (partsmigrate.ts): such a plugin waits in Pi and OpenCode until it is (pluginstatus.ts partsWaitFor).
+   * be moved (partsmigrate.ts): such a plugin waits in Pi and OpenCode until it is (pluginstatus.ts waitsToMove).
    */
   waiting?: string[];
   /** Each listed plugin's one switch, by plugin (pluginrecord.ts PluginSwitch). */
