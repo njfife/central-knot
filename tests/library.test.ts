@@ -465,9 +465,12 @@ test('Changed here: the current version is not what it took from the source, or 
 
 const plugin = { plugin: true };
 
-test('A plugin: a name the library has no item for is made, and so is one deleted (a deleted name never blocks it); a name the library has unlinked is never linked, the same content or not', () => {
+test('A plugin: a name the library has no item for is made, and so is his own deleted; one of its own he deleted only at a click that brings the plugin in; a name the library has unlinked is never linked, the same content or not', () => {
   assert.equal(fromSource(undefined, there('s'), 'none', plugin), 'make');
-  assert.equal(fromSource({ ...linked('l', 'l'), deleted: { at: '2026-11-01T00:00:00.000Z' } }, there('s'), 'this', plugin), 'make');
+  const tombstone = { ...linked('l', 'l'), deleted: { at: '2026-11-01T00:00:00.000Z' } };
+  assert.equal(fromSource(tombstone, there('s'), 'this', plugin), 'deleted', 'the background never brings it back');
+  assert.equal(fromSource(tombstone, there('s'), 'this', { ...plugin, bringBack: true }), 'make', 'the plugin’s On does');
+  assert.equal(fromSource({ ...tombstone, source: undefined }, there('s'), 'none', plugin), 'make', 'his own, let go and deleted: the plugin’s comes back');
   const own = { ...linked('s', 's'), source: undefined, seen: undefined, versions: [{ hash: 's', at: '2026-11-02T10:00:00.000Z', from: { how: 'found' as const, harness: 'pi-cli' as const } }] };
   assert.equal(fromSource(own, there('s'), 'none', plugin), 'differs', 'the person’s own, the same content: not linked, so the plugin’s Off never turns it off');
   assert.equal(fromSource(own, there('s'), 'none'), 'link', 'a Git source links it');
