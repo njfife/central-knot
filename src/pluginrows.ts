@@ -45,8 +45,8 @@ export const inTool = (fact: Pick<LibraryFacts, 'copies' | 'plugin'>, tool: Harn
 /**
  * Whether a row of the person's own is this plugin's item already: some tool has that row's item through this plugin (its
  * box says so), the row's item is linked to this plugin (library.ts A PLUGIN: its row says "from the plugin"), or the row's copy in some tool is on record as this plugin's part (a Codex plugin's MCP server put into
- * Pi, which no box shows as through the plugin, since Codex may not start a plugin's servers). An MCP server's part is no
- * copy of the row's: its line says it is the plugin's (`unseen`, servers.ts), so it counts too.
+ * Pi, which no box shows as through the plugin, since Codex may not start a plugin's servers). A part's copy waiting to be moved
+ * to the library is no copy of the row's: its line says it waits (`unseen`, partsmigrate.ts hideParts), so it counts too.
  */
 const onOwnRow = (home: HomeView, fact: LibraryFacts, row: PluginRow) => [fact.key, fact.name].some(name => !!name && samePart(row, { kind: row.kind, name }))
   && (Object.values(fact.plugin ?? {}).some(given => given.plugin === row.plugin && given.marketplace === row.marketName)
