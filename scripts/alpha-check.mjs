@@ -162,7 +162,7 @@ check('and neither took the home over meanwhile', (await readRecord(HOME)).recor
 const exited = new Promise(done => plain.child.once('exit', () => done(true)));
 await alpha.click('#held-quit-other');
 check('Quit Central Knot, in the alpha: the standard app quits', await Promise.race([exited, wait(30000).then(() => false)]));
-check('and the alpha is freed: its pages are back, saying the standard app quit and that the alpha syncs this home now', await alpha.until(`!document.querySelector('#held')`) && /^Central Knot has quit\..* Central Knot Alpha syncs this home now\.$/.test(await alpha.text('[data-outcome] .band-text')), await alpha.text('[data-outcome] .band-text'));
+check('and the alpha is freed: its pages are back, saying first that the alpha syncs this home now, keeping the standard app’s choices, then that it quit', await alpha.until(`!document.querySelector('#held')`) && /^Central Knot Alpha syncs this home now, and keeps Central Knot’s choices: .* Central Knot has quit\.$/.test(await alpha.text('[data-outcome] .band-text')), await alpha.text('[data-outcome] .band-text'));
 const taken = (await readRecord(HOME)).record;
 check('the record is under the alpha, by its name', taken?.owner === ALPHA_BUILD && taken?.ownerName === 'Central Knot Alpha', taken && { owner: taken.owner, ownerName: taken.ownerName });
 check('the alpha keeps its settings in a folder of its own', existsSync(join(appData, ALPHA_BUILD, 'sharing-settings.json')) && readFileSync(join(appData, ALPHA_BUILD, 'sharing-settings.json'), 'utf8').includes(taken?.generation ?? '-'), appData);

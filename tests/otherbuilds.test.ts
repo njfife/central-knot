@@ -8,7 +8,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { test } from 'node:test';
-import { intoFolder, lookForBuilds, QUIT_WAIT_MS, quitBuild, removeBuild, runsOutside, type BuildsContext } from '../src/otherbuilds.ts';
+import { QUIT_WAIT_MS } from '../src/model.ts';
+import { intoFolder, lookForBuilds, quitBuild, removeBuild, runsOutside, type BuildsContext } from '../src/otherbuilds.ts';
 import { macPlaces } from '../src/platform.ts';
 import type { OtherBuild } from '../src/types.ts';
 import { ALPHA_BUILD } from '../src/updates.ts';
@@ -16,7 +17,7 @@ import { STANDARD_BUILD } from '../src/values.ts';
 import { standInApp, standInMac } from './macstandins.ts';
 
 const ALPHA = 'Central Knot Alpha', STANDARD = 'Central Knot', ACME = 'Acme Knot', ACME_BUILD = 'com.centralknot.custom.acme';
-const trashWords = (name: string) => `${name} is in the Trash, where it stays until you empty the Trash. Your skills, MCP servers and agents, and the record of them, stay where they are: they’re kept in the home, not in an app. ${name}’s own settings folder stays too. If ${name} still starts at sign-in, turn it off in System Settings › General › Login Items.`;
+const trashWords = (name: string) => `${name} is in the Trash, where it stays until you empty the Trash. Your skills, MCP servers and agents, which of them are kept in step, and History stay: they’re saved in this home, not in an app. ${name}’s own settings folder stays too. If ${name} still starts at sign-in, turn it off in System Settings › General › Login Items.`;
 
 /**
  * A Mac made up in a temp folder: the standard app runs (unless `own` says another build), the stand-ins hold the apps, and
@@ -32,7 +33,8 @@ function made(base: string, own: string) {
   const home = join(base, 'home'), mine = join(home, 'Applications'), downloads = join(home, 'Downloads');
   mkdirSync(mine, { recursive: true });
   mkdirSync(downloads, { recursive: true });
-  const context: BuildsContext = { own, places: macPlaces(home, { CK_TEST_APPS: stand.root }), trash: intoFolder(stand.trash), home, quitWaitMs: 1500 };
+  const support = join(base, 'Application Support');
+  const context: BuildsContext = { own, places: macPlaces(home, { CK_TEST_APPS: stand.root }), trash: intoFolder(stand.trash), home, quitWaitMs: 1500, settingsFolder: build => join(support, build) };
   const apps: ChildProcess[] = [];
   /** A stand-in app running from `path` as the build `bundleId` (one that quits when asked, `afterMs` later, or not), listed as running. */
   const runs = async (copies: { bundleId: string; path: string; quits: boolean; afterMs?: number }[]) => {
@@ -44,7 +46,7 @@ function made(base: string, own: string) {
   const trashed = () => (existsSync(stand.trash) ? readdirSync(stand.trash) : []);
   /** The alpha installed in the stand-in /Applications, as the look finds it. */
   const alpha = (): OtherBuild & { installed: string } => ({ build: ALPHA_BUILD, name: ALPHA, installed: stand.bundle(stand.applications, ALPHA, ALPHA_BUILD) });
-  return { stand, home, mine, downloads, context, apps, runs, trashed, alpha };
+  return { stand, home, mine, downloads, support, context, apps, runs, trashed, alpha };
 }
 const alive = (app: ChildProcess) => app.exitCode === null && app.signalCode === null;
 
@@ -86,6 +88,16 @@ test('A running build is found by its bundle id wherever it runs from; one with 
   const fromTrash = stand.bundle(join(context.home, '.Trash'), ALPHA, ALPHA_BUILD);
   await runs([{ bundleId: ALPHA_BUILD, path: fromTrash, quits: true }]);
   assert.deepEqual(await lookForBuilds(context), [{ build: ALPHA_BUILD, name: ALPHA, running: [fromTrash] }]);
+}));
+
+test('A name with “&” reads as written, and the look says whether each build’s settings folder is there (what can be kept when the home’s record passes from it)', () => aMac(async ({ stand, support, context }) => {
+  const smith = stand.bundle(stand.applications, 'Smith & Co Knot', 'com.centralknot.custom.smith');
+  const alpha = stand.bundle(stand.applications, ALPHA, ALPHA_BUILD);
+  mkdirSync(join(support, ALPHA_BUILD), { recursive: true });
+  assert.deepEqual(await lookForBuilds(context), [
+    { build: ALPHA_BUILD, name: ALPHA, installed: alpha, running: [], settingsFound: true },
+    { build: 'com.centralknot.custom.smith', name: 'Smith & Co Knot', installed: smith, running: [] },
+  ]);
 }));
 
 test('A custom build running from elsewhere is found only where the open home’s record names it, the one other id looked for running', () => aMac(async ({ stand, downloads, context, runs }) => {
@@ -139,10 +151,11 @@ test('Replace only from a copy at the top of an Applications folder: from a disk
   const installedHere = { ...context, ownBundle: join(stand.applications, `${STANDARD}.app`) };
   assert.equal(runsOutside(installedHere), undefined);
   assert.equal(runsOutside(context), undefined, 'a run from the source counts as installed');
-  for (const [ownBundle, where] of [['/Volumes/Central Knot/Central Knot.app', '/Volumes/Central Knot/Central Knot.app'], [join(home, '.Trash/Central Knot.app'), '~/.Trash/Central Knot.app']]) {
+  // Where it runs from isn't said: one opened from Downloads runs from a temporary system folder (App Translocation).
+  for (const ownBundle of ['/Volumes/Central Knot/Central Knot.app', join(home, '.Trash/Central Knot.app'), '/private/var/folders/x/T/AppTranslocation/1/d/Central Knot.app']) {
     const outside = { ...context, ownBundle };
     assert.equal(runsOutside(outside), ownBundle);
-    assert.deepEqual(await removeBuild(outside, found), { said: `This copy runs from ${where}, not from an Applications folder, so nothing was removed. Move it to Applications and open it from there first.`, done: false });
+    assert.deepEqual(await removeBuild(outside, found), { said: 'This copy isn’t running from an Applications folder, so nothing was removed. Move it to Applications and open it again from there.', done: false });
   }
   assert.ok(alive(app) && existsSync(found.installed));
   assert.deepEqual(trashed(), []);
@@ -195,7 +208,7 @@ test('Every running copy is asked to quit, wherever it runs from, and nothing is
 test('Where the Trash refuses, nothing else is tried: the bundle stays, and the words say so with the bundle to show in Finder', () => aMac(async ({ stand, context, runs, alpha }) => {
   const found = alpha();
   const refusing = { ...context, trash: async () => { throw new Error('The operation couldn’t be completed.'); } };
-  const rest = `so it is still in ${stand.applications}. Nothing else was tried: move it to the Trash in Finder, or ask whoever manages this Mac.`;
+  const rest = `so it is still in ${stand.applications}. Nothing else was tried: move it to the Trash in Finder (or ask whoever manages this Mac), then click Refresh.`;
   assert.deepEqual(await removeBuild(refusing, found), { said: `macOS didn’t let Central Knot move ${ALPHA} to the Trash, ${rest}`, done: false, show: found.installed });
   await runs([{ bundleId: ALPHA_BUILD, path: found.installed, quits: true }]);
   assert.equal((await removeBuild(refusing, found)).said, `${ALPHA} has quit, but macOS didn’t let Central Knot move it to the Trash, ${rest}`);

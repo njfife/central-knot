@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { caughtUpNames, plural, timesApart } from '../src/model.ts';
+import { caughtUpNames, holdingBuild, plural, timesApart } from '../src/model.ts';
 
 test('plural words read naturally', () => {
   assert.equal(plural(1, 'copy', 'copies'), '1 copy');
@@ -40,4 +40,13 @@ test('Every row of a list says its time in one form: how long ago while that tel
   assert.ok(/^\d+:\d\d\D/.test(todayRow) && !/\d:\d\d:\d\d/.test(todayRow), todayRow);
   assert.match(dayRow, /^yesterday at \d+:\d\d\D/);
   assert.doesNotMatch(timesApart([plus(0), yesterday], now)[1], /yesterday/);
+});
+
+test('What holds this build, one install at a time: nothing is written before the first look answers, then the first other build found holds it; none found, or whether one is here can’t be told, holds nothing', () => {
+  const alpha = { build: 'com.centralknot.alpha', name: 'Central Knot Alpha', installed: '/Applications/Central Knot Alpha.app' };
+  const acme = { build: 'com.centralknot.custom.acme', name: 'Acme Knot', running: ['/Users/me/Downloads/Acme Knot.app'] };
+  assert.equal(holdingBuild('unlooked'), 'unlooked', 'before the first look answers: held');
+  assert.equal(holdingBuild([alpha, acme]), alpha);
+  assert.equal(holdingBuild([]), undefined, 'none found');
+  assert.equal(holdingBuild(undefined), undefined, 'can’t be told (an Applications folder that can’t be read): not held');
 });

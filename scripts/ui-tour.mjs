@@ -2395,13 +2395,13 @@ if (wanted('remove-build')) {
   writeFileSync(join(scratch, ALPHA_ID, 'app-settings.json'), JSON.stringify({ historyDays: 90 }));
   putBack();
   await look();
-  await atEverySize('held-installed', 'Central Knot Alpha is installed in the Applications folder and synced this home last: the window shows only the held screen, which says where it is, that nothing changes until one of the two is gone, what stays, what Replace carries over and what it does, with Replace and Quit; the sidebar keeps only the update control', true);
+  await atEverySize('held-installed', 'Central Knot Alpha is installed in the Applications folder and syncs this home: the window shows only the held screen: where it is, what is going on and what the buttons do, Replace and Quit, then what stays, which of its choices Replace keeps, what Replace does and how to keep the alpha instead; the sidebar keeps only the update control', true);
   await shot(a, 'held-installed-hover', 'The pointer on "Replace Central Knot Alpha": its hover look (a tooltip doesn’t show in a picture).', await middleOf('#held-replace'));
   await focusOn('#held-replace'); await shot(a, 'held-installed-focus', 'Keyboard focus on "Replace Central Knot Alpha", with its ring.');
   // Refused: macOS won't move it to the Trash (the stand-in's Trash can't be written), then a copy that won't quit.
   mkdirSync(MAC.trash, { recursive: true }); chmodSync(MAC.trash, 0o555);
   await a.click('#held-replace'); await waitFor(a, idle, 30000); await a.settle();
-  await atEverySize('held-refused-trash', 'Clicked Replace where macOS refuses to move it to the Trash: still held; the screen says nothing else was tried, with Show in Finder');
+  await atEverySize('held-refused-trash', 'Clicked Replace where macOS refuses to move it to the Trash: still held; under the buttons, that nothing else was tried and to click Refresh once it is moved, with Show in Finder');
   chmodSync(MAC.trash, 0o755);
   await running([installed], false);
   await look(); await a.click('#held-replace'); await waitFor(a, idle, 40000); await a.settle();
@@ -2409,7 +2409,7 @@ if (wanted('remove-build')) {
   for (const app of apps.splice(0)) app.kill('SIGKILL');
   MAC.running([]);
   await look(); await a.click('#held-replace'); await waitFor(a, idle, 30000); await a.settle();
-  await atEverySize('replaced', 'Clicked Replace: the alpha is in the Trash, its History days are kept here, this build syncs the home now, and the pages are back with the band');
+  await atEverySize('replaced', 'Clicked Replace: the pages are back, and the band says first that this build syncs the home now and keeps the alpha’s choices (how many days of History are kept among them), then that the alpha is in the Trash');
   // Running only, from Downloads, then from the Trash (as a sign-in might start it again): Quit it in place of Replace.
   await running([MAC.bundle(join(HOME, 'Downloads'), 'Central Knot Alpha', ALPHA_ID)]);
   await look();
@@ -2429,7 +2429,7 @@ if (wanted('remove-build')) {
   await atEverySize('held-self-from-trash', 'This copy runs from the Trash: it can’t replace the other build, so it offers only Quit, and says to turn off a sign-in start');
   await fresh({ CK_TEST_OWN_BUNDLE: '/Volumes/Central Knot/Central Knot.app' }, true);
   await look();
-  await shot(a, 'held-self-from-disk-image', 'This copy runs from its disk image: only Quit, and it says to move it to Applications and open it from there.');
+  await shot(a, 'held-self-from-disk-image', 'This copy runs from its disk image: only Quit, and it says, without the path, to move it to Applications and open it again from there.');
   rmSync(long, { recursive: true });
   for (const app of apps.splice(0)) app.kill('SIGKILL');
   MAC.running([]);

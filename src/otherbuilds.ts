@@ -5,21 +5,24 @@
 //   take (whyNot: a folder of its own whose Info.plist names another build), each by the name its Info.plist gives; and the
 //   copies running of those builds, of the standard app and the alpha, and of the build the open home's record names, by
 //   bundle id, wherever they run from (runningCopies: the one meaning of "running" here, also what the take-over band says of
-//   the build that syncs a home). A bundle in a subfolder of Applications is not looked at.
+//   the build that syncs a home). Each with whether its settings folder is there (settingsFound: whether they can be kept
+//   when the home's record passes from it). A bundle in a subfolder of Applications is not looked at.
 // - Replace (removeBuild): only from a copy of this build that runs at the top of an Applications folder (runsOutside); the
 //   same check at the click and again just before the Trash; every running copy is asked to quit first and waited for. Quit
 //   (quitBuild) only asks. Where anything isn't known for sure, nothing is quit or removed. Each says in plain words what came
 //   of it.
 // Elsewhere: main.ts looks first in each view and holds this build while another is found (heldReason, model.ts holdingBuild:
-// share.ts writeAccess refuses), answers builds:replace and builds:quit and then carries on (carryOn: the replaced build's
-// settings kept, the home's record taken over); the page draws the held screen (otherbuildview.ts). The shapes are types.ts
-// OtherBuild and BuildOutcome. Tests stand in for the Mac with tests/macstandins.ts.
+// share.ts writeAccess refuses), answers builds:replace and builds:quit (carryOn), and once this build is free takes over a
+// home's record that names a build no longer found, keeping that build's settings first (lookForOthers, takeOverHome); the page
+// draws the held screen (otherbuildview.ts). The shapes are types.ts OtherBuild and BuildOutcome. Tests stand in for the Mac
+// with tests/macstandins.ts.
 import { execFile } from 'node:child_process';
-import { lstat, mkdir, readdir, readFile, realpath, rename } from 'node:fs/promises';
+import { access, lstat, mkdir, readdir, readFile, realpath, rename } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { MacPlaces } from './platform.ts';
 import { errorCode } from './share.ts';
+import { QUIT_WAIT_MS } from './model.ts';
 import type { BuildOutcome, OtherBuild } from './types.ts';
 import { ALPHA_BUILD } from './updates.ts';
 import { PRODUCT, STANDARD_BUILD } from './values.ts';
@@ -35,14 +38,14 @@ export interface BuildsContext {
   trash: (bundle: string) => Promise<void>;
   /** The account's home, for showing a path inside it as ~. */
   home: string;
+  /** Where a build keeps its settings (main.ts settingsFolderOf): the look says whether it is there (OtherBuild settingsFound). */
+  settingsFolder: (build: string) => string;
   /** How long the copies asked to quit are waited for (QUIT_WAIT_MS unless a test says). */
   quitWaitMs?: number;
 }
 
 /** A build of Central Knot's bundle id: the standard app's, the alpha's or a custom build's (bundlepack.ts). */
 const BUILD_ID = /^com\.centralknot\./;
-/** How long Replace and Quit wait for a build asked to quit: longer than the 15 s a build holds its quit for a plugin step under way (main.ts before-quit). */
-export const QUIT_WAIT_MS = 20_000;
 
 /** Moves a bundle into a folder of a test's own instead of the account's Trash (platform.ts macPlaces trash), keeping its name where it is free. */
 export const intoFolder = (folder: string) => async (bundle: string) => {
@@ -54,8 +57,14 @@ export const intoFolder = (folder: string) => async (bundle: string) => {
 /** A path as the words show it: inside the account's home, from ~. */
 const shown = (context: BuildsContext, path: string) => (path.startsWith(`${context.home}/`) ? `~${path.slice(context.home.length)}` : path);
 
+const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+/** XML's escapes read back: "Smith &amp; Co" is "Smith & Co". */
+const unescaped = (text: string) => text.replace(/&(amp|lt|gt|quot|apos);/g, (_, name: string) => ENTITIES[name]);
 /** One key's text in an app's (XML) Info.plist. */
-const plistValue = (plist: string, key: string) => new RegExp(`<key>${key}</key>\\s*<string>([^<]+)</string>`).exec(plist)?.[1]?.trim();
+const plistValue = (plist: string, key: string) => {
+  const text = new RegExp(`<key>${key}</key>\\s*<string>([^<]+)</string>`).exec(plist)?.[1]?.trim();
+  return text && unescaped(text);
+};
 /** A bundle's id and name, from its Info.plist as an app's own (XML) one has them; nothing where there is none to read. */
 async function plistOf(bundle: string): Promise<{ id?: string; name?: string }> {
   const plist = await readFile(join(bundle, 'Contents/Info.plist'), 'utf8').catch(() => '');
@@ -144,8 +153,9 @@ export async function lookForBuilds(context: BuildsContext, owner?: string): Pro
   for (const build of ids) {
     const running = (await runningCopies(context.places.lsappinfo, build))?.map(copy => copy.bundle);
     const installed = bundles.filter(each => each.build === build);
-    for (const each of installed) found.push({ ...each, ...(running ? { running } : {}) });
-    if (!installed.length && running?.length) found.push({ build, name: (await plistOf(running[0])).name ?? `Another ${PRODUCT} build (${build})`, running });
+    const settings = await access(context.settingsFolder(build)).then(() => ({ settingsFound: true as const }), () => ({}));
+    for (const each of installed) found.push({ ...each, ...(running ? { running } : {}), ...settings });
+    if (!installed.length && running?.length) found.push({ build, name: (await plistOf(running[0])).name ?? `Another ${PRODUCT} build (${build})`, running, ...settings });
   }
   return found;
 }
@@ -189,7 +199,8 @@ const signInWords = (name: string) => `If ${name} still starts at sign-in, turn 
  */
 export async function removeBuild(context: BuildsContext, found: OtherBuild): Promise<BuildOutcome> {
   const outside = runsOutside(context), { name } = found;
-  if (outside) return { said: `This copy runs from ${shown(context, outside)}, not from an Applications folder, so nothing was removed. Move it to Applications and open it from there first.`, done: false };
+  // Its path isn't said: a copy opened from Downloads runs from a temporary system folder (App Translocation).
+  if (outside) return { said: 'This copy isn’t running from an Applications folder, so nothing was removed. Move it to Applications and open it again from there.', done: false };
   if (!found.installed) return { said: `${name} isn’t in an Applications folder, so nothing was removed.`, done: false };
   const bundle = resolve(found.installed);
   const refused = await whyNot(context, bundle, found);
@@ -201,10 +212,10 @@ export async function removeBuild(context: BuildsContext, found: OtherBuild): Pr
   if (changed) return { said: `${quit === 'quit' ? `${name} has quit. ` : ''}${changed}`, done: false };
   try { await context.trash(bundle); } catch {
     const kept = quit === 'quit' ? `${name} has quit, but macOS didn’t let Central Knot move it to the Trash` : `macOS didn’t let Central Knot move ${name} to the Trash`;
-    return { said: `${kept}, so it is still in ${shown(context, dirname(bundle))}. Nothing else was tried: move it to the Trash in Finder, or ask whoever manages this Mac.`, done: false, show: bundle };
+    return { said: `${kept}, so it is still in ${shown(context, dirname(bundle))}. Nothing else was tried: move it to the Trash in Finder (or ask whoever manages this Mac), then click Refresh.`, done: false, show: bundle };
   }
   return {
-    said: `${name} is in the Trash, where it stays until you empty the Trash. Your skills, MCP servers and agents, and the record of them, stay where they are: they’re kept in the home, not in an app. ${name}’s own settings folder stays too. ${signInWords(name)}`,
+    said: `${name} is in the Trash, where it stays until you empty the Trash. Your skills, MCP servers and agents, which of them are kept in step, and History stay: they’re saved in this home, not in an app. ${name}’s own settings folder stays too. ${signInWords(name)}`,
     done: true,
   };
 }

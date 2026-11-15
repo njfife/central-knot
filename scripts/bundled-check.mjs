@@ -335,7 +335,8 @@ if (writes) {
   check('the status bar’s sync switch says whose it is', await b.run(`document.querySelector('#sync-switch .sync-state').textContent`) .then(text => text === 'By Central Knot' || text === 'Central Knot’s, not open'), await b.run(`document.querySelector('#sync-switch .sync-state').textContent`));
   await b.click('#nav-skills');
   await b.click('#take-over-sync');
-  check('Take over syncing: this build syncs the home now, and says so', await b.until(`!document.querySelector('#other-owner')`) && await b.run(`document.querySelector('#announcement').textContent`).then(text => text === `${NAME} now syncs this home. To go back, take over in Central Knot.`), await b.run(`document.querySelector('#announcement').textContent`));
+  // What became of the standard app's settings follows (main.ts takeOverHome), then the way back.
+  check('Take over syncing: this build syncs the home now, and says so', await b.until(`!document.querySelector('#other-owner')`) && await b.run(`document.querySelector('#announcement').textContent`).then(text => text.startsWith(`${NAME} syncs this home now, `) && text.endsWith(' To go back, take over in Central Knot.')), await b.run(`document.querySelector('#announcement').textContent`));
   const taken = record();
   check('the record is the same one, under the new owner, with what was managed', taken.owner === `com.centralknot.custom.${ID}` && taken.ownerName === NAME && !!JSON.parse(readFileSync(join(HOME, '.central-knot/skills.json'), 'utf8')).items.notes, taken);
   const other = await syncGate(standard);

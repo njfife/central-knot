@@ -205,6 +205,8 @@ export function setHome(view: HomeView | null | undefined, { reload = true } = {
   if (!view) return;
   const before = state.home ? homeTools().join() : undefined;
   state.home = keepUnshown(state.home, view);
+  // A record taken over at this view's look (types.ts HomeView tookOver), after whatever the read itself said.
+  if (view.tookOver) announce(view.tookOver);
   forgetLostHarness();
   if (before !== undefined && homeTools().join() === before) return;
   leaveAbsentPage();
@@ -1176,8 +1178,8 @@ export const takeOverButton = (owner: { name: string }, look: { variant: 'outlin
 export const takeOverSync = () => busy('Taking over syncing…', async () => {
   const taken = await api().takeOverSync(state.home!.home);
   if (taken.view) setHome(taken.view);
-  // Short enough for the status bar to keep its first sentence whole; the second says the way back.
-  announce(taken.stopped ? `Syncing was not taken over. ${taken.stopped}` : taken.from ? `Central Knot now syncs this home${taken.view?.syncOn === false ? ' (automatic sync is off here)' : ''}. To go back, take over in ${taken.from}.` : 'Central Knot already syncs this home.');
+  // What the take-over did (main.ts takeOverHome: this build syncs the home now, and what became of the other build's settings), then the way back.
+  announce(taken.stopped ? `Syncing was not taken over. ${taken.stopped}` : taken.said ? `${taken.said} To go back, take over in ${taken.from}.` : 'Central Knot already syncs this home.');
 });
 
 /** A background read is running, or one arrived while the page was busy and runs when it is done (busy). */

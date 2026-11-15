@@ -45,7 +45,7 @@ import { trayIconPng } from './trayicon.ts';
 import { homePass, passTells } from './homepass.ts';
 import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from './profiles.ts';
 import { homeItems, inUse, inUseName, switchable, type LiveItem } from './profileplan.ts';
-import { defaultHistoryDays, historyDayChoices, holdingBuild, syncOwner } from './model.ts';
+import { defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil, syncOwner } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, BuildOutcome, OtherBuild, PartRef, PartsPick, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
@@ -75,8 +75,8 @@ const custom = readCustomBuildSync(__dirname);
 /**
  * The app this build is: a custom build's own, or the one its release tag's line is (updates.ts lineApp: an alpha is
  * "Central Knot Alpha"); the standard app otherwise. Any other app than the standard one keeps its settings and log in a
- * folder of its own, so it runs beside the standard app and never reads or writes that app's settings (ORG-07). A data
- * folder named on the command line (tests) still wins.
+ * folder of its own, so it never shares the standard app's settings (ORG-07); a build reads another's only to keep them when it
+ * takes a home's record over from it (settingsFolderOf, keepSettingsOf). A data folder named on the command line (tests) still wins.
  */
 const own = custom ?? lineApp(releaseLine(buildTag()));
 if (own.bundleId !== STANDARD_BUILD) {
@@ -547,8 +547,9 @@ async function syncThenView(explicit = false): Promise<HomeView> {
 
 /** The look for other builds, one pass, then the view built from the home as it left it; `passed`: what the pass did. */
 async function syncAndView(explicit = false): Promise<{ view: HomeView; passed: BackgroundPass }> {
-  // First, so the held screen is shown before any pass could write: held, the pass below meets writeAccess's refusal.
-  await lookForOthers();
+  // First, so the held screen is shown before any pass could write: held, the pass below meets writeAccess's refusal. A record
+  // taken over on the way is said with the view (a click on the held screen says it itself: carryOn).
+  const tookOver = await lookForOthers();
   const shared: ShareContext = { ...context(), reads: new Map() };
   const before = await read();
   const passed = await pass(before, explicit), { skills } = passed;
@@ -565,7 +566,7 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passed: 
   const syncEverything = (await readRecord(current!.home)).record?.syncEverything;
   const readId = handoff.id + 1;
   const made: HomeView = {
-    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), readId, profiles, parts: await readParts(current!.home),
+    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), readId, profiles, parts: await readParts(current!.home), ...(tookOver ? { tookOver } : {}),
     // Apps that run the tools or read their files are looked for only on this computer, like the tools' own apps.
     ...(current!.mode === 'actual' ? { otherApps: await findOtherApps(current!.home) } : {}),
     sync: { managed, present, joining: await joiningCounts(shared, managed, present, syncEverything === true), writes: await skillFolders(shared, managed), access: await writeAccess(shared), gate: await syncGate(shared),
@@ -655,7 +656,7 @@ function buildsContext(): BuildsContext | undefined {
   if (!looksForBuilds) return undefined;
   const places = macPlaces(homedir());
   return {
-    own: BUILD, places, home: homedir(),
+    own: BUILD, places, home: homedir(), settingsFolder: settingsFolderOf,
     // Test-only, with stand-ins: where this copy is to say it runs from (CK_TEST_OWN_BUNDLE: an Applications folder, the Trash).
     ...(testApps && process.env.CK_TEST_OWN_BUNDLE ? { ownBundle: process.env.CK_TEST_OWN_BUNDLE } : app.isPackaged ? { ownBundle: process.execPath.replace(/\/Contents\/MacOS\/[^/]+$/, '') } : {}),
     trash: places.trash ? intoFolder(places.trash) : bundle => shell.trashItem(bundle),
@@ -671,20 +672,28 @@ function buildsContext(): BuildsContext | undefined {
 let others: OtherBuild[] | undefined | 'unlooked' = looksForBuilds ? 'unlooked' : undefined;
 /** Why this build may write nothing now (share.ts ShareContext held): another build is here (model.ts holdingBuild), or the first look hasn't answered. */
 function heldReason(): string | undefined {
-  if (others === 'unlooked') return `${own.name} is still looking for other builds of ${PRODUCT} on this Mac, so nothing is written yet.`;
-  const other = holdingBuild(others);
-  return other && `${other.name} is also ${other.installed ? 'installed' : 'running'} on this Mac, and only one build of ${PRODUCT} works at a time, so ${own.name} changes nothing in this home or your tools ${other.installed ? 'until one of the two is gone' : 'while both are open'}.`;
+  const holder = holdingBuild(others);
+  if (holder === 'unlooked') return `${own.name} is still looking for other builds of ${PRODUCT} on this Mac, so nothing is written yet.`;
+  return holder && `${holder.name} is also ${holder.installed ? 'installed' : 'running'} on this Mac, and only one build of ${PRODUCT} works at a time, so ${own.name} changes nothing in this home or your tools ${holdsUntil(holder)}.`;
 }
-/** The look (syncAndView's first step), and what follows from it: held, the window is shown, even after a start at sign-in; freed, the build starts as it would have. */
-async function lookForOthers() {
+/**
+ * The look (syncAndView's first step), and what follows from it: held, the window is shown, even after a start at sign-in.
+ * Freed of a build that held it, this build takes over a home's record that names a build no longer found (takeOverHome),
+ * however that build went, then starts as it would have. Answers what the take-over said, where one happened.
+ */
+async function lookForOthers(): Promise<string | undefined> {
   const builds = buildsContext();
-  if (!builds) return;
-  const wasHeld = !!heldReason();
-  others = await lookForBuilds(builds, (await readRecord(current!.home)).record?.owner);
+  if (!builds) return undefined;
+  const before = holdingBuild(others), owner = (await readRecord(current!.home)).record?.owner;
+  others = await lookForBuilds(builds, owner);
   if (others === undefined) log('other builds: an Applications folder can’t be read, so whether another build is here isn’t known; not held');
   if (heldReason() && (window.isDestroyed() || !window.isVisible())) showWindow();
-  if (!heldReason() && wasHeld) await freed();
-  if (!!heldReason() !== wasHeld) refreshTray();
+  if (!!heldReason() !== !!before) refreshTray();
+  if (heldReason() || !before) return undefined;
+  const gone = before !== 'unlooked' && Array.isArray(others) && !others.length && !!owner && owner !== BUILD;
+  const taken = gone ? await takeOverHome() : undefined;
+  await freed();
+  return taken?.said;
 }
 /** What waits for a build that isn't held: its login item at its first open (firstSignIn) and a bundled build's feed. At launch, else once the look finds none. */
 async function freed() {
@@ -692,29 +701,40 @@ async function freed() {
   if (custom?.feed) { clearTimeout(feedTimer); feedTimer = setTimeout(() => void lookAtFeed(), FEED_FIRST_MS); }
 }
 /**
- * After a click on the build that holds this one: where it is gone (in the Trash, or quit) and this home's record names it, its
- * settings that decide what is written are kept as this build's (keepSettingsOf) and, once a look finds this build free, the
- * record is taken over (share.ts takeOverSync), before any pass. Then the view, which looks again.
+ * After a click on the build that holds this one (Replace, or Quit X): the look again, which takes the home's record over where
+ * this build is free now (lookForOthers); what that said comes first. Then the view.
  */
 async function carryOn(other: OtherBuild, outcome: BuildOutcome): Promise<BuildOutcome & { view: HomeView | null }> {
   log(`other build: ${other.name} (${other.build}): ${outcome.said}`);
-  const owned = outcome.done && (await readRecord(current!.home)).record?.owner === other.build;
-  const kept = owned && await keepSettingsOf(other.build);
-  if (owned) await lookForOthers();
-  const taken = owned && !heldReason() ? await takeOverSync(context()) : undefined;
-  if (taken?.from) log(`sync: took over syncing ${current!.home} from ${taken.from}`);
-  const said = [outcome.said, kept ? `${other.name}’s Automatic sync, plugin updates, History’s days and open home are kept here.` : '',
-    taken?.from ? `${own.name} syncs this home now.` : taken?.stopped ? `Syncing wasn’t taken over: ${taken.stopped}` : ''].filter(Boolean).join(' ');
+  const said = [await lookForOthers(), outcome.said].filter(Boolean).join(' ');
   return { said, done: outcome.done, ...(outcome.show ? { show: outcome.show } : {}), view: await syncThenView() };
 }
 /**
- * The replaced build's own choices that decide what is written (Automatic sync, automatic plugin updates, History's days and
- * the open home), saved as this build's, so replacing it changes nothing in the tools and drops nothing from History. Read from
- * its data folder (beside this build's, named as main.ts names each build's) as that build reads them: a value it never saved
- * is its default. False, and nothing saved, where that folder isn't there.
+ * Takes this home's record over from the build it names (share.ts takeOverSync), keeping that build's settings first where its
+ * folder is found (keepSettingsOf), so the change of hands changes nothing in the tools and drops nothing from History. Every
+ * route by which the record changes hands comes here: this build freed of the build that held it (lookForOthers), and Take over
+ * syncing. `said`: what it did, starting with this build syncing the home now.
+ */
+async function takeOverHome(): Promise<{ stopped?: string; from?: string; said?: string }> {
+  const owner = (await readRecord(current!.home)).record?.owner;
+  const kept = owner && owner !== BUILD && (await writeAccess(context())).allowed ? await keepSettingsOf(owner) : undefined;
+  const taken = await takeOverSync(context());
+  if (!taken.from) return taken;
+  log(`sync: took over syncing ${current!.home} from ${taken.from}${kept ? ', keeping its settings' : ''}`);
+  const choices = 'whether Automatic sync is on, whether plugins update by themselves, how many days of History are kept and which folder it opens when it starts';
+  return { ...taken, said: kept ? `${own.name} syncs this home now, and keeps ${taken.from}’s choices: ${choices}.`
+    : `${own.name} syncs this home now, with its own settings: ${taken.from}’s settings folder wasn’t found, so History is kept for as many days `
+      + `as ${own.name} keeps it, and anything older is dropped at its next change.` };
+}
+/** Where a build keeps its settings: beside this build's folder, named as every build's is (the standard app's by the package's name, any other's by its bundle id: `own` above). */
+const settingsFolderOf = (build: string) => join(dirname(app.getPath('userData')), build === STANDARD_BUILD ? packageInfo.name : build);
+/**
+ * Another build's own choices that decide what is written (Automatic sync, automatic plugin updates, History's days and the
+ * home it opens at start), saved as this build's. Read from its settings folder as that build reads them: a value it never
+ * saved is its default. False, and nothing saved, where that folder isn't there.
  */
 async function keepSettingsOf(build: string): Promise<boolean> {
-  const folder = join(dirname(app.getPath('userData')), build === STANDARD_BUILD ? packageInfo.name : build);
+  const folder = settingsFolderOf(build);
   if (!await access(folder).then(() => true, () => false)) return false;
   const read = (name: string) => readFile(join(folder, name), 'utf8').then(text => record(JSON.parse(text))).catch(() => undefined);
   const theirs = (await read('app-settings.json') ?? {}) as AppSettings, sync = await read('sync-settings.json');
@@ -1398,13 +1418,9 @@ app.whenReady().then(async () => {
     const { view, passed } = await syncAndView();
     return { ...chosen, view, did: (passed.done ?? []).filter(result => result.harness === tool) };
   });
-  // Take over syncing (ORG-08): this build becomes the home's sync owner, then reads and syncs it as its owner.
-  handle('sync:take-over', async home => {
-    if (home !== current?.home) return { stopped: elsewhere, view: null };
-    const taken = await takeOverSync(context());
-    if (taken.from) log(`sync: took over syncing ${home} from ${taken.from}`);
-    return { ...taken, view: await syncThenView() };
-  });
+  // Take over syncing (ORG-08): this build becomes the home's sync owner, keeping the other build's settings first (takeOverHome),
+  // then reads and syncs it as its owner.
+  handle('sync:take-over', async home => (home === current?.home ? { ...await takeOverHome(), view: await syncThenView() } : { stopped: elsewhere, view: null }));
   // With Sync off, a click writes exactly the items it is about; spreading anything else waits for Sync.
   // MCP servers: a click writes every tool but Claude Code; Claude Code only through Write to Claude Code, once Claude is closed.
   handle('servers:apply', async (list, resume, home) => (home === current?.home

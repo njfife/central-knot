@@ -30,7 +30,7 @@ export interface StandInMac {
   applications: string;
   /** What Replace moved to the Trash lands here. */
   trash: string;
-  /** Writes a made-up app bundle: `<folder>/<name>.app` with an Info.plist naming its bundle id. Returns its path. */
+  /** Writes a made-up app bundle: `<folder>/<name>.app` with an Info.plist naming its bundle id and its name, escaped as XML is. Returns its path. */
   bundle(folder: string, name: string, bundleId: string): string;
   /** The copies the stand-in lsappinfo lists as running (while their process lives), each with the bundle it runs from. */
   running(copies: { bundleId: string; pid: number; path: string }[]): void;
@@ -45,7 +45,7 @@ export function standInMac(root: string): StandInMac {
     bundle(folder, name, bundleId) {
       const app = join(folder, `${name}.app`);
       mkdirSync(join(app, 'Contents/MacOS'), { recursive: true });
-      writeFileSync(join(app, 'Contents/Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict>\n\t<key>CFBundleIdentifier</key>\n\t<string>${bundleId}</string>\n\t<key>CFBundleName</key>\n\t<string>${name}</string>\n</dict></plist>\n`);
+      writeFileSync(join(app, 'Contents/Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict>\n\t<key>CFBundleIdentifier</key>\n\t<string>${bundleId}</string>\n\t<key>CFBundleName</key>\n\t<string>${name.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</string>\n</dict></plist>\n`);
       return app;
     },
     running(copies) { writeFileSync(join(root, 'running.json'), `${JSON.stringify(copies)}\n`); },
