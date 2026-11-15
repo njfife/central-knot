@@ -166,7 +166,9 @@ const writes = process.platform === 'darwin';
 const waitFor = async (test, ms = 20000) => { for (const end = Date.now() + ms; Date.now() < end; await wait(200)) if (test()) return true; return false; };
 if (writes) {
   check('the marketplace was added to Claude Code’s and Codex’s own lists, by their own commands', await waitFor(() => addedBy('claude').length === 1 && addedBy('codex').length === 1), { claude: addedBy('claude'), codex: addedBy('codex') });
-  check('each was given the folder in the build’s own data folder', addedBy('claude')[0] === marketFolder && addedBy('codex')[0] === marketFolder, addedBy('claude'));
+  // Compared where each really is: with CFFIXED_USER_HOME the app names the folder through /var, a link to /private/var on a Mac.
+  const isMarketFolder = path => { try { return realpathSync(path) === realpathSync(marketFolder); } catch { return false; } };
+  check('each was given the folder in the build’s own data folder', isMarketFolder(addedBy('claude')[0]) && isMarketFolder(addedBy('codex')[0]), addedBy('claude'));
   check('Copilot CLI, which refuses this marketplace, was not asked', addedBy('copilot').length === 0);
   check('nothing was installed by it', !existsSync(join(HOME, '.claude/plugins/installed_plugins.json')));
   check('the status bar says once that nothing was installed, and where the marketplace is now listed', await a.until(`document.querySelector('#announcement').textContent.startsWith('Nothing was installed: Acme plugins is listed in Claude Code and Codex (see Plugins).')`), await a.run(`document.querySelector('#announcement').textContent`));
