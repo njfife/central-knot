@@ -10,7 +10,7 @@ import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { componentsOf, dotted, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { pluginKey } from './pluginplan.ts';
-import { cantSwitchSkill, comparableText, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partWords, PREVIEW_ONLY, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, whyNotCarried, type ToolMark } from './pluginstatus.ts';
+import { cantSwitchSkill, comparableText, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partWords, PREVIEW_ONLY, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, waitingWords, waitsToMove, whyNotCarried, type ToolMark } from './pluginstatus.ts';
 import { hasCowork, takesPlugins } from './presence.ts';
 import { applyPluginOps, market, openLink, shownDetail, toggleOpened, turnPlugin } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, Outcome, PluginDetail, PluginItemLine, PluginTurn, PluginView, PluginsView } from './types.ts';
@@ -97,11 +97,14 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   };
   const updates = view.canWrite ? updateOps(view, entry, plugin) : [];
   const notIncluded = whyNotCarried(entry, plugin.name);
+  // Parts of it from before the library wait to be moved: why, and what ends it, said once on the page, not only on hover.
+  const waiting = waitsToMove(entry, plugin.name) ? view.tools.filter(tool => !takesPlugins(tool)) : [];
   return h('section.plugin-panel', { 'aria-label': 'Your tools' },
     h('div.plugin-panel-head', {}, h('span.plugin-panel-switch', {}, pluginSwitch(view, entry, plugin, `pswitch-page-${marketIndex}-${plugin.name}`), h('h3', {}, 'Your tools')),
       updates.length ? updateButton(updates, `pupdate-${marketIndex}-${plugin.name}`) : null),
     // A plugin a bundled build doesn't include says why here, on the page, once for every tool.
     notIncluded ? h('p.plugin-panel-hint', { id: 'plugin-not-included' }, notIncluded) : null,
+    waiting.length ? h('p.plugin-panel-hint', { id: 'plugin-parts-waiting' }, waitingWords(view, entry, plugin.name, waiting)) : null,
     withToolCount(h('div.plugin-tool-rows', {}, view.tools.map(tool => {
       const { mark, words } = markOf(view, entry, plugin, tool, compareTo);
       return h('div.plugin-tool', { 'data-tool': tool }, markCell(view, entry, plugin, tool, marketIndex, compareTo),

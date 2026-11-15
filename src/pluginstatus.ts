@@ -400,7 +400,7 @@ export function toolMark(view: PluginsView, entry: MarketplaceView, plugin: stri
   const name = names[tool], state = stateOf(entry, plugin, tool);
   const recorded = !!entry.switches?.[plugin]?.entry;
   if (!owed || owed.has === 'unknown') return { mark: 'unknown', words: recordUnread(tool) };
-  if (!takesPlugins(tool) && waitsToMove(entry, plugin)) return { mark: 'parts-waiting', words: waitingWords(view, entry, plugin, tool) };
+  if (!takesPlugins(tool) && waitsToMove(entry, plugin)) return { mark: 'parts-waiting', words: waitingWords(view, entry, plugin, [tool]) };
   const kept = entry.switches?.[plugin]?.entry?.except.includes(tool);
   // Installed though the person doesn't want it there: said with what takes it out, or why nothing can here.
   const unwanted = recorded && !owed.wanted ? ` ${kept ? `It is kept out of ${name}` : 'The plugin is off'}; ${owed.held ? owed.held : 'Take out there takes it out.'}` : '';
@@ -432,15 +432,15 @@ export function toolMark(view: PluginsView, entry: MarketplaceView, plugin: stri
 }
 
 /**
- * A waiting plugin's line in Pi or OpenCode (waitsToMove): its parts wait to be moved, why (the last pass's reason, PluginsView
- * partsWait), and what its Off does there once they are moved (partsmigrate.ts: the item is On as the entry is, and a copy
- * edited there stays as it is).
+ * What a waiting plugin (waitsToMove) says of `tools` (Pi, OpenCode): its line's tooltip, and the hint on its page. Its parts wait
+ * to be moved, why (the last pass's reason, PluginsView partsWait), and what its Off does there once they are moved
+ * (partsmigrate.ts: the item is On as the entry is, and a copy edited there stays as it is).
  */
-function waitingWords(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): string {
-  const recorded = entry.switches?.[plugin]?.entry;
-  const then = recorded && !recorded.on ? `The plugin is off, so they turn off in ${names[tool]} when they are moved, apart from any you edited there, which stay as they are.`
-    : `Turning the plugin off reaches ${names[tool]} when they are moved.`;
-  return [`${names[tool]}: ${WAITS_TO_MOVE.charAt(0).toLowerCase()}${WAITS_TO_MOVE.slice(1)}`, view.partsWait, then].filter(Boolean).join(' ');
+export function waitingWords(view: PluginsView, entry: MarketplaceView, plugin: string, tools: HarnessId[]): string {
+  const recorded = entry.switches?.[plugin]?.entry, where = andList(tools.map(tool => names[tool]));
+  const then = recorded && !recorded.on ? `The plugin is off, so they turn off in ${where} when they are moved, apart from any you edited there, which stay as they are.`
+    : `Turning the plugin off reaches ${where} when they are moved.`;
+  return [`${where}: ${WAITS_TO_MOVE.charAt(0).toLowerCase()}${WAITS_TO_MOVE.slice(1)}`, view.partsWait, then].filter(Boolean).join(' ');
 }
 
 /** Whether a plugin's switch shows partial: On, and kept out of some tool here that could take it (a tool that can't take it never counts). */

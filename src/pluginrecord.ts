@@ -26,9 +26,10 @@
 // failed, one removed there by hand) waits for Install there on the plugin's page. "Has it" is installed whole, or (in Pi and
 // OpenCode, which have no plugin installer) some item linked to the plugin wanted in that tool (`items`). In Pi and OpenCode a
 // plugin whose parts from before the library wait to be moved has none and can't go in (rows 7 and 6: pluginstatus.ts toolNow,
-// waitsToMove), so nothing is owed there until partsmigrate.ts has moved them. An item's own `except` decides where it is; the entry's only seeds a new item's (pluginlibrary.ts), and a click on one tool
-// changes that tool in each item's `except` alone. A tool new here gets the items already On by the library's own rule; the
-// automatic updates' install there only makes the items the library lacks.
+// waitsToMove), so nothing is owed there until partsmigrate.ts has moved them. An item's own `except` decides where it is; the
+// entry's only seeds a new item's (pluginlibrary.ts), and a click on one tool changes that tool in each item's `except` alone. A
+// tool new here gets the items already On by the library's own rule; the automatic updates' install there only makes the items
+// the library lacks.
 //
 // The first read (firstRecord) makes plugins.json for a home that has none, from what the tools hold now, writing nothing to
 // any tool: each plugin some managed tool has is On, kept out of every tool that lacks it while some managed tool lacks it.

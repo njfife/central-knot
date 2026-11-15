@@ -2658,7 +2658,9 @@ if (wanted('parts-migration')) {
   await a.click('#nav-plugins'); await refresh();
   await waitFor(a, `!!document.querySelector('#popen-0-document-tools')`, 20000);
   await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-tool[data-tool="pi-cli"] [data-state="parts-waiting"]')`, 15000);
-  await atEverySize('waiting-page', 'Before first setup is answered: document-tools’ parts from alpha 1 wait to be moved, so Pi’s line says “Waits to be moved” with the clock (its tooltip says why: answer the question on the Overview) and offers nothing there; the tools with an installer are as for any plugin', true, '.plugin-panel', 'start');
+  await atEverySize('waiting-page', 'Before first setup is answered: document-tools’ parts from alpha 1 wait to be moved, so Pi’s line says “Waits to be moved” with the clock and offers nothing there, and the hint under Your tools says why and what ends it (answer the question on the Overview); the tools with an installer are as for any plugin', true, '.plugin-panel', 'start');
+  await a.click('#plugin-back'); await waitFor(a, `!!document.querySelector('.plugin-legend')`, 15000);
+  await atEverySize('waiting-row', 'The Plugins list while document-tools waits: its row’s Pi cell has the clock, and the key under the list says “Waits to be moved: parts from an earlier version”', true, '.plugin-legend', 'end');
   await fresh();
   // Pi's skills folder seen once by a pass (as an earlier version's noted it; the sync record first setup's answer makes lets it
   // run), then alpha 1's record of its parts: document-tools' pdf-reader in Pi, edited there since; spreadsheet left out of Pi;
