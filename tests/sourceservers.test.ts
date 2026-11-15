@@ -100,7 +100,7 @@ test('What at a link is an MCP server: each entry of the .mcp.json in its folder
       `mcp local: leftOut (${repoFiles})`, `mcp built: leftOut (${repoFiles})`, `mcp inside: leftOut (${repoFiles})`,
       'mcp plugin: leftOut (it names a plugin’s own folder or settings, which only Claude Code fills in, for a plugin)',
       'mcp app: leftOut (it runs from inside an app, so it belongs to that app)',
-      'mcp mixed: leftOut (it has both a command and a URL, which not every tool can hold)',
+      'mcp mixed: leftOut (it has both a command’s fields and a URL’s, which not every tool can hold)',
       // One line per key: the two names that differ only by case.
       'mcp Twin: leftOut (another server in its .mcp.json has this name but for case)',
       'mcp nocommand: unreadable (it has no command to run)', 'mcp nourl: unreadable (it has no URL)', 'mcp odd: unreadable (its entry in .mcp.json is not an object)',

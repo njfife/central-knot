@@ -263,7 +263,8 @@
 // the settle window passed.
 //
 // Worked examples, one per row of each table: tests/library.test.ts. The same on real files: tests/agents.test.ts,
-// tests/skills.test.ts, tests/servers.test.ts and, for A SOURCE, tests/sources.test.ts, tests/sourceagents.test.ts and tests/sourceservers.test.ts.
+// tests/skills.test.ts, tests/servers.test.ts and, for A SOURCE, tests/sources.test.ts, tests/sourceagents.test.ts and
+// tests/sourceservers.test.ts.
 import { linkLabel } from './sourcelink.ts';
 import type { HarnessId } from './types.ts';
 import { toolName } from './words.ts';

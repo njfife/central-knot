@@ -10,8 +10,8 @@
 // - one kind's read, and whether it was read whole (readOf, the one place; library.ts "Read whole");
 // - why a read holds nothing to bring in, in words (unreadWhy, nothingToAddWhy), each kind's part from its table entry.
 // An item there that can't be read is "unreadable", with why, and is never taken to be gone. One that was read and is not
-// brought in by a rule (two of one name, a name no tool can store, a skill holding a link, a server that runs files from the
-// repository) is `leftOut` as well: said as not brought in, it holds back no drop (readOf).
+// brought in by a rule (two of one name, a name no tool can store, a skill that can't be copied as it is, a server that runs
+// files from the repository) is `leftOut` as well: said as not brought in, it holds back no drop (readOf).
 // Not here: fetching a link (sources.ts fetchInto), the kinds' table (sources.ts sourceKinds), and the table each read meets
 // (library.ts sourceAnswers).
 import { lstat, readFile, readdir } from 'node:fs/promises';
@@ -213,8 +213,8 @@ function agentOf(files: AgentFile[], folder: string, rootName: string): ItemTher
 // version its shared part's hash, as Claude Code's entry reads back once written, and its other fields Claude Code's own part
 // (`own`). Unreadable, with why: an entry that isn't an object, or has no command or no URL (mcp.ts cannotHold). Left out:
 // two names that differ only by case (both); one that runs files from the repository or names a plugin's own folder or settings
-// (mcp.ts runsFrom), or runs from inside an app (fromJson `hostBound`); one that mixes a command with a URL, which OpenCode
-// and Codex would each hold differently.
+// (mcp.ts runsFrom), or runs from inside an app (fromJson `hostBound`); one that mixes a command's fields with a URL's, which
+// OpenCode and Codex would each hold differently.
 // Never read: a tool's or editor's own settings (.vscode/mcp.json, .cursor/mcp.json, .claude/settings.json), an `mcp.json`
 // without the dot, a .mcp.json in a folder inside (a link to that folder reads it), Central Knot's own repo layout
 // (mcp/<name>.json), and a plugin's manifest (a link holding a plugin is read as nothing: holdsAt).
@@ -238,7 +238,7 @@ export async function serversAt(root: string, folder: string, rootName: string, 
 }
 
 /** One entry of a .mcp.json at a link (serversAt's header): its server and Claude Code's own part, or why it is unreadable or left out. */
-async function serverAt(where: Omit<ItemThere<never>, 'hash' | 'content' | 'unreadable'> & { name: string }, raw: unknown, twin: boolean, at: string): Promise<ItemThere<NeutralServer>> {
+async function serverAt(where: { folder: string; folderName: string; files: string[]; key: string; name: string }, raw: unknown, twin: boolean, at: string): Promise<ItemThere<NeutralServer>> {
   const unreadable = (why: string, leftOut = false): ItemThere<NeutralServer> => ({ ...where, unreadable: why, ...(leftOut ? { leftOut } : {}) });
   const clause = (sentence: string) => sentence.replace(/\.$/, '').replace(/^It /, 'it ');
   const fields = record(raw);
@@ -250,7 +250,7 @@ async function serverAt(where: Omit<ItemThere<never>, 'hash' | 'content' | 'unre
   if (runs) return unreadable(runs === 'settings' ? 'it names a plugin’s own folder or settings, which only Claude Code fills in, for a plugin' : 'it runs files from the repository, which aren’t copied', true);
   if (entry.hostBound) return unreadable(clause(entry.hostBound), true);
   const mixed = server.transport === 'stdio' ? !!(server.url ?? server.headers) : !!(server.command ?? server.args ?? server.env ?? server.cwd);
-  if (mixed) return unreadable('it has both a command and a URL, which not every tool can hold', true);
+  if (mixed) return unreadable('it has both a command’s fields and a URL’s, which not every tool can hold', true);
   return { ...where, hash: entry.hash, content: server, own: { 'claude-cli': ownPartOf(entry) } };
 }
 

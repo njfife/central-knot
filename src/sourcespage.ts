@@ -24,7 +24,7 @@ import type { HarnessId, LibraryFacts, MergeDone, SourcedItem, SourceFound, Sour
 const api = () => window.centralKnot;
 /** A kind's words on this page ("skill", "Skills"), from its page's (words.ts kindNouns). */
 const nouns = (kind: ItemKind) => kindNouns[pageOfPart[kind]];
-/** The kinds a source brings (the view's: types.ts SourcesView `kinds`), as a sentence names many of them ("skills and agents"). */
+/** The kinds a source brings (the view's: types.ts SourcesView `kinds`), as a sentence names many of them ("skills, agents and MCP servers"). */
 const broughtNames = () => andList((sources.view?.kinds ?? []).map(kind => nouns(kind).many));
 
 export const sources = {
