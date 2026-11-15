@@ -871,10 +871,10 @@ export interface PassResult {
   found?: string[];
   /**
    * A pass with a source's read (librarypass.ts fromSourceStep): the table's answer for each item, but `nothing` and `same`
-   * (which change nothing a person sees), with the History entry that says it, and for the item a click on Merge asked for,
-   * what Merge did (`merge`).
+   * (which change nothing a person sees), with the History entry that says it, whether the item is On once the step is done
+   * (`on`), and for the item a click on Merge asked for, what Merge did (`merge`).
    */
-  sourced?: { name: string; answer: SourceAnswer; history?: string; merge?: MergeDone }[];
+  sourced?: { name: string; answer: SourceAnswer; history?: string; on?: true; merge?: MergeDone }[];
 }
 /**
  * What a click on Merge did (library.ts MERGE; librarypass.ts mergeIn): the merged version made current (`merged`); merged to
@@ -1028,10 +1028,11 @@ export interface ShownLog { selected: boolean; logged: boolean }
 
 /**
  * What a name at a source is to the library now, as the Sources page says it: the source's table's own answer for it (library.ts
- * SourceAnswer, from sourceAnswers: `nothing` for one in Central Knot from this source as the source has it), or `unreadable`,
- * an item there that can't be read, with why.
+ * SourceAnswer, from sourceAnswers: `nothing` for one in Central Knot from this source as the source has it), or an item there
+ * not brought in, with why: `unreadable`, one that can't be read, which holds back its kind's drops, or `leftOut`, one read and
+ * not brought in by a rule (atlink.ts ItemThere `leftOut`), which holds back none.
  */
-export type SourceNameState = SourceAnswer | 'unreadable';
+export type SourceNameState = SourceAnswer | 'unreadable' | 'leftOut';
 /** One item at a source's read, or one item linked to the source that the read doesn't hold (sources.ts namesOf). */
 export interface SourceName {
   /** Its kind; its name (a skill's as its SKILL.md gives it, absent when that can't be read; an agent's its file's base name); and its key in its kind. */
@@ -1043,7 +1044,7 @@ export interface SourceName {
    */
   there?: { folder: string; folderName: string; files: string[] };
   state: SourceNameState;
-  /** `unreadable`: why. `another`: the other source's link. */
+  /** `unreadable` and `leftOut`: why. `another`: the other source's link. */
   why?: string;
   /** An item in Central Knot (not deleted): whether it is On. */
   on?: boolean;
@@ -1064,8 +1065,6 @@ export interface SourceFound {
    * can. An item there that can't be read says why on its own line (SourceName `why`).
    */
   unread?: string;
-  /** What is there that a later version reads, in words (atlink.ts laterWhy: a .mcp.json); absent when nothing is. */
-  later?: string;
 }
 /**
  * A source as the Sources page shows it: its last read (sourcestore.ts: a cache; none kept here reads as nothing at the link's
@@ -1080,9 +1079,10 @@ export type SourcePreview = (SourceFound & { token: string; refused?: string }) 
 export type SourceRowClick = 'bringBack' | 'replace' | 'merge' | 'keep';
 /**
  * One item a source's click did something to: its pass's answer (PassResult sourced), its kind, and the tools it was written to
- * and taken out of (`written`, `removed`: that pass's results for it).
+ * and taken out of (`written`, `removed`), and those where its write or removal waits for a step of the person's own
+ * (`deferred`: Claude Code's MCP servers, until Write to Claude Code), from that pass's results for it.
  */
-export type SourcedItem = NonNullable<PassResult['sourced']>[number] & { kind: ItemKind; written: HarnessId[]; removed: HarnessId[] };
+export type SourcedItem = NonNullable<PassResult['sourced']>[number] & { kind: ItemKind; written: HarnessId[]; removed: HarnessId[]; deferred: HarnessId[] };
 /**
  * What a source's click did: each kind's pass's answers (SourcedItem, but a `wait` the source's row no longer says once the
  * passes are done: sources.ts answer), and their results; why it stopped; the kinds the source wasn't read whole for, in the

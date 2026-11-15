@@ -3,12 +3,13 @@
 // out in one step before its clicks (librarypass.ts fromSourceStep), one pass per kind a source brings. This module owns what
 // is around that step:
 // - the kinds a source brings, one table (sourceKinds: a SourceKind each, its Kind, its pass and its reader at a link).
-//   Skills and agents are its entries in this version. Every run, click and view goes through it: runSource, rowClick,
-//   namesOf, libraryNow, sourcesView and sourceFacts. To add a kind: its entry in sourceKinds, its reader in atlink.ts (given
-//   what the kinds before it found), its Merge in merge.ts (the compiler names what an entry lacks), its view's one call to
-//   sourceFacts, and the Sources page's words (sourcespage.ts, which words a line by its kind and a sentence about every
-//   source by the kinds the view names, SourcesView `kinds`; its aside names the kinds still to come); and, where the look
-//   named the kind as coming later (MCP servers: atlink.ts Holds `mcpJson`, laterWhy), that note taken out;
+//   Skills, agents and MCP servers are its entries in this version. Every run, click and view goes through it: runSource,
+//   rowClick, namesOf, libraryNow, sourcesView and sourceFacts. To add a kind: its entry in sourceKinds, its reader in
+//   atlink.ts (given what the kinds before it found), its Merge in merge.ts (Kind.merge: the compiler names it if missing), its
+//   view's one call to sourceFacts, and the Sources page's words (sourcespage.ts, which words a line by its kind and a
+//   sentence about every source by the kinds the view names, SourcesView `kinds`; its aside names the kinds still to come).
+//   A tool whose writes of the kind wait for a step of the person's own (Claude Code's MCP servers, until Write to Claude
+//   Code: librarypass.ts Disk.locked `waits`) is said by the pass's results (runSource: SourcedItem `deferred`);
 // - a link resolved (sourcelink.ts readLink; its branch, named or the default one, found among the repository's own: refsOf),
 //   and fetched (plugins.ts copySource: the shallow copy marketplaces get, this computer's git and its sign-in, nothing asked
 //   or kept); each source's last read is kept with its record (sourcestore.ts), read from there by each click and view, and
@@ -35,15 +36,17 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { agentsAt, holdsAt, itemsOf, laterWhy, nothingToAddWhy, readOf, skillsAt, unreadWhy, type Holds, type ReaderAt, type RowClick } from './atlink.ts';
+import { agentsAt, holdsAt, itemsOf, nothingToAddWhy, readOf, serversAt, skillsAt, unreadWhy, type Holds, type ReaderAt, type RowClick } from './atlink.ts';
 import type { SharedAgent } from './agentfiles.ts';
 import { agentKind, applyAgents } from './agents.ts';
 import { connectedRepoAddress } from './gitrepo.ts';
 import { changedHere, itemKey, linkedSource, removedBy, sourceAnswers, type Copies, type ItemKind, type LibraryItem } from './library.ts';
-import { copiesOf, lookFor, type PassOptions, type SourcedKind } from './librarypass.ts';
+import { copiesOf, lookFor, type Kind, type PassOptions, type Seen } from './librarypass.ts';
+import type { NeutralServer } from './mcp.ts';
 import { copySource, gitFailure, runGit, sameSource } from './plugins.ts';
 import { itemId } from './profileplan.ts';
 import { exists, libraryGate, removeTree, writeAccess, writeDurably, type ShareContext } from './share.ts';
+import { applyServers, serverKind } from './servers.ts';
 import { applySkills, skillKind } from './skills.ts';
 import type { SkillContent } from './skillstore.ts';
 import { copyOf, lookOf, readSources, saveSources, sourcesFolder, stageOf, type SourceRecord } from './sourcestore.ts';
@@ -61,26 +64,28 @@ const recordedOf = (sources: SourceRecord[]) => new Set(sources.map(source => so
 // ---------- The kinds a source brings ----------
 
 /**
- * One kind a source brings, as the table holds it: its Kind (librarypass.ts SourcedKind); its pass (`apply`, the one its
- * page's clicks run), given one read of the source or the items a Merge asks for first; its reader at a link (atlink.ts
- * ReaderAt); and what a read with none of it says it found there (`noneThere`, after "No skill or agent at its root:").
+ * One kind a source brings, as the table holds it: its Kind (librarypass.ts Kind, with its Merge); its pass (`apply`, the one
+ * its page's clicks run), given one read of the source or the items a Merge asks for first; its reader at a link (atlink.ts
+ * ReaderAt); and what a read with none of it says it found there (`noneThere`, after "No skill, agent or MCP server at its root:").
  */
 export interface SourceKind<Content = unknown> {
-  kind: SourcedKind<Content>;
+  kind: Kind<Content, Seen>;
   apply(context: ShareContext, tools: HarnessId[], changes: Change[], options: Pick<PassOptions<Content>, 'source' | 'only'>): Promise<PassResult>;
   at: ReaderAt<Content>;
   noneThere: string;
 }
 /**
- * Every kind a source brings, in the order a source's lines list them and its readers read (an agent's reader is given the
- * skills found). Made when asked, not as the module loads: a kind's module imports this one back (its view asks sourceFacts),
- * so its Kind may not be made yet then.
+ * Every kind a source brings, in the order a source's lines list them and its readers read (each reader is given what the
+ * kinds before it found). Made when asked, not as the module loads: a kind's module imports this one back (its view asks
+ * sourceFacts), so its Kind may not be made yet then.
  */
-const sourceKinds = (): readonly SourceKind[] => [skillSource(), agentSource()];
+const sourceKinds = (): readonly SourceKind[] => [skillSource(), agentSource(), serverSource()];
 const skillSource = (): SourceKind<SkillContent> =>
   ({ kind: skillKind, apply: applySkills, at: skillsAt, noneThere: 'no SKILL.md there, in a folder inside it, or in skills/' });
 const agentSource = (): SourceKind<SharedAgent> =>
   ({ kind: agentKind, apply: applyAgents, at: agentsAt, noneThere: 'no agent loose there or one level inside an agents folder (.md files; *.agent.md in .github/agents, *.toml in .codex/agents), and a folder inside an agents folder is read only from a link to it' });
+const serverSource = (): SourceKind<NeutralServer> =>
+  ({ kind: serverKind, apply: applyServers, at: serversAt, noneThere: 'no .mcp.json there' });
 
 /**
  * A source's last read as kept here, what is at its link (none kept reads as nothing at the link's folder: sourcestore.ts):
@@ -119,7 +124,7 @@ const librariesNow = (context: ShareContext, tools: readonly HarnessId[]) =>
 function namesOf(source: SourceRecord, found: Holds, entry: SourceKind, { items, copies }: Awaited<ReturnType<typeof libraryNow>>, sources: SourceRecord[]): SourceName[] {
   const there = itemsOf(found, entry), read = readOf(source, found, entry, recordedOf(sources)), kind = entry.kind.kind;
   const answers = [...sourceAnswers(items, read, read.recorded, { copies })].filter(([key]) => there.some(one => one.key === key) || !items[key]?.deleted);
-  // An item whose name can't be read is keyed by its folder's name; where no item has that name, it may be the one item missing.
+  // An item whose name can't be read is keyed by its folder's or file's name; where no item has that name, it may be the one item missing.
   const absent = answers.filter(([key]) => !there.some(one => one.key === key)), nameless = there.filter(one => 'unreadable' in one && !one.name && !items[one.key]);
   const sameOne = absent.length === 1 && nameless.length === 1 ? { item: absent[0][0], there: nameless[0].key } : undefined;
   return answers.filter(([key]) => key !== sameOne?.there).map(([key, answer]): SourceName => {
@@ -127,7 +132,7 @@ function namesOf(source: SourceRecord, found: Holds, entry: SourceKind, { items,
     const name = key === sameOne?.item ? item?.name : one?.name ?? item?.name;
     const base = { kind, key, ...(name ? { name } : {}), ...(one ? { there: { folder: one.folder, folderName: one.folderName, files: one.files } } : {}) };
     const on = item && !item.deleted ? { on: item.on } : {};
-    if (one && 'unreadable' in one) return { ...base, ...on, state: 'unreadable', why: one.unreadable };
+    if (one && 'unreadable' in one) return { ...base, ...on, state: one.leftOut ? 'leftOut' : 'unreadable', why: one.unreadable };
     const other = answer === 'another' ? sources.find(each => each.id === linkedSource(item, read.recorded))?.link : undefined;
     return { ...base, ...on, state: answer, ...(other ? { why: other } : {}) };
   });
@@ -139,17 +144,18 @@ const linesOf = (source: SourceRecord, found: Holds, libraries: Awaited<ReturnTy
 /**
  * The pass for one source's last read: one per kind in the table, each given its kind's read (a row's click only to its own
  * kind's), whose step also decides that pass's scope (librarypass.ts fromSourceStep). Answers what they did: each item a step
- * answered for, with its kind and the tools it was written to and taken out of (from that kind's own results, by its name),
- * every result, and the kinds whose read wasn't whole. A pass that stops stops the rest.
+ * answered for, with its kind and the tools it was written to, taken out of, or whose write or removal waits for a step of
+ * the person's own (from that kind's own results, by its name), every result, and the kinds whose read wasn't whole. A pass
+ * that stops stops the rest.
  */
 async function runSource(context: ShareContext, tools: HarnessId[], source: SourceRecord, sources: SourceRecord[], clicked?: { kind: ItemKind; asked: RowClick }) {
   const found = await lastFound(context, source), done: Omit<SourceResult, 'view'> & { results: DestinationResult[] } = { results: [] };
   for (const entry of sourceKinds()) {
     const read = readOf(source, found, entry, recordedOf(sources), clicked?.kind === entry.kind.kind ? clicked.asked : {});
     const passed = await entry.apply(context, tools, [], { source: read });
-    const toolsOf = (name: string, outcome: 'written' | 'removed') =>
-      passed.results.filter(each => each.item === name && each.outcome === outcome && each.harness).map(each => each.harness!);
-    const sourced = passed.sourced?.map(each => ({ ...each, kind: read.kind, written: toolsOf(each.name, 'written'), removed: toolsOf(each.name, 'removed') }));
+    const toolsOf = (name: string, outcome: 'written' | 'removed' | 'waits') =>
+      passed.results.filter(each => each.item === name && (outcome === 'waits' ? each.waits : each.outcome === outcome) && each.harness).map(each => each.harness!);
+    const sourced = passed.sourced?.map(each => ({ ...each, kind: read.kind, written: toolsOf(each.name, 'written'), removed: toolsOf(each.name, 'removed'), deferred: toolsOf(each.name, 'waits') }));
     done.results.push(...passed.results);
     if (sourced) done.sourced = [...done.sourced ?? [], ...sourced];
     if (!read.whole) done.notWhole = [...done.notWhole ?? [], read.kind];
@@ -237,9 +243,9 @@ export async function previewSource(context: ShareContext, tools: HarnessId[], l
 }
 
 const foundOf = (source: Resolved & Partial<Pick<SourceRecord, 'commit' | 'commitAt'>>, found: Holds, names: SourceName[]): SourceFound => {
-  const unread = unreadWhy(found, source), later = laterWhy(found);
+  const unread = unreadWhy(found, source);
   return { link: source.link, repository: source.repository, ref: source.ref, folder: source.folder, commit: source.commit, commitAt: source.commitAt, holds: found.holds, names,
-    ...(unread ? { unread } : {}), ...(later ? { later } : {}) };
+    ...(unread ? { unread } : {}) };
 };
 
 /**
@@ -395,8 +401,8 @@ export async function sourcesView(context: ShareContext, tools: HarnessId[]): Pr
  * fromSource): the source's link, and whether that source's last read has a version that waits (the table's `wait`, from the
  * same answers as the Sources page), or else whether it is changed here (library.ts changedHere), so the source's next change
  * will meet it; and each item a source removed (`removed`: library.ts removedBy), with that source's link. `items` and
- * `copies`: the kind's view's own look (skills.ts skillsView and agents.ts agentsView ask it). A kind the table has no entry
- * for has no source.
+ * `copies`: the kind's view's own look (skills.ts skillsView, agents.ts agentsView and servers.ts serversView ask it). A kind
+ * the table has no entry for has no source.
  */
 export async function sourceFacts(context: ShareContext, kind: ItemKind, items: Record<string, LibraryItem>, copies: (item: LibraryItem) => Copies) {
   const facts = new Map<string, NonNullable<LibraryFacts['fromSource']>>(), entry = sourceKinds().find(each => each.kind.kind === kind);

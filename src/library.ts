@@ -130,23 +130,27 @@
 //                                        or deleted
 //
 // "Read whole", for one kind (each kind a source brings has a read of its own, by its own keys): the source was fetched, the
-// link's folder is there and is no plugin or marketplace, at least one item of any kind there can be read, and every item of
-// this kind there could be read (atlink.ts readOf decides it, the one place). A source that holds no item that can be read
-// (its one skill deleted there, every one unreadable, its folder gone, a plugin) is not read whole: no name is gone, and the
-// source turns nothing Off. So a source that drops every agent and keeps a skill turns its agents Off, and one agent there
-// that can't be read holds back only the agents' drops. Skills and agents are the kinds a source brings in this version.
+// link's folder is there and is no plugin or marketplace, at least one item of any kind there was read, and every item of this
+// kind there was read (atlink.ts readOf decides it, the one place). An item was read when it can be brought in, or when it is
+// left out by a rule (atlink.ts ItemThere `leftOut`: two of one name, a server that runs files from the repository, say); one
+// that couldn't be read (a broken file, an entry with no command) was not. A source where nothing was read (its one skill
+// deleted there, every one unreadable, its folder gone, a plugin) is not read whole: no name is gone, and the source turns
+// nothing Off. So a source that drops every agent and keeps a skill turns its agents Off; one agent there that can't be read
+// holds back only the agents' drops, a .mcp.json that can't be read every server's, and an item left out none. Skills, agents
+// and MCP servers are the kinds a source brings in this version.
 //
-// EACH TOOL'S OWN FIELDS FROM A SOURCE (an agent's `tools` or `model`; a version holds the shared part only). Each file at the
-// link is in one tool's form (atlink.ts agentsAt). Where the step makes, links or updates the item, it keeps that file as that
-// tool's own part only where the item keeps none for that tool (librarypass.ts keepSourceOwn): a first On there writes the
-// source's file byte for byte, and nothing set in a tool is written over. A tool with a copy keeps its own part at every pass,
+// EACH TOOL'S OWN FIELDS FROM A SOURCE (an agent's `tools` or `model`, a server's `timeout`, say; a version holds the shared
+// part only). Each file at the link is in one tool's form (atlink.ts agentsAt; a .mcp.json is Claude Code's: serversAt). Where
+// the step makes, links or updates the item, it keeps that file, or the entry's other fields, as that tool's own part only
+// where the item keeps none for that tool (librarypass.ts keepSourceOwn): a first On there writes the source's file byte for
+// byte (a server's entry with the source's fields and values), and nothing set in a tool is written over. A tool with a copy keeps its own part at every pass,
 // so the rule decides only for a tool with none. It is a second rule beside Pull's, which always keeps the repo's file as
 // Claude Code's own part (librarypass.ts pull). Nothing records which own part is a source's and which a person's, so it has
 // two costs, and is the default until the owner decides otherwise:
 // - own fields changed alone at the source never arrive: the shared part's hash is as it was, so the table answers `nothing`;
 //   the item's row stays as it was, and Check now says nothing came in;
-// - the prompt and own fields changed together bring the prompt only: the own fields stay as that tool's own part has them,
-//   which on an item never turned On is the source's first read's, for good.
+// - the shared part (an agent's prompt, a server's command, say) and own fields changed together bring the shared part only:
+//   the own fields stay as that tool's own part has them, which on an item never turned On is the source's first read's, for good.
 //
 // REMOVED AT ITS SOURCE (`removedBy`, the one place it is decided; worked out at each look, never stored): an item that is Off,
 // linked to no source, has a version from a recorded source's link since it last came in from a tool (fromLinkSinceTakeIn; one
@@ -168,12 +172,16 @@
 // to the step, read from the last read) makes S current dated by its click, so an edit a tool saved before the click gives way
 // to it and is kept as a version (THE RULE); its Undo puts back the version before and `seen` as it was (types.ts Change
 // seen), so where it had been changed here S waits again. The step reads the tools before the guards (librarypass.ts guardFolders): a tool managed again in
-// that same pass can read as changed here, and S then waits one read more; nothing reads as unchanged that is not.
+// that same pass can read as changed here, and S then waits one read more; nothing reads as unchanged that is not. A write
+// that waits for Write to Claude Code is no change here (that tool's copy is still what was applied), so a second update
+// follows too and Write writes the newest; an edit made there while it waits is an edit like any other.
 //
 // MERGE (`mergeFiles`, a key handed to the step as Replace's is; the kind runs the line merge: librarypass.ts Kind.merge). Three
 // folders: the base (`seen`), yours (the current version) and S, compared path by path, each path a file (its bytes and its
 // executable bit, apart) or a folder; an agent's paths are its three parts, its name, description and prompt, each a file
-// (merge.ts mergeAgent). Nothing is normalised: a file that differs only in its line endings or its last newline differs.
+// (merge.ts mergeAgent); an MCP server's are its transport, command, arguments, working folder and URL and each environment
+// variable and header by its name, each a value with no lines, so a "line merge" of one is a conflict (merge.ts mergeServer).
+// Nothing is normalised: a file that differs only in its line endings or its last newline differs.
 //
 //   the path                                                        the merged version has
 //   the same on both sides (unchanged, changed alike, or gone on    that
@@ -256,7 +264,8 @@
 // the settle window passed.
 //
 // Worked examples, one per row of each table: tests/library.test.ts. The same on real files: tests/agents.test.ts,
-// tests/skills.test.ts, tests/servers.test.ts and, for A SOURCE, tests/sources.test.ts and tests/sourceagents.test.ts.
+// tests/skills.test.ts, tests/servers.test.ts and, for A SOURCE, tests/sources.test.ts, tests/sourceagents.test.ts and
+// tests/sourceservers.test.ts.
 import { linkLabel } from './sourcelink.ts';
 import type { HarnessId } from './types.ts';
 import { toolName } from './words.ts';

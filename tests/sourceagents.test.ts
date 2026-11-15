@@ -56,7 +56,7 @@ const linesOf = (found: { names: { kind: string; name?: string; key: string; sta
 
 // ---------- What at a link is an agent ----------
 
-test('What at a link is an agent: a file in an agents folder of each tool’s form, a loose *.agent.md, a loose .md naming both fields; never a README, a page, a command or a file in another folder; a .mcp.json is named as coming later', async () => {
+test('What at a link is an agent: a file in an agents folder of each tool’s form, a loose *.agent.md, a loose .md naming both fields; never a README, a page, a command or a file in another folder; a .mcp.json beside them holds a server', async () => {
   const repo = await repository(hosts, 'https://github.com/team/kit');
   await repo.commit({
     'agents/reviewer.md': '---\nname: reviewer\n---\n\nReview.\n',
@@ -73,7 +73,7 @@ test('What at a link is an agent: a file in an agents folder of each tool’s fo
     'README.md': agentMd('readme'),
     'CLAUDE.md': agentMd('claude'), 'AGENTS.md': agentMd('agents'), 'CHANGELOG.md': agentMd('changes'),
     'commands/go.md': agentMd('go'), 'docs/page.md': agentMd('page'), 'prompts/ask.md': agentMd('ask'),
-    '.mcp.json': '{"mcpServers":{"docs":{"command":"docs"}}}',
+    '.mcp.json': '{"mcpServers":{"docs":{"command":"docs-server"}}}',
   });
   const box = await sandbox();
   try {
@@ -89,8 +89,8 @@ test('What at a link is an agent: a file in an agents folder of each tool’s fo
       ['agent', 'TEMPLATE', '', ['TEMPLATE.md'], 'make'],
       ['agent', 'scout', '', ['scout.agent.md'], 'make'],
       ['agent', 'writer', '', ['writer.md'], 'make'],
+      ['mcp', 'docs', '', ['.mcp.json'], 'make'],
     ]);
-    assert.equal(look.later, 'Its .mcp.json is not read: MCP servers from a link come in a later version.');
     // A link straight at the agents folder: each Markdown file there with front matter is an agent, no field asked.
     const folder = await previewSource(box.context, box.tools, 'https://github.com/team/kit/tree/main/agents') as Extract<SourcePreview, { token: string }>;
     assert.deepEqual(linesOf(folder), ['agent reviewer: make']);
@@ -133,8 +133,8 @@ test('A look that finds nothing says only what it looked for: agents in a folder
   const box = await sandbox();
   try {
     const look = await previewSource(box.context, box.tools, 'https://github.com/team/nested');
-    assert.equal(look.refused, 'No skill or agent at its root: no SKILL.md there, in a folder inside it, or in skills/; no agent loose there or one level inside an agents folder'
-      + ' (.md files; *.agent.md in .github/agents, *.toml in .codex/agents), and a folder inside an agents folder is read only from a link to it.');
+    assert.equal(look.refused, 'No skill, agent or MCP server at its root: no SKILL.md there, in a folder inside it, or in skills/; no agent loose there or one level inside an agents folder'
+      + ' (.md files; *.agent.md in .github/agents, *.toml in .codex/agents), and a folder inside an agents folder is read only from a link to it; no .mcp.json there.');
     // The way the sentence names: a link to that folder reads it.
     assert.deepEqual(linesOf(await previewSource(box.context, box.tools, 'https://github.com/team/nested/tree/main/agents/review') as Extract<SourcePreview, { token: string }>), ['agent reviewer: make']);
   } finally { await box.cleanup(); }
@@ -175,7 +175,7 @@ test('A broken file is unreadable and never gone: an agent whose front matter br
     await repo.commit({ 'agents/reviewer.md': '---\nname: [reviewer\n---\nBroken.\n', 'writer.md': '---\nname: writer\ndescription: "unclosed\n---\nBroken.\n' });
     const done = await check(box, (await sourceOf(box)).id);
     // Nothing there can be read, so no kind was read whole (library.ts "Read whole").
-    assert.deepEqual([done.notWhole, answered(done)], [['skill', 'agent'], []]);
+    assert.deepEqual([done.notWhole, answered(done)], [['skill', 'agent', 'mcp'], []]);
     const lines = (await sourceOf(box)).names;
     assert.deepEqual(lines.map(name => [name.name, name.state]), [['reviewer', 'unreadable'], ['writer', 'unreadable']]);
     assert.match(lines[0].why ?? '', /^agents\/reviewer\.md can’t be read as an agent \(/);
@@ -208,13 +208,13 @@ test('Gone, and said: a loose file whose front matter parses but no longer names
 
 // ---------- Two of one name ----------
 
-test('Two files of one name: in one tool’s form both are unreadable; in two tools’ forms with one shared part they are one agent with each file its tool’s own part; differing, both are unreadable', async () => {
+test('Two files of one name: in one tool’s form both are left out; in two tools’ forms with one shared part they are one agent with each file its tool’s own part; differing, both are left out', async () => {
   const box = await sandbox();
   try {
     const one = await repository(hosts, 'https://github.com/team/twice');
     await one.commit({ 'agents/reviewer.md': agentMd('reviewer'), 'reviewer.md': agentMd('reviewer') });
     const look = await previewSource(box.context, box.tools, 'https://github.com/team/twice') as Extract<SourcePreview, { token: string }>;
-    assert.deepEqual(look.names.map(name => [name.name, name.state, name.why, name.there?.files]), [['reviewer', 'unreadable', 'two files here are named reviewer in Claude Code’s form, so neither is brought in', ['agents/reviewer.md', 'reviewer.md']]]);
+    assert.deepEqual(look.names.map(name => [name.name, name.state, name.why, name.there?.files]), [['reviewer', 'leftOut', 'two files here are named reviewer in Claude Code’s form', ['agents/reviewer.md', 'reviewer.md']]]);
 
     const forms = await repository(hosts, 'https://github.com/team/forms');
     const claude = agentMd('reviewer', 'Review.\n', 'tools: Read\n'), copilot = agentMd('reviewer', 'Review.\n', 'target: vscode\n');
@@ -227,7 +227,7 @@ test('Two files of one name: in one tool’s form both are unreadable; in two to
     const differ = await repository(hosts, 'https://github.com/team/differ');
     await differ.commit({ 'agents/reviewer.md': agentMd('reviewer', 'One way.\n'), '.github/agents/reviewer.agent.md': agentMd('reviewer', 'Another way.\n') });
     const split = await previewSource(box.context, box.tools, 'https://github.com/team/differ') as Extract<SourcePreview, { token: string }>;
-    assert.deepEqual(split.names.map(name => [name.state, name.why]), [['unreadable', 'its Claude Code and Copilot CLI files differ in name, description or prompt, so neither is brought in']]);
+    assert.deepEqual(split.names.map(name => [name.state, name.why]), [['leftOut', 'its Claude Code and Copilot CLI files differ in name, description or prompt']]);
   } finally { await box.cleanup(); }
 });
 
@@ -301,7 +301,7 @@ test('Read whole is per kind: a source that drops its agents and keeps a skill t
     await repo.git('mv', 'kit', 'moved');
     await repo.commit({});
     const moved = await check(box, id);
-    assert.deepEqual([answered(moved), moved.notWhole, await skillOn('notes')], [[], ['skill', 'agent'], true]);
+    assert.deepEqual([answered(moved), moved.notWhole, await skillOn('notes')], [[], ['skill', 'agent', 'mcp'], true]);
   } finally { await box.cleanup(); }
 });
 

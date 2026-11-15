@@ -15,13 +15,16 @@
 //   through a plugin and no entry of its own.
 // - Claude Code's file is written only by Write to Claude Code (writeToClaude), with Claude closed: until then its writes and
 //   removals wait (Disk.locked `waits`), and each row that owes one says so (`waits`). Write to Claude Code runs the kind
-//   built the other way round: Claude Code's file open, every other tool's writes waiting for the next pass.
+//   built the other way round: Claude Code's file open, every other tool's writes waiting for the next pass. A source's update
+//   or drop of a server waits there the same way (sources.ts SourcedItem `deferred`).
+// - Merge of a source's version (merge.ts mergeServer); what at a link is a server is atlink.ts serversAt.
 // - a tool's own switch for a server (mcpswitch.ts) is read at each look for its mark (`switchedOff`) and never written by a
 //   pass. Where it lives inside the entry (Codex, Pi, OpenCode) it is that tool's own field, so it comes back with the entry.
 //   One write follows a pass: Claude Code's deny of a server the profiles migration turned Off was kept, so the server doesn't
 //   start there before Write to Claude Code takes its entry out, and is cleared once the server is wanted there (releaseKeptDenies).
 // Around the pass: applyServers, writeToClaude and restoreServer run it (the page's clicks);
-// serversView is the MCP servers page's reading (types.ts LibraryView); serversForRepo is what the Git repo's Push sends. Elsewhere: the formats, mcp.ts; where things are kept and
+// serversView is the MCP servers page's reading (types.ts LibraryView), with each row's source (sources.ts sourceFacts);
+// serversForRepo is what the Git repo's Push sends. Elsewhere: the formats, mcp.ts; where things are kept and
 // the migration from the earlier record, serverstore.ts and servermigrate.ts; the row and its words, libraryrow.ts with
 // librarypages.ts; History's sentences and actions, historyactions.ts.
 import { readFile, stat } from 'node:fs/promises';
@@ -30,13 +33,15 @@ import { listed, noteAgainst, pendingEdits, plan, wantedIn } from './library.ts'
 import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, leavingIn, lookFor, restore, runPass, sharedFileSeen, takeInAnswers, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords, writesWait } from './libraryrow.ts';
-import { cannotHold, editEntry, mcpFile, ownText, readTool, recoverSettings, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
+import { mergeServer } from './merge.ts';
+import { cannotHold, editEntry, mcpFile, ownPartOf, readTool, recoverSettings, SERVER_PARTS, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, readMcpSwitches, withMcpSwitch } from './mcpswitch.ts';
 import { throughPlugins } from './plugins.ts';
 import { mcpTools } from './presence.ts';
 import { keepDenies, keepOwn, keptDenies, keptOwn, openLibrary, readVersion, recordedServers, saveLibrary, storeVersion } from './serverstore.ts';
 import { errorCode, itemKey, readParts, syncGate, writeAccess, writeFileChecked, type ShareContext } from './share.ts';
 import type { SwitchFile } from './skillswitch.ts';
+import { sourceFacts } from './sources.ts';
 import type { Change, HarnessId, LibraryFacts, LibraryView, PassResult, SyncNotice, ThroughPlugin, ToolCopy } from './types.ts';
 import { throughPlugin, toolName } from './words.ts';
 
@@ -160,7 +165,7 @@ function kindFor(writeClaude: boolean): Kind<NeutralServer, McpEntry, ServerDisk
     recover: recoverSettings,
     read: (context, managed) => readDisk(context, managed, writeClaude),
     contentOf: entry => entry.server,
-    ownOf: entry => ownText({ name: entry.name, place: entry.place, extras: entry.extras }),
+    ownOf: ownPartOf,
     keepOwn,
     write: writeServer,
     refusesToLoad: async (_context, _item, tool, server) => cannotHold(tool, server),
@@ -170,6 +175,7 @@ function kindFor(writeClaude: boolean): Kind<NeutralServer, McpEntry, ServerDisk
       return !stopped ? 'removed' : stopped.changed ? 'changed' : 'failed';
     },
     historyAction: libraryAction,
+    merge: mergeServer,
   };
 }
 /** The servers' Kind for every pass but Write to Claude Code's: Claude Code's writes and removals wait. */
@@ -264,9 +270,8 @@ export async function serversForRepo(context: ShareContext, tools: HarnessId[]):
 
 // ---------- View ----------
 
-/** The parts of a server a version's note names, in the order a sentence lists them. */
-const PARTS: [keyof NeutralServer, string][] = [['transport', 'transport'], ['command', 'command'], ['args', 'arguments'], ['env', 'environment'], ['cwd', 'working folder'], ['url', 'URL'], ['headers', 'headers']];
-const changedParts = (was: NeutralServer, is: NeutralServer) => PARTS.filter(([part]) => JSON.stringify(was[part] ?? null) !== JSON.stringify(is[part] ?? null)).map(([, words]) => words);
+/** The parts of a server a version's note names (mcp.ts SERVER_PARTS), in the order a sentence lists them. */
+const changedParts = (was: NeutralServer, is: NeutralServer) => SERVER_PARTS.filter(([part]) => JSON.stringify(was[part] ?? null) !== JSON.stringify(is[part] ?? null)).map(([, words]) => words);
 
 /** Each version's note (library.ts VersionChange), as agents.ts changesOf says it for an agent's fields. */
 async function changesOf(context: ShareContext, item: LibraryItem): Promise<VersionChange[]> {
@@ -291,8 +296,8 @@ export async function serversView(context: ShareContext, tools: HarnessId[], not
   const { look, live, problem } = await lookFor(serverKind, context, tools);
   const { library, managed } = look;
   const keys = [...new Set([...look.disk.byKey.keys(), ...look.disk.unseenNames.keys(), ...live.map(item => item.key)])].sort((first, second) => first.localeCompare(second));
-  const items: LibraryFacts[] = [];
-  for (const key of keys) items.push(await rowFacts(look, key, live.find(item => item.key === key)));
+  const items: LibraryFacts[] = [], fromSource = await sourceFacts(context, 'mcp', library.items, item => copiesOf(look, item));
+  for (const key of keys) items.push(await rowFacts(look, key, live.find(item => item.key === key), fromSource.get(key)));
   const gate = problem ? { state: 'stopped' as const, reason: problem } : await syncGate(context);
   const problems = problem ? [problem, ...look.disk.problems] : look.disk.problems;
   return { tools: managed, items, library: library.items, access: await writeAccess(context), gate, problems, notices };
@@ -307,10 +312,10 @@ const toolCopy = (entry: McpEntry): ToolCopy => ({
 /**
  * One server's row: what each managed tool holds and, for a server in the library, what the next pass does in each (`plan`,
  * from the same reading a pass makes: copiesOf) and why nothing can happen in one (`unseen`, `cannot`); the tools where a write
- * or removal waits for Write to Claude Code (`waits`, a deleted server's too, whose row is a found one), and each tool's own
- * switch (`switchedOff`).
+ * or removal waits for Write to Claude Code (`waits`, a deleted server's too, whose row is a found one), each tool's own
+ * switch (`switchedOff`), and the source it is from, as sources.ts sourceFacts says it (`fromSource`).
  */
-async function rowFacts(look: ServerLook, key: string, item: LibraryItem | undefined): Promise<LibraryFacts> {
+async function rowFacts(look: ServerLook, key: string, item: LibraryItem | undefined, fromSource: LibraryFacts['fromSource']): Promise<LibraryFacts> {
   const disk = look.disk, slot = disk.byKey.get(key) ?? {};
   const entries = look.managed.flatMap(tool => (slot[tool] ? [slot[tool]!] : []));
   const name = item?.name ?? entries[0]?.name ?? disk.unseenNames.get(key) ?? key;
@@ -343,5 +348,6 @@ async function rowFacts(look: ServerLook, key: string, item: LibraryItem | undef
     ...(made && item ? { plan: { ...made, keep: [...made.keep, ...(look.givingWay.get(key) ?? [])] }, versionChanges: await changesOf(look.context, item) }
       : { takeInAnswers: takeInAnswers(look, key) }),
     ...some('plugin', plugin), ...some('unseen', unseen), ...some('waits', waits), ...some('switchedOff', switchedOff), ...some('switchProblem', switchProblem),
+    ...(fromSource ? { fromSource } : {}),
   };
 }

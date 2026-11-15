@@ -31,6 +31,7 @@ import { libraryEntry } from '../src/historyactions.ts';
 import { itemKey, type ItemKind, type LibraryItem } from '../src/library.ts';
 import { homeItems, inUse } from '../src/profileplan.ts';
 import { readProfiles } from '../src/profiles.ts';
+import { serverHash } from '../src/mcp.ts';
 import { applyServers } from '../src/servers.ts';
 import { setSyncEverything } from '../src/everything.ts';
 import { managedNow, readRecord, syncGate, writeAccess } from '../src/share.ts';
@@ -202,8 +203,10 @@ for (const old of homes) for (const sync of ['off', 'on'] as const) {
         const item = libraryOf(pass, was.kind)[was.key], row = pass.pages[pageOf[was.kind]].items.find(each => each.key === was.key);
         assert.ok(item && !item.deleted && row, `${was.id} is in the library`);
         assert.equal(item.on, !heldOff.includes(was.id), `${was.id} is ${heldOff.includes(was.id) ? 'Off' : 'On'}`);
-        // With Sync on, the first pass took the waiting edit in: notes is at it.
-        assert.equal(item.hash, was.id === 'skill:notes' && sync === 'on' ? waitingNow : was.hash, `${was.id} is at the content it had`);
+        // With Sync on, the first pass took the waiting edit in: notes is at it. search was recorded with an empty argument
+        // list, which is read as none now (mcp.ts nonEmpty): the first pass takes it in once at that hash, its files as they were.
+        const had = was.id === 'skill:notes' && sync === 'on' ? waitingNow : was.id === 'mcp:search' ? serverHash({ transport: 'stdio', command: 'search-mcp' }) : was.hash;
+        assert.equal(item.hash, had, `${was.id} is at the content it had`);
         assert.ok(item.versions.some(version => version.hash === item.hash), `${was.id}'s content is one of its versions`);
         for (const tool of was.out) assert.ok(item.except.includes(tool), `${was.id} is still kept out of ${tool}`);
         if (heldOff.includes(was.id)) continue;

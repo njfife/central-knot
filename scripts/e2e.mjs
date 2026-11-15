@@ -2343,7 +2343,7 @@ async function sourcesFlow() {
   check('Add says deslop is in Central Knot, Off', /Added github\.com\/stephenturner\/skill-deslop \(main\)\. deslop is in Central Knot, Off: turn it on in Skills\./.test(await a.text('.band-done .band-text') ?? ''), await a.text('.band-done'));
   same('in Central Knot, Off, in no tool', [record()?.on, Object.values(roots).some(root => existsSync(join(home, root, 'deslop')))], [false, false]);
   check('its row says it is in Central Knot, Off, and says beforehand that Check now can change skills and agents in the tools', /In Central Knot, Off/.test(await a.text('.source-row .source-name[data-key="deslop"]') ?? '')
-    && /Check now reads the link again, as Central Knot does once a day while Automatic sync is on: a skill or an agent changed there is updated in the tools it is on in, unless you changed it here \(then it waits for you\); one no longer there is turned off and taken out of them\./.test(await a.text('.source-row') ?? ''), await a.text('.source-row'));
+    && /Check now reads the link again, as Central Knot does once a day while Automatic sync is on: a skill, an agent or an MCP server changed there is updated in the tools it is on in, unless you changed it here \(then it waits for you\); one no longer there is turned off and taken out of them\./.test(await a.text('.source-row') ?? ''), await a.text('.source-row'));
   const id = await a.run(`document.querySelector('.source-row').dataset.source`);
 
   await a.click('#nav-skills');
@@ -2467,13 +2467,15 @@ async function sourcesFlow() {
   check('Add on its line brings unslop back into Central Knot, Off, and says so', await until(async () => /unslop is in Central Knot, Off: turn it on in Skills\./.test(await a.text('.band-done .band-text') ?? ''))
     && !unslop()?.deleted && unslop()?.on === false && !(await a.exists(`#source-bring-${id}-skill-unslop`)), [await a.text('.band-done'), unslop()]);
 
-  // A source with a skill and an agent: the look lists both, Add brings both in Off, the agent turned On on Agents gets the
-  // source's file in Claude Code byte for byte, a change at the source alone updates it (Open Agents), and Merge puts a change
-  // made in Claude Code and one made at the source together.
+  // A source with a skill, an agent and an MCP server: the look lists all three, Add brings them in Off, the agent turned On on
+  // Agents gets the source's file in Claude Code byte for byte, a change at the source alone updates it (Open Agents), and Merge
+  // puts a change made in Claude Code and one made at the source together; the server turned On is in Copilot CLI's file at
+  // once and waits for Write to Claude Code, a change at the source says Claude Code waits (Open MCP servers), and Merge.
   const kit = join(hosts, 'github.com/team/kit.git'), reviewerMd = '---\nname: reviewer\ndescription: Reviews code.\ntools: Read, Grep\n---\n\nYou review code.\nThe middle.\nMore middle.\nBe brief.\n';
+  const relayJson = env => `${JSON.stringify({ mcpServers: { relay: { command: 'relay-mcp', env, timeout: 30 } } }, null, 2)}\n`;
   mkdirSync(kit, { recursive: true });
   spawnSync('git', ['init', '--quiet', '--initial-branch=main', kit]);
-  commit(kit, { 'notes/SKILL.md': '---\nname: notes\ndescription: Takes notes.\n---\n\nTake notes.\n', 'agents/reviewer.md': reviewerMd });
+  commit(kit, { 'notes/SKILL.md': '---\nname: notes\ndescription: Takes notes.\n---\n\nTake notes.\n', 'agents/reviewer.md': reviewerMd, '.mcp.json': relayJson({ A: '1', B: '1' }) });
   const agentFile = tool => join(home, { 'claude-cli': '.claude/agents/reviewer.md', 'copilot-cli': '.copilot/agents/reviewer.agent.md', 'codex-cli': '.codex/agents/reviewer.toml' }[tool]);
   const agentRecord = () => JSON.parse(readNow(join(home, '.central-knot/agents.json')) || '{"items":{}}').items.reviewer;
   await a.click('#nav-sources');
@@ -2481,13 +2483,14 @@ async function sourcesFlow() {
   await a.click('#source-look');
   await until(() => a.exists('#source-preview'));
   const kitLook = await a.text('#source-preview') ?? '';
-  check('Look lists the skill and the agent, each with its kind and where it sits, coming in Off, and Add says both', (await a.all('#source-preview .source-name', 'e.dataset.kind + " " + e.dataset.key')).join() === 'skill notes,agent reviewer'
+  check('Look lists the skill, the agent and the server, each with its kind and where it sits, coming in Off, and Add says all three', (await a.all('#source-preview .source-name', 'e.dataset.kind + " " + e.dataset.key')).join() === 'skill notes,agent reviewer,mcp relay'
     && /reviewer\s*agent, in the folder agents/.test(await a.text('#source-preview .source-name[data-kind="agent"]') ?? '') && /1 file: reviewer\.md/.test(await a.text('#source-preview .source-name[data-kind="agent"]') ?? '')
-    && (await a.text('#source-add'))?.trim() === 'Add 1 skill and 1 agent', kitLook);
+    && /relay\s*MCP server, at the root of kit/.test(await a.text('#source-preview .source-name[data-kind="mcp"]') ?? '') && /1 file: \.mcp\.json/.test(await a.text('#source-preview .source-name[data-kind="mcp"]') ?? '')
+    && (await a.text('#source-add'))?.trim() === 'Add 1 skill, 1 agent and 1 MCP server', kitLook);
   await a.shot('sources-look-agent');
   await a.click('#source-add');
   await until(async () => (await a.all('.source-row')).length === 2);
-  check('Add says notes and reviewer are in Central Knot, Off, to turn on in Skills and Agents', /notes and reviewer are in Central Knot, Off: turn them on in Skills and Agents\./.test(await a.text('.band-done .band-text') ?? '') && agentRecord()?.on === false, await a.text('.band-done'));
+  check('Add says notes, reviewer and relay are in Central Knot, Off, to turn on in Skills, Agents and MCP servers', /notes, reviewer and relay are in Central Knot, Off: turn them on in Skills, Agents and MCP servers\./.test(await a.text('.band-done .band-text') ?? '') && agentRecord()?.on === false, await a.text('.band-done'));
   const kitId = await a.run(`[...document.querySelectorAll('.source-row')].find(row => row.textContent.includes('team/kit')).dataset.source`);
   await a.click('#nav-agents');
   await until(() => a.exists('#open-reviewer'));
@@ -2514,6 +2517,38 @@ async function sourcesFlow() {
   check('Merge puts both changes in every tool, keeps Claude Code’s own fields, and says so with Undo the merge', await until(async () => /reviewer now has your changes and the source’s, merged, in all 3 tools; the version it had is kept\./.test(await a.text('.band-done .band-text') ?? ''))
     && (await a.text('#outcome-undo')) === 'Undo the merge'
     && await until(() => ['claude-cli', 'copilot-cli', 'codex-cli'].every(tool => /You review code, mine\.[\s\S]*Be brief, kind and exact\./.test(readNow(agentFile(tool))))) && readNow(agentFile('claude-cli')).includes('tools: Read, Grep'), [await a.text('.band-done'), readNow(agentFile('claude-cli'))]);
+
+  const mcpFile = tool => join(home, { 'claude-cli': '.claude.json', 'copilot-cli': '.copilot/mcp-config.json', 'codex-cli': '.codex/config.toml' }[tool]);
+  const relayIn = tool => JSON.parse(readNow(mcpFile(tool)) || '{}').mcpServers?.relay;
+  await a.click('#nav-mcp');
+  await until(() => a.exists('#switch-relay'));
+  await a.click('#switch-relay');
+  check('the source’s server, turned On, is in Copilot CLI’s file at once, and MCP servers offers Write to Claude Code', await until(() => relayIn('copilot-cli')?.command === 'relay-mcp') && await until(() => a.exists('#mcp-write-claude'))
+    && !relayIn('claude-cli') && /relay-mcp/.test(readNow(mcpFile('codex-cli'))), [readNow(mcpFile('copilot-cli')), await a.text('.bands')]);
+  await a.click('#mcp-write-claude');
+  check('Write to Claude Code puts it there with the source’s own field', await until(() => relayIn('claude-cli')?.timeout === 30), readNow(mcpFile('claude-cli')));
+  commit(kit, { '.mcp.json': relayJson({ A: '1', B: '2' }) });
+  await a.click('#nav-sources');
+  await a.click(`#source-check-${kitId}`);
+  check('a change at the source updates Copilot CLI and Codex, and the band says Claude Code gets it at Write to Claude Code, with Open MCP servers', await until(async () => /relay was updated from its source, now in Copilot CLI and Codex\. Claude Code gets it when you click Write to Claude Code, on MCP servers\./.test(await a.text('.band-done .band-text') ?? ''))
+    && await a.exists('#source-open-mcp') && relayIn('copilot-cli')?.env?.B === '2' && relayIn('claude-cli')?.env?.B === '1', [await a.text('.band-done'), readNow(mcpFile('claude-cli'))]);
+  await a.shot('sources-server-waits');
+  const copilotMcp = JSON.parse(readNow(mcpFile('copilot-cli')));
+  copilotMcp.mcpServers.relay.env.A = 'mine';
+  writeFileSync(mcpFile('copilot-cli'), JSON.stringify(copilotMcp, null, 2));
+  check('an edit in Copilot CLI is taken in and reaches Codex', await until(() => /A = "mine"/.test(readNow(mcpFile('codex-cli')))), readNow(mcpFile('codex-cli')));
+  commit(kit, { '.mcp.json': relayJson({ A: '1', B: '3' }) });
+  await a.click(`#source-check-${kitId}`);
+  await until(async () => await a.exists(`#source-merge-${kitId}-mcp-relay`));
+  await until(() => a.run(`document.body.dataset.busy !== 'true' && document.querySelector('#source-merge-${kitId}-mcp-relay')?.disabled === false`));
+  await a.click(`#source-merge-${kitId}-mcp-relay`);
+  check('Merge puts both changes in Copilot CLI and Codex, says Claude Code gets it at Write to Claude Code, and offers Undo the merge', await until(async () => /relay now has your changes and the source’s, merged, in Copilot CLI and Codex; the version it had is kept\. Claude Code gets it when you click Write to Claude Code, on MCP servers\./.test(await a.text('.band-done .band-text') ?? ''))
+    && (await a.text('#outcome-undo')) === 'Undo the merge' && JSON.stringify(relayIn('copilot-cli')?.env) === '{"A":"mine","B":"3"}', [await a.text('.band-done'), readNow(mcpFile('copilot-cli'))]);
+  // Its entry at the source now runs a file of the repository: left out there, so the server here stays as it was, and its line says so.
+  commit(kit, { '.mcp.json': `${JSON.stringify({ mcpServers: { relay: { command: './bin/relay' } } }, null, 2)}\n` });
+  await a.click(`#source-check-${kitId}`);
+  check('an entry the source now leaves out says the server here stays as it was, On, and it stays in Copilot CLI', await until(async () => /In Central Knot, On, as it was: what the source has now is not brought in, since it runs files from the repository, which aren’t copied\./.test(await a.text(`.source-row[data-source="${kitId}"] .source-name[data-kind="mcp"]`) ?? ''))
+    && relayIn('copilot-cli')?.command === 'relay-mcp', [await a.text(`.source-row[data-source="${kitId}"]`), readNow(mcpFile('copilot-cli'))]);
 
   await a.click('#nav-sources');
   await type('https://github.com/team/plugin');
