@@ -1101,7 +1101,7 @@ async function practiceFlow() {
   await a.click('#nav-mcp');
   same('MCP servers from every tool, found', [(await rowKeys(a)).sort(), await sectionsNow(a)], [['docs', 'files'], [['found', ['docs', 'files']]]]);
   same('files is in Copilot and Codex, not in Claude Code', [await cellState(a, 'files', 'copilot-cli'), await cellState(a, 'files', 'codex-cli'), await cellState(a, 'files', 'claude-cli')], ['own-copy', 'own-copy', 'none']);
-  check('a found server has Add where a switch would be, and there is no Apply all', await a.exists('#add-docs') && !(await a.exists('#switch-docs')) && !(await a.exists('#apply, #manage-all')));
+  check('a found server has Add where a switch would be, and no button that waits for a later click', await a.exists('#add-docs') && !(await a.exists('#switch-docs')) && !(await a.exists('#apply, #manage-all')));
   const tomlBefore = readFileSync(join(practice, '.codex/config.toml'), 'utf8');
   await a.click('#add-docs');
   // files is added from the keyboard (focus on its Add, as Tab leaves it): its row moves under On at once, and each heading counts its rows.
@@ -1331,6 +1331,8 @@ async function practiceFlow() {
     'skills/old-triage/SKILL.md': '---\nname: old-triage\ndescription: Dropped in 2.0.0.\n---\n',
   });
   await a.click('#nav-plugins');
+  // Every plugin click below acts at once: nothing on these pages waits for a later click, so none of these ever shows.
+  await a.run(`window.ckWaiting = []; new MutationObserver(() => { for (const e of document.querySelectorAll('#plugins-apply, #plugins-discard, .skill-switch-chosen')) window.ckWaiting.push(e.id || e.className); }).observe(document.body, { subtree: true, childList: true, attributes: true }); true`);
   check('no marketplaces yet', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
   await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#add-marketplace');
@@ -1504,21 +1506,19 @@ async function practiceFlow() {
   await a.click('#pfile-0-skills-triage');
   same('a skill opens its SKILL.md as written, one block per version that differs', await a.all('.plugin-file .content-block', '[e.querySelector(".content-owner")?.textContent, e.querySelector("pre").textContent]'),
     [['SKILL.md · Marketplace (2.0.0)', readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8')], ['SKILL.md · Claude Code (1.9.0)', '---\nname: triage\ndescription: Sorts new issues.\n---\n\nThe old steps.\n']]);
-  // Update: Claude Code's 1.9.0 is behind, so its box and one button offer the update; Apply all runs Claude Code's own
-  // `plugin update` (a stand-in that moves its record to 2.0.0), and the page reads the new version back from that record.
-  same('an out-of-date copy offers Update, for every tool behind', [await a.run(`document.querySelector('#pcell-0-issue-tracker-claude-cli')?.dataset.state`), await a.text('#pupdate-0-issue-tracker')], ['outdated', 'Update in Claude Code']);
+  // Update: Claude Code's 1.9.0 is behind, so its box and one button offer the update; the click runs Claude Code's own
+  // `plugin update` at once (a stand-in that moves its record to 2.0.0), and the page reads the new version back from that record.
+  same('an out-of-date copy offers Update, for every tool behind, saying before the click that it can’t be undone', [await a.run(`document.querySelector('#pcell-0-issue-tracker-claude-cli')?.dataset.state`), await a.text('#pupdate-0-issue-tracker'), await a.run(`document.querySelector('#pupdate-0-issue-tracker').title`)],
+    ['outdated', 'Update in Claude Code', 'Updates it in Claude Code now. An update can’t be undone.']);
   const claudeStub = join(HOME, '.local/bin/claude'), stubBefore = readFileSync(claudeStub, 'utf8');
   const newCopy = join(practice, '.claude/plugins/cache/ck-test-market/issue-tracker/2.0.0');
   writeFileSync(claudeStub, `#!/bin/sh\n[ "$*" = "plugin update issue-tracker@ck-test-market --scope user" ] || exit 9\nmkdir -p '${newCopy}/skills/triage' && cp '${join(market, 'plugins/issue-tracker/skills/triage/SKILL.md')}' '${newCopy}/skills/triage/'\nprintf '{"version":2,"plugins":{"issue-tracker@ck-test-market":[{"scope":"user","installPath":"${newCopy}","version":"2.0.0"}]}}' > "$HOME/.claude/plugins/installed_plugins.json"\necho 'Plugin "issue-tracker" updated from 1.9.0 to 2.0.0 for scope user.'\n`);
   await a.click('#pupdate-0-issue-tracker');
-  check('Update only chooses it', /1 update/.test(await a.text('.toolbar') ?? '') && /Will update to 2\.0\.0/.test(await a.text('.plugin-panel') ?? ''), await a.text('.plugin-panel'));
-  check('a crowded toolbar keeps a short count, with the full summary as its tooltip', await a.run(`(() => { const count = document.querySelector('.plugins-toolbar .apply-count'); return !!count && count.title.includes('1 update'); })()`));
-  await a.click('#plugins-apply');
   for (let tries = 0; tries < 30 && !/Installed · 2\.0\.0/.test(await a.text('.plugin-panel') ?? ''); tries++) await wait(100);
-  check('Apply all updates it, read back from Claude Code’s record, and says it can’t be undone', /Installed · 2\.0\.0/.test(await a.text('.plugin-panel') ?? '') && !/Marketplace has/.test(await a.text('.plugin-panel') ?? '')
+  check('the click updates it at once, read back from Claude Code’s record, says it can’t be undone, and offers no Undo', /Installed · 2\.0\.0/.test(await a.text('.plugin-panel') ?? '') && !/Marketplace has/.test(await a.text('.plugin-panel') ?? '')
     && /updated to 2\.0\.0 in Claude Code, which can’t be undone/i.test(await a.run(`document.querySelector('#announcement')?.dataset.text ?? ''`)) && !(await a.exists('#plugins-undo')), [await a.text('.plugin-panel'), await a.run(`document.querySelector('#announcement')?.dataset.text`), await a.text('.bands')]);
   // The copy changes at the same version (2.0.0): once read again, the page says so and offers Update. Claude Code's own
-  // update keeps its copy ("already at the latest"), so Apply all uninstalls and installs it again, and compares after.
+  // update keeps its copy ("already at the latest"), so Update uninstalls and installs it again, and compares after.
   const triage = join(newCopy, 'skills/triage/SKILL.md'), record = readFileSync(join(practice, '.claude/plugins/installed_plugins.json'), 'utf8');
   writeFileSync(triage, readFileSync(triage, 'utf8') + '\nA line added by hand.\n');
   writeFileSync(claudeStub, `#!/bin/sh\ncase "$*" in\n  "plugin update issue-tracker@ck-test-market --scope user") echo 'issue-tracker is already at the latest version (2.0.0).' ;;\n  "plugin uninstall issue-tracker@ck-test-market --scope user") printf '{"version":2,"plugins":{}}' > "$HOME/.claude/plugins/installed_plugins.json" ;;\n  "plugin install issue-tracker@ck-test-market --scope user") cp '${join(market, 'plugins/issue-tracker/skills/triage/SKILL.md')}' '${triage}' && printf '%s' '${record}' > "$HOME/.claude/plugins/installed_plugins.json" ;;\n  *) exit 9 ;;\nesac\n`);
@@ -1528,9 +1528,8 @@ async function practiceFlow() {
   for (let tries = 0; tries < 30 && !/differs from the marketplace’s copy/.test(await a.text('.plugin-panel') ?? ''); tries++) await wait(100);
   same('a copy that differs at the same version says so and offers Update', [/Installed · 2\.0\.0 · differs from the marketplace’s copy/.test(await a.text('.plugin-panel') ?? ''), await a.run(`document.querySelector('#pcell-0-issue-tracker-claude-cli')?.dataset.state`), await a.text('#pupdate-0-issue-tracker')], [true, 'outdated', 'Update in Claude Code']);
   await a.click('#pupdate-0-issue-tracker');
-  await a.click('#plugins-apply');
   for (let tries = 0; tries < 30 && /differs from the marketplace’s copy/.test(await a.text('.plugin-panel') ?? 'differs from the marketplace’s copy'); tries++) await wait(100);
-  check('Apply all reinstalls it where Claude Code keeps its copy, and the result says so', !/differs from the marketplace’s copy/.test(await a.text('.plugin-panel') ?? '') && readFileSync(triage, 'utf8') === readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8')
+  check('Update reinstalls it where Claude Code keeps its copy, and the result says so', !/differs from the marketplace’s copy/.test(await a.text('.plugin-panel') ?? '') && readFileSync(triage, 'utf8') === readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8')
     && /reinstalled from the marketplace’s copy of 2\.0\.0 in Claude Code/i.test(await a.run(`document.querySelector('#announcement')?.dataset.text ?? ''`)), [await a.text('.plugin-panel'), await a.run(`document.querySelector('#announcement')?.dataset.text`)]);
   writeFileSync(claudeStub, stubBefore);
   // Claude Code lets it go outside the app; coming back to Plugins reads the install states, and the copies, again.
@@ -1721,8 +1720,9 @@ async function practiceFlow() {
   for (let tries = 0; tries < 40 && !/Can go in now/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
   check('once the name is free, the page offers it with Update parts', /Can go in now: skill triage/.test(await a.text('.plugin-parts-section') ?? '') && /Update parts in Pi/.test(await a.text('#pparts-issue-tracker') ?? ''), await a.text('.plugin-parts-section'));
   await a.click('#pparts-issue-tracker');
-  await a.click('#plugins-apply');
-  check('Update parts adds it', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !readFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), 'utf8').includes('Mine.'), await a.text('.bands'));
+  check('Update parts adds it at once', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !readFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), 'utf8').includes('Mine.'), await a.text('.bands'));
+  same('its Undo says it puts those parts back, and does: the skill goes again', [await a.run(`document.querySelector('#plugins-undo')?.title`), await (async () => { await a.click('#plugins-undo'); return existsSync(join(practice, '.pi/agent/skills/triage')); })()],
+    ['Reverses what changed, through each tool’s own command or switch: puts the parts back as they were in Pi.', false]);
   await turnIssueTracker();
   check('Off takes its parts out of Pi', !existsSync(join(practice, '.pi/agent/skills/triage')) && !readFileSync(piMcp, 'utf8').includes('issues'), readFileSync(piMcp, 'utf8'));
   // Single parts: On over a link in triage's place that leads nowhere puts the skill in its place; then a switch under Pi takes
@@ -1744,15 +1744,15 @@ async function practiceFlow() {
   for (let tries = 0; tries < 40 && await standOf('mcp-issues') === 'missing'; tries++) await wait(100);
   same('each part has a switch under Pi, on', [await standOf('skill-triage'), await standOf('mcp-issues')], ['in true', 'in true']);
   await a.click(partSwitch('mcp-issues'));
-  check('a part’s switch chooses it alone, and the page says what Apply all will do', await standOf('mcp-issues') === 'part-off false' && /Will take out 1 part/.test(await a.text('.plugin-panel') ?? '') && /1 part to take out/.test(await a.text('.toolbar') ?? '')
-    && /Comes out of Pi/.test(await a.text('.plugin-group:has(#ppart-0-issue-tracker-mcp-issues-pi-cli)') ?? ''), `${await standOf('mcp-issues')} | ${await a.text('.plugin-panel')} | ${await a.text('.toolbar')}`);
-  await a.click('#plugins-apply');
-  check('only that part comes out', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !readFileSync(piMcp, 'utf8').includes('issues') && /MCP server issues taken out of Pi/i.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
+  check('a part’s switch takes only that part out, at once', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !readFileSync(piMcp, 'utf8').includes('issues') && /MCP server issues taken out of Pi/i.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
   for (let tries = 0; tries < 40 && !/Left out by you/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
   check('the part left out is said, with its switch off', /Installed[^:]*: skill triage/.test(await a.text('.plugin-parts-section') ?? '') && /Left out by you: MCP server issues/.test(await a.text('.plugin-parts-section') ?? '') && await standOf('mcp-issues') === 'out false' && await standOf('skill-triage') === 'in true', await a.text('.plugin-parts-section'));
+  const triageText = readFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), 'utf8');
   await a.click(partSwitch('skill-triage'));
-  await a.click('#plugins-apply');
   check('turning its switch off takes it out again', !existsSync(join(practice, '.pi/agent/skills/triage')), await a.text('.bands'));
+  await a.click('#plugins-undo');
+  same('Undo puts that one part back as it was', [existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && readFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), 'utf8'), readFileSync(piMcp, 'utf8').includes('issues')], [triageText, false]);
+  await a.click(partSwitch('skill-triage'));
   rmSync(join(practice, '.pi'), { recursive: true, force: true });
   await a.run('window.centralKnot.refresh()');
   // One skill of an installed plugin, off and back on (ENB-06): Codex's switch is a [[skills.config]] block naming
@@ -1769,9 +1769,7 @@ async function practiceFlow() {
   for (let tries = 0; tries < 60 && !(await a.exists('#pskill-0-document-tools-pdf-reader-codex-cli')); tries++) await wait(100);
   same('an installed plugin’s skills each get a switch in the tool that has it, on', await a.all('.plugin-skills .switch[id^="pskill-"]', 'e.id + "=" + e.getAttribute("aria-checked")'), ['pskill-0-document-tools-pdf-reader-codex-cli=true', 'pskill-0-document-tools-spreadsheet-codex-cli=true']);
   await a.click('#pskill-0-document-tools-pdf-reader-codex-cli');
-  check('turning one off only chooses it', /1 skill to turn off/.test(await a.text('.toolbar') ?? '') && readFileSync(codexConfig, 'utf8') === configBefore, await a.text('.toolbar'));
-  await a.click('#plugins-apply');
-  check('Apply all turns it off with Codex’s own switch, by name', readFileSync(codexConfig, 'utf8') === `${configBefore}\n[[skills.config]]\nname = "document-tools:pdf-reader"\nenabled = false\n`, readFileSync(codexConfig, 'utf8'));
+  check('a click turns it off at once, with Codex’s own switch, by name', readFileSync(codexConfig, 'utf8') === `${configBefore}\n[[skills.config]]\nname = "document-tools:pdf-reader"\nenabled = false\n`, readFileSync(codexConfig, 'utf8'));
   check('and the page shows it off', await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`) === 'false' && /Installed (· [^·]+ )?· 1 skill off/.test(await a.text('.plugin-panel')) && /pdf-reader turned off in Codex/.test(await a.text('.toolbar') ?? ''), await a.text('.plugin-page'));
   // The Skills page shows the same switch in Codex's box for the plugin's skill.
   const pdfRow = 'document-tools@ck-test-market/pdf-reader';
@@ -1781,6 +1779,7 @@ async function practiceFlow() {
   await a.click('#nav-plugins');
   await a.click('#plugins-undo');
   same('Undo turns it back on: config.toml is as it was', [readFileSync(codexConfig, 'utf8') === configBefore, await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`)], [true, 'true']);
+  same('nothing on the plugin pages waited for a later click: no Apply, no Discard, no chosen switch', await a.run('window.ckWaiting'), []);
   writeFileSync(codexConfig, configBefore.slice(0, configBefore.indexOf('\n[marketplaces.ck-test-market]')));
   await a.click('#plugin-back');
   // About has every fact about the marketplace, and Remove.
@@ -2182,6 +2181,36 @@ async function listDiffersFlow() {
   console.log(`(Plugins list drawn ${drawn} ms after opening it; the differing copies known after ${known} ms)`);
   same('no page errors, list differs', a.pageErrors, []);
   await a.quit();
+  // Update all runs both updates in one run, with one result. A newer release of the app, downloading meanwhile, becomes ready
+  // during that run and waits: a restart between two of its steps would stop the rest.
+  const claudeStub = join(HOME, '.local/bin/claude'), stubBefore = readFileSync(claudeStub, 'utf8'), cache = join(home, '.claude/plugins/cache/ck-test-market');
+  writeFileSync(claudeStub, `#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.309 (Claude Code)" && exit 0\ncase "$1 $2 $4 $5" in\n  "plugin update --scope user") sleep 3; name="\${3%@*}"; for copy in '${cache}'/"$name"/*/; do cp -R '${join(market, 'plugins')}'/"$name"/. "$copy"; done ;;\n  *) exit 9 ;;\nesac\n`);
+  const zip = join(scratch, 'update-all.zip');
+  writeFileSync(zip, Buffer.alloc(3_000_000, 7));
+  const fixture = await serveReleases([{ tag: 'v0.5.0-preview.5', zip, bytesPerSecond: 1_000_000 }]);
+  const b = await launch(data, [], HOME, { CK_UPDATE_STUB: 'v0.5.0-preview.4', CK_UPDATE_RELEASES: fixture.releasesUrl });
+  try {
+    const look = () => b.run(`document.getElementById('update-control')?.dataset.look`), busy = () => b.run(`document.body.dataset.busy === 'true'`);
+    const behind = async () => await b.exists(row('issue-tracker')) || await b.exists(row('document-tools'));
+    await b.run(`(document.querySelector('#nav-plugins').click(), true)`);
+    for (let tries = 0; tries < 200 && !(await b.exists(row('issue-tracker')) && await b.exists(row('document-tools')) && await look() === 'available'); tries++) await wait(100);
+    same('Update all says before the click what it runs, the copies it replaces, and that it can’t be undone', await b.run(`document.querySelector('#market-update-all-0').title`),
+      'Updates document-tools in Claude Code and issue-tracker in Claude Code. It replaces the copies that differ from the marketplace’s: document-tools and issue-tracker. Runs now. An update can’t be undone.');
+    // The release downloads in about 3 seconds; each plugin's update takes 3.
+    await b.run(`(document.getElementById('update-control').click(), document.getElementById('market-update-all-0').click(), true)`);
+    // A restart in the middle (the stand-in's install quits the app) would leave the page unreachable: that is raced, not waited on.
+    const quit = new Promise(done => b.child.once('exit', () => done('restarted mid-run')));
+    const held = (async () => { for (let tries = 0; tries < 80 && await look() !== 'held'; tries++) await wait(250); return 'waited'; })();
+    same('the app’s update, ready during the run, waits for it rather than restarting', await Promise.race([quit, held]), 'waited');
+    if (b.child.exitCode === null) {
+      same('and the control says why while the run goes on', [await look(), await busy(), /Restarting now stops the plugin changes under way\./.test(await b.run(`document.getElementById('update-control').title`))], ['held', true, true]);
+      for (let tries = 0; tries < 150 && (await busy() || await behind()); tries++) await wait(100);
+      const said = await b.run(`document.querySelector('#announcement')?.dataset.text ?? ''`);
+      check('the run went to its end: both updates in one result, no Undo, no row behind, and the app still running', !(await behind()) && !(await b.exists('#plugins-undo')) && b.child.exitCode === null
+        && /document-tools: updated to the marketplace’s copy of 1\.2\.0 in Claude Code.*; issue-tracker: updated to the marketplace’s copy of 2\.0\.0 in Claude Code/.test(said), said);
+      same('no page errors, Update all', b.pageErrors, []);
+    }
+  } finally { writeFileSync(claudeStub, stubBefore); await b.quit(); await fixture.close(); }
 }
 
 async function repoBaseFlow() {
@@ -2559,7 +2588,7 @@ async function updateFlow() {
     await typeDraft();
     await watchLooks();
     await press('update-control');
-    same('the click says it won’t restart by itself, with changes waiting', await a.run(`document.getElementById('announcement').dataset.text`), 'Downloading 0.5.0 preview 5. Something here isn’t saved yet, so Central Knot will wait for you to restart.');
+    same('the click says it won’t restart by itself, with changes waiting', await a.run(`document.getElementById('announcement').dataset.text`), 'Downloading 0.5.0 preview 5. Restarting now loses your unsaved instructions draft. If that still holds when it’s ready, Central Knot waits for you to restart.');
     same('downloaded and prepared, it waits to restart', await reaches('held'), 'held');
     const looks = await a.run('window.ckLooks');
     check('one click downloads, with progress on the control, then prepares', looks.filter(look => /^working Downloading… \d+%$/.test(look)).length >= 2 && looks.includes('working Preparing update…'), looks);
@@ -3969,7 +3998,6 @@ esac
   rmSync(join(home, 'issue-fails'));
   for (let tries = 0; tries < 50 && !(await a.exists('#pupdate-0-issue-tracker')); tries++) await wait(100);
   await a.click('#pupdate-0-issue-tracker');
-  await a.click('#plugins-apply');
   check('Update on the page makes it, and the failure’s note goes with no check in between', await until(() => versions()['issue-tracker'] === '4.0.0' && noted().failures?.length === 0, 10000) && await until(async () => !(await a.exists('#plugin-updates-failed')), 5000), JSON.stringify([versions(), noted().failures, await a.text('#plugin-updates-failed')]));
   same('no page errors, plugin updates on a schedule', a.pageErrors, []);
   await a.quit();

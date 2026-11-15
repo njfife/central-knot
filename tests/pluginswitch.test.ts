@@ -11,7 +11,7 @@ const installed = (tool: HarnessId, more: Partial<InstalledPlugin> = {}): Instal
     ...(tool === 'codex-cli' ? [] : [{ kind: 'agent' as const, name: 'helper', description: '' }])],
   ...more });
 const item = (install: InstalledPlugin, kind: PartKind, name: string): PluginItemAt => ({ kind, name, tool: install.tool, install });
-/** What the draft holds, as "tool action item", in the order Apply all runs it. */
+/** What the draft holds, as "tool action item", in the order a run takes it. */
 const chosen = (draft: PluginDraft) => batches([...draft.values()]).map(step => `${step.tools[0]} ${step.action}${step.skill ? ` ${step.skill}` : ''}${step.part ? ` ${step.part.kind} ${step.part.name}` : ''}`);
 
 test('a skill or an MCP server with its own switch flips that switch alone, and a second click takes the choice back', () => {

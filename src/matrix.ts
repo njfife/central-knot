@@ -114,7 +114,7 @@ function switchPluginItem(item: PluginItemAt) {
   const on = !itemOn(item);
   clickPluginItem(draft, item);
   const ops = [...draft.values()];
-  void applyPluginSwitches(ops, draft, { said: itemSaid(item, on, ops), undone: undoneWords(item.name, on, names[item.tool]) });
+  void applyPluginSwitches(ops, { said: itemSaid(item, on, ops), undone: undoneWords(item.name, on, names[item.tool]) });
 }
 
 /** Why an item a tool has through a plugin can't be switched on this page now, if it can't: the switch itself (pluginswitch.cantSwitch), or a home that can't be written. */
@@ -1148,9 +1148,9 @@ function mainClick(name: string, on: boolean, changes: Change[], plugins: Return
   const there = !changes.length && new Set(plugins.turned.map(item => item.tool)).size === 1;
   const along = plugins.turned.map(item => alongWords(item, plugins.ops, there)).filter(Boolean).join(' ') || undefined;
   const next = wholePluginAct(name, plugins.whole, on);
-  if (changes.length) return applyClick({ kind, items: [name], changes, said, also, note: plugins.limit, next, plugins: plugins.ops.length ? { ops: plugins.ops, draft: plugins.draft, said: along } : undefined });
+  if (changes.length) return applyClick({ kind, items: [name], changes, said, also, note: plugins.limit, next, plugins: plugins.ops.length ? { ops: plugins.ops, said: along } : undefined });
   const where = toolsPhrase(plugins.turned.map(item => item.tool), toolList());
-  return applyPluginSwitches(plugins.ops, plugins.draft, { also, note: plugins.limit, next, said: [said([]), along].filter(Boolean).join(' '), undone: undoneWords(name, on, where) });
+  return applyPluginSwitches(plugins.ops, { also, note: plugins.limit, next, said: [said([]), along].filter(Boolean).join(' '), undone: undoneWords(name, on, where) });
 }
 
 /** A plugin item's Undo, in one form on every page: what the click did, turned back ("Undone: triage is back on in Codex."). */
@@ -1165,7 +1165,7 @@ function wholePluginAct(name: string, whole: PluginItemAt[], on: boolean) {
     const draft: PluginDraft = new Map();
     for (const item of whole) clickPluginItem(draft, item);
     const ops = [...draft.values()];
-    void applyPluginSwitches(ops, draft, { said: whole.map(item => itemSaid(item, on, ops)).join(' '), undone: undoneWords(name, on, where) });
+    void applyPluginSwitches(ops, { said: whole.map(item => itemSaid(item, on, ops)).join(' '), undone: undoneWords(name, on, where) });
   } };
 }
 

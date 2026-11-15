@@ -356,16 +356,16 @@ test('Single parts: a first pick leaves the rest out, an update keeps them out, 
   } finally { await box.cleanup(); }
 });
 
-test('A pick beside an install of all the parts is that install with exceptions; a part that can’t go in fails by name', async () => {
+test('A part taken out alone stays out on the next update until turned on; a part that can’t go in fails by name', async () => {
   const box = await threeSkills();
   try {
-    const most = await installParts(box.context, box.to, await box.files(), { on: [], off: [skill('grill-me')], rest: true });
+    await installParts(box.context, box.to, await box.files());
+    const most = await installParts(box.context, box.to, await box.files(), { on: [], off: [skill('grill-me')] });
     assert.equal(most.outcome, 'installed', most.message);
-    assert.match(most.message, /Parts installed: 2 skills/);
     assert.deepEqual(await box.inPi(), ['figma-design', 'tdd']);
-    // The one left out stays out on the next update, until it is turned on with the rest.
+    // The one left out stays out on the next update, until it is turned on again.
     assert.deepEqual(await (async () => { await installParts(box.context, box.to, await box.files()); return box.inPi(); })(), ['figma-design', 'tdd']);
-    const all = await installParts(box.context, box.to, await box.files(), { on: [skill('grill-me')], off: [], rest: true });
+    const all = await installParts(box.context, box.to, await box.files(), { on: [skill('grill-me')], off: [] });
     assert.equal(all.outcome, 'installed', all.message);
     assert.deepEqual(await box.inPi(), ['figma-design', 'grill-me', 'tdd']);
     // A request naming one part both ways, or twice, takes it once, and out wins: the record never doubles.

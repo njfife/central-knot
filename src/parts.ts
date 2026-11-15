@@ -173,7 +173,7 @@ export async function planParts(context: ShareContext, files: PluginFiles, tools
         const rewrite = part.kind === 'skill' && holds.skillRootProblem && ready.find(item => samePart(item, part))?.hash !== own.hash;
         if (left) part.why = sentence(left);
         else if (rewrite) part.why = holds.skillRootProblem;
-        // Taking it out goes through the same folder: its switch says so before Apply all would fail.
+        // Taking it out goes through the same folder: its switch says so before a run would fail.
         else if (part.kind === 'skill' && holds.skillRootProblem) part.fixed = holds.skillRootProblem;
         continue;
       }
@@ -516,8 +516,8 @@ const report = (tool: HarnessId, outcome: ActionReport['outcome'], message: stri
  * Installs a plugin's parts in a tool, or brings them up to date: parts still as they went in are replaced by the plugin's
  * current ones, new ones added, ones the plugin dropped removed. Edited, deleted or managed parts stay as they are; a part whose source can't be read now keeps
  * its installed copy. With `pick`, each part in `on` goes in (also one turned off or removed before) and each one in
- * `off` comes out and stays out. Unless `pick.rest`, only those parts change, and the first pick for a tool leaves the
- * plugin's other parts out too. The record names every part before anything is written, so a run that stops halfway still owns what it wrote.
+ * `off` comes out and stays out. Only those parts change, and the first pick for a tool leaves the plugin's other parts out
+ * too. The record names every part before anything is written, so a run that stops halfway still owns what it wrote.
  * A run with failures keeps the old version and digest, so the plugin still shows as changed. Undoable.
  */
 export async function installParts(context: ShareContext, target: PartsTarget, files: PluginFiles, pick?: PartsPick): Promise<ActionReport> {
@@ -529,10 +529,9 @@ export async function installParts(context: ShareContext, target: PartsTarget, f
   const { ready, plan, unread } = await partsFor(context, files, tool);
   if (!ready.length && !before) return report(tool, 'failed', `Nothing in it can go into ${toolNames[tool]}. ${plan.map(part => part.why).filter(Boolean)[0] ?? 'It has no skills, MCP servers or agents.'}`);
   const held = before?.items ?? [];
-  const whole = wholeChange(held, ready, unread, files);
-  const change = pick ? pickedChange(held, ready, plan, pick, pick.rest ? whole : undefined) : whole;
+  const change = pick ? pickedChange(held, ready, plan, pick) : wholeChange(held, ready, unread, files);
   // Only single parts change: the others stay as they are, at the version they have.
-  const only = !!pick && !pick.rest;
+  const only = !!pick;
   const record = (items: PartItem[], version: string | undefined, contentDigest: string): PartsInstall | null => (items.length
     ? { source: target.source, marketName: target.marketName, plugin: target.plugin, version, tool, at: new Date().toISOString(), digest: contentDigest, items }
     : null);
@@ -594,19 +593,17 @@ function wholeChange(held: PartItem[], ready: Ready[], unread: Set<string>, file
 }
 
 /**
- * Single parts, chosen (`pick`), beside the rest of the tool's parts: those move as the whole plugin's do (`rest`), or
- * stay as they are, and with no record yet are recorded as out, so a later update brings in only what was chosen. A part
- * turned on is wanted in (`settle` writes it even where the record has it out or it is gone from the tool); one turned
- * off is wanted out.
+ * Single parts, chosen (`pick`): the tool's other parts stay as they are, and with no record yet are recorded as out, so a
+ * later update brings in only what was chosen. A part turned on is wanted in (`settle` writes it even where the record has
+ * it out or it is gone from the tool); one turned off is wanted out.
  */
-function pickedChange(held: PartItem[], ready: Ready[], plan: PartPlan[], pick: PartsPick, rest: PartsChange | undefined): PartsChange {
+function pickedChange(held: PartItem[], ready: Ready[], plan: PartPlan[], pick: PartsPick): PartsChange {
   // Each part once, whatever the request repeats: one named both ways comes out.
   const once = (refs: PartRef[]) => refs.filter((ref, at) => refs.findIndex(other => samePart(other, ref)) === at);
   const off = once(pick.off), on = once(pick.on).filter(ref => !off.some(other => samePart(other, ref)));
   const picked = (item: Pick<PartItem, 'kind' | 'name'>) => [...on, ...off].some(ref => samePart(ref, item));
   const others = <T extends PartItem>(items: T[]) => items.filter(item => !picked(item));
-  const change: PartsChange = rest ? { ...rest, from: others(rest.from), to: others(rest.to) }
-    : { from: [], to: [], aside: [...others(held), ...(held.length ? [] : others(ready).map(outOf))], cannot: [] };
+  const change: PartsChange = { from: [], to: [], aside: [...others(held), ...(held.length ? [] : others(ready).map(outOf))], cannot: [] };
   for (const ref of on) {
     const want = ready.find(item => samePart(item, ref));
     const old = held.find(item => samePart(item, ref));
