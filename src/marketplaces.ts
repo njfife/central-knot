@@ -374,7 +374,10 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     };
   }
 
-  /** The plugins the managed tools hold now, for the first read: installed whole from a marketplace the tool's record names, and parts on record. */
+  /**
+   * The plugins the managed tools hold now, for the first read: installed whole from a marketplace the tool's record names, and
+   * parts on record, in a managed tool or in Pi or OpenCode left out (the move decides those as the record knew them: partsmigrate.ts).
+   */
   async function holdingsIn(ctx: engine.PluginContext, tools: HarnessId[]): Promise<Holding[]> {
     const holdings: Holding[] = [];
     for (const tool of tools.filter(takesPlugins)) {
@@ -384,7 +387,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
         if (source && found.state.state !== 'not-installed') holdings.push({ tool, source, marketName: found.marketplace, plugin: found.plugin });
       }
     }
-    if (host.share) for (const install of await readParts(ctx.home)) if (tools.includes(install.tool)) holdings.push({ tool: install.tool, source: install.source, marketName: install.marketName, plugin: install.plugin });
+    const counted = (tool: HarnessId) => tools.includes(tool) || !takesPlugins(tool);
+    if (host.share) for (const { tool, source, marketName, plugin } of await readParts(ctx.home)) if (counted(tool)) holdings.push({ tool, source, marketName, plugin });
     return holdings;
   }
 

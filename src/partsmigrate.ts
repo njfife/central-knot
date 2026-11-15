@@ -23,11 +23,11 @@
 //
 //   the tool (Pi, OpenCode) holds                     the item there
 //   the plugin's part, its copy as the part wrote it  applied: that content
-//   the plugin's part, its copy edited                applied at the part's kept content where the kind's record holds that
-//                                                     tool's folder identity (a managed tool's only), so the first pass lets
-//                                                     the item go as his own and takes the edit in (librarypass.ts letGo); else
-//                                                     (a pass would read A back from the copy: librarypass.ts cameBack; or
-//                                                     nothing kept) kept out, the edit that tool's own
+//   the plugin's part, its copy edited                applied at the part's kept content where the tool is managed and the
+//                                                     kind's record holds its folder identity, so the first pass lets the item
+//                                                     go as his own and takes the edit in (librarypass.ts letGo); else (no
+//                                                     identity: a pass would read A back from the copy, librarypass.ts
+//                                                     cameBack; not managed; or nothing kept) kept out, the edit that tool's own
 //   the plugin's part, no copy, deleted by hand       kept out
 //   the plugin's part, no copy, never written         nothing: where the item is On, the first pass writes it, as the old
 //                                                     engine's next run would have
@@ -43,7 +43,8 @@
 // written over by its update. Of contents that differ (one tool picked up to a later version), the current one is what the
 // plugin's files hold now, else the higher version on record, never the later time; the others are kept as versions. A key whose
 // copies give no content (nothing kept, every copy edited) is his own item, from the first copy. Known miss: where a plugin's files
-// can't be read now, a part a first pick left out gets no item, and nor does a name that was no part.
+// can't be read now, a part a first pick left out gets no item then, nor does a name that was no part, which the plugin's next
+// read of its files then makes, On as the plugin is, in each tool where the plugin is (pluginlibrary.ts).
 //
 // It waits, writing nothing of its own, while the record can't be read, there is no sync record or the gate refuses, plugins.json
 // is absent or has a problem, a kind's record has one, or a copy of a part in a managed tool can't be read for sure. Its writes,
@@ -131,9 +132,9 @@ const unchangedByRecord: Record<ItemKind, (copy: Seen, part: PartItem) => boolea
 
 /**
  * One kind as the migration reads it: its record; the tools it decides (`tools`: every managed one and every one the record names,
- * managed or not); what they hold (its own read, unguarded); its parts.
+ * managed or not) and of them the managed ones; what they hold (its own read, unguarded); its parts.
  */
-interface KindRead { kind: Kind<unknown, Seen>; library: KindLibrary; tools: HarnessId[]; disk: Disk<Seen>; parts: OnRecord[] }
+interface KindRead { kind: Kind<unknown, Seen>; library: KindLibrary; tools: HarnessId[]; managed: HarnessId[]; disk: Disk<Seen>; parts: OnRecord[] }
 
 /**
  * THE MIGRATION (the header): answers why it waits, if it does. `kinds`: every kind on the library (homepass.ts gives them, as this
@@ -157,7 +158,7 @@ export async function migrateParts(context: ShareContext, managed: HarnessId[], 
     // A copy that can't be read for sure in a managed tool waits; in one not managed that tool is kept out (itemFor).
     const unread = ofKind.map(({ install, part }) => !part.removed && kindManaged.includes(install.tool) && unseenIn(disk, install.tool, itemKey(part.name))).find(Boolean);
     if (unread) return { waits: unread };
-    moving.push({ kind, library, tools, disk, parts: ofKind });
+    moving.push({ kind, library, tools, managed: kindManaged, disk, parts: ofKind });
   }
   const record = await entriesFirst(context.home, plugins.record, parts, managed);
   const reads = new Map<string, ReturnType<PluginNow>>();
@@ -205,7 +206,7 @@ async function entriesFirst(home: string, record: PluginRecord, parts: OnRecord[
  * One key's item (the header's table), its versions and own parts stored; none for the known miss. `atPlugin`: what the plugin's
  * files hold of the key now, read only where it decides.
  */
-async function itemFor(context: ShareContext, { kind, library, tools, disk }: KindRead, key: string, name: string, ofKey: OnRecord[], entry: PluginEntry,
+async function itemFor(context: ShareContext, { kind, library, tools, managed, disk }: KindRead, key: string, name: string, ofKey: OnRecord[], entry: PluginEntry,
   atPlugin: () => Promise<{ hash: string; content: unknown; at: string } | undefined>): Promise<LibraryItem | undefined> {
   const ours = ofKey.filter(({ install }) => install.plugin === entry.plugin && sameSource(install.source, entry.source));
   const except: HarnessId[] = [], applied = new Map<HarnessId, Content>(), unedited: Content[] = [], partCopies: Seen[] = [];
@@ -219,8 +220,9 @@ async function itemFor(context: ShareContext, { kind, library, tools, disk }: Ki
     const kept = await keptOf[kind.kind](context, at);
     const content: Content = { hash: copy.hash, content: kind.contentOf(copy), ...keptAt(at) };
     if (kept ? copy.hash === kept.hash : unchangedByRecord[kind.kind](copy, at.part)) { applied.set(tool, content); unedited.push(content); }
-    // A tool not managed has none (toolchoice.ts lets it go when it is left out, and librarypass.ts keepFolders at every pass).
-    else if (kept && library.folders[tool]) applied.set(tool, { ...kept, ...keptAt(at) });
+    // Never in a tool not managed, though its identity may be on record (the MCP record's migration notes every tool's file; alpha 1
+    // let a left-out tool's go only at its next pass): its edit stays its own whatever order the first pass takes (letGo, cameBack).
+    else if (kept && managed.includes(tool) && library.folders[tool]) applied.set(tool, { ...kept, ...keptAt(at) });
     else except.push(tool);
   }
   // A tool the plugin is kept out of gets none of its items, whenever it appears (pluginlibrary.ts pluginOutOf, the same).

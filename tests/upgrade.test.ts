@@ -443,13 +443,15 @@ for (const rule of [true, false]) for (const sync of ['on', 'off'] as const) {
 // comes back and nothing he edited there is written over; memo's agent, which Pi never had, doesn't go there; and a skill journal's
 // plugin gains meanwhile doesn't either, since the plugins record keeps journal out of Pi (pluginlibrary.ts pluginOutOf).
 describe('Upgrading alpha-1-parts with Pi left out, then managing Pi again', () => {
-  let box: Box, made: Files, names: Record<ItemKind, string[]>, entries: Record<string, string>, joined: AfterPass[];
+  let box: Box, made: Files, names: Record<ItemKind, string[]>, entries: Record<string, string>, out: AfterPass[], joined: AfterPass[];
   before(async () => {
     box = await placeParts(true, ['codex-cli', 'pi-cli']);
+    // No profiles file: nothing passes before the move, so the MCP record's own migration has just noted Pi's settings file.
+    await rm(join(box.store, 'profiles.json'));
     made = await filesIn(box.home);
     names = await partNames(box);
     entries = await partEntries(box, names.mcp);
-    start(box, 'on', 2);
+    out = start(box, 'on', 2);
     await mkdir(join(box.home, 'market/plugins/journal/skills/prompts'), { recursive: true });
     await writeFile(join(box.home, 'market/plugins/journal/skills/prompts/SKILL.md'), '---\nname: prompts\ndescription: Prompts for the day.\n---\n\nAsk one question.\n');
     const read = await plugins(box).markets.items(join(box.home, 'market'), 'team', 'journal', ['opencode-cli'], box.home, false, true);
@@ -458,6 +460,13 @@ describe('Upgrading alpha-1-parts with Pi left out, then managing Pi again', () 
     joined = start(box, 'on', 2);
   });
   after(() => rm(box.base, { recursive: true, force: true }));
+
+  test('the move keeps Pi out of lookup, edited there, though the MCP record holds Pi’s settings file; the plugins record keeps Pi out of no plugin it had parts in', async () => {
+    const lookup = libraryOf(out[1], 'mcp').lookup, record = await readJson(join(box.store, 'plugins.json'));
+    assert.deepEqual([lookup.except.includes('pi-cli'), lookup.applied['pi-cli']], [true, undefined], 'his edit there stays Pi’s own, whatever order a pass takes');
+    const keepsPiOut = record.plugins.filter((entry: PluginEntry) => entry.except.includes('pi-cli')).map((entry: PluginEntry) => entry.plugin).sort();
+    assert.deepEqual(keepsPiOut, ['journal', 'tasks'], 'only the plugins Pi had no part of');
+  });
 
   test('after two passes no file or entry of a part’s name in Pi has changed since before the upgrade; only alpha 1’s own items join it', async () => {
     const inPi = changedInTools(made, joined[1].files).filter(path => path.startsWith('.pi/'));
