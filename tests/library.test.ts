@@ -347,7 +347,7 @@ test('A record’s value is an item only with each field of the type it holds (w
 
 // ---------- takeInAnswer: the FOUND table, row by row, a click's column and Synchronize everything's ----------
 
-const copy = (harness: 'claude-cli' | 'codex-cli' | 'copilot-cli', hash: string, more: { at?: number; part?: true; switchedOff?: true } = {}) => ({ harness, hash, ...more });
+const copy = (harness: 'claude-cli' | 'codex-cli' | 'copilot-cli', hash: string, more: { at?: number; switchedOff?: true } = {}) => ({ harness, hash, ...more });
 const found = (copies: ReturnType<typeof copy>[], more: { deleted?: boolean; leaving?: boolean } = {}) => ({ copies, deleted: false, leaving: false, ...more });
 /** Both columns' answers for one found key. */
 const both = (key: ReturnType<typeof found>, settle?: { clock: number; ms: number }) => [takeInAnswer('click', key), takeInAnswer('rule', key, undefined, settle)];
@@ -358,8 +358,6 @@ test('Found, a deleted item’s copy still to leave a harness at Write to Claude
   assert.deepEqual(both(found([copy('claude-cli', 'a')], { deleted: true, leaving: true })), [{ leave: 'leaving' }, { leave: 'leaving' }]));
 test('Found, the record holds it deleted: a click takes it in (the tombstone is lifted), the rule leaves it for good', () =>
   assert.deepEqual(both(found([copy('codex-cli', 'a')], { deleted: true })), [{ take: copy('codex-cli', 'a'), chosen: false }, { leave: 'deleted' }]));
-test('Found, a copy that is a plugin’s part: a click takes it in, the rule leaves it (its row keeps Add)', () =>
-  assert.deepEqual(both(found([copy('codex-cli', 'a', { part: true }), copy('claude-cli', 'a')])), [{ take: copy('codex-cli', 'a', { part: true }), chosen: false }, { leave: 'part' }]));
 test('Found, every copy switched off by its tool’s own switch: a click takes it in, the rule leaves it; one copy on is enough for the rule', () => {
   assert.deepEqual(both(found([copy('codex-cli', 'a', { switchedOff: true })])), [{ take: copy('codex-cli', 'a', { switchedOff: true }), chosen: false }, { leave: 'switched-off' }]);
   assert.deepEqual(takeInAnswer('rule', found([copy('claude-cli', 'a'), copy('codex-cli', 'a', { switchedOff: true })])), { take: copy('claude-cli', 'a'), chosen: false });

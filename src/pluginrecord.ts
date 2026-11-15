@@ -156,13 +156,21 @@ export function firstRecord(managed: HarnessId[], holdings: Holding[], waited: W
   const plugins: PluginEntry[] = [];
   for (const held of holdings) {
     if (!managed.includes(held.tool) || entryOf({ tools: [], plugins }, held.source, held.plugin)) continue;
-    const mine = holdings.filter(other => other.plugin === held.plugin && sameSource(other.source, held.source));
-    const has = (tool: HarnessId) => mine.some(other => other.tool === tool);
-    const waits = (tool: HarnessId) => waited.some(wait => wait.tool === tool && wait.plugin === held.plugin && sameSource(wait.source, held.source));
-    const except = managed.every(has) ? [] : harnessIds.filter(tool => !has(tool) && !waits(tool));
-    plugins.push({ ...newEntry(held.source, held.marketName, held.plugin, true), except });
+    plugins.push(firstEntry(managed, holdings, waited, held));
   }
   return { tools: managed.filter(tool => !waited.some(wait => wait.tool === tool)), plugins };
+}
+
+/**
+ * The entry the first read makes for the plugin `held` names (firstRecord's rule above), from every holding of it. Also the
+ * entry the parts' migration makes for a plugin whose parts are only in tools not managed (partsmigrate.ts).
+ */
+export function firstEntry(managed: HarnessId[], holdings: Holding[], waited: WaitedBefore[], held: Holding): PluginEntry {
+  const mine = holdings.filter(other => other.plugin === held.plugin && sameSource(other.source, held.source));
+  const has = (tool: HarnessId) => mine.some(other => other.tool === tool);
+  const waits = (tool: HarnessId) => waited.some(wait => wait.tool === tool && wait.plugin === held.plugin && sameSource(wait.source, held.source));
+  const except = managed.every(has) ? [] : harnessIds.filter(tool => !has(tool) && !waits(tool));
+  return { ...newEntry(held.source, held.marketName, held.plugin, true), except };
 }
 
 // ---------- The file ----------

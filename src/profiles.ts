@@ -18,6 +18,7 @@ import { changes, liveItems, switchPlan, undoPlan, type Libraries, type LiveItem
 import { applyServers, serverKind } from './servers.ts';
 import { errorCode, libraryGate, storeDirectory, writeDurably, type ShareContext } from './share.ts';
 import { applySkills, skillKind } from './skills.ts';
+import { recordedIds } from './sourcestore.ts';
 import { strings } from './values.ts';
 import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, PassResult, Profile, ProfileEdit, ProfileSwitchResult, ProfilesView } from './types.ts';
 
@@ -55,8 +56,8 @@ export async function readProfileFile(home: string): Promise<{ view: ProfilesVie
   }
 }
 
-/** The home's profiles, for the page and the menus. */
-export const readProfiles = async (home: string): Promise<ProfilesView> => (await readProfileFile(home)).view;
+/** The home's profiles, for the page and the menus, with the plugins whose items they leave alone (profileplan.ts liveItems). */
+export const readProfiles = async (home: string): Promise<ProfilesView> => ({ ...(await readProfileFile(home)).view, plugins: (await recordedIds(home)).plugins.map(entry => entry.id) });
 
 /** Writes the profiles as format 2. */
 export const saveProfiles = (home: string, profiles: Profile[]) =>
@@ -115,21 +116,21 @@ const KINDS: { kind: ItemKind; open: (context: ShareContext) => Promise<{ librar
   { kind: 'agent', open: context => agentKind.open(context), pass: applyAgents },
 ];
 
-/** Each kind's items as its record holds them now, or why one can't be read (then nothing is switched). */
-export async function readLibraries(context: ShareContext): Promise<{ libraries: Libraries } | { stop: string }> {
+/** Each kind's items as its record holds them now, and the plugins the home records (liveItems); or why a record can't be read (then nothing is switched). */
+export async function readLibraries(context: ShareContext): Promise<{ libraries: Libraries; plugins: Set<string> } | { stop: string }> {
   const libraries = {} as Libraries;
   for (const { kind, open } of KINDS) {
     const { library, problem } = await open(context);
     if (problem) return { stop: `${problem} Nothing was switched.` };
     libraries[kind] = library.items;
   }
-  return { libraries };
+  return { libraries, plugins: new Set((await recordedIds(context.home)).plugins.map(entry => entry.id)) };
 }
 
 /** The live library items now, for the menus (main.ts), which have no page view to read them from; none when a record can't be read. */
 export async function liveNow(context: ShareContext): Promise<LiveItem[]> {
   const read = await readLibraries(context);
-  return 'stop' in read ? [] : liveItems(read.libraries);
+  return 'stop' in read ? [] : liveItems(read.libraries, read.plugins);
 }
 
 /**
@@ -186,7 +187,7 @@ export async function switchProfile(context: ShareContext, tools: HarnessId[], i
   if (!profile) return stopped('That profile is gone. Nothing was switched.');
   const read = await readLibraries(context);
   if ('stop' in read) return stopped(read.stop);
-  const turns = switchPlan(profile, liveItems(read.libraries));
+  const turns = switchPlan(profile, liveItems(read.libraries, read.plugins));
   if (!changes(turns)) return { name: profile.name, on: [], off: [], left: [], waits: [], results: [] };
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return stopped(`${gate.refused} Nothing was switched.`);
@@ -209,7 +210,7 @@ export async function undoSwitch(context: ShareContext, tools: HarnessId[], even
   if (!past?.profile?.on || past.undoneBy) return stop('That switch has nothing to undo.');
   const read = await readLibraries(context);
   if ('stop' in read) return stop(read.stop);
-  const turns = undoPlan(past, liveItems(read.libraries));
+  const turns = undoPlan(past, liveItems(read.libraries, read.plugins));
   if (!changes(turns)) return stop('Nothing to undo: each item that switch changed was changed again since.');
   const gate = await libraryGate(context, { start: true });
   if ('refused' in gate) return stop(`${gate.refused} Nothing was undone.`);

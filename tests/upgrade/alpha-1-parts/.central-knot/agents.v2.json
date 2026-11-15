@@ -1,0 +1,75 @@
+{
+  "formatVersion": 2,
+  "items": {
+    "reviewer": {
+      "name": "reviewer",
+      "state": "shared",
+      "off": [],
+      "hash": "339dfb43cc6afdaafa89fec25979577b796ec7aeb3d9b03e69d3c11968e835c9",
+      "copies": [
+        {
+          "tool": "claude-cli",
+          "file": "/tmp/ck-upgrade-fixture/home/.claude/agents/reviewer.md",
+          "hash": "339dfb43cc6afdaafa89fec25979577b796ec7aeb3d9b03e69d3c11968e835c9",
+          "bytes": "8e0595517b55c531a053cd013c4f64e64ab923edf75fc017e18e68bfd513a54a"
+        },
+        {
+          "tool": "copilot-cli",
+          "file": "/tmp/ck-upgrade-fixture/home/.copilot/agents/reviewer.agent.md",
+          "hash": "339dfb43cc6afdaafa89fec25979577b796ec7aeb3d9b03e69d3c11968e835c9",
+          "bytes": "8e0595517b55c531a053cd013c4f64e64ab923edf75fc017e18e68bfd513a54a"
+        },
+        {
+          "tool": "codex-cli",
+          "file": "/tmp/ck-upgrade-fixture/home/.codex/agents/reviewer.toml",
+          "hash": "339dfb43cc6afdaafa89fec25979577b796ec7aeb3d9b03e69d3c11968e835c9",
+          "bytes": "b0286952420afe05b0edc36b48a891004a1edebb14d5b2238d148fc8ae1f486c"
+        }
+      ],
+      "origin": "claude-cli"
+    },
+    "planner": {
+      "name": "planner",
+      "state": "shared",
+      "off": [],
+      "hash": "0c5eae5dba73f4f8f1e57554725c6f79dda67a7f303602d88264f814892c714d",
+      "copies": [
+        {
+          "tool": "claude-cli",
+          "file": "/tmp/ck-upgrade-fixture/home/.claude/agents/planner.md",
+          "hash": "0c5eae5dba73f4f8f1e57554725c6f79dda67a7f303602d88264f814892c714d",
+          "bytes": "e711f87b15385b004676f80bb833b7cecf6549e2da45cdd8fcab9f3b28a5d411"
+        },
+        {
+          "tool": "copilot-cli",
+          "file": "/tmp/ck-upgrade-fixture/home/.copilot/agents/planner.agent.md",
+          "hash": "0c5eae5dba73f4f8f1e57554725c6f79dda67a7f303602d88264f814892c714d",
+          "bytes": "363f9becbb18a3f3d4707ae7c72b4404298f63491ef38b8f4dd2d0b1d9a445a2",
+          "oneWay": true
+        },
+        {
+          "tool": "codex-cli",
+          "file": "/tmp/ck-upgrade-fixture/home/.codex/agents/planner.toml",
+          "hash": "0c5eae5dba73f4f8f1e57554725c6f79dda67a7f303602d88264f814892c714d",
+          "bytes": "bb46a2a009b16aa4512e0ca698ce9bb330c843e8a6f819be69a13ae4b9492db9",
+          "oneWay": true
+        }
+      ],
+      "origin": "claude-cli"
+    }
+  },
+  "roots": {
+    "claude-cli": {
+      "ino": 85644594,
+      "birth": 1794583986608
+    },
+    "copilot-cli": {
+      "ino": 85644597,
+      "birth": 1794583986608
+    },
+    "codex-cli": {
+      "ino": 85644645,
+      "birth": 1794583986701
+    }
+  }
+}

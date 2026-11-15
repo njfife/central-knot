@@ -240,10 +240,11 @@ test('A copy that can’t be read, and an MCP entry in a form Central Knot doesn
   } finally { await box.cleanup(); }
 });
 
-test('A plugin’s parts are left found, each row keeping its Add; Add on one takes in that part alone', async () => {
+test('While a plugin’s parts wait to be moved to the library, no copy of their names is taken in, his own in another tool neither; Add has nothing to take', async () => {
   const box = await sandbox();
   try {
     for (const name of ['alpha', 'beta', 'taken-out', 'own']) await putSkill(box, 'codex-cli', name);
+    await putSkill(box, 'claude-cli', 'alpha', 'His own alpha.');
     await putAgent(box, 'codex-cli', 'kit-agent');
     // A part the person took out of Codex since (`removed`), whose name a skill of their own has now; and an agent part whose
     // name a skill of the person's own shares: neither skill is the plugin's.
@@ -253,13 +254,10 @@ test('A plugin’s parts are left found, each row keeping its Add; Add on one ta
     await writeFile(partsRecordPath(box.home), JSON.stringify({ installs: [{ source: 'example/market', marketName: 'market', plugin: 'kit', tool: 'codex-cli', at: '2026-11-13T09:00:00Z', digest: 'd', items }] }));
     await turnOn(box);
     await background(box);
-    let view = await views(box);
+    const view = await views(box);
     assert.deepEqual([placeIn(view.skills, 'taken-out'), placeIn(view.skills, 'own')], ['on', 'on'], 'a part taken out, and another kind’s part, are no skill’s part');
-    assert.deepEqual([rowOf(view.skills, 'alpha')?.takeInAnswers?.rule, rowOf(view.agents, 'kit-agent')?.takeInAnswers?.rule, 'take' in rowOf(view.skills, 'alpha')!.takeInAnswers!.click], [{ leave: 'part' }, { leave: 'part' }, true]);
-    await applySkills(box.context, tools, [add(view.skills, 'alpha')]);
-    await background(box);
-    view = await views(box);
-    assert.deepEqual([placeIn(view.skills, 'alpha'), placeIn(view.skills, 'beta'), placeIn(view.agents, 'kit-agent')], ['on', 'found', 'found']);
+    assert.deepEqual([placeIn(view.skills, 'alpha'), placeIn(view.skills, 'beta'), placeIn(view.agents, 'kit-agent'), await skillIn(box, 'copilot-cli', 'alpha')], ['found', 'found', 'found', undefined]);
+    assert.deepEqual([rowOf(view.skills, 'alpha')?.takeInAnswers, rowOf(view.agents, 'kit-agent')?.takeInAnswers?.rule], [{ click: { leave: 'no-copy' }, rule: { leave: 'no-copy' } }, { leave: 'no-copy' }]);
   } finally { await box.cleanup(); }
 });
 
@@ -328,7 +326,7 @@ test('A profile in use when the rule takes an item in: its name drops, nothing e
     await putSkill(box, 'claude-cli', 'notes');
     await applySkills(box.context, tools, [add((await views(box)).skills, 'notes')]);
     const { id } = await saveProfile(box.context, { name: 'Work', items: ['skill:notes'] });
-    const live = async () => { const read = await readLibraries(box.context); return 'libraries' in read ? liveItems(read.libraries) : []; };
+    const live = async () => { const read = await readLibraries(box.context); return 'libraries' in read ? liveItems(read.libraries, read.plugins) : []; };
     assert.deepEqual(inUse((await readProfiles(box.home)).profiles, await live()).map(profile => profile.name), ['Work']);
     await putSkill(box, 'codex-cli', 'tidy');
     await turnOn(box);

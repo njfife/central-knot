@@ -156,8 +156,8 @@ test('The status line says where the agent stands, and in which harnesses', () =
   assert.equal(statusLine(differing, undefined, tools), 'Not in Central Knot · in Claude Code and Codex, with different copies. Add it to keep it in Central Knot and put it in every tool.');
   // With Synchronize everything on, a found row says what the rule does with it.
   assert.equal(statusLine(differing, undefined, tools, true), 'Not in Central Knot · in Claude Code and Codex, with different copies. Add it to keep it in Central Knot and put it in every tool. Synchronize everything leaves it for you to choose: its copies differ.');
-  assert.deepEqual([ruleSays({ leave: 'deleted' }), ruleSays({ leave: 'part' }), ruleSays({ leave: 'no-copy' })],
-    ['It was deleted from Central Knot, so it will not be added by itself again. Add, or Restore in History, brings it back.', 'Synchronize everything leaves it: it is a plugin’s part, so only Add takes it in.', '']);
+  assert.deepEqual([ruleSays({ leave: 'deleted' }), ruleSays({ leave: 'no-copy' })],
+    ['It was deleted from Central Knot, so it will not be added by itself again. Add, or Restore in History, brings it back.', '']);
 });
 
 test('The switch says what a click does: off everywhere, or on everywhere; a found agent’s Add says it takes it in, or asks which copy', () => {

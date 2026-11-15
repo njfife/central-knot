@@ -1,0 +1,10 @@
+{
+  "mcp": {
+    "lookup": {
+      "type": "local",
+      "command": [
+        "lookup-mcp"
+      ]
+    }
+  }
+}

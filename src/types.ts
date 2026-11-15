@@ -1182,6 +1182,8 @@ export interface Profile { id: string; name: string; items: string[] }
 
 export interface ProfilesView {
   profiles: Profile[];
+  /** The ids of the plugins the home records: an item linked to one is outside profiles (profileplan.ts liveItems). */
+  plugins?: string[];
   /** Why profiles can't be read or saved here, if they can't. */
   problem?: string;
 }

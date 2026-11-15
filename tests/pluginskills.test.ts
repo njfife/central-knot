@@ -65,7 +65,7 @@ test('a tool that has a skill through an installed plugin has it another way, an
   } finally { await rm(base, { recursive: true, force: true }); }
 });
 
-test('an MCP server or agent a tool has through a plugin gets no entry or file of its own there; a server’s part entry is the plugin’s, never taken in', async () => {
+test('an MCP server or agent a tool has through a plugin is said so there; while a part of its name waits to be moved to the library, nothing of that name is taken in or written', async () => {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-plugin-parts-')));
   const home = join(base, 'home');
   const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
@@ -93,23 +93,16 @@ test('an MCP server or agent a tool has through a plugin gets no entry or file o
 
     const server = (await serversView(context, tools)).items.find(item => item.key === 'issues')!;
     assert.deepEqual([server.plugin, server.cannot['claude-cli']], [{ 'claude-cli': { ...from, name: 'issues' } }, 'Claude Code has this MCP server through the plugin issue-tracker (version 1.2.0), so no separate copy is placed there.']);
-    // Codex's entry is the plugin's part there: never found or taken in, and said why.
-    assert.deepEqual([Object.keys(server.copies), server.unseen?.['codex-cli']], [['copilot-cli'], 'Codex has it as part of a plugin Central Knot installed there, so it is the plugin’s.']);
-    const codexBefore = await readFile(join(home, '.codex/config.toml'), 'utf8');
-    const served = await applyServers(context, tools, [{ key: 'issues', on: true, except: [] }]);
-    assert.equal(served.stopped, undefined);
-    assert.equal(await readFile(join(home, '.claude.json'), 'utf8'), '{}\n', 'Claude Code, which has it through the plugin, is not written');
-    assert.equal(await readFile(join(home, '.codex/config.toml'), 'utf8'), codexBefore, 'the part’s entry is left as it is');
-
+    // Codex's entry is the plugin's part there, and Copilot CLI's of that name his own: both wait (partsmigrate.ts hideParts).
+    const waiting = 'A plugin’s part of this name is waiting to be moved to the library, so nothing changes here until it is.';
+    assert.deepEqual([server.unseen?.['codex-cli'], server.unseen?.['copilot-cli']], [waiting, waiting]);
     const agent = (await agentsView(context, tools)).items.find(item => item.key === 'triager')!;
     assert.deepEqual([agent.plugin, agent.cannot['claude-cli']], [{ 'claude-cli': { ...from, name: 'triager' } }, 'Claude Code has this agent through the plugin issue-tracker (version 1.2.0), so no separate copy is placed there.']);
+    const before = [await readFile(join(home, '.claude.json'), 'utf8'), await readFile(join(home, '.codex/config.toml'), 'utf8'), await readFile(join(home, '.copilot/mcp-config.json'), 'utf8')];
+    const served = await applyServers(context, tools, [{ key: 'issues', on: true, except: [] }]);
     const sorted = await applyAgents(context, tools, [{ key: 'triager', on: true, except: [] }]);
-    assert.equal(sorted.stopped, undefined);
-    assert.deepEqual([await exists(join(home, '.copilot/agents/triager.agent.md')), await exists(join(home, '.claude/agents/triager.md'))], [true, false]);
-    // Settled: a later pass neither writes there nor reads the missing copy as a deletion.
-    const again = await applyAgents({ ...context, settleMs: 0 }, tools, []);
-    assert.deepEqual([again.writes, await exists(join(home, '.copilot/agents/triager.agent.md')), await exists(join(home, '.codex/agents/triager.toml'))], [0, true, true]);
-    assert.equal((await applyServers({ ...context, settleMs: 0 }, tools, [], { settleMs: 0 })).writes, 0);
-    assert.ok(JSON.parse(await readFile(join(home, '.copilot/mcp-config.json'), 'utf8')).mcpServers.issues);
+    assert.deepEqual([served.results[0]?.message, sorted.results[0]?.message], ['No tool has a copy of it to take in any more.', 'No tool has a copy of it to take in any more.']);
+    assert.deepEqual([await readFile(join(home, '.claude.json'), 'utf8'), await readFile(join(home, '.codex/config.toml'), 'utf8'), await readFile(join(home, '.copilot/mcp-config.json'), 'utf8')], before);
+    assert.deepEqual([await exists(join(home, '.copilot/agents/triager.agent.md')), await exists(join(home, '.claude/agents/triager.md'))], [false, false]);
   } finally { await rm(base, { recursive: true, force: true }); }
 });

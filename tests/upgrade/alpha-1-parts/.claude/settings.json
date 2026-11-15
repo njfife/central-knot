@@ -1,0 +1,10 @@
+{
+  "skillOverrides": {
+    "drafts": "off"
+  },
+  "deniedMcpServers": [
+    {
+      "serverName": "search"
+    }
+  ]
+}

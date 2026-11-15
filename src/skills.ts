@@ -26,7 +26,7 @@ import { copiesOf, foundCopies, lookFor, restore, runPass, takeInAnswers, unseen
 import { libraryWords } from './libraryrow.ts';
 import { comparableText } from './pluginstatus.ts';
 import { pluginHolds, throughPlugins, type GivenByPlugin, type PluginHold } from './plugins.ts';
-import { errorCode, itemKey, landingOf, libraryGate, partsIn, plainError, readTree, syncGate, targetFor, writeAccess, type ShareContext, type Tree } from './share.ts';
+import { errorCode, itemKey, landingOf, libraryGate, plainError, readTree, syncGate, targetFor, writeAccess, type ShareContext, type Tree } from './share.ts';
 import { alsoReads, lockedRoot, placeFolder, readCopy, readSkillsFolder, recoverFolders, removeFolder, rootOf, rootProblem, sharedFolder, swapFolder, type SkillCopy } from './skillfiles.ts';
 import { openLibrary, readVersion, recordedSkills, saveLibrary, storeVersion, type SkillContent } from './skillstore.ts';
 import { mergeSkill } from './merge.ts';
@@ -82,7 +82,7 @@ const ownLabel = (tool: HarnessId) => harnesses[tool].skillRoots('', '')[0].labe
 export async function readDisk(context: ShareContext, managed: HarnessId[]): Promise<SkillDisk> {
   const disk: SkillDisk = {
     byKey: new Map(), unseen: new Map(), uncopied: new Set(), locked: new Map(), problems: [], outside: new Map(), ways: new Map(), readsFrom: {},
-    through: await throughPlugins(context, managed, 'skill'), parts: await partsIn(context.home, 'skill'), shapes: new Map(), switches: new Map(), switchedOff: new Map(),
+    through: await throughPlugins(context, managed, 'skill'), shapes: new Map(), switches: new Map(), switchedOff: new Map(),
     linked: await pluginHolds(context, managed),
     anotherWay: (item, tool) => anotherWay(disk, managed, item, tool),
     cannotTake: (item, tool) => cannotTake(context, disk, item, tool),

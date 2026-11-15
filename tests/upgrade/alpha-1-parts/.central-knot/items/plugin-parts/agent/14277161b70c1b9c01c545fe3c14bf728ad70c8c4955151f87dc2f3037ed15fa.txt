@@ -1,0 +1,7 @@
+---
+name: writer
+description: The writer agent.
+mode: all
+---
+
+Write the document.

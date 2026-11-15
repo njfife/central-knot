@@ -1,0 +1,89 @@
+{
+  "target": {
+    "source": "/tmp/ck-upgrade-fixture/home/market",
+    "plugin": "docs",
+    "tool": "opencode-cli"
+  },
+  "before": {
+    "source": "/tmp/ck-upgrade-fixture/home/market",
+    "marketName": "team",
+    "plugin": "docs",
+    "version": "1.0.0",
+    "tool": "opencode-cli",
+    "at": "2026-11-15T09:33:07.907Z",
+    "digest": "5b94c4ecf93fc8410824c45209030d0d22e1b1795d24855db67014736f04b8aa",
+    "items": [
+      {
+        "kind": "skill",
+        "name": "forms",
+        "hash": "d8680c8531f781032c9d6ef51dcaeabd7318d0a16eb8b87db763a24220e0ce32",
+        "seen": "d8680c8531f781032c9d6ef51dcaeabd7318d0a16eb8b87db763a24220e0ce32"
+      },
+      {
+        "kind": "skill",
+        "name": "pdf",
+        "hash": "2d3ec9d7f99b61eacc8dc93e97664befdd6bcc7ae5721fb9e577ec65b480f6ef",
+        "seen": "2d3ec9d7f99b61eacc8dc93e97664befdd6bcc7ae5721fb9e577ec65b480f6ef"
+      },
+      {
+        "kind": "skill",
+        "name": "review",
+        "hash": "21d44a32fe872027b46b4d39d2c4b2da2f9dd9dac8428aff377c502ca2820c5d",
+        "seen": "21d44a32fe872027b46b4d39d2c4b2da2f9dd9dac8428aff377c502ca2820c5d"
+      },
+      {
+        "kind": "mcp",
+        "name": "lookup",
+        "hash": "37e1989a7a914b00c15d5c18af31accb32bdfc7e8b431d47321996a5431e3b56",
+        "seen": "fe6adbf337755381ca6f09b91ce10c2c1fae84099960fb91dcd84ec292fb1aeb"
+      },
+      {
+        "kind": "agent",
+        "name": "writer",
+        "hash": "14277161b70c1b9c01c545fe3c14bf728ad70c8c4955151f87dc2f3037ed15fa",
+        "seen": "14277161b70c1b9c01c545fe3c14bf728ad70c8c4955151f87dc2f3037ed15fa"
+      }
+    ]
+  },
+  "after": {
+    "source": "/tmp/ck-upgrade-fixture/home/market",
+    "marketName": "team",
+    "plugin": "docs",
+    "version": "1.0.0",
+    "tool": "opencode-cli",
+    "at": "2026-11-15T09:33:08.001Z",
+    "digest": "2b116c2a3ccd3bccd94817db9badfd3c6aa68b7085d2b0fdf75e350631a38c8d",
+    "items": [
+      {
+        "kind": "skill",
+        "name": "pdf",
+        "hash": "2d3ec9d7f99b61eacc8dc93e97664befdd6bcc7ae5721fb9e577ec65b480f6ef",
+        "seen": "2d3ec9d7f99b61eacc8dc93e97664befdd6bcc7ae5721fb9e577ec65b480f6ef"
+      },
+      {
+        "kind": "skill",
+        "name": "review",
+        "hash": "21d44a32fe872027b46b4d39d2c4b2da2f9dd9dac8428aff377c502ca2820c5d",
+        "seen": "21d44a32fe872027b46b4d39d2c4b2da2f9dd9dac8428aff377c502ca2820c5d"
+      },
+      {
+        "kind": "mcp",
+        "name": "lookup",
+        "hash": "37e1989a7a914b00c15d5c18af31accb32bdfc7e8b431d47321996a5431e3b56",
+        "seen": "fe6adbf337755381ca6f09b91ce10c2c1fae84099960fb91dcd84ec292fb1aeb"
+      },
+      {
+        "kind": "agent",
+        "name": "writer",
+        "hash": "14277161b70c1b9c01c545fe3c14bf728ad70c8c4955151f87dc2f3037ed15fa",
+        "seen": "14277161b70c1b9c01c545fe3c14bf728ad70c8c4955151f87dc2f3037ed15fa"
+      },
+      {
+        "kind": "skill",
+        "name": "forms",
+        "hash": "d8680c8531f781032c9d6ef51dcaeabd7318d0a16eb8b87db763a24220e0ce32",
+        "removed": true
+      }
+    ]
+  }
+}

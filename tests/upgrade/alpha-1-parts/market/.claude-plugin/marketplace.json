@@ -1,0 +1,1 @@
+{"name":"team","plugins":[{"name":"docs","source":"./plugins/docs"},{"name":"memo","source":"./plugins/memo"},{"name":"sheet","source":"./plugins/sheet"},{"name":"picks","source":"./plugins/picks"},{"name":"tasks","source":"./plugins/tasks"}]}

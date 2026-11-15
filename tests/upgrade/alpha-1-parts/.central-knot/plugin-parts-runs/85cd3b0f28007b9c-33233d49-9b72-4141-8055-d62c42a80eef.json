@@ -1,0 +1,24 @@
+{
+  "target": {
+    "source": "/tmp/ck-upgrade-fixture/home/market",
+    "plugin": "memo",
+    "tool": "pi-cli"
+  },
+  "before": null,
+  "after": {
+    "source": "/tmp/ck-upgrade-fixture/home/market",
+    "marketName": "team",
+    "plugin": "memo",
+    "tool": "pi-cli",
+    "at": "2026-11-15T09:33:07.932Z",
+    "digest": "07968b48aa5d4ca23f05200777bb74d602c22555885371384e31f7afdfd538d1",
+    "items": [
+      {
+        "kind": "skill",
+        "name": "memo",
+        "hash": "d850e37471aa4713705a18e637f0a8afae2833ef91912bd8f4c5b1d0c0f42937",
+        "seen": "d850e37471aa4713705a18e637f0a8afae2833ef91912bd8f4c5b1d0c0f42937"
+      }
+    ]
+  }
+}

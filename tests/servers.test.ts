@@ -268,7 +268,7 @@ test('An edit in one tool becomes the current version and reaches the others; of
   } finally { await box.cleanup(); }
 });
 
-test('What is never taken in says why and offers nothing: a server that belongs to an app, a form Central Knot doesn’t edit, two names that differ only by case, a plugin’s part', async () => {
+test('What is never taken in says why and offers nothing: a server that belongs to an app, a form Central Knot doesn’t edit, two names that differ only by case, a plugin’s part waiting to be moved to the library', async () => {
   const box = await sandbox();
   try {
     await writeFile(box.path('codex-cli'), '[mcp_servers.node_repl]\ncommand = "/Applications/ChatGPT.app/Contents/Resources/node"\n\n[mcp_servers]\ninline = { command = "x" }\n');
@@ -282,7 +282,7 @@ test('What is never taken in says why and offers nothing: a server that belongs 
       both: [0, 'OpenCode’s entry for it is not written in a form Central Knot edits, so it is left alone.'],
       inline: [0, 'Codex’s entry for it is not written in a form Central Knot edits, so it is left alone.'],
       node_repl: [0, 'ChatGPT desktop keeps this server for itself.'],
-      part: [0, 'Copilot CLI has it as part of a plugin Central Knot installed there, so it is the plugin’s.'],
+      part: [1, 'A plugin’s part of this name is waiting to be moved to the library, so nothing changes here until it is.'],
       twice: [0, 'Two servers whose names differ only by case are in Copilot CLI’s settings. Rename one so Central Knot can tell them apart.'],
     });
     const before = await box.files();

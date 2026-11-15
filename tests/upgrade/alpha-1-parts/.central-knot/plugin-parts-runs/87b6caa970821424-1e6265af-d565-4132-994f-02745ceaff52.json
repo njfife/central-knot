@@ -1,0 +1,36 @@
+{
+  "target": {
+    "source": "/tmp/ck-upgrade-fixture/home/market",
+    "plugin": "picks",
+    "tool": "pi-cli"
+  },
+  "before": null,
+  "after": {
+    "source": "/tmp/ck-upgrade-fixture/home/market",
+    "marketName": "team",
+    "plugin": "picks",
+    "tool": "pi-cli",
+    "at": "2026-11-15T09:33:07.972Z",
+    "digest": "7ccd7d42a2fa48d655ca5fdaf4ab0e1e7a6d9cad1b09a5e445cf74e049722229",
+    "items": [
+      {
+        "kind": "skill",
+        "name": "three",
+        "hash": "5764d14008d11e23b0666629c49062598b7774ea04df1bd32954ae44f6026e8d",
+        "removed": true
+      },
+      {
+        "kind": "skill",
+        "name": "two",
+        "hash": "b0a1081829c1e121d5055f55ae855f0d936110d188e6596d1b66989399b0040d",
+        "removed": true
+      },
+      {
+        "kind": "skill",
+        "name": "one",
+        "hash": "f1673afec53a11f3876561220631300432d8e6beb6b478c87ccf6b12809ba548",
+        "seen": "f1673afec53a11f3876561220631300432d8e6beb6b478c87ccf6b12809ba548"
+      }
+    ]
+  }
+}

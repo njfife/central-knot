@@ -28,7 +28,7 @@ import { copiesOf, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk
 import { mergeAgent } from './merge.ts';
 import { pluginHolds, throughPlugins } from './plugins.ts';
 import { agentsKeptIn, type AgentTool } from './presence.ts';
-import { errorCode, exists, partsIn, recoverParked, removeFileChecked, syncGate, writeAccess, writeFileChecked } from './share.ts';
+import { errorCode, exists, recoverParked, removeFileChecked, syncGate, writeAccess, writeFileChecked } from './share.ts';
 import { sourceFacts } from './sources.ts';
 import type { ShareContext } from './share.ts';
 import type { Change, HarnessId, LibraryFacts, LibraryView, PassResult, SyncNotice, ThroughPlugin, ToolCopy } from './types.ts';
@@ -55,7 +55,7 @@ type AgentLook = Look<SharedAgent, AgentEntry, AgentDisk>;
 async function readDisk(context: ShareContext, managed: HarnessId[], library: KindLibrary): Promise<AgentDisk> {
   const disk: AgentDisk = {
     byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], through: await agentsThroughPlugins(context, managed),
-    parts: await partsIn(context.home, 'agent'), skills: await skillsLoaded(context, managed),
+    skills: await skillsLoaded(context, managed),
     // A plugin's item, in a tool that takes the plugin, is held by the plugin alone (plugins.ts pluginHolds); its can't-take
     // answer keeps a copy the tool has.
     linked: await pluginHolds(context, managed),

@@ -11,7 +11,7 @@
 //   with a file moved aside put back: recoverParked), and Central Knot's own files written whole (writeDurably);
 // - a skill's folder read as one content (readTree), copied byte for byte (copyTree), staged beside its target and put in
 //   place (stagingFolder, placeCopy);
-// - plugin parts on record, read only (readParts, partsIn; parts.ts writes them).
+// - plugin parts on record, read only (readParts; parts.ts writes them, partsmigrate.ts moves them to the library).
 // Not here: a kind's record (kindstore.ts and each kind's store), History (history.ts), a tool's folders and files
 // (skillfiles.ts, mcp.ts, agentfiles.ts), and which tools are managed (presence.ts managedTools).
 //
@@ -32,10 +32,9 @@ import { access, chmod, constants, copyFile, link, lstat, mkdir, open, readFile,
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
 import { configRoot, harnessIds, harnesses, writeRoot } from './harnesses.ts';
 import { instructionFiles } from './instructions.ts';
-import { itemKey as itemKeyOf } from './library.ts';
 import { mcpFile } from './mcp.ts';
 import { managedTools } from './presence.ts';
-import type { HarnessId, HistoryDays, HomeMode, PartKind, PartsInstall, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
+import type { HarnessId, HistoryDays, HomeMode, PartsInstall, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
 
 /** sync.json's format (SyncRecord); format 1 is read until the skills migration (skillstore.ts) writes format 2. */
 export const FORMAT_VERSION = 2;
@@ -68,7 +67,7 @@ export interface ShareContext {
   /** Reads shared within one pass or one view (what each tool has through its plugins): set only on a context made for that one use. */
   reads?: Map<string, Promise<unknown>>;
   /** Test seam: throws at a named step, standing in for a crash. */
-  fault?: (step: 'before-rename' | 'after-rename' | 'before-replace' | 'mid-replace' | 'before-remove') => void;
+  fault?: (step: 'before-rename' | 'after-rename' | 'before-replace' | 'mid-replace' | 'before-remove' | 'parts-kind-saved' | 'parts-before-rename') => void;
   /** The clock for observation intervals (CON-04); tests pass their own. */
   now?: () => number;
   /** How many days History keeps events, and deleted items' content (STO-04); the default unless Settings says otherwise. */
@@ -113,20 +112,6 @@ export async function readParts(home: string): Promise<PartsInstall[]> {
 const recordPath = (home: string) => join(storeDirectory(home), 'sync.json');
 
 export { itemKey } from './library.ts';
-
-/**
- * The managed tools each item of one kind went into as a plugin's part, by the item's key (readParts; a part the person took
- * out since is left out). What a skill's or an agent's read gives the pass as librarypass.ts Disk.parts.
- */
-export async function partsIn(home: string, kind: PartKind): Promise<Map<string, HarnessId[]>> {
-  const found = new Map<string, HarnessId[]>();
-  for (const install of await readParts(home)) for (const part of install.items) {
-    if (part.kind !== kind || part.removed) continue;
-    const key = itemKeyOf(part.name);
-    found.set(key, [...(found.get(key) ?? []), install.tool]);
-  }
-  return found;
-}
 
 export const errorCode = (error: unknown) => (typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '');
 

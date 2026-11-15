@@ -519,8 +519,12 @@ interface BackgroundPass { skills?: LibraryPass; serversAndAgents?: ServersAndAg
  */
 async function pass(snapshots: Snapshot[], explicit = false): Promise<BackgroundPass> {
   const shared: ShareContext = { ...context(), read: async () => snapshots, reads: new Map() };
-  const { synced, profilesFailed } = await homePass(shared, await managedNow(shared, snapshots), syncOn || explicit);
+  // While plugin parts from before the library wait to be moved there, the plugins record's first read comes first (its install
+  // alpha 1 waited for read from pluginUpdates, made before any pass), and the move may read a plugin (homepass.ts step 2).
+  const pluginNow = await carriedMarket?.beforeParts().catch((error: unknown) => { logFailure('plugins record', error); return undefined; });
+  const { synced, profilesFailed, partsFailed } = await homePass(shared, await managedNow(shared, snapshots), syncOn || explicit, pluginNow);
   if (profilesFailed !== undefined) logFailure('moving profiles', profilesFailed);
+  if (partsFailed !== undefined) logFailure('moving plugin parts', partsFailed);
   if (!synced) return {};
   const { skills, servers, agents } = synced;
   return { skills: skills ?? { results: [], writes: 0 }, done: [skills, servers, agents].flatMap(kind => kind?.results ?? []), told: passTells(synced), serversAndAgents: {

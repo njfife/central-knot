@@ -1,5 +1,6 @@
 // One start of Central Knot on a home, in a process of its own, so nothing an earlier start kept in memory carries over (a
-// library migrated only in memory, a copy first seen missing). It runs what main.ts syncThenView runs, `passes` times:
+// library migrated only in memory, a copy first seen missing). It runs what main.ts syncThenView runs, `passes` times: while
+// plugin parts are on record, the plugins record's first read (marketplaces.ts beforeParts, with no tool's command run), then
 // homepass.ts homePass, then the three item pages' reads. After each pass it prints every file in the home (its SHA-256, and a
 // stamp that changes whenever the file is written, even with the same bytes), what the pass told, the pages as read, and each
 // version those pages list that its kind's reader (the one the page and Restore use) can't read.
@@ -14,7 +15,8 @@ import { discover } from '../../src/discovery.ts';
 import { harnessIds } from '../../src/harnesses.ts';
 import { homePass } from '../../src/homepass.ts';
 import { serverVersion, serversView } from '../../src/servers.ts';
-import { managedNow, type ShareContext } from '../../src/share.ts';
+import { createMarketplaces } from '../../src/marketplaces.ts';
+import { managedNow, readRecord, writeAccess, type ShareContext } from '../../src/share.ts';
 import { skillVersion, skillsView } from '../../src/skills.ts';
 import type { LibraryView } from '../../src/types.ts';
 
@@ -24,6 +26,17 @@ export function appContext(home: string, appData: string): ShareContext {
     home, mode: 'custom', build: STANDARD_BUILD, buildName: 'Central Knot', settingsPath: join(appData, 'sharing-settings.json'),
     realHome: join(appData, 'real'), read: () => Promise.all(harnessIds.map(harness => discover({ home, mode: 'custom', harness }))),
   };
+}
+
+/** The Plugins side as main.ts gives it to a pass, on this home: the real engine, but no tool's command runs. */
+function plugins(context: ShareContext, appData: string) {
+  const never = async () => { throw new Error('No tool’s command runs at a start.'); };
+  return createMarketplaces({
+    home: () => ({ home: context.home }), dataDir: join(appData, 'data'), pickFolder: async () => undefined, openExternal: async () => {},
+    read: async () => ({ tools: await managedNow(context, await context.read()), snapshots: [] }), share: () => context,
+    leftOut: async () => (await readRecord(context.home)).record?.leftOut ?? [], writeAccess: () => writeAccess(context),
+  }, { findClis: async () => ({ binaries: {}, apps: {} }), checkAccess: never, addMarketplace: never, readCatalog: never, readRemotePlugin: never,
+    install: never, uninstall: never, update: never, setSkill: never, setPart: never, setWhole: never }, []);
 }
 
 /** Every file under a folder, by its path from there: its SHA-256, and its inode and modification time (`stamp`). */
@@ -63,10 +76,12 @@ async function start(home: string, appData: string, syncOn: boolean, passes: num
     const context: ShareContext = { ...appContext(home, appData), reads: new Map() };
     const snapshots = await context.read();
     const managed = await managedNow(context, snapshots);
-    const { synced, profilesFailed } = await homePass({ ...context, read: async () => snapshots }, managed, syncOn);
+    const pluginNow = await plugins(context, appData).beforeParts();
+    const { synced, profilesFailed, partsFailed } = await homePass({ ...context, read: async () => snapshots }, managed, syncOn, pluginNow);
     const results = [synced?.skills, synced?.servers, synced?.agents];
     const problems = [
       ...(profilesFailed === undefined ? [] : [`Moving profiles failed: ${String(profilesFailed)}`]),
+      ...(partsFailed === undefined ? [] : [`Moving plugin parts failed: ${String(partsFailed)}`]),
       ...(synced?.crashes ?? []).map(crash => crash.message),
       ...results.flatMap(result => (result?.stopped ? [result.stopped] : [])),
       ...results.flatMap(result => result?.results ?? []).filter(entry => entry.outcome === 'failed').map(entry => `${entry.item}: ${entry.message}`),

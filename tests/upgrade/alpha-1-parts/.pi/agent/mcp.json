@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "lookup": {
+      "type": "stdio",
+      "command": "lookup-mcp",
+      "args": []
+    }
+  }
+}

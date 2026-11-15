@@ -1,0 +1,53 @@
+{
+  "target": {
+    "source": "/tmp/ck-upgrade-fixture/home/market",
+    "plugin": "sheet",
+    "tool": "opencode-cli"
+  },
+  "before": {
+    "source": "/tmp/ck-upgrade-fixture/home/market",
+    "marketName": "team",
+    "plugin": "sheet",
+    "version": "1.0.0",
+    "tool": "opencode-cli",
+    "at": "2026-11-15T09:33:07.963Z",
+    "digest": "36df62e6368ddf293a00085e473bb85f358c7f6d32c6506e26097bae5e57de03",
+    "items": [
+      {
+        "kind": "skill",
+        "name": "chart",
+        "hash": "672b135477329054daa3761882cb59fb6d6ac44ca0c2c0237b5ea8fc26ed5358",
+        "seen": "672b135477329054daa3761882cb59fb6d6ac44ca0c2c0237b5ea8fc26ed5358"
+      },
+      {
+        "kind": "skill",
+        "name": "sheet",
+        "hash": "da17ddb11c0d9ff6f8224b02716e8d074609583fcb9ae8b06311186623b4bede",
+        "seen": "da17ddb11c0d9ff6f8224b02716e8d074609583fcb9ae8b06311186623b4bede"
+      }
+    ]
+  },
+  "after": {
+    "source": "/tmp/ck-upgrade-fixture/home/market",
+    "marketName": "team",
+    "plugin": "sheet",
+    "version": "1.0.0",
+    "tool": "opencode-cli",
+    "at": "2026-11-15T09:33:07.992Z",
+    "digest": "36df62e6368ddf293a00085e473bb85f358c7f6d32c6506e26097bae5e57de03",
+    "items": [
+      {
+        "kind": "skill",
+        "name": "sheet",
+        "hash": "da17ddb11c0d9ff6f8224b02716e8d074609583fcb9ae8b06311186623b4bede",
+        "seen": "da17ddb11c0d9ff6f8224b02716e8d074609583fcb9ae8b06311186623b4bede"
+      },
+      {
+        "kind": "skill",
+        "name": "chart",
+        "hash": "672b135477329054daa3761882cb59fb6d6ac44ca0c2c0237b5ea8fc26ed5358",
+        "removed": true
+      }
+    ]
+  }
+}
