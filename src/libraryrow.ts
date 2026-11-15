@@ -374,7 +374,6 @@ export function ruleSays(answer: TakeInAnswer): string {
   if ('take' in answer) return 'Synchronize everything takes it in when sync runs.';
   if ('wait' in answer) return 'Synchronize everything leaves it for you to choose: its copies differ.';
   return { deleted: 'It was deleted from Central Knot, so it will not be added by itself again. Add, or Restore in History, brings it back.',
-    part: 'Synchronize everything leaves it: it is a plugin’s part, so only Add takes it in.',
     'switched-off': 'Synchronize everything leaves it: every tool that has it has it switched off in its own settings, so only Add takes it in.',
     settling: '', 'no-copy': '', leaving: '', 'choice-changed': '' }[answer.leave];
 }

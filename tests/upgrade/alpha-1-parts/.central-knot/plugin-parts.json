@@ -1,0 +1,249 @@
+{
+  "installs": [
+    {
+      "source": "/tmp/ck-upgrade-fixture/home/market",
+      "marketName": "team",
+      "plugin": "docs",
+      "version": "1.0.0",
+      "tool": "pi-cli",
+      "at": "2026-11-15T11:53:37.234Z",
+      "digest": "9db1bb82ce2a403193aa70f3707f2edcce25f8b1b868731dd6370f7a71348bed",
+      "items": [
+        {
+          "kind": "skill",
+          "name": "forms",
+          "hash": "d8680c8531f781032c9d6ef51dcaeabd7318d0a16eb8b87db763a24220e0ce32",
+          "seen": "d8680c8531f781032c9d6ef51dcaeabd7318d0a16eb8b87db763a24220e0ce32"
+        },
+        {
+          "kind": "skill",
+          "name": "pdf",
+          "hash": "2d3ec9d7f99b61eacc8dc93e97664befdd6bcc7ae5721fb9e577ec65b480f6ef",
+          "seen": "2d3ec9d7f99b61eacc8dc93e97664befdd6bcc7ae5721fb9e577ec65b480f6ef"
+        },
+        {
+          "kind": "skill",
+          "name": "review",
+          "hash": "21d44a32fe872027b46b4d39d2c4b2da2f9dd9dac8428aff377c502ca2820c5d",
+          "seen": "21d44a32fe872027b46b4d39d2c4b2da2f9dd9dac8428aff377c502ca2820c5d"
+        },
+        {
+          "kind": "mcp",
+          "name": "lookup",
+          "hash": "3a91fa5166d96d2f4545a002827a250f5af800a34c7935647b40299c282322cc",
+          "seen": "8d3ba26e228f6c9aecbf080bc371097bc9e6501b1905866730e58d00bf1bb1cf"
+        }
+      ]
+    },
+    {
+      "source": "/tmp/ck-upgrade-fixture/home/market",
+      "marketName": "team",
+      "plugin": "docs",
+      "version": "1.0.0",
+      "tool": "codex-cli",
+      "at": "2026-11-15T11:53:37.272Z",
+      "digest": "ada25480c602f5e1f44df009a0da5647a018f667e804403850978b83c2c13476",
+      "items": [
+        {
+          "kind": "skill",
+          "name": "forms",
+          "hash": "d8680c8531f781032c9d6ef51dcaeabd7318d0a16eb8b87db763a24220e0ce32",
+          "seen": "d8680c8531f781032c9d6ef51dcaeabd7318d0a16eb8b87db763a24220e0ce32"
+        },
+        {
+          "kind": "skill",
+          "name": "pdf",
+          "hash": "2d3ec9d7f99b61eacc8dc93e97664befdd6bcc7ae5721fb9e577ec65b480f6ef",
+          "seen": "2d3ec9d7f99b61eacc8dc93e97664befdd6bcc7ae5721fb9e577ec65b480f6ef"
+        },
+        {
+          "kind": "skill",
+          "name": "review",
+          "hash": "21d44a32fe872027b46b4d39d2c4b2da2f9dd9dac8428aff377c502ca2820c5d",
+          "seen": "21d44a32fe872027b46b4d39d2c4b2da2f9dd9dac8428aff377c502ca2820c5d"
+        },
+        {
+          "kind": "mcp",
+          "name": "lookup",
+          "hash": "3a91fa5166d96d2f4545a002827a250f5af800a34c7935647b40299c282322cc",
+          "seen": "8d3ba26e228f6c9aecbf080bc371097bc9e6501b1905866730e58d00bf1bb1cf"
+        },
+        {
+          "kind": "agent",
+          "name": "writer",
+          "hash": "d2d022b82d641afc1eceafa8b6d9aee26585d702a80abca7ad35f7cae8f85a0f",
+          "seen": "d2d022b82d641afc1eceafa8b6d9aee26585d702a80abca7ad35f7cae8f85a0f"
+        }
+      ]
+    },
+    {
+      "source": "/tmp/ck-upgrade-fixture/home/market",
+      "marketName": "team",
+      "plugin": "memo",
+      "tool": "pi-cli",
+      "at": "2026-11-15T11:53:37.280Z",
+      "digest": "fefbe8c7677326ba05911495dafdc3ba25477a6f36310d24b067394e20bb7f3f",
+      "items": [
+        {
+          "kind": "skill",
+          "name": "memo",
+          "hash": "d850e37471aa4713705a18e637f0a8afae2833ef91912bd8f4c5b1d0c0f42937",
+          "seen": "d850e37471aa4713705a18e637f0a8afae2833ef91912bd8f4c5b1d0c0f42937"
+        },
+        {
+          "kind": "mcp",
+          "name": "memo-index",
+          "hash": "5af81108bb539597bb13f664331e989cb0ce5e9372f618868dd28d95322b4c96",
+          "seen": "db6febf1736f4209736de0d7ab0beba1fffc55dfa9c6f5293fc81ee9d42ac3db"
+        }
+      ]
+    },
+    {
+      "source": "/tmp/ck-upgrade-fixture/home/market",
+      "marketName": "team",
+      "plugin": "journal",
+      "tool": "opencode-cli",
+      "at": "2026-11-15T11:53:37.287Z",
+      "digest": "91d7607426446bf4acdc6a10e4a6ad8d65d189cb2dc03992a9ec922efa0f72d2",
+      "items": [
+        {
+          "kind": "skill",
+          "name": "journal",
+          "hash": "e10b1c6fbf4fe6ac56e2591840e1324e4f10b5584290dd98e01c41404529ec85",
+          "seen": "e10b1c6fbf4fe6ac56e2591840e1324e4f10b5584290dd98e01c41404529ec85"
+        }
+      ]
+    },
+    {
+      "source": "/tmp/ck-upgrade-fixture/home/gone-market",
+      "marketName": "gone",
+      "plugin": "old",
+      "tool": "pi-cli",
+      "at": "2026-11-15T11:53:37.304Z",
+      "digest": "163d85067a056f559b307c4739eef120e39b6e4545ad0dbe44174786c58b5fba",
+      "items": [
+        {
+          "kind": "skill",
+          "name": "old",
+          "hash": "3d0bb74a2a15f3fd7967276323eda479687826bc9d5713885c423f62f411e95f",
+          "seen": "3d0bb74a2a15f3fd7967276323eda479687826bc9d5713885c423f62f411e95f"
+        }
+      ]
+    },
+    {
+      "source": "/tmp/ck-upgrade-fixture/home/market",
+      "marketName": "team",
+      "plugin": "picks",
+      "tool": "pi-cli",
+      "at": "2026-11-15T11:53:37.334Z",
+      "digest": "7ccd7d42a2fa48d655ca5fdaf4ab0e1e7a6d9cad1b09a5e445cf74e049722229",
+      "items": [
+        {
+          "kind": "skill",
+          "name": "three",
+          "hash": "5764d14008d11e23b0666629c49062598b7774ea04df1bd32954ae44f6026e8d",
+          "removed": true
+        },
+        {
+          "kind": "skill",
+          "name": "two",
+          "hash": "b0a1081829c1e121d5055f55ae855f0d936110d188e6596d1b66989399b0040d",
+          "removed": true
+        },
+        {
+          "kind": "skill",
+          "name": "one",
+          "hash": "f1673afec53a11f3876561220631300432d8e6beb6b478c87ccf6b12809ba548",
+          "seen": "f1673afec53a11f3876561220631300432d8e6beb6b478c87ccf6b12809ba548"
+        }
+      ]
+    },
+    {
+      "source": "/tmp/ck-upgrade-fixture/home/market",
+      "marketName": "team",
+      "plugin": "sheet",
+      "version": "2.0.0",
+      "tool": "pi-cli",
+      "at": "2026-11-15T11:53:37.345Z",
+      "digest": "671b112e8d26bc95209f1f8e028cd205e7f5d3b0b98283cfd71bd6d6fd0aad4e",
+      "items": [
+        {
+          "kind": "skill",
+          "name": "chart",
+          "hash": "672b135477329054daa3761882cb59fb6d6ac44ca0c2c0237b5ea8fc26ed5358",
+          "seen": "672b135477329054daa3761882cb59fb6d6ac44ca0c2c0237b5ea8fc26ed5358"
+        },
+        {
+          "kind": "skill",
+          "name": "sheet",
+          "hash": "49c59a5866e89506695e69276b9b2a355e7e712e463dc2425680af3f19e89b18",
+          "seen": "49c59a5866e89506695e69276b9b2a355e7e712e463dc2425680af3f19e89b18"
+        }
+      ]
+    },
+    {
+      "source": "/tmp/ck-upgrade-fixture/home/market",
+      "marketName": "team",
+      "plugin": "sheet",
+      "version": "1.0.0",
+      "tool": "opencode-cli",
+      "at": "2026-11-15T11:53:37.355Z",
+      "digest": "36df62e6368ddf293a00085e473bb85f358c7f6d32c6506e26097bae5e57de03",
+      "items": [
+        {
+          "kind": "skill",
+          "name": "sheet",
+          "hash": "da17ddb11c0d9ff6f8224b02716e8d074609583fcb9ae8b06311186623b4bede",
+          "seen": "da17ddb11c0d9ff6f8224b02716e8d074609583fcb9ae8b06311186623b4bede"
+        },
+        {
+          "kind": "skill",
+          "name": "chart",
+          "hash": "672b135477329054daa3761882cb59fb6d6ac44ca0c2c0237b5ea8fc26ed5358",
+          "removed": true
+        }
+      ]
+    },
+    {
+      "source": "/tmp/ck-upgrade-fixture/home/market",
+      "marketName": "team",
+      "plugin": "docs",
+      "version": "1.0.0",
+      "tool": "opencode-cli",
+      "at": "2026-11-15T11:53:37.365Z",
+      "digest": "0ab6c5d12f8d620c08383f96d94f46dfc844cf22adb2ca3ab8c312d948f455ea",
+      "items": [
+        {
+          "kind": "skill",
+          "name": "pdf",
+          "hash": "2d3ec9d7f99b61eacc8dc93e97664befdd6bcc7ae5721fb9e577ec65b480f6ef",
+          "seen": "2d3ec9d7f99b61eacc8dc93e97664befdd6bcc7ae5721fb9e577ec65b480f6ef"
+        },
+        {
+          "kind": "skill",
+          "name": "review",
+          "hash": "21d44a32fe872027b46b4d39d2c4b2da2f9dd9dac8428aff377c502ca2820c5d",
+          "seen": "21d44a32fe872027b46b4d39d2c4b2da2f9dd9dac8428aff377c502ca2820c5d"
+        },
+        {
+          "kind": "mcp",
+          "name": "lookup",
+          "hash": "3a91fa5166d96d2f4545a002827a250f5af800a34c7935647b40299c282322cc",
+          "seen": "08dd088b22058efd7d756a8c4a45bb0b26883b4323cc25fdbdf2a64f21e060b9"
+        },
+        {
+          "kind": "agent",
+          "name": "writer",
+          "hash": "14277161b70c1b9c01c545fe3c14bf728ad70c8c4955151f87dc2f3037ed15fa",
+          "seen": "14277161b70c1b9c01c545fe3c14bf728ad70c8c4955151f87dc2f3037ed15fa"
+        },
+        {
+          "kind": "skill",
+          "name": "forms",
+          "hash": "d8680c8531f781032c9d6ef51dcaeabd7318d0a16eb8b87db763a24220e0ce32",
+          "removed": true
+        }
+      ]
+    }
+  ]
+}

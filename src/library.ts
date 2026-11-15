@@ -275,7 +275,6 @@
 //   a deleted item's copy still to leave a harness   no Add: History can restore it       left found
 //     at a step of the person's own (Write to Claude Code)
 //   the record holds it deleted                      on: its tombstone is lifted          left found, for good
-//   a copy that is a plugin's part                   on                                   left found: its row keeps Add
 //   every copy switched off by its tool's own switch on                                   left found: its row keeps Add
 //   a copy whose own time is inside the settle       on                                   left for the next pass
 //     window of the pass's clock
@@ -285,7 +284,8 @@
 //   otherwise                                        taken in from the one content, or the copy chosen
 //
 // Not found at all, so in neither column: a copy of an item that is Off, or in a harness the item is kept out of (the table
-// above: "the harness's own copy: left alone"); a copy a harness has that can't be read (unseen); a copy in a harness not managed;
+// above: "the harness's own copy: left alone"); a copy a harness has that can't be read (unseen; so is every copy of a plugin's
+// part's name while it waits to be moved to the library: partsmigrate.ts); a copy in a harness not managed;
 // and a loose file in Pi's skills folder, where Pi keeps agents as skills, that the agents record doesn't say Central Knot
 // applied there: it is the person's own skill, never read as an agent and never replaced, and it holds that agent out of Pi
 // (agentfiles.ts readAgents). A copy
@@ -748,8 +748,6 @@ export interface FoundCopy {
   harness: HarnessId; hash: string;
   /** When it was last changed (ms); absent where a copy has no time of its own (an MCP entry). */
   at?: number;
-  /** A plugin's part (parts.ts): the plugin put it in that harness. */
-  part?: true;
   /** That harness's own switch turns it off there (skillswitch.ts, mcpswitch.ts). */
   switchedOff?: true;
 }
@@ -765,7 +763,7 @@ export interface FoundKey {
 /** Who asks to take a found key in: a click on its Add, or Synchronize everything. */
 export type TakenBy = 'click' | 'rule';
 /** Why a found key is left found (the header's FOUND table, one per row). */
-export type LeftFound = 'no-copy' | 'leaving' | 'deleted' | 'part' | 'switched-off' | 'settling' | 'choice-changed';
+export type LeftFound = 'no-copy' | 'leaving' | 'deleted' | 'switched-off' | 'settling' | 'choice-changed';
 /**
  * The table's answer: take it in from this copy (`chosen`: the person chose it among copies that differ), wait for a choice of
  * copy (`latest`: the content changed last, which the question preselects: latestCopy), or leave it found.
@@ -781,7 +779,6 @@ export function takeInAnswer(by: TakenBy, found: FoundKey, chosen?: { harness: H
   if (!copies.length) return { leave: 'no-copy' };
   if (found.leaving) return { leave: 'leaving' };
   if (rule && found.deleted) return { leave: 'deleted' };
-  if (rule && copies.some(copy => copy.part)) return { leave: 'part' };
   if (rule && copies.every(copy => copy.switchedOff)) return { leave: 'switched-off' };
   if (rule && settle && copies.some(copy => copy.at !== undefined && Math.abs(settle.clock - copy.at) < settle.ms)) return { leave: 'settling' };
   const pick = chosen && copies.find(copy => copy.harness === chosen.harness);

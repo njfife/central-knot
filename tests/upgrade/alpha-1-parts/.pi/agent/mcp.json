@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "lookup": {
+      "type": "stdio",
+      "command": "lookup-mcp",
+      "args": [],
+      "env": {
+        "A": "HIS-VALUE"
+      }
+    },
+    "memo-index": {
+      "type": "stdio",
+      "command": "memo-index-mcp"
+    }
+  }
+}

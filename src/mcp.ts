@@ -78,6 +78,8 @@ const list = (value: unknown): string[] | undefined => (Array.isArray(value) ? v
 // An empty map or list is read as none: OpenCode can't hold an empty argument list (its command is one list), so `"args": []`
 // read back as none there, and the server read as edited in OpenCode.
 const nonEmpty = <T extends object>(value: T | undefined) => (value && Object.keys(value).length ? value : undefined);
+/** A server kept in the neutral shape as the readers above read an entry: an empty list or map is none (partsmigrate.ts reads parts.ts's kept servers so). */
+export const asRead = (server: NeutralServer): NeutralServer => ({ ...server, args: nonEmpty(server.args), env: nonEmpty(server.env), headers: nonEmpty(server.headers) });
 
 /** Belongs to the app that wrote it: ChatGPT desktop's own servers, or a command inside an app bundle (said as a sentence). */
 function hostBound(name: string, server: NeutralServer): string | undefined {

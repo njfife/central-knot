@@ -105,10 +105,11 @@ const onIn = (linked: Linked[], tool: HarnessId) => (takesPlugins(tool) ? 0 : li
 /**
  * The tools a name the plugin makes is kept out of (library.ts A PLUGIN): each managed tool with no installer where the plugin
  * is not now (no item linked to it wanted there), but those a click brings it into (`into`); and each the entry keeps it out
- * of. The step adds each tool with a copy of that name (librarypass.ts fromSourceStep).
+ * of, managed or not, so a tool that appears later gets none of it (partsmigrate.ts keeps a moved item out of them too). The
+ * step adds each tool with a copy of that name (librarypass.ts fromSourceStep).
  */
 const pluginOutOf = (entry: PluginEntry, tools: readonly HarnessId[], linked: Linked[], into: readonly HarnessId[]) =>
-  itemTools(tools).filter(tool => entry.except.includes(tool) || (!into.includes(tool) && !onIn(linked, tool)));
+  [...new Set([...itemTools(entry.except), ...itemTools(tools).filter(tool => !into.includes(tool) && !onIn(linked, tool))])];
 
 // ---------- Running it ----------
 

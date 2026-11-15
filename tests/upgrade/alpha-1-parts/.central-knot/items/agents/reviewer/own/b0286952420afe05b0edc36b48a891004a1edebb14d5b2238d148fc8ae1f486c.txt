@@ -1,0 +1,5 @@
+name = "reviewer"
+description = "The reviewer agent."
+developer_instructions = """
+Read the diff and list problems.
+"""

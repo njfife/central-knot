@@ -26,9 +26,9 @@ import { libraryWords } from './libraryrow.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type KindLibrary, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { mergeAgent } from './merge.ts';
-import { pluginHolds, throughPlugins } from './plugins.ts';
+import { linkedToPlugin, pluginHolds, throughPlugins } from './plugins.ts';
 import { agentsKeptIn, type AgentTool } from './presence.ts';
-import { errorCode, exists, partsIn, recoverParked, removeFileChecked, syncGate, writeAccess, writeFileChecked } from './share.ts';
+import { errorCode, exists, recoverParked, removeFileChecked, syncGate, writeAccess, writeFileChecked } from './share.ts';
 import { sourceFacts } from './sources.ts';
 import type { ShareContext } from './share.ts';
 import type { Change, HarnessId, LibraryFacts, LibraryView, PassResult, SyncNotice, ThroughPlugin, ToolCopy } from './types.ts';
@@ -54,8 +54,8 @@ type AgentLook = Look<SharedAgent, AgentEntry, AgentDisk>;
  */
 async function readDisk(context: ShareContext, managed: HarnessId[], library: KindLibrary): Promise<AgentDisk> {
   const disk: AgentDisk = {
-    byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], through: await agentsThroughPlugins(context, managed),
-    parts: await partsIn(context.home, 'agent'), skills: await skillsLoaded(context, managed),
+    byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], through: await agentsThroughPlugins(context, managed, library.items),
+    skills: await skillsLoaded(context, managed),
     // A plugin's item, in a tool that takes the plugin, is held by the plugin alone (plugins.ts pluginHolds); its can't-take
     // answer keeps a copy the tool has.
     linked: await pluginHolds(context, managed),
@@ -108,12 +108,13 @@ async function skillsLoaded(context: ShareContext, managed: HarnessId[]): Promis
 
 /**
  * The agents each harness has through its installed plugins, by key: such a harness gets no file of its own beside the
- * plugin's. Only an agent Central Knot installed elsewhere as that plugin's part counts: a name alone could be another agent.
+ * plugin's. Only the plugin's own agent counts (a name alone could be another agent): one the library holds linked to that
+ * plugin (`items`: the agents' record), or while a home's parts wait to be moved (partsmigrate.ts), one on record as its part.
  */
-async function agentsThroughPlugins(context: ShareContext, tools: HarnessId[]): Promise<ThroughPlugins> {
-  const found: ThroughPlugins = new Map();
+async function agentsThroughPlugins(context: ShareContext, tools: HarnessId[], items: Record<string, LibraryItem>): Promise<ThroughPlugins> {
+  const found: ThroughPlugins = new Map(), linked = await linkedToPlugin(context.home, items);
   for (const [tool, given] of await throughPlugins(context, tools, 'agent')) {
-    const asParts = [...given].flatMap(([key, { asParts: isPart, text: _text, ...plugin }]) => (isPart ? [[key, plugin] as const] : []));
+    const asParts = [...given].flatMap(([key, { asParts: isPart, text: _text, ...plugin }]) => (isPart || linked(key, plugin) ? [[key, plugin] as const] : []));
     found.set(tool, new Map(asParts));
   }
   return found;

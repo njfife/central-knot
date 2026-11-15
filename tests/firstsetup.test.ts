@@ -343,7 +343,7 @@ test('The walkthrough left half way: nothing is stored about where it was; what 
   } finally { await box.cleanup(); }
 });
 
-test('The walkthrough leaves a plugin’s parts alone: a part whose copies differ is no item it asks about, and its row still asks', async () => {
+test('The walkthrough leaves a plugin’s parts alone: a part’s name, waiting to be moved to the library, is no item it asks about, and its row says it waits', async () => {
   const box = await sandbox();
   try {
     await putSkill(box, skillRoot['codex-cli'], 'kit-skill', 'The plugin’s.', 1_000_000);
@@ -353,7 +353,9 @@ test('The walkthrough leaves a plugin’s parts alone: a part whose copies diffe
     await mkdir(join(box.home, '.central-knot'), { recursive: true });
     await writeFile(partsRecordPath(box.home), JSON.stringify({ installs: [{ source: 'example/market', marketName: 'market', plugin: 'kit', tool: 'codex-cli', at: '2026-11-13T09:00:00Z', digest: 'd', items: [{ kind: 'skill', name: 'kit-skill', hash: '' }] }] }));
     const view = await homeView(box);
-    assert.deepEqual([waitingForChoice(view).map(item => item.key), 'wait' in rowOf(view.skills, 'kit-skill').takeInAnswers!.click], [['mine'], true]);
+    const kit = rowOf(view.skills, 'kit-skill');
+    assert.deepEqual([waitingForChoice(view).map(item => item.key), kit.takeInAnswers!.click], [['mine'], { leave: 'no-copy' }]);
+    assert.match(kit.unseen!['claude-cli']!, /waiting to be moved to the library/, 'his own copy of the name too');
     assert.equal(whatYesDoes(view).choosing, 1);
   } finally { await box.cleanup(); }
 });
@@ -635,7 +637,7 @@ test('Yes with a profile in use and a tool left out: the profile’s name drops 
     await putSkill(box, skillRoot['claude-cli'], 'notes');
     await applySkills(box.context, tools, [rowClicks.on(pageRow(rowOf(await skillsView(box.context, tools), 'notes')), undefined)]);
     await saveProfile(box.context, { name: 'Work', items: ['skill:notes'] });
-    const live = async () => { const read = await readLibraries(box.context); return 'libraries' in read ? liveItems(read.libraries) : []; };
+    const live = async () => { const read = await readLibraries(box.context); return 'libraries' in read ? liveItems(read.libraries, read.plugins) : []; };
     assert.deepEqual(inUse((await readProfiles(box.home)).profiles, await live()).map(profile => profile.name), ['Work']);
     await putSkill(box, skillRoot['claude-cli'], 'tidy');
     await putSkill(box, skillRoot['claude-cli'], 'plan');

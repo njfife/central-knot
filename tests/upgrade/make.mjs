@@ -4,6 +4,7 @@
 // the paths its records keep stay as made (the test points them at its copy).
 //   node tests/upgrade/make.mjs preview-9 <checkout of v0.5.0-preview.9>   makes tests/upgrade/preview-9 (home A)
 //   node tests/upgrade/make.mjs alpha-1 <checkout of v0.6.0-alpha.1>       makes tests/upgrade/alpha-1 from preview-9 (home B)
+//   node tests/upgrade/make.mjs alpha-1-parts <checkout of v0.6.0-alpha.1> makes tests/upgrade/alpha-1-parts from alpha-1 (home C)
 import assert from 'node:assert/strict';
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -13,7 +14,7 @@ const HOME = '/tmp/ck-upgrade-fixture/home';
 const APP_DATA = '/tmp/ck-upgrade-fixture/app';
 const here = dirname(fileURLToPath(import.meta.url));
 const [which, checkout] = process.argv.slice(2);
-if (!['preview-9', 'alpha-1'].includes(which) || !checkout) throw new Error('Usage: node tests/upgrade/make.mjs preview-9|alpha-1 <checkout of the tag>');
+if (!['preview-9', 'alpha-1', 'alpha-1-parts'].includes(which) || !checkout) throw new Error('Usage: node tests/upgrade/make.mjs preview-9|alpha-1|alpha-1-parts <checkout of the tag>');
 const engine = (file) => import(join(resolve(checkout), 'src', file));
 
 const { discover } = await engine('discovery.ts');
@@ -107,9 +108,103 @@ async function alphaOne() {
   await put('.codex/skills/notes/SKILL.md', skill('notes', 'Write each note as one line, dated, in Codex.'));
 }
 
+/** A folder marketplace inside the home: `plugins` by name, each its files by path inside the plugin's folder. */
+async function market(folder, name, plugins) {
+  await put(`${folder}/.claude-plugin/marketplace.json`, JSON.stringify({ name, plugins: Object.keys(plugins).map(plugin => ({ name: plugin, source: `./plugins/${plugin}` })) }));
+  for (const [plugin, files] of Object.entries(plugins)) for (const [path, text] of Object.entries(files)) await put(`${folder}/plugins/${plugin}/${path}`, text);
+}
+
+async function alphaOneParts() {
+  const { installParts } = await engine('parts.ts');
+  const { pluginFiles } = await engine('catalogdetail.ts');
+  const { applySkills } = await engine('skills.ts');
+  // Home B where it was made, and the app's memory of its sync record. Automatic sync is off there, so alpha 1 runs no pass.
+  await cp(join(here, 'alpha-1'), HOME, { recursive: true });
+  const { generation } = JSON.parse(await readFile(join(HOME, '.central-knot/sync.json'), 'utf8'));
+  await writeFile(context.settingsPath, `${JSON.stringify({ homes: { [HOME]: { generation } } }, null, 2)}\n`);
+  // 1. Pi and OpenCode installed (their settings folders), and two folder marketplaces kept in the home: team, and gone (which
+  //    the test removes, as a marketplace gone at the upgrade).
+  await mkdir(join(HOME, '.pi/agent'), { recursive: true });
+  await mkdir(join(HOME, '.config/opencode'), { recursive: true });
+  const team = `${HOME}/market`, gone = `${HOME}/gone-market`;
+  const docs = {
+    'skills/pdf/SKILL.md': skill('pdf', 'Read PDFs page by page.'), 'skills/review/SKILL.md': skill('review', 'Review the document.'),
+    'skills/forms/SKILL.md': skill('forms', 'Fill forms field by field.'), 'agents/writer.md': agent('writer', 'Write the document.', 'model: sonnet\n'),
+    // lookup's entry has an empty argument list, as alpha 1 kept it; bundled runs from the plugin's own folder, so it is never a part.
+    '.mcp.json': JSON.stringify({ mcpServers: { lookup: { command: 'lookup-mcp', args: [], env: { A: '1' } }, bundled: { command: './bin/serve' } } }),
+    'bin/serve': '#!/bin/sh\n',
+  };
+  const sheet = (version, body) => ({ '.claude-plugin/plugin.json': JSON.stringify({ name: 'sheet', version }), 'skills/sheet/SKILL.md': skill('sheet', body),
+    'skills/chart/SKILL.md': skill('chart', 'Draw one chart per sheet.') });
+  // memo's agent scribe is no part anywhere (memo went into Pi alone, which took no agents); its server memo-index is.
+  const memo = { 'skills/memo/SKILL.md': skill('memo', 'Keep a memo.'), 'agents/scribe.md': agent('scribe', 'Write it down.'),
+    '.mcp.json': JSON.stringify({ mcpServers: { 'memo-index': { command: 'memo-index-mcp' } } }) };
+  await market('market', 'team', { docs, memo, sheet: sheet('1.0.0', 'Sheets, version one.'),
+    picks: Object.fromEntries(['one', 'two', 'three'].map(name => [`skills/${name}/SKILL.md`, skill(name, `The ${name} part.`)])),
+    tasks: { 'skills/tasks/SKILL.md': skill('tasks', 'List the tasks.') }, journal: { 'skills/journal/SKILL.md': skill('journal', 'Write the day down.') } });
+  await market('gone-market', 'gone', { old: { 'skills/old/SKILL.md': skill('old', 'From a marketplace gone since.') } });
+  // 2. The tools' own records of plugins installed whole, as their own commands write them (no version of Central Knot writes
+  //    them; the shapes tests/upgrade.test.ts used): Claude Code has memo and tasks from team, old from gone, xlsx from the
+  //    Anthropic Directory; Copilot CLI has tasks, turned off there by its own switch.
+  // Each installed copy is the marketplace's plugin as it is (xlsx's, from the Directory, its own), so no update is owed.
+  const bodies = { tasks: 'List the tasks.', old: 'From a marketplace gone since.', xlsx: 'Read spreadsheets.' };
+  const copy = async (root, name) => { await put(`${root}/skills/${name}/SKILL.md`, skill(name, bodies[name])); return join(HOME, root); };
+  const claude = (name, marketName = 'team') => copy(`.claude/plugins/cache/${marketName}/${name}/unknown`, name);
+  // Claude Code's memo is the marketplace's whole plugin folder, its agent and server too.
+  const memoCopy = '.claude/plugins/cache/team/memo/unknown';
+  await cp(join(HOME, 'market/plugins/memo'), join(HOME, memoCopy), { recursive: true });
+  await put('.claude/plugins/known_marketplaces.json', JSON.stringify({ team: { source: { source: 'git', url: team } }, gone: { source: { source: 'git', url: gone } } }));
+  await put('.claude/plugins/installed_plugins.json', JSON.stringify({ version: 2, plugins: {
+    'memo@team': [{ scope: 'user', installPath: join(HOME, memoCopy), version: 'unknown' }], 'tasks@team': [{ scope: 'user', installPath: await claude('tasks'), version: 'unknown' }],
+    'old@gone': [{ scope: 'user', installPath: await claude('old', 'gone'), version: 'unknown' }],
+    'xlsx@anthropic-plugin-directory': [{ scope: 'user', installPath: await claude('xlsx', 'anthropic-plugin-directory'), version: 'unknown', directoryRepositoryKey: 'github.com/acme/xlsx#' }] } }));
+  await put('.copilot/settings.json', JSON.stringify({ extraKnownMarketplaces: { team: { source: { source: 'git', url: team } } } }));
+  await put('.copilot/config.json', JSON.stringify({ installedPlugins: [{ name: 'tasks', marketplace: 'team', cache_path: await copy('.copilot/installed-plugins/team/tasks', 'tasks'), enabled: false }] }));
+  // 3. Parts, by alpha 1's Plugins page (parts.ts installParts, and its picks): docs whole into Pi, OpenCode and Codex (Codex's
+  //    route blocked here; the test leaves Codex out, as a tool left out since); memo and old into Pi; sheet into Pi and OpenCode;
+  //    picks picked part by part in Pi, one alone, so two and three are recorded out and never written.
+  const files = (root, plugin) => pluginFiles(join(root, 'plugins', plugin), { name: plugin, source: `./plugins/${plugin}` }, root);
+  const parts = async (root, marketName, plugin, tool, version, pick) => {
+    const report = await installParts(context, { source: root, marketName, plugin, tool, version }, await files(root, plugin), pick);
+    assert.equal(report.outcome, 'installed', `${plugin} into ${tool}: ${report.message}`);
+    return report;
+  };
+  for (const tool of ['pi-cli', 'opencode-cli', 'codex-cli']) await parts(team, 'team', 'docs', tool, '1.0.0');
+  await parts(team, 'team', 'memo', 'pi-cli');
+  await parts(team, 'team', 'journal', 'opencode-cli');
+  // memo's server turned off in Claude Code from its row (alpha 1's switch for one server of a plugin, which writes Claude Code's settings).
+  const { setPart } = await engine('plugins.ts');
+  const off = await setPart({ home: HOME, dataDir: join(APP_DATA, 'plugins'), binaries: {}, reads: new Map() }, 'team', 'memo', { kind: 'mcp', name: 'memo-index' }, 'claude-cli', false, team);
+  assert.equal(off.outcome, 'part-off', off.message);
+  await parts(gone, 'gone', 'old', 'pi-cli');
+  for (const tool of ['pi-cli', 'opencode-cli']) await parts(team, 'team', 'sheet', tool, '1.0.0');
+  await parts(team, 'team', 'picks', 'pi-cli', undefined, { on: [{ kind: 'skill', name: 'one' }], off: [] });
+  // 4. sheet 2.0.0 in team (its skill sheet changed, chart not), and sheet picked again in Pi alone: Pi has 2.0.0's. Then
+  //    chart turned off in OpenCode, a single-part pick that keeps 1.0.0 on record there: OpenCode's later time is the older
+  //    version's.
+  for (const [path, text] of Object.entries(sheet('2.0.0', 'Sheets, version two.'))) await put(`market/plugins/sheet/${path}`, text);
+  await parts(team, 'team', 'sheet', 'pi-cli', '2.0.0', { on: [{ kind: 'skill', name: 'sheet' }], off: [] });
+  await parts(team, 'team', 'sheet', 'opencode-cli', '2.0.0', { on: [], off: [{ kind: 'skill', name: 'chart' }] });
+  // 5. forms turned off in OpenCode by its switch under What it holds.
+  await parts(team, 'team', 'docs', 'opencode-cli', '1.0.0', { on: [], off: [{ kind: 'skill', name: 'forms' }] });
+  // 6. By hand: pdf edited in Pi, review deleted from Pi, lookup's environment variable edited in Pi, writer edited in OpenCode.
+  await put('.pi/agent/skills/pdf/SKILL.md', skill('pdf', 'Read PDFs page by page, and mark each page read.'));
+  await rm(join(HOME, '.pi/agent/skills/review'), { recursive: true });
+  const piServers = JSON.parse(await readFile(join(HOME, '.pi/agent/mcp.json'), 'utf8'));
+  piServers.mcpServers.lookup.env = { A: 'HIS-VALUE' };
+  await put('.pi/agent/mcp.json', `${JSON.stringify(piServers, null, 2)}\n`);
+  const writer = '.config/opencode/agents/writer.md';
+  await put(writer, (await readFile(join(HOME, writer), 'utf8')).replace('Write the document.', 'Write the document, then read it aloud.'));
+  // 7. one taken in with Add on the Skills page (alpha 1, Automatic sync off: the click's item alone): it is his own item now,
+  //    written to Claude Code, Copilot CLI and Codex (OpenCode reads it from Claude Code's skills folder). Its pass notes Pi's and OpenCode's skills folders, so skills.json knows them; agents.json and the MCP record
+  //    (not on the library in alpha 1) never saw Pi or OpenCode.
+  assert.deepEqual(did(await applySkills(context, await tools(), [{ key: 'one', managed: true, off: [] }], { only: new Set(['one']) })),
+    ['one claude-cli written', 'one codex-cli written', 'one copilot-cli written']);
+}
+
 await rm(dirname(HOME), { recursive: true, force: true });
 await mkdir(APP_DATA, { recursive: true });
-await (which === 'preview-9' ? previewNine() : alphaOne());
+await ({ 'preview-9': previewNine, 'alpha-1': alphaOne, 'alpha-1-parts': alphaOneParts })[which]();
 const out = join(here, which);
 await rm(out, { recursive: true, force: true });
 await cp(HOME, out, { recursive: true });

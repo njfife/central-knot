@@ -14,6 +14,7 @@ import { codexSkillSwitches, type CodexSkillSwitch } from './skillswitch.ts';
 import { partOff, serverHeld, withPartSwitch } from './partswitch.ts';
 import { DIRECTORY, INLINE_SKILLS_CONFIG, hasPartSwitch, heldReason, noCli, offByBareName, noSwitchReason, samePart } from './pluginstatus.ts';
 import { takesPlugins, type PluginTool } from './presence.ts';
+import type { LibraryItem } from './library.ts';
 import { readPluginRecord } from './pluginrecord.ts';
 import { errorCode, itemKey, readParts, writeFileChecked } from './share.ts';
 import { SAFE_NAME, compareVersions, githubRepo, isCommitHash, isFolder, isHttps, record, strings, text, withoutBom } from './values.ts';
@@ -661,6 +662,16 @@ export async function pluginParts(context: PluginContext, tool: PluginTool): Pro
 
 /** What a tool has through a plugin, as the pages ask: `asParts`, the item is on record as that plugin's part in some tool; a skill comes with its SKILL.md. */
 export type GivenByPlugin = ThroughPlugin & { asParts: boolean; text?: string };
+
+/**
+ * Whether the library's item of a key (`items`, one kind's) is linked to the plugin a tool has it through (library.ts A PLUGIN):
+ * the plugin's own item, which servers.ts and agents.ts count as a part on record is counted (`asParts`).
+ */
+export async function linkedToPlugin(home: string, items: Record<string, Pick<LibraryItem, 'source' | 'deleted'>>) {
+  const entries = (await readPluginRecord(home)).record?.plugins ?? [];
+  return (key: string, given: Pick<ThroughPlugin, 'plugin' | 'marketplace'>) => !items[key]?.deleted
+    && entries.some(entry => entry.id === items[key]?.source && entry.plugin === given.plugin && entry.marketName === given.marketplace);
+}
 
 /**
  * What each of `tools` has through its installed plugins, of one kind: by tool, then by the item's key on its page

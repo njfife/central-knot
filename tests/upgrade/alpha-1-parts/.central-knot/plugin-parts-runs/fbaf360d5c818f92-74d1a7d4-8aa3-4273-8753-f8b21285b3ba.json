@@ -1,0 +1,24 @@
+{
+  "target": {
+    "source": "/tmp/ck-upgrade-fixture/home/gone-market",
+    "plugin": "old",
+    "tool": "pi-cli"
+  },
+  "before": null,
+  "after": {
+    "source": "/tmp/ck-upgrade-fixture/home/gone-market",
+    "marketName": "gone",
+    "plugin": "old",
+    "tool": "pi-cli",
+    "at": "2026-11-15T11:53:37.304Z",
+    "digest": "163d85067a056f559b307c4739eef120e39b6e4545ad0dbe44174786c58b5fba",
+    "items": [
+      {
+        "kind": "skill",
+        "name": "old",
+        "hash": "3d0bb74a2a15f3fd7967276323eda479687826bc9d5713885c423f62f411e95f",
+        "seen": "3d0bb74a2a15f3fd7967276323eda479687826bc9d5713885c423f62f411e95f"
+      }
+    ]
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "formatVersion": 3,
+  "items": {
+    "reviewer": {
+      "kind": "agent",
+      "key": "reviewer",
+      "name": "reviewer",
+      "on": true,
+      "hash": "339dfb43cc6afdaafa89fec25979577b796ec7aeb3d9b03e69d3c11968e835c9",
+      "versions": [
+        {
+          "hash": "339dfb43cc6afdaafa89fec25979577b796ec7aeb3d9b03e69d3c11968e835c9",
+          "at": "2026-11-13T15:33:06.981Z",
+          "from": {
+            "how": "migrated"
+          }
+        }
+      ],
+      "except": [],
+      "applied": {
+        "claude-cli": "339dfb43cc6afdaafa89fec25979577b796ec7aeb3d9b03e69d3c11968e835c9",
+        "copilot-cli": "339dfb43cc6afdaafa89fec25979577b796ec7aeb3d9b03e69d3c11968e835c9",
+        "codex-cli": "339dfb43cc6afdaafa89fec25979577b796ec7aeb3d9b03e69d3c11968e835c9"
+      },
+      "own": {
+        "claude-cli": "8e0595517b55c531a053cd013c4f64e64ab923edf75fc017e18e68bfd513a54a",
+        "copilot-cli": "8e0595517b55c531a053cd013c4f64e64ab923edf75fc017e18e68bfd513a54a",
+        "codex-cli": "b0286952420afe05b0edc36b48a891004a1edebb14d5b2238d148fc8ae1f486c"
+      }
+    },
+    "planner": {
+      "kind": "agent",
+      "key": "planner",
+      "name": "planner",
+      "on": true,
+      "hash": "0c5eae5dba73f4f8f1e57554725c6f79dda67a7f303602d88264f814892c714d",
+      "versions": [
+        {
+          "hash": "0c5eae5dba73f4f8f1e57554725c6f79dda67a7f303602d88264f814892c714d",
+          "at": "2026-11-13T15:33:06.981Z",
+          "from": {
+            "how": "migrated"
+          }
+        }
+      ],
+      "except": [],
+      "applied": {
+        "claude-cli": "0c5eae5dba73f4f8f1e57554725c6f79dda67a7f303602d88264f814892c714d",
+        "copilot-cli": "0c5eae5dba73f4f8f1e57554725c6f79dda67a7f303602d88264f814892c714d",
+        "codex-cli": "0c5eae5dba73f4f8f1e57554725c6f79dda67a7f303602d88264f814892c714d"
+      },
+      "own": {
+        "claude-cli": "e711f87b15385b004676f80bb833b7cecf6549e2da45cdd8fcab9f3b28a5d411",
+        "copilot-cli": "363f9becbb18a3f3d4707ae7c72b4404298f63491ef38b8f4dd2d0b1d9a445a2",
+        "codex-cli": "bb46a2a009b16aa4512e0ca698ce9bb330c843e8a6f819be69a13ae4b9492db9"
+      }
+    }
+  },
+  "folders": {
+    "claude-cli": {
+      "path": "/tmp/ck-upgrade-fixture/home/.claude/agents",
+      "ino": 85644761,
+      "birth": 1794583986982
+    },
+    "copilot-cli": {
+      "path": "/tmp/ck-upgrade-fixture/home/.copilot/agents",
+      "ino": 85644734,
+      "birth": 1794583986981
+    },
+    "codex-cli": {
+      "path": "/tmp/ck-upgrade-fixture/home/.codex/agents",
+      "ino": 85644747,
+      "birth": 1794583986982
+    }
+  }
+}

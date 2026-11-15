@@ -31,7 +31,7 @@ const ids = (items: { id: string }[]) => items.map(item => item.id);
 const profile = (name: string, items: string[]): Profile => ({ id: name, name, items });
 
 test('A switch turns what the profile names On and every other library item Off; an id naming no live item is skipped', () => {
-  const live = liveItems(libraryOf([['skill', 'dev', true], ['skill', 'pager', true], ['skill', 'gone', true, true], ['mcp', 'docs', false], ['agent', 'writer', true]]));
+  const live = liveItems(libraryOf([['skill', 'dev', true], ['skill', 'pager', true], ['skill', 'gone', true, true], ['mcp', 'docs', false], ['agent', 'writer', true]]), new Set());
   assert.deepEqual(ids(live), ['skill:dev', 'skill:pager', 'mcp:docs', 'agent:writer'], 'a deleted item is not live');
   // skill:gone was deleted and skill:loose is only found in a tool: both skipped, and both stay in the profile.
   const turns = switchPlan(profile('Work', ['skill:dev', 'mcp:docs', 'skill:gone', 'skill:loose']), live);
@@ -42,13 +42,13 @@ test('A switch turns what the profile names On and every other library item Off;
 });
 
 test('A profile is in use exactly while switching to it would change nothing: two with the same items both are, an empty one only while nothing is On', () => {
-  const live = liveItems(libraryOf([['skill', 'dev', true], ['agent', 'writer', true], ['mcp', 'docs', false], ['skill', 'gone', false, true]]));
+  const live = liveItems(libraryOf([['skill', 'dev', true], ['agent', 'writer', true], ['mcp', 'docs', false], ['skill', 'gone', false, true]]), new Set());
   const dev = profile('Dev', ['skill:dev', 'agent:writer']), same = profile('Same', ['agent:writer', 'skill:dev', 'skill:gone', 'skill:loose']);
   const all = profile('All', ['skill:dev', 'agent:writer', 'mcp:docs']), empty = profile('Empty', []);
   assert.deepEqual(inUse([dev, same, all, empty], live), [dev, same], 'ids naming no live item are skipped here too');
   assert.equal(inUseName([dev, same, all, empty], live), 'Dev and Same');
   assert.equal(inUseName([all, empty], live), 'No profile');
-  const nothingOn = liveItems(libraryOf([['skill', 'dev', false]]));
+  const nothingOn = liveItems(libraryOf([['skill', 'dev', false]]), new Set());
   assert.deepEqual(inUse([dev, empty], nothingOn), [empty]);
   // A profile with nothing live in it is not offered to switch to: it would turn every item off.
   assert.deepEqual([dev, empty, profile('Gone', ['skill:gone', 'skill:loose'])].map(each => switchable(each, live)), [true, false, false]);
@@ -57,7 +57,7 @@ test('A profile is in use exactly while switching to it would change nothing: tw
 test('The Undo of a switch turns back each item still as the switch left it, decided from each item now', () => {
   const entry = { profile: { toName: 'Dev', on: [{ id: 'mcp:docs', name: 'docs' }], off: [{ id: 'skill:pager', name: 'pager' }, { id: 'skill:notes', name: 'notes' }, { id: 'agent:gone', name: 'gone' }] } };
   // Since the switch: pager was turned back on by hand, docs was turned off by hand, and agent gone was deleted.
-  const live = liveItems(libraryOf([['skill', 'pager', true], ['skill', 'notes', false], ['mcp', 'docs', false], ['agent', 'gone', false, true]]));
+  const live = liveItems(libraryOf([['skill', 'pager', true], ['skill', 'notes', false], ['mcp', 'docs', false], ['agent', 'gone', false, true]]), new Set());
   const back = undoPlan(entry, live);
   assert.deepEqual([ids(back.on), ids(back.off)], [['skill:notes'], []]);
   assert.deepEqual(undoPlan({ profile: { toName: 'Old' } }, live), { on: [], off: [] }, 'an entry from before profiles were sets of items has nothing to undo');

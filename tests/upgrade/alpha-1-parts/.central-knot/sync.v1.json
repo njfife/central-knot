@@ -1,0 +1,108 @@
+{
+  "formatVersion": 1,
+  "generation": "d340e99d-e7fa-44d7-82f8-039ddb629d01",
+  "owner": "com.centralknot.firstlook",
+  "ownerName": "Central Knot",
+  "items": {
+    "notes": {
+      "name": "notes",
+      "hash": "73dd9391c431310711b014d51ab8ab9518b7d7aeb9f3c3021927156c0228bdbc",
+      "state": "shared",
+      "startId": "",
+      "observedAt": "2026-11-13T15:33:06.658Z",
+      "copies": [
+        {
+          "harness": "claude-cli",
+          "directory": "/tmp/ck-upgrade-fixture/home/.claude/skills/notes",
+          "hash": "73dd9391c431310711b014d51ab8ab9518b7d7aeb9f3c3021927156c0228bdbc",
+          "created": false,
+          "status": "written"
+        },
+        {
+          "harness": "copilot-cli",
+          "directory": "/tmp/ck-upgrade-fixture/home/.copilot/skills/notes",
+          "hash": "73dd9391c431310711b014d51ab8ab9518b7d7aeb9f3c3021927156c0228bdbc",
+          "created": true,
+          "status": "written"
+        },
+        {
+          "harness": "codex-cli",
+          "directory": "/tmp/ck-upgrade-fixture/home/.codex/skills/notes",
+          "hash": "73dd9391c431310711b014d51ab8ab9518b7d7aeb9f3c3021927156c0228bdbc",
+          "created": true,
+          "status": "written"
+        }
+      ],
+      "off": []
+    },
+    "style": {
+      "name": "style",
+      "hash": "e0937a52307ca6cb4d8ec2ef381ac12a61721ba8ee425b656a4386cca76c8921",
+      "state": "shared",
+      "startId": "",
+      "observedAt": "2026-11-13T15:33:06.658Z",
+      "copies": [
+        {
+          "harness": "claude-cli",
+          "directory": "/tmp/ck-upgrade-fixture/home/.claude/skills/style",
+          "hash": "e0937a52307ca6cb4d8ec2ef381ac12a61721ba8ee425b656a4386cca76c8921",
+          "created": false,
+          "status": "written"
+        },
+        {
+          "harness": "copilot-cli",
+          "directory": "/tmp/ck-upgrade-fixture/home/.copilot/skills/style",
+          "hash": "e0937a52307ca6cb4d8ec2ef381ac12a61721ba8ee425b656a4386cca76c8921",
+          "created": true,
+          "status": "written"
+        }
+      ],
+      "off": [
+        "codex-cli"
+      ]
+    },
+    "clash": {
+      "name": "clash",
+      "hash": "",
+      "state": "shared",
+      "startId": "",
+      "observedAt": "2026-11-13T15:33:06.658Z",
+      "copies": [],
+      "off": []
+    },
+    "drafts": {
+      "name": "drafts",
+      "hash": "bdfece224c1554058af200d5e6ee5a13788382f5c66689b6664d2ee3f12e9962",
+      "state": "shared",
+      "startId": "",
+      "observedAt": "2026-11-13T15:33:06.658Z",
+      "copies": [
+        {
+          "harness": "claude-cli",
+          "directory": "/tmp/ck-upgrade-fixture/home/.claude/skills/drafts",
+          "hash": "bdfece224c1554058af200d5e6ee5a13788382f5c66689b6664d2ee3f12e9962",
+          "created": false,
+          "status": "written"
+        }
+      ],
+      "off": [
+        "copilot-cli",
+        "codex-cli"
+      ]
+    }
+  },
+  "roots": {
+    "/tmp/ck-upgrade-fixture/home/.claude/skills": {
+      "ino": 85644572,
+      "birth": 1794583986606
+    },
+    "/tmp/ck-upgrade-fixture/home/.copilot/skills": {
+      "ino": 85644584,
+      "birth": 1794583986607
+    },
+    "/tmp/ck-upgrade-fixture/home/.codex/skills": {
+      "ino": 85644578,
+      "birth": 1794583986606
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "skillOverrides": {
+    "drafts": "off"
+  },
+  "deniedMcpServers": [
+    {
+      "serverName": "search"
+    },
+    {
+      "serverName": "plugin:memo:memo-index"
+    }
+  ]
+}

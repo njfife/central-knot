@@ -1,0 +1,49 @@
+{
+  "target": {
+    "source": "/tmp/ck-upgrade-fixture/home/market",
+    "plugin": "docs",
+    "tool": "codex-cli"
+  },
+  "before": null,
+  "after": {
+    "source": "/tmp/ck-upgrade-fixture/home/market",
+    "marketName": "team",
+    "plugin": "docs",
+    "version": "1.0.0",
+    "tool": "codex-cli",
+    "at": "2026-11-15T11:53:37.272Z",
+    "digest": "ada25480c602f5e1f44df009a0da5647a018f667e804403850978b83c2c13476",
+    "items": [
+      {
+        "kind": "skill",
+        "name": "forms",
+        "hash": "d8680c8531f781032c9d6ef51dcaeabd7318d0a16eb8b87db763a24220e0ce32",
+        "seen": "d8680c8531f781032c9d6ef51dcaeabd7318d0a16eb8b87db763a24220e0ce32"
+      },
+      {
+        "kind": "skill",
+        "name": "pdf",
+        "hash": "2d3ec9d7f99b61eacc8dc93e97664befdd6bcc7ae5721fb9e577ec65b480f6ef",
+        "seen": "2d3ec9d7f99b61eacc8dc93e97664befdd6bcc7ae5721fb9e577ec65b480f6ef"
+      },
+      {
+        "kind": "skill",
+        "name": "review",
+        "hash": "21d44a32fe872027b46b4d39d2c4b2da2f9dd9dac8428aff377c502ca2820c5d",
+        "seen": "21d44a32fe872027b46b4d39d2c4b2da2f9dd9dac8428aff377c502ca2820c5d"
+      },
+      {
+        "kind": "mcp",
+        "name": "lookup",
+        "hash": "3a91fa5166d96d2f4545a002827a250f5af800a34c7935647b40299c282322cc",
+        "seen": "8d3ba26e228f6c9aecbf080bc371097bc9e6501b1905866730e58d00bf1bb1cf"
+      },
+      {
+        "kind": "agent",
+        "name": "writer",
+        "hash": "d2d022b82d641afc1eceafa8b6d9aee26585d702a80abca7ad35f7cae8f85a0f",
+        "seen": "d2d022b82d641afc1eceafa8b6d9aee26585d702a80abca7ad35f7cae8f85a0f"
+      }
+    ]
+  }
+}

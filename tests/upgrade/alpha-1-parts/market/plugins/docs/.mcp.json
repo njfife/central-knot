@@ -1,0 +1,1 @@
+{"mcpServers":{"lookup":{"command":"lookup-mcp","args":[],"env":{"A":"1"}},"bundled":{"command":"./bin/serve"}}}

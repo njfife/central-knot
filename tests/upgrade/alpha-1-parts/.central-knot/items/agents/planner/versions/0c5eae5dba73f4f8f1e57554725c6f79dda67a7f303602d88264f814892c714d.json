@@ -1,0 +1,5 @@
+{
+  "name": "planner",
+  "description": "The planner agent.",
+  "prompt": "Plan the change in steps.\n"
+}

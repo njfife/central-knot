@@ -2,7 +2,8 @@
 // `agent:<key>` and `mcp:<key>`. Switching to it turns each item it names On and every other library item Off (switchPlan);
 // a profile is in use exactly while that would change nothing, so which one is in use is worked out, never stored (inUse);
 // and a switch's Undo turns back each item still as the switch left it (undoPlan). An id that names no live library item
-// (one only found in a tool, one a plugin brings, one deleted) is skipped by all three and stays in the profile.
+// (one only found in a tool, one a plugin brings, one deleted) is skipped by all three and stays in the profile; so is an item
+// linked to a plugin the home records (library.ts A PLUGIN), which follows its plugin's switch alone (liveItems).
 // Read by profiles.ts (which carries a switch out), profilemigrate.ts, the Profiles page, History's page and the menus
 // (main.ts), so each says the same. The profiles file and the switch itself are profiles.ts's.
 import type { ItemKind, LibraryItem } from './library.ts';
@@ -22,14 +23,18 @@ export interface LiveItem { id: string; kind: ItemKind; key: string; name: strin
 /** Each kind's items as the library holds them, deleted ones too (types.ts LibraryView `library`, or a kind's record). */
 export type Libraries = Record<ItemKind, Record<string, LibraryItem>>;
 
-/** Every live library item, skills first, then MCP servers, then agents. */
-export function liveItems(libraries: Libraries): LiveItem[] {
-  return (['skill', 'mcp', 'agent'] as const).flatMap(kind => Object.values(libraries[kind]).filter(item => !item.deleted)
+/**
+ * Every live library item that profiles act on, skills first, then MCP servers, then agents: all but those linked to a plugin
+ * (`plugins`: the ids of the plugins the home records), which a switch never turns On or Off and no profile counts.
+ */
+export function liveItems(libraries: Libraries, plugins: ReadonlySet<string>): LiveItem[] {
+  return (['skill', 'mcp', 'agent'] as const).flatMap(kind => Object.values(libraries[kind]).filter(item => !item.deleted && !(item.source && plugins.has(item.source)))
     .map(({ key, name, on, except }) => ({ id: itemId(kind, key), kind, key, name, on, except })));
 }
 
-/** A home view's live items (each kind's `library` in types.ts HomeView), as the page and the menus read them. */
-export const homeItems = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents'>) => liveItems({ skill: home.skills.library, mcp: home.mcp.library, agent: home.agents.library });
+/** A home view's live items that profiles act on (each kind's `library` in types.ts HomeView), as the page and the menus read them. */
+export const homeItems = (home: Pick<HomeView, 'skills' | 'mcp' | 'agents' | 'profiles'>) =>
+  liveItems({ skill: home.skills.library, mcp: home.mcp.library, agent: home.agents.library }, new Set(home.profiles.plugins));
 
 /** What a switch, or its Undo, changes: the items it turns On, and those it turns Off. */
 export interface Turns { on: LiveItem[]; off: LiveItem[] }

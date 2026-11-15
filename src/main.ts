@@ -511,6 +511,8 @@ interface ServersAndAgentsResult { serverNotices: SyncNotice[]; agentNotices: Sy
  */
 interface BackgroundPass { skills?: LibraryPass; serversAndAgents?: ServersAndAgentsResult; told?: ReturnType<typeof passTells>; done?: DestinationResult[] }
 
+/** Each reason the move of plugin parts waited that the log has had this launch (pass). */
+const partsWaitsLogged = new Set<string>();
 /**
  * One pass on the open home: writes only with Sync on (or when asked explicitly); with Sync off nothing is done in the
  * background, and an edit or a deletion waits for Sync or a click on its item. `snapshots`: the caller's read of the home,
@@ -520,8 +522,14 @@ interface BackgroundPass { skills?: LibraryPass; serversAndAgents?: ServersAndAg
  */
 async function pass(snapshots: Snapshot[], explicit = false): Promise<BackgroundPass> {
   const shared: ShareContext = { ...context(), read: async () => snapshots, reads: new Map() };
-  const { synced, profilesFailed } = await homePass(shared, await managedNow(shared, snapshots), syncOn || explicit);
+  // While plugin parts from before the library wait to be moved there, the plugins record's first read comes first (its install
+  // alpha 1 waited for read from pluginUpdates, made before any pass), and the move may read a plugin (homepass.ts step 2).
+  const pluginNow = await carriedMarket?.beforeParts().catch((error: unknown) => { logFailure('plugins record', error); return undefined; });
+  const { synced, profilesFailed, partsFailed, partsWait } = await homePass(shared, await managedNow(shared, snapshots), syncOn || explicit, pluginNow);
   if (profilesFailed !== undefined) logFailure('moving profiles', profilesFailed);
+  if (partsFailed !== undefined) logFailure('moving plugin parts', partsFailed);
+  // Why the move of plugin parts waits, once per launch and reason (a home can wait for good: its rows say only "waiting").
+  if (partsWait && !partsWaitsLogged.has(partsWait)) { partsWaitsLogged.add(partsWait); log(`plugin parts: waiting to be moved to the library: ${partsWait}`); }
   if (!synced) return {};
   const { skills, servers, agents } = synced;
   return { skills: skills ?? { results: [], writes: 0 }, done: [skills, servers, agents].flatMap(kind => kind?.results ?? []), told: passTells(synced), serversAndAgents: {

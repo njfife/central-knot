@@ -1,0 +1,44 @@
+{
+  "formatVersion": 1,
+  "items": {
+    "docs": {
+      "state": "shared",
+      "off": [],
+      "hash": "38d482fa23bdc68be745bff594c465cf2f2b9a168e63eed22a3978f736a30f92",
+      "copies": [
+        {
+          "tool": "claude-cli",
+          "hash": "38d482fa23bdc68be745bff594c465cf2f2b9a168e63eed22a3978f736a30f92",
+          "file": "/tmp/ck-upgrade-fixture/home/.claude.json"
+        },
+        {
+          "tool": "copilot-cli",
+          "hash": "38d482fa23bdc68be745bff594c465cf2f2b9a168e63eed22a3978f736a30f92",
+          "file": "/tmp/ck-upgrade-fixture/home/.copilot/mcp-config.json"
+        },
+        {
+          "tool": "codex-cli",
+          "hash": "38d482fa23bdc68be745bff594c465cf2f2b9a168e63eed22a3978f736a30f92",
+          "file": "/tmp/ck-upgrade-fixture/home/.codex/config.toml"
+        }
+      ],
+      "missingSince": {}
+    },
+    "search": {
+      "state": "shared",
+      "off": [
+        "copilot-cli",
+        "codex-cli"
+      ],
+      "hash": "5be967dfbdc847f47e10f159f3eab504e93b1ed14a58f97e8afc1516ab00ea87",
+      "copies": [
+        {
+          "tool": "claude-cli",
+          "hash": "5be967dfbdc847f47e10f159f3eab504e93b1ed14a58f97e8afc1516ab00ea87",
+          "file": "/tmp/ck-upgrade-fixture/home/.claude.json"
+        }
+      ],
+      "missingSince": {}
+    }
+  }
+}

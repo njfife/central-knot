@@ -8,8 +8,8 @@
 //   back with the entry, so Off then On gives each tool back its entry. An entry has no time of its own (library.ts: of two
 //   edits the first tool wins).
 // - what is never taken in (readDisk, Disk.unseen with its reason): a server that belongs to an app (mcp.ts hostBound), an
-//   entry in a form Central Knot doesn't edit, two names in one file that differ only by case, and an entry Central Knot wrote
-//   as a plugin's part (parts.ts), which is the plugin's. A settings file that can't be read or parsed makes the whole tool
+//   entry in a form Central Knot doesn't edit, and two names in one file that differ only by case (a plugin's part from before
+//   the library waits unseen too, as every kind's does: partsmigrate.ts). A settings file that can't be read or parsed makes the whole tool
 //   unseen; a missing one is away (folderSeen), so its entries are written back once it can be, never read as deletions.
 // - why a tool can't be given a server (Disk.held): it can't hold its transport (mcp.ts cannotHold), or it has the server
 //   through a plugin and no entry of its own.
@@ -36,10 +36,10 @@ import { libraryWords, writesWait } from './libraryrow.ts';
 import { mergeServer } from './merge.ts';
 import { cannotHold, editEntry, mcpFile, ownPartOf, readTool, recoverSettings, SERVER_PARTS, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, readMcpSwitches, withMcpSwitch } from './mcpswitch.ts';
-import { pluginHolds, throughPlugins } from './plugins.ts';
+import { linkedToPlugin, pluginHolds, throughPlugins, type GivenByPlugin } from './plugins.ts';
 import { mcpTools } from './presence.ts';
 import { keepDenies, keepOwn, keptDenies, keptOwn, openLibrary, readVersion, recordedServers, saveLibrary, storeVersion } from './serverstore.ts';
-import { errorCode, itemKey, readParts, syncGate, writeAccess, writeFileChecked, type ShareContext } from './share.ts';
+import { errorCode, itemKey, syncGate, writeAccess, writeFileChecked, type ShareContext } from './share.ts';
 import type { SwitchFile } from './skillswitch.ts';
 import { sourceFacts } from './sources.ts';
 import type { Change, HarnessId, LibraryFacts, LibraryView, PassResult, SyncNotice, ThroughPlugin, ToolCopy } from './types.ts';
@@ -77,7 +77,7 @@ type ServerLook = Look<NeutralServer, McpEntry, ServerDisk>;
 async function readDisk(context: ShareContext, managed: HarnessId[], writeClaude: boolean): Promise<ServerDisk> {
   const disk: ServerDisk = {
     byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], shapes: new Map(), unseenNames: new Map(), switchedOff: new Map(),
-    through: await serversThroughPlugins(context, managed), switches: await readMcpSwitches(context, managed), linked: await pluginHolds(context, managed),
+    through: await serversThroughPlugins(context, managed, await recordedServers(context.home)), switches: await readMcpSwitches(context, managed), linked: await pluginHolds(context, managed),
     held: (item, tool) => {
       const linked = disk.linked(item, tool);
       if (linked) return linked;
@@ -89,22 +89,19 @@ async function readDisk(context: ShareContext, managed: HarnessId[], writeClaude
     // A tool that can't hold the current version (an SSE server, in Codex), or gets a plugin's server only with the plugin, keeps the entry it has.
     refuses: (item, tool) => { const linked = disk.linked(item, tool); return linked && !linked.anotherWay ? linked.why : cannotTake(disk, item, tool); },
   };
-  const parts = await readParts(context.home);
   for (const tool of managed) {
     const read = await readTool(context, tool), file = mcpFile(context, tool);
     if (read.problem) { disk.unseen.set(`${tool}:*`, read.problem); disk.problems.push(read.problem); continue; }
-    const asPart = new Set(parts.filter(install => install.tool === tool).flatMap(install => install.items.filter(part => part.kind === 'mcp' && !part.removed).map(part => part.name)));
     const notTaken = (name: string, why: string) => { disk.unseen.set(`${tool}:${itemKey(name)}`, why); disk.unseenNames.set(itemKey(name), name); };
     for (const name of read.invalid ?? []) {
       notTaken(name, `${toolName(tool)}’s entry for it is not written in a form Central Knot edits, so it is left alone.`);
       disk.problems.push(`${file}: “${name}” is not written as a server entry Central Knot can edit, so it is left alone.`);
     }
-    const part = `${toolName(tool)} has it as part of a plugin Central Knot installed there, so it is the plugin’s.`;
     const twice = `Two servers whose names differ only by case are in ${toolName(tool)}’s settings. Rename one so Central Knot can tell them apart.`;
     const seen = new Map<string, McpEntry>();
     for (const entry of read.entries) {
       const key = itemKey(entry.name);
-      const why = entry.hostBound ?? (asPart.has(entry.name) ? part : seen.has(key) || disk.unseen.has(`${tool}:${key}`) ? twice : undefined);
+      const why = entry.hostBound ?? (seen.has(key) || disk.unseen.has(`${tool}:${key}`) ? twice : undefined);
       if (why) notTaken(entry.name, why); else seen.set(key, entry);
     }
     // A name seen twice is unseen for both entries.
@@ -135,11 +132,13 @@ const cannotTake = (disk: ServerDisk, item: Wanted, tool: HarnessId) => {
 
 /**
  * The servers each tool has through its installed plugins, by key: such a tool gets no entry of its own beside the plugin's.
- * Only a server Central Knot installed elsewhere as that plugin's part counts: a name alone could be another server.
+ * Only the plugin's own server counts (a name alone could be another server): one the library holds linked to that plugin
+ * (`items`: the servers' record), or while a home's parts wait to be moved (partsmigrate.ts), one on record as its part.
  */
-async function serversThroughPlugins(context: ShareContext, tools: HarnessId[]): Promise<ServerDisk['through']> {
-  const all = await throughPlugins(context, tools, 'mcp');
-  return new Map([...all].map(([tool, given]) => [tool, new Map([...given].flatMap(([key, { asParts, text: _text, ...plugin }]) => (asParts ? [[key, plugin] as const] : [])))]));
+async function serversThroughPlugins(context: ShareContext, tools: HarnessId[], items: Record<string, LibraryItem>): Promise<ServerDisk['through']> {
+  const all = await throughPlugins(context, tools, 'mcp'), linked = await linkedToPlugin(context.home, items);
+  const own = (given: Map<string, GivenByPlugin>) => [...given].flatMap(([key, { asParts, text: _text, ...plugin }]) => (asParts || linked(key, plugin) ? [[key, plugin] as const] : []));
+  return new Map([...all].map(([tool, given]) => [tool, new Map(own(given))]));
 }
 
 // ---------- The servers' Kind ----------

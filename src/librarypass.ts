@@ -5,7 +5,8 @@
 // them. Everything here is the same for every kind:
 //
 //   lookAt         each managed harness's copies, read once through the kind (Disk); a copy that can't be read for sure is
-//                  unseen, never missing
+//                  unseen, never missing; and while plugin-parts.json is there, every copy of a part's name (partsmigrate.ts
+//                  hideParts)
 //   deletionsTold  a deleted item that History has no standing entry for gets one, so it has its Restore for History's days
 //   letGo          each item linked to a plugin that was changed here is let go (library.ts A PLUGIN, through
 //                  fromSourceStep), so a plugin's click on it below no longer takes it
@@ -53,8 +54,8 @@
 // To put another kind on the library, every place it is wired in (this is the one list; librarypages.ts points here, and the
 // compiler names a member `Kind` lacks):
 // - the contract: its name in library.ts ItemKind, and one object implementing `Kind`, like agents.ts agentKind (a kind with
-//   no part of its own per tool has `ownOf` answer undefined and `keepOwn` false; its read fills Disk.parts where a plugin's
-//   part is one of its found copies, as share.ts partsIn gives them);
+//   no part of its own per tool has `ownOf` answer undefined and `keepOwn` false; a plugin's parts from before the library
+//   become its items by partsmigrate.ts, which reads every kind sources.ts sourceKinds names);
 // - its callers: runPass for its passes (the app's clicks), restore for History's actions, lookFor for its
 //   page's view, and forgetFolders and joinCounts from toolchoice.ts;
 // - its view: a types.ts LibraryView (as agents.ts agentsView gives), kept in types.ts HomeView under the page's name for the
@@ -75,6 +76,7 @@ import type { ItemNow } from './historyactions.ts';
 import type { Copies, FoundCopy, FoundKey, HarnessCopy, ItemKind, LeftFound, LibraryItem, Plan, Origin, Shelf, SourceSeen, TakenBy, Version } from './library.ts';
 import { appendHistory, historyCutoff, readHistory, replaceHistory } from './history.ts';
 import { errorCode, libraryGate } from './share.ts';
+import { hideParts } from './partsmigrate.ts';
 import { pluginLink } from './sourcelink.ts';
 import { recordedIds, type Recorded } from './sourcestore.ts';
 import type { ShareContext } from './share.ts';
@@ -134,12 +136,6 @@ export interface Disk<Entry extends Seen> {
    * it out.
    */
   outside?: Map<string, Partial<Record<HarnessId, Entry>>>;
-  /**
-   * The harnesses whose own copy is a plugin's part (parts.ts: put there where the tool can't take the plugin), by key, which
-   * Synchronize everything leaves found (library.ts takeInAnswer). A kind whose parts are never found copies (MCP servers:
-   * unseen, "it is the plugin's") leaves it out.
-   */
-  parts?: Map<string, HarnessId[]>;
   /**
    * The harnesses whose own switch turns the item off there (skillswitch.ts, mcpswitch.ts), by key: where every found copy is
    * off, the rule leaves it found. A kind with no such switch (agents) leaves it out.
@@ -258,11 +254,16 @@ export interface Look<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
 }
 type AnyLook = Look<unknown, Seen, Disk<Seen>>;
 
-/** Reads the managed harnesses once. The guards come after (guardFolders), once a pass's clicks are on its items. */
+/**
+ * Reads the managed harnesses once, with every copy of a plugin's part from before the library unseen while it waits to be moved
+ * there (partsmigrate.ts hideParts). The guards come after (guardFolders), once a pass's clicks are on its items.
+ */
 async function lookAt<C, E extends Seen, D extends Disk<E>>(
   kind: Kind<C, E, D>, context: ShareContext, managed: HarnessId[], library: KindLibrary, settle?: Look<C, E, D>['settle'],
 ): Promise<Look<C, E, D>> {
-  return { kind, context, managed, library, disk: await kind.read(context, managed, library), foldersNow: {}, givingWay: new Map(), settle };
+  const disk = await kind.read(context, managed, library);
+  await hideParts(context.home, kind.kind, managed, disk.unseen);
+  return { kind, context, managed, library, disk, foldersNow: {}, givingWay: new Map(), settle };
 }
 
 /**
@@ -451,16 +452,16 @@ export function foundCopies<E extends Seen>(look: Look<unknown, E, Disk<E>>, key
 }
 
 /**
- * What the take-in table (library.ts takeInAnswer) is told of a found key, from this look: its copies (foundCopies, each a
- * plugin's part or not: Disk.parts), whether the record holds it deleted, and whether that deleted item's copy still waits to
- * leave a harness (its plan removes a copy where writes wait: Disk.locked `waits`). The one place both a click and
+ * What the take-in table (library.ts takeInAnswer) is told of a found key, from this look: its copies (foundCopies, each switched
+ * off by its tool's own switch or not: Disk.switchedOff), whether the record holds it deleted, and whether that deleted item's copy
+ * still waits to leave a harness (its plan removes a copy where writes wait: Disk.locked `waits`). The one place both a click and
  * Synchronize everything, and each kind's view, learn it.
  */
 export function foundKey(look: AnyLook, key: string, except: readonly HarnessId[] = []): FoundKey {
-  const parts = look.disk.parts?.get(key) ?? [], switchedOff = look.disk.switchedOff?.get(key) ?? [];
+  const switchedOff = look.disk.switchedOff?.get(key) ?? [];
   const tombstone = look.library.items[key]?.deleted ? look.library.items[key] : undefined;
   const copies = foundCopies(look, key, except).map((copy): FoundCopy => ({ harness: copy.tool, hash: copy.hash, at: copy.at,
-    ...(parts.includes(copy.tool) ? { part: true } : {}), ...(switchedOff.includes(copy.tool) ? { switchedOff: true } : {}) }));
+    ...(switchedOff.includes(copy.tool) ? { switchedOff: true } : {}) }));
   return { copies, deleted: !!tombstone, leaving: !!tombstone && leavingIn(look, tombstone).length > 0 };
 }
 

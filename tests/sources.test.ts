@@ -1221,7 +1221,7 @@ test('A profile that includes a source’s skill is in use while it is On; the s
   try {
     const { repo, id } = await oneSkill(box, 'notes', { on: true });
     await saveProfile(box.context, { name: 'Writing', items: ['skill:notes'] });
-    const used = async () => { const libraries = await readLibraries(box.context); return 'stop' in libraries ? [] : inUse((await readProfiles(box.home)).profiles, liveItems(libraries.libraries)).map(profile => profile.name); };
+    const used = async () => { const libraries = await readLibraries(box.context); return 'stop' in libraries ? [] : inUse((await readProfiles(box.home)).profiles, liveItems(libraries.libraries, libraries.plugins)).map(profile => profile.name); };
     assert.deepEqual(await used(), ['Writing']);
     await repo.commit({ 'SKILL.md': null, 'other/SKILL.md': skillMd('other') });
     await check(box, id);

@@ -1,0 +1,5 @@
+name = "writer"
+description = "The writer agent."
+developer_instructions = """
+Write the document.
+"""

@@ -1,0 +1,5 @@
+{
+  "name": "reviewer",
+  "description": "The reviewer agent.",
+  "prompt": "Read the diff and list problems.\n"
+}
