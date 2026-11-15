@@ -70,6 +70,8 @@
 // own as well (a copy in ~/.agents/skills beside one in its own folder): that copy is `present` with `anotherWay` (the table's
 // last row), and the harness is decided as one the item isn't wanted in (wantedHere).
 //
+// An item linked to a plugin (A PLUGIN, below), in a tool with the plugin's own installer, is held first by plugins.ts pluginHolds.
+//
 // Other marks a harness's line can carry are a kind's own, worked out at each look from what it read and never stored, and
 // they change nothing a pass does: for skills, a tool's own switch that turns the skill off there (skills.ts toolFacts, `loads`).
 //
@@ -213,6 +215,35 @@
 // a copy deleted by hand that no pass has seen yet turns the item Off whatever the source answered (THE RULE), and a dropped
 // item's copies leave the harnesses as any Off item's do. Whether an item is linked is `linkedTo`'s alone: one linked to a
 // source that is no longer recorded reads as not linked, so Remove lets go of every link at once.
+//
+// A PLUGIN (pluginlibrary.ts) is the other kind of source: a plugin whose skills, agents and MCP servers are written as items in
+// Pi and OpenCode, which have no plugin installer. Its id is its plugins.json entry's (pluginrecord.ts PluginEntry `id`), its link
+// sourcelink.ts pluginLink's ("the plugin pdf", never a Git link), and it is read from its marketplace's copy at a click that
+// brings it into a tool, at its Update and at the automatic updates' check (pluginlibrary.ts says when). Its read (SourceSeen
+// `plugin`) meets the table above but for these rows, each decided in fromSource by that one field:
+//
+//   at the plugin                       the item                    what happens
+//   a name the library has no item      none, or deleted and not    the item is made with the plugin's On, kept out of each tool
+//     for                               linked (his own, let go)    the plugin is not in now (`outOf`) and of each managed tool
+//                                                                   with a copy of that name (librarypass.ts fromSourceStep), so
+//                                                                   arriving On writes over nothing
+//   a name of its own he deleted        deleted, linked             stays deleted (`deleted`) but at a click that turns its
+//                                                                   items On (`bringBack`: its On, Add, Install there, Update)
+//   a name the library has              not linked, same content    never linked (`differs`: Central Knot has its own)
+//                                       or not
+//   anything, read or not               linked, changed here        let go (`let-go`): unlinked, the person's own item from then on,
+//                                                                   kept where it is (On, out of each managed tool with no copy
+//                                                                   of it then); never linked again or written over while it differs.
+//                                                                   Before every other row, so the plugin's drop never turns it Off
+//   S changed                           linked, a tool's copy       nothing, until a read where it can be seen: no version of a
+//                                       can't be seen for sure      plugin ever waits, and no Merge, Replace or Keep mine is asked
+//
+// "Changed here" for a plugin's item is CHANGED HERE but for a copy that can't be seen for sure, which lets nothing go
+// (editedHere). Every pass takes the let-go row for each item linked to a recorded plugin, whether or not it reads the plugin
+// (librarypass.ts letGo), so an edit is let go at the look that sees it; the plugin's own clicks on its items are taken only
+// while the item is still linked to it (types.ts Change forPlugin). "Linked" reads the ids of plugins.json and sources.json
+// alike (sourcestore.ts recordedIds), so a Git source never takes a plugin's item, nor the reverse. Nothing else is stored
+// about a plugin's read: what it holds is read again at each of those moments.
 //
 // Two promises hold the model together:
 // - H unseen is never H gone. A copy the adapter can't see for sure (unreadable, half saved, inside the settle window,
@@ -570,26 +601,31 @@ export function linkedTo(item: LibraryItem | undefined, { id, link }: { id: stri
  * too), S waits for the person (`wait`: the item was changed here), S is merged into the current version (`merge`: Merge's
  * answer alone, never a row's), S is kept as a version and the current one stays (`keep`: Keep mine's alone), the item turns
  * Off and is let go (`drop`), or `nothing`. A name the library has that is not brought in says why: its content differs
- * (`differs`), it is another source's (`another`), or it is deleted (`deleted`).
+ * (`differs`; for a plugin, any name it has that the library has unlinked), it is another source's (`another`), or it is
+ * deleted (`deleted`). A plugin's item changed here is let go (`let-go`: A PLUGIN).
  */
-export type SourceAnswer = 'make' | 'link' | 'same' | 'update' | 'wait' | 'merge' | 'keep' | 'drop' | 'nothing' | 'differs' | 'another' | 'deleted';
+export type SourceAnswer = 'make' | 'link' | 'same' | 'update' | 'wait' | 'merge' | 'keep' | 'drop' | 'nothing' | 'differs' | 'another' | 'deleted' | 'let-go';
 
 /**
  * What the table is told of one name besides the item and S: what each managed tool holds of the item now (librarypass.ts
  * copiesOf; none, for what the record alone says), and a click on the source's row for it, Add on a deleted one (`bringBack`),
  * or Replace, Merge or Keep mine on one whose version waits (`replace`, `merge`, `keep`).
  */
-export interface SourceAsked { copies?: Copies; bringBack?: boolean; replace?: boolean; merge?: boolean; keep?: boolean }
+export interface SourceAsked { copies?: Copies; bringBack?: boolean; replace?: boolean; merge?: boolean; keep?: boolean; plugin?: boolean }
 
-/** The header's A SOURCE table for one name: `item` is the library's for its key (deleted or not), `here` what the source holds. */
+/**
+ * The header's A SOURCE table for one name: `item` is the library's for its key (deleted or not), `here` what the source holds.
+ * `asked.plugin`: the source is a plugin, whose rows differ (A PLUGIN).
+ */
 export function fromSource(item: LibraryItem | undefined, here: AtSource, linked: LinkedTo, asked: SourceAsked = {}): SourceAnswer {
+  const copies = asked.copies ?? {}, plugin = !!asked.plugin;
+  if (plugin && item && !item.deleted && linked === 'this' && editedHere(item, copies)) return 'let-go';
   if (here === 'unreadable') return 'nothing';
   if (here === 'gone') return item && !item.deleted && linked === 'this' ? 'drop' : 'nothing';
   if (!item) return 'make';
-  if (item.deleted) return asked.bringBack ? 'make' : 'deleted';
+  if (item.deleted) return asked.bringBack || (plugin && linked !== 'this') ? 'make' : 'deleted';
   if (linked === 'another') return 'another';
-  if (linked === 'none') return here.hash === item.hash ? 'link' : 'differs';
-  const copies = asked.copies ?? {};
+  if (linked === 'none') return here.hash === item.hash && !plugin ? 'link' : 'differs';
   // Its current version is the one this same link gave, so only an edit a tool holds can have changed it since: then it differs.
   if (linked === 'once') return here.hash === item.hash ? 'link' : changedHere(item, item.hash, copies) ? 'differs' : 'update';
   if (here.hash === item.seen) return 'nothing';
@@ -597,6 +633,8 @@ export function fromSource(item: LibraryItem | undefined, here: AtSource, linked
   // Keep mine keeps the current version, so nothing a tool holds stops it (KEEP MINE): it writes nothing.
   if (asked.keep) return 'keep';
   if (!changedHere(item, item.seen, copies) || asked.replace) return 'update';
+  // A plugin's item is never edited here at this row (let go above): only a copy that can't be seen now holds S back, till a read.
+  if (plugin) return 'nothing';
   // Merge merges into the current version: a change a tool still holds (MERGE: a save landing, or settling) leaves it waiting.
   return asked.merge && !toolHoldsChange(item, copies) ? 'merge' : 'wait';
 }
@@ -614,13 +652,22 @@ function toolHoldsChange(item: LibraryItem, copies: Copies): boolean {
   const unseenWhereApplied = (Object.keys(copies) as HarnessId[]).some(tool => copies[tool]!.is === 'unseen' && item.applied[tool] !== undefined);
   return unseenWhereApplied || pendingEdits(plan(item, copies)).length > 0;
 }
+/**
+ * Whether a plugin's item was changed here (A PLUGIN): its current version is not `seen`, or a tool's copy holds an edit no pass
+ * has taken in. A copy that can't be seen for sure is no change here: it lets nothing go.
+ */
+const editedHere = (item: LibraryItem, copies: Copies) => item.hash !== item.seen || pendingEdits(plan(item, copies)).length > 0;
 
 /**
  * One read of a source as its table reads it (atlink.ts readOf makes it, the one place that decides what was read): the
  * source, its head commit's time (which a version it makes current is dated by), each name there by key with its content's
  * hash or why it can't be read, and whether it was read whole (the header).
  */
-export interface SourceSeen { id: string; link: string; commitAt: string; whole: boolean; names: Map<string, { hash: string } | { unreadable: string }> }
+export interface SourceSeen {
+  id: string; link: string; commitAt: string; whole: boolean; names: Map<string, { hash: string } | { unreadable: string }>;
+  /** The read is a plugin's (A PLUGIN): its On, which a name it makes arrives with, and the tools that name is kept out of. */
+  plugin?: { on: boolean; outOf: HarnessId[] };
+}
 
 /**
  * The table for one read, all at once: an answer for each name it holds and each item linked to the source (`items`: the
@@ -637,19 +684,20 @@ export function sourceAnswers(items: Record<string, LibraryItem>, read: SourceSe
     const entry = read.names.get(key), item = items[key];
     const here: AtSource = !entry ? (read.whole ? 'gone' : 'unreadable') : 'hash' in entry ? { hash: entry.hash } : 'unreadable';
     const about: SourceAsked = { copies: item && asked.copies?.(item), bringBack: asked.bringBack?.has(key), replace: asked.replace?.has(key),
-      merge: asked.merge?.has(key), keep: asked.keep?.has(key) };
+      merge: asked.merge?.has(key), keep: asked.keep?.has(key), plugin: !!read.plugin };
     return [key, fromSource(item, here, linkedTo(item, read, recorded), about)];
   }));
 }
 
 /**
  * The recorded source that removed an item of `kind`, if one did (the header's REMOVED AT ITS SOURCE): the item is Off and
- * linked to none, it has a version from that source's link since it last came in from a tool (fromLinkSinceTakeIn), and that
- * source's last read of its kind doesn't hold its name. `reads`: every source the home records, each with its last read's
- * names and its kind (a read of another kind is never one of the item's).
+ * linked to none (`recorded`: every id an item can be linked to, sourcestore.ts recordedIds), it has a version from that
+ * source's link since it last came in from a tool (fromLinkSinceTakeIn), and that source's last read of its kind doesn't hold
+ * its name. `reads`: every source the home records, each with its last read's names and its kind (a read of another kind is
+ * never one of the item's).
  */
-export function removedBy<Read extends Pick<SourceSeen, 'id' | 'link' | 'names'> & { kind: ItemKind }>(item: LibraryItem, kind: ItemKind, reads: readonly Read[]) {
-  if (item.on || item.deleted || linkedSource(item, new Set(reads.map(read => read.id)))) return undefined;
+export function removedBy<Read extends Pick<SourceSeen, 'id' | 'link' | 'names'> & { kind: ItemKind }>(item: LibraryItem, kind: ItemKind, reads: readonly Read[], recorded: ReadonlySet<string>) {
+  if (item.on || item.deleted || linkedSource(item, recorded)) return undefined;
   return reads.find(read => read.kind === kind && !read.names.has(item.key) && fromLinkSinceTakeIn(item, read.link));
 }
 

@@ -32,7 +32,7 @@ import { PRODUCT } from './values.ts';
 import { leftOutSentence } from './words.ts';
 import { copyTree, errorCode, exists, itemKey, libraryGate, managedNow, notCopied, sha256 as sha, plainError, readTree, removeTree, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext, type Tree } from './share.ts';
 import { undoBase } from './instructions.ts';
-import { sourceAt } from './sourcestore.ts';
+import { recordedIds, sourceAt } from './sourcestore.ts';
 import type { BaseUndo, DestinationResult, HarnessId, HistoryEvent, RepoChange, RepoCommit, RepoKind, RepoResult, RepoView, Snapshot } from './types.ts';
 
 /** The base instructions (instructions.ts repoBase): read for Push, applied on Pull. Without it, instructions/ is left alone. */
@@ -290,7 +290,7 @@ const writtenPath = (dir: string) => join(dir, '.git', 'ck-written-skills.json')
 const forgetWritten = (dir: string) => rm(writtenPath(dir), { force: true });
 
 /**
- * Writes every skill in Central Knot's library, On or Off here, under skills/ (unchanged folders left as written): its current
+ * Writes every skill in Central Knot's library, On or Off here, but one linked to a plugin (pluginItems), under skills/ (unchanged folders left as written): its current
  * version's folder, or an edit made in a tool and not taken in yet, as a click's own pass would take it in (skills.ts
  * skillsForRepo). Being Off here never takes a skill out of the repo: only Delete from Central Knot does. A skill a tool has
  * that isn't in Central Knot is not sent, and not removed from the repo either.
@@ -299,8 +299,9 @@ async function writeSkills(context: ShareContext, dir: string, tools: HarnessId[
   const written: Written = { unsent: new Map(), unmanaged: new Set() };
   // Missing or damaged, it only means every skill is written again.
   const before: Record<string, string> = await readFile(writtenPath(dir), 'utf8').then(JSON.parse).catch(() => ({}));
-  const sources = new Map<string, string>();
+  const sources = new Map<string, string>(), plugin = await pluginItems(context.home);
   for (const { item, folder } of await skillsForRepo(context, tools)) {
+    if (plugin(item)) continue;
     if (folder) sources.set(item.name, folder);
     else markUnsendable(written.unsent, item.key, 'skill', item.name, 'Its current version is no longer in Central Knot’s store.');
   }
@@ -324,11 +325,18 @@ async function writeSkills(context: ShareContext, dir: string, tools: HarnessId[
   return written;
 }
 
+/**
+ * Whether Push leaves an item out: one linked to a plugin (library.ts A PLUGIN), which each machine gets from the plugin there;
+ * pushed, it would arrive elsewhere unlinked and On, and Claude Code there would load it twice beside the installed plugin.
+ * Pull is unchanged. The one place Push decides it, for each kind's writer.
+ */
+const pluginItems = async (home: string) => { const ids = new Set((await recordedIds(home)).plugins.map(entry => entry.id)); return (item: { source?: string }) => !!item.source && ids.has(item.source); };
+
 /** What a writer reports: the Managed items here that can't go in the repo, and the keys of items here that aren't Managed. */
 interface Written { unsent: Unsent; unmanaged: Set<string> }
 
 /**
- * Writes every MCP server in Central Knot's library, On or Off here, under mcp/ in Claude Code's shape: its current version (or
+ * Writes every MCP server in Central Knot's library, On or Off here, but one linked to a plugin (pluginItems), under mcp/ in Claude Code's shape: its current version (or
  * an edit made in a tool and not taken in yet, as a click's own pass would take it in: servers.ts serversForRepo), with Claude
  * Code's own fields for it where Central Knot has them, over the repo's own file, whose other keys (a hand-written note, a
  * setting only Claude Code has) stay as the repo has them. Being Off here never takes a server out of the repo: only Delete from
@@ -337,8 +345,8 @@ interface Written { unsent: Unsent; unmanaged: Set<string> }
 async function writeServers(context: ShareContext, dir: string, tools: HarnessId[], baseId: string | undefined): Promise<Written> {
   await clearLayout(dir, 'mcp', entry => entry.isFile() && entry.name.endsWith('.json'));
   const written: Written = { unsent: new Map(), unmanaged: new Set() };
-  const library = await serversForRepo(context, tools), view = await serversView(context, tools);
-  const pathOf = (name: string) => `mcp/${toFile(name)}.json`;
+  const plugin = await pluginItems(context.home), all = await serversForRepo(context, tools), view = await serversView(context, tools);
+  const library = all.filter(entry => !plugin(entry.item)), pathOf = (name: string) => `mcp/${toFile(name)}.json`;
   const inRepo = baseId ? await readBlobs(dir, library.map(entry => `${baseId}:${pathOf(entry.item.name)}`)) : new Map<string, Buffer>();
   for (const { item, server, claudeOwn } of library) {
     if (!server) { markUnsendable(written.unsent, serverKey(item.name), 'mcp', item.name, 'Its current version is no longer in Central Knot’s store.'); continue; }
@@ -347,13 +355,13 @@ async function writeServers(context: ShareContext, dir: string, tools: HarnessId
     try { if (repoFile) repoExtras = fromJson(item.name, 'claude-cli', '', JSON.parse(repoFile)).extras; } catch { /* not JSON: nothing to keep */ }
     await writeScratch(join(dir, pathOf(item.name)), `${JSON.stringify(jsonEntry('claude-cli', server, { ...repoExtras, ...claudeOwn }), null, 2)}\n`);
   }
-  const inLibrary = new Set(library.map(entry => entry.item.key));
+  const inLibrary = new Set(all.map(entry => entry.item.key));
   for (const found of view.items) if (!inLibrary.has(found.key) && Object.keys(found.copies).length) written.unmanaged.add(serverKey(found.name));
   return written;
 }
 
 /**
- * Writes every agent in Central Knot's library, On or Off here, under agents/ in Claude Code's format: its current version (or
+ * Writes every agent in Central Knot's library, On or Off here, but one linked to a plugin (pluginItems), under agents/ in Claude Code's format: its current version (or
  * an edit made in a tool and not taken in yet, as a click's own pass would take it in: agents.ts agentsForRepo),
  * with Claude Code's own settings (tools, model) from Claude Code's file for it (agents.ts agentsForRepo), else as the repo's
  * own file has them (all read in one go). Being Off here never takes an agent out of the repo: only Delete from Central Knot
@@ -362,15 +370,15 @@ async function writeServers(context: ShareContext, dir: string, tools: HarnessId
 async function writeAgents(context: ShareContext, dir: string, tools: HarnessId[], baseId: string | undefined): Promise<Written> {
   await clearLayout(dir, 'agents', entry => entry.isFile() && entry.name.endsWith('.md'));
   const written: Written = { unsent: new Map(), unmanaged: new Set() };
-  const library = await agentsForRepo(context, tools), view = await agentsView(context, tools);
-  const pathOf = (name: string) => `agents/${toFile(name)}.md`;
+  const plugin = await pluginItems(context.home), all = await agentsForRepo(context, tools), view = await agentsView(context, tools);
+  const library = all.filter(entry => !plugin(entry.item)), pathOf = (name: string) => `agents/${toFile(name)}.md`;
   const plain = library.filter(entry => entry.agent && entry.claudeFile === undefined);
   const inRepo = baseId ? await readBlobs(dir, plain.map(entry => `${baseId}:${pathOf(entry.item.name)}`)) : new Map<string, Buffer>();
   for (const { item, agent, claudeFile } of library) {
     if (!agent) { markUnsendable(written.unsent, agentKey(item.name), 'agent', item.name, 'Its current version is no longer in Central Knot’s store.'); continue; }
     await writeScratch(join(dir, pathOf(item.name)), claudeFile ?? agentText('claude-cli', agent, inRepo.get(`${baseId}:${pathOf(item.name)}`)?.toString('utf8')));
   }
-  const inLibrary = new Set(library.map(entry => entry.item.key));
+  const inLibrary = new Set(all.map(entry => entry.item.key));
   for (const found of view.items) if (!inLibrary.has(found.key)) written.unmanaged.add(agentKey(found.name));
   return written;
 }

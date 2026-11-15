@@ -19,8 +19,8 @@
 // never something of its own.
 import { originWords, theVersion, wantedIn, type LibraryItem, type Plan, type TakeInAnswer, type Version, type VersionChange } from './library.ts';
 import { clockTimesApart, dayAndTime } from './model.ts';
-import { linkLabel } from './sourcelink.ts';
-import type { Change, HarnessId, ItemNotice, LibraryFacts, TakenInNotice } from './types.ts';
+import { linkLabel, pluginOf } from './sourcelink.ts';
+import type { Change, HarnessId, ItemNotice, LibraryFacts, PluginItemNotice, TakenInNotice } from './types.ts';
 import { andList, kindNouns, sentence, toolName, toolsPhrase } from './words.ts';
 
 // ---------- What a kind supplies ----------
@@ -115,21 +115,26 @@ export interface LibraryRow {
  * link, `after`), which also says when nothing waits yet but the next change would (`nextWaits`: edited here, an older version
  * made current, or a Merge's result).
  */
-export function fromSourceWords(from: NonNullable<LibraryFacts['fromSource']>): { tag?: { text: string; title: string }; before: string; after: string } {
+export function fromSourceWords(from: NonNullable<LibraryFacts['fromSource']>): { tag?: { text: string; title: string }; before: string; after: string; page: 'sources' | 'plugins' } {
   const label = linkLabel(from.link);
+  // An item a plugin brought (library.ts A PLUGIN): it never waits, and a change made here lets it go.
+  if (pluginOf(from.link)) {
+    const follows = `It follows the plugin in the tools that take no plugins; a change you make to it here makes it your own, no longer the plugin’s`;
+    return { tag: { text: `from ${label}`, title: `${follows}.` }, before: `From ${label}. ${follows}. The plugin’s page is on `, after: '.', page: 'plugins' };
+  }
   if (from.removed) {
     const off = `${label} no longer has it: it is Off, and no longer from that source. Turn it on to use it again`;
     return { tag: { text: 'removed at its source', title: `${off}.` },
-      before: `${off}. Should ${label} have it again, it follows the source if unchanged here, and stays as you have it if you changed it. See `, after: '.' };
+      before: `${off}. Should ${label} have it again, it follows the source if unchanged here, and stays as you have it if you changed it. See `, after: '.', page: 'sources' };
   }
   const changed = 'You changed it here, or a tool’s copy of it can’t be read just now';
-  if (from.nextWaits) return { before: `From ${label}, a source. ${changed}, so the source’s next change will wait for you to Merge, Replace or Keep mine on `, after: '.' };
-  if (!from.waits) return { before: `From ${label}, a source. What changes there comes in once a day while Automatic sync is on, and at Check now on `, after: ', unless you change it here.' };
+  if (from.nextWaits) return { before: `From ${label}, a source. ${changed}, so the source’s next change will wait for you to Merge, Replace or Keep mine on `, after: '.', page: 'sources' };
+  if (!from.waits) return { before: `From ${label}, a source. What changes there comes in once a day while Automatic sync is on, and at Check now on `, after: ', unless you change it here.', page: 'sources' };
   const waits = 'Yours stays current, since it was changed here or a tool’s copy of it can’t be read just now';
   const choose = 'Merge puts its changes into yours if they don’t clash, and Replace takes it as it is; either keeps yours as a version.'
     + ' Keep mine keeps yours current, and the source’s version as a version, so it no longer waits.';
   return { tag: { text: 'update at its source', title: `${label} has a newer version. ${waits}. On Sources, ${choose}` },
-    before: `From ${label}, a source, which has a newer version. ${waits}. On `, after: `, ${choose}` };
+    before: `From ${label}, a source, which has a newer version. ${waits}. On `, after: `, ${choose}`, page: 'sources' };
 }
 
 /** A harness's own switch that turns the item off there, as its line and tag's tooltip say it: "switched off in Codex’s own settings". */
@@ -509,7 +514,10 @@ export function sentences(words: RowWords) {
    * taken in (the latest, where times prove it), or a copy deleted by hand that turned the item off. `action`: the notice's button, which runs its History entry's
    * own action (historyactions.ts); `help`: what that does.
    */
-  function noticeWords(notice: Pick<ItemNotice, 'kind' | 'item' | 'winner' | 'losers' | 'orderProved'>): { text: string; action: 'undo' | 'turn-on'; help: string } {
+  function noticeWords(notice: Pick<ItemNotice, 'kind' | 'item' | 'winner' | 'losers' | 'orderProved'> | PluginItemNotice): { text: string; action?: 'undo' | 'turn-on'; help: string } {
+    // A plugin's item (library.ts A PLUGIN): let go as the person's own, said with no button (History has the entry), or dropped.
+    if ('link' in notice) return notice.kind === 'let-go' ? { text: `${notice.item} is your own now: you changed it here, so it no longer follows ${linkLabel(notice.link)}. It stays in the tools that have it; its row lets it into the others.`, help: '' }
+      : { text: `${notice.item}: ${linkLabel(notice.link)} no longer has it, so it is off. Central Knot keeps it.`, action: 'turn-on', help: `Put ${notice.item} back in every tool, as your own: it no longer follows the plugin` };
     const who = toolName(notice.winner), others = andList(notice.losers.map(toolName)), name = notice.item;
     const earlier = `Make the version from before ${who}’s edit current again, in every tool ${name} is on in`;
     if (notice.kind === 'deleted-by-hand') {

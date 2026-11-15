@@ -15,6 +15,9 @@
 // and Keep mine on its line. And an MCP server, "relay" in its .mcp.json: changed there (an environment variable, or its
 // arguments), dropped and back there, turned On and Off, deleted, edited by hand in Copilot CLI (alone, or with a change at the
 // source and a Check now), Write to Claude Code (whose writes wait for it), and Add, Merge, Replace and Keep mine on its line.
+// And a plugin, kit, from a folder marketplace, whose skill tome is a library item linked to it in Pi (library.ts A PLUGIN; no
+// tool's installer runs here, so Claude Code, Copilot CLI and Codex never get it): kit On and Off, kept out of Pi and let in,
+// its Undo, tome changed in the plugin then Update, dropped and back then Update, and edited by hand in Pi (let go then).
 // Odd seeds start with notes made by hand in Claude Code (a folder with a script, a file of mode 0600 and an empty folder), so
 // the source's notes differs and is not brought in; even seeds start with notes, critic and relay from the source, turned On.
 // After every step:
@@ -31,6 +34,9 @@
 //   (i) the source's agent: each file of it Central Knot wrote over or removed held a version of it, or is still in a tool;
 //       and in a copy of the home put back after, a second plain pass over the agents writes nothing, then an On critic is
 //       current in every managed tool, an Off or deleted one has nothing applied. Its line's clicks are among (c)'s;
+//   (k) the plugin's skill: a content of it Central Knot wrote over or removed in Pi is a version of it or still in Pi; while it
+//       is linked to kit, nothing of it is applied in a tool with an installer; and in a copy put back after, two plain passes,
+//       then a linked tome On and wanted in Pi is current there;
 //   (j) the source's server, the same: each entry of it Central Knot wrote over or removed held a version of it, or is still in
 //       a tool; and in a copy put back after, a second plain pass over the servers writes nothing, then after Write to Claude
 //       Code an On relay is current in every managed tool, an Off or deleted one has nothing applied. Its line's clicks too.
@@ -56,13 +62,17 @@ import { asItIs, asksWhichCopy, harnessIs, placeOf, rowClicks } from '../src/lib
 import { DAY_MS } from '../src/model.ts';
 import { readTree, type ShareContext } from '../src/share.ts';
 import type { LibraryItem } from '../src/library.ts';
-import { applySkills, clearSwitch, takeOver } from '../src/skills.ts';
+import { applySkills, clearSwitch, skillKind, takeOver } from '../src/skills.ts';
 import { setDisabled } from '../src/skillswitch.ts';
 import { chooseTools } from '../src/toolchoice.ts';
 import type { Change, HarnessId, HistoryDays, HistoryEvent, PassResult, SourceResult } from '../src/types.ts';
 import { bytes, folderOf, historyActions, put, roots, sandbox, seen, skillText, tools as clickTools, trial, undo, type Tool } from './skillclicks.ts';
 import { addSource, checkSource, previewSource, removeSource, rowClick, sourcesView } from '../src/sources.ts';
 import { repository, standInHosts } from './sourcerepo.ts';
+import { createMarketplaces } from '../src/marketplaces.ts';
+import { readPluginRecord } from '../src/pluginrecord.ts';
+import * as pluginEngine from '../src/plugins.ts';
+import type { PluginTurnResult } from '../src/types.ts';
 
 const hosts = await standInHosts();
 test.after(() => hosts.cleanup());
@@ -174,6 +184,27 @@ async function walk(seed: number): Promise<Finding[]> {
       if ((!item!.on || item!.deleted) && item!.applied[tool] !== undefined) fail(`(j) after quiet passes and Write to Claude Code the source’s server, Off, still has an entry applied in ${tool}`);
     }
   });
+  // The plugin kit and its skill tome (the header): its marketplace and Central Knot's data folder are under the sandbox, so a trial puts them back too.
+  const kitRoot = join(box.base, 'market'), tomeAt = join(kitRoot, 'plugins/kit/skills/tome/SKILL.md'), tomeInPi = join(box.home, roots['pi-cli'], 'tome');
+  await mkdir(join(kitRoot, '.claude-plugin'), { recursive: true });
+  await writeFile(join(kitRoot, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'team', plugins: [{ name: 'kit', source: './plugins/kit' }] }));
+  await mkdir(join(tomeAt, '..'), { recursive: true });
+  await writeFile(tomeAt, skillText('Tome 0.', 'tome'));
+  const never = async () => { throw new Error('no tool’s installer runs in the walk'); };
+  const markets = createMarketplaces({ home: () => ({ home: box.home, actual: true }), read: async () => ({ tools: [...tools], snapshots: [] }), writeAccess: async () => ({ allowed: true }),
+    dataDir: join(box.base, 'data'), pickFolder: async () => undefined, openExternal: async () => {}, leftOut: async () => [], share: () => context() },
+  { findClis: async () => ({ binaries: {}, apps: {} }), checkAccess: pluginEngine.checkAccess, addMarketplace: never, readCatalog: pluginEngine.readCatalog, readRemotePlugin: never, install: never, uninstall: never, update: never, setSkill: never, setPart: never, setWhole: never }, []);
+  await markets.add(kitRoot);
+  let kitHasTome = true, lastKit: PluginTurnResult | undefined;
+  const kitEntry = async () => (await readPluginRecord(box.home)).record?.plugins.find(entry => entry.plugin === 'kit');
+  const tome = async () => (await skillKind.open(context())).library.items.tome;
+  const tomeTaken = new Set<string>();
+  /** (k) on the home as it is, in a trial: two plain passes; then a tome linked to kit, On and wanted in Pi, is current there. */
+  const kitSettle = () => trial(box, async () => {
+    await pass(); await pass();
+    const item = await tome(), entry = await kitEntry();
+    if (item && entry && item.source === entry.id && wantedIn(item, 'pi-cli') && tools.includes('pi-cli') && await contentAt(tomeInPi) !== item.hash) fail('(k) after quiet passes the plugin’s tome, On in Pi, is not current there');
+  });
   const sourceNow = async () => (await sourcesView(context(), tools)).sources[0];
   const checkNow = (id: string, more: Partial<ShareContext> = {}) => checkSource(context(more), async () => tools, id, work => work());
 
@@ -217,6 +248,8 @@ async function walk(seed: number): Promise<Finding[]> {
     // Even seeds: the source's agent, added with it, turned On too, so its changes and its line's clicks come within the walk.
     if (!(seed % 2)) await applyAgents(context(), tools, [{ key: 'critic', on: true, except: [], seenOn: false }]);
     if (!(seed % 2)) { await applyServers(context(), tools, [{ key: 'relay', on: true, except: [], seenOn: false }]); await writeToClaude(context(), tools, ['relay']); }
+    // Even seeds: kit On, so tome is in Pi from the start and every kit step meets it.
+    if (!(seed % 2)) await markets.turn(kitRoot, 'kit', 'on', undefined, box.home);
     agentAsWritten = await agentNow();
     for (let step = 0; step < STEPS && !found.length; step++) {
       const { row, item, fact } = await seen(box, context());
@@ -355,6 +388,19 @@ async function walk(seed: number): Promise<Finding[]> {
       if (recorded && relayLine?.state === 'wait') for (const click of ['merge', 'replace', 'keep'] as const) {
         add(4, { name: `${click} on relay’s line`, app: true, run: async more => asPass(await rowClick(context(more), tools, recorded.id, 'mcp', 'relay', click)) });
       }
+      // The plugin kit: its switch (On, Off, kept out of Pi and let in) and its Undo, tome changed or dropped in it then Update, tome edited in Pi.
+      const kit = await kitEntry(), update = () => markets.items(kitRoot, 'team', 'kit', ['pi-cli'], box.home);
+      const kitTurn = (what: 'on' | 'off' | 'keep-out' | 'let-in', tool?: HarnessId) => async () => { lastKit = await markets.turn(kitRoot, 'kit', what, tool, box.home); return lastKit; };
+      add(4, { name: `kit ${kit?.on ? 'Off' : 'On'}`, app: true, run: kitTurn(kit?.on ? 'off' : 'on') });
+      if (kit?.on && tools.includes('pi-cli')) add(2, { name: `kit ${kit.except.includes('pi-cli') ? 'let into' : 'kept out of'} Pi`, app: true, run: kitTurn(kit.except.includes('pi-cli') ? 'let-in' : 'keep-out', 'pi-cli') });
+      if (lastKit?.back?.length) { const undone = lastKit; add(3, { name: 'Undo kit', app: true, run: () => markets.undoTurn(kitRoot, 'kit', undone.before ?? null, undone.back!, box.home) }); }
+      if (kitHasTome) add(3, { name: 'kit changes tome, then Update', app: true, run: async () => { await writeFile(tomeAt, skillText(`Tome ${++marker}.`, 'tome')); return update(); } });
+      add(2, { name: kitHasTome ? 'kit drops tome, then Update' : 'kit has tome again, then Update', app: true, run: async () => {
+        kitHasTome = !kitHasTome;
+        if (kitHasTome) { await mkdir(join(tomeAt, '..'), { recursive: true }); await writeFile(tomeAt, skillText(`Tome ${++marker}.`, 'tome')); } else await rm(join(tomeAt, '..'), { recursive: true });
+        return update();
+      } });
+      if (await bytes(tomeInPi)) add(2, { name: 'hand edit tome in Pi', run: () => writeFile(join(tomeInPi, 'SKILL.md'), skillText(`Mine ${++marker}.`, 'tome')) });
       add(1, { name: `Automatic sync ${syncOn ? 'off' : 'on'}`, run: async () => { syncOn = !syncOn; } });
       add(1, { name: 'the agent Off then On', app: true, writes: 'agent', run: async () => {
         const off = await applyAgents(context(), tools, [{ key: 'writer', on: false, except: [], seenOn: true }]);
@@ -404,7 +450,7 @@ async function walk(seed: number): Promise<Finding[]> {
       const crash = act.app && !act.byHand && !blocked && next() < 0.1 ? pick(['before-remove', 'before-rename', 'mid-replace'] as const) : undefined;
       trace.push(`${act.name}${blocked ? ` [${blocked} read-only]` : ''}${crash ? ` [crash ${crash}]` : ''}`);
       const before = await folders(), contentsBefore = await contents(), managedBefore = [...tools], entriesBefore = await historyCount(), settledBefore = settled;
-      const switchesBefore = await switchesNow(), criticBefore = await criticNow(), relayBefore = await relayNow();
+      const switchesBefore = await switchesNow(), criticBefore = await criticNow(), relayBefore = await relayNow(), tomeBefore = await contentAt(tomeInPi);
       let done: unknown, crashed = false;
       if (blocked) await readOnly(blocked, true);
       try { done = await act.run(crash ? { fault: at => { if (at === crash) throw new Error('crash'); } } : {}); }
@@ -439,6 +485,11 @@ async function walk(seed: number): Promise<Finding[]> {
       if (act.app && !act.byHand) for (const tool of managedBefore) if (relayBefore[tool] !== undefined && relayBefore[tool] !== relayAfter[tool]) relayTaken.add(relayBefore[tool]!);
       const relayVersions = new Set((await relay())?.versions.map(version => version.hash)), relayHere = new Set(Object.values(relayAfter));
       for (const hash of relayTaken) if (!relayVersions.has(hash) && !relayHere.has(hash)) { relayTaken.delete(hash); fail('(j) an entry of the source’s server Central Knot wrote over or removed is neither a version nor in any tool'); }
+      // (k) The plugin's tome: what Central Knot wrote over or removed in Pi is a version of it or still in Pi; linked, nothing of it in a tool with an installer.
+      const tomeNow = await tome(), tomeAfter = await contentAt(tomeInPi), kitNow = await kitEntry();
+      if (act.app && !act.byHand && tomeBefore && tomeBefore !== tomeAfter) tomeTaken.add(tomeBefore);
+      for (const hash of tomeTaken) if (!tomeNow?.versions.some(version => version.hash === hash) && hash !== tomeAfter) { tomeTaken.delete(hash); fail('(k) a content of the plugin’s tome Central Knot wrote over or removed is neither a version nor in Pi'); }
+      if (tomeNow && kitNow && tomeNow.source === kitNow.id) for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli'] as const) if (tomeNow.applied[tool] !== undefined) fail(`(k) the plugin’s tome, linked to it, has a copy applied in ${tool}`);
       // (f) Every click has its History entry, a crashed one too.
       const answer = act.click && !crashed ? done as PassResult : undefined;
       const refused = !!answer && (!!answer.stopped || answer.results.some(entry => entry.unchanged || entry.differs));
@@ -453,6 +504,7 @@ async function walk(seed: number): Promise<Finding[]> {
         });
       }
       settled = await settles();
+      await kitSettle();
       await agentsSettle();
       await serversSettle();
       // (c) Every action offered now does something.
@@ -497,7 +549,7 @@ async function walk(seed: number): Promise<Finding[]> {
 const extra = Number(process.env.CK_WALKS ?? 0), from = Number(process.env.CK_SEED ?? 5000);
 const only = process.env.CK_ONLY;
 const walks = only ? [Number(only)] : [...SEEDS, ...Array.from({ length: extra }, (_, index) => from + index)];
-test(`A random walk of ${STEPS} steps over a skill, an agent and a source’s agent and MCP server in one home, ${walks.length} times: nothing Central Knot removes or writes over is lost, passes settle, every action offered does something, Off then On is byte for byte, an unseeable copy turns nothing Off, and the agent is never touched`, async () => {
+test(`A random walk of ${STEPS} steps over a skill, an agent, a source’s agent and MCP server and a plugin’s skill in one home, ${walks.length} times: nothing Central Knot removes or writes over is lost, passes settle, every action offered does something, Off then On is byte for byte, an unseeable copy turns nothing Off, and the agent is never touched`, async () => {
   const findings = new Map<string, { count: number; trace: string }>();
   const waiting = [...walks];
   await Promise.all(Array.from({ length: only ? 1 : 6 }, async () => {

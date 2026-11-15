@@ -36,7 +36,7 @@ import { libraryWords, writesWait } from './libraryrow.ts';
 import { mergeServer } from './merge.ts';
 import { cannotHold, editEntry, mcpFile, ownPartOf, readTool, recoverSettings, SERVER_PARTS, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, readMcpSwitches, withMcpSwitch } from './mcpswitch.ts';
-import { throughPlugins } from './plugins.ts';
+import { pluginHolds, throughPlugins } from './plugins.ts';
 import { mcpTools } from './presence.ts';
 import { keepDenies, keepOwn, keptDenies, keptOwn, openLibrary, readVersion, recordedServers, saveLibrary, storeVersion } from './serverstore.ts';
 import { errorCode, itemKey, readParts, syncGate, writeAccess, writeFileChecked, type ShareContext } from './share.ts';
@@ -65,6 +65,8 @@ interface ServerDisk extends Disk<McpEntry> {
   /** Each tool's own switch file for servers, read once (mcpswitch.ts). */
   switches: Map<HarnessId, SwitchFile>;
   switchedOff: Map<string, HarnessId[]>;
+  /** For an item linked to a plugin, in a tool that takes the plugin: plugins.ts pluginHolds, asked before every other reason. */
+  linked: Awaited<ReturnType<typeof pluginHolds>>;
 }
 type ServerLook = Look<NeutralServer, McpEntry, ServerDisk>;
 
@@ -75,15 +77,17 @@ type ServerLook = Look<NeutralServer, McpEntry, ServerDisk>;
 async function readDisk(context: ShareContext, managed: HarnessId[], writeClaude: boolean): Promise<ServerDisk> {
   const disk: ServerDisk = {
     byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], shapes: new Map(), unseenNames: new Map(), switchedOff: new Map(),
-    through: await serversThroughPlugins(context, managed), switches: await readMcpSwitches(context, managed),
+    through: await serversThroughPlugins(context, managed), switches: await readMcpSwitches(context, managed), linked: await pluginHolds(context, managed),
     held: (item, tool) => {
+      const linked = disk.linked(item, tool);
+      if (linked) return linked;
       const given = disk.through.get(tool)?.get(item.key);
       if (given) return { why: throughPlugin(tool, given, 'MCP server') };
       const why = cannotTake(disk, item, tool);
       return why ? { why } : undefined;
     },
-    // A tool that can't hold the current version (an SSE server, in Codex) keeps the entry it has.
-    refuses: (item, tool) => cannotTake(disk, item, tool),
+    // A tool that can't hold the current version (an SSE server, in Codex), or gets a plugin's server only with the plugin, keeps the entry it has.
+    refuses: (item, tool) => { const linked = disk.linked(item, tool); return linked && !linked.anotherWay ? linked.why : cannotTake(disk, item, tool); },
   };
   const parts = await readParts(context.home);
   for (const tool of managed) {

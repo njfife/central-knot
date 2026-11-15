@@ -1578,6 +1578,10 @@ async function practiceFlow() {
   await a.click('#popen-0-document-tools');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme')); tries++) await wait(100);
   // A plugin's parts in a tool without plugins (Pi): its skill and MCP server go in as ordinary items, marked as from it, and Undo takes them out.
+  // Only a plugin with parts on record keeps that route (pluginstatus.ts routeOf): issue-tracker has them in OpenCode, as an earlier
+  // version left them, in a tool this home doesn't manage; any other plugin's items go in as library items (pluginSwitchFlow).
+  writeFileSync(join(practice, '.central-knot/plugin-parts.json'), JSON.stringify({ installs: [{ source: market, marketName: 'ck-test-market', plugin: 'issue-tracker', tool: 'opencode-cli', at: '2026-11-01T00:00:00.000Z', digest: 'earlier',
+    items: [{ kind: 'skill', name: 'triage', hash: 'earlier' }, { kind: 'mcp', name: 'issues', hash: 'earlier' }] }] }));
   mkdirSync(join(practice, '.pi/agent'), { recursive: true });
   await a.run('window.centralKnot.refresh()');
   await a.click('#nav-skills');
@@ -1752,6 +1756,8 @@ async function practiceFlow() {
   same('Undo puts that one part back as it was', [existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && readFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), 'utf8'), readFileSync(piMcp, 'utf8').includes('issues')], [triageText, false]);
   await a.click(partSwitch('skill-triage'));
   rmSync(join(practice, '.pi'), { recursive: true, force: true });
+  // The parts record given above goes too: a marketplace whose plugin has parts on record stays listed until they are removed.
+  rmSync(join(practice, '.central-knot/plugin-parts.json'), { force: true });
   await a.run('window.centralKnot.refresh()');
   // One skill of an installed plugin, off and back on (ENB-06): Codex's switch is a [[skills.config]] block naming
   // document-tools:pdf-reader in config.toml. Codex has it installed as its record says.
@@ -2947,7 +2953,7 @@ async function openCodeFlow() {
   await pictures(a, 'opencode-page-skills');
   await a.click('#harness-tab-plugins');
   await pictures(a, 'opencode-page-plugins');
-  check('its Plugins tab says where plugins install and that its parts can go in', /installs marketplace plugins into Claude Code\. A plugin’s page on Plugins can put its parts in OpenCode as separate items\./.test(await a.text('#harness-body') ?? ''), await a.text('#harness-body'));
+  check('its Plugins tab says where plugins install and that a plugin’s items can go in', /installs marketplace plugins into Claude Code\. A plugin’s page on Plugins puts its skills, agents and MCP servers in OpenCode as items of Central Knot’s that follow the plugin\./.test(await a.text('#harness-body') ?? ''), await a.text('#harness-body'));
   await a.click('#harness-tab-about');
   const about = await a.text('#harness-body');
   check('About names its folders and its settings file', ['~/.config/opencode/skills', '~/.claude/skills', '~/.config/opencode/opencode.json', '~/.config/opencode/agents', '~/.config/opencode/AGENTS.md'].every(path => about.includes(path)), about);
@@ -2980,7 +2986,7 @@ async function openCodeFlow() {
   await p.click('#add-oc-docs');
   const inCopilot = JSON.parse(readNow(join(practice, '.copilot/mcp-config.json')) || '{}').mcpServers?.['oc-docs'];
   same('OpenCode’s server reaches Copilot CLI in Copilot’s form', [inCopilot?.command, inCopilot?.args, inCopilot?.env], ['npx', ['-y', 'docs'], { DOCS_TOKEN: 'value-123' }]);
-  // OpenCode takes no plugin whole: a plugin's skills, MCP servers and agents go in as ordinary items, in OpenCode's forms.
+  // OpenCode takes no plugin whole: a plugin's skills, MCP servers and agents go in as library items linked to it, in OpenCode's forms.
   const market = join(scratch, 'opencode-market');
   writeMarket(market);
   await p.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)})`);
@@ -2990,15 +2996,15 @@ async function openCodeFlow() {
   const turnOn = async plugin => { await p.click(`.plugin-row[data-plugin="${plugin}"] .plugin-row-switch .switch`); for (let tries = 0; tries < 80 && await p.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); };
   for (let tries = 0; tries < 50 && !(await p.exists(box('issue-tracker'))); tries++) await wait(100);
   same('OpenCode is a column; the plugins, off, are in none of the tools', [await p.run(`document.querySelector('${box('issue-tracker')}')?.dataset.state`), await p.run(`document.querySelector('${box('release-helper')}')?.dataset.state`)], ['absent', 'absent']);
-  // Each switch On: the plugin's parts go into OpenCode (Claude Code's installer, a stand-in, refuses, and says so).
+  // Each switch On: the plugin's items go into OpenCode (Claude Code's installer, a stand-in, refuses, and says so).
   await turnOn('issue-tracker');
   await turnOn('release-helper');
-  for (let tries = 0; tries < 50 && (await p.run(`document.querySelector('${box('release-helper')}')?.dataset.state`)) !== 'parts'; tries++) await wait(100);
+  for (let tries = 0; tries < 50 && (await p.run(`document.querySelector('${box('release-helper')}')?.dataset.state`)) !== 'items'; tries++) await wait(100);
   const withParts = readNow(join(mine, 'opencode.json'));
   check('the plugin’s skill and MCP server are in OpenCode, the server in OpenCode’s form', existsSync(join(mine, 'skills/triage/SKILL.md')) && /"issues": \{\s*"type": "local",\s*"command": \[\s*"npx",\s*"-y",\s*"@example\/issues-mcp"\s*\]\s*\}/.test(withParts) && withParts.includes('// mine'), withParts || await p.text('.bands'));
   const partAgent = readNow(join(mine, 'agents/release-reviewer.md'));
   check('and a plugin’s agent is an OpenCode agent', partAgent.includes('description: Reviews a release branch before it ships.') && partAgent.includes('mode: all') && partAgent.includes('Review it.'), partAgent || await p.text('.bands'));
-  await pictures(p, 'opencode-parts-four-tools');
+  await pictures(p, 'opencode-items-four-tools');
   // Five tools is the widest table: nothing is cut off at the smallest window. Pi is installed with Harnesses open, whose
   // Refresh is the one read that finds it (Plugins' own read would find it first and start a second).
   await p.click('#nav-harnesses');
@@ -3022,7 +3028,7 @@ async function openCodeFlow() {
   }
   await p.click('#nav-plugins');
   await p.click('[id^="popen-"][id$="-issue-tracker"]');
-  for (let tries = 0; tries < 40 && !/Can go in|Its parts/.test(await p.text('.plugin-page') ?? ''); tries++) await wait(100);
+  for (let tries = 0; tries < 40 && !/Its items/.test(await p.text('.plugin-page') ?? ''); tries++) await wait(100);
   await fitsAtMinimum(p, 'a plugin’s page with five tools');
   await pictures(p, 'opencode-five-plugin-page');
   same('no page errors, OpenCode in the Practice copy', p.pageErrors, []);
@@ -4073,22 +4079,50 @@ esac
   const done = async () => { for (let tries = 0; tries < 100 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(100); await a.settle(); };
   const pictures = async name => { if (!shots) return; for (const [width, height] of [SMALLEST, [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); await a.shot(`${name}-${width}`); } await fullSize(a); };
   same('off, it is in no tool: its switch is off and each tool’s mark empty', [await switchIs('#pswitch-0-issue-tracker'), await marks()], ['false', ['absent', 'absent']]);
-  // On, from the list: Claude Code by its own command, Pi by its parts, at once.
+  // On, from the list: Claude Code by its own command, Pi by its items (library items linked to the plugin), at once.
   await a.click('#pswitch-0-issue-tracker');
   await done();
-  same('On installs it in Claude Code with its own command and puts its parts in Pi', [calls(), installed(), inPi(), await marks(), await switchIs('#pswitch-0-issue-tracker')],
-    [['plugin marketplace add ' + market, 'plugin install issue-tracker@ck-test-market --scope user'], true, [true, true], ['installed', 'parts'], 'true']);
-  check('the result says what the switch did, with Undo', /issue-tracker: installed in Claude Code; parts installed in Pi\./.test(await a.text('#plugins-result') ?? '') && await a.exists('#plugins-undo'), await a.text('#plugins-result'));
+  same('On installs it in Claude Code with its own command and puts its items in Pi', [calls(), installed(), inPi(), await marks(), await switchIs('#pswitch-0-issue-tracker')],
+    [['plugin marketplace add ' + market, 'plugin install issue-tracker@ck-test-market --scope user'], true, [true, true], ['installed', 'items'], 'true']);
+  check('the result says what the switch did, with Undo', /issue-tracker: installed in Claude Code; its items put in Pi\./.test(await a.text('#plugins-result') ?? '') && await a.exists('#plugins-undo'), await a.text('#plugins-result'));
   same('the home records it On, kept out of nothing', [entry()?.on, entry()?.except], [true, []]);
   await pictures('plugin-switch-list');
+  // Its items are rows of the item pages, from the plugin: one row each, Claude Code's copy (the plugin's) folded in.
+  await a.click('#nav-skills');
+  check('triage is one row on Skills, “from the plugin issue-tracker”, and Claude Code has it with the plugin', /from the plugin issue-tracker/.test(await a.text('.ov-row[data-key="triage"]') ?? '')
+    && !(await a.exists('.ov-row[data-key="issue-tracker@ck-test-market/triage"]')), await a.text('.page'));
+  await a.click('#nav-mcp');
+  check('issues is one row on MCP servers, from the plugin too', /from the plugin issue-tracker/.test(await a.text('.ov-row[data-key="issues"]') ?? ''), await a.text('.page'));
+  await a.click('#nav-plugins');
+  await a.click('#popen-0-issue-tracker');
+  for (let tries = 0; tries < 50 && !/Its items/.test(await a.text('.plugin-page') ?? ''); tries++) await wait(100);
+  check('its page lists its items for Pi', /Its items[\s\S]*skill triage[\s\S]*MCP server issues/.test(await a.text('.plugin-items-section') ?? ''), await a.text('.plugin-page'));
+  // Changed in Pi, triage is let go: the person's own from then on, said once on Skills; an update of the plugin's issues still follows.
+  writeFileSync(join(home, '.pi/agent/skills/triage/SKILL.md'), `${readFileSync(join(home, '.pi/agent/skills/triage/SKILL.md'), 'utf8')}\nMine.\n`);
+  await a.click('#header-refresh');
+  await a.click('#nav-skills');
+  for (let tries = 0; tries < 50 && !/is your own now/.test(await a.text('.bands') ?? ''); tries++) await wait(100);
+  check('changed in Pi, triage is his own now, said once', /triage is your own now: you changed it here, so it no longer follows the plugin issue-tracker/.test(await a.text('.bands') ?? '') && !/from the plugin/.test(await a.text('.ov-row[data-key="triage"]') ?? ''), await a.text('.bands'));
+  writeFileSync(join(market, 'plugins/issue-tracker/.mcp.json'), JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp', '--v2'] } } }));
+  // Plugins opens again on the page last shown there, issue-tracker's; Refresh reads the marketplace's change.
+  await a.click('#nav-plugins');
+  if (!(await a.exists('#plugin-back'))) await a.click('#popen-0-issue-tracker');
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 50 && !(await a.exists('#pupdate-0-issue-tracker')); tries++) await wait(100);
+  check('its page says an update is ready for issues, and that triage is his own', /MCP server issues\s*An update is ready/.test(await a.text('.plugin-items-section') ?? '') && /skill triage\s*Not brought in: you have your own/.test(await a.text('.plugin-items-section') ?? ''), await a.text('.plugin-items-section'));
+  await pictures('plugin-items-page');
+  await a.click('#pupdate-0-issue-tracker');
+  await done();
+  same('Update brings issues up to date in Pi, and leaves triage as he has it', [(readNow(join(home, '.pi/agent/mcp.json')) ?? '').includes('--v2'), readFileSync(join(home, '.pi/agent/skills/triage/SKILL.md'), 'utf8').includes('Mine.')], [true, true]);
+  await a.click('#plugin-back');
   // Keep out, on its page: Pi alone, at once; the switch is then partial.
   await a.click('#popen-0-issue-tracker');
   for (let tries = 0; tries < 50 && !(await a.exists('#pkeep-0-issue-tracker-pi-cli')); tries++) await wait(100);
-  check('each tool’s line says what it has, with Keep out', /Installed · 2\.0\.0/.test(await a.text('.plugin-tool[data-tool="claude-cli"]') ?? '') && /Parts installed/.test(await a.text('.plugin-tool[data-tool="pi-cli"]') ?? '') && (await a.text('#pkeep-0-issue-tracker-pi-cli')) === 'Keep out', await a.text('.plugin-panel'));
+  check('each tool’s line says what it has, with Keep out', /Installed · 2\.0\.0/.test(await a.text('.plugin-tool[data-tool="claude-cli"]') ?? '') && /\d+ of its \d+ items (is|are) on/.test(await a.text('.plugin-tool[data-tool="pi-cli"]') ?? '') && (await a.text('#pkeep-0-issue-tracker-pi-cli')) === 'Keep out', await a.text('.plugin-panel'));
   await a.click('#pkeep-0-issue-tracker-pi-cli');
   await done();
-  same('Keep out takes its parts out of Pi alone, records it, and the switch shows partial', [inPi(), installed(), entry()?.except, await a.text('#pkeep-0-issue-tracker-pi-cli'), await a.run(`document.querySelector('.plugin-tool[data-tool="pi-cli"] .cell-button')?.dataset.state`), await switchIs('#pswitch-page-0-issue-tracker')],
-    [[false, false], true, ['pi-cli'], 'Let in', 'kept-out', 'true partial']);
+  same('Keep out takes its items out of Pi alone (not triage, his own now), records it, and the switch shows partial', [inPi(), installed(), entry()?.except, await a.text('#pkeep-0-issue-tracker-pi-cli'), await a.run(`document.querySelector('.plugin-tool[data-tool="pi-cli"] .cell-button')?.dataset.state`), await switchIs('#pswitch-page-0-issue-tracker')],
+    [[true, false], true, ['pi-cli'], 'Let in', 'kept-out', 'true partial']);
   await pictures('plugin-switch-page');
   await fitsAtMinimum(a, 'a plugin’s page with a tool kept out');
   await a.click('#plugin-back');
@@ -4143,7 +4177,7 @@ esac
   for (let tries = 0; tries < 50 && !(await a.exists('#pswitch-page-0-document-tools')); tries++) await wait(100);
   await a.click('#pswitch-page-0-document-tools');
   await done();
-  same('a refused install is said, its line offers Install there, and Pi has its parts', [/Could not add the marketplace|Not installed/.test(await a.text('.plugin-problems') ?? ''), await a.run(`document.querySelector('.plugin-tool[data-tool="claude-cli"] .cell-button')?.dataset.state`),
+  same('a refused install is said, its line offers Install there, and Pi has its items', [/Could not add the marketplace|Not installed/.test(await a.text('.plugin-problems') ?? ''), await a.run(`document.querySelector('.plugin-tool[data-tool="claude-cli"] .cell-button')?.dataset.state`),
     await a.exists('#pfix-0-document-tools-claude-cli'), existsSync(join(home, '.pi/agent/skills/pdf-reader/SKILL.md'))], [true, 'missing', true, true]);
   await pictures('plugin-switch-failed');
   await fitsAtMinimum(a, 'a plugin’s page with an install that failed');

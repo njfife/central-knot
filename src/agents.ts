@@ -26,7 +26,7 @@ import { libraryWords } from './libraryrow.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type KindLibrary, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { mergeAgent } from './merge.ts';
-import { throughPlugins } from './plugins.ts';
+import { pluginHolds, throughPlugins } from './plugins.ts';
 import { agentsKeptIn, type AgentTool } from './presence.ts';
 import { errorCode, exists, partsIn, recoverParked, removeFileChecked, syncGate, writeAccess, writeFileChecked } from './share.ts';
 import { sourceFacts } from './sources.ts';
@@ -44,7 +44,7 @@ type ThroughPlugins = Map<HarnessId, Map<string, ThroughPlugin>>;
  * The managed harnesses' agent files now (librarypass.ts Disk), what each harness's plugins bring, which the page shows, and
  * (`skills`) the keys of the person's skills in a harness that keeps agents as skills, which hold the agent there (agentHeld).
  */
-interface AgentDisk extends Disk<AgentEntry> { through: ThroughPlugins; skills: Map<HarnessId, Set<string>> }
+interface AgentDisk extends Disk<AgentEntry> { through: ThroughPlugins; skills: Map<HarnessId, Set<string>>; linked: Awaited<ReturnType<typeof pluginHolds>> }
 type AgentLook = Look<SharedAgent, AgentEntry, AgentDisk>;
 
 /**
@@ -56,7 +56,11 @@ async function readDisk(context: ShareContext, managed: HarnessId[], library: Ki
   const disk: AgentDisk = {
     byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], through: await agentsThroughPlugins(context, managed),
     parts: await partsIn(context.home, 'agent'), skills: await skillsLoaded(context, managed),
-    held: (item, tool) => { const why = agentHeld(disk, managed, item, tool); return why ? { why } : undefined; },
+    // A plugin's item, in a tool that takes the plugin, is held by the plugin alone (plugins.ts pluginHolds); its can't-take
+    // answer keeps a copy the tool has.
+    linked: await pluginHolds(context, managed),
+    held: (item, tool) => { const linked = disk.linked(item, tool); if (linked) return linked; const why = agentHeld(disk, managed, item, tool); return why ? { why } : undefined; },
+    refuses: (item, tool) => { const linked = disk.linked(item, tool); return linked && !linked.anotherWay ? linked.why : undefined; },
   };
   for (const tool of managed as AgentTool[]) {
     const read = await readAgents(context, tool, library.items), folder = agentsFolder(context, tool);

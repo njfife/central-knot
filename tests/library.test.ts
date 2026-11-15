@@ -461,6 +461,35 @@ test('Changed here: the current version is not what it took from the source, or 
   assert.equal(changedHere({ ...on, seen: 'l', hash: 'l' }, 'l', {}), false, 'made current again at what it took, or edited back to it by hand');
 });
 
+// ---------- A plugin's rows (library.ts's header, A PLUGIN): the same table, but where `plugin` says otherwise ----------
+
+const plugin = { plugin: true };
+
+test('A plugin: a name the library has no item for is made, and so is his own deleted; one of its own he deleted only at a click that brings the plugin in; a name the library has unlinked is never linked, the same content or not', () => {
+  assert.equal(fromSource(undefined, there('s'), 'none', plugin), 'make');
+  const tombstone = { ...linked('l', 'l'), deleted: { at: '2026-11-01T00:00:00.000Z' } };
+  assert.equal(fromSource(tombstone, there('s'), 'this', plugin), 'deleted', 'the background never brings it back');
+  assert.equal(fromSource(tombstone, there('s'), 'this', { ...plugin, bringBack: true }), 'make', 'the plugin’s On does');
+  assert.equal(fromSource({ ...tombstone, source: undefined }, there('s'), 'none', plugin), 'make', 'his own, let go and deleted: the plugin’s comes back');
+  const own = { ...linked('s', 's'), source: undefined, seen: undefined, versions: [{ hash: 's', at: '2026-11-02T10:00:00.000Z', from: { how: 'found' as const, harness: 'pi-cli' as const } }] };
+  assert.equal(fromSource(own, there('s'), 'none', plugin), 'differs', 'the person’s own, the same content: not linked, so the plugin’s Off never turns it off');
+  assert.equal(fromSource(own, there('s'), 'none'), 'link', 'a Git source links it');
+  assert.equal(fromSource(own, there('other'), 'none', plugin), 'differs');
+});
+
+test('A plugin: its item changed here is let go, before every other row, whatever the read holds; a copy that can’t be seen for sure lets nothing go', () => {
+  const on = { ...linked('l', 'l'), on: true, applied: { 'pi-cli': 'l' } } satisfies LibraryItem;
+  assert.equal(fromSource({ ...on, hash: 'mine' }, there('s'), 'this', plugin), 'let-go', 'an edit taken in, S changed');
+  assert.equal(fromSource({ ...on, hash: 'mine' }, there('l'), 'this', plugin), 'let-go', 'S unchanged too: a Git source’s item would only wait at S’s next change');
+  assert.equal(fromSource(on, 'unreadable', 'this', { ...plugin, copies: { 'pi-cli': holds('e') } }), 'let-go', 'an edit in Pi no pass has taken in, the plugin not read');
+  assert.equal(fromSource({ ...on, hash: 'mine' }, 'gone', 'this', plugin), 'let-go', 'the plugin dropped it: his own stays as it is, never turned off');
+  assert.equal(fromSource(on, there('s'), 'this', { ...plugin, copies: { 'pi-cli': unseen } }), 'nothing', 'Pi’s copy settling: no difference yet, and S waits for a read where it can be seen');
+  assert.equal(fromSource(on, there('s'), 'this', { ...plugin, copies: { 'pi-cli': holds('l') } }), 'update', 'unchanged here: S becomes current');
+  assert.equal(fromSource(on, 'gone', 'this', plugin), 'drop');
+  assert.equal(fromSource({ ...on, hash: 'mine' }, there('s'), 'this', { ...plugin, copies: { 'pi-cli': holds('l') } }), 'let-go');
+  assert.equal(fromSource({ ...on, hash: 'mine', source: undefined }, there('s'), 'none', plugin), 'differs', 'let go once, it stays the person’s while it differs');
+});
+
 test('A source: a name gone, read whole, drops an item linked to it; one that can’t be read, or isn’t linked, changes nothing', () => {
   assert.equal(fromSource(linked('l', 'l'), 'gone', 'this'), 'drop');
   assert.equal(fromSource(linked('l', 'l'), 'unreadable', 'this'), 'nothing');
@@ -521,26 +550,29 @@ test('A source: Keep mine on its row keeps the current version, whatever a tool 
 
 /** A source's last read of skills as removedBy reads it: its id, its link, its kind and the names it holds. */
 const lastRead = (names: [string, { hash: string } | { unreadable: string }][], id = 'src', link = 'team/notes') => ({ id, link, kind: 'skill' as const, names: new Map(names) });
+/** The ids the home records, here those of the reads alone (sourcestore.ts recordedIds gives a plugin's too). */
+const ids = (reads: readonly { id: string }[]) => new Set(reads.map(read => read.id));
 
 test('Removed at its source: Off, linked to none, a version from a recorded source’s link, and that source’s last read without its name; any of these not so, and nothing says it', () => {
   const dropped = { ...linked('l', 'l'), source: undefined, seen: undefined };
   const reads = [lastRead([['jottings', { hash: 'j' }]])];
-  assert.equal(removedBy(dropped, 'skill', reads), reads[0]);
-  assert.equal(removedBy({ ...dropped, on: true }, 'skill', reads), undefined, 'turned On: the revert');
-  assert.equal(removedBy({ ...dropped, deleted: { at: '2026-11-05T10:00:00.000Z' } }, 'skill', reads), undefined, 'deleted');
-  assert.equal(removedBy({ ...dropped, source: 'src' }, 'skill', reads), undefined, 'linked to it again');
-  assert.equal(removedBy({ ...dropped, source: 'gone' }, 'skill', reads), reads[0], 'linked to a source no longer recorded is linked to none');
-  assert.equal(removedBy(dropped, 'skill', []), undefined, 'its source removed');
-  assert.equal(removedBy(dropped, 'skill', [lastRead([['notes', { hash: 's' }]])]), undefined, 'the name back');
-  assert.equal(removedBy(dropped, 'skill', [lastRead([['notes', { unreadable: 'its SKILL.md can’t be read' }]])]), undefined, 'the name back, unreadable: that line says why');
+  assert.equal(removedBy(dropped, 'skill', reads, ids(reads)), reads[0]);
+  assert.equal(removedBy({ ...dropped, on: true }, 'skill', reads, ids(reads)), undefined, 'turned On: the revert');
+  assert.equal(removedBy({ ...dropped, deleted: { at: '2026-11-05T10:00:00.000Z' } }, 'skill', reads, ids(reads)), undefined, 'deleted');
+  assert.equal(removedBy({ ...dropped, source: 'src' }, 'skill', reads, ids(reads)), undefined, 'linked to it again');
+  assert.equal(removedBy({ ...dropped, source: 'gone' }, 'skill', reads, ids(reads)), reads[0], 'linked to a source no longer recorded is linked to none');
+  assert.equal(removedBy(dropped, 'skill', [], ids([])), undefined, 'its source removed');
+  assert.equal(removedBy(dropped, 'skill', [lastRead([['notes', { hash: 's' }]])], ids(reads)), undefined, 'the name back');
+  assert.equal(removedBy(dropped, 'skill', [lastRead([['notes', { unreadable: 'its SKILL.md can’t be read' }]])], ids(reads)), undefined, 'the name back, unreadable: that line says why');
   const empty = [lastRead([])];
-  assert.equal(removedBy(dropped, 'skill', empty), empty[0], 'a read with no skill at all, not whole, leaves it');
-  assert.equal(removedBy(dropped, 'skill', [lastRead([['jottings', { hash: 'j' }]], 'src', 'team/other')]), undefined, 'no version from that link');
+  assert.equal(removedBy(dropped, 'skill', empty, ids(empty)), empty[0], 'a read with no skill at all, not whole, leaves it');
+  assert.equal(removedBy(dropped, 'skill', [lastRead([['jottings', { hash: 'j' }]], 'src', 'team/other')], ids(reads)), undefined, 'no version from that link');
+  assert.equal(removedBy({ ...dropped, source: 'plugin-id' }, 'skill', reads, new Set(['src', 'plugin-id'])), undefined, 'linked to a plugin the home records: never removed by a source');
   const merged = { ...dropped, versions: [{ hash: 'l', at: '2026-11-04T10:00:00.000Z', from: { how: 'merged' as const, link: 'team/notes' } }] };
-  assert.equal(removedBy(merged, 'skill', reads), reads[0], 'a version Merge made, with that link, counts too');
+  assert.equal(removedBy(merged, 'skill', reads, ids(reads)), reads[0], 'a version Merge made, with that link, counts too');
   const takenIn = { hash: 'own', at: '2026-11-06T10:00:00.000Z', from: { how: 'found' as const, harness: 'claude-cli' as const } };
-  assert.equal(removedBy({ ...dropped, hash: 'own', versions: [takenIn, ...dropped.versions] }, 'skill', reads), undefined, 'taken in from a tool since: only versions after that count');
-  assert.equal(removedBy({ ...dropped, versions: [...dropped.versions, takenIn] }, 'skill', reads), reads[0], 'taken in first, then from the source');
+  assert.equal(removedBy({ ...dropped, hash: 'own', versions: [takenIn, ...dropped.versions] }, 'skill', reads, ids(reads)), undefined, 'taken in from a tool since: only versions after that count');
+  assert.equal(removedBy({ ...dropped, versions: [...dropped.versions, takenIn] }, 'skill', reads, ids(reads)), reads[0], 'taken in first, then from the source');
 });
 
 test('Removed at its source, within its kind: a skill and an agent of one name are read apart; the agent is removed though the source still holds a skill of that name, and the skill is not removed for the agent gone', () => {
@@ -548,8 +580,8 @@ test('Removed at its source, within its kind: a skill and an agent of one name a
   const dropped = { ...linked('l', 'l'), source: undefined, seen: undefined };
   const skills = { id: 'src', link: 'team/notes', kind: 'skill' as const, names: new Map([['notes', { hash: 's' }]]) };
   const agents = { id: 'src', link: 'team/notes', kind: 'agent' as const, names: new Map<string, { hash: string }>() };
-  assert.equal(removedBy(dropped, 'agent', [skills, agents]), agents, 'the agent: the agents’ read doesn’t hold it, whatever the skills’ read holds');
-  assert.equal(removedBy(dropped, 'skill', [skills, agents]), undefined, 'the skill: the skills’ read holds it, and the agents’ read is never the skill’s');
+  assert.equal(removedBy(dropped, 'agent', [skills, agents], ids([skills])), agents, 'the agent: the agents’ read doesn’t hold it, whatever the skills’ read holds');
+  assert.equal(removedBy(dropped, 'skill', [skills, agents], ids([skills])), undefined, 'the skill: the skills’ read holds it, and the agents’ read is never the skill’s');
 });
 
 // ---------- Merge's table (library.ts's header, MERGE), one row each ----------

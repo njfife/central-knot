@@ -17,7 +17,9 @@
 // writes what it is given.
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { readPluginRecord, type PluginEntry } from './pluginrecord.ts';
 import { sameSource } from './plugins.ts';
+import { pluginLink } from './sourcelink.ts';
 import { NOTHING_CHANGED, errorCode, storeDirectory, writeDurably } from './share.ts';
 
 /** One source, as the home records it (sources.json). */
@@ -70,3 +72,16 @@ export const saveSources = (home: string, sources: SourceRecord[]) => writeDurab
  * (gitrepo.ts connectRepo), since Push would write to a source, as a source refuses the Git repo (sources.ts resolve).
  */
 export const sourceAt = async (home: string, address: string) => (await readSources(home)).sources.find(source => sameSource(source.repository, address));
+
+/**
+ * Every id an item can be linked to (library.ts linkedSource), the one place they are gathered: each source's in sources.json and
+ * each plugin's in plugins.json (library.ts A PLUGIN), with the link each is named by (`links`: a source's as given, a plugin's
+ * sourcelink.ts pluginLink) and the plugins' entries. A record that can't be read gives none of its ids.
+ */
+export async function recordedIds(home: string): Promise<{ ids: Set<string>; links: Map<string, string>; plugins: PluginEntry[] }> {
+  const [{ sources }, { record }] = await Promise.all([readSources(home), readPluginRecord(home)]);
+  const plugins = record?.plugins ?? [];
+  const links = new Map([...sources.map(source => [source.id, source.link] as const), ...plugins.map(entry => [entry.id, pluginLink(entry.plugin, entry.marketName)] as const)]);
+  return { ids: new Set(links.keys()), links, plugins };
+}
+export type Recorded = Awaited<ReturnType<typeof recordedIds>>;

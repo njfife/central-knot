@@ -7,9 +7,10 @@ import { markdown } from './markdown.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginKey, type PluginOp } from './pluginplan.ts';
 import { applyPluginOps, market, openLink, shownDetail, turnPlugin } from './pluginstate.ts';
-import { PREVIEW_ONLY, addWords, cantUninstall, copyStale, foundIn, outdated, switchPartial, switchWords, toolMark, updateTools, versionToCompare, type ToolMark } from './pluginstatus.ts';
+import { PREVIEW_ONLY, addWords, cantUninstall, copyStale, foundIn, itemsIn, outdated, switchPartial, switchWords, toolMark, updateTools, versionToCompare, type ToolMark } from './pluginstatus.ts';
 import { pluginUpdates } from './pluginupdateview.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, PluginView, PluginsView } from './types.ts';
+import { takesPlugins } from './presence.ts';
 import { andList, toolNames as names } from './words.ts';
 
 /** The name a plugin is shown by: its display name when the catalog gives one. */
@@ -29,6 +30,7 @@ const MARK_LOOKS: Record<ToolMark, { look: string; glyph: () => Element }> = {
   outdated: { look: 'cell-differs.cell-on', glyph: () => icon('refresh-cw', 14) },
   parts: { look: 'cell-synced.cell-on.cell-parts', glyph: () => icon('blocks', 15) },
   'parts-changed': { look: 'cell-differs.cell-on', glyph: () => icon('refresh-cw', 14) },
+  items: { look: 'cell-synced.cell-on', glyph: () => icon('check', 16) },
   stays: { look: 'cell-differs.cell-on', glyph: () => icon('circle-alert', 14) },
   waits: { look: 'cell-waiting', glyph: () => icon('clock', 14) },
   'not-brought': { look: 'cell-kept', glyph: () => icon('circle-off', 14) },
@@ -87,14 +89,17 @@ export function pluginSwitch(view: PluginsView, entry: MarketplaceView, plugin: 
 
 /**
  * What Update runs for one plugin: an update in each tool whose installed copy is older than the marketplace's or
- * differs from it at the same version (pluginstatus.outdated), and
- * its parts brought up to date in each tool holding them out of date. Empty when nothing is out of date.
+ * differs from it at the same version (pluginstatus.outdated), its parts brought up to date in each tool holding them out of
+ * date, and its items read again where the plugin has something for them. Empty when nothing is out of date.
  */
 export function updateOps(view: PluginsView, entry: MarketplaceView, plugin: PluginView): PluginOp[] {
   const detail = shownDetail(pluginKey(entry.source, plugin.name));
   const { plugin: tools, parts } = updateTools(view, entry, plugin.name, versionToCompare(plugin, detail), componentsOf(entry, plugin), detail);
   const op = (tool: PluginOp['tool'], action: PluginOp['action']): PluginOp => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action });
-  return [...tools.map(tool => op(tool, 'update')), ...parts.map(tool => op(tool, 'install-parts'))];
+  // Its items, read again where the plugin has something for them (pluginlibrary.ts itemsView `ready`).
+  const itemTools = view.tools.filter(tool => !takesPlugins(tool)), holding = itemTools.filter(tool => itemsIn(entry, plugin.name, tool));
+  const items = view.canWrite && entry.items?.[plugin.name]?.ready ? (holding.length ? holding : itemTools.slice(0, 1)) : [];
+  return [...tools.map(tool => op(tool, 'update')), ...parts.map(tool => op(tool, 'install-parts')), ...items.map(tool => op(tool, 'update-items'))];
 }
 
 /** "Update in Claude Code and Codex" (or in 3 tools) for these ops; a click runs them at once. `row`: on a list row. */
@@ -102,7 +107,8 @@ export function updateButton(ops: PluginOp[], id: string, { row = false } = {}) 
   const tools = [...new Set(ops.map(op => op.tool))];
   const named = (action: PluginOp['action']) => andList(ops.filter(op => op.action === action).map(op => names[op.tool]));
   const title = [named('update') && `Updates it in ${named('update')} now. An update can’t be undone.`,
-    named('install-parts') && `Brings its parts up to date in ${named('install-parts')} now; Undo puts them back.`];
+    named('install-parts') && `Brings its parts up to date in ${named('install-parts')} now; Undo puts them back.`,
+    named('update-items') && `Brings its items up to date from the plugin now, in ${named('update-items')}; History can undo each.`];
   // On a list row it is a link, so the row keeps its height, and a click on it doesn't open the plugin.
   return button({ variant: row ? 'link' : 'outline', size: row ? 'micro' : 'small', icon: row ? undefined : 'refresh-cw', id, disabled: !!app.busy,
     label: `Update in ${tools.length > 2 ? `${tools.length} tools` : andList(tools.map(tool => names[tool]))}`, attrs: { title: title.filter(Boolean).join(' ') },

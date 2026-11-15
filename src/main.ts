@@ -1268,6 +1268,7 @@ app.whenReady().then(async () => {
     // A change to a plugin that worked (an update, an uninstall, its parts) settles what failed there by itself before.
     changed: (source, plugin, tools) => void pluginUpdates?.settled(source, plugin, tools).catch(error => logFailure('plugin updates', error)),
     waitedBefore: async () => pluginUpdates?.waitedBefore() ?? [],
+    notices: (kind, told) => { (kind === 'skill' ? pendingNotices : kind === 'mcp' ? pendingServerNotices : pendingAgentNotices).push(...told); },
     bundled: () => (bundle && custom ? { source: bundle.folder, view: {
       app: custom.name, displayName: custom.marketplace?.displayName, logo: custom.marketplace?.logo && `${CARRIED_FOLDER}/${custom.marketplace.logo}`,
       release: releaseDate(bundle.release, true), from: bundle.release.from || undefined, unpackaged: bundle.release.unpackaged, kept: bundle.release.kept,
@@ -1310,6 +1311,7 @@ app.whenReady().then(async () => {
         install: (source, marketName, plugin, tools, home) => step('plugins:install', [source, marketName, plugin, tools, home], () => markets.install(source, marketName, plugin, onlyAllowed(tools, pluginTools), home)),
         update: (source, marketName, plugin, tools, home) => step('plugins:update', [source, marketName, plugin, tools, home], () => markets.update(source, marketName, plugin, onlyAllowed(tools, pluginTools), home, { reinstall: false })),
         parts: (source, marketName, plugin, tool, mode, run, home, pick) => step('plugins:parts', [source, marketName, plugin, tool, mode, run, home, pick], () => markets.parts(source, marketName, plugin, tool, mode, run, home, pick)),
+        items: (source, marketName, plugin, tools, home, bring) => step('plugins:items', [source, marketName, plugin, tools, home, bring], () => markets.items(source, marketName, plugin, tools, home, bring)),
       },
       noteJoined: (tools, home) => queued(() => markets.noteJoined(tools, home)),
       load: async () => { const saved: unknown = JSON.parse(await readFile(recordPath, 'utf8')); return Array.isArray(saved) ? saved as UpdatesRecord[] : undefined; },
