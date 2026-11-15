@@ -6,8 +6,8 @@
       "plugin": "docs",
       "version": "1.0.0",
       "tool": "pi-cli",
-      "at": "2026-11-15T09:33:07.886Z",
-      "digest": "6860426ef3f1a98037a6581720ea455f31d7c970d45bb1fdd6d76f3d8c2bd671",
+      "at": "2026-11-15T11:53:37.234Z",
+      "digest": "9db1bb82ce2a403193aa70f3707f2edcce25f8b1b868731dd6370f7a71348bed",
       "items": [
         {
           "kind": "skill",
@@ -30,8 +30,8 @@
         {
           "kind": "mcp",
           "name": "lookup",
-          "hash": "37e1989a7a914b00c15d5c18af31accb32bdfc7e8b431d47321996a5431e3b56",
-          "seen": "bc3ffcfcd3df0872b0401c24ced94d9ed60c22e4935528c836669cce668a9732"
+          "hash": "3a91fa5166d96d2f4545a002827a250f5af800a34c7935647b40299c282322cc",
+          "seen": "8d3ba26e228f6c9aecbf080bc371097bc9e6501b1905866730e58d00bf1bb1cf"
         }
       ]
     },
@@ -41,8 +41,8 @@
       "plugin": "docs",
       "version": "1.0.0",
       "tool": "codex-cli",
-      "at": "2026-11-15T09:33:07.925Z",
-      "digest": "d6473c9486f1b1520062c4cc605075af5e62610311960384bb03247d045bf391",
+      "at": "2026-11-15T11:53:37.272Z",
+      "digest": "ada25480c602f5e1f44df009a0da5647a018f667e804403850978b83c2c13476",
       "items": [
         {
           "kind": "skill",
@@ -65,8 +65,8 @@
         {
           "kind": "mcp",
           "name": "lookup",
-          "hash": "37e1989a7a914b00c15d5c18af31accb32bdfc7e8b431d47321996a5431e3b56",
-          "seen": "bc3ffcfcd3df0872b0401c24ced94d9ed60c22e4935528c836669cce668a9732"
+          "hash": "3a91fa5166d96d2f4545a002827a250f5af800a34c7935647b40299c282322cc",
+          "seen": "8d3ba26e228f6c9aecbf080bc371097bc9e6501b1905866730e58d00bf1bb1cf"
         },
         {
           "kind": "agent",
@@ -81,14 +81,36 @@
       "marketName": "team",
       "plugin": "memo",
       "tool": "pi-cli",
-      "at": "2026-11-15T09:33:07.932Z",
-      "digest": "07968b48aa5d4ca23f05200777bb74d602c22555885371384e31f7afdfd538d1",
+      "at": "2026-11-15T11:53:37.280Z",
+      "digest": "fefbe8c7677326ba05911495dafdc3ba25477a6f36310d24b067394e20bb7f3f",
       "items": [
         {
           "kind": "skill",
           "name": "memo",
           "hash": "d850e37471aa4713705a18e637f0a8afae2833ef91912bd8f4c5b1d0c0f42937",
           "seen": "d850e37471aa4713705a18e637f0a8afae2833ef91912bd8f4c5b1d0c0f42937"
+        },
+        {
+          "kind": "mcp",
+          "name": "memo-index",
+          "hash": "5af81108bb539597bb13f664331e989cb0ce5e9372f618868dd28d95322b4c96",
+          "seen": "db6febf1736f4209736de0d7ab0beba1fffc55dfa9c6f5293fc81ee9d42ac3db"
+        }
+      ]
+    },
+    {
+      "source": "/tmp/ck-upgrade-fixture/home/market",
+      "marketName": "team",
+      "plugin": "journal",
+      "tool": "opencode-cli",
+      "at": "2026-11-15T11:53:37.287Z",
+      "digest": "91d7607426446bf4acdc6a10e4a6ad8d65d189cb2dc03992a9ec922efa0f72d2",
+      "items": [
+        {
+          "kind": "skill",
+          "name": "journal",
+          "hash": "e10b1c6fbf4fe6ac56e2591840e1324e4f10b5584290dd98e01c41404529ec85",
+          "seen": "e10b1c6fbf4fe6ac56e2591840e1324e4f10b5584290dd98e01c41404529ec85"
         }
       ]
     },
@@ -97,7 +119,7 @@
       "marketName": "gone",
       "plugin": "old",
       "tool": "pi-cli",
-      "at": "2026-11-15T09:33:07.940Z",
+      "at": "2026-11-15T11:53:37.304Z",
       "digest": "163d85067a056f559b307c4739eef120e39b6e4545ad0dbe44174786c58b5fba",
       "items": [
         {
@@ -113,7 +135,7 @@
       "marketName": "team",
       "plugin": "picks",
       "tool": "pi-cli",
-      "at": "2026-11-15T09:33:07.972Z",
+      "at": "2026-11-15T11:53:37.334Z",
       "digest": "7ccd7d42a2fa48d655ca5fdaf4ab0e1e7a6d9cad1b09a5e445cf74e049722229",
       "items": [
         {
@@ -142,7 +164,7 @@
       "plugin": "sheet",
       "version": "2.0.0",
       "tool": "pi-cli",
-      "at": "2026-11-15T09:33:07.983Z",
+      "at": "2026-11-15T11:53:37.345Z",
       "digest": "671b112e8d26bc95209f1f8e028cd205e7f5d3b0b98283cfd71bd6d6fd0aad4e",
       "items": [
         {
@@ -165,7 +187,7 @@
       "plugin": "sheet",
       "version": "1.0.0",
       "tool": "opencode-cli",
-      "at": "2026-11-15T09:33:07.992Z",
+      "at": "2026-11-15T11:53:37.355Z",
       "digest": "36df62e6368ddf293a00085e473bb85f358c7f6d32c6506e26097bae5e57de03",
       "items": [
         {
@@ -188,8 +210,8 @@
       "plugin": "docs",
       "version": "1.0.0",
       "tool": "opencode-cli",
-      "at": "2026-11-15T09:33:08.001Z",
-      "digest": "2b116c2a3ccd3bccd94817db9badfd3c6aa68b7085d2b0fdf75e350631a38c8d",
+      "at": "2026-11-15T11:53:37.365Z",
+      "digest": "0ab6c5d12f8d620c08383f96d94f46dfc844cf22adb2ca3ab8c312d948f455ea",
       "items": [
         {
           "kind": "skill",
@@ -206,8 +228,8 @@
         {
           "kind": "mcp",
           "name": "lookup",
-          "hash": "37e1989a7a914b00c15d5c18af31accb32bdfc7e8b431d47321996a5431e3b56",
-          "seen": "fe6adbf337755381ca6f09b91ce10c2c1fae84099960fb91dcd84ec292fb1aeb"
+          "hash": "3a91fa5166d96d2f4545a002827a250f5af800a34c7935647b40299c282322cc",
+          "seen": "08dd088b22058efd7d756a8c4a45bb0b26883b4323cc25fdbdf2a64f21e060b9"
         },
         {
           "kind": "agent",

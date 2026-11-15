@@ -131,25 +131,31 @@ async function alphaOneParts() {
     'skills/pdf/SKILL.md': skill('pdf', 'Read PDFs page by page.'), 'skills/review/SKILL.md': skill('review', 'Review the document.'),
     'skills/forms/SKILL.md': skill('forms', 'Fill forms field by field.'), 'agents/writer.md': agent('writer', 'Write the document.', 'model: sonnet\n'),
     // lookup's entry has an empty argument list, as alpha 1 kept it; bundled runs from the plugin's own folder, so it is never a part.
-    '.mcp.json': JSON.stringify({ mcpServers: { lookup: { command: 'lookup-mcp', args: [] }, bundled: { command: './bin/serve' } } }),
+    '.mcp.json': JSON.stringify({ mcpServers: { lookup: { command: 'lookup-mcp', args: [], env: { A: '1' } }, bundled: { command: './bin/serve' } } }),
     'bin/serve': '#!/bin/sh\n',
   };
   const sheet = (version, body) => ({ '.claude-plugin/plugin.json': JSON.stringify({ name: 'sheet', version }), 'skills/sheet/SKILL.md': skill('sheet', body),
     'skills/chart/SKILL.md': skill('chart', 'Draw one chart per sheet.') });
-  await market('market', 'team', { docs, memo: { 'skills/memo/SKILL.md': skill('memo', 'Keep a memo.') }, sheet: sheet('1.0.0', 'Sheets, version one.'),
+  // memo's agent scribe is no part anywhere (memo went into Pi alone, which took no agents); its server memo-index is.
+  const memo = { 'skills/memo/SKILL.md': skill('memo', 'Keep a memo.'), 'agents/scribe.md': agent('scribe', 'Write it down.'),
+    '.mcp.json': JSON.stringify({ mcpServers: { 'memo-index': { command: 'memo-index-mcp' } } }) };
+  await market('market', 'team', { docs, memo, sheet: sheet('1.0.0', 'Sheets, version one.'),
     picks: Object.fromEntries(['one', 'two', 'three'].map(name => [`skills/${name}/SKILL.md`, skill(name, `The ${name} part.`)])),
-    tasks: { 'skills/tasks/SKILL.md': skill('tasks', 'List the tasks.') } });
+    tasks: { 'skills/tasks/SKILL.md': skill('tasks', 'List the tasks.') }, journal: { 'skills/journal/SKILL.md': skill('journal', 'Write the day down.') } });
   await market('gone-market', 'gone', { old: { 'skills/old/SKILL.md': skill('old', 'From a marketplace gone since.') } });
   // 2. The tools' own records of plugins installed whole, as their own commands write them (no version of Central Knot writes
   //    them; the shapes tests/upgrade.test.ts used): Claude Code has memo and tasks from team, old from gone, xlsx from the
   //    Anthropic Directory; Copilot CLI has tasks, turned off there by its own switch.
   // Each installed copy is the marketplace's plugin as it is (xlsx's, from the Directory, its own), so no update is owed.
-  const bodies = { memo: 'Keep a memo.', tasks: 'List the tasks.', old: 'From a marketplace gone since.', xlsx: 'Read spreadsheets.' };
+  const bodies = { tasks: 'List the tasks.', old: 'From a marketplace gone since.', xlsx: 'Read spreadsheets.' };
   const copy = async (root, name) => { await put(`${root}/skills/${name}/SKILL.md`, skill(name, bodies[name])); return join(HOME, root); };
   const claude = (name, marketName = 'team') => copy(`.claude/plugins/cache/${marketName}/${name}/unknown`, name);
+  // Claude Code's memo is the marketplace's whole plugin folder, its agent and server too.
+  const memoCopy = '.claude/plugins/cache/team/memo/unknown';
+  await cp(join(HOME, 'market/plugins/memo'), join(HOME, memoCopy), { recursive: true });
   await put('.claude/plugins/known_marketplaces.json', JSON.stringify({ team: { source: { source: 'git', url: team } }, gone: { source: { source: 'git', url: gone } } }));
   await put('.claude/plugins/installed_plugins.json', JSON.stringify({ version: 2, plugins: {
-    'memo@team': [{ scope: 'user', installPath: await claude('memo'), version: 'unknown' }], 'tasks@team': [{ scope: 'user', installPath: await claude('tasks'), version: 'unknown' }],
+    'memo@team': [{ scope: 'user', installPath: join(HOME, memoCopy), version: 'unknown' }], 'tasks@team': [{ scope: 'user', installPath: await claude('tasks'), version: 'unknown' }],
     'old@gone': [{ scope: 'user', installPath: await claude('old', 'gone'), version: 'unknown' }],
     'xlsx@anthropic-plugin-directory': [{ scope: 'user', installPath: await claude('xlsx', 'anthropic-plugin-directory'), version: 'unknown', directoryRepositoryKey: 'github.com/acme/xlsx#' }] } }));
   await put('.copilot/settings.json', JSON.stringify({ extraKnownMarketplaces: { team: { source: { source: 'git', url: team } } } }));
@@ -165,6 +171,11 @@ async function alphaOneParts() {
   };
   for (const tool of ['pi-cli', 'opencode-cli', 'codex-cli']) await parts(team, 'team', 'docs', tool, '1.0.0');
   await parts(team, 'team', 'memo', 'pi-cli');
+  await parts(team, 'team', 'journal', 'opencode-cli');
+  // memo's server turned off in Claude Code from its row (alpha 1's switch for one server of a plugin, which writes Claude Code's settings).
+  const { setPart } = await engine('plugins.ts');
+  const off = await setPart({ home: HOME, dataDir: join(APP_DATA, 'plugins'), binaries: {}, reads: new Map() }, 'team', 'memo', { kind: 'mcp', name: 'memo-index' }, 'claude-cli', false, team);
+  assert.equal(off.outcome, 'part-off', off.message);
   await parts(gone, 'gone', 'old', 'pi-cli');
   for (const tool of ['pi-cli', 'opencode-cli']) await parts(team, 'team', 'sheet', tool, '1.0.0');
   await parts(team, 'team', 'picks', 'pi-cli', undefined, { on: [{ kind: 'skill', name: 'one' }], off: [] });
@@ -176,9 +187,12 @@ async function alphaOneParts() {
   await parts(team, 'team', 'sheet', 'opencode-cli', '2.0.0', { on: [], off: [{ kind: 'skill', name: 'chart' }] });
   // 5. forms turned off in OpenCode by its switch under What it holds.
   await parts(team, 'team', 'docs', 'opencode-cli', '1.0.0', { on: [], off: [{ kind: 'skill', name: 'forms' }] });
-  // 6. By hand: pdf edited in Pi, review deleted from Pi, writer edited in OpenCode.
+  // 6. By hand: pdf edited in Pi, review deleted from Pi, lookup's environment variable edited in Pi, writer edited in OpenCode.
   await put('.pi/agent/skills/pdf/SKILL.md', skill('pdf', 'Read PDFs page by page, and mark each page read.'));
   await rm(join(HOME, '.pi/agent/skills/review'), { recursive: true });
+  const piServers = JSON.parse(await readFile(join(HOME, '.pi/agent/mcp.json'), 'utf8'));
+  piServers.mcpServers.lookup.env = { A: 'HIS-VALUE' };
+  await put('.pi/agent/mcp.json', `${JSON.stringify(piServers, null, 2)}\n`);
   const writer = '.config/opencode/agents/writer.md';
   await put(writer, (await readFile(join(HOME, writer), 'utf8')).replace('Write the document.', 'Write the document, then read it aloud.'));
   // 7. one taken in with Add on the Skills page (alpha 1, Automatic sync off: the click's item alone): it is his own item now,

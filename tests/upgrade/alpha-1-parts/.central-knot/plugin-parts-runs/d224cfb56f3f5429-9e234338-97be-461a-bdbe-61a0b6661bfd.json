@@ -1,0 +1,24 @@
+{
+  "target": {
+    "source": "/tmp/ck-upgrade-fixture/home/market",
+    "plugin": "journal",
+    "tool": "opencode-cli"
+  },
+  "before": null,
+  "after": {
+    "source": "/tmp/ck-upgrade-fixture/home/market",
+    "marketName": "team",
+    "plugin": "journal",
+    "tool": "opencode-cli",
+    "at": "2026-11-15T11:53:37.287Z",
+    "digest": "91d7607426446bf4acdc6a10e4a6ad8d65d189cb2dc03992a9ec922efa0f72d2",
+    "items": [
+      {
+        "kind": "skill",
+        "name": "journal",
+        "hash": "e10b1c6fbf4fe6ac56e2591840e1324e4f10b5584290dd98e01c41404529ec85",
+        "seen": "e10b1c6fbf4fe6ac56e2591840e1324e4f10b5584290dd98e01c41404529ec85"
+      }
+    ]
+  }
+}

@@ -10,3 +10,6 @@ args = ["-y", "docs-mcp"]
 [mcp_servers.lookup]
 command = "lookup-mcp"
 args = []
+
+[mcp_servers.lookup.env]
+A = "1"

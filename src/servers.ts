@@ -36,7 +36,7 @@ import { libraryWords, writesWait } from './libraryrow.ts';
 import { mergeServer } from './merge.ts';
 import { cannotHold, editEntry, mcpFile, ownPartOf, readTool, recoverSettings, SERVER_PARTS, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, readMcpSwitches, withMcpSwitch } from './mcpswitch.ts';
-import { pluginHolds, throughPlugins } from './plugins.ts';
+import { linkedToPlugin, pluginHolds, throughPlugins, type GivenByPlugin } from './plugins.ts';
 import { mcpTools } from './presence.ts';
 import { keepDenies, keepOwn, keptDenies, keptOwn, openLibrary, readVersion, recordedServers, saveLibrary, storeVersion } from './serverstore.ts';
 import { errorCode, itemKey, syncGate, writeAccess, writeFileChecked, type ShareContext } from './share.ts';
@@ -77,7 +77,7 @@ type ServerLook = Look<NeutralServer, McpEntry, ServerDisk>;
 async function readDisk(context: ShareContext, managed: HarnessId[], writeClaude: boolean): Promise<ServerDisk> {
   const disk: ServerDisk = {
     byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [], shapes: new Map(), unseenNames: new Map(), switchedOff: new Map(),
-    through: await serversThroughPlugins(context, managed), switches: await readMcpSwitches(context, managed), linked: await pluginHolds(context, managed),
+    through: await serversThroughPlugins(context, managed, await recordedServers(context.home)), switches: await readMcpSwitches(context, managed), linked: await pluginHolds(context, managed),
     held: (item, tool) => {
       const linked = disk.linked(item, tool);
       if (linked) return linked;
@@ -132,11 +132,13 @@ const cannotTake = (disk: ServerDisk, item: Wanted, tool: HarnessId) => {
 
 /**
  * The servers each tool has through its installed plugins, by key: such a tool gets no entry of its own beside the plugin's.
- * Only a server Central Knot installed elsewhere as that plugin's part counts: a name alone could be another server.
+ * Only the plugin's own server counts (a name alone could be another server): one the library holds linked to that plugin
+ * (`items`: the servers' record), or while a home's parts wait to be moved (partsmigrate.ts), one on record as its part.
  */
-async function serversThroughPlugins(context: ShareContext, tools: HarnessId[]): Promise<ServerDisk['through']> {
-  const all = await throughPlugins(context, tools, 'mcp');
-  return new Map([...all].map(([tool, given]) => [tool, new Map([...given].flatMap(([key, { asParts, text: _text, ...plugin }]) => (asParts ? [[key, plugin] as const] : [])))]));
+async function serversThroughPlugins(context: ShareContext, tools: HarnessId[], items: Record<string, LibraryItem>): Promise<ServerDisk['through']> {
+  const all = await throughPlugins(context, tools, 'mcp'), linked = await linkedToPlugin(context.home, items);
+  const own = (given: Map<string, GivenByPlugin>) => [...given].flatMap(([key, { asParts, text: _text, ...plugin }]) => (asParts || linked(key, plugin) ? [[key, plugin] as const] : []));
+  return new Map([...all].map(([tool, given]) => [tool, new Map(own(given))]));
 }
 
 // ---------- The servers' Kind ----------

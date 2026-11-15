@@ -1,5 +1,8 @@
 {
   "transport": "stdio",
   "command": "lookup-mcp",
-  "args": []
+  "args": [],
+  "env": {
+    "A": "1"
+  }
 }

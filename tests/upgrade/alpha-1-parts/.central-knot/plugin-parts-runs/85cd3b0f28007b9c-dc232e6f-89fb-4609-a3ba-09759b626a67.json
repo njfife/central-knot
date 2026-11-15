@@ -10,14 +10,20 @@
     "marketName": "team",
     "plugin": "memo",
     "tool": "pi-cli",
-    "at": "2026-11-15T09:33:07.932Z",
-    "digest": "07968b48aa5d4ca23f05200777bb74d602c22555885371384e31f7afdfd538d1",
+    "at": "2026-11-15T11:53:37.280Z",
+    "digest": "fefbe8c7677326ba05911495dafdc3ba25477a6f36310d24b067394e20bb7f3f",
     "items": [
       {
         "kind": "skill",
         "name": "memo",
         "hash": "d850e37471aa4713705a18e637f0a8afae2833ef91912bd8f4c5b1d0c0f42937",
         "seen": "d850e37471aa4713705a18e637f0a8afae2833ef91912bd8f4c5b1d0c0f42937"
+      },
+      {
+        "kind": "mcp",
+        "name": "memo-index",
+        "hash": "5af81108bb539597bb13f664331e989cb0ce5e9372f618868dd28d95322b4c96",
+        "seen": "db6febf1736f4209736de0d7ab0beba1fffc55dfa9c6f5293fc81ee9d42ac3db"
       }
     ]
   }

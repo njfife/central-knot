@@ -34,7 +34,7 @@ import { homeItems, inUse, switchPlan } from '../src/profileplan.ts';
 import { readProfiles } from '../src/profiles.ts';
 import { readTool, serverHash } from '../src/mcp.ts';
 import type { PluginEntry } from '../src/pluginrecord.ts';
-import { applyServers } from '../src/servers.ts';
+import { applyServers, serversView } from '../src/servers.ts';
 import { setSyncEverything } from '../src/everything.ts';
 import { managedNow, readRecord, syncGate, writeAccess } from '../src/share.ts';
 import { asksNow } from '../src/setupcounts.ts';
@@ -283,18 +283,19 @@ for (const old of homes) for (const sync of ['off', 'on'] as const) {
 // ---------- The first launch over a home with plugin parts (partsmigrate.ts), made by alpha 1's own engine ----------
 //
 // tests/upgrade/alpha-1-parts is home B with Pi and OpenCode installed and plugins put in by alpha 1 (its README has every case):
-// docs as parts in Pi, OpenCode and Codex (pdf edited in Pi, review deleted from Pi, forms and writer's... see below), sheet at two
-// versions, picks picked part by part, memo and old as parts in Pi beside Claude Code's whole installs, tasks installed whole. As a
-// person meets it at the upgrade, its marketplace gone has been removed and Codex has been left out since. Its first launch runs
-// with Synchronize everything on and off, each with Automatic sync on and off; each start in a process of its own, with the
-// plugins record's first read before the pass, as main.ts makes it.
+// docs as parts in Pi, OpenCode and Codex (pdf and lookup edited in Pi, review deleted from Pi, forms off in OpenCode, writer edited
+// in OpenCode), sheet at two versions, picks picked part by part, journal in OpenCode alone, memo (its server switched off in Claude
+// Code, its agent no part anywhere) and old as parts in Pi beside Claude Code's whole installs, tasks installed whole. As a person
+// meets it at the upgrade, its marketplace gone has been removed and Codex has been left out since. Its first launch runs with
+// Synchronize everything on and off, each with Automatic sync on and off; each start in a process of its own, with the plugins
+// record's first read before the pass, as main.ts makes it.
 
-/** alpha-1-parts placed as a person meets it at the upgrade (above), with Synchronize everything answered `rule`. */
-async function placeParts(rule: boolean): Promise<Box> {
+/** alpha-1-parts placed as a person meets it at the upgrade (above), with Synchronize everything answered `rule`; `leftOut`: the tools left out. */
+async function placeParts(rule: boolean, leftOut: HarnessId[] = ['codex-cli']): Promise<Box> {
   const box = await place('alpha-1-parts');
   await rm(join(box.home, 'gone-market'), { recursive: true });
   const sync = JSON.parse(await readFile(join(box.store, 'sync.json'), 'utf8'));
-  await writeFile(join(box.store, 'sync.json'), `${JSON.stringify({ ...sync, leftOut: ['codex-cli'] }, null, 2)}\n`);
+  await writeFile(join(box.store, 'sync.json'), `${JSON.stringify({ ...sync, leftOut }, null, 2)}\n`);
   assert.deepEqual(await setSyncEverything(appContext(box.home, box.appData), rule, true), {});
   return box;
 }
@@ -331,32 +332,37 @@ for (const rule of [true, false]) for (const sync of ['on', 'off'] as const) {
     });
     after(() => rm(box.base, { recursive: true, force: true }));
 
-    test(`changes no file of a part’s name in any tool${sync === 'on' ? ' but the table’s two writes: his pdf edit and sheet’s later version, into OpenCode' : ''}; Codex, left out, is as it was`, async () => {
-      const written = sync === 'on' ? { '.config/opencode/skills/pdf/SKILL.md': made.sha256['.pi/agent/skills/pdf/SKILL.md'], '.config/opencode/skills/sheet/SKILL.md': made.sha256['.pi/agent/skills/sheet/SKILL.md'] } : {};
-      const changed = changedInTools(made, first[2].files);
-      assert.deepEqual(changed.filter(ofPartName(names)), Object.keys(written).sort());
-      for (const [path, hash] of Object.entries(written)) assert.equal(first[2].files.sha256[path], hash, path);
-      assert.deepEqual(changed.filter(path => path.startsWith('.codex/')), []);
-      assert.deepEqual(await partEntries(box, names.mcp), entries, 'lookup’s entry in each tool');
+    test(`changes in the tools only the profiles migration’s file${sync === 'on' ? ', the table’s writes into OpenCode (pdf and lookup let go, his edits reaching its unedited copies; sheet’s later version), and alpha 1’s own items joining Pi and OpenCode' : ''}`, async () => {
+      // Every file in every tool that changed, and why. OpenCode's settings file and Pi's hold alpha 1's server docs joining them too.
+      const joining = ['.config/opencode/agents/planner.md', '.config/opencode/agents/reviewer.md', '.config/opencode/opencode.json', '.pi/agent/mcp.json',
+        '.pi/agent/skills/drafts/SKILL.md', '.pi/agent/skills/notes/SKILL.md', '.pi/agent/skills/planner.md', '.pi/agent/skills/reviewer.md', '.pi/agent/skills/style/SKILL.md'];
+      const table = ['.config/opencode/skills/pdf/SKILL.md', '.config/opencode/skills/sheet/SKILL.md'];
+      assert.deepEqual(changedInTools(made, first[2].files), ['.claude/settings.json', ...(sync === 'on' ? [...table, ...joining] : [])].sort());
+      if (sync === 'on') for (const [to, from] of [[table[0], '.pi/agent/skills/pdf/SKILL.md'], [table[1], '.pi/agent/skills/sheet/SKILL.md']]) assert.equal(first[2].files.sha256[to], made.sha256[from], to);
+      const opencodeLookup = sync === 'on' ? entries['pi-cli lookup'] : entries['opencode-cli lookup'];
+      assert.deepEqual(await partEntries(box, names.mcp), { ...entries, 'opencode-cli lookup': opencodeLookup }, 'each part’s entry in each tool');
       assert.deepEqual([...first, ...again].flatMap(pass => pass.problems), []);
     });
 
-    test('makes every name on the old record a live item, linked to its plugin or his own, kept out where its part never was or was left out', async () => {
+    test('makes every name on the old record, and memo’s agent that was no part, a live item, linked to its plugin or his own, kept out where its part never was or was left out', async () => {
       const plugins = await readJson(join(box.store, 'plugins.json')), whose = (id?: string) => plugins.plugins.find((entry: { id: string }) => entry.id === id)?.plugin ?? 'his';
-      const items = Object.fromEntries((['skill', 'agent', 'mcp'] as const).flatMap(kind => names[kind].map(name => {
+      const items = Object.fromEntries((['skill', 'agent', 'mcp'] as const).flatMap(kind => [...names[kind], ...(kind === 'agent' ? ['scribe'] : [])].map(name => {
         const item = libraryOf(first[2], kind)[itemKey(name)];
         return [`${kind}:${name}`, item && !item.deleted ? [whose(item.source), item.on, item.except.join(' '), Object.keys(item.applied).sort().join(' ')] : 'none'];
       })));
-      // pdf, edited in Pi (whose folder skills.json knows): let go as his own by the first pass, which Sync off doesn't run, and kept
-      // where it is. writer, edited in OpenCode (whose folder agents.json never knew): OpenCode kept out, his edit that tool's own.
-      // one, taken in by Add in alpha 1, was his own already (still applied in Codex, which left).
-      const pdf = sync === 'on' ? ['his', true, 'claude-cli copilot-cli', 'opencode-cli pi-cli'] : ['docs', true, '', 'opencode-cli pi-cli'];
+      // pdf and lookup, edited in Pi (whose folders skills.json and the MCP record know): let go as his own by the first pass, which
+      // Sync off doesn't run, and kept where they are. writer, edited in OpenCode (whose folder agents.json never knew): OpenCode kept
+      // out, his edit that tool's own. Codex, left out, is decided as the record knew it: its part copies are its own, kept out. one,
+      // taken in by Add in alpha 1, was his own already (still applied in Codex). scribe, no part anywhere, is kept out of both.
+      const [pdf, lookup] = sync === 'on' ? [['his', true, 'claude-cli copilot-cli codex-cli', 'opencode-cli pi-cli'], ['his', true, 'claude-cli copilot-cli codex-cli', 'opencode-cli pi-cli']]
+        : [['docs', true, 'codex-cli', 'opencode-cli pi-cli'], ['docs', true, 'codex-cli', 'opencode-cli pi-cli']];
       assert.deepEqual(items, {
-        'skill:forms': ['docs', true, 'opencode-cli', 'pi-cli'], 'skill:pdf': pdf, 'skill:review': ['docs', true, 'pi-cli', 'opencode-cli'],
-        'skill:memo': ['memo', true, 'opencode-cli', 'pi-cli'], 'skill:old': ['old', true, 'opencode-cli', 'pi-cli'],
+        'skill:forms': ['docs', true, 'codex-cli opencode-cli', 'pi-cli'], 'skill:pdf': pdf, 'skill:review': ['docs', true, 'codex-cli pi-cli', 'opencode-cli'],
+        'skill:memo': ['memo', true, 'opencode-cli', 'pi-cli'], 'skill:journal': ['journal', true, 'pi-cli', 'opencode-cli'], 'skill:old': ['old', true, 'opencode-cli', 'pi-cli'],
         'skill:three': ['picks', true, 'pi-cli opencode-cli', ''], 'skill:two': ['picks', true, 'pi-cli opencode-cli', ''], 'skill:one': ['his', true, '', 'claude-cli codex-cli copilot-cli pi-cli'],
         'skill:chart': ['sheet', true, 'opencode-cli', 'pi-cli'], 'skill:sheet': ['sheet', true, '', 'opencode-cli pi-cli'],
-        'agent:writer': ['docs', true, 'pi-cli opencode-cli', ''], 'mcp:lookup': ['docs', true, '', 'opencode-cli pi-cli'],
+        'agent:writer': ['docs', true, 'codex-cli pi-cli opencode-cli', ''], 'agent:scribe': ['memo', true, 'pi-cli opencode-cli', ''],
+        'mcp:lookup': lookup, 'mcp:memo-index': ['memo', true, 'opencode-cli', 'pi-cli'],
       });
       for (const kind of ['skill', 'agent', 'mcp'] as const) for (const name of names[kind]) assert.ok(!first[2].pages[pageOf[kind]].items.find(row => row.key === itemKey(name))?.takeInAnswers, `${kind}:${name} is not found`);
     });
@@ -369,18 +375,19 @@ for (const rule of [true, false]) for (const sync of ['on', 'off'] as const) {
       assert.deepEqual([first[0].files.sha256['.central-knot/plugin-parts.v1.json'], first[0].files.sha256['.central-knot/plugin-parts.json']], [made.sha256['.central-knot/plugin-parts.json'], undefined]);
     });
 
-    test(`tells History of a part’s name ${sync === 'on' ? 'only pdf’s let-go and its edit taken in, and sheet brought up in OpenCode' : 'nothing'}`, async () => {
+    test(`tells History of a part’s name ${sync === 'on' ? 'only pdf’s and lookup’s let-go and their edits taken in, and sheet brought up in OpenCode' : 'nothing'}`, async () => {
       const before = new Set(((await readJson(join(fixtures, 'alpha-1-parts/.central-knot/history.json'))).events as HistoryEvent[]).map(event => event.id));
       const told = ((await readJson(join(box.store, 'history.json'))).events as HistoryEvent[]).filter(event => !before.has(event.id)
         && (names.skill.includes(event.key) || [...names.agent, ...names.mcp].some(name => event.key === `agent:${name}` || event.key === `mcp:${name}`)));
-      assert.deepEqual(told.map(event => `${event.key} ${event.cause ?? event.kind}`).sort(), sync === 'on' ? ['pdf edit', 'pdf own-now', 'sheet in-line'] : []);
+      assert.deepEqual(told.map(event => `${event.key} ${event.cause ?? event.kind}`).sort(), sync === 'on' ? ['mcp:lookup edit', 'mcp:lookup own-now', 'pdf edit', 'pdf own-now', 'sheet in-line'] : []);
     });
 
     test('records the plugins installed whole as without parts, and each plugin some managed tool has, On, kept out of each tool lacking it', async () => {
       const record = await readJson(join(box.store, 'plugins.json'));
       assert.deepEqual(Object.fromEntries(record.plugins.map((entry: PluginEntry) => [entry.plugin, [entry.marketName, entry.on, entry.except.join(' ')]])), {
         tasks: ['team', true, 'codex-cli pi-cli opencode-cli'], memo: ['team', true, 'copilot-cli codex-cli opencode-cli'], old: ['gone', true, 'copilot-cli codex-cli opencode-cli'],
-        docs: ['team', true, 'claude-cli copilot-cli codex-cli'], sheet: ['team', true, 'claude-cli copilot-cli codex-cli'], picks: ['team', true, 'claude-cli copilot-cli codex-cli opencode-cli'] });
+        docs: ['team', true, 'claude-cli copilot-cli codex-cli'], sheet: ['team', true, 'claude-cli copilot-cli codex-cli'], picks: ['team', true, 'claude-cli copilot-cli codex-cli opencode-cli'],
+        journal: ['team', true, 'claude-cli copilot-cli codex-cli pi-cli'] });
       assert.deepEqual(record.tools, ['claude-cli', 'copilot-cli', 'pi-cli', 'opencode-cli']);
     });
 
@@ -388,8 +395,8 @@ for (const rule of [true, false]) for (const sync of ['on', 'off'] as const) {
       const profiles = await readProfiles(box.home), focus = profiles.profiles.find(profile => profile.name === 'Focus')!;
       const parts = (['skill', 'agent', 'mcp'] as const).flatMap(kind => names[kind].map(name => `${kind}:${itemKey(name)}`));
       const turns = switchPlan(focus, homeItems({ ...first[2].pages, profiles }));
-      // one was taken in by Add in alpha 1; pdf, with Sync on, is his own since it was let go. No plugin's item is in the plan.
-      assert.deepEqual([...turns.on, ...turns.off].map(item => item.id).filter(id => parts.includes(id)).sort(), sync === 'on' ? ['skill:one', 'skill:pdf'] : ['skill:one']);
+      // one was taken in by Add in alpha 1; pdf and lookup, with Sync on, are his own since they were let go. No plugin's item is in the plan.
+      assert.deepEqual([...turns.on, ...turns.off].map(item => item.id).filter(id => parts.includes(id)).sort(), sync === 'on' ? ['mcp:lookup', 'skill:one', 'skill:pdf'] : ['skill:one']);
     });
 
     test(`two automatic checks${sync === 'on' ? ', and each plugin’s Update,' : ' (paused, as Automatic sync is off)'} run no install or uninstall and write nothing`, async () => {
@@ -406,19 +413,56 @@ for (const rule of [true, false]) for (const sync of ['on', 'off'] as const) {
     });
 
     // Last, since it changes the home: Codex, left out since, managed again. What its card counts is what the pass then does
-    // (tests/managetool.test.ts holds the two equal). Of the parts' names there: the plugins' items write nothing (they come only
-    // with the plugin); pdf, let go as his own while Codex was out, joins it as any item of his does, Codex's copy kept first.
-    if (rule && sync === 'on') test('Codex managed again: the plugins’ items write nothing there; his own pdf joins it, Codex’s copy one of its versions', async () => {
+    // (tests/managetool.test.ts holds the two equal). Codex was decided as the record knew it, so of a part's name nothing changes.
+    if (rule && sync === 'on') test('Codex managed again: no file or entry of a part’s name there changes', async () => {
       const context = appContext(box.home, box.appData), lookup = (await partEntries(box, names.mcp))['codex-cli lookup'];
       assert.deepEqual(await chooseTools(context, 'codex-cli', true), {});
       const was = await filesIn(box.home), joined = start(box, 'on', 1)[0];
-      assert.deepEqual([changedInTools(was, joined.files).filter(ofPartName(names)), (await partEntries(box, names.mcp))['codex-cli lookup']], [['.codex/skills/pdf/SKILL.md'], lookup]);
-      assert.equal(joined.files.sha256['.codex/skills/pdf/SKILL.md'], was.sha256['.pi/agent/skills/pdf/SKILL.md']);
-      // Codex's copy was the plugin's content, which pdf holds as a version already (library.ts managedAgain keeps no second one).
-      assert.ok(libraryOf(joined, 'skill').pdf.versions.some(version => version.from.how === 'source'), 'Codex’s copy is a version');
+      assert.ok(lookup && changedInTools(was, joined.files).some(path => path.startsWith('.codex/')), 'Codex holds lookup, and joining wrote there');
+      assert.deepEqual([changedInTools(was, joined.files).filter(ofPartName(names)), (await partEntries(box, names.mcp))['codex-cli lookup']], [[], lookup]);
+    });
+
+    // memo's server was switched off in Claude Code from its row before the upgrade: its box and switch are there after it.
+    if (rule && sync === 'off') test('memo’s server, switched off in Claude Code before the upgrade, keeps its box and switch there, Off, and turning it On works', async () => {
+      const context = appContext(box.home, box.appData), tools = await managedNow(context, await context.read());
+      const box_ = async () => (await serversView({ ...context, reads: new Map() }, tools)).items.find(row => row.key === 'memo-index')?.plugin?.['claude-cli'];
+      assert.deepEqual(await box_(), { plugin: 'memo', marketplace: 'team', source: join(box.home, 'market'), off: true, name: 'memo-index' });
+      const on = await plugins_.setPart({ home: box.home, dataDir: join(box.appData, 'plugins'), binaries: {}, reads: new Map() }, 'team', 'memo', { kind: 'mcp', name: 'memo-index' }, 'claude-cli', true, join(box.home, 'market'));
+      assert.deepEqual([on.outcome, (await box_())?.off], ['part-on', undefined]);
     });
   });
 }
+
+// Pi left out at the upgrade and managed again later: the move decides it as the record knew it, so nothing he removed there
+// comes back and nothing he edited there is written over; memo's agent, which Pi never had, doesn't go there; and a skill journal's
+// plugin gains meanwhile doesn't either, since the plugins record keeps journal out of Pi (pluginlibrary.ts pluginOutOf).
+describe('Upgrading alpha-1-parts with Pi left out, then managing Pi again', () => {
+  let box: Box, made: Files, names: Record<ItemKind, string[]>, entries: Record<string, string>, joined: AfterPass[];
+  before(async () => {
+    box = await placeParts(true, ['codex-cli', 'pi-cli']);
+    made = await filesIn(box.home);
+    names = await partNames(box);
+    entries = await partEntries(box, names.mcp);
+    start(box, 'on', 2);
+    await mkdir(join(box.home, 'market/plugins/journal/skills/prompts'), { recursive: true });
+    await writeFile(join(box.home, 'market/plugins/journal/skills/prompts/SKILL.md'), '---\nname: prompts\ndescription: Prompts for the day.\n---\n\nAsk one question.\n');
+    const read = await plugins(box).markets.items(join(box.home, 'market'), 'team', 'journal', ['opencode-cli'], box.home, false, true);
+    assert.equal(read.stopped, undefined);
+    assert.deepEqual(await chooseTools(appContext(box.home, box.appData), 'pi-cli', true), {});
+    joined = start(box, 'on', 2);
+  });
+  after(() => rm(box.base, { recursive: true, force: true }));
+
+  test('after two passes no file or entry of a part’s name in Pi has changed since before the upgrade; only alpha 1’s own items join it', async () => {
+    const inPi = changedInTools(made, joined[1].files).filter(path => path.startsWith('.pi/'));
+    assert.deepEqual(inPi, ['.pi/agent/mcp.json', '.pi/agent/skills/drafts/SKILL.md', '.pi/agent/skills/notes/SKILL.md', '.pi/agent/skills/planner.md', '.pi/agent/skills/reviewer.md', '.pi/agent/skills/style/SKILL.md'],
+      'alpha 1’s skills, agents (as skills) and server docs, On and kept out of nothing, join Pi as any item does');
+    const now = await partEntries(box, names.mcp);
+    assert.deepEqual([inPi.filter(ofPartName(names)), now['pi-cli lookup'], now['pi-cli memo-index'], joined[1].files.sha256['.pi/agent/skills/scribe.md'], joined[1].files.sha256['.config/opencode/skills/prompts/SKILL.md'] !== undefined],
+      [[], entries['pi-cli lookup'], entries['pi-cli memo-index'], undefined, true], 'prompts reached OpenCode, where journal is');
+    assert.deepEqual([...joined].flatMap(pass => pass.problems), []);
+  });
+});
 
 describe('Upgrading alpha-1-parts while Claude Code’s record of its plugins can’t be read', () => {
   let box: Box, made: Files, names: Record<ItemKind, string[]>, waiting: AfterPass[], then: AfterPass[];

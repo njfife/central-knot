@@ -20,12 +20,14 @@ import type { DestinationResult, HarnessId, PassResult } from './types.ts';
 
 /**
  * What one pass did. `synced`: absent when step 3 did not run (Sync off, or this build doesn't sync the home); a kind's result
- * is absent when it crashed, and the crash is in `crashes`. `profilesFailed`, `partsFailed`: why step 1 or 2 failed, for the log.
+ * is absent when it crashed, and the crash is in `crashes`. `profilesFailed`, `partsFailed`: why step 1 or 2 failed; `partsWait`:
+ * why step 2 waits; each for the log.
  */
 export interface HomePass {
   synced?: { skills?: PassResult; servers?: PassResult; agents?: PassResult; crashes: DestinationResult[] };
   profilesFailed?: unknown;
   partsFailed?: unknown;
+  partsWait?: string;
 }
 
 /** Each kind's pass as a failure of it is named on the page ("MCP sync: …"), whether it crashed or stopped part-way. */
@@ -38,8 +40,9 @@ const passNames = { skills: 'Skills sync', servers: 'MCP sync', agents: 'Agents 
 export async function homePass(context: ShareContext, managed: HarnessId[], writes: boolean, pluginNow?: PluginNow): Promise<HomePass> {
   let profilesFailed: unknown, partsFailed: unknown;
   await migrateProfiles(context, managed).catch((error: unknown) => { profilesFailed = error ?? 'failed'; });
-  await migrateParts(context, managed, [skillKind, agentKind, serverKind], pluginNow).catch((error: unknown) => { partsFailed = error ?? 'failed'; });
-  const failure = { ...(profilesFailed === undefined ? {} : { profilesFailed }), ...(partsFailed === undefined ? {} : { partsFailed }) };
+  const moved = migrateParts(context, managed, [skillKind, agentKind, serverKind], pluginNow);
+  const { waits: partsWait } = await moved.catch((error: unknown): { waits?: string } => { partsFailed = error ?? 'failed'; return {}; });
+  const failure = { ...(profilesFailed === undefined ? {} : { profilesFailed }), ...(partsFailed === undefined ? {} : { partsFailed }), ...(partsWait ? { partsWait } : {}) };
   if (!(await syncsHere(context)) || !writes) return failure;
   const crashes: DestinationResult[] = [];
   const crashed = (item: string) => (error: unknown) => {

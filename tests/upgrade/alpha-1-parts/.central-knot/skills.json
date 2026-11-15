@@ -112,7 +112,7 @@
       "versions": [
         {
           "hash": "f1673afec53a11f3876561220631300432d8e6beb6b478c87ccf6b12809ba548",
-          "at": "2026-11-15T09:33:07.970Z",
+          "at": "2026-11-15T11:53:37.332Z",
           "from": {
             "how": "found",
             "harness": "pi-cli"
@@ -147,13 +147,13 @@
     },
     "pi-cli": {
       "path": "/tmp/ck-upgrade-fixture/home/.pi/agent/skills",
-      "ino": 123284873,
-      "birth": 1794735187876
+      "ino": 124611862,
+      "birth": 1794743617225
     },
     "opencode-cli": {
       "path": "/tmp/ck-upgrade-fixture/home/.config/opencode/skills",
-      "ino": 123284893,
-      "birth": 1794735187899
+      "ino": 124611882,
+      "birth": 1794743617246
     }
   }
 }

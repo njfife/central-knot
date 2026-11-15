@@ -126,6 +126,17 @@ test('A skill only Pi had keeps OpenCode out, and an OpenCode agent keeps Pi out
   } finally { await box.cleanup(); }
 });
 
+test('A tool the plugin is kept out of, neither managed nor on the record, is kept out of its items, so it gets none when it appears', async () => {
+  const box = await partsHome({ tools: ['pi-cli'] });
+  try {
+    box.entries[0].except = ['opencode-cli'];
+    await box.copy('pi-cli', 'pdf');
+    await box.record([{ tool: 'pi-cli', item: part('pdf', await box.keep('pdf')) }]);
+    await box.migrate();
+    assert.deepEqual((await box.library()).pdf.except, ['opencode-cli']);
+  } finally { await box.cleanup(); }
+});
+
 test('Two versions: the one the plugin’s files hold now is current, else the higher version on record, never the later time; the other is kept, and brought up at the pass', async () => {
   for (const files of [true, false]) {
     const box = await partsHome();
@@ -244,22 +255,24 @@ test('A name the library has a live item of stays his; a deleted one is made ove
   } finally { await box.cleanup(); }
 });
 
-test('A plugin Off makes its items Off; one with no entry (its parts only in a tool not managed) gets the first read’s entry, saved before any item names it', async () => {
+test('A plugin Off makes its items Off; one with no entry (its parts only in a tool not managed) gets the first read’s entry, saved before any item names it, and that tool is decided as the record knew it', async () => {
   const box = await partsHome({ tools: ['pi-cli'] });
   try {
     box.entries[0].on = false;
     await mkdir(box.at('opencode-cli', 'skills'), { recursive: true });
     const [pdf, lone] = [await box.keep('pdf'), await box.keep('lone')];
     await box.copy('pi-cli', 'pdf'); await box.copy('opencode-cli', 'lone');
-    await box.record([{ tool: 'pi-cli', item: part('pdf', pdf) }, { tool: 'opencode-cli', plugin: 'lone-kit', item: part('lone', lone) }]);
+    await box.record([{ tool: 'pi-cli', item: part('pdf', pdf) }, { tool: 'opencode-cli', plugin: 'lone-kit', item: part('lone', lone) }, { tool: 'codex-cli', plugin: 'lone-kit', item: part('lone', lone) }]);
     // Stopped once its skills are saved: the next run finds the same entry, so its items stay linked to it.
     box.context.fault = step => { if (step === 'parts-kind-saved') throw new Error('crash'); };
     await assert.rejects(box.migrate(), /crash/);
     delete box.context.fault;
     await box.migrate();
     const items = await box.library(), made = (await readPluginRecord(box.home)).record!.plugins.filter(entry => entry.plugin === 'lone-kit');
+    // OpenCode, not managed, is decided as the record knew it: lone's copy there is applied, so managing OpenCode again changes nothing.
+    // Codex holds only a part's loose copy: it hasn't the plugin, so the entry keeps it out (no install is owed there beside it).
     assert.deepEqual([items.pdf.on, made.length, made[0].on, made[0].except, items.lone.source, items.lone.except, items.lone.applied],
-      [false, 1, true, ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'], made[0].id, ['pi-cli'], {}]);
+      [false, 1, true, ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'], made[0].id, ['pi-cli'], { 'opencode-cli': lone }]);
   } finally { await box.cleanup(); }
 });
 

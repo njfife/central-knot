@@ -11,8 +11,8 @@
     "plugin": "docs",
     "version": "1.0.0",
     "tool": "codex-cli",
-    "at": "2026-11-15T09:33:07.925Z",
-    "digest": "d6473c9486f1b1520062c4cc605075af5e62610311960384bb03247d045bf391",
+    "at": "2026-11-15T11:53:37.272Z",
+    "digest": "ada25480c602f5e1f44df009a0da5647a018f667e804403850978b83c2c13476",
     "items": [
       {
         "kind": "skill",
@@ -35,8 +35,8 @@
       {
         "kind": "mcp",
         "name": "lookup",
-        "hash": "37e1989a7a914b00c15d5c18af31accb32bdfc7e8b431d47321996a5431e3b56",
-        "seen": "bc3ffcfcd3df0872b0401c24ced94d9ed60c22e4935528c836669cce668a9732"
+        "hash": "3a91fa5166d96d2f4545a002827a250f5af800a34c7935647b40299c282322cc",
+        "seen": "8d3ba26e228f6c9aecbf080bc371097bc9e6501b1905866730e58d00bf1bb1cf"
       },
       {
         "kind": "agent",

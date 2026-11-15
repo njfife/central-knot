@@ -11,8 +11,8 @@
     "plugin": "docs",
     "version": "1.0.0",
     "tool": "pi-cli",
-    "at": "2026-11-15T09:33:07.886Z",
-    "digest": "6860426ef3f1a98037a6581720ea455f31d7c970d45bb1fdd6d76f3d8c2bd671",
+    "at": "2026-11-15T11:53:37.234Z",
+    "digest": "9db1bb82ce2a403193aa70f3707f2edcce25f8b1b868731dd6370f7a71348bed",
     "items": [
       {
         "kind": "skill",
@@ -35,8 +35,8 @@
       {
         "kind": "mcp",
         "name": "lookup",
-        "hash": "37e1989a7a914b00c15d5c18af31accb32bdfc7e8b431d47321996a5431e3b56",
-        "seen": "bc3ffcfcd3df0872b0401c24ced94d9ed60c22e4935528c836669cce668a9732"
+        "hash": "3a91fa5166d96d2f4545a002827a250f5af800a34c7935647b40299c282322cc",
+        "seen": "8d3ba26e228f6c9aecbf080bc371097bc9e6501b1905866730e58d00bf1bb1cf"
       }
     ]
   }

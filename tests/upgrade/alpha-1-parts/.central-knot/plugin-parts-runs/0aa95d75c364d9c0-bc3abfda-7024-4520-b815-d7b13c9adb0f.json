@@ -2,15 +2,15 @@
   "target": {
     "source": "/tmp/ck-upgrade-fixture/home/market",
     "plugin": "sheet",
-    "tool": "opencode-cli"
+    "tool": "pi-cli"
   },
   "before": {
     "source": "/tmp/ck-upgrade-fixture/home/market",
     "marketName": "team",
     "plugin": "sheet",
     "version": "1.0.0",
-    "tool": "opencode-cli",
-    "at": "2026-11-15T09:33:07.963Z",
+    "tool": "pi-cli",
+    "at": "2026-11-15T11:53:37.314Z",
     "digest": "36df62e6368ddf293a00085e473bb85f358c7f6d32c6506e26097bae5e57de03",
     "items": [
       {
@@ -31,22 +31,22 @@
     "source": "/tmp/ck-upgrade-fixture/home/market",
     "marketName": "team",
     "plugin": "sheet",
-    "version": "1.0.0",
-    "tool": "opencode-cli",
-    "at": "2026-11-15T09:33:07.992Z",
-    "digest": "36df62e6368ddf293a00085e473bb85f358c7f6d32c6506e26097bae5e57de03",
+    "version": "2.0.0",
+    "tool": "pi-cli",
+    "at": "2026-11-15T11:53:37.345Z",
+    "digest": "671b112e8d26bc95209f1f8e028cd205e7f5d3b0b98283cfd71bd6d6fd0aad4e",
     "items": [
-      {
-        "kind": "skill",
-        "name": "sheet",
-        "hash": "da17ddb11c0d9ff6f8224b02716e8d074609583fcb9ae8b06311186623b4bede",
-        "seen": "da17ddb11c0d9ff6f8224b02716e8d074609583fcb9ae8b06311186623b4bede"
-      },
       {
         "kind": "skill",
         "name": "chart",
         "hash": "672b135477329054daa3761882cb59fb6d6ac44ca0c2c0237b5ea8fc26ed5358",
-        "removed": true
+        "seen": "672b135477329054daa3761882cb59fb6d6ac44ca0c2c0237b5ea8fc26ed5358"
+      },
+      {
+        "kind": "skill",
+        "name": "sheet",
+        "hash": "49c59a5866e89506695e69276b9b2a355e7e712e463dc2425680af3f19e89b18",
+        "seen": "49c59a5866e89506695e69276b9b2a355e7e712e463dc2425680af3f19e89b18"
       }
     ]
   }

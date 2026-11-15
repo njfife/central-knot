@@ -1659,12 +1659,38 @@ async function practiceFlow() {
   rmSync(join(practice, '.codex/plugins'), { recursive: true, force: true });
   if (codexTomlBefore === undefined) rmSync(codexToml, { force: true }); else writeFileSync(codexToml, codexTomlBefore);
   await a.click('#header-refresh');
-  // Its MCP server, moved to the library from its part too, is one row from the plugin; Claude Code, which has the plugin, gets
-  // no separate copy and says why (plugins.ts pluginHolds).
+  // Its MCP server, moved to the library from its part too, is linked to the plugin, so it has a switch of its own in Claude Code:
+  // the opened row's switch turns that one server off at once, by the name Claude Code gives a plugin's server; the row's mark
+  // only shows it.
   await a.click('#nav-mcp');
-  same('issues is one row on MCP servers, from the plugin, and Claude Code has it with the plugin', [/from the plugin issue-tracker/.test(await a.text('.ov-row[data-key="issues"]') ?? ''), await cellState(a, 'issues', 'claude-cli'),
-    /has it with the plugin issue-tracker, so no separate copy is placed there\.$/.test(await a.run(`document.querySelector('#cell-issues-claude-cli')?.title`) ?? '')], [true, 'cannot', true]);
+  same('so does its MCP server, on MCP servers, and its mark is no button', await a.run(`[document.querySelector('#cell-issues-claude-cli')?.dataset.state, /has it with the plugin issue-tracker/.test(document.querySelector('#cell-issues-claude-cli')?.title ?? ''), document.querySelector('#cell-issues-claude-cli')?.tagName]`), ['plugin', true, 'SPAN']);
+  if (!(await a.exists('#enable-issues-claude-cli'))) await a.click('#open-issues');
+  same('the opened row has its switch in Claude Code, on', [await a.run(`document.querySelector('#enable-issues-claude-cli')?.getAttribute('aria-checked')`), /Click to turn it off in Claude Code\.$/.test(await a.run(`document.querySelector('#enable-issues-claude-cli')?.getAttribute('aria-label')`) ?? '')], ['true', true]);
+  await a.click('#enable-issues-claude-cli');
+  for (let tries = 0; tries < 40 && (await cellState(a, 'issues', 'claude-cli')) !== 'plugin-off'; tries++) await wait(100);
+  check('a click turns that one server off at once with Claude Code’s own switch, and the page says so, with Undo', JSON.stringify(JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers) === '[{"serverName":"plugin:issue-tracker:issues"}]'
+    && await cellState(a, 'issues', 'claude-cli') === 'plugin-off' && /issues is off in Claude Code\./.test(await a.text('.bands') ?? '') && await a.exists('#outcome-undo-plugin'), [pluginSettingsNow(), await a.text('.bands')]);
+  await a.click('#nav-skills');
+  same('the plugin’s skill is still on there', await cellState(a, 'triage', 'claude-cli'), 'plugin');
+  await a.click('#nav-mcp');
+  if (!(await a.exists('#enable-issues-claude-cli'))) await a.click('#open-issues');
+  same('the opened row shows it off in Claude Code', await a.run(`[document.querySelector('#enable-issues-claude-cli')?.getAttribute('aria-checked'), document.querySelector('#enable-issues-claude-cli')?.closest('.tool-switch')?.textContent]`), ['false', 'Off']);
+  await fitsAtMinimum(a, 'a server a tool has through a plugin, opened');
+  await a.shot('server-through-plugin-off');
+  await a.click('#enable-issues-claude-cli');
+  for (let tries = 0; tries < 40 && (await cellState(a, 'issues', 'claude-cli')) !== 'plugin'; tries++) await wait(100);
+  check('its switch turns it back on: the settings are as they were', (pluginSettingsNow() === pluginSettingsBefore || JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers === undefined) && await cellState(a, 'issues', 'claude-cli') === 'plugin', pluginSettingsNow());
+  await a.click('#outcome-undo-plugin');
+  for (let tries = 0; tries < 40 && (await cellState(a, 'issues', 'claude-cli')) !== 'plugin-off'; tries++) await wait(100);
+  same('Undo turns it off again', [await cellState(a, 'issues', 'claude-cli'), JSON.parse(pluginSettingsNow() ?? '{}').deniedMcpServers?.length], ['plugin-off', 1]);
+  await a.settle();
   if (pluginSettingsBefore === undefined) rmSync(pluginSettings, { force: true }); else writeFileSync(pluginSettings, pluginSettingsBefore);
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 40 && (await a.run(`document.querySelector('#cell-issues-claude-cli')?.dataset.state`)) !== 'plugin'; tries++) await wait(100);
+  if (!(await a.exists('#enable-issues-claude-cli-page'))) await a.click('#open-issues');
+  await a.click('#enable-issues-claude-cli-page');
+  for (let tries = 0; tries < 30 && !(await a.exists('#plugin-back')); tries++) await wait(100);
+  check('and its opened row leads to the plugin’s page', await a.exists('#plugin-back') && /issue[- ]tracker/i.test(await a.text('.plugin-page h2') ?? ''), await a.text('.plugin-page h2'));
   // triage, moved to the library from its part above: Delete from Central Knot takes Pi's copy out, and leaves the plugin's own
   // skill in Claude Code.
   await a.click('#nav-skills');
