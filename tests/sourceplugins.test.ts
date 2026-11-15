@@ -346,13 +346,13 @@ test('A marketplace, a source on its plugin’s skills/ folder, and the plugin O
   } finally { await box.cleanup(); }
 });
 
-/** Claude Code and Copilot CLI with the plugin kit installed from the marketplace team, its copy holding these files. */
-async function installedKit(box: Box, files: Record<string, string>) {
+/** Claude Code and Copilot CLI with the plugin kit installed from the marketplace team, its copy holding these files; `enabled`: turned on in both. */
+async function installedKit(box: Box, files: Record<string, string>, enabled = true) {
   const copy = join(box.base, 'kit-copy'), market = { team: { source: { source: 'directory', path: '/m' } } };
   for (const [path, text] of Object.entries(files)) await put(join(copy, path), text);
   await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'kit@team': [{ scope: 'user', installPath: copy, version: '1.0.0' }] } }));
-  await put(join(box.home, '.claude/settings.json'), JSON.stringify({ extraKnownMarketplaces: market, enabledPlugins: { 'kit@team': true } }));
-  await put(join(box.home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'kit', marketplace: 'team', version: '1.0.0', cache_path: copy, enabled: true }] }));
+  await put(join(box.home, '.claude/settings.json'), JSON.stringify({ extraKnownMarketplaces: market, enabledPlugins: { 'kit@team': enabled } }));
+  await put(join(box.home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'kit', marketplace: 'team', version: '1.0.0', cache_path: copy, enabled }] }));
   await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: market }));
 }
 
@@ -382,6 +382,43 @@ test('The same plugin added as a source, its agent and server On, then installed
     // The check's pass read the tools before the update: the next pass places the new version.
     await applyAgents(box.context, box.tools, []);
     assert.deepEqual(await agentFiles(), [true, true, true], 'twice in Claude Code and Copilot CLI: Central Knot’s and the plugin’s');
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin turned off in a tool holds nothing there: the source’s agent and server, On, come back in Claude Code and Copilot CLI at the next pass, and leave again when it is turned on', async () => {
+  const box = await sandbox(['claude-cli', 'copilot-cli']);
+  try {
+    const files = { '.claude-plugin/plugin.json': '{"name":"kit"}', 'agents/helper.md': helperMd(), '.mcp.json': mcpJson({ relay: { command: 'npx', args: ['relay'] } }) };
+    const repo = await repository(hosts, 'https://github.com/team/kit');
+    await repo.commit(files);
+    await add(box, 'https://github.com/team/kit');
+    await applyAgents(box.context, box.tools, [{ key: 'helper', on: true, except: [], seenOn: false }]);
+    await applyServers(box.context, box.tools, [{ key: 'relay', on: true, except: [], seenOn: false }]);
+    const pass = async () => { await applyAgents(box.context, box.tools, []); await applyServers(box.context, box.tools, []); await writeToClaude(box.context, box.tools, ['relay']); };
+    const serverIn = async (file: string) => Object.keys(JSON.parse(await readFile(join(box.home, file), 'utf8').catch(() => '{}')).mcpServers ?? {}).includes('relay');
+    const copies = async () => [...await Promise.all(['.claude/agents/helper.md', '.copilot/agents/helper.agent.md'].map(path => exists(join(box.home, path)))), await serverIn('.claude.json'), await serverIn('.copilot/mcp-config.json')];
+    await installedKit(box, files);
+    await pass();
+    assert.deepEqual(await copies(), [false, false, false, false], 'the plugin’s alone, while it is on');
+    await installedKit(box, files, false);
+    await pass();
+    assert.deepEqual(await copies(), [true, true, true, true], 'turned off in both tools: Central Knot’s copies are back');
+    await installedKit(box, files, true);
+    await pass();
+    assert.deepEqual(await copies(), [false, false, false, false], 'turned on again: they leave again');
+  } finally { await box.cleanup(); }
+});
+
+test('A README, or any page with no front matter, in a plugin’s agents/ folder is no agent: no line for it, the agents are read whole, and an agent the source removes turns Off', async () => {
+  const box = await sandbox();
+  try {
+    const repo = await repository(hosts, 'https://github.com/team/crew');
+    await repo.commit({ '.claude-plugin/plugin.json': '{"name":"crew"}', 'agents/helper.md': helperMd(), 'agents/other.md': helperMd().replace('name: helper', 'name: other'), 'agents/README.md': '# The crew\n', 'agents/index.md': 'What each agent does.\n' });
+    const { look: seen, id } = await add(box, 'https://github.com/team/crew');
+    assert.deepEqual(linesOf(seen), ['agent helper: make', 'agent other: make']);
+    await repo.commit({ 'agents/other.md': null });
+    const done = await check(box, id);
+    assert.deepEqual([answered(done), done.notWhole], [['agent other: drop'], undefined]);
   } finally { await box.cleanup(); }
 });
 

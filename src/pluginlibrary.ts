@@ -2,8 +2,7 @@
 // PLUGIN: the table's rows that differ for a plugin, decided by SourceSeen `plugin`). This module owns:
 // - the plugin's read (readPlugin): its files as catalogdetail.ts pluginFiles reads them from the marketplace's copy
 //   (marketplaces.ts locate, never a tool's installed copy), made into one SourceRead per kind by the one reader of a plugin's
-//   items (atlink.ts pluginItems, on its `marketplace` route: a skill keyed by its folder's name), and whether each kind was read
-//   whole;
+//   items (atlink.ts pluginItems, its `marketplace` route), and whether each kind was read whole;
 // - running it (runItems): each kind's pass (sources.ts sourceKinds) with that read and the clicks the plugin's switch makes on
 //   its items, one pass per kind, as a profile switch makes them; and its Undo (itemsBack);
 // - what the Plugins page shows of them (itemsView: "Its items", and "has it" in each tool).
@@ -13,10 +12,8 @@
 // only once they are (pluginstatus.ts waitsToMove). Kept elsewhere: the table (library.ts), the held answer in the tools with an
 // installer (plugins.ts pluginHolds), the switch's table (pluginrecord.ts owedTo), and the let-go of an item changed here, in
 // every pass (librarypass.ts letGo).
-// Known miss: a skill whose folder's name and SKILL.md name differ (folder pdf-tools, name pdf) is the item pdf-tools, as every
-// tool's copy is named; Pi and OpenCode load it as pdf, so it can meet a skill of that name there unmarked, and the same
-// repository given as a Git link (its skills/ folder, or the plugin's own folder: atlink.ts pluginItems' `link` route) brings it
-// as a second item, pdf.
+// Known miss: a skill keyed by its folder (library.ts A SOURCE, the two key rules) whose SKILL.md names it otherwise is loaded
+// by Pi and OpenCode under that name, so it can meet a skill of that name there unmarked, and through a Git link is a second item.
 import { basename } from 'node:path';
 import { pluginItems, wasRead } from './atlink.ts';
 import type { PluginFiles } from './catalogdetail.ts';

@@ -697,6 +697,20 @@ export async function throughPlugins(home: { home: string; overrides?: Partial<R
   return found;
 }
 
+/**
+ * What each of `tools` has through its installed plugins that holds the library's item of a key there (agents.ts and servers.ts
+ * `through`): the part of the plugin the item is linked to (linkedToPlugin), or a part of the same content (`same`, the kind's own
+ * test against the item's current version). A part turned off in a tool, or whose plugin is, holds no item it isn't linked to, so
+ * Central Knot's copy is placed there. (Skills still count one turned off: skills.ts pluginFor, tests/pluginskills.test.ts.)
+ */
+export async function partsHolding(home: Parameters<typeof throughPlugins>[0], tools: HarnessId[], kind: 'agent' | 'mcp', items: Record<string, Pick<LibraryItem, 'source' | 'deleted'>>, same: (key: string, part: GivenByPlugin) => boolean) {
+  const linked = await linkedToPlugin(home.home, items), found = new Map<HarnessId, Map<string, ThroughPlugin>>();
+  for (const [tool, given] of await throughPlugins(home, tools, kind)) {
+    found.set(tool, new Map([...given].flatMap(([key, { text, ...part }]) => (linked(key, part) || (!part.off && same(key, { ...part, text })) ? [[key, part] as const] : []))));
+  }
+  return found;
+}
+
 /** An item a plugin's switch holds in a tool with the plugin's own installer, as Disk.held answers (library.ts THE RULE's held notes). */
 export type PluginHold = { why: string; anotherWay?: true };
 /**

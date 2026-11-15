@@ -63,13 +63,13 @@
 // folder it can't write, or for an agent in Pi, which keeps agents as skills, a skill of that name there, of which Pi would
 // load only one: a folder, a link to one, or a loose file Central Knot didn't put there; agents.ts agentHeld), or it has the
 // item another way (`anotherWay`: for every kind, through a plugin installed there that brings the same item, linked to it or
-// of the same content (skills.ts pluginFor, agents.ts agentsThroughPlugins, servers.ts serversThroughPlugins); for skills also
-// OpenCode reading Claude Code's folder while the item is wanted there, a link, or a copy in ~/.agents/skills that Central Knot
-// doesn't own). Only the second lets A go,
-// since Central Knot's copy is not what the harness has. The kind answers (librarypass.ts Disk.held, told where the item is
-// wanted); tests/librarypass.test.ts has a reader on a toy kind. A harness can have the item another way and hold a copy of its
-// own as well (a copy in ~/.agents/skills beside one in its own folder): that copy is `present` with `anotherWay` (the table's
-// last row), and the harness is decided as one the item isn't wanted in (wantedHere).
+// of the same content, which for an agent or a server is a plugin on there: skills.ts pluginFor, plugins.ts partsHolding; for
+// skills also OpenCode reading Claude Code's folder while the item is wanted there, a link, or a copy in ~/.agents/skills that
+// Central Knot doesn't own). Only the second lets A go, since Central Knot's copy is not what the harness has. The kind answers
+// (librarypass.ts Disk.held, told where the item is wanted); tests/librarypass.test.ts has a reader on a toy kind. A harness
+// can have the item another way and hold a copy of its own as well (a copy in ~/.agents/skills beside one in its own folder):
+// that copy is `present` with `anotherWay` (the table's last row), and the harness is decided as one the item isn't wanted in
+// (wantedHere).
 //
 // An item linked to a plugin (A PLUGIN, below), in a tool with the plugin's own installer, is held first by plugins.ts pluginHolds.
 //
@@ -139,15 +139,15 @@
 //
 // "Read whole", for one kind (each kind a source brings has a read of its own, by its own keys): the source was fetched, the
 // link's folder is there and is no marketplace, and no plugin its repository's marketplace lists (atlink.ts holdsAt; a plugin's
-// own folder is read as a link's folder, plus what its files hold elsewhere), at least one item of any kind there was read, and every item of this
-// kind there was read (atlink.ts readOf decides it, the one place). An item was read when it can be brought in, or when it is
-// left out by a rule (atlink.ts ItemThere `leftOut`: two of one name, a server that runs files from the repository, say); one
-// that couldn't be read (a broken file, an entry with no command) was not. A source where nothing was read (its one skill
-// deleted there, every one unreadable, its folder gone, a marketplace) is not read whole: no name is gone, and the source turns
-// nothing Off. So a source that drops every agent and keeps a skill turns its agents Off; one agent there that can't be read
-// holds back only the agents' drops, a .mcp.json that can't be read every server's, a plugin's plugin.json that can't be read
-// every kind's, and an item left out none. Skills, agents
-// and MCP servers are the kinds a source brings in this version.
+// own folder is read as a link's folder, plus what its files hold elsewhere), at least one item of any kind there was read, and
+// every item of this kind there was read (atlink.ts readOf decides it, the one place). An item was read when it can be brought
+// in, or when it is left out by a rule (atlink.ts ItemThere `leftOut`: two of one name, a server that runs files from the
+// repository, say); one that couldn't be read (a broken file, an entry with no command) was not. A source where nothing was
+// read (its one skill deleted there, every one unreadable, its folder gone, a marketplace) is not read whole: no name is gone,
+// and the source turns nothing Off. So a source that drops every agent and keeps a skill turns its agents Off; one agent there
+// that can't be read holds back only the agents' drops, a .mcp.json that can't be read every server's, a plugin's plugin.json
+// that can't be read every kind's, and an item left out none. Skills, agents and MCP servers are the kinds a source brings in
+// this version.
 //
 // EACH TOOL'S OWN FIELDS FROM A SOURCE (an agent's `tools` or `model`, a server's `timeout`, say; a version holds the shared
 // part only). Each file at the link is in one tool's form (atlink.ts agentsAt; a .mcp.json is Claude Code's: serversAt). Where

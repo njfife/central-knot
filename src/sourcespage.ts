@@ -240,15 +240,9 @@ const whereWords = (found: SourceFound) => [`Branch ${found.ref}`, found.folder 
 
 /** What of a plugin's own folder doesn't come (types.ts NotComing), as a sentence; none when it has none of those. */
 function notComingWords(left: NotComing | undefined): string | undefined {
-  const parts: [words: string, many: boolean][] = [];
-  const its = (count: number, word: string) => (count === 1 ? `its ${word}` : `its ${count} ${word}s`);
-  if (left?.commands) parts.push([its(left.commands, 'command'), left.commands > 1]);
-  if (left?.hooks) parts.push(['its hooks', true]);
-  if (left?.lspServers) parts.push([its(left.lspServers, 'LSP server'), left.lspServers > 1]);
-  if (left?.bin) parts.push(['its bin folder', false]);
-  if (!parts.length) return undefined;
-  const said = andList(parts.map(([words]) => words)), many = parts.length > 1 || parts[0][1];
-  return `${said[0].toUpperCase()}${said.slice(1)} ${many ? 'don’t' : 'doesn’t'} come: Central Knot installs plugins only from a marketplace, on the Plugins page. To have ${many ? 'them' : 'it'}, add a marketplace that lists this plugin there.`;
+  const parts = !left ? [] : [left.commands ? `its ${plural(left.commands, 'command')}` : '', left.hooks ? 'its hooks' : '',
+    left.lspServers ? `its ${plural(left.lspServers, 'LSP server')}` : '', left.bin ? 'its bin folder' : ''].filter(Boolean);
+  return parts.length ? `Not brought in: ${andList(parts)}. Central Knot installs plugins only from a marketplace, on the Plugins page: to have the whole plugin, add a marketplace that lists it there.` : undefined;
 }
 
 /** An item's files, the first few by path; every one in the tooltip. */
@@ -305,7 +299,7 @@ function handOffPanel(preview: Extract<SourcePreview, { token: string }>, handed
     ? ` A link to one of its other folders, not a plugin’s (its skills/, say), brings that folder’s ${broughtNames()} here.` : '';
   return h('div.source-preview', { id: 'source-preview', role: 'region', 'aria-label': `What ${label} holds` },
     h('div.source-preview-head', {}, h('strong.source-link', { title: preview.link }, label), h('span.source-where.tone-muted', {}, whereWords(preview))),
-    sayLine('puzzle', 'tone-muted', `${preview.refused ?? ''} Add to Plugins adds ${handed.name} there, with its ${plural(handed.plugins, 'plugin')}, each with a switch of its own, none turned on.${folders}`),
+    sayLine('puzzle', 'tone-muted', `${preview.refused ?? ''} Add to Plugins adds ${handed.name} there, with its ${plural(handed.plugins, 'plugin')}, none turned on.${folders}`),
     h('div.source-preview-actions', {},
       button({ variant: 'primary', size: 'small', icon: 'plus', label: 'Add to Plugins', id: 'source-to-plugins', disabled: !state.home?.sync.access.allowed || !!state.busy, onclick: () => void toPlugins(handed.address) }),
       cancel,
@@ -386,7 +380,7 @@ function sourceRow(source: SourceView) {
       button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `source-remove-cancel-${source.id}`, onclick: () => { sources.confirmRemove = undefined; rerender(); } })) : null,
     source.problem ? h('p.source-refused', {}, icon('circle-alert', 14, 'tone-danger'), h('span', {}, `Couldn’t fetch it at the last check: ${source.problem} What came from it stays as it is; below is its last read.`)) : null,
     source.unread ? sayLine('triangle-alert', 'tone-warning', source.holds === 'marketplace' || source.holds === 'listed'
-      ? `${source.unread} This source turns nothing off. Look at the link again, above, to see how it can go on Plugins; then remove this source.`
+      ? `${source.unread} This source turns nothing off. Remove this source, then look at its link again, above, to see how it can go on Plugins.`
       : `${source.unread} Until it can be read, this source turns nothing off.`) : null,
     notComingWords(source.notComing) ? sayLine('circle-minus', 'tone-muted', notComingWords(source.notComing)!) : null,
     source.names.length || removed.length ? h('ul.source-names', {}, source.names.map(name => nameRow(name, false, nameButton(name))), removed.map(({ fact, kind }) => removedRow(fact, kind, locked))) : null);

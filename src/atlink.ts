@@ -20,8 +20,8 @@
 // item it stands for in Central Knot stays as it is.
 // Known misses, as the README says: a plugin whose own repository another marketplace on the Plugins page lists is read here as
 // items, and so is a link to another folder inside a marketplace's repository (its skills/, say); with both on, a skill is placed
-// once while its SKILL.md is the same (skills.ts pluginFor), and so are an agent and a server while their shared part is (agents.ts,
-// servers.ts), but one that differs comes twice. A plugin with only .codex-plugin/plugin.json is read at the default places, not at
+// once while its SKILL.md is the same (skills.ts pluginFor), and so are an agent and a server while their shared part is (plugins.ts
+// partsHolding), but one that differs comes twice. A plugin with only .codex-plugin/plugin.json is read at the default places, not at
 // paths that manifest names. Of a name the link's readers and the plugin's files both find in different folders, the link's is read.
 // Not here: fetching a link (sources.ts fetchInto), the kinds' table (sources.ts sourceKinds), and the table each read meets
 // (library.ts sourceAnswers).
@@ -127,7 +127,7 @@ const usableName = (name: string) => !!name && name.length <= 200 && !/[/\\:\0]/
 /**
  * One skill's folder at a link: its name (its SKILL.md's, else its folder's, `folderName`), its files and its content, or why it
  * is unreadable. Its files are listed whatever else, so a later kind never reads one of them as its own (heldEarlier).
-` * `byFolder`: named by its folder alone, as every tool's copy is (a marketplace's plugin's skill: pluginItems), its SKILL.md still read.
+ * `byFolder`: named by its folder alone, as every tool's copy is (a marketplace's plugin's skill: pluginItems), its SKILL.md still read.
  */
 export async function skillAt(root: string, folder: string, folderName: string, byFolder = false): Promise<ItemThere<SkillContent>> {
   const directory = join(root, folder), file = join(directory, 'SKILL.md'), tree = await readTree(directory), files = [...tree.files.keys()].sort();
@@ -289,15 +289,13 @@ export async function serverAt(where: { folder: string; folderName: string; file
 // ---------- A plugin's items ----------
 // One reader for a plugin's skills, agents and MCP servers (pluginItems), from its files as catalogdetail.ts pluginFiles finds them
 // (as Claude Code finds a plugin's: the paths its plugin.json names, else skills/, agents/ and .mcp.json, or one skill at its root),
-// through the per-item checks a link's readers use (skillAt, agentInText, serverAt), never their place-finding. Each item is named
-// as a link's are: its folder from `root`, and that folder's own name (`rootName` for the root), never Central Knot's copy's. Two
-// routes read with it, and they differ only in a skill's key (library.ts says both rules, A SOURCE and A PLUGIN):
-// - `marketplace`: a plugin a marketplace lists, as its items in Pi and OpenCode (pluginlibrary.ts readPlugin): a skill by its
-//   folder's name, as every tool's copy of it is named;
-// - `link`: a plugin's own folder at a source's link (holdsAt): a skill by its SKILL.md's name, as any link's skill is, so one read
-//   from the plugin's folder and one read from a link to its skills/ folder are one item.
-// What its files leave unread (PluginFiles `unread`) is an unreadable line of that kind: one by name, or one line (`unread`) for a
-// folder of them that can't be listed, a servers file that isn't JSON, or a plugin.json that can't be read (then every kind's).
+// through the per-item checks a link's readers use (skillAt, agentInText, serverAt), never their place-finding; what is no agent
+// at a link (a README, a page with no front matter) is none here either. Each item is named as a link's are: its folder from
+// `root`, and that folder's own name (`rootName` for the root), never Central Knot's copy's. Two routes read with it, a
+// marketplace's plugin in Pi and OpenCode (`marketplace`: pluginlibrary.ts readPlugin) and a plugin's own folder at a source's
+// link (`link`: holdsAt), and they differ only in a skill's key (library.ts A SOURCE says the two rules). What its files leave
+// unread (PluginFiles `unread`) is an unreadable line of that kind: one by name, or one line (`unread`) for a folder of them that
+// can't be listed, a servers file that isn't JSON, or a plugin.json that can't be read (then every kind's).
 
 /** The route a plugin's items are read for (the header above). */
 export type PluginRoute = 'marketplace' | 'link';
@@ -319,11 +317,13 @@ export async function pluginItems(files: PluginFiles, root: string, rootName: st
   const whole = (unread: boolean, what: string, key: string, why: string): Pick<PluginKindRead, 'unread'> => (!unread ? {}
     : { unread: { ...plugin, key: itemKey(files.unread.manifest ? 'plugin.json' : key), unreadable: files.unread.manifest ? `its .claude-plugin/plugin.json can’t be read, so where its ${what} are isn’t known` : why } });
   const skills = await Promise.all(files.skills.map(({ name, dir }) => { const at = where(dir); return route === 'link' ? skillAt(root, at.folder, at.folderName) : skillAt(root, at.folder, name, true); }));
-  const agents = files.agents.map(({ name, path, text, whole: all }): ItemThere<unknown> => {
+  const agents = files.agents.flatMap(({ name, path, text, whole: all }): ItemThere<unknown>[] => {
     const file = join(files.folder, path), there = { ...where(dirname(file)), key: itemKey(name), name, files: [basename(file)] }, shown = relative(root, file);
     const read = all ? agentInText({ path: shown, tool: 'claude-cli', name }, text, false) : undefined;
-    if (!read) return { ...there, unreadable: all ? `${shown} has no front matter, so it is no agent` : `${shown} is larger than Central Knot copies` };
-    return 'unreadable' in read ? { ...there, unreadable: read.unreadable } : { ...there, hash: agentHash(read.agent), content: read.agent, own: { 'claude-cli': read.text } };
+    // A page (a README, or a .md with no front matter) is no agent, as at any link (agentsAt's header).
+    if (NOT_AN_AGENT.test(basename(file)) || (all && !read)) return [];
+    if (!read) return [{ ...there, unreadable: `${shown} is larger than Central Knot copies` }];
+    return ['unreadable' in read ? { ...there, unreadable: read.unreadable } : { ...there, hash: agentHash(read.agent), content: read.agent, own: { 'claude-cli': read.text } }];
   });
   const keys = Object.keys(files.servers).map(itemKey);
   const servers = await Promise.all(Object.entries(files.servers).map(([name, raw]) => serverAt({ ...plugin, key: itemKey(name), name }, raw, keys.filter(key => key === itemKey(name)).length > 1, files.folder)));

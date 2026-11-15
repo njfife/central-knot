@@ -2522,14 +2522,14 @@ async function sourcesFlow() {
   await a.click('#source-look');
   await until(() => a.exists('#source-preview'));
   const pluginLook = await a.text('#source-preview') ?? '';
-  check('a link to a plugin’s own folder lists its skill, says it holds a plugin and that its 2 commands and its hooks don’t come, and offers Add', (await a.all('#source-preview .source-name', 'e.dataset.key')).join() === 'pdf'
-    && /The link holds a plugin: its skills, agents and MCP servers come in as this source’s/.test(pluginLook) && /Its 2 commands and its hooks don’t come: Central Knot installs plugins only from a marketplace/.test(pluginLook) && (await a.text('#source-add'))?.trim() === 'Add 1 skill', pluginLook);
+  check('a link to a plugin’s own folder lists its skill, says it holds a plugin and that its 2 commands and its hooks are not brought in, and offers Add', (await a.all('#source-preview .source-name', 'e.dataset.key')).join() === 'pdf'
+    && /The link holds a plugin: its skills, agents and MCP servers come in as this source’s/.test(pluginLook) && /Not brought in: its 2 commands and its hooks\. Central Knot installs plugins only from a marketplace/.test(pluginLook) && (await a.text('#source-add'))?.trim() === 'Add 1 skill', pluginLook);
   await fitsAtMinimum(a, 'Sources, with a source and a look open');
   await a.click('#source-add');
   await until(async () => /pdf is in Central Knot, Off/.test(await a.text('.band-done .band-text') ?? ''));
   const pdfRecord = () => JSON.parse(readNow(join(home, '.central-knot/skills.json')) || '{"items":{}}').items.pdf;
   check('Add brings pdf in, Off, in no tool, and its row says what doesn’t come', pdfRecord()?.on === false && !existsSync(join(home, roots['claude-cli'], 'pdf'))
-    && /Its 2 commands and its hooks don’t come/.test(await a.text(`.source-row:has(.source-name[data-key="pdf"])`) ?? ''), [pdfRecord(), await a.text('.page')]);
+    && /Not brought in: its 2 commands and its hooks\./.test(await a.text(`.source-row:has(.source-name[data-key="pdf"])`) ?? ''), [pdfRecord(), await a.text('.page')]);
   await a.click('#nav-skills');
   await until(() => a.exists('#switch-pdf'));
   await a.click('#switch-pdf');

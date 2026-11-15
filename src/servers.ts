@@ -36,7 +36,7 @@ import { libraryWords, writesWait } from './libraryrow.ts';
 import { mergeServer } from './merge.ts';
 import { cannotHold, editEntry, fromJson, mcpFile, ownPartOf, readTool, recoverSettings, SERVER_PARTS, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, readMcpSwitches, withMcpSwitch } from './mcpswitch.ts';
-import { linkedToPlugin, pluginHolds, throughPlugins, type GivenByPlugin } from './plugins.ts';
+import { partsHolding, pluginHolds } from './plugins.ts';
 import { mcpTools } from './presence.ts';
 import { keepDenies, keepOwn, keptDenies, keptOwn, openLibrary, readVersion, recordedServers, saveLibrary, storeVersion } from './serverstore.ts';
 import { errorCode, itemKey, syncGate, writeAccess, writeFileChecked, type ShareContext } from './share.ts';
@@ -133,16 +133,14 @@ const cannotTake = (disk: ServerDisk, item: Wanted, tool: HarnessId) => {
 };
 
 /**
- * The servers each tool has through its installed plugins, by key: such a tool gets no entry of its own beside the plugin's.
- * Only the same server counts (a name alone could be another server): one the library holds linked to that plugin (`items`:
- * the servers' record), or one whose shared part is the item's current version (a source's item that the plugin brings too).
+ * The servers each tool has through its installed plugins, by key (plugins.ts partsHolding): such a tool gets no entry of its
+ * own beside the plugin's. The same server is one whose shared part is the item's current version.
  */
-async function serversThroughPlugins(context: ShareContext, tools: HarnessId[], items: Record<string, LibraryItem>): Promise<ServerDisk['through']> {
-  const all = await throughPlugins(context, tools, 'mcp'), linked = await linkedToPlugin(context.home, items);
-  const same = (key: string, name: string, entry?: string) => { const fields = entry === undefined ? undefined : record(JSON.parse(entry)); return !!fields && !items[key]?.deleted && fromJson(name, 'claude-cli', '', fields).hash === items[key]?.hash; };
-  const own = (given: Map<string, GivenByPlugin>) => [...given].flatMap(([key, { text, ...plugin }]) => (linked(key, plugin) || same(key, plugin.name ?? key, text) ? [[key, plugin] as const] : []));
-  return new Map([...all].map(([tool, given]) => [tool, new Map(own(given))]));
-}
+const serversThroughPlugins = (context: ShareContext, tools: HarnessId[], items: Record<string, LibraryItem>): Promise<ServerDisk['through']> =>
+  partsHolding(context, tools, 'mcp', items, (key, part) => {
+    const fields = part.text === undefined ? undefined : record(JSON.parse(part.text));
+    return !!fields && !items[key]?.deleted && fromJson(part.name ?? key, 'claude-cli', '', fields).hash === items[key]?.hash;
+  });
 
 // ---------- The servers' Kind ----------
 
