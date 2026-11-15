@@ -1,51 +1,51 @@
-// Another build of Central Knot on this Mac (the preview beside the alpha, or the other way round): found at each look, and
-// removed or quit only on a click. Nothing about it is stored, and nothing here runs by itself.
-// - The look (lookForBuilds): the bundles in the two Applications folders (platform.ts macPlaces) that Remove may take (whyNot:
-//   named for the product, a folder of its own whose Info.plist names one of the two builds, knownBuilds, other than this
-//   one); and the copies of those builds that are running, by bundle id, wherever they run from (runningCopies: the one
-//   meaning of "running" here, also what the take-over band says of the build that syncs a home).
-// - Remove (removeClick, then removeBuild): the same check at the click and again just before the Trash; every running copy is
-//   asked to quit first. Quit (quitBuild) only asks. Where anything isn't known for sure, nothing is quit or removed. Each
-//   says in plain words what came of it.
-// Elsewhere: main.ts runs the look with each view (HomeView otherBuilds) and answers builds:remove and builds:quit, with one
-// line in the log for each; the page draws it all in otherbuildview.ts (the Overview's band, the two take-over choices that
-// matrix.ts otherOwnerBand and pages.ts overviewPage show) and settingspage.ts otherBuildsSection. The shapes are
-// types.ts OtherBuild and BuildOutcome. Tests stand in for the Mac with tests/macstandins.ts.
+// Another build of Central Knot on this Mac (one install at a time): found at each look, and replaced or quit only on a click.
+// Nothing about it is stored, and nothing here runs by itself. A build is its bundle id: one starting `com.centralknot.` (BUILD_ID:
+// the standard app's, the alpha's and every custom build's) other than this build's own.
+// - The look (lookForBuilds): the bundles at the top of the two Applications folders (platform.ts macPlaces) that Replace may
+//   take (whyNot: a folder of its own whose Info.plist names another build), each by the name its Info.plist gives; and the
+//   copies running of those builds, of the standard app and the alpha, and of the build the open home's record names, by
+//   bundle id, wherever they run from (runningCopies: the one meaning of "running" here, also what the take-over band says of
+//   the build that syncs a home). Each with whether its settings folder is there (settingsFound: whether they can be kept
+//   when the home's record passes from it). A bundle in a subfolder of Applications is not looked at.
+// - Replace (removeBuild): only from a copy of this build that runs at the top of an Applications folder (runsOutside); the
+//   same check at the click and again just before the Trash; every running copy is asked to quit first and waited for. Quit
+//   (quitBuild) only asks. Where anything isn't known for sure, nothing is quit or removed. Each says in plain words what came
+//   of it.
+// Elsewhere: main.ts looks first in each view and holds this build while another is found (heldReason, model.ts holdingBuild:
+// share.ts writeAccess refuses), answers builds:replace and builds:quit (carryOn), and once this build is free takes over a
+// home's record that names a build no longer found, keeping that build's settings first (lookForOthers, takeOverHome); the page
+// draws the held screen (otherbuildview.ts). The shapes are types.ts OtherBuild and BuildOutcome. Tests stand in for the Mac
+// with tests/macstandins.ts.
 import { execFile } from 'node:child_process';
-import { lstat, mkdir, readdir, readFile, realpath, rename } from 'node:fs/promises';
+import { access, lstat, mkdir, readdir, readFile, realpath, rename } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { MacPlaces } from './platform.ts';
-import { errorCode, syncGate, takeOverSync, type ShareContext } from './share.ts';
+import { errorCode } from './share.ts';
+import { QUIT_WAIT_MS } from './model.ts';
 import type { BuildOutcome, OtherBuild } from './types.ts';
-import { lineApp, type BuildApp } from './updates.ts';
-import { syncOwner } from './model.ts';
-import { PRODUCT } from './values.ts';
+import { ALPHA_BUILD } from './updates.ts';
+import { PRODUCT, STANDARD_BUILD } from './values.ts';
 
-/** What a look or a click goes by: this build, the builds that count, and where this Mac's apps are. */
+/** What a look or a click goes by: this build, and where this Mac's apps are. */
 export interface BuildsContext {
   /** This app's bundle id: a bundle with it is never another build. */
   own: string;
-  /** This app's own bundle, never removed; unset in a run from the source. */
+  /** This app's own bundle, never removed; unset in a run from the source, which counts as installed. */
   ownBundle?: string;
-  known: BuildApp[];
   places: MacPlaces;
   /** Moves a bundle to the Trash: Electron's shell.trashItem, or intoFolder(places.trash) where a test names its own. */
   trash: (bundle: string) => Promise<void>;
   /** The account's home, for showing a path inside it as ~. */
   home: string;
+  /** Where a build keeps its settings (main.ts settingsFolderOf): the look says whether it is there (OtherBuild settingsFound). */
+  settingsFolder: (build: string) => string;
   /** How long the copies asked to quit are waited for (QUIT_WAIT_MS unless a test says). */
   quitWaitMs?: number;
 }
 
-/** How long Remove and Quit wait for a build asked to quit: a few seconds, enough for an idle app. */
-export const QUIT_WAIT_MS = 5_000;
-
-/**
- * The two builds of Central Knot this code knows by id, the standard app and the alpha: the only ones ever offered, quit or
- * removed. A home's record may name another build as its owner (a custom build): that home gets Take over syncing as before.
- */
-export const knownBuilds = (): BuildApp[] => [lineApp('preview'), lineApp('alpha')];
+/** A build of Central Knot's bundle id: the standard app's, the alpha's or a custom build's (bundlepack.ts). */
+const BUILD_ID = /^com\.centralknot\./;
 
 /** Moves a bundle into a folder of a test's own instead of the account's Trash (platform.ts macPlaces trash), keeping its name where it is free. */
 export const intoFolder = (folder: string) => async (bundle: string) => {
@@ -57,39 +57,50 @@ export const intoFolder = (folder: string) => async (bundle: string) => {
 /** A path as the words show it: inside the account's home, from ~. */
 const shown = (context: BuildsContext, path: string) => (path.startsWith(`${context.home}/`) ? `~${path.slice(context.home.length)}` : path);
 
-const PLIST_ID = /<key>CFBundleIdentifier<\/key>\s*<string>([^<]+)<\/string>/;
-/** A bundle's id, from its Info.plist as an app's own (XML) one has it; undefined where there is none to read. */
-const bundleIdOf = async (bundle: string) => (await readFile(join(bundle, 'Contents/Info.plist'), 'utf8').catch(() => '')).match(PLIST_ID)?.[1]?.trim();
+const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+/** XML's escapes read back: "Smith &amp; Co" is "Smith & Co". */
+const unescaped = (text: string) => text.replace(/&(amp|lt|gt|quot|apos);/g, (_, name: string) => ENTITIES[name]);
+/** One key's text in an app's (XML) Info.plist. */
+const plistValue = (plist: string, key: string) => {
+  const text = new RegExp(`<key>${key}</key>\\s*<string>([^<]+)</string>`).exec(plist)?.[1]?.trim();
+  return text && unescaped(text);
+};
+/** A bundle's id and name, from its Info.plist as an app's own (XML) one has them; nothing where there is none to read. */
+async function plistOf(bundle: string): Promise<{ id?: string; name?: string }> {
+  const plist = await readFile(join(bundle, 'Contents/Info.plist'), 'utf8').catch(() => '');
+  return { id: plistValue(plist, 'CFBundleIdentifier'), name: plistValue(plist, 'CFBundleName') };
+}
 
-/** The known build other than this one that an id names, if any. */
-const anotherBuild = (context: BuildsContext, id: string | undefined) => context.known.find(known => known.bundleId === id && known.bundleId !== context.own);
+/** Whether an id is another build of Central Knot than this one. */
+const isOtherBuild = (context: BuildsContext, id: string | undefined): id is string => !!id && BUILD_ID.test(id) && id !== context.own;
 
 const notABuild = (context: BuildsContext, bundle: string) => `${shown(context, bundle)} isn’t another build of ${PRODUCT} in an Applications folder, so nothing was removed.`;
 
 /**
- * What Remove may take, as `wanted`: a folder of its own (not a link) at the top of an Applications folder, named for the
- * product, not this app, whose Info.plist names `wanted`. Undefined when it may; else why not, in words. Asked at the look, at
- * the click, and again as the last thing before the Trash, since the bundle may be replaced meanwhile.
+ * What Replace may take, as `wanted`: a folder of its own (not a link) at the top of an Applications folder, not this app,
+ * whose Info.plist names `wanted`'s id. Undefined when it may; else why not, in words. Asked at the look, at the click, and
+ * again as the last thing before the Trash, since the bundle may be replaced meanwhile.
  */
-async function whyNot(context: BuildsContext, bundle: string, wanted: BuildApp): Promise<string | undefined> {
+async function whyNot(context: BuildsContext, bundle: string, wanted: OtherBuild): Promise<string | undefined> {
   const where = shown(context, bundle);
-  if (!context.places.applications.includes(dirname(bundle)) || !basename(bundle).startsWith(PRODUCT) || !bundle.endsWith('.app')) return notABuild(context, bundle);
+  if (!context.places.applications.includes(dirname(bundle)) || !bundle.endsWith('.app') || !isOtherBuild(context, wanted.build)) return notABuild(context, bundle);
   if (context.ownBundle && await samePlace(bundle, context.ownBundle)) return `${where} is this app itself, so nothing was removed.`;
   const found = await lstat(bundle).catch(() => undefined);
   if (!found) return `${where} isn’t there any more, so nothing was removed.`;
-  if (!found.isDirectory() || await bundleIdOf(bundle) !== wanted.bundleId) return `${where} isn’t ${wanted.name}, so nothing was removed. It may have been replaced since Central Knot looked.`;
+  if (!found.isDirectory() || (await plistOf(bundle)).id !== wanted.build) return `${where} isn’t ${wanted.name}, so nothing was removed. It may have been replaced since Central Knot looked.`;
   return undefined;
 }
 
-/** Every bundle of another build at the top of the Applications folders (whyNot); undefined where a folder that is there can't be read. */
-async function installedBuilds(context: BuildsContext): Promise<{ build: BuildApp; bundle: string }[] | undefined> {
-  const found: { build: BuildApp; bundle: string }[] = [];
+/** Every bundle of another build at the top of the Applications folders (whyNot), by its name; undefined where a folder that is there can't be read. */
+async function installedBuilds(context: BuildsContext): Promise<(OtherBuild & { installed: string })[] | undefined> {
+  const found: (OtherBuild & { installed: string })[] = [];
   for (const folder of context.places.applications) {
     let names: string[];
     try { names = await readdir(folder); } catch (error) { if (errorCode(error) === 'ENOENT') continue; return undefined; }
-    for (const name of names.filter(name => name.startsWith(PRODUCT) && name.endsWith('.app')).sort()) {
-      const bundle = join(folder, name), build = anotherBuild(context, await bundleIdOf(bundle));
-      if (build && !(await whyNot(context, bundle, build))) found.push({ build, bundle });
+    for (const name of names.filter(each => each.endsWith('.app')).sort()) {
+      const bundle = join(folder, name), { id, name: shownName } = await plistOf(bundle);
+      const build = { build: id ?? '', name: shownName ?? name.slice(0, -'.app'.length), installed: bundle };
+      if (isOtherBuild(context, id) && !(await whyNot(context, bundle, build))) found.push(build);
     }
   }
   return found;
@@ -128,22 +139,29 @@ export async function isRunning(context: BuildsContext, build: string): Promise<
 }
 
 /**
- * Another build of Central Knot on this Mac: each of its bundles in an Applications folder, with where its copies run, and a
- * build none of whose bundles is there but which is running, from wherever it runs. Undefined where an Applications folder that
- * is there can't be read: a page then says nothing rather than that nothing is there.
+ * Other builds of Central Knot on this Mac: each bundle in an Applications folder, with where its build's copies run, and a
+ * build none of whose bundles is there but which is running, from wherever it runs, by the name its running bundle gives.
+ * Running copies are looked for by id: the builds found installed, the standard app, the alpha, and `owner`, the build the open
+ * home's record names (a custom build running from elsewhere is found only so). Undefined where an Applications folder that is
+ * there can't be read: whether another build is here can't be told then.
  */
-export async function lookForBuilds(context: BuildsContext): Promise<OtherBuild[] | undefined> {
+export async function lookForBuilds(context: BuildsContext, owner?: string): Promise<OtherBuild[] | undefined> {
   const bundles = await installedBuilds(context);
   if (!bundles) return undefined;
+  const ids = [...new Set([...bundles.map(each => each.build), STANDARD_BUILD, ALPHA_BUILD, owner])].filter(id => isOtherBuild(context, id));
   const found: OtherBuild[] = [];
-  for (const build of context.known.filter(known => known.bundleId !== context.own)) {
-    const running = (await runningCopies(context.places.lsappinfo, build.bundleId))?.map(copy => copy.bundle);
-    const installed = bundles.filter(each => each.build.bundleId === build.bundleId);
-    for (const each of installed) found.push({ build: build.bundleId, name: build.name, installed: each.bundle, ...(running ? { running } : {}) });
-    if (!installed.length && running?.length) found.push({ build: build.bundleId, name: build.name, running });
+  for (const build of ids) {
+    const running = (await runningCopies(context.places.lsappinfo, build))?.map(copy => copy.bundle);
+    const installed = bundles.filter(each => each.build === build);
+    const settings = await access(context.settingsFolder(build)).then(() => ({ settingsFound: true as const }), () => ({}));
+    for (const each of installed) found.push({ ...each, ...(running ? { running } : {}), ...settings });
+    if (!installed.length && running?.length) found.push({ build, name: (await plistOf(running[0])).name ?? `Another ${PRODUCT} build (${build})`, running, ...settings });
   }
   return found;
 }
+
+/** Where this copy of the app runs from, when that is not the top of an Applications folder (the Trash, a disk image, Downloads): it replaces no build from there. */
+export const runsOutside = (context: BuildsContext) => (context.ownBundle && !context.places.applications.includes(dirname(context.ownBundle)) ? context.ownBundle : undefined);
 
 /**
  * Asks every running copy of a build to quit, with the signal Central Knot takes as Quit (no AppleScript, so macOS asks no
@@ -162,6 +180,8 @@ async function quitCopies(context: BuildsContext, build: string): Promise<'none'
     if (Date.now() >= until) return left ? 'still' : 'unknown';
   }
 }
+/** What a wait that ran out says: a build may take a while to finish what it is doing, but not this long. */
+const stillWords = (context: BuildsContext, name: string) => `${name} didn’t quit within ${Math.round((context.quitWaitMs ?? QUIT_WAIT_MS) / 1000)} seconds`;
 
 /** The same folder or bundle, links followed. */
 const samePlace = async (first: string, second: string) =>
@@ -171,60 +191,43 @@ const samePlace = async (first: string, second: string) =>
 const signInWords = (name: string) => `If ${name} still starts at sign-in, turn it off in System Settings › General › Login Items.`;
 
 /**
- * Removes another build of Central Knot: refused, in plain words, for anything but another build's bundle in an Applications
- * folder (whyNot), checked at the click. Every running copy of it is asked to quit and waited for (quitCopies); if any is still
- * running (it may be asking about unsaved work), or whether it runs can't be told, nothing is removed. The bundle is checked
- * again, then goes to the Trash; where macOS refuses that, nothing else is tried: the words say so, with the bundle to show in Finder.
+ * Replace: removes another build of Central Knot. Refused, in plain words, from a copy of this app outside an Applications
+ * folder (runsOutside: from a disk image it would leave no build installed), and for anything but another build's bundle at the
+ * top of one (whyNot), checked at the click. Every running copy of it is asked to quit and waited for (quitCopies); if any is
+ * still running, or whether it runs can't be told, nothing is removed. The bundle is checked again, then goes to the Trash;
+ * where macOS refuses that, nothing else is tried: the words say so, with the bundle to show in Finder.
  */
-export async function removeBuild(context: BuildsContext, path: string, build: string): Promise<BuildOutcome> {
-  const bundle = resolve(path), wanted = anotherBuild(context, build);
-  if (!wanted) return { said: notABuild(context, bundle), done: false };
-  const refused = await whyNot(context, bundle, wanted);
+export async function removeBuild(context: BuildsContext, found: OtherBuild): Promise<BuildOutcome> {
+  const outside = runsOutside(context), { name } = found;
+  // Its path isn't said: a copy opened from Downloads runs from a temporary system folder (App Translocation).
+  if (outside) return { said: 'This copy isn’t running from an Applications folder, so nothing was removed. Move it to Applications and open it again from there.', done: false };
+  if (!found.installed) return { said: `${name} isn’t in an Applications folder, so nothing was removed.`, done: false };
+  const bundle = resolve(found.installed);
+  const refused = await whyNot(context, bundle, found);
   if (refused) return { said: refused, done: false };
-  const { name } = wanted;
-  const quit = await quitCopies(context, build);
+  const quit = await quitCopies(context, found.build);
   if (quit === 'unknown') return { said: `Central Knot couldn’t tell whether ${name} is running, so nothing was removed. Quit ${name}, then try again.`, done: false };
-  if (quit === 'still') return { said: `${name} is still running, so nothing was removed: it may be asking about unsaved work. Quit it yourself, then try again.`, done: false };
-  const changed = await whyNot(context, bundle, wanted);
+  if (quit === 'still') return { said: `${stillWords(context, name)}, so nothing was removed. Quit it yourself, then try again.`, done: false };
+  const changed = await whyNot(context, bundle, found);
   if (changed) return { said: `${quit === 'quit' ? `${name} has quit. ` : ''}${changed}`, done: false };
   try { await context.trash(bundle); } catch {
-    const refused = quit === 'quit' ? `${name} has quit, but macOS didn’t let Central Knot move it to the Trash` : `macOS didn’t let Central Knot move ${name} to the Trash`;
-    return { said: `${refused}, so it is still in ${shown(context, dirname(bundle))}. Nothing else was tried: move it to the Trash in Finder, or ask whoever manages this Mac.`, done: false, show: bundle };
+    const kept = quit === 'quit' ? `${name} has quit, but macOS didn’t let Central Knot move it to the Trash` : `macOS didn’t let Central Knot move ${name} to the Trash`;
+    return { said: `${kept}, so it is still in ${shown(context, dirname(bundle))}. Nothing else was tried: move it to the Trash in Finder (or ask whoever manages this Mac), then click Refresh.`, done: false, show: bundle };
   }
   return {
-    said: `${name} is in the Trash, where it stays until you empty the Trash. Your skills, MCP servers and agents, and the record of them, stay where they are: they’re kept in the home, not in an app. ${name}’s own settings folder stays too. ${signInWords(name)}`,
+    said: `${name} is in the Trash, where it stays until you empty the Trash. Your skills, MCP servers and agents, which of them are kept in step, and History stay: they’re saved in this home, not in an app. ${name}’s own settings folder stays too. ${signInWords(name)}`,
     done: true,
   };
 }
 
-/**
- * A click's Remove, of one of the two builds only: with `takeOver`, syncing this home is taken over from the build first
- * (share.ts takeOverSync) and said on its own, and a take-over refused removes nothing; a remove that then fails leaves the
- * take-over done, and says so. Without it, the build that syncs this home is not removed: the home would be left with an owner
- * that is gone.
- */
-export async function removeClick(home: ShareContext, context: BuildsContext, path: string, build: string, takeOver: boolean): Promise<BuildOutcome & { took?: string }> {
-  // Neither of the two builds (knownBuilds): nothing is taken over, quit or removed.
-  const wanted = anotherBuild(context, build);
-  if (!wanted) return { said: notABuild(context, resolve(path)), done: false };
-  const gate = await syncGate(home);
-  if (!takeOver && syncOwner(gate)?.build === build) return { said: `${wanted.name} syncs this home, so it was not removed. Take over syncing first.`, done: false };
-  if (!takeOver) return removeBuild(context, path, build);
-  const taken = await takeOverSync(home);
-  if (taken.stopped) return { said: `Syncing was not taken over, so nothing was removed. ${taken.stopped}`, done: false };
-  const removal = await removeBuild(context, path, build);
-  return { ...removal, said: `${taken.from ? 'Central Knot now syncs this home. ' : ''}${removal.said}`, ...(taken.from ? { took: taken.from } : {}) };
-}
-
 /** Quit: asks every running copy of another build to quit (quitCopies), and says what came of it. Nothing is removed. */
-export async function quitBuild(context: BuildsContext, build: string): Promise<BuildOutcome> {
-  const wanted = anotherBuild(context, build);
-  if (!wanted) return { said: `That isn’t another build of ${PRODUCT}, so nothing was asked to quit.`, done: false };
-  const fromTrash = (await runningCopies(context.places.lsappinfo, build))?.some(copy => copy.bundle.includes('/.Trash/'));
-  const quit = await quitCopies(context, build);
-  const { name } = wanted;
+export async function quitBuild(context: BuildsContext, found: OtherBuild): Promise<BuildOutcome> {
+  const { name } = found;
+  if (!isOtherBuild(context, found.build)) return { said: `That isn’t another build of ${PRODUCT}, so nothing was asked to quit.`, done: false };
+  const fromTrash = (await runningCopies(context.places.lsappinfo, found.build))?.some(copy => copy.bundle.includes('/.Trash/'));
+  const quit = await quitCopies(context, found.build);
   if (quit === 'none') return { said: `${name} isn’t running.`, done: true };
   if (quit === 'quit') return { said: `${name} has quit.${fromTrash ? ` It ran from the Trash. ${signInWords(name)}` : ''}`, done: true };
-  if (quit === 'still') return { said: `${name} is still running: it may be asking about unsaved work. Quit it from its own window or menu.`, done: false };
+  if (quit === 'still') return { said: `${stillWords(context, name)}. Quit it from its own window or menu.`, done: false };
   return { said: `Central Knot couldn’t tell whether ${name} is running.`, done: false };
 }

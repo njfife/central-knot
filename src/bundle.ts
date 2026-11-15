@@ -22,7 +22,7 @@ export const CARRIED_FOLDER = 'bundle';
 
 /**
  * What makes a build a custom one. `bundleId` is the system's name for the app and the name of its settings folder (no
- * other app's folder has that name), so it installs beside the standard app and never shares its settings; `id` is the
+ * other app's folder has that name), so it never shares the standard app's settings; `id` is the
  * short form the build was given, and `name` is what it calls itself. `marketplace` is set for a
  * bundled build: how the carried marketplace is shown here (its name for the tools is always the catalog's own).
  */

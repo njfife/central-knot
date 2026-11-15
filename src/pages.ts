@@ -3,7 +3,7 @@
 // empty states (kindEmpty). Every other page has a module of its own (harnesspage.ts, historypage.ts, profilespage.ts,
 // sourcespage.ts, repopage.ts, pluginspage.ts, instructionspage.ts, settingspage.ts); which page draws is renderer.ts
 // renderPage, and the page's state and actions are app.ts's.
-import { absentKinds, announce, noToolManaged, noToolManagedSentence, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type PageKind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, type Page } from './app.ts';
+import { absentKinds, announce, otherOwnerSaid, takeOverButton, noToolManaged, noToolManagedSentence, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type PageKind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, type Page } from './app.ts';
 import { afterLayout, button, cardGrid, emptyState, fileBlocks, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, syncOwner, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
@@ -14,7 +14,6 @@ import { inTool, pluginItemCount, rowCount } from './pluginrows.ts';
 import { asksWhichCopy } from './libraryrow.ts';
 import { anyOn, kindSource } from './itemrow.ts';
 import { setupLead } from './firstsetup.ts';
-import { otherBuildBands, takeOverChoices } from './otherbuildview.ts';
 
 // ---------- Overview ----------
 
@@ -200,10 +199,10 @@ function nextStep(home: HomeView, nothingOn: boolean, asking: boolean): string {
   return nothingOn && home.sync.access.allowed && !asking ? ' Open one below and turn on what you want the same in every tool.' : '';
 }
 
-/** The Overview's line where another build syncs this home: who, and Take over syncing or the two choices (otherbuildview.ts takeOverChoices). */
+/** The Overview's line where another build syncs this home: who, and Take over syncing. */
 function ownerLine(home: HomeView) {
-  const { said, buttons } = takeOverChoices(home, { variant: 'link', size: 'micro' }, { take: 'overview-take-over', remove: 'overview-take-over-remove' }, !!state.busy);
-  return h('p.overview-line', { id: 'overview-other-owner' }, icon('circle-alert', 14, 'tone-warning'), `${said} `, ...buttons.flatMap((choice, index) => (index ? [' · ', choice] : [choice])));
+  const owner = syncOwner(home.sync.gate)!;
+  return h('p.overview-line', { id: 'overview-other-owner' }, icon('circle-alert', 14, 'tone-warning'), `${otherOwnerSaid(owner)} `, takeOverButton(owner, { variant: 'link', size: 'micro' }, 'overview-take-over', !!state.busy));
 }
 
 export function overviewPage() {
@@ -218,12 +217,11 @@ export function overviewPage() {
   const absent = absentKinds();
   const empty = noToolManaged();
   const nothingOn = !anyOn(home);
-  // A click's result, then another build of Central Knot found on this Mac (otherbuildview.ts).
-  const bands = [outcomeBand(), ...otherBuildBands(home)].filter(band => !!band);
+  const band = outcomeBand();
   // First setup's one place: its question, or the way into its walkthrough (firstsetup.ts).
   const setup = empty ? null : setupLead(home);
   return h('div.page', {},
-    bands.length ? h('div.bands', {}, bands) : null,
+    band ? h('div.bands', {}, band) : null,
     h('div.scroll.overview-scroll', { id: 'overview-scroll' },
       practiceBanner(),
       // A home with no tools has nothing to count: the way forward is another home.
@@ -238,14 +236,13 @@ export function overviewPage() {
       h('div.overview-more', {},
         absent.length && !empty ? h('p.overview-line', { id: 'overview-absent' }, icon('info', 14, 'tone-muted'), `No tool here holds ${orList(absent.map(kind => kindNames[kind]))}.`) : null,
         !home.sync.access.allowed ? h('p.overview-line', {}, icon('lock', 14, 'tone-warning'), `Automatic sync is paused. Preview only: ${previewReason(home.sync.access.reason)}.`)
-        // Another build syncs this home: said here, with the way to take over (and to remove that build, where it is installed here).
+        // Another build syncs this home: said here, with the way to take over.
         : syncOwner(home.sync.gate) ? ownerLine(home)
         // Green only once something syncs; before that, sync is on and waiting, in the status bar's grey. With no tool managed
         // nothing syncs at all (the status bar says so).
         : empty || (home.syncOn && nothingOn) ? null : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingOn ? 'tone-muted' : 'tone-success') : 'tone-warning'),
           ...(home.syncOn ? [`Automatic sync is on: edits spread between tools in seconds${home.sync.syncEverything ? ', and what turns up in a tool is taken in by Synchronize everything' : ''}, with a notice and Undo.`]
             : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync once', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
-        // Not a build of Central Knot removed to the Trash: that is in the Trash until the Trash is emptied (otherbuildview.ts).
         h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Every change Central Knot makes in your tools is kept in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ', with Undo.'),
         // The two pages the cards don't cover, named once so a newcomer knows what they are; Plugins only where a tool here
         // installs them, and neither in a home with no tools.

@@ -2,7 +2,8 @@
 // - the home's store, `.central-knot/` (storeDirectory), and its sync record, sync.json (SyncRecord: which build syncs the
 //   home, the tools left out, Synchronize everything), read and saved (readRecord, saveRecord); only takeOverSync changes its
 //   owner, and work the build that owned it had under way stops at its next item or save (stillOwned);
-// - two gates: writeAccess, whether this window may write this home at all (the real home only when chosen), and the gate for
+// - two gates: writeAccess, whether this window may write this home at all (the real home only when chosen; nothing while this
+//   build is held by another: ShareContext held), and the gate for
 //   library writes (libraryGate), the one answer to "may this write of the library happen now", which asks writeAccess and
 //   syncGate (which build syncs the home, and whether it waits for Resume). A write of the library asks libraryGate, never the
 //   two apart; the views read them apart, to say why on the page;
@@ -61,6 +62,8 @@ export interface ShareContext {
   realHome: string;
   /** Real-home writes are on only where Nathan accepted them: macOS, and never in a smoke test. */
   allowActualWrites?: boolean;
+  /** Why nothing at all may be written now: another build of Central Knot is on this Mac, one install at a time (main.ts heldReason). Unset: not held. */
+  held?: string;
   overrides?: Partial<Record<HarnessId, string>>;
   /** Reads shared within one pass or one view (what each tool has through its plugins): set only on a context made for that one use. */
   reads?: Map<string, Promise<unknown>>;
@@ -505,8 +508,9 @@ export async function syncsHere(context: ShareContext): Promise<boolean> {
   return (await writeAccess(context)).allowed && (await syncGate(context)).state === 'ready';
 }
 
-/** The real home is written only by explicitly choosing it. A simulated home that reaches it stays read-only. */
+/** Nothing is written while this build is held; the real home only by explicitly choosing it. A simulated home that reaches it stays read-only. */
 export async function writeAccess(context: ShareContext): Promise<WriteAccess> {
+  if (context.held) return { allowed: false, reason: context.held };
   if (context.mode === 'actual') {
     if (!context.allowActualWrites) return { allowed: false, reason: 'Preview only: writing to real folders works only on macOS in this version. You can look around; nothing is written.' };
     for (const id of Object.keys(harnesses) as HarnessId[]) {
