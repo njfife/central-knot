@@ -4005,7 +4005,7 @@ esac
   // Keep out, on its page: Pi alone, at once; the switch is then partial.
   await a.click('#popen-0-issue-tracker');
   for (let tries = 0; tries < 50 && !(await a.exists('#pkeep-0-issue-tracker-pi-cli')); tries++) await wait(100);
-  check('each tool’s line says what it has, with Keep out', /Installed · 2\.0\.0/.test(await a.text('.plugin-tool[data-tool="claude-cli"]') ?? '') && /Its items are on/.test(await a.text('.plugin-tool[data-tool="pi-cli"]') ?? '') && (await a.text('#pkeep-0-issue-tracker-pi-cli')) === 'Keep out', await a.text('.plugin-panel'));
+  check('each tool’s line says what it has, with Keep out', /Installed · 2\.0\.0/.test(await a.text('.plugin-tool[data-tool="claude-cli"]') ?? '') && /\d+ of its \d+ items are on/.test(await a.text('.plugin-tool[data-tool="pi-cli"]') ?? '') && (await a.text('#pkeep-0-issue-tracker-pi-cli')) === 'Keep out', await a.text('.plugin-panel'));
   await a.click('#pkeep-0-issue-tracker-pi-cli');
   await done();
   same('Keep out takes its items out of Pi alone (not triage, his own now), records it, and the switch shows partial', [inPi(), installed(), entry()?.except, await a.text('#pkeep-0-issue-tracker-pi-cli'), await a.run(`document.querySelector('.plugin-tool[data-tool="pi-cli"] .cell-button')?.dataset.state`), await switchIs('#pswitch-page-0-issue-tracker')],

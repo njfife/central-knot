@@ -216,6 +216,8 @@ test('An item turned off by itself comes back On with the plugin’s On: nothing
   try {
     await box.turn('on');
     await applySkills(box.share, box.tools, [{ key: 'review', on: false, except: [] }]);
+    const { itemsOnWords } = await import('../src/pluginstatus.ts');
+    assert.equal(itemsOnWords(await box.view(), 'kit', 'pi-cli'), '4 of its 5 items are on', 'the page counts the one off');
     await box.turn('off');
     await box.turn('on');
     assert.equal((await box.library()).skill.review!.on, true);

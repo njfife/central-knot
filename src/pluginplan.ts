@@ -15,9 +15,7 @@ import { andList, byToolOrder, toolNames as names } from './words.ts';
  * brought up to date); remove-parts: those parts out again; pick-parts: single parts of it put in or taken out there
  * (`pick`); undo-parts: an Undo of a parts run (`run`), which only an Undo makes. The Plugins page's clicks run update,
  * install-parts (as the parts' update), a skill's switch and pick-parts; install, remove and remove-parts come from a
- * plugin's switch and an Undo. In Pi and OpenCode a plugin's items are library items (pluginlibrary.ts): install-items and
- * remove-items, its switch's (marketplaces.ts turn runs them itself, one pass per kind); update-items, its Update and the
- * automatic updates' read of it (install-items too, for a tool new here); items-back, its switch's Undo (`items`).
+ * plugin's switch and an Undo. The four items actions (isItems) are a plugin's items in Pi and OpenCode (pluginlibrary.ts).
  */
 export type PluginAction = 'install' | 'update' | 'remove' | 'skill-off' | 'skill-on' | 'part-off' | 'part-on' | 'plugin-off' | 'plugin-on' | 'install-parts' | 'remove-parts' | 'pick-parts' | 'undo-parts'
   | 'install-items' | 'remove-items' | 'update-items' | 'items-back';

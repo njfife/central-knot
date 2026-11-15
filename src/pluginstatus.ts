@@ -158,12 +158,10 @@ export const FROM_DIRECTORY = 'Claude Code has its copy from the Anthropic Direc
  */
 export const routeOf = (entry: MarketplaceView, plugin: string): 'parts' | 'items' => (Object.values(entry.parts?.[plugin] ?? {}).some(parts => !!parts?.items.length) ? 'parts' : 'items');
 
-/**
- * Whether some item linked to the plugin is wanted in this tool (pluginlibrary.ts itemsView): "has it" for Pi and OpenCode. Never
- * in a tool that takes the plugin itself, which has its items only with the installed plugin (plugins.ts pluginHolds).
- */
-export const itemsIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) => !takesPlugins(tool)
-  && !!entry.items?.[plugin]?.lines.some(line => line.on && !line.except?.includes(tool) && (line.state === 'linked' || line.state === 'update' || line.state === 'going'));
+/** Whether the tool has the plugin's items: "has it" for Pi and OpenCode, as pluginlibrary.ts onIn counted it for the view. */
+export const itemsIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) => !!entry.items?.[plugin]?.on[tool];
+/** "2 of its 3 items are on", in one tool. */
+export const itemsOnWords = (entry: MarketplaceView, plugin: string, tool: HarnessId) => `${entry.items?.[plugin]?.on[tool] ?? 0} of its ${entry.items?.[plugin]?.of ?? 0} items are on`;
 
 /** This plugin's parts in a tool, when they were installed there as separate items (parts.ts). */
 export const partsOf = (entry: MarketplaceView, plugin: string, tool: HarnessId): PartsState | undefined => entry.parts?.[plugin]?.[tool];
@@ -499,7 +497,7 @@ export function toolMark(view: PluginsView, entry: MarketplaceView, plugin: stri
   }
   if (owed.has === 'items') {
     const ready = entry.items?.[plugin]?.ready ? ' An update is ready: Update.' : '';
-    const words = `${name}: its items are on there, as items of Central Knot’s that follow the plugin.${ready}`;
+    const words = `${name}: ${itemsOnWords(entry, plugin, tool)} there, as items of Central Knot’s that follow the plugin.${ready}`;
     return unwanted ? { mark: 'stays', words: `${words}${unwanted.replace('Take out there takes it out.', 'Take out there turns them off there.')}` } : { mark: 'items', words };
   }
   if (owed.wanted && owed.held) return { mark: 'cannot', words: `${name}: ${owed.held}` };

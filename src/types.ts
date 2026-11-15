@@ -739,8 +739,11 @@ export interface MarketplaceView {
  * and no longer linked (`removed`), or one not brought in, with why (`not-brought`).
  */
 export interface PluginItemLine { kind: ItemKind; key: string; name: string; state: 'linked' | 'update' | 'going' | 'new' | 'removed' | 'not-brought'; on?: boolean; except?: HarnessId[]; why?: string }
-/** A plugin's items as its page shows them: its lines, whether Update has something to do, and why the plugin can't be read now. */
-export interface PluginItemsView { lines: PluginItemLine[]; ready?: true; problem?: string }
+/**
+ * A plugin's items as its page shows them: its lines, how many of its `of` items linked to it are on in each tool with no installer
+ * (`on`), whether Update has something to do, and why the plugin can't be read now.
+ */
+export interface PluginItemsView { lines: PluginItemLine[]; on: Partial<Record<HarnessId, number>>; of: number; ready?: true; problem?: string }
 
 /**
  * One named part of a plugin (a skill, command or agent): what it says it does, its whole file (SKILL.md or NAME.md) as

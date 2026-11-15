@@ -10,7 +10,7 @@ import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { componentsOf, dotted, markOf, pluginSwitch, pluginTitle, readme, markCell, updateButton, updateOps, updatesRun, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { pluginKey, type PluginOp } from './pluginplan.ts';
-import { cantSwitchSkill, comparableText, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partsEligible, partsFit, partsOf, partsOffer, partsPickable, partStillIn, partsWhy, partWords, PREVIEW_ONLY, samePart, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, versionWord, whyNotCarried, changedPartsWords, type ToolMark } from './pluginstatus.ts';
+import { cantSwitchSkill, comparableText, itemsOnWords, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partsEligible, partsFit, partsOf, partsOffer, partsPickable, partStillIn, partsWhy, partWords, PREVIEW_ONLY, samePart, skillOff, stateOf, unavailable, untestedBuild, versionToCompare, versionWord, whyNotCarried, changedPartsWords, type ToolMark } from './pluginstatus.ts';
 import { hasCowork, takesPlugins } from './presence.ts';
 import { applyPluginOps, market, openLink, shownDetail, toggleOpened, turnPlugin } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, Outcome, PartKind, PartPlan, PartRef, PartsState, PluginDetail, PluginItemLine, PluginTurn, PluginView, PluginsView } from './types.ts';
@@ -58,7 +58,7 @@ function installedLine(version: string | undefined, offered: string | undefined,
 
 /** Each mark's short words on a tool's line (the whole sentence is its tooltip: pluginstatus.ts toolMark). */
 const MARK_WORDS: Record<ToolMark, string> = {
-  installed: 'Installed', outdated: 'Installed', parts: 'Parts installed', 'parts-changed': 'Parts out of date', items: 'Its items are on', stays: 'Still installed', waits: 'Goes in at the next check', 'not-brought': 'Not brought here: off in a tool’s own settings',
+  installed: 'Installed', outdated: 'Installed', parts: 'Parts installed', 'parts-changed': 'Parts out of date', items: 'Its items', stays: 'Still installed', waits: 'Goes in at the next check', 'not-brought': 'Not brought here: off in a tool’s own settings',
   missing: 'Not in it, though on', cannot: 'Not available', 'kept-out': 'Kept out', absent: 'Not installed', unknown: 'Can’t be read now', 'not-known': 'Unknown',
 };
 
@@ -85,6 +85,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     const all = plansFor(entry, plugin)?.[tool]?.filter(part => !part.wholeKind).length ?? 0;
     if (mark === 'parts' && parts && parts.items.length < all) return `${parts.items.length} of ${all} parts installed`;
     if (mark === 'waits' && !updatesRun()) return 'Waits for automatic updates';
+    if (mark === 'items') return itemsOnWords(entry, plugin.name, tool);
     if (mark === 'cannot' && takesNoneOf(view, entry, plugin, tool)) return 'None of its parts fit';
     return [MARK_WORDS[mark], mark === 'absent' || mark === 'missing' ? limitNote(limits(tool)) : ''].filter(Boolean).join(' · ');
   };

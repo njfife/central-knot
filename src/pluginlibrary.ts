@@ -93,8 +93,11 @@ export async function linkedIds(context: ShareContext): Promise<Set<string>> {
   return new Set(kinds.flatMap(library => Object.values(library.items).filter(item => item.source && !item.deleted).map(item => item.source!)));
 }
 
-/** The tools of `tools` with no installer where some item linked to the plugin is wanted ("has it": pluginrecord.ts). */
-const holding = (linked: Linked[], tools: readonly HarnessId[]) => itemTools(tools).filter(tool => linked.some(({ item }) => wantedIn(item, tool)));
+/**
+ * How many items linked to the plugin are wanted in a tool with no installer (none in one with an installer): the one place
+ * "has it" there is worked out, one or more (pluginrecord.ts); the page reads it from itemsView (pluginstatus.ts itemsIn).
+ */
+const onIn = (linked: Linked[], tool: HarnessId) => (takesPlugins(tool) ? 0 : linked.filter(({ item }) => wantedIn(item, tool)).length);
 
 /**
  * The tools a name the plugin makes is kept out of (library.ts A PLUGIN): each managed tool with no installer where the plugin
@@ -102,7 +105,7 @@ const holding = (linked: Linked[], tools: readonly HarnessId[]) => itemTools(too
  * of. The step adds each tool with a copy of that name (librarypass.ts fromSourceStep).
  */
 const pluginOutOf = (entry: PluginEntry, tools: readonly HarnessId[], linked: Linked[], into: readonly HarnessId[]) =>
-  itemTools(tools).filter(tool => entry.except.includes(tool) || (!into.includes(tool) && !holding(linked, tools).includes(tool)));
+  itemTools(tools).filter(tool => entry.except.includes(tool) || (!into.includes(tool) && !onIn(linked, tool)));
 
 // ---------- Running it ----------
 
@@ -116,12 +119,9 @@ const pluginOutOf = (entry: PluginEntry, tools: readonly HarnessId[], linked: Li
 export type ItemsAsk = { into: HarnessId[]; on?: true; letIn?: true } | { outOf: HarnessId[]; off?: true } | { read: HarnessId[]; bring?: true; click?: true };
 
 /**
- * A plugin's switch on its items (pluginrecord.ts rows 5 and 10, Update, a tool new here), one pass per kind: the plugin read
- * first where the click brings it in or reads it (`files`: none when its marketplace no longer lists it or its files can't be
- * read, so nothing is made, updated or dropped), then each linked item clicked: On (`on`) or Off (`off`), or the tools named
- * let in or kept out in its `except` alone. Each click is taken only while the item is still linked (types.ts Change
- * forPlugin). Answers one report per tool named, the items' states before, for the Undo (itemsBack), and each kind's notices
- * (an item the plugin no longer has, one let go as the person's own), for its page.
+ * A plugin's switch on its items (pluginrecord.ts rows 5 and 10, Update, a tool new here), one kind at a time: the plugin's
+ * read first where the ask has one, then each item linked to it after that read clicked (clickOn), taken only while it is still
+ * linked (types.ts Change forPlugin). Answers one report per tool named, and the items' states before, for the Undo.
  */
 export async function runItems(context: ShareContext, tools: HarnessId[], entry: PluginEntry, ask: ItemsAsk, files: Files, op: Op): Promise<Ran & { back?: ItemState[] }> {
   const before = await linkedItems(context, entry.id), named = 'into' in ask ? ask.into : 'outOf' in ask ? ask.outOf : ask.read;
@@ -157,7 +157,6 @@ type Op = Pick<PluginOp, 'source' | 'marketName' | 'plugin' | 'action'>;
 type Files = { files?: PluginFiles; commitAt: string; problem?: string };
 /** What a run on a plugin's items answers: each tool's report, why it stopped, and each kind's notices for its page. */
 type Ran = { done: PluginDone[]; stopped?: string; notices: { kind: ItemKind; notices: SyncNotice[] }[] };
-/** Each pass a run made, with its kind. */
 type Passed = { kind: ItemKind; result: PassResult };
 const ran = (done: PluginDone[], results: Passed[]): Ran => {
   const stopped = results.find(({ result }) => result.stopped)?.result.stopped;
@@ -174,14 +173,14 @@ function clickOn(ask: ItemsAsk, item: LibraryItem, own: (tool: HarnessId) => boo
 
 /** One tool's report of a run on a plugin's items: what it has of them now, and whether the run changed what it has. */
 function reportIn(tool: HarnessId, ask: ItemsAsk, before: Linked[], after: Linked[], results: Passed[], problem?: string): PluginDone['report'] {
-  const has = holding(after, [tool]).length > 0, name = toolNames[tool];
-  const changed = has !== holding(before, [tool]).length > 0 || wroteIn(results, tool);
-  const wanted = after.filter(({ item }) => wantedIn(item, tool)).length, said = `${wanted} of its ${after.length} items ${wanted === 1 ? 'is' : 'are'} on in ${name}`;
-  const report = (outcome: PluginDone['report']['outcome'], message: string) => ({ tool, outcome, message, runs: [], changed });
-  if ('outOf' in ask) return has ? report('failed', `${said}: they were changed here since.`) : report('uninstalled', `Its items are out of ${name}. Central Knot keeps them.`);
+  const on = onIn(after, tool), has = on > 0, name = toolNames[tool];
+  const changed = has !== onIn(before, tool) > 0 || wroteIn(results, tool);
+  const said = `${on} of its ${after.length} items ${on === 1 ? 'is' : 'are'} on in ${name}.`;
+  const report = (outcome: PluginDone['report']['outcome'], message = said) => ({ tool, outcome, message, runs: [], changed });
+  if ('outOf' in ask) return report(has ? 'failed' : 'uninstalled');
   if (!has && 'into' in ask) return report('held', problem ?? `None of its items can go into ${name}.`);
   if (problem && 'read' in ask) return report('failed', problem);
-  return report('read' in ask && !ask.bring ? 'updated' : 'installed', problem ? `${said}. ${problem}` : `${said}.`);
+  return report('read' in ask && !ask.bring ? 'updated' : 'installed', problem ? `${said} ${problem}` : said);
 }
 const wroteIn = (results: Passed[], tool: HarnessId) => results.some(({ result }) => result.results.some(each => each.harness === tool && (each.outcome === 'written' || each.outcome === 'removed')));
 
@@ -197,7 +196,7 @@ export async function itemsBack(context: ShareContext, tools: HarnessId[], id: s
   }
   const after = await linkedItems(context, id);
   const done = named.map((tool): PluginDone => {
-    const has = holding(after, [tool]).length > 0, changed = has !== holding(before, [tool]).length > 0 || wroteIn(results, tool);
+    const has = onIn(after, tool) > 0, changed = has !== onIn(before, tool) > 0 || wroteIn(results, tool);
     return { ...op, tool, report: { tool, outcome: has ? 'installed' : 'uninstalled', message: `Its items are as they were in ${toolNames[tool]}.`, runs: [], changed } };
   });
   return ran(done, results);
@@ -208,11 +207,12 @@ export async function itemsBack(context: ShareContext, tools: HarnessId[], id: s
 /**
  * What the Plugins page shows of a plugin's items (types.ts PluginItemsView), from the same table the pass carries out: each
  * item linked to it, with its state where it isn't plain (Off; an update ready; removed by the plugin's update); each name it
- * has that is not brought in, with why; and whether Update has something to do (`ready`). `reads`: none where the plugin can't
+ * has that is not brought in, with why; how many are on in each tool (onIn); and whether Update has something to do (`ready`). `reads`: none where the plugin can't
  * be read now (`problem` says why); then only its linked items are listed.
  */
 export async function itemsView(context: ShareContext, tools: readonly HarnessId[], entry: PluginEntry, reads: SourceRead<unknown>[] | undefined, problem?: string): Promise<PluginItemsView> {
-  const lines: PluginItemLine[] = [];
+  const lines: PluginItemLine[] = [], linked = await linkedItems(context, entry.id);
+  const on = Object.fromEntries(itemTools(tools).map(tool => [tool, onIn(linked, tool)]));
   let ready = false;
   for (const kind of sourceKinds()) {
     const { look } = await lookFor(kind.kind, context, tools), items = look.library.items, read = reads?.find(each => each.kind === kind.kind.kind);
@@ -228,7 +228,7 @@ export async function itemsView(context: ShareContext, tools: readonly HarnessId
       else if (read?.whole && !item.on && !item.source && fromLinkSinceTakeIn(item, read.link)) lines.push({ kind: kind.kind.kind, key: item.key, name: item.name, state: 'removed' });
     }
   }
-  return { lines, ...(ready ? { ready: true as const } : {}), ...(problem ? { problem } : {}) };
+  return { lines, on, of: linked.length, ...(ready ? { ready: true as const } : {}), ...(problem ? { problem } : {}) };
 }
 
 const WHY_NOT = { differs: 'you have your own', another: 'another source has it', deleted: 'you deleted it; History’s Restore, or the plugin’s next On, brings it back' };

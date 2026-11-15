@@ -731,7 +731,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     // A copy turned off in a tool's own settings comes back off: its whole-plugin switch is turned off again after the install.
     const offBefore = (each: HarnessId) => { const state = entry.states[plugin]?.[each]; return state?.state === 'installed' && !!state.off; };
     const back = reverse(ran.done).flatMap(op => (op.action === 'install' && offBefore(op.tool) ? [op, { ...op, action: 'plugin-off' as const }] : [op]));
-    // Pi and OpenCode: its items (pluginlibrary.ts), one pass per kind, with their states before for the Undo.
+    // Pi and OpenCode: its items (pluginlibrary.ts).
     const wanted = itemsIn.some(each => switchOf(shown, entry, listed, known, record).tools[each]?.wanted);
     const items = itemsIn.length && !ran.stopped ? await turnItems(entry.source, marketName, after, what, itemsIn, wanted) : undefined;
     if (items?.back) back.push({ source: entry.source, marketName, plugin, tool: itemsIn[0]!, action: 'items-back', items: items.back });

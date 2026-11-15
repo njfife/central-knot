@@ -70,11 +70,7 @@
 // own as well (a copy in ~/.agents/skills beside one in its own folder): that copy is `present` with `anotherWay` (the table's
 // last row), and the harness is decided as one the item isn't wanted in (wantedHere).
 //
-// An item linked to a plugin (A PLUGIN, below), in a tool with the plugin's own installer (Claude Code, Copilot CLI, Codex), is
-// held by one answer before the kind's own (plugins.ts pluginHeld): it has the item another way where that tool has the plugin
-// installed; it can't be given it where it hasn't (the plugin Off or kept out there, its installer can't run here, or the tool's
-// record of its plugins can't be read now), and that answer also keeps a copy the tool has (Disk.refuses), so nothing of
-// Central Knot's is ever written there over a copy of that name, whichever way the tool's record reads.
+// An item linked to a plugin (A PLUGIN, below), in a tool with the plugin's own installer, is held first by plugins.ts pluginHolds.
 //
 // Other marks a harness's line can carry are a kind's own, worked out at each look from what it read and never stored, and
 // they change nothing a pass does: for skills, a tool's own switch that turns the skill off there (skills.ts toolFacts, `loads`).

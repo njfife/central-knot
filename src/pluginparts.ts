@@ -96,7 +96,7 @@ export function updateOps(view: PluginsView, entry: MarketplaceView, plugin: Plu
   const detail = shownDetail(pluginKey(entry.source, plugin.name));
   const { plugin: tools, parts } = updateTools(view, entry, plugin.name, versionToCompare(plugin, detail), componentsOf(entry, plugin), detail);
   const op = (tool: PluginOp['tool'], action: PluginOp['action']): PluginOp => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action });
-  // Its items, read again from the plugin where its read has something for them (pluginlibrary.ts itemsView), once for the tools that have them.
+  // Its items, read again where the plugin has something for them (pluginlibrary.ts itemsView `ready`).
   const itemTools = view.tools.filter(tool => !takesPlugins(tool)), holding = itemTools.filter(tool => itemsIn(entry, plugin.name, tool));
   const items = view.canWrite && entry.items?.[plugin.name]?.ready ? (holding.length ? holding : itemTools.slice(0, 1)) : [];
   return [...tools.map(tool => op(tool, 'update')), ...parts.map(tool => op(tool, 'install-parts')), ...items.map(tool => op(tool, 'update-items'))];
