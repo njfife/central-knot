@@ -1,9 +1,9 @@
 // A plugin's skills, agents and MCP servers as library items in Pi and OpenCode, which have no plugin installer (library.ts A
 // PLUGIN: the table's rows that differ for a plugin, decided by SourceSeen `plugin`). This module owns:
 // - the plugin's read (readPlugin): its files as catalogdetail.ts pluginFiles reads them from the marketplace's copy
-//   (marketplaces.ts locate, never a tool's installed copy), made into one SourceRead per kind through the per-item checks a
-//   link's readers use (atlink.ts skillAt keyed by its folder's name, agentInText, serverAt), never their place-finding; and
-//   whether each kind was read whole;
+//   (marketplaces.ts locate, never a tool's installed copy), made into one SourceRead per kind by the one reader of a plugin's
+//   items (atlink.ts pluginItems, on its `marketplace` route: a skill keyed by its folder's name), and whether each kind was read
+//   whole;
 // - running it (runItems): each kind's pass (sources.ts sourceKinds) with that read and the clicks the plugin's switch makes on
 //   its items, one pass per kind, as a profile switch makes them; and its Undo (itemsBack);
 // - what the Plugins page shows of them (itemsView: "Its items", and "has it" in each tool).
@@ -14,12 +14,12 @@
 // the switch's table (pluginrecord.ts owedTo), and the let-go of an item changed here, in every pass (librarypass.ts letGo).
 // Known miss: a skill whose folder's name and SKILL.md name differ (folder pdf-tools, name pdf) is the item pdf-tools, as every
 // tool's copy is named; Pi and OpenCode load it as pdf, so it can meet a skill of that name there unmarked, and the same
-// repository given as a Git link brings it as a second item, pdf.
-import { basename, dirname } from 'node:path';
-import { agentHash } from './agentfiles.ts';
-import { agentInText, serverAt, skillAt, wasRead, type ItemThere } from './atlink.ts';
+// repository given as a Git link (its skills/ folder, or the plugin's own folder: atlink.ts pluginItems' `link` route) brings it
+// as a second item, pdf.
+import { basename } from 'node:path';
+import { pluginItems, wasRead } from './atlink.ts';
 import type { PluginFiles } from './catalogdetail.ts';
-import { fromLinkSinceTakeIn, itemKey, sourceAnswers, wantedIn, type ItemKind, type LibraryItem } from './library.ts';
+import { fromLinkSinceTakeIn, sourceAnswers, wantedIn, type ItemKind, type LibraryItem } from './library.ts';
 import { copiesOf, lookFor, type SourceRead } from './librarypass.ts';
 import type { PluginDone, PluginOp } from './pluginplan.ts';
 import type { PluginEntry } from './pluginrecord.ts';
@@ -39,28 +39,6 @@ export interface ItemState { kind: ItemKind; key: string; on: boolean; except: H
 
 // ---------- The read ----------
 
-/** Of a kind's items, two of one key are both left out, said once each (a plugin's folders are read nested). */
-const onceEach = (items: ItemThere<unknown>[], what: string) => items.map((item): ItemThere<unknown> => {
-  if (items.filter(other => other.key === item.key).length < 2) return item;
-  const { folder, folderName, key, name, files } = item;
-  return { folder, folderName, key, name, files, unreadable: `two ${what} in the plugin are named ${name}`, leftOut: true };
-});
-
-/** Each kind's items in a plugin's files, keyed as every tool's copy is (a skill by its folder, an agent by its file). */
-const readers: Record<ItemKind, (files: PluginFiles) => Promise<ItemThere<unknown>[]>> = {
-  skill: async files => onceEach(await Promise.all(files.skills.map(({ name, dir }) => skillAt(dirname(dir), basename(dir), name, true))), 'skills'),
-  agent: async files => onceEach(files.agents.map(({ name, text, whole }): ItemThere<unknown> => {
-    const where = { folder: 'agents', folderName: basename(files.folder), key: itemKey(name), name, files: [`${name}.md`] };
-    const read = whole ? agentInText({ path: `${name}.md`, tool: 'claude-cli', name }, text, false) : undefined;
-    if (!read) return { ...where, unreadable: whole ? `${name}.md has no front matter, so it is no agent` : `${name}.md is larger than Central Knot copies` };
-    return 'unreadable' in read ? { ...where, unreadable: read.unreadable } : { ...where, hash: agentHash(read.agent), content: read.agent, own: { 'claude-cli': read.text } };
-  }), 'agents'),
-  mcp: files => {
-    const keys = Object.keys(files.servers).map(itemKey), where = { folder: '', folderName: basename(files.folder), files: [] };
-    return Promise.all(Object.entries(files.servers).map(([name, raw]) => serverAt({ ...where, key: itemKey(name), name }, raw, keys.filter(key => key === itemKey(name)).length > 1, files.folder)));
-  },
-};
-
 /**
  * A plugin's files read as one SourceRead per kind (library.ts A PLUGIN): each name with its content, or why it can't be read
  * or is left out. A kind is read whole as a link's kind is (library.ts "Read whole"; atlink.ts wasRead): something in the plugin
@@ -69,13 +47,12 @@ const readers: Record<ItemKind, (files: PluginFiles) => Promise<ItemThere<unknow
  * makes is kept out of (pluginOutOf). `commitAt`: when its marketplace was read.
  */
 export async function readPlugin(files: PluginFiles, entry: PluginEntry, commitAt: string, recorded: ReadonlySet<string>, outOf: HarnessId[]): Promise<SourceRead<unknown>[]> {
-  const kinds = await Promise.all(sourceKinds().map(async kind => ({ kind, items: await readers[kind.kind.kind](files) })));
-  const read = kinds.some(each => each.items.some(wasRead));
-  const unread: Record<ItemKind, string[]> = { skill: files.unread.skills, agent: files.unread.agents, mcp: files.unread.servers ? ['*'] : [] };
-  return kinds.map(({ kind, items }): SourceRead<unknown> => {
-    const names: SourceRead<unknown>['names'] = new Map(unread[kind.kind.kind].filter(name => name !== '*').map(name => [itemKey(name), { unreadable: 'it can’t be read' }]));
+  const read = await pluginItems(files, files.folder, basename(files.folder), 'marketplace');
+  const any = Object.values(read).some(each => each.items.some(wasRead));
+  return sourceKinds().map((kind): SourceRead<unknown> => {
+    const { items, unread } = read[kind.kind.kind], names: SourceRead<unknown>['names'] = new Map();
     for (const item of items) names.set(item.key, 'unreadable' in item ? { unreadable: item.unreadable } : { name: item.name, hash: item.hash, content: item.content, own: item.own });
-    const whole = read && !unread[kind.kind.kind].length && items.every(wasRead), link = pluginLink(entry.plugin, entry.marketName);
+    const whole = any && !unread && items.every(wasRead), link = pluginLink(entry.plugin, entry.marketName);
     return { id: entry.id, link, commitAt, kind: kind.kind.kind, mergeWith: kind.kind.merge, whole, names, recorded, plugin: { on: entry.on, outOf } };
   });
 }

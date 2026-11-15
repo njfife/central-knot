@@ -636,7 +636,7 @@ export const installedCopies = (context: PluginContext, tool: PluginTool): Promi
 });
 
 /** One item a tool has through an installed plugin: a skill, an agent or an MCP server, with the plugin it comes through. */
-export interface PluginPart extends ThroughPlugin { kind: PartKind; name: string; /** A skill's SKILL.md, to tell it from another skill of the same name. */ text?: string }
+export interface PluginPart extends ThroughPlugin { kind: PartKind; name: string; /** A skill's SKILL.md, an agent's file, an MCP server's entry as JSON: to tell it from another of the same name. */ text?: string }
 
 /**
  * What each of a tool's installed plugins gives it, by name: its skills in every tool, and its agents and MCP servers
@@ -654,8 +654,8 @@ export async function pluginParts(context: PluginContext, tool: PluginTool): Pro
     const add = (kind: PartKind, name: string, more: { off?: boolean; text?: string } = {}) => given.push({ kind, name, ...from, ...(off || more.off ? { off: true as const } : {}), ...(more.text === undefined ? {} : { text: more.text }) });
     for (const skill of contents.skills) add('skill', skill.name, { off: state.skillsOff?.some(entry => entry.skill === skill.name), text: skill.text });
     if (tool === 'codex-cli') continue;
-    for (const agent of contents.agents) add('agent', agent.name, { off: agentsOff?.includes(agent.name) });
-    for (const server of contents.mcpServers) add('mcp', server.name, { off: serversOff?.includes(server.name) });
+    for (const agent of contents.agents) add('agent', agent.name, { off: agentsOff?.includes(agent.name), text: agent.text });
+    for (const server of contents.mcpServers) add('mcp', server.name, { off: serversOff?.includes(server.name), text: server.entry });
   }
   return given;
 }
@@ -676,7 +676,7 @@ export async function linkedToPlugin(home: string, items: Record<string, Pick<Li
 /**
  * What each of `tools` has through its installed plugins, of one kind: by tool, then by the item's key on its page
  * (share.ts itemKey of its name). A name alone doesn't make two items one: the caller counts an item as the plugin's when the
- * library's item is linked to that plugin (linkedToPlugin) or, for a skill, when its SKILL.md is the same. A name two plugins
+ * library's item is linked to that plugin (linkedToPlugin) or its content is the same (each kind's own test). A name two plugins
  * hold goes by the first listed. Read once where `home` carries `reads` (one pass or one view), since the Skills, MCP servers
  * and Agents pages all ask.
  */

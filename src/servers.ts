@@ -34,7 +34,7 @@ import type { LibraryItem, Version, VersionChange } from './library.ts';
 import { copiesOf, leavingIn, lookFor, restore, runPass, sharedFileSeen, takeInAnswers, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords, writesWait } from './libraryrow.ts';
 import { mergeServer } from './merge.ts';
-import { cannotHold, editEntry, mcpFile, ownPartOf, readTool, recoverSettings, SERVER_PARTS, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
+import { cannotHold, editEntry, fromJson, mcpFile, ownPartOf, readTool, recoverSettings, SERVER_PARTS, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, readMcpSwitches, withMcpSwitch } from './mcpswitch.ts';
 import { linkedToPlugin, pluginHolds, throughPlugins, type GivenByPlugin } from './plugins.ts';
 import { mcpTools } from './presence.ts';
@@ -44,6 +44,7 @@ import type { SwitchFile } from './skillswitch.ts';
 import { sourceFacts } from './sources.ts';
 import type { Change, HarnessId, LibraryFacts, LibraryView, PassResult, SyncNotice, ThroughPlugin, ToolCopy } from './types.ts';
 import { throughPlugin, toolName } from './words.ts';
+import { record } from './values.ts';
 
 /** A server in one line, as its row and the copy question say it: "Command · npx -y docs", or "HTTP · https://…". */
 export const summary = (server: NeutralServer) =>
@@ -60,7 +61,7 @@ interface ServerDisk extends Disk<McpEntry> {
   shapes: Map<string, NeutralServer>;
   /** The names of servers seen only in a form never taken in (Disk.unseen says why), by key: each a row. */
   unseenNames: Map<string, string>;
-  /** What each tool has through its installed plugins, by key (only a server Central Knot installed elsewhere as that plugin's part). */
+  /** What each tool has through its installed plugins, by key (only the same server: serversThroughPlugins). */
   through: Map<HarnessId, Map<string, ThroughPlugin>>;
   /** Each tool's own switch file for servers, read once (mcpswitch.ts). */
   switches: Map<HarnessId, SwitchFile>;
@@ -81,8 +82,9 @@ async function readDisk(context: ShareContext, managed: HarnessId[], writeClaude
     held: (item, tool) => {
       const linked = disk.linked(item, tool);
       if (linked) return linked;
+      // A plugin installed there that brings the server is a way it has it: Central Knot's entry goes (library.ts THE RULE).
       const given = disk.through.get(tool)?.get(item.key);
-      if (given) return { why: throughPlugin(tool, given, 'MCP server') };
+      if (given) return { why: throughPlugin(tool, given, 'MCP server'), anotherWay: true };
       const why = cannotTake(disk, item, tool);
       return why ? { why } : undefined;
     },
@@ -132,12 +134,13 @@ const cannotTake = (disk: ServerDisk, item: Wanted, tool: HarnessId) => {
 
 /**
  * The servers each tool has through its installed plugins, by key: such a tool gets no entry of its own beside the plugin's.
- * Only the plugin's own server counts (a name alone could be another server): one the library holds linked to that plugin
- * (`items`: the servers' record).
+ * Only the same server counts (a name alone could be another server): one the library holds linked to that plugin (`items`:
+ * the servers' record), or one whose shared part is the item's current version (a source's item that the plugin brings too).
  */
 async function serversThroughPlugins(context: ShareContext, tools: HarnessId[], items: Record<string, LibraryItem>): Promise<ServerDisk['through']> {
   const all = await throughPlugins(context, tools, 'mcp'), linked = await linkedToPlugin(context.home, items);
-  const own = (given: Map<string, GivenByPlugin>) => [...given].flatMap(([key, { text: _text, ...plugin }]) => (linked(key, plugin) ? [[key, plugin] as const] : []));
+  const same = (key: string, name: string, entry?: string) => { const fields = entry === undefined ? undefined : record(JSON.parse(entry)); return !!fields && !items[key]?.deleted && fromJson(name, 'claude-cli', '', fields).hash === items[key]?.hash; };
+  const own = (given: Map<string, GivenByPlugin>) => [...given].flatMap(([key, { text, ...plugin }]) => (linked(key, plugin) || same(key, plugin.name ?? key, text) ? [[key, plugin] as const] : []));
   return new Map([...all].map(([tool, given]) => [tool, new Map(own(given))]));
 }
 

@@ -20,6 +20,7 @@ import { harnessIds } from './harnesses.ts';
 import { writeDurably, type ShareContext } from './share.ts';
 import { readRecord as readPartsRecord, type PartsRecord, type PluginNow } from './partsmigrate.ts';
 import { MARKET_UNREAD, SKILL_SWITCH_TESTED_FROM, copyDiffers, firstReadWaits, heldReason, keptReason, marketTitle, notCarried, recordUnread, toolNow, updateTools, versionToCompare, waitsToMove } from './pluginstatus.ts';
+import { readLink } from './sourcelink.ts';
 import { isFolder, isHttps, onlyAllowed, record, shortBuild } from './values.ts';
 import { leftOutSentence } from './words.ts';
 
@@ -490,13 +491,17 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /**
    * Adds a marketplace to Central Knot's own list (installs nothing, adds nothing to any tool). It is read first, and only
-   * a readable one is added; that read is kept as its catalog. Returns the new view and the source as the view spells it
-   * (a source already listed under another spelling keeps its first spelling).
+   * a readable one is added; that read is kept as its catalog. Returns the new view, the source as the view spells it (a source
+   * already listed under another spelling keeps its first spelling), and whether it was on the page already (`already`: on this
+   * list, or added in a tool or by the build). A web link to a branch or a folder is refused: a marketplace is read at its
+   * repository's root, from its default branch (Sources' Look reads such a link: sources.ts handOff).
    */
-  async function add(source: string): Promise<{ problem?: string; view?: PluginsView; source?: string }> {
+  async function add(source: string): Promise<{ problem?: string; view?: PluginsView; source?: string; already?: true }> {
     const text = source.trim();
     if (text.startsWith('-')) return { problem: 'That isn’t a marketplace: owner/repo, a Git URL or a folder.' };
     if (/^(\.\.?|~)([\\/]|$)/.test(text)) return { problem: 'Use the folder’s full path, or choose it with Folder…' };
+    const link = isFolder(text) ? undefined : readLink(text);
+    if (link && 'rest' in link && link.rest) return { problem: 'That link names a branch or a folder, and a marketplace is added from its repository’s address (owner/repo, or one git clones), read at its root from its default branch. Paste the link on Sources instead: Look there says what it holds, and offers Add to Plugins for a marketplace this page can add.' };
     const ctx = await context();
     // A Git source is asked for access before it is fetched: one that can't be read adds nothing and copies nothing (MKT-05).
     const access = isFolder(text) ? undefined : await use.checkAccess(ctx, text);
@@ -509,8 +514,9 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const stored = listedAs ?? text;
     // The read just made is the catalog: the view uses it instead of fetching again.
     if (!isFolder(stored)) fetched.set(stored, { catalog });
-    const shown = await view();
-    return { view: shown, source: shown.marketplaces.find(entry => engine.sameSource(entry.source, stored))?.source ?? stored };
+    const shown = await view(), listed = shown.marketplaces.find(entry => engine.sameSource(entry.source, stored));
+    const already = !!listedAs || !!listed?.origins.some(origin => origin !== 'central-knot');
+    return { view: shown, source: listed?.source ?? stored, ...(already ? { already } : {}) };
   }
 
   /** A suggested marketplace the person doesn't want offered: remembered, and not offered again. `again`: offer it again after all (its Undo). */

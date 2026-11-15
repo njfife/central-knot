@@ -256,7 +256,7 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
     commands: await markdownIn(root, folder, listedOr('commands', join(folder, 'commands'))),
     agents: await markdownIn(root, folder, listedOr('agents', join(folder, 'agents'))),
     hooks: Object.keys(hooks).sort(),
-    mcpServers: Object.entries(servers).map(([name, server]) => ({ name, runs: serverRuns(server) })).sort((first, second) => first.name.localeCompare(second.name)),
+    mcpServers: Object.entries(servers).map(([name, server]) => ({ name, runs: serverRuns(server), entry: JSON.stringify(server) })).sort((first, second) => first.name.localeCompare(second.name)),
     mcpUsesPluginRoot: JSON.stringify(servers).includes('${CLAUDE_PLUGIN_ROOT}'),
     lspServers: Object.keys(lsp).sort(),
     bin: (await listInside(root, folder)).includes('bin'),
@@ -277,14 +277,16 @@ export interface PluginFiles {
   /** The plugin's folder: a server's relative paths are checked against it. */
   folder: string;
   skills: { name: string; dir: string }[];
-  agents: { name: string; text: string; whole: boolean }[];
+  /** Each agent's file: its name, its path from `folder`, its text, and whether that text is all of it. */
+  agents: { name: string; path: string; text: string; whole: boolean }[];
   servers: Record<string, unknown>;
   /**
    * What is there but couldn't be read: skills and agents by name, or '*' when a folder of them (or plugin.json, which may
-   * name other folders) couldn't be read; `servers` when a servers file isn't readable JSON. An update keeps those parts
-   * as installed rather than reading their absence as the plugin dropping them.
+   * name other folders) couldn't be read; `servers` when a servers file isn't readable JSON; `manifest` when that was its
+   * plugin.json (then every kind has '*' or `servers`). An update keeps those parts as installed rather than reading their
+   * absence as the plugin dropping them.
    */
-  unread: { skills: string[]; agents: string[]; servers: boolean };
+  unread: { skills: string[]; agents: string[]; servers: boolean; manifest: boolean };
 }
 /** A plugin's parts as Claude Code reads them (the same readers as pluginContents), with the files to copy. */
 export async function pluginFiles(folder: string, entry: Record<string, unknown>, root: string): Promise<PluginFiles> {
@@ -295,14 +297,14 @@ export async function pluginFiles(folder: string, entry: Record<string, unknown>
   const manifest = join(folder, '.claude-plugin/plugin.json');
   const manifestUnread = !(await pluginManifest(folder, root)) && await present(manifest);
   const servers = await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json');
-  const unread = { skills: manifestUnread ? ['*'] : [] as string[], agents: manifestUnread ? ['*'] : [] as string[], servers: servers.unread || manifestUnread };
+  const unread = { skills: manifestUnread ? ['*'] : [] as string[], agents: manifestUnread ? ['*'] : [] as string[], servers: servers.unread || manifestUnread, manifest: manifestUnread };
   const skills = (await skillsOf(folder, entry, root, {}, unread.skills)).map(part => join(folder, part.path));
   const agents: PluginFiles['agents'] = [];
   for (const part of await markdownIn(root, folder, listedOr('agents', join(folder, 'agents')), unread.agents)) {
     // Read again with its size known: a part copied as an item is never a cut copy.
     const file = join(folder, part.path);
     const read = await readInside(root, file, PART_FILE_LIMIT);
-    if (read) agents.push({ name: agentName(file), text: read.text, whole: read.whole });
+    if (read) agents.push({ name: agentName(file), path: part.path, text: read.text, whole: read.whole });
     else unread.agents.push(agentName(file));
   }
   return { folder, skills: skills.map(dir => ({ name: basename(dir), dir })), agents, servers: servers.values, unread };

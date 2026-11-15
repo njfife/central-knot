@@ -62,9 +62,10 @@
 // "Held" has two reasons, both worked out at each look and never stored: it can't be given the item (a name it can't store, a
 // folder it can't write, or for an agent in Pi, which keeps agents as skills, a skill of that name there, of which Pi would
 // load only one: a folder, a link to one, or a loose file Central Knot didn't put there; agents.ts agentHeld), or it has the
-// item another way (`anotherWay`, which only skills answer: through a plugin, OpenCode
-// reading Claude Code's folder while the item is wanted there, a link, or a copy in ~/.agents/skills that Central Knot doesn't
-// own; agents and MCP servers count a plugin that brings the item as a reason it can't be given it). Only the second lets A go,
+// item another way (`anotherWay`: for every kind, through a plugin installed there that brings the same item, linked to it or
+// of the same content (skills.ts pluginFor, agents.ts agentsThroughPlugins, servers.ts serversThroughPlugins); for skills also
+// OpenCode reading Claude Code's folder while the item is wanted there, a link, or a copy in ~/.agents/skills that Central Knot
+// doesn't own). Only the second lets A go,
 // since Central Knot's copy is not what the harness has. The kind answers (librarypass.ts Disk.held, told where the item is
 // wanted); tests/librarypass.test.ts has a reader on a toy kind. A harness can have the item another way and hold a copy of its
 // own as well (a copy in ~/.agents/skills beside one in its own folder): that copy is `present` with `anotherWay` (the table's
@@ -131,14 +132,21 @@
 //                                        linked to another source,   brings a deleted one back, Off, as a new one comes
 //                                        or deleted
 //
+// A skill at a link is keyed by its SKILL.md's name wherever it is read from: a link to its folder, to a folder of skills, or to a
+// plugin's own folder (atlink.ts pluginItems, `link` route). A plugin's skill a marketplace lists is keyed by its folder's name, as
+// every tool's copy of it is named (A PLUGIN, below; pluginItems, `marketplace` route). Two routes, two key rules: where a skill's
+// folder and SKILL.md name differ, the same skill through both is two items in Pi and OpenCode (pluginlibrary.ts's known miss).
+//
 // "Read whole", for one kind (each kind a source brings has a read of its own, by its own keys): the source was fetched, the
-// link's folder is there and is no plugin or marketplace, at least one item of any kind there was read, and every item of this
+// link's folder is there and is no marketplace, and no plugin its repository's marketplace lists (atlink.ts holdsAt; a plugin's
+// own folder is read as a link's folder, plus what its files hold elsewhere), at least one item of any kind there was read, and every item of this
 // kind there was read (atlink.ts readOf decides it, the one place). An item was read when it can be brought in, or when it is
 // left out by a rule (atlink.ts ItemThere `leftOut`: two of one name, a server that runs files from the repository, say); one
 // that couldn't be read (a broken file, an entry with no command) was not. A source where nothing was read (its one skill
-// deleted there, every one unreadable, its folder gone, a plugin) is not read whole: no name is gone, and the source turns
+// deleted there, every one unreadable, its folder gone, a marketplace) is not read whole: no name is gone, and the source turns
 // nothing Off. So a source that drops every agent and keeps a skill turns its agents Off; one agent there that can't be read
-// holds back only the agents' drops, a .mcp.json that can't be read every server's, and an item left out none. Skills, agents
+// holds back only the agents' drops, a .mcp.json that can't be read every server's, a plugin's plugin.json that can't be read
+// every kind's, and an item left out none. Skills, agents
 // and MCP servers are the kinds a source brings in this version.
 //
 // EACH TOOL'S OWN FIELDS FROM A SOURCE (an agent's `tools` or `model`, a server's `timeout`, say; a version holds the shared
@@ -219,7 +227,8 @@
 // A PLUGIN (pluginlibrary.ts) is the other kind of source: a plugin whose skills, agents and MCP servers are written as items in
 // Pi and OpenCode, which have no plugin installer. Its id is its plugins.json entry's (pluginrecord.ts PluginEntry `id`), its link
 // sourcelink.ts pluginLink's ("the plugin pdf", never a Git link), and it is read from its marketplace's copy at a click that
-// brings it into a tool, at its Update and at the automatic updates' check (pluginlibrary.ts says when). Its read (SourceSeen
+// brings it into a tool, at its Update and at the automatic updates' check (pluginlibrary.ts says when); a skill of it is keyed by
+// its folder's name (A SOURCE says both key rules). Its read (SourceSeen
 // `plugin`) meets the table above but for these rows, each decided in fromSource by that one field:
 //
 //   at the plugin                       the item                    what happens

@@ -1024,6 +1024,7 @@ span.ins-confirm { margin-top: 0; }
 .market-add-input, .market-find { box-sizing: border-box; width: 100%; height: 30px; padding: 0 10px; border: 1px solid var(--control-line); border-radius: 7px; background: var(--surface); color: var(--ink); font: inherit; font-size: 12.5px; }
 .market-add-input:focus, .market-find:focus { outline: 2px solid var(--focus); outline-offset: -1px; }
 .market-add-actions { display: flex; gap: 6px; }
+.market-add-note { margin: 4px 6px 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .market-empty-add { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .market-empty-add .market-add { width: 360px; max-width: 100%; text-align: left; }
 /* Suggested marketplaces: under the list (and under the add box on the empty page), each a name, whose default it is, Add and a way to say no. */
@@ -1278,6 +1279,9 @@ span.ins-confirm { margin-top: 0; }
   .market-list > .market-suggested .market-suggestion-meta { display: none; }
   .market-add-head { display: none; }
   .market-add-input { width: 240px; }
+  /* The line to Sources takes a line of its own under the strip, as the suggestions do. */
+  .market-list:has(> .market-add-note) { flex-wrap: wrap; row-gap: 6px; }
+  .market-list > .market-add-note { order: 2; flex: 1 0 100%; margin: 0; }
   .plugins-page { --market-gutter: 16px; }
   /* Less height around the table, and two-line rows (the name, then what it holds and what it does), so several show. */
   .market-page, .plugin-page { padding-top: 12px; }

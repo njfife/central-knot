@@ -17,7 +17,8 @@
 //   of it, is atlink.ts's (holdsAt, readOf: whether it was read whole is decided there);
 // - the clicks: Look (previewSource: what Add would do, name by name, before anything is kept), Add, Check now, a click on one
 //   name's line in its kind (rowClick: Add on one the library holds deleted; Replace, Merge and Keep mine on one whose version
-//   waits) and Remove;
+//   waits) and Remove; and whether Look hands a marketplace to the Plugins page (handOff: Add to Plugins is the Plugins page's
+//   own add, marketplaces.ts add, which the page calls; no source is made, and nothing is kept here);
 // - the check once a day (checkDue: the rhythm is here, main.ts only calls it on its schedule's turn, with Automatic sync on);
 // - what the table says, as the pages show it: the Sources page's view (sourcesView) and each linked or removed item's row on
 //   its kind's page (sourceFacts), both from the same answers the pass carries out, with the tools read now.
@@ -51,7 +52,8 @@ import { applySkills, skillKind } from './skills.ts';
 import type { SkillContent } from './skillstore.ts';
 import { copyOf, lookOf, readSources, recordedIds, saveSources, sourcesFolder, stageOf, type Recorded, type SourceRecord } from './sourcestore.ts';
 import { linkLabel, readLink, splitRef } from './sourcelink.ts';
-import type { Change, DestinationResult, HarnessId, LibraryFacts, PassResult, SourceFound, SourceName, SourcePreview, SourceResult, SourceRowClick, SourcesView, SourceView } from './types.ts';
+import type { Change, DestinationResult, HarnessId, LibraryFacts, PassResult, SourceFound, SourceName, SourcePreview, SourceResult, SourceRowClick, SourcesView, SourceView, ToPlugins } from './types.ts';
+import { githubRepo } from './values.ts';
 
 /** A link as resolved before it is fetched: what a source records of where it reads (its `ref` always a branch or tag's name). */
 type Resolved = Pick<SourceRecord, 'link' | 'repository' | 'ref' | 'folder'>;
@@ -185,20 +187,34 @@ async function theGitRepo(context: ShareContext, repository: string): Promise<st
 
 /**
  * A link, read and resolved to a repository, a branch or tag (the one the link names, else the default branch's name) and a
- * folder. Refused when it is no link, is the Git repo Pull and Push use, names a branch the repository hasn't, or names none
- * and the repository says no default branch.
+ * folder, with the default branch's name (`head`, never stored: handOff reads it). Refused when it is no link, is the Git repo
+ * Pull and Push use, names a branch the repository hasn't, or names none and the repository says no default branch.
  */
-async function resolve(context: ShareContext, link: string): Promise<Resolved | { refused: string }> {
+async function resolve(context: ShareContext, link: string): Promise<{ where: Resolved; head?: string } | { refused: string }> {
   const read = readLink(link);
   if ('refused' in read) return read;
   const isRepo = await theGitRepo(context, read.repository);
   if (isRepo) return { refused: isRepo };
-  const listed = await refsOf(read.repository);
+  const listed = await refsOf(read.repository), at = { link: link.trim(), repository: read.repository };
   if ('problem' in listed) return { refused: listed.problem };
-  if (!read.rest) return listed.head ? { link: link.trim(), repository: read.repository, ref: listed.head, folder: '' }
+  if (!read.rest) return listed.head ? { where: { ...at, ref: listed.head, folder: '' }, head: listed.head }
     : { refused: 'The repository doesn’t say which branch is its default. Paste a link to the branch (…/tree/<branch>).' };
   const split = splitRef(read.rest, listed.refs);
-  return split ? { link: link.trim(), repository: read.repository, ...split } : { refused: `The repository has no branch or tag named ${read.rest[0]}, or by any longer name this link starts with.` };
+  return split ? { where: { ...at, ...split }, head: listed.head } : { refused: `The repository has no branch or tag named ${read.rest[0]}, or by any longer name this link starts with.` };
+}
+
+/**
+ * Whether Look hands what a link holds to the Plugins page (the one place it is decided): a marketplace, or a plugin its
+ * repository's marketplace lists (atlink.ts holdsAt), whose marketplace the Plugins page can add as it adds one (marketplaces.ts
+ * add): at its repository's root, read from its default branch (`head`, as resolve found it). Answers the hand-off (the address
+ * that page adds: owner/repo on GitHub, else the repository as git fetches it), or why not, in words; none for anything else.
+ */
+function handOff(where: Resolved, head: string | undefined, found: Holds): { toPlugins: ToPlugins } | { why: string } | undefined {
+  if ((found.holds !== 'marketplace' && found.holds !== 'listed') || !found.market || 'problem' in found.market) return undefined;
+  const rule = 'the Plugins page adds a marketplace from its repository’s default branch, at its root';
+  if (found.holds === 'marketplace' && where.folder) return { why: `It is in the folder ${where.folder}, not at its repository’s root, and ${rule}. To use it, clone the repository and add that folder in it with Folder… on Plugins.` };
+  if (where.ref !== head) return { why: `It was read on ${where.ref}, not ${head ? `the default branch, ${head}` : 'a default branch'}, and ${rule}. To use it, clone that branch and add the clone’s folder with Folder… on Plugins.` };
+  return { toPlugins: { address: githubRepo(where.repository) ?? where.repository, name: found.market.name, plugins: found.market.plugins } };
 }
 
 /** Fetches a source's branch into `target` (made whole or not at all), and reads its head: the commit and its time. */
@@ -224,27 +240,28 @@ export async function previewSource(context: ShareContext, tools: HarnessId[], l
   if ('refused' in gate) return refuse(gate.refused);
   const { sources, problem } = await readSources(context.home);
   if (problem) return refuse(problem);
-  const where = await resolve(context, link);
-  if ('refused' in where) return refuse(where.refused);
+  const resolved = await resolve(context, link);
+  if ('refused' in resolved) return refuse(resolved.refused);
+  const { where, head } = resolved;
   if (twinOf(sources, where)) return refuse('That link is a source already: its row is below.');
   await mkdir(sourcesFolder(context.home), { recursive: true });
   for (const name of await readdir(sourcesFolder(context.home))) if (name.startsWith('.look-')) await rm(join(sourcesFolder(context.home), name), { recursive: true, force: true });
   const token = randomUUID(), look = lookOf(context.home, token);
   const fetched = await fetchInto(where, look);
   if ('problem' in fetched) return refuse(fetched.problem);
-  const resolved = { ...where, ...fetched };
-  await writeDurably(`${look}.json`, JSON.stringify(resolved));
-  const found = await holdsAt(look, resolved.folder, resolved.repository, sourceKinds());
+  const read = { ...where, ...fetched };
+  await writeDurably(`${look}.json`, JSON.stringify(read));
+  const found = await holdsAt(look, read.folder, read.repository, sourceKinds());
   // Read as Add will record it: a source of this look's own id, among those the home records.
-  const names = linesOf({ ...resolved, id: token, readAt: '', addedAt: '' }, found, await librariesNow(context, tools), await recordedIds(context.home));
-  const refused = nothingToAddWhy(found, resolved);
-  return { ...foundOf(resolved, found, names), token, ...(refused ? { refused } : {}) };
+  const names = linesOf({ ...read, id: token, readAt: '', addedAt: '' }, found, await librariesNow(context, tools), await recordedIds(context.home));
+  const offer = handOff(read, head, found), refused = [nothingToAddWhy(found, read), offer && 'why' in offer ? offer.why : ''].filter(Boolean).join(' ');
+  return { ...foundOf(read, found, names), token, ...(refused ? { refused } : {}), ...(offer && 'toPlugins' in offer ? { toPlugins: offer.toPlugins } : {}) };
 }
 
 const foundOf = (source: Resolved & Partial<Pick<SourceRecord, 'commit' | 'commitAt'>>, found: Holds, names: SourceName[]): SourceFound => {
   const unread = unreadWhy(found, source);
   return { link: source.link, repository: source.repository, ref: source.ref, folder: source.folder, commit: source.commit, commitAt: source.commitAt, holds: found.holds, names,
-    ...(unread ? { unread } : {}) };
+    ...(unread ? { unread } : {}), ...(found.notComing ? { notComing: found.notComing } : {}) };
 };
 
 /**

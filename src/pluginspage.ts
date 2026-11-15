@@ -41,6 +41,10 @@ function addBox(first: boolean) {
       button({ variant: 'outline', size: 'small', icon: 'folder-plus', label: 'Folder…', name: 'Choose a marketplace folder', id: 'pick-marketplace-folder', disabled: !!app.busy, onclick: () => void pickMarketplaceFolder().then(folder => { if (folder) void addMarketplace(folder); }) })));
 }
 
+/** Under the open add box: a link that is no marketplace goes on Sources. */
+const toSources = () => h('p.market-add-note', {}, `Any other link, to a folder of skills, agents or MCP servers, or to one plugin, goes on `,
+  button({ variant: 'link', size: 'micro', label: 'Sources', id: 'market-add-to-sources', onclick: () => showPage('sources') }), '.');
+
 /**
  * Marketplaces offered without being looked for (suggested.ts): each named with the tools here it is the default of, an
  * Add button and a way to say no for good. Nothing is fetched or listed until Add. `first`: on the empty page, where they
@@ -77,7 +81,7 @@ function marketList(view: PluginsView, shown: MarketplaceView) {
       h('span.market-item-name', {}, marketLogo(entry), marketTitle(entry)), h('span.market-item-meta', {}, meta)));
   };
   return h('nav.market-list', { 'aria-label': 'Marketplaces' },
-    h('h2.market-list-title', {}, 'Marketplaces'), h('ul', {}, view.marketplaces.map(item)), suggestions(view), addBox(false));
+    h('h2.market-list-title', {}, 'Marketplaces'), h('ul', {}, view.marketplaces.map(item)), suggestions(view), addBox(false), market.addOpen ? toSources() : null);
 }
 
 /** One row per plugin: its switch, what it is and holds, and each tool's mark. The row opens the plugin's page. */
@@ -443,6 +447,7 @@ export function pluginsPage() {
   const empty = emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a Git repository or folder that lists plugins. Adding one installs nothing.',
     h('div.market-empty-add', {},
       addBox(true),
+      toSources(),
       suggestions(view, true),
       h('p.empty-aside', {}, `Marketplaces you added in ${orList(view.tools.filter(takesPlugins).map(tool => names[tool]))} show up here by themselves.`)));
   return h('div.page.plugins-page', {},
