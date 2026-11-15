@@ -124,7 +124,7 @@ const librariesNow = (context: ShareContext, tools: readonly HarnessId[]) =>
 function namesOf(source: SourceRecord, found: Holds, entry: SourceKind, { items, copies }: Awaited<ReturnType<typeof libraryNow>>, sources: SourceRecord[]): SourceName[] {
   const there = itemsOf(found, entry), read = readOf(source, found, entry, recordedOf(sources)), kind = entry.kind.kind;
   const answers = [...sourceAnswers(items, read, read.recorded, { copies })].filter(([key]) => there.some(one => one.key === key) || !items[key]?.deleted);
-  // An item whose name can't be read is keyed by its folder's name; where no item has that name, it may be the one item missing.
+  // An item whose name can't be read is keyed by its folder's or file's name; where no item has that name, it may be the one item missing.
   const absent = answers.filter(([key]) => !there.some(one => one.key === key)), nameless = there.filter(one => 'unreadable' in one && !one.name && !items[one.key]);
   const sameOne = absent.length === 1 && nameless.length === 1 ? { item: absent[0][0], there: nameless[0].key } : undefined;
   return answers.filter(([key]) => key !== sameOne?.there).map(([key, answer]): SourceName => {

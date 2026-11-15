@@ -130,13 +130,14 @@
 //                                        or deleted
 //
 // "Read whole", for one kind (each kind a source brings has a read of its own, by its own keys): the source was fetched, the
-// link's folder is there and is no plugin or marketplace, at least one item of any kind there can be read, and every item of
-// this kind there was read (atlink.ts readOf decides it, the one place; one read and left out by a rule, such as a server that
-// runs files from the repository, counts as read: atlink.ts ItemThere `leftOut`). A source that holds no item that can be read
-// (its one skill deleted there, every one unreadable, its folder gone, a plugin) is not read whole: no name is gone, and the
-// source turns nothing Off. So a source that drops every agent and keeps a skill turns its agents Off, and one agent there
-// that can't be read holds back only the agents' drops; a .mcp.json that can't be read holds back every server's. Skills,
-// agents and MCP servers are the kinds a source brings in this version.
+// link's folder is there and is no plugin or marketplace, at least one item of any kind there was read, and every item of this
+// kind there was read (atlink.ts readOf decides it, the one place). An item was read when it can be brought in, or when it is
+// left out by a rule (atlink.ts ItemThere `leftOut`: two of one name, a server that runs files from the repository, say); one
+// that couldn't be read (a broken file, an entry with no command) was not. A source where nothing was read (its one skill
+// deleted there, every one unreadable, its folder gone, a plugin) is not read whole: no name is gone, and the source turns
+// nothing Off. So a source that drops every agent and keeps a skill turns its agents Off; one agent there that can't be read
+// holds back only the agents' drops, a .mcp.json that can't be read every server's, and an item left out none. Skills, agents
+// and MCP servers are the kinds a source brings in this version.
 //
 // EACH TOOL'S OWN FIELDS FROM A SOURCE (an agent's `tools` or `model`, a server's `timeout`, say; a version holds the shared
 // part only). Each file at the link is in one tool's form (atlink.ts agentsAt; a .mcp.json is Claude Code's: serversAt). Where
