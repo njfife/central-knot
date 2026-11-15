@@ -2673,9 +2673,26 @@ if (wanted('plugin-library')) {
   rmSync(join(market, 'plugins/issue-tracker/skills/triage'), { recursive: true, force: true });
   await refresh(); await waitFor(a, `!!document.querySelector('#pupdate-0-issue-tracker')`, 15000);
   await a.click('#pupdate-0-issue-tracker'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle();
+  await a.click('#nav-skills'); await waitFor(a, `!!document.querySelector('.sync-notice[data-kind="dropped"]')`, 15000);
+  await atEverySize('dropped-notice', 'Update read issue-tracker, which no longer has triage: on Skills the notice says triage: the plugin issue-tracker no longer has it, so it is off, Central Knot keeps it, with Turn on (as your own) and History', true, '.sync-notice[data-kind="dropped"]');
+  await a.click('#nav-plugins');
   writeFileSync(join(market, 'plugins/issue-tracker/.mcp.json'), JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp', '--v2'] } } }));
   await refresh(); await waitFor(a, `/An update is ready/.test(document.querySelector('.plugin-items-section')?.textContent ?? '')`, 15000);
-  await atEverySize('items-page', 'issue-tracker turned on in a home with Pi and no tool’s command-line tool: Your tools has Pi’s line, “Its items are on”, and Claude Code’s, Copilot CLI’s and Codex’s, each “Not available” (its command-line tool wasn’t found, so its plugin commands can’t run); the plugin then dropped triage (Update turned it off) and changed issues: Its items lists MCP server issues, “An update is ready: Update brings it in”, and skill triage, “Removed by the plugin’s update, so it is off. Turning it on keeps it as yours”, with Update at the top', true, '.plugin-items-section');
+  await atEverySize('items-page', 'issue-tracker turned on in a home with Pi and no tool’s command-line tool: Your tools has Pi’s line, “1 of its 1 items is on” (triage, dropped, is no longer the plugin’s), and Claude Code’s, Copilot CLI’s and Codex’s, each “Not available” (its command-line tool wasn’t found, so its plugin commands can’t run); the plugin then dropped triage (Update turned it off) and changed issues: Its items lists MCP server issues, “An update is ready: Update brings it in”, and skill triage, “Removed by the plugin’s update, so it is off. Turning it on keeps it as yours”, with Update at the top', true, '.plugin-items-section');
+  await a.click('#nav-mcp'); await openRow('issues');
+  // document-tools on too, with a third skill, charts; pdf-reader then edited in Pi (let go as his own) and spreadsheet deleted from Central Knot.
+  mkdirSync(join(market, 'plugins/document-tools/skills/charts'), { recursive: true });
+  writeFileSync(join(market, 'plugins/document-tools/skills/charts/SKILL.md'), '---\nname: charts\ndescription: Draws a chart from a table.\n---\nDraw it.\n');
+  await a.click('#nav-plugins'); await refresh(); if (await a.has('#plugin-back')) await a.click('#plugin-back');
+  await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('#pswitch-page-0-document-tools')`, 15000);
+  await a.click('#pswitch-page-0-document-tools'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle();
+  edit(join(practice, '.pi/agent/skills/pdf-reader/SKILL.md'), text => `${text}\nMy own way of reading PDFs.\n`);
+  await refresh(); await a.click('#nav-skills'); await waitFor(a, `!!document.querySelector('.sync-notice[data-kind="let-go"]')`, 15000);
+  await openRow('pdf-reader');
+  await atEverySize('let-go-row', 'pdf-reader was edited in Pi: on Skills the notice says it is your own now, no longer following the plugin document-tools, that it stays in the tools that have it and its row lets it into the others; its row says Pi only, with no “from the plugin”, and its versions keep the plugin’s', true, '.ov-row[data-key="pdf-reader"]', 'start');
+  await openRow('spreadsheet'); await a.click('#delete-spreadsheet'); await a.click('#delete-confirm-spreadsheet'); await a.settle();
+  await a.click('#nav-plugins'); await refresh(); await waitFor(a, `/you deleted it/.test(document.querySelector('.plugin-items-section')?.textContent ?? '')`, 15000);
+  await atEverySize('own-and-deleted', 'document-tools’ page: Its items lists skill charts (plain: on in Pi), skill pdf-reader “Not brought in: you have your own”, and skill spreadsheet, deleted from Central Knot, “Not brought in: you deleted it; History’s Restore, or the plugin’s next On, brings it back”', true, '.plugin-items-section');
   await a.click('#nav-mcp'); await openRow('issues');
   await atEverySize('item-row', 'On MCP servers, issues is on in Pi with “from the plugin issue-tracker” after its name; opened, Claude Code’s, Copilot CLI’s and Codex’s lines say it comes only with the plugin, which isn’t installed there, and the line at the end says it is from the plugin issue-tracker, follows it in the tools that take no plugins, and that a change made here makes it yours, with a link to Plugins', true, '.ov-row[data-key="issues"]', 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);

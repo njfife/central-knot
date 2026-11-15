@@ -161,7 +161,10 @@ export const routeOf = (entry: MarketplaceView, plugin: string): 'parts' | 'item
 /** Whether the tool has the plugin's items: "has it" for Pi and OpenCode, as pluginlibrary.ts onIn counted it for the view. */
 export const itemsIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) => !!entry.items?.[plugin]?.on[tool];
 /** "2 of its 3 items are on", in one tool. */
-export const itemsOnWords = (entry: MarketplaceView, plugin: string, tool: HarnessId) => `${entry.items?.[plugin]?.on[tool] ?? 0} of its ${entry.items?.[plugin]?.of ?? 0} items are on`;
+export const itemsOnWords = (entry: MarketplaceView, plugin: string, tool: HarnessId) => {
+  const on = entry.items?.[plugin]?.on[tool] ?? 0;
+  return `${on} of its ${entry.items?.[plugin]?.of ?? 0} items ${on === 1 ? 'is' : 'are'} on`;
+};
 
 /** This plugin's parts in a tool, when they were installed there as separate items (parts.ts). */
 export const partsOf = (entry: MarketplaceView, plugin: string, tool: HarnessId): PartsState | undefined => entry.parts?.[plugin]?.[tool];
