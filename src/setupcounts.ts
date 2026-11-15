@@ -12,8 +12,7 @@ type PageKind = 'skills' | 'mcp' | 'agents';
 
 /**
  * Whether the home is asked first setup's question now: never answered (types.ts SyncView syncEverything absent), a tool managed
- * (with none, the Overview points to Harnesses instead), and writable by this build (not preview only, not another build's, its
- * record whole). In a home that waits for Resume, Resume comes first (`resume`), and the question after it.
+ * (with none, the Overview points to Harnesses instead), and writable by this build (not preview only, its record whole). In a home that waits for Resume, Resume comes first (`resume`), and the question after it.
  */
 export function asksNow(home: HomeView): 'question' | 'resume' | undefined {
   const { syncEverything, managed, access, gate } = home.sync;

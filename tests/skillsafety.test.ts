@@ -1,7 +1,8 @@
 // Skills' safety on real folders: what a pass refuses and writes nothing for (a damaged, missing, foreign or newer record; a
-// home that reaches the person's real configuration; another build's home), and what a skill's folder is (bytes and modes,
-// no nested .git, no Finder or editor leftovers; odd names as keys). The skills kind is src/skills.ts; these hold for every
-// kind, through src/share.ts's gates (syncGate, writeAccess, takeOverSync), and are shown here on skills.
+// home that reaches the person's real configuration), a record another build wrote and its take-over, and what a skill's
+// folder is (bytes and modes, no nested .git, no Finder or editor leftovers; odd names as keys). The skills kind is
+// src/skills.ts; these hold for every kind, through src/share.ts's gates (syncGate, writeAccess) and takeOverSync, and are
+// shown here on skills.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -9,10 +10,9 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
-import { libraryGate, managedNow, readRecord, saveRecord, storeDirectory, syncGate, takeOverSync, writeAccess, type ShareContext } from '../src/share.ts';
+import { managedNow, readRecord, storeDirectory, syncGate, takeOverSync, writeAccess, type ShareContext } from '../src/share.ts';
 import { applySkills, skillsView } from '../src/skills.ts';
 import type { Change, HarnessId, Snapshot } from '../src/types.ts';
-import { lineApp, releaseLine } from '../src/updates.ts';
 
 const both: HarnessId[] = ['claude-cli', 'copilot-cli'];
 const CLAUDE = '.claude/skills', COPILOT = '.copilot/skills';
@@ -164,7 +164,7 @@ test('Odd valid names sync and are remembered: constructor, __proto__ and long n
   } finally { await box.cleanup(); }
 });
 
-test('Every stop writes nothing: damaged, missing, another generation, a newer format and another owner', async () => {
+test('Every stop writes nothing: damaged, missing, another generation and a newer format', async () => {
   const box = await sandbox();
   try {
     await skill(box.home, CLAUDE, 'solo');
@@ -185,7 +185,6 @@ test('Every stop writes nothing: damaged, missing, another generation, a newer f
     await attempt(null, /missing/);
     await attempt(JSON.stringify({ ...record, generation: 'other' }), /not the one/);
     await attempt(JSON.stringify({ ...record, formatVersion: record.formatVersion + 1 }), /newer/);
-    await attempt(JSON.stringify({ ...record, owner: 'someone-else' }), /Another Central Knot build \(someone-else\) syncs this home, so nothing was written or deleted\. Take over syncing/);
     await writeFile(path, good);
     assert.equal((await apply(ctx(box), [manage('new-one')])).writes, 1, 'restoring the record then retrying works');
   } finally { await box.cleanup(); }
@@ -285,69 +284,46 @@ test('Real home: written only when allowed; a relative override stops it and an 
   } finally { await box.cleanup(); }
 });
 
-test('One build syncs a home at a time: the other names the owner, and Take over syncing carries on from the same record', async () => {
+test('A record another build wrote is read by its generation alone: no memory of it here, Resume; resumed, a pass writes and the record still names that build', async () => {
   const box = await sandbox();
   try {
-    await skill(box.home, '.claude/skills', 'notes');
-    // Two builds on one home, each with its own settings.
+    await skill(box.home, CLAUDE, 'notes');
     const standard = ctx(box, { build: 'com.centralknot.firstlook', buildName: 'Central Knot', settingsPath: join(box.base, 'standard-settings.json') });
     const acme = ctx(box, { build: 'com.centralknot.custom.acme', buildName: 'Acme Knot', settingsPath: join(box.base, 'acme-settings.json') });
-    // The standard app manages a skill: the home is its to sync.
     assert.equal((await apply(standard, [manage('notes')])).stopped, undefined);
-    assert.equal((await syncGate(standard)).state, 'ready');
-    const owned = (await readRecord(box.home)).record!;
-    assert.deepEqual([owned.owner, owned.ownerName], ['com.centralknot.firstlook', 'Central Knot']);
-    // The custom build finds it owned: it names the owner and writes nothing.
-    assert.deepEqual(await syncGate(acme), { state: 'stopped', reason: 'Central Knot syncs this home, so nothing was written or deleted. Take over syncing to have Acme Knot sync it instead.', owner: { build: 'com.centralknot.firstlook', name: 'Central Knot' } });
-    const before = await snapshotTree(box.home);
-    assert.match((await apply(acme, [manage('notes')])).stopped ?? '', /^Central Knot syncs this home/);
-    assert.deepEqual(await snapshotTree(box.home), before);
-    // Take over syncing: the same record and generation under the new owner, and the same skills. Nothing is set up again.
-    assert.deepEqual(await takeOverSync(acme), { from: 'Central Knot' });
-    const taken = (await readRecord(box.home)).record!;
-    assert.deepEqual([taken.owner, taken.ownerName, taken.generation], ['com.centralknot.custom.acme', 'Acme Knot', owned.generation]);
-    assert.equal((await syncGate(acme)).state, 'ready');
-    assert.equal((await view(acme)).items.find(item => item.key === 'notes')?.on, true);
-    // The build that owned it now finds the other one, by name, and stops; taking over again changes nothing for the new owner.
-    const stopped = await syncGate(standard);
-    assert.ok(stopped.state === 'stopped' && stopped.owner?.name === 'Acme Knot', JSON.stringify(stopped));
-    assert.deepEqual(await takeOverSync(acme), {});
-    // A pass the standard app had under way when it was taken over stops at its next save: it can't take the home back by finishing.
-    const stale = { ...owned };
-    await assert.rejects(saveRecord(box.home, stale), /^Error: Acme Knot took over syncing this home meanwhile, so this stopped there\.$/);
-    assert.equal((await readRecord(box.home)).record!.owner, 'com.centralknot.custom.acme');
-    // A home that can't be written is taken over by nobody.
-    assert.match((await takeOverSync({ ...standard, mode: 'actual', home: box.home, realHome: box.home, allowActualWrites: false })).stopped ?? '', /^Preview only/);
-    // And back again, by the same step.
-    assert.deepEqual(await takeOverSync(standard), { from: 'Acme Knot' });
-    assert.equal((await syncGate(standard)).state, 'ready');
-    // A record made before builds wrote their names: the standard app's identity is known, any other is said as it is.
-    const path = join(box.home, '.central-knot/sync.json');
-    const { ownerName: _name, ...unnamed } = JSON.parse(await readFile(path, 'utf8'));
-    await writeFile(path, JSON.stringify(unnamed));
-    const refusal = async () => { const gate = await libraryGate(acme); return 'refused' in gate ? gate.refused : ''; };
-    assert.match(await refusal(), /^Central Knot syncs this home/);
-    await writeFile(path, JSON.stringify({ ...unnamed, owner: 'com.example.other' }));
-    assert.match(await refusal(), /^Another Central Knot build \(com\.example\.other\) syncs this home/);
-    // A record that can't be read is taken over by nobody.
-    await writeFile(path, '{ damaged');
-    assert.match((await takeOverSync(acme)).stopped ?? '', /^The sync record is damaged\./);
-    assert.equal(await readFile(path, 'utf8'), '{ damaged');
+    const written = (await readRecord(box.home)).record!;
+    assert.equal((await syncGate(acme)).state, 'needs-resume', 'Acme Knot has no memory of it');
+    await skill(box.home, CLAUDE, 'more');
+    assert.match((await apply(acme, [manage('more')])).stopped ?? '', /no memory of it/);
+    const resumed = await apply(acme, [manage('more')], true);
+    assert.deepEqual([resumed.stopped, resumed.writes, (await syncGate(acme)).state], [undefined, 1, 'ready']);
+    assert.deepEqual((await readRecord(box.home)).record, written, 'the record still names the standard app: only a take-over rewrites it');
   } finally { await box.cleanup(); }
 });
 
-test('The preview and the alpha on one home: each names the other as the person knows it, and either can take over', async () => {
+test('A take-over rewrites only the build a record names, by id and name, and keeps its generation; this build still waits for Resume until it remembers it', async () => {
   const box = await sandbox();
   try {
-    await skill(box.home, '.claude/skills', 'notes');
-    // Each app's identity as main.ts takes it from its release tag (updates.ts lineApp), with its own settings.
-    const app = (tag: string, settings: string) => { const own = lineApp(releaseLine(tag)); return ctx(box, { build: own.bundleId, buildName: own.name, settingsPath: join(box.base, settings) }); };
-    const preview = app('v0.5.0-preview.9', 'preview-settings.json'), alpha = app('v0.6.0-alpha.1', 'alpha-settings.json');
-    assert.equal((await apply(preview, [manage('notes')])).stopped, undefined);
-    assert.deepEqual(await syncGate(alpha), { state: 'stopped', reason: 'Central Knot syncs this home, so nothing was written or deleted. Take over syncing to have Central Knot Alpha sync it instead.', owner: { build: 'com.centralknot.firstlook', name: 'Central Knot' } });
-    assert.deepEqual(await takeOverSync(alpha), { from: 'Central Knot' });
-    assert.deepEqual(await syncGate(preview), { state: 'stopped', reason: 'Central Knot Alpha syncs this home, so nothing was written or deleted. Take over syncing to have Central Knot sync it instead.', owner: { build: 'com.centralknot.alpha', name: 'Central Knot Alpha' } });
-    assert.deepEqual(await takeOverSync(preview), { from: 'Central Knot Alpha' });
-    assert.equal((await syncGate(preview)).state, 'ready');
+    await skill(box.home, CLAUDE, 'notes');
+    const standard = ctx(box, { build: 'com.centralknot.firstlook', buildName: 'Central Knot', settingsPath: join(box.base, 'standard-settings.json') });
+    const acme = ctx(box, { build: 'com.centralknot.custom.acme', buildName: 'Acme Knot', settingsPath: join(box.base, 'acme-settings.json') });
+    assert.equal((await apply(standard, [manage('notes')])).stopped, undefined);
+    const before = (await readRecord(box.home)).record!;
+    assert.deepEqual(await takeOverSync(acme), { from: 'Central Knot' });
+    assert.deepEqual((await readRecord(box.home)).record, { ...before, owner: 'com.centralknot.custom.acme', ownerName: 'Acme Knot' });
+    assert.equal((await syncGate(acme)).state, 'needs-resume', 'remembering it is main.ts takeOverHome’s, and only where it carries');
+    assert.deepEqual(await takeOverSync(acme), {}, 'a record that names this build already is left as it is');
+    // A record made before builds wrote their names is said by the standard app's name, or any other build's id.
+    const path = join(box.home, '.central-knot/sync.json');
+    const { ownerName: _name, ...unnamed } = before;
+    await writeFile(path, JSON.stringify(unnamed));
+    assert.deepEqual(await takeOverSync(acme), { from: 'Central Knot' });
+    await writeFile(path, JSON.stringify({ ...unnamed, owner: 'com.example.other' }));
+    assert.deepEqual(await takeOverSync(acme), { from: 'Another Central Knot build (com.example.other)' });
+    // A home that can't be written, or a record that can't be read, is taken over by nobody.
+    assert.match((await takeOverSync({ ...standard, mode: 'actual', realHome: box.home, allowActualWrites: false })).stopped ?? '', /^Preview only/);
+    await writeFile(path, '{ damaged');
+    assert.match((await takeOverSync(acme)).stopped ?? '', /^The sync record is damaged\./);
+    assert.equal(await readFile(path, 'utf8'), '{ damaged');
   } finally { await box.cleanup(); }
 });

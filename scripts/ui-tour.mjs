@@ -894,13 +894,6 @@ if (wanted('sync-everything')) {
   await a.click('#sync-everything-on');
   await waitFor(a, `document.querySelector('#sync-everything-on')?.getAttribute('aria-checked') === 'false'`, 15000);
   await atEverySize('settings-off-again', 'Clicked its switch again: off; its line says what turning it on would add now (notes, undone, would not be)', false, '#setting-sync-everything');
-  // Another build syncs this home: the row can't be switched here, and says why in place of its hint.
-  const record = join(practice, '.central-knot/sync.json');
-  edit(record, text => JSON.stringify({ ...JSON.parse(text), owner: 'another-build', ownerName: 'Central Knot Alpha' }));
-  await refresh();
-  await a.click('#nav-settings');
-  for (const [width, height] of SIZES.slice(0, 2)) { await a.size(width, height); await show('#setting-sync-everything'); await shot(a, `settings-disabled-${width}`, `Another build (Central Knot Alpha) syncs this home: the switch is disabled and the row says why, in place of its hint (${width}×${height})`); }
-  await a.size(1280, 800);
 }
 
 if (wanted('plugin-skills')) {
@@ -1876,9 +1869,9 @@ if (wanted('settings')) {
   await shot(a, 'settings-show-log', 'Clicked "Show log file". On Linux the app opens the log\'s folder (here a stand-in file manager) and the row says which file to look for. macOS and Windows select the file instead and add no line.');
   await a.theme('light'); await shot(a, 'settings-show-log-light', 'The same, light.'); await a.theme('dark');
   // Keep history for. History is given changes 3, 12 and 25 days old; shortening to 7 days asks first, then History keeps only the newest.
-  // Nothing is managed yet, so this home has no sync record: a shorter window is saved, and its History is cut the next time it records a change.
+  // Nothing is managed yet, so this home has no sync record: a shorter window is saved, and its History is cut the next time Central Knot records a change there.
   await keepFor(a, 7); await a.click('#history-shorten'); await wait(300); await a.settle();
-  await shot(a, 'settings-history-saved-for-later', 'Shortened to 7 days in a home that doesn’t sync yet (nothing managed): the window is saved, and the row says (with the neutral info glyph) that older History goes the next time this home records a change, not that it was removed. The Show log file note from the step before is gone: one finished note at a time.');
+  await shot(a, 'settings-history-saved-for-later', 'Shortened to 7 days in a home that doesn’t sync yet (nothing managed): the window is saved, and the row says (with the neutral info glyph) that older History no longer shows and goes the next time Central Knot records a change in this home, not that it was removed. The Show log file note from the step before is gone: one finished note at a time.');
   await keepFor(a, 30);
   // From here the home syncs (everything managed, as in the sync tour), so shortening removes older History at once.
   await a.click('#nav-skills');
@@ -2219,10 +2212,6 @@ if (wanted('manage')) {
   await atEverySize('overview-none-managed', 'The Overview with no tool managed: it names the tools left out and points to Harnesses; the sidebar holds only the pages that need no tool', true);
   await a.click('#overview-open-harnesses');
   for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#manage-${tool}`);
-  // Another build syncs this home: every switch is off with the reason.
-  edit(join(practice, '.central-knot/sync.json'), text => JSON.stringify({ ...JSON.parse(text), owner: 'another-build', ownerName: 'Central Knot Alpha' }));
-  await refresh();
-  await atEverySize('another-build', 'Another build (Central Knot Alpha) syncs this home: every Manage switch is disabled, and the note at the top says why', true);
 }
 
 // ---------- Git repo ----------

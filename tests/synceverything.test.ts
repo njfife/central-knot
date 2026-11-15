@@ -16,7 +16,7 @@ import { inUse, liveItems } from '../src/profileplan.ts';
 import { readLibraries, readProfiles, saveProfile, switchProfile } from '../src/profiles.ts';
 import { applyServers, serversView } from '../src/servers.ts';
 import { setSyncEverything } from '../src/everything.ts';
-import { partsRecordPath, readRecord, readTree, saveRecord, syncGate, type ShareContext } from '../src/share.ts';
+import { partsRecordPath, readRecord, readTree, syncGate, type ShareContext } from '../src/share.ts';
 import { applySkills, restoreSkill, skillKind, skillsView, takeOver } from '../src/skills.ts';
 import { setDisabled } from '../src/skillswitch.ts';
 import type { Change, HarnessId, LibraryFacts, LibraryView, PassResult } from '../src/types.ts';
@@ -154,12 +154,11 @@ test('Switching it on in a home with no sync record makes the record, as the fir
     await turnOn(box);
     assert.deepEqual([(await readRecord(box.home)).record?.syncEverything, (await syncGate(box.context)).state], [true, 'ready']);
     const record = (await readRecord(box.home)).record!;
-    await writeFile(join(box.home, '.central-knot/sync.json'), JSON.stringify({ ...record, syncEverything: 'yes' }));
+    const damaged = JSON.stringify({ ...record, syncEverything: 'yes' });
+    await writeFile(join(box.home, '.central-knot/sync.json'), damaged);
     assert.equal((await readRecord(box.home)).problem, 'The sync record is damaged.', 'the setting is true or false, nothing else');
-    await saveRecord(box.home, { ...record, owner: 'another-build', ownerName: 'Central Knot Alpha' }, true);
-    const refused = await setSyncEverything(box.context, false);
-    assert.match(refused.stopped ?? '', /Central Knot Alpha syncs this home/);
-    assert.equal((await readRecord(box.home)).record?.syncEverything, true);
+    assert.match((await setSyncEverything(box.context, false)).stopped ?? '', /^The sync record is damaged\./);
+    assert.equal(await readFile(join(box.home, '.central-knot/sync.json'), 'utf8'), damaged);
   } finally { await box.cleanup(); }
 });
 

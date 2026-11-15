@@ -9,7 +9,7 @@
 // the page that comes back (app.ts tell). What is written while held, the menus and the login item are main.ts's (heldReason).
 import { announce, busy, setHome, showFile, shownPath, state, tell } from './app.ts';
 import { button, h, icon } from './dom.ts';
-import { holdingBuild, holdsUntil, QUIT_WAIT_MS, syncOwner } from './model.ts';
+import { holdingBuild, holdsUntil, QUIT_WAIT_MS } from './model.ts';
 import type { BuildOutcome, HomeView, OtherBuild } from './types.ts';
 import { PRODUCT } from './values.ts';
 
@@ -52,16 +52,23 @@ function offer(home: HomeView, other: OtherBuild): { act?: 'replace' | 'quit'; l
       + `where it stays until you empty the Trash. ${name}’s own settings folder stays.` };
 }
 
-/** What becomes of the other build's settings: kept where it syncs this home and its settings folder was found (types.ts OtherBuild settingsFound), else not. */
-function settingsWords(home: HomeView, other: OtherBuild, verb: string): string {
+/**
+ * What becomes of the other build's settings, as the look says it (types.ts OtherBuild ownsRecord, settingsFound, carries;
+ * main.ts takeOverHome): its choices kept where it carries them, else History's days alone, else none.
+ */
+function settingsWords(other: OtherBuild, verb: string): string {
   const name = other.name;
-  if (syncOwner(home.sync.gate)?.build !== other.build) return `${name}’s own settings, and any marketplace added only in it, don’t carry over.`;
+  if (!other.ownsRecord) return `${name}’s own settings, and any marketplace added only in it, don’t carry over.`;
   if (!other.settingsFound) {
     return `${name} syncs this home, but its settings folder isn’t on this Mac, so Central Knot will use its own settings, among them how many days of History `
       + `are kept: anything older is dropped at its next change. Any marketplace added only in ${name} doesn’t carry over.`;
   }
-  return `${name} syncs this home, so ${verb} keeps its choices here: whether Automatic sync is on, whether plugins update by themselves, how many days of History `
-    + `are kept (the longer of the two) and which folder it opens when it starts. Its other settings, and any marketplace added only in it, don’t carry over.`;
+  if (!other.carries) {
+    return `${name} syncs this home, but ${verb} keeps Central Knot’s own choices here: whether Automatic sync is on and whether plugins update by themselves `
+      + `stay as they are, and History is kept for the longer of the two builds’ days. Its other settings, and any marketplace added only in it, don’t carry over.`;
+  }
+  return `${name} syncs this home, so ${verb} keeps its choices here: whether Automatic sync is on, whether plugins update by themselves and how many days `
+    + `of History are kept (the longer of the two). Its other settings, and any marketplace added only in it, don’t carry over.`;
 }
 
 /** The screen that stands in for every page while `other` holds this build: what is going on and the buttons first, then the detail. */
@@ -77,7 +84,7 @@ export function heldScreen(home: HomeView, other: OtherBuild): HTMLElement {
     said ? h('p.held-said', { role: 'status', id: 'held-said' }, icon(said.done ? 'check' : 'triangle-alert', 14, said.done ? 'tone-success' : 'tone-warning'), h('span', {}, `${said.said} `),
       said.show ? button({ variant: 'link', size: 'micro', label: 'Show in Finder', id: 'held-show', onclick: () => showFile(said!.show!) }) : null) : null,
     h('p.held-line', {}, 'Your skills, MCP servers and agents, which of them are kept in step, and History stay whichever build you keep: they’re saved in this home, not in an app.'),
-    h('p.held-line', {}, settingsWords(home, other, act === 'quit' ? `Quit ${other.name}` : 'Replace')),
+    h('p.held-line', {}, settingsWords(other, act === 'quit' ? `Quit ${other.name}` : 'Replace')),
     h('p.held-line', {}, how),
     act ? h('p.held-line', {}, `To keep ${other.name} instead, quit Central Knot and move it to the Trash.`) : null)));
 }

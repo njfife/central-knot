@@ -8,7 +8,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, truncateSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { tmpdir, userInfo } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { connect, debugPorts } from './cdp.mjs';
@@ -17,7 +17,7 @@ import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
 import { applySkills } from '../src/skills.ts';
-import { managedNow, syncGate } from '../src/share.ts';
+import { managedNow } from '../src/share.ts';
 import { standInMac } from '../tests/macstandins.ts';
 
 const args = process.argv.slice(2);
@@ -37,9 +37,9 @@ function check(name, ok, detail) {
 
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'ck-bundled-')));
 const HOME = join(scratch, 'home');
-// Where the build keeps its settings: beside the standard app's, under its own identity. On a Mac that is the account's own
-// Application Support folder whatever HOME says, so the build's folder there is removed before and after.
-const appData = process.platform === 'darwin' ? join(userInfo().homedir, 'Library/Application Support') : join(HOME, '.config');
+// Where the build keeps its settings: beside the standard app's, under its own identity, inside the throwaway home (on a Mac,
+// CFFIXED_USER_HOME puts Application Support there), so the standard app's folder it would read is never the account's own.
+const appData = process.platform === 'darwin' ? join(HOME, 'Library/Application Support') : join(HOME, '.config');
 const dataDir = join(appData, `com.centralknot.custom.${ID}`);
 rmSync(dataDir, { recursive: true, force: true });
 const launched = new Set();
@@ -125,7 +125,7 @@ for (const [name, output] of [['claude', '2.1.309 (Claude Code)'], ['copilot', '
 const addedBy = name => { try { return readFileSync(join(HOME, `added-by-${name}.txt`), 'utf8').trim().split('\n'); } catch { return []; } };
 async function launch() {
   // CK_TEST_APPS: what stands in for /Applications, the running apps and the Trash (platform.ts macPlaces): none of them runs here.
-  const env = { HOME, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp'), CK_TEST_APPS: standInMac(join(scratch, 'mac')).root };
+  const env = { HOME, CFFIXED_USER_HOME: HOME, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp'), CK_TEST_APPS: standInMac(join(scratch, 'mac')).root };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   // No data folder is named: the build must choose its own.
@@ -166,7 +166,9 @@ const writes = process.platform === 'darwin';
 const waitFor = async (test, ms = 20000) => { for (const end = Date.now() + ms; Date.now() < end; await wait(200)) if (test()) return true; return false; };
 if (writes) {
   check('the marketplace was added to Claude Code’s and Codex’s own lists, by their own commands', await waitFor(() => addedBy('claude').length === 1 && addedBy('codex').length === 1), { claude: addedBy('claude'), codex: addedBy('codex') });
-  check('each was given the folder in the build’s own data folder', addedBy('claude')[0] === marketFolder && addedBy('codex')[0] === marketFolder, addedBy('claude'));
+  // Compared where each really is: with CFFIXED_USER_HOME the app names the folder through /var, a link to /private/var on a Mac.
+  const isMarketFolder = path => { try { return realpathSync(path) === realpathSync(marketFolder); } catch { return false; } };
+  check('each was given the folder in the build’s own data folder', isMarketFolder(addedBy('claude')[0]) && isMarketFolder(addedBy('codex')[0]), addedBy('claude'));
   check('Copilot CLI, which refuses this marketplace, was not asked', addedBy('copilot').length === 0);
   check('nothing was installed by it', !existsSync(join(HOME, '.claude/plugins/installed_plugins.json')));
   check('the status bar says once that nothing was installed, and where the marketplace is now listed', await a.until(`document.querySelector('#announcement').textContent.startsWith('Nothing was installed: Acme plugins is listed in Claude Code and Codex (see Plugins).')`), await a.run(`document.querySelector('#announcement').textContent`));
@@ -295,6 +297,8 @@ if (writes) rmSync(join(HOME, '.claude/plugins/known_marketplaces.json'));
 
 // A second open keeps what is there: the same folder, not unpacked again, and what was taken out of a tool stays out.
 const b = await launch();
+// What the status bar said at that open, before anything below says more (the record taken over: the last section).
+const saidAtOpen = await b.run(`document.querySelector('#announcement').textContent`);
 await b.click('#nav-plugins');
 check('a second open lists it again, as the feed left it', await b.until(`document.querySelectorAll('.plugin-row').length === 6 && document.querySelector('[data-plugin="document-tools"] .plugin-row-version')?.textContent === '1.3.0'`));
 if (writes) {
@@ -314,41 +318,18 @@ if (writes) {
 }
 check('a second open keeps the unpacked marketplace as it is', statSync(marketFolder).ino === before);
 
-// ---------- One build syncs a home at a time ----------
-await b.click('#nav-skills');
-const ownerSays = () => b.run(`document.querySelector('#other-owner .band-text')?.textContent ?? ''`);
-// Whether the standard app is open now is asked of the stand-in for macOS's list of running apps, where it isn't.
-check('Skills says the standard app syncs this home', await b.until(`!!document.querySelector('#other-owner')`) && await ownerSays() === 'Central Knot synced this home last and isn’t open, so nothing is syncing here now. Taking over keeps every managed item and choice.', await ownerSays());
-check('with Take over syncing beside it', await b.run(`document.querySelector('#take-over-sync')?.textContent`) === 'Take over syncing');
-check('Skills fits with it at 1280', await b.fits());
-await b.shot('skills-other-owner-1280');
-await b.size(860, 560);
-check('Skills fits with it at 860', await b.fits());
-await b.shot('skills-other-owner-860');
-await b.size(1280, 800);
-await b.click('#nav-overview');
-check('the Skills card on Overview doesn’t say All in sync of a home another build syncs', !(await b.run(`document.body.innerText`)).includes('All in sync'));
-// (A preview-only home says that on Overview instead.)
-if (writes) check('Overview says so too', await b.run(`document.querySelector('#overview-other-owner')?.textContent ?? ''`).then(text => text.startsWith('Central Knot ') && text.endsWith('Take over syncing')), await b.run(`document.querySelector('#overview-other-owner')?.textContent`));
-await b.shot('overview-other-owner-1280');
+// ---------- The record taken over ----------
+// This build opens HOME as this Mac's own home, so its first look takes the standard app's record over and carries that app's
+// choices (main.ts takeOverHome): here none, since the standard app's settings folder isn't in the throwaway home.
 if (writes) {
-  check('the status bar’s sync switch says whose it is', await b.run(`document.querySelector('#sync-switch .sync-state').textContent`) .then(text => text === 'By Central Knot' || text === 'Central Knot’s, not open'), await b.run(`document.querySelector('#sync-switch .sync-state').textContent`));
-  await b.click('#nav-skills');
-  await b.click('#take-over-sync');
-  // What became of the standard app's settings follows (main.ts takeOverHome), then the way back.
-  check('Take over syncing: this build syncs the home now, and says so', await b.until(`!document.querySelector('#other-owner')`) && await b.run(`document.querySelector('#announcement').textContent`).then(text => text.startsWith(`${NAME} syncs this home now, `) && text.endsWith(' To go back, take over in Central Knot.')), await b.run(`document.querySelector('#announcement').textContent`));
+  check('the second open takes the record over by itself, and says so first: the standard app’s settings folder wasn’t found', saidAtOpen.startsWith(`${NAME} syncs this home now, with its own settings: Central Knot’s settings folder wasn’t found`), saidAtOpen);
   const taken = record();
-  check('the record is the same one, under the new owner, with what was managed', taken.owner === `com.centralknot.custom.${ID}` && taken.ownerName === NAME && !!JSON.parse(readFileSync(join(HOME, '.central-knot/skills.json'), 'utf8')).items.notes, taken);
-  const other = await syncGate(standard);
-  check('the standard app then finds this build syncs it, by name', other.state === 'stopped' && other.owner?.name === NAME, other);
-  check('the sync switch is this build’s again', await b.run(`document.querySelector('#sync-switch .sync-state').textContent`).then(text => text.startsWith('On')), await b.run(`document.querySelector('#sync-switch').textContent`));
-  await b.shot('skills-taken-over-1280');
-  await b.size(860, 560);
-  await b.shot('skills-taken-over-860');
-  await b.size(1280, 800);
-} else {
+  check('the record is the same one, now naming this build by its id and name, with what was managed', taken.owner === `com.centralknot.custom.${ID}` && taken.ownerName === NAME && !!JSON.parse(readFileSync(join(HOME, '.central-knot/skills.json'), 'utf8')).items.notes, taken);
+  check('none of the standard app’s settings were read: its folder isn’t there', !existsSync(join(appData, 'central-knot')));
   await b.click('#nav-skills');
-  check('where the home is preview only, taking over is not offered to act', await b.run(`document.querySelector('#take-over-sync').disabled`) === true);
+  check('Skills asks no Resume, and notes is On in this build', await b.run(`!document.querySelector('#resume') && document.querySelector('.ov-row[data-key="notes"] .switch')?.getAttribute('aria-checked') === 'true'`), await b.run(`document.querySelector('.bands')?.textContent`));
+} else {
+  check('where the home is preview only, the record is left as it is', record().owner === 'com.centralknot.firstlook', record());
 }
 check('no page error at the second open', b.errors.length === 0, b.errors);
 b.quit();

@@ -457,8 +457,12 @@ function readFound(view: HomeView, from?: string): string {
   return `Read ${andList(counts)}${from ? ` from ${from}` : ''}.${caught || told ? '' : ' Nothing changed.'}`;
 }
 
-/** A home just opened, as its band says it: an empty one (no tools, or nothing in them) says only that it opened; the page says the rest. */
-const openedText = (view: HomeView) => (!view.skills.items.length && !view.mcp.items.length && !view.agents.items.length ? `Opened ${view.label}.` : `Opened ${view.label}. ${readFound(view)}`);
+/**
+ * A home just opened, as its band says it: first a record taken over at its look (HomeView tookOver), so the band doesn't hide
+ * it; an empty home (no tools, or nothing in them) says only that it opened; the page says the rest.
+ */
+const openedText = (view: HomeView) => [view.tookOver,
+  !view.skills.items.length && !view.mcp.items.length && !view.agents.items.length ? `Opened ${view.label}.` : `Opened ${view.label}. ${readFound(view)}`].filter(Boolean).join(' ');
 
 /** A read said in the status bar: what it found, and in which home. */
 const readSummary = (view: HomeView) => readFound(view, view.label);
@@ -524,7 +528,7 @@ export async function readAgain() {
   if (read) await loadPageData(state.page, { fresh: true, readId: state.home?.readId });
 }
 
-/** Why the open home can't be written now, if so: preview only, or another Central Knot build owns its sync. */
+/** Why the open home can't be written now, if so: preview only (or held by another build), or its record stops every write. */
 export const whyReadOnly = (home: HomeView) => (!home.sync.access.allowed ? home.sync.access.reason : home.sync.gate.state === 'stopped' ? home.sync.gate.reason : undefined);
 
 /**
@@ -942,7 +946,7 @@ function askAboutBaseDraft(): boolean {
   rerender(); document.getElementById(base.stage === 'review' ? 'base-review-keep' : 'base-keep')?.focus(); return true;
 }
 
-/** This home only shows its files: saving is off (a preview-only home or another build syncing). */
+/** This home only shows its files: saving is off (writeAccess refuses it: preview only, or held by another build). */
 export const savingOff = () => !!state.home && !state.home.sync.access.allowed;
 
 /** Reviews taking a base block out of a tool's file (a tool no longer on the list); saving it is an ordinary checked save. */
@@ -1157,29 +1161,6 @@ export const syncNow = () => busy('Syncing…', async () => {
   const view = await api().syncNow(state.home!.home);
   setHome(view);
   announce('Synced once. Automatic sync stays off.', true);
-});
-
-/**
- * Another build syncs this home: who, whether it is open now (where that can be told), what that means here, and that
- * taking over loses nothing. Said the same on every page.
- */
-export const otherOwnerSaid = (owner: { name: string; running?: boolean }) =>
-  `${owner.name} ${ownerSyncs(owner)}, so ${owner.running === false ? 'nothing is syncing here now' : 'skills, MCP servers and agents aren’t changed from here'}. Taking over keeps every managed item and choice.`;
-/** What the build that syncs this home is doing, as far as can be told: whether it is open decides which. */
-export const ownerSyncs = (owner: { running?: boolean }) => (owner.running === false ? 'synced this home last and isn’t open' : owner.running ? 'is open and syncs this home' : 'syncs this home');
-/** What Take over syncing does, for its button's tooltip. */
-export const takeOverTitle = (owner: { name: string }) => `Central Knot syncs this home from now on, from where ${owner.name} left it, and anything waiting is synced straight away. ${owner.name} stops syncing here until you take over from it again.`;
-
-/** Take over syncing's button, wherever another build's record names it the home's owner (pages.ts ownerLine, matrix.ts otherOwnerBand). */
-export const takeOverButton = (owner: { name: string }, look: { variant: 'outline' | 'link'; size: 'small' | 'micro' }, id: string, disabled: boolean) =>
-  button({ ...look, label: 'Take over syncing', id, disabled, onclick: () => void takeOverSync(), attrs: { title: takeOverTitle(owner) } });
-
-/** Take over syncing: Central Knot syncs the home from now on, in place of the build that did; nothing is reset. */
-export const takeOverSync = () => busy('Taking over syncing…', async () => {
-  const taken = await api().takeOverSync(state.home!.home);
-  if (taken.view) setHome(taken.view);
-  // What the take-over did (main.ts takeOverHome: this build syncs the home now, and what became of the other build's settings), then the way back.
-  announce(taken.stopped ? `Syncing was not taken over. ${taken.stopped}` : taken.said ? `${taken.said} To go back, take over in ${taken.from}.` : 'Central Knot already syncs this home.');
 });
 
 /** A background read is running, or one arrived while the page was busy and runs when it is done (busy). */

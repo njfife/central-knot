@@ -469,7 +469,7 @@ test('A base written into a tool that is then left out: its Undo leaves that fil
   } finally { await b.cleanup(); }
 });
 
-test('Turning a tool on or off is refused where a click would be: another buildâ€™s home; in a home waiting for Resume it resumes only when asked', async () => {
+test('Turning a tool on or off in a home waiting for Resume is refused, as a click is, unless asked to resume: then it resumes', async () => {
   const b = await box();
   try {
     await b.turnOn();
@@ -479,10 +479,6 @@ test('Turning a tool on or off is refused where a click would be: another buildâ
     assert.match((await chooseTools(b.context, 'codex-cli', false)).stopped ?? '', /no memory of it/);
     assert.deepEqual(await chooseTools(b.context, 'codex-cli', false, true), {});
     assert.deepEqual([(await syncGate(b.context)).state, await b.managed()], ['ready', ['claude-cli', 'copilot-cli']]);
-    // Another build syncs the home: nothing changes.
-    const other: ShareContext = { ...b.context, build: 'com.example.other', settingsPath: join(b.base, 'other.json') };
-    assert.match((await chooseTools(other, 'codex-cli', true)).stopped ?? '', /syncs this home/);
-    assert.deepEqual((await readRecord(b.home)).record?.leftOut, ['codex-cli']);
   } finally { await b.cleanup(); }
 });
 
