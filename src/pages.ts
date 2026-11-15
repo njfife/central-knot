@@ -1,11 +1,11 @@
-// The Overview (overviewPage: the home's first sentence, first setup's question, another build's bands, a card per kind), and
+// The Overview (overviewPage: the home's first sentence, first setup's question, a card per kind), and
 // the Skills, MCP servers and Agents pages around the tables matrix.ts draws (skillsPage, mcpPage, agentsPage), with their
 // empty states (kindEmpty). Every other page has a module of its own (harnesspage.ts, historypage.ts, profilespage.ts,
 // sourcespage.ts, repopage.ts, pluginspage.ts, instructionspage.ts, settingspage.ts); which page draws is renderer.ts
 // renderPage, and the page's state and actions are app.ts's.
-import { absentKinds, announce, otherOwnerSaid, takeOverButton, noToolManaged, noToolManagedSentence, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type PageKind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, type Page } from './app.ts';
+import { absentKinds, announce, noToolManaged, noToolManagedSentence, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type PageKind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, type Page } from './app.ts';
 import { afterLayout, button, cardGrid, emptyState, fileBlocks, h, icon, pathText, section } from './dom.ts';
-import { fullToolName, plural, skillCount, syncOwner, toolName } from './model.ts';
+import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
 import { heldKinds } from './presence.ts';
 import { brandMark, itemsTable, outcomeBand, showFiltered, skillsBrowser, wrappingPath } from './matrix.ts';
@@ -136,8 +136,7 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof ic
   const attention = differs ? { tone: 'tone-warning', glyph: 'diff' as const, text: `${differs} ${differs === 1 ? 'differs' : 'differ'}`, title: `${differs} ${differs === 1 ? 'has' : 'have'} different copies. Show only these.` }
     : edits ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${edits} waiting`, title: `${plural(edits, 'change')} waiting to sync` }
       : waitsForClaude ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${waitsForClaude} for Claude Code`, title: `${waitsForClaude} ${waitsForClaude === 1 ? 'waits' : 'wait'} for Write to Claude Code` }
-        // Not said of a home another build syncs: whether it is in sync is that build's to say.
-        : on && !(home?.sync.gate.state === 'stopped' && home.sync.gate.owner) ? { tone: 'tone-success', glyph: 'check' as const, text: 'All in sync', title: 'Every synced one is the same in every tool it syncs to' }
+        : on ? { tone: 'tone-success', glyph: 'check' as const, text: 'All in sync', title: 'Every synced one is the same in every tool it syncs to' }
           : undefined;
   const status = !attention ? null : differs
     ? h(`button.kind-card-state.kind-card-link.${attention.tone}`, { type: 'button', id: `overview-${page}-differ`, title: attention.title, onclick: () => { showFiltered(page, 'attention'); showPage(page); } }, icon(attention.glyph, 13), attention.text)
@@ -199,12 +198,6 @@ function nextStep(home: HomeView, nothingOn: boolean, asking: boolean): string {
   return nothingOn && home.sync.access.allowed && !asking ? ' Open one below and turn on what you want the same in every tool.' : '';
 }
 
-/** The Overview's line where another build syncs this home: who, and Take over syncing. */
-function ownerLine(home: HomeView) {
-  const owner = syncOwner(home.sync.gate)!;
-  return h('p.overview-line', { id: 'overview-other-owner' }, icon('circle-alert', 14, 'tone-warning'), `${otherOwnerSaid(owner)} `, takeOverButton(owner, { variant: 'link', size: 'micro' }, 'overview-take-over', !!state.busy));
-}
-
 export function overviewPage() {
   const home = state.home;
   if (!home) return notRead();
@@ -236,8 +229,6 @@ export function overviewPage() {
       h('div.overview-more', {},
         absent.length && !empty ? h('p.overview-line', { id: 'overview-absent' }, icon('info', 14, 'tone-muted'), `No tool here holds ${orList(absent.map(kind => kindNames[kind]))}.`) : null,
         !home.sync.access.allowed ? h('p.overview-line', {}, icon('lock', 14, 'tone-warning'), `Automatic sync is paused. Preview only: ${previewReason(home.sync.access.reason)}.`)
-        // Another build syncs this home: said here, with the way to take over.
-        : syncOwner(home.sync.gate) ? ownerLine(home)
         // Green only once something syncs; before that, sync is on and waiting, in the status bar's grey. With no tool managed
         // nothing syncs at all (the status bar says so).
         : empty || (home.syncOn && nothingOn) ? null : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingOn ? 'tone-muted' : 'tone-success') : 'tone-warning'),

@@ -8,7 +8,7 @@
 import { readFile, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DAY_MS, defaultHistoryDays } from './model.ts';
-import { errorCode, readRecord, storeDirectory, syncsHere, writeAccess, writeDurably, type ShareContext } from './share.ts';
+import { errorCode, storeDirectory, syncsHere, writeDurably, type ShareContext } from './share.ts';
 import { pruneDeleted } from './skillstore.ts';
 import type { HistoryEvent, HistoryPrune } from './types.ts';
 
@@ -55,14 +55,11 @@ async function saveHistory(context: ShareContext, events: HistoryEvent[]) {
 
 /**
  * Applies a shortened window to this home at once (Settings): History loses what is now older, and a deleted skill's versions
- * that only it kept go. Only in a home this build syncs and may write ('done'). Elsewhere the next History write there applies
- * it: this build's once it syncs the home ('later'), or, in a preview-only home or one another build syncs, that copy's ('elsewhere').
+ * that only it kept go. Only in a home this build syncs and may write ('done'). Elsewhere this build's next History write there
+ * applies it ('later'): with one install at a time, no other build writes History on this Mac.
  */
 export async function pruneHistory(context: ShareContext): Promise<Exclude<HistoryPrune, 'no-home' | 'failed'>> {
-  if (!(await syncsHere(context))) {
-    const { record } = await readRecord(context.home);
-    return (await writeAccess(context)).allowed && (!record || record.owner === context.build) ? 'later' : 'elsewhere';
-  }
+  if (!(await syncsHere(context))) return 'later';
   await saveHistory(context, await readHistory(context));
   return 'done';
 }

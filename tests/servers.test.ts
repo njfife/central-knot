@@ -20,7 +20,7 @@ import { discover } from '../src/discovery.ts';
 import { homePass, passTells } from '../src/homepass.ts';
 import { mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { applyServers, restoreServer, serversView, writeToClaude } from '../src/servers.ts';
-import { readRecord, saveRecord, type ShareContext } from '../src/share.ts';
+import type { ShareContext } from '../src/share.ts';
 import { readTomlTables } from '../src/textedit.ts';
 import type { Change, HarnessId, HomeView, LibraryFacts } from '../src/types.ts';
 
@@ -646,17 +646,6 @@ test('A removal Claude Code owes goes to the file it was owed in, never to Claud
   await fs.writeFile(join(alternate, '.claude.json'), docsRuns('BASE'));
   await writeToClaude({ ...box.context, overrides: { 'claude-cli': alternate } }, three, ['docs']);
   assert.equal((await readTool({ ...box.context, overrides: { 'claude-cli': alternate } }, 'claude-cli')).entries[0]?.server.command, 'BASE');
-}));
-
-test('Another build taking over syncing stops an MCP server’s Undo: nothing is written', () => inBox(async box => {
-  await fs.writeFile(box.path('copilot-cli'), docsRuns('BASE'));
-  await applyServers(box.context, copilotAndCodex, [on('docs')]);
-  await fs.writeFile(box.path('copilot-cli'), docsRuns('EDIT'));
-  await applyServers(box.context, copilotAndCodex, []);
-  const event = (await readHistory(box.context)).find(entry => entry.kind === 'edit')!;
-  const { record } = await readRecord(box.home); record!.owner = 'other'; await saveRecord(box.home, record!, true);
-  assert.equal((await restoreServer(box.context, copilotAndCodex, event.id)).writes, 0);
-  assert.equal(await commandIn(box, 'copilot-cli'), 'EDIT');
 }));
 
 for (const broken of ['{"mcpServers":null}', '{"mcpServers":{"docs":null}}']) test(`A settings file holding ${broken} deletes nothing elsewhere: the other copies stay`, () => inBox(async box => {

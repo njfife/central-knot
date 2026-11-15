@@ -8,7 +8,7 @@
 //   its items, one pass per kind, as a profile switch makes them; and its Undo (itemsBack);
 // - what the Plugins page shows of them (itemsView: "Its items", and "has it" in each tool).
 // When a plugin is read: at a click that brings it into Pi or OpenCode (On, Add, Let in, Install there), at its Update and
-// Update all, and at the automatic updates' check, for a plugin with an item linked to it or a tool new here (marketplaces.ts);
+// Update all, and at the automatic updates' check, for a plugin with items (withItemsOf) or a tool new here (marketplaces.ts);
 // Off, Keep out and Take out there only click. Which plugins take this route and which keep their parts is pluginstatus.ts
 // routeOf. Kept elsewhere: the table (library.ts), the held answer in the tools with an installer (plugins.ts pluginHolds),
 // the switch's table (pluginrecord.ts owedTo), and the let-go of an item changed here, in every pass (librarypass.ts letGo).
@@ -87,10 +87,13 @@ async function linkedItems(context: ShareContext, id: string): Promise<Linked[]>
   return kinds.flatMap(({ kind, library }) => Object.values(library.items).filter(item => item.source === id && !item.deleted).map(item => ({ kind, item })));
 }
 
-/** The ids some item of any kind is linked to now (a plugin's or a source's): the plugins worth reading for the page. */
-export async function linkedIds(context: ShareContext): Promise<Set<string>> {
-  const kinds = await Promise.all(sourceKinds().map(async kind => (await kind.kind.open(context)).library));
-  return new Set(kinds.flatMap(library => Object.values(library.items).filter(item => item.source && !item.deleted).map(item => item.source!)));
+/**
+ * The plugins worth reading for the page: each with an item linked to it, or one with a version from it since its last take-in
+ * (library.ts fromLinkSinceTakeIn: his own after a let-go, one he deleted), so its page still says why those aren't brought in.
+ */
+export async function withItemsOf(context: ShareContext, entries: PluginEntry[]): Promise<PluginEntry[]> {
+  const items = (await Promise.all(sourceKinds().map(async kind => Object.values((await kind.kind.open(context)).library.items)))).flat();
+  return entries.filter(entry => items.some(item => (item.source === entry.id && !item.deleted) || fromLinkSinceTakeIn(item, pluginLink(entry.plugin, entry.marketName))));
 }
 
 /**
@@ -128,8 +131,8 @@ export async function runItems(context: ShareContext, tools: HarnessId[], entry:
   const brought = 'into' in ask || ('read' in ask && ask.bring) ? named : [];
   const outOf = pluginOutOf(entry, tools, before, brought), recorded = (await recordedIds(context.home)).ids;
   const read = files.files && !('outOf' in ask) ? await readPlugin(files.files, entry, files.commitAt, recorded, outOf) : [];
-  // A click that brings the plugin in brings back a name of its own he deleted; the background never does (library.ts A PLUGIN).
-  const reads = 'into' in ask || ('read' in ask && ask.click) ? read.map(each => ({ ...each, bringBack: new Set(each.names.keys()) })) : read;
+  // A click that turns its items On brings back a name of its own he deleted; Let in and the background never do (library.ts A PLUGIN).
+  const reads = ('into' in ask && ask.on) || ('read' in ask && ask.click) ? read.map(each => ({ ...each, bringBack: new Set(each.names.keys()) })) : read;
   const results: Passed[] = [];
   for (const kind of sourceKinds()) {
     const read = reads.find(each => each.kind === kind.kind.kind), passed = (result: PassResult) => results.push({ kind: kind.kind.kind, result });
@@ -231,12 +234,12 @@ export async function itemsView(context: ShareContext, tools: readonly HarnessId
   return { lines, on, of: linked.length, ...(ready ? { ready: true as const } : {}), ...(problem ? { problem } : {}) };
 }
 
-const WHY_NOT = { differs: 'you have your own', another: 'another source has it', deleted: 'you deleted it; History’s Restore, or the plugin’s next On, brings it back' };
 /** One name's line in "Its items", from the table's answer for it (library.ts SourceAnswer). */
 function lineOf(kind: SourceKind, key: string, name: string, item: LibraryItem | undefined, answer: string, unreadable?: string): PluginItemLine {
   const base = { kind: kind.kind.kind, key, name };
   if (unreadable) return { ...base, state: 'not-brought', why: unreadable };
   if (answer === 'make') return { ...base, state: 'new' };
-  if (answer === 'differs' || answer === 'another' || answer === 'deleted') return { ...base, state: 'not-brought', why: WHY_NOT[answer] };
+  if (answer === 'deleted') return { ...base, state: 'deleted' };
+  if (answer === 'differs' || answer === 'another') return { ...base, state: 'not-brought', why: answer === 'another' ? 'another source has it' : 'you have your own' };
   return { ...base, state: answer === 'update' ? 'update' : answer === 'drop' ? 'going' : 'linked', on: !!item?.on, except: item?.except ?? [] };
 }

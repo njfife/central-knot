@@ -75,7 +75,7 @@ import { carryOut, fromLinkSinceTakeIn, itemKey, keepVersion, linkedSource, mana
 import type { ItemNow } from './historyactions.ts';
 import type { Copies, FoundCopy, FoundKey, HarnessCopy, ItemKind, LeftFound, LibraryItem, Plan, Origin, Shelf, SourceSeen, TakenBy, Version } from './library.ts';
 import { appendHistory, historyCutoff, readHistory, replaceHistory } from './history.ts';
-import { errorCode, libraryGate, stillOwned } from './share.ts';
+import { errorCode, libraryGate } from './share.ts';
 import { hideParts } from './partsmigrate.ts';
 import { pluginLink } from './sourcelink.ts';
 import { recordedIds, type Recorded } from './sourcestore.ts';
@@ -575,32 +575,25 @@ export async function runPass<C, E extends Seen, D extends Disk<E>>(
   const look: AnyLook = await lookAt(kind, context, managed, library, settle);
   const store = (item: LibraryItem, hash: string, content: unknown) => kind.store(context, item, hash, content as C);
   const pass: Pass = { ...look, shelf: { store, save: () => saveIfChanged(pass) }, saved, asked: new Map(), giveBack: new Map(), told: !!options.told, takenIn: [], sourced: new Map(), results: [], notices: [], writes: 0, made: [] };
-  try {
-    await deletionsTold(pass);
-    await letGo(pass, await recordedIds(context.home));
-    for (const [key, brought] of options.pulled ?? []) await pull(pass, key, brought);
-    const sourceScope = options.source ? await fromSourceStep(pass, options.source) : undefined;
-    for (const asked of clicks) await click(pass, asked);
-    if (options.background && gate.record.syncEverything === true) await takeInByRule(pass);
-    // What this pass concerns: its clicks' items, and what a source's table answered for, else those in `only`, else every item.
-    const inScope = (key: string) => (sourceScope ? sourceScope.has(key) : !options.only || options.only.has(key)) || clicks.some(asked => asked.key === key);
-    const items = Object.values(library.items).filter(item => inScope(item.key));
-    await guardFolders(pass, items, pass.shelf);
-    for (const item of items) { await stillOwned(context.home, context.build); await syncItem(pass, item); }
-    if (pass.takenIn.length) pass.notices.push(takenInNotice(pass.takenIn));
-    // A plugin's update that dropped an item says so on its page once (library.ts A PLUGIN): History holds its Turn on.
-    if (options.source?.plugin) for (const [key, said] of pass.sourced) if (said.answer === 'drop' && said.history) pass.notices.push({ kind: 'dropped', key, item: said.name, link: options.source.link, history: said.history });
-    // A file noted away that this pass made (a kind of files: Kind.folderSeen) is noted as it is now, so the next pass doesn't
-    // take Central Knot's own write for a file made again (keepFolders: a click's pass still moves no known identity on).
-    if (kind.folderSeen) for (const tool of managed) if (pass.foldersNow[tool] && 'away' in pass.foldersNow[tool]) pass.foldersNow[tool] = await kind.folderSeen(context, tool);
-    keepFolders(library, pass.foldersNow, managed, !options.only && !sourceScope);
-    await saveIfChanged(pass);
-  } catch (error) {
-    // Another build took over syncing this home meanwhile (share.ts stillOwned, asked before each item and each save): the
-    // pass stops there, what it wrote and kept stays, and it says why.
-    if (errorCode(error) !== 'CK_TAKEN') throw error;
-    return { stopped: (error as Error).message, results: pass.results, writes: pass.writes, notices: pass.notices, made: pass.made };
-  }
+  await deletionsTold(pass);
+  await letGo(pass, await recordedIds(context.home));
+  for (const [key, brought] of options.pulled ?? []) await pull(pass, key, brought);
+  const sourceScope = options.source ? await fromSourceStep(pass, options.source) : undefined;
+  for (const asked of clicks) await click(pass, asked);
+  if (options.background && gate.record.syncEverything === true) await takeInByRule(pass);
+  // What this pass concerns: its clicks' items, and what a source's table answered for, else those in `only`, else every item.
+  const inScope = (key: string) => (sourceScope ? sourceScope.has(key) : !options.only || options.only.has(key)) || clicks.some(asked => asked.key === key);
+  const items = Object.values(library.items).filter(item => inScope(item.key));
+  await guardFolders(pass, items, pass.shelf);
+  for (const item of items) await syncItem(pass, item);
+  if (pass.takenIn.length) pass.notices.push(takenInNotice(pass.takenIn));
+  // A plugin's update that dropped an item says so on its page once (library.ts A PLUGIN): History holds its Turn on.
+  if (options.source?.plugin) for (const [key, said] of pass.sourced) if (said.answer === 'drop' && said.history) pass.notices.push({ kind: 'dropped', key, item: said.name, link: options.source.link, history: said.history });
+  // A file noted away that this pass made (a kind of files: Kind.folderSeen) is noted as it is now, so the next pass doesn't
+  // take Central Knot's own write for a file made again (keepFolders: a click's pass still moves no known identity on).
+  if (kind.folderSeen) for (const tool of managed) if (pass.foldersNow[tool] && 'away' in pass.foldersNow[tool]) pass.foldersNow[tool] = await kind.folderSeen(context, tool);
+  keepFolders(library, pass.foldersNow, managed, !options.only && !sourceScope);
+  await saveIfChanged(pass);
   return { results: pass.results, writes: pass.writes, notices: pass.notices, settling: settle.settling, made: pass.made,
     ...(options.background ? { found: foundKeys(pass) } : {}), ...(options.source ? { sourced: [...pass.sourced.values()] } : {}) };
 }
@@ -628,14 +621,10 @@ export async function forgetFolders<C, E extends Seen, D extends Disk<E>>(kind: 
   if (JSON.stringify(library.folders) !== before) await kind.save(context.home, library);
 }
 
-/**
- * Saves the record when it is not as last saved: before any harness file changes (syncItem), and when the pass ends; never once
- * another build has taken over syncing this home (share.ts stillOwned).
- */
+/** Saves the record when it is not as last saved: before any harness file changes (syncItem), and when the pass ends. */
 async function saveIfChanged(pass: Pass) {
   const text = JSON.stringify(pass.library);
   if (text === pass.saved) return;
-  await stillOwned(pass.context.home, pass.context.build);
   await pass.kind.save(pass.context.home, pass.library);
   pass.saved = text;
 }
@@ -1108,8 +1097,8 @@ async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Se
     // Told here, not by the item's own pass: an item let go may be outside this pass's scope (letGo), and nothing is written.
     if (answer === 'let-go' && item) {
       delete item.source; delete item.seen;
-      // Kept where it is: out of each managed tool with no copy of it now (library.ts A PLUGIN); its row lets it in elsewhere.
-      item.except = [...new Set([...item.except, ...pass.managed.filter(tool => !pass.disk.byKey.get(key)?.[tool] && !unseenIn(pass.disk, tool, key))])].sort(byToolOrder);
+      // On, it is kept where it is: out of each managed tool with no copy of it now (library.ts A PLUGIN); Off, its except stays.
+      if (item.on) item.except = [...new Set([...item.except, ...pass.managed.filter(tool => !pass.disk.byKey.get(key)?.[tool] && !unseenIn(pass.disk, tool, key))])].sort(byToolOrder);
       const history = randomUUID();
       await appendHistory(pass.context, [{ id: history, at: now(), key: `${pass.kind.historyPrefix}${key}`, item: item.name, kind: 'edit', cause: 'own-now', previous: item.hash, version: item.hash, link, losers: [], orderProved: true }]);
       pass.notices.push({ kind: 'let-go', key, item: item.name, link, history });

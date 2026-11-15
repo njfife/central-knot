@@ -1,7 +1,8 @@
 // The pass's contract (src/librarypass.ts Kind) on a toy kind and real files: what Disk.held is told, so a tool that reads
 // another tool's folder has an item another way only while the item is really in that tool (as skills have it; agents and MCP
-// servers don't); and a pass that stops once another build takes over syncing the home. The toy is one text file per item
-// ("notes"); Claude Code keeps them in its folder, OpenCode in its own and it also reads Claude Code's, as it does for skills.
+// servers don't); and a pass that runs to its end while another build takes the home's record over. The toy is one text file
+// per item ("notes"); Claude Code keeps them in its folder, OpenCode in its own and it also reads Claude Code's, as it does for
+// skills.
 // The pass's other rules (the folder guards, the settle window, the gate, a crash between two steps) are exampled on real
 // agents in tests/agents.test.ts.
 import { test } from 'node:test';
@@ -12,7 +13,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { wantedIn } from '../src/library.ts';
 import { copiesOf, lookFor, runPass, type Disk, type Kind, type KindLibrary, type Seen } from '../src/librarypass.ts';
-import { takeOverSync, type ShareContext } from '../src/share.ts';
+import { readRecord, takeOverSync, type ShareContext } from '../src/share.ts';
 import { readHistory } from '../src/history.ts';
 import type { Change, HarnessId } from '../src/types.ts';
 
@@ -111,26 +112,23 @@ test('A tool that has the item another way and holds a copy Central Knot didn’
   } finally { await cleanup(); }
 });
 
-test('A pass whose home another build takes over during its first item writes nothing more: the second item is not written, and it says why', async () => {
+test('A pass under way while another build re-records the home as its own runs to its end: both items are written, and the record names that build', async () => {
   const { context, cleanup } = await sandbox();
   try {
     // OpenCode doesn't read Claude Code's folder here, so each item is written into its own.
     const toy = noteKind(), read = toy.read;
-    const writes: string[] = [];
     const kind: Kind<string, Note> = {
       ...toy, read: async (at, managed, library) => ({ ...await read(at, managed, library), held: () => undefined }),
       write: async (at, item, tool, here, text) => {
-        // The other build takes over while the first item is being written.
-        if (!writes.length) await takeOverSync({ ...context, build: 'other', buildName: 'The other build' });
-        writes.push(item.name);
+        // The other build takes the record over while the first item is being written.
+        if (item.name === 'first') await takeOverSync({ ...context, build: 'other', buildName: 'The other build' });
         return toy.write(at, item, tool, here, text);
       },
     };
     for (const name of ['first', 'second']) await writeFile(join(folderOf(context, 'claude-cli'), `${name}.txt`), `${name}\n`);
     const result = await runPass(kind, context, tools, [{ key: 'first', on: true, except: [] }, { key: 'second', on: true, except: [] }]);
-    assert.deepEqual(writes, ['first'], 'the second item is not written');
-    assert.equal(result.stopped, 'The other build took over syncing this home meanwhile, so this stopped there.');
-    assert.deepEqual(await readdir(folderOf(context, 'opencode-cli')), ['first.txt']);
-    assert.ok(!(await readHistory(context)).some(event => event.key === 'note:second'), 'nor is anything recorded of it');
+    assert.deepEqual([result.stopped, (await readdir(folderOf(context, 'opencode-cli'))).sort()], [undefined, ['first.txt', 'second.txt']]);
+    assert.ok((await readHistory(context)).some(event => event.key === 'note:second'), 'and History has the second');
+    assert.equal((await readRecord(context.home)).record?.owner, 'other');
   } finally { await cleanup(); }
 });

@@ -137,16 +137,12 @@ test('A home from before this step, with items On and the rule never answered, i
   } finally { await box.cleanup(); }
 });
 
-test('Not asked where nothing may be written: another build’s home, a preview-only one, one with no tool managed; Resume first where the home waits for it', async () => {
+test('Not asked where nothing may be written: a preview-only home, one with no tool managed; Resume first where the home waits for it', async () => {
   const box = await sandbox();
   try {
     await putSkill(box, skillRoot['claude-cli'], 'notes');
-    // Another build owns the record: not asked, and an answer is refused.
-    await saveRecord(box.home, { ...newRecord({ ...box.context, build: 'alpha' }), ownerName: 'Central Knot Alpha' });
-    assert.equal(asksNow(await homeView(box)), undefined);
-    assert.match((await setSyncEverything(box.context, true, true)).stopped ?? '', /Central Knot Alpha syncs this home/);
     // This build's record, but no memory of it: Resume first.
-    await saveRecord(box.home, newRecord(box.context), true);
+    await saveRecord(box.home, newRecord(box.context));
     assert.equal(asksNow(await homeView(box)), 'resume');
     assert.match((await setSyncEverything(box.context, true, true)).stopped ?? '', /no memory of it/);
     await remember(box.context, (await recordOf(box))!.generation);
@@ -377,10 +373,10 @@ test('“Use the latest for the rest” says what happened to each: taken in, sk
   const [notes, review, plan] = [item('notes'), item('review'), item('plan', 'agents')], docs: Waiting = { kind: 'mcp', key: 'docs', name: 'docs' };
   const done = latestDone([notes, review, plan], [docs], [
     { kind: 'skills', result: { writes: 1, results: [{ item: 'review', outcome: 'held', unchanged: true, chooseAgain: true, message: 'The copy you chose changed since you chose it.' }] } },
-    { kind: 'agents', result: { stopped: 'Central Knot Alpha syncs this home, so nothing was written or deleted.', results: [], writes: 0 } },
+    { kind: 'agents', result: { stopped: 'The sync record is damaged. Nothing was written or deleted. Put the record back, then try again.', results: [], writes: 0 } },
   ], [review, plan, docs]);
   assert.deepEqual(done, { warn: true, text: 'Used the latest copy for 1 item, each with its own Undo in History. Skipped 1 with no dates to go by (docs): it stays found, and its row asks which copy. '
-    + 'review changed meanwhile, so it is asked again. plan wasn’t chosen: Central Knot Alpha syncs this home, so nothing was written or deleted.' });
+    + 'review changed meanwhile, so it is asked again. plan wasn’t chosen: The sync record is damaged. Nothing was written or deleted. Put the record back, then try again.' });
 });
 
 // ---------- The one Undo meets later changes ----------

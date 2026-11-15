@@ -70,7 +70,7 @@ test('A held build writes nothing in the home or the tools, by any route: each i
       ['a tool new to the plugins record', async () => markets.noteJoined(['codex-cli'], box.home)],
       ['an instruction file saved', async () => (await saveInstruction(held, [], 'claude-cli', 'New.\n', '')).stopped],
       ['the Git repo connected', async () => (await connectRepo(held, 'https://github.com/example/library', '')).stopped],
-      ['Take over syncing', async () => (await takeOverSync(held)).stopped],
+      ['a take-over of the record (the look’s, main.ts takeOverHome)', async () => (await takeOverSync(held)).stopped],
       ['History kept to its days', async () => pruneHistory(held)],
     ];
     const answers: Record<string, unknown> = {};
@@ -79,8 +79,8 @@ test('A held build writes nothing in the home or the tools, by any route: each i
     assert.deepEqual(calls, [], 'no tool command ran');
     // Where a route answers in words, they are the held sentence.
     for (const route of ['a click on Skills', 'a click on MCP servers', 'a click on Agents', 'a profile switch', 'a profile saved', 'a tool’s Manage switch', 'Synchronize everything',
-      'a source’s check (the daily one is the same call)', 'a plugin installed, as an owed install is', 'a plugin updated by itself', 'an instruction file saved', 'the Git repo connected', 'Take over syncing']) assert.equal(answers[route], HELD, route);
+      'a source’s check (the daily one is the same call)', 'a plugin installed, as an owed install is', 'a plugin updated by itself', 'an instruction file saved', 'the Git repo connected', 'a take-over of the record (the look’s, main.ts takeOverHome)']) assert.equal(answers[route], HELD, route);
     assert.deepEqual(answers['the bundled marketplace added to the tools'], []);
-    assert.equal(answers['History kept to its days'], 'elsewhere');
+    assert.equal(answers['History kept to its days'], 'later');
   } finally { await box.cleanup(); }
 });

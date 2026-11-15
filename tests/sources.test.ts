@@ -1349,19 +1349,6 @@ test('Check now concerns its source’s skills and nothing else: an edit waiting
   } finally { await box.cleanup(); }
 });
 
-test('In a home another build of Central Knot syncs, a source’s Look, Check now and Remove are refused at the gate, and nothing changes', async () => {
-  const { readRecord, saveRecord } = await import('../src/share.ts');
-  const box = await sandbox();
-  try {
-    const { id } = await oneSkill(box, 'notes');
-    const { record } = await readRecord(box.home);
-    await saveRecord(box.home, { ...record!, owner: 'com.example.another-build', ownerName: 'Another build' }, true);
-    const refused = [(await previewSource(box.context, box.tools, 'team/notes')).refused, (await check(box, id)).stopped, (await removeSource(box.context, box.tools, id)).stopped];
-    assert.ok(refused.every(said => /Another build/.test(said ?? '')), JSON.stringify(refused));
-    assert.equal((await sourcesView(box.context, box.tools)).sources.length, 1, 'the source is still recorded');
-  } finally { await box.cleanup(); }
-});
-
 test('Look at a repository, connect it as the Git repo, then Add: Add refuses it, as Look would now, and nothing becomes a source', async () => {
   const { connectRepo } = await import('../src/gitrepo.ts');
   const box = await sandbox();
