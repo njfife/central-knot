@@ -17,7 +17,7 @@
 // repository given as a Git link brings it as a second item, pdf.
 import { basename, dirname } from 'node:path';
 import { agentHash } from './agentfiles.ts';
-import { agentInText, serverAt, skillAt, type ItemThere } from './atlink.ts';
+import { agentInText, serverAt, skillAt, wasRead, type ItemThere } from './atlink.ts';
 import type { PluginFiles } from './catalogdetail.ts';
 import { fromLinkSinceTakeIn, itemKey, sourceAnswers, wantedIn, type ItemKind, type LibraryItem } from './library.ts';
 import { copiesOf, lookFor, type SourceRead } from './librarypass.ts';
@@ -60,19 +60,19 @@ const readers: Record<ItemKind, (files: PluginFiles) => Promise<ItemThere<unknow
 
 /**
  * A plugin's files read as one SourceRead per kind (library.ts A PLUGIN): each name with its content, or why it can't be read
- * or is left out. A kind is read whole when something in the plugin can be read (a plugin's folder missing from the
- * marketplace's copy reads as empty, so it is not), its files left nothing of that kind unread (PluginFiles `unread`) and every
- * item of it was read or left out by a rule. `outOf`: the tools a name it
+ * or is left out. A kind is read whole as a link's kind is (library.ts "Read whole"; atlink.ts wasRead): something in the plugin
+ * was read (a plugin's folder missing from the marketplace's copy reads as empty, so it is not), its files left nothing of that
+ * kind unread (PluginFiles `unread`), and every item of it was read. `outOf`: the tools a name it
  * makes is kept out of (pluginOutOf). `commitAt`: when its marketplace was read.
  */
 export async function readPlugin(files: PluginFiles, entry: PluginEntry, commitAt: string, recorded: ReadonlySet<string>, outOf: HarnessId[]): Promise<SourceRead<unknown>[]> {
   const kinds = await Promise.all(sourceKinds().map(async kind => ({ kind, items: await readers[kind.kind.kind](files) })));
-  const readable = kinds.some(each => each.items.some(item => !('unreadable' in item)));
+  const read = kinds.some(each => each.items.some(wasRead));
   const unread: Record<ItemKind, string[]> = { skill: files.unread.skills, agent: files.unread.agents, mcp: files.unread.servers ? ['*'] : [] };
   return kinds.map(({ kind, items }): SourceRead<unknown> => {
     const names: SourceRead<unknown>['names'] = new Map(unread[kind.kind.kind].filter(name => name !== '*').map(name => [itemKey(name), { unreadable: 'it can’t be read' }]));
     for (const item of items) names.set(item.key, 'unreadable' in item ? { unreadable: item.unreadable } : { name: item.name, hash: item.hash, content: item.content, ...(item.own ? { own: item.own } : {}) });
-    const whole = readable && !unread[kind.kind.kind].length && items.every(item => !('unreadable' in item) || item.leftOut);
+    const whole = read && !unread[kind.kind.kind].length && items.every(wasRead);
     return { id: entry.id, link: pluginLink(entry.plugin, entry.marketName), commitAt, kind: kind.kind.kind, mergeWith: kind.kind.merge, whole, names, recorded, plugin: { on: entry.on, outOf } };
   });
 }

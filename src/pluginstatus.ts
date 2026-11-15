@@ -158,9 +158,12 @@ export const FROM_DIRECTORY = 'Claude Code has its copy from the Anthropic Direc
  */
 export const routeOf = (entry: MarketplaceView, plugin: string): 'parts' | 'items' => (Object.values(entry.parts?.[plugin] ?? {}).some(parts => !!parts?.items.length) ? 'parts' : 'items');
 
-/** Whether some item linked to the plugin is wanted in this tool (pluginlibrary.ts itemsView): "has it" for Pi and OpenCode. */
-export const itemsIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) =>
-  !!entry.items?.[plugin]?.lines.some(line => line.on && !line.except?.includes(tool) && (line.state === 'linked' || line.state === 'update' || line.state === 'going'));
+/**
+ * Whether some item linked to the plugin is wanted in this tool (pluginlibrary.ts itemsView): "has it" for Pi and OpenCode. Never
+ * in a tool that takes the plugin itself, which has its items only with the installed plugin (plugins.ts pluginHolds).
+ */
+export const itemsIn = (entry: MarketplaceView, plugin: string, tool: HarnessId) => !takesPlugins(tool)
+  && !!entry.items?.[plugin]?.lines.some(line => line.on && !line.except?.includes(tool) && (line.state === 'linked' || line.state === 'update' || line.state === 'going'));
 
 /** This plugin's parts in a tool, when they were installed there as separate items (parts.ts). */
 export const partsOf = (entry: MarketplaceView, plugin: string, tool: HarnessId): PartsState | undefined => entry.parts?.[plugin]?.[tool];

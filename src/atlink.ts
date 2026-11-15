@@ -269,7 +269,7 @@ export async function serverAt(where: { folder: string; folderName: string; file
 export type RowClick = Pick<SourceRead<unknown>, 'bringBack' | 'replace' | 'merge' | 'keep'>;
 
 /** Whether an item at a link was read: it can be brought in, or it is left out by a rule. Only one that couldn't be read wasn't. */
-const wasRead = (item: ItemThere<unknown>) => !('unreadable' in item) || !!item.leftOut;
+export const wasRead = (item: ItemThere<unknown>) => !('unreadable' in item) || !!item.leftOut;
 /** Whether what is at a link holds an item of any kind that can be brought in: what Look's Add asks. */
 const canBringIn = (found: Holds) => found.kinds.some(each => each.items.some(item => !('unreadable' in item)));
 

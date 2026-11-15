@@ -656,7 +656,7 @@ function libraryTag(skill: ItemRow) {
 /** The tag after an item's name while a version waits at the source it is linked to, or once its source removed it (libraryrow.ts fromSourceWords). */
 function sourceTag(skill: ItemRow) {
   const tag = skill.fromSource && fromSourceWords(skill.fromSource).tag, plugin = skill.fromSource && pluginOf(skill.fromSource.link);
-  return tag ? h('span.row-tag.row-tag-source', { title: tag.title }, icon('link-2', 12, plugin ? 'tone-muted' : 'tone-warning'), tag.text) : null;
+  return tag ? h(`span.row-tag.row-tag-source${plugin ? '.row-tag-plugin' : ''}`, { title: tag.title }, icon('link-2', 12, plugin ? 'tone-muted' : 'tone-warning'), tag.text) : null;
 }
 /** The opened row's line saying which source an item is from, and whether a version waits there or it removed the item, with its link to Sources. */
 function fromSourceLine(key: string, from: NonNullable<ItemRow['fromSource']>) {

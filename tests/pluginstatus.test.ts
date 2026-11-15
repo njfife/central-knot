@@ -19,6 +19,9 @@ test('A tool takes a plugin by its own installer only when its CLI is there and 
   assert.equal(route('copilot-cli', withParts), 'parts', 'a plugin with parts on record keeps its parts route, in every tool');
   assert.equal(toolNow({ ...view, tools: [...view.tools, 'pi-cli'] }, entry, 'p', 'pi-cli', undefined, false).route, 'items', 'Pi takes a plugin with no parts as library items');
   assert.equal(toolNow({ ...view, tools: [...view.tools, 'pi-cli'] }, withParts, 'p', 'pi-cli', undefined, false).route, 'parts');
+  // Its items On in Pi: Pi has it; Copilot CLI, with no copy of the plugin, has nothing of it (its items come only with the plugin).
+  const withItems: MarketplaceView = { ...entry, items: { p: { lines: [{ kind: 'skill', key: 's', name: 's', state: 'linked', on: true, except: [] }] } } };
+  assert.deepEqual(['pi-cli', 'copilot-cli'].map(tool => toolNow({ ...view, tools: [...view.tools, 'pi-cli'] }, withItems, 'p', tool as 'pi-cli', undefined, false).has), ['items', 'none']);
   // One answer for every box, panel and key: held says why, installed is never unavailable, a missing CLI is.
   assert.equal(unavailable(view, entry, 'p', 'codex-cli'), 'other');
   assert.equal(unavailable({ ...view, clis: {} }, entry, 'p', 'claude-cli'), undefined);
