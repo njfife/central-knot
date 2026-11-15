@@ -1,9 +1,10 @@
 // Small helpers both the main process and the page use: times in words (dayAndTime, timesApart), History's days (the choices
 // and the default: historyDayChoices, defaultHistoryDays), counts (plural), a tool's monogram, which build syncs a home
-// (syncOwner), a notice's names, what the Caught up band names (caughtUpNames), the notices a view set aside brought, carried
-// into the next view (withSetAside), and grouping.
+// (syncOwner), one install at a time (what holds this build: holdingBuild, holdsUntil, QUIT_WAIT_MS), a notice's names, what
+// the Caught up band names (caughtUpNames), the notices a view set aside brought, carried into the next view (withSetAside), and
+// grouping.
 // Pure: no DOM, no files. Tools' and kinds' names and lists in words are words.ts's.
-import type { HarnessId, HistoryDays, HomeView, Snapshot, SyncGate, SyncNotice } from './types.ts';
+import type { HarnessId, HistoryDays, HomeView, OtherBuild, Snapshot, SyncGate, SyncNotice } from './types.ts';
 
 const monograms: Record<HarnessId, string> = { 'claude-cli': 'Cc', 'copilot-cli': 'Cp', 'codex-cli': 'Cx', 'pi-cli': 'Pi', 'opencode-cli': 'Oc' };
 export { toolName } from './words.ts';
@@ -13,6 +14,19 @@ export const fullToolName = (snapshot: Snapshot) => `${snapshot.harnessName} ${s
 export const clockTime = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 /** The build that syncs a home in this one's place, where its record names another (share.ts syncGate); undefined otherwise. */
 export const syncOwner = (gate: SyncGate) => (gate.state === 'stopped' ? gate.owner : undefined);
+/**
+ * One install at a time: what holds this build, from what the looks have found so far (main.ts others, types.ts HomeView
+ * otherBuilds): 'unlooked' until the first look answers, so nothing is written before it; else the first other build the last
+ * look found; else none, also where whether one is here can't be told. Main's gate (main.ts heldReason, which share.ts
+ * writeAccess obeys) and the page's held screen (otherbuildview.ts) both go by it.
+ */
+export function holdingBuild(found: OtherBuild[] | undefined): OtherBuild | undefined;
+export function holdingBuild(found: OtherBuild[] | undefined | 'unlooked'): OtherBuild | 'unlooked' | undefined;
+export function holdingBuild(found: OtherBuild[] | undefined | 'unlooked') { return found === 'unlooked' ? found : found?.[0]; }
+/** How long a build that holds this one keeps it from changing anything: while it is installed, or, one only running, while it is open. */
+export const holdsUntil = (other: OtherBuild) => (other.installed ? 'until one of the two is gone' : 'while both are open');
+/** How long Replace and Quit wait for a build asked to quit: longer than the 15 s a build holds its quit for a plugin step under way (main.ts before-quit). */
+export const QUIT_WAIT_MS = 20_000;
 
 /** The items a sync notice names: its one item, or every item Synchronize everything took in. */
 export const noticeNames = (notice: SyncNotice) => (notice.kind === 'taken-in' ? notice.items : [notice.item]);

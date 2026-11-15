@@ -68,8 +68,8 @@ export const ALPHA_BUILD = 'com.centralknot.alpha';
 
 /**
  * The app a line's builds are: its name, wherever the app shows it, and its bundle id. An alpha is its own app, "Central Knot
- * Alpha", installed beside the standard app with its own settings folder, log and downloads; previews and finals (and a build
- * with no tag) are the standard app. A custom build has a name and id of its own instead (bundle.ts custom-build.json).
+ * Alpha", with its own settings folder, log and downloads (installed, it replaces the standard app: otherbuilds.ts); previews
+ * and finals (and a build with no tag) are the standard app. A custom build has a name and id of its own instead (bundle.ts custom-build.json).
  * The alpha's name is put together from PRODUCT, so the build's renaming of the plain name (scripts/build.mjs) leaves it whole.
  */
 export interface BuildApp { name: string; bundleId: string }

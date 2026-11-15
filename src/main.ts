@@ -1,12 +1,14 @@
 // The main process (MAP.md, "The app's shell and Settings"): the window, the menu bar icon, the app menu and the Dock; the app's
-// own settings (app-settings.json, AppSettings) and log; which home is open; watching its folders and polling; and the queue
-// each change takes its turn in (queued). It runs the pass of the whole home (pass, through homepass.ts homePass), builds the
+// own settings (app-settings.json, AppSettings) and log; which home is open; whether another build of Central Knot holds this
+// one (heldReason, from otherbuilds.ts: one install at a time); watching its folders and polling; and the queue each change
+// takes its turn in (queued). It runs the pass of the whole home (pass, through homepass.ts homePass), builds the
 // view every page reads (syncThenView: types.ts HomeView), and registers every IPC channel the page calls through preload.ts
 // (the Plugins page's are marketplaces.ts's, registered with this module's handle). Each handler hands its request to an engine;
 // a click on an item page goes through the `changes` sanitizer, which must copy each field of types.ts Change. Not here: what a
 // change does (the engines: librarypass.ts and each kind, profiles.ts, sources.ts, gitrepo.ts, instructions.ts, plugins.ts) and
 // what a page shows (from renderer.ts).
-import { onlyAllowed, record, strings } from './values.ts';
+import { onlyAllowed, PRODUCT, record, strings } from './values.ts';
+import packageInfo from '../package.json' with { type: 'json' };
 import { execFile } from 'node:child_process';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, shell, Tray, type MenuItemConstructorOptions } from 'electron';
 import { homedir, hostname, tmpdir } from 'node:os';
@@ -16,7 +18,7 @@ import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover, findOtherApps } from './discovery.ts';
 import { envOverride, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { CLAUDE_PROCESS, appCandidates, executableCandidates, macPlaces, searchPath } from './platform.ts';
-import { intoFolder, isRunning, knownBuilds, lookForBuilds, quitBuild, removeClick, type BuildsContext } from './otherbuilds.ts';
+import { intoFolder, isRunning, lookForBuilds, quitBuild, removeBuild, runsOutside, type BuildsContext } from './otherbuilds.ts';
 import { leftOutNow, managedNow, readRecord, syncGate, takeOverSync, writeAccess, type ShareContext } from './share.ts';
 import { everythingEntryAction, setSyncEverything } from './everything.ts';
 import { chooseTools, whatJoiningDoes } from './toolchoice.ts';
@@ -43,9 +45,9 @@ import { trayIconPng } from './trayicon.ts';
 import { homePass, passTells } from './homepass.ts';
 import { deleteProfile, liveNow, readProfiles, saveProfile, switchProfile, undoSwitch } from './profiles.ts';
 import { homeItems, inUse, inUseName, switchable, type LiveItem } from './profileplan.ts';
-import { defaultHistoryDays, historyDayChoices, syncOwner } from './model.ts';
+import { defaultHistoryDays, historyDayChoices, holdingBuild, holdsUntil, syncOwner } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
-import type { ActionReport, Appearance, ApplyResult, PartRef, PartsPick, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
+import type { ActionReport, Appearance, ApplyResult, BuildOutcome, OtherBuild, PartRef, PartsPick, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, PassResult as LibraryPass, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
 import { joinedWords, toolList } from './words.ts';
 import { buildTag, startUpdater, type PendingUpdate } from './updater.ts';
@@ -73,8 +75,8 @@ const custom = readCustomBuildSync(__dirname);
 /**
  * The app this build is: a custom build's own, or the one its release tag's line is (updates.ts lineApp: an alpha is
  * "Central Knot Alpha"); the standard app otherwise. Any other app than the standard one keeps its settings and log in a
- * folder of its own, so it runs beside the standard app and never reads or writes that app's settings (ORG-07). A data
- * folder named on the command line (tests) still wins.
+ * folder of its own, so it never shares the standard app's settings (ORG-07); a build reads another's only to keep them when it
+ * takes a home's record over from it (settingsFolderOf, keepSettingsOf). A data folder named on the command line (tests) still wins.
  */
 const own = custom ?? lineApp(releaseLine(buildTag()));
 if (own.bundleId !== STANDARD_BUILD) {
@@ -92,6 +94,8 @@ if (process.env.CK_TEST_DEBUG_PORT) app.commandLine.appendSwitch('remote-debuggi
 // Test-only too: CK_TEST_APPS names a folder that stands in for /Applications, the running apps and the Trash (platform.ts
 // macPlaces), so a test never looks at or removes the real ones; with it, another build is looked for in a development run too.
 const testApps = !!process.env.CK_TEST_APPS;
+/** Whether this run looks for other builds of Central Knot (buildsContext): on a Mac in an installed app, or where a test named its stand-ins; never in a smoke run. */
+const looksForBuilds = !smoke && ((process.platform === 'darwin' && app.isPackaged) || testApps);
 // Asked now, while the window is being made, so the first read of this computer's tools doesn't wait on a shell's startup.
 void searchPath();
 /** This build's name in a home's sync record: its app's bundle id (the standard app's, the alpha's or a custom build's own). */
@@ -151,7 +155,7 @@ function context(): ShareContext {
     settingsPath: join(app.getPath('userData'), 'sharing-settings.json'), realHome: homedir(),
     allowActualWrites: process.platform === 'darwin' && !smoke,
     overrides: Object.fromEntries(harnessIds.map(id => [id, overrideFor(id)])),
-    historyDays: historyDays(),
+    historyDays: historyDays(), held: heldReason(),
   };
 }
 
@@ -300,7 +304,8 @@ const saveSignInQuietly = (on: boolean) => void setStartAtSignIn(on).catch(error
 /** The checkbox both menus show: the system's answer, the reason beside it, and changeable only where it can be. */
 function signInItem(): MenuItemConstructorOptions {
   const state = signIn();
-  return { label: signInLabel(state), type: 'checkbox', checked: state.on, enabled: state.available, click: item => saveSignInQuietly(item.checked) };
+  // Held (heldReason), a build adds no login item, and none is changed from its menus.
+  return { label: signInLabel(state), type: 'checkbox', checked: state.on, enabled: state.available && !heldReason(), click: item => saveSignInQuietly(item.checked) };
 }
 /** Where the person finishes or undoes it in the system's own settings: fixed places, never one the page names. */
 function openSignInSettings(): Promise<void> {
@@ -395,7 +400,7 @@ function switchFromMenu(id: string) {
  */
 function profileMenu(): Electron.MenuItemConstructorOptions {
   if (!lastProfiles.profiles.length) return { label: 'Profiles…', enabled: !!current, click: () => showPage('profiles') };
-  const usable = homeWritable && !!current, inUseNow = inUse(lastProfiles.profiles, lastItems);
+  const usable = homeWritable && !heldReason() && !!current, inUseNow = inUse(lastProfiles.profiles, lastItems);
   return { label: `Profile: ${inUseName(lastProfiles.profiles, lastItems)}`, submenu: [
     // One not offered (nothing in it: profileplan.ts switchable) is shown disabled, as on the Profiles page.
     ...lastProfiles.profiles.map(profile => {
@@ -407,6 +412,15 @@ function profileMenu(): Electron.MenuItemConstructorOptions {
   ] };
 }
 
+/** Automatic sync and Sync once, as both menus carry them: shown, not offered, where nothing may be written (preview only, or held: heldReason, which no menu calls preview only). */
+function syncItems(): MenuItemConstructorOptions[] {
+  const usable = homeWritable && !heldReason();
+  return [
+    { label: usable || heldReason() ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && usable, enabled: usable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
+    { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && usable, enabled: !!current, click: () => void syncOnce() },
+  ];
+}
+
 function trayMenu() {
   return Menu.buildFromTemplate([
     { label: 'Open Central Knot', click: showWindow },
@@ -416,8 +430,7 @@ function trayMenu() {
     { type: 'separator' },
     // The status line says where, and any news; the checkbox below already says whether sync is on.
     { label: statusLine(), enabled: unseen || !!unseenPlugins, click: showNews },
-    { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
-    { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void syncOnce() },
+    ...syncItems(),
     { type: 'separator' },
     // Linux has no start at sign-in yet, so its tray never offers one.
     { ...signInItem(), visible: process.platform !== 'linux' },
@@ -460,8 +473,7 @@ function appMenu() {
       // The same status line as the menu bar menu: where, and any news.
       { label: statusLine(), enabled: unseen || !!unseenPlugins, click: showNews },
       { type: 'separator' },
-      { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
-      { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void syncOnce() },
+      ...syncItems(),
       signInItem(),
       { type: 'separator' },
       { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
@@ -533,8 +545,11 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   return (await syncAndView(explicit)).view;
 }
 
-/** One pass, then the view built from the home as it left it; `passed`: what the pass did. */
+/** The look for other builds, one pass, then the view built from the home as it left it; `passed`: what the pass did. */
 async function syncAndView(explicit = false): Promise<{ view: HomeView; passed: BackgroundPass }> {
+  // First, so the held screen is shown before any pass could write: held, the pass below meets writeAccess's refusal. A record
+  // taken over on the way is said with the view (a click on the held screen says it itself: carryOn).
+  const tookOver = await lookForOthers();
   const shared: ShareContext = { ...context(), reads: new Map() };
   const before = await read();
   const passed = await pass(before, explicit), { skills } = passed;
@@ -551,7 +566,7 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passed: 
   const syncEverything = (await readRecord(current!.home)).record?.syncEverything;
   const readId = handoff.id + 1;
   const made: HomeView = {
-    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), readId, profiles, parts: await readParts(current!.home),
+    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), readId, profiles, parts: await readParts(current!.home), ...(tookOver ? { tookOver } : {}),
     // Apps that run the tools or read their files are looked for only on this computer, like the tools' own apps.
     ...(current!.mode === 'actual' ? { otherApps: await findOtherApps(current!.home) } : {}),
     sync: { managed, present, joining: await joiningCounts(shared, managed, present, syncEverything === true), writes: await skillFolders(shared, managed), access: await writeAccess(shared), gate: await syncGate(shared),
@@ -563,10 +578,11 @@ async function syncAndView(explicit = false): Promise<{ view: HomeView; passed: 
   // What plugins installed whole bring, read with the home so the Skills, MCP servers and Agents pages show it without Plugins.
   // With the view's own reads, so each tool's installed plugins are read once for these rows and the pages' Through a plugin boxes.
   made.pluginItems = await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), managed);
-  // Another build of Central Knot on this Mac, and whether the one that syncs this home is open now (what the page says of it).
-  const builds = buildsContext(), owner = syncOwner(made.sync.gate);
-  if (builds) {
-    made.otherBuilds = await lookForBuilds(builds);
+  // What the look above found, where this copy runs from, and whether the build that syncs this home is open now (what the page says of it).
+  const builds = buildsContext(), owner = syncOwner(made.sync.gate), outside = builds && runsOutside(builds);
+  if (builds && others !== 'unlooked') {
+    made.otherBuilds = others;
+    if (outside) made.runsOutside = outside;
     if (owner) owner.running = await isRunning(builds, owner.build);
   }
   followProfiles(made.profiles, homeItems(made));
@@ -612,7 +628,8 @@ let feedLook: Promise<void> | undefined;
  */
 function lookAtFeed(): Promise<void> {
   const feed = custom?.feed;
-  if (!feed || smoke) return Promise.resolve();
+  // Held, not even the build's own folder, which the tools load the carried marketplace from: freed starts it again.
+  if (!feed || smoke || heldReason()) return Promise.resolve();
   feedLook ??= (async () => {
     clearTimeout(feedTimer);
     // Read past the app's web cache: a static server gives no cache rules, and a cached manifest would hide a new release for days.
@@ -636,13 +653,96 @@ function lookAtFeed(): Promise<void> {
  * run), or where a test named its stand-ins (CK_TEST_APPS); never in a smoke run.
  */
 function buildsContext(): BuildsContext | undefined {
-  if (smoke || !((process.platform === 'darwin' && app.isPackaged) || testApps)) return undefined;
+  if (!looksForBuilds) return undefined;
   const places = macPlaces(homedir());
   return {
-    own: BUILD, known: knownBuilds(), places, home: homedir(),
-    ...(app.isPackaged ? { ownBundle: process.execPath.replace(/\/Contents\/MacOS\/[^/]+$/, '') } : {}),
+    own: BUILD, places, home: homedir(), settingsFolder: settingsFolderOf,
+    // Test-only, with stand-ins: where this copy is to say it runs from (CK_TEST_OWN_BUNDLE: an Applications folder, the Trash).
+    ...(testApps && process.env.CK_TEST_OWN_BUNDLE ? { ownBundle: process.env.CK_TEST_OWN_BUNDLE } : app.isPackaged ? { ownBundle: process.execPath.replace(/\/Contents\/MacOS\/[^/]+$/, '') } : {}),
     trash: places.trash ? intoFolder(places.trash) : bundle => shell.trashItem(bundle),
   };
+}
+
+// ---------- One install at a time (otherbuilds.ts; the page's held screen: otherbuildview.ts) ----------
+
+/**
+ * What the last look at other builds of Central Knot found (otherbuilds.ts lookForBuilds), never stored: 'unlooked' until the
+ * first look answers, so nothing is written before it; undefined where nothing is looked for or an Applications folder can't be read.
+ */
+let others: OtherBuild[] | undefined | 'unlooked' = looksForBuilds ? 'unlooked' : undefined;
+/** Why this build may write nothing now (share.ts ShareContext held): another build is here (model.ts holdingBuild), or the first look hasn't answered. */
+function heldReason(): string | undefined {
+  const holder = holdingBuild(others);
+  if (holder === 'unlooked') return `${own.name} is still looking for other builds of ${PRODUCT} on this Mac, so nothing is written yet.`;
+  return holder && `${holder.name} is also ${holder.installed ? 'installed' : 'running'} on this Mac, and only one build of ${PRODUCT} works at a time, so ${own.name} changes nothing in this home or your tools ${holdsUntil(holder)}.`;
+}
+/**
+ * The look (syncAndView's first step), and what follows from it: held, the window is shown, even after a start at sign-in.
+ * Freed of a build that held it, this build takes over a home's record that names a build no longer found (takeOverHome),
+ * however that build went, then starts as it would have. Answers what the take-over said, where one happened.
+ */
+async function lookForOthers(): Promise<string | undefined> {
+  const builds = buildsContext();
+  if (!builds) return undefined;
+  const before = holdingBuild(others), owner = (await readRecord(current!.home)).record?.owner;
+  others = await lookForBuilds(builds, owner);
+  if (others === undefined) log('other builds: an Applications folder can’t be read, so whether another build is here isn’t known; not held');
+  if (heldReason() && (window.isDestroyed() || !window.isVisible())) showWindow();
+  if (!!heldReason() !== !!before) refreshTray();
+  if (heldReason() || !before) return undefined;
+  const gone = before !== 'unlooked' && Array.isArray(others) && !others.length && !!owner && owner !== BUILD;
+  const taken = gone ? await takeOverHome() : undefined;
+  await freed();
+  return taken?.said;
+}
+/** What waits for a build that isn't held: its login item at its first open (firstSignIn) and a bundled build's feed. At launch, else once the look finds none. */
+async function freed() {
+  await firstSignIn();
+  if (custom?.feed) { clearTimeout(feedTimer); feedTimer = setTimeout(() => void lookAtFeed(), FEED_FIRST_MS); }
+}
+/**
+ * After a click on the build that holds this one (Replace, or Quit X): the look again, which takes the home's record over where
+ * this build is free now (lookForOthers); what that said comes first. Then the view.
+ */
+async function carryOn(other: OtherBuild, outcome: BuildOutcome): Promise<BuildOutcome & { view: HomeView | null }> {
+  log(`other build: ${other.name} (${other.build}): ${outcome.said}`);
+  const said = [await lookForOthers(), outcome.said].filter(Boolean).join(' ');
+  return { said, done: outcome.done, ...(outcome.show ? { show: outcome.show } : {}), view: await syncThenView() };
+}
+/**
+ * Takes this home's record over from the build it names (share.ts takeOverSync), keeping that build's settings first where its
+ * folder is found (keepSettingsOf), so the change of hands changes nothing in the tools and drops nothing from History. Every
+ * route by which the record changes hands comes here: this build freed of the build that held it (lookForOthers), and Take over
+ * syncing. `said`: what it did, starting with this build syncing the home now.
+ */
+async function takeOverHome(): Promise<{ stopped?: string; from?: string; said?: string }> {
+  const owner = (await readRecord(current!.home)).record?.owner;
+  const kept = owner && owner !== BUILD && (await writeAccess(context())).allowed ? await keepSettingsOf(owner) : undefined;
+  const taken = await takeOverSync(context());
+  if (!taken.from) return taken;
+  log(`sync: took over syncing ${current!.home} from ${taken.from}${kept ? ', keeping its settings' : ''}`);
+  const choices = 'whether Automatic sync is on, whether plugins update by themselves, how many days of History are kept (the longer of the two) and which folder it opens when it starts';
+  return { ...taken, said: kept ? `${own.name} syncs this home now, and keeps ${taken.from}’s choices: ${choices}.`
+    : `${own.name} syncs this home now, with its own settings: ${taken.from}’s settings folder wasn’t found, so History is kept for as many days `
+      + `as ${own.name} keeps it, and anything older is dropped at its next change.` };
+}
+/** Where a build keeps its settings: beside this build's folder, named as every build's is (the standard app's by the package's name, any other's by its bundle id: `own` above). */
+const settingsFolderOf = (build: string) => join(dirname(app.getPath('userData')), build === STANDARD_BUILD ? packageInfo.name : build);
+/**
+ * Another build's own choices that decide what is written (Automatic sync, automatic plugin updates, History's days and the
+ * home it opens at start), saved as this build's. Read from its settings folder as that build reads them: a value it never
+ * saved is its default. History's days are this build's for every home it opens, so the longer of the two is kept: a take-over
+ * never shortens History. False, and nothing saved, where that folder isn't there.
+ */
+async function keepSettingsOf(build: string): Promise<boolean> {
+  const folder = settingsFolderOf(build);
+  if (!await access(folder).then(() => true, () => false)) return false;
+  const read = (name: string) => readFile(join(folder, name), 'utf8').then(text => record(JSON.parse(text))).catch(() => undefined);
+  const theirs = (await read('app-settings.json') ?? {}) as AppSettings, sync = await read('sync-settings.json');
+  const days = Math.max(historyDays(), isHistoryDays(theirs.historyDays) ? theirs.historyDays : defaultHistoryDays) as HistoryDays;
+  await saveAppSettings({ home: theirs.home, historyDays: days, pluginUpdates: theirs.pluginUpdates });
+  await saveSyncSetting(sync?.syncOn !== false);
+  return true;
 }
 
 /** The marketplace feature's own work at open (marketplaces.ts); set once its requests are registered. */
@@ -984,6 +1084,8 @@ function createWindow(show: boolean) {
   // However the window comes back, the Dock icon comes with it. (Never the other way: macOS also calls a covered window hidden.)
   window.on('show', joinDock);
   window.on('close', event => {
+    // A held build is never left running out of sight: closing its window quits it.
+    if (heldReason()) quitting = true;
     log(`window close (${quitting ? 'quitting' : tray ? 'hidden' : 'no menu bar icon'})`);
     if (quitting || !tray) return;
     event.preventDefault();
@@ -1058,9 +1160,9 @@ app.whenReady().then(async () => {
     if (opened.problem) log(`bundle: ${opened.problem}`);
     else log(`bundle: ${bundle?.release.marketplace} as of ${bundle ? releaseLabel(bundle.release) : 'nothing'} (sequence ${bundle?.release.sequence}), ready in ${Date.now() - began} ms`);
   }
-  if (custom?.feed) feedTimer = setTimeout(() => void lookAtFeed(), FEED_FIRST_MS);
   applyAppearance();
-  await firstSignIn();
+  // Where other builds are looked for, this waits for the first look to find none (lookForOthers).
+  if (!heldReason()) await freed();
   makeTray();
   createWindow(!smoke && !startedHidden());
   // Started at sign-in with no window: the menu bar icon only.
@@ -1290,25 +1392,20 @@ app.whenReady().then(async () => {
     return { ...set, view: await syncThenView() };
   });
   handle('sync:now', async home => (home === current?.home ? syncThenView(true) : null));
-  // Another build of Central Knot: removed (taken over from first, where asked) or quit, on a click alone. One log line each.
-  const notHere = { said: 'Another build is removed or quit only by the installed app on a Mac.', done: false, view: null };
-  handle('builds:remove', async (home, path, build, takeOver) => {
-    if (home !== current?.home || typeof path !== 'string' || typeof build !== 'string') return { said: elsewhere, done: false, view: null };
-    const builds = buildsContext();
-    if (!builds) return notHere;
-    const removal = await removeClick(context(), builds, path, build, takeOver === true);
-    if (removal.took) log(`sync: took over syncing ${home} from ${removal.took}`);
-    log(`other build: ${removal.done ? `moved ${path} to the Trash` : `${path} not removed: ${removal.said}`}`);
-    return { said: removal.said, done: removal.done, ...(removal.show ? { show: removal.show } : {}), view: await syncThenView() };
+  // One install at a time: the build the held screen names (by its id, and for Replace its bundle) replaced, or quit where it only
+  // runs; then this build carries on (carryOn). On a click alone.
+  const notHere = { said: 'Another build is replaced or quit only by the installed app on a Mac.', done: false, view: null };
+  const named = (build: unknown, path?: unknown) => (Array.isArray(others) ? others : []).find(each => each.build === build && (path === undefined || each.installed === path));
+  const gone = async () => ({ said: 'That build isn’t found here any more, so nothing was removed or asked to quit.', done: false, view: await syncThenView() });
+  handle('builds:replace', async (path, build) => {
+    const builds = buildsContext(), other = named(build, path);
+    return !builds || !current ? notHere : other ? carryOn(other, await removeBuild(builds, other)) : gone();
   });
   handle('builds:quit', async build => {
-    if (typeof build !== 'string' || !current) return { said: elsewhere, done: false, view: null };
-    const builds = buildsContext();
-    if (!builds) return notHere;
-    const quit = await quitBuild(builds, build);
-    log(`other build: asked ${build} to quit: ${quit.said}`);
-    return { ...quit, view: await syncThenView() };
+    const builds = buildsContext(), other = named(build);
+    return !builds || !current ? notHere : other ? carryOn(other, await quitBuild(builds, other)) : gone();
   });
+  handleNow('app:quit', async () => { quitting = true; app.quit(); });
   // A tool's Manage switch (toolchoice.ts chooseTools), then the home read again: with Automatic sync on, that pass brings a tool
   // turned on into line, and what it did there (`did`) is what the page's band says. A tool turned on is new to the plugins
   // record (marketplaces.ts toolManaged), and gets each On plugin not kept out of it at a check made now.
@@ -1323,13 +1420,9 @@ app.whenReady().then(async () => {
     const { view, passed } = await syncAndView();
     return { ...chosen, view, did: (passed.done ?? []).filter(result => result.harness === tool) };
   });
-  // Take over syncing (ORG-08): this build becomes the home's sync owner, then reads and syncs it as its owner.
-  handle('sync:take-over', async home => {
-    if (home !== current?.home) return { stopped: elsewhere, view: null };
-    const taken = await takeOverSync(context());
-    if (taken.from) log(`sync: took over syncing ${home} from ${taken.from}`);
-    return { ...taken, view: await syncThenView() };
-  });
+  // Take over syncing (ORG-08): this build becomes the home's sync owner, keeping the other build's settings first (takeOverHome),
+  // then reads and syncs it as its owner.
+  handle('sync:take-over', async home => (home === current?.home ? { ...await takeOverHome(), view: await syncThenView() } : { stopped: elsewhere, view: null }));
   // With Sync off, a click writes exactly the items it is about; spreading anything else waits for Sync.
   // MCP servers: a click writes every tool but Claude Code; Claude Code only through Write to Claude Code, once Claude is closed.
   handle('servers:apply', async (list, resume, home) => (home === current?.home

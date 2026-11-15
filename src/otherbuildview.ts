@@ -1,136 +1,97 @@
-// Another build of Central Knot on this Mac, on the page: what the last look found (types.ts HomeView otherBuilds, from
-// otherbuilds.ts in main), offered where it is decided. Where the build that syncs this home is installed here, Take over
-// syncing becomes two choices (takeOverChoices, drawn by matrix.ts otherOwnerBand, pages.ts overviewPage and Settings' row);
-// where another build is here and doesn't sync this home, the Overview has a band with Remove and Keep both (otherBuildBands)
-// and Settings a row for each one found (settingspage.ts otherBuildsSection, in the words of buildHint and buildActions).
-// Before any click the words say which app goes, which copies stay, and what else stays (removeWords). A click is
-// removeOtherBuild or quitOtherBuild; its result is a band on the page it was made on (app.ts tell), or in Settings that
-// section's line.
-import { announce, busy, otherOwnerSaid, ownerSyncs, rerender, setHome, showFile, shownPath, state, takeOverSync, takeOverTitle, tell } from './app.ts';
-import { button, closeButton, h, icon } from './dom.ts';
-import { readFlag, writeFlag } from './flags.ts';
-import { syncOwner } from './model.ts';
+// One install at a time, on the page: while the last look found another build of Central Knot on this Mac (heldBy: model.ts
+// holdingBuild over types.ts HomeView otherBuilds, found by otherbuilds.ts in main), the window shows this one screen in place of
+// the pages (renderer.ts). First which build and where, what is going on and what the buttons do (offer), and the buttons:
+// Replace (Quit X for a build that only runs) and Quit; then what stays, what becomes of the other build's settings
+// (settingsWords), what the offer does step by step, and how to keep the other build instead. A copy of this app outside an
+// Applications folder (HomeView runsOutside) offers Replace nowhere, and from the Trash only Quit. A click is replaceOtherBuild or
+// quitOtherBuild (main.ts builds:replace and builds:quit); what it came to is said under the buttons while a build still holds
+// this one, the same or the next (with Show in Finder where macOS kept the bundle), and once the look finds none, in a band on
+// the page that comes back (app.ts tell). What is written while held, the menus and the login item are main.ts's (heldReason).
+import { announce, busy, setHome, showFile, shownPath, state, tell } from './app.ts';
+import { button, h, icon } from './dom.ts';
+import { holdingBuild, holdsUntil, QUIT_WAIT_MS, syncOwner } from './model.ts';
 import type { BuildOutcome, HomeView, OtherBuild } from './types.ts';
 import { PRODUCT } from './values.ts';
 
-/** A found build with a bundle in an Applications folder: Remove can take it. */
-type Installed = OtherBuild & { installed: string };
-const isInstalled = (found: OtherBuild): found is Installed => !!found.installed;
-
-/** Whether a found build is the one that syncs the open home: it is removed only by taking over first. */
-export const syncsHere = (home: HomeView, found: OtherBuild) => syncOwner(home.sync.gate)?.build === found.build;
+/** The build that holds this one, where one does: the pages give way to heldScreen. */
+export const heldBy = (home: HomeView | undefined) => (home ? holdingBuild(home.otherBuilds) : undefined);
 
 const folderOf = (bundle: string) => shownPath(bundle.slice(0, bundle.lastIndexOf('/')));
-/** Where a found build is, as one clause: "in /Applications, and is running", or "running from ~/Downloads/…". */
-const whereWords = (found: OtherBuild) => (found.installed ? `in ${folderOf(found.installed)}${found.running?.includes(found.installed) ? ', and is running' : ''}`
-  : `running from ${(found.running ?? []).map(shownPath).join(' and ')}`);
+/** Where a found build is, as one clause: "installed in /Applications, and is running", or "running from ~/Downloads/…, …". */
+const whereWords = (found: OtherBuild) => (found.installed ? `installed in ${folderOf(found.installed)}${found.running?.includes(found.installed) ? ', and is running' : ''}`
+  : `running from ${(found.running ?? []).map(shownPath).join(' and ')}, not from an Applications folder`);
 
-/** What stays when a build is removed: said before the click, as the result says it after. */
-// "Central Knot itself" is this app: written plainly, so an alpha or a custom build says its own name there (scripts/build.mjs),
-// apart from the other build's, which is `name`.
-const staysWords = (name: string) => `Your skills, MCP servers and agents, the record of them and History stay: they’re kept in this home, not in an app. ${name}’s own settings folder stays too, and Central Knot itself is not touched.`;
-
-/**
- * What Remove does, said before the click: which bundle goes to the Trash and that every running copy quits first, which other
- * copies stay (one running from somewhere else, another installed one), and what else stays.
- */
-function removeWords(home: HomeView, found: Installed): string {
-  const elsewhere = (found.running ?? []).filter(path => path !== found.installed);
-  const others = (home.otherBuilds ?? []).flatMap(each => (each.build === found.build && each.installed && each.installed !== found.installed && !elsewhere.includes(each.installed) ? [each.installed] : []));
-  return [
-    `Removing quits every running copy of ${found.name}, then moves ${shownPath(found.installed)} to the Trash, where it stays until you empty the Trash.`,
-    ...elsewhere.map(path => `The copy running from ${shownPath(path)} quits too, but stays where it is.`),
-    ...others.map(path => `The copy at ${shownPath(path)} stays installed.`),
-    staysWords(found.name),
-  ].join(' ');
-}
-
-/** A build that runs from the Trash most likely started at sign-in, which only the system's own settings turn off. */
-const fromTrash = (found: OtherBuild) => (found.running ?? []).some(path => path.includes('/.Trash/'))
-  ? ` It runs from the Trash: if it starts at sign-in, turn that off in System Settings › General › Login Items.` : '';
-
-/** Settings' row for a found build: what it is, where it is, that one build syncs a home at a time, and what its action does. */
-export function buildHint(home: HomeView, found: OtherBuild): string {
-  const one = `Only one build of ${PRODUCT} syncs a home at a time`, where = whereWords(found);
-  if (!isInstalled(found)) return `${where.charAt(0).toUpperCase()}${where.slice(1)}, not from an Applications folder. ${one}. Quit asks it to quit; nothing is removed.${fromTrash(found)}`;
-  const owner = syncOwner(home.sync.gate);
-  const syncing = owner && syncsHere(home, found) ? `. ${found.name} ${ownerSyncs(owner)}, so removing it takes over syncing first` : '';
-  return `Installed ${where}. ${one}${syncing}. ${removeWords(home, found)}`;
-}
-
-/** Shows what a click came to, in words: a band on its page, or Settings' line. */
-type Show = (outcome: BuildOutcome) => void;
-
-/** Asks main while the page is busy, takes the view it sends back (with the build gone, or still there), and shows the result. */
-const ask = (message: string, call: () => Promise<BuildOutcome & { view: HomeView | null }>, show: Show) =>
-  busy(message, async () => { const answer = await call(); setHome(answer.view); show(answer); });
-
-/** Removes a found build: quits it and moves it to the Trash (otherbuilds.ts removeClick), taking over syncing first where asked. */
-export const removeOtherBuild = (found: Installed, takeOver: boolean, show: Show = tellHere) =>
-  ask(`${takeOver ? 'Taking over syncing, then removing' : 'Removing'} ${found.name}…`, () => window.centralKnot.removeOtherBuild(state.home!.home, found.installed, found.build, takeOver), show);
-/** Asks every running copy of a found build to quit (otherbuilds.ts quitBuild). */
-export const quitOtherBuild = (found: OtherBuild, show: Show = tellHere) => ask(`Asking ${found.name} to quit…`, () => window.centralKnot.quitOtherBuild(found.build), show);
-
-/** A click's result as a band on the page it was made on, with Show in Finder where macOS kept the bundle where it was. */
-function tellHere(outcome: BuildOutcome) {
-  const finder = outcome.show;
-  tell({ page: state.page, text: outcome.said, band: true, warn: !outcome.done, ...(finder ? { act: { label: 'Show in Finder', id: 'other-build-show', run: () => showFile(finder) } } : {}) });
-}
+/** What the last click on this screen came to, while a build still holds this one (the same one, or the next): said under the buttons. */
+let said: BuildOutcome | undefined;
+/** A view that isn't held drops it (renderer.ts renderPage), so a held screen later in the session never shows an old result. */
+export const forgetHeldResult = () => { said = undefined; };
 
 /**
- * What a found build offers (Settings' row, the Overview's band): Remove where it is installed, or where it syncs this home
- * the two take-over choices; Quit where it only runs from somewhere else. `show`: where the result goes.
+ * What this copy offers for the build that holds it: Replace only from an Applications folder (HomeView runsOutside unset),
+ * Quit X for a build that only runs (from anywhere but the Trash), and Quit itself always. `lead`: what the buttons do, said
+ * first; `how`: what the offer does step by step, or why this copy offers no more than Quit.
  */
-export function buildActions(home: HomeView, found: OtherBuild, id: string, show: Show = tellHere): HTMLElement[] {
-  const disabled = !!state.busy;
-  if (!isInstalled(found)) return [button({ variant: 'outline', size: 'small', label: `Quit ${found.name}`, id, disabled, onclick: () => void quitOtherBuild(found, show), attrs: { title: `Asks ${found.name} to quit. Nothing is removed.` } })];
-  if (syncsHere(home, found)) return takeOverChoices(home, { variant: 'outline', size: 'small' }, { take: `${id}-keep`, remove: id }, disabled || !home.sync.access.allowed, show).buttons;
-  return [button({ variant: 'outline', size: 'small', label: `Remove ${found.name}`, id, disabled, onclick: () => void removeOtherBuild(found, false, show), attrs: { title: removeWords(home, found) } })];
+function offer(home: HomeView, other: OtherBuild): { act?: 'replace' | 'quit'; lead: string; how: string } {
+  const outside = home.runsOutside, name = other.name, wait = `${QUIT_WAIT_MS / 1000} seconds`;
+  const nothing = `Only one build of ${PRODUCT} works at a time, so Central Knot changes nothing in this home or your tools ${holdsUntil(other)}`;
+  if (outside?.includes('/.Trash/')) {
+    return { lead: `${nothing}, and this copy can’t replace ${name}: quit it.`,
+      how: 'This copy of Central Knot runs from the Trash. If it starts at sign-in, turn that off in System Settings › General › Login Items.' };
+  }
+  // Its path isn't said: a copy opened from Downloads runs from a temporary system folder (App Translocation).
+  if (outside && other.installed) {
+    return { lead: `${nothing}, and this copy can’t replace ${name}: quit it.`,
+      how: `This copy isn’t running from an Applications folder: to replace ${name}, quit it, move it to Applications and open it again from there.` };
+  }
+  if (!other.installed) {
+    return { act: 'quit', lead: `${nothing}: Quit ${name} closes it and Central Knot carries on, and Quit Central Knot closes this app instead.`,
+      how: `Quit ${name} asks every running copy of it to quit and waits up to ${wait}; nothing is removed.` };
+  }
+  return { act: 'replace', lead: `${nothing}: Replace moves ${name} to the Trash and Central Knot carries on, and Quit Central Knot closes this app and leaves both installed.`,
+    how: `Replace asks every running copy of ${name} to quit and waits up to ${wait}, then moves ${shownPath(other.installed)} to the Trash, `
+      + `where it stays until you empty the Trash. ${name}’s own settings folder stays.` };
 }
 
-/** An id made from a build id or a path, for the page's elements. */
-export const slug = (text: string) => text.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '');
-const hiddenFlag = (build: string) => `ck-other-build-hidden-${build}`;
-
-/**
- * The Overview's band for each other build found here that doesn't sync this home (one per build, its first bundle): Remove,
- * and Keep both, which hides the band (the flag); Settings keeps its row while the build is found. A build only running from
- * somewhere else has Quit and a close button instead.
- */
-export function otherBuildBands(home: HomeView): HTMLElement[] {
-  const shown = new Set<string>();
-  return (home.otherBuilds ?? []).filter(found => !syncsHere(home, found) && !readFlag(hiddenFlag(found.build)) && !shown.has(found.build) && shown.add(found.build)).map(found => {
-    const id = slug(found.build), hide = () => { writeFlag(hiddenFlag(found.build)); rerender(); };
-    const words = isInstalled(found) ? `${found.name} is installed here too, ${whereWords(found)}. Only one build of ${PRODUCT} syncs a home at a time. ${removeWords(home, found)}`
-      : `${found.name} is ${whereWords(found)}. Only one build of ${PRODUCT} syncs a home at a time.${fromTrash(found)}`;
-    const keep = isInstalled(found) ? button({ variant: 'outline', size: 'small', label: 'Keep both', id: `other-build-hide-${id}`, onclick: hide,
-      attrs: { title: `Hides this note: both stay installed, and one syncs a home at a time. Settings still lists ${found.name}.` } }) : null;
-    return h('div.band.band-two', { role: 'status', id: `other-build-${id}` }, icon('info', 14, 'tone-muted'), h('span.band-text', {}, words),
-      h('span.band-actions', {}, ...buildActions(home, found, `other-build-action-${id}`), keep),
-      keep ? null : closeButton(hide, { id: `other-build-hide-${id}`, label: 'Hide this note', title: `Hide this note. Settings still lists ${found.name} while it is here.` }));
-  });
+/** What becomes of the other build's settings: kept where it syncs this home and its settings folder was found (types.ts OtherBuild settingsFound), else not. */
+function settingsWords(home: HomeView, other: OtherBuild, verb: string): string {
+  const name = other.name;
+  if (syncOwner(home.sync.gate)?.build !== other.build) return `${name}’s own settings, and any marketplace added only in it, don’t carry over.`;
+  if (!other.settingsFound) {
+    return `${name} syncs this home, but its settings folder isn’t on this Mac, so Central Knot will use its own settings, among them how many days of History `
+      + `are kept: anything older is dropped at its next change. Any marketplace added only in ${name} doesn’t carry over.`;
+  }
+  return `${name} syncs this home, so ${verb} keeps its choices here: whether Automatic sync is on, whether plugins update by themselves, how many days of History `
+    + `are kept (the longer of the two) and which folder it opens when it starts. Its other settings, and any marketplace added only in it, don’t carry over.`;
 }
 
-/**
- * Take over syncing, where another build syncs this home: one button as before, or, where that build is installed here, two
- * choices that each say what they do: take over and remove it, or take over and keep both (it stays installed, stopped
- * here). `said`: the sentence that goes with them. `ids`: the take-over button's and the remove choice's. `show`: where a
- * removal's result goes.
- */
-export function takeOverChoices(home: HomeView, look: { variant: 'outline' | 'link'; size: 'small' | 'micro' }, ids: { take: string; remove: string }, disabled: boolean, show: Show = tellHere): { said: string; buttons: HTMLElement[] } {
-  const owner = syncOwner(home.sync.gate)!;
-  const bundle = home.otherBuilds?.filter(isInstalled).find(found => found.build === owner.build);
-  const take = button({ ...look, label: bundle ? 'Take over, keep both' : 'Take over syncing', id: ids.take, disabled, onclick: () => void takeOverSync(),
-    attrs: { title: `${takeOverTitle(owner)}${bundle ? ` ${owner.name} stays installed.` : ''}` } });
-  if (!bundle) return { said: otherOwnerSaid(owner), buttons: [take] };
-  const remove = button({ ...look, label: `Take over and remove ${owner.name}`, id: ids.remove, disabled, onclick: () => void removeOtherBuild(bundle, true, show),
-    attrs: { title: `Central Knot syncs this home from now on. ${removeWords(home, bundle)}` } });
-  return { said: `${otherOwnerSaid(owner)} ${owner.name} is installed here too: take over and remove it, or take over and keep both. ${removeWords(home, bundle)}`, buttons: [remove, take] };
+/** The screen that stands in for every page while `other` holds this build: what is going on and the buttons first, then the detail. */
+export function heldScreen(home: HomeView, other: OtherBuild): HTMLElement {
+  const { act, lead, how } = offer(home, other), disabled = !!state.busy;
+  return h('div.page', {}, h('div.scroll.held-scroll', { id: 'held-scroll' }, h('section.held', { id: 'held', 'aria-labelledby': 'held-title' },
+    h('h2.held-title', { id: 'held-title' }, `${other.name} is ${whereWords(other)}`),
+    h('p.held-line', {}, lead),
+    h('div.held-actions', {},
+      act === 'replace' ? button({ variant: 'primary', size: 'small', label: `Replace ${other.name}`, id: 'held-replace', disabled, onclick: () => void replaceOtherBuild(other) })
+        : act === 'quit' ? button({ variant: 'primary', size: 'small', label: `Quit ${other.name}`, id: 'held-quit-other', disabled, onclick: () => void quitOtherBuild(other) }) : null,
+      button({ variant: act ? 'outline' : 'primary', size: 'small', label: 'Quit Central Knot', id: 'held-quit', disabled, onclick: () => void window.centralKnot.quit() })),
+    said ? h('p.held-said', { role: 'status', id: 'held-said' }, icon(said.done ? 'check' : 'triangle-alert', 14, said.done ? 'tone-success' : 'tone-warning'), h('span', {}, `${said.said} `),
+      said.show ? button({ variant: 'link', size: 'micro', label: 'Show in Finder', id: 'held-show', onclick: () => showFile(said!.show!) }) : null) : null,
+    h('p.held-line', {}, 'Your skills, MCP servers and agents, which of them are kept in step, and History stay whichever build you keep: they’re saved in this home, not in an app.'),
+    h('p.held-line', {}, settingsWords(home, other, act === 'quit' ? `Quit ${other.name}` : 'Replace')),
+    h('p.held-line', {}, how),
+    act ? h('p.held-line', {}, `To keep ${other.name} instead, quit Central Knot and move it to the Trash.`) : null)));
 }
 
-/** Settings' line for a click's result, where its row may be gone with the build. */
-export const rowMessage = (outcome: BuildOutcome) => {
-  announce(outcome.said, true);
-  const finder = outcome.show;
-  return { text: outcome.said, tone: outcome.done ? 'done' as const : 'failure' as const, ...(finder ? { action: { label: 'Show in Finder', run: () => showFile(finder) } } : {}) };
-};
+/** Asks main while the page is busy and takes the view it sends back: still held, the result is said on this screen; freed, in a band on the page that comes back. */
+const ask = (message: string, call: () => Promise<BuildOutcome & { view: HomeView | null }>) => busy(message, async () => {
+  const answer = await call();
+  setHome(answer.view);
+  const outcome = { said: answer.said, done: answer.done, ...(answer.show ? { show: answer.show } : {}) };
+  said = heldBy(state.home) ? outcome : undefined;
+  if (said) announce(outcome.said, true);
+  else tell({ page: state.page, text: outcome.said, band: true, warn: !outcome.done });
+});
+/** Replace: the build quit and moved to the Trash (otherbuilds.ts removeBuild), then this one carries on (main.ts carryOn). */
+export const replaceOtherBuild = (other: OtherBuild) => ask(`Replacing ${other.name}…`, () => window.centralKnot.replaceOtherBuild(other.installed!, other.build));
+/** Quit X, for a build that only runs: every running copy asked to quit (otherbuilds.ts quitBuild), then the same. */
+export const quitOtherBuild = (other: OtherBuild) => ask(`Asking ${other.name} to quit…`, () => window.centralKnot.quitOtherBuild(other.build));

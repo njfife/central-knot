@@ -1,5 +1,6 @@
 // The page's entry: the window's frame around the page (the sidebar, the header, the status bar and the Sync switch), which page
-// draws (renderPage), and drawing again on a change. The page's state and actions are app.ts's; each page is drawn by its own
+// draws (renderPage: while another build holds this one, the held screen of otherbuildview.ts instead of every page, with the
+// sidebar's update control kept), and drawing again on a change. The page's state and actions are app.ts's; each page is drawn by its own
 // module (pages.ts and the *page.ts modules, matrix.ts for the item tables).
 import { settingsPage } from './settingspage.ts';
 import packageInfo from '../package.json' with { type: 'json' };
@@ -22,6 +23,7 @@ import { noticeNames, plural } from './model.ts';
 import { anyOn } from './itemrow.ts';
 import { followUpdates, sidebarEnd, statusEnd } from './updateview.ts';
 import { followPluginUpdates } from './pluginupdateview.ts';
+import { forgetHeldResult, heldBy, heldScreen } from './otherbuildview.ts';
 
 const region = (id: string) => document.getElementById(id)!;
 /** Each page's title, in the header and the sidebar: a kind's page by its kind's title (words.ts kindNouns). */
@@ -96,6 +98,8 @@ function repoRow() {
 
 function renderSidebar() {
   const home = state.home;
+  // Held: no page and no other home to go to, only the update control.
+  if (heldBy(home)) { region('nav').replaceChildren(); region('homes').replaceChildren(); region('sidebar-end').replaceChildren(...sidebarEnd()); return; }
   // A kind no tool here can hold has no row (app.ts absentKinds).
   const absent = absentKinds();
   const row = (page: HomeKind, ...rest: [IconName, number?]) => (absent.includes(page) ? null : navRow(page, titles[page], ...rest));
@@ -135,7 +139,7 @@ function renderHeader(rail: boolean) {
       variant: 'ghost', icon: 'panel-left', name: rail ? 'Expand the sidebar' : 'Collapse the sidebar', id: 'sidebar-toggle',
       onclick: () => { state.sidebar = rail ? 'open' : 'rail'; rerender(); },
     }),
-    h('h1.page-title', {}, (state.page === 'harnesses' && harnessTitle()) || titles[state.page]),
+    h('h1.page-title', {}, heldBy(state.home) ? 'One build at a time' : (state.page === 'harnesses' && harnessTitle()) || titles[state.page]),
     // The same Refresh on every page: it reads the home again, then the page's own data (on Plugins, every marketplace).
     h('div.header-end', {}, button({ icon: 'refresh-cw', label: 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
       onclick: () => void readAgain() })),
@@ -144,11 +148,15 @@ function renderHeader(rail: boolean) {
 
 function renderPage() {
   document.body.classList.toggle('page-harnesses', state.page === 'harnesses');
+  const held = heldBy(state.home);
+  if (held) { region('page').replaceChildren(heldScreen(state.home!, held)); return; }
+  forgetHeldResult();
   region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'profiles' ? profilesPage() : state.page === 'history' ? historyPage() : state.page === 'repo' ? repoPage() : state.page === 'sources' ? sourcesPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : harnessesPage());
 }
 
 /** What the home lets Central Knot write, said in the status bar; `short` stands in when the bar is narrow (style.css). */
 function writeFact(sync: SyncView): { glyph: IconName; text: string; short?: string; tone: string } {
+  if (heldBy(state.home)) return { glyph: 'lock', text: 'Paused: another build is here', short: 'Paused', tone: 'tone-warning' };
   // Another build syncing this home stops only this build's syncing (the switch beside this says whose it is): plugins and
   // instruction files are still written from here.
   if (sync.gate.state === 'stopped' && !sync.gate.owner) return { glyph: 'circle-alert', text: 'Writing is stopped', tone: 'tone-danger' };
@@ -198,7 +206,7 @@ function renderStatus() {
     write ? h(`span.status-item${write.tone ? `.${write.tone}` : ''}`, { title: write.text }, icon(write.glyph, 14),
       h('span.status-clip.fact-long', {}, write.text), write.short ? h('span.status-clip.fact-short', {}, write.short) : null) : '',
     // The profile in use is always in sight, after the home and where it writes, and one click away from switching.
-    profileStatus() ?? '',
+    (!heldBy(home) && profileStatus()) || '',
     home ? syncSwitch(home) : '',
   );
   region('status-end').replaceChildren(...statusEnd(packageInfo.version));

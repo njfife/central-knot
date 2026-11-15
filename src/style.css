@@ -818,6 +818,15 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .empty .btn { margin-top: 8px; }
 .empty-actions { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-top: 4px; }
 
+/* ---------- The held screen (otherbuildview.ts): one install at a time; running prose keeps a reading width ---------- */
+.held-scroll { display: flex; flex-direction: column; padding: 24px var(--pad-end) 32px 16px; }
+.held { display: flex; flex-direction: column; gap: 12px; max-width: var(--measure); font-size: 14px; line-height: 1.5; color: var(--ink); }
+.held-title { font-size: 16px; line-height: 24px; font-weight: 600; overflow-wrap: anywhere; }
+.held-line { overflow-wrap: anywhere; }
+.held-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.held-said { display: flex; align-items: baseline; gap: 6px; overflow-wrap: anywhere; }
+.held-said > svg { flex: none; transform: translateY(2px); }
+
 /* ---------- Overview ---------- */
 .overview-scroll { display: flex; flex-direction: column; gap: 16px; padding: 20px var(--pad-end) 32px 16px; }
 .overview-scroll > * { flex: none; }
@@ -1332,8 +1341,6 @@ span.ins-confirm { margin-top: 0; }
 .setting-message { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 6px; margin: -8px 0 0; }
 /* What Synchronize everything just took in, a line per kind: spaced as the row's own lines are (each takes back 8px of 12). */
 .setting-added { grid-column: 1 / -1; display: grid; row-gap: 12px; }
-/* A section's own line, in a row of its own (what the last click on another build came to: settingspage.ts otherBuildsSection). */
-.setting-said > .setting-message { margin: 0; }
 .setting-message .icon { flex: none; margin-top: 1px; }
 .setting-message-body { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 4px; min-width: 0; }
 .setting-failure { color: var(--danger); }
