@@ -27,6 +27,7 @@ import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { agentsFolder } from '../src/agentfiles.ts';
 import { applyAgents } from '../src/agents.ts';
+import { chooseTools } from '../src/toolchoice.ts';
 import { libraryEntry } from '../src/historyactions.ts';
 import { itemKey, type ItemKind, type LibraryItem } from '../src/library.ts';
 import { homeItems, inUse, switchPlan } from '../src/profileplan.ts';
@@ -402,6 +403,19 @@ for (const rule of [true, false]) for (const sync of ['on', 'off'] as const) {
       await updates.check();
       if (sync === 'on') for (const plugin of ['docs', 'sheet', 'picks', 'memo']) await markets.items(join(box.home, 'market'), 'team', plugin, ['pi-cli', 'opencode-cli'], box.home, false, true);
       assert.deepEqual([asked, writtenBetween(was, await filesIn(box.home)).filter(path => path !== '.central-knot/plugins.json')], [[], []]);
+    });
+
+    // Last, since it changes the home: Codex, left out since, managed again. What its card counts is what the pass then does
+    // (tests/managetool.test.ts holds the two equal). Of the parts' names there: the plugins' items write nothing (they come only
+    // with the plugin); pdf, let go as his own while Codex was out, joins it as any item of his does, Codex's copy kept first.
+    if (rule && sync === 'on') test('Codex managed again: the plugins’ items write nothing there; his own pdf joins it, Codex’s copy one of its versions', async () => {
+      const context = appContext(box.home, box.appData), lookup = (await partEntries(box, names.mcp))['codex-cli lookup'];
+      assert.deepEqual(await chooseTools(context, 'codex-cli', true), {});
+      const was = await filesIn(box.home), joined = start(box, 'on', 1)[0];
+      assert.deepEqual([changedInTools(was, joined.files).filter(ofPartName(names)), (await partEntries(box, names.mcp))['codex-cli lookup']], [['.codex/skills/pdf/SKILL.md'], lookup]);
+      assert.equal(joined.files.sha256['.codex/skills/pdf/SKILL.md'], was.sha256['.pi/agent/skills/pdf/SKILL.md']);
+      // Codex's copy was the plugin's content, which pdf holds as a version already (library.ts managedAgain keeps no second one).
+      assert.ok(libraryOf(joined, 'skill').pdf.versions.some(version => version.from.how === 'source'), 'Codex’s copy is a version');
     });
   });
 }

@@ -21,10 +21,11 @@
 //
 //   the tool (Pi, OpenCode) holds                     the item there
 //   the plugin's part, its copy as the part wrote it  applied: that content
-//   the plugin's part, its copy edited                applied at the part's content where the kind's record holds that tool's
-//                                                     folder identity, so the first pass lets the item go as his own and takes
-//                                                     the edit in (librarypass.ts letGo); elsewhere kept out (a pass would read
-//                                                     A back from the copy: librarypass.ts cameBack), the edit that tool's own
+//   the plugin's part, its copy edited                applied at the part's kept content where the kind's record holds that
+//                                                     tool's folder identity, so the first pass lets the item go as his own
+//                                                     and takes the edit in (librarypass.ts letGo); else (no identity, a pass
+//                                                     would read A back from the copy: librarypass.ts cameBack; or nothing
+//                                                     kept) kept out, the edit that tool's own
 //   the plugin's part, no copy, deleted by hand       kept out
 //   the plugin's part, no copy, never written         nothing: where the item is On, the first pass writes it, as the old
 //                                                     engine's next run would have
@@ -48,7 +49,8 @@
 // It waits, writing nothing of its own, while the record can't be read, there is no sync record or the gate refuses, plugins.json
 // is absent or has a problem, a kind's record has one, or a copy of a part on record can't be read for sure. Its writes, each safe
 // to stop after: the new plugins.json entries, before any item names one; each kind's versions and own parts (new names only),
-// then its record; last, the record renamed to plugin-parts.v1.json (beside one there, never over it). A key with a live item is
+// then its record (a record in an older format is first written by its own migration, as any writer opens it); last, the record
+// renamed to plugin-parts.v1.json (beside one there, never over it). A key with a live item is
 // done, so a run after a stop finishes the rest. No tool file and no History entry: what the first pass does with the items is
 // THE RULE's (library.ts). Migrated items are outside profiles (profileplan.ts liveItems).
 import { readFile, rename } from 'node:fs/promises';

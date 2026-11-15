@@ -2602,11 +2602,13 @@ if (wanted('plugin-library')) {
 if (wanted('parts-migration')) {
   await fresh();
   begin('parts-migration');
-  // Pi's skills folder seen once (as an earlier version's pass noted it), then parts.ts's record as alpha 1 left it: document-tools'
-  // pdf-reader in Pi, edited there since; spreadsheet left out of Pi; issue-tracker's triage and issues in Pi.
+  // Pi's skills folder seen once by a pass (as an earlier version's noted it; the sync record first setup's answer makes lets it
+  // run), then parts.ts's record as alpha 1 left it: document-tools' pdf-reader in Pi, edited there since; spreadsheet left out of
+  // Pi; issue-tracker's triage and issues in Pi.
   const market = join(scratch, 'migration-market');
   writeMarket(market);
   mkdirSync(join(practice, '.pi/agent/skills'), { recursive: true });
+  await a.run(`window.centralKnot.setSyncEverything(false, ${JSON.stringify(practice)}, true)`);
   await refresh();
   await writeOldParts(practice, market, 'team-tools', 'document-tools', 'pi-cli', { skills: { 'pdf-reader': { edited: '\nMy own way of reading PDFs.\n' }, spreadsheet: { removed: true } } });
   await writeOldParts(practice, market, 'team-tools', 'issue-tracker', 'pi-cli', { skills: { triage: {} }, servers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp'] } } });
