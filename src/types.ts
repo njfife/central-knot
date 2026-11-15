@@ -1081,11 +1081,11 @@ export type SourceRowClick = 'bringBack' | 'replace' | 'merge' | 'keep';
 export type SourcedItem = NonNullable<PassResult['sourced']>[number] & { kind: ItemKind; written: HarnessId[]; removed: HarnessId[] };
 /**
  * What a source's click did: each kind's pass's answers (SourcedItem, but a `wait` the source's row no longer says once the
- * passes are done: sources.ts answer), and their results; why it stopped; whether the source wasn't read whole for a kind
- * (`notWhole`: the source turned nothing of that kind off, though a pass may have, for a copy deleted by hand; the source's row
- * says why); and the page's view after.
+ * passes are done: sources.ts answer), and their results; why it stopped; the kinds the source wasn't read whole for, in the
+ * table's order (`notWhole`: the source turned nothing of those kinds off, though a pass may have, for a copy deleted by hand;
+ * the source's row says why), absent when every kind was read whole; and the page's view after.
  */
-export interface SourceResult { stopped?: string; sourced?: SourcedItem[]; results?: DestinationResult[]; notWhole?: true; view: SourcesView | null }
+export interface SourceResult { stopped?: string; sourced?: SourcedItem[]; results?: DestinationResult[]; notWhole?: ItemKind[]; view: SourcesView | null }
 
 // ---------- Git repo ----------
 

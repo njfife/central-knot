@@ -37,6 +37,7 @@ export type ItemThere<Content> = { folder: string; folderName: string; key: stri
 /**
  * A kind's reader (sources.ts SourceKind `at`): every item of its kind at `folder` in a copy (`root`); `rootName` names one at
  * the repository's root that its own file doesn't name; `earlier`, the items the kinds before it in the table found there.
+ * `earlier` doesn't say whose each item is: a skill holds all under its `folder`, an agent only its `files` (agentsAt assumes skills).
  */
 export type ReaderAt<Content> = (root: string, folder: string, rootName: string, earlier: readonly ItemThere<unknown>[]) => Promise<ItemThere<Content>[]>;
 /**

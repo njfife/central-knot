@@ -127,6 +127,19 @@ test('A link straight at a commands folder brings each command that names name a
   } finally { await box.cleanup(); }
 });
 
+test('A look that finds nothing says only what it looked for: agents in a folder inside agents/, and Codex files kept in agents/, are named as not read there', async () => {
+  const repo = await repository(hosts, 'https://github.com/team/nested');
+  await repo.commit({ 'agents/review/reviewer.md': agentMd('reviewer'), 'agents/coder.toml': 'name = "coder"\ndeveloper_instructions = "Code."\n', 'README.md': '# Nested\n' });
+  const box = await sandbox();
+  try {
+    const look = await previewSource(box.context, box.tools, 'https://github.com/team/nested');
+    assert.equal(look.refused, 'No skill or agent at its root: no SKILL.md there, in a folder inside it, or in skills/; no agent loose there or one level inside an agents folder'
+      + ' (.md files; *.agent.md in .github/agents, *.toml in .codex/agents), and a folder inside an agents folder is read only from a link to it.');
+    // The way the sentence names: a link to that folder reads it.
+    assert.deepEqual(linesOf(await previewSource(box.context, box.tools, 'https://github.com/team/nested/tree/main/agents/review') as Extract<SourcePreview, { token: string }>), ['agent reviewer: make']);
+  } finally { await box.cleanup(); }
+});
+
 // ---------- Its name ----------
 
 test('An agent’s key and name are its file’s base name, never its front matter’s name: reviewer.md naming code-reviewer is the agent reviewer, written as reviewer.md and read back under its key', async () => {
@@ -161,7 +174,8 @@ test('A broken file is unreadable and never gone: an agent whose front matter br
     await turn(box, 'writer', true);
     await repo.commit({ 'agents/reviewer.md': '---\nname: [reviewer\n---\nBroken.\n', 'writer.md': '---\nname: writer\ndescription: "unclosed\n---\nBroken.\n' });
     const done = await check(box, (await sourceOf(box)).id);
-    assert.deepEqual([done.notWhole, answered(done)], [true, []]);
+    // Nothing there can be read, so no kind was read whole (library.ts "Read whole").
+    assert.deepEqual([done.notWhole, answered(done)], [['skill', 'agent'], []]);
     const lines = (await sourceOf(box)).names;
     assert.deepEqual(lines.map(name => [name.name, name.state]), [['reviewer', 'unreadable'], ['writer', 'unreadable']]);
     assert.match(lines[0].why ?? '', /^agents\/reviewer\.md can’t be read as an agent \(/);
@@ -276,7 +290,7 @@ test('Read whole is per kind: a source that drops its agents and keeps a skill t
     // One agent unreadable, the other gone, and a skill gone: the skill drops, the agent waits.
     await repo.commit({ 'kit/agents/reviewer.md': '---\nname: [reviewer\n---\n', 'kit/agents/writer.md': null, 'kit/drafts/SKILL.md': null });
     const held = await check(box, id);
-    assert.deepEqual([answered(held), held.notWhole], [['skill drafts: drop'], true]);
+    assert.deepEqual([answered(held), held.notWhole], [['skill drafts: drop'], ['agent']]);
     assert.deepEqual([await skillOn('drafts'), (await agent(box, 'writer')).item?.on], [false, true]);
     // Every agent gone, a skill kept: the agents drop.
     await repo.commit({ 'kit/agents/reviewer.md': null });
@@ -287,7 +301,21 @@ test('Read whole is per kind: a source that drops its agents and keeps a skill t
     await repo.git('mv', 'kit', 'moved');
     await repo.commit({});
     const moved = await check(box, id);
-    assert.deepEqual([answered(moved), moved.notWhole, await skillOn('notes')], [[], true, true]);
+    assert.deepEqual([answered(moved), moved.notWhole, await skillOn('notes')], [[], ['skill', 'agent'], true]);
+  } finally { await box.cleanup(); }
+});
+
+test('One check that drops an agent while a skill there can’t be read says which kind was held back: notWhole names the skill, not the source whole', async () => {
+  const repo = await repository(hosts, 'https://github.com/team/rm');
+  await repo.commit({ 'notes/SKILL.md': skillMd('notes'), 'agents/a.md': agentMd('a'), 'agents/b.md': agentMd('b') });
+  const box = await sandbox();
+  try {
+    await add(box, 'https://github.com/team/rm');
+    await turn(box, 'a', true);
+    await repo.commit({ 'notes/SKILL.md': '---\nname: [notes\n---\nBroken.\n', 'agents/a.md': null });
+    const done = await check(box, (await sourceOf(box)).id);
+    // The page words these as "a is no longer at …: it was turned off …" and "… so the source turned no skill off" (sourcespage.ts whatItDid).
+    assert.deepEqual([answered(done), done.notWhole, (await agent(box, 'a')).item?.on], [['agent a: drop'], ['skill'], false]);
   } finally { await box.cleanup(); }
 });
 

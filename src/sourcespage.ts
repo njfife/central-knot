@@ -124,7 +124,7 @@ interface Said { text: string; warns: boolean; note?: string; undo?: { id: strin
 
 /**
  * What a source's click did, from what its passes did (types.ts SourcedItem: each item's kind and answer, the History entry that
- * says it, what a Merge did, and the tools it was written to or taken out of), and why the source wasn't read whole. An item
+ * says it, what a Merge did, and the tools it was written to or taken out of), and the kinds it wasn't read whole for. An item
  * its source dropped leads, with Turn on, and it, a read not whole or a Merge that changed nothing is a warning; else the one
  * update or merge has Undo. `replaced`: the item a click on Replace asked for, by kind and name, whose update says so.
  */
@@ -150,7 +150,7 @@ export function whatItDid(result: Pick<SourceResult, 'sourced' | 'notWhole'>, la
     made.length ? `${names(made)} ${are(made)} in Central Knot, Off: turn ${made.length === 1 ? 'it' : 'them'} on in ${andList([...new Set(made.map(entry => nouns(entry.kind).title))])}.` : '',
     linked.length ? `${names(linked)} ${are(linked)} in Central Knot already, the same, and ${linked.length === 1 ? 'is' : 'are'} now from it.` : '',
     left.length ? `Not brought in: ${names(left)} (${left.length === 1 ? 'its row says' : 'their rows say'} why).` : '',
-    result.notWhole ? `Not all of ${label} could be read (its row says why), so the source turned nothing off.` : '',
+    result.notWhole ? `Not all of ${label} could be read (its row says why), so the source turned no ${orList(result.notWhole.map(kind => nouns(kind).one))} off.` : '',
   ].filter(Boolean);
   const turnOn = dropped.length === 1 && dropped[0].history ? { id: dropped[0].history, label: `Turn ${dropped[0].name} on` } : undefined;
   // Merge's result exactly yours is Keep mine's outcome, with its entry (librarypass.ts keepMine).
@@ -202,7 +202,7 @@ function stateWords(name: SourceName, preview: boolean): { text: string; warns?:
     case 'differs': return { text: `Not brought in: Central Knot already has a different ${called}. To take this one instead, delete yours from Central Knot on ${nouns(name.kind).title} (that also takes it out of every tool it is on in), then ${preview ? 'once the source is added, Add on its row' : 'Add on this row'}.`, warns: true };
     case 'another': return { text: `Not brought in: Central Knot has ${called} from ${name.why ? linkLabel(name.why) : 'another source'}`, warns: true };
     case 'deleted': return { text: `Not brought in: deleted from Central Knot.${preview ? ' Once the source is added, Add on its row brings it back, or Restore in History.' : ''}`, warns: true };
-    case 'unreadable': return { text: `Can’t be read: ${name.why}. ${preview ? 'Add can’t bring it in.' : 'Until it can, this source turns nothing off.'}`, warns: true };
+    case 'unreadable': return { text: `Can’t be read: ${name.why}. ${preview ? 'Add can’t bring it in.' : `Until it can, this source turns no ${nouns(name.kind).one} off.`}`, warns: true };
   }
 }
 

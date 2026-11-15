@@ -7,7 +7,8 @@
 //   namesOf, libraryNow, sourcesView and sourceFacts. To add a kind: its entry in sourceKinds, its reader in atlink.ts (given
 //   what the kinds before it found), its Merge in merge.ts (the compiler names what an entry lacks), its view's one call to
 //   sourceFacts, and the Sources page's words (sourcespage.ts, which words a line by its kind and a sentence about every
-//   source by the kinds the view names, SourcesView `kinds`; its aside names the kinds still to come);
+//   source by the kinds the view names, SourcesView `kinds`; its aside names the kinds still to come); and, where the look
+//   named the kind as coming later (MCP servers: atlink.ts Holds `mcpJson`, laterWhy), that note taken out;
 // - a link resolved (sourcelink.ts readLink; its branch, named or the default one, found among the repository's own: refsOf),
 //   and fetched (plugins.ts copySource: the shallow copy marketplaces get, this computer's git and its sign-in, nothing asked
 //   or kept); each source's last read is kept with its record (sourcestore.ts), read from there by each click and view, and
@@ -79,7 +80,7 @@ const sourceKinds = (): readonly SourceKind[] => [skillSource(), agentSource()];
 const skillSource = (): SourceKind<SkillContent> =>
   ({ kind: skillKind, apply: applySkills, at: skillsAt, noneThere: 'no SKILL.md there, in a folder inside it, or in skills/' });
 const agentSource = (): SourceKind<SharedAgent> =>
-  ({ kind: agentKind, apply: applyAgents, at: agentsAt, noneThere: 'no agent’s file there or in an agents folder' });
+  ({ kind: agentKind, apply: applyAgents, at: agentsAt, noneThere: 'no agent loose there or one level inside an agents folder (.md files; *.agent.md in .github/agents, *.toml in .codex/agents), and a folder inside an agents folder is read only from a link to it' });
 
 /**
  * A source's last read as kept here, what is at its link (none kept reads as nothing at the link's folder: sourcestore.ts):
@@ -139,7 +140,7 @@ const linesOf = (source: SourceRecord, found: Holds, libraries: Awaited<ReturnTy
  * The pass for one source's last read: one per kind in the table, each given its kind's read (a row's click only to its own
  * kind's), whose step also decides that pass's scope (librarypass.ts fromSourceStep). Answers what they did: each item a step
  * answered for, with its kind and the tools it was written to and taken out of (from that kind's own results, by its name),
- * every result, and whether any kind's read wasn't whole. A pass that stops stops the rest.
+ * every result, and the kinds whose read wasn't whole. A pass that stops stops the rest.
  */
 async function runSource(context: ShareContext, tools: HarnessId[], source: SourceRecord, sources: SourceRecord[], clicked?: { kind: ItemKind; asked: RowClick }) {
   const found = await lastFound(context, source), done: Omit<SourceResult, 'view'> & { results: DestinationResult[] } = { results: [] };
@@ -151,7 +152,7 @@ async function runSource(context: ShareContext, tools: HarnessId[], source: Sour
     const sourced = passed.sourced?.map(each => ({ ...each, kind: read.kind, written: toolsOf(each.name, 'written'), removed: toolsOf(each.name, 'removed') }));
     done.results.push(...passed.results);
     if (sourced) done.sourced = [...done.sourced ?? [], ...sourced];
-    if (!read.whole) done.notWhole = true;
+    if (!read.whole) done.notWhole = [...done.notWhole ?? [], read.kind];
     if (passed.stopped) return { ...done, stopped: passed.stopped };
   }
   return done;
