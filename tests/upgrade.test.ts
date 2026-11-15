@@ -21,7 +21,7 @@ import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cp, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -297,6 +297,10 @@ async function placeParts(rule: boolean, leftOut: HarnessId[] = ['codex-cli']): 
   const sync = JSON.parse(await readFile(join(box.store, 'sync.json'), 'utf8'));
   await writeFile(join(box.store, 'sync.json'), `${JSON.stringify({ ...sync, leftOut }, null, 2)}\n`);
   assert.deepEqual(await setSyncEverything(appContext(box.home, box.appData), rule, true), {});
+  // Every tool file as old as alpha 1 left it, not as new as the copy: a found item is past the settle window at the first pass,
+  // so Synchronize everything takes it in then (helper, found in Copilot CLI), whatever the machine's speed.
+  const old = new Date('2026-11-13T00:00:00Z');
+  for (const path of Object.keys((await filesIn(box.home)).sha256)) if (inTools(path)) await utimes(join(box.home, path), old, old);
   return box;
 }
 /** The parts' names on the old record, by kind. */
@@ -337,7 +341,9 @@ for (const rule of [true, false]) for (const sync of ['on', 'off'] as const) {
       const joining = ['.config/opencode/agents/planner.md', '.config/opencode/agents/reviewer.md', '.config/opencode/opencode.json', '.pi/agent/mcp.json',
         '.pi/agent/skills/drafts/SKILL.md', '.pi/agent/skills/notes/SKILL.md', '.pi/agent/skills/planner.md', '.pi/agent/skills/reviewer.md', '.pi/agent/skills/style/SKILL.md'];
       const table = ['.config/opencode/skills/pdf/SKILL.md', '.config/opencode/skills/sheet/SKILL.md'];
-      assert.deepEqual(changedInTools(made, first[2].files), ['.claude/settings.json', ...(sync === 'on' ? [...table, ...joining] : [])].sort());
+      // With Synchronize everything on, helper, found in Copilot CLI (no part's name), is taken in and turned On in every tool.
+      const takenIn = rule ? ['.claude/agents/helper.md', '.config/opencode/agents/helper.md', '.pi/agent/skills/helper.md'] : [];
+      assert.deepEqual(changedInTools(made, first[2].files), ['.claude/settings.json', ...(sync === 'on' ? [...table, ...joining, ...takenIn] : [])].sort());
       if (sync === 'on') for (const [to, from] of [[table[0], '.pi/agent/skills/pdf/SKILL.md'], [table[1], '.pi/agent/skills/sheet/SKILL.md']]) assert.equal(first[2].files.sha256[to], made.sha256[from], to);
       const opencodeLookup = sync === 'on' ? entries['pi-cli lookup'] : entries['opencode-cli lookup'];
       assert.deepEqual(await partEntries(box, names.mcp), { ...entries, 'opencode-cli lookup': opencodeLookup }, 'each part’s entry in each tool');
@@ -455,8 +461,8 @@ describe('Upgrading alpha-1-parts with Pi left out, then managing Pi again', () 
 
   test('after two passes no file or entry of a part’s name in Pi has changed since before the upgrade; only alpha 1’s own items join it', async () => {
     const inPi = changedInTools(made, joined[1].files).filter(path => path.startsWith('.pi/'));
-    assert.deepEqual(inPi, ['.pi/agent/mcp.json', '.pi/agent/skills/drafts/SKILL.md', '.pi/agent/skills/notes/SKILL.md', '.pi/agent/skills/planner.md', '.pi/agent/skills/reviewer.md', '.pi/agent/skills/style/SKILL.md'],
-      'alpha 1’s skills, agents (as skills) and server docs, On and kept out of nothing, join Pi as any item does');
+    assert.deepEqual(inPi, ['.pi/agent/mcp.json', '.pi/agent/skills/drafts/SKILL.md', '.pi/agent/skills/helper.md', '.pi/agent/skills/notes/SKILL.md', '.pi/agent/skills/planner.md',
+      '.pi/agent/skills/reviewer.md', '.pi/agent/skills/style/SKILL.md'], 'alpha 1’s items and helper (taken in), On and kept out of nothing, join Pi as any item does');
     const now = await partEntries(box, names.mcp);
     assert.deepEqual([inPi.filter(ofPartName(names)), now['pi-cli lookup'], now['pi-cli memo-index'], joined[1].files.sha256['.pi/agent/skills/scribe.md'], joined[1].files.sha256['.config/opencode/skills/prompts/SKILL.md'] !== undefined],
       [[], entries['pi-cli lookup'], entries['pi-cli memo-index'], undefined, true], 'prompts reached OpenCode, where journal is');
