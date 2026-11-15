@@ -2280,7 +2280,11 @@ async function sourcesFlow() {
   const plugin = join(hosts, 'github.com/team/plugin.git');
   mkdirSync(plugin, { recursive: true });
   spawnSync('git', ['init', '--quiet', '--initial-branch=main', plugin]);
-  commit(plugin, { '.claude-plugin/plugin.json': '{"name":"plugin"}', 'skills/pdf/SKILL.md': '---\nname: pdf\ndescription: PDFs.\n---\nPDFs.\n' });
+  commit(plugin, { '.claude-plugin/plugin.json': '{"name":"plugin"}', 'skills/pdf/SKILL.md': '---\nname: pdf\ndescription: PDFs.\n---\nPDFs.\n', 'commands/go.md': 'Go.\n', 'commands/stop.md': 'Stop.\n', 'hooks/hooks.json': '{"hooks":{"PreToolUse":[]}}' });
+  const market = join(hosts, 'github.com/team/market.git');
+  mkdirSync(market, { recursive: true });
+  spawnSync('git', ['init', '--quiet', '--initial-branch=main', market]);
+  commit(market, { '.claude-plugin/marketplace.json': JSON.stringify({ name: 'acme-tools', plugins: [{ name: 'kit', source: './plugins/kit' }] }), 'plugins/kit/.claude-plugin/plugin.json': '{"name":"kit"}', 'plugins/kit/skills/notes/SKILL.md': '---\nname: notes\ndescription: Notes.\n---\nNotes.\n' });
   const home = join(scratch, 'sources-home'), data = join(scratch, 'sources-data');
   const roots = { 'claude-cli': '.claude/skills', 'copilot-cli': '.copilot/skills', 'codex-cli': '.codex/skills' };
   for (const root of Object.values(roots)) mkdirSync(join(home, root), { recursive: true });
@@ -2512,12 +2516,49 @@ async function sourcesFlow() {
   check('an entry the source now leaves out says the server here stays as it was, On, and it stays in Copilot CLI', await until(async () => /In Central Knot, On, as it was: what the source has now is not brought in, since it runs files from the repository, which aren’t copied\./.test(await a.text(`.source-row[data-source="${kitId}"] .source-name[data-kind="mcp"]`) ?? ''))
     && relayIn('copilot-cli')?.command === 'relay-mcp', [await a.text(`.source-row[data-source="${kitId}"]`), readNow(mcpFile('copilot-cli'))]);
 
+  // A plugin's own folder: Look lists its skill and says what doesn't come; Add brings it in Off; turned On, a tool has it.
   await a.click('#nav-sources');
   await type('https://github.com/team/plugin');
   await a.click('#source-look');
   await until(() => a.exists('#source-preview'));
-  check('a link that is a plugin is named as one, and nothing there is added', /The link holds a plugin/.test(await a.text('#source-preview') ?? '') && !(await a.exists('#source-add')), await a.text('#source-preview'));
+  const pluginLook = await a.text('#source-preview') ?? '';
+  check('a link to a plugin’s own folder lists its skill, says it holds a plugin and that its 2 commands and its hooks don’t come, and offers Add', (await a.all('#source-preview .source-name', 'e.dataset.key')).join() === 'pdf'
+    && /The link holds a plugin: its skills, agents and MCP servers come in as this source’s/.test(pluginLook) && /Its 2 commands and its hooks don’t come: Central Knot installs plugins only from a marketplace/.test(pluginLook) && (await a.text('#source-add'))?.trim() === 'Add 1 skill', pluginLook);
   await fitsAtMinimum(a, 'Sources, with a source and a look open');
+  await a.click('#source-add');
+  await until(async () => /pdf is in Central Knot, Off/.test(await a.text('.band-done .band-text') ?? ''));
+  const pdfRecord = () => JSON.parse(readNow(join(home, '.central-knot/skills.json')) || '{"items":{}}').items.pdf;
+  check('Add brings pdf in, Off, in no tool, and its row says what doesn’t come', pdfRecord()?.on === false && !existsSync(join(home, roots['claude-cli'], 'pdf'))
+    && /Its 2 commands and its hooks don’t come/.test(await a.text(`.source-row:has(.source-name[data-key="pdf"])`) ?? ''), [pdfRecord(), await a.text('.page')]);
+  await a.click('#nav-skills');
+  await until(() => a.exists('#switch-pdf'));
+  await a.click('#switch-pdf');
+  check('turned On, pdf’s SKILL.md is in Claude Code', await until(() => existsSync(join(home, roots['claude-cli'], 'pdf/SKILL.md'))), readdirSync(join(home, roots['claude-cli'])));
+
+  // A marketplace: Look offers Add to Plugins, never Add. While the repository can't be read, Add to Plugins opens Plugins with
+  // that page's words and the link stays; once it can, the marketplace is listed there, nothing is installed, no tool record is made.
+  await a.click('#nav-sources');
+  await type('https://github.com/team/market');
+  await a.click('#source-look');
+  await until(() => a.exists('#source-to-plugins'));
+  const marketLook = await a.text('#source-preview') ?? '';
+  check('a marketplace’s link: Look names it with its plugin count and offers Add to Plugins, not Add', /The link holds a marketplace, acme-tools, with 1 plugin/.test(marketLook) && /none turned on/.test(marketLook) && !(await a.exists('#source-add')), marketLook);
+  renameSync(market, `${market}.away`);
+  await a.click('#source-to-plugins');
+  check('the repository unreadable: Add to Plugins opens Plugins with its words, nothing listed', await until(async () => /No access, or no repository there/.test(await a.text('.plugin-problems') ?? '')) && !(await a.text('.market-list') ?? '').includes('acme-tools'), await a.text('.page'));
+  await a.click('#nav-sources');
+  check('and the link and its look stay on Sources', await a.run(`document.querySelector('#source-link').value`) === 'https://github.com/team/market' && await a.exists('#source-to-plugins'), await a.text('.page'));
+  renameSync(`${market}.away`, market);
+  await a.click('#source-to-plugins');
+  const pluginsSaid = async () => `${await a.text('.plugins-page') ?? ''} ${await a.run(`document.querySelector('#announcement')?.dataset.text ?? ''`) ?? ''}`;
+  check('Add to Plugins opens Plugins with acme-tools listed and says nothing was installed; no tool record is made', await until(async () => (await a.text('.market-list') ?? '').includes('acme-tools') && /Marketplace added: 1 plugin, nothing installed \(acme-tools\)\./.test(await pluginsSaid()))
+    && !existsSync(join(home, '.claude/plugins')) && !existsSync(join(home, '.copilot/config.json')) && !(JSON.parse(readNow(join(home, '.central-knot/plugins.json')) || '{}').plugins ?? []).length,
+    [await pluginsSaid(), existsSync(join(home, '.claude/plugins')), readNow(join(home, '.central-knot/plugins.json'))]);
+  await a.click('#nav-sources');
+  check('and Sources made no source of it: the field is clear, no look is open, no row names it', await a.run(`document.querySelector('#source-link').value`) === '' && !(await a.exists('#source-preview')) && !(await a.text('.source-rows') ?? '').includes('team/market'), await a.text('.page'));
+  await type('https://github.com/team/plugin/tree/main/skills');
+  await a.click('#source-look');
+  await until(() => a.exists('#source-preview'));
   for (const [width, height] of [[1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(a, width, height); same(`nothing cut off on Sources at ${width}×${height}`, await a.run(CUT_OFF), []); }
   await fullSize(a);
 

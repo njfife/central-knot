@@ -241,9 +241,10 @@ const whereWords = (found: SourceFound) => [`Branch ${found.ref}`, found.folder 
 /** What of a plugin's own folder doesn't come (types.ts NotComing), as a sentence; none when it has none of those. */
 function notComingWords(left: NotComing | undefined): string | undefined {
   const parts: [words: string, many: boolean][] = [];
-  if (left?.commands) parts.push([`its ${plural(left.commands, 'command')}`, left.commands > 1]);
+  const its = (count: number, word: string) => (count === 1 ? `its ${word}` : `its ${count} ${word}s`);
+  if (left?.commands) parts.push([its(left.commands, 'command'), left.commands > 1]);
   if (left?.hooks) parts.push(['its hooks', true]);
-  if (left?.lspServers) parts.push([`its ${plural(left.lspServers, 'LSP server')}`, left.lspServers > 1]);
+  if (left?.lspServers) parts.push([its(left.lspServers, 'LSP server'), left.lspServers > 1]);
   if (left?.bin) parts.push(['its bin folder', false]);
   if (!parts.length) return undefined;
   const said = andList(parts.map(([words]) => words)), many = parts.length > 1 || parts[0][1];

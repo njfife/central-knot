@@ -115,13 +115,15 @@ test('A source never loses an item because its repository gained a plugin.json: 
   const box = await sandbox();
   try {
     const mixed = await repository(hosts, 'https://github.com/team/mixed');
-    await mixed.commit({ 'foo/SKILL.md': skillMd('foo'), '.claude/agents/x.md': '---\nname: x\ndescription: X.\n---\n\nX.\n' });
+    // Its .mcp.json, which a plugin's files read too, makes the read whole: an item lost would be dropped.
+    await mixed.commit({ 'foo/SKILL.md': skillMd('foo'), '.claude/agents/x.md': '---\nname: x\ndescription: X.\n---\n\nX.\n', '.mcp.json': mcpJson({ relay: { command: 'npx' } }) });
     const first = await add(box, 'https://github.com/team/mixed');
-    assert.deepEqual(answered(first.added), ['agent x: make', 'skill foo: make']);
+    assert.deepEqual(answered(first.added), ['agent x: make', 'mcp relay: make', 'skill foo: make']);
     await mixed.commit({ '.claude-plugin/plugin.json': '{"name":"mixed"}' });
-    assert.deepEqual(answered(await check(box, first.id)), [], 'nothing turns Off, nothing is updated');
+    const done = await check(box, first.id);
+    assert.deepEqual([answered(done), done.notWhole], [[], undefined], 'read whole, and nothing turns Off or is updated');
     const row = (await sourcesView(box.context, box.tools)).sources.find(source => source.id === first.id)!;
-    assert.deepEqual([row.holds, linesOf(row)], ['plugin', ['agent x: nothing', 'skill foo: nothing']]);
+    assert.deepEqual([row.holds, linesOf(row)], ['plugin', ['agent x: nothing', 'mcp relay: nothing', 'skill foo: nothing']]);
 
     const listed = await repository(hosts, 'https://github.com/team/listed-skills');
     await listed.commit({ 'skills/a/SKILL.md': skillMd('a'), 'skills/b/SKILL.md': skillMd('b') });
@@ -354,27 +356,32 @@ async function installedKit(box: Box, files: Record<string, string>) {
   await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: market }));
 }
 
-test('The same plugin added as a source and installed in Claude Code and Copilot CLI, both On: one agent and one server of each name there (the plugin’s), and Codex, which loads neither from a plugin, gets Central Knot’s; an agent of that name that differs is the known miss, placed beside the plugin’s', async () => {
+test('The same plugin added as a source, its agent and server On, then installed in Claude Code and Copilot CLI: Central Knot’s copies leave both, so each has one of each name (the plugin’s), and Codex, which loads neither from a plugin, keeps Central Knot’s; an agent of that name that differs is the known miss, placed beside the plugin’s', async () => {
   const box = await sandbox(['claude-cli', 'copilot-cli', 'codex-cli']);
   try {
     const files = { '.claude-plugin/plugin.json': '{"name":"kit"}', 'agents/helper.md': helperMd(), '.mcp.json': mcpJson({ relay: { command: 'npx', args: ['relay'] } }) };
-    await installedKit(box, files);
     const repo = await repository(hosts, 'https://github.com/team/kit');
     await repo.commit(files);
     const { id } = await add(box, 'https://github.com/team/kit');
     await applyAgents(box.context, box.tools, [{ key: 'helper', on: true, except: [], seenOn: false }]);
     await applyServers(box.context, box.tools, [{ key: 'relay', on: true, except: [], seenOn: false }]);
     await writeToClaude(box.context, box.tools, ['relay']);
-    const claudeServers = async () => Object.keys(JSON.parse(await readFile(join(box.home, '.claude.json'), 'utf8').catch(() => '{}')).mcpServers ?? {});
-    const copilotServers = async () => Object.keys(JSON.parse(await readFile(join(box.home, '.copilot/mcp-config.json'), 'utf8').catch(() => '{}')).mcpServers ?? {});
-    assert.deepEqual(await Promise.all([exists(join(box.home, '.claude/agents/helper.md')), exists(join(box.home, '.copilot/agents/helper.agent.md')), exists(join(box.home, '.codex/agents/helper.toml'))]), [false, false, true]);
-    assert.deepEqual([await claudeServers(), await copilotServers(), (await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('[mcp_servers.relay]')], [[], [], true]);
+    const agentFiles = () => Promise.all(['.claude/agents/helper.md', '.copilot/agents/helper.agent.md', '.codex/agents/helper.toml'].map(path => exists(join(box.home, path))));
+    const serverIn = async (file: string) => Object.keys(JSON.parse(await readFile(join(box.home, file), 'utf8').catch(() => '{}')).mcpServers ?? {}).includes('relay');
+    const servers = async () => [await serverIn('.claude.json'), await serverIn('.copilot/mcp-config.json'), (await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('[mcp_servers.relay]')];
+    assert.deepEqual([await agentFiles(), await servers()], [[true, true, true], [true, true, true]], 'Central Knot’s copies, before the plugin');
+
+    await installedKit(box, files);
+    await applyAgents(box.context, box.tools, []);
+    await applyServers(box.context, box.tools, []);
+    await writeToClaude(box.context, box.tools, ['relay']);
+    assert.deepEqual([await agentFiles(), await servers()], [[false, false, true], [false, false, true]], 'the plugin’s alone in Claude Code and Copilot CLI');
 
     await repo.commit({ 'agents/helper.md': helperMd('Help, differently.') });
     assert.deepEqual(answered(await check(box, id)), ['agent helper: update']);
     // The check's pass read the tools before the update: the next pass places the new version.
     await applyAgents(box.context, box.tools, []);
-    assert.deepEqual(await Promise.all([exists(join(box.home, '.claude/agents/helper.md')), exists(join(box.home, '.copilot/agents/helper.agent.md'))]), [true, true], 'twice: Central Knot’s and the plugin’s');
+    assert.deepEqual(await agentFiles(), [true, true, true], 'twice in Claude Code and Copilot CLI: Central Knot’s and the plugin’s');
   } finally { await box.cleanup(); }
 });
 

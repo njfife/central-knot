@@ -15,6 +15,9 @@
 // and Keep mine on its line. And an MCP server, "relay" in its .mcp.json: changed there (an environment variable, or its
 // arguments), dropped and back there, turned On and Off, deleted, edited by hand in Copilot CLI (alone, or with a change at the
 // source and a Check now), Write to Claude Code (whose writes wait for it), and Add, Merge, Replace and Keep mine on its line.
+// The source's link is a plugin's own folder from the start in every third walk (a plugin.json naming its notes/ folder), and
+// becomes one and stops being one, each between two Check nows: read the same way, the second answers no update, drop or new
+// item (atlink.ts holdsAt: the link's readers first).
 // And a plugin, kit, from a folder marketplace, whose skill tome is a library item linked to it in Pi (library.ts A PLUGIN; no
 // tool's installer runs here, so Claude Code, Copilot CLI and Codex never get it): kit On and Off, kept out of Pi and let in,
 // its Undo, tome changed in the plugin then Update, dropped and back then Update, and edited by hand in Pi (let go then).
@@ -149,11 +152,12 @@ async function walk(seed: number): Promise<Finding[]> {
   const readOnly = (tool: Tool, on: boolean) => chmod(join(box.home, roots[tool]), on ? 0o555 : 0o755).catch(() => undefined);
   let agentAsWritten: Record<string, string | undefined> = {};
   let clock = Date.now() + 1e9;
-  // The source: a repository of this walk's own, whose root is a notes skill until it drops it (renamed jottings there).
+  // The source: a repository of this walk's own, whose root is a notes skill until it drops it (renamed jottings there); every
+  // third walk's root is a plugin's own folder from the start, its plugin.json naming that notes/ folder.
   const sourceLink = `https://github.com/walk/notes-${seed}`, source = await repository(hosts, sourceLink);
-  const relayAt = { A: '1', B: '1', args: ['--relay'] };
-  await source.commit({ 'notes/SKILL.md': skillText('From the source.'), 'agents/critic.md': criticMd('You critique.'), '.mcp.json': relayJson(relayAt) });
-  let sourceHasNotes = true, sourceHasCritic = true, sourceHasRelay = true;
+  const relayAt = { A: '1', B: '1', args: ['--relay'] }, pluginJson = JSON.stringify({ name: 'notes-kit', skills: ['./notes'] });
+  let sourceHasNotes = true, sourceHasCritic = true, sourceHasRelay = true, sourceIsPlugin = seed % 3 === 0;
+  await source.commit({ 'notes/SKILL.md': skillText('From the source.'), 'agents/critic.md': criticMd('You critique.'), '.mcp.json': relayJson(relayAt), ...(sourceIsPlugin ? { '.claude-plugin/plugin.json': pluginJson } : {}) });
   const criticTaken = new Set<string>();
   const critic = async () => (await agentsView(context(), tools)).library.critic as LibraryItem | undefined;
   const criticNow = async () => Object.fromEntries(await Promise.all(allTools.map(async tool => [tool, await readFile(join(box.home, criticFiles[tool as keyof typeof criticFiles]), 'utf8').catch(() => undefined)] as const)));
@@ -317,6 +321,15 @@ async function walk(seed: number): Promise<Finding[]> {
           } finally { await source.commit({ 'notes/SKILL.md': skillText(`Source ${++marker}.`) }); }
         } });
       }
+      // The link becomes a plugin's own folder, or stops being one: a Check now first, so the second meets that change alone.
+      if (recorded) add(2, { name: sourceIsPlugin ? 'the source is no plugin again, then Check now' : 'the source becomes a plugin (its plugin.json names notes/), then Check now', app: true, run: async more => {
+        await checkNow(recorded.id, more);
+        sourceIsPlugin = !sourceIsPlugin;
+        await source.commit({ '.claude-plugin/plugin.json': sourceIsPlugin ? pluginJson : null });
+        const done = await checkNow(recorded.id, more), moved = (done.sourced ?? []).filter(entry => ['drop', 'update', 'make', 'link'].includes(entry.answer));
+        if (moved.length) fail(`a source that ${sourceIsPlugin ? 'became' : 'stopped being'} a plugin’s folder answered ${moved.map(entry => `${entry.name}: ${entry.answer}`).join(', ')}`);
+        return done;
+      } });
       add(3, { name: 'the source changes notes', run: async () => { await source.commit({ 'notes/SKILL.md': skillText(`Source ${++marker}.`, sourceHasNotes ? 'notes' : 'jottings') }); } });
       // A line apart from the body a hand edit rewrites: what Merge's line merge puts together.
       if (sourceHasNotes) add(2, { name: 'the source changes notes’s description', run: async () => {
