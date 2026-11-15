@@ -11,8 +11,8 @@
 // Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options), updates, settings, base, scroll, harnesses, manage (a
 // tool's Manage switch, each state of the Harnesses list it changes, and the Skills page and Overview with tools left out), repo,
 // remove-build (another build of Central Knot on this Mac, as made-up bundles), sources (a Git link read on a click, made-up
-// repositories standing in for GitHub), source-agents (agents from a link, beside a skill) and sort (the item pages sorted by
-// last updated).
+// repositories standing in for GitHub), source-agents (agents from a link, beside a skill), source-servers (MCP servers from a
+// link, and Claude Code's wait for Write to Claude Code) and sort (the item pages sorted by last updated).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -2541,7 +2541,7 @@ if (wanted('sources')) {
   await atEverySize('dropped', 'The skill was renamed unslop at the source; clicked Check now: the band leads, under a warning mark, with deslop no longer at the source, turned off and taken out of all 3 tools, Central Knot keeping it, with Turn deslop on; then unslop in Central Knot, Off; the row lists unslop, and deslop, not in its last read, under a warning mark: no longer at this source, Off, and no longer from it, with Turn on', true, '.source-row');
   deslop({ 'SKILL.md': '---\nname: [unslop\n---\nBroken.\n' }, 'Break the front matter');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
-  await atEverySize('unreadable', 'Its SKILL.md stopped parsing at the source; clicked Check now: the band, under a warning mark and with no Open Skills, says not all of the source could be read, so the source turned no skill or agent off (nothing there can be read), and that its row says why; the row has one line for the skill, unslop, at the root of skill-deslop, saying its SKILL.md can’t be read and why, and that until it can this source turns no skill off; deslop’s line, no longer at this source, with Turn on, stays as it was', false, '.source-row');
+  await atEverySize('unreadable', 'Its SKILL.md stopped parsing at the source; clicked Check now: the band, under a warning mark and with no Open Skills, says not all of the source could be read, so the source turned no skill, agent or MCP server off (nothing there can be read), and that its row says why; the row has one line for the skill, unslop, at the root of skill-deslop, saying its SKILL.md can’t be read and why, and that until it can this source turns no skill off; deslop’s line, no longer at this source, with Turn on, stays as it was', false, '.source-row');
   deslop({ 'SKILL.md': skillMd('unslop', 'Read the text, list what reads as slop, and rewrite it plainly. Keep the author’s voice.') }, 'Mend the front matter');
   await a.click('.source-row .source-actions button'); await busyDone(); await a.settle();
   await a.click('#nav-skills'); await openRow('deslop');
@@ -2589,7 +2589,6 @@ if (wanted('source-agents')) {
     'notes/SKILL.md': '---\nname: notes\ndescription: Take notes the team’s way.\n---\n\nThe team’s notes.\n',
     'agents/reviewer.md': reviewer('Read the change as a newcomer would.\nSay where you were lost.'),
     '.claude/agents/release-notes-writer-for-the-whole-team.md': '---\nname: release-notes-writer-for-the-whole-team\ndescription: Writes the release notes from the merged pull requests, grouped by area, in plain words a user reads.\n---\n\nWrite the release notes.\n',
-    '.mcp.json': '{"mcpServers":{"docs":{"command":"docs-server"}}}',
     'README.md': '# review-kit\n',
   });
   await fresh({ GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${join(hosts, 'github.com')}/.insteadOf`, GIT_CONFIG_VALUE_0: 'https://github.com/' });
@@ -2598,7 +2597,7 @@ if (wanted('source-agents')) {
   await a.click('#nav-sources');
   await a.run(`(() => { const input = document.querySelector('#source-link'); input.value = 'https://github.com/team/review-kit'; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   await a.click('#source-look'); await busyDone(); await a.settle();
-  await atEverySize('look', 'Looked at team/review-kit: one skill, notes, in the folder notes, and two agents, reviewer in the folder agents and release-notes-writer-for-the-whole-team in .claude/agents, each line saying its kind, where it sits and its file; each comes in Off; a note that its .mcp.json is not read, since MCP servers from a link come in a later version; Add 1 skill and 2 agents', true, '#source-preview');
+  await atEverySize('look', 'Looked at team/review-kit: one skill, notes, in the folder notes, and two agents, reviewer in the folder agents and release-notes-writer-for-the-whole-team in .claude/agents, each line saying its kind, where it sits and its file; each comes in Off; Add 1 skill and 2 agents', true, '#source-preview');
   await a.click('#source-add'); await busyDone(); await a.settle();
   await atEverySize('source-row', 'Clicked Add 1 skill and 2 agents: the band says notes, reviewer and release-notes-writer-for-the-whole-team are in Central Knot, Off, to turn on in Skills and Agents, with Open Skills; the source’s row lists the skill and both agents, In Central Knot, Off', true, '.source-row');
   await a.click('#nav-agents'); await openRow('reviewer');
@@ -2617,6 +2616,59 @@ if (wanted('source-agents')) {
   await atEverySize('agent-removed', 'reviewer was taken out of the source; clicked Check now: the band leads, under a warning mark, with reviewer no longer at the source, turned off and taken out of the tools, Central Knot keeping it, with Turn reviewer on; the source’s row has reviewer’s line, an agent not in its last read: no longer at this source, Off, and no longer from it, with Turn on', true, '.source-row');
   await a.click('#nav-agents'); await openRow('reviewer');
   await atEverySize('agent-removed-agents', 'On Agents, reviewer is Off, out of every tool, with “removed at its source” after its name; opened, the line at the end says the source no longer has it, that it is Off and no longer from that source, to turn it on to use it again, and what happens should the source have it again', true, '.ov-row[data-key="reviewer"]', 'start');
+  if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
+}
+
+if (wanted('source-servers')) {
+  begin('source-servers');
+  // git's own url.<base>.insteadOf sends https://github.com/<path> to folders here: nothing reaches the network.
+  const hosts = join(scratch, 'source-server-hosts'), dir = join(hosts, 'github.com/team/service-kit.git');
+  const commit = (files, message = 'change') => {
+    for (const [file, text] of Object.entries(files)) { if (text === null) rmSync(join(dir, file), { recursive: true, force: true }); else { mkdirSync(join(dir, file, '..'), { recursive: true }); writeFileSync(join(dir, file), text); } }
+    for (const step of [['add', '--all'], ['commit', '--quiet', '-m', message]]) execFileSync('git', ['-C', dir, '-c', 'user.name=Team', '-c', 'user.email=team@example.com', '-c', 'commit.gpgsign=false', ...step]);
+  };
+  mkdirSync(dir, { recursive: true });
+  execFileSync('git', ['init', '--quiet', '--initial-branch=main', dir]);
+  const relay = log => ({ command: 'npx', args: ['-y', '@team/relay-mcp'], env: { RELAY_REGION: 'west', RELAY_LOG: log }, timeout: 30 });
+  const servers = (more = {}) => `${JSON.stringify({ mcpServers: { ...more } }, null, 2)}\n`;
+  const search = { type: 'http', url: 'https://search.example.com/mcp', headers: { 'X-Team': 'docs' } };
+  commit({
+    'agents/reviewer.md': '---\nname: reviewer\ndescription: Reviews a change for what a reader would trip on.\n---\n\nRead the change as a newcomer would.\n',
+    '.mcp.json': servers({ relay: relay('info'), 'search-index': search, 'team-plugin-helper': { command: '${CLAUDE_PLUGIN_ROOT}/bin/helper' }, 'half-written': { type: 'stdio' } }),
+    'README.md': '# service-kit\n',
+  });
+  await fresh({ GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${join(hosts, 'github.com')}/.insteadOf`, GIT_CONFIG_VALUE_0: 'https://github.com/' });
+  const busyDone = () => waitFor(a, `document.body.dataset.busy !== 'true'`, 20000);
+  const checkNow = async () => { await a.click('#nav-sources'); await a.click('.source-row .source-actions button'); await busyDone(); await a.settle(); };
+  const writeClaude = async () => { await a.click('#nav-mcp'); await waitFor(a, `!!document.querySelector('#mcp-write-claude')`, 15000); await a.click('#mcp-write-claude'); await busyDone(); await a.settle(); };
+  await a.click('#nav-sources');
+  await a.run(`(() => { const input = document.querySelector('#source-link'); input.value = 'https://github.com/team/service-kit'; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await a.click('#source-look'); await busyDone(); await a.settle();
+  await atEverySize('look', 'Looked at team/service-kit: one agent, reviewer, in the folder agents, and four MCP servers from its .mcp.json at the root: relay and search-index come in Off; team-plugin-helper is not brought in, since it names a plugin’s own folder or settings, which only Claude Code fills in, for a plugin; half-written can’t be read, since it has no command to run; Add 1 agent and 2 MCP servers', true, '#source-preview');
+  await a.click('#source-add'); await busyDone(); await a.settle();
+  await a.click('#nav-mcp'); await openRow('relay');
+  await atEverySize('server-row-source', 'On MCP servers, relay is Off, in Central Knot only; opened, its version says it came from github.com/team/service-kit, and the line at the end says it is from that source, and that what changes there comes in once a day while Automatic sync is on, and at Check now on Sources, unless you change it here', true, '.ov-row[data-key="relay"]', 'start');
+  await turnOnRow('relay'); await switchOn('relay');
+  await writeClaude();
+  commit({ '.mcp.json': servers({ relay: relay('debug'), 'search-index': search, 'team-plugin-helper': { command: '${CLAUDE_PLUGIN_ROOT}/bin/helper' } }) }, 'Log more');
+  await checkNow();
+  await atEverySize('server-update-waits', 'relay was turned On and written to Claude Code, then its RELAY_LOG changed at the source (and half-written was taken out there); clicked Check now: the band says relay was updated from its source, now in the other tools, and that Claude Code gets it when you click Write to Claude Code, on MCP servers, with Open MCP servers and Undo the update', true, '.source-row');
+  await a.click('#nav-mcp'); await openRow('relay');
+  await atEverySize('server-waits-row', 'On MCP servers, relay’s row: on in every tool, Claude Code’s write waiting for Write to Claude Code, which the band above offers', false, '.ov-row[data-key="relay"]', 'start');
+  await writeClaude();
+  const inCopilot = join(practice, '.copilot/mcp-config.json');
+  edit(inCopilot, text => { const parsed = JSON.parse(text); parsed.mcpServers.relay.env.RELAY_REGION = 'east'; return JSON.stringify(parsed, null, 2); });
+  await waitFor(a, `!!document.querySelector('.sync-notice')`, 15000);
+  commit({ '.mcp.json': servers({ relay: relay('warn'), 'search-index': search, 'team-plugin-helper': { command: '${CLAUDE_PLUGIN_ROOT}/bin/helper' } }) }, 'Log less');
+  await checkNow();
+  await atEverySize('server-waiting', 'relay’s RELAY_REGION was edited in Copilot CLI, and its RELAY_LOG changed at the source; clicked Check now: the band says relay changed at the source and yours stays current, and what Merge, Replace and Keep mine do; relay’s line, under a warning mark, says the same and ends with Merge, Replace and Keep mine', true, '.source-row');
+  await a.click('.source-row button[id$="-mcp-relay"][id^="source-merge-"]'); await busyDone(); await a.settle();
+  await writeClaude();
+  commit({ '.mcp.json': servers({ 'search-index': search, 'team-plugin-helper': { command: '${CLAUDE_PLUGIN_ROOT}/bin/helper' } }) }, 'Drop relay');
+  await checkNow();
+  await atEverySize('server-removed', 'relay was taken out of the source; clicked Check now: the band leads, under a warning mark, with relay no longer at the source, turned off and taken out of the other tools, Central Knot keeping it, and that it leaves Claude Code when you click Write to Claude Code, with Turn relay on; the source’s row has relay’s line: no longer at this source, Off, no longer from it, and Claude Code still has it until you click Write to Claude Code, with Turn on', true, '.source-row');
+  await a.click('#nav-mcp'); await openRow('relay');
+  await atEverySize('server-removed-mcp', 'On MCP servers, relay is Off with “removed at its source” after its name and “still in Claude Code until Write”; opened, the line at the end says the source no longer has it, that it is Off and no longer from that source, and what happens should the source have it again', true, '.ov-row[data-key="relay"]', 'start');
   if (pageErrors.length) throw new Error(`The page threw: ${pageErrors.join(' | ')}`);
 }
 
