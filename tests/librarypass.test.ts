@@ -37,6 +37,7 @@ function noteKind(): Kind<string, Note> {
     readVersion: async (_context, key, hash) => versions.get(`${key}:${hash}`),
     hashOf,
     recover: async () => {},
+    merge: async () => ({ couldNot: 'A note has no Merge.' }),
     read: async (context, managed) => {
       const disk: Disk<Note> = {
         byKey: new Map(), unseen: new Map(), locked: new Map(), problems: [],

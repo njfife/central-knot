@@ -24,7 +24,7 @@ import { libraryAction } from './historyactions.ts';
 import { itemKey, listed, noteAgainst, pendingEdits, plan } from './library.ts';
 import { libraryWords } from './libraryrow.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
-import { copiesOf, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type KindLibrary, type Look, type PassOptions, type SourcedKind, type Wanted } from './librarypass.ts';
+import { copiesOf, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type KindLibrary, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { mergeAgent } from './merge.ts';
 import { throughPlugins } from './plugins.ts';
 import { agentsKeptIn, type AgentTool } from './presence.ts';
@@ -149,7 +149,7 @@ function cannotTake(disk: AgentDisk, managed: HarnessId[], item: Wanted, tool: H
 // ---------- The agents' Kind ----------
 
 /** Agents as a kind of item (librarypass.ts Kind): one file per agent in each harness's agents folder (Pi's: its skills folder). */
-export const agentKind: SourcedKind<SharedAgent, AgentEntry, AgentDisk> = {
+export const agentKind: Kind<SharedAgent, AgentEntry, AgentDisk> = {
   kind: 'agent',
   // The item and its copy as the page names them (libraryrow.ts libraryWords); a harness's folder of them only the pass says.
   words: { item: libraryWords.agents.item, copy: libraryWords.agents.copy, folder: tool => agentsKeptIn[tool as AgentTool] },

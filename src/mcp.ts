@@ -1,13 +1,15 @@
 // MCP servers in each tool's own format: one tool's entries read into one shape (NeutralServer, the part every tool holds the
-// same way; the rest of an entry is that tool's own fields, `extras`), what a tool can't hold (cannotHold), and one entry
-// written or removed with every other byte of the settings file kept (editEntry, rereading and checking the file first, so a
-// save made meanwhile is never lost). Nothing here decides anything: servers.ts is MCP servers on Central Knot's library (the
-// servers' Kind), which reads and writes through this module; mcpswitch.ts is each tool's own switch for a server.
+// same way; the rest of an entry is that tool's own fields, `extras`), what a tool can't hold (cannotHold), what can't run
+// once copied out of the folder it sits in (runsFrom: a plugin's, or a source's repository), and one entry written or removed
+// with every other byte of the settings file kept (editEntry, rereading and checking the file first, so a save made meanwhile
+// is never lost). Nothing here decides anything: servers.ts is MCP servers on Central Knot's library (the servers' Kind), which
+// reads and writes through this module; mcpswitch.ts is each tool's own switch for a server.
 import { record, withoutBom } from './values.ts';
 import { lstat, readFile, readlink, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
+import { PLUGIN_ONLY } from './catalogdetail.ts';
 import { configRoot, harnesses, openCodeSettings } from './harnesses.ts';
-import { errorCode, recoverParked, sha256, writeFileChecked, type ShareContext } from './share.ts';
+import { errorCode, exists, recoverParked, sha256, writeFileChecked, type ShareContext } from './share.ts';
 import { readJsonc, readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import type { HarnessId } from './types.ts';
 
@@ -40,6 +42,16 @@ export interface McpEntry {
  */
 export interface OwnPart { name: string; place?: string[]; extras: Record<string, unknown> }
 export const ownText = (own: OwnPart) => JSON.stringify(own);
+/** One entry's own part as text (servers.ts serverKind ownOf, and a source's .mcp.json entry: atlink.ts serversAt). */
+export const ownPartOf = (entry: McpEntry) => ownText({ name: entry.name, place: entry.place, extras: entry.extras });
+
+/**
+ * A server's parts in the order a sentence lists them, with each one's words, and for a map, the words for one entry of it:
+ * a version's note names the parts (servers.ts changesOf), and Merge takes each part whole, a map entry by entry (merge.ts
+ * mergeServer), naming a conflict as "the command" or "the header Authorization".
+ */
+export const SERVER_PARTS: [keyof NeutralServer, string, string?][] = [['transport', 'transport'], ['command', 'command'], ['args', 'arguments'],
+  ['env', 'environment', 'environment variable'], ['cwd', 'working folder'], ['url', 'URL'], ['headers', 'headers', 'header']];
 
 // ---------- Files ----------
 
@@ -63,9 +75,11 @@ export const serverHash = (server: NeutralServer) => sha256(JSON.stringify(canon
 
 const strings = (value: unknown): Record<string, string> | undefined => (value && typeof value === 'object' && !Array.isArray(value) ? Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, String(item)])) : undefined);
 const list = (value: unknown): string[] | undefined => (Array.isArray(value) ? value.map(String) : undefined);
+// An empty map or list is read as none: OpenCode can't hold an empty argument list (its command is one list), so `"args": []`
+// read back as none there, and the server read as edited in OpenCode.
 const nonEmpty = <T extends object>(value: T | undefined) => (value && Object.keys(value).length ? value : undefined);
 
-/** Belongs to the app that wrote it: ChatGPT desktop's own servers, or a command inside an app bundle. */
+/** Belongs to the app that wrote it: ChatGPT desktop's own servers, or a command inside an app bundle (said as a sentence). */
 function hostBound(name: string, server: NeutralServer): string | undefined {
   if (name === 'node_repl') return 'ChatGPT desktop keeps this server for itself.';
   if ([server.command, server.cwd].some(path => path && /\/[^/]+\.app\//.test(path))) return 'It runs from inside an app, so it belongs to that app.';
@@ -76,7 +90,7 @@ export function fromJson(name: string, tool: HarnessId, file: string, raw: Recor
   const type = String(raw.type ?? (raw.url ? 'http' : 'stdio'));
   const server: NeutralServer = {
     transport: type === 'sse' ? 'sse' : type === 'http' || type === 'streamable-http' ? 'http' : 'stdio',
-    command: typeof raw.command === 'string' ? raw.command : undefined, args: list(raw.args), env: nonEmpty(strings(raw.env)),
+    command: typeof raw.command === 'string' ? raw.command : undefined, args: nonEmpty(list(raw.args)), env: nonEmpty(strings(raw.env)),
     cwd: typeof raw.cwd === 'string' ? raw.cwd : undefined, url: typeof raw.url === 'string' ? raw.url : undefined, headers: nonEmpty(strings(raw.headers)),
   };
   const extras = Object.fromEntries(Object.entries(raw).filter(([key]) => !['type', 'command', 'args', 'env', 'cwd', 'url', 'headers'].includes(key)));
@@ -164,7 +178,7 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
         const headers = headersTable ? Object.fromEntries(headersTable.entries.map(entry => [entry.key, String(entry.value)])) : strings(value('http_headers')) ?? dotted('http_headers');
         const url = typeof value('url') === 'string' ? value('url') as string : undefined;
         const server: NeutralServer = {
-          transport: url ? 'http' : 'stdio', command: typeof value('command') === 'string' ? value('command') as string : undefined, args: list(value('args')),
+          transport: url ? 'http' : 'stdio', command: typeof value('command') === 'string' ? value('command') as string : undefined, args: nonEmpty(list(value('args'))),
           env: nonEmpty(env), cwd: typeof value('cwd') === 'string' ? value('cwd') as string : undefined, url, headers: nonEmpty(headers),
         };
         const extras: Record<string, unknown> = {};
@@ -201,6 +215,26 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
   } catch {
     return { entries: [], exists: true, problem: `${file} could not be read as ${tool === 'codex-cli' ? 'TOML' : 'JSON'}, so its servers are not offered and it is never written.` };
   }
+}
+
+/**
+ * Whether an entry can run only from the folder it sits in (`folder`: a plugin's, or a source's at its link), which isn't
+ * copied: it names that folder's own settings, which only Claude Code fills in for a plugin (`settings`: ${CLAUDE_PLUGIN_ROOT},
+ * ${CLAUDE_PLUGIN_DATA}, ${user_config.…}), or runs files from it (`files`: a path starting ./ or ../, a relative `cwd`, or a
+ * relative name that is there; a program on PATH, a package name or a URL is not). Each caller words it (parts.ts, atlink.ts).
+ * Known miss: a `cwd` of `~/…` counts as relative.
+ */
+export async function runsFrom(raw: Record<string, unknown>, folder: string): Promise<'settings' | 'files' | undefined> {
+  if (PLUGIN_ONLY.test(JSON.stringify(raw))) return 'settings';
+  const text = (value: unknown) => (typeof value === 'string' ? value : undefined);
+  const inFolder = async (value: string) => !isAbsolute(value) && (/^\.\.?([\\/]|$)/.test(value) || await exists(join(folder, value)));
+  const command = text(raw.command), cwd = text(raw.cwd);
+  // An option's value counts too (`--config=./server.json`); a bare flag doesn't.
+  const args = (Array.isArray(raw.args) ? raw.args.map(text) : []).map(arg => (arg?.startsWith('-') ? arg.split('=').slice(1).join('=') || undefined : arg))
+    .filter((arg): arg is string => !!arg && !/^[a-z][\w+.-]*:/i.test(arg));
+  const relativeCommand = !!command && !isAbsolute(command) && (/[\\/]/.test(command) || await inFolder(command));
+  const fileArg = (await Promise.all(args.map(inFolder))).some(Boolean);
+  return (cwd !== undefined && !isAbsolute(cwd)) || relativeCommand || fileArg ? 'files' : undefined;
 }
 
 /** Why a tool cannot hold this server, if it cannot (CD §5, Unsupported). */

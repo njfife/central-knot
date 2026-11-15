@@ -6,9 +6,12 @@
 //   those sides, a file both sides changed merged by lineMerge; a conflict is named by its path ("SKILL.md");
 // - an agent's (`mergeAgent`): three parts, its name, description and prompt, each compared whole; one both sides changed is
 //   merged by lineMerge (a one-line name or description changed both ways conflicts there); a conflict is named in words ("the
-//   prompt").
-// The merged content is stored as a version of the item (the kind's store) before it is answered. Everything a merge makes on
-// the way is in one folder of its own in .central-knot/ (merging-…), removed before it returns (a crash midway can leave it).
+//   prompt");
+// - an MCP server's (`mergeServer`): its transport, command, arguments (the list whole), working folder and URL, and each
+//   environment variable and header by its name (mcp.ts SERVER_PARTS); a value has no lines, so one both sides changed,
+//   differently, is a conflict, with no line merge and no work folder; named in words ("the environment variable API_URL").
+// The merged content is stored as a version of the item (the kind's store) before it is answered. Everything a line merge
+// makes on the way is in one folder of its own in .central-knot/ (merging-…), removed before it returns (a crash midway can leave it).
 // Bytes are copied as they are: nothing is normalised. A conflict found by comparing the parts still lets the line merges run,
 // so one answer names every conflicting part.
 // Not here: which side a part takes (mergeFiles), what Merge changes in the library and History (librarypass.ts mergeIn), and
@@ -19,6 +22,8 @@ import { agentHash, type SharedAgent } from './agentfiles.ts';
 import { storeVersion as storeAgentVersion } from './agentstore.ts';
 import { mergeFiles, type LibraryItem, type Merged, type PathIs } from './library.ts';
 import type { MergeResult } from './librarypass.ts';
+import { SERVER_PARTS, type NeutralServer } from './mcp.ts';
+import { storeVersion as storeServerVersion } from './serverstore.ts';
 import { runGit } from './plugins.ts';
 import { errorCode, plainError, readTree, removeTree, sha256, storeDirectory, type ShareContext, type Tree } from './share.ts';
 import { readVersion, storeVersion, type SkillContent } from './skillstore.ts';
@@ -103,4 +108,40 @@ export async function mergeAgent(context: ShareContext, item: LibraryItem, three
     await storeAgentVersion(context, item.key, agentHash(out), out);
     return { merged: out };
   });
+}
+
+/**
+ * A server's parts as a merge compares them (mcp.ts SERVER_PARTS): each field whole, a map's entries one by one, each path
+ * the field and, for an entry, its name encoded (no "/", so mergeFiles makes no folder of it; no space, the separator).
+ */
+function serverParts(server: NeutralServer): Map<string, PathIs> {
+  const parts = new Map<string, PathIs>(), put = (path: string, value: unknown) => parts.set(path, { sha256: sha256(JSON.stringify(value)), exec: false });
+  for (const [field, , entry] of SERVER_PARTS) {
+    const value = server[field];
+    if (entry) for (const [name, one] of Object.entries(value ?? {})) put(`${field} ${encodeURIComponent(name)}`, one);
+    else if (value !== undefined) put(field, value);
+  }
+  return parts;
+}
+
+/** Merges the source's version of an MCP server into yours against the base (librarypass.ts Kind.merge), part by part. */
+export async function mergeServer(context: ShareContext, item: LibraryItem, three: Record<'base' | 'yours' | 'theirs', NeutralServer>): Promise<MergeResult<NeutralServer>> {
+  const { merged, conflicts } = mergeFiles(serverParts(three.base), serverParts(three.yours), serverParts(three.theirs));
+  const sides = merged as Map<string, Exclude<Merged, 'folder'>>, both = [...sides].filter(([, is]) => is.bytes === 'line-merge').map(([path]) => path);
+  if (conflicts.length || both.length) {
+    const clashing = new Set([...conflicts, ...both]);
+    return { conflicts: SERVER_PARTS.flatMap(([field, words, entry]) => [...clashing].filter(path => path.split(' ')[0] === field).sort()
+      .map(path => (entry ? `the ${entry} ${decodeURIComponent(path.split(' ')[1])}` : `the ${words}`))) };
+  }
+  const out: NeutralServer = { ...three.yours };
+  for (const [field, , entry] of SERVER_PARTS) {
+    const from = (path: string) => three[sides.get(path)!.bytes as 'yours' | 'theirs'];
+    if (!entry) { if (sides.has(field)) Object.assign(out, { [field]: from(field)[field] }); else delete out[field]; continue; }
+    // Yours' order first, then the source's new ones.
+    const names = [...new Set([...Object.keys(three.yours[field] ?? {}), ...Object.keys(three.theirs[field] ?? {})])].filter(name => sides.has(`${field} ${encodeURIComponent(name)}`));
+    const map = Object.fromEntries(names.map(name => [name, (from(`${field} ${encodeURIComponent(name)}`)[field] as Record<string, string>)[name]]));
+    if (names.length) Object.assign(out, { [field]: map }); else delete out[field];
+  }
+  await storeServerVersion(context, item.key, out);
+  return { merged: out };
 }

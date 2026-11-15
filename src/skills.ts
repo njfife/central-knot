@@ -22,7 +22,7 @@ import { appendHistory, readHistory, replaceHistory } from './history.ts';
 import { isClearedSwitch, libraryAction, libraryEntry } from './historyactions.ts';
 import { keepVersion, listed, noteAgainst, pendingEdits, plan, wantedIn } from './library.ts';
 import type { LibraryItem, Version, VersionChange } from './library.ts';
-import { copiesOf, foundCopies, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Look, type PassOptions, type SourcedKind, type Wanted } from './librarypass.ts';
+import { copiesOf, foundCopies, lookFor, restore, runPass, takeInAnswers, unseenIn, type Disk, type Kind, type Look, type PassOptions, type Wanted } from './librarypass.ts';
 import { libraryWords } from './libraryrow.ts';
 import { comparableText } from './pluginstatus.ts';
 import { throughPlugins, type GivenByPlugin } from './plugins.ts';
@@ -233,7 +233,7 @@ function wontLoad(context: ShareContext, tool: HarnessId, name: string, shape: S
 // ---------- The skills' Kind ----------
 
 /** Skills as a kind of item (librarypass.ts Kind): one folder per skill in each tool's own skills folder. */
-export const skillKind: SourcedKind<SkillContent, SkillCopy, SkillDisk> = {
+export const skillKind: Kind<SkillContent, SkillCopy, SkillDisk> = {
   kind: 'skill',
   // The item and its copy as the page names them (libraryrow.ts libraryWords); a tool's folder of them only the pass says.
   words: { item: libraryWords.skills.item, copy: libraryWords.skills.copy, folder: () => 'skills folder' },

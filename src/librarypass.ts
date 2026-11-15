@@ -227,19 +227,15 @@ export interface Kind<Content, Entry extends Seen, D extends Disk<Entry> = Disk<
    */
   historyAction(entry: HistoryEvent, item: LibraryItem | undefined, now: ItemNow, version?: string): { change: Change } | undefined;
   /**
-   * Merge (library.ts MERGE): the source's version (`theirs`) merged into `yours` against `base`, path by path as library.ts
-   * mergeFiles says, a file both sides changed by a line merge run here. Merged: the content, stored under the item already
-   * (as `store` stores one), and nothing else of the merge's left behind; else the conflicting paths, or why it couldn't run.
-   * A kind no source brings leaves it out (MCP servers): see SourcedKind.
+   * Merge (library.ts MERGE), which a click on Merge on a source's line runs (merge.ts): the source's version (`theirs`)
+   * merged into `yours` against `base`, part by part as library.ts mergeFiles says. Merged: the content, stored under the item
+   * already (as `store` stores one), and nothing else of the merge's left behind; else the conflicting parts, or why it
+   * couldn't run.
    */
-  merge?(context: ShareContext, item: LibraryItem, three: { base: Content; yours: Content; theirs: Content }): Promise<MergeResult<Content>>;
+  merge(context: ShareContext, item: LibraryItem, three: { base: Content; yours: Content; theirs: Content }): Promise<MergeResult<Content>>;
 }
 /** What Kind.merge answers. */
 export type MergeResult<Content> = { merged: Content } | { conflicts: string[] } | { couldNot: string };
-/** A kind a source brings (sources.ts SourceKind): a Kind with Merge, which a click on Merge on a source's line runs. */
-export interface SourcedKind<Content, Entry extends Seen = Seen, D extends Disk<Entry> = Disk<Entry>> extends Kind<Content, Entry, D> {
-  merge(context: ShareContext, item: LibraryItem, three: { base: Content; yours: Content; theirs: Content }): Promise<MergeResult<Content>>;
-}
 
 // ---------- What the harnesses hold ----------
 
@@ -492,7 +488,7 @@ export type Pulled<Content> = { name: string; content: Content; own?: { harness:
 /**
  * One read of a source as the pass is given it (atlink.ts readOf): the table's reading of it (library.ts SourceSeen), of one
  * kind (`kind`), with each readable name's own name and content, and each tool's own part where a file of it is in that tool's
- * form (`own`: an agent's), and that kind's Merge (`mergeWith`: SourcedKind merge, which mergeIn runs). `recorded`: the sources the home records now. `bringBack`: keys held deleted that a
+ * form (`own`: an agent's file, a server's other fields), and that kind's Merge (`mergeWith`: Kind.merge, which mergeIn runs). `recorded`: the sources the home records now. `bringBack`: keys held deleted that a
  * click on Add on the source's row brings back; `replace`: keys whose waiting version a click on Replace there makes current;
  * `merge`: keys whose waiting version a click on Merge there merges into the current one; `keep`: keys whose waiting version a
  * click on Keep mine there keeps as a version, the current one staying.
@@ -1067,7 +1063,8 @@ async function makeCurrent(pass: Pass, item: LibraryItem, version: string, refus
  * (cause `source`) for one made, an `edit` for one made current (a Replace's with `seen` as it was; a Merge's with cause
  * `source-merged`), an `edit` for one kept (cause `source-kept`), an `off` (cause `source-dropped`) for one dropped. No
  * harness is written here: the plan after it applies the current version where the item is On, and takes in a tool's edit no
- * pass had taken in. Answers the keys it answered for: the pass's scope.
+ * pass had taken in. What it did to each item is told with whether the item is On then (PassResult sourced `on`). Answers the
+ * keys it answered for: the pass's scope.
  */
 async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Set<string>> {
   const clicked = { bringBack: read.bringBack, replace: read.replace, merge: read.merge, keep: read.keep };
@@ -1107,6 +1104,7 @@ async function fromSourceStep(pass: Pass, read: SourceRead<unknown>): Promise<Se
     } else if (answer === 'merge') pass.sourced.get(key)!.merge = await mergeIn(pass, item!, entry, read);
     else if (answer === 'keep') await keepMine(pass, item!, entry, read);
   }
+  for (const [key, said] of pass.sourced) if (pass.library.items[key]?.on) said.on = true;
   await saveIfChanged(pass);
   return new Set(answers.keys());
 }
