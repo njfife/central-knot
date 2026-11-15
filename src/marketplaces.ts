@@ -662,14 +662,14 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   /**
    * A plugin read from its marketplace's copy and its items brought up to date (pluginlibrary.ts runItems, a read alone), `tools`
    * counted as where it is now: Update and Update all for a plugin with items, and the automatic updates' check, where a tool new
-   * here gets the items the library lacks (what it has already reaches it by the library's own rule).
+   * here (`bring`: the install it is owed) gets the items the library lacks (what it has already reaches it by the library's own rule).
    */
-  async function items(source: string, marketName: string, plugin: string, tools: HarnessId[], home: unknown): Promise<PluginActionResult> {
+  async function items(source: string, marketName: string, plugin: string, tools: HarnessId[], home: unknown, bring = false): Promise<PluginActionResult> {
     const stopped = await guard(home, tools);
     if (stopped) return { stopped, reports: [] };
     const share = host.share?.(), entry = entryOf((await readPluginRecord(String(home))).record, source, plugin);
     if (!share || !entry) return { reports: failedFor(tools, 'It has no entry in the plugins record here, so its items aren’t read.') };
-    const ran = await runItems(share, (await host.read()).tools, entry, { read: tools }, await itemFiles(await context(), source, plugin), { source, marketName, plugin, action: 'update-items' });
+    const ran = await runItems(share, (await host.read()).tools, entry, { read: tools, ...(bring ? { bring: true as const } : {}) }, await itemFiles(await context(), source, plugin), { source, marketName, plugin, action: bring ? 'install-items' : 'update-items' });
     for (const told of ran.notices) host.notices?.(told.kind, told.notices);
     return { ...(ran.stopped ? { stopped: ran.stopped } : {}), reports: ran.done.map(done => done.report) };
   }

@@ -1180,7 +1180,7 @@ app.whenReady().then(async () => {
         install: (source, marketName, plugin, tools, home) => step('plugins:install', [source, marketName, plugin, tools, home], () => markets.install(source, marketName, plugin, onlyAllowed(tools, pluginTools), home)),
         update: (source, marketName, plugin, tools, home) => step('plugins:update', [source, marketName, plugin, tools, home], () => markets.update(source, marketName, plugin, onlyAllowed(tools, pluginTools), home, { reinstall: false })),
         parts: (source, marketName, plugin, tool, mode, run, home, pick) => step('plugins:parts', [source, marketName, plugin, tool, mode, run, home, pick], () => markets.parts(source, marketName, plugin, tool, mode, run, home, pick)),
-        items: (source, marketName, plugin, tools, home) => step('plugins:items', [source, marketName, plugin, tools, home], () => markets.items(source, marketName, plugin, tools, home)),
+        items: (source, marketName, plugin, tools, home, bring) => step('plugins:items', [source, marketName, plugin, tools, home, bring], () => markets.items(source, marketName, plugin, tools, home, bring)),
       },
       noteJoined: (tools, home) => queued(() => markets.noteJoined(tools, home)),
       load: async () => { const saved: unknown = JSON.parse(await readFile(recordPath, 'utf8')); return Array.isArray(saved) ? saved as UpdatesRecord[] : undefined; },

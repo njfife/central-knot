@@ -321,8 +321,8 @@ export interface PlanApi {
   setWhole?(source: string, marketName: string, plugin: string, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
   update?(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   parts?(source: string, marketName: string, plugin: string, tool: HarnessId, mode: 'install' | 'remove' | 'undo', run: string | undefined, home: string, pick?: PartsPick): Promise<PluginActionResult>;
-  /** A plugin read and its items brought up to date (marketplaces.ts items), `tools` counted as where it is now (Update; a tool new here). */
-  items?(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
+  /** A plugin read and its items brought up to date (marketplaces.ts items): Update, or with `bring` a tool new here's install, `tools` then counted as where it is. */
+  items?(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string, bring?: boolean): Promise<PluginActionResult>;
 }
 
 /**
@@ -339,7 +339,7 @@ export async function runPlan(ops: PluginOp[], api: PlanApi, home: string, onSte
       result = step.action === 'install' ? await api.install(step.source, step.marketName, step.plugin, step.tools, home)
         : step.action === 'update' ? (api.update ? await api.update(step.source, step.marketName, step.plugin, step.tools, home) : { reports: failedFor(step.tools, 'Plugins can’t be updated here.') })
         : step.action === 'remove' ? await api.uninstall(step.source, step.marketName, step.plugin, step.tools[0]!, home)
-        : isItems(step.action) ? (api.items ? await api.items(step.source, step.marketName, step.plugin, step.tools, home) : { reports: failedFor(step.tools, 'Its items can’t be read here.') })
+        : isItems(step.action) ? (api.items ? await api.items(step.source, step.marketName, step.plugin, step.tools, home, step.action === 'install-items') : { reports: failedFor(step.tools, 'Its items can’t be read here.') })
         : isParts(step.action) ? (api.parts ? await api.parts(step.source, step.marketName, step.plugin, step.tools[0]!, partsMode(step.action)!, step.run, home, step.pick) : { reports: failedFor(step.tools, 'Parts can’t be installed here.') })
         : isWhole(step.action) ? (api.setWhole ? await api.setWhole(step.source, step.marketName, step.plugin, step.tools[0]!, step.action === 'plugin-on', home) : { reports: failedFor(step.tools, 'Plugins can’t be turned on or off here.') })
         : step.part ? (api.setPart ? await api.setPart(step.source, step.marketName, step.plugin, step.part, step.tools[0]!, step.action === 'part-on', home) : { reports: failedFor(step.tools, 'That can’t be turned on or off here.') })

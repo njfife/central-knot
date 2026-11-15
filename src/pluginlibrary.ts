@@ -15,7 +15,6 @@
 // Known miss: a skill whose folder's name and SKILL.md name differ (folder pdf-tools, name pdf) is the item pdf-tools, as every
 // tool's copy is named; Pi and OpenCode load it as pdf, so it can meet a skill of that name there unmarked, and the same
 // repository given as a Git link brings it as a second item, pdf.
-import { stat } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
 import { agentHash } from './agentfiles.ts';
 import { agentInText, serverAt, skillAt, type ItemThere } from './atlink.ts';
@@ -61,19 +60,19 @@ const readers: Record<ItemKind, (files: PluginFiles) => Promise<ItemThere<unknow
 
 /**
  * A plugin's files read as one SourceRead per kind (library.ts A PLUGIN): each name with its content, or why it can't be read
- * or is left out. A kind is read whole when the plugin's folder is there, something in it can be read, its files left nothing
- * of that kind unread (PluginFiles `unread`) and every item of it was read or left out by a rule. `outOf`: the tools a name it
+ * or is left out. A kind is read whole when something in the plugin can be read (a plugin's folder missing from the
+ * marketplace's copy reads as empty, so it is not), its files left nothing of that kind unread (PluginFiles `unread`) and every
+ * item of it was read or left out by a rule. `outOf`: the tools a name it
  * makes is kept out of (pluginOutOf). `commitAt`: when its marketplace was read.
  */
 export async function readPlugin(files: PluginFiles, entry: PluginEntry, commitAt: string, recorded: ReadonlySet<string>, outOf: HarnessId[]): Promise<SourceRead<unknown>[]> {
-  const there = await stat(files.folder).then(info => info.isDirectory(), () => false);
-  const kinds = await Promise.all(sourceKinds().map(async kind => ({ kind, items: there ? await readers[kind.kind.kind](files) : [] })));
+  const kinds = await Promise.all(sourceKinds().map(async kind => ({ kind, items: await readers[kind.kind.kind](files) })));
   const readable = kinds.some(each => each.items.some(item => !('unreadable' in item)));
   const unread: Record<ItemKind, string[]> = { skill: files.unread.skills, agent: files.unread.agents, mcp: files.unread.servers ? ['*'] : [] };
   return kinds.map(({ kind, items }): SourceRead<unknown> => {
     const names: SourceRead<unknown>['names'] = new Map(unread[kind.kind.kind].filter(name => name !== '*').map(name => [itemKey(name), { unreadable: 'it can’t be read' }]));
     for (const item of items) names.set(item.key, 'unreadable' in item ? { unreadable: item.unreadable } : { name: item.name, hash: item.hash, content: item.content, ...(item.own ? { own: item.own } : {}) });
-    const whole = there && readable && !unread[kind.kind.kind].length && items.every(item => !('unreadable' in item) || item.leftOut);
+    const whole = readable && !unread[kind.kind.kind].length && items.every(item => !('unreadable' in item) || item.leftOut);
     return { id: entry.id, link: pluginLink(entry.plugin, entry.marketName), commitAt, kind: kind.kind.kind, mergeWith: kind.kind.merge, whole, names, recorded, plugin: { on: entry.on, outOf } };
   });
 }
@@ -106,9 +105,10 @@ const pluginOutOf = (entry: PluginEntry, tools: readonly HarnessId[], linked: { 
 /**
  * What a plugin's switch asks of its items: every item On (`on`: the plugin's On and Add) or Off (`off`), or one tool let in or
  * kept out in each item's `except` (Let in, Install there; Keep out, Take out there), never both (library.ts A PLUGIN); or a
- * read alone (Update; a tool new here). `into`, `outOf` and `read` name the tools its result reports on.
+ * read alone (Update; with `bring`, the automatic updates' install in a tool new here, which counts as where the plugin is).
+ * `into`, `outOf` and `read` name the tools its result reports on.
  */
-export type ItemsAsk = { into: HarnessId[]; on?: true } | { outOf: HarnessId[]; off?: true } | { read: HarnessId[] };
+export type ItemsAsk = { into: HarnessId[]; on?: true } | { outOf: HarnessId[]; off?: true } | { read: HarnessId[]; bring?: true };
 
 /**
  * A plugin's switch on its items (pluginrecord.ts rows 5 and 10, Update, a tool new here), one pass per kind: the plugin read
@@ -121,7 +121,8 @@ export type ItemsAsk = { into: HarnessId[]; on?: true } | { outOf: HarnessId[]; 
 export async function runItems(context: ShareContext, tools: HarnessId[], entry: PluginEntry, ask: ItemsAsk, files: { files?: PluginFiles; commitAt: string; problem?: string },
   op: Pick<PluginOp, 'source' | 'marketName' | 'plugin' | 'action'>): Promise<{ done: PluginDone[]; back?: ItemState[]; stopped?: string; notices: { kind: ItemKind; notices: SyncNotice[] }[] }> {
   const before = await linkedItems(context, entry.id), named = 'into' in ask ? ask.into : 'outOf' in ask ? ask.outOf : ask.read;
-  const reads = files.files && !('outOf' in ask) ? await readPlugin(files.files, entry, files.commitAt, (await recordedIds(context.home)).ids, pluginOutOf(entry, tools, before, named)) : [];
+  const brought = 'into' in ask || ('read' in ask && ask.bring) ? named : [];
+  const reads = files.files && !('outOf' in ask) ? await readPlugin(files.files, entry, files.commitAt, (await recordedIds(context.home)).ids, pluginOutOf(entry, tools, before, brought)) : [];
   const results: PassResult[] = [], notices: { kind: ItemKind; notices: SyncNotice[] }[] = [];
   for (const kind of sourceKinds()) {
     // A tool let in keeps out each item it has a copy of its own of (Central Knot never applied it there): never written over.
@@ -153,7 +154,7 @@ function reportIn(tool: HarnessId, ask: ItemsAsk, before: { item: LibraryItem }[
   if ('outOf' in ask) return has ? { tool, outcome: 'failed', message: `${said}: they were changed here since.`, runs: [] } : { tool, outcome: 'uninstalled', message: `Its items are out of ${name}. Central Knot keeps them.`, runs: [], changed };
   if (!has && 'into' in ask) return { tool, outcome: 'held', message: problem ?? `None of its items can go into ${name}.`, runs: [] };
   if (problem && 'read' in ask) return { tool, outcome: 'failed', message: problem, runs: [] };
-  return { tool, outcome: 'read' in ask ? 'updated' : 'installed', message: problem ? `${said}. ${problem}` : `${said}.`, runs: [], changed };
+  return { tool, outcome: 'read' in ask && !ask.bring ? 'updated' : 'installed', message: problem ? `${said}. ${problem}` : `${said}.`, runs: [], changed };
 }
 
 /**
